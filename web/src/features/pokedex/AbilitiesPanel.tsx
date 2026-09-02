@@ -1,12 +1,15 @@
 import { useGameData } from '../../lib/GameDataContext'
+import AbilityPopover from './AbilityPopover'
 
-function AbilityCard({ id }: { id: string }) {
+function AbilityCard({ id, align }: { id: string; align: 'left' | 'right' }) {
   const { abilitiesById } = useGameData()
   const ability = abilitiesById.get(id)
   if (!ability) return null
   return (
     <div className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-      <div className="text-sm font-semibold">{ability.name}</div>
+      <AbilityPopover ability={ability} align={align}>
+        <div className="text-sm font-semibold underline decoration-dotted">{ability.name}</div>
+      </AbilityPopover>
       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
         {ability.description}
       </p>
@@ -33,7 +36,7 @@ export default function AbilitiesPanel({
               None
             </p>
           ) : (
-            abilities.map((id) => <AbilityCard key={id} id={id} />)
+            abilities.map((id) => <AbilityCard key={id} id={id} align="left" />)
           )}
         </div>
       </div>
@@ -47,7 +50,7 @@ export default function AbilitiesPanel({
               None
             </p>
           ) : (
-            innates.map((id) => <AbilityCard key={id} id={id} />)
+            innates.map((id) => <AbilityCard key={id} id={id} align="right" />)
           )}
         </div>
       </div>
