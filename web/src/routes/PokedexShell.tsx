@@ -60,7 +60,7 @@ export default function PokedexShell() {
   // exception: they're full standalone mons with their own evolution lines, not a
   // variant of anything, so they get their own top-level list entry too (see
   // displayName() for how they're told apart from their same-named base in the UI).
-  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isStandaloneForm(s.id)), [species])
+  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isStandaloneForm(s)), [species])
   const searchIndex = useMemo(() => buildSearchIndex(baseSpecies, species), [baseSpecies, species])
 
   const results = useMemo(() => {

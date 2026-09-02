@@ -10,23 +10,28 @@ import type { Species } from './types'
  * The game's own `region_prefix` field is meant to flag regional forms but is
  * inconsistently set (e.g. 57 of 166 Redux-suffixed species have it unset), so the
  * id's own suffix is the reliable signal, not that field.
- *
- * Checking a bare `_SUFFIX` ending (not "contains") deliberately excludes compound
- * forms like "_HISUIAN_MEGA" or "_REDUX_MEGA" -- those are still temporary battle
- * transformations of the standalone form, and per the data don't even nest under it
- * (they point `formOf` at the plain base), so they stay ordinary forms.
  */
 const STANDALONE_FORM_SUFFIXES = ['REDUX', 'ALOLAN', 'GALARIAN', 'HISUIAN', 'PALDEAN']
 
-function standaloneFormSuffix(speciesId: string): string | null {
-  for (const suffix of STANDALONE_FORM_SUFFIXES) {
-    if (speciesId.endsWith(`_${suffix}`)) return suffix
-  }
-  return null
+/** Requires the id's entire remainder after "<formOf>_" to be exactly one of the
+ * suffixes above, not merely end with one. A plain `.endsWith()` check on the id
+ * alone -- what this used to do -- incorrectly promoted compound forms like
+ * SPECIES_BEEDRILL_MEGA_REDUX (remainder "MEGA_REDUX", still ends in "_REDUX") to a
+ * standalone entry too, producing a second "Beedrill Redux" indistinguishable from
+ * the real SPECIES_BEEDRILL_REDUX -- caught by checking for duplicate display names
+ * across the whole dataset, not just spot-checking a few species by hand. Those
+ * compound forms are still temporary battle transformations of the plain base (per
+ * the data they point `formOf` straight at it, not at the standalone form), so they
+ * correctly stay ordinary forms once the remainder is checked exactly.
+ */
+function standaloneFormSuffix(species: Species): string | null {
+  if (!species.formOf || !species.id.startsWith(`${species.formOf}_`)) return null
+  const remainder = species.id.slice(species.formOf.length + 1)
+  return STANDALONE_FORM_SUFFIXES.includes(remainder) ? remainder : null
 }
 
-export function isStandaloneForm(speciesId: string): boolean {
-  return standaloneFormSuffix(speciesId) !== null
+export function isStandaloneForm(species: Species): boolean {
+  return standaloneFormSuffix(species) !== null
 }
 
 /** These forms inherit their base species' plain dex name (the game's own dex text
@@ -37,7 +42,7 @@ export function isStandaloneForm(speciesId: string): boolean {
  * chains) so it reads as the distinct mon it actually is.
  */
 export function displayName(species: Species): string {
-  const suffix = standaloneFormSuffix(species.id)
+  const suffix = standaloneFormSuffix(species)
   if (!suffix) return species.name
   const word = suffix.charAt(0) + suffix.slice(1).toLowerCase()
   return `${species.name} ${word}`
