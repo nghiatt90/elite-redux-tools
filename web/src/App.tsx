@@ -7,7 +7,7 @@ import PokedexList from './routes/PokedexList'
 function Header() {
   return (
     <header
-      className="flex items-center justify-between border-b px-4 py-2"
+      className="flex items-center justify-between border-b px-4 py-2 shrink-0"
       style={{ borderColor: 'var(--color-border)' }}
     >
       <span className="font-semibold">Elite Redux Pokedex</span>
@@ -42,9 +42,14 @@ export default function App() {
   return (
     <BrowserRouter>
       <GameDataProvider>
-        <div className="min-h-screen" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+        <div
+          className="h-screen flex flex-col"
+          style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}
+        >
           <Header />
-          <AppRoutes />
+          <div className="flex-1 min-h-0">
+            <AppRoutes />
+          </div>
         </div>
       </GameDataProvider>
     </BrowserRouter>
