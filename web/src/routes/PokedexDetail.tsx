@@ -4,6 +4,8 @@ import TypeChip from '../components/TypeChip'
 import AbilitiesPanel from '../features/pokedex/AbilitiesPanel'
 import DefensiveMatchupGrid from '../features/pokedex/DefensiveMatchupGrid'
 import DetailStatBars from '../features/pokedex/DetailStatBars'
+import EvolutionChain from '../features/pokedex/EvolutionChain'
+import LearnsetTable from '../features/pokedex/LearnsetTable'
 import SpeciesSprite from '../features/pokedex/SpeciesSprite'
 
 export default function PokedexDetail() {
@@ -68,6 +70,20 @@ export default function PokedexDetail() {
           Abilities &amp; Innates
         </h2>
         <AbilitiesPanel abilities={species.abilities} innates={species.innates} />
+      </section>
+
+      <section className="mt-5">
+        <h2 className="text-sm font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-muted)' }}>
+          Evolution
+        </h2>
+        <EvolutionChain species={species} />
+      </section>
+
+      <section className="mt-5 mb-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-muted)' }}>
+          Learnset
+        </h2>
+        <LearnsetTable learnset={species.learnset} />
       </section>
     </div>
   )
