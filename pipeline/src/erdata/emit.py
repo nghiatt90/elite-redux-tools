@@ -21,6 +21,7 @@ from erdata.generated import (
 )
 from erdata.behaviors import move_behaviors_to_dict
 from erdata.move_behavior import behavior_config_to_dict
+from erdata.natures import battle_constants_to_dict
 from erdata.paths import load_lock, output_dir
 from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
 from erdata.resolve import (
@@ -441,6 +442,7 @@ def build() -> None:
     _write_json(out / "items.json", [item_to_dict(i) for i in sorted(items, key=lambda i: _I(i.id))])
     move_behaviors = move_behaviors_to_dict()
     _write_json(out / "moveBehaviors.json", move_behaviors)
+    _write_json(out / "natures.json", battle_constants_to_dict())
     _write_json(
         out / "meta.json",
         {
