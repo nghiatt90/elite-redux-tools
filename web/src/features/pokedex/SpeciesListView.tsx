@@ -1,11 +1,23 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef } from 'react'
+import { forwardRef, useImperativeHandle, useRef } from 'react'
 import type { Species } from '../../lib/types'
 import SpeciesRow from './SpeciesRow'
 
 const ROW_HEIGHT = 44
 
-export default function SpeciesListView({ species }: { species: Species[] }) {
+export interface SpeciesListHandle {
+  scrollToIndex: (index: number) => void
+}
+
+interface Props {
+  species: Species[]
+  selectedIndex: number
+}
+
+const SpeciesListView = forwardRef<SpeciesListHandle, Props>(function SpeciesListView(
+  { species, selectedIndex },
+  ref,
+) {
   const parentRef = useRef<HTMLDivElement>(null)
 
   const virtualizer = useVirtualizer({
@@ -14,6 +26,10 @@ export default function SpeciesListView({ species }: { species: Species[] }) {
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   })
+
+  useImperativeHandle(ref, () => ({
+    scrollToIndex: (index: number) => virtualizer.scrollToIndex(index, { align: 'auto' }),
+  }))
 
   const items = virtualizer.getVirtualItems()
 
@@ -34,11 +50,13 @@ export default function SpeciesListView({ species }: { species: Species[] }) {
                 transform: `translateY(${item.start}px)`,
               }}
             >
-              <SpeciesRow species={s} />
+              <SpeciesRow species={s} selected={item.index === selectedIndex} />
             </div>
           )
         })}
       </div>
     </div>
   )
-}
+})
+
+export default SpeciesListView
