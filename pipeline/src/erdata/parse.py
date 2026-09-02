@@ -3,7 +3,7 @@
 from google.protobuf import text_format
 from google.protobuf.message import Message
 
-from erdata.generated import AbilityList_pb2, ItemList_pb2, MoveList_pb2, SpeciesList_pb2
+from erdata.generated import AbilityList_pb2, ItemList_pb2, MoveBehaviorConfigList_pb2, MoveList_pb2, SpeciesList_pb2
 from erdata.paths import ER_CONFIG
 
 
@@ -41,6 +41,12 @@ def parse_items() -> list:
     for path in sorted((ER_CONFIG / "items").glob("*.textproto")):
         items.extend(_parse(path, ItemList_pb2.ItemList).item)
     return items
+
+
+def parse_move_behaviors() -> list:
+    return list(
+        _parse_config("MoveBehaviorConfigList.textproto", MoveBehaviorConfigList_pb2.MoveBehaviorConfigList).config
+    )
 
 
 if __name__ == "__main__":
