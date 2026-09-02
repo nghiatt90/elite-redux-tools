@@ -1,17 +1,20 @@
 import { Link, useParams } from 'react-router'
 import { useGameData } from '../lib/GameDataContext'
+import { formatHex } from '../lib/hex'
 import TypeChip from '../components/TypeChip'
 import AbilitiesPanel from '../features/pokedex/AbilitiesPanel'
 import DefensiveMatchupGrid from '../features/pokedex/DefensiveMatchupGrid'
 import DetailStatBars from '../features/pokedex/DetailStatBars'
 import EvolutionChain from '../features/pokedex/EvolutionChain'
+import { grantedTypes } from '../features/pokedex/grantedTypes'
 import LearnsetTable from '../features/pokedex/LearnsetTable'
 import SpeciesSprite from '../features/pokedex/SpeciesSprite'
 
 export default function PokedexDetail() {
   const { id } = useParams<{ id: string }>()
-  const { speciesById } = useGameData()
+  const { speciesById, abilitiesById } = useGameData()
   const species = id ? speciesById.get(id.toUpperCase()) : undefined
+  const extraTypes = species ? grantedTypes(species, abilitiesById) : []
 
   if (!species) {
     return (
@@ -41,11 +44,15 @@ export default function PokedexDetail() {
             </p>
           )}
           <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-            {species.category} · #{species.nationalDexNum.toString().padStart(4, '0')}
+            {species.category} · #{species.nationalDexNum.toString().padStart(4, '0')} ·{' '}
+            <span title="Pokemon ID (internal species number)">{formatHex(species.speciesNum)}</span>
           </p>
           <div className="flex gap-1 mt-2">
             {species.types.map((t) => (
               <TypeChip key={t} type={t} />
+            ))}
+            {extraTypes.map((g) => (
+              <TypeChip key={g.type} type={g.type} conditional title={`via ${g.viaAbility}`} />
             ))}
           </div>
           <p className="text-sm mt-3 leading-relaxed">{species.description}</p>

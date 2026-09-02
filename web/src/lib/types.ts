@@ -23,13 +23,13 @@ export interface Evolution {
 export interface Mega {
   from: string
   megaType: string
-  item?: string
+  item?: number // raw ItemEnum id -- not resolved to a name, no items.json exists yet
   move?: string
 }
 
 export interface Primal {
   from: string
-  item: string
+  item: number // raw ItemEnum id, same caveat as Mega.item
   primalType: string
 }
 
@@ -45,6 +45,7 @@ export interface Learnset {
 
 export interface Species {
   id: string
+  speciesNum: number // raw SpeciesEnum value, e.g. 25 for Pikachu -- the "Pokemon ID", distinct from nationalDexNum
   name: string
   longName?: string
   category: string
@@ -91,6 +92,9 @@ export interface Ability {
   name: string
   description: string
   expandedDescription?: string
+  grantsType?: string // bare type name, e.g. "DRAGON" -- this ability adds a type on top of the species' own
+  components?: string[] // AbilityEnum ids -- present only for compound abilities (e.g. "Big Leaves"), whose
+  // description is an exact " + "-joined list of these components' own names
 }
 
 // typeChart[attackingType][defendingType] = multiplier

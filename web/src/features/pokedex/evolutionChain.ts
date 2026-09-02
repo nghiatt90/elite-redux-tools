@@ -1,8 +1,11 @@
-import type { Species } from '../../lib/types'
+import type { Move, Species } from '../../lib/types'
 
 export interface ChainNode {
   species: Species
   condition?: string // human-readable, e.g. "Lv. 16" or "Lv. 34 (male)" -- empty for the root
+  label?: string // override for species.name -- needed for mega/primal forms, which
+  // almost never have their own longName (form_of inherits the base species' plain
+  // name, so "Charizard"'s three mega forms would otherwise all display identically)
 }
 
 function conditionLabel(level?: number, gender?: string): string | undefined {
@@ -62,4 +65,40 @@ export function buildEvolutionChain(
   }
 
   return stages
+}
+
+/** Mega/primal forms are stored on the FORM species itself (e.g. Mega Charizard X's
+ * own `megas` array points `from: "SPECIES_CHARIZARD"`), not on the base species --
+ * the reverse of how evolutions work. So finding "what can this species mega evolve
+ * into" means scanning every species for one whose megas[].from matches, not reading
+ * a field on `species` directly.
+ */
+const MEGA_TYPE_SUFFIX: Record<string, string> = {
+  MEGA_X: 'X',
+  MEGA_Y: 'Y',
+  MEGA_Z: 'Z',
+  MEGA_A: 'A',
+  MEGA_B: 'B',
+  MEGA_C: 'C',
+}
+
+export function findMegaAndPrimalForms(
+  species: Species,
+  allSpecies: Species[],
+  movesById: Map<string, Move>,
+): ChainNode[] {
+  const nodes: ChainNode[] = []
+  for (const s of allSpecies) {
+    const mega = s.megas.find((m) => m.from === species.id)
+    if (mega) {
+      const suffix = MEGA_TYPE_SUFFIX[mega.megaType]
+      const condition = mega.move ? `via ${movesById.get(mega.move)?.name ?? mega.move}` : 'via held item'
+      nodes.push({ species: s, condition, label: `Mega ${species.name}${suffix ? ` ${suffix}` : ''}` })
+    }
+    const primal = s.primals.find((p) => p.from === species.id)
+    if (primal) {
+      nodes.push({ species: s, condition: 'via held item', label: `Primal ${species.name}` })
+    }
+  }
+  return nodes
 }
