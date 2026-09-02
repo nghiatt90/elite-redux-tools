@@ -2,12 +2,9 @@ import { displayName } from '../../lib/displayName'
 import type { Species } from '../../lib/types'
 
 /** Precomputed search index: one entry per base species, carrying every name a query
- * could reasonably match against -- its own name plus any of its forms' longNames
- * (e.g. searching "Mega" or "Deoxys Attack" should surface the base species, since
- * that's the only entry shown in the primary list; see PokedexList's grouping note).
- * Forms almost always share their base's exact display name (form_of inherits dex
- * info), so the only place a form contributes a genuinely new search term is via its
- * own longName.
+ * could reasonably match against -- its own display name plus every one of its
+ * (non-standalone) forms' derived display names, so "mega" or "beedrill mega" still
+ * surfaces the base even though Mega Beedrill isn't a list entry of its own.
  */
 export interface SearchEntry {
   species: Species
@@ -15,6 +12,7 @@ export interface SearchEntry {
 }
 
 export function buildSearchIndex(baseSpecies: Species[], allSpecies: Species[]): SearchEntry[] {
+  const speciesById = new Map(allSpecies.map((s) => [s.id, s]))
   const formsByBase = new Map<string, Species[]>()
   for (const s of allSpecies) {
     if (!s.isForm || !s.formOf) continue
@@ -24,13 +22,12 @@ export function buildSearchIndex(baseSpecies: Species[], allSpecies: Species[]):
   }
 
   return baseSpecies.map((species) => {
-    // Standalone forms (Redux, regional) are their own list entries now (see
-    // PokedexShell), and their raw .name is identical to their base's ("Weedle" for
-    // both Weedle and Weedle Redux, "Vulpix" for both Vulpix and Vulpix Alolan) --
-    // index the disambiguated display name so "weedle redux" actually ranks as an
-    // own-name match, not a weaker form-longName one.
-    const names = new Set<string>([displayName(species).toLowerCase()])
+    // Every form (standalone or not) inherits its base's raw .name -- "Weedle" for
+    // both Weedle and Weedle Redux -- so index the disambiguated display name, not
+    // the raw one, or "weedle redux" would only ever rank as a weak substring match.
+    const names = new Set<string>([displayName(species, speciesById).toLowerCase()])
     for (const form of formsByBase.get(species.id) ?? []) {
+      names.add(displayName(form, speciesById).toLowerCase())
       if (form.longName) names.add(form.longName.toLowerCase())
     }
     return { species, names: [...names] }
@@ -39,8 +36,8 @@ export function buildSearchIndex(baseSpecies: Species[], allSpecies: Species[]):
 
 /** Lower score = better match. Prefix match on the species' own name ranks above a
  * substring match on its own name, which ranks above a match found only via a form's
- * longName -- so typing "char" finds Charmander before "Mega Charizard" territory,
- * but "deoxys attack" still finds Deoxys.
+ * name -- so typing "char" finds Charmander before "Mega Charizard" territory, but
+ * "beedrill mega" still finds Beedrill.
  */
 export function searchSpecies(index: SearchEntry[], query: string): Species[] {
   const q = query.trim().toLowerCase()

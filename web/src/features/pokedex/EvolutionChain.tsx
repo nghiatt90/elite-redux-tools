@@ -6,7 +6,15 @@ import { displayName } from '../../lib/displayName'
 import type { Species } from '../../lib/types'
 import { buildEvolutionChain, findOtherForms, type ChainNode } from './evolutionChain'
 
-function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
+function SpeciesChip({
+  node,
+  current,
+  speciesById,
+}: {
+  node: ChainNode
+  current: Species
+  speciesById: Map<string, Species>
+}) {
   return (
     <Link
       to={`/pokemon/${node.species.id}`}
@@ -25,7 +33,7 @@ function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
         loading="lazy"
       />
       <div className="text-xs">
-        <div className="font-medium">{node.label ?? node.species.longName ?? displayName(node.species)}</div>
+        <div className="font-medium">{node.label ?? displayName(node.species, speciesById)}</div>
         {node.condition && <div style={{ color: 'var(--color-text-muted)' }}>{node.condition}</div>}
       </div>
     </Link>
@@ -33,11 +41,11 @@ function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
 }
 
 export default function EvolutionChain({ species }: { species: Species }) {
-  const { species: allSpecies, speciesById, movesById } = useGameData()
+  const { speciesById, movesById } = useGameData()
   const stages = useMemo(() => buildEvolutionChain(species, speciesById), [species, speciesById])
   const otherForms = useMemo(
-    () => findOtherForms(species, allSpecies, movesById),
-    [species, allSpecies, movesById],
+    () => findOtherForms(species, speciesById, movesById),
+    [species, speciesById, movesById],
   )
 
   const noRegularEvolution = stages.length <= 1 && stages[0]?.length === 1
@@ -63,7 +71,7 @@ export default function EvolutionChain({ species }: { species: Species }) {
               )}
               <div className="flex flex-col gap-2">
                 {stage.map((node) => (
-                  <SpeciesChip key={node.species.id} node={node} current={species} />
+                  <SpeciesChip key={node.species.id} node={node} current={species} speciesById={speciesById} />
                 ))}
               </div>
             </div>
@@ -81,7 +89,7 @@ export default function EvolutionChain({ species }: { species: Species }) {
           </h3>
           <div className="flex flex-wrap gap-2">
             {otherForms.map((node) => (
-              <SpeciesChip key={node.species.id} node={node} current={species} />
+              <SpeciesChip key={node.species.id} node={node} current={species} speciesById={speciesById} />
             ))}
           </div>
         </div>

@@ -68,38 +68,22 @@ export function buildEvolutionChain(
   return stages
 }
 
-/** Derives a human label from a form's own symbolic id by stripping its base
- * species' id prefix, e.g. SPECIES_CHARIZARD_MEGA_X minus SPECIES_CHARIZARD ->
- * "Mega X", SPECIES_WEEDLE_REDUX -> "Redux", SPECIES_RAPIDASH_MEGA_GALARIAN ->
- * "Mega Galarian". Generic rather than hand-listing every form category (Redux,
- * regional, battle forms, capes, ...) individually -- verified against a sample
- * spanning mega/primal/Redux/regional/cap forms, all read cleanly.
- */
-function labelFromId(formId: string, baseId: string, baseName: string): string {
-  const suffix = formId.startsWith(`${baseId}_`) ? formId.slice(baseId.length + 1) : formId
-  const words = suffix
-    .split('_')
-    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
-    .join(' ')
-  return `${baseName} ${words}`
-}
-
 /** Every kind of form -- mega, primal, Redux, regional (Galarian/Alolan/Hisuian),
  * battle forms, capes, and whatever else Elite Redux adds -- is stored the same way:
  * on the FORM species itself via `formOf` pointing back at the base, the reverse of
  * how regular evolutions work. So finding "what forms does this species have" means
  * scanning every species for a matching `formOf`, not reading a field on `species`
- * directly. This used to only look at the `megas`/`primals` arrays specifically,
- * which meant the other ~500 forms in the data (Redux forms among them) were
- * invisible everywhere, not just in the list (which intentionally hides all forms).
+ * directly. This lists every form regardless of whether it's also a standalone list
+ * entry in its own right (see displayName.ts's isStandaloneForm) -- this section is
+ * the cross-link back to it either way.
  */
 export function findOtherForms(
   species: Species,
-  allSpecies: Species[],
+  speciesById: Map<string, Species>,
   movesById: Map<string, Move>,
 ): ChainNode[] {
   const nodes: ChainNode[] = []
-  for (const s of allSpecies) {
+  for (const s of speciesById.values()) {
     if (s.formOf !== species.id) continue
 
     const mega = s.megas.find((m) => m.from === species.id)
@@ -112,7 +96,7 @@ export function findOtherForms(
         ? 'via held item'
         : undefined
 
-    nodes.push({ species: s, condition, label: labelFromId(s.id, species.id, displayName(species)) })
+    nodes.push({ species: s, condition, label: displayName(s, speciesById) })
   }
   return nodes
 }

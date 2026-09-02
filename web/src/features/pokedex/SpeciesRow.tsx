@@ -15,7 +15,7 @@ export default function SpeciesRow({
   species: Species
   selected?: boolean
 }) {
-  const { abilitiesById } = useGameData()
+  const { abilitiesById, speciesById } = useGameData()
   const extraTypes = grantedTypes(species, abilitiesById)
 
   return (
@@ -37,7 +37,9 @@ export default function SpeciesRow({
         className="pixelated shrink-0"
         loading="lazy"
       />
-      <span className="w-24 sm:w-40 shrink-0 truncate text-sm font-medium">{displayName(species)}</span>
+      <span className="w-24 sm:w-40 shrink-0 truncate text-sm font-medium">
+        {displayName(species, speciesById)}
+      </span>
       <span className="flex gap-1 w-32 sm:w-56 shrink-0 overflow-hidden">
         {species.types.map((t) => (
           <TypeChip key={t} type={t} />

@@ -18,7 +18,7 @@ import { buildSearchIndex, searchSpecies } from '../features/pokedex/search'
 // rail+list+detail layout would be cramped on a tablet, so tablets and phones both
 // get the pre-existing full-screen detail navigation. Deliberate, visible choice.
 export default function PokedexShell() {
-  const { species } = useGameData()
+  const { species, speciesById } = useGameData()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -53,14 +53,15 @@ export default function PokedexShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  // Most forms (mega/battle forms, capes, etc.) are temporary or cosmetic variants
-  // of a base mon -- listing all of them as list peers would just flood the list
-  // with duplicate names, so they're reachable from the base species' detail view
-  // instead. Redux and regional (Alolan/Galarian/Hisuian/Paldean) forms are the
-  // exception: they're full standalone mons with their own evolution lines, not a
-  // variant of anything, so they get their own top-level list entry too (see
-  // displayName() for how they're told apart from their same-named base in the UI).
-  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isStandaloneForm(s)), [species])
+  // A form is a list peer of its base, not buried in the base's detail view, when
+  // it actually differs from its base in abilities/innates or learnset --
+  // mechanically identical forms (same moves, same abilities: a pure
+  // appearance/palette variant) stay grouped, reachable via the base's Other Forms
+  // section instead of adding a redundant row. See isStandaloneForm()/displayName().
+  const baseSpecies = useMemo(
+    () => species.filter((s) => !s.isForm || isStandaloneForm(s, speciesById)),
+    [species, speciesById],
+  )
   const searchIndex = useMemo(() => buildSearchIndex(baseSpecies, species), [baseSpecies, species])
 
   const results = useMemo(() => {
