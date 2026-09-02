@@ -11,15 +11,15 @@ const NAV_LINKS = [
   { to: '/damage-calculator', label: 'Damage Calculator' },
 ]
 
-function Nav() {
+function Nav({ className = '' }: { className?: string }) {
   return (
-    <nav className="flex items-center gap-1">
+    <nav className={`flex items-center gap-1 ${className}`}>
       {NAV_LINKS.map(({ to, label }) => (
         <NavLink
           key={to}
           to={to}
           end={to === '/'}
-          className="rounded-md px-2 py-1 text-sm"
+          className="rounded-md px-2 py-1 text-sm whitespace-nowrap"
           style={({ isActive }) => ({
             background: isActive ? 'var(--color-bg-hover)' : undefined,
             color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
@@ -38,26 +38,29 @@ function Header() {
   const meta = state.status === 'ready' ? state.data.meta : undefined
 
   return (
-    <header
-      className="flex items-center justify-between gap-3 border-b px-4 py-2 shrink-0"
-      style={{ borderColor: 'var(--color-border)' }}
-    >
-      <div className="flex items-center gap-4 min-w-0">
-        <div className="flex items-baseline gap-2 min-w-0 shrink-0">
-          <span className="font-semibold shrink-0">Elite Redux Pokedex</span>
-          {meta && (
-            <span
-              className="text-xs truncate hidden sm:inline"
-              style={{ color: 'var(--color-text-muted)' }}
-              title={`Data generated ${meta.generatedAt}`}
-            >
-              {meta.gameVersion} · data as of {meta.generatedAt.slice(0, 10)}
-            </span>
-          )}
+    <header className="border-b shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-2">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0 shrink-0">
+            <span className="font-semibold shrink-0">Elite Redux Pokedex</span>
+            {meta && (
+              <span
+                className="text-xs truncate hidden sm:inline"
+                style={{ color: 'var(--color-text-muted)' }}
+                title={`Data generated ${meta.generatedAt}`}
+              >
+                {meta.gameVersion} · data as of {meta.generatedAt.slice(0, 10)}
+              </span>
+            )}
+          </div>
+          {/* Desktop/tablet: nav sits inline next to the title. Below sm it moves to
+              its own row (below) instead -- three labels plus the title and toggle
+              don't fit on one line at phone widths without wrapping mid-word. */}
+          <Nav className="hidden sm:flex" />
         </div>
-        <Nav />
+        <ThemeToggle />
       </div>
-      <ThemeToggle />
+      <Nav className="sm:hidden px-4 pb-2 overflow-x-auto" />
     </header>
   )
 }
