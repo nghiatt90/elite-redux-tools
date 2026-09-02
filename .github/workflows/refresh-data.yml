@@ -1,0 +1,71 @@
+name: Refresh game data
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of each month. Manual runs (workflow_dispatch) are the
+    # normal way to trigger this on demand -- monthly is just a floor, chosen over
+    # weekly so a data-format tweak doesn't rewrite the committed snapshot (and
+    # permanently bloat git history) more often than genuinely useful.
+    - cron: '0 6 1 * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install pipeline dependencies
+        working-directory: pipeline
+        run: uv sync --extra dev
+
+      - name: Check for upstream updates
+        id: check
+        working-directory: pipeline
+        run: |
+          set +e
+          uv run python -m erdata.refresh_check --check
+          if [ $? -eq 0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update lockfile and rebuild
+        if: steps.check.outputs.changed == 'true'
+        working-directory: pipeline
+        run: |
+          uv run python -m erdata.refresh_check
+          uv run python -m erdata.build
+
+      - name: Check for a real data change
+        if: steps.check.outputs.changed == 'true'
+        id: diff
+        run: |
+          # emit.py's output is deterministic (sorted keys, fixed separators) for
+          # identical input, so a plain git diff on our own generated JSON already IS
+          # a semantic diff -- no formatting noise to filter out.
+          if git diff --quiet -- data/ sources.lock.json; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a PR
+        if: steps.check.outputs.changed == 'true' && steps.diff.outputs.has_diff == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore(data): refresh game data snapshot'
+          title: 'Refresh game data snapshot'
+          body: |
+            Automated refresh: upstream `er-config` and/or `eliteredux-source` moved.
+            See the diff for what actually changed in `data/v2.65beta/` and the new
+            pinned SHAs in `sources.lock.json`.
+          branch: data-refresh
+          delete-branch: true
