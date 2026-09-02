@@ -37,7 +37,7 @@ export default function SpeciesRow({
         loading="lazy"
       />
       <span className="w-24 sm:w-40 shrink-0 truncate text-sm font-medium">{species.name}</span>
-      <span className="flex gap-1 w-28 sm:w-48 shrink-0 overflow-hidden">
+      <span className="flex gap-1 w-32 sm:w-56 shrink-0 overflow-hidden">
         {species.types.map((t) => (
           <TypeChip key={t} type={t} />
         ))}
@@ -55,17 +55,11 @@ export default function SpeciesRow({
         {bst(species.baseStats)}
       </span>
       <span
-        className="text-xs w-16 text-right tabular-nums hidden md:inline-block"
+        className="text-xs w-20 ml-auto text-right tabular-nums hidden md:inline-block"
         style={{ color: 'var(--color-text-muted)' }}
         title="Pokemon ID (internal species number)"
       >
         {formatHex(species.speciesNum)}
-      </span>
-      <span
-        className="text-xs ml-auto tabular-nums hidden sm:inline-block"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        #{species.nationalDexNum.toString().padStart(4, '0')}
       </span>
     </Link>
   )
