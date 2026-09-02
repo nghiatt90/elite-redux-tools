@@ -1,8 +1,13 @@
 import json
 
+from erdata.ability_hooks import ability_hooks_to_dict
 from erdata.emit import ability_to_dict, item_to_dict, move_to_dict, species_to_dict, type_chart_to_dict
 from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
 from erdata.resolve import build_species_map, playable_species, universal_tutor_sets
+
+# Scraping abilities.cc's 1026 blocks is the slowest fixture in this file by a wide
+# margin; computed once and reused, same as the module already does for parse_*().
+_ABILITY_HOOKS = ability_hooks_to_dict()
 
 
 def _fixtures():
@@ -124,7 +129,7 @@ def test_ability_dict_shape():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
-    d = ability_to_dict(volt_absorb, name_index)
+    d = ability_to_dict(volt_absorb, name_index, _ABILITY_HOOKS)
     json.dumps(d)
     assert d["id"] == "ABILITY_VOLT_ABSORB"
 
@@ -133,7 +138,7 @@ def test_ability_dict_grants_type():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     half_drake = next(a for a in abilities if a.name == "Half Drake")
-    d = ability_to_dict(half_drake, name_index)
+    d = ability_to_dict(half_drake, name_index, _ABILITY_HOOKS)
     assert d["grantsType"] == "DRAGON"
 
 
@@ -141,7 +146,7 @@ def test_ability_dict_compound_resolves_components():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     big_leaves = next(a for a in abilities if a.name == "Big Leaves")
-    d = ability_to_dict(big_leaves, name_index)
+    d = ability_to_dict(big_leaves, name_index, _ABILITY_HOOKS)
     assert d["components"] == [
         "ABILITY_CHLOROPLAST",
         "ABILITY_CHLOROPHYLL",
@@ -155,7 +160,7 @@ def test_ability_dict_non_compound_has_no_components():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
-    d = ability_to_dict(volt_absorb, name_index)
+    d = ability_to_dict(volt_absorb, name_index, _ABILITY_HOOKS)
     assert "components" not in d
 
 

@@ -3,7 +3,6 @@ it deterministically to data/<version>/.
 """
 
 import json
-import re
 from datetime import UTC, datetime
 
 from erdata.generated import (
@@ -19,6 +18,7 @@ from erdata.generated import (
     SpeciesList_pb2,
     Types_pb2,
 )
+from erdata.ability_hooks import ability_hooks_to_dict
 from erdata.behaviors import move_behaviors_to_dict
 from erdata.move_behavior import behavior_config_to_dict
 from erdata.natures import battle_constants_to_dict
@@ -153,18 +153,6 @@ def _primals(species) -> list[dict]:
         {"from": _S(getattr(p, "from")), "item": _I(p.item), "primalType": _PrimalType(p.type)}
         for p in species.primal
     ]
-
-
-# ~18 abilities literally grant an extra type on top of the species' own 1-2, e.g.
-# "Half Drake :: Adds Dragon type on entry." -- verified by hand against the full
-# ability list, and only these plain "Adds <Type> type" phrasings; extracted here
-# rather than hardcoded so it stays correct if wording changes upstream.
-_TYPE_GRANT_PATTERN = re.compile(r"Adds\s+([A-Za-z]+)[- ]?type", re.I)
-
-
-def _grants_type(description: str) -> str | None:
-    m = _TYPE_GRANT_PATTERN.search(description)
-    return m.group(1).upper() if m else None
 
 
 # Compound abilities (e.g. "Big Leaves") have a description that is an exact
@@ -306,7 +294,17 @@ def move_to_dict(move) -> dict:
     return entry
 
 
-def ability_to_dict(ability, name_index: dict) -> dict:
+# addsType is a `Type addsType:5` bitfield in include/abilities.hh's struct Ability --
+# the authoritative source for "this ability grants an extra type" (26 abilities), and
+# what replaced this pipeline's original regex-over-English-description approach (which
+# only matched the literal phrasing "Adds <Type> type" and would silently miss a
+# rewording upstream).
+def _grants_type(ability_id_name: str, ability_hooks: dict) -> str | None:
+    value = ability_hooks.get(ability_id_name, {}).get("bitfields", {}).get("addsType")
+    return value.removeprefix("TYPE_") if value else None
+
+
+def ability_to_dict(ability, name_index: dict, ability_hooks: dict) -> dict:
     entry = {
         "id": _A(ability.id),
         "name": ability.name,
@@ -315,7 +313,7 @@ def ability_to_dict(ability, name_index: dict) -> dict:
     if ability.HasField("expanded_description"):
         entry["expandedDescription"] = ability.expanded_description
 
-    grants = _grants_type(ability.description)
+    grants = _grants_type(_A(ability.id), ability_hooks)
     if grants:
         entry["grantsType"] = grants
 
@@ -434,15 +432,20 @@ def build() -> None:
     )
     _write_json(out / "moves.json", [move_to_dict(m) for m in sorted(moves, key=lambda m: _M(m.id))])
     ability_name_index = {a.name: a for a in abilities}
+    ability_hooks = ability_hooks_to_dict()
     _write_json(
         out / "abilities.json",
-        [ability_to_dict(a, ability_name_index) for a in sorted(abilities, key=lambda a: _A(a.id))],
+        [
+            ability_to_dict(a, ability_name_index, ability_hooks)
+            for a in sorted(abilities, key=lambda a: _A(a.id))
+        ],
     )
     _write_json(out / "types.json", type_chart_to_dict())
     _write_json(out / "items.json", [item_to_dict(i) for i in sorted(items, key=lambda i: _I(i.id))])
     move_behaviors = move_behaviors_to_dict()
     _write_json(out / "moveBehaviors.json", move_behaviors)
     _write_json(out / "natures.json", battle_constants_to_dict())
+    _write_json(out / "abilityHooks.json", ability_hooks)
     _write_json(
         out / "meta.json",
         {
@@ -458,6 +461,7 @@ def build() -> None:
                 "abilities": len(abilities),
                 "items": len(items),
                 "moveBehaviors": len(move_behaviors["behaviors"]),
+                "abilityHooks": len(ability_hooks),
             },
         },
     )
