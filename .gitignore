@@ -26,3 +26,14 @@ venv/
 # Save files / game data (may be added deliberately later, ignore by default)
 *.rxdata
 *.sav
+
+# Generated protobuf modules
+*_pb2.py
+*_pb2.pyi
+
+# Pipeline working dirs
+pipeline/.upstream/
+web/public/data/
+
+# uv
+uv.lock.bak
