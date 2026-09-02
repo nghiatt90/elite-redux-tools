@@ -79,6 +79,16 @@ export const UNLOCK_CONDITIONS: Record<string, string> = {
   SPECIES_GIRATINA_ORIGIN: 'From Nurse Joy, first time you talk to her (Griseous Orb)',
 }
 
+/** Every Mega Evolution -- whichever specific stone it needs -- also needs the Mega
+ * Bracelet itself, a one-time prerequisite Norman hands you along with a starter set
+ * of Mega Stones right before your 5th gym battle (Petalburg Gym, `scripts.pory`
+ * case 6: `giveitem(ITEM_MEGA_BRACELET)`, gated on all 4 prior badges). That's the
+ * honest default for any Mega whose specific stone location hasn't been individually
+ * verified (see UNLOCK_CONDITIONS above) -- unlike "via held item", it's actually
+ * true of every single one of them.
+ */
+export const DEFAULT_MEGA_UNLOCK = 'Requires the Mega Bracelet, from Norman (after 4 Badges)'
+
 export function unlockConditionFor(formId: string): string | undefined {
   return UNLOCK_CONDITIONS[formId]
 }

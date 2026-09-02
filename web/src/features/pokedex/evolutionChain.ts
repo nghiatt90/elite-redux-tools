@@ -1,5 +1,5 @@
 import { displayName } from '../../lib/displayName'
-import { unlockConditionFor } from '../../data/unlockConditions'
+import { DEFAULT_MEGA_UNLOCK, unlockConditionFor } from '../../data/unlockConditions'
 import type { Move, Species } from '../../lib/types'
 
 export interface ChainNode {
@@ -106,7 +106,7 @@ export function findOtherForms(
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
-        : (unlockConditionFor(s.id) ?? 'via held item')
+        : (unlockConditionFor(s.id) ?? DEFAULT_MEGA_UNLOCK)
       : primal
         ? (unlockConditionFor(s.id) ?? 'via held item')
         : undefined
