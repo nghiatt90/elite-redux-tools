@@ -25,9 +25,10 @@ export default function PokedexDetail() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 max-w-3xl mx-auto">
+    <div className="h-full overflow-y-auto p-4">
       <Link className="text-sm underline" to="/">
-        ← Back to list
+        <span className="lg:hidden">← Back to list</span>
+        <span className="hidden lg:inline">✕ Close</span>
       </Link>
 
       <div className="flex gap-4 mt-3">

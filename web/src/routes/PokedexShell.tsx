@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useGameData } from '../lib/GameDataContext'
 import FilterPills from '../features/pokedex/FilterPills'
 import FilterRail from '../features/pokedex/FilterRail'
@@ -7,9 +7,19 @@ import { applyFilters, filtersFromSearchParams, filtersToSearchParams, isEmpty }
 import SpeciesListView, { type SpeciesListHandle } from '../features/pokedex/SpeciesListView'
 import { buildSearchIndex, searchSpecies } from '../features/pokedex/search'
 
-export default function PokedexList() {
+// Persistent layout: the list is never unmounted by a route change. Clicking a
+// species still changes the URL to /pokemon/:id (shareable, deep-linkable) and
+// renders PokedexDetail into the <Outlet/> below, but the list itself, its scroll
+// position, and its filters stay exactly where they were -- no page-navigation feel.
+//
+// Split-pane (list + detail side by side) only kicks in at `lg` (1024px), not `md`
+// (768px) like the rest of the app's responsive breakpoints: a three-column
+// rail+list+detail layout would be cramped on a tablet, so tablets and phones both
+// get the pre-existing full-screen detail navigation. Deliberate, visible choice.
+export default function PokedexShell() {
   const { species } = useGameData()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
@@ -19,6 +29,12 @@ export default function PokedexList() {
   const [filtersVisible, setFiltersVisible] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<SpeciesListHandle>(null)
+
+  const activeId = useMemo(() => {
+    const match = location.pathname.match(/^\/pokemon\/(.+)$/)
+    return match ? decodeURIComponent(match[1]).toUpperCase() : null
+  }, [location.pathname])
+  const isDetailActive = activeId !== null
 
   const setFilters = useCallback(
     (next: typeof filters) => {
@@ -47,13 +63,37 @@ export default function PokedexList() {
     return applyFilters(searched, filters)
   }, [searchIndex, query, filters])
 
+  // When a detail is open (arrived at via mouse click, a direct link, or the URL bar
+  // -- not just keyboard nav), highlight that row in the list too, and let arrow keys
+  // continue from there.
+  const activeIndex = useMemo(
+    () => (activeId ? results.findIndex((s) => s.id === activeId) : -1),
+    [activeId, results],
+  )
+  useEffect(() => {
+    if (activeIndex >= 0) {
+      setSelectedIndex(activeIndex)
+      listRef.current?.scrollToIndex(activeIndex)
+    }
+  }, [activeIndex])
+  const highlightedIndex = activeIndex >= 0 ? activeIndex : selectedIndex
+
   // Autofocus on load, and re-focus whenever anyone starts typing without having
   // clicked into the box first.
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
+  // Only reset selection to the top when the user actually changes the query/filters
+  // after mount -- not on the initial mount itself, which would stomp the
+  // URL-driven activeIndex scroll-into-view above (e.g. landing directly on
+  // /pokemon/:id should show that row, not silently reset to index 0).
+  const isFirstRender = useRef(true)
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
     setSelectedIndex(0)
     listRef.current?.scrollToIndex(0)
   }, [query, filters])
@@ -100,14 +140,14 @@ export default function PokedexList() {
         return
       }
       if (e.key === 'Enter') {
-        const chosen = results[selectedIndex]
+        const chosen = results[highlightedIndex]
         if (chosen) navigate(`/pokemon/${chosen.id}`)
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [query, results, selectedIndex, navigate])
+  }, [query, results, highlightedIndex, navigate])
 
   return (
     <div className="h-full flex">
@@ -116,7 +156,10 @@ export default function PokedexList() {
           <FilterRail filters={filters} onChange={setFilters} />
         </div>
       )}
-      <div className="flex-1 min-w-0 flex flex-col md:border-l" style={{ borderColor: 'var(--color-border)' }}>
+      <div
+        className={`${isDetailActive ? 'hidden lg:flex' : 'flex'} flex-1 min-w-0 flex-col md:border-l`}
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div
           className="px-3 py-2 shrink-0 flex items-center gap-2 sticky top-0 z-10"
           style={{ background: 'var(--color-bg)' }}
@@ -174,10 +217,19 @@ export default function PokedexList() {
               {query ? ' or a shorter name' : ''}.
             </div>
           ) : (
-            <SpeciesListView ref={listRef} species={results} selectedIndex={selectedIndex} />
+            <SpeciesListView ref={listRef} species={results} selectedIndex={highlightedIndex} />
           )}
         </div>
       </div>
+
+      {isDetailActive && (
+        <div
+          className="flex-1 lg:flex-none lg:w-[440px] lg:shrink-0 h-full overflow-y-auto lg:border-l"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <Outlet />
+        </div>
+      )}
 
       {filtersSheetOpen && (
         <div className="md:hidden fixed inset-0 z-20 flex flex-col justify-end">

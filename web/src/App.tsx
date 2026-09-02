@@ -2,7 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
 import PokedexDetail from './routes/PokedexDetail'
-import PokedexList from './routes/PokedexList'
+import PokedexShell from './routes/PokedexShell'
 
 function Header() {
   const state = useGameDataState()
@@ -68,8 +68,13 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<PokedexList />} />
-      <Route path="/pokemon/:id" element={<PokedexDetail />} />
+      {/* PokedexShell is a persistent layout, not a page -- it stays mounted (list
+          scroll position, filters, search all preserved) while /pokemon/:id renders
+          PokedexDetail into its <Outlet/> as a split-pane detail column (desktop) or
+          a full-screen view (mobile/tablet); see PokedexShell.tsx. */}
+      <Route path="/" element={<PokedexShell />}>
+        <Route path="pokemon/:id" element={<PokedexDetail />} />
+      </Route>
     </Routes>
   )
 }
