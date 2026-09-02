@@ -40,4 +40,5 @@ uv.lock.bak
 
 # Committed data snapshot -- deliberately tracked despite a global "data/" ignore rule
 !/data/
+!/web/src/data/
 .playwright-mcp/

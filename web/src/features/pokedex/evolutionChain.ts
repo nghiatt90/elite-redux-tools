@@ -1,4 +1,5 @@
 import { displayName } from '../../lib/displayName'
+import { unlockConditionFor } from '../../data/unlockConditions'
 import type { Move, Species } from '../../lib/types'
 
 export interface ChainNode {
@@ -105,9 +106,9 @@ export function findOtherForms(
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
-        : 'via held item'
+        : unlockConditionFor(s.id)
       : primal
-        ? 'via held item'
+        ? unlockConditionFor(s.id)
         : undefined
 
     nodes.push({ species: s, condition, label: displayName(s, speciesById) })
