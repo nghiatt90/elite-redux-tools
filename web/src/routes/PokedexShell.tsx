@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useGameData } from '../lib/GameDataContext'
-import { isReduxForm } from '../lib/displayName'
+import { isStandaloneForm } from '../lib/displayName'
 import FilterPills from '../features/pokedex/FilterPills'
 import FilterRail from '../features/pokedex/FilterRail'
 import { applyFilters, filtersFromSearchParams, filtersToSearchParams, isEmpty } from '../features/pokedex/filters'
@@ -53,14 +53,14 @@ export default function PokedexShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  // Most forms (mega/regional/battle forms etc.) are temporary or cosmetic variants
-  // of a base mon -- listing all ~780 of them as list peers would just flood the
-  // list with duplicate names, so they're reachable from the base species' detail
-  // view instead. Redux forms are the one exception: they're full standalone mons
-  // with their own evolution lines, not a variant of anything, so they get their own
-  // top-level list entry too (see displayName() for how they're told apart from
-  // their same-named base in the UI).
-  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isReduxForm(s.id)), [species])
+  // Most forms (mega/battle forms, capes, etc.) are temporary or cosmetic variants
+  // of a base mon -- listing all of them as list peers would just flood the list
+  // with duplicate names, so they're reachable from the base species' detail view
+  // instead. Redux and regional (Alolan/Galarian/Hisuian/Paldean) forms are the
+  // exception: they're full standalone mons with their own evolution lines, not a
+  // variant of anything, so they get their own top-level list entry too (see
+  // displayName() for how they're told apart from their same-named base in the UI).
+  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isStandaloneForm(s.id)), [species])
   const searchIndex = useMemo(() => buildSearchIndex(baseSpecies, species), [baseSpecies, species])
 
   const results = useMemo(() => {
