@@ -1,3 +1,4 @@
+import { useGameData } from '../../lib/GameDataContext'
 import type { FilterState } from './filters'
 import { EMPTY_FILTERS } from './filters'
 
@@ -17,7 +18,11 @@ interface Pill {
   clear: (f: FilterState) => FilterState
 }
 
-function buildPills(filters: FilterState): Pill[] {
+function buildPills(
+  filters: FilterState,
+  resolveAbilityName: (id: string) => string,
+  resolveMoveName: (id: string) => string,
+): Pill[] {
   const pills: Pill[] = []
   for (const [type, state] of Object.entries(filters.types)) {
     pills.push({
@@ -33,11 +38,19 @@ function buildPills(filters: FilterState): Pill[] {
       clear: (f) => ({ ...f, statMin: { ...f.statMin, [key]: undefined } }),
     })
   }
-  if (filters.ability) {
-    pills.push({ key: 'ability', label: `ability: ${filters.ability}`, clear: (f) => ({ ...f, ability: '' }) })
+  for (const id of filters.abilityOrInnate) {
+    pills.push({
+      key: `ability-${id}`,
+      label: resolveAbilityName(id),
+      clear: (f) => ({ ...f, abilityOrInnate: f.abilityOrInnate.filter((a) => a !== id) }),
+    })
   }
-  if (filters.innate) {
-    pills.push({ key: 'innate', label: `innate: ${filters.innate}`, clear: (f) => ({ ...f, innate: '' }) })
+  for (const id of filters.moves) {
+    pills.push({
+      key: `move-${id}`,
+      label: resolveMoveName(id),
+      clear: (f) => ({ ...f, moves: f.moves.filter((m) => m !== id) }),
+    })
   }
   return pills
 }
@@ -49,7 +62,11 @@ export default function FilterPills({
   filters: FilterState
   onChange: (f: FilterState) => void
 }) {
-  const pills = buildPills(filters)
+  const { abilitiesById, movesById } = useGameData()
+  const resolveAbilityName = (id: string) => abilitiesById.get(id)?.name ?? id
+  const resolveMoveName = (id: string) => movesById.get(id)?.name ?? id
+
+  const pills = buildPills(filters, resolveAbilityName, resolveMoveName)
   if (pills.length === 0) return null
 
   return (

@@ -8,7 +8,7 @@ import SpeciesListView, { type SpeciesListHandle } from '../features/pokedex/Spe
 import { buildSearchIndex, searchSpecies } from '../features/pokedex/search'
 
 export default function PokedexList() {
-  const { species, abilitiesById } = useGameData()
+  const { species } = useGameData()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -16,6 +16,7 @@ export default function PokedexList() {
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filtersSheetOpen, setFiltersSheetOpen] = useState(false)
+  const [filtersVisible, setFiltersVisible] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<SpeciesListHandle>(null)
 
@@ -40,12 +41,11 @@ export default function PokedexList() {
   // base species only; forms are reachable from the base species' detail view.
   const baseSpecies = useMemo(() => species.filter((s) => !s.isForm), [species])
   const searchIndex = useMemo(() => buildSearchIndex(baseSpecies, species), [baseSpecies, species])
-  const resolveAbilityName = useCallback((id: string) => abilitiesById.get(id)?.name ?? id, [abilitiesById])
 
   const results = useMemo(() => {
     const searched = searchSpecies(searchIndex, query)
-    return applyFilters(searched, filters, resolveAbilityName)
-  }, [searchIndex, query, filters, resolveAbilityName])
+    return applyFilters(searched, filters)
+  }, [searchIndex, query, filters])
 
   // Autofocus on load, and re-focus whenever anyone starts typing without having
   // clicked into the box first.
@@ -111,9 +111,11 @@ export default function PokedexList() {
 
   return (
     <div className="h-full flex">
-      <div className="hidden md:block">
-        <FilterRail filters={filters} onChange={setFilters} />
-      </div>
+      {filtersVisible && (
+        <div className="hidden md:block">
+          <FilterRail filters={filters} onChange={setFilters} />
+        </div>
+      )}
       <div className="flex-1 min-w-0 flex flex-col md:border-l" style={{ borderColor: 'var(--color-border)' }}>
         <div
           className="px-3 py-2 shrink-0 flex items-center gap-2 sticky top-0 z-10"
@@ -140,6 +142,20 @@ export default function PokedexList() {
           >
             Filters
             {!isEmpty(filters) && (
+              <span
+                className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
+                style={{ background: 'var(--color-accent)' }}
+              />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFiltersVisible((v) => !v)}
+            className="hidden md:inline-flex shrink-0 rounded-md border px-2 py-1.5 text-sm relative"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            {filtersVisible ? 'Hide filters' : 'Show filters'}
+            {!filtersVisible && !isEmpty(filters) && (
               <span
                 className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
                 style={{ background: 'var(--color-accent)' }}

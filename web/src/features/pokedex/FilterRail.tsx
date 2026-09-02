@@ -1,6 +1,7 @@
 import { useGameData } from '../../lib/GameDataContext'
 import { typeColor } from '../../lib/typeColors'
 import { ALL_TYPES, type FilterState } from './filters'
+import MultiSelectFilter from './MultiSelectFilter'
 
 const STAT_LABELS: Record<string, string> = {
   hp: 'HP',
@@ -19,7 +20,7 @@ interface Props {
 }
 
 export default function FilterRail({ filters, onChange, className = 'w-56 shrink-0' }: Props) {
-  const { abilities } = useGameData()
+  const { abilities, moves } = useGameData()
 
   function cycleType(type: string) {
     const current = filters.types[type]
@@ -96,34 +97,21 @@ export default function FilterRail({ filters, onChange, className = 'w-56 shrink
         </div>
       </section>
 
-      <section>
-        <h2 className="font-semibold mb-1.5">Ability</h2>
-        <input
-          list="ability-options"
-          value={filters.ability}
-          onChange={(e) => onChange({ ...filters, ability: e.target.value })}
-          placeholder="Any ability"
-          className="w-full rounded-md border px-2 py-1 text-xs"
-          style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)' }}
-        />
-        <datalist id="ability-options">
-          {abilities.map((a) => (
-            <option key={a.id} value={a.name} />
-          ))}
-        </datalist>
-      </section>
+      <MultiSelectFilter
+        label="Ability / Innate"
+        placeholder="Add an ability or innate…"
+        options={abilities}
+        selected={filters.abilityOrInnate}
+        onChange={(ids) => onChange({ ...filters, abilityOrInnate: ids })}
+      />
 
-      <section>
-        <h2 className="font-semibold mb-1.5">Innate</h2>
-        <input
-          list="ability-options"
-          value={filters.innate}
-          onChange={(e) => onChange({ ...filters, innate: e.target.value })}
-          placeholder="Any innate"
-          className="w-full rounded-md border px-2 py-1 text-xs"
-          style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)' }}
-        />
-      </section>
+      <MultiSelectFilter
+        label="Moves"
+        placeholder="Add a move…"
+        options={moves}
+        selected={filters.moves}
+        onChange={(ids) => onChange({ ...filters, moves: ids })}
+      />
     </div>
   )
 }

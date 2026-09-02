@@ -6,12 +6,17 @@ export type TypeFilterState = 'include' | 'exclude'
 export interface FilterState {
   types: Partial<Record<string, TypeFilterState>> // bare type name -> state
   statMin: Partial<Record<'hp' | 'atk' | 'def' | 'spatk' | 'spdef' | 'spe' | 'bst', number>>
-  ability: string // display name, empty = no filter
-  innate: string
+  abilityOrInnate: string[] // AbilityEnum ids; AND across selections (see applyFilters)
+  moves: string[] // MoveEnum ids; AND across selections
 }
 
-export const EMPTY_FILTERS: FilterState = { types: {}, statMin: {}, ability: '', innate: '' }
-export const ALL_TYPES = Object.keys(TYPE_COLORS)
+export const EMPTY_FILTERS: FilterState = { types: {}, statMin: {}, abilityOrInnate: [], moves: [] }
+
+// Mystery and Stellar exist in the raw data (Terapagos/Stellar, the move
+// Present/Mystery) but aren't real gameplay types the user wants surfaced as filter
+// options right now -- picker-only exclusion, TypeChip/typeColors are untouched so
+// those two still render correctly wherever they actually show up.
+export const ALL_TYPES = Object.keys(TYPE_COLORS).filter((t) => t !== 'MYSTERY' && t !== 'STELLAR')
 
 export function filtersFromSearchParams(params: URLSearchParams): FilterState {
   const types: FilterState['types'] = {}
@@ -27,8 +32,8 @@ export function filtersFromSearchParams(params: URLSearchParams): FilterState {
   return {
     types,
     statMin,
-    ability: params.get('ability') ?? '',
-    innate: params.get('innate') ?? '',
+    abilityOrInnate: params.getAll('ability'),
+    moves: params.getAll('move'),
   }
 }
 
@@ -45,10 +50,10 @@ export function filtersToSearchParams(filters: FilterState, existing: URLSearchP
     if (v) params.set(`min_${key}`, String(v))
     else params.delete(`min_${key}`)
   }
-  if (filters.ability) params.set('ability', filters.ability)
-  else params.delete('ability')
-  if (filters.innate) params.set('innate', filters.innate)
-  else params.delete('innate')
+  params.delete('ability')
+  for (const id of filters.abilityOrInnate) params.append('ability', id)
+  params.delete('move')
+  for (const id of filters.moves) params.append('move', id)
   return params
 }
 
@@ -60,15 +65,9 @@ export function bst(stats: Species['baseStats']) {
   return stats.hp + stats.atk + stats.def + stats.spatk + stats.spdef + stats.spe
 }
 
-export function applyFilters(
-  species: Species[],
-  filters: FilterState,
-  resolveAbilityName: (id: string) => string,
-): Species[] {
+export function applyFilters(species: Species[], filters: FilterState): Species[] {
   const includeTypes = Object.entries(filters.types).filter(([, s]) => s === 'include').map(([t]) => t)
   const excludeTypes = Object.entries(filters.types).filter(([, s]) => s === 'exclude').map(([t]) => t)
-  const ability = filters.ability.toLowerCase()
-  const innate = filters.innate.toLowerCase()
 
   return species.filter((s) => {
     const types = s.types.map(bareType)
@@ -81,11 +80,21 @@ export function applyFilters(
     }
     if (filters.statMin.bst && bst(s.baseStats) < filters.statMin.bst) return false
 
-    if (ability && !s.abilities.some((id) => resolveAbilityName(id).toLowerCase() === ability)) {
-      return false
+    // Ability and innate are the same kind of thing to a player filtering by name --
+    // one combined pool, AND across every selected id (must carry all of them,
+    // somewhere across its up-to-3 abilities + up-to-3 innates).
+    if (filters.abilityOrInnate.length > 0) {
+      const pool = new Set([...s.abilities, ...s.innates])
+      if (!filters.abilityOrInnate.every((id) => pool.has(id))) return false
     }
-    if (innate && !s.innates.some((id) => resolveAbilityName(id).toLowerCase() === innate)) {
-      return false
+
+    // "Learns" covers both level-up and tutor moves; AND across every selected move.
+    if (filters.moves.length > 0) {
+      const learned = new Set([
+        ...s.learnset.levelUp.flatMap((entry) => entry.moves),
+        ...s.learnset.tutor,
+      ])
+      if (!filters.moves.every((id) => learned.has(id))) return false
     }
 
     return true
@@ -96,7 +105,7 @@ export function isEmpty(filters: FilterState) {
   return (
     Object.keys(filters.types).length === 0 &&
     Object.keys(filters.statMin).length === 0 &&
-    !filters.ability &&
-    !filters.innate
+    filters.abilityOrInnate.length === 0 &&
+    filters.moves.length === 0
   )
 }
