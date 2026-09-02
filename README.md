@@ -1,6 +1,6 @@
 # Elite Redux Tools
 
-Community tools for [Pokemon Elite Redux](https://reliccastle.com/games/450/), a Pokemon Essentials fangame.
+Community tools for [Pokemon Elite Redux](https://eliteredux.net), a Pokemon Essentials fangame.
 
 ## Planned tools
 
