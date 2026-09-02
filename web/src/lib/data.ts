@@ -1,4 +1,4 @@
-import type { Ability, Meta, Move, Species, TypeChart } from './types'
+import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
 
 // Matches sources.lock.json's game_version and web/package.json's sync-data script,
 // which copies data/<version>/ to public/data/<version>/ before dev/build.
@@ -15,6 +15,7 @@ export const loadSpecies = () => getJSON<Species[]>(`${BASE}/species.json`)
 export const loadMoves = () => getJSON<Move[]>(`${BASE}/moves.json`)
 export const loadAbilities = () => getJSON<Ability[]>(`${BASE}/abilities.json`)
 export const loadTypeChart = () => getJSON<TypeChart>(`${BASE}/types.json`)
+export const loadItems = () => getJSON<Item[]>(`${BASE}/items.json`)
 export const loadMeta = () => getJSON<Meta>(`${BASE}/meta.json`)
 
 export function spriteUrl(speciesId: string, variant: 'front' | 'front-shiny' | 'icon' | 'back') {

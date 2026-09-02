@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { loadAbilities, loadMeta, loadMoves, loadSpecies, loadTypeChart } from './data'
-import type { Ability, Meta, Move, Species, TypeChart } from './types'
+import { loadAbilities, loadItems, loadMeta, loadMoves, loadSpecies, loadTypeChart } from './data'
+import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
 
 interface GameData {
   species: Species[]
@@ -9,6 +9,8 @@ interface GameData {
   movesById: Map<string, Move>
   abilities: Ability[]
   abilitiesById: Map<string, Ability>
+  items: Item[]
+  itemsById: Map<string, Item>
   typeChart: TypeChart
   meta: Meta
 }
@@ -25,8 +27,15 @@ export function GameDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([loadSpecies(), loadMoves(), loadAbilities(), loadTypeChart(), loadMeta()])
-      .then(([species, moves, abilities, typeChart, meta]) => {
+    Promise.all([
+      loadSpecies(),
+      loadMoves(),
+      loadAbilities(),
+      loadItems(),
+      loadTypeChart(),
+      loadMeta(),
+    ])
+      .then(([species, moves, abilities, items, typeChart, meta]) => {
         if (cancelled) return
         setState({
           status: 'ready',
@@ -37,6 +46,8 @@ export function GameDataProvider({ children }: { children: ReactNode }) {
             movesById: new Map(moves.map((m) => [m.id, m])),
             abilities,
             abilitiesById: new Map(abilities.map((a) => [a.id, a])),
+            items,
+            itemsById: new Map(items.map((i) => [i.id, i])),
             typeChart,
             meta,
           },

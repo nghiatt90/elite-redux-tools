@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 
 from erdata.generated import (
     AbilityEnum_pb2,
+    ItemEnum_pb2,
+    ItemList_pb2,
     MoveEnum_pb2,
     MoveList_pb2,
     SpeciesEnum_pb2,
@@ -15,7 +17,7 @@ from erdata.generated import (
     Types_pb2,
 )
 from erdata.paths import load_lock, output_dir
-from erdata.parse import parse_abilities, parse_moves, parse_species
+from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
 from erdata.resolve import (
     build_species_map,
     expand_learnset,
@@ -30,10 +32,14 @@ from erdata.typechart import parse_type_chart
 _S = SpeciesEnum_pb2.SpeciesEnum.Name
 _A = AbilityEnum_pb2.AbilityEnum.Name
 _M = MoveEnum_pb2.MoveEnum.Name
+_I = ItemEnum_pb2.ItemEnum.Name
 _T = Types_pb2.Type.Name
 _Gender = SpeciesList_pb2.Species.Gender.Name
 _MegaType = SpeciesList_pb2.Species.MegaEvolution.MegaType.Name
 _PrimalType = SpeciesList_pb2.Species.PrimalEvolution.PrimalType.Name
+_Pocket = ItemList_pb2.Pocket.Name
+_HoldEffect = ItemList_pb2.HoldEffect.Name
+_UseType = ItemList_pb2.UseType.Name
 
 # A curated subset of Move's ~40 boolean flags -- the ones a Pokedex move list or a
 # damage calculator actually needs to show or act on. Additive: more can be added
@@ -91,7 +97,7 @@ def _megas(species) -> list[dict]:
         entry = {"from": _S(getattr(m, "from")), "megaType": _MegaType(m.type)}
         which = m.WhichOneof("evo_using")
         if which == "item":
-            entry["item"] = m.item
+            entry["item"] = _I(m.item)
         elif which == "move":
             entry["move"] = _M(m.move)
         out.append(entry)
@@ -100,7 +106,7 @@ def _megas(species) -> list[dict]:
 
 def _primals(species) -> list[dict]:
     return [
-        {"from": _S(getattr(p, "from")), "item": p.item, "primalType": _PrimalType(p.type)}
+        {"from": _S(getattr(p, "from")), "item": _I(p.item), "primalType": _PrimalType(p.type)}
         for p in species.primal
     ]
 
@@ -219,6 +225,64 @@ def ability_to_dict(ability, name_index: dict) -> dict:
     return entry
 
 
+# Elite Redux's own in-game hint for how to unlock each Mega Stone (shown via
+# GetMegaHintString in the compiled ROM) is driven by exactly one of these 4 fields
+# per item -- not something reverse-engineered from map scripts, it's structured data
+# straight from er-config, same as everything else this pipeline emits. See
+# tools/codegen/src/er/item/MegaHintGenerator.kt in eliteredux-source for the exact
+# in-game text this mirrors.
+def _mega_stone_hint(item) -> dict | None:
+    which = item.WhichOneof("mega_stone_hint")
+    if which is None:
+        return None
+    if which == "unique_mega_location":
+        return {"kind": "uniqueLocation", "text": item.unique_mega_location}
+    # talk_to_nurse_joy / adoption_center / talk_to_legendary_sage are plain bools;
+    # WhichOneof already told us which one is set, so its value is always True here.
+    kind = {
+        "talk_to_nurse_joy": "nurseJoy",
+        "adoption_center": "adoptionCenter",
+        "talk_to_legendary_sage": "legendarySage",
+    }[which]
+    return {"kind": kind}
+
+
+def item_to_dict(item) -> dict:
+    entry = {
+        "id": _I(item.id),
+        "itemNum": int(item.id),
+        "name": item.name,
+        "description": item.description,
+        "grouping": _Pocket(item.grouping),
+        "holdEffect": _HoldEffect(item.hold_effect),
+        "useType": _UseType(item.use_type),
+    }
+    if item.hold_effect_strength:
+        entry["holdEffectStrength"] = item.hold_effect_strength
+    if item.hold_effect_type:
+        entry["holdEffectType"] = _T(item.hold_effect_type)
+    if item.hold_effect_alias:
+        entry["holdEffectAlias"] = item.hold_effect_alias
+    if item.hold_effect_misc_param:
+        entry["holdEffectMiscParam"] = item.hold_effect_misc_param
+    if item.bp_price:
+        entry["bpPrice"] = item.bp_price
+    if item.mega_badge_requirement:
+        entry["megaBadgeRequirement"] = item.mega_badge_requirement
+    hint = _mega_stone_hint(item)
+    if hint:
+        entry["megaStoneHint"] = hint
+    if item.HasField("natural_gift"):
+        ng = item.natural_gift
+        entry["naturalGift"] = {
+            "power": ng.power,
+            "type": _T(ng.type),
+            "affectsUser": ng.affects_user,
+            "certain": ng.certain,
+        }
+    return entry
+
+
 def type_chart_to_dict() -> dict:
     chart = parse_type_chart()
     return {
@@ -236,6 +300,7 @@ def build() -> None:
     species = parse_species()
     moves = parse_moves()
     abilities = parse_abilities()
+    items = parse_items()
     species_map = build_species_map(species)
     tutors = universal_tutor_sets(moves)
 
@@ -256,6 +321,7 @@ def build() -> None:
         [ability_to_dict(a, ability_name_index) for a in sorted(abilities, key=lambda a: _A(a.id))],
     )
     _write_json(out / "types.json", type_chart_to_dict())
+    _write_json(out / "items.json", [item_to_dict(i) for i in sorted(items, key=lambda i: _I(i.id))])
     _write_json(
         out / "meta.json",
         {
@@ -269,6 +335,7 @@ def build() -> None:
                 "species": len(playable),
                 "moves": len(moves),
                 "abilities": len(abilities),
+                "items": len(items),
             },
         },
     )

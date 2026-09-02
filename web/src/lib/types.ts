@@ -23,13 +23,13 @@ export interface Evolution {
 export interface Mega {
   from: string
   megaType: string
-  item?: number // raw ItemEnum id -- not resolved to a name, no items.json exists yet
+  item?: string // ItemEnum id, e.g. "ITEM_CHARIZARDITE_X" -- look up in items.json
   move?: string
 }
 
 export interface Primal {
   from: string
-  item: number // raw ItemEnum id, same caveat as Mega.item
+  item: string // ItemEnum id, same as Mega.item
   primalType: string
 }
 
@@ -97,6 +97,37 @@ export interface Ability {
   // description is an exact " + "-joined list of these components' own names
 }
 
+// Mirrors er-config's own `mega_stone_hint` oneof -- the same 4-way choice that
+// drives the in-game hint text (GetMegaHintString in the compiled ROM), not
+// something this app invented. "uniqueLocation" carries the exact in-game string;
+// the other 3 kinds are stable enough phrasing to hardcode at the call site.
+export type MegaStoneHint =
+  | { kind: 'nurseJoy' }
+  | { kind: 'adoptionCenter' }
+  | { kind: 'legendarySage' }
+  | { kind: 'uniqueLocation'; text: string }
+
+export interface Item {
+  id: string
+  itemNum: number // raw ItemEnum value
+  name: string
+  description: string
+  grouping: string // Pocket enum, e.g. "POCKET_MEGA_STONES"
+  holdEffect: string // HoldEffect enum, e.g. "HOLD_EFFECT_MEGA_STONE"
+  useType: string
+  holdEffectStrength?: number
+  holdEffectType?: string // bare Type enum, e.g. "TYPE_FIRE" -- for Plates/Gems/etc.
+  holdEffectAlias?: string
+  holdEffectMiscParam?: string
+  bpPrice?: number
+  megaBadgeRequirement?: number // 1-8 = FLAG_BADGEnn_GET, 9 = FLAG_SYS_GAME_CLEAR --
+  // per-item metadata from er-config, not independently verified against map
+  // scripts for every item (at least one, Slowkingite, is known stale -- see
+  // evolutionChain.ts), so treat as a hint rather than fact.
+  megaStoneHint?: MegaStoneHint
+  naturalGift?: { power: number; type: string; affectsUser: boolean; certain: boolean }
+}
+
 // typeChart[attackingType][defendingType] = multiplier
 export type TypeChart = Record<string, Record<string, number>>
 
@@ -104,5 +135,5 @@ export interface Meta {
   gameVersion: string
   generatedAt: string
   sources: Record<string, { repo: string; sha: string; date: string }>
-  counts: { species: number; moves: number; abilities: number }
+  counts: { species: number; moves: number; abilities: number; items: number }
 }

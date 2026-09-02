@@ -41,11 +41,11 @@ function SpeciesChip({
 }
 
 export default function EvolutionChain({ species }: { species: Species }) {
-  const { speciesById, movesById } = useGameData()
+  const { speciesById, movesById, itemsById } = useGameData()
   const stages = useMemo(() => buildEvolutionChain(species, speciesById), [species, speciesById])
   const otherForms = useMemo(
-    () => findOtherForms(species, speciesById, movesById),
-    [species, speciesById, movesById],
+    () => findOtherForms(species, speciesById, movesById, itemsById),
+    [species, speciesById, movesById, itemsById],
   )
 
   const noRegularEvolution = stages.length <= 1 && stages[0]?.length === 1

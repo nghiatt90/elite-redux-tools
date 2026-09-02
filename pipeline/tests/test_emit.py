@@ -1,7 +1,7 @@
 import json
 
-from erdata.emit import ability_to_dict, move_to_dict, species_to_dict, type_chart_to_dict
-from erdata.parse import parse_abilities, parse_moves, parse_species
+from erdata.emit import ability_to_dict, item_to_dict, move_to_dict, species_to_dict, type_chart_to_dict
+from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
 from erdata.resolve import build_species_map, playable_species, universal_tutor_sets
 
 
@@ -29,6 +29,17 @@ def test_species_dict_is_json_serializable_and_has_expected_shape():
     tutor = d["learnset"]["tutor"]
     assert len(tutor) == len(set(tutor))  # deduped -- one overlap exists in the raw data
     assert len(tutor) == len(pikachu.learnset.tutor) + 7 + 4 + 1 - 1
+
+
+def test_species_dict_mega_item_resolves_to_enum_name():
+    species, _, _, species_map, tutors = _fixtures()
+    from erdata.generated import SpeciesEnum_pb2
+
+    charizard_mega_x = next(
+        s for s in species if SpeciesEnum_pb2.SpeciesEnum.Name(s.id) == "SPECIES_CHARIZARD_MEGA_X"
+    )
+    d = species_to_dict(charizard_mega_x, species_map, tutors)
+    assert d["megas"] == [{"from": "SPECIES_CHARIZARD", "megaType": "MEGA_X", "item": "ITEM_CHARIZARDITE_X"}]
 
 
 def test_form_species_dict_carries_inherited_dex_info():
@@ -93,6 +104,42 @@ def test_ability_dict_non_compound_has_no_components():
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
     d = ability_to_dict(volt_absorb, name_index)
     assert "components" not in d
+
+
+def test_item_dict_shape():
+    items = parse_items()
+    charizardite_x = next(i for i in items if i.name == "Charizardite X")
+    d = item_to_dict(charizardite_x)
+    json.dumps(d)
+    assert d["id"] == "ITEM_CHARIZARDITE_X"
+    assert d["itemNum"] == 761
+    assert d["grouping"] == "POCKET_MEGA_STONES"
+    assert d["holdEffect"] == "HOLD_EFFECT_MEGA_STONE"
+
+
+def test_item_dict_mega_stone_hint_kinds():
+    items = parse_items()
+    by_name = {i.name: i for i in items}
+
+    # er-config's own field for this item happens to be nurse-joy; a vanilla-GameFreak
+    # Mega Stone -- picked because it's stable across balance patches, not because
+    # this pipeline hardcodes an assumption about which stones are vanilla.
+    assert item_to_dict(by_name["Charizardite X"])["megaStoneHint"] == {"kind": "nurseJoy"}
+    assert item_to_dict(by_name["Tera Orb"])["megaStoneHint"] == {"kind": "legendarySage"}
+
+    adoption_center_item = next(
+        i for i in items if i.WhichOneof("mega_stone_hint") == "adoption_center"
+    )
+    assert item_to_dict(adoption_center_item)["megaStoneHint"] == {"kind": "adoptionCenter"}
+
+    unique = item_to_dict(by_name["Slowkingite"])["megaStoneHint"]
+    assert unique == {"kind": "uniqueLocation", "text": "Defeat Tate & Liza."}
+
+
+def test_item_dict_has_no_mega_stone_hint_when_unset():
+    items = parse_items()
+    potion = next(i for i in items if i.name == "Potion")
+    assert "megaStoneHint" not in item_to_dict(potion)
 
 
 def test_type_chart_dict_uses_bare_names():

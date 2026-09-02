@@ -1,6 +1,5 @@
 import { displayName } from '../../lib/displayName'
-import { DEFAULT_MEGA_UNLOCK, unlockConditionFor } from '../../data/unlockConditions'
-import type { Move, Species } from '../../lib/types'
+import type { Item, Move, Species } from '../../lib/types'
 
 export interface ChainNode {
   species: Species
@@ -8,6 +7,35 @@ export interface ChainNode {
   label?: string // override for species.name -- needed for mega/primal forms, which
   // almost never have their own longName (form_of inherits the base species' plain
   // name, so "Charizard"'s three mega forms would otherwise all display identically)
+}
+
+/** Mirrors the exact in-game hint text Elite Redux itself generates from the same
+ * field (GetMegaHintString / MegaHintGenerator.kt in eliteredux-source) -- this
+ * isn't wording this app made up, it's what the game shows the player. The 19 items
+ * with no `megaStoneHint` set at all get the game's own "Unknown unlock method."
+ * fallback too, for the same reason (they're not implemented anywhere in
+ * data/maps either -- plausibly Mystery Gift-only, but not confirmed as fact).
+ *
+ * `megaBadgeRequirement` (a separate field on Item) is deliberately not surfaced
+ * here: it's per-item metadata from er-config, and at least one entry (Slowkingite,
+ * badge 5) is provably wrong -- the live map script only grants it alongside the
+ * Mind Badge (badge 7) itself. Rather than propagate a field with a known error
+ * rate, the location text above is shown alone, same as the game's own hint screen.
+ */
+function megaStoneUnlockText(item: Item | undefined): string {
+  const hint = item?.megaStoneHint
+  switch (hint?.kind) {
+    case 'nurseJoy':
+      return 'Talk to Nurse Joy.'
+    case 'adoptionCenter':
+      return `Purchase ${item?.name} from an Adoption Center.`
+    case 'legendarySage':
+      return 'Talk to the legendary sage in Littleroot Town.'
+    case 'uniqueLocation':
+      return hint.text
+    default:
+      return 'Unknown unlock method.'
+  }
 }
 
 function conditionLabel(level?: number, gender?: string): string | undefined {
@@ -89,6 +117,7 @@ export function findOtherForms(
   species: Species,
   speciesById: Map<string, Species>,
   movesById: Map<string, Move>,
+  itemsById: Map<string, Item>,
 ): ChainNode[] {
   const anchorId = species.formOf ?? species.id
   const nodes: ChainNode[] = []
@@ -106,9 +135,9 @@ export function findOtherForms(
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
-        : (unlockConditionFor(s.id) ?? DEFAULT_MEGA_UNLOCK)
+        : megaStoneUnlockText(itemsById.get(mega.item ?? ''))
       : primal
-        ? (unlockConditionFor(s.id) ?? 'via held item')
+        ? megaStoneUnlockText(itemsById.get(primal.item))
         : undefined
 
     nodes.push({ species: s, condition, label: displayName(s, speciesById) })
