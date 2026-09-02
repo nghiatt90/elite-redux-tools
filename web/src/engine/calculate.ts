@@ -1,0 +1,460 @@
+// The top-level entry point: CalculateMoveDamage -> DoMoveDamageCalc ->
+// DoMoveDamageCalcInternal -> CalcFinalDmg (src/battle_util.c:7722-7845), tying
+// together every module in this directory. This is the "port the REAL calculator,
+// not the buggy in-battle preview" path named in the project plan.
+//
+// Ability hooks are not wired in yet (Task 9/10's registry doesn't exist). Every
+// point where the C consults one is a clearly-commented neutral default below, and
+// `unmodelled` on the result collects a human-readable note for each -- so a caller
+// can render "this result doesn't account for X" rather than silently presenting an
+// ability-blind number as complete.
+
+import { idiv, uq } from './fixed'
+import {
+  attackPreModify,
+  benefitsFromStatBuffs,
+  calcAttackStatModifiers,
+  calcDefenseStatModifiers,
+  calculateBattleStat,
+  DEFAULT_STAT_STAGE,
+  defaultDefendingStat,
+  defensePreModify,
+  noPositiveStatStages,
+  spAttackPreModify,
+  spDefensePreModify,
+} from './battleStat'
+import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
+import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
+import { calcCritStage, critChanceDenominator, type CritStageInputs } from './crit'
+import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
+import type { BattleConstants, BattlerBattleState, BattleStatKey, DamageContext, FieldBattleState } from './types'
+
+export interface MoveData {
+  id: string
+  power: number
+  type: string | null
+  type2: string | null
+  split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  splitFlag?: string // USE_HIGHEST_OFFENSE | USE_HIGHEST_DAMAGE | HITS_DEF | HITS_SPDEF | USE_LOWEST_DEFENSE (never handled, see below)
+  effect: string | null
+  customBehavior?: unknown
+  crit?: 'HIGH' | 'ALWAYS'
+  hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
+  flags: Record<string, true>
+}
+
+export interface DamageCalcScenario {
+  move: MoveData
+  attacker: BattlerBattleState
+  defender: BattlerBattleState
+  field: FieldBattleState
+  typeChart: TypeChart
+  moveBehaviors: MoveBehaviors
+  battleConstants: BattleConstants
+  /** UI-supplied context for the handful of turn-order/turn-history facts a static
+   * calculator can't derive on its own -- see types.ts's DamageContext doc. */
+  attackerActsFirst: boolean
+  sameMoveTurnsInARow: number
+}
+
+export interface DamageCalcResult {
+  /** All 16 non-crit damage rolls (85%-100%), ascending. */
+  rolls: number[]
+  /** The same 16 rolls with the crit multiplier forced on -- null if this move/battler
+   * combination can never crit (Lucky Chant, Shell Armor-style, etc. -- none of which
+   * are wired yet, so this is null only when the move itself can't crit). */
+  critRolls: number[] | null
+  critChanceDenominator: number | null
+  effectiveMoveType: string
+  typeEffectiveness: number // UQ_4_12
+  isImmune: boolean
+  unmodelled: string[]
+}
+
+function toDamageContext(scenario: DamageCalcScenario): DamageContext {
+  return {
+    attacker: scenario.attacker.condition,
+    defender: scenario.defender.condition,
+    field: scenario.field,
+    attackerActsFirst: scenario.attackerActsFirst,
+    sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
+  }
+}
+
+/** GetBattleMoveSplit / SetSwapDamageCategory's non-ability-hook branches
+ * (src/battle_util.c:7341-7381). Ties (equal computed stats) are resolved to
+ * PHYSICAL rather than the C's `Random() % 2` -- a static calculator reports one
+ * scenario per call, not a coin flip. USE_LOWEST_DEFENSE is never handled by the C
+ * itself (falls through to the `default` branch, i.e. behaves like USE_BASE_SPLIT) --
+ * reproduced here rather than treated as an error. */
+function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spatk: number; def: number; spdef: number }): 'PHYSICAL' | 'SPECIAL' {
+  const base = scenario.move.split === 'SPECIAL' ? 'SPECIAL' : 'PHYSICAL'
+  let split: 'PHYSICAL' | 'SPECIAL' = base
+
+  if (scenario.move.splitFlag === 'USE_HIGHEST_OFFENSE') {
+    split = rawStats.atk > rawStats.spatk ? 'PHYSICAL' : rawStats.atk < rawStats.spatk ? 'SPECIAL' : base
+  } else if (scenario.move.splitFlag === 'USE_HIGHEST_DAMAGE') {
+    const physicalScore = rawStats.atk * rawStats.spdef
+    const specialScore = rawStats.spatk * rawStats.def
+    split = physicalScore > specialScore ? 'PHYSICAL' : physicalScore < specialScore ? 'SPECIAL' : base
+  }
+
+  if (scenario.attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SWIRLY_GLASSES') {
+    split = split === 'PHYSICAL' ? 'SPECIAL' : 'PHYSICAL'
+  }
+  return split
+}
+
+function toInternalStage(externalStage: number): number {
+  return Math.max(0, Math.min(12, externalStage + DEFAULT_STAT_STAGE))
+}
+
+interface ComputeStatOptions {
+  battler: BattlerBattleState
+  stat: BattleStatKey
+  move: MoveData
+  isAttackRole: boolean
+  isCrit: boolean
+  isWonderRoomActive: boolean
+  field: FieldBattleState
+  statStageRatios: [number, number][]
+}
+
+/** The parts of CalculateStat this engine can run without the ability registry:
+ * raw stat selection, the per-stat pre-modifiers, stat-stage clamping, and the stage
+ * ratio + extra-stat-level application. `onStat` hooks and the secondary-stat blend
+ * are the identity/0 default documented in battleStat.ts. */
+function computeStat(opts: ComputeStatOptions): number {
+  const { battler, stat, move, field } = opts
+  const isIceType = battler.types.includes('ICE')
+  const isRockType = battler.types.includes('ROCK')
+
+  const preModify =
+    stat === 'atk'
+      ? attackPreModify({
+          violentRush: false,
+          showdownMode: false,
+          readiedAction: false,
+          isBurned: battler.condition.status1.has('STATUS1_BURN') && move.effect !== 'EFFECT_FACADE',
+        })
+      : stat === 'spatk'
+        ? spAttackPreModify({ rapidResponse: false, isFrostbitten: battler.condition.status1.has('STATUS1_FROSTBITE') && move.effect !== 'EFFECT_FACADE' })
+        : stat === 'def'
+          ? defensePreModify({ isIceTypeInHail: isIceType && field.weather === 'HAIL' })
+          : stat === 'spdef'
+            ? spDefensePreModify({ isRockTypeInSandstorm: isRockType && field.weather === 'SANDSTORM' })
+            : (s: number) => s // speed has no CalculateStat pre-modifier of its own
+
+  const isBleeding = battler.condition.status1.has('STATUS1_BLEED')
+  const isPoisoned = battler.condition.status1.has('STATUS1_POISON') || battler.condition.status1.has('STATUS1_TOXIC_POISON')
+
+  return calculateBattleStat({
+    rawStat: battler.rawStats[stat],
+    extraStatLevel: battler.extraStatLevel[stat] ?? 0,
+    statStage: toInternalStage(battler.statStages[stat] ?? 0),
+    isUnaware: false, // Unaware ability -- deferred to the registry
+    isWonderRoomActive: opts.isWonderRoomActive,
+    isOffensiveStatForWonderRoom: stat === 'atk' || stat === 'spatk',
+    isCrit: opts.isCrit,
+    isAttackRole: opts.isAttackRole,
+    benefitsFromStatBuffs: benefitsFromStatBuffs(isBleeding, battler.condition.hasBloodStainEffect, isPoisoned, false),
+    preModify,
+    applyOnStatHooks: (s) => s, // onStat ability hooks -- deferred to the registry
+    secondaryStatPercent: 0, // onChoose*Stat hooks setting a secondary blend -- deferred
+    statStageRatios: opts.statStageRatios,
+  })
+}
+
+function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
+  const { attacker, defender, move, field } = scenario
+  const unmodelled: string[] = []
+
+  // EFFECT_LASH_OUT forces isCrit=true for the attacker's own stat calc (:7252).
+  const forcedCrit = move.effect === 'EFFECT_LASH_OUT' ? true : isCrit
+  // EFFECT_FOUL_PLAY uses the DEFENDER's stat and Unaware check instead (:7254-7256).
+  const isFoulPlay = move.effect === 'EFFECT_FOUL_PLAY'
+  const statBattler = isFoulPlay ? defender : attacker
+  // onChooseOffensiveStat ability hooks would run here for the non-Foul-Play/Body-Press
+  // case (:7263-7267) -- deferred to the registry.
+  const atkStat: BattleStatKey = move.effect === 'EFFECT_BODY_PRESS' ? 'def' : split === 'PHYSICAL' ? 'atk' : 'spatk'
+
+  const rawAtkStat = computeStat({
+    battler: statBattler,
+    stat: atkStat,
+    move,
+    isAttackRole: true,
+    isCrit: forcedCrit,
+    isWonderRoomActive: false,
+    field,
+    statStageRatios,
+  })
+
+  const isGhostDefenderInFog = defender.types.includes('GHOST') && field.weather === 'FOG'
+  const finalAtk = calcAttackStatModifiers({
+    attackStat: rawAtkStat,
+    isGhostDefenderInFog,
+    isInfatuatedWithDefender: attacker.isInfatuatedWithOpponent,
+    item: {
+      resolvedHoldEffect: attacker.condition.resolvedHoldEffect,
+      baseSpeciesId: attacker.condition.baseSpeciesId,
+      isPhysical: split === 'PHYSICAL',
+      isSpecial: split === 'SPECIAL',
+    },
+  })
+  return { value: finalAtk, unmodelled }
+}
+
+function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
+  const { defender, move } = scenario
+  const unmodelled: string[] = []
+
+  const isWrappedGripPincer = false // Wrap + Grip Pincer/World Serpent -- deferred (ability)
+  const noPositive = noPositiveStatStages(isCrit, Boolean(move.flags.ignoresStatStages), isWrappedGripPincer)
+  // onChooseDefensiveStat ability hooks would run here (:7410-7419) -- deferred.
+  const defStat = defaultDefendingStat(move.splitFlag, split === 'PHYSICAL')
+
+  const rawDefStat = computeStat({
+    battler: defender,
+    stat: defStat,
+    move,
+    isAttackRole: false,
+    isCrit: noPositive,
+    isWonderRoomActive: false,
+    field: scenario.field,
+    statStageRatios,
+  })
+
+  const finalDef = calcDefenseStatModifiers(rawDefStat, {
+    resolvedHoldEffect: defender.condition.resolvedHoldEffect,
+    speciesId: defender.condition.speciesId,
+    baseSpeciesId: defender.condition.baseSpeciesId,
+    isTransformed: defender.isTransformed,
+    canEvolveStrict: defender.canEvolveStrict,
+    defStatToUse: defStat,
+  })
+  return { value: finalDef, unmodelled }
+}
+
+/** CalcCritChanceStage's non-ability inputs (src/battle_script_commands.c:1523-1558),
+ * built once per scenario since none of it depends on the evaluated type or a
+ * particular damage roll. */
+function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs {
+  const { attacker, move, field } = scenario
+  return {
+    isBlocked: field.sides.defender.luckyChant,
+    isGuaranteed: move.crit === 'ALWAYS',
+    abilityCritBonus: 0, // onCrit ability hooks -- deferred
+    hasHighCritFlag: move.crit === 'HIGH',
+    hasScopeLens: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SCOPE_LENS',
+    hasLuckyPunchOnChanseyLine: false, // needs a species-family table -- deferred
+    hasLeekOnFarfetchdLine: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_LEEK',
+    isViseGrip: move.id === 'MOVE_VISE_GRIP',
+  }
+}
+
+/** The crit chance denominator for this scenario, or null if this move/battler
+ * combination can never crit -- shared by both the roll loop and the separate
+ * crit-forced pass so the two can't drift apart. */
+function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
+  const stage = calcCritStage(scenarioCritStageInputs(scenario))
+  return critChanceDenominator(stage, scenario.battleConstants.criticalHitChance)
+}
+
+/** DoMoveDamageCalcInternal's core equation for ONE evaluated type, up to (but not
+ * including) the random factor -- src/battle_util.c:7722-7786. Returns -1 when the
+ * type effectiveness is a flat immunity, matching the C's early return.
+ *
+ * `forceCrit` selects which of the two output rows (calculateMoveDamage's `rolls` vs
+ * `critRolls`) this evaluation belongs to, rather than drawing a random 0-23 crit
+ * roll per src/battle_script_commands.c:1589's MakeCritRoll() -- a deterministic
+ * calculator reports both a non-crit and a (when possible) crit row, not one sampled
+ * outcome. A move whose crit is unconditionally guaranteed (crit denominator 1) still
+ * reports its "non-crit" row as non-crit even though the real game can never actually
+ * produce that row -- callers should prefer `critRolls` whenever
+ * `critChanceDenominator === 1`. */
+function calcInternal(
+  scenario: DamageCalcScenario,
+  moveType: string,
+  split: 'PHYSICAL' | 'SPECIAL',
+  forceCrit: boolean,
+): { dmg: number; typeEffectiveness: number; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
+  const statStageRatios = battleConstants.statStageRatios
+
+  const defenderTypes = distinctDefendingTypes(defender.types)
+  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, defender.isGrounded)
+  if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, unmodelled }
+
+  const isCrit = forceCrit
+
+  const basePowerCtx: BasePowerModifierContext = {
+    ...toDamageContext(scenario),
+    moveType,
+    isPhysical: split === 'PHYSICAL',
+    isSpecial: split === 'SPECIAL',
+    attackerHoldEffect: {
+      resolvedHoldEffect: attacker.condition.resolvedHoldEffect,
+      strength: attacker.holdEffectStrength,
+      holdEffectType: attacker.holdEffectType,
+    },
+    attackerIsLatiOrLatias: attacker.condition.baseSpeciesId === 'SPECIES_LATIAS' || attacker.condition.baseSpeciesId === 'SPECIES_LATIOS',
+    moveEffect: move.effect,
+    moveArgumentStatus: null, // EFFECT_DOUBLE_DMG_IF_STATUS1's argument -- caller can extend later
+  }
+
+  const behaviorResult = applyMoveBehaviorDamage(move.power, move.effect, moveBehaviors, toDamageContext(scenario))
+  unmodelled.push(...behaviorResult.unmodelled)
+  const power = calcMoveBasePowerAfterModifiers(Math.max(behaviorResult.power, 1), basePowerCtx)
+
+  const atk = computeAttackStat(scenario, split, isCrit, statStageRatios)
+  const def = computeDefenseStat(scenario, split, isCrit, statStageRatios)
+  unmodelled.push(...atk.unmodelled, ...def.unmodelled)
+
+  let dmg = idiv(attacker.level * 2, 5) + 2
+  dmg *= power
+  dmg *= atk.value
+  dmg = idiv(dmg, def.value)
+  dmg = idiv(dmg, 50) + 2
+
+  const isSuperEffective = typeEffectiveness >= uq(2.0)
+  const finalResult = calcFinalDamage(dmg, {
+    ...defaultFinalDamageStages({ typeEffectiveness }),
+    abilityMultiplier: uq(1.0), // CalculateAbilityMultipliers -- deferred to the registry
+    // MISC_EFFECT_INCREASED_CRIT_DAMAGE moves crit for x2.0 instead of x1.5
+    // (src/battle_util.c:7536-7540); move.argument threading isn't wired into
+    // MoveData yet, so this is always the ordinary x1.5 for now.
+    critMultiplier: isCrit ? 1.5 : null,
+    weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
+    stabInHalves: stabInHalves(attacker.types, moveType),
+    screensActive: !isCrit && screensApply(field, split),
+    isDoubleBattle: field.isDoubleBattle,
+    resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
+    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness),
+    hasSuperEffectiveBoost: isSuperEffective && move.effect === 'EFFECT_MISC_HIT',
+    hitsSemiInvulnerableUnderground: false, // no semi-invulnerable-state tracking yet -- deferred
+    hitsSemiInvulnerableUnderwater: false,
+    hitsSemiInvulnerableInAir: false,
+  })
+
+  return { dmg: finalResult.dmg, typeEffectiveness, unmodelled }
+}
+
+/** StabMultiplierInHalves' non-ability branches (src/battle_util.c:7469-7481).
+ * Adaptability/onStab-granting abilities are deferred to the registry. */
+function stabInHalves(attackerTypes: string[], moveType: string): 2 | 3 | 4 {
+  return attackerTypes.includes(moveType) ? 3 : 2
+}
+
+function screensApply(field: FieldBattleState, split: 'PHYSICAL' | 'SPECIAL'): boolean {
+  const side = field.sides.defender
+  if (side.auroraVeil) return true
+  if (split === 'PHYSICAL' && side.reflect) return true
+  if (split === 'SPECIAL' && side.lightScreen) return true
+  return false
+  // Infiltrator-style screen-bypassing abilities are deferred to the registry.
+}
+
+/** The weather damage block, src/battle_util.c:7592-7648 -- ER's two-tier weather
+ * (PERMANENT = weak, TEMPORARY/PRIMAL = strong). ABILITY_WEATHER_DOUBLE_BOOST is
+ * deferred (assume absent, i.e. the non-boosted branch always applies). */
+function weatherDamageMultiplier(weather: FieldBattleState['weather'], move: MoveData, moveType: string): number | null {
+  const isWeatherBoostMove = move.effect === 'EFFECT_WEATHER_BOOST'
+  if (weather === 'RAIN_PERMANENT') {
+    if (isWeatherBoostMove) return 1.2
+    if (moveType === 'FIRE') return 0.5
+    if (moveType === 'WATER') return 1.2
+  } else if (weather === 'RAIN_TEMPORARY' || weather === 'RAIN_PRIMAL') {
+    if (isWeatherBoostMove) return 1.5
+    if (moveType === 'FIRE') return 0.5
+    if (moveType === 'WATER') return 1.5
+  } else if (weather === 'SUN_PERMANENT') {
+    if (isWeatherBoostMove) return 1.2
+    if (moveType === 'FIRE') return 1.2
+    if (moveType === 'WATER') return 0.5
+  } else if (weather === 'SUN_TEMPORARY' || weather === 'SUN_PRIMAL') {
+    if (isWeatherBoostMove) return 1.5
+    if (moveType === 'FIRE') return 1.5
+    if (moveType === 'WATER') return 0.5
+  }
+  return null
+}
+
+function attackerFinalItemMultiplier(attacker: BattlerBattleState, typeEffectiveness: number): number {
+  const effect = attacker.condition.resolvedHoldEffect
+  if (effect === 'HOLD_EFFECT_LIFE_ORB') return uq(1.3)
+  if (effect === 'HOLD_EFFECT_EXPERT_BELT' && typeEffectiveness >= uq(2.0)) return uq(1.2)
+  // Metronome (needs same-move-turn tracking), Amulet Coin (Meowth Partner-only), and
+  // Punching Glove (needs IsIronFistBoosted, an ability check) are deferred.
+  return uq(1.0)
+}
+
+/** CalculateMoveDamage / DoMoveDamageCalc, src/battle_util.c:7788-7827. Evaluates
+ * all 16 damage rolls (and, separately, the same 16 with a forced crit) rather than
+ * drawing one; see kochance.ts for the KO-probability consumer of this shape. */
+export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcResult {
+  const { move } = scenario
+  const moveType = move.type ?? 'NORMAL'
+  const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }
+  const split = resolveSplit(scenario, attackerRaw)
+
+  const evaluate = (mtype: string, forceCrit: boolean) => calcInternal(scenario, mtype, split, forceCrit)
+
+  function fullDamageForRoll(damageRoll: number, forceCrit: boolean): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
+    const primary = evaluate(moveType, forceCrit)
+    let best = { ...primary, effectiveMoveType: moveType }
+
+    if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
+      const alt = evaluate(move.type2, forceCrit)
+      if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: move.type2 }
+    }
+
+    if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
+
+    // random factor, src/battle_util.c:7815-7821 -- Bad Luck/Bad Omen (deferred) would
+    // force roll=15 on the defender's side.
+    let dmg = idiv(best.dmg * (100 - damageRoll), 100)
+    if (dmg === 0) dmg = 1
+    return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
+  }
+
+  const unmodelled = new Set<string>()
+  const rolls: number[] = []
+  let typeEffectiveness = uq(1.0)
+  let effectiveMoveType = moveType
+  // `roll` is the C's own roll variable (multiplier = (100-roll)%, so roll=0 is the
+  // maximum 100% hit and roll=15 the minimum 85% hit, src/battle_util.c:7816-7817).
+  // Iterated 15 -> 0 here so the OUTPUT array itself reads ascending (index 0 =
+  // smallest/85% roll, index 15 = largest/100% roll) -- the conventional order for
+  // presenting a damage range.
+  for (let roll = 15; roll >= 0; roll--) {
+    const result = fullDamageForRoll(roll, false)
+    rolls.push(result.dmg)
+    typeEffectiveness = result.typeEffectiveness
+    effectiveMoveType = result.effectiveMoveType
+    result.unmodelled.forEach((u) => unmodelled.add(u))
+  }
+
+  const isImmune = typeEffectiveness === 0
+
+  // A separate crit-forced pass, so callers can show "if this crits" alongside the
+  // normal spread without re-deriving crit eligibility themselves.
+  const canCrit = scenarioCritDenominator(scenario)
+  let critRolls: number[] | null = null
+  if (canCrit !== null) {
+    critRolls = []
+    for (let roll = 15; roll >= 0; roll--) {
+      critRolls.push(fullDamageForRoll(roll, true).dmg)
+    }
+  }
+
+  return {
+    rolls,
+    critRolls,
+    critChanceDenominator: canCrit,
+    effectiveMoveType,
+    typeEffectiveness,
+    isImmune,
+    unmodelled: [...unmodelled],
+  }
+}

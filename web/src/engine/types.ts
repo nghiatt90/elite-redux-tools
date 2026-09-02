@@ -110,6 +110,43 @@ export interface DamageContext {
   sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns -- Echoed Voice, Metronome (item)
 }
 
+// ---------------------------------------------------------------------------
+// The full battle-scenario shape calculate.ts's entry point consumes. Composes
+// ConditionBattlerContext/ConditionFieldContext (the narrower shapes basePower.ts and
+// conditions.ts already depend on) rather than duplicating their fields flat, so
+// there's exactly one definition of e.g. "what a battler's held item looks like".
+// ---------------------------------------------------------------------------
+
+export interface BattlerBattleState {
+  condition: ConditionBattlerContext
+  types: string[] // 1-3 bare type names, in dex order (type1, type2, type3)
+  isGrounded: boolean // IsBattlerGroundedIgnoreType -- false for pure Flying/Levitate/Air Balloon/etc.
+  level: number
+  nature: string
+  /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw
+   * `gBattleMons[battler].attack` etc. CalculateStat's own pre-modifiers (burn,
+   * violent rush, hail/sand, ...) are applied on top of these by calculate.ts. */
+  rawStats: Record<BattleStatKey, number>
+  /** -6..+6, the conventional external representation; calculate.ts converts to the
+   * C's internal 0..12 at the point of use. */
+  statStages: Record<BattleStatKey, number>
+  extraStatLevel: Record<BattleStatKey, number> // ER's "extra stat levels", default 0 each
+  holdEffectStrength: number | null // holdEffectStrength, for Plate/Type Power/Expert Belt-style items
+  holdEffectType: string | null // Plate/Type Power's secondary type
+  isTransformed: boolean // STATUS2_TRANSFORMED (Metal Powder exemption)
+  canEvolveStrict: boolean // Eviolite eligibility
+  isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler
+  moveSlotPp: Record<string, number> // moveId -> current pp, for Trump Card
+}
+
+export interface FieldBattleState extends ConditionFieldContext {
+  sides: {
+    attacker: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
+    defender: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
+  }
+  isDoubleBattle: false // v1 is singles-only; literal type keeps multi-target code unreachable
+}
+
 /** natures.json's full shape, as emitted by erdata.natures.battle_constants_to_dict(). */
 export interface BattleConstants {
   natureStatTable: NatureStatTable
