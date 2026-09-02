@@ -21,6 +21,7 @@ def test_species_dict_is_json_serializable_and_has_expected_shape():
 
     json.dumps(d)  # round-trips without error
     assert d["id"] == "SPECIES_PIKACHU"
+    assert d["speciesNum"] == 25
     assert d["baseStats"] == {"hp": 35, "atk": 55, "def": 40, "spatk": 50, "spdef": 50, "spe": 95}
     assert d["abilities"] == ["ABILITY_ELECTROCYTES", "ABILITY_GENERATOR", "ABILITY_ELECTRIC_BURST"]
     assert d["innates"] == ["ABILITY_SHORT_CIRCUIT", "ABILITY_STATIC", "ABILITY_GROUND_SHOCK"]
@@ -55,10 +56,41 @@ def test_move_dict_shape():
 
 def test_ability_dict_shape():
     _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
-    d = ability_to_dict(volt_absorb)
+    d = ability_to_dict(volt_absorb, name_index)
     json.dumps(d)
     assert d["id"] == "ABILITY_VOLT_ABSORB"
+
+
+def test_ability_dict_grants_type():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    half_drake = next(a for a in abilities if a.name == "Half Drake")
+    d = ability_to_dict(half_drake, name_index)
+    assert d["grantsType"] == "DRAGON"
+
+
+def test_ability_dict_compound_resolves_components():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    big_leaves = next(a for a in abilities if a.name == "Big Leaves")
+    d = ability_to_dict(big_leaves, name_index)
+    assert d["components"] == [
+        "ABILITY_CHLOROPLAST",
+        "ABILITY_CHLOROPHYLL",
+        "ABILITY_LEAF_GUARD",
+        "ABILITY_HARVEST",
+        "ABILITY_SOLAR_POWER",
+    ]
+
+
+def test_ability_dict_non_compound_has_no_components():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
+    d = ability_to_dict(volt_absorb, name_index)
+    assert "components" not in d
 
 
 def test_type_chart_dict_uses_bare_names():

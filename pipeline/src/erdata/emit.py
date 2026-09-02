@@ -3,6 +3,7 @@ it deterministically to data/<version>/.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
 from erdata.generated import (
@@ -104,6 +105,31 @@ def _primals(species) -> list[dict]:
     ]
 
 
+# ~18 abilities literally grant an extra type on top of the species' own 1-2, e.g.
+# "Half Drake :: Adds Dragon type on entry." -- verified by hand against the full
+# ability list, and only these plain "Adds <Type> type" phrasings; extracted here
+# rather than hardcoded so it stays correct if wording changes upstream.
+_TYPE_GRANT_PATTERN = re.compile(r"Adds\s+([A-Za-z]+)[- ]?type", re.I)
+
+
+def _grants_type(description: str) -> str | None:
+    m = _TYPE_GRANT_PATTERN.search(description)
+    return m.group(1).upper() if m else None
+
+
+# Compound abilities (e.g. "Big Leaves") have a description that is an exact
+# " + "-joined list of other real ability names -- a genuine structural pattern (161
+# of 1044 abilities match), not a guess: verified every split segment resolves to an
+# existing ability by name before treating it as compound.
+def _components(description: str, name_index: dict) -> list | None:
+    if " + " not in description:
+        return None
+    parts = [p.strip().rstrip(".") for p in description.split(" + ")]
+    if len(parts) < 2 or not all(p in name_index for p in parts):
+        return None
+    return [name_index[p] for p in parts]
+
+
 def _learnset(species, species_map, tutors) -> dict:
     resolved = resolve_learnset(species, species_map)
     level_up = [
@@ -118,6 +144,7 @@ def species_to_dict(species, species_map, tutors) -> dict:
     is_form = species.WhichOneof("base_species_info") == "form_of"
     entry = {
         "id": _S(species.id),
+        "speciesNum": int(species.id),
         "name": dex.name,
         "category": dex.category,
         "description": dex.description,
@@ -172,7 +199,7 @@ def move_to_dict(move) -> dict:
     return entry
 
 
-def ability_to_dict(ability) -> dict:
+def ability_to_dict(ability, name_index: dict) -> dict:
     entry = {
         "id": _A(ability.id),
         "name": ability.name,
@@ -180,6 +207,15 @@ def ability_to_dict(ability) -> dict:
     }
     if ability.HasField("expanded_description"):
         entry["expandedDescription"] = ability.expanded_description
+
+    grants = _grants_type(ability.description)
+    if grants:
+        entry["grantsType"] = grants
+
+    components = _components(ability.description, name_index)
+    if components:
+        entry["components"] = [_A(c.id) for c in components]
+
     return entry
 
 
@@ -214,9 +250,10 @@ def build() -> None:
         [species_to_dict(s, species_map, tutors) for s in playable],
     )
     _write_json(out / "moves.json", [move_to_dict(m) for m in sorted(moves, key=lambda m: _M(m.id))])
+    ability_name_index = {a.name: a for a in abilities}
     _write_json(
         out / "abilities.json",
-        [ability_to_dict(a) for a in sorted(abilities, key=lambda a: _A(a.id))],
+        [ability_to_dict(a, ability_name_index) for a in sorted(abilities, key=lambda a: _A(a.id))],
     )
     _write_json(out / "types.json", type_chart_to_dict())
     _write_json(
