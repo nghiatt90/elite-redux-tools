@@ -106,9 +106,9 @@ export function findOtherForms(
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
-        : unlockConditionFor(s.id)
+        : (unlockConditionFor(s.id) ?? 'via held item')
       : primal
-        ? unlockConditionFor(s.id)
+        ? (unlockConditionFor(s.id) ?? 'via held item')
         : undefined
 
     nodes.push({ species: s, condition, label: displayName(s, speciesById) })
