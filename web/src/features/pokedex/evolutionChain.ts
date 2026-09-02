@@ -147,13 +147,20 @@ export function findOtherForms(
     // taking the first is safe -- there's exactly one species-defining mega/primal here.
     const mega = s.megas[0]
     const primal = s.primals[0]
-    const condition = mega
-      ? mega.move
-        ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
-        : megaStoneUnlockText(itemsById.get(mega.item ?? ''))
-      : primal
-        ? megaStoneUnlockText(itemsById.get(primal.item))
-        : GIFT_MON_UNLOCK[s.id]
+    // GIFT_MON_UNLOCK takes priority over the mega/primal item lookup: a few species
+    // (Pikachu/Eevee/Meowth Partner Mega) need a stone that comes bundled with their
+    // own gift mon rather than being independently obtainable, so items.json
+    // legitimately has no hint for it -- the real answer only exists in the gift-mon
+    // table, not on the item.
+    const condition =
+      GIFT_MON_UNLOCK[s.id] ??
+      (mega
+        ? mega.move
+          ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
+          : megaStoneUnlockText(itemsById.get(mega.item ?? ''))
+        : primal
+          ? megaStoneUnlockText(itemsById.get(primal.item))
+          : undefined)
 
     nodes.push({ species: s, condition, label: displayName(s, speciesById) })
   }
