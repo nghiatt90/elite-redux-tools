@@ -37,10 +37,17 @@ export default function SpeciesRow({
         className="pixelated shrink-0"
         loading="lazy"
       />
-      <span className="w-24 sm:w-40 shrink-0 truncate text-sm font-medium">
+      {/* Below sm, the stat bar/BST/hex-id columns are hidden entirely (see below),
+          which used to leave the name and type columns pinned at their old narrow
+          fixed widths instead of using that freed-up space -- clipping longer
+          derived names ("Charizard Mega X" etc, now common since forms got their
+          own distinct names) and a 3rd type chip on species with an ability-granted
+          type. Name flexes to take whatever's left after the (still fairly
+          generous) type column, rather than both being independently capped. */}
+      <span className="flex-1 min-w-0 sm:flex-none sm:w-40 truncate text-sm font-medium">
         {displayName(species, speciesById)}
       </span>
-      <span className="flex gap-1 w-32 sm:w-56 shrink-0 overflow-hidden">
+      <span className="flex gap-1 w-[168px] sm:w-56 shrink-0 overflow-hidden">
         {species.types.map((t) => (
           <TypeChip key={t} type={t} />
         ))}
