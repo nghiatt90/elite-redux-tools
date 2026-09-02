@@ -56,11 +56,11 @@ describe('ability registry coverage gate', () => {
       const entry = lookupAbility(id)
       return entry && isUnmodelled(entry)
     }).length
-    // Baseline as of the coverage gate landing (Task 9) -- update this number down
-    // as Task 10 batches port abilities out of 99-unmodelled.ts. An INCREASE here
-    // means an ability lost its port and fell back to a stub; investigate rather
-    // than raise the number.
-    expect(unmodelledCount).toBeLessThanOrEqual(538)
+    // Updated after each Task 10 batch as abilities are ported out of
+    // 99-unmodelled.ts. An INCREASE here means an ability lost its port and fell
+    // back to a stub; investigate rather than raise the number.
+    // 538 (Task 9 baseline) -> 517 (batch A1: 21 straightforward onOffensiveMultiplier abilities)
+    expect(unmodelledCount).toBeLessThanOrEqual(517)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

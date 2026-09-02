@@ -1,7 +1,7 @@
-// ON_ABILITY's iteration order and the apply-on-flag filters, ported from
-// include/battle_util.h:275-292 and src/abilities.cc:176-198.
+// ON_ABILITY's iteration order, ported from include/battle_util.h:275-281.
+// Apply-on-flag filtering lives in applyOn.ts.
 
-import type { AbilityEntry, AbilityImpl, ApplyOnField } from './types'
+import type { AbilityEntry, AbilityImpl } from './types'
 import { isUnmodelled } from './types'
 import { lookupAbility } from './registry'
 
@@ -51,38 +51,4 @@ export function forEachAbility(
  * check in CalcDefenseStat). */
 export function battlerHasAbility(slots: AbilitySlots, abilityId: string, isSuppressed: (id: string) => boolean): boolean {
   return slotIds(slots).some((id) => id === abilityId && !isSuppressed(id))
-}
-
-/**
- * IsApplyOnFlagAppropriate, src/abilities.cc:176-184 -- the self/ally/foe filter used
- * by onOffensiveMultiplierFor and onStatFor. Simplified for a singles-only engine:
- * `isSelf` is true when the ability's battler IS the context battler (the move's
- * user, for offensive hooks); `isFoe` is true when they're on opposing sides. The
- * "ally" branch can never fire in singles (no ally battler exists) and is included
- * only so this reads the same as the four-way C switch.
- */
-export function isApplyOnFlagAppropriate(isSelf: boolean, isFoe: boolean, flag: ApplyOnField = 'APPLY_ON_SELF'): boolean {
-  if (flag === 'APPLY_ON_SELF') return isSelf
-  if (isSelf) return true // APPLY_IGNORE_SELF bit not modelled -- no v1-relevant ability sets it differently
-  if (isFoe) return flag === 'APPLY_ON_FOE'
-  return flag === 'APPLY_ON_ALLY'
-}
-
-/**
- * IsTargettedApplyOnFlagAppropriate, src/abilities.cc:169-175 -- the
- * attacker/target-relative filter used by onCritFor, onAfterTypeEffectivenessFor,
- * and onChooseDefensiveStatFor. Falls back to isApplyOnFlagAppropriate for the
- * self/ally/foe flag values it doesn't have its own case for.
- */
-export function isTargettedApplyOnFlagAppropriate(
-  sourceIsAttacker: boolean,
-  sourceIsTarget: boolean,
-  isSelf: boolean,
-  isFoe: boolean,
-  flag: ApplyOnField = 'APPLY_ON_SELF',
-): boolean {
-  if (flag === 'APPLY_ON_ATTACKER_OR_TARGET') return sourceIsAttacker || sourceIsTarget
-  if (flag === 'APPLY_ON_ATTACKER') return sourceIsAttacker
-  if (flag === 'APPLY_ON_TARGET') return sourceIsTarget
-  return isApplyOnFlagAppropriate(isSelf, isFoe, flag)
 }

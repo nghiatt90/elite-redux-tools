@@ -21,12 +21,28 @@ export interface ModifierAccumulator {
   resistance: number // UQ_4_12, unused by damage math -- present for signature fidelity only
 }
 
+/**
+ * IMPORTANT, verified against src/battle_util.c:6969-6977's call site: even though
+ * CalculateAbilityMultipliers loops over every battler on the field looking for one
+ * whose ability defines onOffensiveMultiplier, the hook body is always called as
+ * `onOffensiveMultiplier(battlerAtk, ability, battlerDef, ...)` -- i.e. `battlerId`
+ * below is ALWAYS the move's actual user, never the (possibly different) battler
+ * whose ability slot is being checked. This is what lets Plus/Minus-style
+ * ally-boosting abilities work: the hook body checks `BATTLE_PARTNER(battlerId)`
+ * (the MOVE USER's partner) rather than needing its own identity at all -- whether
+ * the hook fires in the first place is decided separately by
+ * IsApplyOnFlagAppropriate(battlerAtk, sourceBattler, ...for) before this is ever
+ * called. Ports for ally-boosting abilities are therefore inert in this v1 singles
+ * engine (no ally battler exists), which is fine -- they simply never fire, matching
+ * the real mechanic's own precondition.
+ */
 export interface OffensiveMultiplierContext extends ModifierAccumulator {
-  attackerId: string // ability's own battler (may be an ally, not necessarily the move's user -- CalculateAbilityMultipliers loops all battlers)
-  moveUserId: string // the battler actually using the move (battlerAtk in the C)
+  battlerId: string // the move's user (battlerAtk) -- see note above, NOT necessarily the ability holder
   defenderId: string
   moveId: string
   moveType: string
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // post-swap split (IS_MOVE_PHYSICAL/IS_MOVE_SPECIAL)
+  moveFlags: Record<string, true> // gBattleMoves[move].flags -- moves.json's own `flags` shape
   /** CalcMoveBasePower's PRE-modifier value (:7531-7533) -- Technician reads this,
    * not the fully-modified power used in the main damage equation. */
   basePower: number
@@ -39,6 +55,8 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   attackerId: string
   moveId: string
   moveType: string
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  moveFlags: Record<string, true>
   typeEffectiveness: number // UQ_4_12
   isCrit: boolean
 }
@@ -137,14 +155,6 @@ export type OnSwapSplit = (ctx: OnSwapSplitContext) => boolean
 export type OnMoveType = (ctx: OnMoveTypeContext) => void
 export type OnRecoil = (ctx: OnRecoilContext) => void
 
-export type ApplyOnField =
-  | 'APPLY_ON_SELF'
-  | 'APPLY_ON_ALLY'
-  | 'APPLY_ON_FOE'
-  | 'APPLY_ON_ATTACKER_OR_TARGET'
-  | 'APPLY_ON_ATTACKER'
-  | 'APPLY_ON_TARGET'
-
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -174,7 +184,15 @@ export interface AbilityImpl {
   src: string
   flags?: Partial<AbilityFlags>
   addsType?: string // bare type name
-  applyOn?: Partial<Record<'onOffensiveMultiplierFor' | 'onCritFor' | 'onAfterTypeEffectivenessFor' | 'onChooseDefensiveStatFor', ApplyOnField>>
+  /** onOffensiveMultiplierFor is a plain AbilityApplyOn bitflag (see applyOn.ts's
+   * numeric constants). onCritFor/onAfterTypeEffectivenessFor/onChooseDefensiveStatFor
+   * use the separate AbilityApplyOnWithTarget encoding (TargetedApplyOn) instead. */
+  applyOn?: {
+    onOffensiveMultiplierFor?: number
+    onCritFor?: import('./applyOn').TargetedApplyOn
+    onAfterTypeEffectivenessFor?: import('./applyOn').TargetedApplyOn
+    onChooseDefensiveStatFor?: import('./applyOn').TargetedApplyOn
+  }
   onOffensiveMultiplier?: OnOffensiveMultiplier
   onDefensiveMultiplier?: OnDefensiveMultiplier
   onStat?: OnStat
