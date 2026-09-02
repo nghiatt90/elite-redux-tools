@@ -1,8 +1,37 @@
-import { BrowserRouter, Route, Routes } from 'react-router'
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
 import PokedexDetail from './routes/PokedexDetail'
 import PokedexShell from './routes/PokedexShell'
+import UnderConstruction from './routes/UnderConstruction'
+
+const NAV_LINKS = [
+  { to: '/', label: 'Pokedex' },
+  { to: '/team-builder', label: 'Team Builder' },
+  { to: '/damage-calculator', label: 'Damage Calculator' },
+]
+
+function Nav() {
+  return (
+    <nav className="flex items-center gap-1">
+      {NAV_LINKS.map(({ to, label }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={to === '/'}
+          className="rounded-md px-2 py-1 text-sm"
+          style={({ isActive }) => ({
+            background: isActive ? 'var(--color-bg-hover)' : undefined,
+            color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
+            fontWeight: isActive ? 600 : 400,
+          })}
+        >
+          {label}
+        </NavLink>
+      ))}
+    </nav>
+  )
+}
 
 function Header() {
   const state = useGameDataState()
@@ -10,20 +39,23 @@ function Header() {
 
   return (
     <header
-      className="flex items-center justify-between border-b px-4 py-2 shrink-0"
+      className="flex items-center justify-between gap-3 border-b px-4 py-2 shrink-0"
       style={{ borderColor: 'var(--color-border)' }}
     >
-      <div className="flex items-baseline gap-2 min-w-0">
-        <span className="font-semibold shrink-0">Elite Redux Pokedex</span>
-        {meta && (
-          <span
-            className="text-xs truncate hidden sm:inline"
-            style={{ color: 'var(--color-text-muted)' }}
-            title={`Data generated ${meta.generatedAt}`}
-          >
-            {meta.gameVersion} · data as of {meta.generatedAt.slice(0, 10)}
-          </span>
-        )}
+      <div className="flex items-center gap-4 min-w-0">
+        <div className="flex items-baseline gap-2 min-w-0 shrink-0">
+          <span className="font-semibold shrink-0">Elite Redux Pokedex</span>
+          {meta && (
+            <span
+              className="text-xs truncate hidden sm:inline"
+              style={{ color: 'var(--color-text-muted)' }}
+              title={`Data generated ${meta.generatedAt}`}
+            >
+              {meta.gameVersion} · data as of {meta.generatedAt.slice(0, 10)}
+            </span>
+          )}
+        </div>
+        <Nav />
       </div>
       <ThemeToggle />
     </header>
@@ -75,6 +107,8 @@ function AppRoutes() {
       <Route path="/" element={<PokedexShell />}>
         <Route path="pokemon/:id" element={<PokedexDetail />} />
       </Route>
+      <Route path="/team-builder" element={<UnderConstruction title="Team Builder" />} />
+      <Route path="/damage-calculator" element={<UnderConstruction title="Damage Calculator" />} />
     </Routes>
   )
 }
