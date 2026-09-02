@@ -1,1 +1,63 @@
 @import "tailwindcss";
+
+:root {
+  --color-bg: #f7f7f5;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #ececea;
+  --color-text: #17171a;
+  --color-text-muted: #5b5b63;
+  --color-border: #dcdcd8;
+  --color-accent: #2f6feb;
+  --color-accent-contrast: #ffffff;
+  --color-danger: #c62828;
+}
+
+/* Dark ships as the default look for this app (its audience is on Discord at
+   midnight), not merely "respects system preference". The toggle in ThemeToggle
+   stamps data-theme on <html>; this block is the fallback for a first visit with no
+   stored preference, keyed off system preference OR simply being the default when
+   the media query can't tell (most engines: prefers-color-scheme: dark also matches
+   "no preference" is false, so we still need the explicit dark-by-default rule
+   below, which stamps data-theme="dark" from JS before paint -- see main.tsx). */
+:root[data-theme='dark'] {
+  --color-bg: #121214;
+  --color-bg-elevated: #1b1b1f;
+  --color-bg-hover: #26262b;
+  --color-text: #f1f1f0;
+  --color-text-muted: #a3a3ab;
+  --color-border: #2f2f35;
+  --color-accent: #6ea8ff;
+  --color-accent-contrast: #0b1220;
+  --color-danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+/* GBA sprites are tiny pixel art; smoothing them on upscale is the #1 tell of a
+   dev-grade fan dex. */
+img.pixelated {
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

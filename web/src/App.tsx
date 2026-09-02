@@ -1,7 +1,20 @@
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
+import ThemeToggle from './lib/ThemeToggle'
 import PokedexDetail from './routes/PokedexDetail'
 import PokedexList from './routes/PokedexList'
+
+function Header() {
+  return (
+    <header
+      className="flex items-center justify-between border-b px-4 py-2"
+      style={{ borderColor: 'var(--color-border)' }}
+    >
+      <span className="font-semibold">Elite Redux Pokedex</span>
+      <ThemeToggle />
+    </header>
+  )
+}
 
 function AppRoutes() {
   const state = useGameDataState()
@@ -10,7 +23,11 @@ function AppRoutes() {
     return <div className="p-4">Loading Pokedex data…</div>
   }
   if (state.status === 'error') {
-    return <div className="p-4 text-red-600">Failed to load data: {state.error.message}</div>
+    return (
+      <div className="p-4" style={{ color: 'var(--color-danger)' }}>
+        Failed to load data: {state.error.message}
+      </div>
+    )
   }
 
   return (
@@ -25,7 +42,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <GameDataProvider>
-        <AppRoutes />
+        <div className="min-h-screen" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+          <Header />
+          <AppRoutes />
+        </div>
       </GameDataProvider>
     </BrowserRouter>
   )
