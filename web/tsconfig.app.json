@@ -4,7 +4,10 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"], // "node" is for *.test.ts files (readFileSync,
+    // fileURLToPath -- see e.g. src/engine/stats.test.ts) that read the committed
+    // data/ snapshot directly rather than fetching it; app code itself has no reason
+    // to reach for Node ambient globals and shouldn't start relying on them.
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
