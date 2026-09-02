@@ -1,4 +1,5 @@
 import { Link, useParams } from 'react-router'
+import { GIFT_MON_UNLOCK } from '../data/giftMonUnlocks'
 import { useGameData } from '../lib/GameDataContext'
 import { displayName } from '../lib/displayName'
 import { formatHex } from '../lib/hex'
@@ -57,6 +58,11 @@ export default function PokedexDetail() {
             ))}
           </div>
           <p className="text-sm mt-3 leading-relaxed">{species.description}</p>
+          {GIFT_MON_UNLOCK[species.id] && (
+            <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="font-medium">Unlock:</span> {GIFT_MON_UNLOCK[species.id]}
+            </p>
+          )}
         </div>
       </div>
 

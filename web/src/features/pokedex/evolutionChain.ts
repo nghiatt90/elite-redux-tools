@@ -1,3 +1,4 @@
+import { GIFT_MON_UNLOCK } from '../../data/giftMonUnlocks'
 import { displayName } from '../../lib/displayName'
 import type { Item, Move, Species } from '../../lib/types'
 
@@ -152,7 +153,7 @@ export function findOtherForms(
         : megaStoneUnlockText(itemsById.get(mega.item ?? ''))
       : primal
         ? megaStoneUnlockText(itemsById.get(primal.item))
-        : undefined
+        : GIFT_MON_UNLOCK[s.id]
 
     nodes.push({ species: s, condition, label: displayName(s, speciesById) })
   }
