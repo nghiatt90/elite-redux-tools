@@ -1,0 +1,25 @@
+{
+  "game_version": "v2.65beta",
+  "sources": {
+    "er-config": {
+      "repo": "https://github.com/Elite-Redux/er-config",
+      "branch": "upcoming",
+      "sha": "de7c6b4d2cf6567e222148fde4d7beb5abce84b3",
+      "date": "2026-09-01T09:59:34Z",
+      "sparse_paths": []
+    },
+    "eliteredux-source": {
+      "repo": "https://github.com/Elite-Redux/eliteredux-source",
+      "branch": "upcoming",
+      "sha": "f51ce63acbb604ae7ee189da9060b95ab083ad07",
+      "date": "2026-09-01T09:59:42Z",
+      "sparse_paths": [
+        "graphics/pokemon",
+        "src/data",
+        "src",
+        "include",
+        "tools/codegen"
+      ]
+    }
+  }
+}
