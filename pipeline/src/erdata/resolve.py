@@ -117,6 +117,11 @@ def expand_learnset(learnset, species, tutors: ResolvedTutors) -> list[int]:
     NO_ATTACKS, gendered bucket skipped if the species is genderless) plus whatever is
     explicitly listed in its own learnset.tutor. NOT just learnset.tutor alone --
     nextdex does not do this expansion.
+
+    A move can legitimately appear in both a universal bucket and a species' own
+    explicit learnset.tutor (685 of 1907 species do this in the current data) --
+    dedupe while keeping first-occurrence order rather than showing the same tutor
+    move twice.
     """
     NoAttacks = type(learnset).UniversalTutors.NO_ATTACKS
     result = list(tutors.universal_status)
@@ -125,7 +130,14 @@ def expand_learnset(learnset, species, tutors: ResolvedTutors) -> list[int]:
     if species.WhichOneof("gender") != "genderless":
         result += tutors.universal_gendered
     result += list(learnset.tutor)
-    return result
+
+    seen = set()
+    deduped = []
+    for move_id in result:
+        if move_id not in seen:
+            seen.add(move_id)
+            deduped.append(move_id)
+    return deduped
 
 
 def resolve_abilities(species) -> list[int]:

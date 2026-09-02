@@ -86,7 +86,31 @@ def test_expand_learnset_adds_universal_tutors_pikachu():
     pikachu = _by_name(species, "SPECIES_PIKACHU")
 
     expanded = expand_learnset(pikachu.learnset, pikachu, tutors)
-    assert len(expanded) == len(pikachu.learnset.tutor) + 7 + 4 + 1
+    # Pikachu's own explicit tutor list overlaps one of the universal buckets in the
+    # raw data, so the union is one shorter than the raw sum -- see the dedup test
+    # below for the general property this is a specific instance of.
+    raw_sum = len(pikachu.learnset.tutor) + 7 + 4 + 1
+    assert len(expanded) == raw_sum - 1
+    assert len(expanded) == len(set(expanded))
+
+
+def test_expand_learnset_has_no_duplicates_even_when_explicit_list_overlaps_universal():
+    # A move can legitimately be both in a universal bucket and explicitly listed in
+    # a species' own learnset.tutor (this is common in the real data, not contrived);
+    # the expanded result must still be duplicate-free.
+    species = parse_species()
+    moves = parse_moves()
+    tutors = universal_tutor_sets(moves)
+
+    dupe_found = False
+    for s in species[:200]:
+        expanded = expand_learnset(s.learnset, s, tutors)
+        assert len(expanded) == len(set(expanded)), f"{s.id} has duplicate tutor moves"
+        if set(s.learnset.tutor) & (
+            set(tutors.universal_status) | set(tutors.universal_attack) | set(tutors.universal_gendered)
+        ):
+            dupe_found = True
+    assert dupe_found, "expected at least one sampled species to exercise the overlap case"
 
 
 def test_ability_list_is_never_padded_to_three():

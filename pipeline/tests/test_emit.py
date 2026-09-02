@@ -26,7 +26,9 @@ def test_species_dict_is_json_serializable_and_has_expected_shape():
     assert d["abilities"] == ["ABILITY_ELECTROCYTES", "ABILITY_GENERATOR", "ABILITY_ELECTRIC_BURST"]
     assert d["innates"] == ["ABILITY_SHORT_CIRCUIT", "ABILITY_STATIC", "ABILITY_GROUND_SHOCK"]
     assert d["isForm"] is False
-    assert len(d["learnset"]["tutor"]) == len(pikachu.learnset.tutor) + 7 + 4 + 1
+    tutor = d["learnset"]["tutor"]
+    assert len(tutor) == len(set(tutor))  # deduped -- one overlap exists in the raw data
+    assert len(tutor) == len(pikachu.learnset.tutor) + 7 + 4 + 1 - 1
 
 
 def test_form_species_dict_carries_inherited_dex_info():
