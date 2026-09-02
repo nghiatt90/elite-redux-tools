@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useGameData } from '../../lib/GameDataContext'
+import { statColor } from '../../lib/statColor'
 import type { BaseStats } from '../../lib/types'
 import { bst } from './filters'
 import { buildPercentileIndex, percentileOf, type StatKey } from './percentiles'
@@ -39,7 +40,7 @@ export default function DetailStatBars({ stats }: { stats: BaseStats }) {
                 className="h-full rounded-sm"
                 style={{
                   width: `${Math.min(100, (value / STAT_MAX) * 100)}%`,
-                  background: 'var(--color-accent)',
+                  background: statColor(value),
                 }}
               />
             </div>

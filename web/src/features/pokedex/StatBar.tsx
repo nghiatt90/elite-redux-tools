@@ -1,3 +1,4 @@
+import { statColor } from '../../lib/statColor'
 import type { BaseStats } from '../../lib/types'
 
 const STAT_ORDER: (keyof BaseStats)[] = ['hp', 'atk', 'def', 'spatk', 'spdef', 'spe']
@@ -15,8 +16,7 @@ export default function StatBar({ stats, className }: { stats: BaseStats; classN
             className="w-1.5 rounded-sm"
             style={{
               height: `${Math.max(8, pct)}%`,
-              background: 'var(--color-accent)',
-              opacity: 0.4 + (pct / 100) * 0.6,
+              background: statColor(value),
             }}
           />
         )

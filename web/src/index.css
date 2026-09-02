@@ -10,6 +10,12 @@
   --color-accent: #2f6feb;
   --color-accent-contrast: #ffffff;
   --color-danger: #c62828;
+
+  /* Base stat buckets: <60 / 60-99 / 100-120 / 120+ -- weak to exceptional. */
+  --stat-low: #c6433c;
+  --stat-mid: #c98a1f;
+  --stat-high: #2f8f5b;
+  --stat-veryhigh: #2f6feb;
 }
 
 /* Dark ships as the default look for this app (its audience is on Discord at
@@ -29,6 +35,11 @@
   --color-accent: #6ea8ff;
   --color-accent-contrast: #0b1220;
   --color-danger: #ff6b6b;
+
+  --stat-low: #ef6a63;
+  --stat-mid: #e0ab4a;
+  --stat-high: #4cbf87;
+  --stat-veryhigh: #6ea8ff;
 }
 
 * {
