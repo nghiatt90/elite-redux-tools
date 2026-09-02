@@ -26,7 +26,12 @@ function megaStoneUnlockText(item: Item | undefined): string {
   const hint = item?.megaStoneHint
   switch (hint?.kind) {
     case 'nurseJoy':
-      return 'Talk to Nurse Joy.'
+      // The in-game hint just says "Talk to Nurse Joy," but that undersells the real
+      // gate: every Mega, regardless of which specific stone, first needs the Mega
+      // Bracelet itself (a one-time item from Norman, see PetalburgCity_Gym's
+      // scripts.pory). Nurse Joy is where these particular stones come from after
+      // that, but leading with the actual prerequisite is more useful to a player.
+      return 'Obtain Mega Bracelet.'
     case 'adoptionCenter':
       return `Purchase ${item?.name} from an Adoption Center.`
     case 'legendarySage':
@@ -130,8 +135,17 @@ export function findOtherForms(
   for (const s of speciesById.values()) {
     if (s.formOf !== anchorId || s.id === species.id) continue
 
-    const mega = s.megas.find((m) => m.from === anchorId)
-    const primal = s.primals.find((p) => p.from === anchorId)
+    // Not filtered by `m.from === anchorId`: a mega of a form-of-a-form (e.g. Typhlosion
+    // Hisuian Mega) has `formOf: SPECIES_TYPHLOSION` -- flattened to the top-level base,
+    // same as every other form -- but its own `megas[].from` correctly points at the
+    // immediate species it evolves from (SPECIES_TYPHLOSION_HISUIAN), which never equals
+    // anchorId. Filtering on that match silently dropped the condition for every such
+    // case. A handful of species (Pikachu Partner Mega's cap variants, Toxtricity Mega,
+    // Necrozma Ultra, ...) carry more than one megas/primals entry on themselves, one per
+    // `from` variant, but every verified case uses the same item across all of them, so
+    // taking the first is safe -- there's exactly one species-defining mega/primal here.
+    const mega = s.megas[0]
+    const primal = s.primals[0]
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
