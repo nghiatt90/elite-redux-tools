@@ -30,6 +30,86 @@ export type NatureStatName = 'ATK' | 'DEF' | 'SPEED' | 'SPATK' | 'SPDEF'
 /** natures.json's natureStatTable shape: {"NATURE_ADAMANT": {ATK: 1, ..., SPDEF: 0}, ...} */
 export type NatureStatTable = Record<string, Record<NatureStatName, -1 | 0 | 1>>
 
+// ---------------------------------------------------------------------------
+// Damage context -- the battle-state facts a move's declarative base-power
+// condition (moveBehaviors.json's `attack.damage.conditions`) or one of the
+// hardcoded CustomMoveCondition<>/CustomMoveDamage<> specializations
+// (src/script_conditions.cc) can read. Deliberately a flat snapshot, not a live
+// simulation: this is a "what if this happened right now" calculator, not a battle
+// engine, so history-dependent facts (did the target act after me this turn, was I
+// damaged this turn) are inputs the UI collects as explicit toggles rather than
+// things the engine derives on its own.
+// ---------------------------------------------------------------------------
+
+export interface ConditionBattlerContext {
+  speciesId: string // exact SPECIES_* id
+  baseSpeciesId: string // GET_BASE_SPECIES_ID(species) -- for non-exact SpeciesCondition
+  itemId: string | null
+  resolvedHoldEffect: string | null // items.json's resolvedHoldEffect, for HoldEffect-keyed ItemCondition
+  itemNegated: boolean // Embargo/Klutz/Magic Room-style suppression; v1 default false
+  status1: Set<string> // bare STATUS1_* flags currently active (poison, burn, ...)
+  hasComatose: boolean // Comatose counts as always-asleep for StatusCondition(SLEEP)
+  hasBloodStainEffect: boolean // Blood Stain counts as always-bleeding for StatusCondition(BLEED)
+  isInfatuated: boolean // STATUS2_INFATUATION
+  wasDamagedThisTurnBy: 'attacker' | 'defender' | 'none' // gRoundStructs[battler].damaged + who
+  recentlyFainted: boolean // side's RecentFainted() -- an ally fainted last turn (Retaliate)
+  hp: number
+  maxHp: number
+  weight: number // hectograms, ability-adjusted (Heavy Metal etc.) -- v1: raw species weight
+  speed: number // GetBattlerTotalSpeedStat equivalent, post-stage/item/ability
+  positiveStatStageCount: number // CountBattlerStatIncreases -- Punishment/Stored Power
+  negativeStatStageCount: number // CountBattlerStatDecreases -- Lash Out
+  usedMovePpRemaining: number | null // pp[slot] for the move being used, if known -- Trump Card
+  helpingHand: boolean
+  ghastlyEcho: boolean // STATUS4_GHASTLY_ECHO
+  chargedUp: boolean // STATUS3_CHARGED_UP
+  meFirst: boolean // STATUS3_ME_FIRST
+  fear: boolean // gVolatileStructs[battler].fear -- read from the OPPOSING battler in CalcMoveBasePowerAfterModifiers
+  safePassage: boolean // gRoundStructs[battler].safePassage -- read from the OPPOSING battler
+  itemResolvedHoldEffectStrength: number | null // holdEffectStrength, 0-100 clamped by caller
+  lastMoveFailed: boolean // Stomping Tantrum
+}
+
+// ER's weather has two intensities per kind (:7592-7648) -- PERMANENT is the WEAK
+// tier (ability/long-lasting weather, e.g. Drizzle), TEMPORARY/PRIMAL is the STRONG
+// tier (Rain Dance-style moves, Primal Reversion) -- the opposite of what the names
+// suggest at a glance. Sand and Hail contribute no *damage* multiplier at all (they
+// boost the Rock/Ice defensive stat instead, in CalculateStat) -- included here only
+// so field state has one representation, not because finalDamage.ts branches on them
+// directly for a damage multiplier.
+export const WEATHER_KINDS = [
+  'NONE',
+  'SUN_PERMANENT',
+  'SUN_TEMPORARY',
+  'SUN_PRIMAL',
+  'RAIN_PERMANENT',
+  'RAIN_TEMPORARY',
+  'RAIN_PRIMAL',
+  'SANDSTORM',
+  'HAIL',
+  'FOG',
+  'STRONG_WINDS',
+] as const
+export type WeatherKind = (typeof WEATHER_KINDS)[number]
+
+export interface ConditionFieldContext {
+  gravityActive: boolean
+  terrain: string | null // bare TERRAIN_* name, or null for no terrain
+  weather: WeatherKind
+}
+
+export interface DamageContext {
+  attacker: ConditionBattlerContext
+  defender: ConditionBattlerContext
+  field: ConditionFieldContext
+  /** True if the attacker's action this turn resolves before the defender's --
+   * drives ActsAfter-based moves (Payback, Bolt Beak, Assurance-style "acts after"
+   * checks). A calculator has no real turn order without a full simulation, so this
+   * is a UI-level toggle, not something derived. */
+  attackerActsFirst: boolean
+  sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns -- Echoed Voice, Metronome (item)
+}
+
 /** natures.json's full shape, as emitted by erdata.natures.battle_constants_to_dict(). */
 export interface BattleConstants {
   natureStatTable: NatureStatTable
