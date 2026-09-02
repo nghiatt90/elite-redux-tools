@@ -1,3 +1,4 @@
+import { displayName } from '../../lib/displayName'
 import type { Move, Species } from '../../lib/types'
 
 export interface ChainNode {
@@ -67,38 +68,51 @@ export function buildEvolutionChain(
   return stages
 }
 
-/** Mega/primal forms are stored on the FORM species itself (e.g. Mega Charizard X's
- * own `megas` array points `from: "SPECIES_CHARIZARD"`), not on the base species --
- * the reverse of how evolutions work. So finding "what can this species mega evolve
- * into" means scanning every species for one whose megas[].from matches, not reading
- * a field on `species` directly.
+/** Derives a human label from a form's own symbolic id by stripping its base
+ * species' id prefix, e.g. SPECIES_CHARIZARD_MEGA_X minus SPECIES_CHARIZARD ->
+ * "Mega X", SPECIES_WEEDLE_REDUX -> "Redux", SPECIES_RAPIDASH_MEGA_GALARIAN ->
+ * "Mega Galarian". Generic rather than hand-listing every form category (Redux,
+ * regional, battle forms, capes, ...) individually -- verified against a sample
+ * spanning mega/primal/Redux/regional/cap forms, all read cleanly.
  */
-const MEGA_TYPE_SUFFIX: Record<string, string> = {
-  MEGA_X: 'X',
-  MEGA_Y: 'Y',
-  MEGA_Z: 'Z',
-  MEGA_A: 'A',
-  MEGA_B: 'B',
-  MEGA_C: 'C',
+function labelFromId(formId: string, baseId: string, baseName: string): string {
+  const suffix = formId.startsWith(`${baseId}_`) ? formId.slice(baseId.length + 1) : formId
+  const words = suffix
+    .split('_')
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(' ')
+  return `${baseName} ${words}`
 }
 
-export function findMegaAndPrimalForms(
+/** Every kind of form -- mega, primal, Redux, regional (Galarian/Alolan/Hisuian),
+ * battle forms, capes, and whatever else Elite Redux adds -- is stored the same way:
+ * on the FORM species itself via `formOf` pointing back at the base, the reverse of
+ * how regular evolutions work. So finding "what forms does this species have" means
+ * scanning every species for a matching `formOf`, not reading a field on `species`
+ * directly. This used to only look at the `megas`/`primals` arrays specifically,
+ * which meant the other ~500 forms in the data (Redux forms among them) were
+ * invisible everywhere, not just in the list (which intentionally hides all forms).
+ */
+export function findOtherForms(
   species: Species,
   allSpecies: Species[],
   movesById: Map<string, Move>,
 ): ChainNode[] {
   const nodes: ChainNode[] = []
   for (const s of allSpecies) {
+    if (s.formOf !== species.id) continue
+
     const mega = s.megas.find((m) => m.from === species.id)
-    if (mega) {
-      const suffix = MEGA_TYPE_SUFFIX[mega.megaType]
-      const condition = mega.move ? `via ${movesById.get(mega.move)?.name ?? mega.move}` : 'via held item'
-      nodes.push({ species: s, condition, label: `Mega ${species.name}${suffix ? ` ${suffix}` : ''}` })
-    }
     const primal = s.primals.find((p) => p.from === species.id)
-    if (primal) {
-      nodes.push({ species: s, condition: 'via held item', label: `Primal ${species.name}` })
-    }
+    const condition = mega
+      ? mega.move
+        ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
+        : 'via held item'
+      : primal
+        ? 'via held item'
+        : undefined
+
+    nodes.push({ species: s, condition, label: labelFromId(s.id, species.id, displayName(species)) })
   }
   return nodes
 }

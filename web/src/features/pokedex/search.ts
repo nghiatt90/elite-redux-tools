@@ -1,3 +1,4 @@
+import { displayName } from '../../lib/displayName'
 import type { Species } from '../../lib/types'
 
 /** Precomputed search index: one entry per base species, carrying every name a query
@@ -23,7 +24,11 @@ export function buildSearchIndex(baseSpecies: Species[], allSpecies: Species[]):
   }
 
   return baseSpecies.map((species) => {
-    const names = new Set<string>([species.name.toLowerCase()])
+    // Redux forms are their own list entries now (see PokedexShell), and their raw
+    // .name is identical to their base's ("Weedle" for both Weedle and Weedle
+    // Redux) -- index the disambiguated display name so "weedle redux" actually
+    // ranks as an own-name match, not a weaker form-longName one.
+    const names = new Set<string>([displayName(species).toLowerCase()])
     for (const form of formsByBase.get(species.id) ?? []) {
       if (form.longName) names.add(form.longName.toLowerCase())
     }

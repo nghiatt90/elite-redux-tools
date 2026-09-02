@@ -2,8 +2,9 @@ import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { useGameData } from '../../lib/GameDataContext'
 import { spriteUrl } from '../../lib/data'
+import { displayName } from '../../lib/displayName'
 import type { Species } from '../../lib/types'
-import { buildEvolutionChain, findMegaAndPrimalForms, type ChainNode } from './evolutionChain'
+import { buildEvolutionChain, findOtherForms, type ChainNode } from './evolutionChain'
 
 function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
   return (
@@ -24,7 +25,7 @@ function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
         loading="lazy"
       />
       <div className="text-xs">
-        <div className="font-medium">{node.label ?? node.species.longName ?? node.species.name}</div>
+        <div className="font-medium">{node.label ?? node.species.longName ?? displayName(node.species)}</div>
         {node.condition && <div style={{ color: 'var(--color-text-muted)' }}>{node.condition}</div>}
       </div>
     </Link>
@@ -34,14 +35,14 @@ function SpeciesChip({ node, current }: { node: ChainNode; current: Species }) {
 export default function EvolutionChain({ species }: { species: Species }) {
   const { species: allSpecies, speciesById, movesById } = useGameData()
   const stages = useMemo(() => buildEvolutionChain(species, speciesById), [species, speciesById])
-  const megaAndPrimalForms = useMemo(
-    () => findMegaAndPrimalForms(species, allSpecies, movesById),
+  const otherForms = useMemo(
+    () => findOtherForms(species, allSpecies, movesById),
     [species, allSpecies, movesById],
   )
 
   const noRegularEvolution = stages.length <= 1 && stages[0]?.length === 1
 
-  if (noRegularEvolution && megaAndPrimalForms.length === 0) {
+  if (noRegularEvolution && otherForms.length === 0) {
     return (
       <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
         Does not evolve.
@@ -70,16 +71,16 @@ export default function EvolutionChain({ species }: { species: Species }) {
         </div>
       )}
 
-      {megaAndPrimalForms.length > 0 && (
+      {otherForms.length > 0 && (
         <div>
           <h3
             className="text-xs font-semibold uppercase tracking-wide mb-1.5"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            Mega / Primal forms
+            Other forms
           </h3>
           <div className="flex flex-wrap gap-2">
-            {megaAndPrimalForms.map((node) => (
+            {otherForms.map((node) => (
               <SpeciesChip key={node.species.id} node={node} current={species} />
             ))}
           </div>

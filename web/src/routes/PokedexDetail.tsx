@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router'
 import { useGameData } from '../lib/GameDataContext'
+import { displayName } from '../lib/displayName'
 import { formatHex } from '../lib/hex'
 import TypeChip from '../components/TypeChip'
 import AbilitiesPanel from '../features/pokedex/AbilitiesPanel'
@@ -37,7 +38,7 @@ export default function PokedexDetail() {
       <div className="flex gap-4 mt-3">
         <SpeciesSprite speciesId={species.id} />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-semibold">{species.name}</h1>
+          <h1 className="text-2xl font-semibold">{displayName(species)}</h1>
           {species.longName && (
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
               {species.longName}

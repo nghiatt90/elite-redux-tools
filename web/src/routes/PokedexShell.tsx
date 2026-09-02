@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useGameData } from '../lib/GameDataContext'
+import { isReduxForm } from '../lib/displayName'
 import FilterPills from '../features/pokedex/FilterPills'
 import FilterRail from '../features/pokedex/FilterRail'
 import { applyFilters, filtersFromSearchParams, filtersToSearchParams, isEmpty } from '../features/pokedex/filters'
@@ -52,10 +53,14 @@ export default function PokedexShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  // 777 of 1907 entries are forms (e.g. every mega/regional/battle form) -- listing
-  // them as peers would flood the list with duplicate names. The primary list shows
-  // base species only; forms are reachable from the base species' detail view.
-  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm), [species])
+  // Most forms (mega/regional/battle forms etc.) are temporary or cosmetic variants
+  // of a base mon -- listing all ~780 of them as list peers would just flood the
+  // list with duplicate names, so they're reachable from the base species' detail
+  // view instead. Redux forms are the one exception: they're full standalone mons
+  // with their own evolution lines, not a variant of anything, so they get their own
+  // top-level list entry too (see displayName() for how they're told apart from
+  // their same-named base in the UI).
+  const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isReduxForm(s.id)), [species])
   const searchIndex = useMemo(() => buildSearchIndex(baseSpecies, species), [baseSpecies, species])
 
   const results = useMemo(() => {
