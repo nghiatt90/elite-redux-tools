@@ -15,7 +15,7 @@ export default function SpeciesRow({
     <Link
       to={`/pokemon/${species.id}`}
       data-selected={selected || undefined}
-      className="flex items-center gap-3 px-3 h-11 border-b hover:bg-[var(--color-bg-hover)]"
+      className="flex items-center gap-2 sm:gap-3 px-3 h-11 border-b hover:bg-[var(--color-bg-hover)]"
       style={{
         borderColor: 'var(--color-border)',
         background: selected ? 'var(--color-bg-hover)' : undefined,
@@ -30,17 +30,25 @@ export default function SpeciesRow({
         className="pixelated shrink-0"
         loading="lazy"
       />
-      <span className="w-40 shrink-0 truncate text-sm font-medium">{species.name}</span>
-      <span className="flex gap-1 w-36 shrink-0 overflow-hidden">
+      <span className="w-24 sm:w-40 shrink-0 truncate text-sm font-medium">{species.name}</span>
+      <span className="flex gap-1 w-24 sm:w-36 shrink-0 overflow-hidden">
         {species.types.map((t) => (
           <TypeChip key={t} type={t} />
         ))}
       </span>
-      <StatBar stats={species.baseStats} className="shrink-0" />
-      <span className="text-xs w-10 text-right tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+      <span className="hidden sm:block shrink-0">
+        <StatBar stats={species.baseStats} />
+      </span>
+      <span
+        className="text-xs w-10 text-right tabular-nums hidden sm:inline-block"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
         {bst(species.baseStats)}
       </span>
-      <span className="text-xs ml-auto tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+      <span
+        className="text-xs ml-auto tabular-nums hidden sm:inline-block"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
         #{species.nationalDexNum.toString().padStart(4, '0')}
       </span>
     </Link>

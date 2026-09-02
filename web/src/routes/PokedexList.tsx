@@ -15,6 +15,7 @@ export default function PokedexList() {
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams])
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [filtersSheetOpen, setFiltersSheetOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<SpeciesListHandle>(null)
 
@@ -110,23 +111,42 @@ export default function PokedexList() {
 
   return (
     <div className="h-full flex">
-      <FilterRail filters={filters} onChange={setFilters} />
-      <div className="flex-1 min-w-0 flex flex-col border-l" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="px-3 py-2 shrink-0 flex items-center gap-2">
+      <div className="hidden md:block">
+        <FilterRail filters={filters} onChange={setFilters} />
+      </div>
+      <div className="flex-1 min-w-0 flex flex-col md:border-l" style={{ borderColor: 'var(--color-border)' }}>
+        <div
+          className="px-3 py-2 shrink-0 flex items-center gap-2 sticky top-0 z-10"
+          style={{ background: 'var(--color-bg)' }}
+        >
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name… (press / to focus)"
-            className="flex-1 rounded-md border px-3 py-1.5 text-sm outline-none"
+            className="flex-1 min-w-0 rounded-md border px-3 py-1.5 text-sm outline-none"
             style={{
               background: 'var(--color-bg-elevated)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)',
             }}
           />
-          <span className="text-sm shrink-0" style={{ color: 'var(--color-text-muted)' }}>
+          <button
+            type="button"
+            onClick={() => setFiltersSheetOpen(true)}
+            className="md:hidden shrink-0 rounded-md border px-2 py-1.5 text-sm relative"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            Filters
+            {!isEmpty(filters) && (
+              <span
+                className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
+                style={{ background: 'var(--color-accent)' }}
+              />
+            )}
+          </button>
+          <span className="hidden sm:inline-block text-sm shrink-0" style={{ color: 'var(--color-text-muted)' }}>
             {results.length} of {baseSpecies.length}
           </span>
         </div>
@@ -142,6 +162,38 @@ export default function PokedexList() {
           )}
         </div>
       </div>
+
+      {filtersSheetOpen && (
+        <div className="md:hidden fixed inset-0 z-20 flex flex-col justify-end">
+          <button
+            type="button"
+            aria-label="Close filters"
+            onClick={() => setFiltersSheetOpen(false)}
+            className="absolute inset-0"
+            style={{ background: 'rgba(0,0,0,0.5)' }}
+          />
+          <div
+            className="relative rounded-t-xl max-h-[80vh] flex flex-col"
+            style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-border)' }}
+          >
+            <div
+              className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              <span className="font-semibold text-sm">Filters</span>
+              <button
+                type="button"
+                onClick={() => setFiltersSheetOpen(false)}
+                className="text-sm underline"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                Done
+              </button>
+            </div>
+            <FilterRail filters={filters} onChange={setFilters} className="w-full" />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

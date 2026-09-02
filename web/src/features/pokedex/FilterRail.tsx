@@ -15,9 +15,10 @@ const STAT_LABELS: Record<string, string> = {
 interface Props {
   filters: FilterState
   onChange: (filters: FilterState) => void
+  className?: string
 }
 
-export default function FilterRail({ filters, onChange }: Props) {
+export default function FilterRail({ filters, onChange, className = 'w-56 shrink-0' }: Props) {
   const { abilities } = useGameData()
 
   function cycleType(type: string) {
@@ -37,7 +38,7 @@ export default function FilterRail({ filters, onChange }: Props) {
   }
 
   return (
-    <div className="w-56 shrink-0 overflow-y-auto p-3 space-y-4 text-sm">
+    <div className={`${className} overflow-y-auto p-3 space-y-4 text-sm`}>
       <section>
         <h2 className="font-semibold mb-1.5">Type</h2>
         <div className="flex flex-wrap gap-1">
