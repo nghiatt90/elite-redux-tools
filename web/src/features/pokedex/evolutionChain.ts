@@ -73,21 +73,35 @@ export function buildEvolutionChain(
  * on the FORM species itself via `formOf` pointing back at the base, the reverse of
  * how regular evolutions work. So finding "what forms does this species have" means
  * scanning every species for a matching `formOf`, not reading a field on `species`
- * directly. This lists every form regardless of whether it's also a standalone list
- * entry in its own right (see displayName.ts's isStandaloneForm) -- this section is
- * the cross-link back to it either way.
+ * directly.
+ *
+ * Works from either side of the family: `species.formOf` gives the anchor (the base)
+ * whether `species` itself is the base or one of its forms, so a form's own detail
+ * page shows the same set -- the base plus every sibling form, excluding itself --
+ * not an empty section. (Previously this only ever scanned for `s.formOf ===
+ * species.id`, which is only ever true when `species` already is the base, so
+ * viewing any form's own page showed nothing.) Lists every form regardless of
+ * whether it's also a standalone list entry in its own right (see displayName.ts's
+ * isStandaloneForm) -- this section is the cross-link either way.
  */
 export function findOtherForms(
   species: Species,
   speciesById: Map<string, Species>,
   movesById: Map<string, Move>,
 ): ChainNode[] {
+  const anchorId = species.formOf ?? species.id
   const nodes: ChainNode[] = []
-  for (const s of speciesById.values()) {
-    if (s.formOf !== species.id) continue
 
-    const mega = s.megas.find((m) => m.from === species.id)
-    const primal = s.primals.find((p) => p.from === species.id)
+  if (anchorId !== species.id) {
+    const anchor = speciesById.get(anchorId)
+    if (anchor) nodes.push({ species: anchor, condition: 'base form', label: displayName(anchor, speciesById) })
+  }
+
+  for (const s of speciesById.values()) {
+    if (s.formOf !== anchorId || s.id === species.id) continue
+
+    const mega = s.megas.find((m) => m.from === anchorId)
+    const primal = s.primals.find((p) => p.from === anchorId)
     const condition = mega
       ? mega.move
         ? `via ${movesById.get(mega.move)?.name ?? mega.move}`
