@@ -39,6 +39,7 @@ import {
   hasStabOverride,
   resolveEffectiveMoveType,
 } from './abilities/dispatchCalc'
+import { battlerHasAbility } from './abilities/dispatch'
 import type { AbilitySlots } from './abilities/dispatch'
 import type { BattleConstants, BattlerBattleState, BattleStatKey, DamageContext, FieldBattleState } from './types'
 
@@ -464,7 +465,7 @@ function calcInternal(
     // MoveData yet, so this is always the ordinary x1.5 for now.
     critMultiplier: isCrit ? 1.5 : null,
     weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
-    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, moveType),
+    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType),
     screensActive: !isCrit && screensApply(field, split),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
@@ -483,12 +484,25 @@ function calcInternal(
   return { dmg: finalResult.dmg, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 }
 
-/** StabMultiplierInHalves, src/battle_util.c:7469-7481. Move === Struggle and
- * field-wide Relic Stone (STAB disabled entirely) aren't modelled -- neither has
- * a natural home in a single-scenario calculator (Struggle never has a "move
- * type" to check STAB against in the first place; Relic Stone is a rare field
- * effect with no UI control yet). */
-function stabInHalves(attackerTypes: string[], attackerSlots: AbilitySlots, moveType: string): 2 | 3 | 4 {
+/**
+ * StabMultiplierInHalves, src/battle_util.c:7469-7481.
+ *
+ *   if (move == MOVE_STRUGGLE) return 2;
+ *   if (IsAbilityOnFieldExcept(battler, ABILITY_RELIC_STONE)) return 2;
+ *
+ * Struggle is typeless (no move type to check STAB against at all), so the early
+ * return there is a pure no-op we get for free by construction -- omitted.
+ * IsAbilityOnFieldExcept scans every battler OTHER than the one computing STAB
+ * (`i == battlerId` is skipped, battle_util.c:4839-4848); in this 2-battler v1
+ * singles engine "every other battler" is just the defender, so the attacker's OWN
+ * Relic Stone (if it somehow held one) would NOT suppress its own STAB, matching
+ * the C exactly. Relic Stone has zero hooks of its own (`breakable` only) -- this
+ * is a hardcoded special case, not something the ability registry can express.
+ * Mold Breaker suppression of `breakable` abilities (including this one) isn't
+ * modelled yet -- see isSuppressed's own doc in dispatchCalc.ts.
+ */
+function stabInHalves(attackerTypes: string[], attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, moveType: string): 2 | 3 | 4 {
+  if (battlerHasAbility(defenderSlots, 'ABILITY_RELIC_STONE', () => false)) return 2
   const isStab = attackerTypes.includes(moveType) || hasStabOverride(attackerSlots, moveType)
   if (!isStab) return 2
   return hasFlag(attackerSlots, 'adaptability') ? 4 : 3

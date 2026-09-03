@@ -156,6 +156,29 @@ describe('calculateMoveDamage -- Garchomp vs Skarmory, real species/move data', 
     expect(result.rolls[15]).toBe(72) // roll=0 (100%)
   })
 
+  it('Relic Stone on the DEFENDER nullifies the attacker\'s STAB entirely (battle_util.c:7469-7481)', () => {
+    // Same Outrage-vs-Skarmory scenario as above, but the defender now holds Relic
+    // Stone: STAB is forced to 2 (i.e. 1.0x, no bonus) regardless of Garchomp's own
+    // Dragon typing or Adaptability. applyModifier(512, 96) = 48 instead of 72.
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_OUTRAGE'),
+        defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_RELIC_STONE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.rolls[15]).toBe(48)
+  })
+
+  it('the attacker\'s OWN Relic Stone does not suppress its own STAB (IsAbilityOnFieldExcept skips the battler itself)', () => {
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_OUTRAGE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_RELIC_STONE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.rolls[15]).toBe(72) // unchanged from the plain STAB case above
+  })
+
   it('rolls are ascending (roll index 0 = smallest multiplier, 85%)', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_OUTRAGE') }))
     for (let i = 1; i < result.rolls.length; i++) {
