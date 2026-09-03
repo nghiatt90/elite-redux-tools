@@ -88,7 +88,9 @@ describe('ability registry coverage gate', () => {
     //             composite -- Bad Luck, Hyper Cutter, Perfectionist, Precise Fist,
     //             Stalwart, Strategic Pause, Mystic Blades, Energized Horns,
     //             Mythical Arrows, Best Offense, Pony Power, Bass Boosted)
-    expect(unmodelledCount).toBeLessThanOrEqual(145)
+    //     -> 133 (batch P: 12 more onOffensiveMultiplier -- 4 "sound Normal move"
+    //             onMoveType conversions + composites of already-ported abilities)
+    expect(unmodelledCount).toBeLessThanOrEqual(133)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

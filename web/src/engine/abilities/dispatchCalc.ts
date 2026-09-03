@@ -133,13 +133,18 @@ export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: 
  * regardless. Ability holder is always the ATTACKER (`checkMoldBreaker = FALSE`
  * ON_ABILITY call, no cross-battler loop, unlike onOffensiveMultiplier/onCrit).
  */
-export function resolveEffectiveMoveType(attackerSlots: AbilitySlots, moveId: string, moveType: string): { moveType: string; ateBoost: boolean } {
+export function resolveEffectiveMoveType(
+  attackerSlots: AbilitySlots,
+  moveId: string,
+  moveType: string,
+  moveFlags: Record<string, true> = {},
+): { moveType: string; ateBoost: boolean } {
   if (moveType !== 'NORMAL') return { moveType, ateBoost: false }
   let resolved = moveType
   let ateBoost = false
   forEachAbility(attackerSlots, isSuppressed, (impl) => {
     if (!impl.onMoveType) return
-    const ctx: OnMoveTypeContext = { battlerId: 'attacker', moveId, moveType, ateBoost: false }
+    const ctx: OnMoveTypeContext = { battlerId: 'attacker', moveId, moveType, ateBoost: false, moveFlags }
     impl.onMoveType(ctx)
     if (ctx.moveType !== moveType) {
       resolved = ctx.moveType

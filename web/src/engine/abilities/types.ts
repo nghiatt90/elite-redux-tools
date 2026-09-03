@@ -183,6 +183,7 @@ export interface OnMoveTypeContext {
   moveId: string
   moveType: string // read/write -- "-ate" abilities overwrite this
   ateBoost: boolean // read/write
+  moveFlags: Record<string, true> // Banshee/Power Metal/Sand Song/Snow Song's sound-flag check
 }
 
 export interface OnRecoilContext {

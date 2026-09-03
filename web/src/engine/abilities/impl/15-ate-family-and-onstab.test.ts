@@ -27,7 +27,7 @@ describe('ate family + onStab batch', () => {
       ['ABILITY_MOB_BOSS', 'DARK'],
       ['ABILITY_AERILATE', 'FLYING'],
     ] as const) {
-      const moveCtx: OnMoveTypeContext = { battlerId: 'x', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', ateBoost: false }
+      const moveCtx: OnMoveTypeContext = { battlerId: 'x', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', ateBoost: false, moveFlags: {} }
       findAbility(id).onMoveType!(moveCtx)
       expect(moveCtx.moveType).toBe(type)
       expect(moveCtx.ateBoost).toBe(true)

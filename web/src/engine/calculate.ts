@@ -339,7 +339,7 @@ function calcInternal(
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
   // terrain-boost base-power check all key off the resolved type, not the move's
   // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  const { moveType } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType)
+  const { moveType } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
 
   const defenderTypes = distinctDefendingTypes(defender.types)
   const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, defender.isGrounded)
