@@ -67,7 +67,9 @@ describe('ability registry coverage gate', () => {
     //     -> 457 (batch A3: 12 more onOffensiveMultiplier, incl. 4 delegate composites)
     //     -> 451 (batch B2: 6 more onDefensiveMultiplier)
     //     -> 431 (batch F: 20 SWARM_MULTIPLIER-family onOffensiveMultiplier)
-    expect(unmodelledCount).toBeLessThanOrEqual(431)
+    //     -> 425 (batch G: 6 hub abilities -- Battle Armor, Stall, Analytic,
+    //             Water Bubble, Fatal Precision, Sand Guard)
+    expect(unmodelledCount).toBeLessThanOrEqual(425)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
