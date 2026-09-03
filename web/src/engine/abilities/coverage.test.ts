@@ -79,7 +79,9 @@ describe('ability registry coverage gate', () => {
     //     -> 193 (batch L: 37 onStat -- weather/terrain/highest-stat/status/hp
     //             families, the 2 Solar-Power+Chlorophyll composites, and the 4
     //             Ruin abilities)
-    expect(unmodelledCount).toBeLessThanOrEqual(193)
+    //     -> 174 (batch M: 12 "-ate"-family abilities whose extra hooks turned out
+    //             to be aliases/small lambdas, + 7 plain onStab-only abilities)
+    expect(unmodelledCount).toBeLessThanOrEqual(174)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

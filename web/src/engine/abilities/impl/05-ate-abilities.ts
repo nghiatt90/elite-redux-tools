@@ -10,8 +10,10 @@
 // Draconic Might/Draconize/Fight Spirit/Lead Claws/Mob Boss/Stainless Steel/
 // Steelworker/Unicorn/Warrior's Spear) carry EXTRA hooks beyond onMoveType/onStab
 // (onStat, onOffensiveMultiplier, onTypeEffectiveness, onAfterTypeEffectiveness,
-// onEntry, onInfiltrate, onDefender) and are left unmodelled rather than ported
-// partially and silently missing part of their real behavior.
+// onEntry, onInfiltrate, onDefender) -- most of those extras are themselves plain
+// aliases to already-ported abilities, so they're ported in
+// 15-ate-family-and-onstab.ts instead of here (only Aerilate's onStat is still left
+// out, for the reason noted there).
 //
 // ATE_ABILITY(type)'s exact condition (src/abilities.cc:296): the type change (and
 // therefore the pseudo-STAB) only applies to a move whose ORIGINAL type is Normal --
@@ -20,7 +22,7 @@
 
 import type { AbilityImpl } from '../types'
 
-function ateAbility(id: string, src: string, type: string): AbilityImpl {
+export function ateAbility(id: string, src: string, type: string): AbilityImpl {
   return {
     id,
     src,

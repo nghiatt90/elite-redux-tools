@@ -138,6 +138,7 @@ export interface OnAfterTypeEffectivenessContext {
   moveType: string
   modifier: number // UQ_4_12, read/write
   perTypeModifiers: [number, number, number] // modifier1/2/3 from the three-type fold, read-only
+  defenderTypes: string[] // IS_BATTLER_OF_TYPE(target, ...) checks -- e.g. Steelworker
 }
 
 export interface OnChooseOffensiveStatContext {
