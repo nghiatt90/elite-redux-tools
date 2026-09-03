@@ -1,6 +1,7 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
+import DamageCalculator from './routes/DamageCalculator'
 import PokedexDetail from './routes/PokedexDetail'
 import PokedexShell from './routes/PokedexShell'
 import UnderConstruction from './routes/UnderConstruction'
@@ -111,7 +112,7 @@ function AppRoutes() {
         <Route path="pokemon/:id" element={<PokedexDetail />} />
       </Route>
       <Route path="/team-builder" element={<UnderConstruction title="Team Builder" />} />
-      <Route path="/damage-calculator" element={<UnderConstruction title="Damage Calculator" />} />
+      <Route path="/damage-calculator" element={<DamageCalculator />} />
     </Routes>
   )
 }
