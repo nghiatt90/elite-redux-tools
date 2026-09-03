@@ -32,6 +32,7 @@ import {
   abilityCoverageNote,
   computeAbilityCritBonus,
   computeAbilityMultiplier,
+  computeAttackerHasMoldBreaker,
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
   computeOnStatModifier,
@@ -221,6 +222,7 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
   const statBattler = isFoulPlay ? defender : attacker
   const isBodyPress = move.effect === 'EFFECT_BODY_PRESS'
   const defaultAtkStat: BattleStatKey = isBodyPress ? 'def' : split === 'PHYSICAL' ? 'atk' : 'spatk'
+  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS')
   // onChooseOffensiveStat only runs in the non-Foul-Play/Body-Press/Monotype-Champ
   // case (:7255-7269) -- the Monotype Champ special case isn't modelled here.
   const atkStat: BattleStatKey =
@@ -230,7 +232,9 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
           battlerId: 'attacker',
           moveId: move.id,
           isCrit: forcedCrit,
-          isUnaware: hasFlag(defender.abilitySlots, 'unaware'),
+          // Unaware IS breakable -- a defender's Unaware here can be bypassed by
+          // the attacker's own Mold Breaker.
+          isUnaware: hasFlag(defender.abilitySlots, 'unaware', attackerHasMoldBreaker),
           moveSplit: split,
           moveFlags: move.flags,
           isHighestAttackingStat: isHighestAttackingStat(attacker, 'atk'),
@@ -311,22 +315,28 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
  * particular damage roll. */
 function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs {
   const { attacker, defender, move, field } = scenario
-  const abilityBonus = computeAbilityCritBonus(attacker.abilitySlots, defender.abilitySlots, {
-    defenderId: 'defender',
-    moveId: move.id,
-    typeEffectiveness: uq(1.0),
-    defenderStatus1: defender.condition.status1,
-    defenderSpeedStageNegative: defender.statStages.spe < 0,
-    defenderResolvedHoldEffect: defender.condition.resolvedHoldEffect,
-    moveFlags: move.flags,
-    // Perfectionist's own check reads CalcMoveBasePower's PRE-modifier value
-    // elsewhere in the pipeline; this call site runs before that's computed, so
-    // move.power (the raw declared value) is used instead -- an approximation for
-    // the handful of moves whose behavior config changes power before the crit
-    // check would otherwise see it.
-    basePower: move.power,
-    attackerActsFirst: scenario.attackerActsFirst,
-  })
+  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS')
+  const abilityBonus = computeAbilityCritBonus(
+    attacker.abilitySlots,
+    defender.abilitySlots,
+    {
+      defenderId: 'defender',
+      moveId: move.id,
+      typeEffectiveness: uq(1.0),
+      defenderStatus1: defender.condition.status1,
+      defenderSpeedStageNegative: defender.statStages.spe < 0,
+      defenderResolvedHoldEffect: defender.condition.resolvedHoldEffect,
+      moveFlags: move.flags,
+      // Perfectionist's own check reads CalcMoveBasePower's PRE-modifier value
+      // elsewhere in the pipeline; this call site runs before that's computed, so
+      // move.power (the raw declared value) is used instead -- an approximation for
+      // the handful of moves whose behavior config changes power before the crit
+      // check would otherwise see it.
+      basePower: move.power,
+      attackerActsFirst: scenario.attackerActsFirst,
+    },
+    attackerHasMoldBreaker,
+  )
   return {
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
     // same "blocked" outcome as Lucky Chant -- both mean "this hit can never crit".
@@ -377,8 +387,23 @@ function calcInternal(
   // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
   const { moveType } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
 
+  // Computed here (rather than down near computeAbilityMultiplier, as in the other two
+  // calcInternal-adjacent call sites) because IsBattlerGroundedIgnoreType's Levitate
+  // check (below) is itself checkMoldBreaker=TRUE (battle_util.c:6694,
+  // RETURN_ABILITY_IF_FLAG(battlerId, TRUE, levitate)) and runs before type
+  // effectiveness is known.
+  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split)
+
   const defenderTypes = distinctDefendingTypes(defender.types)
-  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, defender.isGrounded)
+  // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701): defender.isGrounded is
+  // the species-only baseline (Flying-type is airborne; scenario.ts builds it with no
+  // ability knowledge). The Levitate ABILITY is the one levitating effect this engine
+  // models -- Air Balloon/Magnet Rise/Telekinesis (also CheckLevitatingEffects,
+  // :6687-6695) and Gravity/Iron Ball/Ingrain/Smacked Down (the grounding effects that
+  // override everything, CheckGroundingEffects, :6672-6685) have no scenario state here
+  // and stay unmodelled, same as the rest of the field-state backlog.
+  const isGrounded = defender.isGrounded && !hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker)
+  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, isGrounded)
   if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 
   const isCrit = forceCrit
@@ -456,6 +481,7 @@ function calcInternal(
       attackerActsFirst: scenario.attackerActsFirst,
       defenderTypes: defender.types,
     },
+    attackerHasMoldBreaker,
   )
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),
@@ -465,7 +491,7 @@ function calcInternal(
     // MoveData yet, so this is always the ordinary x1.5 for now.
     critMultiplier: isCrit ? 1.5 : null,
     weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
-    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType),
+    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker),
     screensActive: !isCrit && screensApply(field, split),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
@@ -501,8 +527,16 @@ function calcInternal(
  * Mold Breaker suppression of `breakable` abilities (including this one) isn't
  * modelled yet -- see isSuppressed's own doc in dispatchCalc.ts.
  */
-function stabInHalves(attackerTypes: string[], attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, moveType: string): 2 | 3 | 4 {
-  if (battlerHasAbility(defenderSlots, 'ABILITY_RELIC_STONE', () => false)) return 2
+function stabInHalves(
+  attackerTypes: string[],
+  attackerSlots: AbilitySlots,
+  defenderSlots: AbilitySlots,
+  moveType: string,
+  attackerHasMoldBreaker: boolean,
+): 2 | 3 | 4 {
+  // Relic Stone is `breakable` -- an attacker with an active Mold Breaker bypasses
+  // the field-wide STAB suppression, per IsSuppressed's own rule.
+  if (battlerHasAbility(defenderSlots, 'ABILITY_RELIC_STONE', () => attackerHasMoldBreaker)) return 2
   const isStab = attackerTypes.includes(moveType) || hasStabOverride(attackerSlots, moveType)
   if (!isStab) return 2
   return hasFlag(attackerSlots, 'adaptability') ? 4 : 3

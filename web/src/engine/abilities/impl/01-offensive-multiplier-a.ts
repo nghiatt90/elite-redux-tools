@@ -117,7 +117,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
     // Levitate's presence in `struct Ability`'s function-pointer fields.
     id: 'ABILITY_LEVITATE',
     src: 'src/abilities.cc:781',
-    flags: { levitate: true },
+    flags: { levitate: true, breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FLYING') MUL(ctx, 1.25)
     },

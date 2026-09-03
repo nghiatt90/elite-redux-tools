@@ -130,7 +130,17 @@ describe('ability registry coverage gate', () => {
     //             the gate exists so an undercount fails loudly instead of
     //             silently shipping a wrong number, and a rising count here means
     //             the audit worked as intended.
-    expect(unmodelledCount).toBeLessThanOrEqual(105)
+    //     -> 103 (batch W: onMoldBreaker family -- Mold Breaker (unconditional),
+    //             Teravolt/Turboblaze/Blind Rage (alias, added to their EXISTING
+    //             addsType/onTypeEffectiveness entries), Mycelium Might (status
+    //             moves only). Also wired real Mold Breaker suppression into
+    //             computeAbilityMultiplier's defensive loop, computeAbilityCritBonus's
+    //             defender run, and Relic Stone's check -- Deadly Precision/
+    //             Flawless Precision/Mach 3/Overrule/Stonecutter's onMoldBreaker
+    //             halves stay unmodelled (already real-ported for their OTHER
+    //             hooks) since their condition requires recursively simulating
+    //             the hit's own resolved type/crit/effectiveness first.
+    expect(unmodelledCount).toBeLessThanOrEqual(103)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

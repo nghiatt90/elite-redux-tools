@@ -21,6 +21,7 @@ import type {
   OnChooseDefensiveStatContext,
   OnSwapSplitContext,
   OnMoveTypeContext,
+  OnMoldBreakerContext,
 } from '../types'
 
 export function aliasOffensiveMultiplier(target: string) {
@@ -97,5 +98,12 @@ export function aliasMoveType(target: string) {
   return (ctx: OnMoveTypeContext): void => {
     const t = lookupAbility(target)
     if (t && !isUnmodelled(t)) t.onMoveType?.(ctx)
+  }
+}
+
+export function aliasMoldBreaker(target: string) {
+  return (ctx: OnMoldBreakerContext): boolean => {
+    const t = lookupAbility(target)
+    return t && !isUnmodelled(t) ? (t.onMoldBreaker?.(ctx) ?? false) : false
   }
 }

@@ -67,7 +67,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
       if ((ctx.weather === 'SUN_PERMANENT' || ctx.weather === 'SUN_TEMPORARY' || ctx.weather === 'SUN_PRIMAL') && ctx.moveSplit === 'PHYSICAL') MUL(ctx, 0.5)
     },
   },
-  { id: 'ABILITY_MUCUS_MEMBRANE', src: 'src/abilities.cc:11600', onDefensiveMultiplier: (ctx) => MUL(ctx, 0.7) },
+  { id: 'ABILITY_MUCUS_MEMBRANE', src: 'src/abilities.cc:11600', flags: { breakable: true }, onDefensiveMultiplier: (ctx) => MUL(ctx, 0.7) },
   {
     // Referenced by ABILITY_DEFLECT/ABILITY_ULTRA_INSTINCT's aliases (batch H).
     id: 'ABILITY_PARRY',
@@ -78,11 +78,12 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     id: 'ABILITY_PURIFYING_SALT',
     src: 'src/abilities.cc:6888',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'GHOST') MUL(ctx, 0.5)
     },
   },
-  { id: 'ABILITY_TERASTAL_TREASURE', src: 'src/abilities.cc:8786', onDefensiveMultiplier: (ctx) => MUL(ctx, 0.6) },
+  { id: 'ABILITY_TERASTAL_TREASURE', src: 'src/abilities.cc:8786', flags: { breakable: true }, onDefensiveMultiplier: (ctx) => MUL(ctx, 0.6) },
   {
     id: 'ABILITY_THICK_BLUBBER',
     src: 'src/abilities.cc:10785',
@@ -93,6 +94,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     id: 'ABILITY_WATER_COMPACTION',
     src: 'src/abilities.cc:2623',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'WATER') MUL(ctx, 0.5)
     },
@@ -101,6 +103,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     // Referenced by ABILITY_PETROLEUM_JELLY's composite below.
     id: 'ABILITY_HYPER_CLEANSE',
     src: 'src/abilities.cc:10271',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'POISON') MUL(ctx, 0.5)
     },
@@ -108,6 +111,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     id: 'ABILITY_IMMUNITY',
     src: 'src/abilities.cc:681',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'POISON') MUL(ctx, 0.5)
     },
@@ -115,6 +119,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     id: 'ABILITY_MAGMA_ARMOR',
     src: 'src/abilities.cc:989',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'WATER' || ctx.moveType === 'ICE') MUL(ctx, 0.7)
     },
@@ -141,11 +146,13 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     id: 'ABILITY_FORTRESS',
     src: 'src/abilities.cc:12300',
+    flags: { breakable: true },
     onDefensiveMultiplier: composeDefensive('ABILITY_FILTER', 'ABILITY_SHELL_ARMOR'),
   },
   {
     id: 'ABILITY_PETROLEUM_JELLY',
     src: 'src/abilities.cc:12617',
+    flags: { breakable: true },
     onDefensiveMultiplier: composeDefensive('ABILITY_HYPER_CLEANSE', 'ABILITY_LIQUIFIED'),
   },
 ]

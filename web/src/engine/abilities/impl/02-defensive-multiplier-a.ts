@@ -16,6 +16,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_ARCTIC_FUR',
     src: 'src/abilities.cc:4928',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => MUL(ctx, 0.65),
   },
   {
@@ -29,6 +30,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
     // stacking with the crit x1.5 applied at a different pipeline stage).
     id: 'ABILITY_BAD_OMEN',
     src: 'src/abilities.cc:8326',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.isCrit) MUL(ctx, 0.25)
     },
@@ -36,6 +38,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_BRAIN_MASS',
     src: 'src/abilities.cc:11465',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.defenderAtMaxHp) MUL(ctx, 0.5)
     },
@@ -43,6 +46,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_MULTISCALE',
     src: 'src/abilities.cc:1946',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.defenderAtMaxHp) MUL(ctx, 0.5)
     },
@@ -50,6 +54,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_CHRISTMAS_SPIRIT',
     src: 'src/abilities.cc:3760',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.weather === 'HAIL') MUL(ctx, 0.5)
     },
@@ -72,6 +77,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_PRIMAL_ARMOR',
     src: 'src/abilities.cc:4124',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.typeEffectiveness >= SUPER_EFFECTIVE_THRESHOLD) MUL(ctx, 0.5)
     },
@@ -79,6 +85,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_FUR_COAT',
     src: 'src/abilities.cc:2318',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'PHYSICAL') MUL(ctx, 0.5)
     },
@@ -86,6 +93,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_GUARDIAN_COAT',
     src: 'src/abilities.cc:10151',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'PHYSICAL') MUL(ctx, 0.8)
     },
@@ -93,6 +101,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_ICE_SCALES',
     src: 'src/abilities.cc:3315',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'SPECIAL') MUL(ctx, 0.5)
     },
@@ -100,6 +109,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_OVERCOAT',
     src: 'src/abilities.cc:2060',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'SPECIAL') MUL(ctx, 0.8)
     },
@@ -107,6 +117,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_PRISM_SCALES',
     src: 'src/abilities.cc:3654',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'SPECIAL') MUL(ctx, 0.7)
     },
@@ -114,6 +125,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_HEATPROOF',
     src: 'src/abilities.cc:1459',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FIRE') RESISTANCE(ctx, 0.5)
     },
@@ -121,6 +133,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_HEAVY_METAL',
     src: 'src/abilities.cc:1091',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'GHOST' || ctx.moveType === 'DARK') RESISTANCE(ctx, 0.5)
     },
@@ -135,6 +148,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_THICK_FAT',
     src: 'src/abilities.cc:1082',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FIRE' || ctx.moveType === 'ICE') RESISTANCE(ctx, 0.5)
     },

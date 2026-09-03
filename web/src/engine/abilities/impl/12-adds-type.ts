@@ -8,6 +8,7 @@
 // C rather than silently missed, and it carries `breakable`/`levitate`/
 // `adaptability` for the handful that also set those bitfields.
 
+import { aliasMoldBreaker } from './alias'
 import type { AbilityImpl } from '../types'
 
 export const ADDS_TYPE_ABILITIES: AbilityImpl[] = [
@@ -28,8 +29,10 @@ export const ADDS_TYPE_ABILITIES: AbilityImpl[] = [
   { id: 'ABILITY_METALLIC_JAWS', src: 'src/abilities.cc:9676', addsType: 'STEEL' },
   { id: 'ABILITY_PHANTOM', src: 'src/abilities.cc:4168', addsType: 'GHOST' },
   { id: 'ABILITY_ROCKY_EXTERIOR', src: 'src/abilities.cc:11181', addsType: 'ROCK' },
-  { id: 'ABILITY_TERAVOLT', src: 'src/abilities.cc:2264', addsType: 'ELECTRIC' },
-  { id: 'ABILITY_TURBOBLAZE', src: 'src/abilities.cc:2257', addsType: 'FIRE' },
+  // .onMoldBreaker = Impl<ABILITY_MOLD_BREAKER>.onMoldBreaker (alias, added
+  // once onMoldBreaker joined the damage-hook census -- see batch W).
+  { id: 'ABILITY_TERAVOLT', src: 'src/abilities.cc:2264', addsType: 'ELECTRIC', onMoldBreaker: aliasMoldBreaker('ABILITY_MOLD_BREAKER') },
+  { id: 'ABILITY_TURBOBLAZE', src: 'src/abilities.cc:2257', addsType: 'FIRE', onMoldBreaker: aliasMoldBreaker('ABILITY_MOLD_BREAKER') },
   // .addsType = Impl<ABILITY_AQUATIC>.addsType == TYPE_WATER
   { id: 'ABILITY_WATERBORNE', src: 'src/abilities.cc:11728', addsType: 'WATER', flags: { adaptability: true } },
   { id: 'ABILITY_WITCH_BROOM', src: 'src/abilities.cc:11438', addsType: 'PSYCHIC', flags: { breakable: true, levitate: true } },

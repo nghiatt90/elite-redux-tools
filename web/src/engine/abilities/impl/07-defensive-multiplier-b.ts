@@ -23,6 +23,7 @@ export const DEFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
   {
     id: 'ABILITY_FEATHERCOAT',
     src: 'src/abilities.cc:12319',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       MUL(ctx, ctx.typeEffectiveness < uq(1.0) ? 0.7 : 0.85)
     },

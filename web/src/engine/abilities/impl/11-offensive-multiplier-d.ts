@@ -15,6 +15,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_DEEP_FREEZE',
     src: 'src/abilities.cc:9343',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'WATER' || ctx.moveType === 'ICE') MUL(ctx, 1.25)
     },
@@ -36,6 +37,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_DUNE_TERROR',
     src: 'src/abilities.cc:5432',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'GROUND') MUL(ctx, 1.2)
     },
@@ -69,6 +71,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_NOCTURNAL',
     src: 'src/abilities.cc:4001',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'DARK') MUL(ctx, 1.25)
     },
@@ -179,6 +182,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_DRAGONSLAYER',
     src: 'src/abilities.cc:4071',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('DRAGON')) MUL(ctx, 1.5)
     },
@@ -186,6 +190,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_FAE_HUNTER',
     src: 'src/abilities.cc:5701',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('FAIRY')) MUL(ctx, 1.5)
     },
@@ -193,6 +198,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_FIREFIGHTER',
     src: 'src/abilities.cc:9776',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('FIRE')) MUL(ctx, 1.5)
     },
@@ -200,6 +206,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_LUMBERJACK',
     src: 'src/abilities.cc:5736',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('GRASS')) MUL(ctx, 1.5)
     },
@@ -214,6 +221,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_MONSTER_HUNTER',
     src: 'src/abilities.cc:6653',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('DARK')) MUL(ctx, 1.5)
     },

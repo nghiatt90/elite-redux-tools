@@ -108,6 +108,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     // Impl<ABILITY_GIANT_WINGS>.onOffensiveMultiplier + Impl<ABILITY_LEVITATE>.onOffensiveMultiplier
     id: 'ABILITY_HUGE_WINGS',
     src: 'src/abilities.cc:8534',
+    flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       GIANT_WINGS(ctx)
       LEVITATE(ctx)

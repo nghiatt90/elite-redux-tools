@@ -182,7 +182,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
       lastMoveFailed: false,
     },
     types: species.types.map(bareType),
-    isGrounded: !species.types.includes('TYPE_FLYING'), // Levitate/Air Balloon further reduce this via the ability registry's `.levitate` flag at the call site
+    isGrounded: !species.types.includes('TYPE_FLYING'), // species-only baseline; calculate.ts reduces this further via the Levitate ability flag (see BattlerBattleState.isGrounded's doc)
     semiInvulnerable: config.semiInvulnerable,
     level: config.level,
     nature: config.nature,

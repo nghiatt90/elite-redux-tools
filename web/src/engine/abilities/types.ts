@@ -208,6 +208,12 @@ export interface OnRecoilContext {
   moveType: string
 }
 
+export interface OnMoldBreakerContext {
+  battlerId: string
+  moveId: string
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+}
+
 export type OnOffensiveMultiplier = (ctx: OffensiveMultiplierContext) => void
 export type OnDefensiveMultiplier = (ctx: DefensiveMultiplierContext) => void
 export type OnStat = (ctx: OnStatContext) => void
@@ -230,6 +236,16 @@ export type OnMoveType = (ctx: OnMoveTypeContext) => void
  * define its own recoil at all" check, passing a dummy damage=100. Not wired into
  * calculate.ts (no recoil-damage display exists yet in this v1 calculator). */
 export type OnRecoil = (ctx: OnRecoilContext) => number
+/**
+ * onMoldBreaker returns whether Mold Breaker suppression is active for this hit --
+ * SetMoldBreaker, src/battle_util.c:976-990. Only ported for the abilities whose
+ * condition doesn't require recursively simulating the hit's own resolved type/
+ * type-effectiveness/crit status first (Deadly Precision, Flawless Precision,
+ * Mach 3, Overrule, and Stonecutter all do exactly that -- a genuinely circular
+ * calculation this non-simulated v1 engine can't perform, so those 5 are left
+ * unmodelled rather than approximated).
+ */
+export type OnMoldBreaker = (ctx: OnMoldBreakerContext) => boolean
 
 export interface AbilityFlags {
   adaptability: boolean
@@ -282,6 +298,7 @@ export interface AbilityImpl {
   onSwapSplit?: OnSwapSplit
   onMoveType?: OnMoveType
   onRecoil?: OnRecoil
+  onMoldBreaker?: OnMoldBreaker
 }
 
 export interface UnmodelledAbility {

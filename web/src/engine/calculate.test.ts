@@ -256,6 +256,51 @@ describe('calculateMoveDamage -- semi-invulnerable double damage (battle_util.c:
   })
 })
 
+describe('calculateMoveDamage -- Levitate grants Ground immunity (IsBattlerGroundedIgnoreType, battle_util.c:6699-6701,7975-7979)', () => {
+  it('Earthquake is immune against a Levitate holder even though Garchomp/Ground is neutral-typed', async () => {
+    await import('./abilities/impl/index') // populate the registry
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.isImmune).toBe(true)
+    expect(result.rolls.every((d) => d === 0)).toBe(true)
+  })
+
+  it("Mold Breaker on the attacker bypasses the defender's Levitate immunity", async () => {
+    await import('./abilities/impl/index')
+    const withoutMoldBreaker = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+      }),
+    )
+    const withMoldBreaker = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_MOLD_BREAKER', innates: [null, null, null] } }),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withoutMoldBreaker.isImmune).toBe(true)
+    expect(withMoldBreaker.isImmune).toBe(false)
+    expect(withMoldBreaker.rolls.some((d) => d > 0)).toBe(true)
+  })
+
+  it('Levitate does not grant immunity to non-Ground moves', async () => {
+    await import('./abilities/impl/index')
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_OUTRAGE'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.isImmune).toBe(false)
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

@@ -12,28 +12,64 @@ import { forEachAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
 import type {
+  AbilityEntry,
   DefensiveMultiplierContext,
   OffensiveMultiplierContext,
   OnChooseDefensiveStatContext,
   OnChooseOffensiveStatContext,
   OnCritContext,
+  OnMoldBreakerContext,
   OnMoveTypeContext,
   OnStatContext,
 } from './types'
 import type { BattleStatKey } from '../types'
 
-// v1 has no Mold Breaker / Neutralizing Gas / Gastro Acid modelling yet -- every
-// ability's `breakable` flag is simply never suppressed. Isolated into one function
-// so wiring that in later touches one place, not every call site below.
-function isSuppressed(): boolean {
-  return false
+// v1 has no Neutralizing Gas / Gastro Acid modelling -- a battler's own abilities
+// are NEVER suppressed by ITS OWN mold breaker (IsSuppressed's `battler !=
+// gBattlerAttacker` check, src/battle_util.c:9285-9291), so every call site below
+// that checks a battler's OWN slots (the attacker checking itself, an ability
+// checking its own holder) uses this constant rather than the real predicate.
+const NEVER_SUPPRESSED = (): boolean => false
+
+/**
+ * IsSuppressed's `breakable` branch, src/battle_util.c:9285-9291 -- an ability is
+ * suppressed when Mold Breaker (or an equivalent) is active on the ATTACKER and
+ * the ability being checked (necessarily NOT the attacker's own, since
+ * NEVER_SUPPRESSED covers that case) has the `breakable` flag. Use this predicate
+ * only for a check against a battler OTHER than the one holding the active mold
+ * breaker -- in this 2-battler v1 engine, that's always the defender.
+ */
+function suppressedByMoldBreaker(attackerHasMoldBreaker: boolean) {
+  return (_id: string, entry: AbilityEntry): boolean => attackerHasMoldBreaker && !isUnmodelled(entry) && Boolean(entry.flags?.breakable)
+}
+
+/**
+ * Whether the ATTACKER's own ability slots make Mold Breaker suppression active
+ * for this hit. Only ports the 5 of 10 onMoldBreaker abilities whose condition
+ * doesn't require recursively simulating the hit's own resolved type/type-
+ * effectiveness/crit status first -- see OnMoldBreaker's own doc for why Deadly
+ * Precision/Flawless Precision/Mach 3/Overrule/Stonecutter are left unmodelled.
+ */
+export function computeAttackerHasMoldBreaker(attackerSlots: AbilitySlots, moveId: string, moveSplit: OnMoldBreakerContext['moveSplit']): boolean {
+  let active = false
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (!impl.onMoldBreaker) return
+    if (impl.onMoldBreaker({ battlerId: 'attacker', moveId, moveSplit })) {
+      active = true
+      return 'break'
+    }
+  })
+  return active
 }
 
 /** HasFortKnox, referenced by CalculateAbilityMultipliers (:6968) -- true if the
- * defender holds an (unsuppressed) ability with the fortKnox flag. */
+ * defender holds an (unsuppressed) ability with the fortKnox flag. No ability with
+ * `fortKnox` is ever also `breakable` in the current data (verified against
+ * abilityHooks.json), so Mold Breaker never actually changes this result -- this
+ * function has no mold-breaker parameter for that reason, not by oversight. */
 export function hasFortKnox(defenderSlots: AbilitySlots): boolean {
   let found = false
-  forEachAbility(defenderSlots, isSuppressed, (impl) => {
+  forEachAbility(defenderSlots, NEVER_SUPPRESSED, (impl) => {
     if (impl.flags?.fortKnox) {
       found = true
       return 'break'
@@ -44,10 +80,20 @@ export function hasFortKnox(defenderSlots: AbilitySlots): boolean {
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --
  * Adaptability, Unaware, Levitate, etc. are all "does this battler have the flag
- * anywhere in its 4 slots" checks in the C (RETURN_ABILITY_IF_FLAG). */
-export function hasFlag(slots: AbilitySlots, flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink'): boolean {
+ * anywhere in its 4 slots" checks in the C (RETURN_ABILITY_IF_FLAG). `moldBroken`
+ * defaults to false (matching every pre-existing call site, which all check a
+ * battler's own flags against itself); pass `true` only when checking a battler
+ * OTHER than the one holding an active mold breaker -- of the 7 flags this
+ * function reads, only `unaware` (Unaware) and `levitate` (Levitate) are ever
+ * `breakable`, so this only actually matters for those two flags in the current
+ * data. */
+export function hasFlag(
+  slots: AbilitySlots,
+  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate',
+  moldBroken = false,
+): boolean {
   let found = false
-  forEachAbility(slots, isSuppressed, (impl) => {
+  forEachAbility(slots, moldBroken ? suppressedByMoldBreaker(true) : NEVER_SUPPRESSED, (impl) => {
     if (impl.flags?.[flag]) {
       found = true
       return 'break'
@@ -70,8 +116,19 @@ type DefensiveCtxInputs = Omit<DefensiveMultiplierContext, 'modifier' | 'resista
  * MulModifier re-quantizes at every call: computing the offensive and defensive
  * results independently and then combining them would NOT equal accumulating both
  * into the same running modifier, which is what the C actually does.
+ *
+ * Mold Breaker (`attackerHasMoldBreaker`, see computeAttackerHasMoldBreaker) ONLY
+ * suppresses the DEFENSIVE hook loop below -- verified against the C's own
+ * `checkMoldBreaker` argument at each ON_ABILITY call site: the offensive loop
+ * (both branches above) passes FALSE, the defensive loop passes TRUE.
  */
-export function computeAbilityMultiplier(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, offensive: OffensiveCtxInputs, defensive: DefensiveCtxInputs): number {
+export function computeAbilityMultiplier(
+  attackerSlots: AbilitySlots,
+  defenderSlots: AbilitySlots,
+  offensive: OffensiveCtxInputs,
+  defensive: DefensiveCtxInputs,
+  attackerHasMoldBreaker = false,
+): number {
   // ONE plain mutable object, structurally satisfying both context interfaces (each
   // hook only ever reads its own declared fields, and both write the same shared
   // `modifier`/`resistance`) -- this is what makes the accumulator genuinely shared
@@ -80,19 +137,19 @@ export function computeAbilityMultiplier(attackerSlots: AbilitySlots, defenderSl
   const shared = { ...offensive, ...defensive, modifier: uq(1.0), resistance: uq(1.0) }
 
   if (!hasFortKnox(defenderSlots)) {
-    forEachAbility(attackerSlots, isSuppressed, (impl) => {
+    forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onOffensiveMultiplier) return
       if (!isApplyOnFlagAppropriate(true, false, impl.applyOn?.onOffensiveMultiplierFor)) return
       impl.onOffensiveMultiplier(shared)
     })
-    forEachAbility(defenderSlots, isSuppressed, (impl) => {
+    forEachAbility(defenderSlots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onOffensiveMultiplier) return
       if (!isApplyOnFlagAppropriate(false, false, impl.applyOn?.onOffensiveMultiplierFor)) return
       impl.onOffensiveMultiplier(shared)
     })
   }
 
-  forEachAbility(defenderSlots, isSuppressed, (impl) => {
+  forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
     impl.onDefensiveMultiplier?.(shared)
   })
 
@@ -106,16 +163,24 @@ type OnStatInputs = Omit<OnStatContext, 'stat' | 'flags'>
  * either battler's stat, gated by onStatFor relative to the STAT OWNER (not the
  * ability holder). Returns a `preModify`-shaped function ready to compose with
  * battleStat.ts's other pre-modifiers.
+ *
+ * The C's ON_ABILITY call here passes `checkMoldBreaker = TRUE` (a real gap: Lead
+ * Coat/Chrome Coat's speed-reducing onStat, both `breakable`, would be suppressed
+ * by an attacker's Mold Breaker in the real game). NOT modelled here -- unlike
+ * computeAbilityMultiplier's defensive loop, `statOwnerSlots`/`otherSlots` don't
+ * carry which battler is the actual move user, so correctly suppressing only the
+ * non-attacker side needs identity this function doesn't have; deferred rather
+ * than guessed.
  */
 export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: AbilitySlots, inputs: OnStatInputs) {
   return (stat: number): number => {
     const ctx: OnStatContext = { ...inputs, stat, flags: { nonStackingRuin: false } }
-    forEachAbility(statOwnerSlots, isSuppressed, (impl) => {
+    forEachAbility(statOwnerSlots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onStat) return
       if (!isApplyOnFlagAppropriate(true, false, impl.applyOn?.onStatFor)) return
       impl.onStat(ctx)
     })
-    forEachAbility(otherSlots, isSuppressed, (impl) => {
+    forEachAbility(otherSlots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onStat) return
       // The other battler's ability, relative to the stat owner: never self, never
       // an ally (no ally battler exists in singles) -- always the "foe" branch.
@@ -157,7 +222,7 @@ export function resolveEffectiveMoveType(
 ): { moveType: string; ateBoost: boolean } {
   let resolved = moveType
   let ateBoost = false
-  forEachAbility(attackerSlots, isSuppressed, (impl) => {
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (!impl.onMoveType) return
     const ctx: OnMoveTypeContext = { battlerId: 'attacker', moveId, moveType, ateBoost: false, moveFlags }
     impl.onMoveType(ctx)
@@ -172,7 +237,7 @@ export function resolveEffectiveMoveType(
 
 export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): boolean {
   let granted = false
-  forEachAbility(attackerSlots, isSuppressed, (impl) => {
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (!impl.onStab) return
     if (impl.onStab({ battlerId: 'attacker', moveType })) {
       granted = true
@@ -191,13 +256,18 @@ type OnCritInputs = Omit<OnCritContext, 'battlerId'>
  * which battler's ability is being checked -- unlike onOffensiveMultiplier, `battler`
  * in the hook body IS the real ability holder, so the two facts are independent).
  * Accumulates a stage bonus; any hook returning NEVER_CRIT short-circuits the whole
- * calculation immediately, matching the C's early return.
+ * calculation immediately, matching the C's early return. This loop's ON_ABILITY
+ * call passes `checkMoldBreaker = TRUE` -- unlike computeAbilityMultiplier's
+ * offensive loop -- so an attacker's Mold Breaker DOES bypass a `breakable`
+ * defender ability's crit denial (Battle Armor/Shell Armor's NEVER_CRIT, both
+ * `breakable`); `attackerHasMoldBreaker` only ever suppresses the defender's run,
+ * matching IsSuppressed's own self-exemption.
  */
-export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, inputs: OnCritInputs): number {
+export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, inputs: OnCritInputs, attackerHasMoldBreaker = false): number {
   let bonus = 0
   let blocked = false
-  const run = (slots: AbilitySlots, battlerId: string, sourceIsAttacker: boolean, sourceIsTarget: boolean) => {
-    forEachAbility(slots, isSuppressed, (impl) => {
+  const run = (slots: AbilitySlots, battlerId: string, sourceIsAttacker: boolean, sourceIsTarget: boolean, suppressed: (id: string, entry: AbilityEntry) => boolean) => {
+    forEachAbility(slots, suppressed, (impl) => {
       if (blocked || !impl.onCrit) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
       const result = impl.onCrit({ battlerId, ...inputs })
@@ -208,8 +278,8 @@ export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlo
       bonus += result
     })
   }
-  run(attackerSlots, 'attacker', true, false)
-  if (!blocked) run(defenderSlots, 'defender', false, true)
+  run(attackerSlots, 'attacker', true, false, NEVER_SUPPRESSED)
+  if (!blocked) run(defenderSlots, 'defender', false, true, suppressedByMoldBreaker(attackerHasMoldBreaker))
   return blocked ? NEVER_CRIT : bonus
 }
 
@@ -229,7 +299,7 @@ type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse
  */
 export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseOffensiveStatInputs): BattleStatKey {
   const ctx: OnChooseOffensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
-  forEachAbility(attackerSlots, isSuppressed, (impl) => {
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     impl.onChooseOffensiveStat?.(ctx)
   })
   return ctx.statToUse
@@ -250,7 +320,7 @@ type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse
 export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseDefensiveStatInputs): BattleStatKey {
   const run = (slots: AbilitySlots, sourceIsAttacker: boolean, sourceIsTarget: boolean): BattleStatKey | null => {
     const ctx: OnChooseDefensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
-    forEachAbility(slots, isSuppressed, (impl) => {
+    forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onChooseDefensiveStat) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onChooseDefensiveStatFor)) return
       impl.onChooseDefensiveStat(ctx)

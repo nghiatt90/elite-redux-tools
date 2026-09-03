@@ -10,7 +10,20 @@
 // ability's own `constexpr Ability Impl<ABILITY_X> = {` line (abilities.cc), not
 // the target's -- cross-check the target's behavior in ITS OWN batch file.
 
-import { aliasAfterTypeEffectiveness, aliasChooseDefensiveStat, aliasChooseOffensiveStat, aliasCrit, aliasDefensiveMultiplier, aliasMoveType, aliasOffensiveMultiplier, aliasStab, aliasStat, aliasSwapSplit, aliasTypeEffectiveness } from './alias'
+import {
+  aliasAfterTypeEffectiveness,
+  aliasChooseDefensiveStat,
+  aliasChooseOffensiveStat,
+  aliasCrit,
+  aliasDefensiveMultiplier,
+  aliasMoldBreaker,
+  aliasMoveType,
+  aliasOffensiveMultiplier,
+  aliasStab,
+  aliasStat,
+  aliasSwapSplit,
+  aliasTypeEffectiveness,
+} from './alias'
 import type { AbilityImpl } from '../types'
 
 export const ALIAS_ABILITIES: AbilityImpl[] = [
@@ -22,6 +35,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_ANGELIC_WINGS',
     src: 'src/abilities.cc:11430',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PRISM_SCALES'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_HUGE_WINGS'),
   },
@@ -33,11 +47,13 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_APPLE_ENLIGHTENMENT',
     src: 'src/abilities.cc:7726',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FUR_COAT'),
   },
   {
     id: 'ABILITY_ATLANTIC_RULER',
     src: 'src/abilities.cc:10136',
+    flags: { breakable: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_AQUATIC_DWELLER'),
     onStat: aliasStat('ABILITY_SWIFT_SWIM'),
   },
@@ -65,16 +81,21 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_BLIGHT_SCALE',
     src: 'src/abilities.cc:9499',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_MULTISCALE'),
   },
   {
+    // .onMoldBreaker = Impl<ABILITY_MOLD_BREAKER>.onMoldBreaker added once
+    // onMoldBreaker joined the damage-hook census -- see batch W.
     id: 'ABILITY_BLIND_RAGE',
     src: 'src/abilities.cc:8636',
     onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+    onMoldBreaker: aliasMoldBreaker('ABILITY_MOLD_BREAKER'),
   },
   {
     id: 'ABILITY_BREAKWATER',
     src: 'src/abilities.cc:9124',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
     onStat: aliasStat('ABILITY_SWIFT_SWIM'),
   },
@@ -106,12 +127,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_CRUST_COAT',
     src: 'src/abilities.cc:9241',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
   {
     id: 'ABILITY_CRYSTALLINE_ARMOR',
     src: 'src/abilities.cc:10768',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
   },
   {
@@ -148,6 +171,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_DREAM_STATE',
     src: 'src/abilities.cc:8816',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -159,18 +183,21 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_EMPRESS',
     src: 'src/abilities.cc:11231',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RIVALRY'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RIVALRY'),
   },
   {
     id: 'ABILITY_ENLIGHTENED',
     src: 'src/abilities.cc:6303',
+    flags: { breakable: true },
     onMoveType: aliasMoveType('ABILITY_EMANATE'),
     onStab: aliasStab('ABILITY_EMANATE'),
   },
   {
     id: 'ABILITY_FARADAY_CAGE',
     src: 'src/abilities.cc:9290',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
   },
@@ -182,22 +209,26 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_FIRE_RULER',
     src: 'src/abilities.cc:11847',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLAME_SHIELD'),
   },
   {
     id: 'ABILITY_FIRE_SCALES',
     src: 'src/abilities.cc:7270',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
   },
   {
     id: 'ABILITY_FLAME_BUBBLE',
     src: 'src/abilities.cc:8252',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_WATER_BUBBLE'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WATER_BUBBLE'),
   },
   {
     id: 'ABILITY_FLAME_SHIELD',
     src: 'src/abilities.cc:8837',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
   },
   {
@@ -213,6 +244,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_GLACIAL_GHOST',
     src: 'src/abilities.cc:9989',
+    flags: { breakable: true },
     onStat: aliasStat('ABILITY_SLUSH_RUSH'),
   },
   {
@@ -223,6 +255,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_HASTE_MAKES_WASTE',
     src: 'src/abilities.cc:10382',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_ANALYTIC'),
   },
@@ -256,6 +289,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_ICE_PLUMES',
     src: 'src/abilities.cc:10569',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
   },
   {
@@ -276,6 +310,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_IRON_GIANT',
     src: 'src/abilities.cc:8472',
+    flags: { breakable: true },
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
   },
@@ -292,6 +327,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_LEPIDOPTERAN',
     src: 'src/abilities.cc:11523',
+    flags: { breakable: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SWARM'),
   },
   {
@@ -318,6 +354,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_MASSIVE_PELT',
     src: 'src/abilities.cc:11329',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
   },
   {
@@ -333,6 +370,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_MINDS_EYE',
     src: 'src/abilities.cc:6744',
+    flags: { breakable: true },
     onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
   },
   {
@@ -348,6 +386,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_NIHIL_BLASTER',
     src: 'src/abilities.cc:11662',
+    flags: { breakable: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
   },
   {
@@ -358,6 +397,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_OLD_MARINER',
     src: 'src/abilities.cc:7795',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SEAWEED'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SEAWEED'),
     onStab: aliasStab('ABILITY_AMPHIBIOUS'),
@@ -375,6 +415,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_PERMAFROST_CLONE',
     src: 'src/abilities.cc:7391',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PERMAFROST'),
   },
   {
@@ -400,6 +441,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_PUFFY',
     src: 'src/abilities.cc:9249',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
   },
   {
@@ -421,6 +463,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_RAINBOW_SCALES',
     src: 'src/abilities.cc:11891',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FIRE_SCALES'),
   },
   {
@@ -454,12 +497,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SAND_FIEND',
     src: 'src/abilities.cc:10910',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
     onStat: aliasStat('ABILITY_SAND_FORCE'),
   },
   {
     id: 'ABILITY_SAND_TITAN',
     src: 'src/abilities.cc:12594',
+    flags: { breakable: true },
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
   },
   {
@@ -470,6 +515,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SEPIA_LENS',
     src: 'src/abilities.cc:9789',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
   },
@@ -481,12 +527,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SHATTERED_ARMOR',
     src: 'src/abilities.cc:12263',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
   {
     id: 'ABILITY_SHELL_ARMOR',
     src: 'src/abilities.cc:1353',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -504,6 +552,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SLUDGY_MIX',
     src: 'src/abilities.cc:8958',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PUNK_ROCK'),
     onMoveType: aliasMoveType('ABILITY_INTOXICATE'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
@@ -512,6 +561,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SMOLDERING_WOOD',
     src: 'src/abilities.cc:4335',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RAW_WOOD'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RAW_WOOD'),
   },
@@ -524,6 +574,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SOLID_ROCK',
     src: 'src/abilities.cc:1765',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
   },
   {
@@ -540,12 +591,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_STEEL_BEETLE',
     src: 'src/abilities.cc:8731',
+    flags: { breakable: true },
     onMoveType: aliasMoveType('ABILITY_POLLINATE'),
     onStab: aliasStab('ABILITY_POLLINATE'),
   },
   {
     id: 'ABILITY_STONECUTTER',
     src: 'src/abilities.cc:10700',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FOSSILIZED'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FOSSILIZED'),
   },
@@ -564,6 +617,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_SUMO_GUARD',
     src: 'src/abilities.cc:11482',
+    flags: { breakable: true },
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
   },
@@ -585,11 +639,13 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_TERAFORM_ZERO',
     src: 'src/abilities.cc:9102',
+    flags: { breakable: true },
     onAfterTypeEffectiveness: aliasAfterTypeEffectiveness('ABILITY_TERA_SHELL'),
   },
   {
     id: 'ABILITY_THERMAL_ENTROPY',
     src: 'src/abilities.cc:12383',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
   },
   {
@@ -600,6 +656,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_TOXIC_SHELL',
     src: 'src/abilities.cc:11506',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
   },
@@ -616,6 +673,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_TUMMYACHE',
     src: 'src/abilities.cc:11474',
+    flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
     onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
   },
@@ -642,12 +700,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_VOLTRON',
     src: 'src/abilities.cc:11607',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
   {
     id: 'ABILITY_WAY_OF_PRECISION',
     src: 'src/abilities.cc:8446',
+    flags: { breakable: true },
     onCrit: aliasCrit('ABILITY_PRECISE_FIST'),
   },
   {
