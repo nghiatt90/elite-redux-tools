@@ -224,7 +224,11 @@ export type OnChooseDefensiveStat = (ctx: OnChooseDefensiveStatContext) => void
 /** onSwapSplit returns true to flip the move's damage category. */
 export type OnSwapSplit = (ctx: OnSwapSplitContext) => boolean
 export type OnMoveType = (ctx: OnMoveTypeContext) => void
-export type OnRecoil = (ctx: OnRecoilContext) => void
+/** onRecoil returns the recoil damage amount -- also double-purposed by
+ * IsRecklessBoosted (src/abilities.cc:436-443) as a truthy "does this ability
+ * define its own recoil at all" check, passing a dummy damage=100. Not wired into
+ * calculate.ts (no recoil-damage display exists yet in this v1 calculator). */
+export type OnRecoil = (ctx: OnRecoilContext) => number
 
 export interface AbilityFlags {
   adaptability: boolean

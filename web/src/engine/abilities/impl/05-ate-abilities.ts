@@ -26,7 +26,12 @@ export function ateAbility(id: string, src: string, type: string): AbilityImpl {
   return {
     id,
     src,
+    // CHECK(moveType == TYPE_NORMAL), src/abilities.cc:296 -- part of the
+    // ATE_ABILITY macro's OWN body, not a precondition the dispatcher enforces
+    // (resolveEffectiveMoveType calls every onMoveType hook regardless of the
+    // move's original type; see its own doc for why).
     onMoveType: (ctx) => {
+      if (ctx.moveType !== 'NORMAL') return
       ctx.moveType = type
       ctx.ateBoost = true
     },

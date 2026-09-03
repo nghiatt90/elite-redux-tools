@@ -132,15 +132,22 @@ export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: 
  * Adaptability itself is a separate flag check, not an onStab hook -- see hasFlag.
  */
 /**
- * GetMoveTypeInternal's onMoveType loop (src/battle_main.c:5210-5211) -- the "-ate"
- * abilities. The C only overrides the type when the move's ORIGINAL type is Normal
- * (`CHECK(moveType == TYPE_NORMAL)` inside the ATE_ABILITY macro, src/abilities.cc:
- * 295-301) and, per ON_ABILITY's reverse-slot iteration plus the C's bare `return`
- * on the first hit, the first ability (innate3 -> ... -> ability) that actually
- * changes the type wins -- ties can't occur in practice since real movesets never
- * carry two "-ate" abilities on the same mon, but the semantics are ported exactly
- * regardless. Ability holder is always the ATTACKER (`checkMoldBreaker = FALSE`
- * ON_ABILITY call, no cross-battler loop, unlike onOffensiveMultiplier/onCrit).
+ * GetMoveTypeInternal's onMoveType loop (src/battle_main.c:5210-5211). Verified
+ * against the actual ON_ABILITY call site there: the loop itself has NO "original
+ * type must be Normal" gate -- that check only lives INSIDE the ATE_ABILITY macro
+ * (src/abilities.cc:295-301) and each hand-written onMoveType lambda's own CHECK
+ * (e.g. Cosmic Wings requires Flying, not Normal). So this dispatcher must call
+ * every onMoveType hook regardless of the move's original type and let each hook's
+ * own condition decide -- an earlier version of this function incorrectly
+ * shortcut-returned whenever moveType wasn't 'NORMAL', which silently made
+ * Cosmic Wings (and any future non-Normal-original onMoveType ability) permanently
+ * inert; fixed here. Per ON_ABILITY's reverse-slot iteration plus the C's bare
+ * `return` on the first hit, the first ability (innate3 -> ... -> ability) that
+ * actually changes the type wins -- ties can't occur in practice since real
+ * movesets never carry two type-changing abilities on the same mon, but the
+ * semantics are ported exactly regardless. Ability holder is always the ATTACKER
+ * (`checkMoldBreaker = FALSE` ON_ABILITY call, no cross-battler loop, unlike
+ * onOffensiveMultiplier/onCrit).
  */
 export function resolveEffectiveMoveType(
   attackerSlots: AbilitySlots,
@@ -148,7 +155,6 @@ export function resolveEffectiveMoveType(
   moveType: string,
   moveFlags: Record<string, true> = {},
 ): { moveType: string; ateBoost: boolean } {
-  if (moveType !== 'NORMAL') return { moveType, ateBoost: false }
   let resolved = moveType
   let ateBoost = false
   forEachAbility(attackerSlots, isSuppressed, (impl) => {
