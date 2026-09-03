@@ -88,6 +88,12 @@ export interface OnCritContext {
   defenderId: string
   moveId: string
   typeEffectiveness: number // UQ_4_12
+  // Merciless's own condition set -- the target's (move's target, i.e. the
+  // defender's) status/stat-stage/item facts. Not filled in for the abilities
+  // ported so far except Merciless.
+  defenderStatus1: Set<string>
+  defenderSpeedStageNegative: boolean
+  defenderResolvedHoldEffect: string | null
 }
 
 export interface OnTypeEffectivenessContext {
@@ -198,6 +204,7 @@ export interface AbilityImpl {
    * use the separate AbilityApplyOnWithTarget encoding (TargetedApplyOn) instead. */
   applyOn?: {
     onOffensiveMultiplierFor?: number
+    onStatFor?: number
     onCritFor?: import('./applyOn').TargetedApplyOn
     onAfterTypeEffectivenessFor?: import('./applyOn').TargetedApplyOn
     onChooseDefensiveStatFor?: import('./applyOn').TargetedApplyOn

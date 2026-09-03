@@ -249,7 +249,14 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
  * particular damage roll. */
 function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs {
   const { attacker, defender, move, field } = scenario
-  const abilityBonus = computeAbilityCritBonus(attacker.abilitySlots, defender.abilitySlots, 'defender', move.id, uq(1.0))
+  const abilityBonus = computeAbilityCritBonus(attacker.abilitySlots, defender.abilitySlots, {
+    defenderId: 'defender',
+    moveId: move.id,
+    typeEffectiveness: uq(1.0),
+    defenderStatus1: defender.condition.status1,
+    defenderSpeedStageNegative: defender.statStages.spe < 0,
+    defenderResolvedHoldEffect: defender.condition.resolvedHoldEffect,
+  })
   return {
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
     // same "blocked" outcome as Lucky Chant -- both mean "this hit can never crit".

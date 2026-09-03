@@ -6,12 +6,12 @@
 
 import { uq } from '../fixed'
 import { NEVER_CRIT } from '../crit'
-import { isApplyOnFlagAppropriate } from './applyOn'
+import { isApplyOnFlagAppropriate, isTargettedApplyOnFlagAppropriate } from './applyOn'
 import type { AbilitySlots } from './dispatch'
 import { forEachAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
-import type { DefensiveMultiplierContext, OffensiveMultiplierContext, OnStatContext } from './types'
+import type { DefensiveMultiplierContext, OffensiveMultiplierContext, OnCritContext, OnStatContext } from './types'
 
 // v1 has no Mold Breaker / Neutralizing Gas / Gastro Acid modelling yet -- every
 // ability's `breakable` flag is simply never suppressed. Isolated into one function
@@ -103,14 +103,14 @@ export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: 
     const ctx: OnStatContext = { ...inputs, stat, flags: { nonStackingRuin: false } }
     forEachAbility(statOwnerSlots, isSuppressed, (impl) => {
       if (!impl.onStat) return
-      if (!isApplyOnFlagAppropriate(true, false, impl.applyOn?.onOffensiveMultiplierFor)) return
+      if (!isApplyOnFlagAppropriate(true, false, impl.applyOn?.onStatFor)) return
       impl.onStat(ctx)
     })
     forEachAbility(otherSlots, isSuppressed, (impl) => {
       if (!impl.onStat) return
       // The other battler's ability, relative to the stat owner: never self, never
       // an ally (no ally battler exists in singles) -- always the "foe" branch.
-      if (!isApplyOnFlagAppropriate(false, false, impl.applyOn?.onOffensiveMultiplierFor)) return
+      if (!isApplyOnFlagAppropriate(false, false, impl.applyOn?.onStatFor)) return
       impl.onStat(ctx)
     })
     return ctx.stat
@@ -134,18 +134,25 @@ export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): 
   return granted
 }
 
+type OnCritInputs = Omit<OnCritContext, 'battlerId'>
+
 /**
- * CalcCritChanceStage's onCrit loop (:1529-1536) -- runs across both battlers,
- * accumulating a stage bonus; any hook returning NEVER_CRIT short-circuits the
- * whole calculation to NEVER_CRIT immediately, matching the C's early return.
+ * CalcCritChanceStage's onCrit loop (src/battle_script_commands.c:1529-1536) -- runs
+ * across both battlers, filtered by IsTargettedApplyOnFlagAppropriate relative to the
+ * ATTACKER (the C's fixed `contextBattler` is always battlerAtk here, regardless of
+ * which battler's ability is being checked -- unlike onOffensiveMultiplier, `battler`
+ * in the hook body IS the real ability holder, so the two facts are independent).
+ * Accumulates a stage bonus; any hook returning NEVER_CRIT short-circuits the whole
+ * calculation immediately, matching the C's early return.
  */
-export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defenderId: string, moveId: string, typeEffectiveness: number): number {
+export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, inputs: OnCritInputs): number {
   let bonus = 0
   let blocked = false
-  const run = (slots: AbilitySlots) => {
+  const run = (slots: AbilitySlots, battlerId: string, sourceIsAttacker: boolean, sourceIsTarget: boolean) => {
     forEachAbility(slots, isSuppressed, (impl) => {
       if (blocked || !impl.onCrit) return
-      const result = impl.onCrit({ battlerId: 'self', defenderId, moveId, typeEffectiveness })
+      if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
+      const result = impl.onCrit({ battlerId, ...inputs })
       if (result === NEVER_CRIT) {
         blocked = true
         return 'break'
@@ -153,8 +160,8 @@ export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlo
       bonus += result
     })
   }
-  run(attackerSlots)
-  if (!blocked) run(defenderSlots)
+  run(attackerSlots, 'attacker', true, false)
+  if (!blocked) run(defenderSlots, 'defender', false, true)
   return blocked ? NEVER_CRIT : bonus
 }
 
