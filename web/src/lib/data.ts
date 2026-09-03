@@ -18,6 +18,14 @@ export const loadTypeChart = () => getJSON<TypeChart>(`${BASE}/types.json`)
 export const loadItems = () => getJSON<Item[]>(`${BASE}/items.json`)
 export const loadMeta = () => getJSON<Meta>(`${BASE}/meta.json`)
 
+// Damage-calculator-only artifacts -- NOT part of GameDataContext's eager load (a
+// pokedex visitor shouldn't pay for ~600KB of ability-hook source text and move-
+// behavior configs it never uses). Fetched lazily by the damage calculator route
+// itself; see features/damageCalc/useDamageCalcData.ts.
+export const loadMoveBehaviors = () => getJSON<import('./types').MoveBehaviorsFile>(`${BASE}/moveBehaviors.json`)
+export const loadNatures = () => getJSON<import('./types').BattleConstants>(`${BASE}/natures.json`)
+export const loadAbilityHooks = () => getJSON<import('./types').AbilityHooks>(`${BASE}/abilityHooks.json`)
+
 export function spriteUrl(speciesId: string, variant: 'front' | 'front-shiny' | 'icon' | 'back') {
   return `${BASE}/sprites/${speciesId}/${variant}.png`
 }
