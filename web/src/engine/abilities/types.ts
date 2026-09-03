@@ -89,6 +89,20 @@ export interface OnStatContext {
   moveId: string
   stat: number // read/write -- ports mutate this directly (`ctx.stat = ...`)
   flags: { nonStackingRuin: boolean } // NonStackingState -- Ruin abilities only
+  weather: string // FieldBattleState's bare weather kind
+  terrain: string | null
+  hp: number // the STAT OWNER's hp/maxHp (not necessarily the attacker -- onStat runs for either battler's stat calc)
+  maxHp: number
+  hasAnyStatus: boolean // HasAnyStatusOrAbility(battler) -- see OffensiveMultiplierContext's doc on the same check
+  status1: Set<string> // gBattleMons[battler].status1 bare flags, for a SPECIFIC status check (e.g. Flare Boost's burn)
+  /** GetHighestAttackingStatId(battler) == statId -- compares raw Atk vs SpAtk;
+   * ties favor 'atk', matching this port's tie-break choice (not independently
+   * verified against the C's own tie-break, which the source doesn't make explicit
+   * at a glance). */
+  isHighestAttackingStat: boolean
+  /** GetHighestStatId(battler) == statId -- compares all 5 raw stats; ties favor
+   * whichever is checked first in BattleStatKey order (same caveat as above). */
+  isHighestStat: boolean
 }
 
 export interface OnStabContext {

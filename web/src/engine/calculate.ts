@@ -112,6 +112,20 @@ function toInternalStage(externalStage: number): number {
   return Math.max(0, Math.min(12, externalStage + DEFAULT_STAT_STAGE))
 }
 
+// GetHighestAttackingStatId/GetHighestStatId, src/battle_util.c -- compares RAW
+// stats (not stat-staged). Ties favor 'atk' / BattleStatKey's own declared order
+// respectively; not independently verified against the C's own tie-break.
+function isHighestAttackingStat(battler: BattlerBattleState, stat: BattleStatKey): boolean {
+  const highest = battler.rawStats.atk >= battler.rawStats.spatk ? 'atk' : 'spatk'
+  return stat === highest
+}
+function isHighestStat(battler: BattlerBattleState, stat: BattleStatKey): boolean {
+  const keys: BattleStatKey[] = ['atk', 'def', 'spatk', 'spdef', 'spe']
+  let best: BattleStatKey = keys[0]
+  for (const k of keys) if (battler.rawStats[k] > battler.rawStats[best]) best = k
+  return stat === best
+}
+
 interface ComputeStatOptions {
   battler: BattlerBattleState
   opponent: BattlerBattleState
@@ -166,7 +180,19 @@ function computeStat(opts: ComputeStatOptions): number {
     isAttackRole: opts.isAttackRole,
     benefitsFromStatBuffs: benefitsFromStatBuffs(isBleeding, battler.condition.hasBloodStainEffect, isPoisoned, false),
     preModify,
-    applyOnStatHooks: computeOnStatModifier(battler.abilitySlots, opts.opponent.abilitySlots, { battlerId: 'self', statId: stat, moveId: move.id }),
+    applyOnStatHooks: computeOnStatModifier(battler.abilitySlots, opts.opponent.abilitySlots, {
+      battlerId: 'self',
+      statId: stat,
+      moveId: move.id,
+      weather: field.weather,
+      terrain: field.terrain,
+      hp: battler.condition.hp,
+      maxHp: battler.condition.maxHp,
+      hasAnyStatus: battler.condition.status1.size > 0 || battler.condition.hasComatose || battler.condition.hasBloodStainEffect,
+      status1: battler.condition.status1,
+      isHighestAttackingStat: isHighestAttackingStat(battler, stat),
+      isHighestStat: isHighestStat(battler, stat),
+    }),
     secondaryStatPercent: 0, // onChoose*Stat hooks setting a secondary blend -- deferred
     statStageRatios: opts.statStageRatios,
   })
