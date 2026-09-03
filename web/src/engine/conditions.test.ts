@@ -6,6 +6,7 @@ function battler(overrides: Partial<ConditionBattlerContext> = {}): ConditionBat
   return {
     speciesId: 'SPECIES_PIKACHU',
     baseSpeciesId: 'SPECIES_PIKACHU',
+    heads: 1,
     itemId: null,
     resolvedHoldEffect: null,
     itemNegated: false,

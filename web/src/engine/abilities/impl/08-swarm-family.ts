@@ -12,6 +12,7 @@
 // ctx.attackerMaxHp are the right substitution.
 
 import { MUL } from '../macros'
+import { aliasParentalBond } from './alias'
 import type { AbilityImpl, OffensiveMultiplierContext } from '../types'
 
 function swarmMultiplier(type: string, low: number, high: number) {
@@ -42,6 +43,12 @@ export const SWARM_FAMILY: AbilityImpl[] = [
   { id: 'ABILITY_PURGATORY', src: 'src/abilities.cc:5984', onOffensiveMultiplier: swarmMultiplier('GHOST', 1.8, 1.3) },
   { id: 'ABILITY_GLADIATOR', src: 'src/abilities.cc:9387', onOffensiveMultiplier: swarmMultiplier('FIGHTING', 1.8, 1.3) },
   { id: 'ABILITY_ROCKHARD_SHAFT', src: 'src/abilities.cc:9725', onOffensiveMultiplier: swarmMultiplier('ROCK', 1.8, 1.3) },
-  { id: 'ABILITY_3_GT_1', src: 'src/abilities.cc:12466', onOffensiveMultiplier: swarmMultiplier('WATER', 1.8, 1.3) },
+  {
+    id: 'ABILITY_3_GT_1',
+    src: 'src/abilities.cc:12466',
+    flags: { resistsFortKnox: true },
+    onOffensiveMultiplier: swarmMultiplier('WATER', 1.8, 1.3),
+    onParentalBond: aliasParentalBond('ABILITY_MULTI_HEADED'),
+  },
   { id: 'ABILITY_OVERWHELMING_MIND', src: 'src/abilities.cc:12527', onOffensiveMultiplier: swarmMultiplier('PSYCHIC', 1.8, 1.3) },
 ]

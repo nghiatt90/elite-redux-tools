@@ -140,7 +140,20 @@ describe('ability registry coverage gate', () => {
     //             halves stay unmodelled (already real-ported for their OTHER
     //             hooks) since their condition requires recursively simulating
     //             the hit's own resolved type/crit/effectiveness first.
-    expect(unmodelledCount).toBeLessThanOrEqual(103)
+    //     -> 86  (batch X: all 24 onParentalBond census abilities -- 17 fresh ports
+    //             (Parental Bond, Hyper Aggressive, Ghost Frenzy, Raging Goddess,
+    //             Balloon Blitz, Frenzied Phantom, Dual Hammer, Dual Wield, Familia
+    //             Bond, Ice Cold Hunter, Minion Control, Multi Headed, Primal Maw,
+    //             Raging Boxer, Raging Moth, Unrelenting, Hydra) plus onParentalBond
+    //             added to 7 abilities already real-ported for a different hook
+    //             (3 GT 1, Devourer, Hand Barnacles, Magus Blades, Metallic Jaws,
+    //             Steel Beetle, Witch Broom). NOT wired into calculate.ts -- this v1
+    //             engine computes one hit, and Parental Bond only affects a bonus
+    //             hit's own multiplier -- same "correct now, wired later" shape as
+    //             batch N's onTypeEffectiveness ports. Species.json's `heads` field
+    //             (already emitted, just never consumed) unblocks Multi Headed's
+    //             family without any pipeline change.
+    expect(unmodelledCount).toBeLessThanOrEqual(86)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

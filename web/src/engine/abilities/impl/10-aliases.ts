@@ -19,6 +19,7 @@ import {
   aliasMoldBreaker,
   aliasMoveType,
   aliasOffensiveMultiplier,
+  aliasParentalBond,
   aliasStab,
   aliasStat,
   aliasSwapSplit,
@@ -162,6 +163,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_DEVOURER',
     src: 'src/abilities.cc:6613',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+    onParentalBond: aliasParentalBond('ABILITY_PRIMAL_MAW'),
   },
   {
     id: 'ABILITY_DRAKE_OF_RAGE',
@@ -350,6 +352,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     src: 'src/abilities.cc:10212',
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_BEST_OFFENSE'),
     onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+    // IsKeenEdge(battler, move, moveType) -- own condition, not delegated.
+    onParentalBond: (ctx) => (ctx.moveFlags.sliceBased ? 'MAGUS_BLADES' : null),
   },
   {
     id: 'ABILITY_MASSIVE_PELT',
@@ -594,6 +598,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     flags: { breakable: true },
     onMoveType: aliasMoveType('ABILITY_POLLINATE'),
     onStab: aliasStab('ABILITY_POLLINATE'),
+    onParentalBond: aliasParentalBond('ABILITY_RAGING_BOXER'),
   },
   {
     id: 'ABILITY_STONECUTTER',

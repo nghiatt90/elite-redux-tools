@@ -156,6 +156,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     condition: {
       speciesId: species.id,
       baseSpeciesId,
+      heads: species.heads ?? 1,
       itemId: config.itemId,
       resolvedHoldEffect: item?.resolvedHoldEffect ?? null,
       itemNegated: false,

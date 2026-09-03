@@ -4,7 +4,7 @@
 // Plus 7 plain onStab-only lambdas found alongside them in the same census sweep.
 
 import { ateAbility } from './05-ate-abilities'
-import { aliasOffensiveMultiplier, aliasTypeEffectiveness, aliasAfterTypeEffectiveness } from './alias'
+import { aliasOffensiveMultiplier, aliasTypeEffectiveness, aliasAfterTypeEffectiveness, aliasParentalBond } from './alias'
 import type { AbilityImpl } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -91,7 +91,13 @@ export const ATE_FAMILY_AND_ONSTAB: AbilityImpl[] = [
     onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
   },
   { id: 'ABILITY_AMPHIBIOUS', src: 'src/abilities.cc:3896', onStab: (ctx) => ctx.moveType === 'WATER' },
-  { id: 'ABILITY_HAND_BARNACLES', src: 'src/abilities.cc:11516', flags: { resistsFortKnox: true }, onStab: (ctx) => ctx.moveType === 'WATER' },
+  {
+    id: 'ABILITY_HAND_BARNACLES',
+    src: 'src/abilities.cc:11516',
+    flags: { resistsFortKnox: true },
+    onStab: (ctx) => ctx.moveType === 'WATER',
+    onParentalBond: aliasParentalBond('ABILITY_MULTI_HEADED'),
+  },
   { id: 'ABILITY_LUNAR_ECLIPSE', src: 'src/abilities.cc:4604', onStab: (ctx) => ctx.moveType === 'DARK' || ctx.moveType === 'FAIRY' },
   { id: 'ABILITY_STORM_CLOUD', src: 'src/abilities.cc:11874', onStab: (ctx) => ctx.moveType === 'ELECTRIC' },
   { id: 'ABILITY_TENDER_AFFECTION', src: 'src/abilities.cc:9983', onStab: (ctx) => ctx.moveType === 'FAIRY' },

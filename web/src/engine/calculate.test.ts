@@ -25,6 +25,7 @@ function condition(overrides: Partial<ConditionBattlerContext> = {}): ConditionB
   return {
     speciesId: 'SPECIES_PIKACHU',
     baseSpeciesId: 'SPECIES_PIKACHU',
+    heads: 1,
     itemId: null,
     resolvedHoldEffect: null,
     itemNegated: false,

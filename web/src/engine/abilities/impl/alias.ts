@@ -22,6 +22,8 @@ import type {
   OnSwapSplitContext,
   OnMoveTypeContext,
   OnMoldBreakerContext,
+  OnParentalBondContext,
+  ParentalBondTrigger,
 } from '../types'
 
 export function aliasOffensiveMultiplier(target: string) {
@@ -105,5 +107,12 @@ export function aliasMoldBreaker(target: string) {
   return (ctx: OnMoldBreakerContext): boolean => {
     const t = lookupAbility(target)
     return t && !isUnmodelled(t) ? (t.onMoldBreaker?.(ctx) ?? false) : false
+  }
+}
+
+export function aliasParentalBond(target: string) {
+  return (ctx: OnParentalBondContext): ParentalBondTrigger | null => {
+    const t = lookupAbility(target)
+    return t && !isUnmodelled(t) ? (t.onParentalBond?.(ctx) ?? null) : null
   }
 }

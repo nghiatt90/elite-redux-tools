@@ -20,7 +20,9 @@ import type {
   OnCritContext,
   OnMoldBreakerContext,
   OnMoveTypeContext,
+  OnParentalBondContext,
   OnStatContext,
+  ParentalBondTrigger,
 } from './types'
 import type { BattleStatKey } from '../types'
 
@@ -76,6 +78,66 @@ export function hasFortKnox(defenderSlots: AbilitySlots): boolean {
     }
   })
   return found
+}
+
+/**
+ * GetParentalBondType, src/battle_script_commands.c:990-1003: the first attacker
+ * ability (in slot order) whose onParentalBond hook returns non-null wins. Gated
+ * per-ability by `!hasFortKnox(defenderSlots) || resistsFortKnox` -- unlike the
+ * onOffensiveMultiplier loop (hasFortKnox blocks ALL abilities uniformly, verified
+ * against CalculateAbilityMultipliers, no per-ability override exists there), this
+ * IS a per-ability override, which is why `resistsFortKnox` exists as a flag at all.
+ * Not suppressible by Mold Breaker -- SetMoldBreaker's HITMARKER never gates this
+ * call site in the C.
+ */
+export function computeParentalBondTrigger(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, ctx: OnParentalBondContext): ParentalBondTrigger | null {
+  const defenderHasFortKnox = hasFortKnox(defenderSlots)
+  let trigger: ParentalBondTrigger | null = null
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (!impl.onParentalBond) return
+    if (defenderHasFortKnox && !impl.flags?.resistsFortKnox) return
+    const result = impl.onParentalBond(ctx)
+    if (result) {
+      trigger = result
+      return 'break'
+    }
+  })
+  return trigger
+}
+
+/**
+ * GetParentalBondMultiplier, src/battle_util.c:7483-7513 -- the bonus hit's own
+ * multiplier for a given trigger and hit turn (1-indexed: turn 1 is the FIRST bonus
+ * hit past the initial one). `REQUIRE(turn)` in the C just means "any nonzero turn
+ * gets the flat rate"; only THREE_HEADED varies its rate by turn number.
+ * ICE_COLD_HUNTER and TWO_TO_FIVE have no case here (see ParentalBondTrigger's own
+ * doc) and correctly fall through to the neutral 1.0x default.
+ */
+export function getParentalBondMultiplier(trigger: ParentalBondTrigger | null, turn: number): number {
+  switch (trigger) {
+    case 'HYPER_AGGRESSIVE':
+      if (turn) return uq(0.25)
+      break
+    case 'THREE_HEADED':
+      if (turn === 1) return uq(0.2)
+      if (turn === 2) return uq(0.15)
+      break
+    case 'MINION_CONTROL':
+      if (turn) return uq(0.1)
+      break
+    case 'PRIMAL_MAW':
+      if (turn) return uq(0.4)
+      break
+    case 'DUAL_WIELD':
+      return uq(0.7)
+    case 'FAMILIA_BOND':
+      if (turn) return uq(0.5)
+      break
+    case 'MAGUS_BLADES':
+      if (turn) return uq(0.6)
+      break
+  }
+  return uq(1.0)
 }
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --

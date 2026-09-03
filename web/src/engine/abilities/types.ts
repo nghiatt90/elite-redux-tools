@@ -247,6 +247,38 @@ export type OnRecoil = (ctx: OnRecoilContext) => number
  */
 export type OnMoldBreaker = (ctx: OnMoldBreakerContext) => boolean
 
+export interface OnParentalBondContext {
+  moveType: string
+  moveFlags: Record<string, true>
+  weather: string // FieldBattleState's bare weather kind, e.g. 'HAIL'
+  attackerHeads: number // species.json's `heads` (F_TWO_HEADED/F_THREE_HEADED), default 1
+}
+
+/**
+ * ParentalBondTrigger names mirror the C's `MultihitType` enum values consulted by
+ * GetParentalBondMultiplier (src/battle_util.c:7483-7513) -- 'ICE_COLD_HUNTER' and
+ * 'TWO_TO_FIVE' are real MultihitType values an onParentalBond hook can return, but
+ * NEITHER has a case in that switch, so getParentalBondMultiplier (dispatchCalc.ts)
+ * correctly falls through to its default 1.0x for both: Ice Cold Hunter's two hits
+ * are genuinely full-power (no reduction, just a second complete hit), and
+ * Unrelenting's TWO_TO_FIVE is a Skill-Link-style variable-hit-count mechanic --
+ * a different multi-hit family from Parental Bond's "one bonus hit at a fixed
+ * reduced power" pattern, just returned through the same onParentalBond slot.
+ */
+export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_CONTROL' | 'PRIMAL_MAW' | 'DUAL_WIELD' | 'FAMILIA_BOND' | 'MAGUS_BLADES' | 'ICE_COLD_HUNTER' | 'TWO_TO_FIVE'
+
+/**
+ * onParentalBond returns which bonus-hit trigger this ability grants for the given
+ * move, or null for none (MULTIHIT_SINGLE) -- GetParentalBondType's per-ability call,
+ * src/battle_script_commands.c:990-1003. NOT wired into calculate.ts: this v1 engine
+ * computes exactly one hit's damage, so a ported onParentalBond hook and
+ * getParentalBondMultiplier are complete and correct for the bonus hit's own
+ * multiplier, but nothing yet combines that with a first-hit total the way a real
+ * multi-hit sequence would (see basePower.ts's multi-hit TODO). Same shape as batch
+ * N's onTypeEffectiveness ports: correct now, wired later.
+ */
+export type OnParentalBond = (ctx: OnParentalBondContext) => ParentalBondTrigger | null
+
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -299,6 +331,7 @@ export interface AbilityImpl {
   onMoveType?: OnMoveType
   onRecoil?: OnRecoil
   onMoldBreaker?: OnMoldBreaker
+  onParentalBond?: OnParentalBond
 }
 
 export interface UnmodelledAbility {

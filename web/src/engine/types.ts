@@ -46,6 +46,7 @@ export type NatureStatTable = Record<string, Record<NatureStatName, -1 | 0 | 1>>
 export interface ConditionBattlerContext {
   speciesId: string // exact SPECIES_* id
   baseSpeciesId: string // GET_BASE_SPECIES_ID(species) -- for non-exact SpeciesCondition
+  heads: number // species.json's `heads` (F_TWO_HEADED/F_THREE_HEADED, pokemon.h:209-210), default 1 -- Multi Headed's onParentalBond trigger
   itemId: string | null
   resolvedHoldEffect: string | null // items.json's resolvedHoldEffect, for HoldEffect-keyed ItemCondition
   itemNegated: boolean // Embargo/Klutz/Magic Room-style suppression; v1 default false
