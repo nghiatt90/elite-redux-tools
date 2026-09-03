@@ -95,7 +95,10 @@ describe('ability registry coverage gate', () => {
     //     -> 122 (batch R: Cosmic Wings, unblocked by fixing
     //             resolveEffectiveMoveType's incorrect Normal-only gate; Super
     //             Strain's onRecoil, unwired but complete)
-    expect(unmodelledCount).toBeLessThanOrEqual(122)
+    //     -> 120 (batch S: Mosh Pit, Rat King -- both ALLY-only-scoped, so
+    //             permanently inert in this v1 singles engine, matching Plus/
+    //             Minus/Telepathy)
+    expect(unmodelledCount).toBeLessThanOrEqual(120)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
