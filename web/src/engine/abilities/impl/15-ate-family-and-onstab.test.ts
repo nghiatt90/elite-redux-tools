@@ -59,6 +59,7 @@ describe('ate family + onStab batch', () => {
       attackerStatus1: new Set<string>(),
       sameMoveTurnsInARow: 0,
       terrain: null,
+      movePriority: 0,
     }
     // Butterfly Wings -> Giant Wings: 1.3x on airBased moves
     findAbility('ABILITY_BUTTERFLY_WINGS').onOffensiveMultiplier!({ ...ctx, moveFlags: { airBased: true as const } })

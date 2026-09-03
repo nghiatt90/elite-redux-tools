@@ -35,6 +35,7 @@ describe('ally-only batch S', () => {
         attackerStatus1: new Set(),
         sameMoveTurnsInARow: 0,
         terrain: null,
+        movePriority: 0,
       },
       {
         defenderId: 'defender',

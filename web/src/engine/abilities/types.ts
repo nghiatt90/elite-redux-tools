@@ -66,6 +66,7 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   attackerStatus1: Set<string> // gBattleMons[battler].status1 bare flags -- mirrors OnCritContext's defenderStatus1
   sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns[battler] -- Rhythmic
   terrain: string | null // ConditionFieldContext['terrain'] -- bare TERRAIN_* name, or null
+  movePriority: number // GetMovePriority(...) -- the move's own declared priority; ability-adjusted priority (Prankster etc.) isn't modelled
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {

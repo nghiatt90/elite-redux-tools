@@ -200,6 +200,7 @@ export function toMoveData(move: Move): MoveData {
     crit: move.crit,
     hitsAir: move.hitsAir,
     flags: move.flags,
+    priority: move.priority,
   }
 }
 

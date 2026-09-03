@@ -54,6 +54,7 @@ export interface MoveData {
   crit?: 'HIGH' | 'ALWAYS'
   hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
   flags: Record<string, true>
+  priority?: number // Higher Rank's GetMovePriority(...) > 0 check -- ability-adjusted priority (Prankster etc.) isn't modelled, just the move's own declared value
 }
 
 export interface DamageCalcScenario {
@@ -438,6 +439,7 @@ function calcInternal(
       attackerStatus1: attacker.condition.status1,
       sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
       terrain: field.terrain,
+      movePriority: move.priority ?? 0,
     },
     {
       defenderId: 'defender',

@@ -33,6 +33,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     attackerStatus1: new Set(),
     sameMoveTurnsInARow: 0,
     terrain: null,
+    movePriority: 0,
     ...overrides,
   }
 }
