@@ -55,6 +55,12 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * 0` and `status1 & STATUS1_ANY` agree in every reachable case, so this is ported
    * as the intended check rather than replicating a no-op typo.) */
   attackerHasAnyStatus: boolean
+  attackerHp: number
+  attackerMaxHp: number
+  /** True when the attacker's action resolves before the defender's this turn
+   * (DamageContext's own attackerActsFirst, threaded through -- see its doc there
+   * for why this is a UI-level fact rather than something derived). */
+  attackerActsFirst: boolean
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -68,6 +74,7 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   isCrit: boolean
   weather: string // FieldBattleState['weather'] -- ER's bare weather kind, e.g. 'HAIL'
   defenderAtMaxHp: boolean // BATTLER_MAX_HP(battler), include/battle.h:752
+  attackerActsFirst: boolean // see OffensiveMultiplierContext's doc on the same field
 }
 
 export interface OnStatContext {

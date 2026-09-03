@@ -23,6 +23,9 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     typeEffectiveness: uq(1.0),
     isCrit: false,
     attackerHasAnyStatus: false,
+    attackerHp: 100,
+    attackerMaxHp: 100,
+    attackerActsFirst: true,
     ...overrides,
   }
 }

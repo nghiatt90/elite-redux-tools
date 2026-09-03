@@ -27,8 +27,11 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST')
     const defender = slots('ABILITY_TEST_HALVE')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true }
-    const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false, ...base }, { attackerId: 'attacker', ...base })
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true }
+    const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
+    attackerHp: 100,
+    attackerMaxHp: 100,
+    ...base }, { attackerId: 'attacker', ...base })
 
     // mulModifier(mulModifier(1024, 1536), 512) == mulModifier(1536, 512)
     const expected = Math.floor((Math.floor((1024 * 1536 + 512) / 1024) * 512 + 512) / 1024)
@@ -42,8 +45,11 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST2')
     const defender = slots('ABILITY_TEST_FORTKNOX')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true }
-    const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false, ...base }, { attackerId: 'attacker', ...base })
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true }
+    const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
+    attackerHp: 100,
+    attackerMaxHp: 100,
+    ...base }, { attackerId: 'attacker', ...base })
     expect(result).toBe(uq(1.0)) // the attacker's own boost never ran
   })
 

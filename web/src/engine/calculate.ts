@@ -362,6 +362,9 @@ function calcInternal(
       typeEffectiveness,
       isCrit,
       attackerHasAnyStatus: attacker.condition.status1.size > 0 || attacker.condition.hasComatose || attacker.condition.hasBloodStainEffect,
+      attackerHp: attacker.condition.hp,
+      attackerMaxHp: attacker.condition.maxHp,
+      attackerActsFirst: scenario.attackerActsFirst,
     },
     {
       defenderId: 'defender',
@@ -374,6 +377,7 @@ function calcInternal(
       isCrit,
       weather: field.weather,
       defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
+      attackerActsFirst: scenario.attackerActsFirst,
     },
   )
   const finalResult = calcFinalDamage(dmg, {
