@@ -90,7 +90,9 @@ describe('ability registry coverage gate', () => {
     //             Mythical Arrows, Best Offense, Pony Power, Bass Boosted)
     //     -> 133 (batch P: 12 more onOffensiveMultiplier -- 4 "sound Normal move"
     //             onMoveType conversions + composites of already-ported abilities)
-    expect(unmodelledCount).toBeLessThanOrEqual(133)
+    //     -> 124 (batch Q: 9 onChooseOffensiveStat/onChooseDefensiveStat stat-swap
+    //             abilities, now that the hooks are wired into calculate.ts)
+    expect(unmodelledCount).toBeLessThanOrEqual(124)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

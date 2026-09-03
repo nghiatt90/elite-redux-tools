@@ -22,6 +22,7 @@ import { ATE_FAMILY_AND_ONSTAB } from './15-ate-family-and-onstab'
 import { TYPE_EFFECTIVENESS_ABILITIES } from './16-type-effectiveness'
 import { CRIT_SWAPSPLIT_MISC } from './17-crit-swapsplit-misc'
 import { OFFENSIVE_MULTIPLIER_BATCH_E } from './18-offensive-multiplier-e'
+import { CHOOSE_STAT_ABILITIES } from './19-choose-stat'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -43,6 +44,7 @@ registerAbilities(ATE_FAMILY_AND_ONSTAB)
 registerAbilities(TYPE_EFFECTIVENESS_ABILITIES)
 registerAbilities(CRIT_SWAPSPLIT_MISC)
 registerAbilities(OFFENSIVE_MULTIPLIER_BATCH_E)
+registerAbilities(CHOOSE_STAT_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'
