@@ -282,6 +282,14 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
     defenderStatus1: defender.condition.status1,
     defenderSpeedStageNegative: defender.statStages.spe < 0,
     defenderResolvedHoldEffect: defender.condition.resolvedHoldEffect,
+    moveFlags: move.flags,
+    // Perfectionist's own check reads CalcMoveBasePower's PRE-modifier value
+    // elsewhere in the pipeline; this call site runs before that's computed, so
+    // move.power (the raw declared value) is used instead -- an approximation for
+    // the handful of moves whose behavior config changes power before the crit
+    // check would otherwise see it.
+    basePower: move.power,
+    attackerActsFirst: scenario.attackerActsFirst,
   })
   return {
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the

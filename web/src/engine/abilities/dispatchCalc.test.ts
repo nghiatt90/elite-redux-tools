@@ -75,6 +75,9 @@ describe('computeAbilityCritBonus', () => {
       defenderStatus1: new Set(),
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
+      moveFlags: {},
+      basePower: 40,
+      attackerActsFirst: true,
     })
     expect(result).toBe(3)
   })
@@ -94,6 +97,9 @@ describe('computeAbilityCritBonus', () => {
       defenderStatus1: new Set<string>(),
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
+      moveFlags: {},
+      basePower: 40,
+      attackerActsFirst: true,
     }
     expect(computeAbilityCritBonus(slots(null), slots('ABILITY_TEST_CRIT_UNSCOPED'), inputs)).toBe(0)
 
@@ -114,6 +120,9 @@ describe('computeAbilityCritBonus', () => {
       defenderStatus1: new Set(),
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
+      moveFlags: {},
+      basePower: 40,
+      attackerActsFirst: true,
     })
     expect(result).toBe(NEVER_CRIT)
   })

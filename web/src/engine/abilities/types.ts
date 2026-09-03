@@ -121,6 +121,9 @@ export interface OnCritContext {
   defenderStatus1: Set<string>
   defenderSpeedStageNegative: boolean
   defenderResolvedHoldEffect: string | null
+  moveFlags: Record<string, true> // Hyper Cutter/Precise Fist need contact/punchBased
+  basePower: number // Perfectionist's <=50-and-nonzero check -- CalcMoveBasePower's PRE-modifier value
+  attackerActsFirst: boolean // Strategic Pause's turn-order check
 }
 
 export interface OnTypeEffectivenessContext {

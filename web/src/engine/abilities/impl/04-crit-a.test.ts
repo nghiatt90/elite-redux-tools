@@ -18,6 +18,9 @@ function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     defenderStatus1: new Set(),
     defenderSpeedStageNegative: false,
     defenderResolvedHoldEffect: null,
+    moveFlags: {},
+    basePower: 40,
+    attackerActsFirst: true,
     ...overrides,
   }
 }
