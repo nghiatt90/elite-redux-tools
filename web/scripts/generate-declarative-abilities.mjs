@@ -47,13 +47,34 @@ const FLAG_FIELDS = [
   'noBurnDamage',
 ]
 
+// Mirrors pipeline/src/erdata/ability_hooks.py's _DAMAGE_HOOKS exactly -- the set of
+// hook kinds that actually change a damage number. An ability can define OTHER
+// (non-damage) hooks -- onEntry, onAbsorb's non-damage siblings, onStatusImmune,
+// etc. -- and still need nothing but its declarative bitfields for THIS engine.
+// The original predicate here checked "zero hooks of any kind", which wrongly
+// routed every ability with an unrelated non-damage hook into 99-unmodelled.ts.
+const DAMAGE_HOOKS = new Set([
+  'onOffensiveMultiplier',
+  'onDefensiveMultiplier',
+  'onStat',
+  'onStab',
+  'onCrit',
+  'onTypeEffectiveness',
+  'onAfterTypeEffectiveness',
+  'onChooseOffensiveStat',
+  'onChooseDefensiveStat',
+  'onSwapSplit',
+  'onMoveType',
+  'onRecoil',
+])
+
 const declarative = []
 const unmodelled = []
 
 for (const ability of Object.values(hooks).sort((a, b) => a.id.localeCompare(b.id))) {
   if (!ability.damageRelevant) continue
 
-  if (Object.keys(ability.hooks).length === 0) {
+  if (!Object.keys(ability.hooks).some((h) => DAMAGE_HOOKS.has(h))) {
     const flags = {}
     for (const field of FLAG_FIELDS) {
       const raw = ability.bitfields[field]

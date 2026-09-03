@@ -100,7 +100,18 @@ describe('ability registry coverage gate', () => {
     //             Minus/Telepathy)
     //     -> 119 (batch T: Higher Rank, unblocked by threading move.priority
     //             through to OffensiveMultiplierContext)
-    expect(unmodelledCount).toBeLessThanOrEqual(119)
+    //     -> 40  (batch U: fixed generate-declarative-abilities.mjs's selection
+    //             predicate -- it required ZERO hooks of any kind, so an ability
+    //             whose only DAMAGE-relevant content was a bitfield but which also
+    //             defined an unrelated non-damage hook (onEntry, onAbsorb, ...)
+    //             fell into this file by mistake. Fixed to "no hook in the damage
+    //             set" and regenerated: 80 abilities moved to 00-flags.ts for
+    //             free, including 4 that were producing WRONG numbers (Contempt/
+    //             unaware, RKS System/adaptability+omniStab, Prim and Proper +
+    //             Wonder Scale/fortKnox -- all flags the engine already reads,
+    //             just never attached). See the field-report artifact linked in
+    //             the session history for the full audit this batch executed.)
+    expect(unmodelledCount).toBeLessThanOrEqual(40)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
