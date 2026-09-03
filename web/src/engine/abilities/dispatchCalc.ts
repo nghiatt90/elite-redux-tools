@@ -11,7 +11,16 @@ import type { AbilitySlots } from './dispatch'
 import { forEachAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
-import type { DefensiveMultiplierContext, OffensiveMultiplierContext, OnCritContext, OnMoveTypeContext, OnStatContext } from './types'
+import type {
+  DefensiveMultiplierContext,
+  OffensiveMultiplierContext,
+  OnChooseDefensiveStatContext,
+  OnChooseOffensiveStatContext,
+  OnCritContext,
+  OnMoveTypeContext,
+  OnStatContext,
+} from './types'
+import type { BattleStatKey } from '../types'
 
 // v1 has no Mold Breaker / Neutralizing Gas / Gastro Acid modelling yet -- every
 // ability's `breakable` flag is simply never suppressed. Isolated into one function
@@ -196,6 +205,53 @@ export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlo
   run(attackerSlots, 'attacker', true, false)
   if (!blocked) run(defenderSlots, 'defender', false, true)
   return blocked ? NEVER_CRIT : bonus
+}
+
+type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse' | 'secondaryStat'>
+
+/**
+ * CalcAttackStat's onChooseOffensiveStat loop (:7263-7269) -- unlike every other
+ * hook here, the C checks ONLY `gAbilities[ability].onChooseOffensiveStat` truthy,
+ * with NO IsApplyOnFlagAppropriate call at all: it's always the ATTACKER's own 4
+ * ability slots, unconditionally. secondaryStat writes are captured on the context
+ * for completeness but NOT read by calculate.ts yet -- the C's actual consumer
+ * (CalculateStat's cross-stat blend, :7215-7229) computes and adds a SEPARATE
+ * stat's fully-scaled value, which needs a bigger change to computeStat than a
+ * single context field; Juggernaut/Power Core/Slipstream/Speed Force/Terminal
+ * Velocity are left unmodelled for exactly this reason (their entire effect IS
+ * that blend).
+ */
+export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseOffensiveStatInputs): BattleStatKey {
+  const ctx: OnChooseOffensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
+  forEachAbility(attackerSlots, isSuppressed, (impl) => {
+    impl.onChooseOffensiveStat?.(ctx)
+  })
+  return ctx.statToUse
+}
+
+type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse' | 'secondaryStat'>
+
+/**
+ * CalcDefenseStat's onChooseDefensiveStat loop (:7410-7419) -- iterates battlers
+ * starting at the ATTACKER, stopping at the first one whose OWN 4 ability slots
+ * (accumulated, last-wins, matching onOffensiveMultiplier's pattern) produce a
+ * non-default statToUse; gated by IsTargettedApplyOnFlagAppropriate, where the
+ * context battler is always the ATTACKER (so an unscoped hook only fires when its
+ * own battler IS the attacker -- matching onCrit's documented default-scope
+ * semantics) and an explicit `onChooseDefensiveStatFor: APPLY_ON_TARGET` scope is
+ * what lets a defender-held ability like Blur/Elude/Sleek Scales fire at all.
+ */
+export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseDefensiveStatInputs): BattleStatKey {
+  const run = (slots: AbilitySlots, sourceIsAttacker: boolean, sourceIsTarget: boolean): BattleStatKey | null => {
+    const ctx: OnChooseDefensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
+    forEachAbility(slots, isSuppressed, (impl) => {
+      if (!impl.onChooseDefensiveStat) return
+      if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onChooseDefensiveStatFor)) return
+      impl.onChooseDefensiveStat(ctx)
+    })
+    return ctx.statToUse !== defaultStat ? ctx.statToUse : null
+  }
+  return run(attackerSlots, true, false) ?? run(defenderSlots, false, true) ?? defaultStat
 }
 
 /** Whether a slot's registered entry (if any) is a real port, used by callers that

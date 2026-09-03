@@ -28,7 +28,17 @@ import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, type BasePowe
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
-import { abilityCoverageNote, computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasStabOverride, resolveEffectiveMoveType } from './abilities/dispatchCalc'
+import {
+  abilityCoverageNote,
+  computeAbilityCritBonus,
+  computeAbilityMultiplier,
+  computeChooseDefensiveStat,
+  computeChooseOffensiveStat,
+  computeOnStatModifier,
+  hasFlag,
+  hasStabOverride,
+  resolveEffectiveMoveType,
+} from './abilities/dispatchCalc'
 import type { AbilitySlots } from './abilities/dispatch'
 import type { BattleConstants, BattlerBattleState, BattleStatKey, DamageContext, FieldBattleState } from './types'
 
@@ -207,9 +217,22 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
   // EFFECT_FOUL_PLAY uses the DEFENDER's stat and Unaware check instead (:7254-7256).
   const isFoulPlay = move.effect === 'EFFECT_FOUL_PLAY'
   const statBattler = isFoulPlay ? defender : attacker
-  // onChooseOffensiveStat ability hooks would run here for the non-Foul-Play/Body-Press
-  // case (:7263-7267) -- deferred to the registry.
-  const atkStat: BattleStatKey = move.effect === 'EFFECT_BODY_PRESS' ? 'def' : split === 'PHYSICAL' ? 'atk' : 'spatk'
+  const isBodyPress = move.effect === 'EFFECT_BODY_PRESS'
+  const defaultAtkStat: BattleStatKey = isBodyPress ? 'def' : split === 'PHYSICAL' ? 'atk' : 'spatk'
+  // onChooseOffensiveStat only runs in the non-Foul-Play/Body-Press/Monotype-Champ
+  // case (:7255-7269) -- the Monotype Champ special case isn't modelled here.
+  const atkStat: BattleStatKey =
+    isFoulPlay || isBodyPress
+      ? defaultAtkStat
+      : computeChooseOffensiveStat(attacker.abilitySlots, defaultAtkStat, {
+          battlerId: 'attacker',
+          moveId: move.id,
+          isCrit: forcedCrit,
+          isUnaware: hasFlag(defender.abilitySlots, 'unaware'),
+          moveSplit: split,
+          moveFlags: move.flags,
+          isHighestAttackingStat: isHighestAttackingStat(attacker, 'atk'),
+        })
 
   const rawAtkStat = computeStat({
     battler: statBattler,
@@ -244,8 +267,19 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
 
   const isWrappedGripPincer = false // Wrap + Grip Pincer/World Serpent -- deferred (ability)
   const noPositive = noPositiveStatStages(isCrit, Boolean(move.flags.ignoresStatStages), isWrappedGripPincer)
-  // onChooseDefensiveStat ability hooks would run here (:7410-7419) -- deferred.
-  const defStat = defaultDefendingStat(move.splitFlag, split === 'PHYSICAL')
+  const defaultDefStat = defaultDefendingStat(move.splitFlag, split === 'PHYSICAL')
+  const defRaw = defender.rawStats
+  const defStat = computeChooseDefensiveStat(attacker.abilitySlots, defender.abilitySlots, defaultDefStat, {
+    attackerId: 'attacker',
+    defenderId: 'defender',
+    moveId: move.id,
+    noPositiveStatStages: noPositive,
+    isUnaware: hasFlag(attacker.abilitySlots, 'unaware'),
+    isCrit,
+    moveFlags: move.flags,
+    defenderHasAnyStatus: defender.condition.status1.size > 0 || defender.condition.hasComatose || defender.condition.hasBloodStainEffect,
+    defenderDefComparison: defRaw.def < defRaw.spdef ? 'def' : defRaw.spdef < defRaw.def ? 'spdef' : 'equal',
+  })
 
   const rawDefStat = computeStat({
     battler: defender,

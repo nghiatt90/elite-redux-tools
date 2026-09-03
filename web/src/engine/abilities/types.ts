@@ -156,8 +156,14 @@ export interface OnChooseOffensiveStatContext {
   moveId: string
   isCrit: boolean
   isUnaware: boolean
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  moveFlags: Record<string, true>
+  /** GetHighestAttackingStatId(battler)==STAT_ATK -- an approximation of Equinox's
+   * own fully-computed-stat comparison, reusing the same raw-stat comparison (and
+   * tie-break choice) as OffensiveMultiplierContext's own field of the same name. */
+  isHighestAttackingStat: boolean
   statToUse: BattleStatKey // read/write
-  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write
+  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- NOT consumed by calculate.ts yet (see dispatchCalc.ts's note)
 }
 
 export interface OnChooseDefensiveStatContext {
@@ -166,8 +172,17 @@ export interface OnChooseDefensiveStatContext {
   moveId: string
   noPositiveStatStages: boolean
   isUnaware: boolean
+  isCrit: boolean
+  moveFlags: Record<string, true>
+  defenderHasAnyStatus: boolean
+  /** Approximates Deadeye/Exploit Weakness/Roundhouse's own fully-computed
+   * Def-vs-SpDef comparison using RAW stats (same simplification as
+   * isHighestAttackingStat elsewhere). Each picks the WEAKER of the two to attack
+   * through (`if (def<spdef) DEF; else if (spdef<def) SPDEF;`) -- 'equal' when
+   * neither is strictly lower. */
+  defenderDefComparison: 'def' | 'spdef' | 'equal'
   statToUse: BattleStatKey // read/write
-  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write
+  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- NOT consumed by calculate.ts yet (see dispatchCalc.ts's note)
 }
 
 export interface OnSwapSplitContext {
