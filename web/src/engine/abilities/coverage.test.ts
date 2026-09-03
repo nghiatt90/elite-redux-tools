@@ -76,7 +76,10 @@ describe('ability registry coverage gate', () => {
     //     -> 230 (batch J: 21 pure addsType declaratives; batch K: 19 more
     //             onDefensiveMultiplier, incl. Lead Coat/Chrome Coat's onStat halves
     //             and 3 composite delegates)
-    expect(unmodelledCount).toBeLessThanOrEqual(230)
+    //     -> 193 (batch L: 37 onStat -- weather/terrain/highest-stat/status/hp
+    //             families, the 2 Solar-Power+Chlorophyll composites, and the 4
+    //             Ruin abilities)
+    expect(unmodelledCount).toBeLessThanOrEqual(193)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
