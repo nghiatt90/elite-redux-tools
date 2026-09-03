@@ -1,0 +1,668 @@
+// Batch H: generic lazy-delegation ports for every ability whose entire
+// damage-relevant hook set is `.onX = Impl<ABILITY_OTHER>.onX` in the C
+// (abilityHooks.json's "alias" form -- see ability_hooks.py's classifier). Each
+// hook here calls through alias.ts's lazy lookupAbility() wrapper, so these work
+// correctly regardless of whether the target has been ported yet -- an alias to a
+// still-unmodelled target is a harmless no-op today and starts working the moment
+// that target lands in a real batch, with no edit needed here.
+//
+// Generated from abilityHooks.json's alias census; every entry's src line is the
+// ability's own `constexpr Ability Impl<ABILITY_X> = {` line (abilities.cc), not
+// the target's -- cross-check the target's behavior in ITS OWN batch file.
+
+import { aliasAfterTypeEffectiveness, aliasChooseDefensiveStat, aliasChooseOffensiveStat, aliasCrit, aliasDefensiveMultiplier, aliasMoveType, aliasOffensiveMultiplier, aliasStab, aliasStat, aliasSwapSplit, aliasTypeEffectiveness } from './alias'
+import type { AbilityImpl } from '../types'
+
+export const ALIAS_ABILITIES: AbilityImpl[] = [
+  {
+    id: 'ABILITY_AMPLIFIER',
+    src: 'src/abilities.cc:4773',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
+  },
+  {
+    id: 'ABILITY_ANGELIC_WINGS',
+    src: 'src/abilities.cc:11430',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PRISM_SCALES'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_HUGE_WINGS'),
+  },
+  {
+    id: 'ABILITY_APEX_PREDATOR',
+    src: 'src/abilities.cc:8644',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TOUGH_CLAWS'),
+  },
+  {
+    id: 'ABILITY_APPLE_ENLIGHTENMENT',
+    src: 'src/abilities.cc:7726',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FUR_COAT'),
+  },
+  {
+    id: 'ABILITY_ATLANTIC_RULER',
+    src: 'src/abilities.cc:10136',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_AQUATIC_DWELLER'),
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_AURORAS_GALE',
+    src: 'src/abilities.cc:10494',
+    onStat: aliasStat('ABILITY_MAJESTIC_BIRD'),
+  },
+  {
+    id: 'ABILITY_BACKSTREET_BOY',
+    src: 'src/abilities.cc:11540',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+  },
+  {
+    id: 'ABILITY_BANDIT',
+    src: 'src/abilities.cc:12279',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TECHNICIAN'),
+  },
+  {
+    id: 'ABILITY_BIRD_OF_PREY',
+    src: 'src/abilities.cc:12312',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_BIG_PECKS'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+  },
+  {
+    id: 'ABILITY_BLIGHT_SCALE',
+    src: 'src/abilities.cc:9499',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_MULTISCALE'),
+  },
+  {
+    id: 'ABILITY_BLIND_RAGE',
+    src: 'src/abilities.cc:8636',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+  },
+  {
+    id: 'ABILITY_BREAKWATER',
+    src: 'src/abilities.cc:9124',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_BRUTEFORCE',
+    src: 'src/abilities.cc:9283',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RECKLESS'),
+  },
+  {
+    id: 'ABILITY_CHESTNUT_AXE',
+    src: 'src/abilities.cc:11679',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_COSMIC_DUST',
+    src: 'src/abilities.cc:6738',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_COSMIC_DAZE'),
+  },
+  {
+    id: 'ABILITY_CRIMSON_CROWN',
+    src: 'src/abilities.cc:12640',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_CRUSHING_JAW',
+    src: 'src/abilities.cc:11569',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_CRUST_COAT',
+    src: 'src/abilities.cc:9241',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_CRYSTALLINE_ARMOR',
+    src: 'src/abilities.cc:10768',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_CURRENT_CRASH',
+    src: 'src/abilities.cc:12355',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RECKLESS'),
+  },
+  {
+    id: 'ABILITY_DEFLECT',
+    src: 'src/abilities.cc:12515',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PARRY'),
+  },
+  {
+    id: 'ABILITY_DEPRAVITY',
+    src: 'src/abilities.cc:8865',
+    onCrit: aliasCrit('ABILITY_MERCILESS'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_OVERCHARGE'),
+  },
+  {
+    id: 'ABILITY_DEPTH_EXPLORER',
+    src: 'src/abilities.cc:10925',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FIELD_EXPLORER'),
+  },
+  {
+    id: 'ABILITY_DEVOURER',
+    src: 'src/abilities.cc:6613',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_DRAKE_OF_RAGE',
+    src: 'src/abilities.cc:9865',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
+  },
+  {
+    id: 'ABILITY_DREAM_STATE',
+    src: 'src/abilities.cc:8816',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_ELEMENTAL_VORTEX',
+    src: 'src/abilities.cc:8262',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FLASH_FIRE'),
+  },
+  {
+    id: 'ABILITY_EMPRESS',
+    src: 'src/abilities.cc:11231',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RIVALRY'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RIVALRY'),
+  },
+  {
+    id: 'ABILITY_ENLIGHTENED',
+    src: 'src/abilities.cc:6303',
+    onMoveType: aliasMoveType('ABILITY_EMANATE'),
+    onStab: aliasStab('ABILITY_EMANATE'),
+  },
+  {
+    id: 'ABILITY_FARADAY_CAGE',
+    src: 'src/abilities.cc:9290',
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
+  },
+  {
+    id: 'ABILITY_FINAL_BLOW',
+    src: 'src/abilities.cc:8494',
+    onCrit: aliasCrit('ABILITY_FATAL_PRECISION'),
+  },
+  {
+    id: 'ABILITY_FIRE_RULER',
+    src: 'src/abilities.cc:11847',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLAME_SHIELD'),
+  },
+  {
+    id: 'ABILITY_FIRE_SCALES',
+    src: 'src/abilities.cc:7270',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
+  },
+  {
+    id: 'ABILITY_FLAME_BUBBLE',
+    src: 'src/abilities.cc:8252',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_WATER_BUBBLE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WATER_BUBBLE'),
+  },
+  {
+    id: 'ABILITY_FLAME_SHIELD',
+    src: 'src/abilities.cc:8837',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_FLAMING_MAW',
+    src: 'src/abilities.cc:7739',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_FLAWLESS_PRECISION',
+    src: 'src/abilities.cc:11650',
+    onCrit: aliasCrit('ABILITY_FATAL_PRECISION'),
+  },
+  {
+    id: 'ABILITY_GLACIAL_GHOST',
+    src: 'src/abilities.cc:9989',
+    onStat: aliasStat('ABILITY_SLUSH_RUSH'),
+  },
+  {
+    id: 'ABILITY_GUNMAN',
+    src: 'src/abilities.cc:9507',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_HASTE_MAKES_WASTE',
+    src: 'src/abilities.cc:10382',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_ANALYTIC'),
+  },
+  {
+    id: 'ABILITY_HUNGRY_MAWS',
+    src: 'src/abilities.cc:10389',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_HUNTERS_HORN',
+    src: 'src/abilities.cc:6038',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_HUNTERS_MARK',
+    src: 'src/abilities.cc:9729',
+    onChooseDefensiveStat: aliasChooseDefensiveStat('ABILITY_DEADEYE'),
+    onCrit: aliasCrit('ABILITY_AMBUSH'),
+  },
+  {
+    id: 'ABILITY_HYDRO_CIRCUIT',
+    src: 'src/abilities.cc:5341',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TRANSISTOR'),
+  },
+  {
+    id: 'ABILITY_ICE_PICK',
+    src: 'src/abilities.cc:11491',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TOUGH_CLAWS'),
+    onStat: aliasStat('ABILITY_SLUSH_RUSH'),
+  },
+  {
+    id: 'ABILITY_ICE_PLUMES',
+    src: 'src/abilities.cc:10569',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
+  },
+  {
+    id: 'ABILITY_ICICLE_FIST',
+    src: 'src/abilities.cc:12479',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+  },
+  {
+    id: 'ABILITY_IMPALER',
+    src: 'src/abilities.cc:10199',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_IRON_BARRAGE',
+    src: 'src/abilities.cc:4965',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_IRON_GIANT',
+    src: 'src/abilities.cc:8472',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
+  },
+  {
+    id: 'ABILITY_IRON_SERPENT',
+    src: 'src/abilities.cc:7451',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WINGED_KING'),
+  },
+  {
+    id: 'ABILITY_KUNOICHI_BLADE',
+    src: 'src/abilities.cc:6002',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TECHNICIAN'),
+  },
+  {
+    id: 'ABILITY_LEPIDOPTERAN',
+    src: 'src/abilities.cc:11523',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SWARM'),
+  },
+  {
+    id: 'ABILITY_LUCKY_WINGS',
+    src: 'src/abilities.cc:10228',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_GIANT_WINGS'),
+  },
+  {
+    id: 'ABILITY_MACH_3',
+    src: 'src/abilities.cc:11402',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_SLIPSTREAM'),
+  },
+  {
+    id: 'ABILITY_MAGMA_EATER',
+    src: 'src/abilities.cc:6069',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_MOLTEN_DOWN'),
+  },
+  {
+    id: 'ABILITY_MAGUS_BLADES',
+    src: 'src/abilities.cc:10212',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_BEST_OFFENSE'),
+    onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+  },
+  {
+    id: 'ABILITY_MASSIVE_PELT',
+    src: 'src/abilities.cc:11329',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
+  },
+  {
+    id: 'ABILITY_MASTER_HAND',
+    src: 'src/abilities.cc:8486',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_MAXIMUM_ACCELERATION',
+    src: 'src/abilities.cc:8392',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_SLIPSTREAM'),
+  },
+  {
+    id: 'ABILITY_MINDS_EYE',
+    src: 'src/abilities.cc:6744',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+  },
+  {
+    id: 'ABILITY_MINUS',
+    src: 'src/abilities.cc:1205',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PLUS'),
+  },
+  {
+    id: 'ABILITY_MOLTEN_BLADES',
+    src: 'src/abilities.cc:7484',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_NIHIL_BLASTER',
+    src: 'src/abilities.cc:11662',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_NIKA',
+    src: 'src/abilities.cc:6083',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+  },
+  {
+    id: 'ABILITY_OLD_MARINER',
+    src: 'src/abilities.cc:7795',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SEAWEED'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SEAWEED'),
+    onStab: aliasStab('ABILITY_AMPHIBIOUS'),
+  },
+  {
+    id: 'ABILITY_OMINOUS_SHROUD',
+    src: 'src/abilities.cc:9961',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHADOW_SHIELD'),
+  },
+  {
+    id: 'ABILITY_OVERWATCH',
+    src: 'src/abilities.cc:8968',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STAKEOUT'),
+  },
+  {
+    id: 'ABILITY_PERMAFROST_CLONE',
+    src: 'src/abilities.cc:7391',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PERMAFROST'),
+  },
+  {
+    id: 'ABILITY_PIXIE_POWER',
+    src: 'src/abilities.cc:6045',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FAIRY_AURA'),
+  },
+  {
+    id: 'ABILITY_POWER_EDGE',
+    src: 'src/abilities.cc:8182',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_PRISM_ARMOR',
+    src: 'src/abilities.cc:3174',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_PROPELLER_TAIL',
+    src: 'src/abilities.cc:10575',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_PUFFY',
+    src: 'src/abilities.cc:9249',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
+  },
+  {
+    id: 'ABILITY_PURE_POWER',
+    src: 'src/abilities.cc:3934',
+    onStat: aliasStat('ABILITY_FELINE_PROWESS'),
+  },
+  {
+    id: 'ABILITY_QIGONG',
+    src: 'src/abilities.cc:9326',
+    onMoveType: aliasMoveType('ABILITY_FIGHT_SPIRIT'),
+    onStab: aliasStab('ABILITY_FIGHT_SPIRIT'),
+  },
+  {
+    id: 'ABILITY_QUARK_DRIVE',
+    src: 'src/abilities.cc:6999',
+    onStat: aliasStat('ABILITY_PROTOSYNTHESIS'),
+  },
+  {
+    id: 'ABILITY_RAINBOW_SCALES',
+    src: 'src/abilities.cc:11891',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FIRE_SCALES'),
+  },
+  {
+    id: 'ABILITY_REFRIGERATOR',
+    src: 'src/abilities.cc:6415',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_RELENTLESS',
+    src: 'src/abilities.cc:9402',
+    onChooseDefensiveStat: aliasChooseDefensiveStat('ABILITY_EXPLOIT_WEAKNESS'),
+    onCrit: aliasCrit('ABILITY_MERCILESS'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_EXPLOIT_WEAKNESS'),
+  },
+  {
+    id: 'ABILITY_ROUSED_FANGS',
+    src: 'src/abilities.cc:8810',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_MIND_CRUSH'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_SAMBA',
+    src: 'src/abilities.cc:9380',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+  },
+  {
+    id: 'ABILITY_SAND_BENDER',
+    src: 'src/abilities.cc:9151',
+    onStat: aliasStat('ABILITY_SAND_FORCE'),
+  },
+  {
+    id: 'ABILITY_SAND_FIEND',
+    src: 'src/abilities.cc:10910',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
+    onStat: aliasStat('ABILITY_SAND_FORCE'),
+  },
+  {
+    id: 'ABILITY_SAND_TITAN',
+    src: 'src/abilities.cc:12594',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+  },
+  {
+    id: 'ABILITY_SEABORNE',
+    src: 'src/abilities.cc:6439',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_SEPIA_LENS',
+    src: 'src/abilities.cc:9789',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
+  },
+  {
+    id: 'ABILITY_SHADOW_SHIELD',
+    src: 'src/abilities.cc:3169',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_MULTISCALE'),
+  },
+  {
+    id: 'ABILITY_SHATTERED_ARMOR',
+    src: 'src/abilities.cc:12263',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_SHELL_ARMOR',
+    src: 'src/abilities.cc:1353',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_SHOCKING_MAW',
+    src: 'src/abilities.cc:8796',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_SINISTER_CLAWS',
+    src: 'src/abilities.cc:12394',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MYSTIC_BLADES'),
+    onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+  },
+  {
+    id: 'ABILITY_SLUDGY_MIX',
+    src: 'src/abilities.cc:8958',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PUNK_ROCK'),
+    onMoveType: aliasMoveType('ABILITY_INTOXICATE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
+    onStab: aliasStab('ABILITY_INTOXICATE'),
+  },
+  {
+    id: 'ABILITY_SMOLDERING_WOOD',
+    src: 'src/abilities.cc:4335',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RAW_WOOD'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RAW_WOOD'),
+  },
+  {
+    id: 'ABILITY_SOLAR_FLARE',
+    src: 'src/abilities.cc:4610',
+    onMoveType: aliasMoveType('ABILITY_IMMOLATE'),
+    onStab: aliasStab('ABILITY_IMMOLATE'),
+  },
+  {
+    id: 'ABILITY_SOLID_ROCK',
+    src: 'src/abilities.cc:1765',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_SOUL_DEVOURER',
+    src: 'src/abilities.cc:9356',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_PHANTOM_PAIN'),
+  },
+  {
+    id: 'ABILITY_SPECTRAL_SHROUD',
+    src: 'src/abilities.cc:4870',
+    onMoveType: aliasMoveType('ABILITY_SPECTRALIZE'),
+    onStab: aliasStab('ABILITY_SPECTRALIZE'),
+  },
+  {
+    id: 'ABILITY_STEEL_BEETLE',
+    src: 'src/abilities.cc:8731',
+    onMoveType: aliasMoveType('ABILITY_POLLINATE'),
+    onStab: aliasStab('ABILITY_POLLINATE'),
+  },
+  {
+    id: 'ABILITY_STONECUTTER',
+    src: 'src/abilities.cc:10700',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FOSSILIZED'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FOSSILIZED'),
+  },
+  {
+    id: 'ABILITY_STRIKER_PIXILATE',
+    src: 'src/abilities.cc:9261',
+    onMoveType: aliasMoveType('ABILITY_PIXILATE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+    onStab: aliasStab('ABILITY_PIXILATE'),
+  },
+  {
+    id: 'ABILITY_SUGAR_RUSH',
+    src: 'src/abilities.cc:8135',
+    onStat: aliasStat('ABILITY_UNBURDEN'),
+  },
+  {
+    id: 'ABILITY_SUMO_GUARD',
+    src: 'src/abilities.cc:11482',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
+  },
+  {
+    id: 'ABILITY_SUPER_SCOPE',
+    src: 'src/abilities.cc:9484',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_SWEEPING_EDGE_PLUS',
+    src: 'src/abilities.cc:7456',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_SWORD_OF_DAMNATION',
+    src: 'src/abilities.cc:8545',
+    onStat: aliasStat('ABILITY_SWORD_OF_RUIN'),
+  },
+  {
+    id: 'ABILITY_TERAFORM_ZERO',
+    src: 'src/abilities.cc:9102',
+    onAfterTypeEffectiveness: aliasAfterTypeEffectiveness('ABILITY_TERA_SHELL'),
+  },
+  {
+    id: 'ABILITY_THERMAL_ENTROPY',
+    src: 'src/abilities.cc:12383',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
+  },
+  {
+    id: 'ABILITY_TOUGH_CLAWS',
+    src: 'src/abilities.cc:2436',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_BIG_PECKS'),
+  },
+  {
+    id: 'ABILITY_TOXIC_SHELL',
+    src: 'src/abilities.cc:11506',
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
+  },
+  {
+    id: 'ABILITY_TO_THE_BONE',
+    src: 'src/abilities.cc:9006',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SNIPER'),
+  },
+  {
+    id: 'ABILITY_TRASH_HEAP',
+    src: 'src/abilities.cc:8949',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
+  },
+  {
+    id: 'ABILITY_TUMMYACHE',
+    src: 'src/abilities.cc:11474',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
+  },
+  {
+    id: 'ABILITY_ULTRA_INSTINCT',
+    src: 'src/abilities.cc:8200',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PARRY'),
+  },
+  {
+    id: 'ABILITY_UNSTABLE_CORE',
+    src: 'src/abilities.cc:12504',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_POWER_CORE'),
+  },
+  {
+    id: 'ABILITY_VENGEFUL_SPIRIT',
+    src: 'src/abilities.cc:7162',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_VENGEANCE'),
+  },
+  {
+    id: 'ABILITY_VENOM_CROWN',
+    src: 'src/abilities.cc:9492',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_VOLTRON',
+    src: 'src/abilities.cc:11607',
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_WAY_OF_PRECISION',
+    src: 'src/abilities.cc:8446',
+    onCrit: aliasCrit('ABILITY_PRECISE_FIST'),
+  },
+  {
+    id: 'ABILITY_WAY_OF_SWIFTNESS',
+    src: 'src/abilities.cc:8456',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_WIND_CHIMES',
+    src: 'src/abilities.cc:12492',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_AMPLIFIER'),
+  },
+  {
+    id: 'ABILITY_WIND_RAGE',
+    src: 'src/abilities.cc:8974',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_GIANT_WINGS'),
+  },
+]

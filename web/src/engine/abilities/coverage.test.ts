@@ -69,7 +69,8 @@ describe('ability registry coverage gate', () => {
     //     -> 431 (batch F: 20 SWARM_MULTIPLIER-family onOffensiveMultiplier)
     //     -> 425 (batch G: 6 hub abilities -- Battle Armor, Stall, Analytic,
     //             Water Bubble, Fatal Precision, Sand Guard)
-    expect(unmodelledCount).toBeLessThanOrEqual(425)
+    //     -> 303 (batch H: 122 generic lazy-delegation aliases, see impl/alias.ts)
+    expect(unmodelledCount).toBeLessThanOrEqual(303)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
