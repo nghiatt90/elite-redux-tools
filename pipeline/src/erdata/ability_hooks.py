@@ -306,6 +306,17 @@ _DAMAGE_HOOKS = {
     "onSwapSplit",
     "onMoveType",
     "onRecoil",
+    # Added after an audit found these six change the damage NUMBER too, just via a
+    # call site outside CalcFinalDmg/CalcAttackStat/CalcDefenseStat/
+    # StabMultiplierInHalves/SetCritFlag/CalcTypeEffectivenessMultiplier/
+    # SetSwapDamageCategory -- see the field-report artifact from this session for
+    # the full citation trail.
+    "onParentalBond",  # GetParentalBondMultiplier, battle_util.c:7483-7515,7658-7662 -- extra-hit damage multiplier
+    "onAbsorb",  # battle_ai_attack.c:1853 -- redirects the hit away from damage entirely (forces 0)
+    "onImmune",  # TestImmunityAbilities, battle_util.c:8984-9000 -- aborts before any damage command runs (forces 0)
+    "onInfiltrate",  # bypasses the 0.5x/0.66x screens multiplier in CalcFinalDmg, battle_util.c:7647-7653
+    "onModifyMoveFlags",  # DoesMoveMatchFlag, abilities.cc:331-361 -- can grant a flag another ability's damage hook reads
+    "onMoldBreaker",  # suppresses every `breakable` ability on the defender mid-calc, battle_util.c:9285-9312
 }
 _DAMAGE_BITFIELDS = {
     "adaptability",

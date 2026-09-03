@@ -66,6 +66,14 @@ const DAMAGE_HOOKS = new Set([
   'onSwapSplit',
   'onMoveType',
   'onRecoil',
+  // Keep in sync with pipeline/src/erdata/ability_hooks.py's _DAMAGE_HOOKS --
+  // these 6 were added after an audit found they change the damage number too.
+  'onParentalBond',
+  'onAbsorb',
+  'onImmune',
+  'onInfiltrate',
+  'onModifyMoveFlags',
+  'onMoldBreaker',
 ])
 
 const declarative = []

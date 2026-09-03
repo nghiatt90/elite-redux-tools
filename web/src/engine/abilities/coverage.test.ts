@@ -111,7 +111,26 @@ describe('ability registry coverage gate', () => {
     //             Wonder Scale/fortKnox -- all flags the engine already reads,
     //             just never attached). See the field-report artifact linked in
     //             the session history for the full audit this batch executed.)
-    expect(unmodelledCount).toBeLessThanOrEqual(40)
+    //     -> 105 (batch V: census EXPANDED, not shrunk -- added onParentalBond/
+    //             onAbsorb/onImmune/onInfiltrate/onModifyMoveFlags/onMoldBreaker to
+    //             _DAMAGE_HOOKS (ability_hooks.py), a genuine undercount the field
+    //             report found: these 6 hooks change the damage number but were
+    //             excluded from the census entirely. Total damage-relevant grew
+    //             560->590. Two things happened at once: 30 abilities became
+    //             damage-relevant for the first time (all unmodelled, +30), and 35
+    //             abilities that were previously pure declarative-flag entries in
+    //             00-flags.ts turned out to ALSO define one of the 6 new hooks --
+    //             their flags alone no longer honestly cover them, so they moved
+    //             to explicit unmodelled stubs rather than silently staying
+    //             "done": 40 (batch U) - 40 (all re-verified still real) + 35
+    //             (demoted from 00-flags.ts) + 70 (genuinely new to the census,
+    //             includes both the 30 newly-relevant abilities and any prior
+    //             entries whose reasons grew a new hook) = 105. This is the SAME
+    //             kind of correction as batch U, just in the opposite direction:
+    //             the gate exists so an undercount fails loudly instead of
+    //             silently shipping a wrong number, and a rising count here means
+    //             the audit worked as intended.
+    expect(unmodelledCount).toBeLessThanOrEqual(105)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
