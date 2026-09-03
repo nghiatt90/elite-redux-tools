@@ -98,7 +98,9 @@ describe('ability registry coverage gate', () => {
     //     -> 120 (batch S: Mosh Pit, Rat King -- both ALLY-only-scoped, so
     //             permanently inert in this v1 singles engine, matching Plus/
     //             Minus/Telepathy)
-    expect(unmodelledCount).toBeLessThanOrEqual(120)
+    //     -> 119 (batch T: Higher Rank, unblocked by threading move.priority
+    //             through to OffensiveMultiplierContext)
+    expect(unmodelledCount).toBeLessThanOrEqual(119)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

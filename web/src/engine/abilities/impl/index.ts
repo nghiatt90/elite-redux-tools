@@ -25,6 +25,7 @@ import { OFFENSIVE_MULTIPLIER_BATCH_E } from './18-offensive-multiplier-e'
 import { CHOOSE_STAT_ABILITIES } from './19-choose-stat'
 import { MOVE_TYPE_AND_RECOIL_ABILITIES } from './20-move-type-and-recoil'
 import { ALLY_ONLY_ABILITIES } from './21-ally-only'
+import { HIGHER_RANK_ABILITIES } from './22-higher-rank'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -49,6 +50,7 @@ registerAbilities(OFFENSIVE_MULTIPLIER_BATCH_E)
 registerAbilities(CHOOSE_STAT_ABILITIES)
 registerAbilities(MOVE_TYPE_AND_RECOIL_ABILITIES)
 registerAbilities(ALLY_ONLY_ABILITIES)
+registerAbilities(HIGHER_RANK_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

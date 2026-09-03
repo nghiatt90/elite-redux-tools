@@ -58,7 +58,6 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_GOOD_AS_GOLD', src: 'src/abilities.cc:7332', unmodelled: 'not yet ported (hooks: breakable)' },
   { id: 'ABILITY_HEADSTRONG', src: 'src/abilities.cc:9764', unmodelled: 'not yet ported (hooks: breakable)' },
   { id: 'ABILITY_HEAT_SINK', src: 'src/abilities.cc:10440', unmodelled: 'not yet ported (hooks: breakable)' },
-  { id: 'ABILITY_HIGHER_RANK', src: 'src/abilities.cc:8220', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_HYDRA', src: 'src/abilities.cc:11261', unmodelled: 'not yet ported (hooks: resistsFortKnox)' },
   { id: 'ABILITY_ICE_DEW', src: 'src/abilities.cc:4783', unmodelled: 'not yet ported (hooks: breakable)' },
   { id: 'ABILITY_ICE_FACE', src: 'src/abilities.cc:3335', unmodelled: 'not yet ported (hooks: breakable)' },
