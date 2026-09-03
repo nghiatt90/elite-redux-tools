@@ -4,7 +4,7 @@ import { buildSearchIndex, searchSpecies } from '../pokedex/search'
 import { isStandaloneForm, displayName } from '../../lib/displayName'
 import { useAbilityDisplayName, useGameData } from '../../lib/GameDataContext'
 import type { BattleStatKey } from '../../engine/types'
-import { STATUS_OPTIONS, type BattlerConfig } from './scenario'
+import { SEMI_INVULNERABLE_OPTIONS, STATUS_OPTIONS, type BattlerConfig } from './scenario'
 import type { AbilityHooks, BattleConstants } from '../../lib/types'
 
 const BATTLE_STATS: { key: BattleStatKey; label: string }[] = [
@@ -207,6 +207,22 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
           {STATUS_OPTIONS.map((s) => (
             <option key={s.id ?? 'none'} value={s.id ?? ''}>
               {s.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Semi-invulnerable {/* only matters as the defender -- harmless to set on the attacker */}
+        <select
+          className="mt-0.5 rounded-md border px-2 py-1 text-sm w-full"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+          value={config.semiInvulnerable}
+          onChange={(e) => set('semiInvulnerable', e.target.value as BattlerConfig['semiInvulnerable'])}
+        >
+          {SEMI_INVULNERABLE_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
             </option>
           ))}
         </select>

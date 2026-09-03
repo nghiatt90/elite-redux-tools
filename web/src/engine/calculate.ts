@@ -470,9 +470,14 @@ function calcInternal(
     resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
     attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness),
     hasSuperEffectiveBoost: isSuperEffective && move.effect === 'EFFECT_MISC_HIT',
-    hitsSemiInvulnerableUnderground: false, // no semi-invulnerable-state tracking yet -- deferred
-    hitsSemiInvulnerableUnderwater: false,
-    hitsSemiInvulnerableInAir: false,
+    // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
+    // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
+    // must hold. hitsAir only doubles for the FLAG_DMG_2X_IN_AIR variant --
+    // hitsAir === 'HITS' (FLAG_DMG_IN_AIR) only lets the move connect at all,
+    // with no damage multiplier of its own.
+    hitsSemiInvulnerableUnderground: Boolean(move.flags.hitsUnderground) && defender.semiInvulnerable === 'UNDERGROUND',
+    hitsSemiInvulnerableUnderwater: Boolean(move.flags.hitsUnderwater) && defender.semiInvulnerable === 'UNDERWATER',
+    hitsSemiInvulnerableInAir: move.hitsAir === 'DOUBLE_DAMAGE' && defender.semiInvulnerable === 'AIRBORNE',
   })
 
   return { dmg: finalResult.dmg, typeEffectiveness, resolvedMoveType: moveType, unmodelled }

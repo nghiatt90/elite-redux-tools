@@ -123,6 +123,13 @@ export interface BattlerBattleState {
   condition: ConditionBattlerContext
   types: string[] // 1-3 bare type names, in dex order (type1, type2, type3)
   isGrounded: boolean // IsBattlerGroundedIgnoreType -- false for pure Flying/Levitate/Air Balloon/etc.
+  /** gStatuses3[battler] & STATUS3_UNDERGROUND/UNDERWATER/ON_AIR -- Dig/Dive/Fly-style
+   * semi-invulnerability. A per-turn battle state this calculator can't derive (it
+   * has no turn simulation), so it's a scenario toggle rather than computed --
+   * see BattlerConfig.semiInvulnerable. Only the DEFENDER's value is ever read
+   * (battle_util.c:7707-7709: FLAG_DMG_UNDERGROUND/UNDERWATER/2X_IN_AIR check
+   * gStatuses3[battlerDef] specifically). */
+  semiInvulnerable: 'NONE' | 'UNDERGROUND' | 'UNDERWATER' | 'AIRBORNE'
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

@@ -21,6 +21,16 @@ export const STATUS_OPTIONS = [
   { id: 'STATUS1_FREEZE', label: 'Frozen' },
 ] as const
 
+/** Only meaningful as the DEFENDER -- see BattlerBattleState.semiInvulnerable's doc
+ * on why this is a scenario toggle (Dig/Dive/Fly-style states this calculator has
+ * no turn simulation to derive). */
+export const SEMI_INVULNERABLE_OPTIONS = [
+  { id: 'NONE', label: 'Normal' },
+  { id: 'UNDERGROUND', label: 'Underground (Dig)' },
+  { id: 'UNDERWATER', label: 'Underwater (Dive)' },
+  { id: 'AIRBORNE', label: 'Airborne (Fly/Bounce)' },
+] as const
+
 export const WEATHER_OPTIONS = [
   { id: 'NONE', label: 'None' },
   { id: 'SUN_PERMANENT', label: 'Sun (weak, e.g. Drought)' },
@@ -56,6 +66,9 @@ export interface BattlerConfig {
   status: string | null // one of STATUS_OPTIONS' ids
   hpPercent: number // 1-100, current HP as a percent of max
   moveIds: (string | null)[] // 4 slots
+  /** Dig/Dive/Fly-style semi-invulnerability -- only meaningful as the DEFENDER (see
+   * BattlerBattleState.semiInvulnerable's doc); harmless to set on the attacker. */
+  semiInvulnerable: 'NONE' | 'UNDERGROUND' | 'UNDERWATER' | 'AIRBORNE'
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -80,6 +93,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     status: null,
     hpPercent: 100,
     moveIds: [null, null, null, null],
+    semiInvulnerable: 'NONE',
   }
 }
 
@@ -169,6 +183,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     },
     types: species.types.map(bareType),
     isGrounded: !species.types.includes('TYPE_FLYING'), // Levitate/Air Balloon further reduce this via the ability registry's `.levitate` flag at the call site
+    semiInvulnerable: config.semiInvulnerable,
     level: config.level,
     nature: config.nature,
     rawStats,

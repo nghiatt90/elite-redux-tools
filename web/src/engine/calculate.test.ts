@@ -71,6 +71,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     condition: condition({ speciesId, baseSpeciesId: speciesId, hp: 999, maxHp: 999 }),
     types: bareTypes(s.types),
     isGrounded: true,
+    semiInvulnerable: 'NONE',
     level,
     nature,
     rawStats,
@@ -188,6 +189,47 @@ describe('calculateMoveDamage -- Garchomp vs Skarmory, real species/move data', 
   it('unmodelled is empty for a plain move with no items/field effects/abilities involved', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
     expect(result.unmodelled).toEqual([])
+  })
+})
+
+describe('calculateMoveDamage -- semi-invulnerable double damage (battle_util.c:7707-7709)', () => {
+  it('Earthquake doubles damage against an UNDERGROUND (Dig) defender', () => {
+    const grounded = scenario({ move: moveData('MOVE_EARTHQUAKE'), defender: battler('SPECIES_GARCHOMP') })
+    const underground = scenario({
+      move: moveData('MOVE_EARTHQUAKE'),
+      defender: battler('SPECIES_GARCHOMP', { semiInvulnerable: 'UNDERGROUND' }),
+    })
+    const groundedResult = calculateMoveDamage(grounded)
+    const undergroundResult = calculateMoveDamage(underground)
+    // The 2.0x multiplier itself is exact, but it's folded into finalModifier
+    // ALONGSIDE every other stage before one combined ApplyModifier call, then the
+    // random-roll truncation (:7818-7821) doesn't scale linearly with a doubled
+    // input -- a +/-1 discrepancy from independent floor() truncation is expected,
+    // not a rounding bug in this wiring.
+    expect(undergroundResult.rolls[0]).toBeGreaterThanOrEqual(groundedResult.rolls[0] * 2 - 1)
+    expect(undergroundResult.rolls[0]).toBeLessThanOrEqual(groundedResult.rolls[0] * 2 + 1)
+  })
+
+  it('the toggle only fires for the matching move flag -- Surf does not double vs an UNDERGROUND defender', () => {
+    const normal = scenario({ move: moveData('MOVE_SURF'), defender: battler('SPECIES_GARCHOMP') })
+    const underground = scenario({
+      move: moveData('MOVE_SURF'),
+      defender: battler('SPECIES_GARCHOMP', { semiInvulnerable: 'UNDERGROUND' }),
+    })
+    expect(calculateMoveDamage(underground).rolls[0]).toBe(calculateMoveDamage(normal).rolls[0])
+  })
+
+  it('Gust (hitsAir: DOUBLE_DAMAGE) doubles vs an AIRBORNE defender; Hurricane (hitsAir: HITS) does not', () => {
+    const airborneDefender = battler('SPECIES_GARCHOMP', { semiInvulnerable: 'AIRBORNE' })
+    const grounded = battler('SPECIES_GARCHOMP')
+    const gustAirborne = calculateMoveDamage(scenario({ move: moveData('MOVE_GUST'), defender: airborneDefender }))
+    const gustGrounded = calculateMoveDamage(scenario({ move: moveData('MOVE_GUST'), defender: grounded }))
+    expect(gustAirborne.rolls[0]).toBeGreaterThanOrEqual(gustGrounded.rolls[0] * 2 - 1)
+    expect(gustAirborne.rolls[0]).toBeLessThanOrEqual(gustGrounded.rolls[0] * 2 + 1)
+
+    const hurricaneAirborne = calculateMoveDamage(scenario({ move: moveData('MOVE_HURRICANE'), defender: airborneDefender }))
+    const hurricaneGrounded = calculateMoveDamage(scenario({ move: moveData('MOVE_HURRICANE'), defender: grounded }))
+    expect(hurricaneAirborne.rolls[0]).toBe(hurricaneGrounded.rolls[0]) // HITS only lets it connect, no damage multiplier
   })
 })
 
