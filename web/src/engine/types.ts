@@ -1,6 +1,8 @@
 // Shared engine types. `erasableSyntaxOnly` (tsconfig.app.json) bans TS `enum` --
 // every enum-like value here is a `const` array/object plus a derived union type.
 
+import type { AbilitySlots } from './abilities/dispatch'
+
 export const STAT_KEYS = ['hp', 'atk', 'def', 'spatk', 'spdef', 'spe'] as const
 export type StatKey = (typeof STAT_KEYS)[number]
 
@@ -137,6 +139,7 @@ export interface BattlerBattleState {
   canEvolveStrict: boolean // Eviolite eligibility
   isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler
   moveSlotPp: Record<string, number> // moveId -> current pp, for Trump Card
+  abilitySlots: AbilitySlots
 }
 
 export interface FieldBattleState extends ConditionFieldContext {

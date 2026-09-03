@@ -3,11 +3,12 @@
 // together every module in this directory. This is the "port the REAL calculator,
 // not the buggy in-battle preview" path named in the project plan.
 //
-// Ability hooks are not wired in yet (Task 9/10's registry doesn't exist). Every
-// point where the C consults one is a clearly-commented neutral default below, and
-// `unmodelled` on the result collects a human-readable note for each -- so a caller
-// can render "this result doesn't account for X" rather than silently presenting an
-// ability-blind number as complete.
+// Ability hooks ARE wired in (abilities/dispatchCalc.ts), so results reflect
+// whichever abilities the ported registry batches cover -- see
+// abilities/impl/99-unmodelled.ts for what's still a stub. `unmodelled` on the
+// result collects a human-readable note per gap actually encountered in a given
+// scenario, so a caller can render "this result doesn't account for X" instead of
+// silently presenting a partially ability-blind number as complete.
 
 import { idiv, uq } from './fixed'
 import {
@@ -25,8 +26,10 @@ import {
 } from './battleStat'
 import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
-import { calcCritStage, critChanceDenominator, type CritStageInputs } from './crit'
+import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
+import { abilityCoverageNote, computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasStabOverride } from './abilities/dispatchCalc'
+import type { AbilitySlots } from './abilities/dispatch'
 import type { BattleConstants, BattlerBattleState, BattleStatKey, DamageContext, FieldBattleState } from './types'
 
 export interface MoveData {
@@ -111,6 +114,7 @@ function toInternalStage(externalStage: number): number {
 
 interface ComputeStatOptions {
   battler: BattlerBattleState
+  opponent: BattlerBattleState
   stat: BattleStatKey
   move: MoveData
   isAttackRole: boolean
@@ -152,14 +156,17 @@ function computeStat(opts: ComputeStatOptions): number {
     rawStat: battler.rawStats[stat],
     extraStatLevel: battler.extraStatLevel[stat] ?? 0,
     statStage: toInternalStage(battler.statStages[stat] ?? 0),
-    isUnaware: false, // Unaware ability -- deferred to the registry
+    // IsUnaware(opponent) -- Unaware makes the OPPONENT ignore THIS battler's stat
+    // changes, so it's the opponent's ability that gates this, not the stat owner's
+    // own (src/battle_util.c:7255 for attack, :7398 for defense).
+    isUnaware: hasFlag(opts.opponent.abilitySlots, 'unaware'),
     isWonderRoomActive: opts.isWonderRoomActive,
     isOffensiveStatForWonderRoom: stat === 'atk' || stat === 'spatk',
     isCrit: opts.isCrit,
     isAttackRole: opts.isAttackRole,
     benefitsFromStatBuffs: benefitsFromStatBuffs(isBleeding, battler.condition.hasBloodStainEffect, isPoisoned, false),
     preModify,
-    applyOnStatHooks: (s) => s, // onStat ability hooks -- deferred to the registry
+    applyOnStatHooks: computeOnStatModifier(battler.abilitySlots, opts.opponent.abilitySlots, { battlerId: 'self', statId: stat, moveId: move.id }),
     secondaryStatPercent: 0, // onChoose*Stat hooks setting a secondary blend -- deferred
     statStageRatios: opts.statStageRatios,
   })
@@ -180,6 +187,7 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
 
   const rawAtkStat = computeStat({
     battler: statBattler,
+    opponent: statBattler === attacker ? defender : attacker,
     stat: atkStat,
     move,
     isAttackRole: true,
@@ -205,7 +213,7 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
 }
 
 function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
-  const { defender, move } = scenario
+  const { attacker, defender, move } = scenario
   const unmodelled: string[] = []
 
   const isWrappedGripPincer = false // Wrap + Grip Pincer/World Serpent -- deferred (ability)
@@ -215,6 +223,7 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
 
   const rawDefStat = computeStat({
     battler: defender,
+    opponent: attacker,
     stat: defStat,
     move,
     isAttackRole: false,
@@ -239,11 +248,14 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
  * built once per scenario since none of it depends on the evaluated type or a
  * particular damage roll. */
 function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs {
-  const { attacker, move, field } = scenario
+  const { attacker, defender, move, field } = scenario
+  const abilityBonus = computeAbilityCritBonus(attacker.abilitySlots, defender.abilitySlots, 'defender', move.id, uq(1.0))
   return {
-    isBlocked: field.sides.defender.luckyChant,
+    // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
+    // same "blocked" outcome as Lucky Chant -- both mean "this hit can never crit".
+    isBlocked: field.sides.defender.luckyChant || abilityBonus === NEVER_CRIT,
     isGuaranteed: move.crit === 'ALWAYS',
-    abilityCritBonus: 0, // onCrit ability hooks -- deferred
+    abilityCritBonus: abilityBonus === NEVER_CRIT ? 0 : abilityBonus,
     hasHighCritFlag: move.crit === 'HIGH',
     hasScopeLens: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SCOPE_LENS',
     hasLuckyPunchOnChanseyLine: false, // needs a species-family table -- deferred
@@ -307,6 +319,11 @@ function calcInternal(
   unmodelled.push(...behaviorResult.unmodelled)
   const power = calcMoveBasePowerAfterModifiers(Math.max(behaviorResult.power, 1), basePowerCtx)
 
+  for (const id of [attacker.abilitySlots.ability, ...attacker.abilitySlots.innates, defender.abilitySlots.ability, ...defender.abilitySlots.innates]) {
+    const note = abilityCoverageNote(id)
+    if (note) unmodelled.push(note)
+  }
+
   const atk = computeAttackStat(scenario, split, isCrit, statStageRatios)
   const def = computeDefenseStat(scenario, split, isCrit, statStageRatios)
   unmodelled.push(...atk.unmodelled, ...def.unmodelled)
@@ -318,15 +335,21 @@ function calcInternal(
   dmg = idiv(dmg, 50) + 2
 
   const isSuperEffective = typeEffectiveness >= uq(2.0)
+  const abilityMultiplier = computeAbilityMultiplier(
+    attacker.abilitySlots,
+    defender.abilitySlots,
+    { battlerId: 'attacker', defenderId: 'defender', moveId: move.id, moveType, moveSplit: split, moveFlags: move.flags, basePower: power, typeEffectiveness, isCrit },
+    { defenderId: 'defender', attackerId: 'attacker', moveId: move.id, moveType, moveSplit: split, moveFlags: move.flags, typeEffectiveness, isCrit },
+  )
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),
-    abilityMultiplier: uq(1.0), // CalculateAbilityMultipliers -- deferred to the registry
+    abilityMultiplier,
     // MISC_EFFECT_INCREASED_CRIT_DAMAGE moves crit for x2.0 instead of x1.5
     // (src/battle_util.c:7536-7540); move.argument threading isn't wired into
     // MoveData yet, so this is always the ordinary x1.5 for now.
     critMultiplier: isCrit ? 1.5 : null,
     weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
-    stabInHalves: stabInHalves(attacker.types, moveType),
+    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, moveType),
     screensActive: !isCrit && screensApply(field, split),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
@@ -340,10 +363,15 @@ function calcInternal(
   return { dmg: finalResult.dmg, typeEffectiveness, unmodelled }
 }
 
-/** StabMultiplierInHalves' non-ability branches (src/battle_util.c:7469-7481).
- * Adaptability/onStab-granting abilities are deferred to the registry. */
-function stabInHalves(attackerTypes: string[], moveType: string): 2 | 3 | 4 {
-  return attackerTypes.includes(moveType) ? 3 : 2
+/** StabMultiplierInHalves, src/battle_util.c:7469-7481. Move === Struggle and
+ * field-wide Relic Stone (STAB disabled entirely) aren't modelled -- neither has
+ * a natural home in a single-scenario calculator (Struggle never has a "move
+ * type" to check STAB against in the first place; Relic Stone is a rare field
+ * effect with no UI control yet). */
+function stabInHalves(attackerTypes: string[], attackerSlots: AbilitySlots, moveType: string): 2 | 3 | 4 {
+  const isStab = attackerTypes.includes(moveType) || hasStabOverride(attackerSlots, moveType)
+  if (!isStab) return 2
+  return hasFlag(attackerSlots, 'adaptability') ? 4 : 3
 }
 
 function screensApply(field: FieldBattleState, split: 'PHYSICAL' | 'SPECIAL'): boolean {

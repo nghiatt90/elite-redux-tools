@@ -82,6 +82,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     canEvolveStrict: false,
     isInfatuatedWithOpponent: false,
     moveSlotPp: {},
+    abilitySlots: { ability: null, innates: [null, null, null] },
     ...overrides,
   }
 }
@@ -187,5 +188,33 @@ describe('calculateMoveDamage -- Garchomp vs Skarmory, real species/move data', 
   it('unmodelled is empty for a plain move with no items/field effects/abilities involved', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
     expect(result.unmodelled).toEqual([])
+  })
+})
+
+describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
+  it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
+    await import('./abilities/impl/index') // populate the registry
+    const withoutAbility = calculateMoveDamage(scenario({ move: moveData('MOVE_EMBER') })).rolls[15]
+    const withCombustion = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EMBER'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_COMBUSTION', innates: [null, null, null] } }),
+      }),
+    ).rolls[15]
+    // x1.5 via the ability, on top of whatever else already applied -- must be
+    // meaningfully larger, not just off by rounding.
+    expect(withCombustion).toBeGreaterThan(withoutAbility)
+    expect(withCombustion).toBeGreaterThanOrEqual(Math.floor(withoutAbility * 1.4))
+  })
+
+  it('an ability not in the registry (or not damage-relevant) is silently a no-op, not an error', () => {
+    expect(() =>
+      calculateMoveDamage(
+        scenario({
+          move: moveData('MOVE_TACKLE'),
+          attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_NOT_A_REAL_ABILITY', innates: [null, null, null] } }),
+        }),
+      ),
+    ).not.toThrow()
   })
 })
