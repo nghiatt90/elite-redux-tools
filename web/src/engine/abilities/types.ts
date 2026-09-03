@@ -48,6 +48,13 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   basePower: number
   typeEffectiveness: number // UQ_4_12
   isCrit: boolean
+  /** HasAnyStatusOrAbility(battlerId), src/battle_util.c:9278-9283 -- despite the
+   * name, no ability check at all: major status1, Comatose, or Blood Stain. (The C
+   * itself has `status1 && STATUS1_ANY` -- a logical-AND typo where a bitwise-AND was
+   * clearly meant -- but since status1's only bits ARE major-status bits, `status1 !=
+   * 0` and `status1 & STATUS1_ANY` agree in every reachable case, so this is ported
+   * as the intended check rather than replicating a no-op typo.) */
+  attackerHasAnyStatus: boolean
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {

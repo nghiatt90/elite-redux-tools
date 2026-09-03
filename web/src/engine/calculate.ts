@@ -338,7 +338,18 @@ function calcInternal(
   const abilityMultiplier = computeAbilityMultiplier(
     attacker.abilitySlots,
     defender.abilitySlots,
-    { battlerId: 'attacker', defenderId: 'defender', moveId: move.id, moveType, moveSplit: split, moveFlags: move.flags, basePower: power, typeEffectiveness, isCrit },
+    {
+      battlerId: 'attacker',
+      defenderId: 'defender',
+      moveId: move.id,
+      moveType,
+      moveSplit: split,
+      moveFlags: move.flags,
+      basePower: power,
+      typeEffectiveness,
+      isCrit,
+      attackerHasAnyStatus: attacker.condition.status1.size > 0 || attacker.condition.hasComatose || attacker.condition.hasBloodStainEffect,
+    },
     {
       defenderId: 'defender',
       attackerId: 'attacker',

@@ -61,7 +61,8 @@ describe('ability registry coverage gate', () => {
     // back to a stub; investigate rather than raise the number.
     // 538 (Task 9 baseline) -> 517 (batch A1: 21 onOffensiveMultiplier)
     //     -> 499 (batch B1: 18 onDefensiveMultiplier)
-    expect(unmodelledCount).toBeLessThanOrEqual(499)
+    //     -> 491 (batch A2: 8 more onOffensiveMultiplier)
+    expect(unmodelledCount).toBeLessThanOrEqual(491)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
