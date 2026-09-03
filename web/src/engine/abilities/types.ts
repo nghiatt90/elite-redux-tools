@@ -174,6 +174,8 @@ export interface OnSwapSplitContext {
   battlerId: string
   moveId: string
   moveType: string
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // pre-swap split -- these hooks decide WHETHER to swap it
+  moveFlags: Record<string, true>
 }
 
 export interface OnMoveTypeContext {

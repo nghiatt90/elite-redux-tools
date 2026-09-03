@@ -84,7 +84,11 @@ describe('ability registry coverage gate', () => {
     //     -> 157 (batch N: 17 onTypeEffectiveness/onAfterTypeEffectiveness --
     //             neither hook is wired into calculate.ts's fold yet, but each port
     //             is complete and correct for when it is)
-    expect(unmodelledCount).toBeLessThanOrEqual(157)
+    //     -> 145 (batch O: 6 onCrit, 5 onSwapSplit, 1 onDefensiveMultiplier/
+    //             composite -- Bad Luck, Hyper Cutter, Perfectionist, Precise Fist,
+    //             Stalwart, Strategic Pause, Mystic Blades, Energized Horns,
+    //             Mythical Arrows, Best Offense, Pony Power, Bass Boosted)
+    expect(unmodelledCount).toBeLessThanOrEqual(145)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
