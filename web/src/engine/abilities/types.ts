@@ -129,6 +129,10 @@ export interface OnTypeEffectivenessContext {
   moveId: string
   moveType: string
   modifier: number // UQ_4_12, read/write -- a full override, not an accumulated multiply
+  /** The SINGLE defending type currently being folded (this hook runs once per
+   * component of the defender's up-to-3 types, src/battle_util.c's three-type
+   * fold) -- bare type name, e.g. 'STEEL'. Not `defenderTypes` (the whole list). */
+  defType: string
 }
 
 export interface OnAfterTypeEffectivenessContext {
@@ -139,6 +143,9 @@ export interface OnAfterTypeEffectivenessContext {
   modifier: number // UQ_4_12, read/write
   perTypeModifiers: [number, number, number] // modifier1/2/3 from the three-type fold, read-only
   defenderTypes: string[] // IS_BATTLER_OF_TYPE(target, ...) checks -- e.g. Steelworker
+  weather: string
+  targetGrounded: boolean // !IsBattlerGroundedIgnoreType(target) checks -- BattlerBattleState's own `isGrounded`
+  defenderAtMaxHp: boolean // BATTLER_MAX_HP(target)
 }
 
 export interface OnChooseOffensiveStatContext {

@@ -73,11 +73,11 @@ describe('ate family + onStab batch', () => {
   })
 
   it('Draconize resolves a fully-blocked Dragon hit to neutral; Draconic Might aliases it', () => {
-    const ctx1: OnTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'm', moveType: 'DRAGON', modifier: 0 }
+    const ctx1: OnTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'm', moveType: 'DRAGON', modifier: 0, defType: 'DRAGON' }
     findAbility('ABILITY_DRACONIZE').onTypeEffectiveness!(ctx1)
     expect(ctx1.modifier).toBe(uq(1.0))
 
-    const ctx2: OnTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'm', moveType: 'DRAGON', modifier: 0 }
+    const ctx2: OnTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'm', moveType: 'DRAGON', modifier: 0, defType: 'DRAGON' }
     findAbility('ABILITY_DRACONIC_MIGHT').onTypeEffectiveness!(ctx2)
     expect(ctx2.modifier).toBe(uq(1.0))
     expect(findAbility('ABILITY_DRACONIC_MIGHT').addsType).toBe('DRAGON')
@@ -92,6 +92,9 @@ describe('ate family + onStab batch', () => {
       modifier: uq(1.0),
       perTypeModifiers: [uq(1.0), 0, 0],
       defenderTypes: ['STEEL'],
+      weather: 'NONE',
+      targetGrounded: true,
+      defenderAtMaxHp: true,
     })
     const c1 = mk()
     findAbility('ABILITY_STEELWORKER').onAfterTypeEffectiveness!(c1)
@@ -121,10 +124,10 @@ describe('ate family + onStab batch', () => {
   })
 
   it('Unown Power forces Hidden Power/Secret Power up to super-effective', () => {
-    const ctx: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_HIDDEN_POWER', moveType: 'NORMAL', modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [] }
+    const ctx: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_HIDDEN_POWER', moveType: 'NORMAL', modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true }
     findAbility('ABILITY_UNOWN_POWER').onAfterTypeEffectiveness!(ctx)
     expect(ctx.modifier).toBe(uq(2.0))
-    const ctx2: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [] }
+    const ctx2: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true }
     findAbility('ABILITY_UNOWN_POWER').onAfterTypeEffectiveness!(ctx2)
     expect(ctx2.modifier).toBe(uq(0.5))
   })
