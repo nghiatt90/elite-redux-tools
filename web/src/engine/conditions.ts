@@ -125,15 +125,19 @@ function evalItem(battler: ConditionBattlerContext, item: string[], holdEffect: 
 export function evaluateCondition(condition: ScriptCondition, ctx: DamageContext): boolean {
   switch (condition.kind) {
     case 'weather':
-      // No damage-modifier config in the current data uses a weather condition; the
-      // three-tier weather model (FieldState) needed to implement this properly
-      // belongs in finalDamage.ts's own weather block, not duplicated here.
+      // No damage-modifier config in the current data uses a weather condition
+      // (re-verified 2026-09-03, all 69 structured/non-legacy moveBehaviors.json
+      // configs); the three-tier weather model (FieldState) needed to implement
+      // this properly belongs in finalDamage.ts's own weather block, not
+      // duplicated here.
       throw new Error('ScriptCondition kind "weather" is not modelled by evaluateCondition')
     case 'damaged':
       return evalDamaged(battlerOf(ctx, condition.battler), condition.by)
     case 'status':
       return evalStatus(condition.status, battlerOf(ctx, condition.battler))
     case 'switching':
+      // Verified (2026-09-03, all 69 structured/non-legacy moveBehaviors.json
+      // configs): none currently reference this condition kind.
       throw new Error('ScriptCondition kind "switching" is not modelled by evaluateCondition')
     case 'actsAfter':
       return evalActsAfter(ctx, condition.before, condition.after)
@@ -142,6 +146,11 @@ export function evaluateCondition(condition: ScriptCondition, ctx: DamageContext
     case 'fieldEffect':
       return evalFieldEffect(ctx, condition.effect)
     case 'ability':
+      // Verified (2026-09-03, same sweep as 'switching' above): none currently
+      // reference this condition kind either. Re-check this if abilityHooks.json
+      // or moveBehaviors.json is regenerated from a newer upstream commit --
+      // this throw is a deliberate crash-not-silently-wrong choice, not a safe
+      // default, precisely because it's unverified for FUTURE data.
       throw new Error('ScriptCondition kind "ability" is not modelled by evaluateCondition (needs the ability registry)')
     case 'hp':
       if (condition.hp === 'HP_LOW') {

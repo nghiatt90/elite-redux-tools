@@ -188,3 +188,34 @@ describe('calcMoveBasePowerAfterModifiers', () => {
     expect(calcMoveBasePowerAfterModifiers(50, boosted)).toBeGreaterThan(50 * 2) // sanity: definitely more than a single x2
   })
 })
+
+describe('moveBehaviors.json data contract -- conditions.ts crash guard', () => {
+  // evaluateCondition (conditions.ts) deliberately THROWS on ScriptCondition kinds
+  // 'weather'/'switching'/'ability' rather than silently degrading -- verified
+  // manually against the current data (2026-09-03) that none of the structured
+  // (non-legacy_config) behaviors use them. This test turns that manual
+  // verification into a standing guarantee: if a future abilityHooks.json/
+  // moveBehaviors.json regeneration from a newer upstream commit introduces one,
+  // this fails loudly at test time instead of crashing a user's calculation.
+  it('no structured behavior references an unmodelled condition kind (weather/switching/ability)', () => {
+    const UNMODELLED_KINDS = new Set(['weather', 'switching', 'ability'])
+    const offenders: string[] = []
+
+    function scan(node: unknown, behaviorId: string): void {
+      if (Array.isArray(node)) {
+        for (const item of node) scan(item, behaviorId)
+      } else if (node && typeof node === 'object') {
+        const obj = node as Record<string, unknown>
+        if (typeof obj.kind === 'string' && UNMODELLED_KINDS.has(obj.kind)) offenders.push(`${behaviorId}: kind="${obj.kind}"`)
+        for (const value of Object.values(obj)) scan(value, behaviorId)
+      }
+    }
+
+    for (const [id, cfg] of Object.entries(behaviors)) {
+      if ('legacy_config' in (cfg as object)) continue // opaque, never reaches evaluateCondition
+      scan(cfg, id)
+    }
+
+    expect(offenders).toEqual([])
+  })
+})
