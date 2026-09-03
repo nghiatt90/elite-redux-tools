@@ -81,7 +81,10 @@ describe('ability registry coverage gate', () => {
     //             Ruin abilities)
     //     -> 174 (batch M: 12 "-ate"-family abilities whose extra hooks turned out
     //             to be aliases/small lambdas, + 7 plain onStab-only abilities)
-    expect(unmodelledCount).toBeLessThanOrEqual(174)
+    //     -> 157 (batch N: 17 onTypeEffectiveness/onAfterTypeEffectiveness --
+    //             neither hook is wired into calculate.ts's fold yet, but each port
+    //             is complete and correct for when it is)
+    expect(unmodelledCount).toBeLessThanOrEqual(157)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

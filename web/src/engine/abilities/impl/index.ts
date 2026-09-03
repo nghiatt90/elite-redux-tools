@@ -19,6 +19,7 @@ import { ADDS_TYPE_ABILITIES } from './12-adds-type'
 import { DEFENSIVE_MULTIPLIER_BATCH_C } from './13-defensive-multiplier-c'
 import { ON_STAT_BATCH_A } from './14-on-stat-a'
 import { ATE_FAMILY_AND_ONSTAB } from './15-ate-family-and-onstab'
+import { TYPE_EFFECTIVENESS_ABILITIES } from './16-type-effectiveness'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -37,6 +38,7 @@ registerAbilities(ADDS_TYPE_ABILITIES)
 registerAbilities(DEFENSIVE_MULTIPLIER_BATCH_C)
 registerAbilities(ON_STAT_BATCH_A)
 registerAbilities(ATE_FAMILY_AND_ONSTAB)
+registerAbilities(TYPE_EFFECTIVENESS_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'
