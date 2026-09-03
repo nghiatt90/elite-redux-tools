@@ -207,6 +207,23 @@ describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
     expect(withCombustion).toBeGreaterThanOrEqual(Math.floor(withoutAbility * 1.4))
   })
 
+  it('Pixilate (ported ability) both retypes a Normal move AND grants it STAB end-to-end', async () => {
+    await import('./abilities/impl/index')
+    // Tackle (Normal) into a Dragon/Ground defender: neutral, no STAB (Garchomp isn't
+    // Normal-type) -> baseline 1x. With Pixilate: Tackle becomes Fairy (2x vs Dragon,
+    // neutral vs Ground -> 2x) AND gains STAB (1.5x) -- 3x total, unmistakably larger.
+    const dragonGroundDefender = battler('SPECIES_GARCHOMP')
+    const withoutAbility = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), defender: dragonGroundDefender })).rolls[15]
+    const withPixilate = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        defender: dragonGroundDefender,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PIXILATE', innates: [null, null, null] } }),
+      }),
+    ).rolls[15]
+    expect(withPixilate).toBeGreaterThanOrEqual(Math.floor(withoutAbility * 2.5))
+  })
+
   it('an ability not in the registry (or not damage-relevant) is silently a no-op, not an error', () => {
     expect(() =>
       calculateMoveDamage(

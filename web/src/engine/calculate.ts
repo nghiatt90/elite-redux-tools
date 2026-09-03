@@ -28,7 +28,7 @@ import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, type BasePowe
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
-import { abilityCoverageNote, computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasStabOverride } from './abilities/dispatchCalc'
+import { abilityCoverageNote, computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasStabOverride, resolveEffectiveMoveType } from './abilities/dispatchCalc'
 import type { AbilitySlots } from './abilities/dispatch'
 import type { BattleConstants, BattlerBattleState, BattleStatKey, DamageContext, FieldBattleState } from './types'
 
@@ -293,17 +293,23 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
  * `critChanceDenominator === 1`. */
 function calcInternal(
   scenario: DamageCalcScenario,
-  moveType: string,
+  inputMoveType: string,
   split: 'PHYSICAL' | 'SPECIAL',
   forceCrit: boolean,
-): { dmg: number; typeEffectiveness: number; unmodelled: string[] } {
+): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
   const unmodelled: string[] = []
   const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
   const statStageRatios = battleConstants.statStageRatios
 
+  // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
+  // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
+  // terrain-boost base-power check all key off the resolved type, not the move's
+  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
+  const { moveType } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType)
+
   const defenderTypes = distinctDefendingTypes(defender.types)
   const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, defender.isGrounded)
-  if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, unmodelled }
+  if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 
   const isCrit = forceCrit
 
@@ -389,7 +395,7 @@ function calcInternal(
     hitsSemiInvulnerableInAir: false,
   })
 
-  return { dmg: finalResult.dmg, typeEffectiveness, unmodelled }
+  return { dmg: finalResult.dmg, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 }
 
 /** StabMultiplierInHalves, src/battle_util.c:7469-7481. Move === Struggle and
@@ -459,11 +465,11 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
 
   function fullDamageForRoll(damageRoll: number, forceCrit: boolean): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
     const primary = evaluate(moveType, forceCrit)
-    let best = { ...primary, effectiveMoveType: moveType }
+    let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
     if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
       const alt = evaluate(move.type2, forceCrit)
-      if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: move.type2 }
+      if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
     }
 
     if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }

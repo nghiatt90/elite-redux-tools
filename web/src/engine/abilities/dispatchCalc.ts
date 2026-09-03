@@ -11,7 +11,7 @@ import type { AbilitySlots } from './dispatch'
 import { forEachAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
-import type { DefensiveMultiplierContext, OffensiveMultiplierContext, OnCritContext, OnStatContext } from './types'
+import type { DefensiveMultiplierContext, OffensiveMultiplierContext, OnCritContext, OnMoveTypeContext, OnStatContext } from './types'
 
 // v1 has no Mold Breaker / Neutralizing Gas / Gastro Acid modelling yet -- every
 // ability's `breakable` flag is simply never suppressed. Isolated into one function
@@ -122,6 +122,34 @@ export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: 
  * order) that returns true grants pseudo-STAB, matching the C's break-on-first-hit.
  * Adaptability itself is a separate flag check, not an onStab hook -- see hasFlag.
  */
+/**
+ * GetMoveTypeInternal's onMoveType loop (src/battle_main.c:5210-5211) -- the "-ate"
+ * abilities. The C only overrides the type when the move's ORIGINAL type is Normal
+ * (`CHECK(moveType == TYPE_NORMAL)` inside the ATE_ABILITY macro, src/abilities.cc:
+ * 295-301) and, per ON_ABILITY's reverse-slot iteration plus the C's bare `return`
+ * on the first hit, the first ability (innate3 -> ... -> ability) that actually
+ * changes the type wins -- ties can't occur in practice since real movesets never
+ * carry two "-ate" abilities on the same mon, but the semantics are ported exactly
+ * regardless. Ability holder is always the ATTACKER (`checkMoldBreaker = FALSE`
+ * ON_ABILITY call, no cross-battler loop, unlike onOffensiveMultiplier/onCrit).
+ */
+export function resolveEffectiveMoveType(attackerSlots: AbilitySlots, moveId: string, moveType: string): { moveType: string; ateBoost: boolean } {
+  if (moveType !== 'NORMAL') return { moveType, ateBoost: false }
+  let resolved = moveType
+  let ateBoost = false
+  forEachAbility(attackerSlots, isSuppressed, (impl) => {
+    if (!impl.onMoveType) return
+    const ctx: OnMoveTypeContext = { battlerId: 'attacker', moveId, moveType, ateBoost: false }
+    impl.onMoveType(ctx)
+    if (ctx.moveType !== moveType) {
+      resolved = ctx.moveType
+      ateBoost = ctx.ateBoost
+      return 'break'
+    }
+  })
+  return { moveType: resolved, ateBoost }
+}
+
 export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): boolean {
   let granted = false
   forEachAbility(attackerSlots, isSuppressed, (impl) => {
