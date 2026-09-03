@@ -365,6 +365,10 @@ function calcInternal(
       attackerHp: attacker.condition.hp,
       attackerMaxHp: attacker.condition.maxHp,
       attackerActsFirst: scenario.attackerActsFirst,
+      weather: field.weather,
+      defenderTypes: defender.types,
+      attackerStatus1: attacker.condition.status1,
+      sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
     },
     {
       defenderId: 'defender',

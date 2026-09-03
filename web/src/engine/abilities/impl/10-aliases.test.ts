@@ -26,6 +26,10 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     attackerHp: 100,
     attackerMaxHp: 100,
     attackerActsFirst: true,
+    weather: 'NONE',
+    defenderTypes: [],
+    attackerStatus1: new Set(),
+    sameMoveTurnsInARow: 0,
     ...overrides,
   }
 }

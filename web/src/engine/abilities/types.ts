@@ -61,6 +61,10 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * (DamageContext's own attackerActsFirst, threaded through -- see its doc there
    * for why this is a UI-level fact rather than something derived). */
   attackerActsFirst: boolean
+  weather: string // FieldBattleState['weather'], same bare kind as DefensiveMultiplierContext's
+  defenderTypes: string[] // IS_BATTLER_OF_TYPE(target, ...) checks -- 1-3 bare type names
+  attackerStatus1: Set<string> // gBattleMons[battler].status1 bare flags -- mirrors OnCritContext's defenderStatus1
+  sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns[battler] -- Rhythmic
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
