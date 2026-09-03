@@ -92,7 +92,10 @@ describe('ability registry coverage gate', () => {
     //             onMoveType conversions + composites of already-ported abilities)
     //     -> 124 (batch Q: 9 onChooseOffensiveStat/onChooseDefensiveStat stat-swap
     //             abilities, now that the hooks are wired into calculate.ts)
-    expect(unmodelledCount).toBeLessThanOrEqual(124)
+    //     -> 122 (batch R: Cosmic Wings, unblocked by fixing
+    //             resolveEffectiveMoveType's incorrect Normal-only gate; Super
+    //             Strain's onRecoil, unwired but complete)
+    expect(unmodelledCount).toBeLessThanOrEqual(122)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
