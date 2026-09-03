@@ -11,6 +11,7 @@ import { CRIT_BATTLE_A } from './04-crit-a'
 import { ATE_ABILITIES } from './05-ate-abilities'
 import { OFFENSIVE_MULTIPLIER_BATCH_C } from './06-offensive-multiplier-c'
 import { DEFENSIVE_MULTIPLIER_BATCH_B } from './07-defensive-multiplier-b'
+import { SWARM_FAMILY } from './08-swarm-family'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -21,6 +22,7 @@ registerAbilities(CRIT_BATTLE_A)
 registerAbilities(ATE_ABILITIES)
 registerAbilities(OFFENSIVE_MULTIPLIER_BATCH_C)
 registerAbilities(DEFENSIVE_MULTIPLIER_BATCH_B)
+registerAbilities(SWARM_FAMILY)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'
