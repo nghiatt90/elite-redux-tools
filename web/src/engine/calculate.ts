@@ -339,7 +339,18 @@ function calcInternal(
     attacker.abilitySlots,
     defender.abilitySlots,
     { battlerId: 'attacker', defenderId: 'defender', moveId: move.id, moveType, moveSplit: split, moveFlags: move.flags, basePower: power, typeEffectiveness, isCrit },
-    { defenderId: 'defender', attackerId: 'attacker', moveId: move.id, moveType, moveSplit: split, moveFlags: move.flags, typeEffectiveness, isCrit },
+    {
+      defenderId: 'defender',
+      attackerId: 'attacker',
+      moveId: move.id,
+      moveType,
+      moveSplit: split,
+      moveFlags: move.flags,
+      typeEffectiveness,
+      isCrit,
+      weather: field.weather,
+      defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
+    },
   )
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),

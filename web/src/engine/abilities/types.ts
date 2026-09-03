@@ -59,6 +59,8 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   moveFlags: Record<string, true>
   typeEffectiveness: number // UQ_4_12
   isCrit: boolean
+  weather: string // FieldBattleState['weather'] -- ER's bare weather kind, e.g. 'HAIL'
+  defenderAtMaxHp: boolean // BATTLER_MAX_HP(battler), include/battle.h:752
 }
 
 export interface OnStatContext {

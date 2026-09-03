@@ -5,13 +5,15 @@
 import { registerAbilities } from '../registry'
 import { DECLARATIVE_ABILITIES } from './00-flags'
 import { OFFENSIVE_MULTIPLIER_BATCH_A } from './01-offensive-multiplier-a'
+import { DEFENSIVE_MULTIPLIER_BATCH_A } from './02-defensive-multiplier-a'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
 registerAbilities(OFFENSIVE_MULTIPLIER_BATCH_A)
+registerAbilities(DEFENSIVE_MULTIPLIER_BATCH_A)
 
 // Further Task 10 batches land here as they're ported, e.g.:
-//   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './02-offensive-multiplier-b'
+//   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'
 //   registerAbilities(OFFENSIVE_MULTIPLIER_BATCH_B)
 
 // Registered LAST: registerAbilities throws on a duplicate id, so an ability that's
