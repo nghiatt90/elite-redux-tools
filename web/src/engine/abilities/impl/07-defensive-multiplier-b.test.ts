@@ -24,6 +24,7 @@ function ctx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveMult
     weather: 'NONE',
     defenderAtMaxHp: true,
     attackerActsFirst: true,
+    defenderTypes: [],
     ...overrides,
   }
 }

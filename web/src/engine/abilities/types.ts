@@ -65,6 +65,7 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   defenderTypes: string[] // IS_BATTLER_OF_TYPE(target, ...) checks -- 1-3 bare type names
   attackerStatus1: Set<string> // gBattleMons[battler].status1 bare flags -- mirrors OnCritContext's defenderStatus1
   sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns[battler] -- Rhythmic
+  terrain: string | null // ConditionFieldContext['terrain'] -- bare TERRAIN_* name, or null
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -79,6 +80,7 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   weather: string // FieldBattleState['weather'] -- ER's bare weather kind, e.g. 'HAIL'
   defenderAtMaxHp: boolean // BATTLER_MAX_HP(battler), include/battle.h:752
   attackerActsFirst: boolean // see OffensiveMultiplierContext's doc on the same field
+  defenderTypes: string[] // IS_BATTLER_OF_TYPE(battler, ...) -- the ability holder's OWN types (== the move's target here)
 }
 
 export interface OnStatContext {

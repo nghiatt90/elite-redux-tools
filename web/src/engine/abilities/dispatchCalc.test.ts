@@ -27,11 +27,11 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST')
     const defender = slots('ABILITY_TEST_HALVE')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
-    defenderTypes: [], attackerStatus1: new Set(), sameMoveTurnsInARow: 0,
+    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null,
     ...base }, { attackerId: 'attacker', ...base })
 
     // mulModifier(mulModifier(1024, 1536), 512) == mulModifier(1536, 512)
@@ -46,11 +46,11 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST2')
     const defender = slots('ABILITY_TEST_FORTKNOX')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
-    defenderTypes: [], attackerStatus1: new Set(), sameMoveTurnsInARow: 0,
+    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null,
     ...base }, { attackerId: 'attacker', ...base })
     expect(result).toBe(uq(1.0)) // the attacker's own boost never ran
   })

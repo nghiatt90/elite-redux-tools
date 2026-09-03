@@ -30,6 +30,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     defenderTypes: [],
     attackerStatus1: new Set(),
     sameMoveTurnsInARow: 0,
+    terrain: null,
     ...overrides,
   }
 }

@@ -369,6 +369,7 @@ function calcInternal(
       defenderTypes: defender.types,
       attackerStatus1: attacker.condition.status1,
       sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
+      terrain: field.terrain,
     },
     {
       defenderId: 'defender',
@@ -382,6 +383,7 @@ function calcInternal(
       weather: field.weather,
       defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
       attackerActsFirst: scenario.attackerActsFirst,
+      defenderTypes: defender.types,
     },
   )
   const finalResult = calcFinalDamage(dmg, {

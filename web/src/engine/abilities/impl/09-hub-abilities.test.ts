@@ -32,6 +32,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderTypes: [],
     attackerStatus1: new Set(),
     sameMoveTurnsInARow: 0,
+    terrain: null,
     ...overrides,
   }
 }
@@ -51,6 +52,7 @@ function defCtx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveM
     weather: 'NONE',
     defenderAtMaxHp: true,
     attackerActsFirst: true,
+    defenderTypes: [],
     ...overrides,
   }
 }
