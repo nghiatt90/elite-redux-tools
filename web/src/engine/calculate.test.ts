@@ -405,6 +405,17 @@ describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat 
   })
 })
 
+describe('calculateMoveDamage -- Dark Aura boosts Dark moves for either battler (src/abilities.cc:2493-2506)', () => {
+  it('Assurance (Dark) is boosted 1.33x when the DEFENDER holds Dark Aura (APPLY_ON_ANY)', async () => {
+    await import('./abilities/impl/index')
+    const withoutAura = calculateMoveDamage(scenario({ move: moveData('MOVE_ASSURANCE') }))
+    const withAura = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ASSURANCE'), defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_DARK_AURA', innates: [null, null, null] } }) }),
+    )
+    expect(withAura.rolls[15]).toBeGreaterThan(withoutAura.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

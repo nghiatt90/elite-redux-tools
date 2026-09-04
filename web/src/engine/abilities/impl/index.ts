@@ -34,6 +34,7 @@ import { INFILTRATE_ABILITIES } from './27-infiltrate'
 import { MODIFY_MOVE_FLAGS_ABILITIES } from './28-modify-move-flags'
 import { ABILITY_ACTIVATION_ABILITIES } from './29-ability-activation'
 import { SECONDARY_STAT_BLEND_ABILITIES } from './30-secondary-stat-blend'
+import { AURA_ABILITIES } from './31-aura'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -67,6 +68,7 @@ registerAbilities(INFILTRATE_ABILITIES)
 registerAbilities(MODIFY_MOVE_FLAGS_ABILITIES)
 registerAbilities(ABILITY_ACTIVATION_ABILITIES)
 registerAbilities(SECONDARY_STAT_BLEND_ABILITIES)
+registerAbilities(AURA_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

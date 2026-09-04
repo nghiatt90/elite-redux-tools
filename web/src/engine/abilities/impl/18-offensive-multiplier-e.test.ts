@@ -42,6 +42,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     terrain: null,
     movePriority: 0,
     attackerAbilityOn: false,
+    isAuraBreakActive: false,
     ...overrides,
   }
 }

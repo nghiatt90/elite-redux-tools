@@ -242,7 +242,19 @@ describe('ability registry coverage gate', () => {
     //             patch at all -- they already pointed at these abilities from
     //             an earlier batch and just started working once the target
     //             stopped being an unmodelled stub.
-    expect(unmodelledCount).toBeLessThanOrEqual(27)
+    //     -> 25  (batch AE: Dark Aura/Fairy Aura -- boost same-type moves used by
+    //             EITHER battler (onOffensiveMultiplierFor: APPLY_ON_ANY), reduced
+    //             instead if any battler on the field holds an auraBreak-flagged
+    //             ability (new AbilityFlags.auraBreak, set on the 2 abilities that
+    //             carry it: Aura Break, Nihil Blaster -- IsAbilityOnField's own
+    //             `FALSE` checkMoldBreaker means this is never suppressed).
+    //             isAuraBreakActive is computed once per hit in calculate.ts from
+    //             both battlers' slots (hasFlag), since the hook itself only ever
+    //             sees its own holder's facts. Pixie Power's existing alias to
+    //             Fairy Aura needed no patch -- it just started working. Verified
+    //             end-to-end: a defender-held Dark Aura still boosts the
+    //             attacker's Dark move.
+    expect(unmodelledCount).toBeLessThanOrEqual(25)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

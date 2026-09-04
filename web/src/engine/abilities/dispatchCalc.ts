@@ -208,7 +208,7 @@ export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnIn
  * data. */
 export function hasFlag(
   slots: AbilitySlots,
-  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate',
+  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak',
   moldBroken = false,
 ): boolean {
   let found = false

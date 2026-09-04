@@ -11,7 +11,7 @@ export const DECLARATIVE_ABILITIES: AbilityImpl[] = [
   { id: 'ABILITY_ADAPTABILITY', src: 'src/abilities.cc:1512', flags: { adaptability: true } },
   { id: 'ABILITY_ANTICIPATION', src: 'src/abilities.cc:1646', flags: { breakable: true } },
   { id: 'ABILITY_AROMA_VEIL', src: 'src/abilities.cc:2271', flags: { breakable: true } },
-  { id: 'ABILITY_AURA_BREAK', src: 'src/abilities.cc:2522', flags: { breakable: true } },
+  { id: 'ABILITY_AURA_BREAK', src: 'src/abilities.cc:2522', flags: { breakable: true, auraBreak: true } },
   { id: 'ABILITY_BLOOD_BATH', src: 'src/abilities.cc:7947', flags: { breakable: true } },
   { id: 'ABILITY_BLOODLUST', src: 'src/abilities.cc:7969', flags: { breakable: true } },
   { id: 'ABILITY_CHEATING_DEATH', src: 'src/abilities.cc:5391', flags: { noDamageHits: 2 } },

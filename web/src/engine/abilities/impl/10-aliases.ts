@@ -406,7 +406,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_NIHIL_BLASTER',
     src: 'src/abilities.cc:11662',
-    flags: { breakable: true },
+    flags: { breakable: true, auraBreak: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
   },
   {

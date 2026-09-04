@@ -37,6 +37,7 @@ describe('ally-only batch S', () => {
         terrain: null,
         movePriority: 0,
         attackerAbilityOn: false,
+        isAuraBreakActive: false,
       },
       {
         defenderId: 'defender',

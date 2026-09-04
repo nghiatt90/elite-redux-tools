@@ -502,6 +502,7 @@ function calcInternal(
       terrain: field.terrain,
       movePriority: move.priority ?? 0,
       attackerAbilityOn: attacker.abilityOn,
+      isAuraBreakActive: hasFlag(attacker.abilitySlots, 'auraBreak') || hasFlag(defender.abilitySlots, 'auraBreak'),
     },
     {
       defenderId: 'defender',

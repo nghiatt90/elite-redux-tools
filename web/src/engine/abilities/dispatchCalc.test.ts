@@ -31,7 +31,7 @@ describe('computeAbilityMultiplier', () => {
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
-    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null, movePriority: 0, attackerAbilityOn: false,
+    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null, movePriority: 0, attackerAbilityOn: false, isAuraBreakActive: false,
     ...base }, { attackerId: 'attacker', ...base })
 
     // mulModifier(mulModifier(1024, 1536), 512) == mulModifier(1536, 512)
@@ -50,7 +50,7 @@ describe('computeAbilityMultiplier', () => {
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
-    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null, movePriority: 0, attackerAbilityOn: false,
+    attackerStatus1: new Set(), sameMoveTurnsInARow: 0, terrain: null, movePriority: 0, attackerAbilityOn: false, isAuraBreakActive: false,
     ...base }, { attackerId: 'attacker', ...base })
     expect(result).toBe(uq(1.0)) // the attacker's own boost never ran
   })

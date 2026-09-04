@@ -77,6 +77,12 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * is a self-check (APPLY_ON_SELF, the default), so this is always the loop's own
    * current battler when it's actually invoked. */
   attackerAbilityOn: boolean
+  /** IsAbilityOnField(FALSE, ...auraBreak...) -- true if EITHER battler holds an
+   * `auraBreak`-flagged ability (Aura Break, Nihil Blaster). Computed once from
+   * both battlers' slots and handed in here since this hook only ever sees its
+   * own holder's context, not the other battler's abilities; the C's own
+   * explicit `FALSE` (checkMoldBreaker) means this is never suppressed. */
+  isAuraBreakActive: boolean
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -399,6 +405,11 @@ export interface AbilityFlags {
   halfRecoil: boolean
   foesMinRoll: boolean
   megaLauncherBoost: boolean
+  /** Set on exactly 2 abilities in the census (Aura Break, Nihil Blaster) --
+   * Dark Aura/Fairy Aura's own condition checks whether ANY battler on the field
+   * has this flag (IsAbilityOnField(FALSE, ...auraBreak...), src/abilities.cc:2496,
+   * 2513), not a general-purpose flag other abilities are expected to read. */
+  auraBreak: boolean
   noDamageHits: number
   ruinStat: number
   negatesBurnAtkDrop: boolean

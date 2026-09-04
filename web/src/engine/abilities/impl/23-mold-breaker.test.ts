@@ -64,6 +64,7 @@ describe('mold breaker batch W', () => {
       terrain: null,
       movePriority: 0,
       attackerAbilityOn: false,
+      isAuraBreakActive: false,
     }
     const defensiveCtx = {
       defenderId: 'defender',
