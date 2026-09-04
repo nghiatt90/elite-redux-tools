@@ -480,6 +480,7 @@ function calcInternal(
     },
     attackerIsLatiOrLatias: attacker.condition.baseSpeciesId === 'SPECIES_LATIAS' || attacker.condition.baseSpeciesId === 'SPECIES_LATIOS',
     defenderHasUnnerve: battlerHasAbility(defender.abilitySlots, 'ABILITY_UNNERVE', () => false),
+    moveDoubleDamageVsMega: Boolean(move.flags.doubleDamageVsMega),
     moveEffect: move.effect,
     moveArgumentStatus: null, // EFFECT_DOUBLE_DMG_IF_STATUS1's argument -- caller can extend later
   }

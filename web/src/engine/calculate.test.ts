@@ -910,6 +910,21 @@ describe('calculateMoveDamage -- Punching Glove boosts punch-based moves, static
   })
 })
 
+describe('calculateMoveDamage -- doubleDamageVsMega doubles power against a Mega-evolved defender (battle_util.c:7003-7005)', () => {
+  it('Behemoth Bash doubles power vs a Mega defender, not a non-Mega one', () => {
+    const skarmory = (isMegaEvolved: boolean) =>
+      battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, isMegaEvolved }) })
+
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_BEHEMOTH_BASH'), defender: skarmory(false) }))
+    const vsMega = calculateMoveDamage(scenario({ move: moveData('MOVE_BEHEMOTH_BASH'), defender: skarmory(true) }))
+    expect(vsMega.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const nonBashBaseline = calculateMoveDamage(scenario({ defender: skarmory(false) }))
+    const nonBashVsMega = calculateMoveDamage(scenario({ defender: skarmory(true) }))
+    expect(nonBashVsMega.rolls[15]).toBe(nonBashBaseline.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

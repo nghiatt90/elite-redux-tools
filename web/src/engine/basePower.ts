@@ -253,6 +253,10 @@ export interface BasePowerModifierContext extends DamageContext {
    * berry's own Unnerve check in calculate.ts, which looks from the DEFENDER's
    * side at the attacker). Gems only. */
   defenderHasUnnerve: boolean
+  /** move.flags.doubleDamageVsMega -- checked FIRST, before the hold-effect switch
+   * (:7003-7005), against ConditionBattlerContext.defender.isMegaEvolved (same
+   * GetBaseSpeciesFromMega equivalence as Eternal Flower's own check). */
+  moveDoubleDamageVsMega: boolean
   /** the move's own `effect` (MoveBehavior id), used for the direct-condition switch
    * below -- distinct from moveBehaviors.json lookups, which key by the same ids. */
   moveEffect: string | null
@@ -274,6 +278,9 @@ function isPoisonedForMove(status1: Set<string>): boolean {
  */
 export function calcMoveBasePowerAfterModifiers(actualPower: number, ctx: BasePowerModifierContext): number {
   let modifier = uq(1.0)
+
+  // doubleDamageVsMega (:7003-7005) -- checked before the hold-effect switch.
+  if (ctx.moveDoubleDamageVsMega && ctx.defender.isMegaEvolved) modifier = mulModifier(modifier, uq(2.0))
 
   // Attacker's hold effect (:7011-7034)
   const { resolvedHoldEffect, strength, holdEffectType } = ctx.attackerHoldEffect

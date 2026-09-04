@@ -151,6 +151,7 @@ function bpmCtx(overrides: Partial<BasePowerModifierContext> = {}): BasePowerMod
     attackerHoldEffect: { resolvedHoldEffect: null, strength: null, holdEffectType: null },
     attackerIsLatiOrLatias: false,
     defenderHasUnnerve: false,
+    moveDoubleDamageVsMega: false,
     moveEffect: null,
     moveArgumentStatus: null,
     ...overrides,
@@ -178,6 +179,13 @@ describe('calcMoveBasePowerAfterModifiers', () => {
     expect(calcMoveBasePowerAfterModifiers(100, withGem)).toBe(150)
     expect(calcMoveBasePowerAfterModifiers(100, { ...withGem, moveType: 'WATER' })).toBe(100)
     expect(calcMoveBasePowerAfterModifiers(100, { ...withGem, defenderHasUnnerve: true })).toBe(100)
+  })
+
+  it('doubleDamageVsMega doubles power against a Mega-evolved defender only', () => {
+    const vsMega = bpmCtx({ moveDoubleDamageVsMega: true, defender: battler({ isMegaEvolved: true }) })
+    expect(calcMoveBasePowerAfterModifiers(100, vsMega)).toBe(200)
+    expect(calcMoveBasePowerAfterModifiers(100, { ...vsMega, defender: battler({ isMegaEvolved: false }) })).toBe(100)
+    expect(calcMoveBasePowerAfterModifiers(100, { ...vsMega, moveDoubleDamageVsMega: false })).toBe(100)
   })
 
   it('EFFECT_FACADE doubles power when the attacker has a major status', () => {
