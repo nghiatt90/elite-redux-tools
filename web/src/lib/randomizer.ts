@@ -194,6 +194,16 @@ export function acceptSetSize(set: Uint8Array): number {
   return n
 }
 
+/** How many of an accept-set's members the randomizer can actually *produce*. Banned
+ * abilities are never rolled, so they only ever appear as an untouched source -- a
+ * condition with no generable member cannot enumerate candidates at all and can only
+ * be satisfied by a fixed slot. */
+export function generableSize(set: Uint8Array, ctx: RandomizerContext): number {
+  let n = 0
+  for (let i = 0; i < set.length; i++) if (set[i] && !ctx.bannedByNum[i]) n++
+  return n
+}
+
 export function acceptSetMembers(set: Uint8Array): number[] {
   const out: number[] = []
   for (let i = 0; i < set.length; i++) if (set[i]) out.push(i)
@@ -249,8 +259,13 @@ export interface MatchResult {
   /** Minimum number of distinct result elements that cover every condition -- a
    * lower cost means an ability/compound/group did double duty. */
   slotCost: number
-  /** [activeAbility, ...innates] for the winning abilityNum choice. */
+  /** [activeAbility, ...innates] for the winning abilityNum choice -- the values
+   * matching and slot cost are computed over. */
   resultAbilities: number[]
+  /** *Every* declared ability slot rolled, in slot order -- what the in-game ability
+   * picker actually offers, of which `abilityNum` is the one to select. Only the
+   * chosen one is live at a time, so this is display context, not part of matching. */
+  abilityResults: number[]
 }
 
 function popcount4(n: number): number {
@@ -260,13 +275,24 @@ function popcount4(n: number): number {
 /** Brute-forced minimum hitting set over `memberBitmasks` (one bitmask per condition,
  * bit j set iff result element j satisfies it) -- at most 16 subsets since a result
  * has at most 4 elements. */
-function minHittingSetSize(resultLength: number, memberBitmasks: number[]): number {
+function minHittingSetSize(
+  resultLength: number,
+  memberBitmasks: ArrayLike<number>,
+  conditionCount: number = memberBitmasks.length,
+): number {
   const full = 1 << resultLength
   let best = resultLength
   for (let subset = 1; subset < full; subset++) {
     const size = popcount4(subset)
     if (size >= best) continue
-    if (memberBitmasks.every((bits) => (subset & bits) !== 0)) best = size
+    let hitsAll = true
+    for (let c = 0; c < conditionCount; c++) {
+      if ((subset & memberBitmasks[c]) === 0) {
+        hitsAll = false
+        break
+      }
+    }
+    if (hitsAll) best = size
   }
   return best
 }
@@ -288,12 +314,16 @@ export function evaluateSpeciesAtPid(
   const innateResults = species.innateSources.map((src) =>
     randomizeOne(src, species.num, pid, ctx, modes.innateRandomized),
   )
+  // Rolled for every slot rather than per k: the roll depends only on the source
+  // ability, so the picker's other options are already determined and worth reporting.
+  const abilityResults = species.abilityOptions.map((src) =>
+    randomizeOne(src, species.num, pid, ctx, modes.abilityRandomized),
+  )
 
   let best: MatchResult | null = null
 
   for (let k = 0; k < species.abilityOptions.length; k++) {
-    const abilityResult = randomizeOne(species.abilityOptions[k], species.num, pid, ctx, modes.abilityRandomized)
-    const r = [abilityResult, ...innateResults]
+    const r = [abilityResults[k], ...innateResults]
 
     const memberBitmasks: number[] = []
     let allSatisfied = true
@@ -312,7 +342,7 @@ export function evaluateSpeciesAtPid(
 
     const slotCost = minHittingSetSize(r.length, memberBitmasks)
     if (!best || slotCost < best.slotCost || (slotCost === best.slotCost && k < best.abilityNum)) {
-      best = { speciesNum: species.num, pid, abilityNum: k, slotCost, resultAbilities: r }
+      best = { speciesNum: species.num, pid, abilityNum: k, slotCost, resultAbilities: r, abilityResults }
     }
   }
 
@@ -402,76 +432,98 @@ function findTrivialAllMatchK(
   return null
 }
 
-// A single locked condition's candidates commonly run into the tens of millions (the
-// plan's own estimate: ~25M PIDs for one locked ability, once every source slot is
-// counted) -- well past V8's native Set/Map size cap (~2^24 entries in this Node/V8),
-// which a plain `Set<number>` silently hits with "Set maximum size exceeded". This is
-// a bare open-addressing hash set over uint32 values instead, backed by typed arrays,
-// with no such ceiling; it grows by doubling when its load factor passes 0.7.
-class Uint32HashSet {
-  private table: Uint32Array
-  private occupied: Uint8Array
-  private mask: number
-  size = 0
+// ---------------------------------------------------------------------------------
+// Fused enumeration
+// ---------------------------------------------------------------------------------
 
-  constructor(initialCapacity = 1 << 16) {
-    let capacity = 1
-    while (capacity < initialCapacity) capacity *= 2
-    this.table = new Uint32Array(capacity)
-    this.occupied = new Uint8Array(capacity)
-    this.mask = capacity - 1
-  }
-
-  add(value: number): void {
-    if ((this.size + 1) / this.table.length > 0.7) this.grow()
-    let idx = (Math.imul(value, 2654435761) >>> 0) & this.mask
-    while (this.occupied[idx]) {
-      if (this.table[idx] === value) return
-      idx = (idx + 1) & this.mask
-    }
-    this.table[idx] = value
-    this.occupied[idx] = 1
-    this.size++
-  }
-
-  private grow(): void {
-    const oldTable = this.table
-    const oldOccupied = this.occupied
-    const newCapacity = this.table.length * 2
-    this.table = new Uint32Array(newCapacity)
-    this.occupied = new Uint8Array(newCapacity)
-    this.mask = newCapacity - 1
-    this.size = 0
-    for (let i = 0; i < oldTable.length; i++) {
-      if (oldOccupied[i]) this.add(oldTable[i])
-    }
-  }
-
-  *[Symbol.iterator](): Generator<number> {
-    for (let i = 0; i < this.table.length; i++) {
-      if (this.occupied[i]) yield this.table[i]
-    }
-  }
+/** Precomputed per-species scratch for `searchSpecies`'s hot loop.
+ *
+ * `reverseSearchOne` + `evaluateSpeciesAtPid` say the same thing far more readably and
+ * remain the reference the tests check against. This exists because the readable form
+ * allocates: an array per terminal seed, a ~4.4M-entry array per (source, target)
+ * pair, several small arrays per candidate, and -- worst of all -- a dedup hash table
+ * sized from the candidate estimate, which for a 6-source search rounded up to 2^26
+ * entries, i.e. ~335MB allocated and discarded *per species*. At tens of millions of
+ * candidates that allocation, not the arithmetic, was the runtime.
+ *
+ * Two structural facts make the fused form possible:
+ *
+ * 1. **One seed0 serves every source.** A candidate is `q = seed0 ^ sources[g]`, and
+ *    the roll for source `i` is over `sources[i] ^ q === seed0 ^ (sources[i] ^
+ *    sources[g])`. So every (candidate, source) combination is `chain(seed0 ^ d)` for
+ *    some pairwise XOR `d` -- at most 16 distinct values for 6 sources, against the 36
+ *    chain walks a naive m x m loop would do.
+ * 2. **Dedup needs no table.** A PID reachable through several source slots is emitted
+ *    once per slot; keeping only the lowest-indexed slot whose result lands in the
+ *    generating accept-set picks exactly one, and every value that test needs is
+ *    already sitting in `chainCache`.
+ */
+interface FusedPlan {
+  /** Number of deduped variable (randomized, non-banned) source ability values. */
+  m: number
+  sources: Int32Array
+  /** Distinct pairwise XORs of `sources`; `deltas[0]` is always 0. */
+  deltas: Int32Array
+  /** `deltaIndex[g * m + i]` -> index into `deltas` for `sources[g] ^ sources[i]`. */
+  deltaIndex: Int32Array
+  /** Per declared slot: index into `sources`, or -1 when the slot is a fixed constant
+   * (banned source, or its randomizer mode is off) whose value is in `*Fixed`. */
+  abilitySlot: Int32Array
+  abilityFixed: Int32Array
+  innateSlot: Int32Array
+  innateFixed: Int32Array
 }
 
-function generateCandidatePids(
-  targetAcceptSet: Uint8Array,
-  sources: number[],
-  species: SpeciesEntry,
-  ctx: RandomizerContext,
-): Uint32HashSet {
-  // ~4.1M candidates per (source, target) pair at the real modulus -- size the table
-  // up front so `add` isn't doubling+rehashing repeatedly during the biggest search.
-  const perPairEstimate = Math.ceil(65536 / (ctx.abilitiesCount - 1)) * 65536 * 1.1
-  const targetCount = acceptSetSize(targetAcceptSet)
-  const pids = new Uint32HashSet(Math.ceil((sources.length * targetCount * perPairEstimate) / 0.7) + 16)
-  for (const source of sources) {
-    for (let target = 0; target < ctx.abilitiesCount; target++) {
-      if (!targetAcceptSet[target]) continue
-      for (const pid of reverseSearchOne(source, target, species.num, ctx)) pids.add(pid)
+function buildFusedPlan(species: SpeciesEntry, ctx: RandomizerContext, modes: SearchModes): FusedPlan {
+  const sourceList = variableSources(species, ctx, modes)
+  const m = sourceList.length
+  const sources = Int32Array.from(sourceList)
+  const indexOfSource = new Map<number, number>()
+  sourceList.forEach((v, i) => indexOfSource.set(v, i))
+
+  const deltaList: number[] = [0]
+  const deltaOf = new Map<number, number>([[0, 0]])
+  const deltaIndex = new Int32Array(m * m)
+  for (let g = 0; g < m; g++) {
+    for (let i = 0; i < m; i++) {
+      const d = (sources[g] ^ sources[i]) >>> 0
+      let idx = deltaOf.get(d)
+      if (idx === undefined) {
+        idx = deltaList.length
+        deltaList.push(d)
+        deltaOf.set(d, idx)
+      }
+      deltaIndex[g * m + i] = idx
     }
   }
-  return pids
+
+  function mapSlots(values: number[], enabled: boolean) {
+    const slot = new Int32Array(values.length)
+    const fixed = new Int32Array(values.length)
+    values.forEach((src, i) => {
+      if (isFixed(src, ctx, enabled)) {
+        slot[i] = -1
+        fixed[i] = src
+      } else {
+        slot[i] = indexOfSource.get(src)!
+      }
+    })
+    return { slot, fixed }
+  }
+
+  const ability = mapSlots(species.abilityOptions, modes.abilityRandomized)
+  const innate = mapSlots(species.innateSources, modes.innateRandomized)
+
+  return {
+    m,
+    sources,
+    deltas: Int32Array.from(deltaList),
+    deltaIndex,
+    abilitySlot: ability.slot,
+    abilityFixed: ability.fixed,
+    innateSlot: innate.slot,
+    innateFixed: innate.fixed,
+  }
 }
 
 // ---------------------------------------------------------------------------------
@@ -530,33 +582,152 @@ export function searchSpecies(
   const trivialK = findTrivialAllMatchK(species, conditions, ctx, modes)
   if (trivialK !== null) return { kind: 'trivial-all-match', abilityNum: trivialK }
 
-  const sources = variableSources(species, ctx, modes)
-  if (sources.length === 0) return empty
+  const plan = buildFusedPlan(species, ctx, modes)
+  if (plan.m === 0) return empty
 
-  let generatingCondition = conditions[0]
+  // Candidates are enumerated from one condition's accept-set, so that condition must
+  // contain something the randomizer can actually roll. Picking on raw accept-set size
+  // alone would let an all-banned condition (size 1, unbeatable) win the tie-break and
+  // enumerate nothing -- silently reporting zero matches, and doing so only when that
+  // condition happened to be listed first. Rank on generable size instead, and drop
+  // conditions with none: those are satisfiable only by a fixed slot, which
+  // findTrivialAllMatchK has already ruled on above.
+  let generatingCondition: Condition | null = null
+  let generatingSize = Infinity
   for (const c of conditions) {
-    if (acceptSetSize(c.acceptSet) < acceptSetSize(generatingCondition.acceptSet)) generatingCondition = c
+    const size = generableSize(c.acceptSet, ctx)
+    if (size > 0 && size < generatingSize) {
+      generatingSize = size
+      generatingCondition = c
+    }
   }
+  // Every condition needs a fixed slot to be satisfiable, and findTrivialAllMatchK
+  // found no single ability choice where they all are -- so nothing matches.
+  if (!generatingCondition) return empty
 
-  const candidates = generateCandidatePids(generatingCondition.acceptSet, sources, species, ctx)
+  const { m, deltas, deltaIndex, abilitySlot, abilityFixed, innateSlot, innateFixed } = plan
+  const gen = generatingCondition.acceptSet
+  const banned = ctx.bannedByNum
+  const abilitiesCount = ctx.abilitiesCount
+  const modulus = abilitiesCount - 1
+  const speciesIso = iso(species.num)
+  const nAbility = abilitySlot.length
+  const nInnate = innateSlot.length
+  const rLen = 1 + nInnate
+  const nConditions = conditions.length
+  const acceptSets = conditions.map((c) => c.acceptSet)
+
+  // Reused across every candidate -- see FusedPlan for why that matters.
+  const chainCache = new Int32Array(deltas.length)
+  const r = new Int32Array(rLen)
+  const bitmasks = new Int32Array(nConditions)
 
   let total = 0
   const bySlotCost = new Map<number, number>()
   const promoted: MatchResult[] = []
   const reservoir: MatchResult[] = []
 
-  for (const pid of candidates) {
-    const match = evaluateSpeciesAtPid(species, pid, conditions, ctx, modes)
-    if (!match) continue
-    total++
-    bySlotCost.set(match.slotCost, (bySlotCost.get(match.slotCost) ?? 0) + 1)
-    insertPromoted(promoted, match, promotedSize)
+  /** Called only for results actually kept (promoted or sampled), so a MatchResult's
+   * arrays are allocated a few thousand times rather than tens of millions. */
+  function materialize(gRow: number, k: number, slotCost: number, pid: number): MatchResult {
+    const abilityResults: number[] = []
+    for (let i = 0; i < nAbility; i++) {
+      const idx = abilitySlot[i]
+      abilityResults.push(idx < 0 ? abilityFixed[i] : chainCache[deltaIndex[gRow + idx]])
+    }
+    const resultAbilities: number[] = [abilityResults[k]]
+    for (let i = 0; i < nInnate; i++) {
+      const idx = innateSlot[i]
+      resultAbilities.push(idx < 0 ? innateFixed[i] : chainCache[deltaIndex[gRow + idx]])
+    }
+    return { speciesNum: species.num, pid, abilityNum: k, slotCost, resultAbilities, abilityResults }
+  }
 
-    if (reservoir.length < reservoirSize) {
-      reservoir.push(match)
-    } else {
-      const j = Math.floor(rng() * total)
-      if (j < reservoirSize) reservoir[j] = match
+  for (let target = 0; target < abilitiesCount; target++) {
+    if (!gen[target] || banned[target]) continue
+    const remainder = (target - 1) % modulus
+    for (let h = remainder; h < 65536; h += modulus) {
+      const base = h << 16
+      for (let lo = 0; lo < 65536; lo++) {
+        let cur = (base | lo) >>> 0
+        // Walk back through any banned-reroll chain exactly as
+        // seed0CandidatesFromTerminal does -- every seed0 on it reaches `target` too.
+        for (;;) {
+          const seed0 = isoInverse(cur)
+
+          chainCache[0] = target // delta 0 is the terminal seed itself
+          for (let d = 1; d < deltas.length; d++) {
+            let seed = (seed0 ^ deltas[d]) >>> 0
+            let value: number
+            do {
+              seed = (Math.imul(MULTIPLIER, seed) + INCREMENT) >>> 0
+              value = ((seed >>> 16) % modulus) + 1
+            } while (banned[value])
+            chainCache[d] = value
+          }
+
+          for (let g = 0; g < m; g++) {
+            const gRow = g * m
+            let canonical = true
+            for (let i = 0; i < g; i++) {
+              if (gen[chainCache[deltaIndex[gRow + i]]]) {
+                canonical = false
+                break
+              }
+            }
+            if (!canonical) continue
+
+            for (let i = 0; i < nInnate; i++) {
+              const idx = innateSlot[i]
+              r[1 + i] = idx < 0 ? innateFixed[i] : chainCache[deltaIndex[gRow + idx]]
+            }
+
+            let bestK = -1
+            let bestCost = rLen + 1
+            for (let k = 0; k < nAbility; k++) {
+              const idx = abilitySlot[k]
+              r[0] = idx < 0 ? abilityFixed[k] : chainCache[deltaIndex[gRow + idx]]
+
+              let satisfied = true
+              for (let c = 0; c < nConditions; c++) {
+                const set = acceptSets[c]
+                let bits = 0
+                for (let j = 0; j < rLen; j++) if (set[r[j]]) bits |= 1 << j
+                if (bits === 0) {
+                  satisfied = false
+                  break
+                }
+                bitmasks[c] = bits
+              }
+              if (!satisfied) continue
+
+              const slotCost = minHittingSetSize(rLen, bitmasks, nConditions)
+              if (slotCost < bestCost) {
+                bestCost = slotCost
+                bestK = k
+              }
+            }
+            if (bestK < 0) continue
+
+            total++
+            bySlotCost.set(bestCost, (bySlotCost.get(bestCost) ?? 0) + 1)
+            const pid = (seed0 ^ plan.sources[g] ^ speciesIso) >>> 0
+
+            if (promoted.length < promotedSize || bestCost <= promoted[promoted.length - 1].slotCost) {
+              insertPromoted(promoted, materialize(gRow, bestK, bestCost, pid), promotedSize)
+            }
+            if (reservoir.length < reservoirSize) {
+              reservoir.push(materialize(gRow, bestK, bestCost, pid))
+            } else {
+              const j = Math.floor(rng() * total)
+              if (j < reservoirSize) reservoir[j] = materialize(gRow, bestK, bestCost, pid)
+            }
+          }
+
+          cur = isoInverse(cur)
+          if (!banned[((cur >>> 16) % modulus) + 1]) break
+        }
+      }
     }
   }
 
