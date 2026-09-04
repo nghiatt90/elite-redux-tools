@@ -150,6 +150,7 @@ function bpmCtx(overrides: Partial<BasePowerModifierContext> = {}): BasePowerMod
     isSpecial: false,
     attackerHoldEffect: { resolvedHoldEffect: null, strength: null, holdEffectType: null },
     attackerIsLatiOrLatias: false,
+    defenderHasUnnerve: false,
     moveEffect: null,
     moveArgumentStatus: null,
     ...overrides,
@@ -170,6 +171,13 @@ describe('calcMoveBasePowerAfterModifiers', () => {
 
     const withTypePower = bpmCtx({ moveType: 'GRASS', attackerHoldEffect: { resolvedHoldEffect: 'HOLD_EFFECT_TYPE_POWER', strength: 20, holdEffectType: 'GRASS' } })
     expect(calcMoveBasePowerAfterModifiers(100, withTypePower)).toBe(120)
+  })
+
+  it('a type-matching Gem boosts power unless the defender has Unnerve', () => {
+    const withGem = bpmCtx({ moveType: 'FIRE', attackerHoldEffect: { resolvedHoldEffect: 'HOLD_EFFECT_GEMS', strength: 50, holdEffectType: 'FIRE' } })
+    expect(calcMoveBasePowerAfterModifiers(100, withGem)).toBe(150)
+    expect(calcMoveBasePowerAfterModifiers(100, { ...withGem, moveType: 'WATER' })).toBe(100)
+    expect(calcMoveBasePowerAfterModifiers(100, { ...withGem, defenderHasUnnerve: true })).toBe(100)
   })
 
   it('EFFECT_FACADE doubles power when the attacker has a major status', () => {

@@ -809,6 +809,35 @@ describe('calculateMoveDamage -- Metronome (item) scales up with sameMoveTurnsIn
   })
 })
 
+describe('calculateMoveDamage -- type-matching Gems boost power unless the defender has Unnerve (battle_main.c:5233-5238)', () => {
+  it('boosts a matching-type hit, does nothing off-type, and is suppressed by the defender\'s Unnerve', () => {
+    const gemAttacker = (overrides: Partial<BattlerBattleState> = {}) =>
+      battler('SPECIES_GARCHOMP', {
+        holdEffectType: 'DRAGON',
+        holdEffectStrength: 50,
+        condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_GEMS' }),
+        ...overrides,
+      })
+
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_OUTRAGE') })) // Dragon
+    const withGem = calculateMoveDamage(scenario({ move: moveData('MOVE_OUTRAGE'), attacker: gemAttacker() }))
+    expect(withGem.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const offTypeBaseline = calculateMoveDamage(scenario())
+    const offTypeWithGem = calculateMoveDamage(scenario({ attacker: gemAttacker() }))
+    expect(offTypeWithGem.rolls[15]).toBe(offTypeBaseline.rolls[15])
+
+    const withUnnerveDefender = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_OUTRAGE'),
+        attacker: gemAttacker(),
+        defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_UNNERVE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withUnnerveDefender.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

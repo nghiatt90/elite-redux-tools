@@ -248,6 +248,11 @@ export interface BasePowerModifierContext extends DamageContext {
   isSpecial: boolean
   attackerHoldEffect: HoldEffectBoost
   attackerIsLatiOrLatias: boolean // Soul Dew
+  /** IsUnnerveAbilityOnOpposingSide(battlerAtk) -- the DEFENDER's own Unnerve,
+   * checked from the attacker's perspective (opposite direction from the resist
+   * berry's own Unnerve check in calculate.ts, which looks from the DEFENDER's
+   * side at the attacker). Gems only. */
+  defenderHasUnnerve: boolean
   /** the move's own `effect` (MoveBehavior id), used for the direct-condition switch
    * below -- distinct from moveBehaviors.json lookups, which key by the same ids. */
   moveEffect: string | null
@@ -279,8 +284,13 @@ export function calcMoveBasePowerAfterModifiers(actualPower: number, ctx: BasePo
     modifier = mulModifier(modifier, holdEffectModifier)
   else if ((resolvedHoldEffect === 'HOLD_EFFECT_PLATE' || resolvedHoldEffect === 'HOLD_EFFECT_TYPE_POWER') && holdEffectType === ctx.moveType)
     modifier = mulModifier(modifier, holdEffectModifier)
-  // HOLD_EFFECT_GEMS (per-turn "gem consumed this attack" state) is not modelled --
-  // a static calculator has no notion of "this attack consumed a gem".
+  // HOLD_EFFECT_GEMS's gTurnStructs[].gemBoost looks like turn-history state, but
+  // ApplyTypeOverrideInformation/SetTypeBeforeUsingMove (battle_main.c:5222-5261)
+  // recompute it fresh on every single move use from static facts (item type match
+  // + Unnerve) -- there's no actual history involved, just a cache this static
+  // calculator doesn't need and can inline directly.
+  else if (resolvedHoldEffect === 'HOLD_EFFECT_GEMS' && holdEffectType === ctx.moveType && !ctx.defenderHasUnnerve)
+    modifier = mulModifier(modifier, holdEffectModifier)
 
   // Move-effect direct switch (:7035-7071)
   switch (ctx.moveEffect) {
