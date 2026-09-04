@@ -232,12 +232,54 @@ const UNMODELLED_MISC_EFFECTS = new Set(['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFE
  * isn't part of DamageContext (only BattlerBattleState carries it, see its own
  * doc) so it's a separate parameter here rather than widening that shared shape
  * for this one rarely-used case. */
-export function applyPreModifierBasePower(basePower: number, moveEffect: string | null, miscEffect: string | null, ctx: DamageContext, attackerAlliesFainted: number): BasePowerResult {
+/**
+ * GetMoveTypeInternal's MOVE_WEATHER_BALL case (src/battle_main.c:5124-5133) and
+ * CalcMoveBasePower's EFFECT_WEATHER_BALL case (:6854-6858) resolve to the SAME
+ * "is some weather (or Aurora Borealis) active" fact, so both the type and the
+ * power-doubling share this one function. `null` means no weather active, no
+ * Aurora Borealis -- move stays Normal-type, base power unchanged.
+ *
+ * Chloroplast (a 4-ability declarative bitfield, always-Fire regardless of
+ * weather) is NOT checked here -- it isn't in this pipeline's emitted damage-
+ * relevant bitfield set yet, and adding it means a data regeneration this
+ * project's convention requires asking about first. A Chloroplast holder using
+ * Weather Ball outside Sun therefore under-counts (stays Normal/no boost) rather
+ * than over-counting -- the safe-side gap, not a silent wrong-direction one.
+ */
+export function weatherBallType(weather: string, attackerHasAuroraBorealis: boolean): string | null {
+  if (attackerHasAuroraBorealis) return 'ICE'
+  if (weather === 'RAIN_PERMANENT' || weather === 'RAIN_TEMPORARY' || weather === 'RAIN_PRIMAL') return 'WATER'
+  if (weather === 'SUN_PERMANENT' || weather === 'SUN_TEMPORARY' || weather === 'SUN_PRIMAL') return 'FIRE'
+  if (weather === 'SANDSTORM') return 'ROCK'
+  if (weather === 'HAIL') return 'ICE'
+  if (weather === 'FOG') return 'GHOST'
+  return null
+}
+
+export function applyPreModifierBasePower(
+  basePower: number,
+  moveEffect: string | null,
+  miscEffect: string | null,
+  ctx: DamageContext,
+  attackerAlliesFainted: number,
+  attackerNaturalGiftPower: number | null,
+  attackerHasAuroraBorealis: boolean,
+): BasePowerResult {
+  if (moveEffect === 'EFFECT_WEATHER_BALL') {
+    return { power: weatherBallType(ctx.field.weather, attackerHasAuroraBorealis) !== null ? basePower * 2 : basePower, unmodelled: [] }
+  }
   if (moveEffect === 'EFFECT_WAKE_UP_SLAP') {
     return { power: ctx.defender.status1.has('STATUS1_SLEEP') || ctx.defender.hasComatose ? basePower * 2 : basePower, unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_SMELLINGSALT') {
     return { power: ctx.defender.status1.has('STATUS1_PARALYSIS') ? basePower * 2 : basePower, unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_NATURAL_GIFT') {
+    // Without a berry the C returns 0 outright (the move fails) -- ported as a
+    // literal 0 rather than an unmodelled note, since it's a complete, correct
+    // answer, not a gap; the caller's existing Math.max(power, 1) floor still
+    // applies on top, same as every other move.
+    return { power: attackerNaturalGiftPower ?? 0, unmodelled: [] }
   }
   if (moveEffect !== 'EFFECT_MISC_HIT') return { power: basePower, unmodelled: [] }
 
@@ -271,9 +313,7 @@ export const UNMODELLED_BASE_POWER_EFFECTS = new Set([
   'EFFECT_ROLLOUT',
   'EFFECT_MAGNITUDE',
   'EFFECT_TRIPLE_KICK',
-  'EFFECT_WEATHER_BALL',
   'EFFECT_PURSUIT',
-  'EFFECT_NATURAL_GIFT',
   'EFFECT_FOCUS_PUNCH',
   'EFFECT_BEAT_UP',
 ])

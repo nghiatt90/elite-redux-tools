@@ -30,6 +30,7 @@ import {
   calcMoveBasePowerAfterModifiers,
   percentToModifier,
   UNMODELLED_BASE_POWER_EFFECTS,
+  weatherBallType,
   type BasePowerModifierContext,
   type MoveBehaviors,
 } from './basePower'
@@ -423,14 +424,23 @@ function calcInternal(
   const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
   const statStageRatios = battleConstants.statStageRatios
 
-  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory) is checked
-  // FIRST and, when it matches, short-circuits the whole rest of GetMoveTypeInternal
-  // -- an -ate ability never gets a chance to run (src/battle_main.c:5148-5150,
-  // each switch case in that function returns immediately on match). When the
-  // attacker doesn't hold the right item, this falls through exactly like the C's
-  // `break` does, leaving the move at its declared type for the ability loop below.
+  const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
+
+  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
+  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
+  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
+  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
+  // 5148-5150,5180-5182, each switch case in that function returns immediately on
+  // match). When none applies, this falls through exactly like the C's `break`
+  // does, leaving the move at its declared type for the ability loop below.
   const itemMoveType =
-    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect ? (attacker.holdEffectType ?? inputMoveType) : null
+    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
+      ? (attacker.holdEffectType ?? inputMoveType)
+      : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
+        ? attacker.naturalGift.type
+        : move.effect === 'EFFECT_WEATHER_BALL'
+          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
+          : null
 
   // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
@@ -502,7 +512,15 @@ function calcInternal(
   const behaviorResult = applyMoveBehaviorDamage(move.power, move.effect, moveBehaviors, toDamageContext(scenario))
   unmodelled.push(...behaviorResult.unmodelled)
   if (move.effect && UNMODELLED_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: not modelled (needs turn history)`)
-  const preModifierResult = applyPreModifierBasePower(behaviorResult.power, move.effect, move.miscEffect, toDamageContext(scenario), attacker.alliesFainted)
+  const preModifierResult = applyPreModifierBasePower(
+    behaviorResult.power,
+    move.effect,
+    move.miscEffect,
+    toDamageContext(scenario),
+    attacker.alliesFainted,
+    attacker.naturalGift?.power ?? null,
+    attackerHasAuroraBorealis,
+  )
   unmodelled.push(...preModifierResult.unmodelled)
   const power = calcMoveBasePowerAfterModifiers(Math.max(preModifierResult.power, 1), basePowerCtx)
 

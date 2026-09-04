@@ -88,6 +88,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     extraStatLevel: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 },
     holdEffectStrength: null,
     holdEffectType: null,
+    naturalGift: null,
     isTransformed: false,
     canEvolveStrict: false,
     isInfatuatedWithOpponent: false,
@@ -908,6 +909,44 @@ describe('calculateMoveDamage -- Punching Glove boosts punch-based moves, static
       scenario({ attacker: glove({ abilitySlots: { ability: 'ABILITY_MIXED_MARTIAL_ARTS', innates: [null, null, null] } }) }),
     )
     expect(mixedMartialArts.rolls[15]).toBeGreaterThan(nonPunchBaseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Natural Gift follows the held berry\'s power and type (battle_main.c:5082-5083,5180-5182, battle_util.c:6863-6866)', () => {
+  it('uses the berry\'s own power and type, or 0 power without one', () => {
+    const withCheri = battler('SPECIES_GARCHOMP', {
+      naturalGift: { power: 80, type: 'ELECTRIC' },
+      condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999 }),
+    })
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_NATURAL_GIFT'), attacker: withCheri }))
+    expect(result.effectiveMoveType).toBe('ELECTRIC')
+    expect(result.rolls[15]).toBeGreaterThan(0)
+
+    const withoutBerry = calculateMoveDamage(scenario({ move: moveData('MOVE_NATURAL_GIFT') }))
+    expect(withoutBerry.effectiveMoveType).toBe('NORMAL')
+    // Without a berry, CalcMoveBasePower returns 0 outright -- the engine's own
+    // Math.max(power, 1) floor still applies on top, so this isn't literally 0,
+    // just far weaker than the berry-boosted hit above.
+    expect(withoutBerry.rolls[15]).toBeLessThan(result.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Weather Ball follows the active weather (or Aurora Borealis) (battle_main.c:5124-5133, battle_util.c:6854-6858)', () => {
+  it('becomes Water and doubles power in Rain, stays Normal with no weather', () => {
+    const noWeather = calculateMoveDamage(scenario({ move: moveData('MOVE_WEATHER_BALL') }))
+    expect(noWeather.effectiveMoveType).toBe('NORMAL')
+
+    const inRain = calculateMoveDamage(scenario({ move: moveData('MOVE_WEATHER_BALL'), field: fieldState({ weather: 'RAIN_PERMANENT' }) }))
+    expect(inRain.effectiveMoveType).toBe('WATER')
+    expect(inRain.rolls[15]).toBeGreaterThan(noWeather.rolls[15])
+  })
+
+  it('Aurora Borealis forces Ice regardless of weather', async () => {
+    await import('./abilities/impl/index')
+    const withAuroraBorealis = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_WEATHER_BALL'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_AURORA_BOREALIS', innates: [null, null, null] } }) }),
+    )
+    expect(withAuroraBorealis.effectiveMoveType).toBe('ICE')
   })
 })
 

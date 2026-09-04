@@ -257,6 +257,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     // was unstripped until the resist-berry item pass found it, with no test ever
     // having exercised Plate/Type Power to catch it).
     holdEffectType: item?.holdEffectType ? bareType(item.holdEffectType) : null,
+    naturalGift: item?.naturalGift ? { power: item.naturalGift.power, type: bareType(item.naturalGift.type) } : null,
     isTransformed: false,
     canEvolveStrict: species.evolutions.length > 0,
     isInfatuatedWithOpponent: false,

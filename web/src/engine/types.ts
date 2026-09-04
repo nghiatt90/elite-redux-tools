@@ -189,6 +189,13 @@ export interface BattlerBattleState {
   extraStatLevel: Record<BattleStatKey, number> // ER's "extra stat levels", default 0 each
   holdEffectStrength: number | null // holdEffectStrength, for Plate/Type Power/Expert Belt-style items
   holdEffectType: string | null // Plate/Type Power's secondary type
+  /** items.json's own `naturalGift` block, power+type only (the confusion/frostbite
+   * secondary effect isn't modelled, same as every other move's secondary effect in
+   * this engine) -- null when not holding a berry. EFFECT_NATURAL_GIFT
+   * (CalcMoveBasePower/GetMoveTypeInternal) reads this directly rather than via
+   * resolvedHoldEffect/holdEffectType, which are a DIFFERENT mechanism (Plate/Type
+   * Power/Gems' own type-MATCH check) that berries don't participate in. */
+  naturalGift: { power: number; type: string } | null
   isTransformed: boolean // STATUS2_TRANSFORMED (Metal Powder exemption)
   canEvolveStrict: boolean // Eviolite eligibility
   isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler
