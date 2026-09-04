@@ -49,6 +49,7 @@ describe('ate family + onStab batch', () => {
       moveFlags: { contact: true as const },
       moveEffectChance: 0,
       ateBoost: false,
+      defenderHasComatose: false,
       basePower: 40,
       typeEffectiveness: uq(1.0),
       isCrit: false,

@@ -591,6 +591,38 @@ describe('calculateMoveDamage -- Superconductor/Normalize convert the effective 
   })
 })
 
+describe('calculateMoveDamage -- Dreamcatcher/Dreamscape double damage vs a sleeping defender (src/abilities.cc:3983-3992,10367-10375)', () => {
+  it('Dreamcatcher doubles damage against a sleeping defender, Dreamscape doubles and adds a flat 1.2x', () => {
+    const awakeDefender = battler('SPECIES_SKARMORY')
+    const sleepingDefender = battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', status1: new Set(['STATUS1_SLEEP']) }) })
+
+    const baseline = calculateMoveDamage(scenario({ defender: awakeDefender }))
+    const dreamcatcher = calculateMoveDamage(
+      scenario({
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_DREAMCATCHER', innates: [null, null, null] } }),
+        defender: sleepingDefender,
+      }),
+    )
+    expect(dreamcatcher.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const dreamcatcherAwake = calculateMoveDamage(
+      scenario({
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_DREAMCATCHER', innates: [null, null, null] } }),
+        defender: awakeDefender,
+      }),
+    )
+    expect(dreamcatcherAwake.rolls[15]).toBe(baseline.rolls[15])
+
+    const dreamscape = calculateMoveDamage(
+      scenario({
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_DREAMSCAPE', innates: [null, null, null] } }),
+        defender: sleepingDefender,
+      }),
+    )
+    expect(dreamscape.rolls[15]).toBeGreaterThan(dreamcatcher.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

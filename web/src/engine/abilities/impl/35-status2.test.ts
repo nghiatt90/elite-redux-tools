@@ -21,6 +21,7 @@ function offCtx(defenderIsConfused: boolean, defenderIsEnraged: boolean): Offens
     moveFlags: {},
     moveEffectChance: 0,
     ateBoost: false,
+    defenderHasComatose: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

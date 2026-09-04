@@ -358,7 +358,22 @@ describe('ability registry coverage gate', () => {
     //             this port, and no ability sets ateBoost while landing on
     //             TYPE_NORMAL) -- ported faithfully and unit-tested at the hook
     //             level, verified end-to-end only for the type-conversion half.
-    expect(unmodelledCount).toBeLessThanOrEqual(10)
+    //     -> 8   (batch AO: Dreamcatcher and Dreamscape. The real C scans the whole
+    //             opposing SIDE for any asleep/Comatose battler -- this engine only
+    //             ever models one defender, so that reduces to "is the defender
+    //             asleep," and the C's own recursion guard (skip the boost when
+    //             this call IS the ability's own out-of-turn retaliatory hit)
+    //             depends on gProcessingExtraAttacks state this engine never sets,
+    //             so it's always false here and safely omitted. New
+    //             OffensiveMultiplierContext.defenderHasComatose field (existing
+    //             ConditionBattlerContext.hasComatose, not yet threaded to this
+    //             context). Victory Bomb (same onMoveType-scoped-to-a-synthetic-
+    //             attack shape as Dreamcatcher's guard) is documented as
+    //             permanently unmodelled on OnMoveTypeContext instead of ported --
+    //             its onDefender half isn't a damage hook at all. Verified
+    //             end-to-end: both abilities double damage vs a sleeping defender,
+    //             Dreamscape additionally stacks its flat 1.2x.
+    expect(unmodelledCount).toBeLessThanOrEqual(8)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

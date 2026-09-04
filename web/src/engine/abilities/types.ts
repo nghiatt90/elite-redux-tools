@@ -99,7 +99,11 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   defenderIsConfused: boolean // STATUS2_CONFUSION on the move's TARGET -- Cosmic Daze/Cosmic Dust
   defenderIsEnraged: boolean // STATUS2_ENRAGED on the move's TARGET -- Cosmic Daze/Cosmic Dust
   defenderStatus1: Set<string> // gBattleMons[target].status1 bare flags -- Blood Stigma
-  defenderHasBloodStainEffect: boolean // IsBloodStainAffected(target) -- Blood Stigma
+  defenderHasBloodStainEffect: boolean
+  /** ConditionBattlerContext.hasComatose for the DEFENDER -- Dreamcatcher/Dreamscape's
+   * own "is asleep" check treats Comatose as always-asleep, same as
+   * attackerHasAnyStatus/defenderHasAnyStatus do elsewhere. */
+  defenderHasComatose: boolean // IsBloodStainAffected(target) -- Blood Stigma
   attackerIsUnaware: boolean // IsUnaware(battler) -- Pretty Princess's OWN Unaware check (self, not the defender's)
   defenderHasAnyLoweredStat: boolean // HasAnyLoweredStat(target) -- Pretty Princess
 }
@@ -258,6 +262,19 @@ export interface OnMoveTypeContext {
   ateBoost: boolean // read/write
   moveFlags: Record<string, true> // Banshee/Power Metal/Sand Song/Snow Song's sound-flag check
 }
+
+/**
+ * Victory Bomb (src/abilities.cc:8980-8991) is left permanently unmodelled, same
+ * class of gap as the onMoldBreaker abilities documented above OnMoldBreaker: its
+ * onMoveType CHECK(gProcessingExtraAttacks) CHECK(gQueuedExtraAttackData[0].ability
+ * == ability) scopes the Fire-type override to ONE specific synthetic attack -- the
+ * holder's own post-faint retaliatory Explosion (its onDefender hook), which this
+ * non-turn-simulating engine never constructs. Its onDefender itself isn't a damage
+ * hook at all (it decides whether to launch an out-of-turn counter-move on the
+ * DEFENDER'S death, not this move's own damage), so there's no partial port
+ * available here -- the whole mechanic is out of scope for a static single-hit
+ * damage number, like Dreamcatcher's own FILTER_NOT guard (see 40-dreamcatcher.ts).
+ */
 
 export interface OnRecoilContext {
   battlerId: string

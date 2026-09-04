@@ -30,6 +30,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     moveFlags: {},
     moveEffectChance: 0,
     ateBoost: false,
+    defenderHasComatose: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

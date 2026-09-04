@@ -21,6 +21,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     moveFlags: {},
     moveEffectChance: 30,
     ateBoost: false,
+    defenderHasComatose: false,
     basePower: 70,
     typeEffectiveness: uq(1.0),
     isCrit: false,

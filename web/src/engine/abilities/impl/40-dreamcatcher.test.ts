@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { PRETTY_PRINCESS_ABILITIES } from './37-pretty-princess'
+import { DREAMCATCHER_ABILITIES } from './40-dreamcatcher'
 import type { AbilityImpl, OffensiveMultiplierContext } from '../types'
-import { uq } from '../../fixed'
+import { uq, mulModifier } from '../../fixed'
 
 function findAbility(id: string): AbilityImpl {
-  const entry = PRETTY_PRINCESS_ABILITIES.find((a) => a.id === id)
+  const entry = DREAMCATCHER_ABILITIES.find((a) => a.id === id)
   if (!entry) throw new Error(`${id} not found in batch`)
   return entry
 }
@@ -21,7 +21,6 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     moveFlags: {},
     moveEffectChance: 0,
     ateBoost: false,
-    defenderHasComatose: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,
@@ -43,33 +42,48 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     defenderIsEnraged: false,
     defenderStatus1: new Set(),
     defenderHasBloodStainEffect: false,
+    defenderHasComatose: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
     ...overrides,
   }
 }
 
-describe('pretty princess batch AL', () => {
-  it('boosts 1.5x when the defender has any lowered stat and the attacker is not Unaware', () => {
-    const c = ctx({ defenderHasAnyLoweredStat: true })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
-    expect(c.modifier).toBe(uq(1.5))
+describe('Dreamcatcher batch AO', () => {
+  it('doubles damage against a sleeping defender', () => {
+    const c = ctx({ defenderStatus1: new Set(['STATUS1_SLEEP']) })
+    findAbility('ABILITY_DREAMCATCHER').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(uq(2.0))
   })
 
-  it('does not boost when the defender has no lowered stat', () => {
-    const c = ctx({ defenderHasAnyLoweredStat: false })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
-    expect(c.modifier).toBe(uq(1.0))
+  it('doubles damage against a Comatose defender too', () => {
+    const c = ctx({ defenderHasComatose: true })
+    findAbility('ABILITY_DREAMCATCHER').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(uq(2.0))
   })
 
-  it("the ATTACKER's own Unaware suppresses the boost even if the defender has a lowered stat", () => {
-    const c = ctx({ defenderHasAnyLoweredStat: true, attackerIsUnaware: true })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
+  it('does not boost against an awake defender', () => {
+    const c = ctx()
+    findAbility('ABILITY_DREAMCATCHER').onOffensiveMultiplier!(c)
     expect(c.modifier).toBe(uq(1.0))
+  })
+})
+
+describe('Dreamscape batch AO', () => {
+  it('always applies its own flat 1.2x, on top of the 2x vs a sleeping defender', () => {
+    const c = ctx({ defenderStatus1: new Set(['STATUS1_SLEEP']) })
+    findAbility('ABILITY_DREAMSCAPE').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(mulModifier(uq(2.0), uq(1.2)))
+  })
+
+  it('applies the flat 1.2x even against an awake defender (unconditional)', () => {
+    const c = ctx()
+    findAbility('ABILITY_DREAMSCAPE').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(uq(1.2))
   })
 
   it('every entry cites a src line', () => {
-    for (const ability of PRETTY_PRINCESS_ABILITIES) {
+    for (const ability of DREAMCATCHER_ABILITIES) {
       expect(ability.src).toMatch(/^src\/abilities\.cc:\d+$/)
     }
   })
