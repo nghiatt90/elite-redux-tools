@@ -41,6 +41,7 @@ import {
   computeOnStatModifier,
   hasFlag,
   hasStabOverride,
+  isIronFistBoosted,
   resolveEffectiveMoveType,
 } from './abilities/dispatchCalc'
 import { battlerHasAbility } from './abilities/dispatch'
@@ -577,7 +578,7 @@ function calcInternal(
       !computeInfiltratesScreens(attacker.abilitySlots, { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness),
-    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow),
+    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow, move.flags, split),
     hasSuperEffectiveBoost: isSuperEffective && move.effect === 'EFFECT_MISC_HIT',
     // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
     // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
@@ -660,7 +661,13 @@ function weatherDamageMultiplier(weather: FieldBattleState['weather'], move: Mov
   return null
 }
 
-function attackerFinalItemMultiplier(attacker: BattlerBattleState, typeEffectiveness: number, sameMoveTurnsInARow: number): number {
+function attackerFinalItemMultiplier(
+  attacker: BattlerBattleState,
+  typeEffectiveness: number,
+  sameMoveTurnsInARow: number,
+  moveFlags: Record<string, true>,
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS',
+): number {
   const effect = attacker.condition.resolvedHoldEffect
   if (effect === 'HOLD_EFFECT_LIFE_ORB') return uq(1.3)
   if (effect === 'HOLD_EFFECT_EXPERT_BELT' && typeEffectiveness >= uq(2.0)) return uq(1.2)
@@ -668,8 +675,8 @@ function attackerFinalItemMultiplier(attacker: BattlerBattleState, typeEffective
     const percentBoost = Math.min(sameMoveTurnsInARow * (attacker.holdEffectStrength ?? 0), 100)
     return uq(1.0) + percentToModifier(percentBoost)
   }
-  // Amulet Coin (Meowth Partner-only) and Punching Glove (needs IsIronFistBoosted,
-  // an ability check) are deferred.
+  if (effect === 'HOLD_EFFECT_PUNCHING_GLOVE' && isIronFistBoosted(attacker.abilitySlots, moveFlags, moveSplit)) return uq(1.1)
+  // Amulet Coin (Meowth Partner-only) is deferred.
   return uq(1.0)
 }
 

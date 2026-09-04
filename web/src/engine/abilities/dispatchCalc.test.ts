@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasFortKnox, hasStabOverride } from './dispatchCalc'
+import { computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasFortKnox, hasStabOverride, isIronFistBoosted } from './dispatchCalc'
 import { registerAbilities, _resetRegistryForTests } from './registry'
 import { APPLY_ON_ANY } from './applyOn'
 import { ALWAYS_CRIT, NEVER_CRIT } from '../crit'
@@ -141,6 +141,39 @@ describe('hasStabOverride and hasFlag', () => {
     registerAbilities([adapt])
     expect(hasFlag(slots('ABILITY_TEST_ADAPT'), 'adaptability')).toBe(true)
     expect(hasFlag(slots(null), 'adaptability')).toBe(false)
+  })
+})
+
+describe('isIronFistBoosted', () => {
+  it("the move's own static punchBased flag wins outright, no ability needed", () => {
+    expect(isIronFistBoosted(slots(null), { punchBased: true }, 'PHYSICAL')).toBe(true)
+  })
+
+  it('a non-punch move with no relevant ability is not boosted', () => {
+    expect(isIronFistBoosted(slots(null), {}, 'PHYSICAL')).toBe(false)
+  })
+
+  it("falls back to an ability's onModifyMoveFlags, passing the dummy TYPE_NORMAL (not the move's real type)", () => {
+    const grantsPunchOnNormalOnly: AbilityImpl = {
+      id: 'ABILITY_TEST_GRANTS_PUNCH',
+      src: 'test',
+      onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && ctx.moveType === 'NORMAL',
+    }
+    registerAbilities([grantsPunchOnNormalOnly])
+    // No moveType is passed in at all -- this always checks against the dummy, so
+    // it grants punch regardless of what type the move actually is.
+    expect(isIronFistBoosted(slots('ABILITY_TEST_GRANTS_PUNCH'), {}, 'PHYSICAL')).toBe(true)
+  })
+
+  it('does not fall back to an ability that requires a flag already present', () => {
+    const crossSwap: AbilityImpl = {
+      id: 'ABILITY_TEST_CROSS_SWAP',
+      src: 'test',
+      onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && Boolean(ctx.moveFlags.kickBased),
+    }
+    registerAbilities([crossSwap])
+    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), {}, 'PHYSICAL')).toBe(false)
+    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), { kickBased: true }, 'PHYSICAL')).toBe(true)
   })
 })
 

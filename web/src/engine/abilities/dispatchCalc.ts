@@ -186,6 +186,37 @@ export function computeIsImmune(defenderSlots: AbilitySlots, ctx: OnImmuneContex
  * attacker's own trait, never suppressed by its own Mold Breaker), so this uses
  * NEVER_SUPPRESSED like the offensive-multiplier loop's self-checks.
  */
+/**
+ * IsIronFistBoosted, src/battle_util.c:9409 -- `DoesMoveMatchFlag(battler, move,
+ * TYPE_NORMAL, MOVE_FLAG_PUNCH)`. The move's own static punchBased flag wins
+ * outright; only when that's unset does it fall back to asking every ability on
+ * the move's OWN USER (never the other battler, never mold-breaker-suppressed --
+ * this is the attacker checking its own move) whether it grants punch anyway
+ * (e.g. some hand-based-move-boosting ability's onModifyMoveFlags).
+ *
+ * `TYPE_NORMAL` here is a literal dummy the C itself passes -- NOT the move's real
+ * (possibly ability-converted) type -- so an onModifyMoveFlags block that's itself
+ * conditioned on moveType only grants punch through this specific check when the
+ * dummy happens to match. This is deliberately narrower than a general "does the
+ * move have this flag" helper: DoesMoveMatchFlag's other 21 call sites across the
+ * registry (Iron Fist itself, Mega Launcher, sound-based abilities, ...) each pass
+ * their OWN moveType argument -- real in some cases, a different dummy in others --
+ * so a single shared helper can't safely stand in for all of them without checking
+ * each call site's own convention individually; only Punching Glove's is
+ * implemented here (see OnModifyMoveFlagsContext's own doc for the full backstory
+ * and why the rest are still NOT wired in). */
+export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record<string, true>, moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'): boolean {
+  if (moveFlags.punchBased) return true
+  let granted = false
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (impl.onModifyMoveFlags?.({ flag: 'punchBased', moveType: 'NORMAL', moveFlags, moveSplit })) {
+      granted = true
+      return 'break'
+    }
+  })
+  return granted
+}
+
 export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnInfiltrateContext): boolean {
   let infiltrates = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {

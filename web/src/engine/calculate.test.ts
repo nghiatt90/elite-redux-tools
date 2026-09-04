@@ -882,6 +882,34 @@ describe('calculateMoveDamage -- EFFECT_CHANGE_TYPE_ON_ITEM: Judgment/Multi-Atta
   })
 })
 
+describe('calculateMoveDamage -- Punching Glove boosts punch-based moves, static or ability-granted (battle_util.c:7684-7686)', () => {
+  it('boosts a statically punch-flagged move, and one granted punch by an ability using the C\'s own dummy TYPE_NORMAL check', async () => {
+    await import('./abilities/impl/index')
+    const glove = (overrides: Partial<BattlerBattleState> = {}) =>
+      battler('SPECIES_GARCHOMP', {
+        condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_PUNCHING_GLOVE' }),
+        ...overrides,
+      })
+
+    const punchBaseline = calculateMoveDamage(scenario({ move: moveData('MOVE_MACH_PUNCH') }))
+    const punchWithGlove = calculateMoveDamage(scenario({ move: moveData('MOVE_MACH_PUNCH'), attacker: glove() }))
+    expect(punchWithGlove.rolls[15]).toBeGreaterThan(punchBaseline.rolls[15])
+
+    // Tackle isn't punch-based on its own -- no boost without a granting ability.
+    const nonPunchBaseline = calculateMoveDamage(scenario())
+    const nonPunchWithGlove = calculateMoveDamage(scenario({ attacker: glove() }))
+    expect(nonPunchWithGlove.rolls[15]).toBe(nonPunchBaseline.rolls[15])
+
+    // Mixed Martial Arts grants punch/kick whenever DoesMoveMatchFlag's own dummy
+    // TYPE_NORMAL check passes -- which it always does here, regardless of Tackle's
+    // real (Normal) type coincidentally matching too.
+    const mixedMartialArts = calculateMoveDamage(
+      scenario({ attacker: glove({ abilitySlots: { ability: 'ABILITY_MIXED_MARTIAL_ARTS', innates: [null, null, null] } }) }),
+    )
+    expect(mixedMartialArts.rolls[15]).toBeGreaterThan(nonPunchBaseline.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry
