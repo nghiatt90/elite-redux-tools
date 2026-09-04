@@ -54,6 +54,8 @@ export interface ConditionBattlerContext {
   hasComatose: boolean // Comatose counts as always-asleep for StatusCondition(SLEEP)
   hasBloodStainEffect: boolean // Blood Stain counts as always-bleeding for StatusCondition(BLEED)
   isInfatuated: boolean // STATUS2_INFATUATION
+  isConfused: boolean // STATUS2_CONFUSION (Cosmic Daze/Cosmic Dust, Tangled Feet)
+  isEnraged: boolean // STATUS2_ENRAGED (Cosmic Daze/Cosmic Dust, Madness Enhancement)
   wasDamagedThisTurnBy: 'attacker' | 'defender' | 'none' // gRoundStructs[battler].damaged + who
   recentlyFainted: boolean // side's RecentFainted() -- an ally fainted last turn (Retaliate)
   hp: number

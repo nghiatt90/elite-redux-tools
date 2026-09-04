@@ -34,6 +34,7 @@ function defCtx(overrides: Partial<OnChooseDefensiveStatContext> = {}): OnChoose
     moveFlags: {},
     defenderHasAnyStatus: false,
     defenderDefComparison: 'equal',
+    attackerIsConfused: false,
     statToUse: 'def',
     secondaryStat: {},
     ...overrides,

@@ -14,6 +14,8 @@ function battler(overrides: Partial<ConditionBattlerContext> = {}): ConditionBat
     hasComatose: false,
     hasBloodStainEffect: false,
     isInfatuated: false,
+    isConfused: false,
+    isEnraged: false,
     wasDamagedThisTurnBy: 'none',
     recentlyFainted: false,
     hp: 100,

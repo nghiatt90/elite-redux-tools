@@ -67,6 +67,8 @@ describe('mold breaker batch W', () => {
       isAuraBreakActive: false,
       attackerGender: 'MALE' as const,
       defenderGender: 'MALE' as const,
+      defenderIsConfused: false,
+      defenderIsEnraged: false,
     }
     const defensiveCtx = {
       defenderId: 'defender',
@@ -84,6 +86,7 @@ describe('mold breaker batch W', () => {
       defenderAbilityOn: false,
       attackerGender: 'MALE' as const,
       defenderGender: 'MALE' as const,
+      defenderIsEnraged: false,
     }
 
     const withMoldBreaker = computeAbilityMultiplier(attacker, defender, offensiveCtx, defensiveCtx, true)

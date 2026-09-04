@@ -32,6 +32,7 @@ function defInputs(overrides: Partial<{ moveFlags: Record<string, true> }> = {})
     moveFlags: {},
     defenderHasAnyStatus: false,
     defenderDefComparison: 'equal' as const,
+    attackerIsConfused: false,
     ...overrides,
   }
 }

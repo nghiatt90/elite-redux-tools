@@ -45,6 +45,8 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     isAuraBreakActive: false,
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
+    defenderIsConfused: false,
+    defenderIsEnraged: false,
     ...overrides,
   }
 }

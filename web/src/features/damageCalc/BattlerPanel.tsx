@@ -212,6 +212,16 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
         </select>
       </label>
 
+      <label className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+        <input type="checkbox" checked={config.isConfused} onChange={(e) => set('isConfused', e.target.checked)} />
+        Confused {/* Cosmic Daze/Cosmic Dust, Tangled Feet -- separate from Status above, not mutually exclusive with it */}
+      </label>
+
+      <label className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+        <input type="checkbox" checked={config.isEnraged} onChange={(e) => set('isEnraged', e.target.checked)} />
+        Enraged {/* Cosmic Daze/Cosmic Dust, Madness Enhancement */}
+      </label>
+
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         Semi-invulnerable {/* only matters as the defender -- harmless to set on the attacker */}
         <select

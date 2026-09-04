@@ -85,6 +85,8 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   isAuraBreakActive: boolean
   attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS' // Rivalry's own condition (GetGenderFromSpeciesAndPersonality)
   defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
+  defenderIsConfused: boolean // STATUS2_CONFUSION on the move's TARGET -- Cosmic Daze/Cosmic Dust
+  defenderIsEnraged: boolean // STATUS2_ENRAGED on the move's TARGET -- Cosmic Daze/Cosmic Dust
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -103,6 +105,7 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   defenderAbilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- same generic toggle, defender-named here (Chuckster/Drakelp Head)
   attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS' // Rivalry's own condition (GetGenderFromSpeciesAndPersonality)
   defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
+  defenderIsEnraged: boolean // STATUS2_ENRAGED on the ability holder itself (== the move's target here) -- Madness Enhancement
 }
 
 export interface OnStatContext {
@@ -193,7 +196,7 @@ export interface OnChooseOffensiveStatContext {
    * tie-break choice) as OffensiveMultiplierContext's own field of the same name. */
   isHighestAttackingStat: boolean
   statToUse: BattleStatKey // read/write
-  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- NOT consumed by calculate.ts yet (see dispatchCalc.ts's note)
+  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- folded in by calculate.ts's applySecondaryStatBlend
 }
 
 export interface OnChooseDefensiveStatContext {
@@ -211,8 +214,16 @@ export interface OnChooseDefensiveStatContext {
    * through (`if (def<spdef) DEF; else if (spdef<def) SPDEF;`) -- 'equal' when
    * neither is strictly lower. */
   defenderDefComparison: 'def' | 'spdef' | 'equal'
+  /** STATUS2_CONFUSION -- Tangled Feet's own condition. Unscoped (no explicit
+   * onChooseDefensiveStatFor), so per IsApplyOnFlagAppropriate's own
+   * contextBattler==sourceBattler self-check (contextBattler is always battlerAtk
+   * here), this ability's condition only ever gets checked while scanning the
+   * ATTACKER's own slots -- see computeChooseDefensiveStat's doc. Named from the
+   * attacker's perspective for that reason, not because it's a general rule for
+   * this context. */
+  attackerIsConfused: boolean
   statToUse: BattleStatKey // read/write
-  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- NOT consumed by calculate.ts yet (see dispatchCalc.ts's note)
+  secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- folded in by calculate.ts's applySecondaryStatBlend
 }
 
 export interface OnSwapSplitContext {

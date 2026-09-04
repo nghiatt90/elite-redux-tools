@@ -35,6 +35,8 @@ function offCtx(overrides: Partial<{ moveType: string; isAuraBreakActive: boolea
     isAuraBreakActive: false,
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
+    defenderIsConfused: false,
+    defenderIsEnraged: false,
     ...overrides,
   }
 }
@@ -59,6 +61,7 @@ function defCtx(moveType = 'NORMAL') {
     defenderAbilityOn: false,
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
+    defenderIsEnraged: false,
   }
 }
 

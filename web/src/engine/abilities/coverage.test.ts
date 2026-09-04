@@ -288,7 +288,21 @@ describe('ability registry coverage gate', () => {
     //             not a float multiply, and clamp at 5 fainted (min(5, ...)) --
     //             verified end-to-end (Supreme Overlord boosting a physical
     //             Tackle).
-    expect(unmodelledCount).toBeLessThanOrEqual(21)
+    //     -> 18  (batch AI: Cosmic Daze/Cosmic Dust, Madness Enhancement, Tangled
+    //             Feet -- the STATUS2_CONFUSION/STATUS2_ENRAGED family. New
+    //             ConditionBattlerContext.isConfused/isEnraged (2 checkboxes in
+    //             BattlerPanel.tsx, not mutually exclusive with the Status select),
+    //             since this calculator has no turn simulation to derive these
+    //             volatiles from. Threaded as defenderIsConfused/defenderIsEnraged
+    //             on OffensiveMultiplierContext (the move's TARGET), defenderIsEnraged
+    //             on DefensiveMultiplierContext (the ability holder itself), and
+    //             attackerIsConfused on OnChooseDefensiveStatContext (Tangled Feet
+    //             is unscoped, so per IsApplyOnFlagAppropriate's own self-check it
+    //             only ever fires while checking the ATTACKER's own slots -- see
+    //             computeChooseDefensiveStat's doc). Cosmic Dust's existing alias
+    //             needed no patch. Verified end-to-end: Cosmic Daze doubles damage
+    //             against a confused defender.
+    expect(unmodelledCount).toBeLessThanOrEqual(18)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

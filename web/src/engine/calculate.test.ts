@@ -33,6 +33,8 @@ function condition(overrides: Partial<ConditionBattlerContext> = {}): ConditionB
     hasComatose: false,
     hasBloodStainEffect: false,
     isInfatuated: false,
+    isConfused: false,
+    isEnraged: false,
     wasDamagedThisTurnBy: 'none',
     recentlyFainted: false,
     hp: 100,
@@ -472,6 +474,22 @@ describe('calculateMoveDamage -- Supreme Overlord keys off the alliesFainted sce
       }),
     )
     expect(withFainted.rolls[15]).toBeGreaterThan(withoutFainted.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Cosmic Daze keys off the isConfused/isEnraged scenario toggles (src/abilities.cc:6730-6734)', () => {
+  it('doubles damage when the DEFENDER is confused', () => {
+    const neutral = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_COSMIC_DAZE', innates: [null, null, null] } }) }),
+    )
+    const confusedDefender = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_COSMIC_DAZE', innates: [null, null, null] } }),
+        defender: battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, isConfused: true }) }),
+      }),
+    )
+    expect(confusedDefender.rolls[15]).toBeGreaterThan(neutral.rolls[15])
   })
 })
 

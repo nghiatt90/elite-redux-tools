@@ -36,6 +36,8 @@ function offCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     isAuraBreakActive: false,
     attackerGender,
     defenderGender,
+    defenderIsConfused: false,
+    defenderIsEnraged: false,
   }
 }
 
@@ -58,6 +60,7 @@ function defCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     defenderAbilityOn: false,
     attackerGender,
     defenderGender,
+    defenderIsEnraged: false,
   }
 }
 

@@ -84,6 +84,11 @@ export interface BattlerConfig {
   itemId: string | null
   statStages: { atk: number; def: number; spatk: number; spdef: number; spe: number } // -6..+6
   status: string | null // one of STATUS_OPTIONS' ids
+  /** STATUS2_CONFUSION/STATUS2_ENRAGED -- separate from `status` (a major status1
+   * slot); a mon can be confused/enraged simultaneously with any status1.
+   * Cosmic Daze/Cosmic Dust, Madness Enhancement, Tangled Feet. */
+  isConfused: boolean
+  isEnraged: boolean
   hpPercent: number // 1-100, current HP as a percent of max
   moveIds: (string | null)[] // 4 slots
   /** Dig/Dive/Fly-style semi-invulnerability -- only meaningful as the DEFENDER (see
@@ -125,6 +130,8 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     itemId: null,
     statStages: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 },
     status: null,
+    isConfused: false,
+    isEnraged: false,
     hpPercent: 100,
     moveIds: [null, null, null, null],
     semiInvulnerable: 'NONE',
@@ -202,6 +209,8 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
       hasComatose: false,
       hasBloodStainEffect: false,
       isInfatuated: false,
+      isConfused: config.isConfused,
+      isEnraged: config.isEnraged,
       wasDamagedThisTurnBy: 'none',
       recentlyFainted: false,
       hp,

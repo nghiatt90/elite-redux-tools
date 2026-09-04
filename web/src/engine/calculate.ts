@@ -304,6 +304,7 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     moveFlags: move.flags,
     defenderHasAnyStatus: defender.condition.status1.size > 0 || defender.condition.hasComatose || defender.condition.hasBloodStainEffect,
     defenderDefComparison: defRaw.def < defRaw.spdef ? 'def' : defRaw.spdef < defRaw.def ? 'spdef' : 'equal',
+    attackerIsConfused: attacker.condition.isConfused,
   })
 
   const rawDefStat = applySecondaryStatBlend(
@@ -507,6 +508,8 @@ function calcInternal(
       isAuraBreakActive: hasFlag(attacker.abilitySlots, 'auraBreak') || hasFlag(defender.abilitySlots, 'auraBreak'),
       attackerGender: attacker.gender,
       defenderGender: defender.gender,
+      defenderIsConfused: defender.condition.isConfused,
+      defenderIsEnraged: defender.condition.isEnraged,
     },
     {
       defenderId: 'defender',
@@ -524,6 +527,7 @@ function calcInternal(
       defenderAbilityOn: defender.abilityOn,
       attackerGender: attacker.gender,
       defenderGender: defender.gender,
+      defenderIsEnraged: defender.condition.isEnraged,
     },
     attackerHasMoldBreaker,
   )

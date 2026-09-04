@@ -30,6 +30,8 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     isAuraBreakActive: false,
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
+    defenderIsConfused: false,
+    defenderIsEnraged: false,
     ...overrides,
   }
 }

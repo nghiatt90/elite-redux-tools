@@ -38,6 +38,7 @@ import { AURA_ABILITIES } from './31-aura'
 import { RIVALRY_ABILITIES } from './32-rivalry'
 import { PROTOSYNTHESIS_ABILITIES } from './33-protosynthesis'
 import { FAINTED_COUNT_ABILITIES } from './34-fainted-count'
+import { STATUS2_ABILITIES } from './35-status2'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -75,6 +76,7 @@ registerAbilities(AURA_ABILITIES)
 registerAbilities(RIVALRY_ABILITIES)
 registerAbilities(PROTOSYNTHESIS_ABILITIES)
 registerAbilities(FAINTED_COUNT_ABILITIES)
+registerAbilities(STATUS2_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

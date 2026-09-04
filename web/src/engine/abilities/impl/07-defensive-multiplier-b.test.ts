@@ -28,6 +28,7 @@ function ctx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveMult
     defenderAbilityOn: false,
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
+    defenderIsEnraged: false,
     ...overrides,
   }
 }
