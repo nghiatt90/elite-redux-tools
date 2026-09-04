@@ -36,6 +36,14 @@ proportionate to that.
 - Elite Redux game data (species/move/ability changes) is not vanilla Pokemon data —
   don't assume mainline values are correct; source from `er-config`/`eliteredux-source`
   (see `sources.lock.json` for pinned SHAs), never from memory of vanilla Pokemon.
+- **Pin the released build, not branch tip.** Both upstreams only publish `upcoming`;
+  ROM releases are cut from it with no tag or release branch, so the tip always runs
+  ahead of any playable ROM. That is cosmetic for the Pokedex and fatal for the
+  randomizer, whose LCG modulus is `ABILITIES_COUNT` — one unreleased ability makes
+  every PID it reports wrong. `sources.lock.json`'s `pin_policy` records the current
+  choice; `tests/test_oracle.py::test_abilities_count_matches_the_released_game`
+  enforces it against ER-nextdex's released-game data. When repinning, move the SHA
+  back until that test is green — never loosen the assertion.
 - `data/v2.65beta/` is a **committed** generated snapshot (~42MB), not a build
   artifact to gitignore — it's what the deployed site actually reads. Regenerate via
   `cd pipeline && uv run python -m erdata.build`, review the diff, commit deliberately.
