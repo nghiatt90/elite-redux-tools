@@ -89,12 +89,18 @@ export interface Move {
 
 export interface Ability {
   id: string
+  abilityNum: number // raw AbilityEnum value -- the randomizer's own numbering, gap-free 0..meta.abilitiesCount-1
   name: string
   description: string
   expandedDescription?: string
   grantsType?: string // bare type name, e.g. "DRAGON" -- this ability adds a type on top of the species' own
   components?: string[] // AbilityEnum ids -- present only for compound abilities (e.g. "Big Leaves"), whose
   // description is an exact " + "-joined list of these components' own names
+  randomizerBanned: boolean // can never appear as a randomizer source or result (src/pokemon.c RandomizeAbility/RandomizeInnate)
+  equivalenceGroup?: string[] // AbilityEnum ids (including this one) sharing an identical `description` --
+  // interchangeable for randomizer-search purposes; see pipeline/src/erdata/emit.py
+  nearEquivalentGroup?: string[] // AbilityEnum ids (including this one), hand-curated near-equivalents
+  // exact-group derivation can't catch (e.g. Mold Breaker/Teravolt/Turboblaze) -- see ability_groups.py
 }
 
 // Mirrors er-config's own `mega_stone_hint` oneof -- the same 4-way choice that
@@ -136,4 +142,6 @@ export interface Meta {
   generatedAt: string
   sources: Record<string, { repo: string; sha: string; date: string }>
   counts: { species: number; moves: number; abilities: number; items: number }
+  abilitiesCount: number // the randomizer LCG's modulus (ABILITIES_COUNT in-game); not
+  // always equal to counts.abilities -- see emit.py's _abilities_count
 }
