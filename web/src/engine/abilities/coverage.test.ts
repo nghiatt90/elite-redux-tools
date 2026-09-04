@@ -186,7 +186,22 @@ describe('ability registry coverage gate', () => {
     //             Substitute mechanic to matter to. Demolitionist's readiedAction
     //             volatile follows the SAME always-false precedent already set
     //             elsewhere in this engine (battleStat.ts), not a new gap.
-    expect(unmodelledCount).toBeLessThanOrEqual(47)
+    //     -> 40  (batch AB: all 10 onModifyMoveFlags census abilities -- the LAST
+    //             of the 6 hooks the field-report audit added to the census. 7
+    //             fresh ports (Brawling Wyvern, Festivities, Junshi Sanda, Mixed
+    //             Martial Arts, Musical Notes, Reverbate, Taekkyeon) plus
+    //             onModifyMoveFlags added to 3 abilities already real-ported for a
+    //             different hook (Backstreet Boy, Chestnut Axe, Gunman). NOT wired
+    //             into calculate.ts -- this is a "does the move's own battler grant
+    //             it this flag" fallback that 22 existing moveFlags.X call sites
+    //             would need the granting battler's ability slots threaded into
+    //             their context to consult (several already flag this exact gap in
+    //             their own comments: Liquid Voice, Punk Rock, Dual Wield, Magus
+    //             Blades, Primal Maw, Raging Boxer) -- same "correct now, wired
+    //             later" shape as batch N. This closes out all 6 census-expansion
+    //             hooks from the field report (onParentalBond/onAbsorb/onImmune/
+    //             onInfiltrate/onModifyMoveFlags/onMoldBreaker) end to end.
+    expect(unmodelledCount).toBeLessThanOrEqual(40)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

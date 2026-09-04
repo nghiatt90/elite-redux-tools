@@ -70,6 +70,11 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_BACKSTREET_BOY',
     src: 'src/abilities.cc:11540',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+    onModifyMoveFlags: (ctx) => {
+      if (ctx.flag === 'kickBased') return Boolean(ctx.moveFlags.dance)
+      if (ctx.flag === 'dance') return Boolean(ctx.moveFlags.kickBased)
+      return false
+    },
   },
   {
     id: 'ABILITY_BANDIT',
@@ -112,6 +117,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_CHESTNUT_AXE',
     src: 'src/abilities.cc:11679',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+    onModifyMoveFlags: (ctx) => ctx.flag === 'sliceBased' && ctx.moveType === 'GRASS',
   },
   {
     id: 'ABILITY_COSMIC_DUST',
@@ -262,6 +268,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_GUNMAN',
     src: 'src/abilities.cc:9507',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+    onModifyMoveFlags: (ctx) => ctx.flag === 'bulletBased' && ctx.moveSplit === 'STATUS',
   },
   {
     id: 'ABILITY_HASTE_MAKES_WASTE',

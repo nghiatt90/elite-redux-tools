@@ -31,6 +31,7 @@ import { PARENTAL_BOND_ABILITIES } from './24-parental-bond'
 import { ABSORB_ABILITIES } from './25-absorb'
 import { IMMUNE_ABILITIES } from './26-immune'
 import { INFILTRATE_ABILITIES } from './27-infiltrate'
+import { MODIFY_MOVE_FLAGS_ABILITIES } from './28-modify-move-flags'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -61,6 +62,7 @@ registerAbilities(PARENTAL_BOND_ABILITIES)
 registerAbilities(ABSORB_ABILITIES)
 registerAbilities(IMMUNE_ABILITIES)
 registerAbilities(INFILTRATE_ABILITIES)
+registerAbilities(MODIFY_MOVE_FLAGS_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

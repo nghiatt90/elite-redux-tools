@@ -339,6 +339,35 @@ export interface OnInfiltrateContext {
  */
 export type OnInfiltrate = (ctx: OnInfiltrateContext) => boolean
 
+export interface OnModifyMoveFlagsContext {
+  flag: 'punchBased' | 'kickBased' | 'bulletBased' | 'sliceBased' | 'sound' | 'dance'
+  moveType: string
+  moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+}
+
+/**
+ * onModifyMoveFlags returns whether this ability GRANTS the given move flag to the
+ * current move (for this hit only) -- DoesMoveMatchFlag, src/abilities.cc:331-361:
+ * every IsXBoosted-style helper (IsIronFistBoosted/IsStrikerBoosted/
+ * IsMegaLauncherBoosted/IsSoundMove/IsDance/IsKeenEdge) first checks the move's own
+ * flag bit, and ONLY IF THAT'S UNSET falls back to asking every ability on the
+ * move's own battler whether it grants the flag anyway. `flag`'s 6 values are the
+ * only ones any onModifyMoveFlags block in the census switches on, spelled with the
+ * same names as MoveData.flags' own keys (see emit.py's _MOVE_FLAGS) so a future
+ * `flag`-keyed fallback reads as `moveFlags[flag] || ability grants it`.
+ *
+ * NOT wired into calculate.ts: this fallback would need to reach every existing
+ * `ctx.moveFlags.sound`/`.punchBased`/`.kickBased`/`.bulletBased`/`.sliceBased`/
+ * `.dance` check across the registry (22 call sites, several already carrying a
+ * comment flagging exactly this gap -- Liquid Voice, Punk Rock, Dual Wield, Magus
+ * Blades, Primal Maw, Raging Boxer) with the granting battler's ability slots,
+ * which most of those hooks' context shapes don't carry today. Each port below is
+ * complete and correct for when that plumbing exists -- same "correct now, wired
+ * later" shape as batch N's onTypeEffectiveness ports.
+ */
+export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean
+
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -395,6 +424,7 @@ export interface AbilityImpl {
   onAbsorb?: OnAbsorb
   onImmune?: OnImmune
   onInfiltrate?: OnInfiltrate
+  onModifyMoveFlags?: OnModifyMoveFlags
 }
 
 export interface UnmodelledAbility {
