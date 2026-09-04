@@ -11,6 +11,10 @@ interface Props {
   options: MultiSelectOption[]
   selected: string[]
   onChange: (ids: string[]) => void
+  /** Stops further selections without hiding `options`, which is also what resolves a
+   * selected id to its display name -- blanking the list to lock the input turned every
+   * chip into a raw `ABILITY_*` id. */
+  disabled?: boolean
 }
 
 /** Text input + native <datalist>, no extra dependency. Picking a suggestion (or
@@ -19,7 +23,14 @@ interface Props {
  * against an unselected option commits it (appended to `selected`) and clears the
  * input, so a selection reads as a removable chip rather than sitting in the text box.
  */
-export default function MultiSelectFilter({ label, placeholder, options, selected, onChange }: Props) {
+export default function MultiSelectFilter({
+  label,
+  placeholder,
+  options,
+  selected,
+  onChange,
+  disabled = false,
+}: Props) {
   const [text, setText] = useState('')
   const listId = useId()
 
@@ -48,15 +59,15 @@ export default function MultiSelectFilter({ label, placeholder, options, selecte
         value={text}
         onChange={(e) => handleChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border px-2 py-1 text-xs"
+        disabled={disabled}
+        className="w-full rounded-md border px-2 py-1 text-xs disabled:opacity-60"
         style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)' }}
       />
       <datalist id={listId}>
-        {options
-          .filter((o) => !selected.includes(o.id))
-          .map((o) => (
-            <option key={o.id} value={o.name} />
-          ))}
+        {!disabled &&
+          options
+            .filter((o) => !selected.includes(o.id))
+            .map((o) => <option key={o.id} value={o.name} />)}
       </datalist>
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5">

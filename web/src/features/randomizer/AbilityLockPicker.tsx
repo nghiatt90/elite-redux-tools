@@ -23,7 +23,8 @@ export default function AbilityLockPicker({
     <MultiSelectFilter
       label={`Locked abilities (${selected.length}/${MAX_LOCKED})`}
       placeholder={atMax ? `Max ${MAX_LOCKED} locked` : 'Type an ability or innate name…'}
-      options={atMax ? [] : options}
+      options={options}
+      disabled={atMax}
       selected={selected}
       onChange={(ids) => onChange(ids.slice(0, MAX_LOCKED))}
     />
