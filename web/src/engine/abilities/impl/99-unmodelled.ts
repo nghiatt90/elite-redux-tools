@@ -14,7 +14,6 @@ import type { AbilityEntry } from '../types'
 
 export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_APE_SHIFT', src: 'src/abilities.cc:9036', unmodelled: 'not yet ported (hooks: onCrit)' },
-  { id: 'ABILITY_BONE_ZONE', src: 'src/abilities.cc:4508', unmodelled: 'not yet ported (hooks: onAfterTypeEffectiveness)' },
   { id: 'ABILITY_COLOR_SPECTRUM', src: 'src/abilities.cc:8710', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_CRYSTALLIZE', src: 'src/abilities.cc:3729', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },
   { id: 'ABILITY_DEADLY_PRECISION', src: 'src/abilities.cc:11162', unmodelled: 'not yet ported (hooks: onMoldBreaker)' },
@@ -26,7 +25,6 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_NORMALIZE', src: 'src/abilities.cc:1558', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier, onTypeEffectiveness)' },
   { id: 'ABILITY_PRETTY_PRINCESS', src: 'src/abilities.cc:5258', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_SHEER_FORCE', src: 'src/abilities.cc:1855', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
-  { id: 'ABILITY_SOOTHSAYER', src: 'src/abilities.cc:9409', unmodelled: 'not yet ported (hooks: breakable, onAfterTypeEffectiveness)' },
   { id: 'ABILITY_SUPERCONDUCTOR', src: 'src/abilities.cc:8187', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },
   { id: 'ABILITY_VICTORY_BOMB', src: 'src/abilities.cc:8980', unmodelled: 'not yet ported (hooks: onMoveType)' },
 ]

@@ -178,12 +178,14 @@ export interface OnAfterTypeEffectivenessContext {
   defenderId: string
   moveId: string
   moveType: string
+  moveFlags: Record<string, true> // Bone Zone's own FLAG_BONE_BASED check
   modifier: number // UQ_4_12, read/write
   perTypeModifiers: [number, number, number] // modifier1/2/3 from the three-type fold, read-only
   defenderTypes: string[] // IS_BATTLER_OF_TYPE(target, ...) checks -- e.g. Steelworker
   weather: string
   targetGrounded: boolean // !IsBattlerGroundedIgnoreType(target) checks -- BattlerBattleState's own `isGrounded`
   defenderAtMaxHp: boolean // BATTLER_MAX_HP(target)
+  defenderAbilityOn: boolean // GetAbilityState(target, ability) -- Soothsayer's own decaying-countdown "is my shield still up" check, reusing the generic abilityOn toggle rather than a single-purpose field
 }
 
 export interface OnChooseOffensiveStatContext {

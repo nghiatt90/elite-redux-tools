@@ -6,12 +6,11 @@
 // Deferred (left in 99-unmodelled.ts): Normalize (its onTypeEffectiveness alone
 // would be a partial port -- its onMoveType/onOffensiveMultiplier halves need a
 // "convert EVERY move to Normal" mechanism this engine's resolveEffectiveMoveType
-// doesn't have, since it only handles the opposite "-ate" direction), Bone Zone
-// (needs mod1/2/3 individually WRITABLE, not just the read-only perTypeModifiers
-// this engine exposes -- its fallback path reconstructs the whole three-type fold),
-// Soothsayer (needs per-ability activation-state tracking).
+// doesn't have, since it only handles the opposite "-ate" direction). Bone Zone and
+// Soothsayer (batch AK) turned out to be portable after all -- see their own
+// entries below for why.
 
-import { uq } from '../../fixed'
+import { uq, mulModifier } from '../../fixed'
 import type { AbilityImpl, OnTypeEffectivenessContext } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -91,6 +90,37 @@ export const TYPE_EFFECTIVENESS_ABILITIES: AbilityImpl[] = [
     src: 'src/abilities.cc:1728',
     onTypeEffectiveness: (ctx) => {
       if ((ctx.moveType === 'NORMAL' || ctx.moveType === 'FIGHTING') && ctx.defType === 'GHOST' && ctx.modifier === 0) ctx.modifier = uq(1.0)
+    },
+  },
+  {
+    // mod1/mod2/mod3 (perTypeModifiers) turn out to be plain read-only VALUES here
+    // (the C passes them straight to MulModifier, never derefs/writes through a
+    // pointer) -- this header comment's earlier note calling them "writable" was
+    // an overcautious misreading; the existing read-only field is sufficient.
+    id: 'ABILITY_BONE_ZONE',
+    src: 'src/abilities.cc:4508',
+    onAfterTypeEffectiveness: (ctx) => {
+      if (!ctx.moveFlags.boneBased) return
+      if (ctx.modifier >= uq(1.0)) return
+      if (ctx.modifier === 0) {
+        ctx.modifier = uq(1.0)
+        for (const m of ctx.perTypeModifiers) {
+          if (m) ctx.modifier = mulModifier(ctx.modifier, m)
+        }
+      }
+      if (ctx.modifier < uq(1.0)) ctx.modifier = mulModifier(ctx.modifier, SUPER_EFFECTIVE)
+    },
+  },
+  {
+    // GetAbilityState(target, ability)'s decaying countdown (set to 4 on switch-in,
+    // ticked down each end turn) is per-battle activation state this engine can't
+    // derive -- reuses the generic abilityOn toggle (defenderAbilityOn) rather than
+    // a single-purpose field, same as Avenger/Blood Stigma's own precedent.
+    id: 'ABILITY_SOOTHSAYER',
+    src: 'src/abilities.cc:9409',
+    flags: { breakable: true },
+    onAfterTypeEffectiveness: (ctx) => {
+      if (ctx.defenderAbilityOn && ctx.modifier >= uq(1.0)) ctx.modifier = uq(0.5)
     },
   },
 ]

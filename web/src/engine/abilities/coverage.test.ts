@@ -313,7 +313,17 @@ describe('ability registry coverage gate', () => {
     //             OffensiveMultiplierContext, since that per-battler condition
     //             data already existed. Verified end-to-end (Blood Stigma vs a
     //             bleeding defender).
-    expect(unmodelledCount).toBeLessThanOrEqual(16)
+    //     -> 14  (batch AK: Bone Zone and Soothsayer, both onAfterTypeEffectiveness
+    //             -- still NOT wired into calculate.ts's type-effectiveness fold
+    //             (same as the rest of batch N), but each port is complete and
+    //             correct. Bone Zone turned out to need no new field at all -- the
+    //             earlier note calling perTypeModifiers insufficient was a
+    //             misreading; the C passes mod1/2/3 as plain read-only values, and
+    //             the existing field already covers that. Soothsayer's decaying
+    //             countdown reuses the generic abilityOn toggle (new
+    //             OnAfterTypeEffectivenessContext.defenderAbilityOn), same
+    //             precedent as Avenger/Blood Stigma.
+    expect(unmodelledCount).toBeLessThanOrEqual(14)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

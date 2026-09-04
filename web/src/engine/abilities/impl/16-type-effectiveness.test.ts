@@ -19,12 +19,14 @@ function afterCtx(overrides: Partial<OnAfterTypeEffectivenessContext> = {}): OnA
     defenderId: 'd',
     moveId: 'MOVE_TACKLE',
     moveType: 'NORMAL',
+    moveFlags: {},
     modifier: uq(1.0),
     perTypeModifiers: [uq(1.0), 0, 0],
     defenderTypes: [],
     weather: 'NONE',
     targetGrounded: true,
     defenderAtMaxHp: true,
+    defenderAbilityOn: false,
     ...overrides,
   }
 }
@@ -147,6 +149,54 @@ describe('type effectiveness batch N', () => {
     const c2 = afterCtx({ modifier: uq(2.0) })
     findAbility('ABILITY_WONDER_GUARD').onAfterTypeEffectiveness!(c2)
     expect(c2.modifier).toBe(uq(2.0))
+  })
+
+  it('Bone Zone boosts a resisted (but nonzero) hit to super-effective; leaves a neutral-or-better hit alone', () => {
+    // The immunity-rescue branch (mod===0) and the super-effective boost are
+    // SIBLING ifs in the C, not nested -- a merely-resisted (nonzero) hit skips
+    // the rescue but still gets boosted, matching Bone Zone's real "ignores
+    // resistances too" behavior for bone-based moves.
+    const resisted = afterCtx({ moveFlags: { boneBased: true }, modifier: uq(0.5), perTypeModifiers: [uq(0.5), 0, 0] })
+    findAbility('ABILITY_BONE_ZONE').onAfterTypeEffectiveness!(resisted)
+    expect(resisted.modifier).toBe(uq(1.0)) // 0.5 * SUPER_EFFECTIVE(2.0) = 1.0
+
+    const neutral = afterCtx({ moveFlags: { boneBased: true }, modifier: uq(1.0), perTypeModifiers: [uq(1.0), 0, 0] })
+    findAbility('ABILITY_BONE_ZONE').onAfterTypeEffectiveness!(neutral)
+    expect(neutral.modifier).toBe(uq(1.0)) // >=1.0 -- early return
+  })
+
+  it('Bone Zone rescues a fully-immune hit by refolding the per-type modifiers, then boosts if still resisted', () => {
+    // Ground/Flying-style: one type immune (0), the other resisted (0.5) -- refold
+    // gives 0.5, which is still <1.0, so the super-effective boost applies too.
+    const immune = afterCtx({ moveFlags: { boneBased: true }, modifier: 0, perTypeModifiers: [0, uq(0.5), 0] })
+    findAbility('ABILITY_BONE_ZONE').onAfterTypeEffectiveness!(immune)
+    expect(immune.modifier).toBe(uq(1.0)) // refold(0.5) * SUPER_EFFECTIVE(2.0) = 1.0
+
+    // Fully immune with an otherwise-neutral other type: refold gives 1.0, already
+    // >=1.0 so the boost is skipped.
+    const immuneNeutral = afterCtx({ moveFlags: { boneBased: true }, modifier: 0, perTypeModifiers: [0, uq(1.0), 0] })
+    findAbility('ABILITY_BONE_ZONE').onAfterTypeEffectiveness!(immuneNeutral)
+    expect(immuneNeutral.modifier).toBe(uq(1.0))
+  })
+
+  it('Bone Zone only fires for bone-based moves', () => {
+    const c = afterCtx({ moveFlags: {}, modifier: 0, perTypeModifiers: [0, uq(0.5), 0] })
+    findAbility('ABILITY_BONE_ZONE').onAfterTypeEffectiveness!(c)
+    expect(c.modifier).toBe(0)
+  })
+
+  it('Soothsayer halves a neutral-or-better hit only while its shield (abilityOn) is up', () => {
+    const shielded = afterCtx({ modifier: uq(1.0), defenderAbilityOn: true })
+    findAbility('ABILITY_SOOTHSAYER').onAfterTypeEffectiveness!(shielded)
+    expect(shielded.modifier).toBe(uq(0.5))
+
+    const noShield = afterCtx({ modifier: uq(1.0), defenderAbilityOn: false })
+    findAbility('ABILITY_SOOTHSAYER').onAfterTypeEffectiveness!(noShield)
+    expect(noShield.modifier).toBe(uq(1.0))
+
+    const alreadyResisted = afterCtx({ modifier: uq(0.5), defenderAbilityOn: true })
+    findAbility('ABILITY_SOOTHSAYER').onAfterTypeEffectiveness!(alreadyResisted)
+    expect(alreadyResisted.modifier).toBe(uq(0.5)) // < 1.0 already -- no further halving
   })
 
   it('every entry cites a src line', () => {
