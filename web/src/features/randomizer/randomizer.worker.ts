@@ -14,6 +14,7 @@ import {
   type RandomizerContext,
   type SpeciesEntry,
 } from '../../lib/randomizer'
+import { canJoin, joinSearchSpecies } from '../../lib/speciesJoin'
 import type { Species } from '../../lib/types'
 import type {
   PidSearchRequest,
@@ -88,6 +89,44 @@ function handleSpeciesSearch(msg: SpeciesSearchRequest): void {
     .map((num) => buildCondition(num, groups!, msg.acceptOptions))
 
   const population = msg.fullyEvolvedOnly ? speciesList.filter((s) => s.evolutions.length === 0) : speciesList
+
+  // The join answers this across every species at once, in seconds, instead of running
+  // a full per-species pass over a random sample of them -- see lib/speciesJoin.ts. It
+  // can't model fixed slots, so queries involving those stay on the scan below.
+  if (canJoin(conditions, ctx, msg.modes)) {
+    const entries = population.map(entryFor)
+    const bySpeciesNum = new Map(population.map((s) => [entryFor(s).num, s.id]))
+    const result = joinSearchSpecies(entries, conditions, ctx, msg.modes, {
+      onProgress: (visited, totalBuckets) => {
+        if (cancelledRequestId === msg.requestId) return false
+        post({ type: 'progress', requestId: msg.requestId, scanned: visited, totalToScan: totalBuckets })
+        return true
+      },
+    })
+    if (cancelledRequestId === msg.requestId) return
+
+    const withId = (m: MatchResult & { speciesNum: number }) => ({
+      ...m,
+      speciesId: bySpeciesNum.get(m.speciesNum)!,
+    })
+    post({
+      type: 'speciesResult',
+      requestId: msg.requestId,
+      estimatedTotal: result.total > 0 ? result.total : null,
+      exact: result.exact,
+      method: 'join',
+      coverage: result.coverage,
+      populationSize: population.length,
+      sampledCount: population.length,
+      matchedSpecies: result.matchedSpecies.size,
+      bySlotCost: [...result.bySlotCost.entries()],
+      promoted: result.promoted.map(withId),
+      sample: result.sample.map(withId),
+      trivialSpecies: [],
+    })
+    return
+  }
+
   const indices = sampleIndices(population.length, msg.sampleSize)
 
   let totalAcrossSample = 0
@@ -147,8 +186,12 @@ function handleSpeciesSearch(msg: SpeciesSearchRequest): void {
     type: 'speciesResult',
     requestId: msg.requestId,
     estimatedTotal,
+    exact: false,
+    method: 'scan',
+    coverage: indices.length / population.length,
     populationSize: population.length,
     sampledCount: indices.length,
+    matchedSpecies: speciesWithAnyMatch,
     bySlotCost: [...bySlotCost.entries()],
     promoted: promoted.map(({ match, speciesId }) => ({ ...match, speciesId })),
     sample: sample.map(({ match, speciesId }) => ({ ...match, speciesId })),

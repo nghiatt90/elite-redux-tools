@@ -60,11 +60,21 @@ export interface SpeciesMatch extends MatchResult {
 export interface SpeciesResultMessage {
   type: 'speciesResult'
   requestId: number
-  /** Extrapolated from observed density across the sample -- not exact. Null if
-   * every scanned species came back empty (nothing to extrapolate from). */
+  /** Null when nothing matched at all (nothing to report or extrapolate from). */
   estimatedTotal: number | null
+  /** True when the search was complete: every species, every PID. The join path
+   * reaches this for most queries; the per-species fallback never does. */
+  exact: boolean
+  /** Which search answered this. 'join' covers every species at once; 'scan' is the
+   * per-species fallback over a random sample of species. */
+  method: 'join' | 'scan'
+  /** Fraction of the searched space actually walked -- of the seed space for 'join',
+   * of the species list for 'scan'. 1 when exact. */
+  coverage: number
   populationSize: number
   sampledCount: number
+  /** How many distinct species produced at least one match. */
+  matchedSpecies: number
   bySlotCost: [number, number][]
   promoted: SpeciesMatch[]
   sample: SpeciesMatch[]
