@@ -74,6 +74,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     isGrounded: true,
     semiInvulnerable: 'NONE',
     abilityOn: false,
+    gender: 'MALE',
     level,
     nature,
     rawStats,
@@ -413,6 +414,30 @@ describe('calculateMoveDamage -- Dark Aura boosts Dark moves for either battler 
       scenario({ move: moveData('MOVE_ASSURANCE'), defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_DARK_AURA', innates: [null, null, null] } }) }),
     )
     expect(withAura.rolls[15]).toBeGreaterThan(withoutAura.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Rivalry keys off the gender scenario toggle (src/abilities.cc:1401-1417)', () => {
+  it('same-gender attacker boosts 1.25x; opposite-gender defender-held Rivalry reduces 0.75x', async () => {
+    await import('./abilities/impl/index')
+    const neutral = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
+    const sameGenderBoost = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_RIVALRY', innates: [null, null, null] }, gender: 'MALE' }),
+        defender: battler('SPECIES_SKARMORY', { gender: 'MALE' }),
+      }),
+    )
+    expect(sameGenderBoost.rolls[15]).toBeGreaterThan(neutral.rolls[15])
+
+    const oppositeGenderReduction = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { gender: 'MALE' }),
+        defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_RIVALRY', innates: [null, null, null] }, gender: 'FEMALE' }),
+      }),
+    )
+    expect(oppositeGenderReduction.rolls[15]).toBeLessThan(neutral.rolls[15])
   })
 })
 

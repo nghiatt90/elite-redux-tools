@@ -143,6 +143,12 @@ export interface BattlerBattleState {
    * its own, matching @smogon/calc's own `abilityOn` field for the same class of
    * mechanism. See BattlerConfig.abilityOn. */
   abilityOn: boolean
+  /** GetGenderFromSpeciesAndPersonality's result -- Rivalry's whole condition.
+   * species.json's own `gender` field is a ratio (percentFemale) or `genderless`,
+   * not a fixed value (an individual's actual gender depends on its personality
+   * value, which this calculator doesn't model at all) -- see
+   * BattlerConfig.gender's doc for how the default is picked. */
+  gender: 'MALE' | 'FEMALE' | 'GENDERLESS'
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

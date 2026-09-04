@@ -83,6 +83,8 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * own holder's context, not the other battler's abilities; the C's own
    * explicit `FALSE` (checkMoldBreaker) means this is never suppressed. */
   isAuraBreakActive: boolean
+  attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS' // Rivalry's own condition (GetGenderFromSpeciesAndPersonality)
+  defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -99,6 +101,8 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   attackerActsFirst: boolean // see OffensiveMultiplierContext's doc on the same field
   defenderTypes: string[] // IS_BATTLER_OF_TYPE(battler, ...) -- the ability holder's OWN types (== the move's target here)
   defenderAbilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- same generic toggle, defender-named here (Chuckster/Drakelp Head)
+  attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS' // Rivalry's own condition (GetGenderFromSpeciesAndPersonality)
+  defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
 }
 
 export interface OnStatContext {

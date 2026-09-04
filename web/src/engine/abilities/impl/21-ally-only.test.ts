@@ -38,6 +38,8 @@ describe('ally-only batch S', () => {
         movePriority: 0,
         attackerAbilityOn: false,
         isAuraBreakActive: false,
+        attackerGender: 'MALE' as const,
+        defenderGender: 'MALE' as const,
       },
       {
         defenderId: 'defender',
@@ -53,6 +55,8 @@ describe('ally-only batch S', () => {
         attackerActsFirst: true,
         defenderTypes: [],
         defenderAbilityOn: false,
+        attackerGender: 'MALE' as const,
+        defenderGender: 'MALE' as const,
       },
     )
     expect(result).toBe(uq(1.0))

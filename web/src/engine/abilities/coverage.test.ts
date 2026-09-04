@@ -254,7 +254,21 @@ describe('ability registry coverage gate', () => {
     //             Fairy Aura needed no patch -- it just started working. Verified
     //             end-to-end: a defender-held Dark Aura still boosts the
     //             attacker's Dark move.
-    expect(unmodelledCount).toBeLessThanOrEqual(25)
+    //     -> 24  (batch AF: Rivalry -- the last of the field report's named step-7
+    //             scenario toggles. New BattlerBattleState/BattlerConfig.gender
+    //             ('MALE'|'FEMALE'|'GENDERLESS', a UI select in BattlerPanel.tsx),
+    //             defaulting to 'MALE' but forced to 'GENDERLESS' at
+    //             buildBattlerState time for a genderless species regardless of
+    //             the stored config (species.json's own gender field is a ratio/
+    //             genderless flag, not a fixed value -- an individual's real
+    //             gender depends on its personality, which this calculator
+    //             doesn't model). Threaded into both OffensiveMultiplierContext
+    //             and DefensiveMultiplierContext as attackerGender/defenderGender
+    //             (Rivalry's own offensive half compares attacker-vs-defender
+    //             directly; its defensive half compares the FLIPPED attacker
+    //             gender against the defender's, matching the C's literal
+    //             MALE<->FEMALE swap). Verified end-to-end both directions.
+    expect(unmodelledCount).toBeLessThanOrEqual(24)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

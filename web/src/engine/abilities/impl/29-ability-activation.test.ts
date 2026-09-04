@@ -35,6 +35,8 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     movePriority: 0,
     attackerAbilityOn: false,
     isAuraBreakActive: false,
+    attackerGender: 'MALE' as const,
+    defenderGender: 'MALE' as const,
     ...overrides,
   }
 }
@@ -56,6 +58,8 @@ function defCtx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveM
     attackerActsFirst: true,
     defenderTypes: [],
     defenderAbilityOn: false,
+    attackerGender: 'MALE' as const,
+    defenderGender: 'MALE' as const,
     ...overrides,
   }
 }

@@ -31,6 +31,14 @@ export const SEMI_INVULNERABLE_OPTIONS = [
   { id: 'AIRBORNE', label: 'Airborne (Fly/Bounce)' },
 ] as const
 
+/** See BattlerBattleState.gender's doc -- a genderless species overrides this at
+ * buildBattlerState time regardless of what's selected here. */
+export const GENDER_OPTIONS = [
+  { id: 'MALE', label: 'Male' },
+  { id: 'FEMALE', label: 'Female' },
+  { id: 'GENDERLESS', label: 'Genderless' },
+] as const
+
 export const WEATHER_OPTIONS = [
   { id: 'NONE', label: 'None' },
   { id: 'SUN_PERMANENT', label: 'Sun (weak, e.g. Drought)' },
@@ -73,6 +81,11 @@ export interface BattlerConfig {
    * activation toggle (Flash Fire triggered, Unburden's item lost, etc.),
    * meaningful on either side depending on the specific ability. */
   abilityOn: boolean
+  /** See BattlerBattleState.gender's doc -- ignored (forced to GENDERLESS) for a
+   * genderless species regardless of what's stored here; buildBattlerState is
+   * where that override happens, since it's the first place species data and
+   * config are both in scope. */
+  gender: 'MALE' | 'FEMALE' | 'GENDERLESS'
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -99,6 +112,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     moveIds: [null, null, null, null],
     semiInvulnerable: 'NONE',
     abilityOn: false,
+    gender: 'MALE',
   }
 }
 
@@ -191,6 +205,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     isGrounded: !species.types.includes('TYPE_FLYING'), // species-only baseline; calculate.ts reduces this further via the Levitate ability flag (see BattlerBattleState.isGrounded's doc)
     semiInvulnerable: config.semiInvulnerable,
     abilityOn: config.abilityOn,
+    gender: species.gender.genderless ? 'GENDERLESS' : config.gender,
     level: config.level,
     nature: config.nature,
     rawStats,

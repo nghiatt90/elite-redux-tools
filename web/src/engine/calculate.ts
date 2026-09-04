@@ -503,6 +503,8 @@ function calcInternal(
       movePriority: move.priority ?? 0,
       attackerAbilityOn: attacker.abilityOn,
       isAuraBreakActive: hasFlag(attacker.abilitySlots, 'auraBreak') || hasFlag(defender.abilitySlots, 'auraBreak'),
+      attackerGender: attacker.gender,
+      defenderGender: defender.gender,
     },
     {
       defenderId: 'defender',
@@ -518,6 +520,8 @@ function calcInternal(
       attackerActsFirst: scenario.attackerActsFirst,
       defenderTypes: defender.types,
       defenderAbilityOn: defender.abilityOn,
+      attackerGender: attacker.gender,
+      defenderGender: defender.gender,
     },
     attackerHasMoldBreaker,
   )

@@ -4,7 +4,7 @@ import { buildSearchIndex, searchSpecies } from '../pokedex/search'
 import { isStandaloneForm, displayName } from '../../lib/displayName'
 import { useAbilityDisplayName, useGameData } from '../../lib/GameDataContext'
 import type { BattleStatKey } from '../../engine/types'
-import { SEMI_INVULNERABLE_OPTIONS, STATUS_OPTIONS, type BattlerConfig } from './scenario'
+import { GENDER_OPTIONS, SEMI_INVULNERABLE_OPTIONS, STATUS_OPTIONS, type BattlerConfig } from './scenario'
 import type { AbilityHooks, BattleConstants } from '../../lib/types'
 
 const BATTLE_STATS: { key: BattleStatKey; label: string }[] = [
@@ -231,6 +231,22 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
       <label className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
         <input type="checkbox" checked={config.abilityOn} onChange={(e) => set('abilityOn', e.target.checked)} />
         Ability activated {/* generic in-battle toggle -- Flash Fire triggered, Unburden's item lost, Power Outage/Chuckster/Drakelp Head not yet discharged, Ambush/Stakeout's first turn, Slow Start's timer running */}
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Gender {/* Rivalry -- ignored for a genderless species regardless of this selection */}
+        <select
+          className="mt-0.5 rounded-md border px-2 py-1 text-sm w-full"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+          value={config.gender}
+          onChange={(e) => set('gender', e.target.value as BattlerConfig['gender'])}
+        >
+          {GENDER_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </label>
 
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
