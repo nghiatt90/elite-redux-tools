@@ -209,6 +209,7 @@ function computeStat(opts: ComputeStatOptions): number {
       isHighestAttackingStat: isHighestAttackingStat(battler, stat),
       isHighestStat: isHighestStat(battler, stat),
       abilityOn: battler.abilityOn,
+      boostedStat: battler.boostedStat,
     }),
     secondaryStatPercent: 0, // the OWN-stat self-buff variant (secondaryStat[statEnum]) -- no ability in the census ever targets its own chosen stat this way, so this stays 0; see applySecondaryStatBlend for the (used) other-stat blend
     statStageRatios: opts.statStageRatios,

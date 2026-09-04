@@ -24,6 +24,7 @@ function ctx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     isHighestAttackingStat: false,
     isHighestStat: false,
     abilityOn: false,
+    boostedStat: null,
     ...overrides,
   }
 }

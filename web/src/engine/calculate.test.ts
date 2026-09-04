@@ -75,6 +75,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     semiInvulnerable: 'NONE',
     abilityOn: false,
     gender: 'MALE',
+    boostedStat: null,
     level,
     nature,
     rawStats,
@@ -438,6 +439,22 @@ describe('calculateMoveDamage -- Rivalry keys off the gender scenario toggle (sr
       }),
     )
     expect(oppositeGenderReduction.rolls[15]).toBeLessThan(neutral.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Protosynthesis keys off the boostedStat scenario toggle (src/abilities.cc:6943-6953)', () => {
+  it('boosts Atk 1.3x for a physical move when boostedStat is atk', async () => {
+    await import('./abilities/impl/index')
+    const withoutBoost = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PROTOSYNTHESIS', innates: [null, null, null] } }) }),
+    )
+    const withBoost = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PROTOSYNTHESIS', innates: [null, null, null] }, boostedStat: 'atk' }),
+      }),
+    )
+    expect(withBoost.rolls[15]).toBeGreaterThan(withoutBoost.rolls[15])
   })
 })
 

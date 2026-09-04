@@ -7,10 +7,12 @@
 //
 // Deferred (left in 99-unmodelled.ts): Aerilate (needs GetTypeBeforeUsingMove, tied
 // to its own onMoveType/onStab -- port together later), Eternal Flower (mega-form +
-// a SEPARATE non-stacking flag this engine doesn't track), Protosynthesis/Unburden/
-// Slow Start (need persistent per-battle ability-activation-state), Rat King (needs
-// base stat total), Supreme Overlord/Soul Harvest (need a fainted-teammates count --
-// this v1 singles engine has no team/fainted concept to default sensibly).
+// a SEPARATE non-stacking flag this engine doesn't track), Rat King (needs base stat
+// total), Supreme Overlord/Soul Harvest (need a fainted-teammates count -- this v1
+// singles engine has no team/fainted concept to default sensibly). Unburden/Slow
+// Start (batch AC) and Protosynthesis (batch AG) were ALSO in this "needs
+// persistent ability-activation-state" bucket originally, but a generic abilityOn/
+// boostedStat scenario toggle (BattlerBattleState) unblocked them later.
 
 import { APPLY_ON_OTHER } from '../applyOn'
 import type { AbilityImpl, OnStatContext } from '../types'

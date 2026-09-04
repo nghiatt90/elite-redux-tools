@@ -268,7 +268,19 @@ describe('ability registry coverage gate', () => {
     //             directly; its defensive half compares the FLIPPED attacker
     //             gender against the defender's, matching the C's literal
     //             MALE<->FEMALE swap). Verified end-to-end both directions.
-    expect(unmodelledCount).toBeLessThanOrEqual(24)
+    //     -> 23  (batch AG: Protosynthesis -- the last of the field report's named
+    //             step-7 scenario toggles. New BattlerBattleState/BattlerConfig.
+    //             boostedStat (a BattleStatKey | null UI select in
+    //             BattlerPanel.tsx, matching @smogon/calc's own field), since
+    //             this calculator has no weather/terrain turn simulation to
+    //             derive "did Protosynthesis just activate, and on which stat"
+    //             from. onStat reads it directly: 1.5x for Speed, 1.3x for any
+    //             other matching stat (integer truncation, not float, matching
+    //             the C's own `*stat *=` on a u32). Quark Drive's existing alias
+    //             needed no patch. This closes out ALL 5 of the field report's
+    //             named step-7 toggles (abilityOn, semiInvulnerable, aura
+    //             booleans, gender, boostedStat) end to end.
+    expect(unmodelledCount).toBeLessThanOrEqual(23)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

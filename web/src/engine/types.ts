@@ -149,6 +149,12 @@ export interface BattlerBattleState {
    * value, which this calculator doesn't model at all) -- see
    * BattlerConfig.gender's doc for how the default is picked. */
   gender: 'MALE' | 'FEMALE' | 'GENDERLESS'
+  /** Protosynthesis/Quark Drive's ParadoxBoost.statId -- which stat their weather/
+   * terrain-triggered activation boosted (GetAbilityStateAs(...).paradoxBoost, a
+   * per-battler ability-state struct this calculator has no turn simulation to
+   * derive) -- null when inactive. Matches @smogon/calc's own `boostedStat`
+   * field for the same mechanism. See BattlerConfig.boostedStat's doc. */
+  boostedStat: BattleStatKey | null
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

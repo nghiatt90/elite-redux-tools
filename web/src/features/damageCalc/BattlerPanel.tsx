@@ -4,7 +4,7 @@ import { buildSearchIndex, searchSpecies } from '../pokedex/search'
 import { isStandaloneForm, displayName } from '../../lib/displayName'
 import { useAbilityDisplayName, useGameData } from '../../lib/GameDataContext'
 import type { BattleStatKey } from '../../engine/types'
-import { GENDER_OPTIONS, SEMI_INVULNERABLE_OPTIONS, STATUS_OPTIONS, type BattlerConfig } from './scenario'
+import { BOOSTED_STAT_OPTIONS, GENDER_OPTIONS, SEMI_INVULNERABLE_OPTIONS, STATUS_OPTIONS, type BattlerConfig } from './scenario'
 import type { AbilityHooks, BattleConstants } from '../../lib/types'
 
 const BATTLE_STATS: { key: BattleStatKey; label: string }[] = [
@@ -243,6 +243,22 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
         >
           {GENDER_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Paradox-boosted stat {/* Protosynthesis/Quark Drive -- a scenario toggle, no weather/terrain turn simulation exists to derive it */}
+        <select
+          className="mt-0.5 rounded-md border px-2 py-1 text-sm w-full"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+          value={config.boostedStat ?? ''}
+          onChange={(e) => set('boostedStat', (e.target.value || null) as BattlerConfig['boostedStat'])}
+        >
+          {BOOSTED_STAT_OPTIONS.map((o) => (
+            <option key={o.id ?? 'none'} value={o.id ?? ''}>
               {o.label}
             </option>
           ))}

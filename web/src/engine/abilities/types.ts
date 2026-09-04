@@ -126,6 +126,7 @@ export interface OnStatContext {
    * whichever is checked first in BattleStatKey order (same caveat as above). */
   isHighestStat: boolean
   abilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- the STAT OWNER's own toggle (Unburden/Slow Start)
+  boostedStat: BattleStatKey | null // Protosynthesis/Quark Drive's ParadoxBoost.statId -- the STAT OWNER's own, null when inactive
 }
 
 export interface OnStabContext {

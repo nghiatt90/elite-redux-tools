@@ -3,7 +3,7 @@
 
 import { calcHp, calcStat } from '../../engine/stats'
 import { calculateBattleStat } from '../../engine/battleStat'
-import type { BattlerBattleState, FieldBattleState, StatKey } from '../../engine/types'
+import type { BattleStatKey, BattlerBattleState, FieldBattleState, StatKey } from '../../engine/types'
 import type { DamageCalcScenario, MoveData } from '../../engine/calculate'
 import type { MoveBehaviors } from '../../engine/basePower'
 import type { BattleConstants, Item, Move, MoveBehaviorsFile, Species } from '../../lib/types'
@@ -37,6 +37,18 @@ export const GENDER_OPTIONS = [
   { id: 'MALE', label: 'Male' },
   { id: 'FEMALE', label: 'Female' },
   { id: 'GENDERLESS', label: 'Genderless' },
+] as const
+
+/** See BattlerBattleState.boostedStat's doc -- Protosynthesis/Quark Drive's
+ * activation state, a scenario toggle since this calculator has no weather/
+ * terrain turn simulation to derive it from. */
+export const BOOSTED_STAT_OPTIONS = [
+  { id: null, label: 'None' },
+  { id: 'atk', label: 'Attack' },
+  { id: 'def', label: 'Defense' },
+  { id: 'spatk', label: 'Sp. Attack' },
+  { id: 'spdef', label: 'Sp. Defense' },
+  { id: 'spe', label: 'Speed' },
 ] as const
 
 export const WEATHER_OPTIONS = [
@@ -86,6 +98,9 @@ export interface BattlerConfig {
    * where that override happens, since it's the first place species data and
    * config are both in scope. */
   gender: 'MALE' | 'FEMALE' | 'GENDERLESS'
+  /** See BattlerBattleState.boostedStat's doc -- Protosynthesis/Quark Drive's
+   * activation state, null when inactive/not applicable. */
+  boostedStat: BattleStatKey | null
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -113,6 +128,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     semiInvulnerable: 'NONE',
     abilityOn: false,
     gender: 'MALE',
+    boostedStat: null,
   }
 }
 
@@ -206,6 +222,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     semiInvulnerable: config.semiInvulnerable,
     abilityOn: config.abilityOn,
     gender: species.gender.genderless ? 'GENDERLESS' : config.gender,
+    boostedStat: config.boostedStat,
     level: config.level,
     nature: config.nature,
     rawStats,

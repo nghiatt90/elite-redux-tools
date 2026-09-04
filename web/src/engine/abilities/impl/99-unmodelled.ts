@@ -29,7 +29,6 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_MADNESS_ENHANCEMENT', src: 'src/abilities.cc:9921', unmodelled: 'not yet ported (hooks: onDefensiveMultiplier)' },
   { id: 'ABILITY_NORMALIZE', src: 'src/abilities.cc:1558', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier, onTypeEffectiveness)' },
   { id: 'ABILITY_PRETTY_PRINCESS', src: 'src/abilities.cc:5258', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
-  { id: 'ABILITY_PROTOSYNTHESIS', src: 'src/abilities.cc:6943', unmodelled: 'not yet ported (hooks: onStat)' },
   { id: 'ABILITY_SHEER_FORCE', src: 'src/abilities.cc:1855', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_SOOTHSAYER', src: 'src/abilities.cc:9409', unmodelled: 'not yet ported (hooks: breakable, onAfterTypeEffectiveness)' },
   { id: 'ABILITY_SOUL_HARVEST', src: 'src/abilities.cc:10776', unmodelled: 'not yet ported (hooks: breakable, onStat)' },

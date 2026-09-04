@@ -78,6 +78,7 @@ describe('ally-only batch S', () => {
       isHighestAttackingStat: true,
       isHighestStat: true,
       abilityOn: false,
+      boostedStat: null,
     })
     expect(modify(100)).toBe(100)
   })
