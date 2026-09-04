@@ -126,6 +126,7 @@ function moveData(id: string): MoveData {
     crit: m.crit,
     hitsAir: m.hitsAir,
     flags: m.flags ?? {},
+    changeTypeHoldEffect: m.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && m.argument?.kind === 'other' ? m.argument.value : null,
   }
 }
 
@@ -835,6 +836,49 @@ describe('calculateMoveDamage -- type-matching Gems boost power unless the defen
       }),
     )
     expect(withUnnerveDefender.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_CHANGE_TYPE_ON_ITEM: Judgment/Multi-Attack follow the held Plate/Memory (battle_main.c:5047-5049,5148-5150)', () => {
+  it("Judgment becomes the Plate's type (and gets its power boost); stays Normal without one", () => {
+    const withoutPlate = calculateMoveDamage(scenario({ move: moveData('MOVE_JUDGMENT') }))
+    expect(withoutPlate.effectiveMoveType).toBe('NORMAL')
+
+    const withFistPlate = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_JUDGMENT'),
+        attacker: battler('SPECIES_GARCHOMP', {
+          holdEffectType: 'FIGHTING',
+          holdEffectStrength: 30,
+          condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_PLATE' }),
+        }),
+      }),
+    )
+    expect(withFistPlate.effectiveMoveType).toBe('FIGHTING')
+    // Same item also matches CalcMoveBasePowerAfterModifiers's own Plate case, so
+    // this should ALSO be stronger than a same-type hit without the base-power cut.
+    expect(withFistPlate.rolls[15]).toBeGreaterThan(withoutPlate.rolls[15])
+  })
+
+  it("Multi-Attack becomes the Memory's type, with no base-power boost (Memory isn't in the Plate/Type Power switch)", () => {
+    const withWaterMemory = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_MULTI_ATTACK'),
+        attacker: battler('SPECIES_GARCHOMP', {
+          holdEffectType: 'WATER',
+          condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_MEMORY' }),
+        }),
+      }),
+    )
+    expect(withWaterMemory.effectiveMoveType).toBe('WATER')
+  })
+
+  it("a mismatched item (wrong resolvedHoldEffect) leaves the move at its declared type, still eligible for -ate conversion", async () => {
+    await import('./abilities/impl/index')
+    const withPixilate = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_JUDGMENT'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PIXILATE', innates: [null, null, null] } }) }),
+    )
+    expect(withPixilate.effectiveMoveType).toBe('FAIRY')
   })
 })
 

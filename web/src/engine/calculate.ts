@@ -61,6 +61,13 @@ export interface MoveData {
   hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
   flags: Record<string, true>
   priority?: number // Higher Rank's GetMovePriority(...) > 0 check -- ability-adjusted priority (Prankster etc.) isn't modelled, just the move's own declared value
+  /** EFFECT_CHANGE_TYPE_ON_ITEM's own argument (GetMoveTypeInternal,
+   * src/battle_main.c:5047-5049,5148-5150) -- the HOLD_EFFECT_* the attacker must
+   * hold for this move's type to follow the item instead of its declared type
+   * (Judgment/HOLD_EFFECT_PLATE, Multi-Attack/HOLD_EFFECT_MEMORY). `null` for
+   * every other move; narrowed from Move.argument's full 6-way union since this is
+   * the only shape this specific mechanism needs. */
+  changeTypeHoldEffect: string | null
 }
 
 export interface DamageCalcScenario {
@@ -401,11 +408,21 @@ function calcInternal(
   const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
   const statStageRatios = battleConstants.statStageRatios
 
+  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory) is checked
+  // FIRST and, when it matches, short-circuits the whole rest of GetMoveTypeInternal
+  // -- an -ate ability never gets a chance to run (src/battle_main.c:5148-5150,
+  // each switch case in that function returns immediately on match). When the
+  // attacker doesn't hold the right item, this falls through exactly like the C's
+  // `break` does, leaving the move at its declared type for the ability loop below.
+  const itemMoveType =
+    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect ? (attacker.holdEffectType ?? inputMoveType) : null
+
   // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
   // terrain-boost base-power check all key off the resolved type, not the move's
   // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  const { moveType, ateBoost } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+  const { moveType, ateBoost } =
+    itemMoveType !== null ? { moveType: itemMoveType, ateBoost: false } : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
 
   // Computed here (rather than down near computeAbilityMultiplier, as in the other two
   // calcInternal-adjacent call sites) because IsBattlerGroundedIgnoreType's Levitate

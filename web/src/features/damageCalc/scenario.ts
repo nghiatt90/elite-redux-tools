@@ -283,6 +283,7 @@ export function toMoveData(move: Move): MoveData {
     hitsAir: move.hitsAir,
     flags: move.flags,
     priority: move.priority,
+    changeTypeHoldEffect: move.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && move.argument?.kind === 'other' ? move.argument.value : null,
   }
 }
 
