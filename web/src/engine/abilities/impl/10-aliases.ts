@@ -16,6 +16,7 @@ import {
   aliasChooseOffensiveStat,
   aliasCrit,
   aliasDefensiveMultiplier,
+  aliasAbsorb,
   aliasMoldBreaker,
   aliasMoveType,
   aliasOffensiveMultiplier,
@@ -181,6 +182,11 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_ELEMENTAL_VORTEX',
     src: 'src/abilities.cc:8262',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FLASH_FIRE'),
+    // Impl<ELEMENTAL_VORTEX>.onAbsorb = Impl<WATER_ABSORB>.onAbsorb(...) ||
+    // Impl<FLASH_FIRE>.onAbsorb(...) -- an OR of the two conditions, not a plain
+    // delegate to either one alone. Not breakable (no `.breakable = TRUE` on this
+    // block, unlike Water Absorb/Flash Fire individually -- verified).
+    onAbsorb: (ctx) => aliasAbsorb('ABILITY_WATER_ABSORB')(ctx) || aliasAbsorb('ABILITY_FLASH_FIRE')(ctx),
   },
   {
     id: 'ABILITY_EMPRESS',

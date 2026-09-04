@@ -302,6 +302,34 @@ describe('calculateMoveDamage -- Levitate grants Ground immunity (IsBattlerGroun
   })
 })
 
+describe('calculateMoveDamage -- onAbsorb blocks damage independent of the type chart (TestAbsorbingAbilities, battle_util.c:8961-8969)', () => {
+  it('Surf (super-effective vs Ground/Dragon Garchomp) is fully absorbed by Water Absorb, not just reduced', async () => {
+    await import('./abilities/impl/index')
+    const withoutAbsorb = calculateMoveDamage(scenario({ move: moveData('MOVE_SURF'), defender: battler('SPECIES_GARCHOMP') }))
+    const withAbsorb = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_SURF'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_WATER_ABSORB', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withoutAbsorb.isImmune).toBe(false)
+    expect(withAbsorb.isImmune).toBe(true)
+    expect(withAbsorb.rolls.every((d) => d === 0)).toBe(true)
+  })
+
+  it("Mold Breaker on the attacker bypasses the defender's Water Absorb", async () => {
+    await import('./abilities/impl/index')
+    const withMoldBreaker = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_SURF'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_MOLD_BREAKER', innates: [null, null, null] } }),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_WATER_ABSORB', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withMoldBreaker.isImmune).toBe(false)
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

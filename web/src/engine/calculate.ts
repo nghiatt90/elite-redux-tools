@@ -33,6 +33,7 @@ import {
   computeAbilityCritBonus,
   computeAbilityMultiplier,
   computeAttackerHasMoldBreaker,
+  computeIsAbsorbed,
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
   computeOnStatModifier,
@@ -405,6 +406,16 @@ function calcInternal(
   const isGrounded = defender.isGrounded && !hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker)
   const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, isGrounded)
   if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
+
+  // TestAbsorbingAbilities (:8961-8969) -- a hit-blocking check distinct from type
+  // immunity (Volt Absorb/Water Absorb/etc. can zero out a move whose type chart
+  // entry is otherwise neutral or even super-effective). Forcing typeEffectiveness
+  // to 0 here, same as the Levitate/isGrounded case above, is what makes the
+  // outer calculateMoveDamage's `isImmune` flag (typeEffectiveness === 0) read
+  // correctly for this case too, not just true type immunity.
+  if (computeIsAbsorbed(defender.abilitySlots, { moveType, moveFlags: move.flags }, attackerHasMoldBreaker)) {
+    return { dmg: -1, typeEffectiveness: 0, resolvedMoveType: moveType, unmodelled }
+  }
 
   const isCrit = forceCrit
 

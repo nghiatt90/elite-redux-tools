@@ -279,6 +279,22 @@ export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_
  */
 export type OnParentalBond = (ctx: OnParentalBondContext) => ParentalBondTrigger | null
 
+export interface OnAbsorbContext {
+  moveType: string
+  moveFlags: Record<string, true>
+}
+
+/**
+ * onAbsorb returns whether this ability redirects the move away from dealing damage
+ * entirely -- TestAbsorbingAbilities, src/battle_util.c:8961-8969, called with
+ * checkMoldBreaker=TRUE (breakable abilities ARE suppressible; Justified and Elemental
+ * Vortex are the only two of the census's 22 that aren't breakable). The C's actual
+ * return value also carries a stat-boost/heal/flash-fire-flag payload (`*statId`, the
+ * ABSORB_RESULT_* bits) -- irrelevant here, since this calculator shows one hit's
+ * damage number, not HP/stat side effects, so only "absorbed or not" is modelled.
+ */
+export type OnAbsorb = (ctx: OnAbsorbContext) => boolean
+
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -332,6 +348,7 @@ export interface AbilityImpl {
   onRecoil?: OnRecoil
   onMoldBreaker?: OnMoldBreaker
   onParentalBond?: OnParentalBond
+  onAbsorb?: OnAbsorb
 }
 
 export interface UnmodelledAbility {

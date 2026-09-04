@@ -24,6 +24,7 @@ import type {
   OnMoldBreakerContext,
   OnParentalBondContext,
   ParentalBondTrigger,
+  OnAbsorbContext,
 } from '../types'
 
 export function aliasOffensiveMultiplier(target: string) {
@@ -114,5 +115,12 @@ export function aliasParentalBond(target: string) {
   return (ctx: OnParentalBondContext): ParentalBondTrigger | null => {
     const t = lookupAbility(target)
     return t && !isUnmodelled(t) ? (t.onParentalBond?.(ctx) ?? null) : null
+  }
+}
+
+export function aliasAbsorb(target: string) {
+  return (ctx: OnAbsorbContext): boolean => {
+    const t = lookupAbility(target)
+    return t && !isUnmodelled(t) ? (t.onAbsorb?.(ctx) ?? false) : false
   }
 }

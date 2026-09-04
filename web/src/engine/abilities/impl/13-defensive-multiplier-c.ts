@@ -58,6 +58,8 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FIRE') MUL(ctx, 1.25)
     },
+    // Impl<DRY_SKIN>.onAbsorb = Impl<WATER_ABSORB>.onAbsorb (function-pointer copy).
+    onAbsorb: (ctx) => ctx.moveType === 'WATER',
   },
   {
     id: 'ABILITY_SUN_BASKING',

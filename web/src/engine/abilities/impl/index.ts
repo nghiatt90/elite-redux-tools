@@ -28,6 +28,7 @@ import { ALLY_ONLY_ABILITIES } from './21-ally-only'
 import { HIGHER_RANK_ABILITIES } from './22-higher-rank'
 import { MOLD_BREAKER_ABILITIES } from './23-mold-breaker'
 import { PARENTAL_BOND_ABILITIES } from './24-parental-bond'
+import { ABSORB_ABILITIES } from './25-absorb'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -55,6 +56,7 @@ registerAbilities(ALLY_ONLY_ABILITIES)
 registerAbilities(HIGHER_RANK_ABILITIES)
 registerAbilities(MOLD_BREAKER_ABILITIES)
 registerAbilities(PARENTAL_BOND_ABILITIES)
+registerAbilities(ABSORB_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

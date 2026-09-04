@@ -15,6 +15,7 @@ import type {
   AbilityEntry,
   DefensiveMultiplierContext,
   OffensiveMultiplierContext,
+  OnAbsorbContext,
   OnChooseDefensiveStatContext,
   OnChooseOffensiveStatContext,
   OnCritContext,
@@ -138,6 +139,23 @@ export function getParentalBondMultiplier(trigger: ParentalBondTrigger | null, t
       break
   }
   return uq(1.0)
+}
+
+/**
+ * TestAbsorbingAbilities, src/battle_util.c:8961-8969 -- true if any of the
+ * defender's (unsuppressed) abilities redirects this move away from dealing damage.
+ * checkMoldBreaker=TRUE in the C, so this uses the same suppressedByMoldBreaker
+ * predicate as the defensive-multiplier loop and onCrit's defender run.
+ */
+export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbContext, attackerHasMoldBreaker: boolean): boolean {
+  let absorbed = false
+  forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
+    if (impl.onAbsorb?.(ctx)) {
+      absorbed = true
+      return 'break'
+    }
+  })
+  return absorbed
 }
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --

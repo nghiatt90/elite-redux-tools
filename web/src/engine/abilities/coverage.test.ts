@@ -153,7 +153,17 @@ describe('ability registry coverage gate', () => {
     //             batch N's onTypeEffectiveness ports. Species.json's `heads` field
     //             (already emitted, just never consumed) unblocks Multi Headed's
     //             family without any pipeline change.
-    expect(unmodelledCount).toBeLessThanOrEqual(86)
+    //     -> 66  (batch Y: all 22 onAbsorb census abilities -- 20 fresh ports plus
+    //             onAbsorb added to Dry Skin and Elemental Vortex (already
+    //             real-ported for a different hook). WIRED into calculate.ts
+    //             (computeIsAbsorbed, right after the type-effectiveness check) --
+    //             unlike batch X, this genuinely forces today's damage number to 0,
+    //             the same way a type immunity does, verified end-to-end against a
+    //             super-effective Surf vs Water-Absorb Garchomp. Flash Fire's
+    //             onOffensiveMultiplier half (gated on in-battle activation state
+    //             this engine doesn't track) stays undone, documented inline --
+    //             only its onAbsorb half was portable.
+    expect(unmodelledCount).toBeLessThanOrEqual(66)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
