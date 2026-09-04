@@ -517,6 +517,7 @@ function calcInternal(
       defenderStatus1: defender.condition.status1,
       defenderHasBloodStainEffect: defender.condition.hasBloodStainEffect,
       defenderHasComatose: defender.condition.hasComatose,
+      attackerSlowStartTimer: attacker.slowStartTimer,
       attackerIsUnaware: hasFlag(attacker.abilitySlots, 'unaware'),
       defenderHasAnyLoweredStat: defender.condition.negativeStatStageCount > 0,
     },

@@ -386,7 +386,20 @@ describe('ability registry coverage gate', () => {
     //             computeOnStatModifier since ctx has no other way to see the stat
     //             owner's own ability slots. Verified end-to-end against a real
     //             Mega Venusaur.
-    expect(unmodelledCount).toBeLessThanOrEqual(7)
+    //     -> 5   (batch AQ: Illusion and Lethargy. Illusion's
+    //             gBattleStruct->illusion[battler].on/broken flags are the same
+    //             class of per-battle activation state the generic attackerAbilityOn
+    //             toggle already covers -- reused directly, no new field. Lethargy
+    //             reads the EXACT value of gVolatileStructs[battler].slowStartTimer
+    //             (the SAME underlying timer Slow Start's own plain `if (timer)`
+    //             boolean check already approximates via abilityOn) for a 5-tier
+    //             multiplier a boolean can't represent -- new numeric
+    //             BattlerBattleState.slowStartTimer scenario field (0-5, default 5
+    //             = expired/no debuff), full 6-step plumbing (engine/types.ts,
+    //             scenario.ts, BattlerPanel.tsx slider, abilities/types.ts
+    //             attackerSlowStartTimer, calculate.ts wiring, ability port).
+    //             Verified end-to-end for both.
+    expect(unmodelledCount).toBeLessThanOrEqual(5)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

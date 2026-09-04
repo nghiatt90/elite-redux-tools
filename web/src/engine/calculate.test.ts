@@ -80,6 +80,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     gender: 'MALE',
     boostedStat: null,
     alliesFainted: 0,
+    slowStartTimer: 5,
     level,
     nature,
     rawStats,
@@ -649,6 +650,36 @@ describe('calculateMoveDamage -- Eternal Flower reduces a Mega-evolved defender\
       }),
     )
     expect(megaAlsoHoldingIt.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Illusion/Lethargy key off the abilityOn/slowStartTimer scenario toggles (src/abilities.cc:2118-2129,4934-4960)', () => {
+  it('Illusion boosts 1.3x only while abilityOn is set', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario())
+    const withIllusion = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { abilityOn: true, abilitySlots: { ability: 'ABILITY_ILLUSION', innates: [null, null, null] } }) }),
+    )
+    expect(withIllusion.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const illusionOff = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { abilityOn: false, abilitySlots: { ability: 'ABILITY_ILLUSION', innates: [null, null, null] } }) }),
+    )
+    expect(illusionOff.rolls[15]).toBe(baseline.rolls[15])
+  })
+
+  it('Lethargy scales damage down by its slowStartTimer tier', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario())
+    const withLethargy = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { slowStartTimer: 1, abilitySlots: { ability: 'ABILITY_LETHARGY', innates: [null, null, null] } }) }),
+    )
+    expect(withLethargy.rolls[15]).toBeLessThan(baseline.rolls[15])
+
+    const expired = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { slowStartTimer: 5, abilitySlots: { ability: 'ABILITY_LETHARGY', innates: [null, null, null] } }) }),
+    )
+    expect(expired.rolls[15]).toBe(baseline.rolls[15])
   })
 })
 

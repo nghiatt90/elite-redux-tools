@@ -43,6 +43,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     defenderStatus1: new Set(),
     defenderHasBloodStainEffect: false,
     defenderHasComatose: false,
+    attackerSlowStartTimer: 5,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
     ...overrides,

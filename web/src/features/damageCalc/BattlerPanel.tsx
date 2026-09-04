@@ -281,6 +281,11 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
       </label>
 
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Slow Start/Lethargy timer: {config.slowStartTimer} {/* gVolatileStructs[battler].slowStartTimer -- 5 = expired/no debuff, 0-4 = active tiers, decreasing each turn since entry */}
+        <input type="range" min={0} max={5} className="w-full" value={config.slowStartTimer} onChange={(e) => set('slowStartTimer', Number(e.target.value))} />
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         Current HP: {config.hpPercent}%
         <input
           type="range"

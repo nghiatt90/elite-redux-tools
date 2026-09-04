@@ -103,7 +103,8 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   /** ConditionBattlerContext.hasComatose for the DEFENDER -- Dreamcatcher/Dreamscape's
    * own "is asleep" check treats Comatose as always-asleep, same as
    * attackerHasAnyStatus/defenderHasAnyStatus do elsewhere. */
-  defenderHasComatose: boolean // IsBloodStainAffected(target) -- Blood Stigma
+  defenderHasComatose: boolean
+  attackerSlowStartTimer: number // BattlerBattleState.slowStartTimer -- Lethargy's own 5-tier read of the same timer Slow Start reads as a boolean
   attackerIsUnaware: boolean // IsUnaware(battler) -- Pretty Princess's OWN Unaware check (self, not the defender's)
   defenderHasAnyLoweredStat: boolean // HasAnyLoweredStat(target) -- Pretty Princess
 }

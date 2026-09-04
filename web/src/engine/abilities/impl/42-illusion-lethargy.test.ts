@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { PRETTY_PRINCESS_ABILITIES } from './37-pretty-princess'
+import { ILLUSION_LETHARGY_ABILITIES } from './42-illusion-lethargy'
 import type { AbilityImpl, OffensiveMultiplierContext } from '../types'
 import { uq } from '../../fixed'
 
 function findAbility(id: string): AbilityImpl {
-  const entry = PRETTY_PRINCESS_ABILITIES.find((a) => a.id === id)
+  const entry = ILLUSION_LETHARGY_ABILITIES.find((a) => a.id === id)
   if (!entry) throw new Error(`${id} not found in batch`)
   return entry
 }
@@ -50,27 +50,41 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
   }
 }
 
-describe('pretty princess batch AL', () => {
-  it('boosts 1.5x when the defender has any lowered stat and the attacker is not Unaware', () => {
-    const c = ctx({ defenderHasAnyLoweredStat: true })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
-    expect(c.modifier).toBe(uq(1.5))
+describe('Illusion batch AQ', () => {
+  it('boosts 1.3x while the disguise is on and unbroken (abilityOn toggle)', () => {
+    const c = ctx({ attackerAbilityOn: true })
+    findAbility('ABILITY_ILLUSION').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(uq(1.3))
   })
 
-  it('does not boost when the defender has no lowered stat', () => {
-    const c = ctx({ defenderHasAnyLoweredStat: false })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
+  it('does not boost once the toggle is off', () => {
+    const c = ctx({ attackerAbilityOn: false })
+    findAbility('ABILITY_ILLUSION').onOffensiveMultiplier!(c)
     expect(c.modifier).toBe(uq(1.0))
   })
+})
 
-  it("the ATTACKER's own Unaware suppresses the boost even if the defender has a lowered stat", () => {
-    const c = ctx({ defenderHasAnyLoweredStat: true, attackerIsUnaware: true })
-    findAbility('ABILITY_PRETTY_PRINCESS').onOffensiveMultiplier!(c)
+describe('Lethargy batch AQ', () => {
+  it.each([
+    [0, 0.2],
+    [1, 0.2],
+    [2, 0.4],
+    [3, 0.6],
+    [4, 0.8],
+  ])('applies the %i-tier multiplier %f', (timer, expected) => {
+    const c = ctx({ attackerSlowStartTimer: timer })
+    findAbility('ABILITY_LETHARGY').onOffensiveMultiplier!(c)
+    expect(c.modifier).toBe(uq(expected))
+  })
+
+  it('applies no multiplier once the timer has expired (5+)', () => {
+    const c = ctx({ attackerSlowStartTimer: 5 })
+    findAbility('ABILITY_LETHARGY').onOffensiveMultiplier!(c)
     expect(c.modifier).toBe(uq(1.0))
   })
 
   it('every entry cites a src line', () => {
-    for (const ability of PRETTY_PRINCESS_ABILITIES) {
+    for (const ability of ILLUSION_LETHARGY_ABILITIES) {
       expect(ability.src).toMatch(/^src\/abilities\.cc:\d+$/)
     }
   })

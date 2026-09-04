@@ -169,6 +169,14 @@ export interface BattlerBattleState {
    * abilities clamp with `min(5, ...)` in the C, so values above 5 are equivalent
    * to 5. */
   alliesFainted: number
+  /** gVolatileStructs[battler].slowStartTimer -- set to 5 on entry, counts down
+   * every turn to 0. Slow Start's OWN check is a plain `if (timer)` boolean
+   * (already ported as the generic `abilityOn` toggle, see 29-ability-activation.ts),
+   * but Lethargy reads this SAME per-battler timer's exact value for a 5-tier
+   * multiplier (0.2x/0.4x/0.6x/0.8x/1.0x) -- a scenario toggle since this
+   * non-turn-simulating engine can't derive how many turns have elapsed since
+   * entry, same reasoning as alliesFainted above. */
+  slowStartTimer: number
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

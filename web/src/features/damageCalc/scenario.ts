@@ -108,6 +108,11 @@ export interface BattlerConfig {
   boostedStat: BattleStatKey | null
   /** See BattlerBattleState.alliesFainted's doc. */
   alliesFainted: number
+  /** See BattlerBattleState.slowStartTimer's doc. Default 5 -- the C's switch has
+   * no case for 5+, so this is the "timer already expired, no debuff" neutral
+   * state, matching Slow Start's own `abilityOn` default of false (also "not
+   * currently active") for the same underlying timer. */
+  slowStartTimer: number
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -139,6 +144,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     gender: 'MALE',
     boostedStat: null,
     alliesFainted: 0,
+    slowStartTimer: 5,
   }
 }
 
@@ -237,6 +243,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     gender: species.gender.genderless ? 'GENDERLESS' : config.gender,
     boostedStat: config.boostedStat,
     alliesFainted: config.alliesFainted,
+    slowStartTimer: config.slowStartTimer,
     level: config.level,
     nature: config.nature,
     rawStats,
