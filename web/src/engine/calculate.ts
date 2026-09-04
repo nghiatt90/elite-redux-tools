@@ -24,7 +24,7 @@ import {
   spAttackPreModify,
   spDefensePreModify,
 } from './battleStat'
-import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
+import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, percentToModifier, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
@@ -558,8 +558,8 @@ function calcInternal(
       screensApply(field, split) &&
       !computeInfiltratesScreens(attacker.abilitySlots, { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
     isDoubleBattle: field.isDoubleBattle,
-    resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
-    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness),
+    resistBerryMultiplier: resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness),
+    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow),
     hasSuperEffectiveBoost: isSuperEffective && move.effect === 'EFFECT_MISC_HIT',
     // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
     // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
@@ -642,13 +642,37 @@ function weatherDamageMultiplier(weather: FieldBattleState['weather'], move: Mov
   return null
 }
 
-function attackerFinalItemMultiplier(attacker: BattlerBattleState, typeEffectiveness: number): number {
+function attackerFinalItemMultiplier(attacker: BattlerBattleState, typeEffectiveness: number, sameMoveTurnsInARow: number): number {
   const effect = attacker.condition.resolvedHoldEffect
   if (effect === 'HOLD_EFFECT_LIFE_ORB') return uq(1.3)
   if (effect === 'HOLD_EFFECT_EXPERT_BELT' && typeEffectiveness >= uq(2.0)) return uq(1.2)
-  // Metronome (needs same-move-turn tracking), Amulet Coin (Meowth Partner-only), and
-  // Punching Glove (needs IsIronFistBoosted, an ability check) are deferred.
+  if (effect === 'HOLD_EFFECT_METRONOME') {
+    const percentBoost = Math.min(sameMoveTurnsInARow * (attacker.holdEffectStrength ?? 0), 100)
+    return uq(1.0) + percentToModifier(percentBoost)
+  }
+  // Amulet Coin (Meowth Partner-only) and Punching Glove (needs IsIronFistBoosted,
+  // an ability check) are deferred.
   return uq(1.0)
+}
+
+/** The defender's hold effect (:7688-7700) -- currently just the resist berry, the
+ * only one of this switch's cases that changes the damage NUMBER (the others in the
+ * C's own switch are status/end-of-turn effects, out of scope here). Unnerve and
+ * Ripen are both plain declarative bitfields with no other behavior (same shape as
+ * Relic Stone's own stabInHalves check above) -- read directly by ability ID rather
+ * than adding a pipeline-emitted flag + a whole registry entry for two abilities
+ * whose only damage-relevant behavior is this exact hardcoded read. */
+function resistBerryMultiplier(
+  attackerSlots: AbilitySlots,
+  defender: BattlerBattleState,
+  moveType: string,
+  typeEffectiveness: number,
+): 0.5 | 0.25 | null {
+  if (defender.condition.resolvedHoldEffect !== 'HOLD_EFFECT_RESIST_BERRY') return null
+  if (defender.holdEffectType !== moveType) return null
+  if (moveType !== 'NORMAL' && typeEffectiveness < uq(2.0)) return null
+  if (battlerHasAbility(attackerSlots, 'ABILITY_UNNERVE', () => false)) return null
+  return battlerHasAbility(defender.abilitySlots, 'ABILITY_RIPEN', () => false) ? 0.25 : 0.5
 }
 
 /** CalculateMoveDamage / DoMoveDamageCalc, src/battle_util.c:7788-7827. Evaluates

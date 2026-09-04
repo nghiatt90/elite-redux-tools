@@ -728,6 +728,87 @@ describe('calculateMoveDamage -- Crystallize converts Rock moves to Ice and boos
   })
 })
 
+describe('calculateMoveDamage -- resist berry halves (or quarters, with Ripen) super-effective/Normal damage (battle_util.c:7688-7700)', () => {
+  it('Chilan Berry halves a Normal-type hit unconditionally', () => {
+    const baseline = calculateMoveDamage(scenario())
+    const withChilan = calculateMoveDamage(
+      scenario({
+        defender: battler('SPECIES_SKARMORY', {
+          holdEffectType: 'NORMAL',
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RESIST_BERRY' }),
+        }),
+      }),
+    )
+    expect(withChilan.rolls[15]).toBeLessThan(baseline.rolls[15])
+  })
+
+  it('Occa Berry only reduces a super-effective Fire hit, not a neutral one', () => {
+    const occaDefender = (overrides: Partial<BattlerBattleState> = {}) =>
+      battler('SPECIES_SKARMORY', {
+        holdEffectType: 'FIRE',
+        condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RESIST_BERRY' }),
+        ...overrides,
+      })
+    // Fire vs Steel/Flying Skarmory is super effective (2x Steel, neutral Flying).
+    const seBaseline = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), defender: battler('SPECIES_SKARMORY') }))
+    const seWithOcca = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), defender: occaDefender() }))
+    expect(seWithOcca.rolls[15]).toBeLessThan(seBaseline.rolls[15])
+
+    // Tackle (Normal) isn't Fire -- Occa Berry's own type doesn't match, no reduction.
+    const noMatchBaseline = calculateMoveDamage(scenario({ defender: battler('SPECIES_SKARMORY') }))
+    const noMatchWithOcca = calculateMoveDamage(scenario({ defender: occaDefender() }))
+    expect(noMatchWithOcca.rolls[15]).toBe(noMatchBaseline.rolls[15])
+  })
+
+  it('Ripen quarters instead of halves', () => {
+    const withoutRipen = calculateMoveDamage(
+      scenario({
+        defender: battler('SPECIES_SKARMORY', {
+          holdEffectType: 'NORMAL',
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RESIST_BERRY' }),
+        }),
+      }),
+    )
+    const withRipen = calculateMoveDamage(
+      scenario({
+        defender: battler('SPECIES_SKARMORY', {
+          holdEffectType: 'NORMAL',
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RESIST_BERRY' }),
+          abilitySlots: { ability: 'ABILITY_RIPEN', innates: [null, null, null] },
+        }),
+      }),
+    )
+    expect(withRipen.rolls[15]).toBeLessThan(withoutRipen.rolls[15])
+  })
+
+  it("the attacker's own Unnerve suppresses the berry entirely", () => {
+    const baseline = calculateMoveDamage(scenario())
+    const withUnnerve = calculateMoveDamage(
+      scenario({
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_UNNERVE', innates: [null, null, null] } }),
+        defender: battler('SPECIES_SKARMORY', {
+          holdEffectType: 'NORMAL',
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RESIST_BERRY' }),
+        }),
+      }),
+    )
+    expect(withUnnerve.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Metronome (item) scales up with sameMoveTurnsInARow (battle_util.c:7672-7674)', () => {
+  it('boosts damage the more consecutive turns the same move has been used', () => {
+    const baseline = calculateMoveDamage(scenario())
+    const withMetronome = calculateMoveDamage(
+      scenario({
+        attacker: battler('SPECIES_GARCHOMP', { holdEffectStrength: 20, condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_METRONOME' }) }),
+        sameMoveTurnsInARow: 3,
+      }),
+    )
+    expect(withMetronome.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

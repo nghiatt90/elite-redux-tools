@@ -250,7 +250,13 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     statStages: config.statStages,
     extraStatLevel: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 },
     holdEffectStrength: item?.holdEffectStrength ?? null,
-    holdEffectType: item?.holdEffectType ?? null,
+    // items.json's holdEffectType is the raw proto enum name (e.g. 'TYPE_FIRE'),
+    // like move.type/type2 before bareType() strips them -- basePower.ts's Plate/
+    // Type Power check compares this directly against the already-bare moveType,
+    // so this needed the same stripping or it would never match (a real bug: this
+    // was unstripped until the resist-berry item pass found it, with no test ever
+    // having exercised Plate/Type Power to catch it).
+    holdEffectType: item?.holdEffectType ? bareType(item.holdEffectType) : null,
     isTransformed: false,
     canEvolveStrict: species.evolutions.length > 0,
     isInfatuatedWithOpponent: false,

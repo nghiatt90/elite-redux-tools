@@ -163,6 +163,15 @@ describe('calcMoveBasePowerAfterModifiers', () => {
     expect(calcMoveBasePowerAfterModifiers(100, { ...withBand, isPhysical: false, isSpecial: true })).toBe(100)
   })
 
+  it('Plate/Type Power boost a matching-type move, using the bare (non-TYPE_-prefixed) type name', () => {
+    const withPlate = bpmCtx({ moveType: 'FIRE', attackerHoldEffect: { resolvedHoldEffect: 'HOLD_EFFECT_PLATE', strength: 20, holdEffectType: 'FIRE' } })
+    expect(calcMoveBasePowerAfterModifiers(100, withPlate)).toBe(120)
+    expect(calcMoveBasePowerAfterModifiers(100, { ...withPlate, moveType: 'WATER' })).toBe(100)
+
+    const withTypePower = bpmCtx({ moveType: 'GRASS', attackerHoldEffect: { resolvedHoldEffect: 'HOLD_EFFECT_TYPE_POWER', strength: 20, holdEffectType: 'GRASS' } })
+    expect(calcMoveBasePowerAfterModifiers(100, withTypePower)).toBe(120)
+  })
+
   it('EFFECT_FACADE doubles power when the attacker has a major status', () => {
     const burned = bpmCtx({ moveEffect: 'EFFECT_FACADE', attacker: battler({ status1: new Set(['STATUS1_BURN']) }) })
     expect(calcMoveBasePowerAfterModifiers(70, burned)).toBe(140)
