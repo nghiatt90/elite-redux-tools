@@ -39,6 +39,11 @@ export default function RandomizerControls({
         <h3 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
           Randomizer modes
         </h3>
+        <p className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
+          Set these to match the two randomizer options you picked when starting your save
+          &mdash; the game tracks them separately, and a mismatch makes every result wrong
+          rather than merely different.
+        </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <Toggle
             label="Ability Randomized Mode"
