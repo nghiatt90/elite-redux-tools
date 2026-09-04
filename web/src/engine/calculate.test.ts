@@ -394,6 +394,17 @@ describe('calculateMoveDamage -- abilityOn scenario toggle drives Flash Fire (sr
   })
 })
 
+describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat blend, battle_util.c:7213-7229)', () => {
+  it('Juggernaut adds 20% of Def into the Atk calc for a contact move (Tackle)', async () => {
+    await import('./abilities/impl/index')
+    const withoutJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
+    const withJuggernaut = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_JUGGERNAUT', innates: [null, null, null] } }) }),
+    )
+    expect(withJuggernaut.rolls[15]).toBeGreaterThan(withoutJuggernaut.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

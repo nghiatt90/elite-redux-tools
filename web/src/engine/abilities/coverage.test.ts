@@ -221,7 +221,28 @@ describe('ability registry coverage gate', () => {
     //             which-stat-gets-boosted selection need different field shapes
     //             (a turn counter, a boostedStat selector) and are deliberately
     //             left for a follow-up rather than forced into this boolean.
-    expect(unmodelledCount).toBeLessThanOrEqual(33)
+    //     -> 27  (batch AD: the secondary-stat-blend family, step 8 of the field
+    //             report's roadmap -- CalculateStat's cross-stat blend
+    //             (battle_util.c:7213-7229) is now genuinely wired: computeChoose
+    //             OffensiveStat/computeChooseDefensiveStat return a ChosenStat
+    //             {statToUse, secondaryStat} instead of just statToUse, and
+    //             calculate.ts's new applySecondaryStatBlend folds each named
+    //             OTHER stat's fully-scaled value (stat-stage ratio, extraStatLevel,
+    //             onStat hooks all included, matching the C's own recursive
+    //             CalculateStat call) into the primary at percent/100. Fixed a real
+    //             bug in computeChooseDefensiveStat along the way: it discarded
+    //             secondaryStat whenever statToUse was unchanged, which would have
+    //             silently dropped Sleek Scales (it never touches statToUse at
+    //             all) -- now merged across both the attacker and defender runs,
+    //             short-circuiting at the first primary-stat override exactly like
+    //             the C's `for (...) && !defStatToUse` loop. Juggernaut, Speed
+    //             Force, Power Core, Terminal Velocity, Slipstream, Sleek Scales
+    //             ported fresh; their 6 aliases (Iron Giant, Sumo Guard, Sand
+    //             Titan, Unstable Core, Maximum Acceleration, Mach 3) needed no
+    //             patch at all -- they already pointed at these abilities from
+    //             an earlier batch and just started working once the target
+    //             stopped being an unmodelled stub.
+    expect(unmodelledCount).toBeLessThanOrEqual(27)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

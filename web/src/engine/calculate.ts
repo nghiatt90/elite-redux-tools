@@ -210,9 +210,27 @@ function computeStat(opts: ComputeStatOptions): number {
       isHighestStat: isHighestStat(battler, stat),
       abilityOn: battler.abilityOn,
     }),
-    secondaryStatPercent: 0, // onChoose*Stat hooks setting a secondary blend -- deferred
+    secondaryStatPercent: 0, // the OWN-stat self-buff variant (secondaryStat[statEnum]) -- no ability in the census ever targets its own chosen stat this way, so this stays 0; see applySecondaryStatBlend for the (used) other-stat blend
     statStageRatios: opts.statStageRatios,
   })
+}
+
+/**
+ * CalculateStat's cross-stat blend (:7213-7220): each OTHER stat named in
+ * secondaryStat contributes `floor(thatStat'sFullValue * percent / 100)`, added on
+ * top of the primary stat's own fully-scaled value -- `thatStat'sFullValue` is
+ * computed the same way as the primary (stat-stage scaling, extraStatLevel, onStat
+ * hooks all included, matching the C's own recursive CalculateStat call), just for
+ * a different stat key. `computeOther` is the caller's own computeStat closure so
+ * this stays agnostic to which battler/move/crit context it's being called in.
+ */
+function applySecondaryStatBlend(primary: number, secondaryStat: Partial<Record<BattleStatKey, number>>, computeOther: (stat: BattleStatKey) => number): number {
+  let total = primary
+  for (const [stat, percent] of Object.entries(secondaryStat) as [BattleStatKey, number][]) {
+    if (!percent) continue
+    total += idiv(computeOther(stat) * percent, 100)
+  }
+  return total
 }
 
 function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
@@ -229,9 +247,9 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
   const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS')
   // onChooseOffensiveStat only runs in the non-Foul-Play/Body-Press/Monotype-Champ
   // case (:7255-7269) -- the Monotype Champ special case isn't modelled here.
-  const atkStat: BattleStatKey =
+  const { statToUse: atkStat, secondaryStat: atkSecondaryStat } =
     isFoulPlay || isBodyPress
-      ? defaultAtkStat
+      ? { statToUse: defaultAtkStat, secondaryStat: {} }
       : computeChooseOffensiveStat(attacker.abilitySlots, defaultAtkStat, {
           battlerId: 'attacker',
           moveId: move.id,
@@ -244,17 +262,12 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
           isHighestAttackingStat: isHighestAttackingStat(attacker, 'atk'),
         })
 
-  const rawAtkStat = computeStat({
-    battler: statBattler,
-    opponent: statBattler === attacker ? defender : attacker,
-    stat: atkStat,
-    move,
-    isAttackRole: true,
-    isCrit: forcedCrit,
-    isWonderRoomActive: false,
-    field,
-    statStageRatios,
-  })
+  const statOpponent = statBattler === attacker ? defender : attacker
+  const rawAtkStat = applySecondaryStatBlend(
+    computeStat({ battler: statBattler, opponent: statOpponent, stat: atkStat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+    atkSecondaryStat,
+    (stat) => computeStat({ battler: statBattler, opponent: statOpponent, stat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+  )
 
   const isGhostDefenderInFog = defender.types.includes('GHOST') && field.weather === 'FOG'
   const finalAtk = calcAttackStatModifiers({
@@ -279,7 +292,7 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
   const noPositive = noPositiveStatStages(isCrit, Boolean(move.flags.ignoresStatStages), isWrappedGripPincer)
   const defaultDefStat = defaultDefendingStat(move.splitFlag, split === 'PHYSICAL')
   const defRaw = defender.rawStats
-  const defStat = computeChooseDefensiveStat(attacker.abilitySlots, defender.abilitySlots, defaultDefStat, {
+  const { statToUse: defStat, secondaryStat: defSecondaryStat } = computeChooseDefensiveStat(attacker.abilitySlots, defender.abilitySlots, defaultDefStat, {
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: move.id,
@@ -291,17 +304,11 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     defenderDefComparison: defRaw.def < defRaw.spdef ? 'def' : defRaw.spdef < defRaw.def ? 'spdef' : 'equal',
   })
 
-  const rawDefStat = computeStat({
-    battler: defender,
-    opponent: attacker,
-    stat: defStat,
-    move,
-    isAttackRole: false,
-    isCrit: noPositive,
-    isWonderRoomActive: false,
-    field: scenario.field,
-    statStageRatios,
-  })
+  const rawDefStat = applySecondaryStatBlend(
+    computeStat({ battler: defender, opponent: attacker, stat: defStat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+    defSecondaryStat,
+    (stat) => computeStat({ battler: defender, opponent: attacker, stat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+  )
 
   const finalDef = calcDefenseStatModifiers(rawDefStat, {
     resolvedHoldEffect: defender.condition.resolvedHoldEffect,

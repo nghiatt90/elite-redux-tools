@@ -418,24 +418,28 @@ export function computeAbilityCritBonus(
 
 type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse' | 'secondaryStat'>
 
+/** CalculateStat's cross-stat blend result: the primary stat to use, plus a
+ * percentage-of-another-stat bonus keyed by which OTHER stat contributes (e.g.
+ * Juggernaut's `{ def: 20 }` on a contact move) -- see calculate.ts's
+ * applySecondaryStatBlend for how these percentages get folded into the final
+ * value (CalculateStat, :7213-7229). */
+export interface ChosenStat {
+  statToUse: BattleStatKey
+  secondaryStat: Partial<Record<BattleStatKey, number>>
+}
+
 /**
  * CalcAttackStat's onChooseOffensiveStat loop (:7263-7269) -- unlike every other
  * hook here, the C checks ONLY `gAbilities[ability].onChooseOffensiveStat` truthy,
  * with NO IsApplyOnFlagAppropriate call at all: it's always the ATTACKER's own 4
- * ability slots, unconditionally. secondaryStat writes are captured on the context
- * for completeness but NOT read by calculate.ts yet -- the C's actual consumer
- * (CalculateStat's cross-stat blend, :7215-7229) computes and adds a SEPARATE
- * stat's fully-scaled value, which needs a bigger change to computeStat than a
- * single context field; Juggernaut/Power Core/Slipstream/Speed Force/Terminal
- * Velocity are left unmodelled for exactly this reason (their entire effect IS
- * that blend).
+ * ability slots, unconditionally.
  */
-export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseOffensiveStatInputs): BattleStatKey {
+export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseOffensiveStatInputs): ChosenStat {
   const ctx: OnChooseOffensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     impl.onChooseOffensiveStat?.(ctx)
   })
-  return ctx.statToUse
+  return { statToUse: ctx.statToUse, secondaryStat: ctx.secondaryStat }
 }
 
 type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse' | 'secondaryStat'>
@@ -449,8 +453,18 @@ type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse
  * own battler IS the attacker -- matching onCrit's documented default-scope
  * semantics) and an explicit `onChooseDefensiveStatFor: APPLY_ON_TARGET` scope is
  * what lets a defender-held ability like Blur/Elude/Sleek Scales fire at all.
+ *
+ * The C's loop condition is `for (...) && !defStatToUse` -- it keeps scanning
+ * battlers (accumulating into the SAME shared secondaryDefStats array) until one
+ * sets the primary stat, at which point it stops. Sleek Scales only ever writes
+ * secondaryDefStats (never touches defStatToUse), so it must not be discarded just
+ * because "nothing changed" for the primary stat -- the `??` below preserves the
+ * C's stop-at-first-primary-override behavior (the defender's run, and whatever it
+ * contributes to secondaryStat, is skipped entirely if the attacker's own run
+ * already set a stat) while still merging in the running secondaryStat.
  */
-export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseDefensiveStatInputs): BattleStatKey {
+export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseDefensiveStatInputs): ChosenStat {
+  const secondaryStat: Partial<Record<BattleStatKey, number>> = {}
   const run = (slots: AbilitySlots, sourceIsAttacker: boolean, sourceIsTarget: boolean): BattleStatKey | null => {
     const ctx: OnChooseDefensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
     forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
@@ -458,9 +472,11 @@ export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defender
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onChooseDefensiveStatFor)) return
       impl.onChooseDefensiveStat(ctx)
     })
+    Object.assign(secondaryStat, ctx.secondaryStat)
     return ctx.statToUse !== defaultStat ? ctx.statToUse : null
   }
-  return run(attackerSlots, true, false) ?? run(defenderSlots, false, true) ?? defaultStat
+  const statToUse = run(attackerSlots, true, false) ?? run(defenderSlots, false, true) ?? defaultStat
+  return { statToUse, secondaryStat }
 }
 
 /** Whether a slot's registered entry (if any) is a real port, used by callers that
