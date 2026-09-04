@@ -50,6 +50,7 @@ describe('mold breaker batch W', () => {
       moveType: 'NORMAL',
       moveSplit: 'PHYSICAL' as const,
       moveFlags: {},
+      moveEffectChance: 0,
       basePower: 40,
       typeEffectiveness: uq(1.0),
       isCrit: false,

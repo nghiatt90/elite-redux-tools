@@ -18,6 +18,7 @@ function offCtx(overrides: Partial<{ moveType: string; isAuraBreakActive: boolea
     moveType: 'NORMAL',
     moveSplit: 'PHYSICAL' as const,
     moveFlags: {},
+    moveEffectChance: 0,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

@@ -43,6 +43,11 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   moveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // post-swap split (IS_MOVE_PHYSICAL/IS_MOVE_SPECIAL)
   moveFlags: Record<string, true> // gBattleMoves[move].flags -- moves.json's own `flags` shape
+  /** gBattleMoves[move].secondaryEffectChance -- Sheer Force's own trigger condition
+   * (BattleMovesGenerator.kt's `sheerForce` local) is `split != STATUS && effectChance
+   * != 0 && !noSheerForce`, all three pieces already emitted; no separate
+   * FLAG_SHEER_FORCE_BOOST needs threading through the pipeline. */
+  moveEffectChance: number
   /** CalcMoveBasePower's PRE-modifier value (:7531-7533) -- Technician reads this,
    * not the fully-modified power used in the main damage equation. */
   basePower: number

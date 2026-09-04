@@ -47,6 +47,7 @@ describe('ate family + onStab batch', () => {
       moveType: 'NORMAL',
       moveSplit: 'PHYSICAL' as const,
       moveFlags: { contact: true as const },
+      moveEffectChance: 0,
       basePower: 40,
       typeEffectiveness: uq(1.0),
       isCrit: false,

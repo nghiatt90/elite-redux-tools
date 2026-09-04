@@ -23,7 +23,6 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_ILLUSION', src: 'src/abilities.cc:2118', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_LETHARGY', src: 'src/abilities.cc:4934', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_NORMALIZE', src: 'src/abilities.cc:1558', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier, onTypeEffectiveness)' },
-  { id: 'ABILITY_SHEER_FORCE', src: 'src/abilities.cc:1855', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_SUPERCONDUCTOR', src: 'src/abilities.cc:8187', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },
   { id: 'ABILITY_VICTORY_BOMB', src: 'src/abilities.cc:8980', unmodelled: 'not yet ported (hooks: onMoveType)' },
 ]

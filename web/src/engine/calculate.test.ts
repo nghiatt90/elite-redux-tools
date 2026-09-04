@@ -117,6 +117,7 @@ function moveData(id: string): MoveData {
     type: m.type ? m.type.replace('TYPE_', '') : null,
     type2: m.type2 ? m.type2.replace('TYPE_', '') : null,
     split: m.split,
+    effectChance: m.effectChance,
     splitFlag: m.splitFlag,
     effect: m.effect,
     customBehavior: m.customBehavior,
@@ -538,6 +539,33 @@ describe('calculateMoveDamage -- Pretty Princess boosts against a defender with 
       }),
     )
     expect(attackerAlsoUnaware.rolls[15]).toBe(neutral.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Sheer Force boosts moves with a secondary effect chance (src/abilities.cc:1855-1860)', () => {
+  it('boosts a move with a nonzero effectChance, but not a move without one', () => {
+    // MOVE_ACID is POISON -- the default SPECIES_SKARMORY defender (Steel/Flying) is
+    // immune to Poison-type damage outright, so this overrides to a non-immune
+    // defender to actually see Sheer Force's multiplier.
+    const nonImmuneDefender = battler('SPECIES_GARCHOMP')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_ACID'), defender: nonImmuneDefender }))
+    const withSheerForce = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_ACID'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SHEER_FORCE', innates: [null, null, null] } }),
+        defender: nonImmuneDefender,
+      }),
+    )
+    expect(withSheerForce.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const noEffectBaseline = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
+    const noEffectWithSheerForce = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SHEER_FORCE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(noEffectWithSheerForce.rolls[15]).toBe(noEffectBaseline.rolls[15])
   })
 })
 

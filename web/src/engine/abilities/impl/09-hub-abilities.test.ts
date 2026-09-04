@@ -21,6 +21,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     moveType: 'NORMAL',
     moveSplit: 'PHYSICAL',
     moveFlags: {},
+    moveEffectChance: 0,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

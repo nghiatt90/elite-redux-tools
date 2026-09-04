@@ -261,6 +261,7 @@ export function toMoveData(move: Move): MoveData {
     type: move.type ? bareType(move.type) : null,
     type2: move.type2 ? bareType(move.type2) : null,
     split: move.split,
+    effectChance: move.effectChance,
     splitFlag: move.splitFlag,
     effect: move.effect,
     customBehavior: move.customBehavior,

@@ -333,7 +333,18 @@ describe('ability registry coverage gate', () => {
     //             Lash Out). Verified end-to-end both directions, including that
     //             Unaware held as an INNATE alongside Pretty Princess correctly
     //             suppresses its own boost.
-    expect(unmodelledCount).toBeLessThanOrEqual(13)
+    //     -> 12  (batch AM: Sheer Force. FLAG_SHEER_FORCE_BOOST looked like it
+    //             needed a new pipeline-emitted move flag, but BattleMovesGenerator
+    //             .kt derives it entirely from data already emitted: split !=
+    //             STATUS && effectChance != 0 && !noSheerForce (the move's own
+    //             argument-effect half of the noSheerForce check isn't threaded
+    //             into MoveData, so this covers the common case only, matching
+    //             this engine's existing move-argument approximations elsewhere).
+    //             Just needed MoveData/OffensiveMultiplierContext.moveEffectChance
+    //             threaded through -- no pipeline change, no data regeneration.
+    //             Verified end-to-end: MOVE_ACID (effectChance 30) is boosted,
+    //             MOVE_TACKLE (effectChance 0) is not.
+    expect(unmodelledCount).toBeLessThanOrEqual(12)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

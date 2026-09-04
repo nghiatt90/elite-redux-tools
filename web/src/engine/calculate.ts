@@ -53,6 +53,7 @@ export interface MoveData {
   type: string | null
   type2: string | null
   split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  effectChance: number
   splitFlag?: string // USE_HIGHEST_OFFENSE | USE_HIGHEST_DAMAGE | HITS_DEF | HITS_SPDEF | USE_LOWEST_DEFENSE (never handled, see below)
   effect: string | null
   customBehavior?: unknown
@@ -491,6 +492,7 @@ function calcInternal(
       moveType,
       moveSplit: split,
       moveFlags: move.flags,
+      moveEffectChance: move.effectChance,
       basePower: power,
       typeEffectiveness,
       isCrit,
