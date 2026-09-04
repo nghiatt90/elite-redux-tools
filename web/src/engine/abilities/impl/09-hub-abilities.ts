@@ -3,6 +3,7 @@
 
 import { MUL } from '../macros'
 import { NEVER_CRIT } from '../../crit'
+import { aliasImmune } from './alias'
 import type { AbilityImpl } from '../types'
 
 export const HUB_ABILITIES: AbilityImpl[] = [
@@ -83,5 +84,7 @@ export const HUB_ABILITIES: AbilityImpl[] = [
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveSplit === 'SPECIAL' && ctx.weather === 'SANDSTORM') MUL(ctx, 0.5)
     },
+    // CHECK(sandstorm) then delegates to Queenly Majesty's onImmune (movePriority > 0).
+    onImmune: (ctx) => ctx.weather === 'SANDSTORM' && aliasImmune('ABILITY_QUEENLY_MAJESTY')(ctx),
   },
 ]

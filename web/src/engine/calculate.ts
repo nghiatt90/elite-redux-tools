@@ -34,6 +34,7 @@ import {
   computeAbilityMultiplier,
   computeAttackerHasMoldBreaker,
   computeIsAbsorbed,
+  computeIsImmune,
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
   computeOnStatModifier,
@@ -414,6 +415,18 @@ function calcInternal(
   // outer calculateMoveDamage's `isImmune` flag (typeEffectiveness === 0) read
   // correctly for this case too, not just true type immunity.
   if (computeIsAbsorbed(defender.abilitySlots, { moveType, moveFlags: move.flags }, attackerHasMoldBreaker)) {
+    return { dmg: -1, typeEffectiveness: 0, resolvedMoveType: moveType, unmodelled }
+  }
+
+  // TestImmunityAbilities (:8978-8997) -- a hard block distinct from both type
+  // immunity and onAbsorb (no heal/stat-boost side effect, just "this move fails").
+  if (
+    computeIsImmune(
+      defender.abilitySlots,
+      { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, movePriority: move.priority ?? 0 },
+      attackerHasMoldBreaker,
+    )
+  ) {
     return { dmg: -1, typeEffectiveness: 0, resolvedMoveType: moveType, unmodelled }
   }
 

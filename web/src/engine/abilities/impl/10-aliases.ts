@@ -17,6 +17,7 @@ import {
   aliasCrit,
   aliasDefensiveMultiplier,
   aliasAbsorb,
+  aliasImmune,
   aliasMoldBreaker,
   aliasMoveType,
   aliasOffensiveMultiplier,
@@ -194,6 +195,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RIVALRY'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RIVALRY'),
+    onImmune: aliasImmune('ABILITY_QUEENLY_MAJESTY'),
   },
   {
     id: 'ABILITY_ENLIGHTENED',
@@ -510,6 +512,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
     onStat: aliasStat('ABILITY_SAND_FORCE'),
+    onImmune: aliasImmune('ABILITY_SAND_GUARD'),
   },
   {
     id: 'ABILITY_SAND_TITAN',
@@ -528,6 +531,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
+    onImmune: aliasImmune('ABILITY_SAND_GUARD'),
   },
   {
     id: 'ABILITY_SHADOW_SHIELD',

@@ -19,6 +19,7 @@ import type {
   OnChooseDefensiveStatContext,
   OnChooseOffensiveStatContext,
   OnCritContext,
+  OnImmuneContext,
   OnMoldBreakerContext,
   OnMoveTypeContext,
   OnParentalBondContext,
@@ -156,6 +157,26 @@ export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbCont
     }
   })
   return absorbed
+}
+
+/**
+ * TestImmunityAbilities, src/battle_util.c:8978-8997 -- true if any of the
+ * defender's (unsuppressed) abilities blocks this move outright. checkMoldBreaker=
+ * TRUE in the C, same predicate as computeIsAbsorbed. The C also scans every alive
+ * battler on the field (not just the defender) for an ALLY-scoped block (Queenly
+ * Majesty/Dazzling's `onImmuneFor = APPLY_ON_ALLY` protects the whole side) -- this
+ * v1 singles engine has no ally battler, so only the defender's own slots are
+ * checked, which is exactly equivalent for a 2-battler field.
+ */
+export function computeIsImmune(defenderSlots: AbilitySlots, ctx: OnImmuneContext, attackerHasMoldBreaker: boolean): boolean {
+  let blocked = false
+  forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
+    if (impl.onImmune?.(ctx)) {
+      blocked = true
+      return 'break'
+    }
+  })
+  return blocked
 }
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --

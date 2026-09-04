@@ -163,7 +163,17 @@ describe('ability registry coverage gate', () => {
     //             onOffensiveMultiplier half (gated on in-battle activation state
     //             this engine doesn't track) stays undone, documented inline --
     //             only its onAbsorb half was portable.
-    expect(unmodelledCount).toBeLessThanOrEqual(66)
+    //     -> 52  (batch Z: all 19 onImmune census abilities -- 14 fresh ports plus
+    //             onImmune added to Empress, Sand Fiend, Sand Guard, Sepia Lens,
+    //             Sun Basking (already real-ported for a different hook). WIRED
+    //             into calculate.ts (computeIsImmune, right after the onAbsorb
+    //             check), forcing typeEffectiveness to 0 the same way -- a hard
+    //             block distinct from onAbsorb (no heal/stat-boost side effect).
+    //             Three of the C's conditions (same-side, self-target,
+    //             gProcessingExtraAttacks) are fixed always-true/false constants
+    //             in this v1 2-battler singles engine -- documented on
+    //             OnImmuneContext itself rather than modelled as real fields.
+    expect(unmodelledCount).toBeLessThanOrEqual(52)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

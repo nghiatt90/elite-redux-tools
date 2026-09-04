@@ -295,6 +295,30 @@ export interface OnAbsorbContext {
  */
 export type OnAbsorb = (ctx: OnAbsorbContext) => boolean
 
+export interface OnImmuneContext {
+  moveType: string
+  moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  weather: string
+  movePriority: number
+}
+
+/**
+ * onImmune returns whether this ability blocks the move outright (0 damage, no
+ * absorb-style side effect) -- TestImmunityAbilities, src/battle_util.c:8978-8997,
+ * called with checkMoldBreaker=TRUE. Three conditions the real C checks are always
+ * true/false in this v1 engine and are simply not modelled per-call: `battler !=
+ * attacker` and `GetBattlerSide(attacker) != GetBattlerSide(battler)` (this
+ * calculator always evaluates a distinct attacker/defender pair on opposite
+ * sides -- always true), `GetBattlerBattleMoveTargetFlags(move, attacker) &
+ * MOVE_TARGET_USER` (a self-targeted damaging move essentially doesn't exist in
+ * the dataset -- Bide is the sole exception, already a known special case
+ * elsewhere -- so treated as always false/non-self-targeted), and
+ * `gProcessingExtraAttacks` (multi-hit simulation state this engine doesn't have --
+ * always false, so `CHECK_NOT` always passes).
+ */
+export type OnImmune = (ctx: OnImmuneContext) => boolean
+
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -349,6 +373,7 @@ export interface AbilityImpl {
   onMoldBreaker?: OnMoldBreaker
   onParentalBond?: OnParentalBond
   onAbsorb?: OnAbsorb
+  onImmune?: OnImmune
 }
 
 export interface UnmodelledAbility {

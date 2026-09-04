@@ -12,7 +12,7 @@
 // same as its onOffensiveMultiplier half -- see that batch's note).
 
 import { MUL } from '../macros'
-import { aliasDefensiveMultiplier } from './alias'
+import { aliasDefensiveMultiplier, aliasImmune } from './alias'
 import type { AbilityImpl, DefensiveMultiplierContext } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -68,6 +68,9 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     onDefensiveMultiplier: (ctx) => {
       if ((ctx.weather === 'SUN_PERMANENT' || ctx.weather === 'SUN_TEMPORARY' || ctx.weather === 'SUN_PRIMAL') && ctx.moveSplit === 'PHYSICAL') MUL(ctx, 0.5)
     },
+    // CHECK(any sun variant) then delegates to Queenly Majesty's onImmune.
+    onImmune: (ctx) =>
+      (ctx.weather === 'SUN_PERMANENT' || ctx.weather === 'SUN_TEMPORARY' || ctx.weather === 'SUN_PRIMAL') && aliasImmune('ABILITY_QUEENLY_MAJESTY')(ctx),
   },
   { id: 'ABILITY_MUCUS_MEMBRANE', src: 'src/abilities.cc:11600', flags: { breakable: true }, onDefensiveMultiplier: (ctx) => MUL(ctx, 0.7) },
   {

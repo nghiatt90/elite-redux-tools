@@ -25,6 +25,7 @@ import type {
   OnParentalBondContext,
   ParentalBondTrigger,
   OnAbsorbContext,
+  OnImmuneContext,
 } from '../types'
 
 export function aliasOffensiveMultiplier(target: string) {
@@ -122,5 +123,12 @@ export function aliasAbsorb(target: string) {
   return (ctx: OnAbsorbContext): boolean => {
     const t = lookupAbility(target)
     return t && !isUnmodelled(t) ? (t.onAbsorb?.(ctx) ?? false) : false
+  }
+}
+
+export function aliasImmune(target: string) {
+  return (ctx: OnImmuneContext): boolean => {
+    const t = lookupAbility(target)
+    return t && !isUnmodelled(t) ? (t.onImmune?.(ctx) ?? false) : false
   }
 }
