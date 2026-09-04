@@ -21,6 +21,7 @@ function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     moveFlags: {},
     basePower: 40,
     attackerActsFirst: true,
+    abilityOn: false,
     ...overrides,
   }
 }

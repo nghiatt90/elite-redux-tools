@@ -208,6 +208,7 @@ function computeStat(opts: ComputeStatOptions): number {
       status1: battler.condition.status1,
       isHighestAttackingStat: isHighestAttackingStat(battler, stat),
       isHighestStat: isHighestStat(battler, stat),
+      abilityOn: battler.abilityOn,
     }),
     secondaryStatPercent: 0, // onChoose*Stat hooks setting a secondary blend -- deferred
     statStageRatios: opts.statStageRatios,
@@ -339,6 +340,8 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
       attackerActsFirst: scenario.attackerActsFirst,
     },
     attackerHasMoldBreaker,
+    attacker.abilityOn,
+    defender.abilityOn,
   )
   return {
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
@@ -491,6 +494,7 @@ function calcInternal(
       sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
       terrain: field.terrain,
       movePriority: move.priority ?? 0,
+      attackerAbilityOn: attacker.abilityOn,
     },
     {
       defenderId: 'defender',
@@ -505,6 +509,7 @@ function calcInternal(
       defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
       attackerActsFirst: scenario.attackerActsFirst,
       defenderTypes: defender.types,
+      defenderAbilityOn: defender.abilityOn,
     },
     attackerHasMoldBreaker,
   )

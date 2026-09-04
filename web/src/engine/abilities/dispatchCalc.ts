@@ -366,7 +366,7 @@ export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): 
   return granted
 }
 
-type OnCritInputs = Omit<OnCritContext, 'battlerId'>
+type OnCritInputs = Omit<OnCritContext, 'battlerId' | 'abilityOn'>
 
 /**
  * CalcCritChanceStage's onCrit loop (src/battle_script_commands.c:1529-1536) -- runs
@@ -382,14 +382,28 @@ type OnCritInputs = Omit<OnCritContext, 'battlerId'>
  * `breakable`); `attackerHasMoldBreaker` only ever suppresses the defender's run,
  * matching IsSuppressed's own self-exemption.
  */
-export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, inputs: OnCritInputs, attackerHasMoldBreaker = false): number {
+export function computeAbilityCritBonus(
+  attackerSlots: AbilitySlots,
+  defenderSlots: AbilitySlots,
+  inputs: OnCritInputs,
+  attackerHasMoldBreaker = false,
+  attackerAbilityOn = false,
+  defenderAbilityOn = false,
+): number {
   let bonus = 0
   let blocked = false
-  const run = (slots: AbilitySlots, battlerId: string, sourceIsAttacker: boolean, sourceIsTarget: boolean, suppressed: (id: string, entry: AbilityEntry) => boolean) => {
+  const run = (
+    slots: AbilitySlots,
+    battlerId: string,
+    sourceIsAttacker: boolean,
+    sourceIsTarget: boolean,
+    abilityOn: boolean,
+    suppressed: (id: string, entry: AbilityEntry) => boolean,
+  ) => {
     forEachAbility(slots, suppressed, (impl) => {
       if (blocked || !impl.onCrit) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
-      const result = impl.onCrit({ battlerId, ...inputs })
+      const result = impl.onCrit({ battlerId, abilityOn, ...inputs })
       if (result === NEVER_CRIT) {
         blocked = true
         return 'break'
@@ -397,8 +411,8 @@ export function computeAbilityCritBonus(attackerSlots: AbilitySlots, defenderSlo
       bonus += result
     })
   }
-  run(attackerSlots, 'attacker', true, false, NEVER_SUPPRESSED)
-  if (!blocked) run(defenderSlots, 'defender', false, true, suppressedByMoldBreaker(attackerHasMoldBreaker))
+  run(attackerSlots, 'attacker', true, false, attackerAbilityOn, NEVER_SUPPRESSED)
+  if (!blocked) run(defenderSlots, 'defender', false, true, defenderAbilityOn, suppressedByMoldBreaker(attackerHasMoldBreaker))
   return blocked ? NEVER_CRIT : bonus
 }
 

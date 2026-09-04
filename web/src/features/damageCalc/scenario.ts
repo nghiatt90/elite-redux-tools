@@ -69,6 +69,10 @@ export interface BattlerConfig {
   /** Dig/Dive/Fly-style semi-invulnerability -- only meaningful as the DEFENDER (see
    * BattlerBattleState.semiInvulnerable's doc); harmless to set on the attacker. */
   semiInvulnerable: 'NONE' | 'UNDERGROUND' | 'UNDERWATER' | 'AIRBORNE'
+  /** See BattlerBattleState.abilityOn's doc -- a generic in-battle ability
+   * activation toggle (Flash Fire triggered, Unburden's item lost, etc.),
+   * meaningful on either side depending on the specific ability. */
+  abilityOn: boolean
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -94,6 +98,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     hpPercent: 100,
     moveIds: [null, null, null, null],
     semiInvulnerable: 'NONE',
+    abilityOn: false,
   }
 }
 
@@ -185,6 +190,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     types: species.types.map(bareType),
     isGrounded: !species.types.includes('TYPE_FLYING'), // species-only baseline; calculate.ts reduces this further via the Levitate ability flag (see BattlerBattleState.isGrounded's doc)
     semiInvulnerable: config.semiInvulnerable,
+    abilityOn: config.abilityOn,
     level: config.level,
     nature: config.nature,
     rawStats,

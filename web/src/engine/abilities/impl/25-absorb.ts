@@ -22,6 +22,7 @@
 // Unburden/Protosynthesis/... all need one). Only Flash Fire's onAbsorb half
 // (real, testable, and independent of that gap) is ported.
 
+import { MUL } from '../macros'
 import type { AbilityImpl } from '../types'
 
 export const ABSORB_ABILITIES: AbilityImpl[] = [
@@ -30,12 +31,16 @@ export const ABSORB_ABILITIES: AbilityImpl[] = [
   { id: 'ABILITY_EVAPORATE', src: 'src/abilities.cc:5727', flags: { breakable: true }, onAbsorb: (ctx) => ctx.moveType === 'WATER' },
   { id: 'ABILITY_FIRE_ASPECT', src: 'src/abilities.cc:10472', flags: { breakable: true }, onAbsorb: (ctx) => ctx.moveType === 'FIRE' },
   {
-    // onOffensiveMultiplier (Flash-Fire-activated 1.5x boost) not ported -- see the
-    // file-level note above; no scenario state exists yet for "did this activate".
+    // onOffensiveMultiplier (the RESOURCE_FLAG_FLASH_FIRE-activated 1.5x boost) is
+    // ported in batch AC (29-ability-activation.ts), added to this SAME entry --
+    // see that file for the abilityOn scenario toggle this needed.
     id: 'ABILITY_FLASH_FIRE',
     src: 'src/abilities.cc:695',
     flags: { breakable: true },
     onAbsorb: (ctx) => ctx.moveType === 'FIRE',
+    onOffensiveMultiplier: (ctx) => {
+      if (ctx.moveType === 'FIRE' && ctx.attackerAbilityOn) MUL(ctx, 1.5)
+    },
   },
   { id: 'ABILITY_HEAT_SINK', src: 'src/abilities.cc:10440', flags: { breakable: true }, onAbsorb: (ctx) => ctx.moveType === 'FIRE' },
   { id: 'ABILITY_ICE_DEW', src: 'src/abilities.cc:4783', flags: { breakable: true }, onAbsorb: (ctx) => ctx.moveType === 'ICE' },

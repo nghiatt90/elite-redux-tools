@@ -73,6 +73,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     types: bareTypes(s.types),
     isGrounded: true,
     semiInvulnerable: 'NONE',
+    abilityOn: false,
     level,
     nature,
     rawStats,
@@ -374,6 +375,22 @@ describe('calculateMoveDamage -- onInfiltrate bypasses screens (Infiltrates, Cal
       }),
     )
     expect(withInfiltrator.rolls[15]).toBe(noScreen.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- abilityOn scenario toggle drives Flash Fire (src/abilities.cc:695)', () => {
+  it('Ember gets no boost by default; a 1.5x boost once abilityOn is checked', async () => {
+    await import('./abilities/impl/index')
+    const off = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_EMBER'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_FLASH_FIRE', innates: [null, null, null] } }) }),
+    )
+    const on = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EMBER'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_FLASH_FIRE', innates: [null, null, null] }, abilityOn: true }),
+      }),
+    )
+    expect(on.rolls[15]).toBeGreaterThan(off.rolls[15])
   })
 })
 

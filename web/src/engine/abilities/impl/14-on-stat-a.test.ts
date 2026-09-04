@@ -23,6 +23,7 @@ function ctx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     status1: new Set(),
     isHighestAttackingStat: false,
     isHighestStat: false,
+    abilityOn: false,
     ...overrides,
   }
 }

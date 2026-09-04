@@ -36,6 +36,7 @@ describe('ally-only batch S', () => {
         sameMoveTurnsInARow: 0,
         terrain: null,
         movePriority: 0,
+        attackerAbilityOn: false,
       },
       {
         defenderId: 'defender',
@@ -50,6 +51,7 @@ describe('ally-only batch S', () => {
         defenderAtMaxHp: true,
         attackerActsFirst: true,
         defenderTypes: [],
+        defenderAbilityOn: false,
       },
     )
     expect(result).toBe(uq(1.0))
@@ -70,6 +72,7 @@ describe('ally-only batch S', () => {
       status1: new Set(),
       isHighestAttackingStat: true,
       isHighestStat: true,
+      abilityOn: false,
     })
     expect(modify(100)).toBe(100)
   })

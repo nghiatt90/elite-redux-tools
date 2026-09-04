@@ -201,7 +201,27 @@ describe('ability registry coverage gate', () => {
     //             later" shape as batch N. This closes out all 6 census-expansion
     //             hooks from the field report (onParentalBond/onAbsorb/onImmune/
     //             onInfiltrate/onModifyMoveFlags/onMoldBreaker) end to end.
-    expect(unmodelledCount).toBeLessThanOrEqual(40)
+    //     -> 33  (batch AC: the ability-activation-state family, step 7 of the
+    //             field report's roadmap -- a new generic per-battler `abilityOn`
+    //             scenario toggle (BattlerBattleState/BattlerConfig, a UI checkbox
+    //             in BattlerPanel.tsx), matching @smogon/calc's own field for this
+    //             exact class of mechanism (GetAbilityState/isFirstTurn/timer state
+    //             this non-turn-simulating engine can't derive). Threaded into
+    //             OffensiveMultiplierContext (attackerAbilityOn), Defensive
+    //             MultiplierContext (defenderAbilityOn), OnStatContext (abilityOn,
+    //             the stat owner's own), and OnCritContext (abilityOn, resolved
+    //             per-side by computeAbilityCritBonus's own run() closure since a
+    //             single shared value would be ambiguous across the attacker/
+    //             defender runs). Unburden, Power Outage, Chuckster, Drakelp Head,
+    //             Stakeout, Ambush, Slow Start ported fresh; Flash Fire's
+    //             onOffensiveMultiplier half added to its existing onAbsorb entry.
+    //             abilityOn mirrors the RAW GetAbilityState flag, not "boost
+    //             active" -- some abilities invert it (documented per-entry).
+    //             Lethargy's 5-tier turn-count decay and Protosynthesis's
+    //             which-stat-gets-boosted selection need different field shapes
+    //             (a turn counter, a boostedStat selector) and are deliberately
+    //             left for a follow-up rather than forced into this boolean.
+    expect(unmodelledCount).toBeLessThanOrEqual(33)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

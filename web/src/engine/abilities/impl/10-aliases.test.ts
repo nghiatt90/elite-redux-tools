@@ -32,6 +32,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     sameMoveTurnsInARow: 0,
     terrain: null,
     movePriority: 0,
+    attackerAbilityOn: false,
     ...overrides,
   }
 }
@@ -52,6 +53,7 @@ function defCtx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveM
     defenderAtMaxHp: true,
     attackerActsFirst: true,
     defenderTypes: [],
+    defenderAbilityOn: false,
     ...overrides,
   }
 }

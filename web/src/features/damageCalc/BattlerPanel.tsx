@@ -228,6 +228,11 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
         </select>
       </label>
 
+      <label className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+        <input type="checkbox" checked={config.abilityOn} onChange={(e) => set('abilityOn', e.target.checked)} />
+        Ability activated {/* generic in-battle toggle -- Flash Fire triggered, Unburden's item lost, Power Outage/Chuckster/Drakelp Head not yet discharged, Ambush/Stakeout's first turn, Slow Start's timer running */}
+      </label>
+
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         Current HP: {config.hpPercent}%
         <input

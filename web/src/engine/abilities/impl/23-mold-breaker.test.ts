@@ -63,6 +63,7 @@ describe('mold breaker batch W', () => {
       sameMoveTurnsInARow: 0,
       terrain: null,
       movePriority: 0,
+      attackerAbilityOn: false,
     }
     const defensiveCtx = {
       defenderId: 'defender',
@@ -77,6 +78,7 @@ describe('mold breaker batch W', () => {
       defenderAtMaxHp: true,
       attackerActsFirst: true,
       defenderTypes: [],
+      defenderAbilityOn: false,
     }
 
     const withMoldBreaker = computeAbilityMultiplier(attacker, defender, offensiveCtx, defensiveCtx, true)

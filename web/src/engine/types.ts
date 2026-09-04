@@ -135,6 +135,14 @@ export interface BattlerBattleState {
    * (battle_util.c:7707-7709: FLAG_DMG_UNDERGROUND/UNDERWATER/2X_IN_AIR check
    * gStatuses3[battlerDef] specifically). */
   semiInvulnerable: 'NONE' | 'UNDERGROUND' | 'UNDERWATER' | 'AIRBORNE'
+  /** A generic "is this battler's ability currently in its boosted/active state"
+   * scenario toggle -- GetAbilityState/isFirstTurn/RESOURCE_FLAG-style in-battle
+   * activation state (Flash Fire triggered, Unburden's item lost, Power Outage/
+   * Chuckster/Drakelp Head not yet discharged, Ambush/Stakeout's first-turn check,
+   * Slow Start's timer) that this non-turn-simulating calculator can't derive on
+   * its own, matching @smogon/calc's own `abilityOn` field for the same class of
+   * mechanism. See BattlerConfig.abilityOn. */
+  abilityOn: boolean
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

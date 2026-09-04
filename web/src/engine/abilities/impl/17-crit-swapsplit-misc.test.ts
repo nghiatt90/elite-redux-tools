@@ -30,6 +30,7 @@ function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     moveFlags: {},
     basePower: 40,
     attackerActsFirst: true,
+    abilityOn: false,
     ...overrides,
   }
 }
@@ -61,6 +62,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     sameMoveTurnsInARow: 0,
     terrain: null,
     movePriority: 0,
+    attackerAbilityOn: false,
     ...overrides,
   }
 }
@@ -81,6 +83,7 @@ function defCtx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveM
     defenderAtMaxHp: true,
     attackerActsFirst: true,
     defenderTypes: [],
+    defenderAbilityOn: false,
     ...overrides,
   }
 }

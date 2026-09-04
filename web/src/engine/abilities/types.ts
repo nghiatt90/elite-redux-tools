@@ -67,6 +67,16 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns[battler] -- Rhythmic
   terrain: string | null // ConditionFieldContext['terrain'] -- bare TERRAIN_* name, or null
   movePriority: number // GetMovePriority(...) -- the move's own declared priority; ability-adjusted priority (Prankster etc.) isn't modelled
+  /** A generic per-battler "is this ability's boosted state currently active" flag
+   * -- a scenario toggle, not derived, matching @smogon/calc's own `abilityOn`
+   * design for the same class of mechanism (Flash Fire's RESOURCE_FLAG_FLASH_FIRE,
+   * Power Outage/Stakeout's GetAbilityState/isFirstTurn checks, Ambush's own
+   * isFirstTurn -- none of which this non-turn-simulating engine can derive on its
+   * own). Named from the ATTACKER's perspective, matching attackerHp/
+   * attackerStatus1/etc. above -- every onOffensiveMultiplier ability that reads it
+   * is a self-check (APPLY_ON_SELF, the default), so this is always the loop's own
+   * current battler when it's actually invoked. */
+  attackerAbilityOn: boolean
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -82,6 +92,7 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   defenderAtMaxHp: boolean // BATTLER_MAX_HP(battler), include/battle.h:752
   attackerActsFirst: boolean // see OffensiveMultiplierContext's doc on the same field
   defenderTypes: string[] // IS_BATTLER_OF_TYPE(battler, ...) -- the ability holder's OWN types (== the move's target here)
+  defenderAbilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- same generic toggle, defender-named here (Chuckster/Drakelp Head)
 }
 
 export interface OnStatContext {
@@ -104,6 +115,7 @@ export interface OnStatContext {
   /** GetHighestStatId(battler) == statId -- compares all 5 raw stats; ties favor
    * whichever is checked first in BattleStatKey order (same caveat as above). */
   isHighestStat: boolean
+  abilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- the STAT OWNER's own toggle (Unburden/Slow Start)
 }
 
 export interface OnStabContext {
@@ -125,6 +137,11 @@ export interface OnCritContext {
   moveFlags: Record<string, true> // Hyper Cutter/Precise Fist need contact/punchBased
   basePower: number // Perfectionist's <=50-and-nonzero check -- CalcMoveBasePower's PRE-modifier value
   attackerActsFirst: boolean // Strategic Pause's turn-order check
+  // Resolved per-side by computeAbilityCritBonus's own run() closure (NOT part of
+  // OnCritInputs -- callers supply attackerAbilityOn/defenderAbilityOn separately,
+  // since a single shared value would be ambiguous across the attacker and
+  // defender runs). The ability HOLDER's own toggle (Ambush's isFirstTurn).
+  abilityOn: boolean
 }
 
 export interface OnTypeEffectivenessContext {

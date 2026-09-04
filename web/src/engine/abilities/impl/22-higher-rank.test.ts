@@ -26,6 +26,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     sameMoveTurnsInARow: 0,
     terrain: null,
     movePriority: 1,
+    attackerAbilityOn: false,
     ...overrides,
   }
 }
