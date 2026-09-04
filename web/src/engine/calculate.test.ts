@@ -76,6 +76,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     abilityOn: false,
     gender: 'MALE',
     boostedStat: null,
+    alliesFainted: 0,
     level,
     nature,
     rawStats,
@@ -455,6 +456,22 @@ describe('calculateMoveDamage -- Protosynthesis keys off the boostedStat scenari
       }),
     )
     expect(withBoost.rolls[15]).toBeGreaterThan(withoutBoost.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Supreme Overlord keys off the alliesFainted scenario toggle (src/abilities.cc:7239-7248)', () => {
+  it('boosts a physical Tackle when alliesFainted > 0', async () => {
+    await import('./abilities/impl/index')
+    const withoutFainted = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SUPREME_OVERLORD', innates: [null, null, null] } }) }),
+    )
+    const withFainted = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SUPREME_OVERLORD', innates: [null, null, null] }, alliesFainted: 5 }),
+      }),
+    )
+    expect(withFainted.rolls[15]).toBeGreaterThan(withoutFainted.rolls[15])
   })
 })
 

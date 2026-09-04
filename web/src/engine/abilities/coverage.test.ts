@@ -280,7 +280,15 @@ describe('ability registry coverage gate', () => {
     //             needed no patch. This closes out ALL 5 of the field report's
     //             named step-7 toggles (abilityOn, semiInvulnerable, aura
     //             booleans, gender, boostedStat) end to end.
-    expect(unmodelledCount).toBeLessThanOrEqual(23)
+    //     -> 21  (batch AH: Soul Harvest/Supreme Overlord -- the fainted-teammate-
+    //             count family. New BattlerBattleState/BattlerConfig.alliesFainted
+    //             (a 0-5 UI slider), matching @smogon/calc's own field, since this
+    //             v1 singles engine has no team/fainted concept to derive
+    //             gFaintedMonCount from. Both scale via integer division (idiv),
+    //             not a float multiply, and clamp at 5 fainted (min(5, ...)) --
+    //             verified end-to-end (Supreme Overlord boosting a physical
+    //             Tackle).
+    expect(unmodelledCount).toBeLessThanOrEqual(21)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

@@ -155,6 +155,13 @@ export interface BattlerBattleState {
    * derive) -- null when inactive. Matches @smogon/calc's own `boostedStat`
    * field for the same mechanism. See BattlerConfig.boostedStat's doc. */
   boostedStat: BattleStatKey | null
+  /** gFaintedMonCount[GetBattlerSide(battler)] -- how many of THIS battler's OWN
+   * team have fainted so far this battle (Soul Harvest, Supreme Overlord). This
+   * v1 singles engine has no team/fainted concept to derive it from, matching
+   * @smogon/calc's own `alliesFainted` field for the same mechanism. Both
+   * abilities clamp with `min(5, ...)` in the C, so values above 5 are equivalent
+   * to 5. */
+  alliesFainted: number
   level: number
   nature: string
   /** Out-of-battle stats (calcStat/calcHp already applied) -- the raw

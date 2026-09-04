@@ -81,6 +81,7 @@ function statCtx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     isHighestStat: false,
     abilityOn: false,
     boostedStat: null,
+    alliesFainted: 0,
     ...overrides,
   }
 }

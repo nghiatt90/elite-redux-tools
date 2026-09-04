@@ -266,6 +266,11 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
       </label>
 
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Allies fainted: {config.alliesFainted} {/* Soul Harvest/Supreme Overlord -- this v1 singles engine has no team/fainted concept to derive it from; both abilities cap at 5 anyway */}
+        <input type="range" min={0} max={5} className="w-full" value={config.alliesFainted} onChange={(e) => set('alliesFainted', Number(e.target.value))} />
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         Current HP: {config.hpPercent}%
         <input
           type="range"

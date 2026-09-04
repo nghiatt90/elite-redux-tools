@@ -101,6 +101,8 @@ export interface BattlerConfig {
   /** See BattlerBattleState.boostedStat's doc -- Protosynthesis/Quark Drive's
    * activation state, null when inactive/not applicable. */
   boostedStat: BattleStatKey | null
+  /** See BattlerBattleState.alliesFainted's doc. */
+  alliesFainted: number
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -129,6 +131,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     abilityOn: false,
     gender: 'MALE',
     boostedStat: null,
+    alliesFainted: 0,
   }
 }
 
@@ -223,6 +226,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     abilityOn: config.abilityOn,
     gender: species.gender.genderless ? 'GENDERLESS' : config.gender,
     boostedStat: config.boostedStat,
+    alliesFainted: config.alliesFainted,
     level: config.level,
     nature: config.nature,
     rawStats,

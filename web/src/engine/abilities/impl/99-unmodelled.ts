@@ -31,9 +31,7 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_PRETTY_PRINCESS', src: 'src/abilities.cc:5258', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_SHEER_FORCE', src: 'src/abilities.cc:1855', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_SOOTHSAYER', src: 'src/abilities.cc:9409', unmodelled: 'not yet ported (hooks: breakable, onAfterTypeEffectiveness)' },
-  { id: 'ABILITY_SOUL_HARVEST', src: 'src/abilities.cc:10776', unmodelled: 'not yet ported (hooks: breakable, onStat)' },
   { id: 'ABILITY_SUPERCONDUCTOR', src: 'src/abilities.cc:8187', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },
-  { id: 'ABILITY_SUPREME_OVERLORD', src: 'src/abilities.cc:7239', unmodelled: 'not yet ported (hooks: onStat)' },
   { id: 'ABILITY_TANGLED_FEET', src: 'src/abilities.cc:1383', unmodelled: 'not yet ported (hooks: onChooseDefensiveStat)' },
   { id: 'ABILITY_VICTORY_BOMB', src: 'src/abilities.cc:8980', unmodelled: 'not yet ported (hooks: onMoveType)' },
 ]
