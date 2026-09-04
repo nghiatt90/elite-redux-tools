@@ -1,12 +1,16 @@
-import { BrowserRouter, NavLink, Route, Routes } from 'react-router'
+import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
 import PokedexDetail from './routes/PokedexDetail'
 import PokedexShell from './routes/PokedexShell'
+import RandomizerLayout from './routes/RandomizerLayout'
+import RandomizerPidFinder from './routes/RandomizerPidFinder'
+import RandomizerSpeciesFinder from './routes/RandomizerSpeciesFinder'
 import UnderConstruction from './routes/UnderConstruction'
 
 const NAV_LINKS = [
   { to: '/', label: 'Pokedex' },
+  { to: '/randomizer', label: 'Randomizer' },
   { to: '/team-builder', label: 'Team Builder' },
   { to: '/damage-calculator', label: 'Damage Calculator' },
 ]
@@ -109,6 +113,11 @@ function AppRoutes() {
           a full-screen view (mobile/tablet); see PokedexShell.tsx. */}
       <Route path="/" element={<PokedexShell />}>
         <Route path="pokemon/:id" element={<PokedexDetail />} />
+      </Route>
+      <Route path="/randomizer" element={<RandomizerLayout />}>
+        <Route index element={<Navigate to="pid" replace />} />
+        <Route path="pid" element={<RandomizerPidFinder />} />
+        <Route path="species" element={<RandomizerSpeciesFinder />} />
       </Route>
       <Route path="/team-builder" element={<UnderConstruction title="Team Builder" />} />
       <Route path="/damage-calculator" element={<UnderConstruction title="Damage Calculator" />} />
