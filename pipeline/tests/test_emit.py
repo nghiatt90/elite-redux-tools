@@ -1,8 +1,24 @@
 import json
 
-from erdata.emit import ability_to_dict, item_to_dict, move_to_dict, species_to_dict, type_chart_to_dict
+from erdata.emit import (
+    _build_exact_groups,
+    _build_near_groups,
+    ability_to_dict,
+    item_to_dict,
+    move_to_dict,
+    species_to_dict,
+    type_chart_to_dict,
+)
 from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
+from erdata.randomizer import parse_randomizer_banned
 from erdata.resolve import build_species_map, playable_species, universal_tutor_sets
+
+
+def _ability_dict(ability, abilities, name_index):
+    banned_ids = parse_randomizer_banned()
+    exact_groups = _build_exact_groups(abilities)
+    near_groups = _build_near_groups(name_index)
+    return ability_to_dict(ability, name_index, banned_ids, exact_groups, near_groups)
 
 
 def _fixtures():
@@ -71,16 +87,17 @@ def test_ability_dict_shape():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
-    d = ability_to_dict(volt_absorb, name_index)
+    d = _ability_dict(volt_absorb, abilities, name_index)
     json.dumps(d)
     assert d["id"] == "ABILITY_VOLT_ABSORB"
+    assert d["abilityNum"] == int(volt_absorb.id)
 
 
 def test_ability_dict_grants_type():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     half_drake = next(a for a in abilities if a.name == "Half Drake")
-    d = ability_to_dict(half_drake, name_index)
+    d = _ability_dict(half_drake, abilities, name_index)
     assert d["grantsType"] == "DRAGON"
 
 
@@ -88,7 +105,7 @@ def test_ability_dict_compound_resolves_components():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     big_leaves = next(a for a in abilities if a.name == "Big Leaves")
-    d = ability_to_dict(big_leaves, name_index)
+    d = _ability_dict(big_leaves, abilities, name_index)
     assert d["components"] == [
         "ABILITY_CHLOROPLAST",
         "ABILITY_CHLOROPHYLL",
@@ -102,8 +119,57 @@ def test_ability_dict_non_compound_has_no_components():
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
-    d = ability_to_dict(volt_absorb, name_index)
+    d = _ability_dict(volt_absorb, abilities, name_index)
     assert "components" not in d
+
+
+def test_ability_dict_randomizer_banned_flag():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    wonder_guard = next(a for a in abilities if a.name == "Wonder Guard")
+    volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
+    assert _ability_dict(wonder_guard, abilities, name_index)["randomizerBanned"] is True
+    assert _ability_dict(volt_absorb, abilities, name_index)["randomizerBanned"] is False
+
+
+def test_ability_dict_exact_equivalence_group():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    filter_ = next(a for a in abilities if a.name == "Filter")
+    d = _ability_dict(filter_, abilities, name_index)
+    # "Thick Skin" resolves to ABILITY_PERMAFROST_CLONE, not ABILITY_THICK_SKIN --
+    # grouping is by AbilityEnum id (matching how components/abilities/innates are
+    # already emitted elsewhere), not by display name, precisely so a naming quirk
+    # like this one can't cause a silent mismatch.
+    assert d["equivalenceGroup"] == sorted(
+        [
+            "ABILITY_FILTER",
+            "ABILITY_SOLID_ROCK",
+            "ABILITY_PRISM_ARMOR",
+            "ABILITY_PERMAFROST",
+            "ABILITY_PERMAFROST_CLONE",
+            "ABILITY_FLAME_SHIELD",
+        ]
+    )
+
+
+def test_ability_dict_curated_near_equivalent_group():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    mold_breaker = next(a for a in abilities if a.name == "Mold Breaker")
+    d = _ability_dict(mold_breaker, abilities, name_index)
+    assert d["nearEquivalentGroup"] == sorted(
+        ["ABILITY_MOLD_BREAKER", "ABILITY_TERAVOLT", "ABILITY_TURBOBLAZE"]
+    )
+
+
+def test_ability_dict_no_group_fields_when_unique():
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    volt_absorb = next(a for a in abilities if a.name == "Volt Absorb")
+    d = _ability_dict(volt_absorb, abilities, name_index)
+    assert "equivalenceGroup" not in d
+    assert "nearEquivalentGroup" not in d
 
 
 def test_item_dict_shape():
