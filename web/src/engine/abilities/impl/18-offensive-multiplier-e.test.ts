@@ -32,6 +32,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     ateBoost: false,
     defenderHasComatose: false,
     attackerSlowStartTimer: 5,
+    attackerHasStab: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

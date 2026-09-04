@@ -23,6 +23,7 @@ function offCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     ateBoost: false,
     defenderHasComatose: false,
     attackerSlowStartTimer: 5,
+    attackerHasStab: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

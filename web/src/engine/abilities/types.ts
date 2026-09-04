@@ -105,6 +105,14 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * attackerHasAnyStatus/defenderHasAnyStatus do elsewhere. */
   defenderHasComatose: boolean
   attackerSlowStartTimer: number // BattlerBattleState.slowStartTimer -- Lethargy's own 5-tier read of the same timer Slow Start reads as a boolean
+  /** StabMultiplierInHalves(battler, moveType, move) > 2 -- does this move
+   * currently get a STAB bonus at all (plain 1.5x OR Adaptability's 2x)? Color
+   * Spectrum's own onEndTurn random-type-reassignment isn't simulated by this
+   * engine (no turn history), but its onOffensiveMultiplier condition is just
+   * this STAB fact, independent of HOW the attacker came to have that type --
+   * calculate.ts recomputes the same stabInHalves() call already used for the
+   * real STAB fold, just earlier. */
+  attackerHasStab: boolean
   attackerIsUnaware: boolean // IsUnaware(battler) -- Pretty Princess's OWN Unaware check (self, not the defender's)
   defenderHasAnyLoweredStat: boolean // HasAnyLoweredStat(target) -- Pretty Princess
 }
@@ -185,6 +193,11 @@ export interface OnCritContext {
   // since a single shared value would be ambiguous across the attacker and
   // defender runs). The ability HOLDER's own toggle (Ambush's isFirstTurn).
   abilityOn: boolean
+  /** ConditionBattlerContext.speciesId for the ABILITY HOLDER (self, same
+   * per-side-resolved shape as abilityOn above) -- Ape Shift's own exact-form
+   * check (SPECIES_SLAKING_MEGA_APE_SHIFT), not the general baseSpeciesId used
+   * for form-agnostic matching elsewhere. */
+  speciesId: string
 }
 
 export interface OnTypeEffectivenessContext {

@@ -54,6 +54,7 @@ describe('mold breaker batch W', () => {
       ateBoost: false,
       defenderHasComatose: false,
       attackerSlowStartTimer: 5,
+      attackerHasStab: false,
       basePower: 40,
       typeEffectiveness: uq(1.0),
       isCrit: false,

@@ -399,7 +399,25 @@ describe('ability registry coverage gate', () => {
     //             scenario.ts, BattlerPanel.tsx slider, abilities/types.ts
     //             attackerSlowStartTimer, calculate.ts wiring, ability port).
     //             Verified end-to-end for both.
-    expect(unmodelledCount).toBeLessThanOrEqual(5)
+    //     -> 2   (batch AR: Ape Shift, Color Spectrum, Crystallize. Ape Shift's
+    //             self-species check (SPECIES_SLAKING_MEGA_APE_SHIFT) needed a new
+    //             per-side-resolved OnCritContext.speciesId field -- same threading
+    //             shape as abilityOn (2 new trailing params on
+    //             computeAbilityCritBonus). Color Spectrum's onEndTurn random
+    //             re-typing isn't simulated, but its onOffensiveMultiplier
+    //             condition (StabMultiplierInHalves > 2) is just "does this move
+    //             get STAB at all" -- new OffensiveMultiplierContext.attackerHasStab
+    //             field reuses calculate.ts's own stabInHalves() call, computed
+    //             earlier than its usual call site. Crystallize is the same
+    //             Rock->Ice/ateBoost shape as Superconductor, but UNLIKE
+    //             Superconductor's dead self-combo, Crystallize's own conversion
+    //             (moveType becomes ICE) DOES satisfy its own onOffensiveMultiplier
+    //             condition (moveType==ICE), so it fires from a single ability with
+    //             no multi-ability combo needed. Verified end-to-end for all three.
+    //             Remaining 2 (Deadly Precision, Victory Bomb) are permanently
+    //             unmodelled by design -- see OnMoldBreaker's and OnMoveTypeContext's
+    //             own doc comments for why.
+    expect(unmodelledCount).toBeLessThanOrEqual(2)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

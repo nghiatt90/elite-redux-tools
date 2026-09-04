@@ -44,6 +44,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     defenderHasBloodStainEffect: false,
     defenderHasComatose: false,
     attackerSlowStartTimer: 5,
+    attackerHasStab: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
     ...overrides,

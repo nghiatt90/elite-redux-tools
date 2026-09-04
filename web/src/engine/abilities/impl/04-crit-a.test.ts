@@ -22,6 +22,7 @@ function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     basePower: 40,
     attackerActsFirst: true,
     abilityOn: false,
+    speciesId: 'SPECIES_NONE',
     ...overrides,
   }
 }

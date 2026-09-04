@@ -683,6 +683,51 @@ describe('calculateMoveDamage -- Illusion/Lethargy key off the abilityOn/slowSta
   })
 })
 
+describe('calculateMoveDamage -- Ape Shift always crits in its exact Mega form (src/abilities.cc:9036-9044)', () => {
+  it('forces a guaranteed crit only as SPECIES_SLAKING_MEGA_APE_SHIFT', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario())
+    expect(baseline.critChanceDenominator).not.toBe(1)
+
+    const withApeShift = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_SLAKING_MEGA_APE_SHIFT', { abilitySlots: { ability: 'ABILITY_APE_SHIFT', innates: [null, null, null] } }) }),
+    )
+    expect(withApeShift.critChanceDenominator).toBe(1)
+
+    const wrongForm = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_APE_SHIFT', innates: [null, null, null] } }) }),
+    )
+    expect(wrongForm.critChanceDenominator).not.toBe(1)
+  })
+})
+
+describe('calculateMoveDamage -- Color Spectrum stacks a 1.2x bonus on top of STAB (src/abilities.cc:8710-8728)', () => {
+  it('boosts a STAB move further, but does nothing for a non-STAB move', async () => {
+    await import('./abilities/impl/index')
+    const attackerWithColorSpectrum = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_COLOR_SPECTRUM', innates: [null, null, null] } })
+
+    const stabBaseline = calculateMoveDamage(scenario({ move: moveData('MOVE_OUTRAGE') })) // Dragon, Garchomp's own type -- gets STAB
+    const stabWithColorSpectrum = calculateMoveDamage(scenario({ move: moveData('MOVE_OUTRAGE'), attacker: attackerWithColorSpectrum }))
+    expect(stabWithColorSpectrum.rolls[15]).toBeGreaterThan(stabBaseline.rolls[15])
+
+    const noStabBaseline = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') })) // Normal, not one of Garchomp's types
+    const noStabWithColorSpectrum = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: attackerWithColorSpectrum }))
+    expect(noStabWithColorSpectrum.rolls[15]).toBe(noStabBaseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Crystallize converts Rock moves to Ice and boosts them (src/abilities.cc:3729-3738)', () => {
+  it('converts the move type and applies a 1.1x bonus on top', async () => {
+    await import('./abilities/impl/index')
+    const attackerWithCrystallize = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_CRYSTALLIZE', innates: [null, null, null] } })
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_ROCK_SLIDE'), attacker: attackerWithCrystallize }))
+    expect(result.effectiveMoveType).toBe('ICE')
+
+    const withoutCrystallize = calculateMoveDamage(scenario({ move: moveData('MOVE_ROCK_SLIDE') }))
+    expect(withoutCrystallize.effectiveMoveType).toBe('ROCK')
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

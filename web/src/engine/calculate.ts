@@ -354,6 +354,8 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
     attackerHasMoldBreaker,
     attacker.abilityOn,
     defender.abilityOn,
+    attacker.condition.speciesId,
+    defender.condition.speciesId,
   )
   return {
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
@@ -495,6 +497,7 @@ function calcInternal(
       moveFlags: move.flags,
       moveEffectChance: move.effectChance,
       ateBoost,
+      attackerHasStab: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker) > 2,
       basePower: power,
       typeEffectiveness,
       isCrit,

@@ -371,7 +371,7 @@ export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): 
   return granted
 }
 
-type OnCritInputs = Omit<OnCritContext, 'battlerId' | 'abilityOn'>
+type OnCritInputs = Omit<OnCritContext, 'battlerId' | 'abilityOn' | 'speciesId'>
 
 /**
  * CalcCritChanceStage's onCrit loop (src/battle_script_commands.c:1529-1536) -- runs
@@ -394,6 +394,8 @@ export function computeAbilityCritBonus(
   attackerHasMoldBreaker = false,
   attackerAbilityOn = false,
   defenderAbilityOn = false,
+  attackerSpeciesId = '',
+  defenderSpeciesId = '',
 ): number {
   let bonus = 0
   let blocked = false
@@ -403,12 +405,13 @@ export function computeAbilityCritBonus(
     sourceIsAttacker: boolean,
     sourceIsTarget: boolean,
     abilityOn: boolean,
+    speciesId: string,
     suppressed: (id: string, entry: AbilityEntry) => boolean,
   ) => {
     forEachAbility(slots, suppressed, (impl) => {
       if (blocked || !impl.onCrit) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
-      const result = impl.onCrit({ battlerId, abilityOn, ...inputs })
+      const result = impl.onCrit({ battlerId, abilityOn, speciesId, ...inputs })
       if (result === NEVER_CRIT) {
         blocked = true
         return 'break'
@@ -416,8 +419,8 @@ export function computeAbilityCritBonus(
       bonus += result
     })
   }
-  run(attackerSlots, 'attacker', true, false, attackerAbilityOn, NEVER_SUPPRESSED)
-  if (!blocked) run(defenderSlots, 'defender', false, true, defenderAbilityOn, suppressedByMoldBreaker(attackerHasMoldBreaker))
+  run(attackerSlots, 'attacker', true, false, attackerAbilityOn, attackerSpeciesId, NEVER_SUPPRESSED)
+  if (!blocked) run(defenderSlots, 'defender', false, true, defenderAbilityOn, defenderSpeciesId, suppressedByMoldBreaker(attackerHasMoldBreaker))
   return blocked ? NEVER_CRIT : bonus
 }
 

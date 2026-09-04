@@ -27,6 +27,7 @@ describe('ally-only batch S', () => {
         ateBoost: false,
         defenderHasComatose: false,
         attackerSlowStartTimer: 5,
+        attackerHasStab: false,
         basePower: 40,
         typeEffectiveness: uq(1.0),
         isCrit: false,
