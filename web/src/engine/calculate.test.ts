@@ -127,6 +127,7 @@ function moveData(id: string): MoveData {
     hitsAir: m.hitsAir,
     flags: m.flags ?? {},
     changeTypeHoldEffect: m.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && m.argument?.kind === 'other' ? m.argument.value : null,
+    miscEffect: m.effect === 'EFFECT_MISC_HIT' && m.argument?.kind === 'misc' ? m.argument.misc : null,
   }
 }
 
@@ -907,6 +908,35 @@ describe('calculateMoveDamage -- Punching Glove boosts punch-based moves, static
       scenario({ attacker: glove({ abilitySlots: { ability: 'ABILITY_MIXED_MARTIAL_ARTS', innates: [null, null, null] } }) }),
     )
     expect(mixedMartialArts.rolls[15]).toBeGreaterThan(nonPunchBaseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Wake-Up Slap/Smelling Salts and single-snapshot EFFECT_MISC_HIT sub-cases (battle_util.c:6870-6907)', () => {
+  it('Wake-Up Slap doubles power vs a sleeping defender', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_WAKE_UP_SLAP') }))
+    const sleeping = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_WAKE_UP_SLAP'), defender: battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, status1: new Set(['STATUS1_SLEEP']) }) }) }),
+    )
+    expect(sleeping.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('Smelling Salts doubles power vs a paralyzed defender', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_SMELLING_SALTS') }))
+    const paralyzed = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_SMELLING_SALTS'), defender: battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, status1: new Set(['STATUS1_PARALYSIS']) }) }) }),
+    )
+    expect(paralyzed.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('Psyblade (MISC_EFFECT_ELECTRIC_TERRAIN_BOOST) is stronger on Electric Terrain', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_PSYBLADE') }))
+    const onTerrain = calculateMoveDamage(scenario({ move: moveData('MOVE_PSYBLADE'), field: fieldState({ terrain: 'TERRAIN_ELECTRIC' }) }))
+    expect(onTerrain.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('Rollout is flagged unmodelled rather than silently using its listed base power', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT') }))
+    expect(result.unmodelled.some((n) => n.includes('EFFECT_ROLLOUT'))).toBe(true)
   })
 })
 

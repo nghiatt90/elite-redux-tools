@@ -8,15 +8,18 @@
 //      6995-7117) -- hold effects, per-move-effect conditions (Facade, Brine,
 //      Venoshock, Retaliate, Knock Off, ...), and the terrain STAB-style boost.
 //   3. CalcMoveBasePower's hardcoded pre-switch (:6825-6913) and move-id switch
-//      (:6913-6940) -- NOT ported here (see UNMODELLED_BASE_POWER_EFFECTS): Rollout,
-//      Magnitude, Triple Kick, Weather Ball, Pursuit, Natural Gift, Focus Punch, Beat
-//      Up, and most EFFECT_MISC_HIT sub-cases all depend on turn history (a rollout
-//      counter, "did my last move fail", how many times I've been hit this battle,
-//      party contents) that a stateless "what if I attacked right now" calculator has
-//      no honest default for. Wake-Up Slap/Smelling Salts and the single-snapshot
-//      EFFECT_MISC_HIT cases (electric terrain, vs-bleeding, fog) ARE ported, since
-//      they're pure functions of the field/battler snapshot DamageContext already
-//      carries.
+//      (:6913-6940) -- MOSTLY not ported (see UNMODELLED_BASE_POWER_EFFECTS):
+//      Rollout, Magnitude, Triple Kick, Weather Ball, Pursuit, Natural Gift, Focus
+//      Punch, and Beat Up all depend on turn history (a rollout counter, "did my
+//      last move fail", how many times I've been hit this battle, party contents)
+//      that a stateless "what if I attacked right now" calculator has no honest
+//      default for. Wake-Up Slap/Smelling Salts and the single-snapshot
+//      EFFECT_MISC_HIT sub-cases (electric terrain, vs-bleeding, fog,
+//      fainted-teammate count) ARE ported (applyPreModifierBasePower, below) --
+//      they're pure functions of the field/battler snapshot DamageContext (plus
+//      alliesFainted) already carries. The remaining EFFECT_MISC_HIT sub-cases
+//      (a coin-flip double-damage roll, a "times hit this battle" counter, and a
+//      non-damage type-transmute effect) are surfaced as unmodelled instead.
 
 import { applyModifier, idiv, mulModifier, uq } from './fixed'
 import { evaluateAllConditions, type ScriptCondition } from './conditions'
@@ -209,6 +212,51 @@ export function applyMoveBehaviorDamage(baseDamage: number, behaviorId: string |
     return { power: baseDamage, unmodelled: [`${behaviorId}: no CustomMoveDamage ported`] }
   }
   return { power: customDamageFn(baseDamage, ctx), unmodelled: [] }
+}
+
+/** MISC_EFFECT_* sub-cases NOT ported by applyPreModifierBasePower below --
+ * DOUBLE_DAMAGE is a coin-flip roll (`Random() % 100 < secondaryEffectChance`, no
+ * honest default for a deterministic calculator), TOOK_DAMAGE_BOOST needs a
+ * "times hit this battle" counter this engine has no scenario field for, and
+ * TRANSMUTE (battle_script_commands.c:7205) isn't a damage effect at all (it
+ * copies the target's type onto the user). */
+const UNMODELLED_MISC_EFFECTS = new Set(['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', 'MISC_EFFECT_TRANSMUTE'])
+
+/**
+ * The single-snapshot slice of CalcMoveBasePower's own switch (:6870-6907) --
+ * EFFECT_WAKE_UP_SLAP/EFFECT_SMELLINGSALT (a plain status check) and
+ * EFFECT_MISC_HIT's deterministic argument sub-cases. Runs on `actualPower`
+ * BEFORE applyMoveBehaviorDamage's caller passes it into
+ * calcMoveBasePowerAfterModifiers, matching CalcMoveBasePower's own position
+ * ahead of CalcMoveBasePowerAfterModifiers in the real call chain. `alliesFainted`
+ * isn't part of DamageContext (only BattlerBattleState carries it, see its own
+ * doc) so it's a separate parameter here rather than widening that shared shape
+ * for this one rarely-used case. */
+export function applyPreModifierBasePower(basePower: number, moveEffect: string | null, miscEffect: string | null, ctx: DamageContext, attackerAlliesFainted: number): BasePowerResult {
+  if (moveEffect === 'EFFECT_WAKE_UP_SLAP') {
+    return { power: ctx.defender.status1.has('STATUS1_SLEEP') || ctx.defender.hasComatose ? basePower * 2 : basePower, unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_SMELLINGSALT') {
+    return { power: ctx.defender.status1.has('STATUS1_PARALYSIS') ? basePower * 2 : basePower, unmodelled: [] }
+  }
+  if (moveEffect !== 'EFFECT_MISC_HIT') return { power: basePower, unmodelled: [] }
+
+  const isBleeding = ctx.defender.status1.has('STATUS1_BLEED') || ctx.defender.hasBloodStainEffect
+  switch (miscEffect) {
+    case 'MISC_EFFECT_FAINTED_MON_BOOST':
+      return { power: basePower + 10 * attackerAlliesFainted, unmodelled: [] }
+    case 'MISC_EFFECT_ELECTRIC_TERRAIN_BOOST':
+      return { power: ctx.field.terrain === 'TERRAIN_ELECTRIC' ? idiv(basePower * 3, 2) : basePower, unmodelled: [] }
+    case 'MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING':
+      return { power: isBleeding ? basePower * 2 : basePower, unmodelled: [] }
+    case 'MISC_EFFECT_50_PERCENT_PLUS_DAMAGE_VS_BLEEDING':
+      return { power: isBleeding ? idiv(basePower * 3, 2) : basePower, unmodelled: [] }
+    case 'MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG':
+      return { power: ctx.field.weather === 'FOG' ? basePower * 2 : basePower, unmodelled: [] }
+    default:
+      if (miscEffect && UNMODELLED_MISC_EFFECTS.has(miscEffect)) return { power: basePower, unmodelled: [`${miscEffect}: not modelled`] }
+      return { power: basePower, unmodelled: [] }
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, percentToModifier, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
+import { applyMoveBehaviorDamage, applyPreModifierBasePower, calcMoveBasePowerAfterModifiers, percentToModifier, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
 import type { ConditionBattlerContext, DamageContext } from './types'
 import { uq } from './fixed'
 
@@ -246,5 +246,58 @@ describe('moveBehaviors.json data contract -- conditions.ts crash guard', () => 
     }
 
     expect(offenders).toEqual([])
+  })
+})
+
+describe('applyPreModifierBasePower', () => {
+  it('EFFECT_WAKE_UP_SLAP doubles power vs a sleeping (or Comatose) defender', () => {
+    expect(applyPreModifierBasePower(100, 'EFFECT_WAKE_UP_SLAP', null, ctx({ defender: battler({ status1: new Set(['STATUS1_SLEEP']) }) }), 0).power).toBe(200)
+    expect(applyPreModifierBasePower(100, 'EFFECT_WAKE_UP_SLAP', null, ctx({ defender: battler({ hasComatose: true }) }), 0).power).toBe(200)
+    expect(applyPreModifierBasePower(100, 'EFFECT_WAKE_UP_SLAP', null, ctx(), 0).power).toBe(100)
+  })
+
+  it('EFFECT_SMELLINGSALT doubles power vs a paralyzed defender', () => {
+    expect(applyPreModifierBasePower(75, 'EFFECT_SMELLINGSALT', null, ctx({ defender: battler({ status1: new Set(['STATUS1_PARALYSIS']) }) }), 0).power).toBe(150)
+    expect(applyPreModifierBasePower(75, 'EFFECT_SMELLINGSALT', null, ctx(), 0).power).toBe(75)
+  })
+
+  it('MISC_EFFECT_FAINTED_MON_BOOST adds 10 per fainted ally', () => {
+    expect(applyPreModifierBasePower(50, 'EFFECT_MISC_HIT', 'MISC_EFFECT_FAINTED_MON_BOOST', ctx(), 3).power).toBe(80)
+    expect(applyPreModifierBasePower(50, 'EFFECT_MISC_HIT', 'MISC_EFFECT_FAINTED_MON_BOOST', ctx(), 0).power).toBe(50)
+  })
+
+  it('MISC_EFFECT_ELECTRIC_TERRAIN_BOOST applies 1.5x only while grounded on Electric Terrain', () => {
+    const electric = ctx({ field: { gravityActive: false, weather: 'NONE', terrain: 'TERRAIN_ELECTRIC' } })
+    expect(applyPreModifierBasePower(100, 'EFFECT_MISC_HIT', 'MISC_EFFECT_ELECTRIC_TERRAIN_BOOST', electric, 0).power).toBe(150)
+    expect(applyPreModifierBasePower(100, 'EFFECT_MISC_HIT', 'MISC_EFFECT_ELECTRIC_TERRAIN_BOOST', ctx(), 0).power).toBe(100)
+  })
+
+  it('MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING and its 50%-plus sibling key off bleed/blood-stain', () => {
+    const bleeding = ctx({ defender: battler({ status1: new Set(['STATUS1_BLEED']) }) })
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING', bleeding, 0).power).toBe(160)
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING', ctx(), 0).power).toBe(80)
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_50_PERCENT_PLUS_DAMAGE_VS_BLEEDING', bleeding, 0).power).toBe(120)
+
+    const bloodStained = ctx({ defender: battler({ hasBloodStainEffect: true }) })
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING', bloodStained, 0).power).toBe(160)
+  })
+
+  it('MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG doubles power only in fog', () => {
+    const fog = ctx({ field: { gravityActive: false, weather: 'FOG', terrain: null } })
+    expect(applyPreModifierBasePower(90, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG', fog, 0).power).toBe(180)
+    expect(applyPreModifierBasePower(90, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG', ctx(), 0).power).toBe(90)
+  })
+
+  it('surfaces the genuinely unmodelled MISC_EFFECT sub-cases without touching power', () => {
+    for (const miscEffect of ['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', 'MISC_EFFECT_TRANSMUTE']) {
+      const result = applyPreModifierBasePower(100, 'EFFECT_MISC_HIT', miscEffect, ctx(), 0)
+      expect(result.power).toBe(100)
+      expect(result.unmodelled).toHaveLength(1)
+    }
+  })
+
+  it('leaves power untouched for every other move effect', () => {
+    expect(applyPreModifierBasePower(100, 'EFFECT_FACADE', null, ctx(), 0)).toEqual({ power: 100, unmodelled: [] })
+    expect(applyPreModifierBasePower(100, null, null, ctx(), 0)).toEqual({ power: 100, unmodelled: [] })
   })
 })

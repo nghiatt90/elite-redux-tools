@@ -24,7 +24,15 @@ import {
   spAttackPreModify,
   spDefensePreModify,
 } from './battleStat'
-import { applyMoveBehaviorDamage, calcMoveBasePowerAfterModifiers, percentToModifier, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
+import {
+  applyMoveBehaviorDamage,
+  applyPreModifierBasePower,
+  calcMoveBasePowerAfterModifiers,
+  percentToModifier,
+  UNMODELLED_BASE_POWER_EFFECTS,
+  type BasePowerModifierContext,
+  type MoveBehaviors,
+} from './basePower'
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
@@ -69,6 +77,12 @@ export interface MoveData {
    * every other move; narrowed from Move.argument's full 6-way union since this is
    * the only shape this specific mechanism needs. */
   changeTypeHoldEffect: string | null
+  /** EFFECT_MISC_HIT's own argument (CalcMoveBasePower's argument switch,
+   * src/battle_util.c:6884-6907) -- narrowed from Move.argument's full union to
+   * just its bare `misc` value the same way changeTypeHoldEffect narrows `other`.
+   * Only the deterministic single-snapshot sub-cases are consumed (see
+   * basePower.ts's applyMiscHitBasePower); `null` for every non-misc-argument move. */
+  miscEffect: string | null
 }
 
 export interface DamageCalcScenario {
@@ -487,7 +501,10 @@ function calcInternal(
 
   const behaviorResult = applyMoveBehaviorDamage(move.power, move.effect, moveBehaviors, toDamageContext(scenario))
   unmodelled.push(...behaviorResult.unmodelled)
-  const power = calcMoveBasePowerAfterModifiers(Math.max(behaviorResult.power, 1), basePowerCtx)
+  if (move.effect && UNMODELLED_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: not modelled (needs turn history)`)
+  const preModifierResult = applyPreModifierBasePower(behaviorResult.power, move.effect, move.miscEffect, toDamageContext(scenario), attacker.alliesFainted)
+  unmodelled.push(...preModifierResult.unmodelled)
+  const power = calcMoveBasePowerAfterModifiers(Math.max(preModifierResult.power, 1), basePowerCtx)
 
   for (const id of [attacker.abilitySlots.ability, ...attacker.abilitySlots.innates, defender.abilitySlots.ability, ...defender.abilitySlots.innates]) {
     const note = abilityCoverageNote(id)
