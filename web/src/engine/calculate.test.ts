@@ -358,6 +358,25 @@ describe('calculateMoveDamage -- onImmune blocks damage outright (TestImmunityAb
   })
 })
 
+describe('calculateMoveDamage -- onInfiltrate bypasses screens (Infiltrates, CalcFinalDmg battle_util.c:7649-7655)', () => {
+  it('Reflect halves a physical Tackle; Infiltrator on the attacker bypasses it entirely', async () => {
+    await import('./abilities/impl/index')
+    const reflectField = fieldState({ sides: { attacker: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false }, defender: { reflect: true, lightScreen: false, auroraVeil: false, luckyChant: false } } })
+    const withoutInfiltrator = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), field: reflectField }))
+    const noScreen = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
+    expect(withoutInfiltrator.rolls[15]).toBeLessThan(noScreen.rolls[15])
+
+    const withInfiltrator = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        field: reflectField,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_INFILTRATOR', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withInfiltrator.rolls[15]).toBe(noScreen.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

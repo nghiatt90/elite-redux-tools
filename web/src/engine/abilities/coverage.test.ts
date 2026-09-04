@@ -173,7 +173,20 @@ describe('ability registry coverage gate', () => {
     //             gProcessingExtraAttacks) are fixed always-true/false constants
     //             in this v1 2-battler singles engine -- documented on
     //             OnImmuneContext itself rather than modelled as real fields.
-    expect(unmodelledCount).toBeLessThanOrEqual(52)
+    //     -> 47  (batch AA: all 10 onInfiltrate census abilities -- 5 fresh ports
+    //             (Infiltrator, Duality, King of the Jungle, Pinnacle Blade,
+    //             Demolitionist) plus onInfiltrate added to 5 abilities already
+    //             real-ported for a different hook (Fight Spirit, Warriors Spear,
+    //             Qigong, Marine Apex, Mycelium Might). WIRED into calculate.ts
+    //             (computeInfiltratesScreens, ANDed into screensActive) --
+    //             checkMoldBreaker=FALSE, an attacker's own trait never suppressed
+    //             by its own Mold Breaker, verified end-to-end against a
+    //             Reflect-halved Tackle. Only the screens-bypass bit of the C's
+    //             3-bit InfiltrateType is modelled -- the SUBSTITUTE bit has no
+    //             Substitute mechanic to matter to. Demolitionist's readiedAction
+    //             volatile follows the SAME always-false precedent already set
+    //             elsewhere in this engine (battleStat.ts), not a new gap.
+    expect(unmodelledCount).toBeLessThanOrEqual(47)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

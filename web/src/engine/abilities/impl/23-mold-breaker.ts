@@ -15,10 +15,11 @@ export const MOLD_BREAKER_ABILITIES: AbilityImpl[] = [
     onMoldBreaker: () => true,
   },
   {
-    // .onMoldBreaker only -- onInfiltrate is a SEPARATE hook (screens bypass), not
-    // ported here; see the census-expansion commit for why it's a distinct batch.
     id: 'ABILITY_MYCELIUM_MIGHT',
     src: 'src/abilities.cc:11147',
     onMoldBreaker: (ctx) => ctx.moveSplit === 'STATUS',
+    // onInfiltrate (batch AA): same CHECK(IS_MOVE_STATUS(move)) condition, screens
+    // bypass instead of mold breaker.
+    onInfiltrate: (ctx) => ctx.moveSplit === 'STATUS',
   },
 ]

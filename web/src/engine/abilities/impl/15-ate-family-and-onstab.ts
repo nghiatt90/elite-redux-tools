@@ -2,9 +2,14 @@
 // ATE_ABILITY(type) macro) turned out to be aliases or small self-contained lambdas
 // once actually checked against the C -- see 05-ate-abilities.ts's header comment.
 // Plus 7 plain onStab-only lambdas found alongside them in the same census sweep.
+//
+// Fight Spirit/Warriors Spear's onInfiltrate was added later (batch AA) -- onInfiltrate
+// wasn't in the damage-hook census when this file's header comment below was
+// written, so it's stale for those two specifically; onAttacker/onEntry/onDefender
+// remain genuinely non-damage for the rest.
 
 import { ateAbility } from './05-ate-abilities'
-import { aliasOffensiveMultiplier, aliasTypeEffectiveness, aliasAfterTypeEffectiveness, aliasParentalBond } from './alias'
+import { aliasOffensiveMultiplier, aliasTypeEffectiveness, aliasAfterTypeEffectiveness, aliasParentalBond, aliasInfiltrate } from './alias'
 import type { AbilityImpl } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -13,7 +18,11 @@ export const ATE_FAMILY_AND_ONSTAB: AbilityImpl[] = [
   // Pure ATE_ABILITY -- their only OTHER hooks (onAttacker/onInfiltrate/onEntry/
   // onDefender) are non-damage, not part of this registry's hook set at all.
   { ...ateAbility('ABILITY_ATOMIC_BURST', 'src/abilities.cc:5284', 'ELECTRIC') },
-  { ...ateAbility('ABILITY_FIGHT_SPIRIT', 'src/abilities.cc:3916', 'FIGHTING') },
+  {
+    ...ateAbility('ABILITY_FIGHT_SPIRIT', 'src/abilities.cc:3916', 'FIGHTING'),
+    // CHECK(attacker is Fighting-type) CHECK(moveType === FIGHTING) -> bypasses screens.
+    onInfiltrate: (ctx) => ctx.attackerTypes.includes('FIGHTING') && ctx.moveType === 'FIGHTING',
+  },
   { ...ateAbility('ABILITY_MOB_BOSS', 'src/abilities.cc:12431', 'DARK') },
 
   // ATE_ABILITY + an aliased onOffensiveMultiplier.
@@ -33,6 +42,7 @@ export const ATE_FAMILY_AND_ONSTAB: AbilityImpl[] = [
   {
     ...ateAbility('ABILITY_WARRIORS_SPEAR', 'src/abilities.cc:12565', 'FIGHTING'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+    onInfiltrate: aliasInfiltrate('ABILITY_FIGHT_SPIRIT'),
   },
 
   // ATE_ABILITY + a real onTypeEffectiveness (Dragon-vs-Fairy immunity override) --

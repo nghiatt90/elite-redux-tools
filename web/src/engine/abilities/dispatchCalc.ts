@@ -20,6 +20,7 @@ import type {
   OnChooseOffensiveStatContext,
   OnCritContext,
   OnImmuneContext,
+  OnInfiltrateContext,
   OnMoldBreakerContext,
   OnMoveTypeContext,
   OnParentalBondContext,
@@ -177,6 +178,23 @@ export function computeIsImmune(defenderSlots: AbilitySlots, ctx: OnImmuneContex
     }
   })
   return blocked
+}
+
+/**
+ * Infiltrates, src/battle_script_commands.c:12271-12275 -- true if any of the
+ * ATTACKER's abilities bypasses screens for this hit. checkMoldBreaker=FALSE (an
+ * attacker's own trait, never suppressed by its own Mold Breaker), so this uses
+ * NEVER_SUPPRESSED like the offensive-multiplier loop's self-checks.
+ */
+export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnInfiltrateContext): boolean {
+  let infiltrates = false
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (impl.onInfiltrate?.(ctx)) {
+      infiltrates = true
+      return 'break'
+    }
+  })
+  return infiltrates
 }
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --

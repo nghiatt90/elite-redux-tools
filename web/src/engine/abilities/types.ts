@@ -319,6 +319,26 @@ export interface OnImmuneContext {
  */
 export type OnImmune = (ctx: OnImmuneContext) => boolean
 
+export interface OnInfiltrateContext {
+  moveType: string
+  moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  attackerTypes: string[]
+}
+
+/**
+ * onInfiltrate returns whether the ATTACKER bypasses reflect/light screen/aurora
+ * veil for this hit -- Infiltrates, src/battle_script_commands.c:12271-12275,
+ * called with checkMoldBreaker=FALSE (an attacker's own trait, never suppressed,
+ * same shape as the offensive-multiplier loop's self-checks). The real C returns a
+ * 3-bit InfiltrateType (SCREENS/SUBSTITUTE/BREAK_SCREENS, abilities.hh:16-19) and
+ * CalcFinalDmg only ever tests `type & (SCREENS | BREAK_SCREENS)` (:7651) -- the
+ * SUBSTITUTE bit only matters for whether a Substitute blocks the move outright, a
+ * mechanic this calculator doesn't model, so this hook collapses straight to "does
+ * this bypass screens," not the raw bitmask.
+ */
+export type OnInfiltrate = (ctx: OnInfiltrateContext) => boolean
+
 export interface AbilityFlags {
   adaptability: boolean
   unaware: boolean
@@ -374,6 +394,7 @@ export interface AbilityImpl {
   onParentalBond?: OnParentalBond
   onAbsorb?: OnAbsorb
   onImmune?: OnImmune
+  onInfiltrate?: OnInfiltrate
 }
 
 export interface UnmodelledAbility {

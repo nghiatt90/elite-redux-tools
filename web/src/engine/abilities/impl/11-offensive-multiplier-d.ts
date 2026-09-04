@@ -5,6 +5,7 @@
 
 import { MUL } from '../macros'
 import { mulModifier, uq } from '../../fixed'
+import { aliasInfiltrate } from './alias'
 import type { AbilityImpl } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -217,6 +218,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('WATER')) MUL(ctx, 1.5)
     },
+    onInfiltrate: aliasInfiltrate('ABILITY_INFILTRATOR'),
   },
   {
     id: 'ABILITY_MONSTER_HUNTER',

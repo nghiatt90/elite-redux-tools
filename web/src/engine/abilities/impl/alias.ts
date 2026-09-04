@@ -26,6 +26,7 @@ import type {
   ParentalBondTrigger,
   OnAbsorbContext,
   OnImmuneContext,
+  OnInfiltrateContext,
 } from '../types'
 
 export function aliasOffensiveMultiplier(target: string) {
@@ -130,5 +131,12 @@ export function aliasImmune(target: string) {
   return (ctx: OnImmuneContext): boolean => {
     const t = lookupAbility(target)
     return t && !isUnmodelled(t) ? (t.onImmune?.(ctx) ?? false) : false
+  }
+}
+
+export function aliasInfiltrate(target: string) {
+  return (ctx: OnInfiltrateContext): boolean => {
+    const t = lookupAbility(target)
+    return t && !isUnmodelled(t) ? (t.onInfiltrate?.(ctx) ?? false) : false
   }
 }

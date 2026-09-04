@@ -35,6 +35,7 @@ import {
   computeAttackerHasMoldBreaker,
   computeIsAbsorbed,
   computeIsImmune,
+  computeInfiltratesScreens,
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
   computeOnStatModifier,
@@ -516,7 +517,10 @@ function calcInternal(
     critMultiplier: isCrit ? 1.5 : null,
     weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
     stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker),
-    screensActive: !isCrit && screensApply(field, split),
+    screensActive:
+      !isCrit &&
+      screensApply(field, split) &&
+      !computeInfiltratesScreens(attacker.abilitySlots, { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: null, // resist-berry consumption isn't tracked yet -- deferred
     attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness),
@@ -572,7 +576,9 @@ function screensApply(field: FieldBattleState, split: 'PHYSICAL' | 'SPECIAL'): b
   if (split === 'PHYSICAL' && side.reflect) return true
   if (split === 'SPECIAL' && side.lightScreen) return true
   return false
-  // Infiltrator-style screen-bypassing abilities are deferred to the registry.
+  // Infiltrator-style screen-bypassing abilities are handled at the call site via
+  // computeInfiltratesScreens, not here -- this function only knows the field/side
+  // state, not the attacker's abilities.
 }
 
 /** The weather damage block, src/battle_util.c:7592-7648 -- ER's two-tier weather

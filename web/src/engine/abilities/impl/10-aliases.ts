@@ -18,6 +18,7 @@ import {
   aliasDefensiveMultiplier,
   aliasAbsorb,
   aliasImmune,
+  aliasInfiltrate,
   aliasMoldBreaker,
   aliasMoveType,
   aliasOffensiveMultiplier,
@@ -466,6 +467,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     src: 'src/abilities.cc:9326',
     onMoveType: aliasMoveType('ABILITY_FIGHT_SPIRIT'),
     onStab: aliasStab('ABILITY_FIGHT_SPIRIT'),
+    onInfiltrate: aliasInfiltrate('ABILITY_FIGHT_SPIRIT'),
   },
   {
     id: 'ABILITY_QUARK_DRIVE',
