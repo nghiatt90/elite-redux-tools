@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router'
 import AbilityLockPicker from '../features/randomizer/AbilityLockPicker'
 import { buildIdByNum } from '../features/randomizer/numToId'
 import RandomizerControls from '../features/randomizer/RandomizerControls'
-import ResultsView from '../features/randomizer/ResultsView'
+import ResultsView, { type DisplayMatch } from '../features/randomizer/ResultsView'
 import SpeciesPicker from '../features/randomizer/SpeciesPicker'
 import { useRandomizerWorker } from '../features/randomizer/useRandomizerWorker'
 import {
@@ -15,7 +15,8 @@ import {
   modesToParams,
 } from '../features/randomizer/urlState'
 import { useGameData } from '../lib/GameDataContext'
-import { formatHex } from '../lib/hex'
+import type { MatchResult } from '../lib/randomizer'
+import { formatPid } from '../lib/hex'
 
 export default function RandomizerPidFinder() {
   const { abilities, speciesById } = useGameData()
@@ -30,6 +31,18 @@ export default function RandomizerPidFinder() {
 
   const species = speciesId ? speciesById.get(speciesId) : undefined
   const canSearch = ready && !!species && lockedAbilityIds.length > 0
+
+  // `resultAbilities` is [chosen ability, ...innates]; the row shows every declared
+  // ability slot instead, so innates come off the tail of that and the ability side
+  // comes from `abilityResults`.
+  const toDisplay = (m: MatchResult): DisplayMatch => ({
+    key: formatPid(m.pid),
+    pid: m.pid,
+    abilityNum: m.abilityNum,
+    slotCost: m.slotCost,
+    abilityResults: m.abilityResults.map((n) => idByNum[n]),
+    innates: m.resultAbilities.slice(1).map((n) => idByNum[n]),
+  })
 
   function update(mutate: (params: URLSearchParams) => URLSearchParams) {
     setSearchParams(mutate(new URLSearchParams(searchParams)))
@@ -99,20 +112,8 @@ export default function RandomizerPidFinder() {
           total={pidResult.total}
           exact
           bySlotCost={[...pidResult.bySlotCost.entries()]}
-          promoted={pidResult.promoted.map((m) => ({
-            key: formatHex(m.pid),
-            pid: m.pid,
-            abilityNum: m.abilityNum,
-            slotCost: m.slotCost,
-            resultAbilities: m.resultAbilities.map((n) => idByNum[n]),
-          }))}
-          sample={pidResult.sample.map((m) => ({
-            key: formatHex(m.pid),
-            pid: m.pid,
-            abilityNum: m.abilityNum,
-            slotCost: m.slotCost,
-            resultAbilities: m.resultAbilities.map((n) => idByNum[n]),
-          }))}
+          ranked={pidResult.promoted.map(toDisplay)}
+          sample={pidResult.sample.map(toDisplay)}
         />
       )}
     </div>
