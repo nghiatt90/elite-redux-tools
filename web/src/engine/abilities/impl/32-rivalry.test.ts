@@ -38,6 +38,8 @@ function offCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     defenderGender,
     defenderIsConfused: false,
     defenderIsEnraged: false,
+    defenderStatus1: new Set<string>(),
+    defenderHasBloodStainEffect: false,
   }
 }
 

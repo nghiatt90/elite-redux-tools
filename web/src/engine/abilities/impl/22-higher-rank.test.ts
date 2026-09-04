@@ -32,6 +32,8 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     defenderGender: 'MALE' as const,
     defenderIsConfused: false,
     defenderIsEnraged: false,
+    defenderStatus1: new Set<string>(),
+    defenderHasBloodStainEffect: false,
     ...overrides,
   }
 }

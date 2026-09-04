@@ -493,6 +493,24 @@ describe('calculateMoveDamage -- Cosmic Daze keys off the isConfused/isEnraged s
   })
 })
 
+describe('calculateMoveDamage -- Blood Stigma doubles damage against a bleeding defender (src/abilities.cc:8373-8377)', () => {
+  it('reads the defender\'s STATUS1_BLEED via the shared status1 fixture', () => {
+    const neutral = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_BLOOD_STIGMA', innates: [null, null, null] } }) }),
+    )
+    const bleedingDefender = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_BLOOD_STIGMA', innates: [null, null, null] } }),
+        defender: battler('SPECIES_SKARMORY', {
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, status1: new Set(['STATUS1_BLEED']) }),
+        }),
+      }),
+    )
+    expect(bleedingDefender.rolls[15]).toBeGreaterThan(neutral.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

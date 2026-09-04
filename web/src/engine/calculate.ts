@@ -510,6 +510,8 @@ function calcInternal(
       defenderGender: defender.gender,
       defenderIsConfused: defender.condition.isConfused,
       defenderIsEnraged: defender.condition.isEnraged,
+      defenderStatus1: defender.condition.status1,
+      defenderHasBloodStainEffect: defender.condition.hasBloodStainEffect,
     },
     {
       defenderId: 'defender',

@@ -38,6 +38,8 @@ function offCtx(defenderIsConfused: boolean, defenderIsEnraged: boolean): Offens
     defenderGender: 'MALE',
     defenderIsConfused,
     defenderIsEnraged,
+    defenderStatus1: new Set<string>(),
+    defenderHasBloodStainEffect: false,
   }
 }
 

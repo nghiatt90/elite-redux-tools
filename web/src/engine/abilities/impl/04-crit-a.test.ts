@@ -15,7 +15,7 @@ function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
     typeEffectiveness: 1024,
-    defenderStatus1: new Set(),
+    defenderStatus1: new Set<string>(),
     defenderSpeedStageNegative: false,
     defenderResolvedHoldEffect: null,
     moveFlags: {},

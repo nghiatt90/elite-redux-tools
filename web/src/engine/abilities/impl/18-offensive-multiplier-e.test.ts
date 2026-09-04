@@ -47,6 +47,8 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderGender: 'MALE' as const,
     defenderIsConfused: false,
     defenderIsEnraged: false,
+    defenderStatus1: new Set<string>(),
+    defenderHasBloodStainEffect: false,
     ...overrides,
   }
 }

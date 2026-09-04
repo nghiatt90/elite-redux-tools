@@ -27,7 +27,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST')
     const defender = slots('ABILITY_TEST_HALVE')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -46,7 +46,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST2')
     const defender = slots('ABILITY_TEST_FORTKNOX')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -72,7 +72,7 @@ describe('computeAbilityCritBonus', () => {
       defenderId: 'defender',
       moveId: 'MOVE_TACKLE',
       typeEffectiveness: uq(1.0),
-      defenderStatus1: new Set(),
+      defenderStatus1: new Set<string>(),
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},
@@ -117,7 +117,7 @@ describe('computeAbilityCritBonus', () => {
       defenderId: 'defender',
       moveId: 'MOVE_TACKLE',
       typeEffectiveness: uq(1.0),
-      defenderStatus1: new Set(),
+      defenderStatus1: new Set<string>(),
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},

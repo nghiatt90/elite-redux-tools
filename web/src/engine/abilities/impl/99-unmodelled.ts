@@ -14,8 +14,6 @@ import type { AbilityEntry } from '../types'
 
 export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_APE_SHIFT', src: 'src/abilities.cc:9036', unmodelled: 'not yet ported (hooks: onCrit)' },
-  { id: 'ABILITY_AVENGER', src: 'src/abilities.cc:3851', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
-  { id: 'ABILITY_BLOOD_STIGMA', src: 'src/abilities.cc:8373', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_BONE_ZONE', src: 'src/abilities.cc:4508', unmodelled: 'not yet ported (hooks: onAfterTypeEffectiveness)' },
   { id: 'ABILITY_COLOR_SPECTRUM', src: 'src/abilities.cc:8710', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_CRYSTALLIZE', src: 'src/abilities.cc:3729', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },

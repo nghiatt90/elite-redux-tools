@@ -87,6 +87,8 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
   defenderIsConfused: boolean // STATUS2_CONFUSION on the move's TARGET -- Cosmic Daze/Cosmic Dust
   defenderIsEnraged: boolean // STATUS2_ENRAGED on the move's TARGET -- Cosmic Daze/Cosmic Dust
+  defenderStatus1: Set<string> // gBattleMons[target].status1 bare flags -- Blood Stigma
+  defenderHasBloodStainEffect: boolean // IsBloodStainAffected(target) -- Blood Stigma
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {

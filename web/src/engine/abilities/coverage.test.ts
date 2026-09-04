@@ -302,7 +302,18 @@ describe('ability registry coverage gate', () => {
     //             computeChooseDefensiveStat's doc). Cosmic Dust's existing alias
     //             needed no patch. Verified end-to-end: Cosmic Daze doubles damage
     //             against a confused defender.
-    expect(unmodelledCount).toBeLessThanOrEqual(18)
+    //     -> 16  (batch AJ: Avenger and Blood Stigma, bundled as the last of the
+    //             easy cross-battler-fact checks. Avenger reuses the EXISTING
+    //             generic attackerAbilityOn toggle instead of adding a new
+    //             single-purpose field for gSideTimers[side].retaliateTimer (a
+    //             per-side history fact this engine can't derive, same class of
+    //             mechanism abilityOn already covers). Blood Stigma needed no new
+    //             scenario field at all -- just defenderStatus1/
+    //             defenderHasBloodStainEffect threaded onto
+    //             OffensiveMultiplierContext, since that per-battler condition
+    //             data already existed. Verified end-to-end (Blood Stigma vs a
+    //             bleeding defender).
+    expect(unmodelledCount).toBeLessThanOrEqual(16)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

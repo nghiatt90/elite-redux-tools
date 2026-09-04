@@ -39,6 +39,8 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderGender: 'MALE' as const,
     defenderIsConfused: false,
     defenderIsEnraged: false,
+    defenderStatus1: new Set<string>(),
+    defenderHasBloodStainEffect: false,
     ...overrides,
   }
 }
@@ -95,7 +97,7 @@ function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
     typeEffectiveness: uq(1.0),
-    defenderStatus1: new Set(),
+    defenderStatus1: new Set<string>(),
     defenderSpeedStageNegative: false,
     defenderResolvedHoldEffect: null,
     moveFlags: {},
