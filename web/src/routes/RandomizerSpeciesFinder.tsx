@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router'
 import AbilityLockPicker from '../features/randomizer/AbilityLockPicker'
 import { buildIdByNum } from '../features/randomizer/numToId'
 import RandomizerControls from '../features/randomizer/RandomizerControls'
-import ResultsView from '../features/randomizer/ResultsView'
+import ResultsView, { type DisplayMatch } from '../features/randomizer/ResultsView'
+import type { SpeciesMatch } from '../features/randomizer/protocol'
 import { useRandomizerWorker } from '../features/randomizer/useRandomizerWorker'
 import {
   acceptOptionsFromParams,
@@ -15,7 +16,7 @@ import {
 } from '../features/randomizer/urlState'
 import { displayName } from '../lib/displayName'
 import { useGameData } from '../lib/GameDataContext'
-import { formatHex } from '../lib/hex'
+import { formatPid } from '../lib/hex'
 
 const SAMPLE_SIZE = 40
 
@@ -32,6 +33,22 @@ export default function RandomizerSpeciesFinder() {
 
   const canSearch = ready && lockedAbilityIds.length > 0
 
+  // `resultAbilities` is [chosen ability, ...innates]; the row shows every declared
+  // ability slot instead, so innates come off the tail of that and the ability side
+  // comes from `abilityResults`.
+  const toDisplay = (m: SpeciesMatch): DisplayMatch => {
+    const species = speciesById.get(m.speciesId)
+    return {
+      key: `${m.speciesId}-${formatPid(m.pid)}`,
+      pid: m.pid,
+      abilityNum: m.abilityNum,
+      slotCost: m.slotCost,
+      abilityResults: m.abilityResults.map((n) => idByNum[n]),
+      innates: m.resultAbilities.slice(1).map((n) => idByNum[n]),
+      speciesName: species && displayName(species, speciesById),
+    }
+  }
+
   function update(mutate: (params: URLSearchParams) => URLSearchParams) {
     setSearchParams(mutate(new URLSearchParams(searchParams)))
   }
@@ -46,10 +63,11 @@ export default function RandomizerSpeciesFinder() {
       <div>
         <h1 className="text-lg font-semibold">Species Finder</h1>
         <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-          Lock up to 4 target abilities/innates and find which species can roll them --
-          species unknown, so this scans a random sample ({SAMPLE_SIZE} at a time) and
-          reports an <strong>estimated</strong> total, not an exact one (exhausting even the
-          fully-evolved set is on the order of tens of billions of candidates).
+          Lock up to 4 target abilities/innates and find which species can roll them.
+          With 2 or more locked, this covers <strong>every</strong> species at once and is
+          usually exact; 3 or 4 locked normally finishes in a few seconds. A single lock,
+          or one involving a slot the randomizer never touches, falls back to scanning a
+          random sample of {SAMPLE_SIZE} species and estimating.
         </p>
       </div>
 
@@ -103,7 +121,7 @@ export default function RandomizerSpeciesFinder() {
         )}
         {searching && progress && (
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            scanned {progress.scanned}/{progress.totalToScan} species
+            {((progress.scanned / progress.totalToScan) * 100).toFixed(0)}% searched
           </span>
         )}
       </div>
@@ -114,7 +132,15 @@ export default function RandomizerSpeciesFinder() {
       {speciesResult && (
         <>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            scanned {speciesResult.sampledCount} of {speciesResult.populationSize.toLocaleString()} species
+            {speciesResult.exact
+              ? `exact — all ${speciesResult.populationSize.toLocaleString()} species, every PID`
+              : speciesResult.method === 'join'
+                ? `estimated from ${(speciesResult.coverage * 100).toFixed(1)}% of the PID space, across all ` +
+                  `${speciesResult.populationSize.toLocaleString()} species`
+                : `estimated from ${speciesResult.sampledCount} of ` +
+                  `${speciesResult.populationSize.toLocaleString()} species scanned`}
+            {speciesResult.matchedSpecies > 0 &&
+              ` · ${speciesResult.matchedSpecies.toLocaleString()} species matched`}
           </p>
 
           {speciesResult.trivialSpecies.length > 0 && (
@@ -129,24 +155,10 @@ export default function RandomizerSpeciesFinder() {
 
           <ResultsView
             total={speciesResult.estimatedTotal}
-            exact={false}
+            exact={speciesResult.exact}
             bySlotCost={speciesResult.bySlotCost}
-            promoted={speciesResult.promoted.map((m) => ({
-              key: `${m.speciesId}-${formatHex(m.pid)}`,
-              pid: m.pid,
-              abilityNum: m.abilityNum,
-              slotCost: m.slotCost,
-              resultAbilities: m.resultAbilities.map((n) => idByNum[n]),
-              speciesName: speciesById.get(m.speciesId) && displayName(speciesById.get(m.speciesId)!, speciesById),
-            }))}
-            sample={speciesResult.sample.map((m) => ({
-              key: `${m.speciesId}-${formatHex(m.pid)}`,
-              pid: m.pid,
-              abilityNum: m.abilityNum,
-              slotCost: m.slotCost,
-              resultAbilities: m.resultAbilities.map((n) => idByNum[n]),
-              speciesName: speciesById.get(m.speciesId) && displayName(speciesById.get(m.speciesId)!, speciesById),
-            }))}
+            ranked={speciesResult.promoted.map(toDisplay)}
+            sample={speciesResult.sample.map(toDisplay)}
           />
         </>
       )}
