@@ -569,6 +569,28 @@ describe('calculateMoveDamage -- Sheer Force boosts moves with a secondary effec
   })
 })
 
+describe('calculateMoveDamage -- Superconductor/Normalize convert the effective move type (src/abilities.cc:8187-8196,1558-1568)', () => {
+  it('Superconductor turns a Steel move Electric', () => {
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_IRON_HEAD'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SUPERCONDUCTOR', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.effectiveMoveType).toBe('ELECTRIC')
+  })
+
+  it('Normalize turns any move Normal', () => {
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_IRON_HEAD'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_NORMALIZE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(result.effectiveMoveType).toBe('NORMAL')
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

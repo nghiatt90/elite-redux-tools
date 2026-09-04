@@ -48,6 +48,12 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
    * != 0 && !noSheerForce`, all three pieces already emitted; no separate
    * FLAG_SHEER_FORCE_BOOST needs threading through the pipeline. */
   moveEffectChance: number
+  /** gBattleStruct->ateBoost[battler] -- resolveEffectiveMoveType's own return value
+   * (dispatchCalc.ts), true when SOME onMoveType hook on this battler set it while
+   * resolving the move's effective type this turn (Superconductor/Normalize read
+   * this on themselves; it's a per-battler flag from the SAME resolution pass that
+   * already produced this ctx's own moveType, not a separate lookup). */
+  ateBoost: boolean
   /** CalcMoveBasePower's PRE-modifier value (:7531-7533) -- Technician reads this,
    * not the fully-modified power used in the main damage equation. */
   basePower: number

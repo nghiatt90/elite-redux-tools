@@ -42,6 +42,7 @@ import { STATUS2_ABILITIES } from './35-status2'
 import { AVENGER_BLOOD_STIGMA_ABILITIES } from './36-avenger-blood-stigma'
 import { PRETTY_PRINCESS_ABILITIES } from './37-pretty-princess'
 import { SHEER_FORCE_ABILITIES } from './38-sheer-force'
+import { NORMALIZE_SUPERCONDUCTOR_ABILITIES } from './39-normalize-superconductor'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -83,6 +84,7 @@ registerAbilities(STATUS2_ABILITIES)
 registerAbilities(AVENGER_BLOOD_STIGMA_ABILITIES)
 registerAbilities(PRETTY_PRINCESS_ABILITIES)
 registerAbilities(SHEER_FORCE_ABILITIES)
+registerAbilities(NORMALIZE_SUPERCONDUCTOR_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

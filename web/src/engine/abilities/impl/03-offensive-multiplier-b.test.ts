@@ -20,6 +20,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     moveSplit: 'PHYSICAL',
     moveFlags: {},
     moveEffectChance: 0,
+    ateBoost: false,
     basePower: 40,
     typeEffectiveness: uq(1.0),
     isCrit: false,

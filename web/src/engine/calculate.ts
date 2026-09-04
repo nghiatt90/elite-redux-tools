@@ -402,7 +402,7 @@ function calcInternal(
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
   // terrain-boost base-power check all key off the resolved type, not the move's
   // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  const { moveType } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+  const { moveType, ateBoost } = resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
 
   // Computed here (rather than down near computeAbilityMultiplier, as in the other two
   // calcInternal-adjacent call sites) because IsBattlerGroundedIgnoreType's Levitate
@@ -493,6 +493,7 @@ function calcInternal(
       moveSplit: split,
       moveFlags: move.flags,
       moveEffectChance: move.effectChance,
+      ateBoost,
       basePower: power,
       typeEffectiveness,
       isCrit,

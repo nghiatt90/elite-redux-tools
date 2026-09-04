@@ -3,12 +3,12 @@
 // wired into calculate.ts's type-effectiveness fold yet, but each port here is a
 // complete, correct translation of its C body -- see the context types' own docs.
 //
-// Deferred (left in 99-unmodelled.ts): Normalize (its onTypeEffectiveness alone
-// would be a partial port -- its onMoveType/onOffensiveMultiplier halves need a
-// "convert EVERY move to Normal" mechanism this engine's resolveEffectiveMoveType
-// doesn't have, since it only handles the opposite "-ate" direction). Bone Zone and
-// Soothsayer (batch AK) turned out to be portable after all -- see their own
-// entries below for why.
+// Normalize was previously deferred here on the belief that resolveEffectiveMoveType
+// only handled the opposite ("-ate", type->non-Normal) direction -- it doesn't have
+// any such restriction (it just checks whether a hook changed ctx.moveType from the
+// input), so Normalize's unconditional "->NORMAL" conversion ports the same way; see
+// 39-normalize-superconductor.ts. Bone Zone and Soothsayer (batch AK) were similarly
+// portable after all -- see their own entries below for why.
 
 import { uq, mulModifier } from '../../fixed'
 import type { AbilityImpl, OnTypeEffectivenessContext } from '../types'

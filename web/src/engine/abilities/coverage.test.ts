@@ -344,7 +344,21 @@ describe('ability registry coverage gate', () => {
     //             threaded through -- no pipeline change, no data regeneration.
     //             Verified end-to-end: MOVE_ACID (effectChance 30) is boosted,
     //             MOVE_TACKLE (effectChance 0) is not.
-    expect(unmodelledCount).toBeLessThanOrEqual(12)
+    //     -> 10  (batch AN: Normalize and Superconductor together -- both read the
+    //             same gBattleStruct->ateBoost[battler] flag, now threaded through
+    //             as OffensiveMultiplierContext.ateBoost (resolveEffectiveMoveType
+    //             already computed and discarded it at the call site). Normalize's
+    //             onMoveType was previously (wrongly) believed to need a "convert
+    //             EVERY move to Normal" mechanism resolveEffectiveMoveType didn't
+    //             have -- it has no such restriction; the unconditional conversion
+    //             ports directly. Both abilities' own onOffensiveMultiplier bonus
+    //             is dead code with today's ability roster (see the batch file's
+    //             own comment for why: only the FIRST ability whose onMoveType
+    //             changes the type survives the dispatch loop, in both the C and
+    //             this port, and no ability sets ateBoost while landing on
+    //             TYPE_NORMAL) -- ported faithfully and unit-tested at the hook
+    //             level, verified end-to-end only for the type-conversion half.
+    expect(unmodelledCount).toBeLessThanOrEqual(10)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })
