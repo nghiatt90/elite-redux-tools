@@ -22,6 +22,7 @@ displays icons in menus regardless of shiny status.
 """
 
 from pathlib import Path
+from shutil import rmtree
 
 from PIL import Image
 
@@ -128,6 +129,7 @@ def build_sprites() -> None:
     dest_root = output_dir() / "sprites"
 
     ok, skipped = 0, 0
+    wanted: set[str] = set()
     for s in species:
         sid = _S(s.id)
         sources = species_sprites(s, species_map)
@@ -136,7 +138,19 @@ def build_sprites() -> None:
             continue
         generate_species_sprites(sid, sources, dest_root / sid)
         ok += 1
-    print(f"sprites: {ok} generated, {skipped} skipped (missing source)")
+        wanted.add(sid)
+
+    # Upstream renames and retires species between commits, and the snapshot is
+    # committed rather than rebuilt from scratch -- without this, a species dropped
+    # upstream leaves its sprite directory behind forever, shipping to the site as dead
+    # weight and quietly desynchronising sprites/ from species.json.
+    stale = sorted(d.name for d in dest_root.iterdir() if d.is_dir() and d.name not in wanted)
+    for name in stale:
+        rmtree(dest_root / name)
+
+    print(f"sprites: {ok} generated, {skipped} skipped (missing source), {len(stale)} stale removed")
+    if stale:
+        print("  removed: " + ", ".join(stale))
 
 
 if __name__ == "__main__":
