@@ -10,7 +10,7 @@ def test_moves_count():
 
 
 def test_abilities_count():
-    assert len(parse_abilities()) == 1044
+    assert len(parse_abilities()) == 1034
 
 
 def test_items_count():

@@ -1,18 +1,19 @@
 {
   "game_version": "v2.65beta",
+  "pin_policy": "Pin the upstream commits that match the RELEASED build players run, not the tip of `upcoming`. Elite Redux develops on `upcoming` and cuts ROM releases from it without tags or a release branch, so branch tip runs ahead of every playable ROM. That is invisible in a Pokedex but fatal for the randomizer: its LCG modulus is ABILITIES_COUNT (= max ability enum id + 1), so a single unreleased ability makes 100% of PID results wrong. These SHAs are the newest pair with ABILITIES_COUNT == 1034, matching v2.65beta; ABILITY_BUTTERFLY_WINGS = 1034 landed in er-config on 2026-04-26 and is the boundary. tests/test_oracle.py asserts the count against ER-nextdex's published (released-game) data -- keep that green when repinning.",
   "sources": {
     "er-config": {
       "repo": "https://github.com/Elite-Redux/er-config",
       "branch": "upcoming",
-      "sha": "de7c6b4d2cf6567e222148fde4d7beb5abce84b3",
-      "date": "2026-09-01T09:59:34Z",
+      "sha": "1b8e2cc4a8096d7ec90616f87fbf771bfa732447",
+      "date": "2026-04-24T18:50:41Z",
       "sparse_paths": []
     },
     "eliteredux-source": {
       "repo": "https://github.com/Elite-Redux/eliteredux-source",
       "branch": "upcoming",
-      "sha": "f51ce63acbb604ae7ee189da9060b95ab083ad07",
-      "date": "2026-09-01T09:59:42Z",
+      "sha": "bdebcbbff9760cdd41a02c425bea4857fa0eee26",
+      "date": "2026-04-24T18:50:44Z",
       "sparse_paths": [
         "graphics/pokemon",
         "src/data",

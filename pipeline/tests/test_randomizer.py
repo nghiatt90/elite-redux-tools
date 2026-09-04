@@ -11,8 +11,11 @@ def test_banned_count_and_none_included():
 
 
 def test_abilities_count_matches_gapfree_enum():
+    # The randomizer's LCG modulus is this minus one. Cross-checked against the
+    # released build in test_oracle.test_abilities_count_matches_the_released_game --
+    # if that one fails too, the lockfile has run ahead of the ROM, not the enum.
     abilities = parse_abilities()
-    assert _abilities_count(abilities) == 1044
+    assert _abilities_count(abilities) == 1034
 
 
 def test_exact_groups_count_and_membership():
@@ -67,4 +70,4 @@ def test_compound_count():
     abilities = parse_abilities()
     name_index = {a.name: a for a in abilities}
     compounds = [a for a in abilities if _components(a.description, name_index)]
-    assert len(compounds) == 161
+    assert len(compounds) == 150
