@@ -323,7 +323,17 @@ describe('ability registry coverage gate', () => {
     //             countdown reuses the generic abilityOn toggle (new
     //             OnAfterTypeEffectivenessContext.defenderAbilityOn), same
     //             precedent as Avenger/Blood Stigma.
-    expect(unmodelledCount).toBeLessThanOrEqual(14)
+    //     -> 13  (batch AL: Pretty Princess -- needed no new scenario field, just
+    //             threading two ALREADY-EXISTING per-battler facts onto
+    //             OffensiveMultiplierContext: attackerIsUnaware (the ATTACKER's
+    //             own Unaware self-check, never suppressed even though breakable,
+    //             matching every other self-check in this registry) and
+    //             defenderHasAnyLoweredStat (derived from
+    //             ConditionBattlerContext.negativeStatStageCount, already used by
+    //             Lash Out). Verified end-to-end both directions, including that
+    //             Unaware held as an INNATE alongside Pretty Princess correctly
+    //             suppresses its own boost.
+    expect(unmodelledCount).toBeLessThanOrEqual(13)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

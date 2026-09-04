@@ -511,6 +511,36 @@ describe('calculateMoveDamage -- Blood Stigma doubles damage against a bleeding 
   })
 })
 
+describe('calculateMoveDamage -- Pretty Princess boosts against a defender with a lowered stat (src/abilities.cc:5258-5262)', () => {
+  it('reads the defender\'s negativeStatStageCount, and is suppressed by the ATTACKER\'s own Unaware', () => {
+    const neutral = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PRETTY_PRINCESS', innates: [null, null, null] } }) }),
+    )
+    const loweredDefender = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PRETTY_PRINCESS', innates: [null, null, null] } }),
+        defender: battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, negativeStatStageCount: 1 }) }),
+      }),
+    )
+    expect(loweredDefender.rolls[15]).toBeGreaterThan(neutral.rolls[15])
+
+    // Unaware as an INNATE alongside Pretty Princess as the main ability -- this
+    // engine models multiple simultaneous abilities via slots, and Unaware here is
+    // the ATTACKER's own check (Pretty Princess never looks at the defender's
+    // Unaware), so this should suppress the boost even though the defender still
+    // has a lowered stat.
+    const attackerAlsoUnaware = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PRETTY_PRINCESS', innates: ['ABILITY_UNAWARE', null, null] } }),
+        defender: battler('SPECIES_SKARMORY', { condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, negativeStatStageCount: 1 }) }),
+      }),
+    )
+    expect(attackerAlsoUnaware.rolls[15]).toBe(neutral.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
   it('Combustion (ported ability) boosts a Fire-type move end-to-end', async () => {
     await import('./abilities/impl/index') // populate the registry

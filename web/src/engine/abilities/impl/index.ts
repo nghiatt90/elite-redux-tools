@@ -40,6 +40,7 @@ import { PROTOSYNTHESIS_ABILITIES } from './33-protosynthesis'
 import { FAINTED_COUNT_ABILITIES } from './34-fainted-count'
 import { STATUS2_ABILITIES } from './35-status2'
 import { AVENGER_BLOOD_STIGMA_ABILITIES } from './36-avenger-blood-stigma'
+import { PRETTY_PRINCESS_ABILITIES } from './37-pretty-princess'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -79,6 +80,7 @@ registerAbilities(PROTOSYNTHESIS_ABILITIES)
 registerAbilities(FAINTED_COUNT_ABILITIES)
 registerAbilities(STATUS2_ABILITIES)
 registerAbilities(AVENGER_BLOOD_STIGMA_ABILITIES)
+registerAbilities(PRETTY_PRINCESS_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

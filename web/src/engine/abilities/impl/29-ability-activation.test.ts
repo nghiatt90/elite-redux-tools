@@ -41,6 +41,8 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderIsEnraged: false,
     defenderStatus1: new Set<string>(),
     defenderHasBloodStainEffect: false,
+    attackerIsUnaware: false,
+    defenderHasAnyLoweredStat: false,
     ...overrides,
   }
 }

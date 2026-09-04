@@ -89,6 +89,8 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   defenderIsEnraged: boolean // STATUS2_ENRAGED on the move's TARGET -- Cosmic Daze/Cosmic Dust
   defenderStatus1: Set<string> // gBattleMons[target].status1 bare flags -- Blood Stigma
   defenderHasBloodStainEffect: boolean // IsBloodStainAffected(target) -- Blood Stigma
+  attackerIsUnaware: boolean // IsUnaware(battler) -- Pretty Princess's OWN Unaware check (self, not the defender's)
+  defenderHasAnyLoweredStat: boolean // HasAnyLoweredStat(target) -- Pretty Princess
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {

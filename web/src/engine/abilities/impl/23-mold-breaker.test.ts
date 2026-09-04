@@ -71,6 +71,8 @@ describe('mold breaker batch W', () => {
       defenderIsEnraged: false,
       defenderStatus1: new Set<string>(),
       defenderHasBloodStainEffect: false,
+      attackerIsUnaware: false,
+      defenderHasAnyLoweredStat: false,
     }
     const defensiveCtx = {
       defenderId: 'defender',

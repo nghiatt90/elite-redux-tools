@@ -44,6 +44,8 @@ describe('ally-only batch S', () => {
         defenderIsEnraged: false,
         defenderStatus1: new Set<string>(),
         defenderHasBloodStainEffect: false,
+        attackerIsUnaware: false,
+        defenderHasAnyLoweredStat: false,
       },
       {
         defenderId: 'defender',

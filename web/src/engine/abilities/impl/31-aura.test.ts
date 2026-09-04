@@ -39,6 +39,8 @@ function offCtx(overrides: Partial<{ moveType: string; isAuraBreakActive: boolea
     defenderIsEnraged: false,
     defenderStatus1: new Set<string>(),
     defenderHasBloodStainEffect: false,
+    attackerIsUnaware: false,
+    defenderHasAnyLoweredStat: false,
     ...overrides,
   }
 }
@@ -66,6 +68,8 @@ function defCtx(moveType = 'NORMAL') {
     defenderIsEnraged: false,
     defenderStatus1: new Set<string>(),
     defenderHasBloodStainEffect: false,
+    attackerIsUnaware: false,
+    defenderHasAnyLoweredStat: false,
   }
 }
 
