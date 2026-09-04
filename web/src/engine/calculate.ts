@@ -212,6 +212,7 @@ function computeStat(opts: ComputeStatOptions): number {
       abilityOn: battler.abilityOn,
       boostedStat: battler.boostedStat,
       alliesFainted: battler.alliesFainted,
+      isMegaEvolved: battler.condition.isMegaEvolved,
     }),
     secondaryStatPercent: 0, // the OWN-stat self-buff variant (secondaryStat[statEnum]) -- no ability in the census ever targets its own chosen stat this way, so this stays 0; see applySecondaryStatBlend for the (used) other-stat blend
     statStageRatios: opts.statStageRatios,

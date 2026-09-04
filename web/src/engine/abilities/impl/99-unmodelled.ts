@@ -17,7 +17,6 @@ export const UNMODELLED_ABILITIES: AbilityEntry[] = [
   { id: 'ABILITY_COLOR_SPECTRUM', src: 'src/abilities.cc:8710', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_CRYSTALLIZE', src: 'src/abilities.cc:3729', unmodelled: 'not yet ported (hooks: onMoveType, onOffensiveMultiplier)' },
   { id: 'ABILITY_DEADLY_PRECISION', src: 'src/abilities.cc:11162', unmodelled: 'not yet ported (hooks: onMoldBreaker)' },
-  { id: 'ABILITY_ETERNAL_FLOWER', src: 'src/abilities.cc:11630', unmodelled: 'not yet ported (hooks: onStat)' },
   { id: 'ABILITY_ILLUSION', src: 'src/abilities.cc:2118', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_LETHARGY', src: 'src/abilities.cc:4934', unmodelled: 'not yet ported (hooks: onOffensiveMultiplier)' },
   { id: 'ABILITY_VICTORY_BOMB', src: 'src/abilities.cc:8980', unmodelled: 'not yet ported (hooks: onMoveType)' },

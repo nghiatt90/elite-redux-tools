@@ -202,6 +202,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
       speciesId: species.id,
       baseSpeciesId,
       heads: species.heads ?? 1,
+      isMegaEvolved: species.megas.length > 0 || species.primals.length > 0,
       itemId: config.itemId,
       resolvedHoldEffect: item?.resolvedHoldEffect ?? null,
       itemNegated: false,

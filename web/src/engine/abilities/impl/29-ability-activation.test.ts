@@ -80,7 +80,7 @@ function statCtx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     statId: 'atk',
     moveId: 'MOVE_TACKLE',
     stat: 100,
-    flags: { nonStackingRuin: false },
+    flags: { nonStackingRuin: false, nonStackingEternalFlower: false },
     weather: 'NONE',
     terrain: null,
     hp: 100,
@@ -92,6 +92,8 @@ function statCtx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     abilityOn: false,
     boostedStat: null,
     alliesFainted: 0,
+    isMegaEvolved: false,
+    statOwnerHasEternalFlower: false,
     ...overrides,
   }
 }

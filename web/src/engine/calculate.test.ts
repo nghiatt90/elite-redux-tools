@@ -26,6 +26,7 @@ function condition(overrides: Partial<ConditionBattlerContext> = {}): ConditionB
     speciesId: 'SPECIES_PIKACHU',
     baseSpeciesId: 'SPECIES_PIKACHU',
     heads: 1,
+    isMegaEvolved: false,
     itemId: null,
     resolvedHoldEffect: null,
     itemNegated: false,
@@ -620,6 +621,34 @@ describe('calculateMoveDamage -- Dreamcatcher/Dreamscape double damage vs a slee
       }),
     )
     expect(dreamscape.rolls[15]).toBeGreaterThan(dreamcatcher.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Eternal Flower reduces a Mega-evolved defender\'s stats (src/abilities.cc:11630-11639)', () => {
+  it('boosts damage against a Mega defender, does nothing against a non-Mega one, and exempts a Mega defender that itself holds Eternal Flower', async () => {
+    await import('./abilities/impl/index')
+    const attackerWithEternalFlower = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_ETERNAL_FLOWER', innates: [null, null, null] } })
+    const megaVenusaur = (overrides: Partial<BattlerBattleState> = {}) =>
+      battler('SPECIES_VENUSAUR_MEGA', {
+        condition: condition({ speciesId: 'SPECIES_VENUSAUR_MEGA', baseSpeciesId: 'SPECIES_VENUSAUR', hp: 999, maxHp: 999, isMegaEvolved: true }),
+        ...overrides,
+      })
+
+    const baseline = calculateMoveDamage(scenario({ defender: megaVenusaur() }))
+    const withEternalFlower = calculateMoveDamage(scenario({ attacker: attackerWithEternalFlower, defender: megaVenusaur() }))
+    expect(withEternalFlower.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+
+    const nonMegaBaseline = calculateMoveDamage(scenario({ defender: battler('SPECIES_SKARMORY') }))
+    const nonMegaWithEternalFlower = calculateMoveDamage(scenario({ attacker: attackerWithEternalFlower, defender: battler('SPECIES_SKARMORY') }))
+    expect(nonMegaWithEternalFlower.rolls[15]).toBe(nonMegaBaseline.rolls[15])
+
+    const megaAlsoHoldingIt = calculateMoveDamage(
+      scenario({
+        attacker: attackerWithEternalFlower,
+        defender: megaVenusaur({ abilitySlots: { ability: 'ABILITY_ETERNAL_FLOWER', innates: [null, null, null] } }),
+      }),
+    )
+    expect(megaAlsoHoldingIt.rolls[15]).toBe(baseline.rolls[15])
   })
 })
 

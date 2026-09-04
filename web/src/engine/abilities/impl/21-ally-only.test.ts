@@ -90,6 +90,7 @@ describe('ally-only batch S', () => {
       abilityOn: false,
       boostedStat: null,
       alliesFainted: 0,
+      isMegaEvolved: false,
     })
     expect(modify(100)).toBe(100)
   })

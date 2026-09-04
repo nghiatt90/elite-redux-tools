@@ -148,7 +148,7 @@ describe('computeOnStatModifier', () => {
   it('the stat owner\'s own onStat hook applies by default (APPLY_ON_SELF)', () => {
     const ownHook: AbilityImpl = { id: 'ABILITY_TEST_OWNSTAT', src: 'test', onStat: (ctx) => (ctx.stat += 10) }
     registerAbilities([ownHook])
-    const modify = computeOnStatModifier(slots('ABILITY_TEST_OWNSTAT'), slots(null), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0 })
+    const modify = computeOnStatModifier(slots('ABILITY_TEST_OWNSTAT'), slots(null), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
     expect(modify(100)).toBe(110)
   })
 
@@ -158,13 +158,13 @@ describe('computeOnStatModifier', () => {
     // affecting your stat (e.g. an aura effect) must opt in explicitly.
     const unscoped: AbilityImpl = { id: 'ABILITY_TEST_OTHERSTAT_UNSCOPED', src: 'test', onStat: (ctx) => (ctx.stat *= 2) }
     registerAbilities([unscoped])
-    const unscopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_UNSCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0 })
+    const unscopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_UNSCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
     expect(unscopedModify(100)).toBe(100) // no-op: the other battler's ability never applied
 
     _resetRegistryForTests()
     const scoped: AbilityImpl = { id: 'ABILITY_TEST_OTHERSTAT_SCOPED', src: 'test', applyOn: { onStatFor: APPLY_ON_ANY }, onStat: (ctx) => (ctx.stat *= 2) }
     registerAbilities([scoped])
-    const scopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_SCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0 })
+    const scopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_SCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
     expect(scopedModify(100)).toBe(200)
   })
 })

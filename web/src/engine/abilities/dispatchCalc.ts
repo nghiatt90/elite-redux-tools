@@ -8,7 +8,7 @@ import { uq } from '../fixed'
 import { NEVER_CRIT } from '../crit'
 import { isApplyOnFlagAppropriate, isTargettedApplyOnFlagAppropriate } from './applyOn'
 import type { AbilitySlots } from './dispatch'
-import { forEachAbility } from './dispatch'
+import { forEachAbility, battlerHasAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
 import type {
@@ -275,7 +275,7 @@ export function computeAbilityMultiplier(
   return shared.modifier
 }
 
-type OnStatInputs = Omit<OnStatContext, 'stat' | 'flags'>
+type OnStatInputs = Omit<OnStatContext, 'stat' | 'flags' | 'statOwnerHasEternalFlower'>
 
 /**
  * CalculateStat's onStat loop (:7195-7202): both battlers' abilities can modify
@@ -293,7 +293,12 @@ type OnStatInputs = Omit<OnStatContext, 'stat' | 'flags'>
  */
 export function computeOnStatModifier(statOwnerSlots: AbilitySlots, otherSlots: AbilitySlots, inputs: OnStatInputs) {
   return (stat: number): number => {
-    const ctx: OnStatContext = { ...inputs, stat, flags: { nonStackingRuin: false } }
+    const ctx: OnStatContext = {
+      ...inputs,
+      stat,
+      flags: { nonStackingRuin: false, nonStackingEternalFlower: false },
+      statOwnerHasEternalFlower: battlerHasAbility(statOwnerSlots, 'ABILITY_ETERNAL_FLOWER', NEVER_SUPPRESSED),
+    }
     forEachAbility(statOwnerSlots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onStat) return
       if (!isApplyOnFlagAppropriate(true, false, impl.applyOn?.onStatFor)) return

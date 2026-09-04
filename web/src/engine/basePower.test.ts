@@ -13,6 +13,7 @@ function battler(overrides: Partial<ConditionBattlerContext> = {}): ConditionBat
     speciesId: 'SPECIES_PIKACHU',
     baseSpeciesId: 'SPECIES_PIKACHU',
     heads: 1,
+    isMegaEvolved: false,
     itemId: null,
     resolvedHoldEffect: null,
     itemNegated: false,

@@ -44,6 +44,7 @@ import { PRETTY_PRINCESS_ABILITIES } from './37-pretty-princess'
 import { SHEER_FORCE_ABILITIES } from './38-sheer-force'
 import { NORMALIZE_SUPERCONDUCTOR_ABILITIES } from './39-normalize-superconductor'
 import { DREAMCATCHER_ABILITIES } from './40-dreamcatcher'
+import { ETERNAL_FLOWER_ABILITIES } from './41-eternal-flower'
 import { UNMODELLED_ABILITIES } from './99-unmodelled'
 
 registerAbilities(DECLARATIVE_ABILITIES)
@@ -87,6 +88,7 @@ registerAbilities(PRETTY_PRINCESS_ABILITIES)
 registerAbilities(SHEER_FORCE_ABILITIES)
 registerAbilities(NORMALIZE_SUPERCONDUCTOR_ABILITIES)
 registerAbilities(DREAMCATCHER_ABILITIES)
+registerAbilities(ETERNAL_FLOWER_ABILITIES)
 
 // Further Task 10 batches land here as they're ported, e.g.:
 //   import { OFFENSIVE_MULTIPLIER_BATCH_B } from './03-offensive-multiplier-b'

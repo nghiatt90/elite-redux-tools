@@ -373,7 +373,20 @@ describe('ability registry coverage gate', () => {
     //             its onDefender half isn't a damage hook at all. Verified
     //             end-to-end: both abilities double damage vs a sleeping defender,
     //             Dreamscape additionally stacks its flat 1.2x.
-    expect(unmodelledCount).toBeLessThanOrEqual(8)
+    //     -> 7   (batch AP: Eternal Flower. GetBaseSpeciesFromMega(species) reduces
+    //             to species.json's own `megas`/`primals` lists being nonempty
+    //             (this species itself IS a Mega/Primal form) -- new
+    //             ConditionBattlerContext.isMegaEvolved field, derived at
+    //             buildBattlerState time. Reuses the SAME shared NonStackingState
+    //             bitfield as Ruin (a separate bit, nonStackingEternalFlower) and
+    //             the same applyOn.onStatFor: APPLY_ON_OTHER shape. The C's own
+    //             self-immunity check (an Eternal Flower holder is never debuffed
+    //             by another) needed a new derived OnStatContext field,
+    //             statOwnerHasEternalFlower, computed once per call by
+    //             computeOnStatModifier since ctx has no other way to see the stat
+    //             owner's own ability slots. Verified end-to-end against a real
+    //             Mega Venusaur.
+    expect(unmodelledCount).toBeLessThanOrEqual(7)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

@@ -96,12 +96,12 @@ describe('defensive multiplier batch C', () => {
 
   it('Lead Coat: 0.6x vs physical, 0.9x Speed; Chrome Coat: 0.6x vs special, delegates the same onStat', () => {
     expect(runDef('ABILITY_LEAD_COAT', { moveSplit: 'PHYSICAL' })).toBe(uq(0.6))
-    const statCtx = { battlerId: 'x', statId: 'spe' as const, moveId: 'MOVE_TACKLE', stat: 100, flags: { nonStackingRuin: false }, weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set<string>(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0 }
+    const statCtx = { battlerId: 'x', statId: 'spe' as const, moveId: 'MOVE_TACKLE', stat: 100, flags: { nonStackingRuin: false, nonStackingEternalFlower: false }, weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set<string>(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false, statOwnerHasEternalFlower: false }
     findAbility('ABILITY_LEAD_COAT').onStat!(statCtx)
     expect(statCtx.stat).toBe(90)
 
     expect(runDef('ABILITY_CHROME_COAT', { moveSplit: 'SPECIAL' })).toBe(uq(0.6))
-    const statCtx2 = { battlerId: 'x', statId: 'spe' as const, moveId: 'MOVE_TACKLE', stat: 100, flags: { nonStackingRuin: false }, weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set<string>(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0 }
+    const statCtx2 = { battlerId: 'x', statId: 'spe' as const, moveId: 'MOVE_TACKLE', stat: 100, flags: { nonStackingRuin: false, nonStackingEternalFlower: false }, weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set<string>(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false, statOwnerHasEternalFlower: false }
     findAbility('ABILITY_CHROME_COAT').onStat!(statCtx2)
     expect(statCtx2.stat).toBe(90)
   })

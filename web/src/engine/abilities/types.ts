@@ -132,7 +132,7 @@ export interface OnStatContext {
   statId: BattleStatKey
   moveId: string
   stat: number // read/write -- ports mutate this directly (`ctx.stat = ...`)
-  flags: { nonStackingRuin: boolean } // NonStackingState -- Ruin abilities only
+  flags: { nonStackingRuin: boolean; nonStackingEternalFlower: boolean } // NonStackingState -- shared bitfield, Ruin abilities + Eternal Flower each own one bit
   weather: string // FieldBattleState's bare weather kind
   terrain: string | null
   hp: number // the STAT OWNER's hp/maxHp (not necessarily the attacker -- onStat runs for either battler's stat calc)
@@ -150,6 +150,14 @@ export interface OnStatContext {
   abilityOn: boolean // see OffensiveMultiplierContext's attackerAbilityOn doc -- the STAT OWNER's own toggle (Unburden/Slow Start)
   boostedStat: BattleStatKey | null // Protosynthesis/Quark Drive's ParadoxBoost.statId -- the STAT OWNER's own, null when inactive
   alliesFainted: number // gFaintedMonCount[GetBattlerSide(battler)] -- the STAT OWNER's own team's fainted count (Soul Harvest, Supreme Overlord)
+  isMegaEvolved: boolean // ConditionBattlerContext.isMegaEvolved for the STAT OWNER -- Eternal Flower
+  /** BattlerHasAbility(battler, ABILITY_ETERNAL_FLOWER, FALSE) -- does the STAT
+   * OWNER itself hold Eternal Flower? (Its onStatFor=APPLY_ON_OTHER, so the hook
+   * body's "battler" is whoever is having their stat computed, not the holder --
+   * this is that battler's own self-immunity check, computed by
+   * computeOnStatModifier from statOwnerSlots since ctx has no other way to see
+   * the stat owner's own ability slots.) */
+  statOwnerHasEternalFlower: boolean
 }
 
 export interface OnStabContext {

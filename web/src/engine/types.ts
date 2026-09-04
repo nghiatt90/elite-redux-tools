@@ -47,6 +47,11 @@ export interface ConditionBattlerContext {
   speciesId: string // exact SPECIES_* id
   baseSpeciesId: string // GET_BASE_SPECIES_ID(species) -- for non-exact SpeciesCondition
   heads: number // species.json's `heads` (F_TWO_HEADED/F_THREE_HEADED, pokemon.h:209-210), default 1 -- Multi Headed's onParentalBond trigger
+  /** !!GetBaseSpeciesFromMega(species) -- true iff this species' OWN species.json
+   * entry has a nonempty `megas` or `primals` list (i.e. this battler currently IS
+   * a Mega/Primal form, not that it CAN mega-evolve -- Eternal Flower's own check
+   * reads whichever species is on the field right now). */
+  isMegaEvolved: boolean
   itemId: string | null
   resolvedHoldEffect: string | null // items.json's resolvedHoldEffect, for HoldEffect-keyed ItemCondition
   itemNegated: boolean // Embargo/Klutz/Magic Room-style suppression; v1 default false
