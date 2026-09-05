@@ -316,6 +316,83 @@ describe('calculateMoveDamage -- Levitate grants Ground immunity (IsBattlerGroun
   })
 })
 
+describe('calculateMoveDamage -- Iron Ball/Gravity force grounding, Air Balloon forces airborne (CheckGroundingEffects/CheckLevitatingEffects, battle_util.c:6672-6697)', () => {
+  it('Iron Ball grounds a Levitate holder, overriding the ability entirely', async () => {
+    await import('./abilities/impl/index')
+    const levitateOnly = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(levitateOnly.isImmune).toBe(true)
+
+    const withIronBall = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', {
+          abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] },
+          condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_IRON_BALL' }),
+        }),
+      }),
+    )
+    expect(withIronBall.isImmune).toBe(false)
+  })
+
+  it('Gravity overrides Levitate, same as Iron Ball', async () => {
+    await import('./abilities/impl/index')
+    const withGravity = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } }),
+        field: fieldState({ gravityActive: true }),
+      }),
+    )
+    expect(withGravity.isImmune).toBe(false)
+  })
+
+  it("Gravity does NOT remove a naturally-Flying-type's own chart-based Ground immunity -- GetTypeModifier is a pure chart lookup with no Gravity awareness at all (verified against every IsGravityActive call site in the C, none of which touch type effectiveness)", () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE'), field: fieldState({ gravityActive: true }) })) // Skarmory: Steel/Flying
+    expect(result.isImmune).toBe(true)
+  })
+
+  it('Air Balloon grants Ground immunity to a non-Flying, non-Levitate defender', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE'), defender: battler('SPECIES_GARCHOMP') }))
+    expect(baseline.isImmune).toBe(false)
+
+    const withAirBalloon = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: battler('SPECIES_GARCHOMP', {
+          condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_AIR_BALLOON' }),
+        }),
+      }),
+    )
+    expect(withAirBalloon.isImmune).toBe(true)
+  })
+})
+
+describe('calculateMoveDamage -- Ring Target neutralizes only its holder\'s immune type component (battle_util.c:7881-7884)', () => {
+  it("Thunderbolt vs Ground/Flying Skarmory-like defender: immune without Ring Target, super-effective (not flat neutral) with it", () => {
+    // Skarmory is Steel/Flying (not Ground), so swap in a Ground/Flying-typed
+    // defender directly to exercise the immune-component case.
+    const groundFlyingDefender = battler('SPECIES_SKARMORY', { types: ['GROUND', 'FLYING'] })
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_THUNDERBOLT'), defender: groundFlyingDefender }))
+    expect(baseline.isImmune).toBe(true)
+
+    const withRingTarget = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_THUNDERBOLT'),
+        defender: {
+          ...groundFlyingDefender,
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_RING_TARGET' }),
+        },
+      }),
+    )
+    expect(withRingTarget.isImmune).toBe(false)
+  })
+})
+
 describe('calculateMoveDamage -- onAbsorb blocks damage independent of the type chart (TestAbsorbingAbilities, battle_util.c:8961-8969)', () => {
   it('Surf (super-effective vs Ground/Dragon Garchomp) is fully absorbed by Water Absorb, not just reduced', async () => {
     await import('./abilities/impl/index')

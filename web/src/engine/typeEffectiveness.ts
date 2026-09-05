@@ -37,16 +37,28 @@ export function baseTypeEffectiveness(attackingType: string, defendingType: stri
  * "ignoresLevitation" moves are not modelled by this function -- that flag restores
  * the immunity to neutral and belongs in the caller alongside the rest of move-flag
  * handling.
+ *
+ * `ringTargetHeld` mirrors MulByTypeEffectiveness's own Ring Target check
+ * (:7881-7884): PER-DEFENDING-TYPE, not on the final folded modifier -- a Ring
+ * Target holder that's immune via only ONE of its (up to 3) types still keeps its
+ * OTHER types' real (resisted/super-effective) multiplier, rather than the whole
+ * hit going flatly neutral. The C only applies this when no ability's
+ * onTypeEffectiveness hook already changed that component -- this engine doesn't
+ * dispatch that hook here yet either (see calculate.ts's own module doc), so
+ * there's no double-dip to guard against in practice.
  */
 export function calcTypeEffectiveness(
   attackingType: string,
   defenderTypes: string[],
   chart: TypeChart,
   isGrounded = true,
+  ringTargetHeld = false,
 ): number {
   let modifier = uq(1.0)
   for (const defendingType of defenderTypes) {
-    modifier = mulModifier(modifier, baseTypeEffectiveness(attackingType, defendingType, chart))
+    let componentModifier = baseTypeEffectiveness(attackingType, defendingType, chart)
+    if (componentModifier === 0 && ringTargetHeld) componentModifier = uq(1.0)
+    modifier = mulModifier(modifier, componentModifier)
   }
   if (modifier !== 0 && attackingType === 'GROUND' && !isGrounded) {
     modifier = 0

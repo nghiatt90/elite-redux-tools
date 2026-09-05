@@ -495,15 +495,32 @@ function calcInternal(
   const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split)
 
   const defenderTypes = distinctDefendingTypes(defender.types)
-  // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701): defender.isGrounded is
-  // the species-only baseline (Flying-type is airborne; scenario.ts builds it with no
-  // ability knowledge). The Levitate ABILITY is the one levitating effect this engine
-  // models -- Air Balloon/Magnet Rise/Telekinesis (also CheckLevitatingEffects,
-  // :6687-6695) and Gravity/Iron Ball/Ingrain/Smacked Down (the grounding effects that
-  // override everything, CheckGroundingEffects, :6672-6685) have no scenario state here
-  // and stay unmodelled, same as the rest of the field-state backlog.
-  const isGrounded = defender.isGrounded && !hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker)
-  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, isGrounded)
+  // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701), which checks
+  // CheckGroundingEffects (:6672-6685) FIRST -- Iron Ball or Gravity forces
+  // grounded regardless of type/ability, short-circuiting the rest of the check
+  // entirely (Ingrain/Smacked Down are volatile-status effects with no scenario
+  // field here and stay unmodelled). Only when neither applies does
+  // CheckLevitatingEffects (:6687-6695) get a say: defender.isGrounded is the
+  // species-only baseline (Flying-type is airborne; scenario.ts builds it with no
+  // ability knowledge), further overridden airborne by Levitate or Air Balloon
+  // (Magnet Rise/Telekinesis are also volatile-status, same gap as above).
+  //
+  // NOTE: Gravity here only overrides Levitate/Air Balloon-style airborne
+  // effects, NOT a naturally Flying-typed defender's own chart-based Ground
+  // immunity -- calcTypeEffectiveness's isGrounded param only fires its override
+  // when the type-chart fold is already nonzero (matching CalcFinalDmg's own
+  // `if (modifier && ...)` guard), and GetTypeModifier (:8052-8068) is a pure
+  // static chart lookup with no Gravity awareness anywhere in it. Verified
+  // against every IsGravityActive call site in the C -- none touch type
+  // effectiveness. This may read as counter-intuitive against vanilla Pokemon's
+  // own Gravity mechanic, but it's this codebase's actual, faithfully-ported
+  // behavior, not an oversight in this port.
+  const isForcedGrounded = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || field.gravityActive
+  const isForcedAirborne =
+    !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
+  const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
+  const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
+  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, isGrounded, ringTargetHeld)
   if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 
   // TestAbsorbingAbilities (:8961-8969) -- a hit-blocking check distinct from type

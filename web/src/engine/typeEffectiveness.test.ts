@@ -85,4 +85,20 @@ describe('calcTypeEffectiveness', () => {
     // fallback exists for robustness against a malformed/partial chart at runtime.
     expect(baseTypeEffectiveness('NOT_A_TYPE', 'ALSO_NOT_A_TYPE', chart)).toBe(uq(1.0))
   })
+
+  it("Ring Target neutralizes only the IMMUNE component, keeping the other type's own multiplier (not a flat neutral)", () => {
+    // Electric vs Ground/Flying: 0 (immune) * 2.0 (super effective) = 0 without Ring
+    // Target. With it, the Ground component alone is forced to 1.0 -- the fold
+    // continues as 1.0 * 2.0 = 2.0 (still super effective), not flattened to 1.0.
+    expect(calcTypeEffectiveness('ELECTRIC', ['GROUND', 'FLYING'], chart)).toBe(0)
+    expect(calcTypeEffectiveness('ELECTRIC', ['GROUND', 'FLYING'], chart, true, true)).toBe(uq(2.0))
+  })
+
+  it('Ring Target does nothing when nothing was immune in the first place', () => {
+    expect(calcTypeEffectiveness('FIRE', ['GRASS', 'BUG'], chart, true, true)).toBe(uq(4.0))
+  })
+
+  it("Ring Target does not affect the SEPARATE non-grounded Ground-move immunity check", () => {
+    expect(calcTypeEffectiveness('GROUND', ['NORMAL'], chart, false, true)).toBe(0)
+  })
 })
