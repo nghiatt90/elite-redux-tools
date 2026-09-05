@@ -1,19 +1,17 @@
-import { DEFAULT_SORT, SORT_KEYS, SORT_LABELS, type SortState } from './sort'
+import { SORT_KEYS, SORT_LABELS, type SortState } from './sort'
 
 interface Props {
   sort: SortState
   onChange: (sort: SortState) => void
 }
 
-/** Same click-to-cycle language as the Type buttons in FilterRail: click an
- * inactive criterion to sort by it ascending, click the active one to flip to
- * descending, click it again to clear back to the default (search-relevance /
- * dex-order) list order. Only one criterion is active at a time. */
+/** Dex No ascending is the default -- always exactly one criterion active. Click a
+ * different criterion to sort by it ascending; click the active one again to flip
+ * between ascending and descending. */
 export default function SortSection({ sort, onChange }: Props) {
   function cycle(key: (typeof SORT_KEYS)[number]) {
     if (sort.key !== key) onChange({ key, direction: 'asc' })
-    else if (sort.direction === 'asc') onChange({ key, direction: 'desc' })
-    else onChange(DEFAULT_SORT)
+    else onChange({ key, direction: sort.direction === 'asc' ? 'desc' : 'asc' })
   }
 
   return (
@@ -29,7 +27,7 @@ export default function SortSection({ sort, onChange }: Props) {
               onClick={() => cycle(key)}
               title={
                 active
-                  ? `Sorting by ${SORT_LABELS[key]} (${sort.direction === 'asc' ? 'ascending' : 'descending'}) — click to ${sort.direction === 'asc' ? 'reverse' : 'clear'}`
+                  ? `Sorting by ${SORT_LABELS[key]} (${sort.direction === 'asc' ? 'ascending' : 'descending'}) — click to reverse`
                   : `Sort by ${SORT_LABELS[key]}`
               }
               className="rounded px-1.5 py-0.5 text-xs font-medium"
