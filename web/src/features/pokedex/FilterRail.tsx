@@ -1,25 +1,20 @@
 import { useGameData } from '../../lib/GameDataContext'
 import { typeColor } from '../../lib/typeColors'
-import { ALL_TYPES, type FilterState } from './filters'
+import { ALL_TYPES, STAT_KEYS, STAT_LABELS, type FilterState } from './filters'
 import MultiSelectFilter from './MultiSelectFilter'
-
-const STAT_LABELS: Record<string, string> = {
-  hp: 'HP',
-  atk: 'Atk',
-  def: 'Def',
-  spatk: 'SpA',
-  spdef: 'SpD',
-  spe: 'Spe',
-  bst: 'BST',
-}
+import SortSection from './SortSection'
+import type { SortState } from './sort'
+import StatRangeRow from './StatRangeRow'
 
 interface Props {
   filters: FilterState
   onChange: (filters: FilterState) => void
+  sort: SortState
+  onSortChange: (sort: SortState) => void
   className?: string
 }
 
-export default function FilterRail({ filters, onChange, className = 'w-56 shrink-0' }: Props) {
+export default function FilterRail({ filters, onChange, sort, onSortChange, className = 'w-56 shrink-0' }: Props) {
   const { abilities, moves } = useGameData()
 
   function cycleType(type: string) {
@@ -31,15 +26,20 @@ export default function FilterRail({ filters, onChange, className = 'w-56 shrink
     onChange({ ...filters, types: next })
   }
 
-  function setStatMin(key: keyof FilterState['statMin'], value: number) {
-    const next = { ...filters.statMin }
-    if (value > 0) next[key] = value
-    else delete next[key]
-    onChange({ ...filters, statMin: next })
+  function setStatRange(key: keyof FilterState['statMin'], value: { min?: number; max?: number }) {
+    const statMin = { ...filters.statMin }
+    const statMax = { ...filters.statMax }
+    if (value.min !== undefined) statMin[key] = value.min
+    else delete statMin[key]
+    if (value.max !== undefined) statMax[key] = value.max
+    else delete statMax[key]
+    onChange({ ...filters, statMin, statMax })
   }
 
   return (
     <div className={`${className} overflow-y-auto p-3 space-y-4 text-sm`}>
+      <SortSection sort={sort} onChange={onSortChange} />
+
       <section>
         <h2 className="font-semibold mb-1.5">Type</h2>
         <div className="flex flex-wrap gap-1">
@@ -75,24 +75,19 @@ export default function FilterRail({ filters, onChange, className = 'w-56 shrink
       </section>
 
       <section>
-        <h2 className="font-semibold mb-1.5">Minimum stats</h2>
+        <h2 className="font-semibold mb-1.5">Stats</h2>
         <div className="space-y-1.5">
-          {(['hp', 'atk', 'def', 'spatk', 'spdef', 'spe', 'bst'] as const).map((key) => (
-            <label key={key} className="flex items-center gap-2">
-              <span className="w-9 shrink-0 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {STAT_LABELS[key]}
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={key === 'bst' ? 1000 : 255}
-                step={key === 'bst' ? 10 : 5}
-                value={filters.statMin[key] ?? 0}
-                onChange={(e) => setStatMin(key, Number(e.target.value))}
-                className="flex-1 min-w-0"
-              />
-              <span className="w-8 shrink-0 text-right text-xs tabular-nums">{filters.statMin[key] ?? 0}</span>
-            </label>
+          {STAT_KEYS.map((key) => (
+            <StatRangeRow
+              key={key}
+              label={STAT_LABELS[key]}
+              domainMin={0}
+              domainMax={key === 'bst' ? 1000 : 255}
+              step={key === 'bst' ? 10 : 5}
+              min={filters.statMin[key]}
+              max={filters.statMax[key]}
+              onChange={(value) => setStatRange(key, value)}
+            />
           ))}
         </div>
       </section>

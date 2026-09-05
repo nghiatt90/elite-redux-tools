@@ -33,9 +33,16 @@ function buildPills(
   }
   for (const key of Object.keys(filters.statMin) as (keyof FilterState['statMin'])[]) {
     pills.push({
-      key: `stat-${key}`,
+      key: `stat-min-${key}`,
       label: `${STAT_LABELS[key]} ≥ ${filters.statMin[key]}`,
       clear: (f) => ({ ...f, statMin: { ...f.statMin, [key]: undefined } }),
+    })
+  }
+  for (const key of Object.keys(filters.statMax) as (keyof FilterState['statMax'])[]) {
+    pills.push({
+      key: `stat-max-${key}`,
+      label: `${STAT_LABELS[key]} ≤ ${filters.statMax[key]}`,
+      clear: (f) => ({ ...f, statMax: { ...f.statMax, [key]: undefined } }),
     })
   }
   for (const id of filters.abilityOrInnate) {
