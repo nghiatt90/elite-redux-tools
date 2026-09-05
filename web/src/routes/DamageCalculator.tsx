@@ -56,7 +56,7 @@ export default function DamageCalculator() {
           title="Defender → Attacker"
           attacker={defender}
           defender={attacker}
-          field={{ ...field, attackerSide: field.defenderSide, defenderSide: field.attackerSide }}
+          field={{ ...field, attackerSide: field.defenderSide, defenderSide: field.attackerSide, attackerActsFirst: !field.attackerActsFirst }}
           ctx={ctx}
         />
       </div>

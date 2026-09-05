@@ -296,6 +296,16 @@ export interface FieldConfig {
   gravity: boolean
   attackerSide: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
   defenderSide: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
+  /** See DamageCalcScenario.attackerActsFirst's own doc -- a turn-order fact this
+   * calculator can't derive on its own. */
+  attackerActsFirst: boolean
+  /** See DamageContext.sameMoveTurnsInARow's own doc (Echoed Voice, Metronome
+   * item, Rhythmic). */
+  sameMoveTurnsInARow: number
+  /** See DamageCalcScenario.hitCount's own doc -- only consulted for a VARIABLE
+   * multi-hit move/trigger (EFFECT_MULTI_HIT without Skill Link, a Parental Bond
+   * TWO_TO_FIVE trigger); ignored otherwise. */
+  hitCount: number
 }
 
 export function defaultFieldConfig(): FieldConfig {
@@ -305,6 +315,9 @@ export function defaultFieldConfig(): FieldConfig {
     gravity: false,
     attackerSide: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
     defenderSide: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
+    attackerActsFirst: true,
+    sameMoveTurnsInARow: 0,
+    hitCount: 3, // EFFECT_MULTI_HIT's own average ((2+2+3+3+4+5)/6 rounds to 3)
   }
 }
 
@@ -336,11 +349,8 @@ export function buildScenario(
     // JSON off to it.
     moveBehaviors: ctx.moveBehaviors.behaviors as unknown as MoveBehaviors,
     battleConstants: ctx.natures,
-    attackerActsFirst: true,
-    sameMoveTurnsInARow: 0,
-    // Same status as sameMoveTurnsInARow above -- a real scenario field with no UI
-    // control yet. 3 is EFFECT_MULTI_HIT's own average hit count
-    // ((2+2+3+3+4+5)/6 rounds to 3), a reasonable default until one exists.
-    hitCount: 3,
+    attackerActsFirst: field.attackerActsFirst,
+    sameMoveTurnsInARow: field.sameMoveTurnsInARow,
+    hitCount: field.hitCount,
   }
 }

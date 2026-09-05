@@ -59,9 +59,40 @@ export default function FieldBar({ field, onChange }: Props) {
           <input type="checkbox" checked={field.gravity} onChange={(e) => onChange({ ...field, gravity: e.target.checked })} />
           Gravity
         </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.attackerActsFirst} onChange={(e) => onChange({ ...field, attackerActsFirst: e.target.checked })} />
+          Attacker acts first
+        </label>
       </div>
       <SideScreens label="Attacker's side" side={field.attackerSide} onChange={(s) => onChange({ ...field, attackerSide: s })} />
       <SideScreens label="Defender's side" side={field.defenderSide} onChange={(s) => onChange({ ...field, defenderSide: s })} />
+      <div className="flex flex-wrap gap-3 items-center">
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Same move used in a row
+          <input
+            type="number"
+            min={0}
+            max={10}
+            className="w-16 rounded-md border px-2 py-1 text-sm"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            value={field.sameMoveTurnsInARow}
+            onChange={(e) => onChange({ ...field, sameMoveTurnsInARow: Number(e.target.value) })}
+          />
+          {/* Echoed Voice, Metronome (item), Rhythmic */}
+        </label>
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Multi-hit count (variable moves only)
+          <input
+            type="range"
+            min={2}
+            max={5}
+            className="w-24"
+            value={field.hitCount}
+            onChange={(e) => onChange({ ...field, hitCount: Number(e.target.value) })}
+          />
+          <span>{field.hitCount}</span>
+        </label>
+      </div>
     </div>
   )
 }

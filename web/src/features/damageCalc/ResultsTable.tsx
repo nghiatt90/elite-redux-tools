@@ -53,18 +53,28 @@ function MoveRow({ moveId, scenario }: { moveId: string; scenario: DamageCalcSce
     )
   }
 
+  // Multi-hit moves: totalRolls/totalCritRolls (sum across every hit, see
+  // DamageCalcResult's own doc on how independent per-hit rolls are simplified)
+  // are what a user actually cares about -- null for a single-hit move, where
+  // they're the same number as rolls/critRolls anyway.
+  const rolls = result.totalRolls ?? result.rolls
+  const critRolls = result.totalCritRolls ?? result.critRolls
+
   return (
     <tr className="border-b align-top" style={{ borderColor: 'var(--color-border)' }}>
-      <td className="py-1.5 pr-2 whitespace-nowrap">{moveName}</td>
+      <td className="py-1.5 pr-2 whitespace-nowrap">
+        {moveName}
+        {result.hitCount && <span style={{ color: 'var(--color-text-muted)' }}> (×{result.hitCount})</span>}
+      </td>
       <td className="py-1.5 pr-2">
         <TypeChip type={result.effectiveMoveType} />
       </td>
-      <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">{formatRange(result.rolls, maxHp)}</td>
+      <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">{formatRange(rolls, maxHp)}</td>
       <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">
-        {koSummary(result.rolls, maxHp)}
+        {koSummary(rolls, maxHp)}
         {result.critChanceDenominator && (
           <span className="block text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            crit (1/{result.critChanceDenominator}): {formatRange(result.critRolls!, maxHp)}
+            crit (1/{result.critChanceDenominator}): {formatRange(critRolls!, maxHp)}
           </span>
         )}
         {result.unmodelled.length > 0 && (
