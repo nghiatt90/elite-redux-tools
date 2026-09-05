@@ -366,12 +366,11 @@ export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_
 /**
  * onParentalBond returns which bonus-hit trigger this ability grants for the given
  * move, or null for none (MULTIHIT_SINGLE) -- GetParentalBondType's per-ability call,
- * src/battle_script_commands.c:990-1003. NOT wired into calculate.ts: this v1 engine
- * computes exactly one hit's damage, so a ported onParentalBond hook and
- * getParentalBondMultiplier are complete and correct for the bonus hit's own
- * multiplier, but nothing yet combines that with a first-hit total the way a real
- * multi-hit sequence would (see basePower.ts's multi-hit TODO). Same shape as batch
- * N's onTypeEffectiveness ports: correct now, wired later.
+ * src/battle_script_commands.c:990-1003. Wired into calculate.ts via multiHit.ts's
+ * resolveHitPlan (which also handles a move's own DOUBLE_HIT/MULTI_HIT/TEN_HITS
+ * effects, mutually exclusive with this hook in the C's own dispatch order) --
+ * DamageCalcResult's hitCount/totalRolls/totalCritRolls carry the summed multi-hit
+ * total, alongside the existing single-hit rolls/critRolls.
  */
 export type OnParentalBond = (ctx: OnParentalBondContext) => ParentalBondTrigger | null
 
@@ -453,14 +452,18 @@ export interface OnModifyMoveFlagsContext {
  * same names as MoveData.flags' own keys (see emit.py's _MOVE_FLAGS) so a future
  * `flag`-keyed fallback reads as `moveFlags[flag] || ability grants it`.
  *
- * NOT wired into calculate.ts: this fallback would need to reach every existing
+ * Wired into calculate.ts for exactly ONE of DoesMoveMatchFlag's call sites so far
+ * (dispatchCalc.isIronFistBoosted, for Punching Glove) -- the C passes a literal
+ * TYPE_NORMAL dummy there rather than the move's real type, which is why that one
+ * generalizes safely. The other 21 call sites (Iron Fist itself, Mega Launcher,
+ * sound-based abilities, ...) each pass their OWN moveType argument (real in some
+ * cases, a different dummy in others) and reach every existing
  * `ctx.moveFlags.sound`/`.punchBased`/`.kickBased`/`.bulletBased`/`.sliceBased`/
- * `.dance` check across the registry (22 call sites, several already carrying a
- * comment flagging exactly this gap -- Liquid Voice, Punk Rock, Dual Wield, Magus
- * Blades, Primal Maw, Raging Boxer) with the granting battler's ability slots,
- * which most of those hooks' context shapes don't carry today. Each port below is
- * complete and correct for when that plumbing exists -- same "correct now, wired
- * later" shape as batch N's onTypeEffectiveness ports.
+ * `.dance` check across the registry (several already carrying a comment flagging
+ * this gap -- Liquid Voice, Punk Rock, Dual Wield, Magus Blades, Primal Maw,
+ * Raging Boxer) -- NOT safe to fold into one shared helper without checking each
+ * site's own convention individually, so those stay unwired. Each port below is
+ * complete and correct for when that plumbing exists.
  */
 export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean
 

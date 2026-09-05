@@ -6,6 +6,7 @@ import type { BattleConstants, BattlerBattleState, ConditionBattlerContext, Fiel
 import type { TypeChart } from './typeEffectiveness'
 import type { MoveBehaviors } from './basePower'
 import { calcStat } from './stats'
+import { uq } from './fixed'
 
 const DATA_DIR = new URL('../../../data/v2.65beta/', import.meta.url)
 const species = JSON.parse(readFileSync(fileURLToPath(new URL('species.json', DATA_DIR)), 'utf-8'))
@@ -390,6 +391,82 @@ describe('calculateMoveDamage -- Ring Target neutralizes only its holder\'s immu
       }),
     )
     expect(withRingTarget.isImmune).toBe(false)
+  })
+})
+
+describe('calculateMoveDamage -- onTypeEffectiveness/onAfterTypeEffectiveness are wired in (src/battle_util.c:7861-7913,7984-7992)', () => {
+  it("Scrappy (attacker's own onTypeEffectiveness) lets Normal moves hit a pure Ghost-type defender", async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ defender: battler('SPECIES_MISDREAVUS') })) // pure Ghost, Tackle is Normal
+    expect(baseline.isImmune).toBe(true)
+
+    const withScrappy = calculateMoveDamage(
+      scenario({
+        defender: battler('SPECIES_MISDREAVUS'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SCRAPPY', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withScrappy.isImmune).toBe(false)
+  })
+
+  it("Wonder Guard (defender's onAfterTypeEffectiveness, APPLY_ON_TARGET) blocks everything but super-effective hits", async () => {
+    await import('./abilities/impl/index')
+    const wonderGuardDefender = battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_WONDER_GUARD', innates: [null, null, null] } })
+
+    const neutralHit = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), defender: wonderGuardDefender })) // Normal vs Steel/Flying: 0.5x
+    expect(neutralHit.isImmune).toBe(true)
+
+    const superEffectiveHit = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), defender: wonderGuardDefender })) // Fire vs Steel: 2x
+    expect(superEffectiveHit.isImmune).toBe(false)
+  })
+
+  it("Soothsayer now correctly fires for the DEFENDER (APPLY_ON_TARGET), not the attacker -- the scope bug this session's audit found", async () => {
+    await import('./abilities/impl/index')
+    const soothsayerDefender = battler('SPECIES_SKARMORY', {
+      abilityOn: true,
+      abilitySlots: { ability: 'ABILITY_SOOTHSAYER', innates: [null, null, null] },
+    })
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), defender: battler('SPECIES_SKARMORY') }))
+    const withSoothsayer = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), defender: soothsayerDefender }))
+    expect(withSoothsayer.rolls[15]).toBeLessThan(baseline.rolls[15])
+
+    // Held by the ATTACKER instead: must NOT apply (would have before the scope fix).
+    const soothsayerAttacker = battler('SPECIES_GARCHOMP', { abilityOn: true, abilitySlots: { ability: 'ABILITY_SOOTHSAYER', innates: [null, null, null] } })
+    const wrongSide = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), attacker: soothsayerAttacker, defender: battler('SPECIES_SKARMORY') }))
+    expect(wrongSide.rolls[15]).toBe(baseline.rolls[15])
+  })
+
+  it("Bone Zone (attacker's own onAfterTypeEffectiveness) breaks a bone-based Ground move's Flying immunity", async () => {
+    await import('./abilities/impl/index')
+    // Skarmory (Steel/Flying): Ground vs Steel=2x, vs Flying=0x -> immune outright
+    // without Bone Zone; with it, the Flying component is dropped and the Steel
+    // 2x survives -- super-effective, not just neutral.
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_BONE_CLUB') }))
+    expect(baseline.isImmune).toBe(true)
+
+    const withBoneZone = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_BONE_CLUB'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_BONE_ZONE', innates: [null, null, null] } }) }),
+    )
+    expect(withBoneZone.isImmune).toBe(false)
+    expect(withBoneZone.typeEffectiveness).toBe(uq(2.0))
+  })
+
+  it("Foggy Eye's own missing defensive half (found in this session's audit) caps incoming Ghost damage to 0.5x in Fog", async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_SHADOW_BALL') }))
+    const withFoggyEyeNoWeather = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_SHADOW_BALL'), defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_FOGGY_EYE', innates: [null, null, null] } }) }),
+    )
+    expect(withFoggyEyeNoWeather.rolls[15]).toBe(baseline.rolls[15]) // no Fog -- no effect
+
+    const withFoggyEyeInFog = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_SHADOW_BALL'),
+        defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_FOGGY_EYE', innates: [null, null, null] } }),
+        field: fieldState({ weather: 'FOG' }),
+      }),
+    )
+    expect(withFoggyEyeInFog.rolls[15]).toBeLessThan(baseline.rolls[15])
   })
 })
 

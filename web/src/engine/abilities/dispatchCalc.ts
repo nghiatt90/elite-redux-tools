@@ -4,8 +4,9 @@
 // 7469-7481; src/battle_script_commands.c:1529-1536), built from the primitives
 // in dispatch.ts/applyOn.ts and the AbilityImpl hooks in the registry.
 
-import { uq } from '../fixed'
+import { mulModifier, uq } from '../fixed'
 import { NEVER_CRIT } from '../crit'
+import { baseTypeEffectiveness, type TypeChart } from '../typeEffectiveness'
 import { isApplyOnFlagAppropriate, isTargettedApplyOnFlagAppropriate } from './applyOn'
 import type { AbilitySlots } from './dispatch'
 import { forEachAbility, battlerHasAbility } from './dispatch'
@@ -21,10 +22,12 @@ import type {
   OnCritContext,
   OnImmuneContext,
   OnInfiltrateContext,
+  OnAfterTypeEffectivenessContext,
   OnMoldBreakerContext,
   OnMoveTypeContext,
   OnParentalBondContext,
   OnStatContext,
+  OnTypeEffectivenessContext,
   ParentalBondTrigger,
 } from './types'
 import type { BattleStatKey } from '../types'
@@ -226,6 +229,121 @@ export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnIn
     }
   })
   return infiltrates
+}
+
+/**
+ * MulByTypeEffectiveness's per-defending-type resolution (src/abilities.cc/
+ * battle_util.c:7861-7913), called once per component of the up-to-3-type fold.
+ * The attacker's onTypeEffectiveness abilities get first say (checkMoldBreaker
+ * FALSE and no target/self scope at all in the C -- an attacker's own trait,
+ * dispatched unconditionally against its own slots); only if NONE of them
+ * changed the value does Ring Target's per-component immunity-neutralization
+ * apply. `abilityModified` is inferred from whether ctx.modifier actually
+ * changed across the call -- this port's OnTypeEffectiveness hooks return void,
+ * not the C's own boolean, but every ported body only writes ctx.modifier
+ * exactly when it means to signal a change, so this is equivalent in practice.
+ */
+function resolveTypeEffectivenessComponent(
+  attackerSlots: AbilitySlots,
+  attackerId: string,
+  defenderId: string,
+  moveId: string,
+  moveType: string,
+  defType: string,
+  baseModifier: number,
+  ringTargetHeld: boolean,
+): number {
+  let modifier = baseModifier
+  let abilityModified = false
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (!impl.onTypeEffectiveness) return
+    const ctx: OnTypeEffectivenessContext = { attackerId, defenderId, moveId, moveType, modifier, defType }
+    impl.onTypeEffectiveness(ctx)
+    if (ctx.modifier !== modifier) {
+      modifier = ctx.modifier
+      abilityModified = true
+      return 'break'
+    }
+  })
+  if (!abilityModified && modifier === 0 && ringTargetHeld) modifier = uq(1.0)
+  return modifier
+}
+
+export interface TypeEffectivenessFoldResult {
+  modifier: number
+  /** modifier1/2/3 from the C's own three-type fold, read-only past this point --
+   * Bone Zone's own onAfterTypeEffectiveness reads these. 0 (not uq(1.0)) for a
+   * defender with fewer than 3 distinct types, matching Bone Zone's own `if (m)`
+   * skip-when-falsy check on an unset slot. */
+  perTypeModifiers: [number, number, number]
+}
+
+/**
+ * CalcTypeEffectivenessMultiplierInternal's three-type fold (battle_util.c:
+ * 7947-7957), WITH the attacker's onTypeEffectiveness abilities and Ring Target
+ * folded in per-component -- calcTypeEffectiveness (typeEffectiveness.ts) is the
+ * ability-free version of this same fold, used where no ability registry is
+ * available (plain unit tests) or abilities are already known not to apply.
+ */
+export function computeTypeEffectivenessWithAbilities(
+  attackerSlots: AbilitySlots,
+  attackingType: string,
+  defenderTypes: string[],
+  chart: TypeChart,
+  attackerId: string,
+  defenderId: string,
+  moveId: string,
+  ringTargetHeld: boolean,
+): TypeEffectivenessFoldResult {
+  const components = defenderTypes.map((defType) =>
+    resolveTypeEffectivenessComponent(
+      attackerSlots,
+      attackerId,
+      defenderId,
+      moveId,
+      attackingType,
+      defType,
+      baseTypeEffectiveness(attackingType, defType, chart),
+      ringTargetHeld,
+    ),
+  )
+  let modifier = uq(1.0)
+  for (const component of components) modifier = mulModifier(modifier, component)
+  return { modifier, perTypeModifiers: [components[0] ?? 0, components[1] ?? 0, components[2] ?? 0] }
+}
+
+/**
+ * The post-fold onAfterTypeEffectiveness loop (battle_util.c:7984-7992) --
+ * checkMoldBreaker=TRUE, scanning BOTH battlers (defender first, then attacker,
+ * matching the C's own `(battlerDef + i) % gBattlersCount` iteration order in a
+ * 2-battler singles field) with each ability's own onAfterTypeEffectivenessFor
+ * scope (defaulting to an unscoped self-check, which -- per
+ * IsTargettedApplyOnFlagAppropriate's fallthrough to IsApplyOnFlagAppropriate's
+ * own self-check semantics -- only ever fires for the ATTACKER, since
+ * `contextBattler` is always battlerAtk; see OnChooseDefensiveStatContext's own
+ * doc for the same reasoning applied elsewhere).
+ */
+export function computeAfterTypeEffectiveness(
+  attackerSlots: AbilitySlots,
+  defenderSlots: AbilitySlots,
+  attackerHasMoldBreaker: boolean,
+  inputs: OnAfterTypeEffectivenessContext,
+): number {
+  let modifier = inputs.modifier
+  const passes: [AbilitySlots, boolean, boolean, (id: string, entry: AbilityEntry) => boolean][] = [
+    [defenderSlots, false, true, suppressedByMoldBreaker(attackerHasMoldBreaker)],
+    [attackerSlots, true, false, NEVER_SUPPRESSED],
+  ]
+  for (const [slots, sourceIsAttacker, sourceIsTarget, suppressed] of passes) {
+    forEachAbility(slots, suppressed, (impl) => {
+      if (!impl.onAfterTypeEffectiveness) return
+      if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onAfterTypeEffectivenessFor)) return
+      const ctx: OnAfterTypeEffectivenessContext = { ...inputs, modifier }
+      impl.onAfterTypeEffectiveness(ctx)
+      modifier = ctx.modifier
+    })
+  }
+  return modifier
 }
 
 /** Whether ANY of a battler's (unsuppressed) abilities has the given boolean flag --

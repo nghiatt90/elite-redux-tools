@@ -1,7 +1,12 @@
 // Batch N: onTypeEffectiveness (immunity-breaking, per-defending-type) and
-// onAfterTypeEffectiveness (post-fold, whole-modifier) abilities. Neither hook is
-// wired into calculate.ts's type-effectiveness fold yet, but each port here is a
-// complete, correct translation of its C body -- see the context types' own docs.
+// onAfterTypeEffectiveness (post-fold, whole-modifier) abilities. Wired into
+// calculate.ts via dispatchCalc.ts's computeTypeEffectivenessWithAbilities/
+// computeAfterTypeEffectiveness -- an audit of every ability hook that was ported
+// but never dispatched (prompted by the Parental Bond/Gravity gaps found earlier
+// this session) also caught two real applyOn-scope bugs (Soothsayer, Teraform
+// Zero, both missing their required onAfterTypeEffectivenessFor: APPLY_ON_TARGET)
+// and one fully-missing ability half (Foggy Eye's own onAfterTypeEffectiveness) --
+// see those entries' own comments.
 //
 // Normalize was previously deferred here on the belief that resolveEffectiveMoveType
 // only handled the opposite ("-ate", type->non-Normal) direction -- it doesn't have
@@ -119,6 +124,12 @@ export const TYPE_EFFECTIVENESS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_SOOTHSAYER',
     src: 'src/abilities.cc:9409',
     flags: { breakable: true },
+    // Real bug fix: the C sets .onAfterTypeEffectivenessFor = APPLY_ON_TARGET
+    // (:9427) -- this ability must be held by the DEFENDER to matter (matches
+    // GetAbilityState(target, ...) in its own C body, and the ctx field's own
+    // "defenderAbilityOn" name), but this port omitted the scope entirely, which
+    // would have made it fire for the ATTACKER instead once dispatch is wired in.
+    applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
     onAfterTypeEffectiveness: (ctx) => {
       if (ctx.defenderAbilityOn && ctx.modifier >= uq(1.0)) ctx.modifier = uq(0.5)
     },

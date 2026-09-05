@@ -37,14 +37,16 @@ import {
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { resolveHitPlan } from './multiHit'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
-import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
+import { distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
 import {
   abilityCoverageNote,
   computeAbilityCritBonus,
   computeAbilityMultiplier,
+  computeAfterTypeEffectiveness,
   computeAttackerHasMoldBreaker,
   computeIsAbsorbed,
   computeIsImmune,
+  computeTypeEffectivenessWithAbilities,
   computeInfiltratesScreens,
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
@@ -520,7 +522,27 @@ function calcInternal(
     !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
   const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
   const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
-  const typeEffectiveness = calcTypeEffectiveness(moveType, defenderTypes, typeChart, isGrounded, ringTargetHeld)
+  const typeFold = computeTypeEffectivenessWithAbilities(attacker.abilitySlots, moveType, defenderTypes, typeChart, 'attacker', 'defender', move.id, ringTargetHeld)
+  // The post-fold Ground/grounded override (battle_util.c:7973-7977) -- same check
+  // calcTypeEffectiveness's own isGrounded param applies, done manually here since
+  // this call site needs the raw fold result for onAfterTypeEffectiveness's own
+  // perTypeModifiers/targetGrounded fields below.
+  let typeEffectivenessBeforeAfterHooks = typeFold.modifier
+  if (typeEffectivenessBeforeAfterHooks !== 0 && moveType === 'GROUND' && !isGrounded) typeEffectivenessBeforeAfterHooks = 0
+  const typeEffectiveness = computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
+    attackerId: 'attacker',
+    defenderId: 'defender',
+    moveId: move.id,
+    moveType,
+    moveFlags: move.flags,
+    modifier: typeEffectivenessBeforeAfterHooks,
+    perTypeModifiers: typeFold.perTypeModifiers,
+    defenderTypes,
+    weather: field.weather,
+    targetGrounded: isGrounded,
+    defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
+    defenderAbilityOn: defender.abilityOn,
+  })
   if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 
   // TestAbsorbingAbilities (:8961-8969) -- a hit-blocking check distinct from type

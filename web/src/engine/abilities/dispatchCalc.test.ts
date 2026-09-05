@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { computeAbilityCritBonus, computeAbilityMultiplier, computeOnStatModifier, hasFlag, hasFortKnox, hasStabOverride, isIronFistBoosted } from './dispatchCalc'
+import {
+  computeAbilityCritBonus,
+  computeAbilityMultiplier,
+  computeAfterTypeEffectiveness,
+  computeOnStatModifier,
+  computeTypeEffectivenessWithAbilities,
+  hasFlag,
+  hasFortKnox,
+  hasStabOverride,
+  isIronFistBoosted,
+} from './dispatchCalc'
 import { registerAbilities, _resetRegistryForTests } from './registry'
 import { APPLY_ON_ANY } from './applyOn'
 import { ALWAYS_CRIT, NEVER_CRIT } from '../crit'
@@ -199,5 +209,119 @@ describe('computeOnStatModifier', () => {
     registerAbilities([scoped])
     const scopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_SCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
     expect(scopedModify(100)).toBe(200)
+  })
+})
+
+describe('computeTypeEffectivenessWithAbilities', () => {
+  const chart = {
+    NORMAL: { GHOST: 0, NORMAL: 1 },
+    FIRE: { GRASS: 2, WATER: 0.5 },
+  }
+
+  it('folds multiple defending types the same way as the plain chart lookup, with no abilities', () => {
+    const result = computeTypeEffectivenessWithAbilities(slots(null), 'FIRE', ['GRASS'], chart, 'attacker', 'defender', 'MOVE_TACKLE', false)
+    expect(result.modifier).toBe(uq(2.0))
+    expect(result.perTypeModifiers).toEqual([uq(2.0), 0, 0])
+  })
+
+  it("the attacker's own onTypeEffectiveness ability overrides an immune component (Scrappy-style)", () => {
+    const scrappyLike: AbilityImpl = {
+      id: 'ABILITY_TEST_SCRAPPY',
+      src: 'test',
+      onTypeEffectiveness: (ctx) => {
+        if (ctx.moveType === 'NORMAL' && ctx.defType === 'GHOST' && ctx.modifier === 0) ctx.modifier = uq(1.0)
+      },
+    }
+    registerAbilities([scrappyLike])
+    const result = computeTypeEffectivenessWithAbilities(slots('ABILITY_TEST_SCRAPPY'), 'NORMAL', ['GHOST'], chart, 'attacker', 'defender', 'MOVE_TACKLE', false)
+    expect(result.modifier).toBe(uq(1.0))
+  })
+
+  it("Ring Target only applies when no ability already changed the component", () => {
+    const withRingTarget = computeTypeEffectivenessWithAbilities(slots(null), 'NORMAL', ['GHOST'], chart, 'attacker', 'defender', 'MOVE_TACKLE', true)
+    expect(withRingTarget.modifier).toBe(uq(1.0))
+
+    const scrappyToHalf: AbilityImpl = {
+      id: 'ABILITY_TEST_SCRAPPY_HALF',
+      src: 'test',
+      onTypeEffectiveness: (ctx) => {
+        if (ctx.modifier === 0) ctx.modifier = uq(0.5)
+      },
+    }
+    registerAbilities([scrappyToHalf])
+    // The ability already changed it (to 0.5, not the Ring Target default of 1.0) --
+    // Ring Target must NOT also apply on top.
+    const withBoth = computeTypeEffectivenessWithAbilities(slots('ABILITY_TEST_SCRAPPY_HALF'), 'NORMAL', ['GHOST'], chart, 'attacker', 'defender', 'MOVE_TACKLE', true)
+    expect(withBoth.modifier).toBe(uq(0.5))
+  })
+})
+
+describe('computeAfterTypeEffectiveness', () => {
+  function afterCtx(overrides: Partial<Parameters<typeof computeAfterTypeEffectiveness>[3]> = {}): Parameters<typeof computeAfterTypeEffectiveness>[3] {
+    return {
+      attackerId: 'attacker',
+      defenderId: 'defender',
+      moveId: 'MOVE_TACKLE',
+      moveType: 'NORMAL',
+      moveFlags: {},
+      modifier: uq(2.0),
+      perTypeModifiers: [uq(2.0), 0, 0],
+      defenderTypes: ['NORMAL'],
+      weather: 'NONE',
+      targetGrounded: true,
+      defenderAtMaxHp: true,
+      defenderAbilityOn: false,
+      ...overrides,
+    }
+  }
+
+  it("a defender's onAfterTypeEffectiveness ability needs an explicit APPLY_ON_TARGET scope to fire (Wonder-Guard-style)", () => {
+    const wonderGuardLike: AbilityImpl = {
+      id: 'ABILITY_TEST_WONDER_GUARD',
+      src: 'test',
+      flags: { breakable: true },
+      applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
+      onAfterTypeEffectiveness: (ctx) => {
+        if (ctx.modifier < uq(2.0)) ctx.modifier = 0
+      },
+    }
+    registerAbilities([wonderGuardLike])
+    const result = computeAfterTypeEffectiveness(slots(null), slots('ABILITY_TEST_WONDER_GUARD'), false, afterCtx({ modifier: uq(1.0) }))
+    expect(result).toBe(0)
+  })
+
+  it("an unscoped onAfterTypeEffectiveness ability only ever fires for the ATTACKER (Bone-Zone-style), never the defender", () => {
+    const boneZoneLike: AbilityImpl = {
+      id: 'ABILITY_TEST_BONE_ZONE',
+      src: 'test',
+      onAfterTypeEffectiveness: (ctx) => {
+        if (ctx.modifier === 0) ctx.modifier = uq(1.0)
+      },
+    }
+    registerAbilities([boneZoneLike])
+    const onAttacker = computeAfterTypeEffectiveness(slots('ABILITY_TEST_BONE_ZONE'), slots(null), false, afterCtx({ modifier: 0 }))
+    expect(onAttacker).toBe(uq(1.0))
+
+    _resetRegistryForTests()
+    registerAbilities([boneZoneLike])
+    const onDefender = computeAfterTypeEffectiveness(slots(null), slots('ABILITY_TEST_BONE_ZONE'), false, afterCtx({ modifier: 0 }))
+    expect(onDefender).toBe(0) // never applied -- unscoped means attacker-only
+  })
+
+  it("Mold Breaker suppresses a breakable defender ability, but never the attacker's own", () => {
+    const breakableDefense: AbilityImpl = {
+      id: 'ABILITY_TEST_BREAKABLE_DEFENSE',
+      src: 'test',
+      flags: { breakable: true },
+      applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
+      onAfterTypeEffectiveness: (ctx) => {
+        ctx.modifier = 0
+      },
+    }
+    registerAbilities([breakableDefense])
+    const suppressed = computeAfterTypeEffectiveness(slots(null), slots('ABILITY_TEST_BREAKABLE_DEFENSE'), true, afterCtx({ modifier: uq(1.0) }))
+    expect(suppressed).toBe(uq(1.0)) // Mold Breaker bypassed it
+    const notSuppressed = computeAfterTypeEffectiveness(slots(null), slots('ABILITY_TEST_BREAKABLE_DEFENSE'), false, afterCtx({ modifier: uq(1.0) }))
+    expect(notSuppressed).toBe(0)
   })
 })

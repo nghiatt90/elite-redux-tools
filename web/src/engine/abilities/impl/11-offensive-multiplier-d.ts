@@ -166,10 +166,21 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     },
   },
   {
+    // Real gap fix: this port previously only had the offensive half
+    // (onOffensiveMultiplier) -- the C also has a defensive half
+    // (onAfterTypeEffectiveness, :11414-11420, APPLY_ON_TARGET) capping incoming
+    // Ghost-type damage to 0.5x while the DEFENDER is in Fog, which was missing
+    // entirely.
     id: 'ABILITY_FOGGY_EYE',
     src: 'src/abilities.cc:11409',
+    applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'GHOST' && ctx.weather === 'FOG') MUL(ctx, 1.5)
+    },
+    onAfterTypeEffectiveness: (ctx) => {
+      if (ctx.moveType !== 'GHOST') return
+      if (ctx.weather !== 'FOG') return
+      if (ctx.modifier > uq(0.5)) ctx.modifier = uq(0.5)
     },
   },
   {

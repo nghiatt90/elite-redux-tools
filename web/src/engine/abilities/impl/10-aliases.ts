@@ -664,6 +664,12 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_TERAFORM_ZERO',
     src: 'src/abilities.cc:9102',
     flags: { breakable: true },
+    // Real bug fix: the C aliases BOTH .onAfterTypeEffectiveness AND
+    // .onAfterTypeEffectivenessFor from Tera Shell (:9111) -- aliasAfterTypeEffectiveness
+    // only delegates the hook body, never the scope, so this needed its own
+    // explicit applyOn (same fix Soothsayer needed, and the SAME thing Stainless
+    // Steel's own alias below already got right).
+    applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
     onAfterTypeEffectiveness: aliasAfterTypeEffectiveness('ABILITY_TERA_SHELL'),
   },
   {
