@@ -1,22 +1,18 @@
 name: Refresh game data
 
+# Manual trigger only, deliberately. Upstream moves rarely enough that a schedule
+# bought nothing, and an unattended run is the wrong shape for this job:
+# refresh_check advances the lockfile to each source's *branch head*, and both
+# branches are `upcoming` -- upstream's development branch, which runs ahead of the
+# ROM anyone is playing. That contradicts sources.lock.json's pin_policy, and it is
+# not hypothetical: a snapshot built from `upcoming` shipped a randomizer whose every
+# result was wrong, because ABILITIES_COUNT is the randomizer's modulus and
+# `upcoming` had 10 abilities the release did not.
+#
+# So run this when you know a new ROM is out, and judge the resulting diff against
+# that build. The workflow decides nothing; it only prepares the PR, and the test step
+# below gates it.
 on:
-  schedule:
-    # 06:00 UTC on the 1st of each month. Manual runs (workflow_dispatch) are the
-    # normal way to trigger this on demand -- monthly is just a floor, chosen over
-    # weekly so a data-format tweak doesn't rewrite the committed snapshot (and
-    # permanently bloat git history) more often than genuinely useful.
-    - cron: '0 6 1 * *'
-    #
-    # IMPORTANT: refresh_check advances the lockfile to each source's *branch head*,
-    # and both branches are `upcoming` -- upstream's development branch, which is
-    # ahead of the ROM anyone is playing. That directly contradicts
-    # sources.lock.json's pin_policy, and it is not a hypothetical: a snapshot built
-    # from `upcoming` shipped a randomizer whose every result was wrong, because
-    # ABILITIES_COUNT is the randomizer's modulus and `upcoming` had 10 abilities the
-    # release did not. So this workflow does not merge anything; it prepares a diff a
-    # human must judge against the released build, and the test step below is what
-    # stops a bad refresh from ever reaching a PR.
   workflow_dispatch: {}
 
 permissions:
