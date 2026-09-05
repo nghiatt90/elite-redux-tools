@@ -402,6 +402,23 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
   return { value: finalDef, unmodelled }
 }
 
+/** Lucky Punch's exact species list (src/battle_script_commands.c:1551-1556) --
+ * GET_BASE_SPECIES_ID(species) checked against Happiny/Chansey/Blissey AND their
+ * Redux forms individually, not a single collapsed base id (same "list each family
+ * member explicitly" shape as battleStat.ts's LIGHT_BALL_MULTIPLIER). The Redux
+ * entries are redundant under this pipeline's own baseSpeciesId (which already
+ * collapses SPECIES_CHANSEY_REDUX's formOf back to SPECIES_CHANSEY -- see
+ * BattlerBattleState.condition.baseSpeciesId's doc), but kept for parity with the
+ * C's own explicit list in case that collapsing rule ever changes. */
+const LUCKY_PUNCH_SPECIES = new Set([
+  'SPECIES_HAPPINY',
+  'SPECIES_CHANSEY',
+  'SPECIES_HAPPINY_REDUX',
+  'SPECIES_CHANSEY_REDUX',
+  'SPECIES_BLISSEY_REDUX',
+  'SPECIES_BLISSEY',
+])
+
 /** CalcCritChanceStage's non-ability inputs (src/battle_script_commands.c:1523-1558),
  * built once per scenario since none of it depends on the evaluated type or a
  * particular damage roll. */
@@ -441,7 +458,8 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
     abilityCritBonus: abilityBonus === NEVER_CRIT ? 0 : abilityBonus,
     hasHighCritFlag: move.crit === 'HIGH',
     hasScopeLens: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SCOPE_LENS',
-    hasLuckyPunchOnChanseyLine: false, // needs a species-family table -- deferred
+    hasLuckyPunchOnChanseyLine:
+      attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_LUCKY_PUNCH' && LUCKY_PUNCH_SPECIES.has(attacker.condition.baseSpeciesId),
     hasLeekOnFarfetchdLine: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_LEEK',
     isViseGrip: move.id === 'MOVE_VISE_GRIP',
   }

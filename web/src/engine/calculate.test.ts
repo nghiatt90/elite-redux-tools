@@ -502,6 +502,25 @@ describe('calculateMoveDamage -- onSwapSplit is wired in (SetSwapDamageCategory,
   })
 })
 
+describe('calculateMoveDamage -- Lucky Punch (species-family crit boost, src/battle_script_commands.c:1551-1556)', () => {
+  it('Chansey holding Lucky Punch gets the +2 crit stage boost', () => {
+    const withoutItem = calculateMoveDamage(scenario({ attacker: battler('SPECIES_CHANSEY') }))
+    const withItem = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_CHANSEY', { condition: condition({ speciesId: 'SPECIES_CHANSEY', baseSpeciesId: 'SPECIES_CHANSEY', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_LUCKY_PUNCH' }) }) }),
+    )
+    expect(withItem.critChanceDenominator).not.toBeNull()
+    expect(withItem.critChanceDenominator!).toBeLessThan(withoutItem.critChanceDenominator ?? Infinity)
+  })
+
+  it('a non-Chansey-line holder gets no boost from Lucky Punch', () => {
+    const withoutItem = calculateMoveDamage(scenario())
+    const withItem = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, resolvedHoldEffect: 'HOLD_EFFECT_LUCKY_PUNCH' }) }) }),
+    )
+    expect(withItem.critChanceDenominator).toBe(withoutItem.critChanceDenominator)
+  })
+})
+
 describe('calculateMoveDamage -- EFFECT_HIDDEN_POWER (Hidden Power/Secret Power/Techno Blast share this in ER; GetMoveTypeInternal, src/battle_main.c:5041-5042)', () => {
   it('with no hiddenPowerType set, stays at the declared Normal type and surfaces an unmodelled note', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_HIDDEN_POWER') }))
