@@ -85,13 +85,14 @@ Re-run the pipeline (`cd pipeline && uv run python -m erdata.build`), review the
 under `data/v2.65beta/`, commit it, and push -- Cloudflare picks up the new snapshot on
 the next build automatically.
 
-`.github/workflows/refresh-data.yml` automates the *check* monthly (and on demand via
-`workflow_dispatch`), opening a PR when upstream moves. It does not decide anything:
-it advances the lockfile to each source's branch head, and both branches are
-`upcoming`, which runs ahead of the released ROM. Read `pin_policy` in
-`sources.lock.json` before merging one of its PRs -- getting this wrong is what broke
-the randomizer once already. The workflow runs the pipeline tests before opening a PR,
-so the `ABILITIES_COUNT` assertion has to pass first.
+`.github/workflows/refresh-data.yml` does the same thing from CI -- run it from the
+Actions tab (`workflow_dispatch`) and it opens a PR if upstream has moved. It is
+**manual only, on purpose**: it advances the lockfile to each source's branch head,
+and both branches are `upcoming`, which runs ahead of the released ROM, so the right
+moment to run it is when a new ROM is out -- not on a timer. It decides nothing; read
+`pin_policy` in `sources.lock.json` before merging its PR, since getting this wrong is
+what broke the randomizer once already. The pipeline tests run before the PR is
+opened, so the `ABILITIES_COUNT` assertion has to pass first.
 
 Regenerating sprites re-encodes every PNG even when the pixels are identical (Pillow
 version differences), which turns a no-op refresh into a 7,600-file diff. Only commit
