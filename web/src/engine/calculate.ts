@@ -128,6 +128,10 @@ export interface DamageCalcScenario {
   /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
    * MOVE_SELF_DESTRUCT). */
   attackerWasHitThisTurn: boolean
+  /** See DamageContext.beatUpBaseAttack's own doc (EFFECT_BEAT_UP). */
+  beatUpBaseAttack: number
+  /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
+  beatUpHitCount: number
 }
 
 export interface DamageCalcResult {
@@ -174,6 +178,8 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     attackerRolloutCounter: scenario.attackerRolloutCounter,
     attackerHasDefenseCurl: scenario.attackerHasDefenseCurl,
     attackerWasHitThisTurn: scenario.attackerWasHitThisTurn,
+    beatUpBaseAttack: scenario.beatUpBaseAttack,
+    beatUpHitCount: scenario.beatUpHitCount,
   }
 }
 
@@ -1082,6 +1088,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     attacker.condition.resolvedHoldEffect,
     scenario.hitCount,
     { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
+    scenario.beatUpHitCount,
   )
   let hitCount: number | null = null
   let totalRolls: number[] | null = null

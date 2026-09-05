@@ -132,6 +132,31 @@ export default function FieldBar({ field, onChange }: Props) {
           <input type="checkbox" checked={field.attackerWasHitThisTurn} onChange={(e) => onChange({ ...field, attackerWasHitThisTurn: e.target.checked })} />
           Attacker was hit this turn {/* Focus Punch, Self-Destruct */}
         </label>
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Beat Up: hits
+          <input
+            type="range"
+            min={1}
+            max={6}
+            className="w-16"
+            value={field.beatUpHitCount}
+            onChange={(e) => onChange({ ...field, beatUpHitCount: Number(e.target.value) })}
+          />
+          <span>{field.beatUpHitCount}</span>
+        </label>
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Beat Up: representative base Atk
+          <input
+            type="number"
+            min={5}
+            max={200}
+            className="w-16 rounded-md border px-2 py-1 text-sm"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            value={field.beatUpBaseAttack}
+            onChange={(e) => onChange({ ...field, beatUpBaseAttack: Number(e.target.value) })}
+          />
+          {/* one party member's base Attack stands in for the whole roster -- see DamageContext.beatUpBaseAttack's own doc */}
+        </label>
       </div>
     </div>
   )

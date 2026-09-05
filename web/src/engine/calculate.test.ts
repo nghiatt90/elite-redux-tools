@@ -152,6 +152,8 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
     attackerWasHitThisTurn: false,
+    beatUpBaseAttack: 80,
+    beatUpHitCount: 5,
     ...overrides,
   }
 }
@@ -1424,6 +1426,25 @@ describe('calculateMoveDamage -- Angel\'s Wrath\'s missing base-power half (batt
       }),
     )
     expect(withAngelsWrath.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_BEAT_UP: one representative party member stands in for a real roster (CalcBeatUpPower, battle_util.c:102-117)', () => {
+  it('hitCount matches beatUpHitCount, and a higher beatUpBaseAttack means more damage per hit', () => {
+    const lowAttack = calculateMoveDamage(scenario({ move: moveData('MOVE_BEAT_UP'), beatUpBaseAttack: 30, beatUpHitCount: 3 }))
+    expect(lowAttack.hitCount).toBe(3)
+    expect(lowAttack.unmodelled).toHaveLength(0)
+
+    const highAttack = calculateMoveDamage(scenario({ move: moveData('MOVE_BEAT_UP'), beatUpBaseAttack: 150, beatUpHitCount: 3 }))
+    expect(highAttack.rolls[15]).toBeGreaterThan(lowAttack.rolls[15])
+  })
+
+  it('beatUpHitCount directly controls the number of hits, clamped to 1-6', () => {
+    const twoHits = calculateMoveDamage(scenario({ move: moveData('MOVE_BEAT_UP'), beatUpHitCount: 2 }))
+    const sixHits = calculateMoveDamage(scenario({ move: moveData('MOVE_BEAT_UP'), beatUpHitCount: 6 }))
+    expect(twoHits.hitCount).toBe(2)
+    expect(sixHits.hitCount).toBe(6)
+    expect(sixHits.totalRolls![15]).toBeGreaterThan(twoHits.totalRolls![15])
   })
 })
 

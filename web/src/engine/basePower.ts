@@ -7,24 +7,28 @@
 //   2. CalcMoveBasePowerAfterModifiers's own multiplier chain (src/battle_util.c:
 //      6995-7117) -- hold effects, per-move-effect conditions (Facade, Brine,
 //      Venoshock, Retaliate, Knock Off, ...), and the terrain STAB-style boost.
-//   3. CalcMoveBasePower's hardcoded pre-switch (:6825-6913) and move-id switch
-//      (:6913-6940) -- Magnitude, Triple Kick/Triple Axel, Pursuit, and
-//      Rollout/Ice Ball are ALL ported (applyPreModifierBasePower, below) despite
-//      the module comment's earlier claim that this whole bucket "needs turn
-//      history": Magnitude simulates all 7 tiers and combines them into a real
-//      probability-weighted distribution (calculateMoveDamage's own top-level
-//      gate, calculate.ts); Triple Kick's power scaling is keyed on which hit of
-//      the SAME move use this is (hitIndex, resolved by multiHit.ts within one
-//      calculation, no history needed); Pursuit's doubling is a plain fact about
-//      the defender's chosen action this turn (defenderIsSwitching); Rollout/Ice
-//      Ball's counter (attackerRolloutCounter) IS genuine cross-turn state, but
-//      is exposed directly as a scenario fact (the user states which hit of an
-//      ongoing chain to compute) rather than derived from a turn count, sidestepping
-//      an unverifiable exact-increment-timing question -- see its own doc on
-//      DamageContext. Weather Ball is also ported (below). Beat Up/Focus Punch
-//      (party contents / "did my last move fail", no scenario field exists for
-//      either) are the real remaining turn-history cases -- see
-//      UNMODELLED_BASE_POWER_EFFECTS's own comment.
+//   3. CalcMoveBasePower's hardcoded pre-switch (:6825-6913), move-id switch
+//      (:6915-6935), and Angel's Wrath's own ability-gated switch (:6938-6952) --
+//      ALL ported (applyPreModifierBasePower/applyMoveSpecificBasePower/
+//      applyAngelsWrathBasePower, below) despite the module comment's earlier
+//      claim that most of this bucket "needs turn history": Magnitude simulates
+//      all 7 tiers and combines them into a real probability-weighted
+//      distribution (calculateMoveDamage's own top-level gate, calculate.ts);
+//      Triple Kick's power scaling is keyed on which hit of the SAME move use
+//      this is (hitIndex, resolved by multiHit.ts within one calculation, no
+//      history needed); Pursuit/Focus Punch/Self-Destruct each read a plain
+//      scenario fact (defenderIsSwitching/attackerWasHitThisTurn) about what
+//      happened this turn, not a simulated history; Rollout/Ice Ball's counter
+//      (attackerRolloutCounter) IS genuine cross-turn state, but is exposed
+//      directly (the user states which hit of an ongoing chain to compute)
+//      rather than derived from a turn count, sidestepping an unverifiable
+//      exact-increment-timing question -- see its own doc on DamageContext. Beat
+//      Up (party contents) is the one genuine "no party roster" gap, resolved
+//      the same way alliesFainted resolved Soul Harvest/Supreme Overlord's own
+//      version of this: ONE representative value (beatUpBaseAttack) stands in
+//      for the real per-ally lookup -- see its own doc on DamageContext for why
+//      that's a deliberate simplification, not a bit-exact port. Weather Ball is
+//      also ported (below).
 
 import { applyModifier, idiv, mulModifier, uq } from './fixed'
 import { evaluateAllConditions, type ScriptCondition } from './conditions'
@@ -348,6 +352,13 @@ export function applyPreModifierBasePower(
     // wrong, same mistake as Magnitude/Pursuit: it's a plain scenario fact.
     return { power: ctx.attackerWasHitThisTurn ? 40 : basePower, unmodelled: [] }
   }
+  if (moveEffect === 'EFFECT_BEAT_UP') {
+    // CalcBeatUpPower, battle_util.c:102-117 -- a full override, applying the
+    // exact same floor(baseAttack/10)+5 formula to every hit uniformly (see
+    // DamageContext.beatUpBaseAttack's own doc for the "one representative
+    // value instead of a real party roster" simplification this makes).
+    return { power: Math.floor(ctx.beatUpBaseAttack / 10) + 5, unmodelled: [] }
+  }
   if (moveEffect === 'EFFECT_PURSUIT') {
     // battle_util.c:6860-6861 -- doubles only when the DEFENDER's chosen action
     // this turn is a switch, a plain scenario fact (DamageContext.defenderIsSwitching)
@@ -433,13 +444,17 @@ export function applyAngelsWrathBasePower(basePower: number, moveId: string, att
 
 // ---------------------------------------------------------------------------
 // Behaviors whose base-power mechanic lives in CalcMoveBasePower's hardcoded C
-// switch (:6825-6913) rather than in moveBehaviors.json, and are NOT ported --
-// see the module doc comment for why. Surfaced explicitly so a move using one of
-// these shows an honest "not modelled" instead of silently using its listed base
-// power as if no special mechanic applied.
+// switch (:6825-6913) rather than in moveBehaviors.json -- ALL of them are now
+// ported (see the module doc comment for the full history, including two that
+// were wrongly bucketed here for a while: Focus Punch, and Beat Up, which turned
+// out portable too via one representative party-member stand-in rather than a
+// full roster -- see DamageContext.beatUpBaseAttack's own doc). Kept as an empty
+// set (rather than deleted) so a future move/effect that genuinely needs turn-
+// history state this calculator can't derive has an obvious place to go, with
+// the same "surfaced explicitly, not silently wrong" contract as before.
 // ---------------------------------------------------------------------------
 
-export const UNMODELLED_BASE_POWER_EFFECTS = new Set(['EFFECT_BEAT_UP'])
+export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([])
 
 // ---------------------------------------------------------------------------
 // 2. CalcMoveBasePowerAfterModifiers's own chain (src/battle_util.c:6995-7117).

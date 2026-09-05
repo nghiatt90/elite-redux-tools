@@ -18,8 +18,8 @@
 // the hitModifier this module returns; see that function's own doc for why the
 // two stages can't share one mechanism and stay bit-exact.
 //
-// MULTIHIT_BEAT_UP (party-based hit count) is NOT resolved here -- stays in
-// UNMODELLED_BASE_POWER_EFFECTS, no party/team concept in this v1 engine.
+// MULTIHIT_BEAT_UP (party-based hit count) IS resolved here now, via its own
+// beatUpHitCount scenario toggle -- see that function's own doc.
 
 import { uq } from './fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from './abilities/dispatchCalc'
@@ -81,6 +81,7 @@ export function resolveHitPlan(
   attackerResolvedHoldEffect: string | null,
   scenarioHitCount: number,
   parentalBondCtx: OnParentalBondContext,
+  scenarioBeatUpHitCount: number,
 ): HitPlanResult {
   // A move's own multi-hit effect (CANCELLER_MULTIHIT_MOVES, battle_util.c:3496-3542).
   if (move.effect === 'EFFECT_DOUBLE_HIT') {
@@ -104,6 +105,14 @@ export function resolveHitPlan(
   // C's own pipeline stage (CalcMoveBasePower, not CalcFinalDmg).
   if (move.effect === 'EFFECT_TRIPLE_KICK') {
     return { hitCount: 3, hitModifier: () => uq(1.0) }
+  }
+  // MULTIHIT_BEAT_UP -- a live count of the attacker's non-fainted, non-egg,
+  // non-status party members (battle_script_commands.c:1023-1038), exposed
+  // directly as its own scenario toggle (beatUpHitCount) since there's no party
+  // roster to derive it from -- same shape as Triple Kick's own hitModifier
+  // (power scaling happens via basePower.ts's EFFECT_BEAT_UP case, not here).
+  if (move.effect === 'EFFECT_BEAT_UP') {
+    return { hitCount: clamp(scenarioBeatUpHitCount, 1, 6), hitModifier: () => uq(1.0) }
   }
 
   // Parental Bond family (IsMoveAffectedByParentalBond + GetParentalBondType/Count,

@@ -157,6 +157,25 @@ export interface DamageContext {
    * plain scenario fact, no turn simulation needed, same shape as
    * defenderIsSwitching. */
   attackerWasHitThisTurn: boolean
+  /** CalcBeatUpPower's own per-hit formula (battle_util.c:102-117): floor(base
+   * Attack / 10) + 5, using the SPECIFIC party member (by index) hitting this
+   * time -- a genuine "no party roster" gap, same class as Soul Harvest/Supreme
+   * Overlord before alliesFainted existed. Rather than leave it unmodelled
+   * outright, this exposes ONE representative base Attack stat (the user's own
+   * choice -- e.g. the party's average, or a specific ally they care about) and
+   * applies CalcBeatUpPower's formula to it UNIFORMLY across every hit, instead
+   * of each hit drawing a different party member's own value. A deliberate
+   * simplification (the real move usually hits with several DIFFERENT base
+   * Attack values in sequence), not a bit-exact port -- see MULTIHIT_BEAT_UP's
+   * own doc in multiHit.ts for why this line was drawn here rather than
+   * building a full party-roster UI for one move. */
+  beatUpBaseAttack: number
+  /** GetParentalBondCount's own MINION_CONTROL-style live party count
+   * (battle_script_commands.c:1023-1038, "count = 1" for the user itself plus
+   * one per other living, non-egg, non-status ally) -- same "no party concept"
+   * gap, exposed as a direct hit-count toggle since there's nothing else to
+   * derive it from. 1-6 (the user alone, up to 5 more allies). */
+  beatUpHitCount: number
 }
 
 // ---------------------------------------------------------------------------

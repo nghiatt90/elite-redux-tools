@@ -333,6 +333,10 @@ export interface FieldConfig {
   /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
    * MOVE_SELF_DESTRUCT). */
   attackerWasHitThisTurn: boolean
+  /** See DamageContext.beatUpBaseAttack's own doc (EFFECT_BEAT_UP). */
+  beatUpBaseAttack: number
+  /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
+  beatUpHitCount: number
 }
 
 export function defaultFieldConfig(): FieldConfig {
@@ -350,6 +354,8 @@ export function defaultFieldConfig(): FieldConfig {
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
     attackerWasHitThisTurn: false,
+    beatUpBaseAttack: 80, // a mid-range representative value -- see its own doc
+    beatUpHitCount: 5,
   }
 }
 
@@ -389,5 +395,7 @@ export function buildScenario(
     attackerRolloutCounter: field.attackerRolloutCounter,
     attackerHasDefenseCurl: field.attackerHasDefenseCurl,
     attackerWasHitThisTurn: field.attackerWasHitThisTurn,
+    beatUpBaseAttack: field.beatUpBaseAttack,
+    beatUpHitCount: field.beatUpHitCount,
   }
 }

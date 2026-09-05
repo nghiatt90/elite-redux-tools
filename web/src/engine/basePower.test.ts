@@ -66,6 +66,8 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
     attackerWasHitThisTurn: false,
+    beatUpBaseAttack: 80,
+    beatUpHitCount: 5,
     ...overrides,
   }
 }
@@ -380,6 +382,12 @@ describe('applyPreModifierBasePower', () => {
   it('EFFECT_FOCUS_PUNCH forces power to 40 (not a multiplier) only if the attacker was hit this turn (battle_util.c:6876-6877)', () => {
     expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: true }), 0, null, false).power).toBe(40)
     expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: false }), 0, null, false).power).toBe(150)
+  })
+
+  it('EFFECT_BEAT_UP overrides power to floor(beatUpBaseAttack/10)+5, applied uniformly (CalcBeatUpPower, battle_util.c:102-117)', () => {
+    expect(applyPreModifierBasePower(1, 'EFFECT_BEAT_UP', null, ctx({ beatUpBaseAttack: 80 }), 0, null, false).power).toBe(13)
+    expect(applyPreModifierBasePower(1, 'EFFECT_BEAT_UP', null, ctx({ beatUpBaseAttack: 55 }), 0, null, false).power).toBe(10) // floor(5.5)+5, not round
+    expect(applyPreModifierBasePower(1, 'EFFECT_BEAT_UP', null, ctx({ beatUpBaseAttack: 0 }), 0, null, false).power).toBe(5)
   })
 })
 
