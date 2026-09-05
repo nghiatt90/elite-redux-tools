@@ -53,6 +53,8 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     sameMoveTurnsInARow: 0,
     defenderIsSwitching: false,
     magnitudeTier: null,
+    attackerRolloutCounter: 0,
+    attackerHasDefenseCurl: false,
     ...overrides,
   }
 }
@@ -344,6 +346,19 @@ describe('applyPreModifierBasePower', () => {
     const result = applyPreModifierBasePower(1, 'EFFECT_MAGNITUDE', null, ctx({ magnitudeTier: null }), 0, null, false)
     expect(result.power).toBe(70)
     expect(result.unmodelled).toHaveLength(1)
+  })
+
+  it('EFFECT_ROLLOUT (Rollout/Ice Ball): counter 0 needs Defense Curl for x2, else unboosted (battle_util.c:6838-6841)', () => {
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 0, attackerHasDefenseCurl: false }), 0, null, false).power).toBe(40)
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 0, attackerHasDefenseCurl: true }), 0, null, false).power).toBe(80)
+  })
+
+  it('EFFECT_ROLLOUT: counter 1/2/3 shift power left by (counter-1) -- x1/x2/x4, not a linear x1/x2/x3', () => {
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 1 }), 0, null, false).power).toBe(40)
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 2 }), 0, null, false).power).toBe(80)
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 3 }), 0, null, false).power).toBe(160)
+    // Defense Curl is irrelevant once counter >= 1 -- only the counter===0 branch reads it.
+    expect(applyPreModifierBasePower(40, 'EFFECT_ROLLOUT', null, ctx({ attackerRolloutCounter: 3, attackerHasDefenseCurl: true }), 0, null, false).power).toBe(160)
   })
 
   it('EFFECT_PURSUIT doubles power only when the defender is switching (battle_util.c:6860-6861)', () => {

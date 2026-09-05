@@ -149,6 +149,8 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     hitCount: 3,
     defenderIsSwitching: false,
     magnitudeTier: null,
+    attackerRolloutCounter: 0,
+    attackerHasDefenseCurl: false,
     ...overrides,
   }
 }
@@ -1205,9 +1207,36 @@ describe('calculateMoveDamage -- Wake-Up Slap/Smelling Salts and single-snapshot
     expect(onTerrain.rolls[15]).toBeGreaterThan(baseline.rolls[15])
   })
 
-  it('Rollout is flagged unmodelled rather than silently using its listed base power', () => {
+})
+
+describe('calculateMoveDamage -- Rollout/Ice Ball (EFFECT_ROLLOUT), a direct rolloutCounter input rather than a derived turn count (battle_util.c:6838-6844)', () => {
+  it('counter 0, no Defense Curl: unboosted, same as the declared base power', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT') }))
-    expect(result.unmodelled.some((n) => n.includes('EFFECT_ROLLOUT'))).toBe(true)
+    expect(result.unmodelled).toHaveLength(0)
+  })
+
+  it('counter 0 WITH Defense Curl doubles power, roughly doubling damage (some drift from truncation elsewhere in the pipeline)', () => {
+    const withoutCurl = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT') }))
+    const withCurl = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerHasDefenseCurl: true }))
+    expect(withCurl.rolls[15]).toBeGreaterThan(withoutCurl.rolls[15] * 1.8)
+    expect(withCurl.rolls[15]).toBeLessThan(withoutCurl.rolls[15] * 2.2)
+  })
+
+  it('counter 1/2/3 scale by roughly 2^(counter-1) -- 1x/2x/4x, NOT a linear 1x/2x/3x like Triple Kick', () => {
+    const counter1 = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerRolloutCounter: 1 }))
+    const counter2 = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerRolloutCounter: 2 }))
+    const counter3 = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerRolloutCounter: 3 }))
+    expect(counter2.rolls[15]).toBeGreaterThan(counter1.rolls[15] * 1.8)
+    expect(counter2.rolls[15]).toBeLessThan(counter1.rolls[15] * 2.2)
+    expect(counter3.rolls[15]).toBeGreaterThan(counter2.rolls[15] * 1.8)
+    expect(counter3.rolls[15]).toBeLessThan(counter2.rolls[15] * 2.2)
+  })
+
+  it('Ice Ball shares the exact same mechanic (both are EFFECT_ROLLOUT)', () => {
+    const rollout = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerRolloutCounter: 2 }))
+    const iceBall = calculateMoveDamage(scenario({ move: moveData('MOVE_ICE_BALL'), attackerRolloutCounter: 2 }))
+    expect(iceBall.unmodelled).toHaveLength(0)
+    expect(rollout.unmodelled).toHaveLength(0)
   })
 })
 
@@ -1306,19 +1335,42 @@ describe('calculateMoveDamage -- multi-hit moves (src/battle_script_commands.c:9
   })
 })
 
-describe('calculateMoveDamage -- EFFECT_MAGNITUDE (a pure random roll, no turn history needed; battle_util.c:11286-11307)', () => {
+describe('calculateMoveDamage -- EFFECT_MAGNITUDE (simulates all 7 tiers, weighted by their real probability; battle_util.c:11286-11307)', () => {
   // MOVE_MAGNITUDE is Ground-type -- Skarmory (Steel/Flying), scenario()'s default
   // defender, is flatly immune to it, so these use Garchomp (Ground/Dragon) instead.
-  it('with no tier set, defaults to Magnitude 7 (modal outcome) and surfaces an unmodelled note', () => {
+  it('with no tier forced, combines all 7 tiers into one weighted 320-entry distribution (16 rolls x tier-weight, no unmodelled note)', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP') }))
-    expect(result.unmodelled.some((n) => n.includes('EFFECT_MAGNITUDE'))).toBe(true)
+    // weights (percent/5): 1+2+4+6+4+2+1 = 20, x16 rolls each = 320.
+    expect(result.rolls).toHaveLength(320)
+    expect(result.unmodelled.some((n) => n.includes('EFFECT_MAGNITUDE'))).toBe(false)
+
+    // min must come from tier 4 (10 power) and max from tier 10 (150 power) --
+    // spans the full range, not clustered around the modal tier.
+    const tier4 = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 4 }))
+    const tier10 = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 10 }))
+    expect(result.rolls[0]).toBe(tier4.rolls[0])
+    expect(result.rolls[result.rolls.length - 1]).toBe(tier10.rolls[15])
+
+    // Rebuild the expected combined multiset directly from each tier's own
+    // rolls, repeated by its exact weight (percent/5), and compare bit-for-bit --
+    // this verifies the WEIGHTING itself, not just the range, without assuming
+    // any two tiers' damage values never coincidentally collide (low-power tiers
+    // can both floor-clamp to the same minimum, so counting occurrences of one
+    // specific VALUE isn't a safe assertion here).
+    const weights: Record<number, number> = { 4: 1, 5: 2, 6: 4, 7: 6, 8: 4, 9: 2, 10: 1 }
+    const expected: number[] = []
+    for (const [tier, weight] of Object.entries(weights)) {
+      const tierResult = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: Number(tier) as 4 | 5 | 6 | 7 | 8 | 9 | 10 }))
+      for (let i = 0; i < weight; i++) expected.push(...tierResult.rolls)
+    }
+    expected.sort((a, b) => a - b)
+    expect(result.rolls).toEqual(expected)
   })
 
-  it('a higher magnitude tier deals more damage than a lower one', () => {
-    const low = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 4 }))
-    const high = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 10 }))
-    expect(low.unmodelled.some((n) => n.includes('EFFECT_MAGNITUDE'))).toBe(false)
-    expect(high.rolls[15]).toBeGreaterThan(low.rolls[15])
+  it('forcing a specific tier still works exactly as a plain single-tier calculation (no combining)', () => {
+    const forced = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 10 }))
+    expect(forced.rolls).toHaveLength(16)
+    expect(forced.unmodelled).toHaveLength(0)
   })
 })
 

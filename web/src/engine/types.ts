@@ -130,6 +130,23 @@ export interface DamageContext {
    * scenario, not a probability distribution" pattern this calculator already
    * uses everywhere else. null leaves EFFECT_MAGNITUDE unmodelled. */
   magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
+  /** gVolatileStructs[battlerAtk].rolloutCounter, read directly rather than
+   * derived from a turn count -- Rollout/Ice Ball (EFFECT_ROLLOUT) share this.
+   * Unlike Triple Kick's hitIndex (which this calculator resolves itself within
+   * one move use), rolloutCounter persists ACROSS turns via Cmd_handlerollout's
+   * own post-hit increment (battle_script_commands.c:11176-11191) -- and that
+   * function's exact ordering relative to THIS turn's own base-power calculation
+   * isn't verifiable from the available decompiled source (no battle-script
+   * bytecode to confirm it), so rather than guess an off-by-one mapping from "N
+   * consecutive turns" to a counter value, this exposes the raw counter itself:
+   * the user states which hit of an ongoing chain they want computed, sidestepping
+   * the turn-simulation question entirely. 0-3 (see attackerHasDefenseCurl for the
+   * 0 case's own branch) -- capped at 3 because Cmd_handlerollout's own increment
+   * gate (`rolloutCounter < 3`) makes it unreachable through normal chained use. */
+  attackerRolloutCounter: 0 | 1 | 2 | 3
+  /** STATUS2_DEFENSE_CURL -- only changes EFFECT_ROLLOUT's own counter===0 branch
+   * (battle_util.c:6838-6841): doubles power on an otherwise-unboosted first use. */
+  attackerHasDefenseCurl: boolean
 }
 
 // ---------------------------------------------------------------------------

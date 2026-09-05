@@ -28,6 +28,7 @@ import {
   applyMoveBehaviorDamage,
   applyPreModifierBasePower,
   calcMoveBasePowerAfterModifiers,
+  MAGNITUDE_PROBABILITY_PERCENT,
   percentToModifier,
   UNMODELLED_BASE_POWER_EFFECTS,
   weatherBallType,
@@ -118,6 +119,10 @@ export interface DamageCalcScenario {
   defenderIsSwitching: boolean
   /** See DamageContext.magnitudeTier's own doc (EFFECT_MAGNITUDE). */
   magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
+  /** See DamageContext.attackerRolloutCounter's own doc (EFFECT_ROLLOUT). */
+  attackerRolloutCounter: 0 | 1 | 2 | 3
+  /** See DamageContext.attackerHasDefenseCurl's own doc (EFFECT_ROLLOUT). */
+  attackerHasDefenseCurl: boolean
 }
 
 export interface DamageCalcResult {
@@ -161,6 +166,8 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
     defenderIsSwitching: scenario.defenderIsSwitching,
     magnitudeTier: scenario.magnitudeTier,
+    attackerRolloutCounter: scenario.attackerRolloutCounter,
+    attackerHasDefenseCurl: scenario.attackerHasDefenseCurl,
   }
 }
 
@@ -869,10 +876,63 @@ function resistBerryMultiplier(
   return battlerHasAbility(defender.abilitySlots, 'ABILITY_RIPEN', () => false) ? 0.25 : 0.5
 }
 
+/**
+ * EFFECT_MAGNITUDE's own top-level path: simulates all 7 magnitude tiers (each a
+ * full, independent calculateMoveDamage call with magnitudeTier forced) and
+ * combines them into a REAL probability-weighted damage distribution, rather than
+ * asking the caller to guess one tier. Each tier's own `rolls`/`critRolls`/
+ * `totalRolls`/`totalCritRolls` (already 16 equiprobable values, or a multi-hit
+ * sum of them, per calculateMoveDamage's normal contract) is repeated
+ * `MAGNITUDE_PROBABILITY_PERCENT[tier] / 5` times -- since every tier's percent
+ * is a multiple of 5, this always divides evenly, and the resulting 320-entry
+ * array is STILL a flat equiprobable-elements array (each entry now implicitly
+ * weighted by its repetition count), so every existing consumer of `rolls`
+ * (kochance.ts's calcKoChances, ResultsTable's min/max formatting) needs no
+ * changes at all to correctly reflect the combined distribution -- neither
+ * assumes a fixed length, only that every element is equally likely.
+ *
+ * Non-power facts (isImmune, effectiveMoveType, hitCount, unmodelled, ...) are
+ * taken from the modal tier (7, 30% -- an arbitrary but representative pick,
+ * since these never vary by magnitude tier) with the tier-fallback unmodelled
+ * note stripped (it doesn't apply here -- a full distribution was computed).
+ */
+function calculateMagnitudeDistribution(scenario: DamageCalcScenario): DamageCalcResult {
+  const perTier = Object.entries(MAGNITUDE_PROBABILITY_PERCENT).map(([tierStr, percent]) => {
+    const tier = Number(tierStr) as 4 | 5 | 6 | 7 | 8 | 9 | 10
+    return { tier, weight: percent / 5, result: calculateMoveDamage({ ...scenario, magnitudeTier: tier }) }
+  })
+
+  function combine(pick: (r: DamageCalcResult) => number[] | null): number[] | null {
+    if (perTier.some((p) => pick(p.result) === null)) return null
+    const combined: number[] = []
+    for (const { weight, result } of perTier) {
+      const values = pick(result)!
+      for (let i = 0; i < weight; i++) combined.push(...values)
+    }
+    return combined.sort((a, b) => a - b)
+  }
+
+  const modal = perTier.find((p) => p.tier === 7)!.result
+  return {
+    ...modal,
+    rolls: combine((r) => r.rolls)!,
+    critRolls: combine((r) => r.critRolls),
+    totalRolls: combine((r) => r.totalRolls),
+    totalCritRolls: combine((r) => r.totalCritRolls),
+    unmodelled: modal.unmodelled.filter((n) => !n.includes('EFFECT_MAGNITUDE')),
+  }
+}
+
 /** CalculateMoveDamage / DoMoveDamageCalc, src/battle_util.c:7788-7827. Evaluates
  * all 16 damage rolls (and, separately, the same 16 with a forced crit) rather than
- * drawing one; see kochance.ts for the KO-probability consumer of this shape. */
+ * drawing one; see kochance.ts for the KO-probability consumer of this shape. THE
+ * ONE EXCEPTION: an EFFECT_MAGNITUDE move with no magnitudeTier forced returns a
+ * larger, still-flat-equiprobable array combining all 7 tiers weighted by their
+ * real probability -- see calculateMagnitudeDistribution's own doc. */
 export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcResult {
+  if (scenario.move.effect === 'EFFECT_MAGNITUDE' && scenario.magnitudeTier === null) {
+    return calculateMagnitudeDistribution(scenario)
+  }
   const { move, attacker, defender, field } = scenario
   const moveType = move.type ?? 'NORMAL'
   const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }

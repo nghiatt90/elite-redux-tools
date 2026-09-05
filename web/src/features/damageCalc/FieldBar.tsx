@@ -112,6 +112,22 @@ export default function FieldBar({ field, onChange }: Props) {
             ))}
           </select>
         </label>
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Rollout/Ice Ball counter
+          <input
+            type="range"
+            min={0}
+            max={3}
+            className="w-24"
+            value={field.attackerRolloutCounter}
+            onChange={(e) => onChange({ ...field, attackerRolloutCounter: Number(e.target.value) as FieldConfig['attackerRolloutCounter'] })}
+          />
+          <span>{field.attackerRolloutCounter}</span>
+        </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.attackerHasDefenseCurl} onChange={(e) => onChange({ ...field, attackerHasDefenseCurl: e.target.checked })} />
+          Defense Curl active {/* only matters at Rollout counter 0 */}
+        </label>
       </div>
     </div>
   )

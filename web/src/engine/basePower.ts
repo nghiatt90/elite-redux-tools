@@ -8,20 +8,23 @@
 //      6995-7117) -- hold effects, per-move-effect conditions (Facade, Brine,
 //      Venoshock, Retaliate, Knock Off, ...), and the terrain STAB-style boost.
 //   3. CalcMoveBasePower's hardcoded pre-switch (:6825-6913) and move-id switch
-//      (:6913-6940) -- Magnitude, Triple Kick/Triple Axel, and Pursuit ARE ported
-//      (applyPreModifierBasePower, below) despite the module comment's earlier
-//      claim that this whole bucket "needs turn history": Magnitude is a pure
-//      per-use random roll (a manual tier pick, magnitudeTier); Triple Kick's
-//      power scaling is keyed on which hit of the SAME move use this is
-//      (hitIndex, resolved by multiHit.ts within one calculation, no history
-//      needed); Pursuit's doubling is a plain fact about the defender's chosen
-//      action this turn (defenderIsSwitching), same shape as attackerActsFirst.
-//      Weather Ball is also ported (below). See UNMODELLED_BASE_POWER_EFFECTS's
-//      own comment for what's still deferred -- Rollout/Ice Ball (a genuine
-//      cross-TURN consecutive-use counter, unlike Triple Kick's within-one-use
-//      hit index) and Beat Up/Focus Punch (party contents / "did my last move
-//      fail", no scenario field exists for either) are the real remaining
-//      turn-history cases.
+//      (:6913-6940) -- Magnitude, Triple Kick/Triple Axel, Pursuit, and
+//      Rollout/Ice Ball are ALL ported (applyPreModifierBasePower, below) despite
+//      the module comment's earlier claim that this whole bucket "needs turn
+//      history": Magnitude simulates all 7 tiers and combines them into a real
+//      probability-weighted distribution (calculateMoveDamage's own top-level
+//      gate, calculate.ts); Triple Kick's power scaling is keyed on which hit of
+//      the SAME move use this is (hitIndex, resolved by multiHit.ts within one
+//      calculation, no history needed); Pursuit's doubling is a plain fact about
+//      the defender's chosen action this turn (defenderIsSwitching); Rollout/Ice
+//      Ball's counter (attackerRolloutCounter) IS genuine cross-turn state, but
+//      is exposed directly as a scenario fact (the user states which hit of an
+//      ongoing chain to compute) rather than derived from a turn count, sidestepping
+//      an unverifiable exact-increment-timing question -- see its own doc on
+//      DamageContext. Weather Ball is also ported (below). Beat Up/Focus Punch
+//      (party contents / "did my last move fail", no scenario field exists for
+//      either) are the real remaining turn-history cases -- see
+//      UNMODELLED_BASE_POWER_EFFECTS's own comment.
 
 import { applyModifier, idiv, mulModifier, uq } from './fixed'
 import { evaluateAllConditions, type ScriptCondition } from './conditions'
@@ -265,6 +268,12 @@ export function weatherBallType(weather: string, attackerHasAuroraBorealis: bool
  * random roll this calculator reports as a range instead of drawing. */
 export const MAGNITUDE_POWER: Record<number, number> = { 4: 10, 5: 30, 6: 50, 7: 70, 8: 90, 9: 110, 10: 150 }
 
+/** Same table's probability side, as a percent (sums to 100, matching the C's own
+ * 0-99 roll-range widths: 5/10/20/30/20/10/5). calculate.ts's calculateMoveDamage
+ * uses this to simulate all 7 tiers and combine them into a real probability-
+ * weighted damage distribution instead of asking the user to guess one tier. */
+export const MAGNITUDE_PROBABILITY_PERCENT: Record<number, number> = { 4: 5, 5: 10, 6: 20, 7: 30, 8: 20, 9: 10, 10: 5 }
+
 export function applyPreModifierBasePower(
   basePower: number,
   moveEffect: string | null,
@@ -308,13 +317,28 @@ export function applyPreModifierBasePower(
   }
   if (moveEffect === 'EFFECT_MAGNITUDE') {
     if (ctx.magnitudeTier === null) {
-      // No honest single default for an unset random roll -- Magnitude 7 (70
-      // power) is simply the modal/most-likely outcome (30% per the C's own
-      // table), reported as a rough default alongside the unmodelled note, not a
-      // real answer.
+      // calculateMoveDamage's own top-level gate (calculate.ts) intercepts every
+      // real EFFECT_MAGNITUDE call BEFORE it reaches here, simulating all 7 tiers
+      // and combining them into a real probability-weighted distribution -- this
+      // branch only exists as a defensive fallback for a caller that invokes this
+      // function directly, bypassing that machinery. No honest single default
+      // exists for an unset random roll in isolation, so Magnitude 7 (70 power,
+      // the modal/most-likely outcome at 30%) is reported alongside a note, not
+      // as a real answer.
       return { power: MAGNITUDE_POWER[7], unmodelled: ['EFFECT_MAGNITUDE: no magnitude tier set -- showing Magnitude 7 (modal outcome) as a rough default'] }
     }
     return { power: MAGNITUDE_POWER[ctx.magnitudeTier], unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_ROLLOUT') {
+    // battle_util.c:6838-6844. counter===0: only Defense Curl doubles it (an
+    // otherwise-unboosted first use is left at its declared power, matching the
+    // C's guard clause exactly -- there's no case where counter 0 alone changes
+    // anything). counter>=1: a left SHIFT by (counter-1), i.e. x2^(counter-1) --
+    // 1/2/4x for counter 1/2/3, not a linear x1/x2/x3 like Triple Kick.
+    if (ctx.attackerRolloutCounter === 0) {
+      return { power: ctx.attackerHasDefenseCurl ? basePower * 2 : basePower, unmodelled: [] }
+    }
+    return { power: basePower * 2 ** (ctx.attackerRolloutCounter - 1), unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_PURSUIT') {
     // battle_util.c:6860-6861 -- doubles only when the DEFENDER's chosen action
@@ -350,11 +374,7 @@ export function applyPreModifierBasePower(
 // power as if no special mechanic applied.
 // ---------------------------------------------------------------------------
 
-export const UNMODELLED_BASE_POWER_EFFECTS = new Set([
-  'EFFECT_ROLLOUT', // Ice Ball shares this too -- a genuine cross-turn consecutive-use counter, see this file's module doc
-  'EFFECT_FOCUS_PUNCH',
-  'EFFECT_BEAT_UP',
-])
+export const UNMODELLED_BASE_POWER_EFFECTS = new Set(['EFFECT_FOCUS_PUNCH', 'EFFECT_BEAT_UP'])
 
 // ---------------------------------------------------------------------------
 // 2. CalcMoveBasePowerAfterModifiers's own chain (src/battle_util.c:6995-7117).
