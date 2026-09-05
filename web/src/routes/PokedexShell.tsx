@@ -7,6 +7,7 @@ import FilterRail from '../features/pokedex/FilterRail'
 import { applyFilters, filtersFromSearchParams, filtersToSearchParams, isEmpty } from '../features/pokedex/filters'
 import SpeciesListView, { type SpeciesListHandle } from '../features/pokedex/SpeciesListView'
 import { buildSearchIndex, searchSpecies } from '../features/pokedex/search'
+import { applySort, sortFromSearchParams, sortToSearchParams } from '../features/pokedex/sort'
 
 // Persistent layout: the list is never unmounted by a route change. Clicking a
 // species still changes the URL to /pokemon/:id (shareable, deep-linkable) and
@@ -25,6 +26,7 @@ export default function PokedexShell() {
 
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams])
+  const sort = useMemo(() => sortFromSearchParams(searchParams), [searchParams])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filtersSheetOpen, setFiltersSheetOpen] = useState(false)
   const [filtersVisible, setFiltersVisible] = useState(true)
@@ -40,6 +42,14 @@ export default function PokedexShell() {
   const setFilters = useCallback(
     (next: typeof filters) => {
       const params = filtersToSearchParams(next, searchParams)
+      setSearchParams(params, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
+
+  const setSort = useCallback(
+    (next: typeof sort) => {
+      const params = sortToSearchParams(next, searchParams)
       setSearchParams(params, { replace: true })
     },
     [searchParams, setSearchParams],
@@ -66,8 +76,9 @@ export default function PokedexShell() {
 
   const results = useMemo(() => {
     const searched = searchSpecies(searchIndex, query)
-    return applyFilters(searched, filters)
-  }, [searchIndex, query, filters])
+    const filtered = applyFilters(searched, filters)
+    return applySort(filtered, sort, speciesById)
+  }, [searchIndex, query, filters, sort, speciesById])
 
   // When a detail is open (arrived at via mouse click, a direct link, or the URL bar
   // -- not just keyboard nav), highlight that row in the list too, and let arrow keys
@@ -102,7 +113,7 @@ export default function PokedexShell() {
     }
     setSelectedIndex(0)
     listRef.current?.scrollToIndex(0)
-  }, [query, filters])
+  }, [query, filters, sort])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -159,7 +170,7 @@ export default function PokedexShell() {
     <div className="h-full flex">
       {filtersVisible && (
         <div className="hidden md:block">
-          <FilterRail filters={filters} onChange={setFilters} />
+          <FilterRail filters={filters} onChange={setFilters} sort={sort} onSortChange={setSort} />
         </div>
       )}
       <div
@@ -264,7 +275,7 @@ export default function PokedexShell() {
                 Done
               </button>
             </div>
-            <FilterRail filters={filters} onChange={setFilters} className="w-full" />
+            <FilterRail filters={filters} onChange={setFilters} sort={sort} onSortChange={setSort} className="w-full" />
           </div>
         </div>
       )}
