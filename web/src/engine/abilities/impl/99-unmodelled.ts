@@ -13,6 +13,5 @@
 import type { AbilityEntry } from '../types'
 
 export const UNMODELLED_ABILITIES: AbilityEntry[] = [
-  { id: 'ABILITY_DEADLY_PRECISION', src: 'src/abilities.cc:11162', unmodelled: 'not yet ported (hooks: onMoldBreaker)' },
   { id: 'ABILITY_VICTORY_BOMB', src: 'src/abilities.cc:8980', unmodelled: 'not yet ported (hooks: onMoveType)' },
 ]

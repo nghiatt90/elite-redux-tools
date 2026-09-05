@@ -257,6 +257,9 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_FLAWLESS_PRECISION',
     src: 'src/abilities.cc:11650',
     onCrit: aliasCrit('ABILITY_FATAL_PRECISION'),
+    // .onMoldBreaker = Impl<ABILITY_DEADLY_PRECISION>.onMoldBreaker (alias,
+    // src/abilities.cc:11653) -- see Deadly Precision's own entry (23-mold-breaker.ts).
+    onMoldBreaker: aliasMoldBreaker('ABILITY_DEADLY_PRECISION'),
   },
   {
     id: 'ABILITY_GLACIAL_GHOST',
@@ -357,6 +360,9 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_MACH_3',
     src: 'src/abilities.cc:11402',
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_SLIPSTREAM'),
+    // .onMoldBreaker = Impl<ABILITY_DEADLY_PRECISION>.onMoldBreaker (alias,
+    // src/abilities.cc:11405) -- see Deadly Precision's own entry (23-mold-breaker.ts).
+    onMoldBreaker: aliasMoldBreaker('ABILITY_DEADLY_PRECISION'),
   },
   {
     id: 'ABILITY_MAGMA_EATER',
@@ -625,6 +631,14 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     flags: { breakable: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FOSSILIZED'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FOSSILIZED'),
+    // src/abilities.cc:10704-10713. calcInternal invokes onMoldBreaker once per
+    // candidate type (moveType, then move.type2 if the move has one -- matching
+    // this engine's own two-type evaluation elsewhere), so ctx.moveType is always
+    // the ONE specific type this call is checking; no extra type2 handling needed
+    // beyond that, despite the C's own body only bothering to recompute type
+    // effectiveness when move.type2 is set (its return value doesn't depend on
+    // whether that recompute happened, just on the resulting moveType).
+    onMoldBreaker: (ctx) => ctx.moveType === 'ROCK',
   },
   {
     id: 'ABILITY_STRIKER_PIXILATE',

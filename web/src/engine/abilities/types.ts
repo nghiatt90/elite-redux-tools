@@ -308,6 +308,37 @@ export interface OnMoldBreakerContext {
   battlerId: string
   moveId: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  /** The ate-boost/ability-resolved type calcInternal is CURRENTLY evaluating --
+   * calcInternal runs once per candidate type (moveType, then move.type2 if
+   * present), so this is always a single concrete type from that call's own
+   * perspective, never both at once. Stonecutter's own condition. null from
+   * scenarioCritStageInputs's own call site (see isForcedCrit), which has no
+   * specific type in scope at all. */
+  moveType: string | null
+  /** Type effectiveness computed via the EXACT SAME grounding+fold+afterHooks
+   * pipeline calcInternal itself uses for the real number, except with Mold
+   * Breaker hardcoded active for this one hypothetical evaluation -- Deadly
+   * Precision/Flawless Precision/Mach 3's own condition (`CalculateMoveDamage
+   * AndEffectiveness` with HITMARKER_MOLD_BREAKER forced on, src/abilities.cc's
+   * onMoldBreaker bodies). null from scenarioCritStageInputs's call site, for the
+   * same reason as moveType -- treat null as "this ability can't activate from
+   * here" rather than throwing; a real compound edge case (this ability AND
+   * Overrule on the very same battler) would then only get partial credit, but
+   * no current species/ability data combines them so this hasn't mattered yet. */
+  hypotheticalTypeEffectiveness: number | null
+  /** Whether the scenario being evaluated assumes this hit crits. Overrule's own
+   * condition is literally `gIsCriticalHit` in the C -- since this calculator
+   * reports a crit and non-crit row as two separate, deterministic scenarios
+   * rather than drawing one random roll, "does this hit crit" translates
+   * directly to "is this the forced-crit row/hypothesis", with no further
+   * ability-suppression math needed. calcInternal passes its own `forceCrit`
+   * parameter directly (Overrule is active on the crit row, not the non-crit
+   * one); scenarioCritStageInputs's own top-level "can this move crit AT ALL"
+   * gate passes `true` unconditionally, asking exactly Overrule's own question
+   * ("in a hypothetical crit scenario, would Mold Breaker be active for this
+   * attacker") to decide whether an otherwise-NEVER_CRIT block (Battle Armor/
+   * Shell Armor) should really apply. */
+  isForcedCrit: boolean
 }
 
 export type OnOffensiveMultiplier = (ctx: OffensiveMultiplierContext) => void
@@ -334,12 +365,16 @@ export type OnMoveType = (ctx: OnMoveTypeContext) => void
 export type OnRecoil = (ctx: OnRecoilContext) => number
 /**
  * onMoldBreaker returns whether Mold Breaker suppression is active for this hit --
- * SetMoldBreaker, src/battle_util.c:976-990. Only ported for the abilities whose
- * condition doesn't require recursively simulating the hit's own resolved type/
- * type-effectiveness/crit status first (Deadly Precision, Flawless Precision,
- * Mach 3, Overrule, and Stonecutter all do exactly that -- a genuinely circular
- * calculation this non-simulated v1 engine can't perform, so those 5 are left
- * unmodelled rather than approximated).
+ * SetMoldBreaker, src/battle_util.c:976-990. Deadly Precision/Flawless Precision/
+ * Mach 3/Overrule/Stonecutter all decide their OWN activation by evaluating the
+ * hit's type effectiveness or crit status hypothetically WITH Mold Breaker forced
+ * on first -- this reads as circular (Mold Breaker is needed to compute type
+ * effectiveness, but these abilities need type effectiveness to decide Mold
+ * Breaker) but isn't actually one: it's a bounded two-branch lookup (evaluate the
+ * hypothesis once, branch on it), not an iterative fixed point, so it's fully
+ * portable -- see OnMoldBreakerContext's own doc on the extra fields
+ * (moveType/hypotheticalTypeEffectiveness/isForcedCrit) calculate.ts precomputes
+ * for exactly this purpose.
  */
 export type OnMoldBreaker = (ctx: OnMoldBreakerContext) => boolean
 

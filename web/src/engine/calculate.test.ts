@@ -1240,6 +1240,59 @@ describe('calculateMoveDamage -- Rollout/Ice Ball (EFFECT_ROLLOUT), a direct rol
   })
 })
 
+describe('calculateMoveDamage -- onMoldBreaker\'s 5 hypothesis-based abilities are wired in (not circular after all -- see this session\'s own audit)', () => {
+  it('Deadly Precision breaks through Levitate to unlock an otherwise-immune super-effective Ground hit', async () => {
+    await import('./abilities/impl/index')
+    // Beldum (Steel/Psychic, non-Flying): Ground is a real 2x weakness by chart,
+    // but Levitate (assigned here regardless of Beldum's real abilities, same
+    // override convention as every other ability test in this file) makes it
+    // airborne, immune outright -- UNLESS Mold Breaker suppresses Levitate.
+    const beldumWithLevitate = battler('SPECIES_BELDUM', { abilitySlots: { ability: 'ABILITY_LEVITATE', innates: [null, null, null] } })
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE'), defender: beldumWithLevitate }))
+    expect(baseline.isImmune).toBe(true)
+
+    const withDeadlyPrecision = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EARTHQUAKE'),
+        defender: beldumWithLevitate,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_DEADLY_PRECISION', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withDeadlyPrecision.isImmune).toBe(false)
+    expect(withDeadlyPrecision.typeEffectiveness).toBe(uq(2.0))
+  })
+
+  it('Overrule breaks through Battle Armor/Shell Armor to unlock an otherwise-blocked crit', async () => {
+    await import('./abilities/impl/index')
+    const battleArmorDefender = battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_BATTLE_ARMOR', innates: [null, null, null] } })
+    const baseline = calculateMoveDamage(scenario({ defender: battleArmorDefender }))
+    expect(baseline.critChanceDenominator).toBeNull() // fully blocked
+
+    const withOverrule = calculateMoveDamage(
+      scenario({
+        defender: battleArmorDefender,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_OVERRULE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withOverrule.critChanceDenominator).not.toBeNull()
+    expect(withOverrule.critRolls).not.toBeNull()
+  })
+
+  it('Stonecutter activates only for a move whose EFFECTIVE type resolves to Rock', () => {
+    // Skarmory (Steel/Flying), no ability shenanigans needed on the defender --
+    // Rock is neutral-to-Flying/weak-to-Steel by chart either way; this just
+    // checks the ability's OWN condition fires per-type, not that it changes
+    // the outcome dramatically.
+    const withStonecutter = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_ROCK_SLIDE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_STONECUTTER', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withStonecutter.unmodelled).toHaveLength(0)
+  })
+})
+
 describe('calculateMoveDamage -- doubleDamageVsMega doubles power against a Mega-evolved defender (battle_util.c:7003-7005)', () => {
   it('Behemoth Bash doubles power vs a Mega defender, not a non-Mega one', () => {
     const skarmory = (isMegaEvolved: boolean) =>

@@ -326,7 +326,21 @@ function applySecondaryStatBlend(primary: number, secondaryStat: Partial<Record<
   return total
 }
 
-function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
+function computeAttackStat(
+  scenario: DamageCalcScenario,
+  split: 'PHYSICAL' | 'SPECIAL',
+  isCrit: boolean,
+  statStageRatios: [number, number][],
+  // Passed in from calcInternal's own single, already-resolved decision (which
+  // itself may depend on Deadly Precision/Flawless Precision/Mach 3/Overrule/
+  // Stonecutter's hypothetical checks) -- Mold Breaker is one uniform flag for
+  // the whole hit, so this must NOT be recomputed independently here (it used to
+  // be, harmlessly for the 5 simple onMoldBreaker abilities since they don't
+  // need extra context, but would silently disagree with calcInternal's own
+  // value for the 5 hypothesis-based ones once those needed real context to
+  // decide).
+  attackerHasMoldBreaker: boolean,
+) {
   const { attacker, defender, move, field } = scenario
   const unmodelled: string[] = []
 
@@ -337,7 +351,6 @@ function computeAttackStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SP
   const statBattler = isFoulPlay ? defender : attacker
   const isBodyPress = move.effect === 'EFFECT_BODY_PRESS'
   const defaultAtkStat: BattleStatKey = isBodyPress ? 'def' : split === 'PHYSICAL' ? 'atk' : 'spatk'
-  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS')
   // onChooseOffensiveStat only runs in the non-Foul-Play/Body-Press/Monotype-Champ
   // case (:7255-7269) -- the Monotype Champ special case isn't modelled here.
   const { statToUse: atkStat, secondaryStat: atkSecondaryStat } =
@@ -437,7 +450,15 @@ const LUCKY_PUNCH_SPECIES = new Set([
  * particular damage roll. */
 function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs {
   const { attacker, defender, move, field } = scenario
-  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS')
+  // isForcedCrit: true -- this is calculateMoveDamage's own top-level "can this
+  // move crit AT ALL" gate (scenarioCritDenominator), not one specific hit's
+  // forceCrit row, so it asks Overrule's own question directly: "in a
+  // hypothetical crit scenario, would Mold Breaker be active for this attacker"
+  // -- exactly what's needed to decide whether an otherwise-NEVER_CRIT block
+  // (Battle Armor/Shell Armor) should really still apply. moveType/
+  // hypotheticalTypeEffectiveness are null here (no specific type is in scope at
+  // this call site) -- see OnMoldBreakerContext's own doc on that tradeoff.
+  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS', null, null, true)
   const abilityBonus = computeAbilityCritBonus(
     attacker.abilitySlots,
     defender.abilitySlots,
@@ -486,78 +507,18 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
   return critChanceDenominator(stage, scenario.battleConstants.criticalHitChance)
 }
 
-/** DoMoveDamageCalcInternal's core equation for ONE evaluated type, up to (but not
- * including) the random factor -- src/battle_util.c:7722-7786. Returns -1 when the
- * type effectiveness is a flat immunity, matching the C's early return.
- *
- * `forceCrit` selects which of the two output rows (calculateMoveDamage's `rolls` vs
- * `critRolls`) this evaluation belongs to, rather than drawing a random 0-23 crit
- * roll per src/battle_script_commands.c:1589's MakeCritRoll() -- a deterministic
- * calculator reports both a non-crit and a (when possible) crit row, not one sampled
- * outcome. A move whose crit is unconditionally guaranteed (crit denominator 1) still
- * reports its "non-crit" row as non-crit even though the real game can never actually
- * produce that row -- callers should prefer `critRolls` whenever
- * `critChanceDenominator === 1`. */
-function calcInternal(
-  scenario: DamageCalcScenario,
-  inputMoveType: string,
-  split: 'PHYSICAL' | 'SPECIAL',
-  forceCrit: boolean,
-  // UQ_4_12 -- GetParentalBondMultiplier's own return, folded into CalcFinalDmg's
-  // stage #10 EXACTLY where the C applies it (finalDamage.ts's own
-  // parentalBondMultiplier stage). uq(1.0) for the first/only hit of any move and
-  // for every hit of a move's OWN multi-hit effect (Population Bomb, Double Hit,
-  // ...), which never scale power per hit -- only a Parental-Bond-family bonus hit
-  // uses anything else. See multiHit.ts's resolveHitPlan.
-  hitModifier: number,
-  /** Which hit (0-indexed) of the current move use this is -- Triple Kick/Triple
-   * Axel's own base-power scaling reads this directly (applyPreModifierBasePower),
-   * unlike hitModifier which is a FINAL-stage multiplier. 0 for every non-multi-hit
-   * move and for every hit of a move whose OWN scaling isn't hit-index-based. */
-  hitIndex: number = 0,
-): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
-  const unmodelled: string[] = []
-  const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
-  const statStageRatios = battleConstants.statStageRatios
-
-  const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
-
-  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
-  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
-  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
-  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
-  // 5148-5150,5180-5182, each switch case in that function returns immediately on
-  // match). When none applies, this falls through exactly like the C's `break`
-  // does, leaving the move at its declared type for the ability loop below.
-  if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
-    unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
-  }
-  const itemMoveType =
-    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
-      ? (attacker.holdEffectType ?? inputMoveType)
-      : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
-        ? attacker.naturalGift.type
-        : move.effect === 'EFFECT_WEATHER_BALL'
-          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
-          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
-            ? attacker.hiddenPowerType
-            : null
-
-  // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
-  // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
-  // terrain-boost base-power check all key off the resolved type, not the move's
-  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  const { moveType, ateBoost } =
-    itemMoveType !== null ? { moveType: itemMoveType, ateBoost: false } : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
-
-  // Computed here (rather than down near computeAbilityMultiplier, as in the other two
-  // calcInternal-adjacent call sites) because IsBattlerGroundedIgnoreType's Levitate
-  // check (below) is itself checkMoldBreaker=TRUE (battle_util.c:6694,
-  // RETURN_ABILITY_IF_FLAG(battlerId, TRUE, levitate)) and runs before type
-  // effectiveness is known.
-  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split)
-
-  const defenderTypes = distinctDefendingTypes(defender.types)
+/**
+ * The grounding + type-chart-fold + onAfterTypeEffectiveness pipeline
+ * (battle_util.c:6672-6701 grounding, MulByTypeEffectiveness/
+ * CalcTypeEffectivenessMultiplierInternal for the fold+after-hooks), factored out
+ * of calcInternal so it can be run TWICE per hit: once hypothetically with Mold
+ * Breaker forced active (Deadly Precision/Flawless Precision/Mach 3/Stonecutter's
+ * own onMoldBreaker condition, see OnMoldBreakerContext's doc), and once for real
+ * with whichever attackerHasMoldBreaker value that hypothesis (plus every other
+ * onMoldBreaker ability) actually resolves to.
+ */
+function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string, defenderTypes: string[], attackerHasMoldBreaker: boolean): number {
+  const { attacker, defender, move, field, typeChart } = scenario
   // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701), which checks
   // CheckGroundingEffects (:6672-6685) FIRST -- Iron Ball or Gravity forces
   // grounded regardless of type/ability, short-circuiting the rest of the check
@@ -590,7 +551,7 @@ function calcInternal(
   // perTypeModifiers/targetGrounded fields below.
   let typeEffectivenessBeforeAfterHooks = typeFold.modifier
   if (typeEffectivenessBeforeAfterHooks !== 0 && moveType === 'GROUND' && !isGrounded) typeEffectivenessBeforeAfterHooks = 0
-  const typeEffectiveness = computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
+  return computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: move.id,
@@ -604,6 +565,91 @@ function calcInternal(
     defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
     defenderAbilityOn: defender.abilityOn,
   })
+}
+
+/** DoMoveDamageCalcInternal's core equation for ONE evaluated type, up to (but not
+ * including) the random factor -- src/battle_util.c:7722-7786. Returns -1 when the
+ * type effectiveness is a flat immunity, matching the C's early return.
+ *
+ * `forceCrit` selects which of the two output rows (calculateMoveDamage's `rolls` vs
+ * `critRolls`) this evaluation belongs to, rather than drawing a random 0-23 crit
+ * roll per src/battle_script_commands.c:1589's MakeCritRoll() -- a deterministic
+ * calculator reports both a non-crit and a (when possible) crit row, not one sampled
+ * outcome. A move whose crit is unconditionally guaranteed (crit denominator 1) still
+ * reports its "non-crit" row as non-crit even though the real game can never actually
+ * produce that row -- callers should prefer `critRolls` whenever
+ * `critChanceDenominator === 1`. */
+function calcInternal(
+  scenario: DamageCalcScenario,
+  inputMoveType: string,
+  split: 'PHYSICAL' | 'SPECIAL',
+  forceCrit: boolean,
+  // UQ_4_12 -- GetParentalBondMultiplier's own return, folded into CalcFinalDmg's
+  // stage #10 EXACTLY where the C applies it (finalDamage.ts's own
+  // parentalBondMultiplier stage). uq(1.0) for the first/only hit of any move and
+  // for every hit of a move's OWN multi-hit effect (Population Bomb, Double Hit,
+  // ...), which never scale power per hit -- only a Parental-Bond-family bonus hit
+  // uses anything else. See multiHit.ts's resolveHitPlan.
+  hitModifier: number,
+  /** Which hit (0-indexed) of the current move use this is -- Triple Kick/Triple
+   * Axel's own base-power scaling reads this directly (applyPreModifierBasePower),
+   * unlike hitModifier which is a FINAL-stage multiplier. 0 for every non-multi-hit
+   * move and for every hit of a move whose OWN scaling isn't hit-index-based. */
+  hitIndex: number = 0,
+): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  const { attacker, defender, move, field, moveBehaviors, battleConstants } = scenario
+  const statStageRatios = battleConstants.statStageRatios
+
+  const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
+
+  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
+  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
+  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
+  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
+  // 5148-5150,5180-5182, each switch case in that function returns immediately on
+  // match). When none applies, this falls through exactly like the C's `break`
+  // does, leaving the move at its declared type for the ability loop below.
+  if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
+    unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
+  }
+  const itemMoveType =
+    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
+      ? (attacker.holdEffectType ?? inputMoveType)
+      : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
+        ? attacker.naturalGift.type
+        : move.effect === 'EFFECT_WEATHER_BALL'
+          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
+          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
+            ? attacker.hiddenPowerType
+            : null
+
+  // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
+  // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
+  // terrain-boost base-power check all key off the resolved type, not the move's
+  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
+  const { moveType, ateBoost } =
+    itemMoveType !== null ? { moveType: itemMoveType, ateBoost: false } : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+
+  const defenderTypes = distinctDefendingTypes(defender.types)
+
+  // Deadly Precision/Flawless Precision/Mach 3/Stonecutter's own onMoldBreaker
+  // condition needs to know what type effectiveness WOULD be if Mold Breaker
+  // were already active -- computed via the exact same pipeline the REAL value
+  // below uses, just with Mold Breaker hardcoded true for this one hypothetical
+  // evaluation (see OnMoldBreakerContext's own doc on why this isn't circular).
+  const hypotheticalTypeEffectiveness = resolveTypeEffectiveness(scenario, moveType, defenderTypes, true)
+  // Computed here (rather than down near computeAbilityMultiplier, as in the other two
+  // calcInternal-adjacent call sites) because IsBattlerGroundedIgnoreType's Levitate
+  // check (below) is itself checkMoldBreaker=TRUE (battle_util.c:6694,
+  // RETURN_ABILITY_IF_FLAG(battlerId, TRUE, levitate)) and runs before type
+  // effectiveness is known.
+  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split, moveType, hypotheticalTypeEffectiveness, forceCrit)
+  // Mold Breaker is a single, uniform flag for the whole hit regardless of WHICH
+  // ability (if any) activated it -- once attackerHasMoldBreaker is true, the
+  // hypothetical pass above (which forced it true) already IS the real value, no
+  // need to recompute; only a false result needs a fresh (unforced) pass.
+  const typeEffectiveness = attackerHasMoldBreaker ? hypotheticalTypeEffectiveness : resolveTypeEffectiveness(scenario, moveType, defenderTypes, false)
   if (typeEffectiveness === 0) return { dmg: -1, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
 
   // TestAbsorbingAbilities (:8961-8969) -- a hit-blocking check distinct from type
@@ -668,7 +714,7 @@ function calcInternal(
     if (note) unmodelled.push(note)
   }
 
-  const atk = computeAttackStat(scenario, split, isCrit, statStageRatios)
+  const atk = computeAttackStat(scenario, split, isCrit, statStageRatios, attackerHasMoldBreaker)
   const def = computeDefenseStat(scenario, split, isCrit, statStageRatios)
   unmodelled.push(...atk.unmodelled, ...def.unmodelled)
 

@@ -157,6 +157,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.isCrit && ctx.typeEffectiveness < uq(1.0)) MUL(ctx, 2)
     },
+    // src/abilities.cc:9895-9904 -- `return gIsCriticalHit`. Since this
+    // calculator reports a crit and non-crit row as two separate, deterministic
+    // scenarios rather than drawing one random roll, "does this hit crit"
+    // translates directly to isForcedCrit (see OnMoldBreakerContext's own doc).
+    onMoldBreaker: (ctx) => ctx.isForcedCrit,
   },
   {
     id: 'ABILITY_ECHOLOCATION',

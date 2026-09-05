@@ -54,16 +54,27 @@ function suppressedByMoldBreaker(attackerHasMoldBreaker: boolean) {
 
 /**
  * Whether the ATTACKER's own ability slots make Mold Breaker suppression active
- * for this hit. Only ports the 5 of 10 onMoldBreaker abilities whose condition
- * doesn't require recursively simulating the hit's own resolved type/type-
- * effectiveness/crit status first -- see OnMoldBreaker's own doc for why Deadly
- * Precision/Flawless Precision/Mach 3/Overrule/Stonecutter are left unmodelled.
+ * for this hit. All 10 onMoldBreaker abilities are ported -- Deadly Precision/
+ * Flawless Precision/Mach 3/Stonecutter read `hypotheticalTypeEffectiveness`/
+ * `moveType`, Overrule reads `isForcedCrit`; see OnMoldBreakerContext's own doc
+ * for what each of these three extra fields means and who computes them.
+ * `moveType`/`hypotheticalTypeEffectiveness` default to null and `isForcedCrit`
+ * to false for the many callers that don't need any of the 5 hypothesis-based
+ * abilities' own activation (every call site outside calculate.ts's own
+ * type-fold and crit-gate code).
  */
-export function computeAttackerHasMoldBreaker(attackerSlots: AbilitySlots, moveId: string, moveSplit: OnMoldBreakerContext['moveSplit']): boolean {
+export function computeAttackerHasMoldBreaker(
+  attackerSlots: AbilitySlots,
+  moveId: string,
+  moveSplit: OnMoldBreakerContext['moveSplit'],
+  moveType: string | null = null,
+  hypotheticalTypeEffectiveness: number | null = null,
+  isForcedCrit: boolean = false,
+): boolean {
   let active = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (!impl.onMoldBreaker) return
-    if (impl.onMoldBreaker({ battlerId: 'attacker', moveId, moveSplit })) {
+    if (impl.onMoldBreaker({ battlerId: 'attacker', moveId, moveSplit, moveType, hypotheticalTypeEffectiveness, isForcedCrit })) {
       active = true
       return 'break'
     }
