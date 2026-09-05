@@ -330,6 +330,9 @@ export interface FieldConfig {
   attackerRolloutCounter: 0 | 1 | 2 | 3
   /** See DamageContext.attackerHasDefenseCurl's own doc (EFFECT_ROLLOUT). */
   attackerHasDefenseCurl: boolean
+  /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
+   * MOVE_SELF_DESTRUCT). */
+  attackerWasHitThisTurn: boolean
 }
 
 export function defaultFieldConfig(): FieldConfig {
@@ -346,6 +349,7 @@ export function defaultFieldConfig(): FieldConfig {
     magnitudeTier: null,
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
+    attackerWasHitThisTurn: false,
   }
 }
 
@@ -384,5 +388,6 @@ export function buildScenario(
     magnitudeTier: field.magnitudeTier,
     attackerRolloutCounter: field.attackerRolloutCounter,
     attackerHasDefenseCurl: field.attackerHasDefenseCurl,
+    attackerWasHitThisTurn: field.attackerWasHitThisTurn,
   }
 }

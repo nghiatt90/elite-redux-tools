@@ -1,7 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { applyMoveBehaviorDamage, applyPreModifierBasePower, calcMoveBasePowerAfterModifiers, percentToModifier, weatherBallType, type BasePowerModifierContext, type MoveBehaviors } from './basePower'
+import {
+  applyAngelsWrathBasePower,
+  applyMoveBehaviorDamage,
+  applyMoveSpecificBasePower,
+  applyPreModifierBasePower,
+  calcMoveBasePowerAfterModifiers,
+  percentToModifier,
+  weatherBallType,
+  type BasePowerModifierContext,
+  type MoveBehaviors,
+} from './basePower'
 import type { ConditionBattlerContext, DamageContext } from './types'
 import { uq } from './fixed'
 
@@ -55,6 +65,7 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     magnitudeTier: null,
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
+    attackerWasHitThisTurn: false,
     ...overrides,
   }
 }
@@ -364,6 +375,68 @@ describe('applyPreModifierBasePower', () => {
   it('EFFECT_PURSUIT doubles power only when the defender is switching (battle_util.c:6860-6861)', () => {
     expect(applyPreModifierBasePower(50, 'EFFECT_PURSUIT', null, ctx({ defenderIsSwitching: true }), 0, null, false).power).toBe(100)
     expect(applyPreModifierBasePower(50, 'EFFECT_PURSUIT', null, ctx({ defenderIsSwitching: false }), 0, null, false).power).toBe(50)
+  })
+
+  it('EFFECT_FOCUS_PUNCH forces power to 40 (not a multiplier) only if the attacker was hit this turn (battle_util.c:6876-6877)', () => {
+    expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: true }), 0, null, false).power).toBe(40)
+    expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: false }), 0, null, false).power).toBe(150)
+  })
+})
+
+describe('applyMoveSpecificBasePower (CalcMoveBasePower\'s move-ID-keyed tail switch, battle_util.c:6915-6935)', () => {
+  const hasAbility =
+    (...ids: string[]) =>
+    (id: string) =>
+      ids.includes(id)
+  const noAbility = () => false
+
+  it('Water Shuriken: Ash-Greninja forces 20, Giant Shuriken forces 100, otherwise unchanged', () => {
+    expect(applyMoveSpecificBasePower(18, 'MOVE_WATER_SHURIKEN', 'SPECIES_GRENINJA_ASH', noAbility, new Set(), false)).toBe(20)
+    expect(applyMoveSpecificBasePower(18, 'MOVE_WATER_SHURIKEN', 'SPECIES_GRENINJA', hasAbility('ABILITY_GIANT_SHURIKEN'), new Set(), false)).toBe(100)
+    expect(applyMoveSpecificBasePower(18, 'MOVE_WATER_SHURIKEN', 'SPECIES_GRENINJA', noAbility, new Set(), false)).toBe(18)
+  })
+
+  it('Dragon Darts: Parental Bond multiplies by 5/4, truncated', () => {
+    expect(applyMoveSpecificBasePower(50, 'MOVE_DRAGON_DARTS', 'SPECIES_GARCHOMP', hasAbility('ABILITY_PARENTAL_BOND'), new Set(), false)).toBe(62)
+    expect(applyMoveSpecificBasePower(50, 'MOVE_DRAGON_DARTS', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(50)
+  })
+
+  it('Self-Destruct doubles power if the attacker was hit this turn, same fact Focus Punch reads', () => {
+    expect(applyMoveSpecificBasePower(200, 'MOVE_SELF_DESTRUCT', 'SPECIES_GARCHOMP', noAbility, new Set(), true)).toBe(400)
+    expect(applyMoveSpecificBasePower(200, 'MOVE_SELF_DESTRUCT', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(200)
+  })
+
+  it('Dream Inversion doubles power vs a sleeping defender', () => {
+    expect(applyMoveSpecificBasePower(70, 'MOVE_DREAM_INVERSION', 'SPECIES_GARCHOMP', noAbility, new Set(['STATUS1_SLEEP']), false)).toBe(140)
+    expect(applyMoveSpecificBasePower(70, 'MOVE_DREAM_INVERSION', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(70)
+  })
+
+  it('Flying Press adds a flat 10 power with Wrestle Showman', () => {
+    expect(applyMoveSpecificBasePower(100, 'MOVE_FLYING_PRESS', 'SPECIES_GARCHOMP', hasAbility('ABILITY_WRESTLE_SHOWMAN'), new Set(), false)).toBe(110)
+    expect(applyMoveSpecificBasePower(100, 'MOVE_FLYING_PRESS', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(100)
+  })
+
+  it('Roar of Time forces power to 100 with Temporal Rupture', () => {
+    expect(applyMoveSpecificBasePower(90, 'MOVE_ROAR_OF_TIME', 'SPECIES_GARCHOMP', hasAbility('ABILITY_TEMPORAL_RUPTURE'), new Set(), false)).toBe(100)
+    expect(applyMoveSpecificBasePower(90, 'MOVE_ROAR_OF_TIME', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(90)
+  })
+
+  it('leaves every other move untouched', () => {
+    expect(applyMoveSpecificBasePower(40, 'MOVE_TACKLE', 'SPECIES_GARCHOMP', noAbility, new Set(), false)).toBe(40)
+  })
+})
+
+describe('applyAngelsWrathBasePower (battle_util.c:6938-6952)', () => {
+  it('forces the exact power for each of its 4 moves, only when the attacker holds it', () => {
+    expect(applyAngelsWrathBasePower(40, 'MOVE_TACKLE', true)).toBe(100)
+    expect(applyAngelsWrathBasePower(40, 'MOVE_POISON_STING', true)).toBe(120)
+    expect(applyAngelsWrathBasePower(60, 'MOVE_ELECTROWEB', true)).toBe(155)
+    expect(applyAngelsWrathBasePower(60, 'MOVE_BUG_BITE', true)).toBe(140)
+  })
+
+  it('leaves power untouched without the ability, or for any other move', () => {
+    expect(applyAngelsWrathBasePower(40, 'MOVE_TACKLE', false)).toBe(40)
+    expect(applyAngelsWrathBasePower(90, 'MOVE_EARTHQUAKE', true)).toBe(90)
   })
 })
 

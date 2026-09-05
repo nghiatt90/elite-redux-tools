@@ -151,6 +151,7 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     magnitudeTier: null,
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
+    attackerWasHitThisTurn: false,
     ...overrides,
   }
 }
@@ -1323,6 +1324,106 @@ describe('calculateMoveDamage -- Victory Bomb, modeled as a directly-selectable 
       scenario({ attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_VICTORY_BOMB', innates: [null, null, null] } }) }),
     )
     expect(withVictoryBomb.rolls).toEqual(baseline.rolls)
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_FOCUS_PUNCH forces power to 40 if the attacker was hit this turn (battle_util.c:6876-6877)', () => {
+  it('a plain scenario flag, no turn history needed (same fix as Magnitude/Pursuit)', () => {
+    const notHit = calculateMoveDamage(scenario({ move: moveData('MOVE_FOCUS_PUNCH') }))
+    const wasHit = calculateMoveDamage(scenario({ move: moveData('MOVE_FOCUS_PUNCH'), attackerWasHitThisTurn: true }))
+    expect(wasHit.rolls[15]).toBeLessThan(notHit.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- CalcMoveBasePower\'s move-ID-keyed tail switch, previously entirely unaudited (battle_util.c:6915-6952)', () => {
+  it('Water Shuriken: Ash-Greninja forces 20 power', async () => {
+    await import('./abilities/impl/index')
+    const normal = calculateMoveDamage(scenario({ move: moveData('MOVE_WATER_SHURIKEN') }))
+    const ashGreninja = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_WATER_SHURIKEN'), attacker: battler('SPECIES_GRENINJA_ASH') }),
+    )
+    expect(ashGreninja.rolls[15]).not.toBe(normal.rolls[15])
+  })
+
+  it('Dragon Darts: Parental Bond multiplies power by 5/4', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_DRAGON_DARTS') }))
+    const withParentalBond = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_DRAGON_DARTS'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PARENTAL_BOND', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withParentalBond.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('Self-Destruct doubles power when the attacker was hit this turn', () => {
+    const notHit = calculateMoveDamage(scenario({ move: moveData('MOVE_SELF_DESTRUCT') }))
+    const wasHit = calculateMoveDamage(scenario({ move: moveData('MOVE_SELF_DESTRUCT'), attackerWasHitThisTurn: true }))
+    expect(wasHit.rolls[15]).toBeGreaterThan(notHit.rolls[15])
+  })
+
+  it('Dream Inversion doubles power against a sleeping defender', () => {
+    const awake = calculateMoveDamage(scenario({ move: moveData('MOVE_DREAM_INVERSION') }))
+    const asleep = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_DREAM_INVERSION'),
+        defender: battler('SPECIES_SKARMORY', {
+          condition: condition({ speciesId: 'SPECIES_SKARMORY', baseSpeciesId: 'SPECIES_SKARMORY', hp: 999, maxHp: 999, status1: new Set(['STATUS1_SLEEP']) }),
+        }),
+      }),
+    )
+    expect(asleep.rolls[15]).toBeGreaterThan(awake.rolls[15])
+  })
+
+  it('Flying Press adds a flat 10 power with Wrestle Showman', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_FLYING_PRESS') }))
+    const withAbility = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_FLYING_PRESS'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_WRESTLE_SHOWMAN', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withAbility.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('Roar of Time forces power to 100 with Temporal Rupture', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_ROAR_OF_TIME') }))
+    const withAbility = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_ROAR_OF_TIME'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_TEMPORAL_RUPTURE', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withAbility.rolls[15]).not.toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Angel\'s Wrath\'s missing base-power half (battle_util.c:6938-6952) -- its type-effectiveness half was already ported', () => {
+  it('forces power for its 4 specific moves, on top of the type-effectiveness boost already ported', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
+    const withAngelsWrath = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_ANGELS_WRATH', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withAngelsWrath.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('does not affect a move outside its own 4-move list (scenario()\'s default MOVE_TACKLE is one of the 4, so this uses a different move)', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER') }))
+    const withAngelsWrath = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_FLAMETHROWER'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_ANGELS_WRATH', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withAngelsWrath.rolls[15]).toBe(baseline.rolls[15])
   })
 })
 

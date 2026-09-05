@@ -49,6 +49,7 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     magnitudeTier: null,
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
+    attackerWasHitThisTurn: false,
     ...overrides,
   }
 }

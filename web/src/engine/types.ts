@@ -147,6 +147,16 @@ export interface DamageContext {
   /** STATUS2_DEFENSE_CURL -- only changes EFFECT_ROLLOUT's own counter===0 branch
    * (battle_util.c:6838-6841): doubles power on an otherwise-unboosted first use. */
   attackerHasDefenseCurl: boolean
+  /** gRoundStructs[battlerAtk].physicalDmg/specialDmg, collapsed to one boolean --
+   * "was the attacker damaged (by either category) earlier THIS turn, before
+   * acting" (battle_script_commands.c:1939-1951 sets it on taking a hit; reset
+   * each turn, per the "Round" -- one turn -- naming, same scope as
+   * sameMoveTurnsInARow's own "Battle"-wide vs per-turn distinction). Used by
+   * EFFECT_FOCUS_PUNCH (:6876-6877, power forced to 40 if true) and
+   * MOVE_SELF_DESTRUCT's own hardcoded case (:6926-6927, doubles power) -- a
+   * plain scenario fact, no turn simulation needed, same shape as
+   * defenderIsSwitching. */
+  attackerWasHitThisTurn: boolean
 }
 
 // ---------------------------------------------------------------------------

@@ -340,6 +340,14 @@ export function applyPreModifierBasePower(
     }
     return { power: basePower * 2 ** (ctx.attackerRolloutCounter - 1), unmodelled: [] }
   }
+  if (moveEffect === 'EFFECT_FOCUS_PUNCH') {
+    // battle_util.c:6876-6877 -- a full override (not a multiplier) to 40 power
+    // if the attacker took ANY damage this turn before acting, matching
+    // Focus Punch's real "loses focus and does a weak hit instead of failing
+    // outright" mechanic. Was previously bucketed as "needs turn history" --
+    // wrong, same mistake as Magnitude/Pursuit: it's a plain scenario fact.
+    return { power: ctx.attackerWasHitThisTurn ? 40 : basePower, unmodelled: [] }
+  }
   if (moveEffect === 'EFFECT_PURSUIT') {
     // battle_util.c:6860-6861 -- doubles only when the DEFENDER's chosen action
     // this turn is a switch, a plain scenario fact (DamageContext.defenderIsSwitching)
@@ -366,6 +374,63 @@ export function applyPreModifierBasePower(
   }
 }
 
+/** The move-ID-keyed switch at the end of CalcMoveBasePower (battle_util.c:
+ * 6915-6935) -- a SEPARATE hardcoded switch from the effect-keyed one above
+ * (applyPreModifierBasePower), for one-off moves whose power depends on the
+ * attacker's species/ability or the defender's status rather than a shared
+ * move EFFECT. Previously entirely unaudited/unported (not even flagged as
+ * unmodelled, since it isn't keyed by effect at all). Runs on whatever power
+ * applyPreModifierBasePower already produced, matching the C's own ordering
+ * (this switch runs strictly after the effect-switch and UpdateBaseDamage). */
+export function applyMoveSpecificBasePower(
+  basePower: number,
+  moveId: string,
+  attackerSpeciesId: string,
+  attackerHasAbility: (id: string) => boolean,
+  defenderStatus1: Set<string>,
+  attackerWasHitThisTurn: boolean,
+): number {
+  switch (moveId) {
+    case 'MOVE_WATER_SHURIKEN':
+      if (attackerSpeciesId === 'SPECIES_GRENINJA_ASH') return 20
+      if (attackerHasAbility('ABILITY_GIANT_SHURIKEN')) return 100
+      return basePower
+    case 'MOVE_DRAGON_DARTS':
+      return attackerHasAbility('ABILITY_PARENTAL_BOND') ? Math.trunc((basePower * 5) / 4) : basePower
+    case 'MOVE_SELF_DESTRUCT':
+      // Same attackerWasHitThisTurn fact EFFECT_FOCUS_PUNCH reads above, just a
+      // different move-specific effect (double, not a flat override).
+      return attackerWasHitThisTurn ? basePower * 2 : basePower
+    case 'MOVE_DREAM_INVERSION':
+      return defenderStatus1.has('STATUS1_SLEEP') ? basePower * 2 : basePower
+    case 'MOVE_FLYING_PRESS':
+      return attackerHasAbility('ABILITY_WRESTLE_SHOWMAN') ? basePower + 10 : basePower
+    case 'MOVE_ROAR_OF_TIME':
+      return attackerHasAbility('ABILITY_TEMPORAL_RUPTURE') ? 100 : basePower
+    default:
+      return basePower
+  }
+}
+
+/** Angel's Wrath's OWN move-ID-keyed switch (battle_util.c:6938-6952), gated on
+ * the attacker actually holding the ability -- a flat power override for 4
+ * specific moves, completely separate from (and layered on top of) the general
+ * move-specific switch above. Angel's Wrath's OTHER half (its onTypeEffectiveness
+ * hook, Poison Sting-vs-Steel/Electroweb-vs-Ground) was already ported
+ * (16-type-effectiveness.ts) -- this base-power half was missed entirely until
+ * this session's own audit of CalcMoveBasePower's tail end. */
+const ANGELS_WRATH_POWER: Record<string, number> = {
+  MOVE_TACKLE: 100,
+  MOVE_POISON_STING: 120,
+  MOVE_ELECTROWEB: 155,
+  MOVE_BUG_BITE: 140,
+}
+
+export function applyAngelsWrathBasePower(basePower: number, moveId: string, attackerHasAngelsWrath: boolean): number {
+  if (!attackerHasAngelsWrath) return basePower
+  return ANGELS_WRATH_POWER[moveId] ?? basePower
+}
+
 // ---------------------------------------------------------------------------
 // Behaviors whose base-power mechanic lives in CalcMoveBasePower's hardcoded C
 // switch (:6825-6913) rather than in moveBehaviors.json, and are NOT ported --
@@ -374,7 +439,7 @@ export function applyPreModifierBasePower(
 // power as if no special mechanic applied.
 // ---------------------------------------------------------------------------
 
-export const UNMODELLED_BASE_POWER_EFFECTS = new Set(['EFFECT_FOCUS_PUNCH', 'EFFECT_BEAT_UP'])
+export const UNMODELLED_BASE_POWER_EFFECTS = new Set(['EFFECT_BEAT_UP'])
 
 // ---------------------------------------------------------------------------
 // 2. CalcMoveBasePowerAfterModifiers's own chain (src/battle_util.c:6995-7117).

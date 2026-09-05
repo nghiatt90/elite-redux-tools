@@ -25,7 +25,9 @@ import {
   spDefensePreModify,
 } from './battleStat'
 import {
+  applyAngelsWrathBasePower,
   applyMoveBehaviorDamage,
+  applyMoveSpecificBasePower,
   applyPreModifierBasePower,
   calcMoveBasePowerAfterModifiers,
   MAGNITUDE_PROBABILITY_PERCENT,
@@ -123,6 +125,9 @@ export interface DamageCalcScenario {
   attackerRolloutCounter: 0 | 1 | 2 | 3
   /** See DamageContext.attackerHasDefenseCurl's own doc (EFFECT_ROLLOUT). */
   attackerHasDefenseCurl: boolean
+  /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
+   * MOVE_SELF_DESTRUCT). */
+  attackerWasHitThisTurn: boolean
 }
 
 export interface DamageCalcResult {
@@ -168,6 +173,7 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     magnitudeTier: scenario.magnitudeTier,
     attackerRolloutCounter: scenario.attackerRolloutCounter,
     attackerHasDefenseCurl: scenario.attackerHasDefenseCurl,
+    attackerWasHitThisTurn: scenario.attackerWasHitThisTurn,
   }
 }
 
@@ -719,7 +725,18 @@ function calcInternal(
   // ABILITY_VICTORY_BOMB's own onMoveType hook (ported normally,
   // 20-move-type-and-recoil.ts), whose condition is reinterpreted the same way.
   const victoryBombPower = move.id === 'MOVE_EXPLOSION' && battlerHasAbility(attacker.abilitySlots, 'ABILITY_VICTORY_BOMB', () => false) ? 100 : null
-  const power = calcMoveBasePowerAfterModifiers(Math.max(victoryBombPower ?? preModifierResult.power, 1), basePowerCtx)
+  // CalcMoveBasePower's move-ID-keyed tail switch (battle_util.c:6915-6952) --
+  // see applyMoveSpecificBasePower/applyAngelsWrathBasePower's own doc.
+  const moveSpecificPower = applyMoveSpecificBasePower(
+    victoryBombPower ?? preModifierResult.power,
+    move.id,
+    attacker.condition.speciesId,
+    (id) => battlerHasAbility(attacker.abilitySlots, id, () => false),
+    defender.condition.status1,
+    scenario.attackerWasHitThisTurn,
+  )
+  const angelsWrathPower = applyAngelsWrathBasePower(moveSpecificPower, move.id, battlerHasAbility(attacker.abilitySlots, 'ABILITY_ANGELS_WRATH', () => false))
+  const power = calcMoveBasePowerAfterModifiers(Math.max(angelsWrathPower, 1), basePowerCtx)
 
   for (const id of [attacker.abilitySlots.ability, ...attacker.abilitySlots.innates, defender.abilitySlots.ability, ...defender.abilitySlots.innates]) {
     const note = abilityCoverageNote(id)
