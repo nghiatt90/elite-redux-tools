@@ -421,6 +421,34 @@ describe('calculateMoveDamage -- ignoresAbility forces Mold Breaker unconditiona
   })
 })
 
+describe('calculateMoveDamage -- Struggle is a flat 1.0x, no type effectiveness and no STAB (CalcTypeEffectivenessMultiplier, battle_util.c:8015-8021)', () => {
+  it('is NOT immune against a pure Ghost defender, despite being declared Normal-type in this data', () => {
+    const struggleVsGhost = calculateMoveDamage(scenario({ move: moveData('MOVE_STRUGGLE'), defender: battler('SPECIES_MISDREAVUS') }))
+    expect(struggleVsGhost.isImmune).toBe(false)
+    expect(struggleVsGhost.typeEffectiveness).toBe(uq(1.0))
+  })
+
+  it('is not resisted or super-effective against any defender -- always exactly neutral', () => {
+    const struggleVsSteel = calculateMoveDamage(scenario({ move: moveData('MOVE_STRUGGLE') })) // Skarmory (Steel/Flying) -- Normal is normally resisted by Steel
+    expect(struggleVsSteel.typeEffectiveness).toBe(uq(1.0))
+  })
+
+  it('does not grant STAB even to a Normal-type attacker', () => {
+    const porygon = battler('SPECIES_PORYGON') // pure Normal
+    const struggle = calculateMoveDamage(scenario({ move: moveData('MOVE_STRUGGLE'), attacker: porygon, defender: battler('SPECIES_GARCHOMP') }))
+    const tackle = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: porygon, defender: battler('SPECIES_GARCHOMP') }))
+    // Tackle (40 power, Normal, DOES get STAB from this same Normal-type
+    // attacker) should deal MORE damage than power-scaling alone would predict
+    // if Struggle (50 power) also incorrectly got STAB -- Struggle/Tackle's
+    // ratio should track the bare 50/40 power ratio (1.25x) divided by STAB's
+    // 1.5x (since Tackle has it and Struggle must not), not the raw 1.25x
+    // itself.
+    const ratio = struggle.rolls[15] / tackle.rolls[15]
+    expect(ratio).toBeLessThan(1.25)
+    expect(ratio).toBeGreaterThan(0.7)
+  })
+})
+
 describe('calculateMoveDamage -- Ring Target neutralizes only its holder\'s immune type component (battle_util.c:7881-7884)', () => {
   it("Thunderbolt vs Ground/Flying Skarmory-like defender: immune without Ring Target, super-effective (not flat neutral) with it", () => {
     // Skarmory is Steel/Flying (not Ground), so swap in a Ground/Flying-typed

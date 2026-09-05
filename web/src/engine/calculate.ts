@@ -528,8 +528,20 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
  * own onMoldBreaker condition, see OnMoldBreakerContext's doc), and once for real
  * with whichever attackerHasMoldBreaker value that hypothesis (plus every other
  * onMoldBreaker ability) actually resolves to.
+ *
+ * Real bug found auditing this: CalcTypeEffectivenessMultiplier
+ * (battle_util.c:8015-8021) skips the ENTIRE fold for MOVE_STRUGGLE
+ * unconditionally (`if (move != MOVE_STRUGGLE && IsValidType(moveType))`),
+ * leaving it flat at neutral (1.0) -- no resistance, no immunity, no
+ * super-effectiveness, regardless of its own declared type. This engine's data
+ * gives Struggle a real declared type (TYPE_NORMAL, unlike vanilla Pokemon's
+ * internal typeless/MYSTERY representation), so without this special case
+ * Struggle was silently being resisted by Rock/Steel/Ghost and OUTRIGHT
+ * IMMUNE against pure Ghost-type defenders -- a real, live bug for a move
+ * every single Pokemon can use.
  */
 function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string, defenderTypes: string[], attackerHasMoldBreaker: boolean): number {
+  if (scenario.move.id === 'MOVE_STRUGGLE') return uq(1.0)
   const { attacker, defender, move, field, typeChart } = scenario
   // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701), which checks
   // CheckGroundingEffects (:6672-6685) FIRST -- Iron Ball or Gravity forces
@@ -789,7 +801,7 @@ function calcInternal(
       moveFlags: move.flags,
       moveEffectChance: move.effectChance,
       ateBoost,
-      attackerHasStab: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker) > 2,
+      attackerHasStab: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker, move.id) > 2,
       basePower: power,
       typeEffectiveness,
       isCrit,
@@ -845,7 +857,7 @@ function calcInternal(
     // MoveData yet, so this is always the ordinary x1.5 for now.
     critMultiplier: isCrit ? 1.5 : null,
     weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
-    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker),
+    stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker, move.id),
     screensActive:
       !isCrit &&
       screensApply(field, split) &&
@@ -873,16 +885,22 @@ function calcInternal(
  *   if (move == MOVE_STRUGGLE) return 2;
  *   if (IsAbilityOnFieldExcept(battler, ABILITY_RELIC_STONE)) return 2;
  *
- * Struggle is typeless (no move type to check STAB against at all), so the early
- * return there is a pure no-op we get for free by construction -- omitted.
+ * CORRECTION (this session's own later audit): an earlier version of this
+ * comment claimed Struggle is typeless so the early return is a no-op --
+ * wrong, this engine's own data gives Struggle a real declared type
+ * (TYPE_NORMAL), so it's a genuine, necessary check (see resolveTypeEffectiveness's
+ * own matching Struggle fix, and CalcTypeEffectivenessMultiplier's own
+ * unconditional Struggle bypass, battle_util.c:8015-8021, which is why THIS
+ * check and that one both special-case the same move independently).
  * IsAbilityOnFieldExcept scans every battler OTHER than the one computing STAB
  * (`i == battlerId` is skipped, battle_util.c:4839-4848); in this 2-battler v1
  * singles engine "every other battler" is just the defender, so the attacker's OWN
  * Relic Stone (if it somehow held one) would NOT suppress its own STAB, matching
  * the C exactly. Relic Stone has zero hooks of its own (`breakable` only) -- this
  * is a hardcoded special case, not something the ability registry can express.
- * Mold Breaker suppression of `breakable` abilities (including this one) isn't
- * modelled yet -- see isSuppressed's own doc in dispatchCalc.ts.
+ * Mold Breaker suppression of this field-wide effect IS modelled (the
+ * attackerHasMoldBreaker parameter below), despite an even earlier version of
+ * this comment also claiming otherwise.
  */
 function stabInHalves(
   attackerTypes: string[],
@@ -890,7 +908,14 @@ function stabInHalves(
   defenderSlots: AbilitySlots,
   moveType: string,
   attackerHasMoldBreaker: boolean,
+  moveId: string,
 ): 2 | 3 | 4 {
+  // Real bug found alongside resolveTypeEffectiveness's own Struggle fix: this
+  // engine's data gives Struggle a real declared type (TYPE_NORMAL), so without
+  // this explicit check a Normal-type (or Normal-STAB-granting-ability)
+  // attacker would incorrectly get STAB on it -- the C's own early return here
+  // isn't a no-op the way an earlier version of this comment claimed.
+  if (moveId === 'MOVE_STRUGGLE') return 2
   // Relic Stone is `breakable` -- an attacker with an active Mold Breaker bypasses
   // the field-wide STAB suppression, per IsSuppressed's own rule.
   if (battlerHasAbility(defenderSlots, 'ABILITY_RELIC_STONE', () => attackerHasMoldBreaker)) return 2
