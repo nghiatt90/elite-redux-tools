@@ -865,7 +865,13 @@ function calcInternal(
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness),
     attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow, move.flags, split),
-    hasSuperEffectiveBoost: isSuperEffective && move.effect === 'EFFECT_MISC_HIT',
+    // Real bug found auditing this: was checking only move.effect ===
+    // 'EFFECT_MISC_HIT', which is true for ALL 8 current EFFECT_MISC_HIT moves
+    // (MISC_EFFECT_FAINTED_MON_BOOST, _ELECTRIC_TERRAIN_BOOST, etc.), not just
+    // the 2 that actually declare MISC_EFFECT_SUPEREFFECTIVE_BOOST
+    // (battle_util.c:7711-7713) -- silently giving 6 unrelated moves an extra
+    // 4/3x whenever they happened to be super effective.
+    hasSuperEffectiveBoost: isSuperEffective && move.miscEffect === 'MISC_EFFECT_SUPEREFFECTIVE_BOOST',
     // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
     // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
     // must hold. hitsAir only doubles for the FLAG_DMG_2X_IN_AIR variant --

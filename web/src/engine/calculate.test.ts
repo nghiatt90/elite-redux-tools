@@ -852,6 +852,42 @@ describe('calculateMoveDamage -- Pretty Princess boosts against a defender with 
   })
 })
 
+describe('calculateMoveDamage -- MISC_EFFECT_SUPEREFFECTIVE_BOOST (4/3x) applies ONLY to its own 2 moves, not every EFFECT_MISC_HIT move (battle_util.c:7711-7713)', () => {
+  // Both comparisons use a same-type, same-split, no-EFFECT "control" move
+  // against the SAME attacker/defender pair, so the only variables are power
+  // (corrected for below) and the boost itself -- comparing across DIFFERENT
+  // defender species would confound the type-effectiveness ratio with their
+  // differing raw Defense stats, which an earlier version of this test did.
+  it('Collision Course vs a neutral matchup deals damage matching its bare power ratio, with no boost (isolates the "not super effective" baseline)', () => {
+    // Fighting vs Skarmory (Steel/Flying): Steel weak(2x) x Flying resists(0.5x) = neutral (1x) overall.
+    const collisionCourse = calculateMoveDamage(scenario({ move: moveData('MOVE_COLLISION_COURSE') })) // 100 power
+    const karateChop = calculateMoveDamage(scenario({ move: moveData('MOVE_KARATE_CHOP') })) // 90 power, same type/split, no effect
+    expect(collisionCourse.typeEffectiveness).toBe(uq(1.0))
+    const ratio = collisionCourse.rolls[15] / karateChop.rolls[15]
+    expect(ratio).toBeCloseTo(100 / 90, 1) // no boost when not super effective
+  })
+
+  it('Collision Course vs a Fighting-weak (Normal-type) defender: the extra 4/3x stacks on top of the bare power ratio', () => {
+    const normalDefender = battler('SPECIES_PORYGON') // pure Normal -- Fighting is super effective (2x)
+    const collisionCourse = calculateMoveDamage(scenario({ move: moveData('MOVE_COLLISION_COURSE'), defender: normalDefender }))
+    const karateChop = calculateMoveDamage(scenario({ move: moveData('MOVE_KARATE_CHOP'), defender: normalDefender }))
+    expect(collisionCourse.typeEffectiveness).toBe(uq(2.0))
+    const ratio = collisionCourse.rolls[15] / karateChop.rolls[15]
+    // Bare power ratio (100/90 ~ 1.111) x the extra 4/3x boost ~ 1.481.
+    expect(ratio).toBeCloseTo((100 / 90) * (4 / 3), 1)
+  })
+
+  it('Last Respects (MISC_EFFECT_FAINTED_MON_BOOST, a DIFFERENT EFFECT_MISC_HIT move) does NOT get the 4/3x even when super effective', () => {
+    const ghostWeakDefender = battler('SPECIES_MISDREAVUS') // pure Ghost -- Ghost is super effective (2x) vs itself
+    const lastRespects = calculateMoveDamage(scenario({ move: moveData('MOVE_LAST_RESPECTS'), defender: ghostWeakDefender })) // 90 power
+    const shadowPunch = calculateMoveDamage(scenario({ move: moveData('MOVE_SHADOW_PUNCH'), defender: ghostWeakDefender })) // 90 power, same type/split, no effect
+    expect(lastRespects.typeEffectiveness).toBe(uq(2.0))
+    expect(shadowPunch.typeEffectiveness).toBe(uq(2.0))
+    // Identical power/type/split -- should deal IDENTICAL damage, not 4/3x more.
+    expect(lastRespects.rolls[15]).toBe(shadowPunch.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- Sheer Force boosts moves with a secondary effect chance (src/abilities.cc:1855-1860)', () => {
   it('boosts a move with a nonzero effectChance, but not a move without one', () => {
     // MOVE_ACID is POISON -- the default SPECIES_SKARMORY defender (Steel/Flying) is
