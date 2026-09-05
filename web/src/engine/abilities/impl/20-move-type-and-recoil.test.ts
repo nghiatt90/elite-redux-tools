@@ -26,6 +26,16 @@ describe('move type + recoil batch R', () => {
     expect(findAbility('ABILITY_SUPER_STRAIN').onRecoil!({ battlerId: 'x', damage: 0, moveType: 'NORMAL' })).toBe(1)
   })
 
+  it('Victory Bomb converts Explosion (and only Explosion) to Fire', () => {
+    const explosion: OnMoveTypeContext = { battlerId: 'x', moveId: 'MOVE_EXPLOSION', moveType: 'NORMAL', ateBoost: false, moveFlags: {} }
+    findAbility('ABILITY_VICTORY_BOMB').onMoveType!(explosion)
+    expect(explosion.moveType).toBe('FIRE')
+
+    const otherMove: OnMoveTypeContext = { battlerId: 'x', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', ateBoost: false, moveFlags: {} }
+    findAbility('ABILITY_VICTORY_BOMB').onMoveType!(otherMove)
+    expect(otherMove.moveType).toBe('NORMAL')
+  })
+
   it('every entry cites a src line', () => {
     for (const ability of MOVE_TYPE_AND_RECOIL_ABILITIES) {
       expect(ability.src).toMatch(/^src\/abilities\.cc:\d+$/)

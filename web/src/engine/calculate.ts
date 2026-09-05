@@ -707,7 +707,19 @@ function calcInternal(
     hitIndex,
   )
   unmodelled.push(...preModifierResult.unmodelled)
-  const power = calcMoveBasePowerAfterModifiers(Math.max(preModifierResult.power, 1), basePowerCtx)
+  // Victory Bomb (src/abilities.cc:8980-8988): the real C queues a SEPARATE,
+  // later, reversed-direction attack (UseOutOfTurnAttack, the holder retaliating
+  // against its attacker once it faints) -- simulating that queue is out of
+  // scope for this single-hit calculator (same class of gap as Glacial Rage's
+  // own follow-up move, see this session's own scoping discussion). Reframed
+  // instead as a directly-selectable "5th attack": selecting MOVE_EXPLOSION IS
+  // the scenario, so the C's own UseOutOfTurnAttack override (declared power 250
+  // -> 100 for that specific queued call) applies unconditionally here rather
+  // than only inside a simulated queue. The matching Fire-type override is
+  // ABILITY_VICTORY_BOMB's own onMoveType hook (ported normally,
+  // 20-move-type-and-recoil.ts), whose condition is reinterpreted the same way.
+  const victoryBombPower = move.id === 'MOVE_EXPLOSION' && battlerHasAbility(attacker.abilitySlots, 'ABILITY_VICTORY_BOMB', () => false) ? 100 : null
+  const power = calcMoveBasePowerAfterModifiers(Math.max(victoryBombPower ?? preModifierResult.power, 1), basePowerCtx)
 
   for (const id of [attacker.abilitySlots.ability, ...attacker.abilitySlots.innates, defender.abilitySlots.ability, ...defender.abilitySlots.innates]) {
     const note = abilityCoverageNote(id)

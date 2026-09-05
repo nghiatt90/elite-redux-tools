@@ -1293,6 +1293,39 @@ describe('calculateMoveDamage -- onMoldBreaker\'s 5 hypothesis-based abilities a
   })
 })
 
+describe('calculateMoveDamage -- Victory Bomb, modeled as a directly-selectable "5th attack" (see calculate.ts\'s own comment for the reframing)', () => {
+  it('MOVE_EXPLOSION becomes a 100-power Fire move when the attacker holds Victory Bomb, instead of its declared 250-power Normal', async () => {
+    await import('./abilities/impl/index')
+    // Garchomp (Ground/Dragon) is neutral to BOTH Normal and Fire, so any damage
+    // difference here isolates the power change (250 -> 100), not the type
+    // change's own effectiveness swing (scenario()'s default Skarmory defender
+    // resists Normal but is weak to Fire, which would confound this comparison).
+    const neutralDefender = battler('SPECIES_GARCHOMP')
+    const withoutAbility = calculateMoveDamage(scenario({ move: moveData('MOVE_EXPLOSION'), defender: neutralDefender }))
+    expect(withoutAbility.effectiveMoveType).toBe('NORMAL')
+
+    const withVictoryBomb = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_EXPLOSION'),
+        defender: neutralDefender,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_VICTORY_BOMB', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withVictoryBomb.effectiveMoveType).toBe('FIRE')
+    // Lower power (100 vs 250) should mean less damage against a neutral defender.
+    expect(withVictoryBomb.rolls[15]).toBeLessThan(withoutAbility.rolls[15])
+  })
+
+  it('does not affect any other move, even for a Victory Bomb holder', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario())
+    const withVictoryBomb = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_VICTORY_BOMB', innates: [null, null, null] } }) }),
+    )
+    expect(withVictoryBomb.rolls).toEqual(baseline.rolls)
+  })
+})
+
 describe('calculateMoveDamage -- doubleDamageVsMega doubles power against a Mega-evolved defender (battle_util.c:7003-7005)', () => {
   it('Behemoth Bash doubles power vs a Mega defender, not a non-Mega one', () => {
     const skarmory = (isMegaEvolved: boolean) =>
