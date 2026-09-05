@@ -90,6 +90,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     holdEffectStrength: null,
     holdEffectType: null,
     naturalGift: null,
+    hiddenPowerType: null,
     isTransformed: false,
     canEvolveStrict: false,
     isInfatuatedWithOpponent: false,
@@ -498,6 +499,29 @@ describe('calculateMoveDamage -- onSwapSplit is wired in (SetSwapDamageCategory,
       }),
     )
     expect(withMysticBlades.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_HIDDEN_POWER (Hidden Power/Secret Power/Techno Blast share this in ER; GetMoveTypeInternal, src/battle_main.c:5041-5042)', () => {
+  it('with no hiddenPowerType set, stays at the declared Normal type and surfaces an unmodelled note', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_HIDDEN_POWER') }))
+    expect(result.effectiveMoveType).toBe('NORMAL')
+    expect(result.unmodelled.some((n) => n.includes('MOVE_HIDDEN_POWER'))).toBe(true)
+  })
+
+  it('with hiddenPowerType set, the move resolves to that type instead (not derived from IVs -- ER assigns it independently)', () => {
+    const result = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_HIDDEN_POWER'), attacker: battler('SPECIES_GARCHOMP', { hiddenPowerType: 'ICE' }) }),
+    )
+    expect(result.effectiveMoveType).toBe('ICE')
+    expect(result.unmodelled.some((n) => n.includes('MOVE_HIDDEN_POWER'))).toBe(false)
+  })
+
+  it('Techno Blast (ER redesign: shares EFFECT_HIDDEN_POWER, not drive-based) also follows hiddenPowerType', () => {
+    const result = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_TECHNO_BLAST'), attacker: battler('SPECIES_GARCHOMP', { hiddenPowerType: 'FIRE' }) }),
+    )
+    expect(result.effectiveMoveType).toBe('FIRE')
   })
 })
 

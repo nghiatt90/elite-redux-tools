@@ -196,6 +196,20 @@ export interface BattlerBattleState {
    * resolvedHoldEffect/holdEffectType, which are a DIFFERENT mechanism (Plate/Type
    * Power/Gems' own type-MATCH check) that berries don't participate in. */
   naturalGift: { power: number; type: string } | null
+  /** EFFECT_HIDDEN_POWER's type (Hidden Power, Secret Power, and -- in this ER
+   * redesign, see MoveList.textproto's own description -- Techno Blast too, all
+   * three sharing one effect: GetMoveTypeInternal/GetTypeBeforeUsingMove,
+   * src/battle_main.c:5041-5042,5141-5142 return `mon->hpType` directly). NOT
+   * derived from IVs: unlike vanilla Pokemon's classic IV-parity formula, this
+   * ER build assigns hpType as its own independently-random BoxMon field at
+   * creation (src/pokemon.c:573-579, `Random() % (NUMBER_OF_MON_TYPES - 1)`,
+   * excluding Mystery) -- and ER also forces every IV to 31 on recalculation
+   * (scenario.ts's defaultIvs doc), which would make the vanilla formula always
+   * return the same type anyway. A real scenario toggle, same shape as
+   * boostedStat/gender, not something this calculator can derive -- null when
+   * unset, which leaves the move at its declared (Normal) type and surfaces an
+   * unmodelled note instead of silently guessing. */
+  hiddenPowerType: string | null
   isTransformed: boolean // STATUS2_TRANSFORMED (Metal Powder exemption)
   canEvolveStrict: boolean // Eviolite eligibility
   isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler

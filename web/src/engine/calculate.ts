@@ -493,6 +493,9 @@ function calcInternal(
   // 5148-5150,5180-5182, each switch case in that function returns immediately on
   // match). When none applies, this falls through exactly like the C's `break`
   // does, leaving the move at its declared type for the ability loop below.
+  if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
+    unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
+  }
   const itemMoveType =
     move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
       ? (attacker.holdEffectType ?? inputMoveType)
@@ -500,7 +503,9 @@ function calcInternal(
         ? attacker.naturalGift.type
         : move.effect === 'EFFECT_WEATHER_BALL'
           ? weatherBallType(field.weather, attackerHasAuroraBorealis)
-          : null
+          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
+            ? attacker.hiddenPowerType
+            : null
 
   // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the

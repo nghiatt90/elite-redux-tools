@@ -58,7 +58,8 @@ function MoveSelect({ value, onChange, options, movesById }: { value: string | n
 }
 
 export default function BattlerPanel({ side, config, onChange, natures, abilityHooks }: Props) {
-  const { species, speciesById, movesById, items } = useGameData()
+  const { species, speciesById, movesById, items, typeChart } = useGameData()
+  const hiddenPowerTypes = useMemo(() => Object.keys(typeChart).sort(), [typeChart])
   const [speciesQuery, setSpeciesQuery] = useState('')
 
   const baseSpecies = useMemo(() => species.filter((s) => !s.isForm || isStandaloneForm(s, speciesById)), [species, speciesById])
@@ -270,6 +271,23 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
           {BOOSTED_STAT_OPTIONS.map((o) => (
             <option key={o.id ?? 'none'} value={o.id ?? ''}>
               {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Hidden Power type {/* Hidden Power/Secret Power/Techno Blast all share this -- ER assigns it as its own independently-random trait, not derived from IVs (which ER forces to 31 anyway), so it's a plain scenario toggle */}
+        <select
+          className="mt-0.5 rounded-md border px-2 py-1 text-sm w-full"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+          value={config.hiddenPowerType ?? ''}
+          onChange={(e) => set('hiddenPowerType', e.target.value || null)}
+        >
+          <option value="">(unset)</option>
+          {hiddenPowerTypes.map((t) => (
+            <option key={t} value={t}>
+              {t.charAt(0) + t.slice(1).toLowerCase()}
             </option>
           ))}
         </select>

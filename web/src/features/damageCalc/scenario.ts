@@ -113,6 +113,9 @@ export interface BattlerConfig {
    * state, matching Slow Start's own `abilityOn` default of false (also "not
    * currently active") for the same underlying timer. */
   slowStartTimer: number
+  /** See BattlerBattleState.hiddenPowerType's doc -- a scenario toggle, null
+   * (unset) by default. */
+  hiddenPowerType: string | null
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -145,6 +148,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     boostedStat: null,
     alliesFainted: 0,
     slowStartTimer: 5,
+    hiddenPowerType: null,
   }
 }
 
@@ -258,6 +262,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     // having exercised Plate/Type Power to catch it).
     holdEffectType: item?.holdEffectType ? bareType(item.holdEffectType) : null,
     naturalGift: item?.naturalGift ? { power: item.naturalGift.power, type: bareType(item.naturalGift.type) } : null,
+    hiddenPowerType: config.hiddenPowerType,
     isTransformed: false,
     canEvolveStrict: species.evolutions.length > 0,
     isInfatuatedWithOpponent: false,
