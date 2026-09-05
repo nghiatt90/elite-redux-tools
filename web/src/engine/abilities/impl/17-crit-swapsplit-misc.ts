@@ -1,8 +1,8 @@
 // Batch O: the remaining onCrit/onSwapSplit lambdas portable with existing context
 // fields, plus one onDefensiveMultiplier alias/composite (Bass Boosted) found
-// alongside them. onSwapSplit isn't wired into calculate.ts's split resolution yet
-// (separately tracked, like onTypeEffectiveness/onAfterTypeEffectiveness), but
-// these ports are complete and correct for when it is.
+// alongside them. onSwapSplit is wired into calculate.ts's resolveSplit (attacker-
+// only, dispatched via dispatchCalc.computeSwapSplit) -- found and fixed in the
+// same ported-but-not-dispatched audit as onTypeEffectiveness/onAfterTypeEffectiveness.
 //
 // Deferred (left in 99-unmodelled.ts): Ambush/Ape Shift (need per-turn "is this the
 // battler's first turn" / an exact mega-form species check, neither tracked),

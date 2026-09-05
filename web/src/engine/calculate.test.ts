@@ -470,6 +470,37 @@ describe('calculateMoveDamage -- onTypeEffectiveness/onAfterTypeEffectiveness ar
   })
 })
 
+describe('calculateMoveDamage -- onSwapSplit is wired in (SetSwapDamageCategory, src/battle_util.c:7341-7381)', () => {
+  it('Mystic Blades flips a physical slicing move to SPECIAL, using spatk/spdef instead of atk/def', async () => {
+    await import('./abilities/impl/index')
+    // Garchomp: atk 130 >> spatk 80. Skarmory: def 140 >> spdef 70. X-Scissor
+    // (physical, sliceBased) normally uses atk vs def (strong stat vs strong
+    // stat); with the split flipped it uses spatk vs spdef (weak vs weak) --
+    // net effect is a much bigger number, not a subtler one, so this isn't a
+    // coincidental near-tie the way Samurott's own atk/spatk would have been.
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_X_SCISSOR') }))
+    const withMysticBlades = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_X_SCISSOR'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_MYSTIC_BLADES', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withMysticBlades.rolls[15]).toBeGreaterThan(baseline.rolls[15])
+  })
+
+  it('a special move is untouched (the ability only checks SPLIT_PHYSICAL)', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER') }))
+    const withMysticBlades = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_FLAMETHROWER'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_MYSTIC_BLADES', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withMysticBlades.rolls[15]).toBe(baseline.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- onAbsorb blocks damage independent of the type chart (TestAbsorbingAbilities, battle_util.c:8961-8969)', () => {
   it('Surf (super-effective vs Ground/Dragon Garchomp) is fully absorbed by Water Absorb, not just reduced', async () => {
     await import('./abilities/impl/index')

@@ -51,6 +51,7 @@ import {
   computeChooseDefensiveStat,
   computeChooseOffensiveStat,
   computeOnStatModifier,
+  computeSwapSplit,
   hasFlag,
   hasStabOverride,
   isIronFistBoosted,
@@ -162,7 +163,16 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
  * PHYSICAL rather than the C's `Random() % 2` -- a static calculator reports one
  * scenario per call, not a coin flip. USE_LOWEST_DEFENSE is never handled by the C
  * itself (falls through to the `default` branch, i.e. behaves like USE_BASE_SPLIT) --
- * reproduced here rather than treated as an error. */
+ * reproduced here rather than treated as an error.
+ *
+ * The `default` branch also runs the onSwapSplit ability census
+ * (SetSwapDamageCategory's `ON_ABILITY` loop, src/battle_util.c:7344-7346) --
+ * Mystic Blades/Energized Horns/Mythical Arrows/Best Offense/Pony Power/Magus
+ * Blades/Sinister Claws, ported in 17-crit-swapsplit-misc.ts and 10-aliases.ts but
+ * previously never dispatched from here (audit gap, same shape as the
+ * onTypeEffectiveness/onAfterTypeEffectiveness fix above). USE_HIGHEST_OFFENSE/
+ * USE_HIGHEST_DAMAGE are separate C branches that never reach ON_ABILITY at all, so
+ * the ability census is only consulted for the `default` case here too. */
 function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spatk: number; def: number; spdef: number }): 'PHYSICAL' | 'SPECIAL' {
   const base = scenario.move.split === 'SPECIAL' ? 'SPECIAL' : 'PHYSICAL'
   let split: 'PHYSICAL' | 'SPECIAL' = base
@@ -173,6 +183,16 @@ function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spa
     const physicalScore = rawStats.atk * rawStats.spdef
     const specialScore = rawStats.spatk * rawStats.def
     split = physicalScore > specialScore ? 'PHYSICAL' : physicalScore < specialScore ? 'SPECIAL' : base
+  } else {
+    const moveType = scenario.move.type ?? 'NORMAL'
+    const swap = computeSwapSplit(scenario.attacker.abilitySlots, {
+      battlerId: 'attacker',
+      moveId: scenario.move.id,
+      moveType,
+      moveSplit: split,
+      moveFlags: scenario.move.flags,
+    })
+    if (swap) split = split === 'PHYSICAL' ? 'SPECIAL' : 'PHYSICAL'
   }
 
   if (scenario.attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SWIRLY_GLASSES') {

@@ -27,6 +27,7 @@ import type {
   OnMoveTypeContext,
   OnParentalBondContext,
   OnStatContext,
+  OnSwapSplitContext,
   OnTypeEffectivenessContext,
   ParentalBondTrigger,
 } from './types'
@@ -218,6 +219,25 @@ export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record
     }
   })
   return granted
+}
+
+/** SetSwapDamageCategory's default-splitFlag branch (src/battle_util.c:7341-7348):
+ * `ON_ABILITY(battler, FALSE, ...)` where `battler` is always `battlerAtk` at the
+ * one call site (:7798) -- attacker-only, no target scope exists for this hook at
+ * all (unlike onTypeEffectiveness's applyOn), and breaks on the first ability that
+ * returns true, same short-circuit as the C's `if (gSwapDamageCategory) break`.
+ * Only invoked for the "default" splitFlag case in resolveSplit -- USE_HIGHEST_OFFENSE/
+ * USE_HIGHEST_DAMAGE are separate branches in the C that never reach ON_ABILITY at
+ * all, matching resolveSplit's existing structure. */
+export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: OnSwapSplitContext): boolean {
+  let swap = false
+  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
+    if (impl.onSwapSplit?.(ctx)) {
+      swap = true
+      return 'break'
+    }
+  })
+  return swap
 }
 
 export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnInfiltrateContext): boolean {

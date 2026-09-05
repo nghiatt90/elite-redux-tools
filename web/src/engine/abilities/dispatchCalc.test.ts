@@ -4,6 +4,7 @@ import {
   computeAbilityMultiplier,
   computeAfterTypeEffectiveness,
   computeOnStatModifier,
+  computeSwapSplit,
   computeTypeEffectivenessWithAbilities,
   hasFlag,
   hasFortKnox,
@@ -184,6 +185,46 @@ describe('isIronFistBoosted', () => {
     registerAbilities([crossSwap])
     expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), {}, 'PHYSICAL')).toBe(false)
     expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), { kickBased: true }, 'PHYSICAL')).toBe(true)
+  })
+})
+
+describe('computeSwapSplit', () => {
+  const swapIfPhysicalSlicing: AbilityImpl = {
+    id: 'ABILITY_TEST_MYSTIC_BLADES',
+    src: 'test',
+    onSwapSplit: (ctx) => ctx.moveSplit === 'PHYSICAL' && Boolean(ctx.moveFlags.sliceBased),
+  }
+
+  it('no matching ability -> no swap', () => {
+    expect(
+      computeSwapSplit(slots(null), { battlerId: 'attacker', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL', moveFlags: {} }),
+    ).toBe(false)
+  })
+
+  it("a physical slicing move with Mystic Blades-shaped ability -> swap", () => {
+    registerAbilities([swapIfPhysicalSlicing])
+    expect(
+      computeSwapSplit(slots('ABILITY_TEST_MYSTIC_BLADES'), {
+        battlerId: 'attacker',
+        moveId: 'MOVE_SLASH',
+        moveType: 'NORMAL',
+        moveSplit: 'PHYSICAL',
+        moveFlags: { sliceBased: true },
+      }),
+    ).toBe(true)
+  })
+
+  it('a special slicing move does not swap (condition already false, matching the C)', () => {
+    registerAbilities([swapIfPhysicalSlicing])
+    expect(
+      computeSwapSplit(slots('ABILITY_TEST_MYSTIC_BLADES'), {
+        battlerId: 'attacker',
+        moveId: 'MOVE_SLASH',
+        moveType: 'NORMAL',
+        moveSplit: 'SPECIAL',
+        moveFlags: { sliceBased: true },
+      }),
+    ).toBe(false)
   })
 })
 
