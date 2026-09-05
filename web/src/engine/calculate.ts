@@ -589,7 +589,32 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
     !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
   const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
   const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
-  const typeFold = computeTypeEffectivenessWithAbilities(attacker.abilitySlots, moveType, defenderTypes, typeChart, 'attacker', 'defender', move.id, ringTargetHeld, isForcedGrounded)
+  // UpdateTypeModifier's own two fields (battle_util.c:7904), codegen'd from
+  // moveBehaviors.json's attack.superEffectiveVs/attack.ignoreTypeImmunity --
+  // real gap found auditing this: both were already declared on
+  // MoveBehaviorAttack but never read anywhere (Freeze-Dry/Sheer Cold vs Water,
+  // Dragon Rage bypassing Fairy's chart immunity to Dragon).
+  const moveBehaviorAttack = move.effect ? scenario.moveBehaviors[move.effect]?.attack : undefined
+  // superEffectiveVs is the raw proto enum name (e.g. "TYPE_WATER"), like
+  // move.type/type2 before scenario.ts's own bareType() strips them -- stripped
+  // here directly since moveBehaviors is passed through as a raw blob with no
+  // per-field processing (see scenario.ts's own comment on why holdEffectType
+  // needed the same fix).
+  const superEffectiveVsType = moveBehaviorAttack?.superEffectiveVs ? moveBehaviorAttack.superEffectiveVs.replace('TYPE_', '') : null
+  const ignoreTypeImmunity = Boolean(moveBehaviorAttack?.ignoreTypeImmunity)
+  const typeFold = computeTypeEffectivenessWithAbilities(
+    attacker.abilitySlots,
+    moveType,
+    defenderTypes,
+    typeChart,
+    'attacker',
+    'defender',
+    move.id,
+    ringTargetHeld,
+    isForcedGrounded,
+    superEffectiveVsType,
+    ignoreTypeImmunity,
+  )
   // The post-fold Ground/grounded override (battle_util.c:7973-7977) -- same check
   // calcTypeEffectiveness's own isGrounded param applies, done manually here since
   // this call site needs the raw fold result for onAfterTypeEffectiveness's own

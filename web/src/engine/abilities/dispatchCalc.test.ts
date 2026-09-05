@@ -325,6 +325,24 @@ describe('computeTypeEffectivenessWithAbilities', () => {
     const groundVsNormal = computeTypeEffectivenessWithAbilities(slots(null), 'GROUND', ['NORMAL'], chart2, 'attacker', 'defender', 'MOVE_EARTHQUAKE', false, true)
     expect(groundVsNormal.modifier).toBe(uq(1.0)) // untouched -- not a Flying component, and not 0 anyway
   })
+
+  it('superEffectiveVsType unconditionally overrides a component to exactly 2.0x, even overriding a real resistance (Freeze-Dry-style, battle_util.c:7904)', () => {
+    const iceChart = { ICE: { WATER: 0.5, GRASS: 1 } }
+    const vsWater = computeTypeEffectivenessWithAbilities(slots(null), 'ICE', ['WATER'], iceChart, 'attacker', 'defender', 'MOVE_FREEZE_DRY', false, false, 'WATER')
+    expect(vsWater.modifier).toBe(uq(2.0)) // NOT the real 0.5x resistance
+
+    const vsGrass = computeTypeEffectivenessWithAbilities(slots(null), 'ICE', ['GRASS'], iceChart, 'attacker', 'defender', 'MOVE_FREEZE_DRY', false, false, 'WATER')
+    expect(vsGrass.modifier).toBe(uq(1.0)) // untouched -- Grass isn't the declared superEffectiveVs type
+  })
+
+  it('ignoreTypeImmunity restores a flatly-immune component to neutral, but leaves a non-zero component alone (Dragon Rage-style, battle_util.c:7904)', () => {
+    const dragonChart = { DRAGON: { FAIRY: 0, STEEL: 0.5 } }
+    const vsFairy = computeTypeEffectivenessWithAbilities(slots(null), 'DRAGON', ['FAIRY'], dragonChart, 'attacker', 'defender', 'MOVE_DRAGON_RAGE', false, false, null, true)
+    expect(vsFairy.modifier).toBe(uq(1.0)) // restored from 0 to neutral, not super effective
+
+    const vsSteel = computeTypeEffectivenessWithAbilities(slots(null), 'DRAGON', ['STEEL'], dragonChart, 'attacker', 'defender', 'MOVE_DRAGON_RAGE', false, false, null, true)
+    expect(vsSteel.modifier).toBe(uq(0.5)) // untouched -- not flatly 0, ignoreTypeImmunity doesn't apply
+  })
 })
 
 describe('computeAfterTypeEffectiveness', () => {

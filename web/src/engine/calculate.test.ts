@@ -506,6 +506,34 @@ describe('calculateMoveDamage -- Weather Double Boost/Nika: unported ability che
   })
 })
 
+describe('calculateMoveDamage -- UpdateTypeModifier\'s superEffectiveVs/ignoreTypeImmunity fields (battle_util.c:7904) -- declared on MoveBehaviorAttack but never read until this fix', () => {
+  it('Freeze-Dry (superEffectiveVs: WATER) is super effective against Water, overriding the real 0.5x resistance', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_FREEZE_DRY'), defender: battler('SPECIES_SQUIRTLE') }))
+    expect(result.typeEffectiveness).toBe(uq(2.0))
+  })
+
+  it('Sheer Cold shares the same Freeze-Dry mechanic (both use EFFECT_FREEZE_DRY)', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_SHEER_COLD'), defender: battler('SPECIES_SQUIRTLE') }))
+    expect(result.typeEffectiveness).toBe(uq(2.0))
+  })
+
+  it('superEffectiveVs does not affect any other matchup', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_FREEZE_DRY') })) // vs default Skarmory (Steel/Flying)
+    expect(result.typeEffectiveness).not.toBe(uq(2.0))
+  })
+
+  it('Dragon Rage (ignoreTypeImmunity) bypasses Fairy\'s real chart immunity to Dragon', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_DRAGON_RAGE'), defender: battler('SPECIES_CLEFAIRY') }))
+    expect(baseline.isImmune).toBe(false)
+    expect(baseline.typeEffectiveness).toBe(uq(1.0)) // restored to neutral, not super effective
+  })
+
+  it('a plain Dragon-type move stays immune against the same Fairy defender, confirming the bypass is Dragon Rage-specific', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_DRAGON_CLAW'), defender: battler('SPECIES_CLEFAIRY') }))
+    expect(result.isImmune).toBe(true)
+  })
+})
+
 describe('calculateMoveDamage -- Struggle is a flat 1.0x, no type effectiveness and no STAB (CalcTypeEffectivenessMultiplier, battle_util.c:8015-8021)', () => {
   it('is NOT immune against a pure Ghost defender, despite being declared Normal-type in this data', () => {
     const struggleVsGhost = calculateMoveDamage(scenario({ move: moveData('MOVE_STRUGGLE'), defender: battler('SPECIES_MISDREAVUS') }))

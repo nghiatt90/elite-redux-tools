@@ -284,6 +284,8 @@ function resolveTypeEffectivenessComponent(
   baseModifier: number,
   ringTargetHeld: boolean,
   defenderForcedGrounded: boolean,
+  superEffectiveVsType: string | null,
+  ignoreTypeImmunity: boolean,
 ): number {
   let modifier = baseModifier
   let abilityModified = false
@@ -310,6 +312,17 @@ function resolveTypeEffectivenessComponent(
   // any OTHER type component (e.g. a Ground/Flying dual-type's Ground half)
   // untouched by this specific check.
   if (moveType === 'GROUND' && defType === 'FLYING' && modifier === 0 && defenderForcedGrounded) modifier = uq(1.0)
+  // UpdateTypeModifier, battle_util.c:7904 -- codegen'd from moveBehaviors.json's
+  // own attack.superEffectiveVs/attack.ignoreTypeImmunity fields (declared on
+  // MoveBehaviorAttack but never actually read anywhere until this fix; found
+  // auditing MulByTypeEffectiveness line by line). superEffectiveVs is an
+  // UNCONDITIONAL override (Freeze-Dry/Sheer Cold force exactly 2.0x against
+  // Water regardless of what the real chart says, even a resistance) -- checked
+  // first, since the C's own switch returns immediately on a matching case.
+  // ignoreTypeImmunity (Dragon Rage, bypassing Fairy's chart immunity to
+  // Dragon) only fires when this component is otherwise flatly 0.
+  if (superEffectiveVsType !== null && defType === superEffectiveVsType) return uq(2.0)
+  if (ignoreTypeImmunity && modifier === 0) modifier = uq(1.0)
   return modifier
 }
 
@@ -339,6 +352,8 @@ export function computeTypeEffectivenessWithAbilities(
   moveId: string,
   ringTargetHeld: boolean,
   defenderForcedGrounded: boolean = false,
+  superEffectiveVsType: string | null = null,
+  ignoreTypeImmunity: boolean = false,
 ): TypeEffectivenessFoldResult {
   const components = defenderTypes.map((defType) =>
     resolveTypeEffectivenessComponent(
@@ -351,6 +366,8 @@ export function computeTypeEffectivenessWithAbilities(
       baseTypeEffectiveness(attackingType, defType, chart),
       ringTargetHeld,
       defenderForcedGrounded,
+      superEffectiveVsType,
+      ignoreTypeImmunity,
     ),
   )
   let modifier = uq(1.0)
