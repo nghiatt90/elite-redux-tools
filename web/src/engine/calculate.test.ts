@@ -154,6 +154,7 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     attackerWasHitThisTurn: false,
     beatUpBaseAttack: 80,
     beatUpHitCount: 5,
+    defenderUsedGlaiveRush: false,
     ...overrides,
   }
 }
@@ -418,6 +419,16 @@ describe('calculateMoveDamage -- ignoresAbility forces Mold Breaker unconditiona
     const sunsteelVsMultiscale = calculateMoveDamage(scenario({ move: moveData('MOVE_SUNSTEEL_STRIKE'), defender: multiscaleDefender }))
     const sunsteelVsPlain = calculateMoveDamage(scenario({ move: moveData('MOVE_SUNSTEEL_STRIKE'), defender: plainDefender }))
     expect(sunsteelVsMultiscale.rolls[15]).toBe(sunsteelVsPlain.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- Glaive Rush doubles damage taken by a defender who used it earlier this turn (battle_util.c:7704)', () => {
+  it('was permanently dead despite finalDamage.ts already having a glaiveRushActive stage -- nothing ever set it', () => {
+    const baseline = calculateMoveDamage(scenario())
+    const withGlaiveRush = calculateMoveDamage(scenario({ defenderUsedGlaiveRush: true }))
+    // ~2x, allowing for fixed-point truncation drift elsewhere in the pipeline.
+    expect(withGlaiveRush.rolls[15]).toBeGreaterThan(baseline.rolls[15] * 1.9)
+    expect(withGlaiveRush.rolls[15]).toBeLessThan(baseline.rolls[15] * 2.1)
   })
 })
 

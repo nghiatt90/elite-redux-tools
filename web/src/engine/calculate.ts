@@ -132,6 +132,14 @@ export interface DamageCalcScenario {
   beatUpBaseAttack: number
   /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
   beatUpHitCount: number
+  /** gRoundStructs[battlerDef].glaiveRush (battle_util.c:7704) -- whether the
+   * DEFENDER used Glaive Rush earlier this same turn (its own move effect sets
+   * this on itself, making it take double damage from the next hit it takes
+   * this turn). A real gap found auditing CalcFinalDmg: finalDamage.ts already
+   * had a glaiveRushActive stage, but nothing in this pipeline ever set it to
+   * true -- it was permanently dead despite looking wired. A plain per-turn
+   * scenario fact, same shape as attackerWasHitThisTurn. */
+  defenderUsedGlaiveRush: boolean
 }
 
 export interface DamageCalcResult {
@@ -878,6 +886,7 @@ function calcInternal(
     // (battle_util.c:7711-7713) -- silently giving 6 unrelated moves an extra
     // 4/3x whenever they happened to be super effective.
     hasSuperEffectiveBoost: isSuperEffective && move.miscEffect === 'MISC_EFFECT_SUPEREFFECTIVE_BOOST',
+    glaiveRushActive: scenario.defenderUsedGlaiveRush,
     // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
     // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
     // must hold. hitsAir only doubles for the FLAG_DMG_2X_IN_AIR variant --

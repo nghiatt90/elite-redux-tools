@@ -337,6 +337,8 @@ export interface FieldConfig {
   beatUpBaseAttack: number
   /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
   beatUpHitCount: number
+  /** See DamageCalcScenario.defenderUsedGlaiveRush's own doc. */
+  defenderUsedGlaiveRush: boolean
 }
 
 export function defaultFieldConfig(): FieldConfig {
@@ -356,6 +358,7 @@ export function defaultFieldConfig(): FieldConfig {
     attackerWasHitThisTurn: false,
     beatUpBaseAttack: 80, // a mid-range representative value -- see its own doc
     beatUpHitCount: 5,
+    defenderUsedGlaiveRush: false,
   }
 }
 
@@ -397,5 +400,6 @@ export function buildScenario(
     attackerWasHitThisTurn: field.attackerWasHitThisTurn,
     beatUpBaseAttack: field.beatUpBaseAttack,
     beatUpHitCount: field.beatUpHitCount,
+    defenderUsedGlaiveRush: field.defenderUsedGlaiveRush,
   }
 }

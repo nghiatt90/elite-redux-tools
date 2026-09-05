@@ -132,6 +132,10 @@ export default function FieldBar({ field, onChange }: Props) {
           <input type="checkbox" checked={field.attackerWasHitThisTurn} onChange={(e) => onChange({ ...field, attackerWasHitThisTurn: e.target.checked })} />
           Attacker was hit this turn {/* Focus Punch, Self-Destruct */}
         </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.defenderUsedGlaiveRush} onChange={(e) => onChange({ ...field, defenderUsedGlaiveRush: e.target.checked })} />
+          Defender used Glaive Rush this turn
+        </label>
         <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
           Beat Up: hits
           <input
