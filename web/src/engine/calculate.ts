@@ -856,7 +856,13 @@ function calcInternal(
     // (src/battle_util.c:7536-7540); move.argument threading isn't wired into
     // MoveData yet, so this is always the ordinary x1.5 for now.
     critMultiplier: isCrit ? 1.5 : null,
-    weatherMultiplier: weatherDamageMultiplier(field.weather, move, moveType),
+    weatherMultiplier: weatherDamageMultiplier(
+      field.weather,
+      move,
+      moveType,
+      battlerHasAbility(attacker.abilitySlots, 'ABILITY_WEATHER_DOUBLE_BOOST', () => false),
+      battlerHasAbility(attacker.abilitySlots, 'ABILITY_NIKA', () => false),
+    ),
     stabInHalves: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker, move.id),
     screensActive:
       !isCrit &&
@@ -944,24 +950,48 @@ function screensApply(field: FieldBattleState, split: 'PHYSICAL' | 'SPECIAL'): b
 /** The weather damage block, src/battle_util.c:7592-7648 -- ER's two-tier weather
  * (PERMANENT = weak, TEMPORARY/PRIMAL = strong). ABILITY_WEATHER_DOUBLE_BOOST is
  * deferred (assume absent, i.e. the non-boosted branch always applies). */
-function weatherDamageMultiplier(weather: FieldBattleState['weather'], move: MoveData, moveType: string): number | null {
+/**
+ * CalcFinalDmg's own weather block, battle_util.c:7580-7634. Real gap found
+ * auditing this: CHECK_WEATHER_DOUBLE_BOOST (ABILITY_WEATHER_DOUBLE_BOOST,
+ * real species: Swablu Redux, Castform Sunny, Reuniclus Redux (+ Mega), Walking
+ * Wake) wasn't ported at all -- it turns EFFECT_WEATHER_BOOST moves' normal
+ * boost into a SQUARED one (1.2 -> 1.44, 1.5 -> 2.25) and, more surprisingly,
+ * turns what would otherwise be the OFF-type PENALTY (Fire in Rain, Water in
+ * Sun) into the SAME boost value instead of a reduction -- ported faithfully as
+ * literally written, not as it "should" make sense. Separately, ABILITY_NIKA
+ * and MOVE_STEAM_ERUPTION specifically exempt Water moves from the Sun penalty
+ * (forcing it back to neutral 1.0 instead of 0.5x) -- also unported before this.
+ */
+function weatherDamageMultiplier(
+  weather: FieldBattleState['weather'],
+  move: MoveData,
+  moveType: string,
+  attackerHasWeatherDoubleBoost: boolean,
+  attackerHasNika: boolean,
+): number | null {
   const isWeatherBoostMove = move.effect === 'EFFECT_WEATHER_BOOST'
+  const check = (boosted: number, dropped: number) => (attackerHasWeatherDoubleBoost ? boosted : dropped)
+  const sunWaterPenalty = (dropped: number, boosted: number) => {
+    let modifier = check(boosted, dropped)
+    if (modifier < 1.0 && (attackerHasNika || move.id === 'MOVE_STEAM_ERUPTION')) modifier = 1.0
+    return modifier
+  }
   if (weather === 'RAIN_PERMANENT') {
-    if (isWeatherBoostMove) return 1.2
-    if (moveType === 'FIRE') return 0.5
+    if (isWeatherBoostMove) return check(1.2 * 1.2, 1.2)
+    if (moveType === 'FIRE') return check(1.2, 0.5)
     if (moveType === 'WATER') return 1.2
   } else if (weather === 'RAIN_TEMPORARY' || weather === 'RAIN_PRIMAL') {
-    if (isWeatherBoostMove) return 1.5
-    if (moveType === 'FIRE') return 0.5
+    if (isWeatherBoostMove) return check(1.5 * 1.5, 1.5)
+    if (moveType === 'FIRE') return check(1.5, 0.5)
     if (moveType === 'WATER') return 1.5
   } else if (weather === 'SUN_PERMANENT') {
-    if (isWeatherBoostMove) return 1.2
+    if (isWeatherBoostMove) return check(1.2 * 1.2, 1.2)
     if (moveType === 'FIRE') return 1.2
-    if (moveType === 'WATER') return 0.5
+    if (moveType === 'WATER') return sunWaterPenalty(0.5, 1.2)
   } else if (weather === 'SUN_TEMPORARY' || weather === 'SUN_PRIMAL') {
-    if (isWeatherBoostMove) return 1.5
+    if (isWeatherBoostMove) return check(1.5 * 1.5, 1.5)
     if (moveType === 'FIRE') return 1.5
-    if (moveType === 'WATER') return 0.5
+    if (moveType === 'WATER') return sunWaterPenalty(0.5, 1.5)
   }
   return null
 }

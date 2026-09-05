@@ -421,6 +421,62 @@ describe('calculateMoveDamage -- ignoresAbility forces Mold Breaker unconditiona
   })
 })
 
+describe('calculateMoveDamage -- Weather Double Boost/Nika: unported ability checks inside CalcFinalDmg\'s weather block (battle_util.c:7580-7634)', () => {
+  it('Weather Double Boost SQUARES an EFFECT_WEATHER_BOOST move\'s own boost (1.2 -> 1.44) instead of leaving it at the plain 1.2', async () => {
+    await import('./abilities/impl/index')
+    const plain = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_SUPERHOT_FLAME'), field: fieldState({ weather: 'SUN_PERMANENT' }) }),
+    )
+    const withAbility = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_SUPERHOT_FLAME'),
+        field: fieldState({ weather: 'SUN_PERMANENT' }),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_WEATHER_DOUBLE_BOOST', innates: [null, null, null] } }),
+      }),
+    )
+    expect(withAbility.rolls[15]).toBeGreaterThan(plain.rolls[15])
+  })
+
+  it('Weather Double Boost flips the Fire-in-Rain PENALTY into the same boost value, rather than reducing it', async () => {
+    await import('./abilities/impl/index')
+    const noWeather = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER') }))
+    const rainPenalized = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), field: fieldState({ weather: 'RAIN_PERMANENT' }) }))
+    expect(rainPenalized.rolls[15]).toBeLessThan(noWeather.rolls[15]) // normal 0.5x penalty
+
+    const rainWithAbility = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_FLAMETHROWER'),
+        field: fieldState({ weather: 'RAIN_PERMANENT' }),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_WEATHER_DOUBLE_BOOST', innates: [null, null, null] } }),
+      }),
+    )
+    // 1.2x boost instead of a 0.5x penalty -- MORE than the no-weather baseline, not less.
+    expect(rainWithAbility.rolls[15]).toBeGreaterThan(noWeather.rolls[15])
+  })
+
+  it('Nika exempts Water moves from the Sun penalty (0.5x -> neutral 1.0x, not a boost)', async () => {
+    await import('./abilities/impl/index')
+    const noWeather = calculateMoveDamage(scenario({ move: moveData('MOVE_SURF') }))
+    const sunPenalized = calculateMoveDamage(scenario({ move: moveData('MOVE_SURF'), field: fieldState({ weather: 'SUN_PERMANENT' }) }))
+    expect(sunPenalized.rolls[15]).toBeLessThan(noWeather.rolls[15])
+
+    const sunWithNika = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_SURF'),
+        field: fieldState({ weather: 'SUN_PERMANENT' }),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_NIKA', innates: [null, null, null] } }),
+      }),
+    )
+    expect(sunWithNika.rolls[15]).toBe(noWeather.rolls[15]) // exactly neutral, matching the no-weather baseline
+  })
+
+  it('Steam Eruption gets the same Sun exemption as Nika, without needing the ability', () => {
+    const noWeather = calculateMoveDamage(scenario({ move: moveData('MOVE_STEAM_ERUPTION') }))
+    const sunWithSteamEruption = calculateMoveDamage(scenario({ move: moveData('MOVE_STEAM_ERUPTION'), field: fieldState({ weather: 'SUN_PERMANENT' }) }))
+    expect(sunWithSteamEruption.rolls[15]).toBe(noWeather.rolls[15])
+  })
+})
+
 describe('calculateMoveDamage -- Struggle is a flat 1.0x, no type effectiveness and no STAB (CalcTypeEffectivenessMultiplier, battle_util.c:8015-8021)', () => {
   it('is NOT immune against a pure Ghost defender, despite being declared Normal-type in this data', () => {
     const struggleVsGhost = calculateMoveDamage(scenario({ move: moveData('MOVE_STRUGGLE'), defender: battler('SPECIES_MISDREAVUS') }))
