@@ -7,6 +7,16 @@ on:
     # weekly so a data-format tweak doesn't rewrite the committed snapshot (and
     # permanently bloat git history) more often than genuinely useful.
     - cron: '0 6 1 * *'
+    #
+    # IMPORTANT: refresh_check advances the lockfile to each source's *branch head*,
+    # and both branches are `upcoming` -- upstream's development branch, which is
+    # ahead of the ROM anyone is playing. That directly contradicts
+    # sources.lock.json's pin_policy, and it is not a hypothetical: a snapshot built
+    # from `upcoming` shipped a randomizer whose every result was wrong, because
+    # ABILITIES_COUNT is the randomizer's modulus and `upcoming` had 10 abilities the
+    # release did not. So this workflow does not merge anything; it prepares a diff a
+    # human must judge against the released build, and the test step below is what
+    # stops a bad refresh from ever reaching a PR.
   workflow_dispatch: {}
 
 permissions:
@@ -44,6 +54,15 @@ jobs:
           uv run python -m erdata.refresh_check
           uv run python -m erdata.build
 
+      # Gates the PR. test_oracle asserts ABILITIES_COUNT against ER-nextdex's
+      # released-game data, so a refresh that has run ahead of the ROM fails here and
+      # the job goes red -- rather than opening a routine-looking snapshot PR that
+      # silently breaks every randomizer result.
+      - name: Verify the refreshed snapshot
+        if: steps.check.outputs.changed == 'true'
+        working-directory: pipeline
+        run: uv run pytest -q
+
       - name: Check for a real data change
         if: steps.check.outputs.changed == 'true'
         id: diff
@@ -67,5 +86,13 @@ jobs:
             Automated refresh: upstream `er-config` and/or `eliteredux-source` moved.
             See the diff for what actually changed in `data/v2.65beta/` and the new
             pinned SHAs in `sources.lock.json`.
+
+            **Before merging, check this against the released game.** Both sources are
+            pinned on `upcoming`, upstream's development branch, so this bumps to
+            whatever is newest there -- which is not necessarily what players are
+            running. See `pin_policy` in `sources.lock.json`. The pipeline tests pass
+            on this branch (the job would have failed otherwise), which means
+            `meta.abilitiesCount` still matches ER-nextdex's released-game data; if
+            you are unsure, that assertion is the one that matters.
           branch: data-refresh
           delete-branch: true
