@@ -38,8 +38,10 @@ export interface FinalDamageStages {
    * apply" by the caller (crit and Infiltrator both bypass it -- see calculate.ts). */
   screensActive: boolean
   isDoubleBattle: boolean // only affects the screens multiplier (0.5 vs 0.66)
-  /** #10 Parental Bond-family multi-hit multiplier, UQ_4_12 -- uq(1.0) (no-op) until
-   * ported. */
+  /** #10 Parental Bond-family bonus hit's own reduced-power multiplier, UQ_4_12 --
+   * uq(1.0) for a move's first/only hit and for every hit of a move's OWN
+   * multi-hit effect (Population Bomb, Double Hit, ...), which never scale power
+   * per hit. Set by calculate.ts per-hit via multiHit.ts's resolveHitPlan. */
   parentalBondMultiplier: number
   /** #11 defender's ally Friend Guard/Caretaker/Food Lovers count (0-3, each x0.75) --
    * always 0 in singles (no ally exists to have the ability). */

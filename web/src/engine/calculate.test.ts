@@ -129,6 +129,7 @@ function moveData(id: string): MoveData {
     flags: m.flags ?? {},
     changeTypeHoldEffect: m.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && m.argument?.kind === 'other' ? m.argument.value : null,
     miscEffect: m.effect === 'EFFECT_MISC_HIT' && m.argument?.kind === 'misc' ? m.argument.misc : null,
+    multiHitArgument: m.effect === 'EFFECT_DOUBLE_HIT' && m.argument?.kind === 'int' ? m.argument.value : null,
   }
 }
 
@@ -143,6 +144,7 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     battleConstants,
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
+    hitCount: 3,
     ...overrides,
   }
 }
@@ -991,6 +993,71 @@ describe('calculateMoveDamage -- doubleDamageVsMega doubles power against a Mega
     const nonBashBaseline = calculateMoveDamage(scenario({ defender: skarmory(false) }))
     const nonBashVsMega = calculateMoveDamage(scenario({ defender: skarmory(true) }))
     expect(nonBashVsMega.rolls[15]).toBe(nonBashBaseline.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- multi-hit moves (src/battle_script_commands.c:958-1064)', () => {
+  it('a single-hit move has no hitCount/totalRolls', () => {
+    const result = calculateMoveDamage(scenario())
+    expect(result.hitCount).toBeNull()
+    expect(result.totalRolls).toBeNull()
+    expect(result.totalCritRolls).toBeNull()
+  })
+
+  it('Double Hit: exactly 2 identical full-power hits, so totalRolls is exactly 2x rolls', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_DOUBLE_HIT') }))
+    expect(result.hitCount).toBe(2)
+    expect(result.totalRolls).toEqual(result.rolls.map((d) => d * 2))
+    expect(result.totalCritRolls).toEqual(result.critRolls!.map((d) => d * 2))
+  })
+
+  it('Population Bomb (EFFECT_TEN_HITS): exactly 10 identical full-power hits', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_POPULATION_BOMB') }))
+    expect(result.hitCount).toBe(10)
+    expect(result.totalRolls).toEqual(result.rolls.map((d) => d * 10))
+  })
+
+  it('EFFECT_MULTI_HIT respects the scenario hitCount, clamped, and Skill Link forces 5', async () => {
+    const threeHits = calculateMoveDamage(scenario({ move: moveData('MOVE_BULLET_SEED'), hitCount: 3 }))
+    expect(threeHits.hitCount).toBe(3)
+    expect(threeHits.totalRolls).toEqual(threeHits.rolls.map((d) => d * 3))
+
+    const clamped = calculateMoveDamage(scenario({ move: moveData('MOVE_BULLET_SEED'), hitCount: 1 }))
+    expect(clamped.hitCount).toBe(2) // clamped up to the minimum
+
+    await import('./abilities/impl/index')
+    const skillLink = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_BULLET_SEED'),
+        hitCount: 2,
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_SKILL_LINK', innates: [null, null, null] } }),
+      }),
+    )
+    expect(skillLink.hitCount).toBe(5)
+  })
+
+  it('Parental Bond: full-power first hit plus a reduced-power bonus hit, on an otherwise single-hit move', async () => {
+    await import('./abilities/impl/index')
+    const baseline = calculateMoveDamage(scenario())
+    const withParentalBond = calculateMoveDamage(
+      scenario({ attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PARENTAL_BOND', innates: [null, null, null] } }) }),
+    )
+    expect(withParentalBond.hitCount).toBe(2)
+    expect(withParentalBond.totalRolls![15]).toBeGreaterThan(baseline.rolls[15])
+    expect(withParentalBond.totalRolls![15]).toBeLessThan(baseline.rolls[15] * 2)
+  })
+
+  it('Parental Bond does not apply to a move that is already multi-hit by its own effect', async () => {
+    await import('./abilities/impl/index')
+    const result = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_DOUBLE_HIT'),
+        attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_PARENTAL_BOND', innates: [null, null, null] } }),
+      }),
+    )
+    // Still exactly 2 identical hits -- Double Hit's own plan, not Parental Bond's.
+    expect(result.hitCount).toBe(2)
+    expect(result.totalRolls).toEqual(result.rolls.map((d) => d * 2))
   })
 })
 

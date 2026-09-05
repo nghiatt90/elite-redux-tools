@@ -286,6 +286,7 @@ export function toMoveData(move: Move): MoveData {
     priority: move.priority,
     changeTypeHoldEffect: move.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && move.argument?.kind === 'other' ? move.argument.value : null,
     miscEffect: move.effect === 'EFFECT_MISC_HIT' && move.argument?.kind === 'misc' ? move.argument.misc : null,
+    multiHitArgument: move.effect === 'EFFECT_DOUBLE_HIT' && move.argument?.kind === 'int' ? move.argument.value : null,
   }
 }
 
@@ -337,5 +338,9 @@ export function buildScenario(
     battleConstants: ctx.natures,
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
+    // Same status as sameMoveTurnsInARow above -- a real scenario field with no UI
+    // control yet. 3 is EFFECT_MULTI_HIT's own average hit count
+    // ((2+2+3+3+4+5)/6 rounds to 3), a reasonable default until one exists.
+    hitCount: 3,
   }
 }

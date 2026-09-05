@@ -3,11 +3,15 @@
 // (src/battle_script_commands.c:990-1003; src/battle_util.c:7483-7513): a bonus hit at a
 // fixed (or trigger-dependent) reduced power, on top of the move's normal single hit.
 //
-// NOT wired into calculate.ts -- this v1 engine computes exactly one hit's damage, and
-// nothing here changes that hit's own number. Every port below is complete and correct
-// for the bonus hit's multiplier whenever multi-hit support exists (same shape as batch
-// N's onTypeEffectiveness ports). See OnParentalBond's own doc in types.ts for why
-// ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's default.
+// Wired into calculate.ts via multiHit.ts's resolveHitPlan -- HYPER_AGGRESSIVE,
+// PRIMAL_MAW, DUAL_WIELD, ICE_COLD_HUNTER, FAMILIA_BOND, MAGUS_BLADES (2 hits) and
+// THREE_HEADED (3 hits) all resolve to a real hitCount/hitModifier. MINION_CONTROL
+// (a live party-member count) stays unmodelled -- no team concept in this v1
+// singles engine, same class of gap Soul Harvest/Supreme Overlord had before
+// alliesFainted existed. TWO_TO_FIVE reuses the scenario hitCount toggle, same as
+// EFFECT_MULTI_HIT's own variable spread. See OnParentalBond's own doc in types.ts
+// for why ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's
+// default (their bonus hit(s) are full power, not reduced).
 //
 // 17 of this batch's 24 census abilities get a fresh entry here; the other 7
 // (3_GT_1, DEVOURER, HAND_BARNACLES, MAGUS_BLADES, METALLIC_JAWS, STEEL_BEETLE,

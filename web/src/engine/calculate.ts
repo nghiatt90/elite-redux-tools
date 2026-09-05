@@ -35,6 +35,7 @@ import {
   type MoveBehaviors,
 } from './basePower'
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
+import { resolveHitPlan } from './multiHit'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
 import {
@@ -84,6 +85,10 @@ export interface MoveData {
    * Only the deterministic single-snapshot sub-cases are consumed (see
    * basePower.ts's applyMiscHitBasePower); `null` for every non-misc-argument move. */
   miscEffect: string | null
+  /** EFFECT_DOUBLE_HIT's own argument (GetMultihitType, src/battle_script_commands.c:
+   * 1063-1064) -- MULTIHIT_THREE when 3, MULTIHIT_TWO (the default) otherwise.
+   * Narrowed from Move.argument's `int` variant. `null` for every other move. */
+  multiHitArgument: number | null
 }
 
 export interface DamageCalcScenario {
@@ -98,6 +103,14 @@ export interface DamageCalcScenario {
    * calculator can't derive on its own -- see types.ts's DamageContext doc. */
   attackerActsFirst: boolean
   sameMoveTurnsInARow: number
+  /** The hit count for a VARIABLE multi-hit move (EFFECT_MULTI_HIT's own 2-5
+   * spread without Skill Link, or a Parental-Bond-family TWO_TO_FIVE trigger) --
+   * this engine can't simulate the real RNG (2/2/3/3/4/5 weighted for the ability
+   * version, `2 + Random()%2 + 2*(Random()%3==0)` for the move version), so it's a
+   * scenario toggle like sameMoveTurnsInARow, clamped into the move's own valid
+   * range at resolution time (see multiHit.ts). Ignored for fixed-count moves
+   * (Double Hit, Population Bomb, Skill Link/Loaded Dice overrides, ...). */
+  hitCount: number
 }
 
 export interface DamageCalcResult {
@@ -112,6 +125,24 @@ export interface DamageCalcResult {
   typeEffectiveness: number // UQ_4_12
   isImmune: boolean
   unmodelled: string[]
+  /** null for a move that only ever hits once. Otherwise the resolved hit count
+   * (Double Hit's 2, Population Bomb's 10, a variable EFFECT_MULTI_HIT/Parental
+   * Bond TWO_TO_FIVE spread clamped from the scenario's own hitCount toggle, ...)
+   * -- see multiHit.ts. */
+  hitCount: number | null
+  /** Sum of ALL hits' damage at each of the 16 roll percentiles, reusing `rolls`
+   * for the first hit and computing each subsequent hit (with its own
+   * hitModifier, see multiHit.ts) at the SAME assumed roll percentile as the
+   * first -- each hit independently draws its own 85-100% roll in the real game,
+   * so this is a deliberate simplification giving valid min/max bounds on the
+   * total, not the true combined distribution's shape in between. `null` when
+   * hitCount is null. */
+  totalRolls: number[] | null
+  /** Same shape as totalRolls but with every hit forced to crit -- an upper
+   * bound (in reality each hit rolls its own independent crit chance), not
+   * "the expected total with critical hits factored in". `null` when hitCount is
+   * null, or when the move can never crit at all (critRolls is also null then). */
+  totalCritRolls: number[] | null
 }
 
 function toDamageContext(scenario: DamageCalcScenario): DamageContext {
@@ -419,6 +450,13 @@ function calcInternal(
   inputMoveType: string,
   split: 'PHYSICAL' | 'SPECIAL',
   forceCrit: boolean,
+  // UQ_4_12 -- GetParentalBondMultiplier's own return, folded into CalcFinalDmg's
+  // stage #10 EXACTLY where the C applies it (finalDamage.ts's own
+  // parentalBondMultiplier stage). uq(1.0) for the first/only hit of any move and
+  // for every hit of a move's OWN multi-hit effect (Population Bomb, Double Hit,
+  // ...), which never scale power per hit -- only a Parental-Bond-family bonus hit
+  // uses anything else. See multiHit.ts's resolveHitPlan.
+  hitModifier: number,
 ): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
   const unmodelled: string[] = []
   const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
@@ -602,6 +640,7 @@ function calcInternal(
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),
     abilityMultiplier,
+    parentalBondMultiplier: hitModifier,
     // MISC_EFFECT_INCREASED_CRIT_DAMAGE moves crit for x2.0 instead of x1.5
     // (src/battle_util.c:7536-7540); move.argument threading isn't wired into
     // MoveData yet, so this is always the ordinary x1.5 for now.
@@ -740,19 +779,23 @@ function resistBerryMultiplier(
  * all 16 damage rolls (and, separately, the same 16 with a forced crit) rather than
  * drawing one; see kochance.ts for the KO-probability consumer of this shape. */
 export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcResult {
-  const { move } = scenario
+  const { move, attacker, defender, field } = scenario
   const moveType = move.type ?? 'NORMAL'
   const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }
   const split = resolveSplit(scenario, attackerRaw)
 
-  const evaluate = (mtype: string, forceCrit: boolean) => calcInternal(scenario, mtype, split, forceCrit)
+  const evaluate = (mtype: string, forceCrit: boolean, hitModifier: number) => calcInternal(scenario, mtype, split, forceCrit, hitModifier)
 
-  function fullDamageForRoll(damageRoll: number, forceCrit: boolean): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
-    const primary = evaluate(moveType, forceCrit)
+  function fullDamageForRoll(
+    damageRoll: number,
+    forceCrit: boolean,
+    hitModifier: number,
+  ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
+    const primary = evaluate(moveType, forceCrit, hitModifier)
     let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
     if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
-      const alt = evaluate(move.type2, forceCrit)
+      const alt = evaluate(move.type2, forceCrit, hitModifier)
       if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
     }
 
@@ -775,7 +818,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   // smallest/85% roll, index 15 = largest/100% roll) -- the conventional order for
   // presenting a damage range.
   for (let roll = 15; roll >= 0; roll--) {
-    const result = fullDamageForRoll(roll, false)
+    const result = fullDamageForRoll(roll, false, uq(1.0))
     rolls.push(result.dmg)
     typeEffectiveness = result.typeEffectiveness
     effectiveMoveType = result.effectiveMoveType
@@ -791,7 +834,43 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   if (canCrit !== null) {
     critRolls = []
     for (let roll = 15; roll >= 0; roll--) {
-      critRolls.push(fullDamageForRoll(roll, true).dmg)
+      critRolls.push(fullDamageForRoll(roll, true, uq(1.0)).dmg)
+    }
+  }
+
+  // Multi-hit: the first hit is exactly what `rolls`/`critRolls` already computed
+  // (hitModifier uq(1.0)) -- only hits 1..N-1 need a fresh pass, using whatever
+  // modifier this hit's mechanism (a move's own multi-hit effect, or a Parental
+  // Bond bonus hit) assigns it. See multiHit.ts and DamageCalcResult's own doc for
+  // why this sums independently-rolled percentiles rather than modelling the true
+  // joint distribution.
+  const hitPlanResult = resolveHitPlan(
+    move,
+    attacker.abilitySlots,
+    defender.abilitySlots,
+    hasFlag(attacker.abilitySlots, 'skillLink'),
+    attacker.condition.resolvedHoldEffect,
+    scenario.hitCount,
+    { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
+  )
+  let hitCount: number | null = null
+  let totalRolls: number[] | null = null
+  let totalCritRolls: number[] | null = null
+  if (hitPlanResult && 'unmodelled' in hitPlanResult) {
+    unmodelled.add(hitPlanResult.unmodelled)
+  } else if (hitPlanResult) {
+    hitCount = hitPlanResult.hitCount
+    totalRolls = [...rolls]
+    totalCritRolls = critRolls ? [...critRolls] : null
+    for (let hitIndex = 1; hitIndex < hitPlanResult.hitCount; hitIndex++) {
+      const hitModifier = hitPlanResult.hitModifier(hitIndex)
+      for (let roll = 15; roll >= 0; roll--) {
+        const arrayIndex = 15 - roll
+        const result = fullDamageForRoll(roll, false, hitModifier)
+        totalRolls[arrayIndex] += result.dmg
+        result.unmodelled.forEach((u) => unmodelled.add(u))
+        if (totalCritRolls) totalCritRolls[arrayIndex] += fullDamageForRoll(roll, true, hitModifier).dmg
+      }
     }
   }
 
@@ -803,5 +882,8 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     typeEffectiveness,
     isImmune,
     unmodelled: [...unmodelled],
+    hitCount,
+    totalRolls,
+    totalCritRolls,
   }
 }

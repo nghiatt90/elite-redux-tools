@@ -1,0 +1,111 @@
+// Multi-hit resolution: GetMultihitType/GetParentalBondType/GetParentalBondCount
+// (src/battle_script_commands.c:958-1064) collapsed into one function, since the
+// C's own control flow makes them mutually exclusive -- CANCELLER_MULTIHIT_MOVES
+// (a move's OWN multi-hit effect) always runs first and sets multiHitCounter;
+// GetParentalBondType's caller only even checks Parental Bond `if
+// (!multiHitCounter)` (battle_script_commands.c:1086), so a move that's already
+// multi-hit by its own effect can never ALSO get a Parental Bond bonus hit.
+//
+// Every hit of a move's own multi-hit effect (Double Hit, Population Bomb, the
+// Skill-Link/Loaded-Dice-boosted forms of EFFECT_MULTI_HIT) deals FULL,
+// unscaled power -- confirmed against CalcMoveBasePower's own switch
+// (battle_util.c:6825-6907), which has no case for these three effects at all
+// (only Rollout and Triple Kick scale power per hit, and those stay unmodelled
+// -- see UNMODELLED_BASE_POWER_EFFECTS). Only a Parental-Bond-family bonus hit
+// (index >= 1) uses anything other than 1.0.
+//
+// MULTIHIT_TRIPLE_KICK (its own per-hit power scaling) and MULTIHIT_BEAT_UP
+// (party-based hit count) are NOT resolved here -- both stay in
+// UNMODELLED_BASE_POWER_EFFECTS, same as before this module existed.
+
+import { uq } from './fixed'
+import { computeParentalBondTrigger, getParentalBondMultiplier } from './abilities/dispatchCalc'
+import type { AbilitySlots } from './abilities/dispatch'
+import type { OnParentalBondContext, ParentalBondTrigger } from './abilities/types'
+
+export interface HitPlan {
+  hitCount: number
+  /** UQ_4_12 -- the modifier for the (0-indexed) hit, folded into CalcFinalDmg's
+   * own parentalBondMultiplier stage regardless of which mechanism produced it. */
+  hitModifier: (hitIndex: number) => number
+}
+
+export type HitPlanResult = HitPlan | { unmodelled: string } | null
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+/**
+ * GetParentalBondCount, src/battle_script_commands.c:1011-1040. MINION_CONTROL's
+ * own count is a live count of the attacker's non-fainted, non-egg, non-status
+ * party members -- this v1 singles engine has no party/team concept (same class
+ * of gap as Soul Harvest/Supreme Overlord before alliesFainted existed), so it's
+ * surfaced as unmodelled rather than guessed. TWO_TO_FIVE reuses the SAME
+ * scenario hitCount toggle as EFFECT_MULTI_HIT's own variable spread, clamped to
+ * its own valid range.
+ */
+function parentalBondHitCount(trigger: ParentalBondTrigger, scenarioHitCount: number): { hitCount: number } | { unmodelled: string } {
+  switch (trigger) {
+    case 'HYPER_AGGRESSIVE':
+    case 'PRIMAL_MAW':
+    case 'DUAL_WIELD':
+    case 'ICE_COLD_HUNTER':
+    case 'FAMILIA_BOND':
+    case 'MAGUS_BLADES':
+      return { hitCount: 2 }
+    case 'THREE_HEADED':
+      return { hitCount: 3 }
+    case 'TWO_TO_FIVE':
+      return { hitCount: clamp(scenarioHitCount, 2, 5) }
+    case 'MINION_CONTROL':
+      return { unmodelled: 'Minion Control: party-based hit count not modelled (no team concept in this engine)' }
+  }
+}
+
+export interface MultiHitMoveData {
+  effect: string | null
+  multiHitArgument: number | null
+  split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  flags: Record<string, true>
+}
+
+export function resolveHitPlan(
+  move: MultiHitMoveData,
+  attackerSlots: AbilitySlots,
+  defenderSlots: AbilitySlots,
+  attackerHasSkillLink: boolean,
+  attackerResolvedHoldEffect: string | null,
+  scenarioHitCount: number,
+  parentalBondCtx: OnParentalBondContext,
+): HitPlanResult {
+  // A move's own multi-hit effect (CANCELLER_MULTIHIT_MOVES, battle_util.c:3496-3542).
+  if (move.effect === 'EFFECT_DOUBLE_HIT') {
+    return { hitCount: move.multiHitArgument === 3 ? 3 : 2, hitModifier: () => uq(1.0) }
+  }
+  if (move.effect === 'EFFECT_TEN_HITS') {
+    return { hitCount: 10, hitModifier: () => uq(1.0) }
+  }
+  if (move.effect === 'EFFECT_MULTI_HIT') {
+    if (attackerHasSkillLink) return { hitCount: 5, hitModifier: () => uq(1.0) }
+    const usesLoadedDice = attackerResolvedHoldEffect === 'HOLD_EFFECT_LOADED_DICE'
+    const [min, max] = usesLoadedDice ? [4, 5] : [2, 5]
+    return { hitCount: clamp(scenarioHitCount, min, max), hitModifier: () => uq(1.0) }
+  }
+
+  // Parental Bond family (IsMoveAffectedByParentalBond + GetParentalBondType/Count,
+  // battle_script_commands.c:992-1004,1011-1040,13190+) -- only the two cheap,
+  // already-available exclusion checks are ported (status moves, and the move's
+  // own noParentalBond flag); the doubles-only and two-turn-move exclusions don't
+  // apply to this v1 singles, non-charge-turn engine.
+  if (move.split === 'STATUS' || move.flags.noParentalBond) return null
+  const trigger = computeParentalBondTrigger(attackerSlots, defenderSlots, parentalBondCtx)
+  if (!trigger) return null
+  const countResult = parentalBondHitCount(trigger, scenarioHitCount)
+  if ('unmodelled' in countResult) return countResult
+  if (countResult.hitCount <= 1) return null
+  return {
+    hitCount: countResult.hitCount,
+    hitModifier: (hitIndex) => (hitIndex === 0 ? uq(1.0) : getParentalBondMultiplier(trigger, hitIndex)),
+  }
+}
