@@ -8,15 +8,18 @@
 //
 // Every hit of a move's own multi-hit effect (Double Hit, Population Bomb, the
 // Skill-Link/Loaded-Dice-boosted forms of EFFECT_MULTI_HIT) deals FULL,
-// unscaled power -- confirmed against CalcMoveBasePower's own switch
-// (battle_util.c:6825-6907), which has no case for these three effects at all
-// (only Rollout and Triple Kick scale power per hit, and those stay unmodelled
-// -- see UNMODELLED_BASE_POWER_EFFECTS). Only a Parental-Bond-family bonus hit
-// (index >= 1) uses anything other than 1.0.
+// unscaled power via THIS module's hitModifier -- confirmed against
+// CalcMoveBasePower's own switch (battle_util.c:6825-6907), which has no case
+// for these effects at all. Only a Parental-Bond-family bonus hit (index >= 1)
+// uses anything other than 1.0 here. Triple Kick/Triple Axel (MULTIHIT_TRIPLE_KICK)
+// scale power too, but NOT via hitModifier -- their scaling happens at
+// CalcMoveBasePower's own pipeline stage (basePower.ts's applyPreModifierBasePower,
+// keyed on hitIndex), which calculate.ts's per-hit loop threads separately from
+// the hitModifier this module returns; see that function's own doc for why the
+// two stages can't share one mechanism and stay bit-exact.
 //
-// MULTIHIT_TRIPLE_KICK (its own per-hit power scaling) and MULTIHIT_BEAT_UP
-// (party-based hit count) are NOT resolved here -- both stay in
-// UNMODELLED_BASE_POWER_EFFECTS, same as before this module existed.
+// MULTIHIT_BEAT_UP (party-based hit count) is NOT resolved here -- stays in
+// UNMODELLED_BASE_POWER_EFFECTS, no party/team concept in this v1 engine.
 
 import { uq } from './fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from './abilities/dispatchCalc'
@@ -91,6 +94,16 @@ export function resolveHitPlan(
     const usesLoadedDice = attackerResolvedHoldEffect === 'HOLD_EFFECT_LOADED_DICE'
     const [min, max] = usesLoadedDice ? [4, 5] : [2, 5]
     return { hitCount: clamp(scenarioHitCount, min, max), hitModifier: () => uq(1.0) }
+  }
+  // MULTIHIT_TRIPLE_KICK (Triple Kick/Triple Axel share EFFECT_TRIPLE_KICK) --
+  // always exactly 3 hits, fixed (battle_util.c:3506-3509, no Skill Link/Loaded
+  // Dice interaction: those only ever apply to MULTIHIT_TWO_TO_FIVE-family moves).
+  // hitModifier stays uq(1.0) for every hit -- the power scaling isn't a
+  // final-stage multiplier, it happens earlier via basePower.ts's own hitIndex
+  // parameter (applyPreModifierBasePower's EFFECT_TRIPLE_KICK case), matching the
+  // C's own pipeline stage (CalcMoveBasePower, not CalcFinalDmg).
+  if (move.effect === 'EFFECT_TRIPLE_KICK') {
+    return { hitCount: 3, hitModifier: () => uq(1.0) }
   }
 
   // Parental Bond family (IsMoveAffectedByParentalBond + GetParentalBondType/Count,

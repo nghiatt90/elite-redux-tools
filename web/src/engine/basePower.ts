@@ -8,18 +8,20 @@
 //      6995-7117) -- hold effects, per-move-effect conditions (Facade, Brine,
 //      Venoshock, Retaliate, Knock Off, ...), and the terrain STAB-style boost.
 //   3. CalcMoveBasePower's hardcoded pre-switch (:6825-6913) and move-id switch
-//      (:6913-6940) -- MOSTLY not ported (see UNMODELLED_BASE_POWER_EFFECTS):
-//      Rollout, Magnitude, Triple Kick, Weather Ball, Pursuit, Natural Gift, Focus
-//      Punch, and Beat Up all depend on turn history (a rollout counter, "did my
-//      last move fail", how many times I've been hit this battle, party contents)
-//      that a stateless "what if I attacked right now" calculator has no honest
-//      default for. Wake-Up Slap/Smelling Salts and the single-snapshot
-//      EFFECT_MISC_HIT sub-cases (electric terrain, vs-bleeding, fog,
-//      fainted-teammate count) ARE ported (applyPreModifierBasePower, below) --
-//      they're pure functions of the field/battler snapshot DamageContext (plus
-//      alliesFainted) already carries. The remaining EFFECT_MISC_HIT sub-cases
-//      (a coin-flip double-damage roll, a "times hit this battle" counter, and a
-//      non-damage type-transmute effect) are surfaced as unmodelled instead.
+//      (:6913-6940) -- Magnitude, Triple Kick/Triple Axel, and Pursuit ARE ported
+//      (applyPreModifierBasePower, below) despite the module comment's earlier
+//      claim that this whole bucket "needs turn history": Magnitude is a pure
+//      per-use random roll (a manual tier pick, magnitudeTier); Triple Kick's
+//      power scaling is keyed on which hit of the SAME move use this is
+//      (hitIndex, resolved by multiHit.ts within one calculation, no history
+//      needed); Pursuit's doubling is a plain fact about the defender's chosen
+//      action this turn (defenderIsSwitching), same shape as attackerActsFirst.
+//      Weather Ball is also ported (below). See UNMODELLED_BASE_POWER_EFFECTS's
+//      own comment for what's still deferred -- Rollout/Ice Ball (a genuine
+//      cross-TURN consecutive-use counter, unlike Triple Kick's within-one-use
+//      hit index) and Beat Up/Focus Punch (party contents / "did my last move
+//      fail", no scenario field exists for either) are the real remaining
+//      turn-history cases.
 
 import { applyModifier, idiv, mulModifier, uq } from './fixed'
 import { evaluateAllConditions, type ScriptCondition } from './conditions'
@@ -256,6 +258,13 @@ export function weatherBallType(weather: string, attackerHasAuroraBorealis: bool
   return null
 }
 
+/** Cmd_setmagnitude's own tier table, src/battle_util.c:11286-11307 -- a pure
+ * per-use random roll (0-99) collapsed to its 7 displayed "Magnitude N" outcomes,
+ * each with a fixed power. Exposed as a manual tier pick (DamageContext.magnitudeTier)
+ * rather than simulated, same "one scenario per call" convention as every other
+ * random roll this calculator reports as a range instead of drawing. */
+export const MAGNITUDE_POWER: Record<number, number> = { 4: 10, 5: 30, 6: 50, 7: 70, 8: 90, 9: 110, 10: 150 }
+
 export function applyPreModifierBasePower(
   basePower: number,
   moveEffect: string | null,
@@ -264,6 +273,12 @@ export function applyPreModifierBasePower(
   attackerAlliesFainted: number,
   attackerNaturalGiftPower: number | null,
   attackerHasAuroraBorealis: boolean,
+  /** Which hit (0-indexed) of the CURRENT move use this is -- Triple Kick/Triple
+   * Axel's own power scaling only depends on this, not on any turn-history state,
+   * so it needs no scenario toggle: multiHit.ts already resolves the hit count and
+   * calculate.ts's per-hit loop already threads an index through, this just reads
+   * it. 0 for every non-multi-hit move (the default, single-hit case). */
+  hitIndex: number = 0,
 ): BasePowerResult {
   if (moveEffect === 'EFFECT_WEATHER_BALL') {
     return { power: weatherBallType(ctx.field.weather, attackerHasAuroraBorealis) !== null ? basePower * 2 : basePower, unmodelled: [] }
@@ -280,6 +295,32 @@ export function applyPreModifierBasePower(
     // answer, not a gap; the caller's existing Math.max(power, 1) floor still
     // applies on top, same as every other move.
     return { power: attackerNaturalGiftPower ?? 0, unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_TRIPLE_KICK') {
+    // battle_util.c:6850-6852: basePower *= 4 - multiHitCounter, where
+    // multiHitCounter COUNTS DOWN from hitCount to 1 across the 3 hits (3,2,1) --
+    // so hitIndex 0/1/2 (counting UP, this calculator's own convention) multiplies
+    // by 1/2/3 respectively. Applied here (CalcMoveBasePower's own switch), NOT as
+    // a final-modifier hitModifier like Parental Bond's bonus hits -- the two
+    // stages truncate independently, so this needs to land at the same pipeline
+    // point the C itself uses to stay bit-exact.
+    return { power: basePower * (hitIndex + 1), unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_MAGNITUDE') {
+    if (ctx.magnitudeTier === null) {
+      // No honest single default for an unset random roll -- Magnitude 7 (70
+      // power) is simply the modal/most-likely outcome (30% per the C's own
+      // table), reported as a rough default alongside the unmodelled note, not a
+      // real answer.
+      return { power: MAGNITUDE_POWER[7], unmodelled: ['EFFECT_MAGNITUDE: no magnitude tier set -- showing Magnitude 7 (modal outcome) as a rough default'] }
+    }
+    return { power: MAGNITUDE_POWER[ctx.magnitudeTier], unmodelled: [] }
+  }
+  if (moveEffect === 'EFFECT_PURSUIT') {
+    // battle_util.c:6860-6861 -- doubles only when the DEFENDER's chosen action
+    // this turn is a switch, a plain scenario fact (DamageContext.defenderIsSwitching)
+    // with no turn-history dependency at all.
+    return { power: ctx.defenderIsSwitching ? basePower * 2 : basePower, unmodelled: [] }
   }
   if (moveEffect !== 'EFFECT_MISC_HIT') return { power: basePower, unmodelled: [] }
 
@@ -310,10 +351,7 @@ export function applyPreModifierBasePower(
 // ---------------------------------------------------------------------------
 
 export const UNMODELLED_BASE_POWER_EFFECTS = new Set([
-  'EFFECT_ROLLOUT',
-  'EFFECT_MAGNITUDE',
-  'EFFECT_TRIPLE_KICK',
-  'EFFECT_PURSUIT',
+  'EFFECT_ROLLOUT', // Ice Ball shares this too -- a genuine cross-turn consecutive-use counter, see this file's module doc
   'EFFECT_FOCUS_PUNCH',
   'EFFECT_BEAT_UP',
 ])

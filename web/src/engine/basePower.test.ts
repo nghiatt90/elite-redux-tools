@@ -51,6 +51,8 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     field: { gravityActive: false, terrain: null, weather: 'NONE' },
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
+    defenderIsSwitching: false,
+    magnitudeTier: null,
     ...overrides,
   }
 }
@@ -311,6 +313,42 @@ describe('applyPreModifierBasePower', () => {
     expect(applyPreModifierBasePower(50, 'EFFECT_WEATHER_BALL', null, rain, 0, null, false).power).toBe(100)
     expect(applyPreModifierBasePower(50, 'EFFECT_WEATHER_BALL', null, ctx(), 0, null, false).power).toBe(50)
     expect(applyPreModifierBasePower(50, 'EFFECT_WEATHER_BALL', null, ctx(), 0, null, true).power).toBe(100)
+  })
+
+  it('EFFECT_TRIPLE_KICK (Triple Kick/Triple Axel) scales power 1x/2x/3x by hitIndex (battle_util.c:6850-6852)', () => {
+    expect(applyPreModifierBasePower(20, 'EFFECT_TRIPLE_KICK', null, ctx(), 0, null, false, 0).power).toBe(20)
+    expect(applyPreModifierBasePower(20, 'EFFECT_TRIPLE_KICK', null, ctx(), 0, null, false, 1).power).toBe(40)
+    expect(applyPreModifierBasePower(20, 'EFFECT_TRIPLE_KICK', null, ctx(), 0, null, false, 2).power).toBe(60)
+    // hitIndex defaults to 0 for a non-multi-hit caller.
+    expect(applyPreModifierBasePower(20, 'EFFECT_TRIPLE_KICK', null, ctx(), 0, null, false).power).toBe(20)
+  })
+
+  it('EFFECT_MAGNITUDE uses the fixed per-tier power table (battle_util.c:11286-11307)', () => {
+    const tiers: [number, number][] = [
+      [4, 10],
+      [5, 30],
+      [6, 50],
+      [7, 70],
+      [8, 90],
+      [9, 110],
+      [10, 150],
+    ]
+    for (const [tier, power] of tiers) {
+      const result = applyPreModifierBasePower(1, 'EFFECT_MAGNITUDE', null, ctx({ magnitudeTier: tier as 4 | 5 | 6 | 7 | 8 | 9 | 10 }), 0, null, false)
+      expect(result.power).toBe(power)
+      expect(result.unmodelled).toHaveLength(0)
+    }
+  })
+
+  it('EFFECT_MAGNITUDE with no tier set falls back to the modal Magnitude 7 (70) and surfaces an unmodelled note', () => {
+    const result = applyPreModifierBasePower(1, 'EFFECT_MAGNITUDE', null, ctx({ magnitudeTier: null }), 0, null, false)
+    expect(result.power).toBe(70)
+    expect(result.unmodelled).toHaveLength(1)
+  })
+
+  it('EFFECT_PURSUIT doubles power only when the defender is switching (battle_util.c:6860-6861)', () => {
+    expect(applyPreModifierBasePower(50, 'EFFECT_PURSUIT', null, ctx({ defenderIsSwitching: true }), 0, null, false).power).toBe(100)
+    expect(applyPreModifierBasePower(50, 'EFFECT_PURSUIT', null, ctx({ defenderIsSwitching: false }), 0, null, false).power).toBe(50)
   })
 })
 

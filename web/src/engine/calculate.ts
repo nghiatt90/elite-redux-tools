@@ -114,6 +114,10 @@ export interface DamageCalcScenario {
    * range at resolution time (see multiHit.ts). Ignored for fixed-count moves
    * (Double Hit, Population Bomb, Skill Link/Loaded Dice overrides, ...). */
   hitCount: number
+  /** See DamageContext.defenderIsSwitching's own doc (EFFECT_PURSUIT). */
+  defenderIsSwitching: boolean
+  /** See DamageContext.magnitudeTier's own doc (EFFECT_MAGNITUDE). */
+  magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
 }
 
 export interface DamageCalcResult {
@@ -155,6 +159,8 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     field: scenario.field,
     attackerActsFirst: scenario.attackerActsFirst,
     sameMoveTurnsInARow: scenario.sameMoveTurnsInARow,
+    defenderIsSwitching: scenario.defenderIsSwitching,
+    magnitudeTier: scenario.magnitudeTier,
   }
 }
 
@@ -497,6 +503,11 @@ function calcInternal(
   // ...), which never scale power per hit -- only a Parental-Bond-family bonus hit
   // uses anything else. See multiHit.ts's resolveHitPlan.
   hitModifier: number,
+  /** Which hit (0-indexed) of the current move use this is -- Triple Kick/Triple
+   * Axel's own base-power scaling reads this directly (applyPreModifierBasePower),
+   * unlike hitModifier which is a FINAL-stage multiplier. 0 for every non-multi-hit
+   * move and for every hit of a move whose OWN scaling isn't hit-index-based. */
+  hitIndex: number = 0,
 ): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
   const unmodelled: string[] = []
   const { attacker, defender, move, field, typeChart, moveBehaviors, battleConstants } = scenario
@@ -640,6 +651,7 @@ function calcInternal(
     attacker.alliesFainted,
     attacker.naturalGift?.power ?? null,
     attackerHasAuroraBorealis,
+    hitIndex,
   )
   unmodelled.push(...preModifierResult.unmodelled)
   const power = calcMoveBasePowerAfterModifiers(Math.max(preModifierResult.power, 1), basePowerCtx)
@@ -866,18 +878,19 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }
   const split = resolveSplit(scenario, attackerRaw)
 
-  const evaluate = (mtype: string, forceCrit: boolean, hitModifier: number) => calcInternal(scenario, mtype, split, forceCrit, hitModifier)
+  const evaluate = (mtype: string, forceCrit: boolean, hitModifier: number, hitIndex: number) => calcInternal(scenario, mtype, split, forceCrit, hitModifier, hitIndex)
 
   function fullDamageForRoll(
     damageRoll: number,
     forceCrit: boolean,
     hitModifier: number,
+    hitIndex: number = 0,
   ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
-    const primary = evaluate(moveType, forceCrit, hitModifier)
+    const primary = evaluate(moveType, forceCrit, hitModifier, hitIndex)
     let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
     if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
-      const alt = evaluate(move.type2, forceCrit, hitModifier)
+      const alt = evaluate(move.type2, forceCrit, hitModifier, hitIndex)
       if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
     }
 
@@ -948,10 +961,10 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
       const hitModifier = hitPlanResult.hitModifier(hitIndex)
       for (let roll = 15; roll >= 0; roll--) {
         const arrayIndex = 15 - roll
-        const result = fullDamageForRoll(roll, false, hitModifier)
+        const result = fullDamageForRoll(roll, false, hitModifier, hitIndex)
         totalRolls[arrayIndex] += result.dmg
         result.unmodelled.forEach((u) => unmodelled.add(u))
-        if (totalCritRolls) totalCritRolls[arrayIndex] += fullDamageForRoll(roll, true, hitModifier).dmg
+        if (totalCritRolls) totalCritRolls[arrayIndex] += fullDamageForRoll(roll, true, hitModifier, hitIndex).dmg
       }
     }
   }

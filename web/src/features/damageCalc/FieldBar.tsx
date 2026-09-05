@@ -1,4 +1,4 @@
-import { TERRAIN_OPTIONS, WEATHER_OPTIONS, type FieldConfig } from './scenario'
+import { MAGNITUDE_OPTIONS, TERRAIN_OPTIONS, WEATHER_OPTIONS, type FieldConfig } from './scenario'
 
 interface Props {
   field: FieldConfig
@@ -63,6 +63,10 @@ export default function FieldBar({ field, onChange }: Props) {
           <input type="checkbox" checked={field.attackerActsFirst} onChange={(e) => onChange({ ...field, attackerActsFirst: e.target.checked })} />
           Attacker acts first
         </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.defenderIsSwitching} onChange={(e) => onChange({ ...field, defenderIsSwitching: e.target.checked })} />
+          Defender is switching out {/* Pursuit */}
+        </label>
       </div>
       <SideScreens label="Attacker's side" side={field.attackerSide} onChange={(s) => onChange({ ...field, attackerSide: s })} />
       <SideScreens label="Defender's side" side={field.defenderSide} onChange={(s) => onChange({ ...field, defenderSide: s })} />
@@ -91,6 +95,22 @@ export default function FieldBar({ field, onChange }: Props) {
             onChange={(e) => onChange({ ...field, hitCount: Number(e.target.value) })}
           />
           <span>{field.hitCount}</span>
+        </label>
+        <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          Magnitude tier
+          <select
+            className="rounded-md border px-2 py-1 text-sm"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            value={field.magnitudeTier ?? ''}
+            onChange={(e) => onChange({ ...field, magnitudeTier: (e.target.value ? Number(e.target.value) : null) as FieldConfig['magnitudeTier'] })}
+          >
+            <option value="">(unset)</option>
+            {MAGNITUDE_OPTIONS.map((m) => (
+              <option key={m.tier} value={m.tier}>
+                Magnitude {m.tier} ({m.power} power, {m.chance}%)
+              </option>
+            ))}
+          </select>
         </label>
       </div>
     </div>

@@ -45,6 +45,8 @@ function ctx(overrides: Partial<DamageContext> = {}): DamageContext {
     field: { gravityActive: false, terrain: null, weather: 'NONE' },
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
+    defenderIsSwitching: false,
+    magnitudeTier: null,
     ...overrides,
   }
 }

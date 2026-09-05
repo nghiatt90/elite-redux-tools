@@ -118,6 +118,18 @@ export interface DamageContext {
    * is a UI-level toggle, not something derived. */
   attackerActsFirst: boolean
   sameMoveTurnsInARow: number // gBattleStruct->sameMoveTurns -- Echoed Voice, Metronome (item)
+  /** gActionsByTurnOrder[target] == B_ACTION_SWITCH -- EFFECT_PURSUIT's own doubling
+   * condition (battle_util.c:6860). A fact about the DEFENDER's chosen action this
+   * turn, not derivable without a full turn simulation -- a scenario toggle, same
+   * shape as attackerActsFirst. */
+  defenderIsSwitching: boolean
+  /** Cmd_setmagnitude's own random roll, pre-resolved to the displayed "Magnitude N"
+   * tier (4-10) rather than the raw 0-99 roll -- battle_util.c:11265-11307's table
+   * is a pure, turn-history-free random draw (unlike Rollout/Triple Kick, which
+   * depend on which hit/turn this is), so a manual tier pick is the same "pick one
+   * scenario, not a probability distribution" pattern this calculator already
+   * uses everywhere else. null leaves EFFECT_MAGNITUDE unmodelled. */
+  magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
 }
 
 // ---------------------------------------------------------------------------

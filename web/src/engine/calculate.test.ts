@@ -147,6 +147,8 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
     hitCount: 3,
+    defenderIsSwitching: false,
+    magnitudeTier: null,
     ...overrides,
   }
 }
@@ -1286,6 +1288,61 @@ describe('calculateMoveDamage -- multi-hit moves (src/battle_script_commands.c:9
     // Still exactly 2 identical hits -- Double Hit's own plan, not Parental Bond's.
     expect(result.hitCount).toBe(2)
     expect(result.totalRolls).toEqual(result.rolls.map((d) => d * 2))
+  })
+
+  it('Triple Kick/Triple Axel: 3 hits scaling 1x/2x/3x power, NOT 3 identical hits (battle_util.c:6850-6852)', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_TRIPLE_KICK') }))
+    expect(result.hitCount).toBe(3)
+    // Each hit is independently rolled at rolls[15]'s percentile; hit 2 and hit 3
+    // scale the SAME base roll by 2x/3x (not identical, unlike Double Hit/Bullet
+    // Seed above), so totalRolls[15] should be strictly between 3x and 6x
+    // rolls[15] -- above 3x rules out "no scaling was applied", below 6x rules
+    // out "scaled by hit COUNT instead of hit INDEX".
+    expect(result.totalRolls![15]).toBeGreaterThan(result.rolls[15] * 3)
+    expect(result.totalRolls![15]).toBeLessThan(result.rolls[15] * 6)
+
+    const axel = calculateMoveDamage(scenario({ move: moveData('MOVE_TRIPLE_AXEL') }))
+    expect(axel.hitCount).toBe(3)
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_MAGNITUDE (a pure random roll, no turn history needed; battle_util.c:11286-11307)', () => {
+  // MOVE_MAGNITUDE is Ground-type -- Skarmory (Steel/Flying), scenario()'s default
+  // defender, is flatly immune to it, so these use Garchomp (Ground/Dragon) instead.
+  it('with no tier set, defaults to Magnitude 7 (modal outcome) and surfaces an unmodelled note', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP') }))
+    expect(result.unmodelled.some((n) => n.includes('EFFECT_MAGNITUDE'))).toBe(true)
+  })
+
+  it('a higher magnitude tier deals more damage than a lower one', () => {
+    const low = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 4 }))
+    const high = calculateMoveDamage(scenario({ move: moveData('MOVE_MAGNITUDE'), defender: battler('SPECIES_GARCHOMP'), magnitudeTier: 10 }))
+    expect(low.unmodelled.some((n) => n.includes('EFFECT_MAGNITUDE'))).toBe(false)
+    expect(high.rolls[15]).toBeGreaterThan(low.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_PURSUIT (a plain scenario flag, no turn history needed; battle_util.c:6860-6861)', () => {
+  it('doubles power when the defender is switching, unchanged otherwise', () => {
+    const notSwitching = calculateMoveDamage(scenario({ move: moveData('MOVE_PURSUIT') }))
+    const switching = calculateMoveDamage(scenario({ move: moveData('MOVE_PURSUIT'), defenderIsSwitching: true }))
+    expect(switching.rolls[15]).toBeGreaterThan(notSwitching.rolls[15])
+  })
+})
+
+describe('calculateMoveDamage -- EFFECT_CLEAR_SMOG (MOVE_ABSORB in this ER build -- damage + a non-damage stat-clear secondary effect)', () => {
+  it('computes a plain damage number from its declared power, same as any other move -- the secondary effect never touches this number', () => {
+    // MOVE_ABSORB's own moveBehaviors.json entry is legacyConfig-only (no
+    // attack.damage block), same as most of the 391 opaque entries -- but since
+    // its ONLY behavior beyond plain damage is clearing the DEFENDER's stat
+    // stages (a non-damage secondary effect, out of scope like every other
+    // status/stat move effect in this engine), the opacity here doesn't hide
+    // anything damage-relevant. applyMoveBehaviorDamage's own fallback (no
+    // `attack.damage` -> use the declared power unmodified) already gives the
+    // right number with zero special-casing needed.
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_ABSORB') }))
+    expect(result.unmodelled).toHaveLength(0)
+    expect(result.rolls[15]).toBeGreaterThan(0)
   })
 })
 

@@ -65,6 +65,17 @@ export const WEATHER_OPTIONS = [
   { id: 'STRONG_WINDS', label: 'Strong Winds' },
 ] as const
 
+/** DamageContext.magnitudeTier's own table (battle_util.c:11286-11307). */
+export const MAGNITUDE_OPTIONS = [
+  { tier: 4, power: 10, chance: 5 },
+  { tier: 5, power: 30, chance: 10 },
+  { tier: 6, power: 50, chance: 20 },
+  { tier: 7, power: 70, chance: 30 },
+  { tier: 8, power: 90, chance: 20 },
+  { tier: 9, power: 110, chance: 10 },
+  { tier: 10, power: 150, chance: 5 },
+] as const
+
 export const TERRAIN_OPTIONS = [
   { id: null, label: 'None' },
   { id: 'TERRAIN_ELECTRIC', label: 'Electric' },
@@ -311,6 +322,10 @@ export interface FieldConfig {
    * multi-hit move/trigger (EFFECT_MULTI_HIT without Skill Link, a Parental Bond
    * TWO_TO_FIVE trigger); ignored otherwise. */
   hitCount: number
+  /** See DamageContext.defenderIsSwitching's own doc (EFFECT_PURSUIT). */
+  defenderIsSwitching: boolean
+  /** See DamageContext.magnitudeTier's own doc (EFFECT_MAGNITUDE). */
+  magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
 }
 
 export function defaultFieldConfig(): FieldConfig {
@@ -323,6 +338,8 @@ export function defaultFieldConfig(): FieldConfig {
     attackerActsFirst: true,
     sameMoveTurnsInARow: 0,
     hitCount: 3, // EFFECT_MULTI_HIT's own average ((2+2+3+3+4+5)/6 rounds to 3)
+    defenderIsSwitching: false,
+    magnitudeTier: null,
   }
 }
 
@@ -357,5 +374,7 @@ export function buildScenario(
     attackerActsFirst: field.attackerActsFirst,
     sameMoveTurnsInARow: field.sameMoveTurnsInARow,
     hitCount: field.hitCount,
+    defenderIsSwitching: field.defenderIsSwitching,
+    magnitudeTier: field.magnitudeTier,
   }
 }
