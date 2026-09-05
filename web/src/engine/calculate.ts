@@ -172,6 +172,19 @@ export interface DamageCalcResult {
    * "the expected total with critical hits factored in". `null` when hitCount is
    * null, or when the move can never crit at all (critRolls is also null then). */
   totalCritRolls: number[] | null
+  /** IsAbilityOnSide(battlerDef, BAD_LUCK/BAD_OMEN), battle_util.c:7815-7817 --
+   * when true, the real game's random roll is FORCED to 15 (the worst/minimum
+   * of the 16), so `rolls[0]`/`totalRolls[0]` (and the matching crit row) are
+   * the only value that can actually occur -- the rest of the range shown is
+   * unreachable while this holds, not a real spread. A UI-level framing flag,
+   * not a fixed-up number: every value in `rolls` is still independently
+   * correct for what it represents. Suppression uses only the cheap, already-
+   * ported onMoldBreaker abilities (via computeAttackerHasMoldBreaker with no
+   * type/crit context) rather than fully re-deriving the 5 hypothesis-based
+   * ones (Deadly Precision et al.) -- an attacker holding one of those AND a
+   * defender holding Bad Luck/Bad Omen at once is an extreme enough edge case
+   * that this simplification was chosen over duplicating that machinery here. */
+  isForcedMinRoll: boolean
 }
 
 function toDamageContext(scenario: DamageCalcScenario): DamageContext {
@@ -1105,6 +1118,10 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   const moveType = move.type ?? 'NORMAL'
   const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }
   const split = resolveSplit(scenario, attackerRaw)
+  const cheapAttackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split)
+  const isForcedMinRoll =
+    battlerHasAbility(defender.abilitySlots, 'ABILITY_BAD_LUCK', () => cheapAttackerHasMoldBreaker) ||
+    battlerHasAbility(defender.abilitySlots, 'ABILITY_BAD_OMEN', () => cheapAttackerHasMoldBreaker)
 
   const evaluate = (mtype: string, forceCrit: boolean, hitModifier: number, hitIndex: number) => calcInternal(scenario, mtype, split, forceCrit, hitModifier, hitIndex)
 
@@ -1124,8 +1141,11 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
 
     if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
 
-    // random factor, src/battle_util.c:7815-7821 -- Bad Luck/Bad Omen (deferred) would
-    // force roll=15 on the defender's side.
+    // random factor, src/battle_util.c:7815-7821 -- Bad Luck/Bad Omen force
+    // roll=15 on the defender's side; surfaced via the result's own
+    // isForcedMinRoll flag (calculateMoveDamage) rather than changed here --
+    // every roll in this array is still independently correct, it's the
+    // CALLER's job to know only rolls[0] is reachable when that flag is set.
     let dmg = idiv(best.dmg * (100 - damageRoll), 100)
     if (dmg === 0) dmg = 1
     return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
@@ -1209,5 +1229,6 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     hitCount,
     totalRolls,
     totalCritRolls,
+    isForcedMinRoll,
   }
 }

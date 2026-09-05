@@ -422,6 +422,24 @@ describe('calculateMoveDamage -- ignoresAbility forces Mold Breaker unconditiona
   })
 })
 
+describe('calculateMoveDamage -- isForcedMinRoll flags Bad Luck/Bad Omen (battle_util.c:7815-7817) without altering any actual roll value', () => {
+  it('is true when the defender holds Bad Luck or Bad Omen, false otherwise -- rolls array itself is unchanged either way', () => {
+    const baseline = calculateMoveDamage(scenario())
+    expect(baseline.isForcedMinRoll).toBe(false)
+
+    const badLuck = calculateMoveDamage(
+      scenario({ defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_BAD_LUCK', innates: [null, null, null] } }) }),
+    )
+    expect(badLuck.isForcedMinRoll).toBe(true)
+    expect(badLuck.rolls).toEqual(baseline.rolls) // the roll VALUES are untouched -- only the framing flag differs
+
+    const badOmen = calculateMoveDamage(
+      scenario({ defender: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_BAD_OMEN', innates: [null, null, null] } }) }),
+    )
+    expect(badOmen.isForcedMinRoll).toBe(true)
+  })
+})
+
 describe('calculateMoveDamage -- Glaive Rush doubles damage taken by a defender who used it earlier this turn (battle_util.c:7704)', () => {
   it('was permanently dead despite finalDamage.ts already having a glaiveRushActive stage -- nothing ever set it', () => {
     const baseline = calculateMoveDamage(scenario())

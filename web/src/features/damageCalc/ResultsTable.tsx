@@ -82,6 +82,11 @@ function MoveRow({ moveId, scenario }: { moveId: string; scenario: DamageCalcSce
             ⚠ {result.unmodelled.length} ability/effect{result.unmodelled.length > 1 ? 's' : ''} not modelled
           </span>
         )}
+        {result.isForcedMinRoll && (
+          <span className="block text-xs" style={{ color: 'var(--color-text-muted)' }} title="Bad Luck/Bad Omen forces every roll to the worst (85%) outcome -- only the low end of this range is actually reachable.">
+            Bad Luck/Omen: only the lowest roll is reachable
+          </span>
+        )}
       </td>
     </tr>
   )
