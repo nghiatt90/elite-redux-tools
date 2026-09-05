@@ -360,9 +360,18 @@ describe('calculateMoveDamage -- Iron Ball/Gravity force grounding, Air Balloon 
     expect(withGravity.isImmune).toBe(false)
   })
 
-  it("Gravity does NOT remove a naturally-Flying-type's own chart-based Ground immunity -- GetTypeModifier is a pure chart lookup with no Gravity awareness at all (verified against every IsGravityActive call site in the C, none of which touch type effectiveness)", () => {
-    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE'), field: fieldState({ gravityActive: true }) })) // Skarmory: Steel/Flying
-    expect(result.isImmune).toBe(true)
+  it("Gravity DOES restore a naturally-Flying-type's own chart-based Ground immunity (battle_util.c:7902, IsBattlerGrounded) -- corrects an earlier claim in this codebase that missed this per-component check", () => {
+    // Skarmory (Steel/Flying): Ground vs Steel=2x, vs Flying=0x (chart immunity)
+    // without Gravity -> immune outright. With Gravity, ONLY the Flying
+    // component is restored to neutral (per-component, not the whole modifier)
+    // -- the Steel component's real 2x survives, so this becomes 2x super
+    // effective, not just "no longer immune".
+    const withoutGravity = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE') }))
+    expect(withoutGravity.isImmune).toBe(true)
+
+    const withGravity = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE'), field: fieldState({ gravityActive: true }) }))
+    expect(withGravity.isImmune).toBe(false)
+    expect(withGravity.typeEffectiveness).toBe(uq(2.0))
   })
 
   it('Air Balloon grants Ground immunity to a non-Flying, non-Levitate defender', () => {
@@ -378,6 +387,37 @@ describe('calculateMoveDamage -- Iron Ball/Gravity force grounding, Air Balloon 
       }),
     )
     expect(withAirBalloon.isImmune).toBe(true)
+  })
+
+  it('Thousand Arrows (ignoresLevitation) punches through a naturally Flying-typed immunity, flattening the WHOLE modifier to neutral (battle_util.c:7981-7984) -- unlike the Gravity fix above, this does NOT preserve other components\' real multiplier', () => {
+    // Skarmory (Steel/Flying): without the flag, Ground-family moves are a flat
+    // immunity (Flying's chart 0 dominates the fold) regardless of Steel's own
+    // real 2x weakness.
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_EARTHQUAKE') }))
+    expect(baseline.isImmune).toBe(true)
+
+    const thousandArrows = calculateMoveDamage(scenario({ move: moveData('MOVE_THOUSAND_ARROWS') }))
+    expect(thousandArrows.isImmune).toBe(false)
+    expect(thousandArrows.typeEffectiveness).toBe(uq(1.0)) // flattened neutral, NOT Steel's real 2x
+  })
+})
+
+describe('calculateMoveDamage -- ignoresAbility forces Mold Breaker unconditionally (SetMoldBreaker, battle_script_commands.c:976-978)', () => {
+  it('Sunsteel Strike suppresses a breakable defensive ability (Multiscale) without the attacker needing Mold Breaker itself', async () => {
+    await import('./abilities/impl/index')
+    const plainDefender = battler('SPECIES_SKARMORY')
+    const multiscaleDefender = battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_MULTISCALE', innates: [null, null, null] } })
+
+    // A move WITHOUT ignoresAbility is genuinely halved by Multiscale.
+    const normalMoveVsMultiscale = calculateMoveDamage(scenario({ move: moveData('MOVE_STEEL_BEAM'), defender: multiscaleDefender }))
+    const normalMoveVsPlain = calculateMoveDamage(scenario({ move: moveData('MOVE_STEEL_BEAM'), defender: plainDefender }))
+    expect(normalMoveVsMultiscale.rolls[15]).toBeLessThan(normalMoveVsPlain.rolls[15])
+
+    // Sunsteel Strike (ignoresAbility) should deal the SAME damage regardless
+    // of Multiscale -- it's suppressed outright, not just reduced.
+    const sunsteelVsMultiscale = calculateMoveDamage(scenario({ move: moveData('MOVE_SUNSTEEL_STRIKE'), defender: multiscaleDefender }))
+    const sunsteelVsPlain = calculateMoveDamage(scenario({ move: moveData('MOVE_SUNSTEEL_STRIKE'), defender: plainDefender }))
+    expect(sunsteelVsMultiscale.rolls[15]).toBe(sunsteelVsPlain.rolls[15])
   })
 })
 

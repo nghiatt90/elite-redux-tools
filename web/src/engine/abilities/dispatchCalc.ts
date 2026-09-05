@@ -283,6 +283,7 @@ function resolveTypeEffectivenessComponent(
   defType: string,
   baseModifier: number,
   ringTargetHeld: boolean,
+  defenderForcedGrounded: boolean,
 ): number {
   let modifier = baseModifier
   let abilityModified = false
@@ -297,6 +298,18 @@ function resolveTypeEffectivenessComponent(
     }
   })
   if (!abilityModified && modifier === 0 && ringTargetHeld) modifier = uq(1.0)
+  // battle_util.c:7902 -- corrects an earlier (wrong) claim in this codebase's
+  // own comments that Gravity/Iron Ball never affect a naturally Flying-typed
+  // defender's own chart-based Ground immunity. They DO, but only via this
+  // exact per-component check (IsBattlerGrounded, the TYPE-INCLUSIVE grounding
+  // check -- distinct from IsBattlerGroundedIgnoreType, which the WHOLE-modifier
+  // override elsewhere in this pipeline uses and which really doesn't consider
+  // type at all): if the defender is forcibly grounded (Iron Ball/Gravity/etc,
+  // NOT ability/item airborne suppression) AND this specific component is the
+  // Flying-vs-Ground immunity, restore just that component to neutral, leaving
+  // any OTHER type component (e.g. a Ground/Flying dual-type's Ground half)
+  // untouched by this specific check.
+  if (moveType === 'GROUND' && defType === 'FLYING' && modifier === 0 && defenderForcedGrounded) modifier = uq(1.0)
   return modifier
 }
 
@@ -325,6 +338,7 @@ export function computeTypeEffectivenessWithAbilities(
   defenderId: string,
   moveId: string,
   ringTargetHeld: boolean,
+  defenderForcedGrounded: boolean = false,
 ): TypeEffectivenessFoldResult {
   const components = defenderTypes.map((defType) =>
     resolveTypeEffectivenessComponent(
@@ -336,6 +350,7 @@ export function computeTypeEffectivenessWithAbilities(
       defType,
       baseTypeEffectiveness(attackingType, defType, chart),
       ringTargetHeld,
+      defenderForcedGrounded,
     ),
   )
   let modifier = uq(1.0)

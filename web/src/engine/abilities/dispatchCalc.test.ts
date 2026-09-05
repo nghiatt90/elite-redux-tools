@@ -295,6 +295,36 @@ describe('computeTypeEffectivenessWithAbilities', () => {
     const withBoth = computeTypeEffectivenessWithAbilities(slots('ABILITY_TEST_SCRAPPY_HALF'), 'NORMAL', ['GHOST'], chart, 'attacker', 'defender', 'MOVE_TACKLE', true)
     expect(withBoth.modifier).toBe(uq(0.5))
   })
+
+  it('defenderForcedGrounded restores ONLY the Ground-vs-Flying component (battle_util.c:7902), leaving other components alone', () => {
+    const groundVsSteelFlying = { GROUND: { STEEL: 2, FLYING: 0 } }
+    const withoutGrounding = computeTypeEffectivenessWithAbilities(slots(null), 'GROUND', ['STEEL', 'FLYING'], groundVsSteelFlying, 'attacker', 'defender', 'MOVE_EARTHQUAKE', false, false)
+    expect(withoutGrounding.modifier).toBe(0) // flat immunity via the Flying component
+
+    const withForcedGrounding = computeTypeEffectivenessWithAbilities(
+      slots(null),
+      'GROUND',
+      ['STEEL', 'FLYING'],
+      groundVsSteelFlying,
+      'attacker',
+      'defender',
+      'MOVE_EARTHQUAKE',
+      false,
+      true,
+    )
+    // Flying's 0 restored to neutral (1.0), Steel's real 2x survives -- 2x
+    // super effective overall, NOT flattened to neutral.
+    expect(withForcedGrounding.modifier).toBe(uq(2.0))
+  })
+
+  it('defenderForcedGrounded does nothing for a non-Ground move or a non-Flying component', () => {
+    const chart2 = { FIRE: { FLYING: 2 }, GROUND: { NORMAL: 1 } }
+    const fireVsFlying = computeTypeEffectivenessWithAbilities(slots(null), 'FIRE', ['FLYING'], chart2, 'attacker', 'defender', 'MOVE_FLAMETHROWER', false, true)
+    expect(fireVsFlying.modifier).toBe(uq(2.0)) // untouched -- not a Ground move
+
+    const groundVsNormal = computeTypeEffectivenessWithAbilities(slots(null), 'GROUND', ['NORMAL'], chart2, 'attacker', 'defender', 'MOVE_EARTHQUAKE', false, true)
+    expect(groundVsNormal.modifier).toBe(uq(1.0)) // untouched -- not a Flying component, and not 0 anyway
+  })
 })
 
 describe('computeAfterTypeEffectiveness', () => {

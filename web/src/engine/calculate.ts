@@ -541,28 +541,40 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   // ability knowledge), further overridden airborne by Levitate or Air Balloon
   // (Magnet Rise/Telekinesis are also volatile-status, same gap as above).
   //
-  // NOTE: Gravity here only overrides Levitate/Air Balloon-style airborne
-  // effects, NOT a naturally Flying-typed defender's own chart-based Ground
-  // immunity -- calcTypeEffectiveness's isGrounded param only fires its override
-  // when the type-chart fold is already nonzero (matching CalcFinalDmg's own
-  // `if (modifier && ...)` guard), and GetTypeModifier (:8052-8068) is a pure
-  // static chart lookup with no Gravity awareness anywhere in it. Verified
-  // against every IsGravityActive call site in the C -- none touch type
-  // effectiveness. This may read as counter-intuitive against vanilla Pokemon's
-  // own Gravity mechanic, but it's this codebase's actual, faithfully-ported
-  // behavior, not an oversight in this port.
+  // CORRECTION (this session's own later audit): an earlier version of this
+  // comment claimed Gravity/Iron Ball never override a naturally Flying-typed
+  // defender's own chart-based Ground immunity -- that was wrong, based on an
+  // incomplete IsGravityActive call-site grep that missed battle_util.c:7902,
+  // reached via IsBattlerGrounded (not IsGravityActive directly). They DO
+  // restore it, but only via a separate, PER-COMPONENT check
+  // (dispatchCalc.ts's resolveTypeEffectivenessComponent, fed
+  // isForcedGrounded below) distinct from this WHOLE-modifier isGrounded
+  // override, which stays ability/item-only (IsBattlerGroundedIgnoreType,
+  // genuinely type-blind) as originally described.
   const isForcedGrounded = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || field.gravityActive
   const isForcedAirborne =
     !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
   const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
   const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
-  const typeFold = computeTypeEffectivenessWithAbilities(attacker.abilitySlots, moveType, defenderTypes, typeChart, 'attacker', 'defender', move.id, ringTargetHeld)
+  const typeFold = computeTypeEffectivenessWithAbilities(attacker.abilitySlots, moveType, defenderTypes, typeChart, 'attacker', 'defender', move.id, ringTargetHeld, isForcedGrounded)
   // The post-fold Ground/grounded override (battle_util.c:7973-7977) -- same check
   // calcTypeEffectiveness's own isGrounded param applies, done manually here since
   // this call site needs the raw fold result for onAfterTypeEffectiveness's own
   // perTypeModifiers/targetGrounded fields below.
   let typeEffectivenessBeforeAfterHooks = typeFold.modifier
   if (typeEffectivenessBeforeAfterHooks !== 0 && moveType === 'GROUND' && !isGrounded) typeEffectivenessBeforeAfterHooks = 0
+  // Thousand Arrows-style "ignoresLevitation" moves (battle_util.c:7981-7984,
+  // FLAG_DMG_UNGROUNDED_IGNORE_TYPE_IF_FLYING) restore the WHOLE modifier to
+  // neutral whenever it's flatly zero for an airborne target -- unlike the
+  // grounding-based restore above (isGrounded, ability/item-only), this one
+  // punches through even a NATURALLY Flying-typed target's own chart immunity,
+  // which is the whole point of the move. Checked AFTER the grounding override
+  // above (not independently re-deriving "is this target airborne"): if the
+  // target were forcibly grounded (Iron Ball/Gravity), the per-component fold
+  // below already restores the real chart value before this point is ever
+  // reached, so modifier isn't 0 to begin with -- matching the C's own
+  // (redundant-looking, but consistent) `!IsBattlerGrounded` guard.
+  if (moveType === 'GROUND' && move.flags.ignoresLevitation && typeEffectivenessBeforeAfterHooks === 0) typeEffectivenessBeforeAfterHooks = uq(1.0)
   return computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
     attackerId: 'attacker',
     defenderId: 'defender',
@@ -656,7 +668,12 @@ function calcInternal(
   // check (below) is itself checkMoldBreaker=TRUE (battle_util.c:6694,
   // RETURN_ABILITY_IF_FLAG(battlerId, TRUE, levitate)) and runs before type
   // effectiveness is known.
-  const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split, moveType, hypotheticalTypeEffectiveness, forceCrit)
+  // FLAG_TARGET_ABILITY_IGNORED (SetMoldBreaker, battle_script_commands.c:976-978)
+  // -- a move's own ignoresAbility flag unconditionally forces Mold Breaker,
+  // checked FIRST in the C before any ability-based onMoldBreaker check even
+  // runs (order doesn't matter here since this is a plain OR).
+  const attackerHasMoldBreaker =
+    Boolean(move.flags.ignoresAbility) || computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split, moveType, hypotheticalTypeEffectiveness, forceCrit)
   // Mold Breaker is a single, uniform flag for the whole hit regardless of WHICH
   // ability (if any) activated it -- once attackerHasMoldBreaker is true, the
   // hypothetical pass above (which forced it true) already IS the real value, no

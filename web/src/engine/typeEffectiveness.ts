@@ -34,9 +34,13 @@ export function baseTypeEffectiveness(attackingType: string, defendingType: stri
  * move against a non-grounded defender (pure Flying, Levitate, Air Balloon, ...) is a
  * flat immunity applied AFTER the type-chart fold, overriding whatever the chart said
  * (e.g. Ground vs Ground/Flying still misses). Thousand Arrows-style
- * "ignoresLevitation" moves are not modelled by this function -- that flag restores
- * the immunity to neutral and belongs in the caller alongside the rest of move-flag
- * handling.
+ * "ignoresLevitation" moves are ported, but not by this function -- that flag
+ * restores the WHOLE modifier to neutral (battle_util.c:7981-7984) and lives in
+ * calculate.ts's resolveTypeEffectiveness alongside the rest of move-flag
+ * handling, same as this doc always said it should. (Separately, forced
+ * grounding -- Iron Ball/Gravity -- restores just the Flying-vs-Ground
+ * PER-COMPONENT value even without that move flag; see
+ * dispatchCalc.ts's resolveTypeEffectivenessComponent.)
  *
  * `ringTargetHeld` mirrors MulByTypeEffectiveness's own Ring Target check
  * (:7881-7884): PER-DEFENDING-TYPE, not on the final folded modifier -- a Ring
