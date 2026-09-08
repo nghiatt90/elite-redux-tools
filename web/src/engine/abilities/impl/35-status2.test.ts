@@ -70,6 +70,7 @@ function defCtx(defenderIsEnraged: boolean): DefensiveMultiplierContext {
     attackerGender: 'MALE',
     defenderGender: 'MALE',
     defenderIsEnraged,
+    attackerTypes: [],
   }
 }
 

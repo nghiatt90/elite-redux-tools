@@ -6,7 +6,7 @@
 // reversed "convert every move to Normal" mechanism Normalize itself needs) once
 // actually read against the C.
 
-import { aliasOffensiveMultiplier } from './alias'
+import { aliasOffensiveMultiplier, aliasChooseOffensiveStat } from './alias'
 import type { AbilityImpl, OnMoveTypeContext } from '../types'
 
 function soundAteAbility(id: string, src: string, type: string): AbilityImpl {
@@ -28,13 +28,36 @@ export const OFFENSIVE_MULTIPLIER_BATCH_E: AbilityImpl[] = [
   soundAteAbility('ABILITY_SAND_SONG', 'src/abilities.cc:3672', 'GROUND'),
   soundAteAbility('ABILITY_SNOW_SONG', 'src/abilities.cc:7823', 'ICE'),
 
-  { id: 'ABILITY_MAGICAL_FISTS', src: 'src/abilities.cc:9131', onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST') },
-  { id: 'ABILITY_POWER_FISTS', src: 'src/abilities.cc:3663', onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST') },
   {
-    // Referenced by ABILITY_GNASHING_CANNON's composite below.
+    // Real gap fix: the C's onChooseOffensiveStat half (:9133-9136, IsIronFistBoosted
+    // == moveFlags.punchBased -> SPATK) was missing from this port entirely.
+    id: 'ABILITY_MAGICAL_FISTS',
+    src: 'src/abilities.cc:9131',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+    onChooseOffensiveStat: (ctx) => {
+      if (ctx.moveFlags.punchBased) ctx.statToUse = 'spatk'
+    },
+  },
+  {
+    // Real gap fix: the C's onChooseDefensiveStat half (:3667-3670, IsIronFistBoosted
+    // == moveFlags.punchBased -> SPDEF) was missing from this port entirely.
+    id: 'ABILITY_POWER_FISTS',
+    src: 'src/abilities.cc:3663',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+    onChooseDefensiveStat: (ctx) => {
+      if (ctx.moveFlags.punchBased) ctx.statToUse = 'spdef'
+    },
+  },
+  {
+    // Referenced by ABILITY_GNASHING_CANNON's composite below. Real gap fix: the
+    // C's onChooseOffensiveStat half (:7233-7236, FLAG_STRONG_JAW_BOOST ==
+    // moveFlags.biteBased -> SPATK) was missing from this port entirely.
     id: 'ABILITY_MIND_CRUSH',
     src: 'src/abilities.cc:7230',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+    onChooseOffensiveStat: (ctx) => {
+      if (ctx.moveFlags.biteBased) ctx.statToUse = 'spatk'
+    },
   },
 
   {
@@ -46,12 +69,15 @@ export const OFFENSIVE_MULTIPLIER_BATCH_E: AbilityImpl[] = [
     },
   },
   {
+    // Real gap fix: `.onChooseOffensiveStat = Impl<MIND_CRUSH>.onChooseOffensiveStat`
+    // (:10269) was missing from this port entirely.
     id: 'ABILITY_GNASHING_CANNON',
     src: 'src/abilities.cc:10261',
     onOffensiveMultiplier: (ctx) => {
       aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER')(ctx)
       aliasOffensiveMultiplier('ABILITY_MIND_CRUSH')(ctx)
     },
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_MIND_CRUSH'),
   },
   {
     id: 'ABILITY_REAPERS_EMBARCE',

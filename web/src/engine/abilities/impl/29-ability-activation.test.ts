@@ -72,6 +72,7 @@ function defCtx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveM
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
     defenderIsEnraged: false,
+    attackerTypes: [],
     ...overrides,
   }
 }

@@ -78,12 +78,18 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
     onSwapSplit: (ctx) => ctx.moveSplit === 'PHYSICAL' && !!ctx.moveFlags.arrowBased,
   },
   {
-    // .onSwapSplit = Impl<ABILITY_MYSTIC_BLADES>.onSwapSplit (alias); the
-    // .onChooseOffensiveStat half (alias to Juggernaut) isn't ported -- that hook
-    // isn't wired into calculate.ts yet.
+    // Real gap fix: the .onChooseOffensiveStat half was previously left off this
+    // port entirely (a stale comment here claimed it aliased Juggernaut and that
+    // the hook wasn't wired yet -- both wrong: it's its own lambda, and
+    // onChooseOffensiveStat has been wired since batch Q). IsKeenEdge(...) ==
+    // DoesMoveMatchFlag(..., MOVE_FLAG_KEEN_EDGE) == moveFlags.sliceBased, same
+    // condition as ABILITY_KEEN_EDGE's own (03-offensive-multiplier-b.ts).
     id: 'ABILITY_BEST_OFFENSE',
     src: 'src/abilities.cc:10190',
     onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+    onChooseOffensiveStat: (ctx) => {
+      if (ctx.moveFlags.sliceBased) ctx.secondaryStat.def = (ctx.secondaryStat.def ?? 0) + 20
+    },
   },
   {
     id: 'ABILITY_PONY_POWER',

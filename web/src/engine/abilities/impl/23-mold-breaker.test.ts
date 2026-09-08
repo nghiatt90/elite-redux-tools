@@ -98,6 +98,7 @@ describe('mold breaker batch W', () => {
       attackerGender: 'MALE' as const,
       defenderGender: 'MALE' as const,
       defenderIsEnraged: false,
+      attackerTypes: [],
     }
 
     const withMoldBreaker = computeAbilityMultiplier(attacker, defender, offensiveCtx, defensiveCtx, true)

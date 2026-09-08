@@ -134,6 +134,7 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS' // Rivalry's own condition (GetGenderFromSpeciesAndPersonality)
   defenderGender: 'MALE' | 'FEMALE' | 'GENDERLESS'
   defenderIsEnraged: boolean // STATUS2_ENRAGED on the ability holder itself (== the move's target here) -- Madness Enhancement
+  attackerTypes: string[] // IS_BATTLER_OF_TYPE(attacker, ...) -- the move USER's own types (Dragonslayer/Fae Hunter/Firefighter/Lumberjack/Monster Hunter's defensive halves)
 }
 
 export interface OnStatContext {

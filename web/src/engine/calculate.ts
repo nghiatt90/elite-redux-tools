@@ -891,6 +891,7 @@ function calcInternal(
       attackerGender: attacker.gender,
       defenderGender: defender.gender,
       defenderIsEnraged: defender.condition.isEnraged,
+      attackerTypes: attacker.types,
     },
     attackerHasMoldBreaker,
   )

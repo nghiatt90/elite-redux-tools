@@ -70,6 +70,7 @@ function defCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     attackerGender,
     defenderGender,
     defenderIsEnraged: false,
+    attackerTypes: [],
   }
 }
 

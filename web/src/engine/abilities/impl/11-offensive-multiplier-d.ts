@@ -5,7 +5,7 @@
 
 import { MUL } from '../macros'
 import { mulModifier, uq } from '../../fixed'
-import { aliasInfiltrate } from './alias'
+import { aliasInfiltrate, aliasStab } from './alias'
 import type { AbilityImpl } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -19,6 +19,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'WATER' || ctx.moveType === 'ICE') MUL(ctx, 1.25)
+    },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:9349-9351,
+    // RESISTANCE(.5) vs Fire) that this port was entirely missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.moveType === 'FIRE') MUL(ctx, 0.5)
     },
   },
   {
@@ -41,6 +46,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'GROUND') MUL(ctx, 1.2)
+    },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:5436-5438,
+    // MUL(.65) in Sandstorm) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.weather === 'SANDSTORM') MUL(ctx, 0.65)
     },
   },
   {
@@ -76,6 +86,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'DARK') MUL(ctx, 1.25)
     },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:4005-4007,
+    // RESISTANCE(.75) vs Dark/Fairy) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.moveType === 'DARK' || ctx.moveType === 'FAIRY') MUL(ctx, 0.75)
+    },
   },
   {
     id: 'ABILITY_PLASMA_LAMP',
@@ -109,6 +124,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveFlags.hammerBased) MUL(ctx, 1.1)
     },
+    // Real gap fix: the C's onChooseDefensiveStat half (:8048-8050, hammerBased ->
+    // SPDEF) was missing from this port entirely.
+    onChooseDefensiveStat: (ctx) => {
+      if (ctx.moveFlags.hammerBased) ctx.statToUse = 'spdef'
+    },
   },
   {
     // IsSoundMove's C also lets an attacker-held ability GRANT the sound flag
@@ -119,6 +139,13 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     src: 'src/abilities.cc:2763',
     onOffensiveMultiplier: (ctx) => {
       if (ctx.moveFlags.sound) MUL(ctx, 1.2)
+    },
+    // Real gap fix: the C's own onMoveType half (:2767-2771, sound Normal move ->
+    // Water) was missing -- BANSHEE/POWER_METAL/SAND_SONG/SNOW_SONG (18-offensive-
+    // multiplier-e.ts's soundAteAbility) already ported this exact shape for their
+    // own types, this just never landed on Liquid Voice itself.
+    onMoveType: (ctx) => {
+      if (ctx.moveType === 'NORMAL' && ctx.moveFlags?.sound) ctx.moveType = 'WATER'
     },
   },
   {
@@ -147,9 +174,14 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
   {
     id: 'ABILITY_ARCANE_FORCE',
     src: 'src/abilities.cc:6367',
+    // Real gap fix: the C also has `.onStab = Impl<MYSTIC_POWER>.onStab` (always
+    // TRUE) plus `.omniStab = TRUE` -- this port had neither, so Arcane Force never
+    // actually granted its unconditional pseudo-STAB.
+    flags: { omniStab: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.typeEffectiveness >= SUPER_EFFECTIVE) MUL(ctx, 1.1)
     },
+    onStab: aliasStab('ABILITY_MYSTIC_POWER'),
   },
   {
     id: 'ABILITY_OVERRULE',
@@ -203,6 +235,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('DRAGON')) MUL(ctx, 1.5)
     },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:4075-4078,
+    // MUL(.5) when the ATTACKER is Dragon-type) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.attackerTypes.includes('DRAGON')) MUL(ctx, 0.5)
+    },
   },
   {
     id: 'ABILITY_FAE_HUNTER',
@@ -210,6 +247,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('FAIRY')) MUL(ctx, 1.5)
+    },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:5705-5707,
+    // RESISTANCE(.5) when the ATTACKER is Fairy-type) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.attackerTypes.includes('FAIRY')) MUL(ctx, 0.5)
     },
   },
   {
@@ -219,6 +261,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('FIRE')) MUL(ctx, 1.5)
     },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:9780-9782,
+    // MUL(.5) when the ATTACKER is Fire-type) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.attackerTypes.includes('FIRE')) MUL(ctx, 0.5)
+    },
   },
   {
     id: 'ABILITY_LUMBERJACK',
@@ -226,6 +273,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('GRASS')) MUL(ctx, 1.5)
+    },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:5740-5742,
+    // RESISTANCE(.5) when the ATTACKER is Grass-type) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.attackerTypes.includes('GRASS')) MUL(ctx, 0.5)
     },
   },
   {
@@ -242,6 +294,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
       if (ctx.defenderTypes.includes('DARK')) MUL(ctx, 1.5)
+    },
+    // Real gap fix: the C also has an onDefensiveMultiplier half (:6657-6659,
+    // MUL(.5) when the ATTACKER is Dark-type) that this port was missing.
+    onDefensiveMultiplier: (ctx) => {
+      if (ctx.attackerTypes.includes('DARK')) MUL(ctx, 0.5)
     },
   },
   {

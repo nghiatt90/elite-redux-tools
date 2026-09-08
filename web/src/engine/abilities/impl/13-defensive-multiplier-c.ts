@@ -12,7 +12,7 @@
 // same as its onOffensiveMultiplier half -- see that batch's note).
 
 import { MUL } from '../macros'
-import { aliasDefensiveMultiplier, aliasImmune } from './alias'
+import { aliasDefensiveMultiplier, aliasImmune, aliasCrit } from './alias'
 import type { AbilityImpl, DefensiveMultiplierContext } from '../types'
 
 const SUPER_EFFECTIVE = 2048 // GetSuperEffectiveMult() == UQ_4_12(2.0)
@@ -88,12 +88,27 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
       if (ctx.moveType === 'GHOST') MUL(ctx, 0.5)
     },
   },
-  { id: 'ABILITY_TERASTAL_TREASURE', src: 'src/abilities.cc:8786', flags: { breakable: true }, onDefensiveMultiplier: (ctx) => MUL(ctx, 0.6) },
   {
+    // Real gap fix: the C also has an onStat half (:8789-8791, Speed *0.8) missing
+    // from this port entirely.
+    id: 'ABILITY_TERASTAL_TREASURE',
+    src: 'src/abilities.cc:8786',
+    flags: { breakable: true },
+    onDefensiveMultiplier: (ctx) => MUL(ctx, 0.6),
+    onStat: (ctx) => {
+      if (ctx.statId === 'spe') ctx.stat = Math.trunc(ctx.stat * 0.8)
+    },
+  },
+  {
+    // Real gap fix: the C also has an onStat half (:10792-10794, Speed *0.5)
+    // missing from this port entirely.
     id: 'ABILITY_THICK_BLUBBER',
     src: 'src/abilities.cc:10785',
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FIRE' || ctx.moveType === 'ICE') MUL(ctx, 0.25)
+    },
+    onStat: (ctx) => {
+      if (ctx.statId === 'spe') ctx.stat = Math.trunc(ctx.stat * 0.5)
     },
   },
   {
@@ -144,15 +159,23 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     onStat: (ctx) => LEAD_COAT.onStat!(ctx),
   },
   {
+    // Real gap fix: the C also copies Shell Armor's onCrit/onCritFor
+    // (:12456-12457), which this port was missing entirely.
     id: 'ABILITY_DROIDEKA',
     src: 'src/abilities.cc:12450',
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onDefensiveMultiplier: composeDefensive('ABILITY_HEATPROOF', 'ABILITY_SHELL_ARMOR'),
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
   },
   {
+    // Real gap fix: the C also copies Shell Armor's onCrit/onCritFor
+    // (:12306-12307), which this port was missing entirely.
     id: 'ABILITY_FORTRESS',
     src: 'src/abilities.cc:12300',
     flags: { breakable: true },
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onDefensiveMultiplier: composeDefensive('ABILITY_FILTER', 'ABILITY_SHELL_ARMOR'),
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
   },
   {
     id: 'ABILITY_PETROLEUM_JELLY',

@@ -69,6 +69,7 @@ describe('ally-only batch S', () => {
         attackerGender: 'MALE' as const,
         defenderGender: 'MALE' as const,
         defenderIsEnraged: false,
+        attackerTypes: [],
       },
     )
     expect(result).toBe(uq(1.0))

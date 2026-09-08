@@ -71,6 +71,7 @@ function defCtx(moveType = 'NORMAL') {
     attackerGender: 'MALE' as const,
     defenderGender: 'MALE' as const,
     defenderIsEnraged: false,
+    attackerTypes: [],
     defenderStatus1: new Set<string>(),
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,

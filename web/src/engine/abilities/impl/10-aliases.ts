@@ -138,6 +138,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_CRUST_COAT',
     src: 'src/abilities.cc:9241',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:9244).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -145,6 +147,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_CRYSTALLINE_ARMOR',
     src: 'src/abilities.cc:10768',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:10770).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
   },
   {
@@ -183,6 +187,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_DREAM_STATE',
     src: 'src/abilities.cc:8816',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:8819).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -215,6 +221,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_FARADAY_CAGE',
     src: 'src/abilities.cc:9290',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:9300).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
   },
@@ -557,6 +565,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_SHATTERED_ARMOR',
     src: 'src/abilities.cc:12263',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:12267).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -564,6 +574,11 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_SHELL_ARMOR',
     src: 'src/abilities.cc:1353',
     flags: { breakable: true },
+    // Real gap fix: `.onCritFor = Impl<BATTLE_ARMOR>.onCritFor` (APPLY_ON_TARGET,
+    // :528) was never copied over -- without it, the default scope (APPLY_ON_SELF)
+    // made this NEVER apply when Shell Armor's holder is the one being attacked,
+    // i.e. never actually prevented a crit against itself.
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
@@ -701,6 +716,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_TOXIC_SHELL',
     src: 'src/abilities.cc:11506',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:11511).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
   },
@@ -745,6 +762,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_VOLTRON',
     src: 'src/abilities.cc:11607',
     flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:11611).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
   },
