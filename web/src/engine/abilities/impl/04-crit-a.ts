@@ -4,12 +4,17 @@
 // a per-turn fact this engine doesn't track) is left unmodelled.
 
 import { ALWAYS_CRIT } from '../../crit'
+import { APPLY_ON_ANY } from '../applyOn'
 import type { AbilityImpl } from '../types'
 
 export const CRIT_BATTLE_A: AbilityImpl[] = [
   {
+    // Real gap fix: `.onCritFor = APPLY_ON_ANY` (:7965) was missing -- without it
+    // the default scope (APPLY_ON_SELF) made this never contribute when Battle
+    // Aura is held by the DEFENDER rather than the attacker.
     id: 'ABILITY_BATTLE_AURA',
     src: 'src/abilities.cc:7963',
+    applyOn: { onCritFor: APPLY_ON_ANY },
     onCrit: () => 2,
   },
   {

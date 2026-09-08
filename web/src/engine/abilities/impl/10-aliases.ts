@@ -28,6 +28,7 @@ import {
   aliasSwapSplit,
   aliasTypeEffectiveness,
 } from './alias'
+import { APPLY_ON_OTHER, APPLY_ON_ANY } from '../applyOn'
 import type { AbilityImpl } from '../types'
 
 export const ALIAS_ABILITIES: AbilityImpl[] = [
@@ -453,8 +454,12 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PERMAFROST'),
   },
   {
+    // Real gap fix: `.onOffensiveMultiplierFor = APPLY_ON_ANY` (:6054, matching
+    // Fairy Aura's own scope) was missing -- without it this never contributed
+    // when Pixie Power is held by the DEFENDER rather than the attacker.
     id: 'ABILITY_PIXIE_POWER',
     src: 'src/abilities.cc:6045',
+    applyOn: { onOffensiveMultiplierFor: APPLY_ON_ANY },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FAIRY_AURA'),
   },
   {
@@ -685,8 +690,13 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
   },
   {
+    // Real gap fix: `.onStatFor = APPLY_ON_OTHER` (:8549, matching every other
+    // Ruin-family ability, 14-on-stat-a.ts) was missing -- without it the default
+    // scope let this affect the HOLDER's own stat (self) instead of every OTHER
+    // battler's, the opposite of what a Ruin ability does.
     id: 'ABILITY_SWORD_OF_DAMNATION',
     src: 'src/abilities.cc:8545',
+    applyOn: { onStatFor: APPLY_ON_OTHER },
     onStat: aliasStat('ABILITY_SWORD_OF_RUIN'),
   },
   {
