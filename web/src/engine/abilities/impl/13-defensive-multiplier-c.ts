@@ -161,8 +161,10 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   {
     // Real gap fix: the C also copies Shell Armor's onCrit/onCritFor
     // (:12456-12457), which this port was missing entirely.
+    // Real gap fix: `.breakable = TRUE` (:12456) was also missing.
     id: 'ABILITY_DROIDEKA',
     src: 'src/abilities.cc:12450',
+    flags: { breakable: true },
     applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onDefensiveMultiplier: composeDefensive('ABILITY_HEATPROOF', 'ABILITY_SHELL_ARMOR'),
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),

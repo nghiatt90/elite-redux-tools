@@ -5,10 +5,13 @@ import { uq } from '../../fixed'
 import { MUL, RESISTANCE } from '../macros'
 import type { AbilityImpl } from '../types'
 
+// Real gap fix: all 3 callers' `.breakable = TRUE` was missing -- without it, an
+// attacker's Mold Breaker never suppressed this defensive multiplier.
 function fluffyLike(id: string, src: string, weakType: string): AbilityImpl {
   return {
     id,
     src,
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === weakType) RESISTANCE(ctx, 2.0)
       if (ctx.moveFlags.contact) MUL(ctx, 0.5)

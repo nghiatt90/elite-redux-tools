@@ -68,8 +68,11 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
     },
   },
   {
+    // Real gap fix: `.breakable = TRUE` (:4123) was missing -- without it, an
+    // attacker's Mold Breaker never suppressed this defensive multiplier.
     id: 'ABILITY_PERMAFROST',
     src: 'src/abilities.cc:4115',
+    flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.typeEffectiveness >= SUPER_EFFECTIVE_THRESHOLD) MUL(ctx, 0.65)
     },

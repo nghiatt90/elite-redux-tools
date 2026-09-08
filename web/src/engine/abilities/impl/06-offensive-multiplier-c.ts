@@ -106,9 +106,11 @@ export const OFFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
   },
   {
     // Impl<ABILITY_GIANT_WINGS>.onOffensiveMultiplier + Impl<ABILITY_LEVITATE>.onOffensiveMultiplier
+    // Real gap fix: `.levitate = TRUE` (:8541) was also missing -- without it,
+    // this ability never restored Ground immunity for its Flying-typed holder.
     id: 'ABILITY_HUGE_WINGS',
     src: 'src/abilities.cc:8534',
-    flags: { breakable: true },
+    flags: { breakable: true, levitate: true },
     onOffensiveMultiplier: (ctx) => {
       GIANT_WINGS(ctx)
       LEVITATE(ctx)

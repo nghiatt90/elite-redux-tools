@@ -75,7 +75,9 @@ export const ATE_ABILITIES: AbilityImpl[] = [
   ateAbility('ABILITY_MINERALIZE', 'src/abilities.cc:5063', 'ROCK'),
   ateAbility('ABILITY_MOLTEN_COAT', 'src/abilities.cc:10285', 'ROCK'),
   ateAbility('ABILITY_PIXILATE', 'src/abilities.cc:2441', 'FAIRY'),
-  ateAbility('ABILITY_POLLINATE', 'src/abilities.cc:4806', 'BUG'),
+  // `.breakable = TRUE` (:4808) is inert today (onMoveType/onStab dispatch never
+  // consults it), but declared for census hygiene and in case that changes.
+  { ...ateAbility('ABILITY_POLLINATE', 'src/abilities.cc:4806', 'BUG'), flags: { breakable: true } },
   ateAbility('ABILITY_REFRIGERATE', 'src/abilities.cc:2345', 'ICE'),
   ateAbility('ABILITY_SPECTRALIZE', 'src/abilities.cc:4839', 'GHOST'),
   ateAbility('ABILITY_TECTONIZE', 'src/abilities.cc:4029', 'GROUND'),

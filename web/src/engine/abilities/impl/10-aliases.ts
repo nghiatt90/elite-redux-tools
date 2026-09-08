@@ -38,9 +38,10 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
   },
   {
+    // Real gap fix: `.levitate = TRUE` (:11436) was also missing.
     id: 'ABILITY_ANGELIC_WINGS',
     src: 'src/abilities.cc:11430',
-    flags: { breakable: true },
+    flags: { breakable: true, levitate: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PRISM_SCALES'),
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_HUGE_WINGS'),
   },
@@ -350,14 +351,18 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WINGED_KING'),
   },
   {
+    // Real gap fix: `.skillLink = TRUE` (:6005) was missing -- without it, this
+    // ability never forced its multi-hit moves to the maximum hit count.
     id: 'ABILITY_KUNOICHI_BLADE',
     src: 'src/abilities.cc:6002',
+    flags: { skillLink: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TECHNICIAN'),
   },
   {
+    // Real gap fix: `.unaware = TRUE` (:11527) was also missing.
     id: 'ABILITY_LEPIDOPTERAN',
     src: 'src/abilities.cc:11523',
-    flags: { breakable: true },
+    flags: { breakable: true, unaware: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SWARM'),
   },
   {
@@ -693,9 +698,11 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     // Real gap fix: `.onStatFor = APPLY_ON_OTHER` (:8549, matching every other
     // Ruin-family ability, 14-on-stat-a.ts) was missing -- without it the default
     // scope let this affect the HOLDER's own stat (self) instead of every OTHER
-    // battler's, the opposite of what a Ruin ability does.
+    // battler's, the opposite of what a Ruin ability does. `.unaware = TRUE`
+    // (:8548) was also missing.
     id: 'ABILITY_SWORD_OF_DAMNATION',
     src: 'src/abilities.cc:8545',
+    flags: { unaware: true },
     applyOn: { onStatFor: APPLY_ON_OTHER },
     onStat: aliasStat('ABILITY_SWORD_OF_RUIN'),
   },
