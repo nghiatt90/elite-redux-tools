@@ -51,6 +51,8 @@ export interface Species {
   category: string
   description: string
   nationalDexNum: number
+  height: number // decimetres
+  weight: number // hectograms -- Low Kick/Heat Crash read this
   isForm: boolean
   formOf: string | null
   types: string[]
@@ -69,6 +71,17 @@ export interface MoveFlags {
   [flag: string]: true
 }
 
+// The Move.argument oneof (MoveList.proto's 6-way `Argument` message) -- the extra
+// parameter some MoveBehaviors need. See pipeline/src/erdata/emit.py's
+// _argument_to_dict.
+export type MoveArgument =
+  | { kind: 'type'; type: string }
+  | { kind: 'effect'; effect: string; affectsUser: boolean; certain: boolean }
+  | { kind: 'int'; value: number }
+  | { kind: 'other'; value: string }
+  | { kind: 'status'; status: string }
+  | { kind: 'misc'; misc: string }
+
 export interface Move {
   id: string
   name: string
@@ -76,6 +89,7 @@ export interface Move {
   description: string
   shortDescription: string
   type: string | null
+  type2: string | null // ER dual-typed moves compute damage against both and keep the larger
   power: number
   accuracy: number
   pp: number
@@ -83,6 +97,16 @@ export interface Move {
   effectChance: number
   split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
   target: string | null
+  // `effect` is the MoveBehavior enum -- the actual mechanic (multi-hit, recoil,
+  // fixed damage, ...); `customBehavior` is a one-off inline MoveBehaviorConfig for
+  // the handful of moves that don't reference a named behavior. Exactly one is set.
+  effect: string | null
+  customBehavior: MoveBehaviorConfig | null
+  splitFlag?: string // USE_HIGHEST_OFFENSE | USE_LOWEST_DEFENSE | HITS_SPDEF | HITS_DEF | USE_HIGHEST_DAMAGE
+  crit?: 'HIGH' | 'ALWAYS'
+  hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
+  hitCount?: number
+  argument?: MoveArgument
   flags: MoveFlags
   tutorCategory?: string
 }
@@ -103,6 +127,42 @@ export interface Ability {
   // exact-group derivation can't catch (e.g. Mold Breaker/Teravolt/Turboblaze) -- see ability_groups.py
 }
 
+// moveBehaviors.json / abilityHooks.json / natures.json -- damage-calculator-only
+// artifacts (see lib/data.ts's loadMoveBehaviors/loadNatures/loadAbilityHooks).
+// Kept loosely typed here rather than as a byte-precise mirror of
+// erdata.move_behavior/behaviors/ability_hooks's output: the damage engine
+// (web/src/engine/*.ts) owns the precise, strictly-typed shapes it actually
+// pattern-matches on (MoveBehaviors in engine/basePower.ts, ScriptCondition in
+// engine/conditions.ts, AbilityImpl/AbilityEntry in engine/abilities/types.ts) --
+// these three are just what gets fetched-and-handed-off to it.
+export type MoveBehaviorConfig = Record<string, unknown>
+export interface MoveBehaviorsFile {
+  behaviors: Record<string, MoveBehaviorConfig>
+  moveEffectOptions: Record<string, Record<string, boolean>>
+}
+export interface BattleConstants {
+  natureStatTable: Record<string, Record<'ATK' | 'DEF' | 'SPEED' | 'SPATK' | 'SPDEF', -1 | 0 | 1>>
+  statStageRatios: [number, number][]
+  criticalHitChance: number[]
+  maxIvs: number
+  maxEvPerStat: number
+  maxEvTotal: number
+  maxLevel: number
+  defaultStatStage: number
+  uq412Precision: number
+}
+export interface AbilityHookEntry {
+  id: string
+  sourceLine: number
+  endLine: number
+  hooks: Record<string, { form: string; source: string; aliasTarget?: string; aliasHook?: string; macroName?: string; macroArgs?: string }>
+  applyOn: Record<string, string>
+  bitfields: Record<string, string>
+  damageRelevant: boolean
+  damageRelevantReasons: string[]
+}
+export type AbilityHooks = Record<string, AbilityHookEntry>
+
 // Mirrors er-config's own `mega_stone_hint` oneof -- the same 4-way choice that
 // drives the in-game hint text (GetMegaHintString in the compiled ROM), not
 // something this app invented. "uniqueLocation" carries the exact in-game string;
@@ -119,7 +179,8 @@ export interface Item {
   name: string
   description: string
   grouping: string // Pocket enum, e.g. "POCKET_MEGA_STONES"
-  holdEffect: string // HoldEffect enum, e.g. "HOLD_EFFECT_MEGA_STONE"
+  holdEffect: string // HoldEffect enum, e.g. "HOLD_EFFECT_MEGA_STONE" -- often "HOLD_EFFECT_CUSTOM" (17 of 20 real hold effects collapse to this in the raw proto); use resolvedHoldEffect for the actual mechanic
+  resolvedHoldEffect: string // HOLD_EFFECT_CUSTOM de-aliased, e.g. "HOLD_EFFECT_LIFE_ORB" for Life Orb -- what the ROM's code actually gets
   useType: string
   holdEffectStrength?: number
   holdEffectType?: string // bare Type enum, e.g. "TYPE_FIRE" -- for Plates/Gems/etc.
@@ -131,7 +192,7 @@ export interface Item {
   // scripts for every item (at least one, Slowkingite, is known stale -- see
   // evolutionChain.ts), so treat as a hint rather than fact.
   megaStoneHint?: MegaStoneHint
-  naturalGift?: { power: number; type: string; affectsUser: boolean; certain: boolean }
+  naturalGift?: { power: number; type: string; affectsUser: boolean; certain: boolean; effect?: string; priority?: number }
 }
 
 // typeChart[attackingType][defendingType] = multiplier
@@ -141,7 +202,7 @@ export interface Meta {
   gameVersion: string
   generatedAt: string
   sources: Record<string, { repo: string; sha: string; date: string }>
-  counts: { species: number; moves: number; abilities: number; items: number }
+  counts: { species: number; moves: number; abilities: number; items: number; moveBehaviors: number; abilityHooks: number }
   abilitiesCount: number // the randomizer LCG's modulus (ABILITIES_COUNT in-game); not
   // always equal to counts.abilities -- see emit.py's _abilities_count
 }

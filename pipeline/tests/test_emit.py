@@ -1,5 +1,6 @@
 import json
 
+from erdata.ability_hooks import ability_hooks_to_dict
 from erdata.emit import (
     _build_exact_groups,
     _build_near_groups,
@@ -13,12 +14,16 @@ from erdata.parse import parse_abilities, parse_items, parse_moves, parse_specie
 from erdata.randomizer import parse_randomizer_banned
 from erdata.resolve import build_species_map, playable_species, universal_tutor_sets
 
+# Scraping abilities.cc's 1026 blocks is the slowest fixture in this file by a wide
+# margin; computed once and reused, same as the module already does for parse_*().
+_ABILITY_HOOKS = ability_hooks_to_dict()
+
 
 def _ability_dict(ability, abilities, name_index):
     banned_ids = parse_randomizer_banned()
     exact_groups = _build_exact_groups(abilities)
     near_groups = _build_near_groups(name_index)
-    return ability_to_dict(ability, name_index, banned_ids, exact_groups, near_groups)
+    return ability_to_dict(ability, name_index, _ABILITY_HOOKS, banned_ids, exact_groups, near_groups)
 
 
 def _fixtures():
@@ -81,6 +86,59 @@ def test_move_dict_shape():
     assert d["split"] == "PHYSICAL"
     assert d["power"] == 40
     assert d["flags"]["contact"] is True
+
+
+def test_move_dict_has_no_effect_or_custom_behavior_when_plain_hit():
+    _, moves, _, _, _ = _fixtures()
+    pound = next(m for m in moves if m.name == "Pound")
+    d = move_to_dict(pound)
+    assert d["effect"] is None
+    assert d["customBehavior"] is None
+
+
+def test_move_dict_effect_is_the_move_behavior_enum():
+    _, moves, _, _, _ = _fixtures()
+    tri_attack = next(m for m in moves if m.name == "Tri Attack")
+    d = move_to_dict(tri_attack)
+    assert d["effect"] == "EFFECT_TRI_ATTACK"
+    assert d["splitFlag"] == "USE_HIGHEST_OFFENSE"
+
+
+def test_move_dict_inline_custom_behavior():
+    _, moves, _, _, _ = _fixtures()
+    razor_wind = next(m for m in moves if m.name == "Razor Wind")
+    d = move_to_dict(razor_wind)
+    assert d["effect"] is None
+    assert d["customBehavior"]["attack"]["superEffectiveVs"] == "TYPE_ROCK"
+    assert d["crit"] == "HIGH"
+
+
+def test_move_dict_argument_shape():
+    _, moves, _, _, _ = _fixtures()
+    double_slap = next(m for m in moves if m.name == "Double Slap")
+    d = move_to_dict(double_slap)
+    assert d["argument"] == {"kind": "effect", "effect": "MOVE_EFFECT_DOUBLESLAP", "affectsUser": False, "certain": False}
+
+
+def test_move_dict_has_no_type2_split_flag_crit_hits_air_hit_count_when_default():
+    _, moves, _, _, _ = _fixtures()
+    pound = next(m for m in moves if m.name == "Pound")
+    d = move_to_dict(pound)
+    assert d["type2"] is None
+    assert "splitFlag" not in d
+    assert "crit" not in d
+    assert "hitsAir" not in d
+    assert "hitCount" not in d
+    assert "argument" not in d
+
+
+def test_species_dict_has_weight_and_height():
+    species, _, _, species_map, tutors = _fixtures()
+    pikachu = next(s for s in playable_species(species) if s.dex.name == "Pikachu")
+    d = species_to_dict(pikachu, species_map, tutors)
+    assert d["weight"] == pikachu.dex.weight
+    assert d["height"] == pikachu.dex.height
+    assert d["weight"] > 0  # Pikachu has real dex data upstream
 
 
 def test_ability_dict_shape():
@@ -181,6 +239,23 @@ def test_item_dict_shape():
     assert d["itemNum"] == 761
     assert d["grouping"] == "POCKET_MEGA_STONES"
     assert d["holdEffect"] == "HOLD_EFFECT_MEGA_STONE"
+    assert d["resolvedHoldEffect"] == "HOLD_EFFECT_MEGA_STONE"
+
+
+def test_item_dict_resolves_hold_effect_custom_by_alias_or_id():
+    items = parse_items()
+    by_name = {i.name: i for i in items}
+
+    life_orb = item_to_dict(by_name["Life Orb"])
+    assert life_orb["holdEffect"] == "HOLD_EFFECT_CUSTOM"
+    assert life_orb["resolvedHoldEffect"] == "HOLD_EFFECT_LIFE_ORB"
+
+    choice_band = item_to_dict(by_name["Choice Band"])
+    assert choice_band["holdEffect"] == "HOLD_EFFECT_CUSTOM"
+    assert choice_band["resolvedHoldEffect"] == "HOLD_EFFECT_CHOICE_BAND"
+
+    # the whole point: these two were indistinguishable before resolvedHoldEffect
+    assert life_orb["resolvedHoldEffect"] != choice_band["resolvedHoldEffect"]
 
 
 def test_item_dict_mega_stone_hint_kinds():

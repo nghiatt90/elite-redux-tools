@@ -1,0 +1,830 @@
+// Batch H: generic lazy-delegation ports for every ability whose entire
+// damage-relevant hook set is `.onX = Impl<ABILITY_OTHER>.onX` in the C
+// (abilityHooks.json's "alias" form -- see ability_hooks.py's classifier). Each
+// hook here calls through alias.ts's lazy lookupAbility() wrapper, so these work
+// correctly regardless of whether the target has been ported yet -- an alias to a
+// still-unmodelled target is a harmless no-op today and starts working the moment
+// that target lands in a real batch, with no edit needed here.
+//
+// Generated from abilityHooks.json's alias census; every entry's src line is the
+// ability's own `constexpr Ability Impl<ABILITY_X> = {` line (abilities.cc), not
+// the target's -- cross-check the target's behavior in ITS OWN batch file.
+
+import {
+  aliasAfterTypeEffectiveness,
+  aliasChooseDefensiveStat,
+  aliasChooseOffensiveStat,
+  aliasCrit,
+  aliasDefensiveMultiplier,
+  aliasAbsorb,
+  aliasImmune,
+  aliasInfiltrate,
+  aliasMoldBreaker,
+  aliasMoveType,
+  aliasOffensiveMultiplier,
+  aliasParentalBond,
+  aliasStab,
+  aliasStat,
+  aliasSwapSplit,
+  aliasTypeEffectiveness,
+} from './alias'
+import { APPLY_ON_OTHER, APPLY_ON_ANY } from '../applyOn'
+import type { AbilityImpl } from '../types'
+
+export const ALIAS_ABILITIES: AbilityImpl[] = [
+  {
+    id: 'ABILITY_AMPLIFIER',
+    src: 'src/abilities.cc:4773',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
+  },
+  {
+    // Real gap fix: `.levitate = TRUE` (:11436) was also missing.
+    id: 'ABILITY_ANGELIC_WINGS',
+    src: 'src/abilities.cc:11430',
+    flags: { breakable: true, levitate: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PRISM_SCALES'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_HUGE_WINGS'),
+  },
+  {
+    id: 'ABILITY_APEX_PREDATOR',
+    src: 'src/abilities.cc:8644',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TOUGH_CLAWS'),
+  },
+  {
+    id: 'ABILITY_APPLE_ENLIGHTENMENT',
+    src: 'src/abilities.cc:7726',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FUR_COAT'),
+  },
+  {
+    id: 'ABILITY_ATLANTIC_RULER',
+    src: 'src/abilities.cc:10136',
+    flags: { breakable: true },
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_AQUATIC_DWELLER'),
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_AURORAS_GALE',
+    src: 'src/abilities.cc:10494',
+    onStat: aliasStat('ABILITY_MAJESTIC_BIRD'),
+  },
+  {
+    id: 'ABILITY_BACKSTREET_BOY',
+    src: 'src/abilities.cc:11540',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+    onModifyMoveFlags: (ctx) => {
+      if (ctx.flag === 'kickBased') return Boolean(ctx.moveFlags.dance)
+      if (ctx.flag === 'dance') return Boolean(ctx.moveFlags.kickBased)
+      return false
+    },
+  },
+  {
+    id: 'ABILITY_BANDIT',
+    src: 'src/abilities.cc:12279',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TECHNICIAN'),
+  },
+  {
+    id: 'ABILITY_BIRD_OF_PREY',
+    src: 'src/abilities.cc:12312',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_BIG_PECKS'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+  },
+  {
+    id: 'ABILITY_BLIGHT_SCALE',
+    src: 'src/abilities.cc:9499',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_MULTISCALE'),
+  },
+  {
+    // .onMoldBreaker = Impl<ABILITY_MOLD_BREAKER>.onMoldBreaker added once
+    // onMoldBreaker joined the damage-hook census -- see batch W.
+    id: 'ABILITY_BLIND_RAGE',
+    src: 'src/abilities.cc:8636',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+    onMoldBreaker: aliasMoldBreaker('ABILITY_MOLD_BREAKER'),
+  },
+  {
+    id: 'ABILITY_BREAKWATER',
+    src: 'src/abilities.cc:9124',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_BRUTEFORCE',
+    src: 'src/abilities.cc:9283',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RECKLESS'),
+  },
+  {
+    id: 'ABILITY_CHESTNUT_AXE',
+    src: 'src/abilities.cc:11679',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+    onModifyMoveFlags: (ctx) => ctx.flag === 'sliceBased' && ctx.moveType === 'GRASS',
+  },
+  {
+    id: 'ABILITY_COSMIC_DUST',
+    src: 'src/abilities.cc:6738',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_COSMIC_DAZE'),
+  },
+  {
+    id: 'ABILITY_CRIMSON_CROWN',
+    src: 'src/abilities.cc:12640',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_CRUSHING_JAW',
+    src: 'src/abilities.cc:11569',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_CRUST_COAT',
+    src: 'src/abilities.cc:9241',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:9244).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_CRYSTALLINE_ARMOR',
+    src: 'src/abilities.cc:10768',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:10770).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_CURRENT_CRASH',
+    src: 'src/abilities.cc:12355',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RECKLESS'),
+  },
+  {
+    id: 'ABILITY_DEFLECT',
+    src: 'src/abilities.cc:12515',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PARRY'),
+  },
+  {
+    id: 'ABILITY_DEPRAVITY',
+    src: 'src/abilities.cc:8865',
+    onCrit: aliasCrit('ABILITY_MERCILESS'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_OVERCHARGE'),
+  },
+  {
+    id: 'ABILITY_DEPTH_EXPLORER',
+    src: 'src/abilities.cc:10925',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FIELD_EXPLORER'),
+  },
+  {
+    id: 'ABILITY_DEVOURER',
+    src: 'src/abilities.cc:6613',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+    onParentalBond: aliasParentalBond('ABILITY_PRIMAL_MAW'),
+  },
+  {
+    id: 'ABILITY_DRAKE_OF_RAGE',
+    src: 'src/abilities.cc:9865',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
+  },
+  {
+    id: 'ABILITY_DREAM_STATE',
+    src: 'src/abilities.cc:8816',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:8819).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_ELEMENTAL_VORTEX',
+    src: 'src/abilities.cc:8262',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FLASH_FIRE'),
+    // Impl<ELEMENTAL_VORTEX>.onAbsorb = Impl<WATER_ABSORB>.onAbsorb(...) ||
+    // Impl<FLASH_FIRE>.onAbsorb(...) -- an OR of the two conditions, not a plain
+    // delegate to either one alone. Not breakable (no `.breakable = TRUE` on this
+    // block, unlike Water Absorb/Flash Fire individually -- verified).
+    onAbsorb: (ctx) => aliasAbsorb('ABILITY_WATER_ABSORB')(ctx) || aliasAbsorb('ABILITY_FLASH_FIRE')(ctx),
+  },
+  {
+    id: 'ABILITY_EMPRESS',
+    src: 'src/abilities.cc:11231',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RIVALRY'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RIVALRY'),
+    onImmune: aliasImmune('ABILITY_QUEENLY_MAJESTY'),
+  },
+  {
+    id: 'ABILITY_ENLIGHTENED',
+    src: 'src/abilities.cc:6303',
+    flags: { breakable: true },
+    onMoveType: aliasMoveType('ABILITY_EMANATE'),
+    onStab: aliasStab('ABILITY_EMANATE'),
+  },
+  {
+    id: 'ABILITY_FARADAY_CAGE',
+    src: 'src/abilities.cc:9290',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:9300).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
+  },
+  {
+    id: 'ABILITY_FINAL_BLOW',
+    src: 'src/abilities.cc:8494',
+    onCrit: aliasCrit('ABILITY_FATAL_PRECISION'),
+  },
+  {
+    id: 'ABILITY_FIRE_RULER',
+    src: 'src/abilities.cc:11847',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLAME_SHIELD'),
+  },
+  {
+    id: 'ABILITY_FIRE_SCALES',
+    src: 'src/abilities.cc:7270',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
+  },
+  {
+    id: 'ABILITY_FLAME_BUBBLE',
+    src: 'src/abilities.cc:8252',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_WATER_BUBBLE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WATER_BUBBLE'),
+  },
+  {
+    id: 'ABILITY_FLAME_SHIELD',
+    src: 'src/abilities.cc:8837',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_FLAMING_MAW',
+    src: 'src/abilities.cc:7739',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_FLAWLESS_PRECISION',
+    src: 'src/abilities.cc:11650',
+    onCrit: aliasCrit('ABILITY_FATAL_PRECISION'),
+    // .onMoldBreaker = Impl<ABILITY_DEADLY_PRECISION>.onMoldBreaker (alias,
+    // src/abilities.cc:11653) -- see Deadly Precision's own entry (23-mold-breaker.ts).
+    onMoldBreaker: aliasMoldBreaker('ABILITY_DEADLY_PRECISION'),
+  },
+  {
+    id: 'ABILITY_GLACIAL_GHOST',
+    src: 'src/abilities.cc:9989',
+    flags: { breakable: true },
+    onStat: aliasStat('ABILITY_SLUSH_RUSH'),
+  },
+  {
+    id: 'ABILITY_GUNMAN',
+    src: 'src/abilities.cc:9507',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+    onModifyMoveFlags: (ctx) => ctx.flag === 'bulletBased' && ctx.moveSplit === 'STATUS',
+  },
+  {
+    id: 'ABILITY_HASTE_MAKES_WASTE',
+    src: 'src/abilities.cc:10382',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_STALL'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_ANALYTIC'),
+  },
+  {
+    id: 'ABILITY_HUNGRY_MAWS',
+    src: 'src/abilities.cc:10389',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_HUNTERS_HORN',
+    src: 'src/abilities.cc:6038',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_HUNTERS_MARK',
+    src: 'src/abilities.cc:9729',
+    onChooseDefensiveStat: aliasChooseDefensiveStat('ABILITY_DEADEYE'),
+    onCrit: aliasCrit('ABILITY_AMBUSH'),
+  },
+  {
+    id: 'ABILITY_HYDRO_CIRCUIT',
+    src: 'src/abilities.cc:5341',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TRANSISTOR'),
+  },
+  {
+    id: 'ABILITY_ICE_PICK',
+    src: 'src/abilities.cc:11491',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TOUGH_CLAWS'),
+    onStat: aliasStat('ABILITY_SLUSH_RUSH'),
+  },
+  {
+    id: 'ABILITY_ICE_PLUMES',
+    src: 'src/abilities.cc:10569',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_ICE_SCALES'),
+  },
+  {
+    id: 'ABILITY_ICICLE_FIST',
+    src: 'src/abilities.cc:12479',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+  },
+  {
+    id: 'ABILITY_IMPALER',
+    src: 'src/abilities.cc:10199',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_IRON_BARRAGE',
+    src: 'src/abilities.cc:4965',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_IRON_GIANT',
+    src: 'src/abilities.cc:8472',
+    flags: { breakable: true },
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
+  },
+  {
+    id: 'ABILITY_IRON_SERPENT',
+    src: 'src/abilities.cc:7451',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_WINGED_KING'),
+  },
+  {
+    // Real gap fix: `.skillLink = TRUE` (:6005) was missing -- without it, this
+    // ability never forced its multi-hit moves to the maximum hit count.
+    id: 'ABILITY_KUNOICHI_BLADE',
+    src: 'src/abilities.cc:6002',
+    flags: { skillLink: true },
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TECHNICIAN'),
+  },
+  {
+    // Real gap fix: `.unaware = TRUE` (:11527) was also missing.
+    id: 'ABILITY_LEPIDOPTERAN',
+    src: 'src/abilities.cc:11523',
+    flags: { breakable: true, unaware: true },
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SWARM'),
+  },
+  {
+    id: 'ABILITY_LUCKY_WINGS',
+    src: 'src/abilities.cc:10228',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_GIANT_WINGS'),
+  },
+  {
+    id: 'ABILITY_MACH_3',
+    src: 'src/abilities.cc:11402',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_SLIPSTREAM'),
+    // .onMoldBreaker = Impl<ABILITY_DEADLY_PRECISION>.onMoldBreaker (alias,
+    // src/abilities.cc:11405) -- see Deadly Precision's own entry (23-mold-breaker.ts).
+    onMoldBreaker: aliasMoldBreaker('ABILITY_DEADLY_PRECISION'),
+  },
+  {
+    id: 'ABILITY_MAGMA_EATER',
+    src: 'src/abilities.cc:6069',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_MOLTEN_DOWN'),
+  },
+  {
+    // Upstream pin correction, not a porting bug: `upcoming`'s tip (2026-09-01,
+    // this repo's earlier pin) reworked Magus Blades to have its own onParentalBond
+    // (IsKeenEdge -> a Magus-Blades-specific multihit type) and dropped its
+    // onOffensiveMultiplier entirely. The pin actually matching the released
+    // v2.65beta ROM (2026-04-24, sources.lock.json) has neither change: onParentalBond
+    // delegates to Dual Wield's own condition (bulletBased || sliceBased -> the
+    // ordinary DUAL_WIELD type), and onOffensiveMultiplier delegates to Keen Edge
+    // (+30% for slicing moves). Confirmed by diffing abilities.cc between both
+    // pinned SHAs.
+    id: 'ABILITY_MAGUS_BLADES',
+    src: 'src/abilities.cc:10212',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_BEST_OFFENSE'),
+    onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+    onParentalBond: aliasParentalBond('ABILITY_DUAL_WIELD'),
+  },
+  {
+    id: 'ABILITY_MASSIVE_PELT',
+    src: 'src/abilities.cc:11329',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
+  },
+  {
+    id: 'ABILITY_MASTER_HAND',
+    src: 'src/abilities.cc:8486',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_MAXIMUM_ACCELERATION',
+    src: 'src/abilities.cc:8392',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_SLIPSTREAM'),
+  },
+  {
+    id: 'ABILITY_MINDS_EYE',
+    src: 'src/abilities.cc:6744',
+    flags: { breakable: true },
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_SCRAPPY'),
+  },
+  {
+    id: 'ABILITY_MINUS',
+    src: 'src/abilities.cc:1205',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PLUS'),
+  },
+  {
+    id: 'ABILITY_MOLTEN_BLADES',
+    src: 'src/abilities.cc:7484',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_NIHIL_BLASTER',
+    src: 'src/abilities.cc:11662',
+    flags: { breakable: true, auraBreak: true },
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_NIKA',
+    src: 'src/abilities.cc:6083',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
+  },
+  {
+    id: 'ABILITY_OLD_MARINER',
+    src: 'src/abilities.cc:7795',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SEAWEED'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SEAWEED'),
+    onStab: aliasStab('ABILITY_AMPHIBIOUS'),
+  },
+  {
+    id: 'ABILITY_OMINOUS_SHROUD',
+    src: 'src/abilities.cc:9961',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHADOW_SHIELD'),
+  },
+  {
+    id: 'ABILITY_OVERWATCH',
+    src: 'src/abilities.cc:8968',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STAKEOUT'),
+  },
+  {
+    id: 'ABILITY_PERMAFROST_CLONE',
+    src: 'src/abilities.cc:7391',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PERMAFROST'),
+  },
+  {
+    // Real gap fix: `.onOffensiveMultiplierFor = APPLY_ON_ANY` (:6054, matching
+    // Fairy Aura's own scope) was missing -- without it this never contributed
+    // when Pixie Power is held by the DEFENDER rather than the attacker.
+    id: 'ABILITY_PIXIE_POWER',
+    src: 'src/abilities.cc:6045',
+    applyOn: { onOffensiveMultiplierFor: APPLY_ON_ANY },
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FAIRY_AURA'),
+  },
+  {
+    id: 'ABILITY_POWER_EDGE',
+    src: 'src/abilities.cc:8182',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    id: 'ABILITY_PRISM_ARMOR',
+    src: 'src/abilities.cc:3174',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_PROPELLER_TAIL',
+    src: 'src/abilities.cc:10575',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_PUFFY',
+    src: 'src/abilities.cc:9249',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FLUFFY'),
+  },
+  {
+    id: 'ABILITY_PURE_POWER',
+    src: 'src/abilities.cc:3934',
+    onStat: aliasStat('ABILITY_FELINE_PROWESS'),
+  },
+  {
+    id: 'ABILITY_QIGONG',
+    src: 'src/abilities.cc:9326',
+    onMoveType: aliasMoveType('ABILITY_FIGHT_SPIRIT'),
+    onStab: aliasStab('ABILITY_FIGHT_SPIRIT'),
+    onInfiltrate: aliasInfiltrate('ABILITY_FIGHT_SPIRIT'),
+  },
+  {
+    id: 'ABILITY_QUARK_DRIVE',
+    src: 'src/abilities.cc:6999',
+    onStat: aliasStat('ABILITY_PROTOSYNTHESIS'),
+  },
+  {
+    id: 'ABILITY_RAINBOW_SCALES',
+    src: 'src/abilities.cc:11891',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FIRE_SCALES'),
+  },
+  {
+    id: 'ABILITY_REFRIGERATOR',
+    src: 'src/abilities.cc:6415',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_RELENTLESS',
+    src: 'src/abilities.cc:9402',
+    onChooseDefensiveStat: aliasChooseDefensiveStat('ABILITY_EXPLOIT_WEAKNESS'),
+    onCrit: aliasCrit('ABILITY_MERCILESS'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_EXPLOIT_WEAKNESS'),
+  },
+  {
+    id: 'ABILITY_ROUSED_FANGS',
+    src: 'src/abilities.cc:8810',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_MIND_CRUSH'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_SAMBA',
+    src: 'src/abilities.cc:9380',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+  },
+  {
+    id: 'ABILITY_SAND_BENDER',
+    src: 'src/abilities.cc:9151',
+    onStat: aliasStat('ABILITY_SAND_FORCE'),
+  },
+  {
+    id: 'ABILITY_SAND_FIEND',
+    src: 'src/abilities.cc:10910',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
+    onStat: aliasStat('ABILITY_SAND_FORCE'),
+    onImmune: aliasImmune('ABILITY_SAND_GUARD'),
+  },
+  {
+    id: 'ABILITY_SAND_TITAN',
+    src: 'src/abilities.cc:12594',
+    flags: { breakable: true },
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+  },
+  {
+    id: 'ABILITY_SEABORNE',
+    src: 'src/abilities.cc:6439',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_SEPIA_LENS',
+    src: 'src/abilities.cc:9789',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SAND_GUARD'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_TINTED_LENS'),
+    onImmune: aliasImmune('ABILITY_SAND_GUARD'),
+  },
+  {
+    id: 'ABILITY_SHADOW_SHIELD',
+    src: 'src/abilities.cc:3169',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_MULTISCALE'),
+  },
+  {
+    id: 'ABILITY_SHATTERED_ARMOR',
+    src: 'src/abilities.cc:12263',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:12267).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_SHELL_ARMOR',
+    src: 'src/abilities.cc:1353',
+    flags: { breakable: true },
+    // Real gap fix: `.onCritFor = Impl<BATTLE_ARMOR>.onCritFor` (APPLY_ON_TARGET,
+    // :528) was never copied over -- without it, the default scope (APPLY_ON_SELF)
+    // made this NEVER apply when Shell Armor's holder is the one being attacked,
+    // i.e. never actually prevented a crit against itself.
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_SHOCKING_MAW',
+    src: 'src/abilities.cc:8796',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRONG_JAW'),
+  },
+  {
+    id: 'ABILITY_SINISTER_CLAWS',
+    src: 'src/abilities.cc:12394',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MYSTIC_BLADES'),
+    onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
+  },
+  {
+    id: 'ABILITY_SLUDGY_MIX',
+    src: 'src/abilities.cc:8958',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PUNK_ROCK'),
+    onMoveType: aliasMoveType('ABILITY_INTOXICATE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_PUNK_ROCK'),
+    onStab: aliasStab('ABILITY_INTOXICATE'),
+  },
+  {
+    id: 'ABILITY_SMOLDERING_WOOD',
+    src: 'src/abilities.cc:4335',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_RAW_WOOD'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RAW_WOOD'),
+  },
+  {
+    id: 'ABILITY_SOLAR_FLARE',
+    src: 'src/abilities.cc:4610',
+    onMoveType: aliasMoveType('ABILITY_IMMOLATE'),
+    onStab: aliasStab('ABILITY_IMMOLATE'),
+  },
+  {
+    id: 'ABILITY_SOLID_ROCK',
+    src: 'src/abilities.cc:1765',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FILTER'),
+  },
+  {
+    id: 'ABILITY_SOUL_DEVOURER',
+    src: 'src/abilities.cc:9356',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_PHANTOM_PAIN'),
+  },
+  {
+    id: 'ABILITY_SPECTRAL_SHROUD',
+    src: 'src/abilities.cc:4870',
+    onMoveType: aliasMoveType('ABILITY_SPECTRALIZE'),
+    onStab: aliasStab('ABILITY_SPECTRALIZE'),
+  },
+  {
+    id: 'ABILITY_STEEL_BEETLE',
+    src: 'src/abilities.cc:8731',
+    flags: { breakable: true },
+    onMoveType: aliasMoveType('ABILITY_POLLINATE'),
+    onStab: aliasStab('ABILITY_POLLINATE'),
+    onParentalBond: aliasParentalBond('ABILITY_RAGING_BOXER'),
+  },
+  {
+    id: 'ABILITY_STONECUTTER',
+    src: 'src/abilities.cc:10700',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_FOSSILIZED'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_FOSSILIZED'),
+    // src/abilities.cc:10704-10713. calcInternal invokes onMoldBreaker once per
+    // candidate type (moveType, then move.type2 if the move has one -- matching
+    // this engine's own two-type evaluation elsewhere), so ctx.moveType is always
+    // the ONE specific type this call is checking; no extra type2 handling needed
+    // beyond that, despite the C's own body only bothering to recompute type
+    // effectiveness when move.type2 is set (its return value doesn't depend on
+    // whether that recompute happened, just on the resulting moveType).
+    onMoldBreaker: (ctx) => ctx.moveType === 'ROCK',
+  },
+  {
+    id: 'ABILITY_STRIKER_PIXILATE',
+    src: 'src/abilities.cc:9261',
+    onMoveType: aliasMoveType('ABILITY_PIXILATE'),
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_STRIKER'),
+    onStab: aliasStab('ABILITY_PIXILATE'),
+  },
+  {
+    id: 'ABILITY_SUGAR_RUSH',
+    src: 'src/abilities.cc:8135',
+    onStat: aliasStat('ABILITY_UNBURDEN'),
+  },
+  {
+    id: 'ABILITY_SUMO_GUARD',
+    src: 'src/abilities.cc:11482',
+    flags: { breakable: true },
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
+  },
+  {
+    id: 'ABILITY_SUPER_SCOPE',
+    src: 'src/abilities.cc:9484',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MEGA_LAUNCHER'),
+  },
+  {
+    id: 'ABILITY_SWEEPING_EDGE_PLUS',
+    src: 'src/abilities.cc:7456',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+  },
+  {
+    // Real gap fix: `.onStatFor = APPLY_ON_OTHER` (:8549, matching every other
+    // Ruin-family ability, 14-on-stat-a.ts) was missing -- without it the default
+    // scope let this affect the HOLDER's own stat (self) instead of every OTHER
+    // battler's, the opposite of what a Ruin ability does. `.unaware = TRUE`
+    // (:8548) was also missing.
+    id: 'ABILITY_SWORD_OF_DAMNATION',
+    src: 'src/abilities.cc:8545',
+    flags: { unaware: true },
+    applyOn: { onStatFor: APPLY_ON_OTHER },
+    onStat: aliasStat('ABILITY_SWORD_OF_RUIN'),
+  },
+  {
+    id: 'ABILITY_TERAFORM_ZERO',
+    src: 'src/abilities.cc:9102',
+    flags: { breakable: true },
+    // Real bug fix: the C aliases BOTH .onAfterTypeEffectiveness AND
+    // .onAfterTypeEffectivenessFor from Tera Shell (:9111) -- aliasAfterTypeEffectiveness
+    // only delegates the hook body, never the scope, so this needed its own
+    // explicit applyOn (same fix Soothsayer needed, and the SAME thing Stainless
+    // Steel's own alias below already got right).
+    applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
+    onAfterTypeEffectiveness: aliasAfterTypeEffectiveness('ABILITY_TERA_SHELL'),
+  },
+  {
+    id: 'ABILITY_THERMAL_ENTROPY',
+    src: 'src/abilities.cc:12383',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
+  },
+  {
+    id: 'ABILITY_TOUGH_CLAWS',
+    src: 'src/abilities.cc:2436',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_BIG_PECKS'),
+  },
+  {
+    id: 'ABILITY_TOXIC_SHELL',
+    src: 'src/abilities.cc:11506',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:11511).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_SHELL_ARMOR'),
+  },
+  {
+    id: 'ABILITY_TO_THE_BONE',
+    src: 'src/abilities.cc:9006',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_SNIPER'),
+  },
+  {
+    id: 'ABILITY_TRASH_HEAP',
+    src: 'src/abilities.cc:8949',
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
+  },
+  {
+    id: 'ABILITY_TUMMYACHE',
+    src: 'src/abilities.cc:11474',
+    flags: { breakable: true },
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_THICK_FAT'),
+    onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_CORROSION'),
+  },
+  {
+    id: 'ABILITY_ULTRA_INSTINCT',
+    src: 'src/abilities.cc:8200',
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_PARRY'),
+  },
+  {
+    id: 'ABILITY_UNSTABLE_CORE',
+    src: 'src/abilities.cc:12504',
+    onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_POWER_CORE'),
+  },
+  {
+    id: 'ABILITY_VENGEFUL_SPIRIT',
+    src: 'src/abilities.cc:7162',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_VENGEANCE'),
+  },
+  {
+    id: 'ABILITY_VENOM_CROWN',
+    src: 'src/abilities.cc:9492',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_MIGHTY_HORN'),
+  },
+  {
+    id: 'ABILITY_VOLTRON',
+    src: 'src/abilities.cc:11607',
+    flags: { breakable: true },
+    // Real gap fix: same missing onCritFor scope as Shell Armor (:11611).
+    applyOn: { onCritFor: 'APPLY_ON_TARGET' },
+    onCrit: aliasCrit('ABILITY_BATTLE_ARMOR'),
+    onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_BATTLE_ARMOR'),
+  },
+  {
+    id: 'ABILITY_WAY_OF_PRECISION',
+    src: 'src/abilities.cc:8446',
+    flags: { breakable: true },
+    onCrit: aliasCrit('ABILITY_PRECISE_FIST'),
+  },
+  {
+    id: 'ABILITY_WAY_OF_SWIFTNESS',
+    src: 'src/abilities.cc:8456',
+    onStat: aliasStat('ABILITY_SWIFT_SWIM'),
+  },
+  {
+    id: 'ABILITY_WIND_CHIMES',
+    src: 'src/abilities.cc:12492',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_AMPLIFIER'),
+  },
+  {
+    id: 'ABILITY_WIND_RAGE',
+    src: 'src/abilities.cc:8974',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_GIANT_WINGS'),
+  },
+  {
+    // New port, not previously in the registry: this session's earlier audit was
+    // done against `upcoming`'s tip (2026-09-01), where World Serpent's
+    // onOffensiveMultiplier had been dropped entirely (onEndTurn=Serpent Bind's
+    // added instead), so the census correctly saw no damage-relevant hook here.
+    // The pin actually matching the released v2.65beta ROM (2026-04-24,
+    // sources.lock.json) still has onOffensiveMultiplier delegating to Long Reach
+    // (+1.2x for physical moves) -- confirmed by diffing abilities.cc between both
+    // pinned SHAs. onAttacker/onAccuracy (Grip Pincer's) are non-damage hooks.
+    id: 'ABILITY_WORLD_SERPENT',
+    src: 'src/abilities.cc:10249',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_LONG_REACH'),
+  },
+]

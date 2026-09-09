@@ -75,6 +75,8 @@ function species(overrides: Partial<Species> = {}): Species {
     category: 'Test',
     description: '',
     nationalDexNum: 1,
+    height: 1,
+    weight: 1,
     isForm: false,
     formOf: null,
     types: ['TYPE_NORMAL'],

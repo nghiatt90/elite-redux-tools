@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router'
 import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
+import DamageCalculator from './routes/DamageCalculator'
 import PokedexDetail from './routes/PokedexDetail'
 import PokedexShell from './routes/PokedexShell'
 import RandomizerLayout from './routes/RandomizerLayout'
@@ -120,7 +121,7 @@ function AppRoutes() {
         <Route path="species" element={<RandomizerSpeciesFinder />} />
       </Route>
       <Route path="/team-builder" element={<UnderConstruction title="Team Builder" />} />
-      <Route path="/damage-calculator" element={<UnderConstruction title="Damage Calculator" />} />
+      <Route path="/damage-calculator" element={<DamageCalculator />} />
     </Routes>
   )
 }
