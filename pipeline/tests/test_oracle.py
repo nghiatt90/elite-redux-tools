@@ -13,7 +13,7 @@ import urllib.error
 
 import pytest
 
-from erdata.emit import species_to_dict
+from erdata.emit import _abilities_count, species_to_dict
 from erdata.generated import AbilityEnum_pb2, MoveEnum_pb2
 from erdata.oracle import fetch_oracle, oracle_species_by_id
 from erdata.parse import parse_abilities, parse_moves, parse_species
@@ -21,26 +21,31 @@ from erdata.resolve import build_species_map, playable_species, universal_tutor_
 
 _MAX_SET_DRIFT = 5  # small upstream-commit drift is fine; a larger delta is a real bug
 
-# nextdex's cached snapshot is ~2 weeks older than our pinned SHA, and Elite Redux is
-# under active balance-patch development on this branch -- per-field tolerances below
-# are set from what a root-caused sample of real mismatches looks like (verified by
+# nextdex's cached snapshot is roughly a month older than our pinned SHA, and Elite
+# Redux is under active balance-patch development on this branch -- per-field tolerances
+# below are set from what a root-caused sample of real mismatches looks like (verified by
 # hand: e.g. ABILITY_MENACING_SITUATION's in-game display name is "Phobia" as of our
 # pin but nextdex's snapshot still shows "Menacing Situation"; Caterpie gained a new
 # level-1 move "Silk Trap" after nextdex's snapshot was taken). These are content
 # drift, not pipeline bugs. Level-up learnsets are the most actively tuned field and
 # get the widest tolerance; base stats/types are the most stable and get the tightest.
 _MAX_STAT_TYPE_MISMATCH_RATE = 0.05
-_MAX_ABILITY_MISMATCH_RATE = 0.15
+_MAX_ABILITY_MISMATCH_RATE = 0.05
 _MAX_LEARNSET_MISMATCH_RATE = 0.30
 _MAX_TUTOR_SHORTFALL_RATE = 0.05
 
 
 @pytest.fixture(scope="module")
-def oracle():
+def raw_oracle():
     try:
-        return oracle_species_by_id(fetch_oracle())
+        return fetch_oracle()
     except (urllib.error.URLError, TimeoutError) as e:
         pytest.skip(f"oracle unreachable: {e}")
+
+
+@pytest.fixture(scope="module")
+def oracle(raw_oracle):
+    return oracle_species_by_id(raw_oracle)
 
 
 @pytest.fixture(scope="module")
@@ -76,6 +81,18 @@ def _assert_mismatch_rate_low(shared, mismatches, label, max_rate):
         f"{label}: {len(mismatches)}/{len(shared)} ({rate:.1%}) mismatched, "
         f"exceeds {max_rate:.0%} tolerance -- sample: {mismatches[:10]}"
     )
+
+
+def test_abilities_count_matches_the_released_game(raw_oracle):
+    """The one place where "close enough" isn't: ABILITIES_COUNT is the randomizer's
+    LCG modulus (`(seed >> 16) % (ABILITIES_COUNT - 1) + 1`), so a single ability that
+    exists upstream but not in the ROM players run makes *every* PID the finder reports
+    wrong -- not slightly off, unrelated. nextdex parses the released build, so its
+    ability count is the authority on what shipped. This is an equality, not a
+    tolerance: if it fails, sources.lock.json has run ahead of the release (see its
+    pin_policy) and must be moved back, not the assertion loosened.
+    """
+    assert _abilities_count(parse_abilities()) == len(raw_oracle["abilities"])
 
 
 def test_species_id_sets_nearly_match(ours, oracle):

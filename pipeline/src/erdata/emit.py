@@ -3,8 +3,10 @@ it deterministically to data/<version>/.
 """
 
 import json
+from collections import defaultdict
 from datetime import UTC, datetime
 
+from erdata.ability_groups import NEAR_EQUIVALENT_GROUPS
 from erdata.generated import (
     AbilityEnum_pb2,
     ItemEnum_pb2,
@@ -24,6 +26,7 @@ from erdata.move_behavior import behavior_config_to_dict
 from erdata.natures import battle_constants_to_dict
 from erdata.paths import load_lock, output_dir
 from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
+from erdata.randomizer import parse_randomizer_banned
 from erdata.resolve import (
     build_species_map,
     expand_learnset,
@@ -304,22 +307,78 @@ def _grants_type(ability_id_name: str, ability_hooks: dict) -> str | None:
     return value.removeprefix("TYPE_") if value else None
 
 
-def ability_to_dict(ability, name_index: dict, ability_hooks: dict) -> dict:
+# Exact groups: abilities sharing an identical `description` (the short, canonical
+# rules text) are interchangeable for randomizer-search purposes. Measured at the
+# pinned SHA: 22 groups covering 54 abilities -- e.g. Filter/Solid Rock/Prism Armor/
+# Permafrost/Thick Skin/Flame Shield all read "Takes 35% less damage from Super-
+# effective moves." Grouped on `description` alone, never on `name` ("Embody Aspect"
+# (x4) and "As One" (x2) share a name but behave differently per member) and never on
+# `expandedDescription` (present for only 890/1044 abilities, and its flavor wording
+# diverges within some description-identical groups, e.g. Soul Eater vs Scavenger).
+def _build_exact_groups(abilities) -> dict[str, list[str]]:
+    by_description: dict[str, list] = defaultdict(list)
+    for a in abilities:
+        by_description[a.description].append(a)
+
+    groups: dict[str, list[str]] = {}
+    for members in by_description.values():
+        if len(members) < 2:
+            continue
+        ids = sorted(_A(a.id) for a in members)
+        for a in members:
+            groups[_A(a.id)] = ids
+    return groups
+
+
+# Curated groups: near-equivalents exact-group derivation can't catch, e.g. Mold
+# Breaker's family (see ability_groups.py). Every member name must resolve to a real
+# ability -- a typo here would silently drop a group instead of erroring.
+def _build_near_groups(name_index: dict) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for group in NEAR_EQUIVALENT_GROUPS:
+        members = group["members"]
+        missing = [m for m in members if m not in name_index]
+        assert not missing, f"curated group members not found in abilities.json: {missing}"
+        ids = sorted(_A(name_index[m].id) for m in members)
+        for m in members:
+            groups[_A(name_index[m].id)] = ids
+    return groups
+
+
+def ability_to_dict(
+    ability,
+    name_index: dict,
+    ability_hooks: dict,
+    banned_ids: set[str],
+    exact_groups: dict[str, list[str]],
+    near_groups: dict[str, list[str]],
+) -> dict:
+    ability_id = _A(ability.id)
     entry = {
-        "id": _A(ability.id),
+        "id": ability_id,
+        "abilityNum": int(ability.id),
         "name": ability.name,
         "description": ability.description,
     }
     if ability.HasField("expanded_description"):
         entry["expandedDescription"] = ability.expanded_description
 
-    grants = _grants_type(_A(ability.id), ability_hooks)
+    grants = _grants_type(ability_id, ability_hooks)
     if grants:
         entry["grantsType"] = grants
 
     components = _components(ability.description, name_index)
     if components:
         entry["components"] = [_A(c.id) for c in components]
+
+    # Randomizer (RandomizeInnate/RandomizeAbility, src/pokemon.c): whether this
+    # ability can appear as a randomizer source or result at all.
+    entry["randomizerBanned"] = ability_id in banned_ids
+
+    if ability_id in exact_groups:
+        entry["equivalenceGroup"] = exact_groups[ability_id]
+    if ability_id in near_groups:
+        entry["nearEquivalentGroup"] = near_groups[ability_id]
 
     return entry
 
@@ -411,6 +470,16 @@ def _write_json(path, data) -> None:
     path.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+# The randomizer's modulus (`ABILITIES_COUNT` in eliteredux-source, `EnumGenerator.kt`
+# in its own codegen) is `max(ability id) + 1` -- valid only because the enum is
+# gap-free from 0, which their own codegen enforces on itself and we assert here too.
+def _abilities_count(abilities) -> int:
+    ids = sorted(int(a.id) for a in abilities)
+    count = ids[-1] + 1
+    assert ids == list(range(count)), "AbilityEnum has gaps -- ABILITIES_COUNT assumption invalid"
+    return count
+
+
 def build() -> None:
     lock = load_lock()
     species = parse_species()
@@ -433,10 +502,13 @@ def build() -> None:
     _write_json(out / "moves.json", [move_to_dict(m) for m in sorted(moves, key=lambda m: _M(m.id))])
     ability_name_index = {a.name: a for a in abilities}
     ability_hooks = ability_hooks_to_dict()
+    banned_ids = parse_randomizer_banned()
+    exact_groups = _build_exact_groups(abilities)
+    near_groups = _build_near_groups(ability_name_index)
     _write_json(
         out / "abilities.json",
         [
-            ability_to_dict(a, ability_name_index, ability_hooks)
+            ability_to_dict(a, ability_name_index, ability_hooks, banned_ids, exact_groups, near_groups)
             for a in sorted(abilities, key=lambda a: _A(a.id))
         ],
     )
@@ -463,6 +535,11 @@ def build() -> None:
                 "moveBehaviors": len(move_behaviors["behaviors"]),
                 "abilityHooks": len(ability_hooks),
             },
+            # ABILITIES_COUNT equivalent -- the randomizer LCG's modulus
+            # (`(seed >> 16) % (abilitiesCount - 1)) + 1`, src/random.c). Not the same
+            # as counts.abilities in general (this is max id + 1); they coincide here
+            # only because the enum happens to be gap-free starting at 0.
+            "abilitiesCount": _abilities_count(abilities),
         },
     )
     print(f"wrote {out}")

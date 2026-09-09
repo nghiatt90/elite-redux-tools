@@ -125,7 +125,10 @@ describe('alias abilities (lazy delegation)', () => {
     }
   })
 
-  it('covers all 122 pure-alias abilities identified from abilityHooks.json', () => {
-    expect(ALIAS_ABILITIES.length).toBe(122)
+  // 123, not 122: World Serpent was added to this file during the sources.lock.json
+  // pin correction (released v2.65beta still has its onOffensiveMultiplier, which
+  // `upcoming`'s tip had dropped -- see this file's own doc on that ability).
+  it('covers all 123 pure-alias abilities identified from abilityHooks.json', () => {
+    expect(ALIAS_ABILITIES.length).toBe(123)
   })
 })

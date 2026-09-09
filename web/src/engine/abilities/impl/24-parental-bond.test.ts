@@ -70,8 +70,13 @@ describe('parental bond batch X', () => {
     expect(computeParentalBondTrigger(slots('ABILITY_ICE_COLD_HUNTER'), slots(null), ctx({ moveType: 'WATER', weather: 'HAIL' }))).toBeNull()
   })
 
-  it('Magus Blades needs a slicing move', () => {
-    expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), slots(null), ctx({ moveFlags: { sliceBased: true } }))).toBe('MAGUS_BLADES')
+  // Released v2.65beta (sources.lock.json's pinned SHA, not `upcoming`'s tip):
+  // Magus Blades aliases Dual Wield's own condition (bulletBased || sliceBased ->
+  // DUAL_WIELD), not a standalone MAGUS_BLADES-typed trigger -- see 10-aliases.ts's
+  // own doc on this pin correction.
+  it("Magus Blades needs a bullet or slicing move (aliases Dual Wield's own condition)", () => {
+    expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), slots(null), ctx({ moveFlags: { sliceBased: true } }))).toBe('DUAL_WIELD')
+    expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), slots(null), ctx({ moveFlags: { bulletBased: true } }))).toBe('DUAL_WIELD')
     expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), slots(null), ctx())).toBeNull()
   })
 

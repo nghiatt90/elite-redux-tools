@@ -384,12 +384,21 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     onTypeEffectiveness: aliasTypeEffectiveness('ABILITY_MOLTEN_DOWN'),
   },
   {
+    // Upstream pin correction, not a porting bug: `upcoming`'s tip (2026-09-01,
+    // this repo's earlier pin) reworked Magus Blades to have its own onParentalBond
+    // (IsKeenEdge -> a Magus-Blades-specific multihit type) and dropped its
+    // onOffensiveMultiplier entirely. The pin actually matching the released
+    // v2.65beta ROM (2026-04-24, sources.lock.json) has neither change: onParentalBond
+    // delegates to Dual Wield's own condition (bulletBased || sliceBased -> the
+    // ordinary DUAL_WIELD type), and onOffensiveMultiplier delegates to Keen Edge
+    // (+30% for slicing moves). Confirmed by diffing abilities.cc between both
+    // pinned SHAs.
     id: 'ABILITY_MAGUS_BLADES',
     src: 'src/abilities.cc:10212',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_BEST_OFFENSE'),
     onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
-    // IsKeenEdge(battler, move, moveType) -- own condition, not delegated.
-    onParentalBond: (ctx) => (ctx.moveFlags.sliceBased ? 'MAGUS_BLADES' : null),
+    onParentalBond: aliasParentalBond('ABILITY_DUAL_WIELD'),
   },
   {
     id: 'ABILITY_MASSIVE_PELT',
@@ -804,5 +813,18 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_WIND_RAGE',
     src: 'src/abilities.cc:8974',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_GIANT_WINGS'),
+  },
+  {
+    // New port, not previously in the registry: this session's earlier audit was
+    // done against `upcoming`'s tip (2026-09-01), where World Serpent's
+    // onOffensiveMultiplier had been dropped entirely (onEndTurn=Serpent Bind's
+    // added instead), so the census correctly saw no damage-relevant hook here.
+    // The pin actually matching the released v2.65beta ROM (2026-04-24,
+    // sources.lock.json) still has onOffensiveMultiplier delegating to Long Reach
+    // (+1.2x for physical moves) -- confirmed by diffing abilities.cc between both
+    // pinned SHAs. onAttacker/onAccuracy (Grip Pincer's) are non-damage hooks.
+    id: 'ABILITY_WORLD_SERPENT',
+    src: 'src/abilities.cc:10249',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_LONG_REACH'),
   },
 ]

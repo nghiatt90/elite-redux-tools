@@ -78,17 +78,21 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
     onSwapSplit: (ctx) => ctx.moveSplit === 'PHYSICAL' && !!ctx.moveFlags.arrowBased,
   },
   {
-    // Real gap fix: the .onChooseOffensiveStat half was previously left off this
-    // port entirely (a stale comment here claimed it aliased Juggernaut and that
-    // the hook wasn't wired yet -- both wrong: it's its own lambda, and
-    // onChooseOffensiveStat has been wired since batch Q). IsKeenEdge(...) ==
-    // DoesMoveMatchFlag(..., MOVE_FLAG_KEEN_EDGE) == moveFlags.sliceBased, same
-    // condition as ABILITY_KEEN_EDGE's own (03-offensive-multiplier-b.ts).
+    // Upstream pin correction, not a porting bug: `upcoming`'s tip (2026-09-01,
+    // this repo's earlier pin) reworked Best Offense to gate onChooseOffensiveStat
+    // on Keen Edge and target DEF, and dropped its onOffensiveMultiplier entirely.
+    // The pin actually matching the released v2.65beta ROM (2026-04-24,
+    // sources.lock.json) has neither change: onOffensiveMultiplier delegates to
+    // Keen Edge (+30% for slicing moves), and onChooseOffensiveStat is a plain,
+    // UNCONDITIONAL +20% SpDef blend (matching the in-game description, "...and
+    // use +20% Sp. Def" -- no "Keen Edge moves only" qualifier on that half).
+    // Confirmed by diffing abilities.cc between both pinned SHAs.
     id: 'ABILITY_BEST_OFFENSE',
     src: 'src/abilities.cc:10190',
+    onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
     onSwapSplit: aliasSwapSplit('ABILITY_MYSTIC_BLADES'),
     onChooseOffensiveStat: (ctx) => {
-      if (ctx.moveFlags.sliceBased) ctx.secondaryStat.def = (ctx.secondaryStat.def ?? 0) + 20
+      ctx.secondaryStat.spdef = (ctx.secondaryStat.spdef ?? 0) + 20
     },
   },
   {

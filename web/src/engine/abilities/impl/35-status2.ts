@@ -21,10 +21,14 @@ export const STATUS2_ABILITIES: AbilityImpl[] = [
     },
   },
   {
+    // Real gap fix (upstream pin correction, not a porting bug): abilities.cc's
+    // `upcoming` tip (2026-09-01, this repo's earlier pin) has MUL(.8), but the
+    // pin actually matching the released v2.65beta ROM (2026-04-24, sources.lock.json)
+    // has MUL(.5) -- confirmed by diffing abilities.cc between both pinned SHAs.
     id: 'ABILITY_MADNESS_ENHANCEMENT',
     src: 'src/abilities.cc:9921',
     onDefensiveMultiplier: (ctx) => {
-      if (ctx.defenderIsEnraged) MUL(ctx, 0.8)
+      if (ctx.defenderIsEnraged) MUL(ctx, 0.5)
     },
   },
   {

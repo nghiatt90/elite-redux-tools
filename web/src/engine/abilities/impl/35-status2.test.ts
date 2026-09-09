@@ -106,10 +106,12 @@ describe('status2 batch AI', () => {
     expect(neither.modifier).toBe(uq(1.0))
   })
 
-  it('Madness Enhancement reduces incoming damage 0.8x only while enraged', () => {
+  // Released v2.65beta (sources.lock.json's pinned SHA, not `upcoming`'s tip) has
+  // MUL(.5), not MUL(.8) -- see 35-status2.ts's own doc on this pin correction.
+  it('Madness Enhancement reduces incoming damage 0.5x only while enraged', () => {
     const enraged = defCtx(true)
     findAbility('ABILITY_MADNESS_ENHANCEMENT').onDefensiveMultiplier!(enraged)
-    expect(enraged.modifier).toBe(uq(0.8))
+    expect(enraged.modifier).toBe(uq(0.5))
 
     const notEnraged = defCtx(false)
     findAbility('ABILITY_MADNESS_ENHANCEMENT').onDefensiveMultiplier!(notEnraged)

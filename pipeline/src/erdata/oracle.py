@@ -27,7 +27,10 @@ def fetch_oracle() -> dict:
         UPSTREAM.mkdir(parents=True, exist_ok=True)
         with urllib.request.urlopen(_URL, timeout=30) as resp:
             _CACHE.write_bytes(resp.read())
-    return json.loads(_CACHE.read_text())
+    # Explicit encoding: the payload has non-ASCII in ability/move text ("Pokémon"),
+    # and read_text() would otherwise decode it with the platform default (cp1252 on
+    # Windows) and blow up.
+    return json.loads(_CACHE.read_text(encoding="utf-8"))
 
 
 def oracle_species_by_id(oracle: dict) -> dict[str, dict]:
@@ -38,8 +41,13 @@ def oracle_species_by_id(oracle: dict) -> dict[str, dict]:
     not a unique key and silently collides.
     """
     type_names = oracle["typeT"]
-    ability_names = {a["id"]: a["name"] for a in oracle["abilities"]}
-    move_names = {m["id"]: m["name"] for m in oracle["moves"]}
+    # A species' `abis`/`inns`/`tutor`/`levelUpMoves[].id` are *positions* in nextdex's
+    # own abilities/moves arrays, not AbilityEnum/MoveEnum values -- its `id` field
+    # carries the enum value and the two disagree for 81 abilities and 3 moves at the
+    # current snapshot. Looking them up by `id` silently mislabels those, which is what
+    # forced _MAX_ABILITY_MISMATCH_RATE up to a level that hid real drift.
+    ability_names = [a["name"] for a in oracle["abilities"]]
+    move_names = [m["name"] for m in oracle["moves"]]
 
     def convert(sp: dict) -> dict:
         stats = sp["stats"]
@@ -53,10 +61,12 @@ def oracle_species_by_id(oracle: dict) -> dict[str, dict]:
                 "spe": stats["base"][5],
             },
             "types": {type_names[t].upper() for t in stats["types"]},
-            "abilities": {ability_names[a] for a in stats["abis"] if a in ability_names},
-            "innates": {ability_names[i] for i in stats["inns"] if i in ability_names},
-            "levelUpMoves": {move_names[m["id"]] for m in sp["levelUpMoves"] if m["id"] in move_names},
-            "tutor": {move_names[t] for t in sp["tutor"] if t in move_names},
+            "abilities": {ability_names[a] for a in stats["abis"] if a < len(ability_names)},
+            "innates": {ability_names[i] for i in stats["inns"] if i < len(ability_names)},
+            "levelUpMoves": {
+                move_names[m["id"]] for m in sp["levelUpMoves"] if m["id"] < len(move_names)
+            },
+            "tutor": {move_names[t] for t in sp["tutor"] if t < len(move_names)},
         }
 
     return {sp["NAME"]: convert(sp) for sp in oracle["species"] if sp.get("NAME")}

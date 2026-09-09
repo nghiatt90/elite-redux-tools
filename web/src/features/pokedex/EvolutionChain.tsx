@@ -4,7 +4,7 @@ import { useGameData } from '../../lib/GameDataContext'
 import { spriteUrl } from '../../lib/data'
 import { displayName } from '../../lib/displayName'
 import type { Species } from '../../lib/types'
-import { buildEvolutionChain, findOtherForms, type ChainNode } from './evolutionChain'
+import { buildEvolutionChain, findOtherForms, type ChainNode } from './evolutionLines'
 
 function SpeciesChip({
   node,
