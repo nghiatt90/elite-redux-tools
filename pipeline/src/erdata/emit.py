@@ -40,7 +40,7 @@ from erdata.resolve import (
     universal_tutor_sets,
 )
 from erdata.trainers import parse_trainers, real_trainers, resolve_party_tiers
-from erdata.typechart import parse_type_chart
+from erdata.typechart import parse_inverse_type_chart, parse_type_chart
 
 _S = SpeciesEnum_pb2.SpeciesEnum.Name
 _A = AbilityEnum_pb2.AbilityEnum.Name
@@ -542,6 +542,14 @@ def type_chart_to_dict() -> dict:
     }
 
 
+def inverse_type_chart_to_dict() -> dict:
+    chart = parse_inverse_type_chart()
+    return {
+        atk.removeprefix("TYPE_"): {def_.removeprefix("TYPE_"): mult for def_, mult in row.items()}
+        for atk, row in chart.items()
+    }
+
+
 def _write_json(path, data) -> None:
     path.write_text(
         json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
@@ -591,6 +599,10 @@ def build() -> None:
         ],
     )
     _write_json(out / "types.json", type_chart_to_dict())
+    # GetTypeModifier's Inverse Room / B_FLAG_INVERSE_BATTLE table (battle_util.c:1015,
+    # 8021-8038) -- a separate hand-written chart, not derived from types.json's own
+    # (see typechart.py's module comment). Sibling file, same TypeChart shape.
+    _write_json(out / "typesInverse.json", inverse_type_chart_to_dict())
     _write_json(out / "items.json", [item_to_dict(i) for i in sorted(items, key=lambda i: _I(i.id))])
     move_behaviors = move_behaviors_to_dict()
     _write_json(out / "moveBehaviors.json", move_behaviors)

@@ -5,6 +5,7 @@ from erdata.emit import (
     _build_exact_groups,
     _build_near_groups,
     ability_to_dict,
+    inverse_type_chart_to_dict,
     item_to_dict,
     move_to_dict,
     species_to_dict,
@@ -289,6 +290,15 @@ def test_type_chart_dict_uses_bare_names():
     chart = type_chart_to_dict()
     assert chart["FIRE"]["GRASS"] == 2.0
     assert "TYPE_FIRE" not in chart
+
+
+def test_inverse_type_chart_dict_uses_bare_names_and_differs_from_forward():
+    chart = inverse_type_chart_to_dict()
+    assert chart["FIRE"]["GRASS"] == 0.5
+    assert "TYPE_FIRE" not in chart
+    # Not just the forward table with a wrapper -- see typechart.py's own doc on why
+    # this is a genuinely separate hand-written array.
+    assert chart["FIRE"]["GRASS"] != type_chart_to_dict()["FIRE"]["GRASS"]
 
 
 def _trainers():
