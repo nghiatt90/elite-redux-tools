@@ -97,8 +97,14 @@ proportionate to that.
 - **Trainer parties are not emitted yet.** `pipeline/.upstream/er-config/TrainerList.textproto`
   is 2.8MB of parties with items, natures, EVs, abilities, movesets and three difficulty
   tiers (`ace` / `elite` / `hell`), and `TrainerList_pb2.py` is already compiled — but
-  nothing writes a `trainers.json`. Note `.ability` there is a **slot index** into the
-  species' three ability slots, not an ability id.
+  nothing writes a `trainers.json`. **`.ability` in the textproto is a real ability id, not
+  a slot index** — `TrainerList.proto:248` declares it `AbilityEnum ability = 5`, so parse it
+  the same way as every other `AbilityEnum` field. The slot index exists only downstream, in
+  the generated C: `TrainerPartyGenerator.kt:147-156` converts the id with
+  `SPECIES_MAP[species]!!.abilityList.indexOf(ability)` when emitting `gTrainers[]`, and
+  **omits `.ability` entirely** when that returns -1 (the mon does not have the ability the
+  textproto names, which the codegen reports as a validation error rather than fixing). An
+  earlier revision of this file had these two backwards.
 - `sparse_paths` in `sources.lock.json` currently omits `data/`, so upstream map scripts
   and battle-script bytecode are not fetched. Widen it if you need per-battle field
   effects, gym-skill assignment, or the move-behaviour scripts.
