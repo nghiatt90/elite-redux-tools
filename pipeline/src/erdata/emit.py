@@ -24,6 +24,7 @@ from erdata.generated import (
 )
 from erdata.ability_hooks import ability_hooks_to_dict
 from erdata.behaviors import move_behaviors_to_dict
+from erdata.encounters import encounters_to_dict
 from erdata.move_behavior import behavior_config_to_dict
 from erdata.natures import battle_constants_to_dict
 from erdata.paths import load_lock, output_dir
@@ -597,6 +598,8 @@ def build() -> None:
     _write_json(out / "abilityHooks.json", ability_hooks)
     trainers = sorted(real_trainers(parse_trainers()), key=lambda t: t.id)
     _write_json(out / "trainers.json", [trainer_to_dict(t) for t in trainers])
+    encounters = encounters_to_dict()
+    _write_json(out / "encounters.json", encounters)
     _write_json(
         out / "meta.json",
         {
@@ -614,6 +617,9 @@ def build() -> None:
                 "moveBehaviors": len(move_behaviors["behaviors"]),
                 "abilityHooks": len(ability_hooks),
                 "trainers": len(trainers),
+                "fieldEffects": len(encounters["fieldEffects"]),
+                "battleEvents": len(encounters["battleEvents"]),
+                "trainerChains": len(encounters["trainerChains"]),
             },
             # ABILITIES_COUNT equivalent -- the randomizer LCG's modulus
             # (`(seed >> 16) % (abilitiesCount - 1)) + 1`, src/random.c). Not the same

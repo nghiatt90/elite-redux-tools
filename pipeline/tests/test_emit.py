@@ -406,6 +406,25 @@ def test_trainer_dict_nonstandard_override_reason_is_carried_through():
     assert pelipper["nonstandard"] == "Invalid moves: [MOVE_U_TURN]"
 
 
+def test_build_writes_encounters_json(tmp_path, monkeypatch):
+    import erdata.paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "DATA_ROOT", tmp_path)
+    import erdata.emit as emit_mod
+
+    monkeypatch.setattr(emit_mod, "output_dir", lambda: tmp_path / paths_mod.game_version())
+
+    emit_mod.build()
+    encounters = json.loads((tmp_path / paths_mod.game_version() / "encounters.json").read_bytes())
+    assert set(encounters) == {"fieldEffects", "battleEvents", "trainerChains"}
+    assert len(encounters["fieldEffects"]) > 0
+
+    meta = json.loads((tmp_path / paths_mod.game_version() / "meta.json").read_bytes())
+    assert meta["counts"]["fieldEffects"] == len(encounters["fieldEffects"])
+    assert meta["counts"]["battleEvents"] == len(encounters["battleEvents"])
+    assert meta["counts"]["trainerChains"] == len(encounters["trainerChains"])
+
+
 def test_emit_is_deterministic(tmp_path, monkeypatch):
     import erdata.paths as paths_mod
 
