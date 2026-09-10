@@ -195,6 +195,56 @@ export interface Item {
   naturalGift?: { power: number; type: string; affectsUser: boolean; certain: boolean; effect?: string; priority?: number }
 }
 
+export interface TrainerEvs {
+  hp: number
+  atk: number
+  def: number
+  spatk: number
+  spdef: number
+  spe: number
+}
+
+export interface TrainerMon {
+  species: string
+  item: string // ItemEnum id, e.g. "ITEM_LEFTOVERS"
+  nature: string // Nature enum, e.g. "NATURE_ADAMANT"
+  ability: string // AbilityEnum id -- TrainerList.proto declares this a real ability,
+  // not a slot index; see pipeline/src/erdata/trainers.py's module docstring
+  evs: TrainerEvs
+  moves: string[] // MoveEnum ids, up to 4
+  ironPill: boolean // zeroes this mon's Speed IV; every other stat's IV is forced to 31 regardless
+  hiddenPowerType: string // bare Type enum; defaults to "TYPE_NORMAL" when unset in the textproto
+  nonstandard?: string // free-text override reason (e.g. "Invalid moves: [...]") that makes
+  // the upstream codegen skip this mon; no runtime effect, carried through as a label only
+}
+
+export interface TrainerParties {
+  ace: TrainerMon[]
+  elite: TrainerMon[] // falls back to ace when empty in the textproto (common: 504 of 932 trainers)
+  hell: TrainerMon[] // falls back to the *resolved* elite (which may itself have fallen back to
+  // ace), not directly to ace (common: 534 of 932 trainers) -- see resolve_party_tiers
+}
+
+// Deliberately absent: level (derived at battle time from the player's highest party
+// level, see CLAUDE.md -- not parsed game data), IVs (forced to 31 on recalculation),
+// trainer-level bag items and isAlpha (no such fields exist in the Trainer message).
+export interface Trainer {
+  id: string // TrainerEnum id, e.g. "TRAINER_SAWYER_1"
+  trainerNum: number // raw TrainerEnum value
+  name: string
+  gender: string // "MALE" | "FEMALE" | ...
+  hasTrainerFlag: boolean // present in the schema but never read by gTrainers[] emission -- purpose unverified
+  forcedDouble: boolean
+  risky: boolean
+  preferStatus: boolean
+  preferStall: boolean
+  noSwitching: boolean
+  class: string | null // TrainerClass enum, e.g. "TRAINER_CLASS_HIKER"
+  pic: string | null // TrainerPic enum
+  music: string | null // TrainerMusic enum
+  parties: TrainerParties
+}
+
 // typeChart[attackingType][defendingType] = multiplier
 export type TypeChart = Record<string, Record<string, number>>
 
@@ -202,7 +252,7 @@ export interface Meta {
   gameVersion: string
   generatedAt: string
   sources: Record<string, { repo: string; sha: string; date: string }>
-  counts: { species: number; moves: number; abilities: number; items: number; moveBehaviors: number; abilityHooks: number }
+  counts: { species: number; moves: number; abilities: number; items: number; moveBehaviors: number; abilityHooks: number; trainers: number }
   abilitiesCount: number // the randomizer LCG's modulus (ABILITIES_COUNT in-game); not
   // always equal to counts.abilities -- see emit.py's _abilities_count
 }
