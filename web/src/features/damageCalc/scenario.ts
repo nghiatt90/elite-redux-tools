@@ -127,6 +127,8 @@ export interface BattlerConfig {
   /** See BattlerBattleState.hiddenPowerType's doc -- a scenario toggle, null
    * (unset) by default. */
   hiddenPowerType: string | null
+  /** See BattlerBattleState.hasMiracleEye's doc. */
+  hasMiracleEye: boolean
 }
 
 export function defaultEvs(): Record<StatKey, number> {
@@ -160,6 +162,7 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
     alliesFainted: 0,
     slowStartTimer: 5,
     hiddenPowerType: null,
+    hasMiracleEye: false,
   }
 }
 
@@ -278,6 +281,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     canEvolveStrict: species.evolutions.length > 0,
     isInfatuatedWithOpponent: false,
     moveSlotPp: {},
+    hasMiracleEye: config.hasMiracleEye,
     abilitySlots: {
       ability: config.abilityIndex >= 0 ? (species.abilities[config.abilityIndex] ?? null) : null,
       innates: [species.innates[0] ?? null, species.innates[1] ?? null, species.innates[2] ?? null],
@@ -310,6 +314,12 @@ export interface FieldConfig {
   weather: FieldBattleState['weather']
   terrain: string | null
   gravity: boolean
+  /** See FieldBattleState.isInverseRoomActive's doc. */
+  inverseRoom: boolean
+  /** See FieldBattleState.isInverseBattleFlagSet's doc. */
+  inverseBattleFlag: boolean
+  /** See FieldBattleState.isWonderRoomActive's doc. */
+  wonderRoom: boolean
   attackerSide: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
   defenderSide: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
   /** See DamageCalcScenario.attackerActsFirst's own doc -- a turn-order fact this
@@ -346,6 +356,9 @@ export function defaultFieldConfig(): FieldConfig {
     weather: 'NONE',
     terrain: null,
     gravity: false,
+    inverseRoom: false,
+    inverseBattleFlag: false,
+    wonderRoom: false,
     attackerSide: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
     defenderSide: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
     attackerActsFirst: true,
@@ -367,7 +380,7 @@ export function buildScenario(
   defenderConfig: BattlerConfig,
   moveId: string,
   field: FieldConfig,
-  ctx: BuildContext & { movesById: Map<string, Move>; typeChart: TypeChart; moveBehaviors: MoveBehaviorsFile },
+  ctx: BuildContext & { movesById: Map<string, Move>; typeChart: TypeChart; inverseTypeChart: TypeChart; moveBehaviors: MoveBehaviorsFile },
 ): DamageCalcScenario {
   const move = ctx.movesById.get(moveId)
   if (!move) throw new Error(`unknown move ${moveId}`)
@@ -382,8 +395,12 @@ export function buildScenario(
       weather: field.weather,
       sides: { attacker: field.attackerSide, defender: field.defenderSide },
       isDoubleBattle: false,
+      isInverseRoomActive: field.inverseRoom,
+      isInverseBattleFlagSet: field.inverseBattleFlag,
+      isWonderRoomActive: field.wonderRoom,
     },
     typeChart: ctx.typeChart,
+    inverseTypeChart: ctx.inverseTypeChart,
     // lib/types.ts's MoveBehaviorsFile deliberately types `behaviors` loosely
     // (Record<string, unknown>) since the engine owns the precise shape (see
     // basePower.ts's MoveBehaviors) -- this is the one place that hands the fetched

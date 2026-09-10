@@ -71,6 +71,55 @@ export function calcTypeEffectiveness(
 }
 
 /**
+ * GetTypeModifier's own toggle inputs (battle_util.c:8021-8038) -- which chart to
+ * select and the one special-case override, all independent of any specific
+ * (attackingType, defendingType) pair.
+ */
+export interface TypeModifierInputs {
+  /** IsInverseRoomActive() -- the Inverse Room field effect (STATUS_FIELD_INVERSE_ROOM,
+   * suppressed by ABILITY_CLUELESS). Collapses both causes into one caller-supplied
+   * fact, same precedent as FieldBattleState.gravityActive (also Clueless-suppressible
+   * in the C but not independently modelled there either). */
+  isInverseRoomActive: boolean
+  /** B_FLAG_INVERSE_BATTLE -- a whole-battle-format config flag, a SEPARATE toggle
+   * from the Inverse Room field effect above (both XOR together, see getTypeModifier's
+   * own doc). */
+  isInverseBattleFlagSet: boolean
+  /** gStatuses3[battlerAtk] & STATUS3_MIRACLE_EYED for the attacking battler. */
+  attackerHasMiracleEye: boolean
+  /** gStatuses3[battlerDef] & STATUS3_MIRACLE_EYED for the defending battler. */
+  defenderHasMiracleEye: boolean
+}
+
+/**
+ * GetTypeModifier, battle_util.c:8021-8038 -- selects the forward or inverse type
+ * chart for ONE (attackingType, defendingType) pair, XORing "inverted" across THREE
+ * independent sources (not an OR -- two active at once cancel out): the Inverse Room
+ * field effect, Miracle Eye on EITHER battler, and the B_FLAG_INVERSE_BATTLE format
+ * flag.
+ *
+ * Separately (:8035), Miracle Eye on EITHER battler -- regardless of whether the
+ * three-way XOR above actually ended up inverted or not -- forces Dark-vs-Psychic
+ * specifically to a flat 0. This is counterintuitive (Miracle Eye conventionally
+ * REMOVES a target's immunities, and Dark is normally super-effective (2x) against
+ * Psychic in both this chart and the inverse one's 0.5, never an immunity to begin
+ * with), but it's exactly what the C does -- ported faithfully rather than "corrected"
+ * to what Miracle Eye is supposed to do.
+ */
+export function getTypeModifier(attackingType: string, defendingType: string, chart: TypeChart, inverseChart: TypeChart, inputs: TypeModifierInputs): number {
+  let inverted = inputs.isInverseRoomActive
+  if (inputs.attackerHasMiracleEye) inverted = !inverted
+  if (inputs.defenderHasMiracleEye) inverted = !inverted
+  if (inputs.isInverseBattleFlagSet) inverted = !inverted
+
+  let ret = baseTypeEffectiveness(attackingType, defendingType, inverted ? inverseChart : chart)
+
+  if ((inputs.attackerHasMiracleEye || inputs.defenderHasMiracleEye) && attackingType === 'DARK' && defendingType === 'PSYCHIC') ret = 0
+
+  return ret
+}
+
+/**
  * Dedupes a defender's 1-3 types into the fold order CalcTypeEffectivenessMultiplierInternal
  * uses: type1 always; type2 only if it differs from type1; type3 only if it's not
  * "no third type" and differs from both type1 and type2. `noneType` is the bare

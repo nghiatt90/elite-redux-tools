@@ -15,6 +15,10 @@ export const loadSpecies = () => getJSON<Species[]>(`${BASE}/species.json`)
 export const loadMoves = () => getJSON<Move[]>(`${BASE}/moves.json`)
 export const loadAbilities = () => getJSON<Ability[]>(`${BASE}/abilities.json`)
 export const loadTypeChart = () => getJSON<TypeChart>(`${BASE}/types.json`)
+// GetTypeModifier's Inverse Room / Miracle Eye / B_FLAG_INVERSE_BATTLE table
+// (battle_util.c:1015) -- a separate hand-written chart, see typesInverse.json's
+// own pipeline-side doc (erdata/typechart.py).
+export const loadInverseTypeChart = () => getJSON<TypeChart>(`${BASE}/typesInverse.json`)
 export const loadItems = () => getJSON<Item[]>(`${BASE}/items.json`)
 export const loadMeta = () => getJSON<Meta>(`${BASE}/meta.json`)
 

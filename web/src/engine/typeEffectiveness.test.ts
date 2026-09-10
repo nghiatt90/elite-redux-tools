@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { baseTypeEffectiveness, calcTypeEffectiveness, distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
+import { baseTypeEffectiveness, calcTypeEffectiveness, distinctDefendingTypes, getTypeModifier, type TypeChart, type TypeModifierInputs } from './typeEffectiveness'
 import { uq } from './fixed'
 
 const TYPES_PATH = fileURLToPath(new URL('../../../data/v2.65beta/types.json', import.meta.url))
 const chart: TypeChart = JSON.parse(readFileSync(TYPES_PATH, 'utf-8'))
+const INVERSE_TYPES_PATH = fileURLToPath(new URL('../../../data/v2.65beta/typesInverse.json', import.meta.url))
+const inverseChart: TypeChart = JSON.parse(readFileSync(INVERSE_TYPES_PATH, 'utf-8'))
 
 describe('baseTypeEffectiveness', () => {
   it('reads the real chart', () => {
@@ -100,5 +102,62 @@ describe('calcTypeEffectiveness', () => {
 
   it("Ring Target does not affect the SEPARATE non-grounded Ground-move immunity check", () => {
     expect(calcTypeEffectiveness('GROUND', ['NORMAL'], chart, false, true)).toBe(0)
+  })
+})
+
+describe('getTypeModifier', () => {
+  const noToggles: TypeModifierInputs = { isInverseRoomActive: false, isInverseBattleFlagSet: false, attackerHasMiracleEye: false, defenderHasMiracleEye: false }
+
+  it('with nothing active, matches the forward chart', () => {
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, noToggles)).toBe(uq(2.0))
+  })
+
+  it('Inverse Room alone selects the inverse chart', () => {
+    expect(chart['FIRE']['GRASS']).toBe(2.0)
+    expect(inverseChart['FIRE']['GRASS']).toBe(0.5)
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, isInverseRoomActive: true })).toBe(uq(0.5))
+  })
+
+  it('B_FLAG_INVERSE_BATTLE alone also selects the inverse chart', () => {
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, isInverseBattleFlagSet: true })).toBe(uq(0.5))
+  })
+
+  it('Inverse Room AND the battle flag together XOR back to the forward chart (not stacking to double-inverse)', () => {
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, isInverseRoomActive: true, isInverseBattleFlagSet: true })).toBe(uq(2.0))
+  })
+
+  it("either battler's Miracle Eye alone also flips to the inverse chart", () => {
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, attackerHasMiracleEye: true })).toBe(uq(0.5))
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, defenderHasMiracleEye: true })).toBe(uq(0.5))
+  })
+
+  it('BOTH battlers having Miracle Eye XORs back to the forward chart', () => {
+    expect(getTypeModifier('FIRE', 'GRASS', chart, inverseChart, { ...noToggles, attackerHasMiracleEye: true, defenderHasMiracleEye: true })).toBe(uq(2.0))
+  })
+
+  it('Dark vs Psychic is forced to 0 whenever EITHER battler has Miracle Eye, regardless of the resulting inversion state', () => {
+    // Forward chart: Dark is 2x vs Psychic. Inverse chart: 0.5x. Miracle Eye forces a
+    // flat 0 in EITHER case -- battle_util.c:8035, ported verbatim even though this
+    // looks backwards for what Miracle Eye conventionally does.
+    expect(chart['DARK']['PSYCHIC']).toBe(2.0)
+    expect(inverseChart['DARK']['PSYCHIC']).toBe(0.5)
+    expect(getTypeModifier('DARK', 'PSYCHIC', chart, inverseChart, { ...noToggles, attackerHasMiracleEye: true })).toBe(0)
+    expect(getTypeModifier('DARK', 'PSYCHIC', chart, inverseChart, { ...noToggles, defenderHasMiracleEye: true, isInverseRoomActive: true })).toBe(0)
+  })
+
+  it('the Dark/Psychic special case does not apply without Miracle Eye, even under Inverse Room', () => {
+    expect(getTypeModifier('DARK', 'PSYCHIC', chart, inverseChart, { ...noToggles, isInverseRoomActive: true })).toBe(uq(0.5))
+  })
+
+  it('the Dark/Psychic special case is direction-specific -- Psychic attacking Dark is untouched by it', () => {
+    // Psychic is a flat 0 (immune) vs Dark on the forward chart but 2.0 on the
+    // inverse one -- attackerHasMiracleEye still flips the chart selection via the
+    // XOR (Miracle Eye isn't ONLY the special-case gate), so the expected value here
+    // is the INVERSE chart's own Psychic-vs-Dark entry, not 0 -- proving the special
+    // case itself (which only fires for atkType===DARK) never kicks in for this
+    // attack/defend order.
+    expect(chart['PSYCHIC']['DARK']).toBe(0)
+    expect(inverseChart['PSYCHIC']['DARK']).toBe(2.0)
+    expect(getTypeModifier('PSYCHIC', 'DARK', chart, inverseChart, { ...noToggles, attackerHasMiracleEye: true })).toBe(uq(2.0))
   })
 })

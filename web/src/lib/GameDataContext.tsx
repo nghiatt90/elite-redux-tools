@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { loadAbilities, loadItems, loadMeta, loadMoves, loadSpecies, loadTypeChart } from './data'
+import { loadAbilities, loadInverseTypeChart, loadItems, loadMeta, loadMoves, loadSpecies, loadTypeChart } from './data'
 import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
 
 interface GameData {
@@ -12,6 +12,7 @@ interface GameData {
   items: Item[]
   itemsById: Map<string, Item>
   typeChart: TypeChart
+  inverseTypeChart: TypeChart
   meta: Meta
 }
 
@@ -33,9 +34,10 @@ export function GameDataProvider({ children }: { children: ReactNode }) {
       loadAbilities(),
       loadItems(),
       loadTypeChart(),
+      loadInverseTypeChart(),
       loadMeta(),
     ])
-      .then(([species, moves, abilities, items, typeChart, meta]) => {
+      .then(([species, moves, abilities, items, typeChart, inverseTypeChart, meta]) => {
         if (cancelled) return
         setState({
           status: 'ready',
@@ -49,6 +51,7 @@ export function GameDataProvider({ children }: { children: ReactNode }) {
             items,
             itemsById: new Map(items.map((i) => [i.id, i])),
             typeChart,
+            inverseTypeChart,
             meta,
           },
         })

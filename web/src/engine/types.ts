@@ -273,6 +273,12 @@ export interface BattlerBattleState {
   isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler
   moveSlotPp: Record<string, number> // moveId -> current pp, for Trump Card
   abilitySlots: AbilitySlots
+  /** gStatuses3[battler] & STATUS3_MIRACLE_EYED -- see TypeModifierInputs's own doc
+   * (typeEffectiveness.ts) for what this does to GetTypeModifier's chart selection
+   * and its separate Dark-vs-Psychic special case. A per-turn battle state this
+   * non-turn-simulating calculator can't derive, so a scenario toggle like
+   * isInfatuatedWithOpponent above. */
+  hasMiracleEye: boolean
 }
 
 export interface FieldBattleState extends ConditionFieldContext {
@@ -281,6 +287,22 @@ export interface FieldBattleState extends ConditionFieldContext {
     defender: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
   }
   isDoubleBattle: false // v1 is singles-only; literal type keeps multi-target code unreachable
+  /** IsInverseRoomActive(), battle_util.c:8680-8687 -- STATUS_FIELD_INVERSE_ROOM,
+   * unless ABILITY_CLUELESS is on the field. Collapses both causes into one
+   * caller-supplied fact, same precedent as gravityActive above (also
+   * Clueless-suppressible in the C but not independently modelled there either). */
+  isInverseRoomActive: boolean
+  /** B_FLAG_INVERSE_BATTLE -- a whole-battle-format config flag, independent of (and
+   * XORed with, not OR'd with) the Inverse Room field effect above -- see
+   * TypeModifierInputs/getTypeModifier's own doc (typeEffectiveness.ts). */
+  isInverseBattleFlagSet: boolean
+  /** isWonderRoomActive(), battle_util.c:8707-8714 -- STATUS_FIELD_WONDER_ROOM OR
+   * (Monotype Champion Normal on an even turn), unless ABILITY_CLUELESS is on the
+   * field. The turn-parity alternation has no representation in this non-turn-
+   * simulating calculator (same class of gap as sameMoveTurnsInARow) -- collapsed
+   * into one caller-supplied fact, same precedent as gravityActive/
+   * isInverseRoomActive above. */
+  isWonderRoomActive: boolean
 }
 
 /** natures.json's full shape, as emitted by erdata.natures.battle_constants_to_dict(). */

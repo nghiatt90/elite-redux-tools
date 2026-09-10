@@ -30,6 +30,7 @@ export default function DamageCalculator() {
     itemsById: gameData.itemsById,
     movesById: gameData.movesById,
     typeChart: gameData.typeChart,
+    inverseTypeChart: gameData.inverseTypeChart,
     moveBehaviors: calcData.data.moveBehaviors,
     natures: calcData.data.natures,
   }

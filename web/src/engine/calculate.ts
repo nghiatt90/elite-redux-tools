@@ -40,7 +40,7 @@ import {
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
 import { resolveHitPlan } from './multiHit'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
-import { distinctDefendingTypes, type TypeChart } from './typeEffectiveness'
+import { distinctDefendingTypes, type TypeChart, type TypeModifierInputs } from './typeEffectiveness'
 import {
   abilityCoverageNote,
   computeAbilityCritBonus,
@@ -103,6 +103,12 @@ export interface DamageCalcScenario {
   defender: BattlerBattleState
   field: FieldBattleState
   typeChart: TypeChart
+  /** sInverseTypeEffectivenessTable (battle_util.c:1015) -- a separate hand-written
+   * chart GetTypeModifier selects instead of `typeChart` under Inverse Room/Miracle
+   * Eye/B_FLAG_INVERSE_BATTLE (see resolveTypeEffectiveness below). Not derivable
+   * from `typeChart` itself -- see typechart.py's own module doc on the pipeline
+   * side for why. */
+  inverseTypeChart: TypeChart
   moveBehaviors: MoveBehaviors
   battleConstants: BattleConstants
   /** UI-supplied context for the handful of turn-order/turn-history facts a static
@@ -602,6 +608,15 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   // needed the same fix).
   const superEffectiveVsType = moveBehaviorAttack?.superEffectiveVs ? moveBehaviorAttack.superEffectiveVs.replace('TYPE_', '') : null
   const ignoreTypeImmunity = Boolean(moveBehaviorAttack?.ignoreTypeImmunity)
+  // GetTypeModifier's own toggle inputs (battle_util.c:8021-8038) -- see
+  // TypeModifierInputs's own doc (typeEffectiveness.ts) for the XOR semantics and
+  // the separate Dark-vs-Psychic special case.
+  const typeModifierInputs: TypeModifierInputs = {
+    isInverseRoomActive: field.isInverseRoomActive,
+    isInverseBattleFlagSet: field.isInverseBattleFlagSet,
+    attackerHasMiracleEye: attacker.hasMiracleEye,
+    defenderHasMiracleEye: defender.hasMiracleEye,
+  }
   const typeFold = computeTypeEffectivenessWithAbilities(
     attacker.abilitySlots,
     moveType,
@@ -614,6 +629,8 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
     isForcedGrounded,
     superEffectiveVsType,
     ignoreTypeImmunity,
+    scenario.inverseTypeChart,
+    typeModifierInputs,
   )
   // The post-fold Ground/grounded override (battle_util.c:7973-7977) -- same check
   // calcTypeEffectiveness's own isGrounded param applies, done manually here since

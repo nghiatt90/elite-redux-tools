@@ -12,7 +12,12 @@ interface Props {
   attacker: BattlerConfig
   defender: BattlerConfig
   field: FieldConfig
-  ctx: BuildContext & { movesById: Map<string, Move>; typeChart: import('../../engine/typeEffectiveness').TypeChart; moveBehaviors: import('../../lib/types').MoveBehaviorsFile }
+  ctx: BuildContext & {
+    movesById: Map<string, Move>
+    typeChart: import('../../engine/typeEffectiveness').TypeChart
+    inverseTypeChart: import('../../engine/typeEffectiveness').TypeChart
+    moveBehaviors: import('../../lib/types').MoveBehaviorsFile
+  }
 }
 
 function formatRange(rolls: number[], maxHp: number): string {

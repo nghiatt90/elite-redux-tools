@@ -223,6 +223,11 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
         Enraged {/* Cosmic Daze/Cosmic Dust, Madness Enhancement */}
       </label>
 
+      <label className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+        <input type="checkbox" checked={config.hasMiracleEye} onChange={(e) => set('hasMiracleEye', e.target.checked)} />
+        Miracle Eye {/* flips the Inverse Room type-chart selection and forces Dark-vs-Psychic to 0 -- see BattlerBattleState.hasMiracleEye's doc */}
+      </label>
+
       <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         Semi-invulnerable {/* only matters as the defender -- harmless to set on the attacker */}
         <select

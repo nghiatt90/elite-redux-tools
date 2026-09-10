@@ -6,7 +6,7 @@
 
 import { mulModifier, uq } from '../fixed'
 import { NEVER_CRIT } from '../crit'
-import { baseTypeEffectiveness, type TypeChart } from '../typeEffectiveness'
+import { getTypeModifier, type TypeChart, type TypeModifierInputs } from '../typeEffectiveness'
 import { isApplyOnFlagAppropriate, isTargettedApplyOnFlagAppropriate } from './applyOn'
 import type { AbilitySlots } from './dispatch'
 import { forEachAbility, battlerHasAbility } from './dispatch'
@@ -354,6 +354,14 @@ export function computeTypeEffectivenessWithAbilities(
   defenderForcedGrounded: boolean = false,
   superEffectiveVsType: string | null = null,
   ignoreTypeImmunity: boolean = false,
+  // Inverse Room / Miracle Eye / B_FLAG_INVERSE_BATTLE (GetTypeModifier,
+  // battle_util.c:8021-8038) -- MulByTypeEffectiveness calls GetTypeModifier (not a
+  // plain chart lookup) per defending type, BEFORE any onTypeEffectiveness ability
+  // hook runs, which is exactly this seed value's role in the fold below. Defaults
+  // to "no inversion, chart itself unused" so every existing call site (tests, the
+  // Pokedex's ability-free matchup grid) keeps working unchanged.
+  inverseChart: TypeChart = chart,
+  typeModifierInputs: TypeModifierInputs = { isInverseRoomActive: false, isInverseBattleFlagSet: false, attackerHasMiracleEye: false, defenderHasMiracleEye: false },
 ): TypeEffectivenessFoldResult {
   const components = defenderTypes.map((defType) =>
     resolveTypeEffectivenessComponent(
@@ -363,7 +371,7 @@ export function computeTypeEffectivenessWithAbilities(
       moveId,
       attackingType,
       defType,
-      baseTypeEffectiveness(attackingType, defType, chart),
+      getTypeModifier(attackingType, defType, chart, inverseChart, typeModifierInputs),
       ringTargetHeld,
       defenderForcedGrounded,
       superEffectiveVsType,

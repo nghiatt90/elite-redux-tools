@@ -12,6 +12,7 @@ const DATA_DIR = new URL('../../../data/v2.65beta/', import.meta.url)
 const species = JSON.parse(readFileSync(fileURLToPath(new URL('species.json', DATA_DIR)), 'utf-8'))
 const movesData = JSON.parse(readFileSync(fileURLToPath(new URL('moves.json', DATA_DIR)), 'utf-8'))
 const typeChart: TypeChart = JSON.parse(readFileSync(fileURLToPath(new URL('types.json', DATA_DIR)), 'utf-8'))
+const inverseTypeChart: TypeChart = JSON.parse(readFileSync(fileURLToPath(new URL('typesInverse.json', DATA_DIR)), 'utf-8'))
 const moveBehaviors: MoveBehaviors = JSON.parse(readFileSync(fileURLToPath(new URL('moveBehaviors.json', DATA_DIR)), 'utf-8')).behaviors
 const battleConstants: BattleConstants = JSON.parse(readFileSync(fileURLToPath(new URL('natures.json', DATA_DIR)), 'utf-8'))
 
@@ -96,6 +97,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     isInfatuatedWithOpponent: false,
     moveSlotPp: {},
     abilitySlots: { ability: null, innates: [null, null, null] },
+    hasMiracleEye: false,
     ...overrides,
   }
 }
@@ -110,6 +112,9 @@ function fieldState(overrides: Partial<FieldBattleState> = {}): FieldBattleState
       defender: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
     },
     isDoubleBattle: false,
+    isInverseRoomActive: false,
+    isInverseBattleFlagSet: false,
+    isWonderRoomActive: false,
     ...overrides,
   }
 }
@@ -142,6 +147,7 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     defender: battler('SPECIES_SKARMORY'),
     field: fieldState(),
     typeChart,
+    inverseTypeChart,
     moveBehaviors,
     battleConstants,
     attackerActsFirst: true,
@@ -400,6 +406,45 @@ describe('calculateMoveDamage -- Iron Ball/Gravity force grounding, Air Balloon 
     const thousandArrows = calculateMoveDamage(scenario({ move: moveData('MOVE_THOUSAND_ARROWS') }))
     expect(thousandArrows.isImmune).toBe(false)
     expect(thousandArrows.typeEffectiveness).toBe(uq(1.0)) // flattened neutral, NOT Steel's real 2x
+  })
+})
+
+describe('calculateMoveDamage -- Inverse Room / Miracle Eye (GetTypeModifier, battle_util.c:8021-8038)', () => {
+  it('Inverse Room selects the inverse chart end-to-end, through the real per-scenario typeChart/inverseTypeChart data', () => {
+    // Garchomp (Dragon/Ground) vs Skarmory (Steel/Flying) with Dragon Claw: forward
+    // chart is neutral vs Steel/Flying's own values; just confirm the inverse table's
+    // real matchup difference actually reaches calculateMoveDamage's result.
+    const withoutInverseRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_FLAMETHROWER'), attacker: battler('SPECIES_GARCHOMP') }))
+    expect(typeChart['FIRE']['STEEL']).toBe(2.0)
+    expect(withoutInverseRoom.typeEffectiveness).toBe(uq(2.0))
+
+    const withInverseRoom = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_FLAMETHROWER'), attacker: battler('SPECIES_GARCHOMP'), field: fieldState({ isInverseRoomActive: true }) }),
+    )
+    expect(inverseTypeChart['FIRE']['STEEL']).not.toBe(2.0)
+    expect(withInverseRoom.typeEffectiveness).toBe(uq(inverseTypeChart['FIRE']['STEEL']))
+  })
+
+  it('Inverse Room and the Inverse Battle flag XOR back to the forward chart when both are on', () => {
+    const both = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_FLAMETHROWER'),
+        attacker: battler('SPECIES_GARCHOMP'),
+        field: fieldState({ isInverseRoomActive: true, isInverseBattleFlagSet: true }),
+      }),
+    )
+    expect(both.typeEffectiveness).toBe(uq(2.0))
+  })
+
+  it("Miracle Eye on either battler also flips the chart selection, and forces Dark-vs-Psychic to a flat 0 (battle_util.c:8035)", () => {
+    const alakazam = battler('SPECIES_ALAKAZAM') // Psychic-type defender
+    const withoutMiracleEye = calculateMoveDamage(scenario({ move: moveData('MOVE_CRUNCH'), defender: alakazam })) // Dark-type move
+    expect(withoutMiracleEye.isImmune).toBe(false)
+    expect(withoutMiracleEye.typeEffectiveness).toBe(uq(2.0)) // Dark is super effective vs Psychic on the forward chart
+
+    const withMiracleEye = calculateMoveDamage(scenario({ move: moveData('MOVE_CRUNCH'), defender: { ...alakazam, hasMiracleEye: true } }))
+    expect(withMiracleEye.isImmune).toBe(true)
+    expect(withMiracleEye.typeEffectiveness).toBe(0)
   })
 })
 

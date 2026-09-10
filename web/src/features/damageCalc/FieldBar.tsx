@@ -60,6 +60,18 @@ export default function FieldBar({ field, onChange }: Props) {
           Gravity
         </label>
         <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.inverseRoom} onChange={(e) => onChange({ ...field, inverseRoom: e.target.checked })} />
+          Inverse Room {/* also XORs with the Inverse Battle flag and either battler's Miracle Eye -- see FieldBattleState.isInverseRoomActive's doc */}
+        </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.inverseBattleFlag} onChange={(e) => onChange({ ...field, inverseBattleFlag: e.target.checked })} />
+          Inverse Battle (format flag)
+        </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <input type="checkbox" checked={field.wonderRoom} onChange={(e) => onChange({ ...field, wonderRoom: e.target.checked })} />
+          Wonder Room {/* ER swaps Atk<->SpAtk, not Def<->SpDef -- see FieldBattleState.isWonderRoomActive's doc */}
+        </label>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           <input type="checkbox" checked={field.attackerActsFirst} onChange={(e) => onChange({ ...field, attackerActsFirst: e.target.checked })} />
           Attacker acts first
         </label>
