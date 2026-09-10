@@ -40,7 +40,9 @@ export interface CalcStatInputs {
   isUnaware: boolean
   isWonderRoomActive: boolean
   /** True only for STAT_ATK/STAT_SPATK, gates the Wonder Room default-stage override
-   * alongside isWonderRoomActive (:7204). */
+   * alongside isWonderRoomActive (:7182 -- an earlier version of this comment cited
+   * :7204, which at the pinned SHA is `statBase /= gStatStageRatios[statStage][1]`,
+   * the stage-ratio division itself, not the override). */
   isOffensiveStatForWonderRoom: boolean
   isCrit: boolean
   /** True when this call is computing the ATTACKER's stat (CalcAttackStat's role),

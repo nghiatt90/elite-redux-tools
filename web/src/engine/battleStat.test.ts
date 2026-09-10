@@ -93,6 +93,26 @@ describe('calculateBattleStat', () => {
     // (300*2) * 10/40 = 150
     expect(calculateBattleStat(doubled)).toBe(150)
   })
+
+  // Wonder Room effect (2): battle_util.c:7182-7183 forces the stat stage to
+  // default for ATK/SPATK specifically -- effect (1) (the ATK<->SPATK raw-stat/
+  // pre-modifier swap itself, :7111-7116) can't be exercised at this layer, since
+  // calculateBattleStat starts from a rawStat the CALLER already chose (see
+  // calculate.ts's wonderRoomStatSwap for that half).
+  it('Wonder Room forces the default stage for an offensive stat, same as isUnaware', () => {
+    const boosted = baseInputs({ statStage: 12, isWonderRoomActive: true, isOffensiveStatForWonderRoom: true })
+    expect(calculateBattleStat(boosted)).toBe(300) // no change from raw, despite the real +6 stage
+  })
+
+  it('Wonder Room does nothing for a NON-offensive stat (Def/SpDef untouched)', () => {
+    const boosted = baseInputs({ statStage: 12, isWonderRoomActive: true, isOffensiveStatForWonderRoom: false })
+    expect(calculateBattleStat(boosted)).toBe(1200) // real +6 stage still applies
+  })
+
+  it('Wonder Room active but isOffensiveStatForWonderRoom false is a no-op (gate, not just the flag alone)', () => {
+    const boosted = baseInputs({ statStage: 0, isWonderRoomActive: true, isOffensiveStatForWonderRoom: false }) // -6 stage
+    expect(calculateBattleStat(boosted)).toBe(75) // ratio [10,40]: 300*10/40 = 75, unaffected by Wonder Room
+  })
 })
 
 describe('attack/sp.attack/defense/sp.defense pre-modifiers', () => {

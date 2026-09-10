@@ -283,12 +283,40 @@ interface ComputeStatOptions {
   statStageRatios: [number, number][]
 }
 
+/**
+ * isWonderRoomActive()'s ATK<->SPATK swap, battle_util.c:7111-7116 -- reassigns the
+ * C's own local `statEnum` BEFORE the switch that picks the raw stat field AND
+ * BEFORE the per-stat pre-modifier branch (burn/violentRush for ATK vs
+ * rapidResponse/frostbite for SPATK) runs, so under Wonder Room a "physical attack"
+ * computation genuinely reads SpAtk's raw stat and SpAtk's own status modifiers --
+ * not just SpAtk's number substituted into ATK's modifier branch. ER swaps the
+ * OFFENSIVE stats only (not Def/SpDef, unlike mainline). Applies independently to
+ * EVERY CalculateStat call, including each secondary-stat blend's own recursive
+ * lookup (:7199 recurses with the SAME statEnum swap re-applied at the top of that
+ * call) -- which is why this lives inside computeStat itself (called for both the
+ * primary stat and, via applySecondaryStatBlend's computeOther closure, each
+ * secondary one) rather than being applied once by computeAttackStat/
+ * computeDefenseStat before calling in.
+ */
+function wonderRoomStatSwap(stat: BattleStatKey, isWonderRoomActive: boolean): BattleStatKey {
+  if (!isWonderRoomActive) return stat
+  if (stat === 'atk') return 'spatk'
+  if (stat === 'spatk') return 'atk'
+  return stat
+}
+
 /** The parts of CalculateStat this engine can run without the ability registry:
  * raw stat selection, the per-stat pre-modifiers, stat-stage clamping, and the stage
  * ratio + extra-stat-level application. `onStat` hooks and the secondary-stat blend
  * are the identity/0 default documented in battleStat.ts. */
 function computeStat(opts: ComputeStatOptions): number {
-  const { battler, stat, move, field } = opts
+  const { battler, move, field } = opts
+  // See wonderRoomStatSwap's own doc -- from here down, `stat` is the (possibly
+  // swapped) value CalculateStat's own body actually keys every branch off of; the
+  // ability onStat hook's statId (OnStatContext.isHighestAttackingStat's own doc:
+  // "GetHighestAttackingStatId(battler) == statId") is defined in terms of this
+  // same post-swap value, matching the C's own onStat loop running AFTER the swap.
+  const stat = wonderRoomStatSwap(opts.stat, opts.isWonderRoomActive)
   const isIceType = battler.types.includes('ICE')
   const isRockType = battler.types.includes('ROCK')
 
@@ -409,9 +437,9 @@ function computeAttackStat(
 
   const statOpponent = statBattler === attacker ? defender : attacker
   const rawAtkStat = applySecondaryStatBlend(
-    computeStat({ battler: statBattler, opponent: statOpponent, stat: atkStat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+    computeStat({ battler: statBattler, opponent: statOpponent, stat: atkStat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: field.isWonderRoomActive, field, statStageRatios }),
     atkSecondaryStat,
-    (stat) => computeStat({ battler: statBattler, opponent: statOpponent, stat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+    (stat) => computeStat({ battler: statBattler, opponent: statOpponent, stat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: field.isWonderRoomActive, field, statStageRatios }),
   )
 
   const isGhostDefenderInFog = defender.types.includes('GHOST') && field.weather === 'FOG'
@@ -451,9 +479,10 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
   })
 
   const rawDefStat = applySecondaryStatBlend(
-    computeStat({ battler: defender, opponent: attacker, stat: defStat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+    computeStat({ battler: defender, opponent: attacker, stat: defStat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: scenario.field.isWonderRoomActive, field: scenario.field, statStageRatios }),
     defSecondaryStat,
-    (stat) => computeStat({ battler: defender, opponent: attacker, stat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+    (stat) =>
+      computeStat({ battler: defender, opponent: attacker, stat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: scenario.field.isWonderRoomActive, field: scenario.field, statStageRatios }),
   )
 
   const finalDef = calcDefenseStatModifiers(rawDefStat, {

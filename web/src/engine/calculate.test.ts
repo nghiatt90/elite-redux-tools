@@ -1912,3 +1912,51 @@ describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
     ).not.toThrow()
   })
 })
+
+describe("calculateMoveDamage -- Wonder Room's ATK<->SPATK swap (CalculateStat, battle_util.c:7111-7116) -- swaps which raw stat AND which pre-modifier branch a physical/special attack reads, not just the number", () => {
+  it("a physical move's attack calculation reads SpAtk instead of Atk when Wonder Room is active", () => {
+    const garchomp = speciesById['SPECIES_GARCHOMP']
+    expect(garchomp.baseStats.atk).toBeGreaterThan(garchomp.baseStats.spatk) // physical attacker -- Wonder Room should HURT it here
+
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') })).rolls[15]
+    const withWonderRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    expect(withWonderRoom).toBeLessThan(baseline)
+  })
+
+  it("swaps the PRE-MODIFIER branch too, not just the raw stat -- a burned attacker's physical move is no longer halved by burn once Wonder Room substitutes SpAtk's own (frostbite-only) branch", () => {
+    const burned = battler('SPECIES_GARCHOMP', { condition: condition({ speciesId: 'SPECIES_GARCHOMP', baseSpeciesId: 'SPECIES_GARCHOMP', hp: 999, maxHp: 999, status1: new Set(['STATUS1_BURN']) }) })
+    const healthy = battler('SPECIES_GARCHOMP')
+
+    // Without Wonder Room: burn halves the physical attack stat (ATK's own branch),
+    // so the burned attacker deals meaningfully less than the healthy one.
+    const burnedNoRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: burned })).rolls[15]
+    const healthyNoRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: healthy })).rolls[15]
+    expect(burnedNoRoom).toBeLessThan(healthyNoRoom)
+
+    // With Wonder Room: the physical move's attack calculation now runs SPATK's own
+    // branch (rapidResponse/frostbite), which burn never touches -- so the burned and
+    // healthy attackers deal IDENTICAL damage, not just "less of a difference".
+    const burnedWithRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: burned, field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    const healthyWithRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: healthy, field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    expect(burnedWithRoom).toBe(healthyWithRoom)
+  })
+
+  it('Body Press is unaffected -- its attack stat is DEF, which Wonder Room never swaps (only ATK<->SPATK)', () => {
+    const baseline = calculateMoveDamage(scenario({ move: moveData('MOVE_BODY_PRESS') })).rolls[15]
+    const withWonderRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_BODY_PRESS'), field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    expect(withWonderRoom).toBe(baseline)
+  })
+
+  it("Wonder Room's stat-stage-to-default override (effect 2, :7182-7183) applies to the SWAPPED (now offensive) stat -- a real +6 SpAtk boost is nullified for a physical move once Wonder Room substitutes it in", () => {
+    const boostedSpAtk = battler('SPECIES_GARCHOMP', { statStages: { atk: 0, def: 0, spatk: 6, spdef: 0, spe: 0 } })
+    const withoutRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: boostedSpAtk })).rolls[15]
+    const withRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: boostedSpAtk, field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    const noBoostWithRoom = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), field: fieldState({ isWonderRoomActive: true }) })).rolls[15]
+    // The +6 SpAtk stage would otherwise inflate the swapped-in stat -- Wonder Room's
+    // OWN stage override cancels that out, so a boosted and unboosted attacker deal
+    // the same damage once the swap is in effect, and both are less than the
+    // (still-boosted, no swap) baseline.
+    expect(withRoom).toBe(noBoostWithRoom)
+    expect(withRoom).toBeLessThan(withoutRoom)
+  })
+})
