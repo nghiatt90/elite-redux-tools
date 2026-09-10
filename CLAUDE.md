@@ -94,5 +94,12 @@ proportionate to that.
   effects, gym-skill assignment, or the move-behaviour scripts.
 - **Agent roles** live in `.claude/agents/` (`plan-reviewer`, `implementer` on Sonnet,
   `code-reviewer`). They are deliberately role-generic and rely on this file for project
-  facts, so keep this file current. They need
-  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and a session restart to run as teammates.
+  facts, so keep this file current. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is already
+  set in `~/.claude/settings.json`, but the flag alone is not enough — **run team work
+  from an interactive terminal `claude` session, not the desktop app's Code tab.** The
+  Code tab is an Agent SDK child session (`CLAUDE_CODE_CHILD_SESSION=1`), and per the
+  docs an SDK/`-p` session never spawns teammates; a named subagent there launches as an
+  ordinary subagent. It also has the `SendMessage` tool removed outright — subagents
+  included — so agents can only report back to the lead, with no mid-flight
+  coordination. `ListAgents` still works there, and cross-session messaging to your other
+  sessions is reachable through the session-management MCP server.
