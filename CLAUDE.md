@@ -76,10 +76,20 @@ proportionate to that.
   back until that test is green — never loosen the assertion.
 - `data/v2.65beta/` is a **committed** generated snapshot (~42MB), not a build
   artifact to gitignore — it's what the deployed site actually reads. Regenerate via
-  `cd pipeline && uv run python -m erdata.build`, review the diff, commit deliberately.
+  `uv run --directory pipeline python -m erdata.build`, review the diff, commit deliberately.
 - `pipeline/src/erdata/generated/` (compiled protobuf modules) and
   `pipeline/.upstream/` (fetched upstream checkouts) ARE gitignored build artifacts —
-  regenerate with `uv run python -m erdata.compile_protos` / `erdata.fetch`.
+  regenerate with `uv run --directory pipeline python -m erdata.compile_protos` /
+  `... -m erdata.fetch`.
+- **Shell commands: never `cd`, never chain.** The `uv` project lives in `pipeline/`, but
+  reach it with `uv run --directory pipeline …`, not `cd pipeline && uv run …`. `--directory`
+  changes cwd before running, and `paths.py` roots everything at `__file__` anyway, so cwd
+  never affects the pipeline's own file resolution. One command per call — no `&&`, no `;`.
+  Both habits make a command unmatchable against the `.claude/settings.json` allowlist, which
+  is written against these exact prefixes, so they raise an approval prompt for work that
+  should run silently. Prefer Glob over `find`, Grep over `grep`, Read over `cat`; those never
+  prompt. Never pipe Python through a heredoc — Write the script to a file, then
+  `uv run python <path>`.
 - Cross-check pipeline output against ER-nextdex's published `gameData.json` as a test
   oracle (see `pipeline/tests/test_oracle.py` and `pipeline/src/erdata/oracle.py`) —
   legitimate to use as a fact-check even though its repo is GPL-3.0, since game data

@@ -2,11 +2,12 @@
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(uv run pytest:*)",
-      "Bash(uv run python -m erdata.build:*)",
-      "Bash(uv run python -m erdata.fetch:*)",
-      "Bash(uv run python -m erdata.compile_protos:*)",
-      "Bash(uv sync:*)",
+      "Bash(uv run --directory pipeline --extra dev pytest:*)",
+      "Bash(uv run --directory pipeline python -m erdata.build:*)",
+      "Bash(uv run --directory pipeline python -m erdata.fetch:*)",
+      "Bash(uv run --directory pipeline python -m erdata.compile_protos:*)",
+      "Bash(uv run --directory pipeline python -m erdata.refresh_check:*)",
+      "Bash(uv sync --directory pipeline:*)",
       "Bash(npm test:*)",
       "Bash(npm run test:*)",
       "Bash(npm run build:*)",

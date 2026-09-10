@@ -51,8 +51,14 @@ Practical notes that are not obvious from the tree:
   headless**, no React; `web/src/features/` and `web/src/routes/` are the React layer. Keep
   that boundary.
 - `erasableSyntaxOnly` bans TypeScript `enum`. Use a `const` array plus a derived union type.
-- Tests: `npm test` in `web/` runs vitest; `uv run pytest` in `pipeline/` runs the Python
-  suite from `pipeline/tests/`.
+- Tests: `npm --prefix web test` runs vitest; `uv run --directory pipeline --extra dev pytest`
+  runs the Python suite from `pipeline/tests/`. The `--extra dev` is required — `pytest` is an
+  optional extra in `pipeline/pyproject.toml`, not a base dependency, so without it uv fails
+  with "Failed to spawn: pytest".
+- **Never `cd`, never chain with `&&` or `;`.** Reach the pipeline's uv project with
+  `uv run --directory pipeline …`. One command per tool call. Both habits make a command
+  unmatchable against the `.claude/settings.json` allowlist and raise a needless approval
+  prompt. Prefer Glob over `find`, Grep over `grep`, Read over `cat`.
 - Where a coverage gate asserts a count that may only move one direction, a batch that moves it
   the wrong way is a regression to investigate, not a number to edit.
 - `data/<version>/` is a committed generated snapshot, not a build artifact. Regenerating it is
