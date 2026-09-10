@@ -41,7 +41,7 @@ _ICON_FRAME = (32, 32)
 
 
 def _load_jasc_pal(path: Path) -> list[int]:
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "JASC-PAL", f"not a JASC-PAL file: {path}"
     count = int(lines[2])
     flat: list[int] = []

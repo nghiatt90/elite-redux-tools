@@ -467,7 +467,9 @@ def type_chart_to_dict() -> dict:
 
 
 def _write_json(path, data) -> None:
-    path.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_text(
+        json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
 
 
 # The randomizer's modulus (`ABILITIES_COUNT` in eliteredux-source, `EnumGenerator.kt`

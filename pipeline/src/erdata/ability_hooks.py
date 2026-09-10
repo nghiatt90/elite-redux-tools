@@ -55,7 +55,7 @@ def parse_ability_struct_fields() -> dict[str, set[str]]:
     has no "For" suffix; an apply-on scope is any "on...For" field; everything else
     (after dropping the three string fields) is a plain bitfield/enum flag.
     """
-    text = _ABILITIES_HH.read_text()
+    text = _ABILITIES_HH.read_text(encoding="utf-8")
     m = _STRUCT_RE.search(text)
     if not m:
         raise AssertionError("could not find `typedef struct Ability { ... } Ability;` in include/abilities.hh")
@@ -342,7 +342,7 @@ _DAMAGE_BITFIELDS = {
 
 
 def ability_hooks_to_dict() -> dict:
-    text = _ABILITIES_CC.read_text()
+    text = _ABILITIES_CC.read_text(encoding="utf-8")
     allowed = parse_ability_struct_fields()
     blocks = extract_ability_blocks(text)
 

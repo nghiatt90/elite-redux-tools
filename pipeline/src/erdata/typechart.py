@@ -29,7 +29,7 @@ def _proto_type_name(c_type_name: str) -> str:
 
 
 def parse_type_chart() -> dict[str, dict[str, float]]:
-    text = (ER_SOURCE / _SOURCE_FILE).read_text()
+    text = (ER_SOURCE / _SOURCE_FILE).read_text(encoding="utf-8")
     start = text.index(f"{_TABLE_NAME}[NUMBER_OF_MON_TYPES][NUMBER_OF_MON_TYPES] = {{")
     end = text.index("\n};", start)
     body = text[start:end]

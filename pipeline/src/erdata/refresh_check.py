@@ -41,7 +41,7 @@ def main() -> int:
 
     if changed and not check_only:
         import json
-        LOCKFILE.write_text(json.dumps(lock, indent=2) + "\n")
+        LOCKFILE.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
         print("sources.lock.json updated")
 
     return 1 if (changed and check_only) else 0

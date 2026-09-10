@@ -29,7 +29,7 @@ _SPECIALIZATION = re.compile(r"constexpr Ability Impl<ABILITY_(\w+)>\s*=\s*\{")
 def parse_randomizer_banned() -> set[str]:
     """AbilityEnum names (e.g. "ABILITY_NONE") banned from the ability/innate
     randomizer -- as a source (left untouched) and as a result (skipped on reroll)."""
-    text = (ER_SOURCE / _SOURCE_FILE).read_text()
+    text = (ER_SOURCE / _SOURCE_FILE).read_text(encoding="utf-8")
     matches = list(_SPECIALIZATION.finditer(text))
     assert matches, f"no Impl<ABILITY_*> specializations found in {_SOURCE_FILE}"
 

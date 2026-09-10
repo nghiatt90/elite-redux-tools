@@ -25,7 +25,7 @@ def test_ability_struct_fields_derived_from_header():
 def test_extract_ability_blocks_count_matches_raw_occurrences():
     from erdata.ability_hooks import _ABILITIES_CC
 
-    text = _ABILITIES_CC.read_text()
+    text = _ABILITIES_CC.read_text(encoding="utf-8")
     blocks = extract_ability_blocks(text)
     assert len(blocks) == 1016
     assert len(blocks) == text.count("constexpr Ability Impl<")

@@ -13,7 +13,7 @@ ER_SOURCE = UPSTREAM / "eliteredux-source"
 
 
 def load_lock() -> dict:
-    return json.loads(LOCKFILE.read_text())
+    return json.loads(LOCKFILE.read_text(encoding="utf-8"))
 
 
 def game_version() -> str:

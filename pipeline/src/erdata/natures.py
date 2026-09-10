@@ -23,7 +23,7 @@ _ENTRY_RE = re.compile(
 
 
 def parse_nature_stat_table() -> dict[str, dict[str, int]]:
-    text = (ER_SOURCE / "src" / "pokemon.c").read_text()
+    text = (ER_SOURCE / "src" / "pokemon.c").read_text(encoding="utf-8")
     matches = list(_ENTRY_RE.finditer(text))
     if len(matches) != 25:
         raise AssertionError(
@@ -47,7 +47,7 @@ _RATIO_ENTRY_RE = re.compile(r"\{\s*(\d+)\s*,\s*(\d+)\s*\}")
 
 
 def parse_stat_stage_ratios() -> list[list[int]]:
-    text = (ER_SOURCE / "src" / "pokemon.c").read_text()
+    text = (ER_SOURCE / "src" / "pokemon.c").read_text(encoding="utf-8")
     body = _RATIO_TABLE_RE.search(text)
     if not body:
         raise AssertionError("could not find gStatStageRatios[MAX_STAT_STAGE + 1][2] in src/pokemon.c")
@@ -69,13 +69,13 @@ _CRIT_CHANCE_RE = re.compile(
 
 
 def parse_critical_hit_chance() -> list[int]:
-    config_text = (ER_SOURCE / "include" / "constants" / "battle_config.h").read_text()
+    config_text = (ER_SOURCE / "include" / "constants" / "battle_config.h").read_text(encoding="utf-8")
     if not re.search(r"#define\s+B_CRIT_CHANCE\s+GEN_7\b", config_text):
         raise AssertionError(
             "include/constants/battle_config.h no longer pins B_CRIT_CHANCE to GEN_7 -- "
             "the critical-hit chance table this pipeline emits may be the wrong branch"
         )
-    text = (ER_SOURCE / "src" / "battle_script_commands.c").read_text()
+    text = (ER_SOURCE / "src" / "battle_script_commands.c").read_text(encoding="utf-8")
     m = _CRIT_CHANCE_RE.search(text)
     if not m:
         raise AssertionError("could not find the #if B_CRIT_CHANCE >= GEN_7 sCriticalHitChance table")

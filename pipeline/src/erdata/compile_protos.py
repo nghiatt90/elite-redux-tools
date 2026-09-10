@@ -16,7 +16,7 @@ def main() -> int:
     if GENERATED.exists():
         shutil.rmtree(GENERATED)
     GENERATED.mkdir(parents=True)
-    (GENERATED / "__init__.py").write_text("")
+    (GENERATED / "__init__.py").write_text("", encoding="utf-8")
 
     protos = sorted(p.name for p in ER_CONFIG.glob("*.proto"))
     args = [
@@ -34,7 +34,8 @@ def main() -> int:
     # so the package dir has to be importable as a path root.
     (GENERATED / "__init__.py").write_text(
         "import sys\nfrom pathlib import Path\n\n"
-        "sys.path.insert(0, str(Path(__file__).parent))\n"
+        "sys.path.insert(0, str(Path(__file__).parent))\n",
+        encoding="utf-8",
     )
     print(f"compiled {len(protos)} protos -> {GENERATED.relative_to(ER_CONFIG.parents[3])}")
     return 0
