@@ -8,11 +8,13 @@ from erdata.emit import (
     item_to_dict,
     move_to_dict,
     species_to_dict,
+    trainer_to_dict,
     type_chart_to_dict,
 )
 from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
 from erdata.randomizer import parse_randomizer_banned
 from erdata.resolve import build_species_map, playable_species, universal_tutor_sets
+from erdata.trainers import parse_trainers, real_trainers, resolve_party_tiers
 
 # Scraping abilities.cc's 1026 blocks is the slowest fixture in this file by a wide
 # margin; computed once and reused, same as the module already does for parse_*().
@@ -287,6 +289,121 @@ def test_type_chart_dict_uses_bare_names():
     chart = type_chart_to_dict()
     assert chart["FIRE"]["GRASS"] == 2.0
     assert "TYPE_FIRE" not in chart
+
+
+def _trainers():
+    return real_trainers(parse_trainers())
+
+
+def test_trainer_dict_shape():
+    trainers = _trainers()
+    sawyer = next(t for t in trainers if t.id == 1)  # TRAINER_SAWYER_1
+    d = trainer_to_dict(sawyer)
+    json.dumps(d)
+    assert d["id"] == "TRAINER_SAWYER_1"
+    assert d["name"] == "Sawyer"
+    assert d["class"] == "TRAINER_CLASS_HIKER"
+    ace = d["parties"]["ace"]
+    assert len(ace) == 5
+    carbink = next(m for m in ace if m["species"] == "SPECIES_CARBINK")
+    assert carbink["ability"] == "ABILITY_STURDY"
+    assert carbink["item"] == "ITEM_LIGHT_CLAY"
+    assert carbink["nature"] == "NATURE_IMPISH"
+    assert carbink["moves"] == [
+        "MOVE_EXPLOSION",
+        "MOVE_MOONBLAST",
+        "MOVE_REFLECT",
+        "MOVE_LIGHT_SCREEN",
+    ]
+
+
+def test_trainer_dict_ability_resolves_as_a_real_id_not_a_slot_index():
+    # TrainerList.proto:248 declares TrainerMon.ability as AbilityEnum, not an int32
+    # slot index -- see trainers.py's module docstring. A slot index would show up
+    # here as "0"/"1"/"2"; a real id looks like every other AbilityEnum field.
+    trainers = _trainers()
+    sawyer = next(t for t in trainers if t.id == 1)
+    d = trainer_to_dict(sawyer)
+    abilities = {m["ability"] for mons in d["parties"].values() for m in mons}
+    assert all(a.startswith("ABILITY_") for a in abilities)
+    assert "ABILITY_STURDY" in abilities
+
+
+def test_trainer_dict_evs_block_shape():
+    trainers = _trainers()
+    sawyer = next(t for t in trainers if t.id == 1)
+    d = trainer_to_dict(sawyer)
+    carbink = next(m for m in d["parties"]["ace"] if m["species"] == "SPECIES_CARBINK")
+    assert carbink["evs"] == {"hp": 252, "atk": 0, "def": 252, "spatk": 0, "spdef": 4, "spe": 0}
+
+
+def test_trainer_dict_has_no_level_or_ivs():
+    # Level is derived at battle time (GetHighestLevelInPlayerParty()-relative, see
+    # CLAUDE.md) and IVs are forced to 31 on recalculation -- neither is parsed game
+    # data, so trainer_to_dict must never fabricate either field.
+    trainers = _trainers()
+    sawyer = next(t for t in trainers if t.id == 1)
+    d = trainer_to_dict(sawyer)
+    assert "level" not in d
+    for mons in d["parties"].values():
+        for m in mons:
+            assert "level" not in m
+            assert "ivs" not in m
+
+
+def test_resolve_party_tiers_elite_falls_back_to_ace_when_empty():
+    # TrainerPartyGenerator.kt:177: `elite.monList.ifEmpty { ace.monList }`.
+    trainers = _trainers()
+    sawyer2 = next(
+        t for t in trainers if t.name == "Sawyer" and len(t.elite.mon) == 0 and len(t.ace.mon) > 0
+    )
+    tiers = resolve_party_tiers(sawyer2)
+    assert tiers["elite"] == tiers["ace"]
+    assert len(tiers["ace"]) == 4
+
+
+def test_resolve_party_tiers_hell_falls_back_to_elite_when_only_hell_empty():
+    # TrainerPartyGenerator.kt:178: `hell.monList.ifEmpty { actualElite }` -- hell
+    # must fall back to elite, not skip straight past it to ace, whenever elite
+    # itself has real data. TRAINER_NOLEN: ace=3, elite=6, hell=0 in the textproto.
+    trainers = _trainers()
+    nolen = next(
+        t
+        for t in trainers
+        if t.name == "Nolen" and len(t.hell.mon) == 0 and len(t.elite.mon) > 0
+    )
+    tiers = resolve_party_tiers(nolen)
+    assert tiers["hell"] == tiers["elite"]
+    assert tiers["hell"] != tiers["ace"]
+    assert len(tiers["elite"]) == 6
+    assert len(tiers["ace"]) == 3
+
+
+def test_resolve_party_tiers_hell_chains_through_elite_to_ace_when_both_empty():
+    # TrainerPartyGenerator.kt:177-178: hell falls back to *actualElite* (the
+    # already-resolved elite tier), not directly to ace -- when both elite and hell
+    # are empty in the textproto this must still bottom out at ace via that chain.
+    # TRAINER_SAWYER_2: ace=4, elite=0, hell=0 in the textproto.
+    trainers = _trainers()
+    sawyer2 = next(
+        t for t in trainers if t.name == "Sawyer" and len(t.elite.mon) == 0 and len(t.hell.mon) == 0
+    )
+    tiers = resolve_party_tiers(sawyer2)
+    assert tiers["elite"] == tiers["ace"]
+    assert tiers["hell"] == tiers["ace"]
+
+
+def test_trainer_dict_nonstandard_override_reason_is_carried_through():
+    trainers = _trainers()
+    alberto = next(t for t in trainers if t.name == "Alberto")
+    d = trainer_to_dict(alberto)
+    pelipper = next(
+        m
+        for mons in d["parties"].values()
+        for m in mons
+        if m["species"] == "SPECIES_PELIPPER" and "nonstandard" in m
+    )
+    assert pelipper["nonstandard"] == "Invalid moves: [MOVE_U_TURN]"
 
 
 def test_emit_is_deterministic(tmp_path, monkeypatch):

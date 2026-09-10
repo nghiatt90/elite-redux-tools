@@ -19,7 +19,8 @@
         "src/data",
         "src",
         "include",
-        "tools/codegen"
+        "tools/codegen",
+        "data"
       ]
     }
   }

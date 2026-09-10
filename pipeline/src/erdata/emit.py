@@ -18,6 +18,8 @@ from erdata.generated import (
     ScriptConditions_pb2,
     SpeciesEnum_pb2,
     SpeciesList_pb2,
+    TrainerEnum_pb2,
+    TrainerList_pb2,
     Types_pb2,
 )
 from erdata.ability_hooks import ability_hooks_to_dict
@@ -36,6 +38,7 @@ from erdata.resolve import (
     resolve_learnset,
     universal_tutor_sets,
 )
+from erdata.trainers import parse_trainers, real_trainers, resolve_party_tiers
 from erdata.typechart import parse_type_chart
 
 _S = SpeciesEnum_pb2.SpeciesEnum.Name
@@ -55,6 +58,11 @@ _UseType = ItemList_pb2.UseType.Name
 _SplitFlag = MoveList_pb2.SplitFlag.Name
 _Crit = MoveList_pb2.Crit.Name
 _HitsAir = MoveList_pb2.HitsAir.Name
+_TrainerId = TrainerEnum_pb2.TrainerEnum.Name
+_Nature = TrainerList_pb2.Nature.Name
+_TrainerClass = TrainerList_pb2.TrainerClass.Name
+_TrainerPic = TrainerList_pb2.TrainerPic.Name
+_TrainerMusic = TrainerList_pb2.TrainerMusic.Name
 
 # A curated subset of Move's ~40 boolean flags -- the ones a Pokedex move list or a
 # damage calculator actually needs to show or act on. Additive: more can be added
@@ -458,6 +466,73 @@ def item_to_dict(item) -> dict:
     return entry
 
 
+# .ability is already a real AbilityEnum value in the textproto, not a slot index --
+# see trainers.py's module docstring for why (it's the compiled C struct, not this
+# textproto, that stores an index; that resolution happens downstream of this
+# pipeline). Resolved the same way as every other AbilityEnum field in this file.
+def _trainer_mon_to_dict(mon) -> dict:
+    entry = {
+        "species": _S(mon.species),
+        "item": _I(mon.item),
+        "nature": _Nature(mon.nature),
+        "ability": _A(mon.ability),
+        "evs": {
+            "hp": mon.hp_ev,
+            "atk": mon.atk_ev,
+            "def": mon.def_ev,
+            "spatk": mon.spatk_ev,
+            "spdef": mon.spdef_ev,
+            "spe": mon.spe_ev,
+        },
+        "moves": [_M(m) for m in mon.move],
+        # Zeroes this mon's Speed IV -- see CLAUDE.md; every other stat's IV is
+        # forced to 31 regardless. TrainerPartyGenerator.kt:163 writes it straight to
+        # the compiled struct's .zeroSpeedIvs.
+        "ironPill": mon.iron_pill,
+        # TrainerPartyGenerator.kt:164: hidden_power_type defaults to TYPE_NORMAL
+        # when left TYPE_NONE in the textproto -- Hidden Power's type/power
+        # calculation always reads *some* type, so this mirrors that default rather
+        # than emitting a null the game itself never produces.
+        "hiddenPowerType": _T(mon.hidden_power_type) if mon.hidden_power_type else "TYPE_NORMAL",
+    }
+    # Free-text override reason (e.g. "Invalid moves: [MOVE_CALM_MIND]") that makes
+    # TrainerPartyGenerator.kt's validator skip this mon entirely -- present on 1090
+    # of the mons in the current data. It has no runtime effect (not part of the
+    # compiled struct); kept only as an honest label for why this mon's data looks
+    # like it shouldn't validate.
+    if mon.nonstandard:
+        entry["nonstandard"] = mon.nonstandard
+    return entry
+
+
+# Level, IVs, trainer-level bag items and isAlpha are deliberately never emitted here
+# -- see trainers.py's module docstring for exactly what's absent and why.
+def trainer_to_dict(trainer) -> dict:
+    parties = resolve_party_tiers(trainer)
+    return {
+        "id": _TrainerId(trainer.id),
+        "trainerNum": int(trainer.id),
+        "name": trainer.name,
+        "gender": _Gender(trainer.gender),
+        # Present in the schema but never read by TrainerPartyGenerator.kt's
+        # gTrainers[] emission (grepped the full codegen tree for it, no hits) --
+        # carried through as-is since it's real proto data, but its purpose is
+        # unverified and it may be vestigial.
+        "hasTrainerFlag": trainer.has_trainer_flag,
+        "forcedDouble": trainer.forced_double,
+        "risky": trainer.risky,
+        "preferStatus": trainer.prefer_status,
+        "preferStall": trainer.prefer_stall,
+        "noSwitching": trainer.no_switching,
+        "class": _TrainerClass(getattr(trainer, "class")) if trainer.HasField("class") else None,
+        "pic": _TrainerPic(trainer.pic) if trainer.HasField("pic") else None,
+        "music": _TrainerMusic(trainer.music) if trainer.HasField("music") else None,
+        # ace/elite/hell already have TrainerPartyGenerator.kt's empty-tier fallback
+        # applied -- see resolve_party_tiers in trainers.py.
+        "parties": {tier: [_trainer_mon_to_dict(m) for m in mons] for tier, mons in parties.items()},
+    }
+
+
 def type_chart_to_dict() -> dict:
     chart = parse_type_chart()
     return {
@@ -520,6 +595,8 @@ def build() -> None:
     _write_json(out / "moveBehaviors.json", move_behaviors)
     _write_json(out / "natures.json", battle_constants_to_dict())
     _write_json(out / "abilityHooks.json", ability_hooks)
+    trainers = sorted(real_trainers(parse_trainers()), key=lambda t: t.id)
+    _write_json(out / "trainers.json", [trainer_to_dict(t) for t in trainers])
     _write_json(
         out / "meta.json",
         {
@@ -536,6 +613,7 @@ def build() -> None:
                 "items": len(items),
                 "moveBehaviors": len(move_behaviors["behaviors"]),
                 "abilityHooks": len(ability_hooks),
+                "trainers": len(trainers),
             },
             # ABILITIES_COUNT equivalent -- the randomizer LCG's modulus
             # (`(seed >> 16) % (abilitiesCount - 1)) + 1`, src/random.c). Not the same
