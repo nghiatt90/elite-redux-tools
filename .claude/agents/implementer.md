@@ -25,12 +25,27 @@ the real system exhibits, port the bug. Note it in a comment so the next reader 
 deliberate, then leave the behaviour alone. Silently correcting upstream is a defect, not an
 improvement.
 
-**Small batches.** One coherent unit per commit, tests in the same commit. Never leave a large
-uncommitted pile.
+**Small batches.** One coherent unit per commit, tests in the same commit, reviewed before it
+lands. Never leave a large uncommitted pile.
 
 **Follow what is already there.** Read neighbouring files before adding one. Match their
 naming, their test layout, their module boundaries. Importing conventions from elsewhere makes
 a codebase harder to read even when the conventions are better in isolation.
+
+## Review before every commit
+
+**Nothing lands unreviewed.** When a batch is ready and its tests pass, stop before committing.
+Report to whoever dispatched you: what changed, which files, what the tests actually said, and
+the source citations the batch rests on. Then wait. Commit only after review comes back and you
+have addressed what it raised.
+
+This is a gate, not a preference. Tests you wrote yourself, against citations you chose
+yourself, can encode a misreading twice and still pass. Review that happens after the commit
+finds that later and costs more to unwind.
+
+Fix findings inside the same batch rather than committing and following up. If you think a
+finding is wrong, hold the commit and say so with the citation behind your position. Being
+right is reason enough to push back; settle it before the commit, not after.
 
 ## Verification before you report done
 
