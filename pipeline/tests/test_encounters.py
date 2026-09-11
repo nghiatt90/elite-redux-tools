@@ -1,6 +1,8 @@
 import json
 
 from erdata.encounters import (
+    _find_chains,
+    _is_prefix,
     _join_own_line_else,
     _pair_field_effects,
     _scan_file,
@@ -47,6 +49,51 @@ def test_field_effects_mossdeep_gym_permanent_trick_room():
     assert fe["trainers"] == ["TRAINER_TATE_AND_LIZA_1"]
 
 
+def test_is_prefix_pins_the_current_known_unsound_rule_not_a_correct_one():
+    # _is_prefix is a SUFFICIENT test for two points co-occurring in one playthrough,
+    # not a NECESSARY one -- see the module docstring's limitation on this, with the
+    # 331-pairs/79-diverge/0-wrong measurement. The last two assertions below pin
+    # today's behaviour (both currently read as "diverging", i.e. mutually exclusive),
+    # not a claim that it is right: `("a",)` and `("b",)` are indistinguishable here
+    # from two SIBLING BRANCHES of one if/else (genuinely mutually exclusive, the
+    # common real case) and from two INDEPENDENT, separately-guarded blocks that could
+    # both execute in the same playthrough (genuinely co-occurring, wrongly excluded) --
+    # this function cannot tell those two shapes apart from the guard path alone. Fixing
+    # that is scoped as its own batch, not done here; this test gets replaced there.
+    assert _is_prefix((), ("a",))  # unconditional is compatible with anything
+    assert _is_prefix(("a",), ("a",))  # identical paths are trivially compatible
+    assert _is_prefix(("a",), ("a", "b"))  # ancestor is compatible with its descendant
+    assert not _is_prefix(("a",), ("b",))  # read as diverging -- sound only if these
+    # are genuinely mutually exclusive (e.g. if/else siblings), not independent blocks
+    assert not _is_prefix(("a", "x"), ("a", "y"))  # same caveat, one level deeper
+
+
+def test_field_effects_champions_room_gravity_only_attributed_to_the_two_doubles_cases():
+    # EverGrandeCity_ChampionsRoom_EventScript_Steven's switch sets STATUS_FIELD_GRAVITY
+    # in cases 2 and 3 only (scripts.pory:314,318), not cases 0/1 or the pre-Game-Clear
+    # else -- previously all four Steven variants (case 0/1's own trainers plus these
+    # two) were attributed to one merged entry; now each case's Gravity activation is
+    # independent and attributed only to that case's own trainer.
+    gravity = [
+        fe
+        for fe in _ENCOUNTERS["fieldEffects"]
+        if fe["map"] == "EverGrandeCity_ChampionsRoom" and fe["fieldId"] == "STATUS_FIELD_GRAVITY"
+    ]
+    assert len(gravity) == 2
+    by_trainers = {tuple(fe["trainers"]): fe for fe in gravity}
+    assert by_trainers[("TRAINER_STEVEN_DOUBLES",)]["guard"] == "switch(var(VAR_ELITE_4_MODE)) case 2"
+    assert (
+        by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["guard"]
+        == "switch(var(VAR_ELITE_4_MODE)) case 3"
+    )
+    # TRAINER_STEVEN and TRAINER_STEVEN_LEGENDS (cases 0/1, which never set Gravity)
+    # must not appear in either entry.
+    assert not {"TRAINER_STEVEN", "TRAINER_STEVEN_LEGENDS"} & (
+        set(by_trainers[("TRAINER_STEVEN_DOUBLES",)]["trainers"])
+        | set(by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["trainers"])
+    )
+
+
 def test_field_effects_monochamp_room_uses_type_as_field_id():
     # EvergrandeCity_MonoChampRoom_1: BATTLE_FIELD_EFFECT_MONOCHAMP pairs
     # VAR_BATTLE_FIELD_ID with a Type enum value, not a STATUS_FIELD_* one -- the two
@@ -63,20 +110,62 @@ def test_pair_field_effects_ignores_the_post_battle_reset_to_zero():
     # TryToSetFieldEffect treats 0 as no effect, so this must never be emitted as a
     # second, bogus field-effect activation.
     writes = [
-        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM"),
-        ("Script", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_TRICK_ROOM"),
-        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "0"),
-        ("Script", "VAR_BATTLE_FIELD_ID", "0"),
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_TRICK_ROOM", ()),
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "0", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "0", ()),
     ]
-    out = _pair_field_effects("SomeMap", writes, {})
+    out = _pair_field_effects("SomeMap", writes, [])
     assert len(out) == 1
     assert out[0] == {
         "map": "SomeMap",
         "script": "Script",
         "effectType": "BATTLE_FIELD_EFFECT_ROOM",
         "fieldId": "STATUS_FIELD_TRICK_ROOM",
+        "guard": None,
         "trainers": [],
     }
+
+
+def test_pair_field_effects_reset_allows_a_second_unconditional_activation():
+    # A genuine second, independent activation at the SAME (unconditional) guard scope
+    # as the first must still be emitted -- the reset clears last_activation_guard the
+    # same way it clears effect_type/field_id, so a same-guard re-completion after a
+    # reset is never mistaken for "just a continuation of the first activation".
+    writes = [
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_TRICK_ROOM", ()),
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "0", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "0", ()),
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_GRAVITY", ()),
+    ]
+    out = _pair_field_effects("SomeMap", writes, [])
+    assert len(out) == 2
+    assert [o["fieldId"] for o in out] == ["STATUS_FIELD_TRICK_ROOM", "STATUS_FIELD_GRAVITY"]
+
+
+def test_pair_field_effects_two_incompatible_branches_each_get_their_own_entry():
+    # EverGrandeCity_ChampionsRoom_EventScript_Steven's shape: the SAME effect/field
+    # pair completes twice, once in each of two mutually exclusive switch cases, with no
+    # reset write between them -- each must still be its own activation, attributed only
+    # to the trainer(s) reachable in that same case, not both cases' trainers merged.
+    case2 = ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 2")
+    case3 = ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 3")
+    writes = [
+        ("Steven", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
+        ("Steven", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_GRAVITY", case2),
+        ("Steven", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_GRAVITY", case3),
+    ]
+    trainer_calls = [
+        ("Steven", "TRAINER_STEVEN_DOUBLES", case2),
+        ("Steven", "TRAINER_STEVEN_DOUBLES_LEGENDS", case3),
+    ]
+    out = _pair_field_effects("EverGrandeCity_ChampionsRoom", writes, trainer_calls)
+    assert len(out) == 2
+    by_trainers = {tuple(o["trainers"]): o for o in out}
+    assert by_trainers[("TRAINER_STEVEN_DOUBLES",)]["guard"] == case2[-1]
+    assert by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["guard"] == case3[-1]
 
 
 def test_battle_events_guard_is_the_actual_defeated_check_not_a_flag():
@@ -233,6 +322,169 @@ def test_join_own_line_else_does_not_touch_an_unrelated_bare_closing_brace():
     assert _join_own_line_else(text).splitlines() == text.splitlines()
 
 
+def test_scan_file_relabels_switch_cases_in_the_guard_path_not_just_the_switch_itself():
+    # Without case-label tracking every case in a switch would share one identical
+    # guard ("switch(EXPR)"), indistinguishable from each other -- exactly the gap that
+    # let EverGrandeCity_ChampionsRoom's Gravity field effect get attributed to every
+    # switch case. Each case's trainerbattle call must carry its OWN guard path,
+    # differing only in the case label, with the switch's own condition text preserved.
+    text = (
+        "script PoryLabel{\n"
+        "\tswitch(var(VAR_ELITE_4_MODE)){\n"
+        "\t\tcase 0:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\t\tbreak\n"
+        "\t\tcase 1:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    calls = {tid: guard_path for _, tid, guard_path in scanned["trainer_calls"]}
+    assert calls["TRAINER_A"] == ("switch(var(VAR_ELITE_4_MODE)) case 0",)
+    assert calls["TRAINER_B"] == ("switch(var(VAR_ELITE_4_MODE)) case 1",)
+    assert calls["TRAINER_A"] != calls["TRAINER_B"]
+
+
+def test_scan_file_switch_default_label_also_relabels_the_guard_path():
+    text = (
+        "script PoryLabel{\n"
+        "\tswitch(var(VAR_RESULT)){\n"
+        "\t\tcase 0:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\t\tbreak\n"
+        "\t\tdefault:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    calls = {tid: guard_path for _, tid, guard_path in scanned["trainer_calls"]}
+    assert calls["TRAINER_B"] == ("switch(var(VAR_RESULT)) default",)
+
+
+def test_scan_file_guard_path_is_the_full_ancestor_chain_outermost_first():
+    # guard_path (unlike battle_events' own innermost-only "guard") carries every open
+    # guard, in nesting order -- needed for the prefix/ancestor test _find_chains and
+    # _pair_field_effects both rely on.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (flag(FLAG_SYS_GAME_CLEAR)){\n"
+        "\t\tswitch(var(VAR_ELITE_4_MODE)){\n"
+        "\t\t\tcase 2:\n"
+        "\t\t\t\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\t\t\tbreak\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    _, _, guard_path = scanned["trainer_calls"][0]
+    assert guard_path == ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 2")
+
+
+def test_find_chains_excludes_mutually_exclusive_switch_cases():
+    # The exact EverGrandeCity_ChampionsRoom_EventScript_Steven shape, reduced: four
+    # switch cases plus an else, five trainerbattle calls, four distinct trainers, none
+    # of them reachable together with any other -- must yield NO chain at all, not a
+    # four/five-name one.
+    def case(n):
+        return ("flag(FLAG_SYS_GAME_CLEAR)", f"switch(var(VAR_ELITE_4_MODE)) case {n}")
+
+    trainer_calls = [
+        ("Steven", "TRAINER_STEVEN", case(0)),
+        ("Steven", "TRAINER_STEVEN_LEGENDS", case(1)),
+        ("Steven", "TRAINER_STEVEN_DOUBLES", case(2)),
+        ("Steven", "TRAINER_STEVEN_DOUBLES_LEGENDS", case(3)),
+        ("Steven", "TRAINER_STEVEN", ("!(flag(FLAG_SYS_GAME_CLEAR))",)),
+    ]
+    assert _find_chains("EverGrandeCity_ChampionsRoom", trainer_calls) == []
+
+
+def test_find_chains_still_flags_a_genuine_sequential_chain():
+    # VictoryRoadRework_EventScript_Wally's shape: an unconditional first call, then a
+    # second call nested inside a real `if` -- the second EXTENDS the first's guard path
+    # rather than diverging from it, so this is a genuine reachable-together chain.
+    trainer_calls = [
+        ("Wally", "TRAINER_WALLY_VR_1", ()),
+        ("Wally", "TRAINER_WALLY_VR_2", ("var(VAR_RESULT)",)),
+    ]
+    chains = _find_chains("VictoryRoadRework", trainer_calls)
+    assert chains == [
+        {
+            "map": "VictoryRoadRework",
+            "script": "Wally",
+            "trainers": ["TRAINER_WALLY_VR_1", "TRAINER_WALLY_VR_2"],
+        }
+    ]
+
+
+def test_find_chains_random_switch_choice_yields_no_chain():
+    # GraniteCave_B2F_EventScript_HitmonStone's shape: `random(3)` then a switch that
+    # picks exactly one of three Blackbelts -- only one is ever fought per visit, so
+    # this must not read as a three-battle chain.
+    def case(n):
+        return (f"switch(var(VAR_RESULT)) case {n}",)
+
+    trainer_calls = [
+        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_1", case(0)),
+        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_2", case(1)),
+        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_3", case(2)),
+    ]
+    assert _find_chains("GraniteCave_B2F", trainer_calls) == []
+
+
+def test_trainer_chains_champions_room_no_longer_reports_a_five_name_chain():
+    assert not any(
+        c["map"] == "EverGrandeCity_ChampionsRoom" for c in _ENCOUNTERS["trainerChains"]
+    )
+
+
+def test_trainer_chains_granitecave_hitmonstone_random_choice_is_not_a_chain():
+    assert not any(
+        c["map"] == "GraniteCave_B2F" and c["script"] == "GraniteCave_B2F_EventScript_HitmonStone"
+        for c in _ENCOUNTERS["trainerChains"]
+    )
+
+
+def test_trainer_chains_sootopolis_trigger_battles_are_the_real_three_not_six():
+    # SootopolisCity_Gym_EventScript_Trigger{Bottom,Middle,Top}Battle each offer a
+    # genuine FLAG_SYS_DISABLE_AUTOHEAL-wrapped three-battle chain (one switch case) and
+    # three mutually-exclusive single-battle-plus-starttagbattle alternatives (the other
+    # cases, whose second trainer is invisible to this module -- starttagbattle, not
+    # trainerbattle*). Before the fix all six trainerbattle_no_intro calls in each
+    # script (the real three, plus each alternative's own one) merged into one bogus
+    # six-entry chain; each must now report just the real three, once.
+    expected = {
+        "SootopolisCity_Gym_EventScript_TriggerBottomBattle": [
+            "TRAINER_BRIDGET",
+            "TRAINER_CRISSY",
+            "TRAINER_BETHANY",
+        ],
+        "SootopolisCity_Gym_EventScript_TriggerMiddleBattle": [
+            "TRAINER_DAPHNE",
+            "TRAINER_CONNIE",
+            "TRAINER_ANDREA",
+        ],
+        "SootopolisCity_Gym_EventScript_TriggerTopBattle": [
+            "TRAINER_OLIVIA",
+            "TRAINER_BRIANNA",
+            "TRAINER_ANNIKA",
+        ],
+    }
+    chains = {
+        c["script"]: c["trainers"]
+        for c in _ENCOUNTERS["trainerChains"]
+        if c["map"] == "SootopolisCity_Gym_1F" and c["script"] in expected
+    }
+    assert chains == expected
+
+
 def test_trainer_chains_victory_road_wally_rematch():
     # VictoryRoadRework_EventScript_Wally fights TRAINER_WALLY_VR_1 then, with no heal
     # in between, immediately offers TRAINER_WALLY_VR_2 -- the back-to-back pattern
@@ -272,8 +524,8 @@ def test_scan_file_tracks_script_context_across_raw_and_poryscript_styles():
     )
     scanned = _scan_file("TestMap", text)
     assert scanned["field_writes"] == [
-        ("RawLabel", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_WEATHER"),
-        ("RawLabel", "VAR_BATTLE_FIELD_ID", "WEATHER_RAIN"),
+        ("RawLabel", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_WEATHER", ()),
+        ("RawLabel", "VAR_BATTLE_FIELD_ID", "WEATHER_RAIN", ()),
     ]
     assert scanned["battle_events"] == [
         {

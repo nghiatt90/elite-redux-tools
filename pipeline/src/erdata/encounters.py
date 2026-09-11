@@ -56,23 +56,97 @@ corpus:
     inside the legacy raw blocks; every occurrence found while writing this module was
     balanced within a single line, which keeps the brace-depth tracker's running count
     correct, but an unbalanced one elsewhere in the corpus would desync it silently.
-  - The trainerbattle-chain detector's only signal that two calls are a genuine
-    back-to-back sequence rather than mutually-exclusive dialogue branches for the same
-    encounter is "2+ *distinct* TRAINER_ ids called in the same script body" (e.g.
-    VictoryRoadRework/scripts.pory:98-105's Wally rematch chain) -- it cannot tell that
-    apart from an `if`/`else` that merely picks one of two different NPCs to fight, and
-    it deliberately does NOT flag a script whose several trainerbattle-family calls all
-    name the *same* trainer id (e.g. MossdeepCity_Gym's tate-and-liza switch/case, which
-    only varies the intro/defeat text per difficulty, not the battle), since requiring
-    2+ distinct ids screens that case out for free.
+  - The trainerbattle-chain detector (`_find_chains`) and the field-effect pairer
+    (`_pair_field_effects`) both need the same fact battle_events' `guard` already
+    carries: whether two points in a script can be reached *together*, in one
+    playthrough, or are mutually exclusive alternatives. Before this was fixed, neither
+    function tracked that at all -- both just grouped by script name, so "2+ distinct
+    TRAINER_ ids called in the same script body" (chains) or "every trainerbattle call
+    anywhere in the script" (field-effect trainer attribution) covered *mutually
+    exclusive* branches exactly as if they were sequential. Confirmed wrong by reading
+    the Champion fight's own script: EverGrandeCity_ChampionsRoom_EventScript_Steven's
+    Gravity field effect (set at scripts.pory:314,318, only inside two of its switch's
+    four cases) was attributed to all four Steven variants regardless, and the same script's
+    five mutually exclusive trainerbattle calls (one if/else branch, one 4-way switch)
+    read as a single five-battle "chain". Both functions now use `_is_prefix` over each
+    call's/write's full guard path (`_scan_file`'s `guard_path`, every open guard from
+    outermost to innermost, including switch-case labels -- see the case/default
+    handling above `_scan_file`) to test that, not just the script name: a chain is
+    anchored on each maximal (leaf) guard path with 2+ distinct trainer ids reachable
+    together with it; a field effect's trainer attribution is narrowed to the calls
+    compatible with its own activation's guard path, and a script can now emit more
+    than one field-effect activation for the same effect/field pair when they complete
+    independently in incompatible branches, each keeping only its own guard's trainers.
+    This closed three more cases the same way, confirmed by reading each: GraniteCave_
+    B2F_EventScript_HitmonStone's `random(3)`-then-`switch` (scripts.pory:21-32) fights
+    exactly one of three Blackbelts, not all three, so it now correctly yields no chain
+    at all; SootopolisCity_Gym_EventScript_Trigger{Bottom,Middle,Top}Battle each offer a
+    genuine `FLAG_SYS_DISABLE_AUTOHEAL`-wrapped three-battle chain (one switch case) plus
+    three mutually-exclusive single-battle-plus-`starttagbattle` alternatives (the other
+    cases) -- previously all six calls (the real three, plus each alternative's one
+    `trainerbattle_no_intro` -- `starttagbattle`'s own two trainer names are invisible
+    to `_TRAINERBATTLE_RE`, a separate, already-known gap) were merged into one
+    six-entry "chain"; each now correctly yields just the real three-battle chain.
+    `_find_chains` still deliberately does NOT flag a script whose several trainerbattle-
+    family calls all name the *same* trainer id (e.g. MossdeepCity_Gym's tate-and-liza
+    switch/case, which only varies the intro/defeat text per difficulty, not the
+    battle), unaffected by this fix, since requiring 2+ distinct ids already screens
+    that case out.
+    Four honest limitations of the fix itself, the first structural and the rest narrow:
+      * `_is_prefix` (one guard path a prefix of the other) is SUFFICIENT for two points
+        to co-occur in one playthrough, but not NECESSARY, so it is unsound as a general
+        co-occurrence test -- two independent sibling blocks, `if (A) { battle }` then,
+        later, a separate `if (B) { battle }` (not an `else`/`else if` of the first), have
+        guard paths `("A",)` and `("B",)`, neither a prefix of the other, so this code
+        would wrongly treat two genuinely reachable-together battles as mutually
+        exclusive and drop a real chain. This is a defect in the rule, not something
+        proven absent from the corpus: measured directly, of 331 pairs of recorded call
+        sites (field writes and trainerbattle calls) sharing a script, 79 diverge under
+        `_is_prefix` (i.e. are judged mutually exclusive), and every one of those 79 was
+        checked against source and is a genuine mutually-exclusive-branch pair, not an
+        independent-sibling one -- so the *data* emitted today is correct, but by measured
+        absence of the failure case in this corpus, not because the rule itself is sound.
+        Making it sound needs real branch-tree modelling in `_find_chains` in particular
+        (maximal/leaf/ancestor reasoning stops meaning anything once siblings can be
+        compatible) and is its own piece of work, deliberately not done here.
+      * Guard-path compatibility is plain text equality on the recorded condition
+        strings, so two textually-identical but structurally-unrelated conditions in the
+        same script (e.g. two separate, unrelated `if (flag(FLAG_SYS_GAME_CLEAR))`
+        checks) would be treated as compatible when they are not -- not found in the
+        corpus, but not checked for either.
+      * Stacked switch-case labels -- two or more `case`/`default` lines in a row
+        sharing one body below them, Poryscript's own fallthrough idiom, distinct from a
+        single comma-grouped case list (which the corpus never uses either, see
+        `_CASE_RE`'s own comment) -- silently lose every label but the last, since
+        `_scan_file`'s case handling relabels guard_stack's top in place rather than
+        accumulating. `switch(var(VAR_RESULT)){ case 2: case 127: goto(...) }`
+        (PetalburgCity_Gym/scripts.pory:1838-1839; also LittlerootTown/scripts.pory:
+        1983-1984 among 35 occurrences measured directly across the corpus) means a call
+        in that body is reachable via *either* label, but would be recorded as guarded on
+        "case 127" alone, silently dropping "case 2" as a way to reach it. Inert today --
+        checked directly: none of the 35 stacked-label bodies in the corpus contains a
+        recorded field write or trainerbattle call -- left unfixed as a known limitation.
+      * `switch`/`case` is the only non-brace-per-branch construct handled -- Poryscript
+        has no loop construct and no nested `switch` in this corpus (both checked
+        directly), so this isn't a currently-live gap, but a future one would silently
+        behave like an unguarded plain block, same as the multi-line-`if`-header gap
+        just above.
   - `battle_events`' "guard" is only the *innermost* enclosing block's own condition (or
     its negation, for an `else`) -- it is never conjoined with an outer guard from a
     block nesting further out. A `registerbattleevent` inside `if (A) { if (B) { ... } }`
     is recorded as guarded on "B" alone, dropping "A" entirely; the same drop applies to
-    a sibling `else`'s negated condition once it sits inside another guard. Not
-    exercised by anything currently emitted -- re-measured directly: of the 51
-    battleEvents entries, 7 sit behind no guard and 44 behind exactly one, none behind
-    two or more -- but a real gap for whatever reads this field once one does. Left
+    a sibling `else`'s negated condition once it sits inside another guard. `fieldEffects`
+    has the exact same shape of drop, not a fixed one: `_pair_field_effects` matches
+    trainers against the *full* guard path internally (see its own comment and
+    `_is_prefix`), but the "guard" key it emits is `activation_guard[-1]`, the innermost
+    element only, same convention as battle_events -- both of EverGrandeCity_
+    ChampionsRoom's two Gravity rows report `"switch(var(VAR_ELITE_4_MODE)) case 2"` /
+    `"case 3"` and silently drop the outer `flag(FLAG_SYS_GAME_CLEAR)` precondition
+    (scripts.pory:304) that is also required to reach either case. `trainerChains` has no
+    "guard" field at all to be narrow. Not exercised by anything currently emitted for
+    battle_events specifically -- re-measured directly: of the 51 battleEvents entries, 7
+    sit behind no guard and 44 behind exactly one, none behind two or more -- but a real
+    gap for whatever reads this field, or fieldEffects' own "guard", once one does. Left
     unfixed here deliberately -- scoped as its own piece of work, not folded into the
     else fix this module just got.
   - A multi-line `if` header (see the brace-tracker bullet above -- condition split
@@ -133,6 +207,18 @@ _IF_RE = re.compile(r"\bif\s*\((.*?)\)\s*\{")
 _ELSE_IF_RE = re.compile(r"\}\s*else\s+if\s*\((.*?)\)\s*\{")
 _ELSE_RE = re.compile(r"\}\s*else\s*\{")
 _SWITCH_RE = re.compile(r"\bswitch\s*\((.*?)\)\s*\{")
+
+# `case 2:` / `default:` -- a Poryscript switch-case label, own line, no brace of its
+# own (the case body runs straight through to the next `case`/`default`/`break`/the
+# switch's own closing "}"). Matched against the already comment-stripped, trimmed
+# line -- every case label in the corpus is either bare or has a trailing `//` comment
+# (e.g. LittlerootTown/scripts.pory:2011's `case 0:// Nurse Joy`), never a comma-
+# grouped fallthrough list (`case 0, 1:`) or code on the same line as the colon (checked
+# directly). The corpus DOES achieve fallthrough, just by a different syntax this regex
+# alone doesn't protect against: stacking two or more separate `case`/`default` label
+# lines in a row above one shared body -- see the module docstring's limitation on that.
+_CASE_RE = re.compile(r"^case\s+(.+?):\s*$")
+_DEFAULT_RE = re.compile(r"^default\s*:\s*$")
 
 _RESET_VALUE = "0"
 
@@ -209,13 +295,28 @@ def _iter_pory_files():
 # registerbattleevent/trainerbattle calls that line itself contains, read against the
 # guard_stack *after* this line's own braces are applied (so a call guarded by an
 # `if (...) {` that opens on this same line still sees that guard).
+#
+# `switch_base_at_depth` tracks, per open `switch(...)` frame (keyed by its position in
+# guard_stack), the switch's own condition text -- keyed by depth rather than a single
+# variable defensively, in case a `switch` is ever nested inside another one's still-open
+# frame, though none is in the current corpus (checked directly: at most one switch
+# frame is ever open at a time). Needed because `case N:`/`default:` labels carry no
+# brace of their own (the case body runs straight through to the next label or the
+# switch's closing "}"), so a case label
+# doesn't push a new frame, it *relabels* guard_stack's current top in place (from
+# "switch(EXPR)" to "switch(EXPR) case N", one case superseding the last). Without
+# this, every case in a switch would share one identical guard, indistinguishable from
+# each other -- exactly the gap that let EverGrandeCity_ChampionsRoom's Gravity field
+# effect get attributed to every switch case, not just the two that set it (see
+# _pair_field_effects's own comment).
 def _scan_file(map_name: str, text: str) -> dict:
-    field_writes: list[tuple[str, str, str]] = []  # (script, var, value)
+    field_writes: list[tuple[str, str, str, tuple]] = []  # (script, var, value, guard_path)
     battle_events: list[dict] = []
-    trainer_calls: list[tuple[str, str]] = []  # (script, trainer_id)
+    trainer_calls: list[tuple[str, str, tuple]] = []  # (script, trainer_id, guard_path)
 
     current_script: str | None = None
     guard_stack: list[str | None] = []
+    switch_base_at_depth: dict[int, str] = {}
 
     for raw_line in _join_own_line_else(text).splitlines():
         line = _strip_comment(raw_line)
@@ -231,7 +332,15 @@ def _scan_file(map_name: str, text: str) -> dict:
         raw_opens = line.count("{")
         raw_closes = line.count("}")
 
-        if elif_m := _ELSE_IF_RE.search(line):
+        if case_m := _CASE_RE.match(stripped):
+            depth = len(guard_stack) - 1
+            if depth in switch_base_at_depth:
+                guard_stack[depth] = f"switch({switch_base_at_depth[depth]}) case {case_m.group(1).strip()}"
+        elif _DEFAULT_RE.match(stripped):
+            depth = len(guard_stack) - 1
+            if depth in switch_base_at_depth:
+                guard_stack[depth] = f"switch({switch_base_at_depth[depth]}) default"
+        elif elif_m := _ELSE_IF_RE.search(line):
             if guard_stack:
                 guard_stack.pop()
             guard_stack.append(elif_m.group(1).strip())
@@ -266,6 +375,7 @@ def _scan_file(map_name: str, text: str) -> dict:
             guard_stack.append(if_m.group(1).strip())
             raw_opens -= 1
         elif switch_m := _SWITCH_RE.search(line):
+            switch_base_at_depth[len(guard_stack)] = switch_m.group(1).strip()
             guard_stack.append(f"switch({switch_m.group(1).strip()})")
             raw_opens -= 1
 
@@ -274,14 +384,23 @@ def _scan_file(map_name: str, text: str) -> dict:
         for _ in range(max(raw_closes, 0)):
             if guard_stack:
                 guard_stack.pop()
+        if raw_closes > 0:  # drop switch_base entries for any frame(s) just popped
+            for depth in [d for d in switch_base_at_depth if d >= len(guard_stack)]:
+                del switch_base_at_depth[depth]
 
         if current_script is None:
             continue
 
         guard = guard_stack[-1] if guard_stack else None
+        # Every *named* (non-None) guard currently open, outermost first -- unlike
+        # `guard` above (battle_events' innermost-only field, see the module
+        # docstring's bullet on that gap), this is the full ancestor chain, used to
+        # tell whether two calls could both be reached in one playthrough (see
+        # _pair_field_effects/_find_chains's shared _is_prefix helper).
+        guard_path = tuple(g for g in guard_stack if g is not None)
 
         for var, value in _SETVAR_FIELD_RE.findall(line):
-            field_writes.append((current_script, var, value))
+            field_writes.append((current_script, var, value, guard_path))
 
         for event, data0, data1 in _REGISTER_RE.findall(line):
             battle_events.append(
@@ -296,63 +415,137 @@ def _scan_file(map_name: str, text: str) -> dict:
             )
 
         for _suffix, trainer_id in _TRAINERBATTLE_RE.findall(line):
-            trainer_calls.append((current_script, trainer_id))
+            trainer_calls.append((current_script, trainer_id, guard_path))
 
     return {"field_writes": field_writes, "battle_events": battle_events, "trainer_calls": trainer_calls}
+
+
+# True iff one guard path is a prefix of the other -- i.e. the shorter path's guards
+# all held on the way to the longer one, so the two points could both be reached along
+# a single execution of the script. Two paths that diverge (neither a prefix of the
+# other, e.g. two different switch cases, or an if's branch vs its else's) never are:
+# that is exactly the "mutually exclusive branches" relationship EverGrandeCity_
+# ChampionsRoom_EventScript_Steven's four switch cases and its if/else are in. Shared
+# by _pair_field_effects and _find_chains -- both need the same "could this trainer
+# call and this other point in the script both happen in one playthrough?" test.
+def _is_prefix(short: tuple, long_: tuple) -> bool:
+    return long_[: len(short)] == short
 
 
 # Pairs VAR_BATTLE_FIELD_EFFECT_TYPE/VAR_BATTLE_FIELD_ID writes within one script into
 # {effectType, fieldId} field-effect activations, dropping the `, 0` writes every script
 # above pairs with (TryToSetFieldEffect treats 0 as no effect; these are the post-battle
-# cleanup writes, not new field effects). A script can activate more than one field
-# effect in sequence (case-by-case difficulty scaling does not do this in the corpus
-# today, but nothing rules it out), so each activation is emitted once, the instant both
-# vars are known and not yet reset.
-def _pair_field_effects(map_name: str, field_writes: list, trainers_by_script: dict) -> list[dict]:
-    by_script: dict[str, list[tuple[str, str]]] = {}
-    for script, var, value in field_writes:
-        by_script.setdefault(script, []).append((var, value))
+# cleanup writes, not new field effects). A script can activate the same field effect
+# independently more than once -- EverGrandeCity_ChampionsRoom_EventScript_Steven's
+# switch sets STATUS_FIELD_GRAVITY in two DIFFERENT, mutually exclusive cases
+# (scripts.pory:314,318) -- so an activation is emitted whenever both vars are known
+# and the write that completed them isn't just a continuation of the previous
+# activation's own guard scope (`_is_prefix` again): a second completion under an
+# INCOMPATIBLE guard is a second, independent activation, not a duplicate.
+#
+# "trainers" used to be every trainerbattle-family call anywhere in the script,
+# regardless of which branch it was in or whether the branch that set the field effect
+# was even the one that reached it -- the asymmetry battleEvents' `guard` field didn't
+# have and fieldEffects did, which is exactly how Gravity ended up attributed to
+# TRAINER_STEVEN and TRAINER_STEVEN_LEGENDS (case 0/1, and the pre-Game-Clear else --
+# none of which ever executes the case 2/3 lines that set it). Now only trainer calls
+# whose own guard path is compatible with (a prefix of, or extended from) the
+# activation's guard path are attached. Most of the current 23 fieldEffects entries have
+# only one trainerbattle call in their whole script to begin with (e.g. each of
+# EvergrandeCity_MonoChampRoom_1's 18 rooms, each its own script with one battle) --
+# guard-narrowing can't change those regardless of whether their own guard is
+# conditional, since there is only ever one candidate to attach either way. Exactly two
+# scripts in the current data have 2+ trainerbattle calls behind different guards:
+# EverGrandeCity_ChampionsRoom_EventScript_Steven, where narrowing is what fixes the
+# result, and MossdeepCity_Gym_EventScript_TateAndLiza (scripts.pory:998-1017, three
+# calls across three switch cases), where narrowing changes nothing -- not because it
+# only has one call, but because its field-effect activation completes unconditionally
+# at scripts.pory:993-994, *before* the switch even opens (guard path `()`, compatible
+# with every branch), and separately because all three of its calls name the same
+# TRAINER_TATE_AND_LIZA_1 regardless of which case is taken.
+def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) -> list[dict]:
+    by_script: dict[str, list[tuple[str, str, tuple]]] = {}
+    for script, var, value, guard_path in field_writes:
+        by_script.setdefault(script, []).append((var, value, guard_path))
+
+    calls_by_script: dict[str, list[tuple[str, tuple]]] = {}
+    for script, trainer_id, guard_path in trainer_calls:
+        calls_by_script.setdefault(script, []).append((trainer_id, guard_path))
 
     out = []
     for script, writes in by_script.items():
         effect_type = field_id = None
-        emitted = False
-        for var, value in writes:
+        last_activation_guard: tuple | None = None  # None: no open activation
+        for var, value, guard_path in writes:
             if value == _RESET_VALUE:
                 if var == "VAR_BATTLE_FIELD_EFFECT_TYPE":
                     effect_type = None
                 else:
                     field_id = None
-                emitted = False
+                last_activation_guard = None
                 continue
             if var == "VAR_BATTLE_FIELD_EFFECT_TYPE":
                 effect_type = value
             else:
                 field_id = value
-            if effect_type and field_id and not emitted:
-                out.append(
-                    {
-                        "map": map_name,
-                        "script": script,
-                        "effectType": effect_type,
-                        "fieldId": field_id,
-                        "trainers": sorted(set(trainers_by_script.get(script, []))),
-                    }
-                )
-                emitted = True
+            if not (effect_type and field_id):
+                continue
+            if last_activation_guard is not None and _is_prefix(
+                *sorted((guard_path, last_activation_guard), key=len)
+            ):
+                continue  # still the same activation as before, not a new one
+            # Whichever of this write's own guard path or the *other* var's own guard
+            # path (set earlier, possibly shallower -- e.g. VAR_BATTLE_FIELD_EFFECT_TYPE
+            # set unconditionally before the VAR_BATTLE_FIELD_ID write that completes
+            # the pair inside a specific switch case) is deeper is this activation's
+            # true scope; reaching the deeper one already implies the shallower one held.
+            activation_guard = max(guard_path, last_activation_guard or (), key=len)
+            last_activation_guard = activation_guard
+            out.append(
+                {
+                    "map": map_name,
+                    "script": script,
+                    "effectType": effect_type,
+                    "fieldId": field_id,
+                    "guard": activation_guard[-1] if activation_guard else None,
+                    "trainers": sorted(
+                        {
+                            tid
+                            for tid, call_guard in calls_by_script.get(script, [])
+                            if _is_prefix(*sorted((call_guard, activation_guard), key=len))
+                        }
+                    ),
+                }
+            )
     return out
 
 
+# A "chain" is 2+ *distinct* trainer ids reachable together along one execution of the
+# script (see _is_prefix) -- not just 2+ distinct ids anywhere in its text, which is
+# what let EverGrandeCity_ChampionsRoom_EventScript_Steven's four mutually exclusive
+# switch cases plus its if/else (five trainerbattle calls, four distinct trainers) read
+# as a single five-battle chain. Anchored on each *maximal* guard path present (one not
+# itself a prefix of some other path in the script, i.e. a "leaf" of the script's
+# branch tree) -- collecting every call whose guard path is an ancestor of that leaf
+# gives exactly the trainers fought along one playthrough that reaches it, and anchoring
+# only on leaves (not every path) avoids emitting the same chain again as a shorter,
+# redundant prefix of itself.
 def _find_chains(map_name: str, trainer_calls: list) -> list[dict]:
-    by_script: dict[str, list[str]] = {}
-    for script, trainer_id in trainer_calls:
-        by_script.setdefault(script, []).append(trainer_id)
+    by_script: dict[str, list[tuple[str, tuple]]] = {}
+    for script, trainer_id, guard_path in trainer_calls:
+        by_script.setdefault(script, []).append((trainer_id, guard_path))
 
-    return [
-        {"map": map_name, "script": script, "trainers": ids}
-        for script, ids in by_script.items()
-        if len(set(ids)) >= 2
-    ]
+    out = []
+    for script, entries in by_script.items():
+        distinct_paths = {guard_path for _, guard_path in entries}
+        leaves = sorted(
+            p for p in distinct_paths if not any(q != p and _is_prefix(p, q) for q in distinct_paths)
+        )
+        for leaf in leaves:
+            ids = [trainer_id for trainer_id, guard_path in entries if _is_prefix(guard_path, leaf)]
+            if len(set(ids)) >= 2:
+                out.append({"map": map_name, "script": script, "trainers": ids})
+    return out
 
 
 def scrape_encounters() -> dict:
@@ -370,11 +563,7 @@ def scrape_encounters() -> dict:
         text = path.read_text(encoding="utf-8")
         scanned = _scan_file(map_name, text)
 
-        trainers_by_script: dict[str, list[str]] = {}
-        for script, trainer_id in scanned["trainer_calls"]:
-            trainers_by_script.setdefault(script, []).append(trainer_id)
-
-        field_effects.extend(_pair_field_effects(map_name, scanned["field_writes"], trainers_by_script))
+        field_effects.extend(_pair_field_effects(map_name, scanned["field_writes"], scanned["trainer_calls"]))
         battle_events.extend(scanned["battle_events"])
         trainer_chains.extend(_find_chains(map_name, scanned["trainer_calls"]))
 
