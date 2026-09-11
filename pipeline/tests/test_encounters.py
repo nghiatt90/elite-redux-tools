@@ -1,6 +1,12 @@
 import json
 
-from erdata.encounters import _pair_field_effects, _scan_file, _strip_comment, scrape_encounters
+from erdata.encounters import (
+    _join_own_line_else,
+    _pair_field_effects,
+    _scan_file,
+    _strip_comment,
+    scrape_encounters,
+)
 
 # Scraping every data/maps/*/scripts.pory is the slowest fixture in this file by a wide
 # margin; computed once and reused, same as test_emit.py does for ability_hooks_to_dict().
@@ -101,12 +107,130 @@ def test_battle_events_mossdeep_gym_guards_on_defeated_count_not_a_single_traine
     assert all(e["guard"] is not None and "var(VAR_RESULT)" in e["guard"] for e in mossdeep)
 
 
-def test_battle_events_tense_battle_is_unconditional():
-    # Every gym boss fight registers BATTLE_EVENT_TENSE_BATTLE right before the
-    # trainerbattle call, outside any per-trainer if-guard.
+def test_battle_events_tense_battle_is_unconditional_except_sootopolis_first_encounter():
+    # 7 of the 8 gyms' BATTLE_EVENT_TENSE_BATTLE registration sits right before the
+    # trainerbattle call, outside any per-trainer if-guard. SootopolisCity_Gym_1F is the
+    # one exception: SootopolisCity_Gym_1F_EventScript_Juan only registers it inside the
+    # `else` branch of `if (flag(FLAG_BADGE08_GET)) { goto rematch } else { ... }`
+    # (scripts.pory:269-280), i.e. only on the first Juan fight, not the post-badge
+    # rematch (which `goto_if_set`s straight past this script). Own-line `else{}` --
+    # see _join_own_line_else -- so this was misread as unguarded before that fix. The
+    # guard is the negated sibling condition (see _scan_file's _ELSE_RE branch), not the
+    # literal string "else" -- this one is a fixed flag check, not something the solver
+    # controls the way a `defeated(TRAINER_X)` guard is.
     tense = [e for e in _ENCOUNTERS["battleEvents"] if e["event"] == "BATTLE_EVENT_TENSE_BATTLE"]
     assert len(tense) >= 8  # one per gym at minimum
-    assert all(e["guard"] is None for e in tense)
+    guarded = {e["map"]: e["guard"] for e in tense}
+    assert guarded.pop("SootopolisCity_Gym_1F") == "!(flag(FLAG_BADGE08_GET))"
+    assert all(guard is None for guard in guarded.values())
+
+
+def test_battle_events_monochamp_room_bug_and_ice_are_guarded_by_the_owned_line_else():
+    # EvergrandeCity_MonoChampRoom_1's Bug and Ice rooms register their battle event
+    # inside the player-accepted `else` branch of `if (var(VAR_RESULT) == NO) { ... }
+    # else { ... }` (scripts.pory:388-406 for Bug, same shape for Ice), not
+    # unconditionally -- both are own-line `}`-then-`else{` (scripts.pory:390-391), the
+    # corpus's dominant style (see _join_own_line_else), so this was misread as
+    # unguarded before that fix. The guard is the negated sibling condition, not the
+    # literal string "else" -- see _scan_file's _ELSE_RE branch.
+    events = {
+        e["script"]: e
+        for e in _ENCOUNTERS["battleEvents"]
+        if e["map"] == "EvergrandeCity_MonoChampRoom_1"
+    }
+    bug = events["EverGrandeCity_MonoChampRoom_1_EventScript_MonoChamp_Bug"]
+    assert bug["event"] == "BATTLE_EVENT_PERMA_STICKY_WEB"
+    assert bug["guard"] == "!(var(VAR_RESULT) == NO)"
+    ice = events["EverGrandeCity_MonoChampRoom_1_EventScript_MonoChamp_Ice"]
+    assert ice["guard"] == "!(var(VAR_RESULT) == NO)"
+
+
+def test_scan_file_recognises_the_own_line_else_style_not_just_same_line():
+    # The corpus's dominant style (207 of 281 else branches, measured directly) closes
+    # an if-block's brace on its own line and puts `else{` on the next line, rather than
+    # `} else {` on one line -- see _join_own_line_else's own comment. The else's guard
+    # is the negated sibling condition, not the literal string "else" -- see _scan_file's
+    # _ELSE_RE branch.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (!defeated(TRAINER_FOO)){\n"
+        "\t\tmsgbox(format(\"hi\"))\n"
+        "\t}\n"
+        "\telse{\n"
+        "\t\tregisterbattleevent(BATTLE_EVENT_SPIKES, 2)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    assert scanned["battle_events"] == [
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "event": "BATTLE_EVENT_SPIKES",
+            "data0": 2,
+            "data1": None,
+            "guard": "!(!defeated(TRAINER_FOO))",
+        }
+    ]
+
+
+def test_scan_file_handles_else_if_even_though_the_corpus_has_none_today():
+    # _ELSE_IF_RE is dead code against the current corpus (checked: zero `else if`
+    # constructs in any spacing) but must still work correctly whenever one shows up --
+    # this earns that claim with a test rather than just asserting it in a comment.
+    # Covers the same-line `} else if (...) {` shape (own-line else-if is untested for
+    # the same reason: no real example to derive the shape from) and checks that the
+    # chain nets braces back to zero afterward, so a call after the whole if/else-if/
+    # else chain sees no guard at all.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (var(VAR_RESULT) == NO){\n"
+        "\t\tmsgbox(format(\"no\"))\n"
+        "\t} else if (var(VAR_RESULT) == YES){\n"
+        "\t\tregisterbattleevent(BATTLE_EVENT_SPIKES, 2)\n"
+        "\t} else {\n"
+        "\t\tmsgbox(format(\"neither\"))\n"
+        "\t}\n"
+        "\tregisterbattleevent(BATTLE_EVENT_TENSE_BATTLE)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    assert scanned["battle_events"] == [
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "event": "BATTLE_EVENT_SPIKES",
+            "data0": 2,
+            "data1": None,
+            "guard": "var(VAR_RESULT) == YES",
+        },
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "event": "BATTLE_EVENT_TENSE_BATTLE",
+            "data0": None,
+            "data1": None,
+            "guard": None,  # braces net to zero after the if/else-if/else chain closes
+        },
+    ]
+
+
+def test_join_own_line_else_leaves_the_same_line_style_untouched():
+    # The minority same-line style (`} else {`, 74 of 281 branches) must keep working
+    # exactly as before -- this pass only needs to act on the own-line style. Compared
+    # line-by-line, not as a raw string: splitlines()/"\n".join() round-tripping drops a
+    # trailing newline, which _scan_file's own splitlines() call downstream never sees.
+    text = "if (x) {\n\ty\n} else {\n\tz\n}\n"
+    assert _join_own_line_else(text).splitlines() == text.splitlines()
+
+
+def test_join_own_line_else_does_not_touch_an_unrelated_bare_closing_brace():
+    # A `}` on its own line that is NOT followed by `else` (e.g. closing a script or an
+    # unrelated if-block) must be left alone -- only the exact "}\nelse..." shape joins.
+    text = "script Foo{\n\tif (x) {\n\t\ty\n\t}\n\tend\n}\n"
+    assert _join_own_line_else(text).splitlines() == text.splitlines()
 
 
 def test_trainer_chains_victory_road_wally_rematch():
