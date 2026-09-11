@@ -878,6 +878,55 @@ describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat 
     expect(withJuggernaut.rolls[15]).toBeGreaterThan(withoutJuggernaut.rolls[15])
   })
 
+  it('the blend contribution itself scales with the primary\'s own boosted stat stage, not just the primary alone (:7196-7211 order of operations)', async () => {
+    // Regression test for the order-of-operations bug this batch fixed: an earlier
+    // version scaled the primary and each blend term independently (each via its own
+    // fully-scaled computeStat call) and just summed the results, so a stat-stage
+    // change on the PRIMARY never reached the blended contribution -- only the C's
+    // literal order (sum the pre-stage values, THEN scale the combined sum by the
+    // primary's own ratio) does that. Juggernaut (20% of Def blended into Atk on a
+    // contact move) makes this directly observable: at neutral Atk, Juggernaut's own
+    // marginal contribution to the top roll is small; at +6 Atk (ratio 4x, index 12
+    // of statStageRatios), a faithful port scales that SAME contribution up with the
+    // stage boost, while the old, buggy code left it exactly where it was at neutral
+    // (measured directly against the pre-fix code: deltaBoosted came back equal to
+    // deltaNeutral, 2 and 2 -- the boost reached the primary but never the blend).
+    await import('./abilities/impl/index')
+    const garchompJuggernaut = () => battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_JUGGERNAUT', innates: [null, null, null] } })
+    const garchompPlain = () => battler('SPECIES_GARCHOMP')
+    const boosted = { statStages: { atk: 6, def: 0, spatk: 0, spdef: 0, spe: 0 } }
+    const neutralNoJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: garchompPlain() })).rolls[15]
+    const neutralWithJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: garchompJuggernaut() })).rolls[15]
+    const boostedNoJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: { ...garchompPlain(), ...boosted } })).rolls[15]
+    const boostedWithJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE'), attacker: { ...garchompJuggernaut(), ...boosted } })).rolls[15]
+
+    const deltaNeutral = neutralWithJuggernaut - neutralNoJuggernaut
+    const deltaBoosted = boostedWithJuggernaut - boostedNoJuggernaut
+    // 74 derived from the C, independently of this implementation, not read back off
+    // it: raw Atk 296, raw Def 226 (both from calcStat on species.json's base stats),
+    // Juggernaut's blend term floor(226*20/100) = 45, pre-stage sum 341. At +6 Atk
+    // (statStageRatios index 12, ratio 4x) the C scales that COMBINED sum: 341*4 =
+    // 1364. Injecting 1364 as a plain attacker's raw stat reproduces a top roll of
+    // 74; injecting 1229 -- the old, buggy order's 296*4 + 45, primary scaled alone
+    // with the un-rescaled blend term added after -- reproduces 66. Same derivation
+    // gives 341 at neutral for BOTH orders (ratio 1x makes them identical), which is
+    // why deltaNeutral alone can't distinguish the two, and +6 can.
+    //
+    // The stat-level delta between with- and without-Juggernaut quadruples exactly
+    // with this fix, 45 to 180 (45*4), matching the stage ratio precisely -- no
+    // special treatment of the blend term, same arithmetic as the primary. The
+    // DAMAGE-roll deltas below (2 and 10) don't preserve that same clean 4x, but not
+    // because the blend term takes an extra rounding step anywhere: each roll is its
+    // own independently-floored output of the whole damage formula, and the neutral
+    // delta of 2 is a coarse rounding of a true difference closer to 2.6 -- the
+    // discrepancy is ordinary floor-division noise at the FINAL roll, not evidence of
+    // anything blend-specific. The bound below only asks for comfortably more than 1x
+    // (the old bug's signature: an unscaled blend term keeps deltaBoosted equal to
+    // deltaNeutral), not the exact stat-level ratio, so it stays robust to that noise.
+    expect(deltaBoosted).toBeGreaterThan(deltaNeutral * 3)
+    expect(boostedWithJuggernaut).toBe(74)
+  })
+
   it('Momentum + Speed Force: a Speed-primary attacker also blending Speed into itself keeps the contribution (battle_util.c:7202-7207)', async () => {
     // Momentum (onChooseOffensiveStat) makes a contact move use Speed as the
     // attacking stat; Speed Force (secondary-stat blend) adds 20% of Speed on top of

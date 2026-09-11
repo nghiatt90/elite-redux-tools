@@ -61,10 +61,23 @@ export interface CalcStatInputs {
   statStageRatios: [number, number][]
 }
 
-/** CalculateStat, src/battle_util.c:7105-7217 (the non-recursive core; STAT_HP and
- * STAT_SPEED's own raw-stat derivation are the caller's responsibility -- this
- * function starts from `rawStat` already selected). */
-export function calculateBattleStat(inputs: CalcStatInputs): number {
+export interface PreStageStat {
+  /** Post-preModify, post-onStat-hooks, post-self-buff-ratio value -- everything
+   * CalculateStat does BEFORE the stat-stage ratio (:7105-7194). */
+  value: number
+  /** The resolved stat stage (post unaware/Wonder Room/crit/benefitsFromStatBuffs
+   * adjustment, :7180-7189) -- not yet applied to `value`. */
+  stage: number
+}
+
+/** The first half of CalculateStat (:7105-7194): raw stat selection, the per-stat
+ * pre-modifier, ability onStat hooks, stat-stage resolution, and the same-stat
+ * self-buff ratio -- everything before the stat-stage ratio itself is applied.
+ * Split out from `calculateBattleStat` so a caller that needs to combine several
+ * stats' PRE-stage values before scaling (calculate.ts's applySecondaryStatBlend,
+ * for CalculateStat's own cross-stat blend, :7196-7211) can do so faithfully,
+ * instead of scaling each stat independently and summing already-scaled results. */
+export function calculateBattleStatPreStage(inputs: CalcStatInputs): PreStageStat {
   let statBase = inputs.preModify(inputs.rawStat)
   statBase = inputs.applyOnStatHooks(statBase)
 
@@ -79,9 +92,28 @@ export function calculateBattleStat(inputs: CalcStatInputs): number {
     statBase = idiv(statBase * (100 + inputs.secondaryStatPercent), 100)
   }
 
-  statBase = applyStatStage(statBase, stage, inputs.statStageRatios)
-  statBase = applyExtraStatLevels(statBase, inputs.extraStatLevel)
-  return statBase
+  return { value: statBase, stage }
+}
+
+/** CalculateStat's tail (:7210-7214): the stat-stage ratio, then extraStatLevel,
+ * applied to whatever value is handed in. `calculateBattleStat` runs this once over
+ * a single stat's own pre-stage value; calculate.ts's applySecondaryStatBlend runs
+ * it once over the primary's pre-stage value PLUS every blend term instead (the
+ * fix this function exists to make impossible to miss for either caller) -- a
+ * future change to this order belongs here, not duplicated at each call site. */
+export function applyStatTail(value: number, stage: number, statStageRatios: [number, number][], extraStatLevel: number): number {
+  return applyExtraStatLevels(applyStatStage(value, stage, statStageRatios), extraStatLevel)
+}
+
+/** CalculateStat, src/battle_util.c:7105-7217 (the non-recursive core; STAT_HP and
+ * STAT_SPEED's own raw-stat derivation are the caller's responsibility -- this
+ * function starts from `rawStat` already selected). Pre-stage part plus the tail
+ * applied once -- see `calculateBattleStatPreStage`'s own doc for why a caller doing
+ * a cross-stat blend needs the two separately rather than calling this function per
+ * stat and summing. */
+export function calculateBattleStat(inputs: CalcStatInputs): number {
+  const { value, stage } = calculateBattleStatPreStage(inputs)
+  return applyStatTail(value, stage, inputs.statStageRatios, inputs.extraStatLevel)
 }
 
 // ---------------------------------------------------------------------------
