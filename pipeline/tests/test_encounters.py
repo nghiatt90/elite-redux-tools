@@ -1,8 +1,9 @@
 import json
 
 from erdata.encounters import (
+    _Frame,
     _find_chains,
-    _is_prefix,
+    _frames_compatible,
     _join_own_line_else,
     _pair_field_effects,
     _scan_file,
@@ -49,23 +50,121 @@ def test_field_effects_mossdeep_gym_permanent_trick_room():
     assert fe["trainers"] == ["TRAINER_TATE_AND_LIZA_1"]
 
 
-def test_is_prefix_pins_the_current_known_unsound_rule_not_a_correct_one():
-    # _is_prefix is a SUFFICIENT test for two points co-occurring in one playthrough,
-    # not a NECESSARY one -- see the module docstring's limitation on this, with the
-    # 331-pairs/79-diverge/0-wrong measurement. The last two assertions below pin
-    # today's behaviour (both currently read as "diverging", i.e. mutually exclusive),
-    # not a claim that it is right: `("a",)` and `("b",)` are indistinguishable here
-    # from two SIBLING BRANCHES of one if/else (genuinely mutually exclusive, the
-    # common real case) and from two INDEPENDENT, separately-guarded blocks that could
-    # both execute in the same playthrough (genuinely co-occurring, wrongly excluded) --
-    # this function cannot tell those two shapes apart from the guard path alone. Fixing
-    # that is scoped as its own batch, not done here; this test gets replaced there.
-    assert _is_prefix((), ("a",))  # unconditional is compatible with anything
-    assert _is_prefix(("a",), ("a",))  # identical paths are trivially compatible
-    assert _is_prefix(("a",), ("a", "b"))  # ancestor is compatible with its descendant
-    assert not _is_prefix(("a",), ("b",))  # read as diverging -- sound only if these
-    # are genuinely mutually exclusive (e.g. if/else siblings), not independent blocks
-    assert not _is_prefix(("a", "x"), ("a", "y"))  # same caveat, one level deeper
+# --- _frames_compatible: the co-occurrence predicate itself -----------------------
+#
+# Four cases. The first three are modeled directly on real corpus shapes (cited in each
+# docstring); the fourth is marked SYNTHETIC because nothing in the corpus exercises it
+# -- it asserts intent (what the predicate is supposed to do), not transcribed
+# behaviour, which is the exact case an earlier, unsound text-path-prefix version of
+# this predicate got backwards. See the module docstring's account of that version.
+
+
+def test_frames_compatible_if_else_pair_is_exclusive():
+    # Modeled on SootopolisCity_Gym_1F_EventScript_Juan (scripts.pory:269-280):
+    # `if (flag(FLAG_BADGE08_GET)) { ... } else { ...registerbattleevent(...)... }` --
+    # the if-branch and the else-branch can never both execute in one playthrough.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (flag(FLAG_BADGE08_GET)){\n"
+        "\t\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\t}\n"
+        "\telse{\n"
+        "\t\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    assert not _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
+
+
+def test_frames_compatible_two_switch_cases_are_exclusive():
+    # Modeled on EverGrandeCity_ChampionsRoom_EventScript_Steven's switch
+    # (scripts.pory:306-322): two case bodies of the same switch can never both execute.
+    text = (
+        "script PoryLabel{\n"
+        "\tswitch(var(VAR_ELITE_4_MODE)){\n"
+        "\t\tcase 2:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\t\tbreak\n"
+        "\t\tcase 3:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    assert not _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
+
+
+def test_frames_compatible_ancestor_and_descendant_are_compatible():
+    # Modeled on VictoryRoadRework_EventScript_Wally: an unconditional first call, then
+    # a second call nested inside a real `if` -- reaching the second means the first's
+    # (empty) scope already held, so the two are compatible: a genuine back-to-back
+    # chain, not a pair of alternatives.
+    text = (
+        "script PoryLabel{\n"
+        "\ttrainerbattle_single(TRAINER_A, Text, Text)\n"
+        "\tif (var(VAR_RESULT)){\n"
+        "\t\ttrainerbattle_rematch(TRAINER_B, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    assert _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
+
+
+def test_frames_compatible_two_independent_sibling_blocks_are_compatible():
+    # SYNTHETIC -- nothing in the corpus exercises this shape (every sequential pair of
+    # separately-guarded blocks sharing a script in the current data turned out, on
+    # inspection, to be genuine if/else-if/else siblings or switch cases, not
+    # independent ifs; see the module docstring's account of the text-path-prefix rule
+    # this predicate replaced, which got exactly this case backwards). Two SEPARATE `if`
+    # statements, one after the other, not connected by `else`/`else if` -- both
+    # conditions could independently hold, so both battles are reachable in the same
+    # playthrough. This asserts intent, not transcribed behaviour.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (flag(FLAG_A)){\n"
+        "\t\ttrainerbattle_single(TRAINER_A, Text, Text)\n"
+        "\t}\n"
+        "\tif (flag(FLAG_B)){\n"
+        "\t\ttrainerbattle_single(TRAINER_B, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    assert _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
+
+
+def test_find_chains_two_independent_sibling_ifs_yield_a_real_chain():
+    # SYNTHETIC, same shape as the compatibility test just above, but exercised
+    # end-to-end through _scan_file -> _find_chains: the predicate being right is not
+    # the same as _find_chains actually using it right, and the clique rewrite
+    # (_maximal_compatible_groups) is where that risk lives -- see its own comment.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (flag(FLAG_A)){\n"
+        "\t\ttrainerbattle_single(TRAINER_A, Text, Text)\n"
+        "\t}\n"
+        "\tif (flag(FLAG_B)){\n"
+        "\t\ttrainerbattle_single(TRAINER_B, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    assert chains == [
+        {"map": "TestMap", "script": "PoryLabel", "trainers": ["TRAINER_A", "TRAINER_B"]}
+    ]
 
 
 def test_field_effects_champions_room_gravity_only_attributed_to_the_two_doubles_cases():
@@ -108,7 +207,8 @@ def test_field_effects_monochamp_room_uses_type_as_field_id():
 def test_pair_field_effects_ignores_the_post_battle_reset_to_zero():
     # Every field-effect script in the corpus resets both vars to 0 after the battle --
     # TryToSetFieldEffect treats 0 as no effect, so this must never be emitted as a
-    # second, bogus field-effect activation.
+    # second, bogus field-effect activation. Empty tuples stand in for an unconditional
+    # frame path -- _frames_compatible never needs to look inside an empty one.
     writes = [
         ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
         ("Script", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_TRICK_ROOM", ()),
@@ -128,9 +228,9 @@ def test_pair_field_effects_ignores_the_post_battle_reset_to_zero():
 
 
 def test_pair_field_effects_reset_allows_a_second_unconditional_activation():
-    # A genuine second, independent activation at the SAME (unconditional) guard scope
-    # as the first must still be emitted -- the reset clears last_activation_guard the
-    # same way it clears effect_type/field_id, so a same-guard re-completion after a
+    # A genuine second, independent activation at the SAME (unconditional) frame scope
+    # as the first must still be emitted -- the reset clears last_activation_frames the
+    # same way it clears effect_type/field_id, so a same-scope re-completion after a
     # reset is never mistaken for "just a continuation of the first activation".
     writes = [
         ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
@@ -150,22 +250,35 @@ def test_pair_field_effects_two_incompatible_branches_each_get_their_own_entry()
     # pair completes twice, once in each of two mutually exclusive switch cases, with no
     # reset write between them -- each must still be its own activation, attributed only
     # to the trainer(s) reachable in that same case, not both cases' trainers merged.
-    case2 = ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 2")
-    case3 = ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 3")
-    writes = [
-        ("Steven", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_ROOM", ()),
-        ("Steven", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_GRAVITY", case2),
-        ("Steven", "VAR_BATTLE_FIELD_ID", "STATUS_FIELD_GRAVITY", case3),
-    ]
-    trainer_calls = [
-        ("Steven", "TRAINER_STEVEN_DOUBLES", case2),
-        ("Steven", "TRAINER_STEVEN_DOUBLES_LEGENDS", case3),
-    ]
-    out = _pair_field_effects("EverGrandeCity_ChampionsRoom", writes, trainer_calls)
+    # Built via _scan_file rather than hand-typed frames, so the frame/group/branch
+    # values are exactly what production code would produce for this shape.
+    text = (
+        "script Steven{\n"
+        "\tsetvar(VAR_BATTLE_FIELD_EFFECT_TYPE, BATTLE_FIELD_EFFECT_ROOM)\n"
+        "\tswitch(var(VAR_ELITE_4_MODE)){\n"
+        "\t\tcase 2:\n"
+        "\t\t\tsetvar(VAR_BATTLE_FIELD_ID, STATUS_FIELD_GRAVITY)\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN_DOUBLES, Text)\n"
+        "\t\tbreak\n"
+        "\t\tcase 3:\n"
+        "\t\t\tsetvar(VAR_BATTLE_FIELD_ID, STATUS_FIELD_GRAVITY)\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN_DOUBLES_LEGENDS, Text)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("EverGrandeCity_ChampionsRoom", text)
+    out = _pair_field_effects(
+        "EverGrandeCity_ChampionsRoom", scanned["field_writes"], scanned["trainer_calls"]
+    )
     assert len(out) == 2
     by_trainers = {tuple(o["trainers"]): o for o in out}
-    assert by_trainers[("TRAINER_STEVEN_DOUBLES",)]["guard"] == case2[-1]
-    assert by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["guard"] == case3[-1]
+    assert by_trainers[("TRAINER_STEVEN_DOUBLES",)]["guard"] == "switch(var(VAR_ELITE_4_MODE)) case 2"
+    assert (
+        by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["guard"]
+        == "switch(var(VAR_ELITE_4_MODE)) case 3"
+    )
 
 
 def test_battle_events_guard_is_the_actual_defeated_check_not_a_flag():
@@ -322,12 +435,12 @@ def test_join_own_line_else_does_not_touch_an_unrelated_bare_closing_brace():
     assert _join_own_line_else(text).splitlines() == text.splitlines()
 
 
-def test_scan_file_relabels_switch_cases_in_the_guard_path_not_just_the_switch_itself():
+def test_scan_file_relabels_switch_cases_to_distinct_frames_sharing_one_group():
     # Without case-label tracking every case in a switch would share one identical
-    # guard ("switch(EXPR)"), indistinguishable from each other -- exactly the gap that
-    # let EverGrandeCity_ChampionsRoom's Gravity field effect get attributed to every
-    # switch case. Each case's trainerbattle call must carry its OWN guard path,
-    # differing only in the case label, with the switch's own condition text preserved.
+    # frame, indistinguishable from each other -- exactly the gap that let
+    # EverGrandeCity_ChampionsRoom's Gravity field effect get attributed to every switch
+    # case. Each case's trainerbattle call must carry its own frame (own text, own
+    # branch), but all cases of ONE switch share that switch's group id.
     text = (
         "script PoryLabel{\n"
         "\tswitch(var(VAR_ELITE_4_MODE)){\n"
@@ -342,13 +455,15 @@ def test_scan_file_relabels_switch_cases_in_the_guard_path_not_just_the_switch_i
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    calls = {tid: guard_path for _, tid, guard_path in scanned["trainer_calls"]}
-    assert calls["TRAINER_A"] == ("switch(var(VAR_ELITE_4_MODE)) case 0",)
-    assert calls["TRAINER_B"] == ("switch(var(VAR_ELITE_4_MODE)) case 1",)
-    assert calls["TRAINER_A"] != calls["TRAINER_B"]
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    a, b = frames["TRAINER_A"][-1], frames["TRAINER_B"][-1]
+    assert a.text == "switch(var(VAR_ELITE_4_MODE)) case 0"
+    assert b.text == "switch(var(VAR_ELITE_4_MODE)) case 1"
+    assert a.group == b.group  # same switch
+    assert a.branch != b.branch  # different case
 
 
-def test_scan_file_switch_default_label_also_relabels_the_guard_path():
+def test_scan_file_switch_default_label_also_relabels_the_frame():
     text = (
         "script PoryLabel{\n"
         "\tswitch(var(VAR_RESULT)){\n"
@@ -363,13 +478,13 @@ def test_scan_file_switch_default_label_also_relabels_the_guard_path():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    calls = {tid: guard_path for _, tid, guard_path in scanned["trainer_calls"]}
-    assert calls["TRAINER_B"] == ("switch(var(VAR_RESULT)) default",)
+    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    assert frames["TRAINER_B"][-1].text == "switch(var(VAR_RESULT)) default"
 
 
-def test_scan_file_guard_path_is_the_full_ancestor_chain_outermost_first():
-    # guard_path (unlike battle_events' own innermost-only "guard") carries every open
-    # guard, in nesting order -- needed for the prefix/ancestor test _find_chains and
+def test_scan_file_frame_path_is_the_full_ancestor_chain_outermost_first():
+    # frame_path (unlike battle_events' own innermost-only "guard") carries every open
+    # frame, in nesting order -- needed for the compatibility test _find_chains and
     # _pair_field_effects both rely on.
     text = (
         "script PoryLabel{\n"
@@ -384,37 +499,61 @@ def test_scan_file_guard_path_is_the_full_ancestor_chain_outermost_first():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    _, _, guard_path = scanned["trainer_calls"][0]
-    assert guard_path == ("flag(FLAG_SYS_GAME_CLEAR)", "switch(var(VAR_ELITE_4_MODE)) case 2")
+    _, _, frame_path = scanned["trainer_calls"][0]
+    assert [f.text for f in frame_path] == [
+        "flag(FLAG_SYS_GAME_CLEAR)",
+        "switch(var(VAR_ELITE_4_MODE)) case 2",
+    ]
 
 
 def test_find_chains_excludes_mutually_exclusive_switch_cases():
-    # The exact EverGrandeCity_ChampionsRoom_EventScript_Steven shape, reduced: four
-    # switch cases plus an else, five trainerbattle calls, four distinct trainers, none
-    # of them reachable together with any other -- must yield NO chain at all, not a
+    # The exact EverGrandeCity_ChampionsRoom_EventScript_Steven shape: four switch cases
+    # plus an else, five trainerbattle calls, four distinct trainers, none of them
+    # reachable together with any other -- must yield NO chain at all, not a
     # four/five-name one.
-    def case(n):
-        return ("flag(FLAG_SYS_GAME_CLEAR)", f"switch(var(VAR_ELITE_4_MODE)) case {n}")
-
-    trainer_calls = [
-        ("Steven", "TRAINER_STEVEN", case(0)),
-        ("Steven", "TRAINER_STEVEN_LEGENDS", case(1)),
-        ("Steven", "TRAINER_STEVEN_DOUBLES", case(2)),
-        ("Steven", "TRAINER_STEVEN_DOUBLES_LEGENDS", case(3)),
-        ("Steven", "TRAINER_STEVEN", ("!(flag(FLAG_SYS_GAME_CLEAR))",)),
-    ]
-    assert _find_chains("EverGrandeCity_ChampionsRoom", trainer_calls) == []
+    text = (
+        "script Steven{\n"
+        "\tif (flag(FLAG_SYS_GAME_CLEAR)){\n"
+        "\t\tswitch(var(VAR_ELITE_4_MODE)){\n"
+        "\t\t\tcase 0:\n"
+        "\t\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN, Text)\n"
+        "\t\t\tbreak\n"
+        "\t\t\tcase 1:\n"
+        "\t\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN_LEGENDS, Text)\n"
+        "\t\t\tbreak\n"
+        "\t\t\tcase 2:\n"
+        "\t\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN_DOUBLES, Text)\n"
+        "\t\t\tbreak\n"
+        "\t\t\tcase 3:\n"
+        "\t\t\t\ttrainerbattle_no_intro(TRAINER_STEVEN_DOUBLES_LEGENDS, Text)\n"
+        "\t\t\tbreak\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\telse{\n"
+        "\t\ttrainerbattle_no_intro(TRAINER_STEVEN, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("EverGrandeCity_ChampionsRoom", text)
+    assert _find_chains("EverGrandeCity_ChampionsRoom", scanned["trainer_calls"]) == []
 
 
 def test_find_chains_still_flags_a_genuine_sequential_chain():
     # VictoryRoadRework_EventScript_Wally's shape: an unconditional first call, then a
-    # second call nested inside a real `if` -- the second EXTENDS the first's guard path
+    # second call nested inside a real `if` -- the second EXTENDS the first's frame path
     # rather than diverging from it, so this is a genuine reachable-together chain.
-    trainer_calls = [
-        ("Wally", "TRAINER_WALLY_VR_1", ()),
-        ("Wally", "TRAINER_WALLY_VR_2", ("var(VAR_RESULT)",)),
-    ]
-    chains = _find_chains("VictoryRoadRework", trainer_calls)
+    text = (
+        "script Wally{\n"
+        "\ttrainerbattle_single(TRAINER_WALLY_VR_1, Text, Text)\n"
+        "\tif (var(VAR_RESULT)){\n"
+        "\t\ttrainerbattle_rematch(TRAINER_WALLY_VR_2, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("VictoryRoadRework", text)
+    chains = _find_chains("VictoryRoadRework", scanned["trainer_calls"])
     assert chains == [
         {
             "map": "VictoryRoadRework",
@@ -428,15 +567,88 @@ def test_find_chains_random_switch_choice_yields_no_chain():
     # GraniteCave_B2F_EventScript_HitmonStone's shape: `random(3)` then a switch that
     # picks exactly one of three Blackbelts -- only one is ever fought per visit, so
     # this must not read as a three-battle chain.
-    def case(n):
-        return (f"switch(var(VAR_RESULT)) case {n}",)
+    text = (
+        "script HitmonStone{\n"
+        "\tswitch(var(VAR_RESULT)){\n"
+        "\t\tcase 0:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_HITMONSTONE_BLACKBELT_1, Text)\n"
+        "\t\tbreak\n"
+        "\t\tcase 1:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_HITMONSTONE_BLACKBELT_2, Text)\n"
+        "\t\tbreak\n"
+        "\t\tcase 2:\n"
+        "\t\t\ttrainerbattle_no_intro(TRAINER_HITMONSTONE_BLACKBELT_3, Text)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("GraniteCave_B2F", text)
+    assert _find_chains("GraniteCave_B2F", scanned["trainer_calls"]) == []
 
-    trainer_calls = [
-        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_1", case(0)),
-        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_2", case(1)),
-        ("HitmonStone", "TRAINER_HITMONSTONE_BLACKBELT_3", case(2)),
+
+def test_find_chains_a_script_can_emit_two_chains_never_a_merged_one():
+    # No corpus script currently emits more than one chain, so this is the only shape
+    # where clique enumeration and output ordering actually interact -- SYNTHETIC.
+    # `if(A){one}` unconditionally, then `if(B){ if(C){two} else {three} }`: ONE is
+    # compatible with both TWO and THREE (independent siblings, via B's own outer if),
+    # but TWO and THREE are mutually exclusive (siblings of the same if/else under B).
+    # Must yield exactly two chains, [ONE, TWO] and [ONE, THREE] -- never a merged
+    # three-name chain, since {ONE, TWO, THREE} is not a clique at all (TWO-THREE is a
+    # conflicting edge).
+    text = (
+        "script PoryLabel{\n"
+        "\tif (A){\n"
+        "\t\ttrainerbattle_single(TRAINER_ONE, Text, Text)\n"
+        "\t}\n"
+        "\tif (B){\n"
+        "\t\tif (C){\n"
+        "\t\t\ttrainerbattle_single(TRAINER_TWO, Text, Text)\n"
+        "\t\t}\n"
+        "\t\telse{\n"
+        "\t\t\ttrainerbattle_single(TRAINER_THREE, Text, Text)\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    trainer_sets = {tuple(c["trainers"]) for c in chains}
+    assert trainer_sets == {
+        ("TRAINER_ONE", "TRAINER_TWO"),
+        ("TRAINER_ONE", "TRAINER_THREE"),
+    }
+    assert ("TRAINER_ONE", "TRAINER_TWO", "TRAINER_THREE") not in trainer_sets
+
+
+def test_find_chains_three_independent_siblings_give_one_three_name_chain():
+    # SYNTHETIC. Three SEPARATE `if`s, none an else/else-if of another -- all three are
+    # pairwise compatible (each pair diverges at a different group), so they form one
+    # maximal clique, not three separate two-name chains.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (A){\n"
+        "\t\ttrainerbattle_single(TRAINER_ONE, Text, Text)\n"
+        "\t}\n"
+        "\tif (B){\n"
+        "\t\ttrainerbattle_single(TRAINER_TWO, Text, Text)\n"
+        "\t}\n"
+        "\tif (C){\n"
+        "\t\ttrainerbattle_single(TRAINER_THREE, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    assert chains == [
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "trainers": ["TRAINER_ONE", "TRAINER_TWO", "TRAINER_THREE"],
+        }
     ]
-    assert _find_chains("GraniteCave_B2F", trainer_calls) == []
 
 
 def test_trainer_chains_champions_room_no_longer_reports_a_five_name_chain():
@@ -537,3 +749,13 @@ def test_scan_file_tracks_script_context_across_raw_and_poryscript_styles():
             "guard": "!defeated(TRAINER_FOO)",
         }
     ]
+
+
+def test_frame_is_the_namedtuple_scan_file_actually_emits():
+    # A minimal sanity check that _Frame's own shape (text, group, branch) is what this
+    # file's other tests assume when they index .text/.group/.branch on a scanned frame.
+    text = "script PoryLabel{\n\tif (A){\n\t\ttrainerbattle_single(TRAINER_A, Text, Text)\n\t}\n\tend\n}\n"
+    scanned = _scan_file("TestMap", text)
+    _, _, frame_path = scanned["trainer_calls"][0]
+    assert isinstance(frame_path[0], _Frame)
+    assert frame_path[0].text == "A"

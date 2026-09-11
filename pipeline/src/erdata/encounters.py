@@ -2,7 +2,11 @@
 data that Elite Redux's own map scripts encode outside of er-config: field effects
 (weather/terrain/room/monotype-champion) applied before specific trainer battles, the
 gym "battle event" buffs/debuffs each gym registers per undefeated gym trainer, and
-back-to-back trainer battle chains fought with no heal in between.
+trainer battle chains -- 2+ distinct trainers reachable together in one playthrough of a
+script. That used to mean "back-to-back, no heal in between" unconditionally; it no
+longer does -- see the "trainerChains asserts co-occurrence, not adjacency" limitation
+below for what changed and why every row emitted today still happens to satisfy the
+stronger reading anyway.
 
 None of this is proto data -- er-config carries no map scripts at all, so every fact
 here is scraped straight from Poryscript source. Only the .pory source is fetched (not
@@ -68,15 +72,28 @@ corpus:
     Gravity field effect (set at scripts.pory:314,318, only inside two of its switch's
     four cases) was attributed to all four Steven variants regardless, and the same script's
     five mutually exclusive trainerbattle calls (one if/else branch, one 4-way switch)
-    read as a single five-battle "chain". Both functions now use `_is_prefix` over each
-    call's/write's full guard path (`_scan_file`'s `guard_path`, every open guard from
-    outermost to innermost, including switch-case labels -- see the case/default
-    handling above `_scan_file`) to test that, not just the script name: a chain is
-    anchored on each maximal (leaf) guard path with 2+ distinct trainer ids reachable
-    together with it; a field effect's trainer attribution is narrowed to the calls
-    compatible with its own activation's guard path, and a script can now emit more
-    than one field-effect activation for the same effect/field pair when they complete
-    independently in incompatible branches, each keeping only its own guard's trainers.
+    read as a single five-battle "chain".
+    Both functions test this via *frame identity*, not text: `_scan_file` gives every
+    `if`/`switch` a fresh, unique group id when it opens, and every `else`/`else if`
+    inherits its sibling's group (a new branch number within it) rather than starting a
+    group of its own; a `case`/`default` label relabels the switch's own frame in place
+    (same group, a fresh branch per label) since it opens no brace of its own. Two points
+    are `_frames_compatible` -- could both be reached in one playthrough -- unless their
+    recorded frame paths (`_scan_file`'s `frame_path`, outermost first) diverge at frames
+    that share a group but differ in branch, i.e. are two arms of the *same* if/else-if/
+    else chain or switch; diverging at frames from *different* groups (two independently-
+    guarded constructs, neither one the other's sibling) is compatible, not exclusive.
+    `_pair_field_effects` narrows a field effect's trainer attribution to the calls
+    `_frames_compatible` with its own activation's frame path, and a script can emit more
+    than one activation for the same effect/field pair when they complete independently
+    in incompatible branches, each keeping only its own frame path's trainers.
+    `_find_chains` anchors a chain on each *maximal compatible group* of call sites (every
+    member pairwise `_frames_compatible` with every other, extendable by none) with 2+
+    distinct trainer ids in it, found by Bron-Kerbosch clique search over the
+    compatibility graph (see `_maximal_compatible_groups`) -- the "maximal path is a
+    prefix of nothing else" shortcut this replaced stopped working the moment
+    independent siblings became compatible, since two such siblings are each their own
+    maximal path yet still exclude each other from one chain.
     This closed three more cases the same way, confirmed by reading each: GraniteCave_
     B2F_EventScript_HitmonStone's `random(3)`-then-`switch` (scripts.pory:21-32) fights
     exactly one of three Blackbelts, not all three, so it now correctly yields no chain
@@ -92,28 +109,18 @@ corpus:
     switch/case, which only varies the intro/defeat text per difficulty, not the
     battle), unaffected by this fix, since requiring 2+ distinct ids already screens
     that case out.
-    Four honest limitations of the fix itself, the first structural and the rest narrow:
-      * `_is_prefix` (one guard path a prefix of the other) is SUFFICIENT for two points
-        to co-occur in one playthrough, but not NECESSARY, so it is unsound as a general
-        co-occurrence test -- two independent sibling blocks, `if (A) { battle }` then,
-        later, a separate `if (B) { battle }` (not an `else`/`else if` of the first), have
-        guard paths `("A",)` and `("B",)`, neither a prefix of the other, so this code
-        would wrongly treat two genuinely reachable-together battles as mutually
-        exclusive and drop a real chain. This is a defect in the rule, not something
-        proven absent from the corpus: measured directly, of 331 pairs of recorded call
-        sites (field writes and trainerbattle calls) sharing a script, 79 diverge under
-        `_is_prefix` (i.e. are judged mutually exclusive), and every one of those 79 was
-        checked against source and is a genuine mutually-exclusive-branch pair, not an
-        independent-sibling one -- so the *data* emitted today is correct, but by measured
-        absence of the failure case in this corpus, not because the rule itself is sound.
-        Making it sound needs real branch-tree modelling in `_find_chains` in particular
-        (maximal/leaf/ancestor reasoning stops meaning anything once siblings can be
-        compatible) and is its own piece of work, deliberately not done here.
-      * Guard-path compatibility is plain text equality on the recorded condition
-        strings, so two textually-identical but structurally-unrelated conditions in the
-        same script (e.g. two separate, unrelated `if (flag(FLAG_SYS_GAME_CLEAR))`
-        checks) would be treated as compatible when they are not -- not found in the
-        corpus, but not checked for either.
+    An earlier version of this fix used plain text-path prefixing (one guard path a
+    prefix of the other) instead of frame identity, which is SUFFICIENT for co-occurrence
+    but not NECESSARY, so it silently misjudged two independent sibling blocks --
+    `if (A) { battle }` then, later, a separate `if (B) { battle }`, not an `else`/`else
+    if` of the first -- as mutually exclusive. That version's emitted data was still
+    correct: measured directly, of 331 pairs of recorded call sites sharing a script, 79
+    diverged under the text rule, and every one of those 79 was checked against source
+    and was a genuine mutually-exclusive-branch pair, not an independent-sibling one, so
+    the corpus happened not to exercise the gap. Frame identity closes it structurally
+    rather than by that measured absence.
+    Three narrower honest limitations remain, all pre-existing and unrelated to the
+    frame-identity fix:
       * Stacked switch-case labels -- two or more `case`/`default` lines in a row
         sharing one body below them, Poryscript's own fallthrough idiom, distinct from a
         single comma-grouped case list (which the corpus never uses either, see
@@ -123,23 +130,56 @@ corpus:
         (PetalburgCity_Gym/scripts.pory:1838-1839; also LittlerootTown/scripts.pory:
         1983-1984 among 35 occurrences measured directly across the corpus) means a call
         in that body is reachable via *either* label, but would be recorded as guarded on
-        "case 127" alone, silently dropping "case 2" as a way to reach it. Inert today --
-        checked directly: none of the 35 stacked-label bodies in the corpus contains a
-        recorded field write or trainerbattle call -- left unfixed as a known limitation.
+        "case 127" alone, silently dropping "case 2" as a way to reach it -- both a lost
+        branch label and a lost branch number, so both a wrong `guard` string and a
+        wrongly-exclusive frame if a call were ever there. Inert today -- checked
+        directly: none of the 35 stacked-label bodies in the corpus contains a recorded
+        field write or trainerbattle call -- left unfixed as a known limitation.
       * `switch`/`case` is the only non-brace-per-branch construct handled -- Poryscript
         has no loop construct and no nested `switch` in this corpus (both checked
         directly), so this isn't a currently-live gap, but a future one would silently
         behave like an unguarded plain block, same as the multi-line-`if`-header gap
         just above.
+      * Frame identity is deliberately blind to condition *text* -- it decides
+        compatibility purely from group/branch structure and never reads what a
+        condition actually says. That is the fix (it is what makes two unrelated `if`s
+        with the same wording correctly independent instead of an accidental prefix
+        match), but it has a mirror-image cost: two independent, differently-grouped
+        blocks whose conditions are *logically contradictory* (e.g. `if (flag(X))
+        { ... }` and, later, a separate `if (!flag(X)) { ... }`, not an `else` of the
+        first) are called compatible, when they cannot in fact both hold. The
+        text-equality rule this replaced would have caught that specific case (by
+        accident, not by design -- it also missed the independent-siblings case this
+        batch fixes) at the cost of the false exclusions described above. Not found in
+        the corpus, but not checked for either -- text-blindness is the accepted price
+        of the structural fix, not an oversight.
+  - `trainerChains` asserts only that its members are reachable together in one
+    playthrough -- not that they are adjacent, and not that nothing heals the player
+    between them. Under the old text-path-prefix rule this was true anyway, by
+    accident: every member necessarily lay on one nesting lineage, so "reachable
+    together" and "back-to-back" coincided. Frame identity widens who counts as
+    reachable together to include independent siblings, which can sit arbitrarily far
+    apart in a script with anything -- including a `special(HealPlayerParty)` call --
+    in between; nothing here checks for one. Measured directly against the current
+    data: 0 of the 8 emitted chains contain an independent-sibling pair (every member
+    of every current chain lies on a single lineage, i.e. still satisfies the old,
+    stronger reading), so nothing emitted today is actually wrong under either
+    definition -- but the row's *meaning* has genuinely widened, and a future corpus
+    change could emit a technically-correct "chain" whose members are nowhere near
+    each other. This connects to, but does not close, the separately-parked finding
+    that this detector ignores `setflag(FLAG_SYS_DISABLE_AUTOHEAL)` -- that flag marks
+    precisely "back-to-back, no heal in between" in the source, and reading it is what
+    would let the stronger, original definition be restored honestly (by checking for
+    it) rather than by the coincidence this fix just removed. Not done here.
   - `battle_events`' "guard" is only the *innermost* enclosing block's own condition (or
     its negation, for an `else`) -- it is never conjoined with an outer guard from a
     block nesting further out. A `registerbattleevent` inside `if (A) { if (B) { ... } }`
     is recorded as guarded on "B" alone, dropping "A" entirely; the same drop applies to
     a sibling `else`'s negated condition once it sits inside another guard. `fieldEffects`
     has the exact same shape of drop, not a fixed one: `_pair_field_effects` matches
-    trainers against the *full* guard path internally (see its own comment and
-    `_is_prefix`), but the "guard" key it emits is `activation_guard[-1]`, the innermost
-    element only, same convention as battle_events -- both of EverGrandeCity_
+    trainers against the *full* frame path internally (see its own comment and
+    `_frames_compatible`), but the "guard" key it emits is the innermost frame's text
+    only, same convention as battle_events -- both of EverGrandeCity_
     ChampionsRoom's two Gravity rows report `"switch(var(VAR_ELITE_4_MODE)) case 2"` /
     `"case 3"` and silently drop the outer `flag(FLAG_SYS_GAME_CLEAR)` precondition
     (scripts.pory:304) that is also required to reach either case. `trainerChains` has no
@@ -176,6 +216,7 @@ spot-check against the source before relying on one for something solver-critica
 """
 
 import re
+from collections import namedtuple
 
 from erdata.paths import ER_SOURCE
 
@@ -221,6 +262,32 @@ _CASE_RE = re.compile(r"^case\s+(.+?):\s*$")
 _DEFAULT_RE = re.compile(r"^default\s*:\s*$")
 
 _RESET_VALUE = "0"
+
+
+# One open guard, on `_scan_file`'s guard_stack. `text` is what gets emitted (as
+# battle_events' innermost-only "guard", or the last element of a frame path elsewhere).
+# `group` and `branch` are synthetic, never derived from condition text, and are what
+# `_frames_compatible` actually compares: `group` is shared by every arm of one
+# if/else-if/else chain or one switch (a fresh id every time a *new* `if`/`switch`
+# opens; `else`/`else if`/`case`/`default` all inherit the construct they belong to),
+# and `branch` is which arm this frame is -- so two frames sharing a group but
+# differing in branch are, structurally, mutually exclusive; two frames from different
+# groups say nothing about each other either way.
+_Frame = namedtuple("_Frame", ("text", "group", "branch"))
+
+
+# Per open `switch(...)` frame (keyed by guard_stack position -- see _scan_file's own
+# comment on why depth-keyed, defensively, rather than a single variable), the group id
+# handed to every case/default label under it and a running count of how many labels
+# have been seen, each becoming that label's own branch number. `base` is the switch's
+# own condition text, reused to rebuild "switch(EXPR) case N" on every relabel.
+class _SwitchInfo:
+    __slots__ = ("group", "base", "next_branch")
+
+    def __init__(self, group: int, base: str):
+        self.group = group
+        self.base = base
+        self.next_branch = 0
 
 
 # Strips Poryscript `//` line comments and legacy-assembly `@` line comments before any
@@ -296,27 +363,23 @@ def _iter_pory_files():
 # guard_stack *after* this line's own braces are applied (so a call guarded by an
 # `if (...) {` that opens on this same line still sees that guard).
 #
-# `switch_base_at_depth` tracks, per open `switch(...)` frame (keyed by its position in
-# guard_stack), the switch's own condition text -- keyed by depth rather than a single
-# variable defensively, in case a `switch` is ever nested inside another one's still-open
-# frame, though none is in the current corpus (checked directly: at most one switch
-# frame is ever open at a time). Needed because `case N:`/`default:` labels carry no
-# brace of their own (the case body runs straight through to the next label or the
-# switch's closing "}"), so a case label
-# doesn't push a new frame, it *relabels* guard_stack's current top in place (from
-# "switch(EXPR)" to "switch(EXPR) case N", one case superseding the last). Without
-# this, every case in a switch would share one identical guard, indistinguishable from
-# each other -- exactly the gap that let EverGrandeCity_ChampionsRoom's Gravity field
-# effect get attributed to every switch case, not just the two that set it (see
-# _pair_field_effects's own comment).
+# `switch_info_at_depth` tracks, per open `switch(...)` frame (keyed by its position in
+# guard_stack -- depth-keyed rather than a single variable defensively, in case a
+# `switch` is ever nested inside another one's still-open frame, though none is in the
+# current corpus, checked directly: at most one switch frame is ever open at a time),
+# the `_SwitchInfo` that hands out that switch's group id and the next branch number.
+# Needed because `case N:`/`default:` labels carry no brace of their own (the case body
+# runs straight through to the next label or the switch's closing "}"), so a case label
+# doesn't push a new frame, it *relabels* guard_stack's current top in place.
 def _scan_file(map_name: str, text: str) -> dict:
-    field_writes: list[tuple[str, str, str, tuple]] = []  # (script, var, value, guard_path)
+    field_writes: list[tuple[str, str, str, tuple]] = []  # (script, var, value, frame_path)
     battle_events: list[dict] = []
-    trainer_calls: list[tuple[str, str, tuple]] = []  # (script, trainer_id, guard_path)
+    trainer_calls: list[tuple[str, str, tuple]] = []  # (script, trainer_id, frame_path)
 
     current_script: str | None = None
-    guard_stack: list[str | None] = []
-    switch_base_at_depth: dict[int, str] = {}
+    guard_stack: list[_Frame | None] = []
+    switch_info_at_depth: dict[int, _SwitchInfo] = {}
+    next_group = 0
 
     for raw_line in _join_own_line_else(text).splitlines():
         line = _strip_comment(raw_line)
@@ -334,16 +397,26 @@ def _scan_file(map_name: str, text: str) -> dict:
 
         if case_m := _CASE_RE.match(stripped):
             depth = len(guard_stack) - 1
-            if depth in switch_base_at_depth:
-                guard_stack[depth] = f"switch({switch_base_at_depth[depth]}) case {case_m.group(1).strip()}"
+            if depth in switch_info_at_depth:
+                info = switch_info_at_depth[depth]
+                branch, info.next_branch = info.next_branch, info.next_branch + 1
+                guard_stack[depth] = _Frame(
+                    f"switch({info.base}) case {case_m.group(1).strip()}", info.group, branch
+                )
         elif _DEFAULT_RE.match(stripped):
             depth = len(guard_stack) - 1
-            if depth in switch_base_at_depth:
-                guard_stack[depth] = f"switch({switch_base_at_depth[depth]}) default"
+            if depth in switch_info_at_depth:
+                info = switch_info_at_depth[depth]
+                branch, info.next_branch = info.next_branch, info.next_branch + 1
+                guard_stack[depth] = _Frame(f"switch({info.base}) default", info.group, branch)
         elif elif_m := _ELSE_IF_RE.search(line):
-            if guard_stack:
-                guard_stack.pop()
-            guard_stack.append(elif_m.group(1).strip())
+            popped = guard_stack.pop() if guard_stack else None
+            if popped is not None:
+                group, branch = popped.group, popped.branch + 1
+            else:  # see the _ELSE_RE branch below for why popped can be None
+                next_group += 1
+                group, branch = next_group, 0
+            guard_stack.append(_Frame(elif_m.group(1).strip(), group, branch))
             raw_opens -= 1
             raw_closes -= 1
         elif _ELSE_RE.search(line):
@@ -354,29 +427,40 @@ def _scan_file(map_name: str, text: str) -> dict:
             # a fixed-flag guard (Sootopolis's FLAG_BADGE08_GET) and an always-true-when-
             # reached one (the Monotype Champion rooms' "did you say yes" dialogue check)
             # need to be told apart, and a solver can't do that from an opaque "else".
-            # popped can genuinely be None here (falling back to the literal "else"),
-            # and this is not a rare or malformed-input case: measured directly, this
-            # fires 45 times in the corpus. The cause is the multi-line-`if`-header gap
-            # noted in the module docstring -- `_IF_RE` requires the condition and the
-            # opening "{" on one line, so a header split across lines (e.g.
-            # Route116/scripts.pory:506-515) or a single-line condition whose "{" sits on
-            # its own next line (e.g. LavaridgeTown/scripts.pory:657-658) pushes an
-            # unguarded (None) frame instead of the real condition, and this branch's
-            # matching `else` pops that None with nothing to negate. With no antecedent
-            # recovered, the literal "else" is the correct conservative answer -- this
-            # fallback is invisible in the emitted output today only because none of
-            # those 45 blocks currently contains a call this module records, not because
-            # the gap itself is unreachable.
+            # `else`/`else if` inherit the popped frame's group (same construct, a new
+            # branch within it) -- popped can genuinely be None here (falling back to a
+            # fresh, ungrouped frame), and this is not a rare or malformed-input case:
+            # measured directly, this fires 45 times in the corpus. The cause is the
+            # multi-line-`if`-header gap noted in the module docstring -- `_IF_RE`
+            # requires the condition and the opening "{" on one line, so a header split
+            # across lines (e.g. Route116/scripts.pory:506-515) or a single-line
+            # condition whose "{" sits on its own next line (e.g.
+            # LavaridgeTown/scripts.pory:657-658) pushes an unguarded (None) frame
+            # instead of the real condition, and this branch's matching `else` pops that
+            # None with nothing to inherit. With no antecedent recovered, the literal
+            # "else" in a fresh group of its own -- compatible with everything, never
+            # mutually exclusive with anything -- is the correct conservative answer;
+            # this fallback is invisible in the emitted output today only because none
+            # of those 45 blocks currently contains a call this module records, not
+            # because the gap itself is unreachable.
             popped = guard_stack.pop() if guard_stack else None
-            guard_stack.append(f"!({popped})" if popped is not None else "else")
+            if popped is not None:
+                text_, group, branch = f"!({popped.text})", popped.group, popped.branch + 1
+            else:
+                next_group += 1
+                text_, group, branch = "else", next_group, 0
+            guard_stack.append(_Frame(text_, group, branch))
             raw_opens -= 1
             raw_closes -= 1
         elif if_m := _IF_RE.search(line):
-            guard_stack.append(if_m.group(1).strip())
+            next_group += 1
+            guard_stack.append(_Frame(if_m.group(1).strip(), next_group, 0))
             raw_opens -= 1
         elif switch_m := _SWITCH_RE.search(line):
-            switch_base_at_depth[len(guard_stack)] = switch_m.group(1).strip()
-            guard_stack.append(f"switch({switch_m.group(1).strip()})")
+            next_group += 1
+            base = switch_m.group(1).strip()
+            switch_info_at_depth[len(guard_stack)] = _SwitchInfo(next_group, base)
+            guard_stack.append(_Frame(f"switch({base})", next_group, -1))  # branch: no case seen yet
             raw_opens -= 1
 
         for _ in range(max(raw_opens, 0)):  # plain blocks (script Name{, bare {) -- no guard
@@ -384,23 +468,24 @@ def _scan_file(map_name: str, text: str) -> dict:
         for _ in range(max(raw_closes, 0)):
             if guard_stack:
                 guard_stack.pop()
-        if raw_closes > 0:  # drop switch_base entries for any frame(s) just popped
-            for depth in [d for d in switch_base_at_depth if d >= len(guard_stack)]:
-                del switch_base_at_depth[depth]
+        if raw_closes > 0:  # drop switch_info entries for any frame(s) just popped
+            for depth in [d for d in switch_info_at_depth if d >= len(guard_stack)]:
+                del switch_info_at_depth[depth]
 
         if current_script is None:
             continue
 
-        guard = guard_stack[-1] if guard_stack else None
-        # Every *named* (non-None) guard currently open, outermost first -- unlike
+        top = guard_stack[-1] if guard_stack else None
+        guard = top.text if top is not None else None
+        # Every *named* (non-None) frame currently open, outermost first -- unlike
         # `guard` above (battle_events' innermost-only field, see the module
         # docstring's bullet on that gap), this is the full ancestor chain, used to
         # tell whether two calls could both be reached in one playthrough (see
-        # _pair_field_effects/_find_chains's shared _is_prefix helper).
-        guard_path = tuple(g for g in guard_stack if g is not None)
+        # _pair_field_effects/_find_chains's shared _frames_compatible helper).
+        frame_path = tuple(f for f in guard_stack if f is not None)
 
         for var, value in _SETVAR_FIELD_RE.findall(line):
-            field_writes.append((current_script, var, value, guard_path))
+            field_writes.append((current_script, var, value, frame_path))
 
         for event, data0, data1 in _REGISTER_RE.findall(line):
             battle_events.append(
@@ -415,21 +500,32 @@ def _scan_file(map_name: str, text: str) -> dict:
             )
 
         for _suffix, trainer_id in _TRAINERBATTLE_RE.findall(line):
-            trainer_calls.append((current_script, trainer_id, guard_path))
+            trainer_calls.append((current_script, trainer_id, frame_path))
 
     return {"field_writes": field_writes, "battle_events": battle_events, "trainer_calls": trainer_calls}
 
 
-# True iff one guard path is a prefix of the other -- i.e. the shorter path's guards
-# all held on the way to the longer one, so the two points could both be reached along
-# a single execution of the script. Two paths that diverge (neither a prefix of the
-# other, e.g. two different switch cases, or an if's branch vs its else's) never are:
-# that is exactly the "mutually exclusive branches" relationship EverGrandeCity_
-# ChampionsRoom_EventScript_Steven's four switch cases and its if/else are in. Shared
-# by _pair_field_effects and _find_chains -- both need the same "could this trainer
-# call and this other point in the script both happen in one playthrough?" test.
-def _is_prefix(short: tuple, long_: tuple) -> bool:
-    return long_[: len(short)] == short
+# True iff two frame paths (see _Frame) could both be reached along a single execution
+# of the script. Walking outermost-first, a shared frame (same group, same branch) is
+# no information either way, so keep comparing deeper; two frames from the SAME group
+# but a DIFFERENT branch are two arms of one if/else-if/else chain or one switch, so
+# mutually exclusive -- that is exactly the relationship EverGrandeCity_
+# ChampionsRoom_EventScript_Steven's four switch cases and its if/else are in. Two
+# frames from DIFFERENT groups mean the two paths have reached separate, independently-
+# guarded constructs -- neither is the other's sibling, so nothing rules out both
+# holding at once, and this is compatible rather than exclusive (the fix that
+# distinguishes this from the plain-text-prefix rule this replaced -- see the module
+# docstring). Running out of frames on one side with no divergence (one path a strict
+# ancestor of the other) is always compatible. Shared by _pair_field_effects and
+# _find_chains -- both need the same "could this trainer call and this other point in
+# the script both happen in one playthrough?" test.
+def _frames_compatible(a: tuple, b: tuple) -> bool:
+    for frame_a, frame_b in zip(a, b):
+        if frame_a.group != frame_b.group:
+            return True
+        if frame_a.branch != frame_b.branch:
+            return False
+    return True
 
 
 # Pairs VAR_BATTLE_FIELD_EFFECT_TYPE/VAR_BATTLE_FIELD_ID writes within one script into
@@ -438,10 +534,22 @@ def _is_prefix(short: tuple, long_: tuple) -> bool:
 # cleanup writes, not new field effects). A script can activate the same field effect
 # independently more than once -- EverGrandeCity_ChampionsRoom_EventScript_Steven's
 # switch sets STATUS_FIELD_GRAVITY in two DIFFERENT, mutually exclusive cases
-# (scripts.pory:314,318) -- so an activation is emitted whenever both vars are known
-# and the write that completed them isn't just a continuation of the previous
-# activation's own guard scope (`_is_prefix` again): a second completion under an
-# INCOMPATIBLE guard is a second, independent activation, not a duplicate.
+# (scripts.pory:314,318) -- so an activation is emitted whenever both vars are known and
+# the write that completed them isn't just a continuation of the previous activation
+# (`_frames_compatible` again): a second completion under an INCOMPATIBLE frame path is
+# a second, independent activation, not a duplicate. The completing write's OWN frame
+# path is used as that activation's scope, which only stands when the OTHER var's own
+# (earlier, textually-prior) write sits on an ANCESTOR path of the completing one --
+# reaching the completing write then does genuinely imply the other one's condition
+# already held, so there's nothing to combine. If the other write instead sat in an
+# independent sibling block, the completing write's own path would silently drop a real
+# precondition. Not exercised by anything currently emitted -- checked directly: for
+# all 23 activations this function currently produces, the other var's write is on an
+# ancestor path of (or equal to) the completing one, so this simplification holds for
+# the current data; an earlier version of this function instead tried to pick
+# "whichever of the two paths is deeper", which stopped being meaningful once path
+# length no longer implied nesting order (see the module docstring's note on frame
+# identity) and was no more correct against the sibling case than this one is.
 #
 # "trainers" used to be every trainerbattle-family call anywhere in the script,
 # regardless of which branch it was in or whether the branch that set the field effect
@@ -449,40 +557,39 @@ def _is_prefix(short: tuple, long_: tuple) -> bool:
 # have and fieldEffects did, which is exactly how Gravity ended up attributed to
 # TRAINER_STEVEN and TRAINER_STEVEN_LEGENDS (case 0/1, and the pre-Game-Clear else --
 # none of which ever executes the case 2/3 lines that set it). Now only trainer calls
-# whose own guard path is compatible with (a prefix of, or extended from) the
-# activation's guard path are attached. Most of the current 23 fieldEffects entries have
-# only one trainerbattle call in their whole script to begin with (e.g. each of
-# EvergrandeCity_MonoChampRoom_1's 18 rooms, each its own script with one battle) --
-# guard-narrowing can't change those regardless of whether their own guard is
-# conditional, since there is only ever one candidate to attach either way. Exactly two
-# scripts in the current data have 2+ trainerbattle calls behind different guards:
-# EverGrandeCity_ChampionsRoom_EventScript_Steven, where narrowing is what fixes the
-# result, and MossdeepCity_Gym_EventScript_TateAndLiza (scripts.pory:998-1017, three
+# `_frames_compatible` with the activation's own frame path are attached. Most of the
+# current 23 fieldEffects entries have only one trainerbattle call in their whole script
+# to begin with (e.g. each of EvergrandeCity_MonoChampRoom_1's 18 rooms, each its own
+# script with one battle) -- narrowing can't change those regardless of whether their
+# own guard is conditional, since there is only ever one candidate to attach either way.
+# Exactly two scripts in the current data have 2+ trainerbattle calls behind different
+# guards: EverGrandeCity_ChampionsRoom_EventScript_Steven, where narrowing is what fixes
+# the result, and MossdeepCity_Gym_EventScript_TateAndLiza (scripts.pory:998-1017, three
 # calls across three switch cases), where narrowing changes nothing -- not because it
 # only has one call, but because its field-effect activation completes unconditionally
-# at scripts.pory:993-994, *before* the switch even opens (guard path `()`, compatible
-# with every branch), and separately because all three of its calls name the same
-# TRAINER_TATE_AND_LIZA_1 regardless of which case is taken.
+# at scripts.pory:993-994, *before* the switch even opens (an empty frame path,
+# compatible with every branch), and separately because all three of its calls name the
+# same TRAINER_TATE_AND_LIZA_1 regardless of which case is taken.
 def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) -> list[dict]:
     by_script: dict[str, list[tuple[str, str, tuple]]] = {}
-    for script, var, value, guard_path in field_writes:
-        by_script.setdefault(script, []).append((var, value, guard_path))
+    for script, var, value, frame_path in field_writes:
+        by_script.setdefault(script, []).append((var, value, frame_path))
 
     calls_by_script: dict[str, list[tuple[str, tuple]]] = {}
-    for script, trainer_id, guard_path in trainer_calls:
-        calls_by_script.setdefault(script, []).append((trainer_id, guard_path))
+    for script, trainer_id, frame_path in trainer_calls:
+        calls_by_script.setdefault(script, []).append((trainer_id, frame_path))
 
     out = []
     for script, writes in by_script.items():
         effect_type = field_id = None
-        last_activation_guard: tuple | None = None  # None: no open activation
-        for var, value, guard_path in writes:
+        last_activation_frames: tuple | None = None  # None: no open activation
+        for var, value, frame_path in writes:
             if value == _RESET_VALUE:
                 if var == "VAR_BATTLE_FIELD_EFFECT_TYPE":
                     effect_type = None
                 else:
                     field_id = None
-                last_activation_guard = None
+                last_activation_frames = None
                 continue
             if var == "VAR_BATTLE_FIELD_EFFECT_TYPE":
                 effect_type = value
@@ -490,29 +597,21 @@ def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) 
                 field_id = value
             if not (effect_type and field_id):
                 continue
-            if last_activation_guard is not None and _is_prefix(
-                *sorted((guard_path, last_activation_guard), key=len)
-            ):
+            if last_activation_frames is not None and _frames_compatible(frame_path, last_activation_frames):
                 continue  # still the same activation as before, not a new one
-            # Whichever of this write's own guard path or the *other* var's own guard
-            # path (set earlier, possibly shallower -- e.g. VAR_BATTLE_FIELD_EFFECT_TYPE
-            # set unconditionally before the VAR_BATTLE_FIELD_ID write that completes
-            # the pair inside a specific switch case) is deeper is this activation's
-            # true scope; reaching the deeper one already implies the shallower one held.
-            activation_guard = max(guard_path, last_activation_guard or (), key=len)
-            last_activation_guard = activation_guard
+            last_activation_frames = frame_path
             out.append(
                 {
                     "map": map_name,
                     "script": script,
                     "effectType": effect_type,
                     "fieldId": field_id,
-                    "guard": activation_guard[-1] if activation_guard else None,
+                    "guard": frame_path[-1].text if frame_path else None,
                     "trainers": sorted(
                         {
                             tid
-                            for tid, call_guard in calls_by_script.get(script, [])
-                            if _is_prefix(*sorted((call_guard, activation_guard), key=len))
+                            for tid, call_frames in calls_by_script.get(script, [])
+                            if _frames_compatible(call_frames, frame_path)
                         }
                     ),
                 }
@@ -520,31 +619,75 @@ def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) 
     return out
 
 
+# Every maximal set of indices into `entries` (0..n-1) that is pairwise
+# `compat[i][j]`-compatible -- i.e. every maximal clique of the compatibility graph.
+# Plain Bron-Kerbosch, no pivoting: n (recorded call sites sharing one script) is small
+# everywhere in this corpus (checked: at most a handful per script), so the textbook
+# worst-case blowup of the unpivoted algorithm is a non-issue here. `_find_chains` needs
+# genuine maximal cliques, not the "maximal guard path, collect its ancestors" shortcut
+# an earlier version used: that shortcut relied on compatibility being closed under
+# "shares a common ancestor", which held when compatible-or-not was decided by plain
+# text-path prefixing, but stops holding once independent siblings are compatible --
+# two such siblings are each individually "maximal" (neither's path is a prefix of the
+# other's), yet still exclude each other, so anchoring on each separately would either
+# emit the same real chain as two different subsets or silently drop the fact that they
+# exclude each other, depending on how the ancestors were collected. `sorted(p)` below
+# makes traversal order (and so the output order across multiple chains in one script,
+# not currently exercised by any script in this corpus) deterministic between runs.
+def _maximal_compatible_groups(n: int, compat: list) -> list:
+    cliques: list = []
+
+    def expand(r: set, p: set, x: set) -> None:
+        if not p and not x:
+            cliques.append(r)
+            return
+        for v in sorted(p):
+            neighbors = {u for u in range(n) if u != v and compat[v][u]}
+            expand(r | {v}, p & neighbors, x & neighbors)
+            p = p - {v}
+            x = x | {v}
+
+    expand(set(), set(range(n)), set())
+    return cliques
+
+
 # A "chain" is 2+ *distinct* trainer ids reachable together along one execution of the
-# script (see _is_prefix) -- not just 2+ distinct ids anywhere in its text, which is
-# what let EverGrandeCity_ChampionsRoom_EventScript_Steven's four mutually exclusive
-# switch cases plus its if/else (five trainerbattle calls, four distinct trainers) read
-# as a single five-battle chain. Anchored on each *maximal* guard path present (one not
-# itself a prefix of some other path in the script, i.e. a "leaf" of the script's
-# branch tree) -- collecting every call whose guard path is an ancestor of that leaf
-# gives exactly the trainers fought along one playthrough that reaches it, and anchoring
-# only on leaves (not every path) avoids emitting the same chain again as a shorter,
-# redundant prefix of itself.
+# script (see _frames_compatible) -- not just 2+ distinct ids anywhere in its text,
+# which is what let EverGrandeCity_ChampionsRoom_EventScript_Steven's four mutually
+# exclusive switch cases plus its if/else (five trainerbattle calls, four distinct
+# trainers) read as a single five-battle chain. Anchored on each maximal compatible
+# group of call sites (`_maximal_compatible_groups`, every member pairwise compatible
+# with every other, extendable by none) with 2+ distinct trainer ids in it.
+#
+# `seen_id_sequences` is live logic, not defensive padding for a case that can't
+# happen: two mutually exclusive branches that each independently name the same
+# trainer ids in the same order -- e.g. an `if`/`else` where both arms fight the same
+# two trainers -- are two DIFFERENT maximal cliques (their entries' frame paths are
+# pairwise incompatible across the two branches, so they can never merge into one
+# clique), yet produce the identical visible (id, order) sequence. Without the dedup
+# that would emit the same chain row twice, which matters because a chain row carries
+# no guard -- unlike battleEvents/fieldEffects, there is nothing in the emitted shape
+# that could tell two such rows apart, so collapsing them here is the only place it can
+# happen. Measured directly against the current data: 0 of the 761 maximal cliques
+# enumerated across the whole corpus hit this shape, so the dedup has never actually
+# suppressed anything yet -- but the shape itself is real and reachable, not merely
+# hypothetical, and will fire the moment the corpus contains it.
 def _find_chains(map_name: str, trainer_calls: list) -> list[dict]:
     by_script: dict[str, list[tuple[str, tuple]]] = {}
-    for script, trainer_id, guard_path in trainer_calls:
-        by_script.setdefault(script, []).append((trainer_id, guard_path))
+    for script, trainer_id, frame_path in trainer_calls:
+        by_script.setdefault(script, []).append((trainer_id, frame_path))
 
     out = []
     for script, entries in by_script.items():
-        distinct_paths = {guard_path for _, guard_path in entries}
-        leaves = sorted(
-            p for p in distinct_paths if not any(q != p and _is_prefix(p, q) for q in distinct_paths)
-        )
-        for leaf in leaves:
-            ids = [trainer_id for trainer_id, guard_path in entries if _is_prefix(guard_path, leaf)]
-            if len(set(ids)) >= 2:
-                out.append({"map": map_name, "script": script, "trainers": ids})
+        n = len(entries)
+        compat = [[_frames_compatible(a[1], b[1]) for b in entries] for a in entries]
+        seen_id_sequences = set()
+        for clique in _maximal_compatible_groups(n, compat):
+            ids = tuple(entries[i][0] for i in sorted(clique))
+            if len(set(ids)) < 2 or ids in seen_id_sequences:
+                continue
+            seen_id_sequences.add(ids)
+            out.append({"map": map_name, "script": script, "trainers": list(ids)})
     return out
 
 
