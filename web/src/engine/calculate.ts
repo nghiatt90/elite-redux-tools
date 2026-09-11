@@ -281,6 +281,11 @@ interface ComputeStatOptions {
   isWonderRoomActive: boolean
   field: FieldBattleState
   statStageRatios: [number, number][]
+  /** Speed's own self-referential secondary-stat blend (:7202-7207) stage-scales the
+   * primary and adds the blend term, then returns immediately -- skipping :7212-7214's
+   * extraStatLevel application entirely. See applySecondaryStatBlend's own doc for why
+   * this needs a SEPARATE primary value rather than reusing the normal one. */
+  suppressExtraStatLevel?: boolean
 }
 
 /**
@@ -341,7 +346,7 @@ function computeStat(opts: ComputeStatOptions): number {
 
   return calculateBattleStat({
     rawStat: battler.rawStats[stat],
-    extraStatLevel: battler.extraStatLevel[stat] ?? 0,
+    extraStatLevel: opts.suppressExtraStatLevel ? 0 : (battler.extraStatLevel[stat] ?? 0),
     statStage: toInternalStage(battler.statStages[stat] ?? 0),
     // IsUnaware(opponent) -- Unaware makes the OPPONENT ignore THIS battler's stat
     // changes, so it's the opponent's ability that gates this, not the stat owner's
@@ -376,18 +381,61 @@ function computeStat(opts: ComputeStatOptions): number {
 }
 
 /**
- * CalculateStat's cross-stat blend (:7213-7220): each OTHER stat named in
- * secondaryStat contributes `floor(thatStat'sFullValue * percent / 100)`, added on
- * top of the primary stat's own fully-scaled value -- `thatStat'sFullValue` is
- * computed the same way as the primary (stat-stage scaling, extraStatLevel, onStat
- * hooks all included, matching the C's own recursive CalculateStat call), just for
- * a different stat key. `computeOther` is the caller's own computeStat closure so
- * this stays agnostic to which battler/move/crit context it's being called in.
+ * CalculateStat's cross-stat blend (:7196-7200; the ChosenStat doc in
+ * dispatchCalc.ts cited the wrong range too -- fixed alongside this one): each OTHER
+ * stat named in secondaryStat contributes `floor(thatStat'sFullValue * percent /
+ * 100)`, added on top of the primary stat's own fully-scaled value --
+ * `thatStat'sFullValue` is computed the same way as the primary (stat-stage scaling,
+ * extraStatLevel, onStat hooks all included, matching the C's own recursive
+ * CalculateStat call), just for a different stat key. `computeOther` is the caller's
+ * own computeStat closure so this stays agnostic to which battler/move/crit context
+ * it's being called in.
+ *
+ * `primaryStatKey` mirrors the C's own `FILTER(i != statEnum)` (:7197): the primary
+ * stat's own entry in `secondaryStat` (if any) is skipped by the general loop below,
+ * not blended in a second time. Callers must pass the POST-Wonder-Room-swap key (i.e.
+ * run it through wonderRoomStatSwap first), matching `statEnum`'s own value at :7197
+ * -- C reassigns `statEnum` for the swap at :7111-7116, before this filter runs.
+ *
+ * Speed is the one key where a same-stat entry is NOT simply dropped, and this is a
+ * LIVE scenario, not a latent one -- an earlier version of this comment claimed no
+ * live scenario ever had `stat === primaryStatKey` true, which stopped being correct
+ * the moment this file started skipping the entry unconditionally rather than not
+ * skipping anything at all (see git history: no filter existed before this one).
+ * CalculateStat's self-buff branch (:7192-7194, `secondaryStat[statEnum]`, the
+ * always-0 `secondaryStatPercent` above) explicitly EXCLUDES STAT_SPEED
+ * (`statEnum != STAT_SPEED`), so a Speed-primary calculation never gets that ratio
+ * boost -- instead, :7202-7207 gives Speed its own separate branch: stage-scale the
+ * primary WITHOUT extraStatLevel, add `secondaryStat[STAT_SPEED]` percent of Speed's
+ * own fully-scaled value, and return immediately, skipping :7212-7214's
+ * extraStatLevel step entirely. Reachable today via Momentum (onChooseOffensiveStat:
+ * `statToUse = 'spe'` on a contact move) plus Speed Force (`secondaryStat.spe += 20`
+ * on a contact move) both firing on the same hit. By id, not display name -- this
+ * project's species data has distinct entries sharing a display name, and an earlier
+ * count of this census was taken by name, silently merging forms: SPECIES_SKARMORY_
+ * MEGA_REDUX (not base Skarmory) and SPECIES_ELECTRODE_HISUIAN (not base Electrode)
+ * are the two that actually carry both, alongside SPECIES_ZIGZAGOON, SPECIES_
+ * ZEBSTRIKA, SPECIES_WATTREL and SPECIES_KILOWATTREL. Blur/Elude (onChooseDefensiveStat,
+ * `statToUse = 'spe'`) plus Sleek Scales (`secondaryStat.spe += 15`, APPLY_ON_TARGET)
+ * reach the same branch on the DEFENSE side too -- code-reachable, but not currently
+ * data-reachable: Sleek Scales belongs to exactly one species, Garchomp, which has
+ * neither Blur nor Elude, and none of the 21 species with Blur or Elude have Sleek
+ * Scales. `computePrimaryWithoutExtraStatLevel` exists because `primary` alone
+ * (already fully scaled, extraStatLevel included) is the WRONG value for this branch
+ * -- see computeAttackStat/computeDefenseStat's call sites for how it's built
+ * (computeStat with `suppressExtraStatLevel: true`).
  */
-function applySecondaryStatBlend(primary: number, secondaryStat: Partial<Record<BattleStatKey, number>>, computeOther: (stat: BattleStatKey) => number): number {
-  let total = primary
+function applySecondaryStatBlend(
+  primary: number,
+  secondaryStat: Partial<Record<BattleStatKey, number>>,
+  computeOther: (stat: BattleStatKey) => number,
+  primaryStatKey: BattleStatKey,
+  computePrimaryWithoutExtraStatLevel: () => number,
+): number {
+  const speedPercent = primaryStatKey === 'spe' ? secondaryStat.spe : undefined
+  let total = speedPercent ? computePrimaryWithoutExtraStatLevel() + idiv(computeOther('spe') * speedPercent, 100) : primary
   for (const [stat, percent] of Object.entries(secondaryStat) as [BattleStatKey, number][]) {
-    if (!percent) continue
+    if (!percent || stat === primaryStatKey) continue
     total += idiv(computeOther(stat) * percent, 100)
   }
   return total
@@ -440,6 +488,20 @@ function computeAttackStat(
     computeStat({ battler: statBattler, opponent: statOpponent, stat: atkStat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: field.isWonderRoomActive, field, statStageRatios }),
     atkSecondaryStat,
     (stat) => computeStat({ battler: statBattler, opponent: statOpponent, stat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: field.isWonderRoomActive, field, statStageRatios }),
+    wonderRoomStatSwap(atkStat, field.isWonderRoomActive),
+    () =>
+      computeStat({
+        battler: statBattler,
+        opponent: statOpponent,
+        stat: atkStat,
+        move,
+        isAttackRole: true,
+        isCrit: forcedCrit,
+        isWonderRoomActive: field.isWonderRoomActive,
+        field,
+        statStageRatios,
+        suppressExtraStatLevel: true,
+      }),
   )
 
   const isGhostDefenderInFog = defender.types.includes('GHOST') && field.weather === 'FOG'
@@ -483,6 +545,20 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     defSecondaryStat,
     (stat) =>
       computeStat({ battler: defender, opponent: attacker, stat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: scenario.field.isWonderRoomActive, field: scenario.field, statStageRatios }),
+    wonderRoomStatSwap(defStat, scenario.field.isWonderRoomActive),
+    () =>
+      computeStat({
+        battler: defender,
+        opponent: attacker,
+        stat: defStat,
+        move,
+        isAttackRole: false,
+        isCrit: noPositive,
+        isWonderRoomActive: scenario.field.isWonderRoomActive,
+        field: scenario.field,
+        statStageRatios,
+        suppressExtraStatLevel: true,
+      }),
   )
 
   const finalDef = calcDefenseStatModifiers(rawDefStat, {

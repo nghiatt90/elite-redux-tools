@@ -868,7 +868,7 @@ describe('calculateMoveDamage -- abilityOn scenario toggle drives Flash Fire (sr
   })
 })
 
-describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat blend, battle_util.c:7213-7229)', () => {
+describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat blend, battle_util.c:7196-7207)', () => {
   it('Juggernaut adds 20% of Def into the Atk calc for a contact move (Tackle)', async () => {
     await import('./abilities/impl/index')
     const withoutJuggernaut = calculateMoveDamage(scenario({ move: moveData('MOVE_TACKLE') }))
@@ -876,6 +876,75 @@ describe('calculateMoveDamage -- secondary-stat blend (CalculateStat cross-stat 
       scenario({ move: moveData('MOVE_TACKLE'), attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_JUGGERNAUT', innates: [null, null, null] } }) }),
     )
     expect(withJuggernaut.rolls[15]).toBeGreaterThan(withoutJuggernaut.rolls[15])
+  })
+
+  it('Momentum + Speed Force: a Speed-primary attacker also blending Speed into itself keeps the contribution (battle_util.c:7202-7207)', async () => {
+    // Momentum (onChooseOffensiveStat) makes a contact move use Speed as the
+    // attacking stat; Speed Force (secondary-stat blend) adds 20% of Speed on top of
+    // whatever the attacking stat already is. Both fire on the same contact move --
+    // SPECIES_SKARMORY_MEGA_REDUX carries both in the real census (a distinct entry
+    // from base Skarmory, which this test builds instead; the ability slots below are
+    // injected directly, so which species actually carries the pairing in the real
+    // data doesn't affect this test's own arithmetic). This hits CalculateStat's
+    // same-stat branch (:7202-7207), not the general cross-stat loop (:7196-7200):
+    // `stat === primaryStatKey` is true here (both are 'spe'), so a version of
+    // applySecondaryStatBlend that only mirrors FILTER(i != statEnum) without also
+    // modelling :7202-7207 would drop this contribution entirely.
+    await import('./abilities/impl/index')
+    const withoutSpeedForce = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_MOMENTUM', innates: [null, null, null] } }),
+      }),
+    )
+    const withSpeedForce = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_SKARMORY', { abilitySlots: { ability: 'ABILITY_MOMENTUM', innates: ['ABILITY_SPEED_FORCE', null, null] } }),
+      }),
+    )
+    expect(withSpeedForce.rolls[15]).toBeGreaterThan(withoutSpeedForce.rolls[15])
+  })
+
+  it('the same-stat Speed blend skips extraStatLevel on the primary term -- adding Speed Force can LOWER the stat when extraStatLevel is active', async () => {
+    // Pins the specific thing a naive fix could get wrong: reusing the ordinary,
+    // fully-scaled `primary` (extraStatLevel included) for this branch instead of
+    // the early-return's own extraStatLevel-free value (:7202-7207 returns before
+    // :7212-7214 ever runs).
+    //
+    // Skarmory's raw Speed (species.json base 90, level 100, neutral nature, 31 IV, 0
+    // EV): floor((2*90+31)*100/100)+5 = 216, unaffected by stat stage at neutral
+    // (ratio 1/1). With extraStatLevel.spe = 5 and Momentum alone (no Speed Force,
+    // so this never reaches :7202-7207), CalculateStat's ordinary tail applies in
+    // full: 216 + floor(216/5)*5 = 431. With Speed Force also present, the same-stat
+    // branch fires instead: the primary term is 216 (extraStatLevel skipped), plus
+    // 20% of the recursively-computed "other" Speed value -- which DOES get
+    // extraStatLevel, so it's the same 431 -- floor(431*20/100) = 86, giving
+    // 216 + 86 = 302. 302 < 431: adding Speed Force paradoxically LOWERS the
+    // attacking stat here. A faithfully-reproduced quirk of the source's early
+    // return, not a bug in the port -- see applySecondaryStatBlend's own doc.
+    // Comparing rolls[15] directly, holding move/defender/everything else fixed,
+    // pins this exact direction without hand-deriving the full damage formula.
+    await import('./abilities/impl/index')
+    const momentumOnly = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_SKARMORY', {
+          abilitySlots: { ability: 'ABILITY_MOMENTUM', innates: [null, null, null] },
+          extraStatLevel: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 5 },
+        }),
+      }),
+    )
+    const momentumAndSpeedForce = calculateMoveDamage(
+      scenario({
+        move: moveData('MOVE_TACKLE'),
+        attacker: battler('SPECIES_SKARMORY', {
+          abilitySlots: { ability: 'ABILITY_MOMENTUM', innates: ['ABILITY_SPEED_FORCE', null, null] },
+          extraStatLevel: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 5 },
+        }),
+      }),
+    )
+    expect(momentumAndSpeedForce.rolls[15]).toBeLessThan(momentumOnly.rolls[15])
   })
 })
 

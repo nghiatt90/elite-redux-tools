@@ -47,7 +47,7 @@ export interface CalcStatInputs {
   isCrit: boolean
   /** True when this call is computing the ATTACKER's stat (CalcAttackStat's role),
    * false for the DEFENDER's (CalcDefenseStat's role) -- drives which direction a
-   * crit ignores stat stages in (:7205-7208). */
+   * crit ignores stat stages in (:7184-7187). */
   isAttackRole: boolean
   benefitsFromStatBuffs: boolean
   /** Per-stat pre-modifier, applied to rawStat before ability hooks or stat stages --
@@ -61,7 +61,7 @@ export interface CalcStatInputs {
   statStageRatios: [number, number][]
 }
 
-/** CalculateStat, src/battle_util.c:7129-7241 (the non-recursive core; STAT_HP and
+/** CalculateStat, src/battle_util.c:7105-7217 (the non-recursive core; STAT_HP and
  * STAT_SPEED's own raw-stat derivation are the caller's responsibility -- this
  * function starts from `rawStat` already selected). */
 export function calculateBattleStat(inputs: CalcStatInputs): number {

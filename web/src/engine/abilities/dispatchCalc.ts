@@ -650,7 +650,7 @@ type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse
  * percentage-of-another-stat bonus keyed by which OTHER stat contributes (e.g.
  * Juggernaut's `{ def: 20 }` on a contact move) -- see calculate.ts's
  * applySecondaryStatBlend for how these percentages get folded into the final
- * value (CalculateStat, :7213-7229). */
+ * value (CalculateStat, :7196-7207). */
 export interface ChosenStat {
   statToUse: BattleStatKey
   secondaryStat: Partial<Record<BattleStatKey, number>>
