@@ -489,13 +489,14 @@ def test_build_writes_encounters_json(tmp_path, monkeypatch):
 
     emit_mod.build()
     encounters = json.loads((tmp_path / paths_mod.game_version() / "encounters.json").read_bytes())
-    assert set(encounters) == {"fieldEffects", "battleEvents", "trainerChains"}
+    assert set(encounters) == {"fieldEffects", "battleEvents", "trainerChains", "tagBattles"}
     assert len(encounters["fieldEffects"]) > 0
 
     meta = json.loads((tmp_path / paths_mod.game_version() / "meta.json").read_bytes())
     assert meta["counts"]["fieldEffects"] == len(encounters["fieldEffects"])
     assert meta["counts"]["battleEvents"] == len(encounters["battleEvents"])
     assert meta["counts"]["trainerChains"] == len(encounters["trainerChains"])
+    assert meta["counts"]["tagBattles"] == len(encounters["tagBattles"])
 
 
 def test_emit_is_deterministic(tmp_path, monkeypatch):

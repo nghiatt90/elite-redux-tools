@@ -4,6 +4,7 @@ from erdata.encounters import (
     _Frame,
     _find_chains,
     _frames_compatible,
+    _iter_script_files,
     _join_own_line_else,
     _pair_field_effects,
     _scan_file,
@@ -11,14 +12,15 @@ from erdata.encounters import (
     scrape_encounters,
 )
 
-# Scraping every data/maps/*/scripts.pory is the slowest fixture in this file by a wide
-# margin; computed once and reused, same as test_emit.py does for ability_hooks_to_dict().
+# Scraping every data/maps/*/scripts.pory and data/scripts/*.inc is the slowest fixture
+# in this file by a wide margin; computed once and reused, same as test_emit.py does
+# for ability_hooks_to_dict().
 _ENCOUNTERS = scrape_encounters()
 
 
 def test_encounters_dict_is_json_serializable():
     json.dumps(_ENCOUNTERS)
-    assert set(_ENCOUNTERS) == {"fieldEffects", "battleEvents", "trainerChains"}
+    assert set(_ENCOUNTERS) == {"fieldEffects", "battleEvents", "trainerChains", "tagBattles"}
 
 
 def test_strip_comment_handles_poryscript_and_raw_asm_styles():
@@ -75,7 +77,7 @@ def test_frames_compatible_if_else_pair_is_exclusive():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     assert not _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
 
 
@@ -96,7 +98,7 @@ def test_frames_compatible_two_switch_cases_are_exclusive():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     assert not _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
 
 
@@ -115,7 +117,7 @@ def test_frames_compatible_ancestor_and_descendant_are_compatible():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     assert _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
 
 
@@ -140,7 +142,7 @@ def test_frames_compatible_two_independent_sibling_blocks_are_compatible():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     assert _frames_compatible(frames["TRAINER_A"], frames["TRAINER_B"])
 
 
@@ -163,7 +165,12 @@ def test_find_chains_two_independent_sibling_ifs_yield_a_real_chain():
     scanned = _scan_file("TestMap", text)
     chains = _find_chains("TestMap", scanned["trainer_calls"])
     assert chains == [
-        {"map": "TestMap", "script": "PoryLabel", "trainers": ["TRAINER_A", "TRAINER_B"]}
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "trainers": ["TRAINER_A", "TRAINER_B"],
+            "healFree": False,
+        }
     ]
 
 
@@ -455,7 +462,7 @@ def test_scan_file_relabels_switch_cases_to_distinct_frames_sharing_one_group():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     a, b = frames["TRAINER_A"][-1], frames["TRAINER_B"][-1]
     assert a.text == "switch(var(VAR_ELITE_4_MODE)) case 0"
     assert b.text == "switch(var(VAR_ELITE_4_MODE)) case 1"
@@ -478,7 +485,7 @@ def test_scan_file_switch_default_label_also_relabels_the_frame():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    frames = {tid: frame_path for _, tid, frame_path in scanned["trainer_calls"]}
+    frames = {tid: frame_path for _, tid, frame_path, _heal_disabled in scanned["trainer_calls"]}
     assert frames["TRAINER_B"][-1].text == "switch(var(VAR_RESULT)) default"
 
 
@@ -499,7 +506,7 @@ def test_scan_file_frame_path_is_the_full_ancestor_chain_outermost_first():
         "}\n"
     )
     scanned = _scan_file("TestMap", text)
-    _, _, frame_path = scanned["trainer_calls"][0]
+    _, _, frame_path, _heal_disabled = scanned["trainer_calls"][0]
     assert [f.text for f in frame_path] == [
         "flag(FLAG_SYS_GAME_CLEAR)",
         "switch(var(VAR_ELITE_4_MODE)) case 2",
@@ -559,6 +566,7 @@ def test_find_chains_still_flags_a_genuine_sequential_chain():
             "map": "VictoryRoadRework",
             "script": "Wally",
             "trainers": ["TRAINER_WALLY_VR_1", "TRAINER_WALLY_VR_2"],
+            "healFree": False,  # this synthetic script never touches FLAG_SYS_DISABLE_AUTOHEAL
         }
     ]
 
@@ -647,6 +655,7 @@ def test_find_chains_three_independent_siblings_give_one_three_name_chain():
             "map": "TestMap",
             "script": "PoryLabel",
             "trainers": ["TRAINER_ONE", "TRAINER_TWO", "TRAINER_THREE"],
+            "healFree": False,
         }
     ]
 
@@ -756,6 +765,191 @@ def test_frame_is_the_namedtuple_scan_file_actually_emits():
     # file's other tests assume when they index .text/.group/.branch on a scanned frame.
     text = "script PoryLabel{\n\tif (A){\n\t\ttrainerbattle_single(TRAINER_A, Text, Text)\n\t}\n\tend\n}\n"
     scanned = _scan_file("TestMap", text)
-    _, _, frame_path = scanned["trainer_calls"][0]
+    _, _, frame_path, _heal_disabled = scanned["trainer_calls"][0]
     assert isinstance(frame_path[0], _Frame)
     assert frame_path[0].text == "A"
+
+
+def test_scan_file_bare_trainerbattle_opcode_captures_the_second_argument():
+    # Modeled on MossdeepCity_SpaceCenter_2F/scripts.pory:355: the bare `trainerbattle`
+    # opcode (no _single/_double/etc. suffix) takes a battle-mode constant FIRST and the
+    # real trainer id SECOND, unlike every suffixed variant. Before _BARE_TRAINERBATTLE_RE
+    # existed, _TRAINERBATTLE_RE's own `(\w*)` suffix group matched this shape too and
+    # captured the mode constant as if it were the trainer -- and since re.findall never
+    # returns overlapping matches, never captured the real trainer id at all.
+    text = (
+        "script PoryLabel{\n"
+        "\ttrainerbattle TRAINER_BATTLE_SET_TRAINER_A, TRAINER_MAXIE_MOSSDEEP, 0, Text, Text\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    ids = [tid for _, tid, _fp, _hd in scanned["trainer_calls"]]
+    assert ids == ["TRAINER_MAXIE_MOSSDEEP"]
+
+
+def test_scan_file_records_starttagbattle_as_a_tag_battle_not_a_trainer_call():
+    # Modeled on DewfordTown_Gym/scripts.pory:572. starttagbattle names two trainer ids
+    # but must never contribute to trainer_calls/trainerChains -- these are doubles
+    # battles, outside what the plan's simulator will ever model, and folding them into
+    # trainerChains as if they were singles is exactly the bug that once produced bogus
+    # six-entry chain rows (see the module docstring).
+    text = (
+        "script PoryLabel{\n"
+        "\tif (var(VAR_RESULT)){\n"
+        "\t\tstarttagbattle(TRAINER_LILITH, TRAINER_BRENDEN, TAG_TEAM_BRENDEN_LILITH, 0, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    assert scanned["trainer_calls"] == []
+    assert scanned["tag_battles"] == [
+        {
+            "map": "TestMap",
+            "script": "PoryLabel",
+            "trainers": ["TRAINER_LILITH", "TRAINER_BRENDEN"],
+            "guard": "var(VAR_RESULT)",
+        }
+    ]
+
+
+def test_find_chains_heal_free_true_when_flag_brackets_every_member():
+    # Modeled on Route111_EventScript_BattleWinstrates: setflag before all members,
+    # clearflag after.
+    text = (
+        "script PoryLabel{\n"
+        "\tsetflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\tclearflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    assert chains[0]["healFree"] is True
+
+
+def test_find_chains_heal_free_true_even_when_the_flag_is_set_after_the_first_member():
+    # Modeled on SootopolisCity_Gym_1F/scripts.pory:545-549: the flag is set AFTER the
+    # first battle in the sequence, so the first member's own state is False, not True
+    # -- irrelevant to whether the chain is heal-free, since there is nothing earlier in
+    # the chain for it to matter against.
+    text = (
+        "script PoryLabel{\n"
+        "\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\tsetflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\ttrainerbattle_no_intro(TRAINER_C, Text)\n"
+        "\tclearflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    assert chains[0]["trainers"] == ["TRAINER_A", "TRAINER_B", "TRAINER_C"]
+    assert chains[0]["healFree"] is True
+
+
+def test_find_chains_heal_free_false_when_a_later_member_is_missing_the_flag():
+    text = (
+        "script PoryLabel{\n"
+        "\tsetflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\ttrainerbattle_no_intro(TRAINER_A, Text)\n"
+        "\tclearflag(FLAG_SYS_DISABLE_AUTOHEAL)\n"
+        "\ttrainerbattle_no_intro(TRAINER_B, Text)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    chains = _find_chains("TestMap", scanned["trainer_calls"])
+    assert chains[0]["healFree"] is False
+
+
+def test_scan_file_heal_disabled_resets_at_a_new_script_boundary():
+    # FLAG_SYS_DISABLE_AUTOHEAL is a real, global game-state flag, but tracked per
+    # script here -- a setflag in one script must not leak into a later, separate
+    # script's own calls.
+    text = (
+        "ScriptA::\n"
+        "\tsetflag FLAG_SYS_DISABLE_AUTOHEAL\n"
+        "\ttrainerbattle_single TRAINER_A, Text, Text\n"
+        "\tend\n"
+        "\n"
+        "ScriptB::\n"
+        "\ttrainerbattle_single TRAINER_B, Text, Text\n"
+        "\tend\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    heal_by_id = {tid: hd for _, tid, _fp, hd in scanned["trainer_calls"]}
+    assert heal_by_id["TRAINER_A"] is True
+    assert heal_by_id["TRAINER_B"] is False
+
+
+def test_iter_script_files_includes_data_scripts_inc():
+    paths = list(_iter_script_files())
+    assert any(p.name == "trainer_hill.inc" for p in paths)
+    assert any(p.name == "scripts.pory" for p in paths)
+
+
+def test_trainer_hill_bare_trainerbattle_is_captured_with_the_inc_files_own_stem_as_map():
+    # data/scripts/trainer_hill.inc:67 -- widening the scan beyond data/maps/ surfaces
+    # this real bare-trainerbattle occurrence; "map" for a shared script is the source
+    # .inc file's own stem, since it has no map of its own.
+    path = next(p for p in _iter_script_files() if p.name == "trainer_hill.inc")
+    text = path.read_text(encoding="utf-8")
+    scanned = _scan_file("trainer_hill", text)
+    ids = {tid for _, tid, _fp, _hd in scanned["trainer_calls"]}
+    assert "TRAINER_PHILLIP" in ids
+    assert "TRAINER_BATTLE_HILL" not in ids
+
+
+def test_trainer_chains_heal_free_matches_source_for_every_current_chain():
+    # Re-derived against source for all 8, not spot-checked -- 7 of the 8 chains sit in
+    # one of the 5 files that use FLAG_SYS_DISABLE_AUTOHEAL and are cleanly bracketed;
+    # VictoryRoadRework never touches the flag at all.
+    expected = {
+        (
+            "MossdeepCity_SpaceCenter_2F",
+            "MossdeepCity_SpaceCenter_2F_EventScript_BattleThreeMagmaGrunts",
+        ): True,
+        ("Route111", "Route111_EventScript_BattleWinstrates"): True,
+        ("SkyPillar_Outside", "SkyPillar_Outside_Text_Gauntlet"): True,
+        ("SlateportCity_OceanicMuseum_2F", "SlateportCity_OceanicMuseum_2F_EventScript_CaptStern"): True,
+        ("SootopolisCity_Gym_1F", "SootopolisCity_Gym_EventScript_TriggerBottomBattle"): True,
+        ("SootopolisCity_Gym_1F", "SootopolisCity_Gym_EventScript_TriggerMiddleBattle"): True,
+        ("SootopolisCity_Gym_1F", "SootopolisCity_Gym_EventScript_TriggerTopBattle"): True,
+        ("VictoryRoadRework", "VictoryRoadRework_EventScript_Wally"): False,
+    }
+    actual = {(c["map"], c["script"]): c["healFree"] for c in _ENCOUNTERS["trainerChains"]}
+    assert actual == expected
+
+
+def test_tag_battles_dewford_brenden_and_lilith():
+    tag = next(
+        t
+        for t in _ENCOUNTERS["tagBattles"]
+        if t["map"] == "DewfordTown_Gym" and t["script"] == "DewfordTown_Gym_EventScript_BrendenAndLilith"
+    )
+    assert tag["trainers"] == ["TRAINER_LILITH", "TRAINER_BRENDEN"]
+    assert tag["guard"] == "var(VAR_RESULT)"
+
+
+def test_tag_battles_sootopolis_juan_spans_two_scripts_as_two_separate_rows():
+    # SootopolisCity_Gym_1F_EventScript_Juan's starttagbattle continues into
+    # Juan_Battle_2 on a win (its own trailing "next script" argument) -- this module
+    # does not follow that link, so the two battles show up as two independent rows,
+    # one per script, not merged into one.
+    juan_related = [
+        t
+        for t in _ENCOUNTERS["tagBattles"]
+        if t["map"] == "SootopolisCity_Gym_1F" and "WALLACE" in t["trainers"][1]
+    ]
+    scripts = {t["script"] for t in juan_related if t["trainers"][0] in ("TRAINER_JUAN_1", "TRAINER_JUAN_5")}
+    assert "SootopolisCity_Gym_1F_EventScript_Juan" in scripts
+    assert "SootopolisCity_Gym_1F_EventScript_Juan_Battle_2" in scripts
+
+
+def test_tag_battles_total_count():
+    assert len(_ENCOUNTERS["tagBattles"]) == 26

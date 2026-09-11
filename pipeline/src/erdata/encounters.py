@@ -1,17 +1,33 @@
-"""Scrape eliteredux-source's data/maps/**/scripts.pory for the per-battle environment
-data that Elite Redux's own map scripts encode outside of er-config: field effects
-(weather/terrain/room/monotype-champion) applied before specific trainer battles, the
-gym "battle event" buffs/debuffs each gym registers per undefeated gym trainer, and
-trainer battle chains -- 2+ distinct trainers reachable together in one playthrough of a
-script. That used to mean "back-to-back, no heal in between" unconditionally; it no
-longer does -- see the "trainerChains asserts co-occurrence, not adjacency" limitation
-below for what changed and why every row emitted today still happens to satisfy the
-stronger reading anyway.
+"""Scrape eliteredux-source's data/maps/**/scripts.pory and data/scripts/*.inc for the
+per-battle environment data that Elite Redux's own map scripts encode outside of
+er-config: field effects (weather/terrain/room/monotype-champion) applied before
+specific trainer battles, the gym "battle event" buffs/debuffs each gym registers per
+undefeated gym trainer, trainer battle chains -- 2+ distinct trainers reachable together
+in one playthrough of a script -- and tag (doubles) battles, recorded separately as
+their own kind rather than folded into chains (see that section's own comment). A
+chain used to mean "back-to-back, no heal in between" unconditionally; it no longer
+does -- see the "trainerChains asserts co-occurrence, not adjacency" limitation below
+for what changed, and "healFree" for how the no-heal claim is still made, honestly,
+per row instead.
 
 None of this is proto data -- er-config carries no map scripts at all, so every fact
-here is scraped straight from Poryscript source. Only the .pory source is fetched (not
-the compiled .inc bytecode, which doesn't exist in this repo -- it's generated at ROM
-build time); see sources.lock.json's sparse_paths, widened to include "data" for this.
+here is scraped straight from Poryscript/raw-assembly source. Only *source* is fetched:
+not the Poryscript compiler's own generated `.inc` companion of each `scripts.pory`
+(e.g. a would-be data/maps/SomeMap/scripts.inc), which doesn't exist in this repo -- it
+is generated at ROM build time, same as the compiled .inc bytecode this sentence
+originally meant. `data/scripts/*.inc` is a DIFFERENT thing entirely, despite the same
+extension: 67 files of hand-authored raw pokeemerald assembly SOURCE, shared scripts not
+tied to any one map (e.g. the Gabby-and-Ty interview sequence, the Trainer Hill
+placeholder battle), version-controlled in eliteredux-source itself and fetched the
+same way data/maps/ is -- see sources.lock.json's sparse_paths, widened to include
+"data" for both. Widening this module's own scan to include it (previously data/maps/
+only) added 0 new fieldEffects/battleEvents/trainerChains/tagBattles entries, measured
+directly: none of its 67 files contain Poryscript's `if`/`switch` brace syntax at all
+(checked directly -- raw assembly has no equivalent), and the one file that does
+contain a real trainerbattle call name relevant to this module
+(data/scripts/trainer_hill.inc) surfaces a single non-chain-forming battle, the same
+shape as the bare-`trainerbattle`-opcode fix below already fixed twice over in the
+map corpus. A real, measured null result, not an unmeasured assumption of one.
 
 The corpus mixes two authoring styles left over from the project's history: legacy raw
 pokeemerald assembly inside `raw \\`...\\`` blocks (bare labels, comma-separated opcode
@@ -154,23 +170,66 @@ corpus:
         the corpus, but not checked for either -- text-blindness is the accepted price
         of the structural fix, not an oversight.
   - `trainerChains` asserts only that its members are reachable together in one
-    playthrough -- not that they are adjacent, and not that nothing heals the player
-    between them. Under the old text-path-prefix rule this was true anyway, by
-    accident: every member necessarily lay on one nesting lineage, so "reachable
-    together" and "back-to-back" coincided. Frame identity widens who counts as
+    playthrough -- not that they are adjacent, and not by itself that nothing heals the
+    player between them; "healFree" carries that second claim honestly instead of it
+    being silently implied by "chain" the way it used to be. Under the old text-path-
+    prefix rule "reachable together" and "back-to-back" coincided by accident: every
+    member necessarily lay on one nesting lineage. Frame identity widens who counts as
     reachable together to include independent siblings, which can sit arbitrarily far
-    apart in a script with anything -- including a `special(HealPlayerParty)` call --
-    in between; nothing here checks for one. Measured directly against the current
-    data: 0 of the 8 emitted chains contain an independent-sibling pair (every member
-    of every current chain lies on a single lineage, i.e. still satisfies the old,
-    stronger reading), so nothing emitted today is actually wrong under either
-    definition -- but the row's *meaning* has genuinely widened, and a future corpus
-    change could emit a technically-correct "chain" whose members are nowhere near
-    each other. This connects to, but does not close, the separately-parked finding
-    that this detector ignores `setflag(FLAG_SYS_DISABLE_AUTOHEAL)` -- that flag marks
-    precisely "back-to-back, no heal in between" in the source, and reading it is what
-    would let the stronger, original definition be restored honestly (by checking for
-    it) rather than by the coincidence this fix just removed. Not done here.
+    apart in a script with anything -- including a heal -- in between, so a chain's
+    membership alone no longer implies adjacency. "healFree" is `True` only when
+    `FLAG_SYS_DISABLE_AUTOHEAL` (see that regex's own comment for what it actually does
+    at runtime, and _find_chains's own comment for exactly what is checked) was set at
+    every member's own call site except the first in script order -- i.e. every
+    transition into a later battle in the chain skipped its pre-battle heal, the
+    source's own "back-to-back" marker. This restores the stronger claim where the
+    source actually backs it. Requiring the flag, rather than reporting it, would have
+    silently dropped any genuinely-sequential-but-unflagged chain -- the same silent-
+    removal failure direction this module has already been bitten by -- so it is
+    reported, not enforced. Measured directly against the current data: of the 8
+    emitted chains, 7 are `healFree: true` (all 5 files that use the flag; each
+    correctly brackets every member but the first, checked against source for all 5)
+    and 1, VictoryRoadRework's Wally chain, is `healFree: false` (that script never
+    touches the flag at all, so its members are reachable together -- a real rematch
+    trigger -- without the source itself claiming they're heal-free). Not tracked
+    across script boundaries -- SootopolisCity_Gym_1F_EventScript_Juan's own
+    setflag/starttagbattle/clearflag spans into a SEPARATE script, Juan_Battle_2, via
+    starttagbattle's own "continue into this script on a win" argument, and
+    heal_disabled resets to false at every script boundary (see _scan_file) -- but this
+    doesn't currently matter for trainerChains, since tag battles are recorded
+    separately (see "tagBattles" below) and never contribute to a chain's own members.
+  - "healFree" tracks exactly one heal-suppression channel, FLAG_SYS_DISABLE_AUTOHEAL --
+    it does not track a script healing the party directly via `special(HealPlayerParty)`,
+    which is not gated by that flag at all and would still leave "healFree" reporting
+    `true` for a script that heals between two chain members this way. Real, not
+    hypothetical: 5 of the current chain scripts contain such a call --
+    MossdeepCity_SpaceCenter_2F/scripts.pory:70, Route111/scripts.pory:297,
+    SkyPillar_Outside/scripts.pory:191, SlateportCity_OceanicMuseum_2F/scripts.pory:14
+    and :92 (a 6th, SlateportCity_OceanicMuseum_2F/scripts.pory:69, is commented out and
+    correctly ignored). Checked the position of every one of the 5 against its own
+    chain's members: each sits either before the script's first battle or after its
+    last, never between two members, so all 8 emitted "healFree" values are correct
+    against source today -- but this is a property of the current corpus, not something
+    this module verifies, and a future script that heals mid-chain this way would still
+    read as heal-free.
+  - `tagBattles` records `starttagbattle(TRAINER_A, TRAINER_B, TAG_TEAM_ID, ...)` calls,
+    previously invisible to this module entirely (`_TRAINERBATTLE_RE` only ever matched
+    "trainerbattle", never "starttagbattle") -- 26 occurrences across 6 map files,
+    measured directly, 0 in data/scripts/*.inc. Deliberately its own list, not folded
+    into `trainerChains`: these are always DOUBLES battles, and the plan excludes
+    doubles from the simulator by literal type, so recording them as trainerbattle-
+    shaped rows (as a previous version of this module's `starttagbattle`-blindness once
+    did, indirectly, by way of the mutually-exclusive-alternatives bug that produced
+    bogus six-entry `trainerChains` rows) would misrepresent them as fights the sim
+    could model, and invisible data can never be excluded deliberately, only forgotten.
+    Each is one self-contained record -- map, script, both trainer ids in call order,
+    and the innermost `guard` at that point (same convention as battleEvents) -- with no
+    attempt to follow a battle's own "continue into this script on a win" trailing
+    argument the way trainerbattle-family calls have one too: Sootopolis's Juan fight
+    genuinely spans two scripts this way (`SootopolisCity_Gym_1F_EventScript_Juan`'s
+    `starttagbattle(TRAINER_JUAN_1, TRAINER_WALLACE, ...)` continues into
+    `Juan_Battle_2`'s own `starttagbattle(TRAINER_JUAN_5, TRAINER_WALLACE_5, ...)` on a
+    win), and is recorded here as two separate rows, one per script, not linked.
   - `battle_events`' "guard" is only the *innermost* enclosing block's own condition (or
     its negation, for an `else`) -- it is never conjoined with an outer guard from a
     block nesting further out. A `registerbattleevent` inside `if (A) { if (B) { ... } }`
@@ -221,6 +280,14 @@ from collections import namedtuple
 from erdata.paths import ER_SOURCE
 
 _MAPS_DIR = ER_SOURCE / "data" / "maps"
+# Shared, not-tied-to-one-map scripts -- data/scripts/*.inc, 67 files, raw pokeemerald
+# assembly throughout (checked: none use Poryscript's `if (cond) {`/`switch (expr) {`
+# brace syntax for control flow; a handful embed literal `{PLAYER}`-style string
+# interpolation braces, already handled the same way the map corpus's own raw blocks
+# are). Scanned by the same _scan_file as the map corpus -- it already accepts both
+# authoring styles -- but each file is its own top-level "map" for labelling purposes,
+# since a shared script has no map of its own; see _iter_script_files.
+_SCRIPTS_DIR = ER_SOURCE / "data" / "scripts"
 
 # Matches a Poryscript script definition (`script Name{`) or a bare top-level raw-ASM
 # label (`Name::` or `Name:`, optionally followed by an `@ ADDR` offset comment) -- both
@@ -240,9 +307,63 @@ _SETVAR_FIELD_RE = re.compile(
 _REGISTER_RE = re.compile(r"\bregisterbattleevent\(\s*(BATTLE_EVENT_\w+)\s*(?:,\s*(\d+))?\s*(?:,\s*(\d+))?\s*\)")
 
 # `trainerbattle_single(TRAINER_X, ...)` / `trainerbattle_no_intro TRAINER_X, ...` /
-# etc. -- every trainerbattle_* opcode in the corpus takes the trainer id as its first
-# argument, so a single regex over the "trainerbattle" prefix covers all of them.
-_TRAINERBATTLE_RE = re.compile(r"\btrainerbattle(\w*)\(?\s*(TRAINER_\w+)")
+# etc. -- every SUFFIXED trainerbattle_* opcode in the corpus takes the trainer id as
+# its first argument, so a single regex over the "trainerbattle_" prefix covers all of
+# them. Suffix required non-empty (`(\w+)`, not `(\w*)`) so this never matches the bare
+# `trainerbattle` opcode below, whose calling convention is different and would
+# otherwise be silently mis-parsed by this one -- see `_BARE_TRAINERBATTLE_RE`.
+_TRAINERBATTLE_RE = re.compile(r"\btrainerbattle(\w+)\(?\s*(TRAINER_\w+)")
+
+# The bare `trainerbattle` opcode (no `_single`/`_double`/etc. suffix) takes a
+# battle-mode constant as its FIRST argument and the real trainer id SECOND -- unlike
+# every suffixed variant, which always takes the trainer id first. Confirmed directly:
+# 4 occurrences in the whole corpus (BattleFrontier_BattlePyramidFloor/scripts.pory:117,
+# `TRAINER_BATTLE_PYRAMID, TRAINER_PHILLIP`; MossdeepCity_SpaceCenter_2F/scripts.pory:
+# 355,359, `TRAINER_BATTLE_SET_TRAINER_A/B, TRAINER_MAXIE_MOSSDEEP`/
+# `TRAINER_COURTNEY_MOSSDEEP`; data/scripts/trainer_hill.inc:67,
+# `TRAINER_BATTLE_HILL, TRAINER_PHILLIP`), all this exact two-argument shape. Before
+# this was added, `_TRAINERBATTLE_RE`'s predecessor (suffix `(\w*)`, matching this bare
+# form too) captured the mode constant as if it were the trainer -- e.g.
+# "TRAINER_BATTLE_SET_TRAINER_A" instead of "TRAINER_MAXIE_MOSSDEEP" -- and, because
+# `re.findall` doesn't return overlapping matches, never captured the real trainer id
+# at all, silently dropping that battle from trainer_calls entirely (not just
+# mislabeling it) rather than emitting garbage: neither script has a 2nd trainer id to
+# pair with the bogus one, so `_find_chains`' 2+-distinct-ids requirement screened the
+# resulting garbage id out of every emitted chain, and no fieldEffects script
+# references either of these trainerbattle calls, so nothing in the *committed* data
+# was ever wrong -- but the real trainer ids were invisible, which is the same failure
+# direction as the gap this fixes elsewhere in this module.
+_BARE_TRAINERBATTLE_RE = re.compile(r"\btrainerbattle\s+[A-Za-z_]\w*\s*,\s*(TRAINER_\w+)")
+
+# `starttagbattle(TRAINER_A, TRAINER_B, TAG_TEAM_ID, ...)` -- always the parenthesised
+# Poryscript form in the corpus (26 occurrences across 6 map files, checked directly;
+# 0 in data/scripts/*.inc). Names two trainer ids but was invisible to
+# `_TRAINERBATTLE_RE`/`_BARE_TRAINERBATTLE_RE` (neither matches "starttagbattle", only
+# "trainerbattle"), so these battles were silently absent from trainer_calls entirely.
+# Recorded separately, as "tagBattles", not folded into trainer_calls/trainerChains:
+# these are doubles battles, and the plan excludes doubles from the simulator by
+# literal type, so they are not fights it will ever model -- recording them as their
+# own kind lets that exclusion be made deliberately later, rather than the data being
+# invisible now and silently wrong (as a fake single, or a fake trainerChains member)
+# if something started reading trainer_calls for them.
+_STARTTAGBATTLE_RE = re.compile(r"\bstarttagbattle\(\s*(TRAINER_\w+)\s*,\s*(TRAINER_\w+)")
+
+# `setflag(FLAG_SYS_DISABLE_AUTOHEAL)` / `setflag FLAG_SYS_DISABLE_AUTOHEAL` (and
+# `clearflag` likewise) -- battle_main.c:844 and pokemon.c:2120 both read this flag as
+# part of the PRE-battle setup (CB2_HandleStartBattle for singles,
+# GetMonsStateToDoubles for tag battles), immediately before HealPlayerParty(): when
+# set, the party is NOT healed going into the battle about to start. It is not a
+# post-battle effect, and the source clears it explicitly at the end of a bracket
+# (checked all 5 files that use it: MossdeepCity_SpaceCenter_2F, Route111,
+# SkyPillar_Outside, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F), not just
+# via CB2_WhiteOut's emergency reset-on-loss (overworld.c:1575) -- that clear fires on a
+# player LOSS (a white-out), which ends the run entirely, so it cannot affect whether
+# the chain that was in progress reads as heal-free; there is no "chain" left to ask
+# about by the time it runs. See _find_chains's own comment for how the flag becomes a
+# chain's "healFree" attribute, and the module docstring for a second, untracked heal
+# channel (`special(HealPlayerParty)` called directly, not gated by this flag).
+_SET_AUTOHEAL_DISABLED_RE = re.compile(r"\bsetflag\(?\s*FLAG_SYS_DISABLE_AUTOHEAL\)?")
+_CLEAR_AUTOHEAL_DISABLED_RE = re.compile(r"\bclearflag\(?\s*FLAG_SYS_DISABLE_AUTOHEAL\)?")
 
 _IF_RE = re.compile(r"\bif\s*\((.*?)\)\s*\{")
 _ELSE_IF_RE = re.compile(r"\}\s*else\s+if\s*\((.*?)\)\s*\{")
@@ -354,14 +475,20 @@ def _join_own_line_else(text: str) -> str:
     return "\n".join(out)
 
 
-def _iter_pory_files():
+# Map scripts first, then shared data/scripts/*.inc -- sorted independently within each
+# group so map-corpus ordering (and so cross-script list order in the emitted JSON) is
+# unaffected by widening the scan to include the second group.
+def _iter_script_files():
     yield from sorted(_MAPS_DIR.glob("*/scripts.pory"))
+    yield from sorted(_SCRIPTS_DIR.glob("*.inc"))
 
 
-# One line -> updated (guard_stack, current_script), plus whatever field-write/
-# registerbattleevent/trainerbattle calls that line itself contains, read against the
-# guard_stack *after* this line's own braces are applied (so a call guarded by an
-# `if (...) {` that opens on this same line still sees that guard).
+# One line -> updated (guard_stack, current_script, heal_disabled), plus whatever
+# field-write/registerbattleevent/trainerbattle/starttagbattle calls that line itself
+# contains, read against the guard_stack *after* this line's own braces are applied (so
+# a call guarded by an `if (...) {` that opens on this same line still sees that guard)
+# and against heal_disabled *after* this line's own setflag/clearflag, if any, is
+# applied.
 #
 # `switch_info_at_depth` tracks, per open `switch(...)` frame (keyed by its position in
 # guard_stack -- depth-keyed rather than a single variable defensively, in case a
@@ -374,12 +501,26 @@ def _iter_pory_files():
 def _scan_file(map_name: str, text: str) -> dict:
     field_writes: list[tuple[str, str, str, tuple]] = []  # (script, var, value, frame_path)
     battle_events: list[dict] = []
-    trainer_calls: list[tuple[str, str, tuple]] = []  # (script, trainer_id, frame_path)
+    trainer_calls: list[tuple[str, str, tuple, bool]] = []  # (script, trainer_id, frame_path, heal_disabled)
+    tag_battles: list[dict] = []
 
     current_script: str | None = None
     guard_stack: list[_Frame | None] = []
     switch_info_at_depth: dict[int, _SwitchInfo] = {}
     next_group = 0
+    # FLAG_SYS_DISABLE_AUTOHEAL's current state -- see that regex's own comment. A
+    # single running boolean, unlike guard_stack/frame_path -- it does NOT know which
+    # branch a setflag/clearflag sat in, so a setflag inside one branch is, in
+    # principle, free to "leak" into a later call site in a sibling branch this
+    # tracker has no way to know is mutually exclusive with it. Checked corpus-wide
+    # against a branch-aware ground truth (built separately, using frame_path
+    # ancestry) rather than assumed safe: 0 disagreements across all 790 trainerbattle-
+    # family call sites in the corpus. Every real setflag/clearflag pair for this flag
+    # either sits at the unconditional (outermost) level or stays within one single
+    # branch from open to close, so this simplification is correct today, not merely
+    # untested -- but it is a real gap this specific measurement closes, not a
+    # structural guarantee the way frame_path's own compatibility test is.
+    heal_disabled = False
 
     for raw_line in _join_own_line_else(text).splitlines():
         line = _strip_comment(raw_line)
@@ -389,8 +530,15 @@ def _scan_file(map_name: str, text: str) -> dict:
             m = _SCRIPT_DEF_RE.match(line)
             if m:
                 current_script = m.group(1)
+                heal_disabled = False  # a real GAME state flag, but scoped per script here
             elif m := _RAW_LABEL_RE.match(stripped):
                 current_script = m.group(1)
+                heal_disabled = False
+
+        if _SET_AUTOHEAL_DISABLED_RE.search(line):
+            heal_disabled = True
+        elif _CLEAR_AUTOHEAL_DISABLED_RE.search(line):
+            heal_disabled = False
 
         raw_opens = line.count("{")
         raw_closes = line.count("}")
@@ -500,9 +648,22 @@ def _scan_file(map_name: str, text: str) -> dict:
             )
 
         for _suffix, trainer_id in _TRAINERBATTLE_RE.findall(line):
-            trainer_calls.append((current_script, trainer_id, frame_path))
+            trainer_calls.append((current_script, trainer_id, frame_path, heal_disabled))
 
-    return {"field_writes": field_writes, "battle_events": battle_events, "trainer_calls": trainer_calls}
+        for trainer_id in _BARE_TRAINERBATTLE_RE.findall(line):
+            trainer_calls.append((current_script, trainer_id, frame_path, heal_disabled))
+
+        for a, b in _STARTTAGBATTLE_RE.findall(line):
+            tag_battles.append(
+                {"map": map_name, "script": current_script, "trainers": [a, b], "guard": guard}
+            )
+
+    return {
+        "field_writes": field_writes,
+        "battle_events": battle_events,
+        "trainer_calls": trainer_calls,
+        "tag_battles": tag_battles,
+    }
 
 
 # True iff two frame paths (see _Frame) could both be reached along a single execution
@@ -576,7 +737,7 @@ def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) 
         by_script.setdefault(script, []).append((var, value, frame_path))
 
     calls_by_script: dict[str, list[tuple[str, tuple]]] = {}
-    for script, trainer_id, frame_path in trainer_calls:
+    for script, trainer_id, frame_path, _heal_disabled in trainer_calls:
         calls_by_script.setdefault(script, []).append((trainer_id, frame_path))
 
     out = []
@@ -664,18 +825,19 @@ def _maximal_compatible_groups(n: int, compat: list) -> list:
 # trainer ids in the same order -- e.g. an `if`/`else` where both arms fight the same
 # two trainers -- are two DIFFERENT maximal cliques (their entries' frame paths are
 # pairwise incompatible across the two branches, so they can never merge into one
-# clique), yet produce the identical visible (id, order) sequence. Without the dedup
-# that would emit the same chain row twice, which matters because a chain row carries
-# no guard -- unlike battleEvents/fieldEffects, there is nothing in the emitted shape
-# that could tell two such rows apart, so collapsing them here is the only place it can
-# happen. Measured directly against the current data: 0 of the 761 maximal cliques
-# enumerated across the whole corpus hit this shape, so the dedup has never actually
-# suppressed anything yet -- but the shape itself is real and reachable, not merely
+# clique), yet produce the identical visible (id, order) sequence, so without this
+# dedup the same chain row would be emitted twice. A chain row's own "healFree" doesn't
+# reliably tell two such rows apart either, since both branches can easily agree on it
+# (e.g. neither touches FLAG_SYS_DISABLE_AUTOHEAL at all), so collapsing them here is
+# still the only place this can be caught. Measured directly against the current data:
+# 0 of the 761 maximal cliques enumerated across the whole corpus hit this shape, so
+# the dedup has never actually suppressed anything yet -- but the shape itself is real
+# and reachable, not merely
 # hypothetical, and will fire the moment the corpus contains it.
 def _find_chains(map_name: str, trainer_calls: list) -> list[dict]:
-    by_script: dict[str, list[tuple[str, tuple]]] = {}
-    for script, trainer_id, frame_path in trainer_calls:
-        by_script.setdefault(script, []).append((trainer_id, frame_path))
+    by_script: dict[str, list[tuple[str, tuple, bool]]] = {}
+    for script, trainer_id, frame_path, heal_disabled in trainer_calls:
+        by_script.setdefault(script, []).append((trainer_id, frame_path, heal_disabled))
 
     out = []
     for script, entries in by_script.items():
@@ -683,37 +845,50 @@ def _find_chains(map_name: str, trainer_calls: list) -> list[dict]:
         compat = [[_frames_compatible(a[1], b[1]) for b in entries] for a in entries]
         seen_id_sequences = set()
         for clique in _maximal_compatible_groups(n, compat):
-            ids = tuple(entries[i][0] for i in sorted(clique))
+            ordered = sorted(clique)
+            ids = tuple(entries[i][0] for i in ordered)
             if len(set(ids)) < 2 or ids in seen_id_sequences:
                 continue
             seen_id_sequences.add(ids)
-            out.append({"map": map_name, "script": script, "trainers": list(ids)})
+            # healFree: FLAG_SYS_DISABLE_AUTOHEAL was set (skipping the pre-battle heal
+            # -- see that regex's own comment) at every member's own call site EXCEPT
+            # the first in script order, which has nothing earlier in this chain for
+            # the flag to matter against.
+            heal_free = all(entries[i][2] for i in ordered[1:])
+            out.append(
+                {"map": map_name, "script": script, "trainers": list(ids), "healFree": heal_free}
+            )
     return out
 
 
 def scrape_encounters() -> dict:
-    """Full scrape across every data/maps/*/scripts.pory. Returns
-    {"fieldEffects": [...], "battleEvents": [...], "trainerChains": [...]}, each entry
-    tagged with the (map, script) it was found in -- see module docstring for what each
-    list means and this module's honest limitations.
+    """Full scrape across every data/maps/*/scripts.pory and data/scripts/*.inc. Returns
+    {"fieldEffects": [...], "battleEvents": [...], "trainerChains": [...],
+    "tagBattles": [...]}, each entry tagged with the (map, script) it was found in --
+    "map" is the source .inc file's own stem for a data/scripts/ entry, since a shared
+    script has no map of its own -- see module docstring for what each list means and
+    this module's honest limitations.
     """
     field_effects: list[dict] = []
     battle_events: list[dict] = []
     trainer_chains: list[dict] = []
+    tag_battles: list[dict] = []
 
-    for path in _iter_pory_files():
-        map_name = path.parent.name
+    for path in _iter_script_files():
+        map_name = path.parent.name if path.suffix == ".pory" else path.stem
         text = path.read_text(encoding="utf-8")
         scanned = _scan_file(map_name, text)
 
         field_effects.extend(_pair_field_effects(map_name, scanned["field_writes"], scanned["trainer_calls"]))
         battle_events.extend(scanned["battle_events"])
         trainer_chains.extend(_find_chains(map_name, scanned["trainer_calls"]))
+        tag_battles.extend(scanned["tag_battles"])
 
     return {
         "fieldEffects": field_effects,
         "battleEvents": battle_events,
         "trainerChains": trainer_chains,
+        "tagBattles": tag_battles,
     }
 
 
@@ -728,6 +903,7 @@ if __name__ == "__main__":
     print(f"fieldEffects={len(result['fieldEffects'])}")
     print(f"battleEvents={len(result['battleEvents'])}")
     print(f"trainerChains={len(result['trainerChains'])}")
+    print(f"tagBattles={len(result['tagBattles'])}")
 
     mossdeep_room = next(
         fe
@@ -744,10 +920,29 @@ if __name__ == "__main__":
     ]
     assert any(e["event"] == "BATTLE_EVENT_SPIKES" and e["guard"] == "!defeated(TRAINER_CRISTIAN)" for e in dewford)
 
+    # Wally's chain is real co-occurrence but NOT flagged heal-free (VictoryRoadRework
+    # never touches FLAG_SYS_DISABLE_AUTOHEAL) -- the exact distinction this field
+    # exists to keep visible, contrasted with Sootopolis's genuinely bracketed chain.
     wally = next(
         c
         for c in result["trainerChains"]
         if c["map"] == "VictoryRoadRework" and c["script"] == "VictoryRoadRework_EventScript_Wally"
     )
     assert wally["trainers"] == ["TRAINER_WALLY_VR_1", "TRAINER_WALLY_VR_2"]
+    assert wally["healFree"] is False
+
+    bottom_battle = next(
+        c
+        for c in result["trainerChains"]
+        if c["map"] == "SootopolisCity_Gym_1F"
+        and c["script"] == "SootopolisCity_Gym_EventScript_TriggerBottomBattle"
+    )
+    assert bottom_battle["healFree"] is True
+
+    dewford_tag = next(
+        t
+        for t in result["tagBattles"]
+        if t["map"] == "DewfordTown_Gym" and t["script"] == "DewfordTown_Gym_EventScript_BrendenAndLilith"
+    )
+    assert dewford_tag["trainers"] == ["TRAINER_LILITH", "TRAINER_BRENDEN"]
     print("ok")
