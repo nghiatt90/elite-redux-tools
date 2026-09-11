@@ -20,6 +20,7 @@ from erdata.trainers import parse_trainers, real_trainers, resolve_party_tiers
 # Scraping abilities.cc's 1026 blocks is the slowest fixture in this file by a wide
 # margin; computed once and reused, same as the module already does for parse_*().
 _ABILITY_HOOKS = ability_hooks_to_dict()
+_SPECIES_MAP = build_species_map(parse_species())
 
 
 def _ability_dict(ability, abilities, name_index):
@@ -308,7 +309,7 @@ def _trainers():
 def test_trainer_dict_shape():
     trainers = _trainers()
     sawyer = next(t for t in trainers if t.id == 1)  # TRAINER_SAWYER_1
-    d = trainer_to_dict(sawyer)
+    d = trainer_to_dict(sawyer, _SPECIES_MAP)
     json.dumps(d)
     assert d["id"] == "TRAINER_SAWYER_1"
     assert d["name"] == "Sawyer"
@@ -333,16 +334,78 @@ def test_trainer_dict_ability_resolves_as_a_real_id_not_a_slot_index():
     # here as "0"/"1"/"2"; a real id looks like every other AbilityEnum field.
     trainers = _trainers()
     sawyer = next(t for t in trainers if t.id == 1)
-    d = trainer_to_dict(sawyer)
+    d = trainer_to_dict(sawyer, _SPECIES_MAP)
     abilities = {m["ability"] for mons in d["parties"].values() for m in mons}
     assert all(a.startswith("ABILITY_") for a in abilities)
     assert "ABILITY_STURDY" in abilities
 
 
+def test_trainer_dict_ability_matches_species_slot_has_no_divergence_marker():
+    # Carbink's declared abilities include Sturdy (SpeciesList.textproto:108612), so
+    # TRAINER_SAWYER_1's Carbink is not a divergence case -- confirms the common path
+    # (indexOf finds a real slot) doesn't spuriously flag anything.
+    trainers = _trainers()
+    sawyer = next(t for t in trainers if t.id == 1)
+    d = trainer_to_dict(sawyer, _SPECIES_MAP)
+    carbink = next(m for m in d["parties"]["ace"] if m["species"] == "SPECIES_CARBINK")
+    assert carbink["ability"] == "ABILITY_STURDY"
+    assert "abilityDivergence" not in carbink
+    assert "textprotoAbility" not in carbink
+
+
+def test_trainer_dict_ability_falls_back_to_species_slot_zero_when_not_declared():
+    # TrainerPartyGenerator.kt:147-156: TRAINER_MATT's (TrainerEnum id 30 -- looked up
+    # by id, not name: a second trainer also named "Matt", TRAINER_MATT_MT_PYRE, exists)
+    # SPECIES_BARBARACLE is given ABILITY_ANTICIPATION (TrainerList.textproto:5841),
+    # which belongs to SPECIES_BARBARACLE_MEGA (SpeciesList.textproto:182215+), not the
+    # base form -- SPECIES_BARBARACLE's own declared abilities are Pickpocket/Swift
+    # Swim/Sand Force (SpeciesList.textproto:106611-106613), and Anticipation is not
+    # among its innates either. `abilityList.indexOf(ability)` returns -1, the compiled
+    # struct's .ability is never written and stays zero-initialised, and
+    # battle_main.c:1854 + pokemon.c:2147-2156 resolve that to the species' own slot 0
+    # -- Pickpocket, not Anticipation.
+    #
+    # This case alone cannot distinguish "searches slots only" from "searches slots
+    # plus innates", because Anticipation fails the lookup against *both* -- see
+    # test_trainer_dict_ability_falls_back_to_species_slot_zero_for_an_innate_name
+    # below for the case that does.
+    trainers = _trainers()
+    matt = next(t for t in trainers if t.id == 30)  # TRAINER_MATT
+    d = trainer_to_dict(matt, _SPECIES_MAP)
+    barbaracle = next(m for m in d["parties"]["ace"] if m["species"] == "SPECIES_BARBARACLE")
+    assert barbaracle["ability"] == "ABILITY_PICKPOCKET"
+    assert barbaracle["abilityDivergence"] is True
+    assert barbaracle["textprotoAbility"] == "ABILITY_ANTICIPATION"
+
+
+def test_trainer_dict_ability_falls_back_to_species_slot_zero_for_an_innate_name():
+    # TRAINER_JENNIFER's (TrainerEnum id 95) elite SPECIES_SALAMENCE is given
+    # ABILITY_INTIMIDATE (TrainerList.textproto:16473), which *is* a real ability
+    # Salamence can have -- just not as one of its three declared ability slots
+    # (Anger Point/Overwhelm/Moxie, SpeciesList.textproto:58636-58638). Intimidate is
+    # one of Salamence's three *innates* instead (SpeciesList.textproto:58639-58641).
+    # `Species.ability` and `Species.innate` are separate repeated fields
+    # (SpeciesList.proto:162-163) and `abilityList.indexOf` only ever searches the
+    # former -- BaseStatsGenerator.kt:26 has to union `abilityList + innateList`
+    # explicitly for its own (unrelated) purpose, which it wouldn't need to do if one
+    # already contained the other. So this resolves exactly like Matt's Barbaracle
+    # above: slot 0, Anger Point, not Intimidate -- this is the case a Barbaracle-only
+    # test suite cannot catch, since Barbaracle's named ability fails the lookup against
+    # slots *and* innates alike and would pass identically against a wrong
+    # implementation that searched both.
+    trainers = _trainers()
+    jennifer = next(t for t in trainers if t.id == 95)  # TRAINER_JENNIFER
+    d = trainer_to_dict(jennifer, _SPECIES_MAP)
+    salamence = next(m for m in d["parties"]["elite"] if m["species"] == "SPECIES_SALAMENCE")
+    assert salamence["ability"] == "ABILITY_ANGER_POINT"
+    assert salamence["abilityDivergence"] is True
+    assert salamence["textprotoAbility"] == "ABILITY_INTIMIDATE"
+
+
 def test_trainer_dict_evs_block_shape():
     trainers = _trainers()
     sawyer = next(t for t in trainers if t.id == 1)
-    d = trainer_to_dict(sawyer)
+    d = trainer_to_dict(sawyer, _SPECIES_MAP)
     carbink = next(m for m in d["parties"]["ace"] if m["species"] == "SPECIES_CARBINK")
     assert carbink["evs"] == {"hp": 252, "atk": 0, "def": 252, "spatk": 0, "spdef": 4, "spe": 0}
 
@@ -353,7 +416,7 @@ def test_trainer_dict_has_no_level_or_ivs():
     # data, so trainer_to_dict must never fabricate either field.
     trainers = _trainers()
     sawyer = next(t for t in trainers if t.id == 1)
-    d = trainer_to_dict(sawyer)
+    d = trainer_to_dict(sawyer, _SPECIES_MAP)
     assert "level" not in d
     for mons in d["parties"].values():
         for m in mons:
@@ -406,7 +469,7 @@ def test_resolve_party_tiers_hell_chains_through_elite_to_ace_when_both_empty():
 def test_trainer_dict_nonstandard_override_reason_is_carried_through():
     trainers = _trainers()
     alberto = next(t for t in trainers if t.name == "Alberto")
-    d = trainer_to_dict(alberto)
+    d = trainer_to_dict(alberto, _SPECIES_MAP)
     pelipper = next(
         m
         for mons in d["parties"].values()

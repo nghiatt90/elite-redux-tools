@@ -467,16 +467,62 @@ def item_to_dict(item) -> dict:
     return entry
 
 
-# .ability is already a real AbilityEnum value in the textproto, not a slot index --
-# see trainers.py's module docstring for why (it's the compiled C struct, not this
-# textproto, that stores an index; that resolution happens downstream of this
-# pipeline). Resolved the same way as every other AbilityEnum field in this file.
-def _trainer_mon_to_dict(mon) -> dict:
+# .ability is a real AbilityEnum value in the textproto (not a slot index -- see
+# trainers.py's module docstring), but the textproto value is not always what the mon
+# fights with. TrainerPartyGenerator.kt:147-156 resolves it to an index into the
+# species' own declared ability list (`SPECIES_MAP[species]!!.abilityList
+# .indexOf(ability)`) and, when the named ability isn't one of that species' 0-3
+# declared abilities, *omits* `.ability` from the compiled struct entirely (a
+# validation error under `#ifdef VALIDATE_TRAINERS` only, not a build failure) rather
+# than erroring. The omitted field is zero-initialised -- slot 0 -- and
+# battle_main.c:1854 feeds that slot straight to
+# `SetMonData(MON_DATA_ABILITY_NUM, ...)`; pokemon.c:2147-2156's
+# `GetAbilityBySpecies(species, abilityNum)` then resolves slot 0 to the species' own
+# first declared ability. Not a corner case: 252 party entries across 130 trainers
+# (measured against the current data) name an ability their species doesn't have --
+# e.g. TRAINER_MATT's SPECIES_BARBARACLE is given ABILITY_ANTICIPATION
+# (TrainerList.textproto:5841), which belongs to SPECIES_BARBARACLE_MEGA
+# (SpeciesList.textproto:182215+), not the base form -- so in game it fights with
+# Pickpocket, SPECIES_BARBARACLE's own slot 0 (SpeciesList.textproto:106611).
+#
+# `abilityList.indexOf` only ever searches the three declared *ability* slots, never
+# the three *innate* ones -- `ability` and `innate` are separate repeated fields
+# (SpeciesList.proto:162-163), and BaseStatsGenerator.kt:26 has to union them
+# explicitly for its own purposes, which it wouldn't need to if one already contained
+# the other. 80 of the 252 diverging entries name one of the species' own innates
+# (e.g. Salamence's ABILITY_INTIMIDATE), and they resolve to slot 0 exactly like any
+# other name the species doesn't have as a slot ability -- innates apply on top of the
+# resolved slot ability in-game (pokemon.c:2304-2306's GetInnateInSlot), they are never
+# a substitute for it.
+#
+# The primary consumers of this file (damage calculator, solver) need what the mon
+# actually fights with, so "ability" below is that resolved value, not the textproto
+# value transcribed verbatim. The named value is never discarded: "textprotoAbility"
+# carries it and "abilityDivergence" is set whenever the two differ.
+def _resolve_effective_ability(mon, species_map) -> tuple[int, bool]:
+    species = species_map.get(mon.species)
+    # No species entry, or a species with zero declared abilities (three exist in the
+    # current data -- SPECIES_NONE, SPECIES_EGG, SPECIES_INFERNAPE_REDUX_B, none of
+    # them ever used in a trainer party): nothing to resolve against, so keep the
+    # textproto value as-is rather than guessing. (`species_map` here -- built from the
+    # full, unfiltered parse_species() -- is not identically populated with Kotlin's own
+    # SPECIES_MAP, which additionally filters species whose randomizer flag marks them
+    # SPECIES_HIDDEN, GeneratorUtils.kt:103-105; two species differ. Neither is ever
+    # referenced by a trainer, and a hidden species in a party would crash the codegen
+    # outright, so this branch never actually exercises that gap.)
+    ability_list = list(species.ability) if species is not None else []
+    if not ability_list or mon.ability in ability_list:
+        return mon.ability, False
+    return ability_list[0], True
+
+
+def _trainer_mon_to_dict(mon, species_map) -> dict:
+    effective_ability, diverges = _resolve_effective_ability(mon, species_map)
     entry = {
         "species": _S(mon.species),
         "item": _I(mon.item),
         "nature": _Nature(mon.nature),
-        "ability": _A(mon.ability),
+        "ability": _A(effective_ability),
         "evs": {
             "hp": mon.hp_ev,
             "atk": mon.atk_ev,
@@ -496,6 +542,9 @@ def _trainer_mon_to_dict(mon) -> dict:
         # than emitting a null the game itself never produces.
         "hiddenPowerType": _T(mon.hidden_power_type) if mon.hidden_power_type else "TYPE_NORMAL",
     }
+    if diverges:
+        entry["abilityDivergence"] = True
+        entry["textprotoAbility"] = _A(mon.ability)
     # Free-text override reason (e.g. "Invalid moves: [MOVE_CALM_MIND]") that makes
     # TrainerPartyGenerator.kt's validator skip this mon entirely -- present on 1090
     # of the mons in the current data. It has no runtime effect (not part of the
@@ -508,7 +557,7 @@ def _trainer_mon_to_dict(mon) -> dict:
 
 # Level, IVs, trainer-level bag items and isAlpha are deliberately never emitted here
 # -- see trainers.py's module docstring for exactly what's absent and why.
-def trainer_to_dict(trainer) -> dict:
+def trainer_to_dict(trainer, species_map) -> dict:
     parties = resolve_party_tiers(trainer)
     return {
         "id": _TrainerId(trainer.id),
@@ -530,7 +579,9 @@ def trainer_to_dict(trainer) -> dict:
         "music": _TrainerMusic(trainer.music) if trainer.HasField("music") else None,
         # ace/elite/hell already have TrainerPartyGenerator.kt's empty-tier fallback
         # applied -- see resolve_party_tiers in trainers.py.
-        "parties": {tier: [_trainer_mon_to_dict(m) for m in mons] for tier, mons in parties.items()},
+        "parties": {
+            tier: [_trainer_mon_to_dict(m, species_map) for m in mons] for tier, mons in parties.items()
+        },
     }
 
 
@@ -609,7 +660,7 @@ def build() -> None:
     _write_json(out / "natures.json", battle_constants_to_dict())
     _write_json(out / "abilityHooks.json", ability_hooks)
     trainers = sorted(real_trainers(parse_trainers()), key=lambda t: t.id)
-    _write_json(out / "trainers.json", [trainer_to_dict(t) for t in trainers])
+    _write_json(out / "trainers.json", [trainer_to_dict(t, species_map) for t in trainers])
     encounters = encounters_to_dict()
     _write_json(out / "encounters.json", encounters)
     _write_json(

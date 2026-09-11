@@ -11,11 +11,17 @@ Two corrections against an earlier, wrong assumption about this schema, found by
 reading the generator rather than trusting a secondhand description of it:
 
 - `TrainerMon.ability` in the textproto is already a real AbilityEnum value (e.g.
-  ABILITY_STURDY), not a slot index. TrainerPartyGenerator.kt:147-156 resolves it to
-  an index into the species' three ability slots (`SPECIES_MAP[species]!!.abilityList
-  .indexOf(ability)`) only when it *writes* the compiled C struct -- that resolution
-  is downstream of the textproto this pipeline parses, so nothing needs resolving on
-  this side. See emit.py's trainer_to_dict.
+  ABILITY_STURDY), not a slot index -- but it is not always what the mon fights with.
+  TrainerPartyGenerator.kt:147-156 resolves it to an index into the species' own
+  declared ability list (`SPECIES_MAP[species]!!.abilityList.indexOf(ability)`) when
+  it writes the compiled C struct, and *omits* `.ability` entirely (silently
+  zero-initialising it to slot 0) whenever the named ability isn't one of that
+  species' declared abilities. 252 party entries across 130 trainers hit this. This
+  module still parses and this file still exposes the raw textproto value; emit.py's
+  trainer_to_dict is what resolves it against species_map and publishes the in-game
+  ability as "ability" (with the textproto value kept under "textprotoAbility" and
+  "abilityDivergence": true when the two differ) -- see that function's comment for
+  the full citation chain.
 - There is no per-mon "items absent" gap: `TrainerMon.item = 3` (a held item) is a
   real, always-present field in TrainerList.proto and is emitted normally. What is
   genuinely absent is a *trainer-level* bag/items list and an isAlpha flag -- neither
@@ -73,9 +79,14 @@ def real_trainers(trainers: list) -> list:
 # i.e. gTrainers[].partyInsane/partyHell fall back to a lower difficulty's party
 # whenever the textproto leaves that tier empty, and Hell falls back through the
 # *resolved* Elite party, not directly to Ace. This is not an edge case: of the 932
-# real trainers in the current data, 504 leave `elite` empty and 534 leave `hell`
-# empty, so skipping this fallback would silently emit an empty party for most
-# trainers on Elite/Hell difficulty instead of what the game actually fields.
+# real trainers (the id-0 TRAINER_NONE placeholder already dropped by real_trainers,
+# counted *after* that drop -- counting before it is the exact off-by-one that
+# previously made this comment say 504/534), 503 leave the raw textproto `elite.mon`
+# empty and 533 leave the raw textproto `hell.mon` empty, so skipping this fallback
+# would silently emit an empty party for most trainers on Elite/Hell difficulty
+# instead of what the game actually fields. Re-measured directly against
+# TrainerList.textproto via parse_trainers()/real_trainers(), not carried over from
+# an earlier count.
 def resolve_party_tiers(trainer) -> dict[str, list]:
     ace = list(trainer.ace.mon)
     elite = list(trainer.elite.mon) or ace

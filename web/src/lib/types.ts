@@ -208,8 +208,24 @@ export interface TrainerMon {
   species: string
   item: string // ItemEnum id, e.g. "ITEM_LEFTOVERS"
   nature: string // Nature enum, e.g. "NATURE_ADAMANT"
-  ability: string // AbilityEnum id -- TrainerList.proto declares this a real ability,
-  // not a slot index; see pipeline/src/erdata/trainers.py's module docstring
+  ability: string // GAME TRUTH: the AbilityEnum id of the ability *slot* the mon fights
+  // with, resolved against its species' declared ability list the same way
+  // TrainerPartyGenerator.kt does, NOT the textproto value transcribed verbatim (the two
+  // differ on 252 party entries across 130 trainers: the codegen silently falls back to
+  // the species' own slot 0 whenever the named ability isn't one of that species'
+  // declared abilities -- 80 of those 252 name one of the species' own innates instead).
+  // The species' three innates apply *on top of* this slot ability in-game, they are
+  // never a substitute for it -- see that species' own "innates" in species.json, this
+  // field only ever resolves to one of its "abilities". See
+  // pipeline/src/erdata/emit.py's _resolve_effective_ability for the full citation.
+  abilityDivergence?: boolean // true when "ability" above differs from the textproto's
+  // named value (i.e. the codegen's indexOf fallback kicked in); absent when they agree.
+  // Filter on this field alone to find every "config asked for something this species
+  // cannot have" entry -- don't diff "ability" against "textprotoAbility" by hand.
+  textprotoAbility?: string // CONFIG TRUTH: the textproto's named AbilityEnum id, present
+  // only when abilityDivergence is true -- what er-config asked for, not what the ROM
+  // fields. Kept as evidence the divergence exists, not silently discarded; a future
+  // repin of er-config/eliteredux-source may make some of these resolve cleanly.
   evs: TrainerEvs
   moves: string[] // MoveEnum ids, up to 4
   ironPill: boolean // zeroes this mon's Speed IV; every other stat's IV is forced to 31 regardless
@@ -220,9 +236,13 @@ export interface TrainerMon {
 
 export interface TrainerParties {
   ace: TrainerMon[]
-  elite: TrainerMon[] // falls back to ace when empty in the textproto (common: 504 of 932 trainers)
+  elite: TrainerMon[] // falls back to ace when empty in the textproto (common: 503 of the 932
+  // real trainers -- the id-0 TRAINER_NONE placeholder already dropped -- leave the raw
+  // textproto elite tier empty; re-measured against TrainerList.textproto directly, see
+  // pipeline/src/erdata/trainers.py's resolve_party_tiers comment)
   hell: TrainerMon[] // falls back to the *resolved* elite (which may itself have fallen back to
-  // ace), not directly to ace (common: 534 of 932 trainers) -- see resolve_party_tiers
+  // ace), not directly to ace (common: 533 of the same 932 real trainers leave the raw
+  // textproto hell tier empty) -- see resolve_party_tiers
 }
 
 // Deliberately absent: level (derived at battle time from the player's highest party
