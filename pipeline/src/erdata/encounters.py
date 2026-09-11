@@ -269,6 +269,28 @@ corpus:
     falls straight through to a `goto(...AfterBattle)` (line 281) -- no fight at all,
     badge set or not. The scraper transcribes the branch condition faithfully; it does
     not reason about what the sibling branch does.
+  - `_pair_field_effects` recognizes a field-effect var's reset write (`_is_reset_value`)
+    by value shape: the literal "0" or a symbolic "..._NONE"-suffixed constant. An
+    earlier version compared only against the literal "0", so
+    `BATTLE_FIELD_EFFECT_NONE` -- the reset EvergrandeCity_MonoChampRoom_1's 18
+    per-type Monotype Champion scripts actually use for VAR_BATTLE_FIELD_EFFECT_TYPE --
+    went unrecognized, and was instead read as an ordinary write. That happened not to
+    corrupt anything emitted, verified directly (a widened check run over the whole
+    corpus produced byte-identical fieldEffects, 23/23 both sides) -- but only because
+    of those scripts' own shape (the reset sits on an unconditional frame that is an
+    ancestor of the one activation it follows, so `_frames_compatible` judged it "still
+    the same activation" by accident, not because the write was recognized as a reset).
+    The failure shape this would-have-missed reset could actually hit: a script
+    resetting a var symbolically on a branch that is neither an ancestor nor a
+    descendant of a following activation's own frame would have emitted a spurious row
+    pairing the unrecognized reset value with the previous activation's stale other
+    field -- not found in the corpus, but not a hypothetical either (see
+    `_is_reset_value`'s own comment and its dedicated test for the exact mechanism).
+    Recognizing the reset now closes that regardless of frame path, since it clears
+    state unconditionally rather than only when judged compatible. Still a heuristic,
+    not exhaustive: "0" and "..._NONE" cover every reset form actually seen for both
+    vars in the corpus today (checked directly), but a reset spelled some other way
+    would silently repeat the same gap.
 
 Treat every entry here as a lead sourced to its (map, script), not a verified fact --
 spot-check against the source before relying on one for something solver-critical.
@@ -383,6 +405,43 @@ _CASE_RE = re.compile(r"^case\s+(.+?):\s*$")
 _DEFAULT_RE = re.compile(r"^default\s*:\s*$")
 
 _RESET_VALUE = "0"
+
+
+# A write clears a field-effect var, rather than setting it, when its value is the
+# literal "0" (used for both vars everywhere in the corpus for VAR_BATTLE_FIELD_ID --
+# 21/21 occurrences, measured directly) OR a symbolic "..._NONE" constant -- the only
+# form actually seen is VAR_BATTLE_FIELD_EFFECT_TYPE's own BATTLE_FIELD_EFFECT_NONE, 18
+# occurrences, all in EvergrandeCity_MonoChampRoom_1's 18 per-type Monotype Champion
+# scripts (one script per type: setvar EFFECT_TYPE=MONOCHAMP + FIELD_ID=TYPE_X inside
+# the "let's fight" branch, trainerbattle_no_intro, then an unconditional
+# `setvar(VAR_BATTLE_FIELD_EFFECT_TYPE, BATTLE_FIELD_EFFECT_NONE)` +
+# `setvar(VAR_BATTLE_FIELD_ID, 0)` cleanup at the very end of the script). An earlier
+# version of this check compared only against the literal "0", so
+# BATTLE_FIELD_EFFECT_NONE wasn't recognized as a reset at all -- it was instead treated
+# as an ordinary write to `effect_type`. That happened not to corrupt any emitted row:
+# each MonoChamp script's cleanup write lands on the script's unconditional (top-level)
+# frame, an ancestor of the one activation it follows, so `_frames_compatible` judged it
+# "still the same activation" and swallowed it via the existing continue -- by that
+# accident of frame ancestry, not because the write was recognized as a reset. Verified
+# empirically, not just by this trace: a widened check run over the whole corpus
+# produced byte-identical fieldEffects, 23/23 rows on both sides, 0 differing either
+# way. The failure shape this widening actually closes, not merely one traced by hand:
+# a script that reset EFFECT_TYPE symbolically BEFORE a second activation on a frame
+# that is neither an ancestor nor a descendant of the reset's own frame would, under the
+# old literal-only check, emit a spurious row pairing the unrecognized reset value with
+# the previous activation's stale fieldId (the reset would fail the `not (effect_type
+# and field_id)` skip, and -- being frame-incompatible this time, unlike the MonoChamp
+# case -- would also fail the "still the same activation" skip, falling through to
+# `out.append`). Not found anywhere in the current corpus; the point is that the old
+# check's correctness rested on the MonoChamp scripts' own shape, not on the check being
+# right, and this widening does not depend on that shape.
+#
+# Still a heuristic, not exhaustive: this recognizes "0" and any "..._NONE"-suffixed
+# symbolic value, which covers every reset form actually seen (checked directly across
+# both vars, the whole corpus), but a future reset spelled some other way (a differently
+# -named "clear" constant, say) would silently repeat exactly the gap just described.
+def _is_reset_value(value: str) -> bool:
+    return value == _RESET_VALUE or value.endswith("_NONE")
 
 
 # One open guard, on `_scan_file`'s guard_stack. `text` is what gets emitted (as
@@ -745,7 +804,7 @@ def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) 
         effect_type = field_id = None
         last_activation_frames: tuple | None = None  # None: no open activation
         for var, value, frame_path in writes:
-            if value == _RESET_VALUE:
+            if _is_reset_value(value):
                 if var == "VAR_BATTLE_FIELD_EFFECT_TYPE":
                     effect_type = None
                 else:

@@ -4,6 +4,7 @@ from erdata.encounters import (
     _Frame,
     _find_chains,
     _frames_compatible,
+    _is_reset_value,
     _iter_script_files,
     _join_own_line_else,
     _pair_field_effects,
@@ -286,6 +287,69 @@ def test_pair_field_effects_two_incompatible_branches_each_get_their_own_entry()
         by_trainers[("TRAINER_STEVEN_DOUBLES_LEGENDS",)]["guard"]
         == "switch(var(VAR_ELITE_4_MODE)) case 3"
     )
+
+
+def test_is_reset_value_recognizes_the_literal_zero_and_any_none_suffixed_symbol():
+    assert _is_reset_value("0")
+    assert _is_reset_value("BATTLE_FIELD_EFFECT_NONE")  # the corpus's one symbolic form
+    assert _is_reset_value("SOME_OTHER_NONE")  # the check is suffix-based, not a fixed list
+    assert not _is_reset_value("BATTLE_FIELD_EFFECT_ROOM")
+    assert not _is_reset_value("STATUS_FIELD_GRAVITY")
+
+
+def test_pair_field_effects_recognizes_the_monochamp_style_symbolic_reset():
+    # EvergrandeCity_MonoChampRoom_1's own shape: EFFECT_TYPE resets via the symbolic
+    # BATTLE_FIELD_EFFECT_NONE, FIELD_ID resets via the literal 0 -- an earlier version
+    # of this function only recognized the literal "0" for either var, so this specific
+    # reset went unrecognized (see _is_reset_value's own comment for what that used to
+    # cost). Mirrors test_pair_field_effects_ignores_the_post_battle_reset_to_zero.
+    writes = [
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_MONOCHAMP", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "TYPE_NORMAL", ()),
+        ("Script", "VAR_BATTLE_FIELD_EFFECT_TYPE", "BATTLE_FIELD_EFFECT_NONE", ()),
+        ("Script", "VAR_BATTLE_FIELD_ID", "0", ()),
+    ]
+    out = _pair_field_effects("SomeMap", writes, [])
+    assert len(out) == 1
+    assert out[0] == {
+        "map": "SomeMap",
+        "script": "Script",
+        "effectType": "BATTLE_FIELD_EFFECT_MONOCHAMP",
+        "fieldId": "TYPE_NORMAL",
+        "guard": None,
+        "trainers": [],
+    }
+
+
+def test_pair_field_effects_symbolic_reset_on_an_incompatible_branch_does_not_leak_a_stale_field_id():
+    # The failure shape the literal-"0"-only check could have hit, even though nothing
+    # in the current corpus does: a symbolic EFFECT_TYPE reset sitting on a branch that
+    # is mutually exclusive with (not an ancestor/descendant of) the activation it
+    # follows. Under the old check, this reset would have been treated as an ordinary
+    # write instead of a reset -- surviving past the `not (effect_type and field_id)`
+    # skip (field_id was still the FIRST activation's stale TRICK_ROOM) and past the
+    # "still the same activation" skip too (this time _frames_compatible is False,
+    # since the reset sits in the exclusive `else`), falling through to a second,
+    # bogus row pairing "BATTLE_FIELD_EFFECT_NONE" with the stale fieldId. With the
+    # reset recognized regardless of frame path, that second row is never reached: the
+    # reset unconditionally clears effect_type and last_activation_frames the moment
+    # it's read, before frame compatibility is even considered.
+    text = (
+        "script Room{\n"
+        "\tif(A){\n"
+        "\t\tsetvar(VAR_BATTLE_FIELD_EFFECT_TYPE, BATTLE_FIELD_EFFECT_ROOM)\n"
+        "\t\tsetvar(VAR_BATTLE_FIELD_ID, STATUS_FIELD_TRICK_ROOM)\n"
+        "\t}\n"
+        "\telse{\n"
+        "\t\tsetvar(VAR_BATTLE_FIELD_EFFECT_TYPE, BATTLE_FIELD_EFFECT_NONE)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("SomeMap", text)
+    out = _pair_field_effects("SomeMap", scanned["field_writes"], scanned["trainer_calls"])
+    assert len(out) == 1
+    assert out[0]["fieldId"] == "STATUS_FIELD_TRICK_ROOM"
 
 
 def test_battle_events_guard_is_the_actual_defeated_check_not_a_flag():
