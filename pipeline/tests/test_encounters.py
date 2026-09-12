@@ -8,6 +8,7 @@ from erdata.encounters import (
     _iter_script_files,
     _join_own_line_else,
     _pair_field_effects,
+    _pair_inverse_battles,
     _scan_file,
     _strip_comment,
     scrape_encounters,
@@ -21,7 +22,13 @@ _ENCOUNTERS = scrape_encounters()
 
 def test_encounters_dict_is_json_serializable():
     json.dumps(_ENCOUNTERS)
-    assert set(_ENCOUNTERS) == {"fieldEffects", "battleEvents", "trainerChains", "tagBattles"}
+    assert set(_ENCOUNTERS) == {
+        "fieldEffects",
+        "battleEvents",
+        "trainerChains",
+        "tagBattles",
+        "inverseBattles",
+    }
 
 
 def test_strip_comment_handles_poryscript_and_raw_asm_styles():
@@ -51,6 +58,28 @@ def test_field_effects_mossdeep_gym_permanent_trick_room():
     assert fe["effectType"] == "BATTLE_FIELD_EFFECT_ROOM"
     assert fe["fieldId"] == "STATUS_FIELD_TRICK_ROOM"
     assert fe["trainers"] == ["TRAINER_TATE_AND_LIZA_1"]
+
+
+def test_inverse_battles_only_tate_and_liza_1_not_the_rematch_variants():
+    # The plan's "Gym 7 has Trick Room and Inverse Room together" is wrong as a
+    # mechanism (TryToSetFieldEffect's Room case cannot set both from one entry --
+    # battle_util.c:4242-4310) but right as a conclusion, and narrower than stated:
+    # FLAG_SYS_INVERSE_BATTLE is set independently, two lines after the Trick Room
+    # write, ONLY in TateAndLiza's own script (scripts.pory:989-1022), never in the
+    # rematch script driving TRAINER_TATE_AND_LIZA_2/_3. See
+    # docs/battle-sim/encounters-guard-field-semantics.md's flag census -- do not
+    # re-derive the census, this test just re-confirms it's wired into scrape output.
+    assert len(_ENCOUNTERS["inverseBattles"]) == 1
+    inverse = _ENCOUNTERS["inverseBattles"][0]
+    assert inverse["map"] == "MossdeepCity_Gym"
+    assert inverse["script"] == "MossdeepCity_Gym_EventScript_TateAndLiza"
+    assert inverse["trainers"] == ["TRAINER_TATE_AND_LIZA_1"]
+    assert inverse["guard"] is None  # set unconditionally, before the switch even opens
+    rematch_scripts = {
+        "MossdeepCity_Gym_EventScript_TateAndLizaRematch",
+        "MossdeepCity_Gym_EventScript_TateAndLizaDoublesRematch",
+    }
+    assert not any(t["script"] in rematch_scripts for t in _ENCOUNTERS["inverseBattles"])
 
 
 # --- _frames_compatible: the co-occurrence predicate itself -----------------------
@@ -949,6 +978,99 @@ def test_scan_file_heal_disabled_resets_at_a_new_script_boundary():
     heal_by_id = {tid: hd for _, tid, _fp, hd in scanned["trainer_calls"]}
     assert heal_by_id["TRAINER_A"] is True
     assert heal_by_id["TRAINER_B"] is False
+
+
+def test_pair_inverse_battles_collects_the_bracketed_trainer():
+    # Synthetic, modeled on the real MossdeepCity_Gym shape: setflag, then a
+    # trainerbattle call, then clearflag -- same row shape _pair_field_effects
+    # produces ({map, script, guard, trainers}), not a bespoke one.
+    text = (
+        "script PoryLabel{\n"
+        "\tsetflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\ttrainerbattle_double(TRAINER_A, Text, Text, Text, Script)\n"
+        "\tclearflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    out = _pair_inverse_battles("TestMap", scanned["inverse_flag_writes"], scanned["trainer_calls"])
+    assert out == [{"map": "TestMap", "script": "PoryLabel", "guard": None, "trainers": ["TRAINER_A"]}]
+
+
+def test_pair_inverse_battles_dedupes_repeat_calls_to_the_same_trainer():
+    # The real TateAndLiza shape this was found against: three switch cases, all
+    # naming the same trainer, all reached under the one already-active flag (set
+    # unconditionally before the switch opens) -- must collapse to ONE row, not three
+    # differing only in which case's dialogue plays. This is the exact regression the
+    # real-data test (test_inverse_battles_only_tate_and_liza_1_not_the_rematch_variants)
+    # first caught: an earlier, bespoke-tracking-set version of this scraper emitted 3
+    # rows for this one fact; _pair_field_effects's own frame-compatible-trainers-as-a-
+    # set aggregation collapses it for free.
+    text = (
+        "script PoryLabel{\n"
+        "\tsetflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\tswitch(var(VAR_RESULT)){\n"
+        "\t\tcase 0:\n"
+        "\t\t\ttrainerbattle_double_no_intro(TRAINER_A, Text, Text, Script)\n"
+        "\t\tbreak\n"
+        "\t\tdefault:\n"
+        "\t\t\ttrainerbattle_double(TRAINER_A, Text, Text, Text, Script, NO_MUSIC)\n"
+        "\t\tbreak\n"
+        "\t}\n"
+        "\tclearflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    out = _pair_inverse_battles("TestMap", scanned["inverse_flag_writes"], scanned["trainer_calls"])
+    assert out == [{"map": "TestMap", "script": "PoryLabel", "guard": None, "trainers": ["TRAINER_A"]}]
+
+
+def test_pair_inverse_battles_excludes_a_call_in_a_mutually_exclusive_sibling_branch():
+    # Scoped by FRAME COMPATIBILITY, the same way _pair_field_effects is -- not by
+    # textual position relative to the setflag/clearflag. TRAINER_OUTSIDE sits in the
+    # `else` of the same if/else the setflag's own `if` branch belongs to, so it can
+    # never be reached in the same playthrough as the activation and must be excluded;
+    # TRAINER_INSIDE, in the same branch as the setflag, must be included.
+    text = (
+        "script PoryLabel{\n"
+        "\tif (A){\n"
+        "\t\tsetflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\t\ttrainerbattle_single(TRAINER_INSIDE, Text, Text)\n"
+        "\t\tclearflag(FLAG_SYS_INVERSE_BATTLE)\n"
+        "\t}\n"
+        "\telse{\n"
+        "\t\ttrainerbattle_single(TRAINER_OUTSIDE, Text, Text)\n"
+        "\t}\n"
+        "\tend\n"
+        "}\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    out = _pair_inverse_battles("TestMap", scanned["inverse_flag_writes"], scanned["trainer_calls"])
+    assert len(out) == 1
+    assert out[0]["trainers"] == ["TRAINER_INSIDE"]
+
+
+def test_pair_inverse_battles_is_scoped_per_script_not_leaked_across_scripts():
+    # A setflag in one script must never attribute a DIFFERENT script's own trainer
+    # call -- by_script/calls_by_script group by script name before anything else runs,
+    # so this holds structurally, not via a reset that has to fire at the right time.
+    text = (
+        "ScriptA::\n"
+        "\tsetflag FLAG_SYS_INVERSE_BATTLE\n"
+        "\ttrainerbattle_single TRAINER_A, Text, Text\n"
+        "\tclearflag FLAG_SYS_INVERSE_BATTLE\n"
+        "\tend\n"
+        "\n"
+        "ScriptB::\n"
+        "\ttrainerbattle_single TRAINER_B, Text, Text\n"
+        "\tend\n"
+    )
+    scanned = _scan_file("TestMap", text)
+    out = _pair_inverse_battles("TestMap", scanned["inverse_flag_writes"], scanned["trainer_calls"])
+    assert len(out) == 1
+    assert out[0]["script"] == "ScriptA"
+    assert out[0]["trainers"] == ["TRAINER_A"]
 
 
 def test_iter_script_files_includes_data_scripts_inc():

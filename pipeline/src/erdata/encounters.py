@@ -387,6 +387,33 @@ _STARTTAGBATTLE_RE = re.compile(r"\bstarttagbattle\(\s*(TRAINER_\w+)\s*,\s*(TRAI
 _SET_AUTOHEAL_DISABLED_RE = re.compile(r"\bsetflag\(?\s*FLAG_SYS_DISABLE_AUTOHEAL\)?")
 _CLEAR_AUTOHEAL_DISABLED_RE = re.compile(r"\bclearflag\(?\s*FLAG_SYS_DISABLE_AUTOHEAL\)?")
 
+# `setflag(FLAG_SYS_INVERSE_BATTLE)` / `clearflag(FLAG_SYS_INVERSE_BATTLE)` --
+# battle_util.c:8028 reads this flag (aliased B_FLAG_INVERSE_BATTLE,
+# include/constants/battle_config.h:121) to invert the whole battle's type chart. Used
+# in exactly one place in the entire game -- grepped the full pinned checkout, not just
+# data/maps/ (see docs/battle-sim/encounters-guard-field-semantics.md's flag census, do
+# not re-derive, a prior version of this census undercounted the clears and
+# mischaracterized the general reset): MossdeepCity_Gym's TateAndLiza script
+# (scripts.pory:989-1022) sets it two lines after its own Trick Room field-effect
+# activation (:993-995) -- an independent script command, not part of that effect --
+# immediately before its three switch cases' trainerbattle_double calls (all naming
+# TRAINER_TATE_AND_LIZA_1), and clears it once more at :1019, right after the switch
+# closes, still inside the same script and at the same (empty) frame depth as the
+# setflag. The rematch script (TateAndLizaRematch/TateAndLizaDoublesRematch,
+# TRAINER_TATE_AND_LIZA_2/_3, :98-123) sets Trick Room the identical way but never
+# calls this setflag anywhere in that path.
+#
+# Paired the same way as VAR_BATTLE_FIELD_EFFECT_TYPE/VAR_BATTLE_FIELD_ID below
+# (_pair_inverse_battles, modeled directly on _pair_field_effects), not tracked as a
+# running boolean during the scan: a single flag needs no "wait for a second write to
+# complete" state the way the two paired vars do, and per-script frame-compatible
+# trainer aggregation is what naturally collapses TateAndLiza's three same-trainer
+# switch cases into one row without extra bookkeeping -- an earlier version of this
+# scraper wrote a bespoke running-boolean-plus-seen-set tracker to get that same
+# dedup, duplicating machinery this file already had.
+_SET_INVERSE_BATTLE_RE = re.compile(r"\bsetflag\(?\s*FLAG_SYS_INVERSE_BATTLE\)?")
+_CLEAR_INVERSE_BATTLE_RE = re.compile(r"\bclearflag\(?\s*FLAG_SYS_INVERSE_BATTLE\)?")
+
 _IF_RE = re.compile(r"\bif\s*\((.*?)\)\s*\{")
 _ELSE_IF_RE = re.compile(r"\}\s*else\s+if\s*\((.*?)\)\s*\{")
 _ELSE_RE = re.compile(r"\}\s*else\s*\{")
@@ -559,6 +586,7 @@ def _iter_script_files():
 # doesn't push a new frame, it *relabels* guard_stack's current top in place.
 def _scan_file(map_name: str, text: str) -> dict:
     field_writes: list[tuple[str, str, str, tuple]] = []  # (script, var, value, frame_path)
+    inverse_flag_writes: list[tuple[str, bool, tuple]] = []  # (script, is_set, frame_path)
     battle_events: list[dict] = []
     trainer_calls: list[tuple[str, str, tuple, bool]] = []  # (script, trainer_id, frame_path, heal_disabled)
     tag_battles: list[dict] = []
@@ -694,6 +722,11 @@ def _scan_file(map_name: str, text: str) -> dict:
         for var, value in _SETVAR_FIELD_RE.findall(line):
             field_writes.append((current_script, var, value, frame_path))
 
+        if _SET_INVERSE_BATTLE_RE.search(line):
+            inverse_flag_writes.append((current_script, True, frame_path))
+        elif _CLEAR_INVERSE_BATTLE_RE.search(line):
+            inverse_flag_writes.append((current_script, False, frame_path))
+
         for event, data0, data1 in _REGISTER_RE.findall(line):
             battle_events.append(
                 {
@@ -719,6 +752,7 @@ def _scan_file(map_name: str, text: str) -> dict:
 
     return {
         "field_writes": field_writes,
+        "inverse_flag_writes": inverse_flag_writes,
         "battle_events": battle_events,
         "trainer_calls": trainer_calls,
         "tag_battles": tag_battles,
@@ -839,6 +873,56 @@ def _pair_field_effects(map_name: str, field_writes: list, trainer_calls: list) 
     return out
 
 
+# Pairs setflag(FLAG_SYS_INVERSE_BATTLE)/clearflag activations into
+# {map, script, guard, trainers: [...]} rows -- the exact shape _pair_field_effects
+# produces, modeled directly on it rather than on heal_disabled's own scan-time
+# running-boolean tracking (_find_chains reads that; _pair_field_effects itself
+# discards the equivalent field on trainer_calls -- see the loop below, `_heal_disabled`
+# -- it never brackets anything). A single flag needs no "wait for a second write to
+# complete" state the two paired field-effect vars do, so an activation opens the
+# moment a `True` write is seen, closes on the next `False`, and (like
+# _pair_field_effects's own reset handling) a `True` write that's still
+# `_frames_compatible` with an already-open activation extends it rather than starting
+# a redundant second row -- this is what collapses TateAndLiza's three same-trainer
+# switch cases (all compatible with the SAME empty-frame-path activation opened before
+# the switch even opens, scripts.pory:993-995) into the one row that exists in the
+# committed data, with no bespoke dedup set needed.
+def _pair_inverse_battles(map_name: str, flag_writes: list, trainer_calls: list) -> list[dict]:
+    by_script: dict[str, list[tuple[bool, tuple]]] = {}
+    for script, is_set, frame_path in flag_writes:
+        by_script.setdefault(script, []).append((is_set, frame_path))
+
+    calls_by_script: dict[str, list[tuple[str, tuple]]] = {}
+    for script, trainer_id, frame_path, _heal_disabled in trainer_calls:
+        calls_by_script.setdefault(script, []).append((trainer_id, frame_path))
+
+    out = []
+    for script, writes in by_script.items():
+        last_activation_frames: tuple | None = None
+        for is_set, frame_path in writes:
+            if not is_set:
+                last_activation_frames = None
+                continue
+            if last_activation_frames is not None and _frames_compatible(frame_path, last_activation_frames):
+                continue  # still the same activation as before, not a new one
+            last_activation_frames = frame_path
+            out.append(
+                {
+                    "map": map_name,
+                    "script": script,
+                    "guard": frame_path[-1].text if frame_path else None,
+                    "trainers": sorted(
+                        {
+                            tid
+                            for tid, call_frames in calls_by_script.get(script, [])
+                            if _frames_compatible(call_frames, frame_path)
+                        }
+                    ),
+                }
+            )
+    return out
+
+
 # Every maximal set of indices into `entries` (0..n-1) that is pairwise
 # `compat[i][j]`-compatible -- i.e. every maximal clique of the compatibility graph.
 # Plain Bron-Kerbosch, no pivoting: n (recorded call sites sharing one script) is small
@@ -923,15 +1007,29 @@ def _find_chains(map_name: str, trainer_calls: list) -> list[dict]:
 def scrape_encounters() -> dict:
     """Full scrape across every data/maps/*/scripts.pory and data/scripts/*.inc. Returns
     {"fieldEffects": [...], "battleEvents": [...], "trainerChains": [...],
-    "tagBattles": [...]}, each entry tagged with the (map, script) it was found in --
-    "map" is the source .inc file's own stem for a data/scripts/ entry, since a shared
-    script has no map of its own -- see module docstring for what each list means and
-    this module's honest limitations.
+    "tagBattles": [...], "inverseBattles": [...]}, each entry tagged with the
+    (map, script) it was found in -- "map" is the source .inc file's own stem for a
+    data/scripts/ entry, since a shared script has no map of its own -- see module
+    docstring for what each list means and this module's honest limitations.
+
+    "inverseBattles" is its own list, not folded into "fieldEffects", for the same
+    reason "tagBattles" is: FLAG_SYS_INVERSE_BATTLE is a battle-format flag
+    (battle_util.c:8028), not a VAR_BATTLE_FIELD_* write, and the one real occurrence
+    sits ALONGSIDE a fieldEffects activation (Trick Room) rather than being part of
+    it -- see _SET_INVERSE_BATTLE_RE's own comment and
+    docs/battle-sim/encounters-guard-field-semantics.md's flag census. Folding it into
+    fieldEffects would either invent a field that mechanism doesn't have or silently
+    conflate two independent script commands into one. Each entry is
+    {"map", "script", "guard", "trainers": [...]} -- the same shape "fieldEffects"
+    itself uses, produced by _pair_inverse_battles (modeled on _pair_field_effects),
+    which is what collapses TateAndLiza's three same-trainer switch cases into the one
+    row that exists in the committed data.
     """
     field_effects: list[dict] = []
     battle_events: list[dict] = []
     trainer_chains: list[dict] = []
     tag_battles: list[dict] = []
+    inverse_battles: list[dict] = []
 
     for path in _iter_script_files():
         map_name = path.parent.name if path.suffix == ".pory" else path.stem
@@ -942,12 +1040,14 @@ def scrape_encounters() -> dict:
         battle_events.extend(scanned["battle_events"])
         trainer_chains.extend(_find_chains(map_name, scanned["trainer_calls"]))
         tag_battles.extend(scanned["tag_battles"])
+        inverse_battles.extend(_pair_inverse_battles(map_name, scanned["inverse_flag_writes"], scanned["trainer_calls"]))
 
     return {
         "fieldEffects": field_effects,
         "battleEvents": battle_events,
         "trainerChains": trainer_chains,
         "tagBattles": tag_battles,
+        "inverseBattles": inverse_battles,
     }
 
 
@@ -963,6 +1063,7 @@ if __name__ == "__main__":
     print(f"battleEvents={len(result['battleEvents'])}")
     print(f"trainerChains={len(result['trainerChains'])}")
     print(f"tagBattles={len(result['tagBattles'])}")
+    print(f"inverseBattles={len(result['inverseBattles'])}")
 
     mossdeep_room = next(
         fe
@@ -1004,4 +1105,18 @@ if __name__ == "__main__":
         if t["map"] == "DewfordTown_Gym" and t["script"] == "DewfordTown_Gym_EventScript_BrendenAndLilith"
     )
     assert dewford_tag["trainers"] == ["TRAINER_LILITH", "TRAINER_BRENDEN"]
+
+    # The one real occurrence in the entire game (see the flag census) -- fight 1 is
+    # both Trick Room and an inverse battle, fights 2 and 3 are Trick Room only.
+    assert len(result["inverseBattles"]) == 1
+    inverse = result["inverseBattles"][0]
+    assert inverse["map"] == "MossdeepCity_Gym"
+    assert inverse["script"] == "MossdeepCity_Gym_EventScript_TateAndLiza"
+    assert inverse["trainers"] == ["TRAINER_TATE_AND_LIZA_1"]
+    rematch_scripts = {
+        "MossdeepCity_Gym_EventScript_TateAndLizaRematch",
+        "MossdeepCity_Gym_EventScript_TateAndLizaDoublesRematch",
+    }
+    assert not any(t["script"] in rematch_scripts for t in result["inverseBattles"])
+
     print("ok")

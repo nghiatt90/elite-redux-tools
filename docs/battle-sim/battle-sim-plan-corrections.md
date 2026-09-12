@@ -51,3 +51,19 @@ Checked 2026-09-11 at the pinned SHA. Do not re-derive these.
    (`battle_ai_switch_items.c:611`).
 7. Minor: the plan cites `ChooseMoveOrAction_Singles:322` for the u8 comparison; 322 is
    `consideredMoveArray[0] = 0`. The truncating assignment is 321, the comparisons 327 and 331.
+8. **"Gym 7's permanent Trick Room plus Inverse Room" is wrong as a mechanism, right as a
+   conclusion, and narrower than stated.** `TryToSetFieldEffect`'s Room case
+   (`battle_util.c:4242-4310`) cannot set both from one field-effect entry: `switch
+   (fieldEffectId)` has independent `STATUS_FIELD_TRICK_ROOM` (:4244) and
+   `STATUS_FIELD_INVERSE_ROOM` (:4283) branches, each its own `break`/`return TRUE`, switching
+   on a single `VarGet(VAR_BATTLE_FIELD_ID)` read once at function entry. But
+   `MossdeepCity_Gym/scripts.pory:989-1022` (`TateAndLiza`, driving `TRAINER_TATE_AND_LIZA_1`)
+   sets Trick Room via that mechanism AND independently calls `setflag(FLAG_SYS_INVERSE_BATTLE)`
+   two lines later (:995) -- two unrelated script commands co-occurring, not one effect
+   producing both. The rematch script (`TateAndLizaRematch`, :98-123, driving
+   `TRAINER_TATE_AND_LIZA_2`/`_3`) sets Trick Room the same way but never calls that `setflag`
+   -- its `clearflag`s are defensive resets, not evidence of a set (same pattern as the
+   documented defensive clear at `SootopolisCity_Gym_1F:301` for a different flag; see
+   [Encounters guard-field semantics](encounters-guard-field-semantics.md)). So: fight 1 is
+   Trick Room + Inverse Battle, fights 2 and 3 are Trick Room only. Flag census and citations:
+   [Encounters guard-field semantics](encounters-guard-field-semantics.md).

@@ -684,6 +684,7 @@ def build() -> None:
                 "battleEvents": len(encounters["battleEvents"]),
                 "trainerChains": len(encounters["trainerChains"]),
                 "tagBattles": len(encounters["tagBattles"]),
+                "inverseBattles": len(encounters["inverseBattles"]),
             },
             # ABILITIES_COUNT equivalent -- the randomizer LCG's modulus
             # (`(seed >> 16) % (abilitiesCount - 1)) + 1`, src/random.c). Not the same
