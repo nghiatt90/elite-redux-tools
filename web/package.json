@@ -8,7 +8,7 @@
     "predev": "npm run sync-data",
     "dev": "vite",
     "prebuild": "npm run sync-data",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && npm run lint && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run"
