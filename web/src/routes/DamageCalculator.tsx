@@ -47,8 +47,8 @@ export default function DamageCalculator() {
       <FieldBar field={field} onChange={setField} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <BattlerPanel side="Attacker" config={attacker} onChange={setAttacker} natures={calcData.data.natures} abilityHooks={calcData.data.abilityHooks} />
-        <BattlerPanel side="Defender" config={defender} onChange={setDefender} natures={calcData.data.natures} abilityHooks={calcData.data.abilityHooks} />
+        <BattlerPanel title="Attacker" config={attacker} onChange={setAttacker} natures={calcData.data.natures} abilityHooks={calcData.data.abilityHooks} />
+        <BattlerPanel title="Defender" config={defender} onChange={setDefender} natures={calcData.data.natures} abilityHooks={calcData.data.abilityHooks} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

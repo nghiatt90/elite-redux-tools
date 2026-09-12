@@ -180,6 +180,9 @@ describe('buildMatchupReport', () => {
     const reflect = carbink.itsMoves.find((m) => m.moveId === 'MOVE_REFLECT')!
     expect(reflect.maxRollDamage).toBeNull()
     expect(reflect.aiEstimatedDamage).toBeNull()
+    // A genuinely powerless move has nothing wrong to warn about -- unlike a
+    // dynamic-damage effect's null (see the test below), which DOES carry a note.
+    expect(reflect.unmodelled).toEqual([])
   })
 
   it(
@@ -204,6 +207,9 @@ describe('buildMatchupReport', () => {
       const marowakReport = report.mons.find((m) => m.speciesId === 'SPECIES_MAROWAK')!
       const superFang = marowakReport.yourMoves.find((m) => m.moveId === 'MOVE_SUPER_FANG')!
       expect(superFang.maxRollDamage).toBeNull()
+      // Review finding: without this, Super Fang read exactly like a harmless status
+      // move (both a bare null, no warning) instead of like the real engine gap it is.
+      expect(superFang.unmodelled).toEqual(['EFFECT_SUPER_FANG: not modelled'])
     },
   )
 

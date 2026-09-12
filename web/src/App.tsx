@@ -7,6 +7,7 @@ import PokedexShell from './routes/PokedexShell'
 import RandomizerLayout from './routes/RandomizerLayout'
 import RandomizerPidFinder from './routes/RandomizerPidFinder'
 import RandomizerSpeciesFinder from './routes/RandomizerSpeciesFinder'
+import TrainerMatchup from './routes/TrainerMatchup'
 import UnderConstruction from './routes/UnderConstruction'
 
 const NAV_LINKS = [
@@ -14,6 +15,7 @@ const NAV_LINKS = [
   { to: '/randomizer', label: 'Randomizer' },
   { to: '/team-builder', label: 'Team Builder' },
   { to: '/damage-calculator', label: 'Damage Calculator' },
+  { to: '/trainer-matchup', label: 'Trainer Matchup' },
 ]
 
 function Nav({ className = '' }: { className?: string }) {
@@ -122,6 +124,7 @@ function AppRoutes() {
       </Route>
       <Route path="/team-builder" element={<UnderConstruction title="Team Builder" />} />
       <Route path="/damage-calculator" element={<DamageCalculator />} />
+      <Route path="/trainer-matchup" element={<TrainerMatchup />} />
     </Routes>
   )
 }

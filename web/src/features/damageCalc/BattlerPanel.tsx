@@ -16,7 +16,12 @@ const BATTLE_STATS: { key: BattleStatKey; label: string }[] = [
 ]
 
 interface Props {
-  side: 'Attacker' | 'Defender'
+  /** Display heading only (see the lone `<h2>{title}</h2>` below) -- a caption, not
+   * a role this component branches on, so it's honest as a plain string union rather
+   * than a bare `string` (which would also silently accept a typo). Widened from
+   * 'Attacker' | 'Defender' to also cover features/matchupReport's reuse of this
+   * panel for the player's own Pokemon. */
+  title: 'Attacker' | 'Defender' | 'Your Pokemon'
   config: BattlerConfig
   onChange: (next: BattlerConfig) => void
   natures: BattleConstants
@@ -57,7 +62,7 @@ function MoveSelect({ value, onChange, options, movesById }: { value: string | n
   )
 }
 
-export default function BattlerPanel({ side, config, onChange, natures, abilityHooks }: Props) {
+export default function BattlerPanel({ title, config, onChange, natures, abilityHooks }: Props) {
   const { species, speciesById, movesById, items, typeChart } = useGameData()
   const hiddenPowerTypes = useMemo(() => Object.keys(typeChart).sort(), [typeChart])
   const [speciesQuery, setSpeciesQuery] = useState('')
@@ -82,7 +87,7 @@ export default function BattlerPanel({ side, config, onChange, natures, abilityH
   return (
     <div className="flex flex-col gap-3 p-3 rounded-md border" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-elevated)' }}>
       <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
-        {side}
+        {title}
       </h2>
 
       <div className="flex items-center gap-3">

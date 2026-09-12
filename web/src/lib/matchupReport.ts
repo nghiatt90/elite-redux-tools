@@ -391,14 +391,25 @@ function evaluateMoveEntry(
     moveId: move.id,
     priority: move.priority ?? 0,
   }
-  if (!move.power || (move.effect && DYNAMIC_DAMAGE_EFFECTS.has(move.effect))) {
+  const isDynamicDamageEffect = Boolean(move.effect && DYNAMIC_DAMAGE_EFFECTS.has(move.effect))
+  if (!move.power || isDynamicDamageEffect) {
     // Two separate reasons collapse to the same "no number" result -- see
     // MatchupMoveEntry.maxRollDamage's own doc for why these can't be merged into
     // one check: AI_CalcDamage's own `else { dmg = 0; }` branch for a truly
     // powerless move, and its own dynamic-damage switch for a move this engine has
     // no port of at all (checked independently of power, since several of these
     // declare power 1 in this ER data, not 0).
-    return { ...base, maxRollDamage: null, maxRollPercent: null, aiEstimatedDamage: null, aiEstimatedPercent: null, isImmune: false, unmodelled: [] }
+    //
+    // `unmodelled` is EMPTY for a plain powerless move (a STATUS move genuinely has
+    // no direct damage -- there's nothing to warn about) but carries a real note for
+    // isDynamicDamageEffect -- a review finding on the React surface caught that
+    // without this split, Super Fang/Endeavor/Final Gambit/Night Shade/Natures
+    // Madness read as harmless (the SAME bare dash a status move gets), when they're
+    // actually the exact same class of engine gap as Counter/Mirror Coat/Bide/
+    // Seismic Toss below, which DO get a warning. See MatchupReportView.tsx's own
+    // "dash means three different things" note.
+    const unmodelled = isDynamicDamageEffect ? [`${move.effect}: not modelled`] : []
+    return { ...base, maxRollDamage: null, maxRollPercent: null, aiEstimatedDamage: null, aiEstimatedPercent: null, isImmune: false, unmodelled }
   }
 
   const scenarioBase = {

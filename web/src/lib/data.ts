@@ -21,9 +21,9 @@ export const loadTypeChart = () => getJSON<TypeChart>(`${BASE}/types.json`)
 export const loadInverseTypeChart = () => getJSON<TypeChart>(`${BASE}/typesInverse.json`)
 export const loadItems = () => getJSON<Item[]>(`${BASE}/items.json`)
 export const loadMeta = () => getJSON<Meta>(`${BASE}/meta.json`)
-// Battle-sim-only artifact (~2.9MB of party data for 932 trainers) -- not part of
-// GameDataContext's eager load, same reasoning as the damage-calculator-only loaders
-// below. Fetched lazily by the matchup-report route.
+// Battle-sim-only artifact (4.23MB of party data for 932 trainers, 343KB gzipped) --
+// not part of GameDataContext's eager load, same reasoning as the damage-calculator-
+// only loaders below. Fetched lazily by the matchup-report route.
 export const loadTrainers = () => getJSON<Trainer[]>(`${BASE}/trainers.json`)
 
 // Damage-calculator-only artifacts -- NOT part of GameDataContext's eager load (a
