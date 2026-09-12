@@ -923,7 +923,12 @@ function calcInternal(
 
   const behaviorResult = applyMoveBehaviorDamage(move.power, move.effect, moveBehaviors, toDamageContext(scenario))
   unmodelled.push(...behaviorResult.unmodelled)
-  if (move.effect && UNMODELLED_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: not modelled (needs turn history)`)
+  // "not modelled" alone, matching UNMODELLED_MISC_EFFECTS's own message shape
+  // (basePower.ts) -- an earlier "(needs turn history)" suffix here was accurate
+  // for some of this set's entries (Counter/Mirror Coat/Bide) but not others
+  // (Super Fang/Endeavor/Final Gambit/etc. need a real, unported formula, not
+  // turn-history state), so a single reason no longer fits every member.
+  if (move.effect && UNMODELLED_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: not modelled`)
   const preModifierResult = applyPreModifierBasePower(
     behaviorResult.power,
     move.effect,

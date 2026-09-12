@@ -2078,3 +2078,46 @@ describe("calculateMoveDamage -- Wonder Room's ATK<->SPATK swap (CalculateStat, 
     expect(withRoom).toBeLessThan(withoutRoom)
   })
 })
+
+describe('calculateMoveDamage -- UNMODELLED_BASE_POWER_EFFECTS warns instead of printing a fake number for moves whose real damage bypasses this formula entirely (basePower.ts)', () => {
+  it.each([
+    'MOVE_COUNTER',
+    'MOVE_MIRROR_COAT',
+    'MOVE_BIDE',
+    'MOVE_SUPER_FANG',
+    'MOVE_NATURES_MADNESS', // EFFECT_SUPER_FANG_HAZE, distinct from MOVE_SUPER_FANG's own EFFECT_SUPER_FANG
+    'MOVE_ENDEAVOR',
+    'MOVE_FINAL_GAMBIT',
+    'MOVE_NIGHT_SHADE', // EFFECT_LEVEL_DAMAGE
+  ])(
+    '%s carries an "unmodelled" note -- not just a silently small number',
+    (moveId) => {
+      // Re-confirms the same fact the set's own doc comment cites: these moves
+      // declare power 1 in this ER data (not the vanilla power-0 convention), so
+      // a caller that only checked `power === 0` before showing a number would
+      // print a small, wrong figure with no warning at all.
+      expect(moveById[moveId].power).toBe(1)
+      const result = calculateMoveDamage(scenario({ move: moveData(moveId) }))
+      expect(result.unmodelled).toContain(`${moveById[moveId].effect}: not modelled`)
+    },
+  )
+
+  it('does NOT warn on an ordinary move sharing no effect with the unmodelled set (Tackle, the scenario() default)', () => {
+    const result = calculateMoveDamage(scenario())
+    expect(result.unmodelled).toEqual([])
+  })
+
+  it(
+    'does NOT warn on Sky Drop just because it shares EFFECT_SKY_DROP with Seismic Toss -- Sky Drop\'s own ' +
+      'final hit (power=60) IS computed correctly by this formula, unlike Seismic Toss (power=1); the set is ' +
+      'deliberately keyed by effect, not move id, and EFFECT_SKY_DROP is deliberately excluded from it (see the ' +
+      "set's own doc in basePower.ts) so Sky Drop can't be caught by a broader fix aimed at Seismic Toss",
+    () => {
+      expect(moveById.MOVE_SKY_DROP.effect).toBe('EFFECT_SKY_DROP')
+      expect(moveById.MOVE_SKY_DROP.power).toBeGreaterThan(1)
+      const result = calculateMoveDamage(scenario({ move: moveData('MOVE_SKY_DROP') }))
+      expect(result.unmodelled).toEqual([])
+      expect(result.rolls[15]).toBeGreaterThan(0)
+    },
+  )
+})

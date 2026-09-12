@@ -444,17 +444,58 @@ export function applyAngelsWrathBasePower(basePower: number, moveId: string, att
 
 // ---------------------------------------------------------------------------
 // Behaviors whose base-power mechanic lives in CalcMoveBasePower's hardcoded C
-// switch (:6825-6913) rather than in moveBehaviors.json -- ALL of them are now
-// ported (see the module doc comment for the full history, including two that
-// were wrongly bucketed here for a while: Focus Punch, and Beat Up, which turned
-// out portable too via one representative party-member stand-in rather than a
-// full roster -- see DamageContext.beatUpBaseAttack's own doc). Kept as an empty
-// set (rather than deleted) so a future move/effect that genuinely needs turn-
-// history state this calculator can't derive has an obvious place to go, with
-// the same "surfaced explicitly, not silently wrong" contract as before.
+// switch (:6803-6886) rather than in moveBehaviors.json -- every effect THAT
+// SWITCH ACTUALLY HANDLES is now ported (see the module doc comment for the full
+// history, including two that were wrongly bucketed here for a while: Focus
+// Punch, and Beat Up, which turned out portable too via one representative
+// party-member stand-in rather than a full roster -- see
+// DamageContext.beatUpBaseAttack's own doc).
+//
+// This set is for a WIDER category than that switch, despite the name: any
+// effect whose REAL in-battle damage this engine's formula cannot produce at
+// all, not only a modifier CalcMoveBasePower's own switch is missing. Found by
+// re-measuring moves.json's declared power for every move using each effect
+// (matchupReport.ts's own DYNAMIC_DAMAGE_EFFECTS/TRUE_DAMAGE_UNAVAILABLE_EFFECTS
+// audit, prompted by a review finding that this calculator was silently
+// printing a small, wrong number for them with no warning at all):
+//
+// - EFFECT_SUPER_FANG, EFFECT_SUPER_FANG_HAZE, EFFECT_LEVEL_DAMAGE,
+//   EFFECT_PSYWAVE, EFFECT_DRAGON_RAGE, EFFECT_ENDEAVOR, EFFECT_FINAL_GAMBIT --
+//   confirmed ABSENT from CalcMoveBasePower's switch above (:6803-6886), i.e.
+//   these moves' real damage bypasses CalcMoveBasePower/DoMoveDamageCalc
+//   entirely in the ROM; AI_CalcDamage (battle_ai_util.c:684-703) computes them
+//   via its own separate dynamic-damage switch instead, which this engine
+//   doesn't port either. (EFFECT_PSYWAVE/EFFECT_DRAGON_RAGE currently have no
+//   move using them in this ER data -- both moves were redesigned into ordinary
+//   power-based moves with different effects -- kept for fidelity to the C.)
+// - EFFECT_COUNTER, EFFECT_MIRROR_COAT, EFFECT_BIDE -- also confirmed absent
+//   from the switch above; their real damage (double whatever was received, or
+//   double a 2-turn accumulated total) is `legacyConfig`-only in
+//   moveBehaviors.json (battle-script bytecode, out of this pipeline's reach --
+//   see docs/battle-sim's own finding on that), and AI_CalcDamage doesn't
+//   special-case them either, so it too falls through to the ordinary formula.
+//
+// Deliberately NOT included: EFFECT_SKY_DROP (Seismic Toss's real effect in
+// this ER build, also power=1 and equally unmodelled) -- it's shared with
+// MOVE_SKY_DROP (power=60), whose own final hit IS computed correctly by the
+// ordinary formula, and this set is keyed by effect, not move id, so adding it
+// here would wrongly warn on Sky Drop too. Seismic Toss's calculator-surface
+// gap is therefore still open; matchupReport.ts's own TRUE_DAMAGE_UNAVAILABLE_
+// MOVE_IDS handles it there by move id instead.
 // ---------------------------------------------------------------------------
 
-export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([])
+export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([
+  'EFFECT_SUPER_FANG',
+  'EFFECT_SUPER_FANG_HAZE',
+  'EFFECT_LEVEL_DAMAGE',
+  'EFFECT_PSYWAVE',
+  'EFFECT_DRAGON_RAGE',
+  'EFFECT_ENDEAVOR',
+  'EFFECT_FINAL_GAMBIT',
+  'EFFECT_COUNTER',
+  'EFFECT_MIRROR_COAT',
+  'EFFECT_BIDE',
+])
 
 // ---------------------------------------------------------------------------
 // 2. CalcMoveBasePowerAfterModifiers's own chain (src/battle_util.c:6995-7117).
