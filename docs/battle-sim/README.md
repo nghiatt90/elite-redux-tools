@@ -24,3 +24,7 @@ checkout and should not be re-derived; re-check them after a repin.
 - [Encounters guard-field semantics](encounters-guard-field-semantics.md) — Settled measurements of the Poryscript map corpus's else styles, and the open defect that encounters.json's `guard` field records the bare string "else" instead of the negated antecedent
 - [Textproto versus codegen divergence](textproto-vs-codegen-divergence.md) — When reviewing pipeline emitters, check whether the Kotlin codegen drops or transforms the field before it reaches the ROM -- textproto truth is not always game truth; includes the settled trainer-ability resolution chain
 - [Verifying cited numbers and corpus claims](verify-cited-numbers-and-corpus-claims.md) — Re-measure every count and every "held for every case in the corpus" claim an author writes in a comment; several have been wrong in this repo
+
+- [Elite Redux data breaks React list keys](er-data-breaks-react-list-keys.md) — Measured -- ER trainer parties repeat species and movesets repeat move ids, so species id, move id and speciesId+level are all unsafe React keys
+- [What the React layer's checks do and do not catch](react-layer-review-gates.md) — Run oxlint by hand on every React-layer review -- build and vitest cannot catch rules-of-hooks or any render-time defect in this repo
+- [Verifying npm and shell behaviour on Windows](windows-npm-and-shell-verification.md) — Measured -- npm runs package.json scripts through cmd.exe on this machine, and plain `npm` fails in Windows PowerShell; use npm.cmd to verify a build
