@@ -1,4 +1,4 @@
-import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
+import type { Ability, Item, Meta, Move, Species, Trainer, TypeChart } from './types'
 
 // Matches sources.lock.json's game_version and web/package.json's sync-data script,
 // which copies data/<version>/ to public/data/<version>/ before dev/build.
@@ -21,6 +21,10 @@ export const loadTypeChart = () => getJSON<TypeChart>(`${BASE}/types.json`)
 export const loadInverseTypeChart = () => getJSON<TypeChart>(`${BASE}/typesInverse.json`)
 export const loadItems = () => getJSON<Item[]>(`${BASE}/items.json`)
 export const loadMeta = () => getJSON<Meta>(`${BASE}/meta.json`)
+// Battle-sim-only artifact (~2.9MB of party data for 932 trainers) -- not part of
+// GameDataContext's eager load, same reasoning as the damage-calculator-only loaders
+// below. Fetched lazily by the matchup-report route.
+export const loadTrainers = () => getJSON<Trainer[]>(`${BASE}/trainers.json`)
 
 // Damage-calculator-only artifacts -- NOT part of GameDataContext's eager load (a
 // pokedex visitor shouldn't pay for ~600KB of ability-hook source text and move-

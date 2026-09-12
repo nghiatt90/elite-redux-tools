@@ -4,10 +4,13 @@
 import { calcHp, calcStat } from '../../engine/stats'
 import { calculateBattleStat } from '../../engine/battleStat'
 import type { BattleStatKey, BattlerBattleState, FieldBattleState, StatKey } from '../../engine/types'
-import type { DamageCalcScenario, MoveData } from '../../engine/calculate'
+import type { DamageCalcScenario } from '../../engine/calculate'
 import type { MoveBehaviors } from '../../engine/basePower'
+import { bareType, toMoveData } from '../../lib/moveData'
 import type { BattleConstants, Item, Move, MoveBehaviorsFile, Species } from '../../lib/types'
 import type { TypeChart } from '../../engine/typeEffectiveness'
+
+export { toMoveData }
 
 export const STATUS_OPTIONS = [
   { id: null, label: 'Healthy' },
@@ -166,10 +169,6 @@ export function defaultBattlerConfig(speciesId: string): BattlerConfig {
   }
 }
 
-function bareType(t: string): string {
-  return t.replace('TYPE_', '')
-}
-
 export interface BuildContext {
   speciesById: Map<string, Species>
   itemsById: Map<string, Item>
@@ -286,27 +285,6 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
       ability: config.abilityIndex >= 0 ? (species.abilities[config.abilityIndex] ?? null) : null,
       innates: [species.innates[0] ?? null, species.innates[1] ?? null, species.innates[2] ?? null],
     },
-  }
-}
-
-export function toMoveData(move: Move): MoveData {
-  return {
-    id: move.id,
-    power: move.power,
-    type: move.type ? bareType(move.type) : null,
-    type2: move.type2 ? bareType(move.type2) : null,
-    split: move.split,
-    effectChance: move.effectChance,
-    splitFlag: move.splitFlag,
-    effect: move.effect,
-    customBehavior: move.customBehavior,
-    crit: move.crit,
-    hitsAir: move.hitsAir,
-    flags: move.flags,
-    priority: move.priority,
-    changeTypeHoldEffect: move.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && move.argument?.kind === 'other' ? move.argument.value : null,
-    miscEffect: move.effect === 'EFFECT_MISC_HIT' && move.argument?.kind === 'misc' ? move.argument.misc : null,
-    multiHitArgument: move.effect === 'EFFECT_DOUBLE_HIT' && move.argument?.kind === 'int' ? move.argument.value : null,
   }
 }
 
