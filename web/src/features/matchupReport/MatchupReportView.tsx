@@ -101,8 +101,9 @@ function YourMovesTable({ entries }: { entries: MatchupMoveEntry[] }) {
  *
  * The explanation above used to live only in each header's `title` tooltip --
  * invisible on touch devices and to anyone just scanning the page -- so it's also
- * printed as plain text under the table now; the tooltips stay as a per-column
- * reminder, not the only copy of the explanation.
+ * printed as plain text once, above every mon card, in MatchupReportView's own return
+ * below (not repeated per table -- a six-mon party doesn't need to read it six times).
+ * The tooltips stay as a per-column reminder, not the only copy of the explanation.
  *
  * A dash in either column can mean any of three different things, distinguished only
  * by whether a warning triangle rides along (see MoveNameCell): a genuine STATUS
@@ -162,10 +163,6 @@ function ItsMovesTable({ entries }: { entries: MatchupMoveEntry[] }) {
           })}
         </tbody>
       </table>
-      <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-        "Worst case" is what can really happen. "What the AI believes" is the trainer's own (possibly wrong) estimate -- it can
-        read lower because the AI evaluates as if your held item had never triggered yet.
-      </p>
     </div>
   )
 }
@@ -243,6 +240,14 @@ export default function MatchupReportView({ report }: { report: MatchupReport })
         </p>
       ) : (
         <div className="flex flex-col gap-3">
+          {/* Said once here, not per mon -- ItsMovesTable used to repeat this same
+              paragraph under every opposing Pokemon's own card, so a six-mon party
+              printed it six times. */}
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            Each "Its moves into you" table below shows two numbers: "Worst case" is what can really happen, and "What the AI
+            believes" is the trainer's own (possibly wrong) estimate -- it can read lower because the AI evaluates as if your
+            held item had never triggered yet.
+          </p>
           {report.mons.map((mon, i) => (
             <MonSection key={i} mon={mon} playerSpeed={playerSpeed} />
           ))}

@@ -2,3 +2,4 @@
 - [Map scripts are .pory, not .inc](reference_map-scripts-are-poryscript-not-inc.md) — plan doc named a stale extension; corpus mixes raw-ASM and Poryscript syntax, needs comment-stripping
 - [Sprite PNG non-determinism cause](reference_sprite-png-nondeterminism-cause.md) — confirmed: cross-environment Pillow/zlib drift, not real content; pixels are identical, revert sprite diffs after any erdata.build run
 - [Inverse/Wonder Room closed](project_inverse-wonder-room-closed.md) — both battle-sim descriptive-report prerequisites landed 2026-09-11; turn-parity/Clueless suppression deliberately left as flat caller-supplied booleans
+- [npm needs cmd shell on this Windows box](reference_npm-needs-cmd-shell-on-this-windows-box.md) — bare `npm ...` in raw PowerShell throws PSSecurityException here; use Bash's `npm --prefix` or a cmd wrapper instead
