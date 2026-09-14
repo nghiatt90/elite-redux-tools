@@ -262,4 +262,26 @@ export const GIFT_MON_UNLOCK: Record<string, string> = {
   // Other
   SPECIES_COSMOG: 'From Professor Birch (Littleroot Town Lab), after beating the Elite Four (National Dex upgrade event).',
   SPECIES_MELTAN: "From Steven's house in Mossdeep City -- a Poké Ball on the floor. Comes holding Melmetalite.",
+
+  // Corrections -- the ONLY entries here that deliberately contradict the game.
+  //
+  // Everything above reproduces what Elite Redux itself tells the player. This one
+  // does not, because the game's own text is factually false about the game's own
+  // content. `items/MegaStonesList.textproto` sets Yveltalite's
+  // `unique_mega_location` to "Defeat the Dark Monotype Champion.", and that string
+  // reaches the player verbatim: MegaHintGenerator.kt emits it into the build-time
+  // `generated/data/megas/hints.h`, GetMegaHintString returns it, and
+  // pokemon_summary_screen.c's PrintMonForm prints it on Mega Yveltal's summary
+  // screen (keyed on gFormChangeTable[...].param == ITEM_YVELTALITE).
+  //
+  // It is wrong. EvergrandeCity_MonoChampRoom_1/scripts.pory's Dark branch runs
+  // `givemon(SPECIES_DARKRAI_NIGHTMARE, 80, ITEM_NONE)` -- a gift Pokémon, no stone.
+  // ITEM_YVELTALITE has no grant site anywhere in eliteredux-source (0 hits across
+  // data/maps and src/), so its real unlock is genuinely unknown, not this.
+  //
+  // Verified in-game against a real ROM (2026-09): the summary screen does show the
+  // wrong hint, so this is an upstream er-config data error, not a pin or parsing
+  // bug on our side. Drop this override if er-config ever fixes the field.
+  SPECIES_YVELTAL_MEGA:
+    'Unknown. (The game shows "Defeat the Dark Monotype Champion." here -- that is WRONG: the Dark Monotype Champion hands over Nightmare Darkrai, not Yveltalite.)',
 }
