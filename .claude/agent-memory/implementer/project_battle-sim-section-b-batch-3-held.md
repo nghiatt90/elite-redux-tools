@@ -8,7 +8,8 @@ metadata:
 Batch 3 is the web-side consumer of `encounters.json`'s `fieldEffects` /
 `inverseBattles` lists (pipeline half already committed at `9cc8e69`), plus a
 forced-double disclosure added on top of it. **Complete, green, reviewed twice,
-and approved for commit.**
+and committed** (`c72c173`, then a browser-review follow-up at `612b60e` -- see
+that update below).
 
 **2026-09-15 update:** a first reviewer (facts saved to
 `.claude/agent-memory/code-reviewer/project_trick-room-and-forced-double-facts.md`)
@@ -70,7 +71,9 @@ retitle the `_4`/`_5` test to describe its inputs rather than the render it can'
 see, add the two cross-reference comments in point 2 above, and fix this note's own
 stale `speedTierNote` mentions (this update, and the table/list correction below).
 See the verification line under "What it touches" above for the final, current
-passing count.
+passing count. This browser-review follow-up batch landed as commit `612b60e`,
+on top of the field-effect batch itself at `c72c173`, both on
+`docs/agent-roles-and-project-notes`.
 
 ## What it touches
 
