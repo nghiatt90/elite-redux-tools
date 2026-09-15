@@ -225,6 +225,12 @@ export interface OnAfterTypeEffectivenessContext {
   weather: string
   targetGrounded: boolean // !IsBattlerGroundedIgnoreType(target) checks -- BattlerBattleState's own `isGrounded`
   defenderAtMaxHp: boolean // BATTLER_MAX_HP(target)
+  /** BATTLER_MAX_HP(battler) -- battle_util.c:7931 always passes the ATTACKER as
+   * this hook's `battler` param (the ability-owner loop var is only used for the
+   * applyOn filter, never forwarded into the call), so this reads the ATTACKER's
+   * own HP regardless of which side's ability is running. Needed only by Tera
+   * Shell at this pin -- see its own comment in 16-type-effectiveness.ts. */
+  attackerAtMaxHp: boolean
   defenderAbilityOn: boolean // GetAbilityState(target, ability) -- Soothsayer's own decaying-countdown "is my shield still up" check, reusing the generic abilityOn toggle rather than a single-purpose field
 }
 

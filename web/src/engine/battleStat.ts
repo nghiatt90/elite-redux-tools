@@ -194,7 +194,7 @@ export interface DefenseItemContext {
   speciesId: string // exact species -- Deep Sea Scale/Metal Powder/Necrozma check against this
   baseSpeciesId: string // GET_BASE_SPECIES_ID -- Soul Dew's Latias/Latios check (so a Mega form still qualifies)
   isTransformed: boolean // STATUS2_TRANSFORMED -- Metal Powder exemption
-  canEvolveStrict: boolean // Eviolite
+  canEvolve: boolean // Eviolite -- CanEvolve(), de-evolution rows included
   defStatToUse: 'atk' | 'def' | 'spatk' | 'spdef' | 'spe'
 }
 
@@ -211,7 +211,7 @@ export function defenseItemModifier(item: DefenseItemContext): number {
       if (item.speciesId === 'SPECIES_DITTO' && item.defStatToUse === 'def' && !item.isTransformed) modifier = mulModifier(modifier, uq(2.0))
       break
     case 'HOLD_EFFECT_EVIOLITE':
-      if (item.canEvolveStrict && item.speciesId !== 'SPECIES_NECROZMA') modifier = mulModifier(modifier, uq(1.5))
+      if (item.canEvolve) modifier = mulModifier(modifier, uq(1.5))
       break
     case 'HOLD_EFFECT_ASSAULT_VEST':
       if (item.defStatToUse === 'spdef') modifier = mulModifier(modifier, uq(1.5))

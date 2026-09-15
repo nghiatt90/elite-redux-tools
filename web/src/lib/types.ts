@@ -62,6 +62,10 @@ export interface Species {
   gender: Gender
   heads?: number
   evolutions: Evolution[]
+  /** This species has an EVO_DEEVOLUTION row in gEvolutionTable -- it is the evo
+   * target of an `allow_deevolution_to` parent (Eevee, Necrozma). Emitted only when
+   * true. Matters to CanEvolve(), which Eviolite reads. */
+  canDeevolve?: boolean
   megas: Mega[]
   primals: Primal[]
   learnset: Learnset

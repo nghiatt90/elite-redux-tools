@@ -164,18 +164,18 @@ describe('attackItemModifier', () => {
 })
 
 describe('defenseItemModifier', () => {
-  it('Eviolite requires CanEvolveStrict and excludes Necrozma', () => {
+  it('Eviolite requires CanEvolve -- no Necrozma exclusion at this pin', () => {
     const ctx = {
       resolvedHoldEffect: 'HOLD_EFFECT_EVIOLITE',
       speciesId: 'SPECIES_CHANSEY',
       baseSpeciesId: 'SPECIES_CHANSEY',
       isTransformed: false,
-      canEvolveStrict: true,
+      canEvolve: true,
       defStatToUse: 'def' as const,
     }
     expect(defenseItemModifier(ctx)).toBe(1536)
-    expect(defenseItemModifier({ ...ctx, speciesId: 'SPECIES_NECROZMA', canEvolveStrict: true })).toBe(1024)
-    expect(defenseItemModifier({ ...ctx, canEvolveStrict: false })).toBe(1024)
+    expect(defenseItemModifier({ ...ctx, speciesId: 'SPECIES_NECROZMA', canEvolve: true })).toBe(1536)
+    expect(defenseItemModifier({ ...ctx, canEvolve: false })).toBe(1024)
   })
 
   it('Assault Vest only boosts SpDef', () => {
@@ -184,7 +184,7 @@ describe('defenseItemModifier', () => {
       speciesId: 'SPECIES_GARCHOMP',
       baseSpeciesId: 'SPECIES_GARCHOMP',
       isTransformed: false,
-      canEvolveStrict: false,
+      canEvolve: false,
       defStatToUse: 'spdef' as const,
     }
     expect(defenseItemModifier(ctx)).toBe(1536)
@@ -197,7 +197,7 @@ describe('defenseItemModifier', () => {
       speciesId: 'SPECIES_LATIOS_MEGA',
       baseSpeciesId: 'SPECIES_LATIOS',
       isTransformed: false,
-      canEvolveStrict: false,
+      canEvolve: false,
       defStatToUse: 'spdef' as const,
     }
     expect(defenseItemModifier(ctx)).toBe(1536)
@@ -209,7 +209,7 @@ describe('defenseItemModifier', () => {
       speciesId: 'SPECIES_GARCHOMP',
       baseSpeciesId: 'SPECIES_GARCHOMP',
       isTransformed: false,
-      canEvolveStrict: false,
+      canEvolve: false,
       defStatToUse: 'spdef' as const,
     }
     expect(calcDefenseStatModifiers(100, ctx)).toBe(150)

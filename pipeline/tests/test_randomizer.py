@@ -70,4 +70,9 @@ def test_compound_count():
     abilities = parse_abilities()
     name_index = {a.name: a for a in abilities}
     compounds = [a for a in abilities if _components(a.description, name_index)]
-    assert len(compounds) == 150
+    # At the v2.65.3b (March) pin, ABILITY_KING_OF_THE_JUNGLE's description is
+    # "Infiltrator + deals 1.5x more damage to Grass-types." -- only the first half
+    # names a real ability, so it doesn't parse as a compound (it becomes a proper
+    # two-ability compound, "Grassy Surge + Infiltrator.", only in a later,
+    # unreleased commit) -- one fewer than the April tip's 150.
+    assert len(compounds) == 149

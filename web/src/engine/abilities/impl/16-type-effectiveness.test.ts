@@ -26,6 +26,7 @@ function afterCtx(overrides: Partial<OnAfterTypeEffectivenessContext> = {}): OnA
     weather: 'NONE',
     targetGrounded: true,
     defenderAtMaxHp: true,
+    attackerAtMaxHp: true,
     defenderAbilityOn: false,
     ...overrides,
   }
@@ -133,13 +134,17 @@ describe('type effectiveness batch N', () => {
     expect(c.modifier).toBe(uq(1.0))
   })
 
-  it('Tera Shell halves a neutral-or-better hit while at max HP', () => {
-    const c = afterCtx({ modifier: uq(1.0), defenderAtMaxHp: true })
+  it("Tera Shell halves a neutral-or-better hit while the ATTACKER is at max HP -- the upstream bug this pin reproduces (fixed later by c8d64d01292a)", () => {
+    const c = afterCtx({ modifier: uq(1.0), attackerAtMaxHp: true })
     findAbility('ABILITY_TERA_SHELL').onAfterTypeEffectiveness!(c)
     expect(c.modifier).toBe(uq(0.5))
-    const c2 = afterCtx({ modifier: uq(1.0), defenderAtMaxHp: false })
+    const c2 = afterCtx({ modifier: uq(1.0), attackerAtMaxHp: false })
     findAbility('ABILITY_TERA_SHELL').onAfterTypeEffectiveness!(c2)
     expect(c2.modifier).toBe(uq(1.0))
+    // The DEFENDER's (holder's) own HP must NOT gate it at this pin.
+    const c3 = afterCtx({ modifier: uq(1.0), attackerAtMaxHp: true, defenderAtMaxHp: false })
+    findAbility('ABILITY_TERA_SHELL').onAfterTypeEffectiveness!(c3)
+    expect(c3.modifier).toBe(uq(0.5))
   })
 
   it('Wonder Guard zeroes out anything below super-effective', () => {

@@ -6,6 +6,8 @@ import { ATE_FAMILY_AND_ONSTAB } from './15-ate-family-and-onstab'
 import { ALIAS_ABILITIES } from './10-aliases'
 import { OFFENSIVE_MULTIPLIER_BATCH_D } from './11-offensive-multiplier-d'
 import { MOLD_BREAKER_ABILITIES } from './23-mold-breaker'
+import type { AbilityImpl, OffensiveMultiplierContext } from '../types'
+import { uq } from '../../fixed'
 
 function slots(ability: string | null): { ability: string | null; innates: [string | null, string | null, string | null] } {
   return { ability, innates: [null, null, null] }
@@ -69,5 +71,53 @@ describe('infiltrate batch AA', () => {
     for (const ability of INFILTRATE_ABILITIES) {
       expect(ability.src).toMatch(/^src\/abilities\.cc:\d+$/)
     }
+  })
+
+  it("King of the Jungle boosts damage 1.5x vs Grass-type targets (no Grassy Surge at this pin)", () => {
+    const kotj = INFILTRATE_ABILITIES.find((a) => a.id === 'ABILITY_KING_OF_THE_JUNGLE') as AbilityImpl
+    const offCtx = (defenderTypes: string[]): OffensiveMultiplierContext => ({
+      modifier: uq(1.0),
+      resistance: uq(1.0),
+      battlerId: 'attacker',
+      defenderId: 'defender',
+      moveId: 'MOVE_TACKLE',
+      moveType: 'NORMAL',
+      moveSplit: 'PHYSICAL',
+      moveFlags: {},
+      moveEffectChance: 0,
+      ateBoost: false,
+      defenderHasComatose: false,
+      attackerSlowStartTimer: 5,
+      attackerHasStab: false,
+      basePower: 40,
+      typeEffectiveness: uq(1.0),
+      isCrit: false,
+      attackerHasAnyStatus: false,
+      attackerHp: 100,
+      attackerMaxHp: 100,
+      attackerActsFirst: true,
+      weather: 'NONE',
+      defenderTypes,
+      attackerStatus1: new Set(),
+      sameMoveTurnsInARow: 0,
+      terrain: null,
+      movePriority: 0,
+      attackerAbilityOn: false,
+      isAuraBreakActive: false,
+      attackerGender: 'MALE' as const,
+      defenderGender: 'MALE' as const,
+      defenderIsConfused: false,
+      defenderIsEnraged: false,
+      defenderStatus1: new Set<string>(),
+      defenderHasBloodStainEffect: false,
+      attackerIsUnaware: false,
+      defenderHasAnyLoweredStat: false,
+    })
+    const grass = offCtx(['GRASS'])
+    kotj.onOffensiveMultiplier!(grass)
+    expect(grass.modifier).toBe(uq(1.5))
+    const normal = offCtx(['NORMAL'])
+    kotj.onOffensiveMultiplier!(normal)
+    expect(normal.modifier).toBe(uq(1.0))
   })
 })

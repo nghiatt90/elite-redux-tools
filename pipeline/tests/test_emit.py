@@ -302,3 +302,36 @@ def test_emit_is_deterministic(tmp_path, monkeypatch):
     emit_mod.build()
     second = (tmp_path / paths_mod.game_version() / "species.json").read_bytes()
     assert first == second
+
+
+def test_deevolution_targets_are_flagged_for_eviolite():
+    # Eviolite reads CanEvolve() (battle_util.c:7271-7278), which walks
+    # gEvolutionTable -- and EvolutionsGenerator.kt:68-71 writes an EVO_DEEVOLUTION
+    # row onto every evo target of an `allow_deevolution_to` species. Only Eevee and
+    # Necrozma carry that flag, so their children qualify despite having no forward
+    # evolution of their own.
+    species, _, _, species_map, tutors = _fixtures()
+    flagged = {d["id"] for s in playable_species(species) if (d := species_to_dict(s, species_map, tutors)).get("canDeevolve")}
+    assert flagged == {
+        "SPECIES_VAPOREON",
+        "SPECIES_JOLTEON",
+        "SPECIES_FLAREON",
+        "SPECIES_ESPEON",
+        "SPECIES_UMBREON",
+        "SPECIES_LEAFEON",
+        "SPECIES_GLACEON",
+        "SPECIES_SYLVEON",
+        "SPECIES_NECROZMA_DUSK_MANE",
+        "SPECIES_NECROZMA_DAWN_WINGS",
+    }
+
+
+def test_abominable_monster_and_icicle_fist_names_are_swapped():
+    # Upstream's own bug at the pinned released build (er-config corrected it later in
+    # b5aaee6bbeb3, 2026-04-21). The shipped ROM shows these two swapped, so the
+    # snapshot must too -- this test exists so nobody "fixes" it back.
+    _, _, abilities, _, _ = _fixtures()
+    name_index = {a.name: a for a in abilities}
+    by_id = {_ability_dict(a, abilities, name_index)["id"]: _ability_dict(a, abilities, name_index) for a in abilities if a.name in ("Icicle Fist", "Abominable Monster")}
+    assert by_id["ABILITY_ABOMINABLE_MONSTER"]["name"] == "Icicle Fist"
+    assert by_id["ABILITY_ICICLE_FIST"]["name"] == "Abominable Monster"

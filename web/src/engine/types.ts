@@ -140,13 +140,14 @@ export interface DamageContext {
    * bytecode to confirm it), so rather than guess an off-by-one mapping from "N
    * consecutive turns" to a counter value, this exposes the raw counter itself:
    * the user states which hit of an ongoing chain they want computed, sidestepping
-   * the turn-simulation question entirely. 0-3 (see attackerHasDefenseCurl for the
-   * 0 case's own branch) -- capped at 3 because Cmd_handlerollout's own increment
-   * gate (`rolloutCounter < 3`) makes it unreachable through normal chained use. */
+   * the turn-simulation question entirely. 0-3 -- capped at 3 because
+   * Cmd_handlerollout's own increment gate (`rolloutCounter < 3`) makes it
+   * unreachable through normal chained use. Counter 0 leaves power untouched: the
+   * released build's EFFECT_ROLLOUT is a bare `REQUIRE(rolloutCounter)` shift
+   * (battle_util.c:6790-6793) with NO Defense Curl branch -- upstream added that
+   * (and with it the only reason to model STATUS2_DEFENSE_CURL at all) after this
+   * pin, so there is no attackerHasDefenseCurl input here. */
   attackerRolloutCounter: 0 | 1 | 2 | 3
-  /** STATUS2_DEFENSE_CURL -- only changes EFFECT_ROLLOUT's own counter===0 branch
-   * (battle_util.c:6838-6841): doubles power on an otherwise-unboosted first use. */
-  attackerHasDefenseCurl: boolean
   /** gRoundStructs[battlerAtk].physicalDmg/specialDmg, collapsed to one boolean --
    * "was the attacker damaged (by either category) earlier THIS turn, before
    * acting" (battle_script_commands.c:1939-1951 sets it on taking a hit; reset
@@ -269,7 +270,12 @@ export interface BattlerBattleState {
    * unmodelled note instead of silently guessing. */
   hiddenPowerType: string | null
   isTransformed: boolean // STATUS2_TRANSFORMED (Metal Powder exemption)
-  canEvolveStrict: boolean // Eviolite eligibility
+  /** CanEvolve(species) (battle_util.c:7271-7278) -- Eviolite eligibility. A bare
+   * "has any gEvolutionTable row", which INCLUDES the EVO_DEEVOLUTION rows, so an
+   * Eeveelution or a Necrozma form qualifies. Upstream later swapped Eviolite to a
+   * CanEvolveStrict() that drops the de-evolution rows and excludes Necrozma
+   * itself, but that is not in the released build this data is pinned to. */
+  canEvolve: boolean
   isInfatuatedWithOpponent: boolean // STATUS2_INFATUATION *and* infatuated specifically with the other battler
   moveSlotPp: Record<string, number> // moveId -> current pp, for Trump Card
   abilitySlots: AbilitySlots

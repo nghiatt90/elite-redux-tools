@@ -25,10 +25,10 @@ export const DEFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
   fluffyLike('ABILITY_LIQUIFIED', 'src/abilities.cc:4053', 'WATER'),
   {
     id: 'ABILITY_FEATHERCOAT',
-    src: 'src/abilities.cc:12319',
+    src: 'src/abilities.cc:12327',
     flags: { breakable: true },
     onDefensiveMultiplier: (ctx) => {
-      MUL(ctx, ctx.typeEffectiveness < uq(1.0) ? 0.7 : 0.85)
+      MUL(ctx, ctx.typeEffectiveness < uq(1.0) ? 0.8 : 0.9)
     },
   },
   {

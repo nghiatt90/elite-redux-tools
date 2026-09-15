@@ -27,7 +27,8 @@ def test_extract_ability_blocks_count_matches_raw_occurrences():
 
     text = _ABILITIES_CC.read_text()
     blocks = extract_ability_blocks(text)
-    assert len(blocks) == 1016
+    # v2.65.3b (March) pin has one fewer Impl<> block than the April tip
+    assert len(blocks) == 1015
     assert len(blocks) == text.count("constexpr Ability Impl<")
 
 
@@ -47,7 +48,8 @@ def test_split_block_fields_rejects_unknown_field():
 def test_ability_hooks_dict_shape_and_count():
     d = ability_hooks_to_dict()
     json.dumps(d)  # round-trips without error
-    assert len(d) == 1016
+    # v2.65.3b (March) pin has one fewer Impl<> block than the April tip
+    assert len(d) == 1015
 
 
 def test_ability_hooks_tinted_lens_lambda():
