@@ -16,7 +16,15 @@
 
 import { useMoveDisplayName, useGameData } from '../../lib/GameDataContext'
 import { displayName } from '../../lib/displayName'
-import { MATCHUP_REPORT_CAVEATS, type MatchupMonReport, type MatchupMoveEntry, type MatchupReport, type SpeedEntry } from '../../lib/matchupReport'
+import {
+  MATCHUP_REPORT_CAVEATS,
+  SPEED_TIER_CAVEAT,
+  TRICK_ROOM_SPEED_TIER_NOTE,
+  type MatchupMonReport,
+  type MatchupMoveEntry,
+  type MatchupReport,
+  type SpeedEntry,
+} from '../../lib/matchupReport'
 
 function formatDamage(entry: MatchupMoveEntry): string {
   if (entry.isImmune) return 'No effect'
@@ -171,7 +179,16 @@ function MonSection({ mon, playerSpeed }: { mon: MatchupMonReport; playerSpeed: 
   const { speciesById } = useGameData()
   const species = speciesById.get(mon.speciesId)
   const name = species ? displayName(species, speciesById) : mon.speciesId
-  const speedComparison = mon.speed === playerSpeed ? 'speed tie' : mon.speed > playerSpeed ? 'faster than you' : 'slower than you'
+  // Deliberately about the STAT, not turn order -- "faster than you" read as a claim
+  // about who moves first, which under Trick Room is the opposite of what the raw
+  // number means (a 2026-09-15 browser review caught this: the speed-tier table
+  // above correctly lists a Trick Room fight slowest-first, but this card header
+  // still said "faster than you" for a mon the table places last). Rather than
+  // threading isTrickRoomActive down into every per-mon card to keep a turn-order
+  // claim consistent with the table, this just stops making a turn-order claim here
+  // at all -- the table above is the one place that states turn order, and
+  // TRICK_ROOM_SPEED_TIER_NOTE/SPEED_TIER_CAVEAT are printed right next to it.
+  const speedComparison = mon.speed === playerSpeed ? 'same Speed as you' : mon.speed > playerSpeed ? 'higher Speed than you' : 'lower Speed than you'
 
   return (
     <div className="rounded-md border p-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-elevated)' }}>
@@ -209,6 +226,9 @@ export default function MatchupReportView({ report }: { report: MatchupReport })
           before the "what this report is" box tells them what the numbers mean, not
           after. This is also the only banner styled with the danger color -- see the
           Inverse Battle banner below for why that one is informational instead. */}
+      {/* This wording also has a subset copy in matchupReport.ts's Double Battle Mode
+          caveat (MATCHUP_REPORT_CAVEATS) for a fight that's a double only because the
+          player's own save option makes it one -- keep the two in sync. */}
       {report.isForcedDouble && (
         <div className="rounded-md border-2 p-3 text-xs" style={{ borderColor: 'var(--color-danger)', background: 'var(--color-bg-elevated)' }}>
           <div className="font-semibold mb-1" style={{ color: 'var(--color-danger)' }}>
@@ -273,8 +293,15 @@ export default function MatchupReportView({ report }: { report: MatchupReport })
             ))}
           </tbody>
         </table>
+        {/* Split into two lines with two different colors, not one merged string --
+            see TRICK_ROOM_SPEED_TIER_NOTE's own doc for the 2026-09-15 browser-review
+            finding this replaced (the two used to be one red string, wrongly coloring
+            an APPLIED effect the same as a genuine limitation). Trick Room is neutral
+            (the table above genuinely does reverse for it); the priority caveat below
+            it is always red and always shown, Trick Room or not. */}
+        {report.isTrickRoomActive && <p className="text-xs mb-1">{TRICK_ROOM_SPEED_TIER_NOTE}</p>}
         <p className="text-xs" style={{ color: 'var(--color-danger)' }}>
-          {report.speedTierNote}
+          {SPEED_TIER_CAVEAT}
         </p>
       </div>
 

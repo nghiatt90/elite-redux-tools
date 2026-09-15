@@ -12,7 +12,6 @@ import {
   buildEnemyBattlerState,
   buildMatchupReport,
   MATCHUP_REPORT_CAVEATS,
-  SPEED_TIER_CAVEAT,
   TRICK_ROOM_SPEED_TIER_NOTE,
   movesForMon,
   neutralField,
@@ -332,17 +331,6 @@ describe('buildMatchupReport', () => {
     },
   )
 
-  it('carries the priority-ignoring caveat on the result itself, next to the speed table it qualifies', () => {
-    const report = buildMatchupReport({
-      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
-      trainer: sawyer,
-      tier: 'ace',
-      playerHighestLevel: 57,
-      ctx,
-    })
-    expect(report.speedTierNote).toBe(SPEED_TIER_CAVEAT)
-  })
-
   it('every enemy mon is reported at the derived enemy level, not a stored one', () => {
     const report = buildMatchupReport({
       player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
@@ -389,7 +377,6 @@ describe('buildMatchupReport', () => {
     expect(report.isTrickRoomActive).toBe(true)
     expect(report.isInverseBattleActive).toBe(true)
     expect(report.isForcedDouble).toBe(true)
-    expect(report.speedTierNote).toBe(TRICK_ROOM_SPEED_TIER_NOTE)
     // Ascending (lowest Speed first), not descending -- confirms buildMatchupReport
     // actually threads isTrickRoomActive into speedTiers's own reversal, not just
     // that the flag and the note are set independently of the ordering.
@@ -473,6 +460,34 @@ describe('buildMatchupReport', () => {
     expect(report.isForcedDouble).toBe(true)
   })
 
+  // The empty-party combination (double banner + "no configured party" message,
+  // per the corrected handoff note's table) couldn't be reached in a browser pass --
+  // a search-input focus issue, unrelated to this batch -- so confirmed here instead,
+  // cheaply: TRAINER_TATE_AND_LIZA_4 and _5 both carry forcedDouble AND have every
+  // party tier empty (re-measured directly against trainers.json). This asserts the
+  // two INPUTS those two render branches each read (isForcedDouble and mons === []),
+  // not the render itself -- MatchupReportView.tsx's own conditionals are what turn
+  // those into the double banner and the empty-party message.
+  it('TRAINER_TATE_AND_LIZA_4/_5 are forced-double AND have an empty party in every tier -- the two inputs the double-banner and empty-party render branches each read', () => {
+    for (const id of ['TRAINER_TATE_AND_LIZA_4', 'TRAINER_TATE_AND_LIZA_5']) {
+      const trainer = trainers.find((t) => t.id === id)!
+      expect(trainer.forcedDouble, `${id}.forcedDouble`).toBe(true)
+      expect(trainer.parties.ace.length, `${id}.parties.ace`).toBe(0)
+      expect(trainer.parties.elite.length, `${id}.parties.elite`).toBe(0)
+      expect(trainer.parties.hell.length, `${id}.parties.hell`).toBe(0)
+
+      const report = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+        trainer,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+      })
+      expect(report.isForcedDouble, `${id}.isForcedDouble`).toBe(true)
+      expect(report.mons, `${id}.mons`).toEqual([])
+    }
+  })
+
   it('an ordinary trainer (TRAINER_SAWYER_1): neither effect active, not a forced double', () => {
     expect(sawyer.forcedDouble).toBe(false)
     const report = buildMatchupReport({
@@ -485,7 +500,6 @@ describe('buildMatchupReport', () => {
     expect(report.isTrickRoomActive).toBe(false)
     expect(report.isInverseBattleActive).toBe(false)
     expect(report.isForcedDouble).toBe(false)
-    expect(report.speedTierNote).toBe(SPEED_TIER_CAVEAT)
   })
 
   it('isForcedDouble is a general trainer-data passthrough, not special-cased to Gym 7', () => {
@@ -523,6 +537,15 @@ describe('neutralField / MATCHUP_REPORT_CAVEATS', () => {
   it('is a non-empty, printable list -- the plan requires caveats on the page, not buried in a comment', () => {
     expect(MATCHUP_REPORT_CAVEATS.length).toBeGreaterThan(0)
     for (const c of MATCHUP_REPORT_CAVEATS) expect(typeof c).toBe('string')
+  })
+
+  // The one regression worth guarding after the 2026-09-15 browser-review color
+  // split (see TRICK_ROOM_SPEED_TIER_NOTE's own doc): the priority sentence getting
+  // merged back into this neutral, applied-fact-only note, which is exactly the
+  // mixed-color bug that split fixed. SPEED_TIER_CAVEAT is the one that's allowed to
+  // mention priority -- it's rendered unconditionally, right below this note.
+  it('TRICK_ROOM_SPEED_TIER_NOTE does not re-merge the priority caveat', () => {
+    expect(TRICK_ROOM_SPEED_TIER_NOTE.toLowerCase()).not.toContain('priority')
   })
 })
 

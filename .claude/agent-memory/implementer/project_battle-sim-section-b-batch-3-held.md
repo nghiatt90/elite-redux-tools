@@ -26,7 +26,51 @@ wiring intact but forcing `isInverseBattleFlagSet` off only at the
 exactly one test fails, on `expect(bodySlamInverse.maxRollDamage!).toBeGreaterThan(...)`,
 confirming that specific line is the one check that catches a field that never
 reaches the engine. The test's title was corrected to describe this. Several facts
-below were WRONG and are corrected here:
+below were WRONG and are corrected here.
+
+**2026-09-15 browser-review update:** a real browser pass (the first for this batch)
+found three things only a rendered page could show, plus one thing a browser pass
+tried and couldn't reach. Fixed:
+1. `MonSection`'s card header said "faster/slower than you" -- a turn-order claim
+   that reads backwards under Trick Room (the table correctly lists a Trick-Room mon
+   last when it acts after you, but the card still said "faster"). Reworded to
+   "higher/lower/same Speed as you" -- a claim about the stat only, true under either
+   ordering, rather than threading `isTrickRoomActive` into every card.
+2. The Double Battle Mode caveat (`MATCHUP_REPORT_CAVEATS`) used to end "see the
+   double-battle banner above", which points at nothing on an ordinary singles page
+   (the banner only renders for `forcedDouble`). Reworded to stand alone; a one-line
+   comment at each of the two sites (the banner's own JSX and this caveat) now
+   cross-references the other instead.
+3. Color split: `TRICK_ROOM_SPEED_TIER_NOTE` and `SPEED_TIER_CAVEAT` used to be one
+   red string carried on `MatchupReport.speedTierNote`, mixing an APPLIED effect
+   (Trick Room, which the report correctly accounts for) with a genuine limitation
+   (priority is never modelled) under one danger color. Split into two constants,
+   the Trick Room one neutral and rendered only when active, the priority one red and
+   rendered unconditionally (it was always true regardless of Trick Room). Since the
+   two no longer varied together, **the `speedTierNote` field was removed from
+   `MatchupReport` entirely** -- every remaining mention of `speedTierNote` elsewhere
+   in this note is now WRONG; `MatchupReportView.tsx` imports both constants
+   directly, the same way it already imports `MATCHUP_REPORT_CAVEATS`. This also
+   surfaced a second bug: the priority caveat's own example ("a lower-Speed mon using
+   a priority move still acts first") reads backwards once it renders directly below
+   the Trick Room note on the same page -- reworded to "a Pokemon listed lower in the
+   table using a priority move can still act first", true under both orderings.
+4. Couldn't reach in the browser: the empty-party case (`_4`/`_5` below), a
+   search-input focus issue unrelated to this batch. Confirmed by test instead --
+   see `lib/matchupReport.test.ts`'s `TRAINER_TATE_AND_LIZA_4/_5` test, which asserts
+   the two inputs (`isForcedDouble`, empty party in every tier) rather than the render.
+
+A follow-up review pass on the above then asked for five more small things: reword
+the priority-caveat example again (still backwards, see point 3's own fix above --
+this was corrected in the SAME batch before commit, not a second follow-up), delete
+a since-pointless sanity test on the two constants' `typeof`/non-empty-ness (kept
+only a single regression guard: `TRICK_ROOM_SPEED_TIER_NOTE` must not contain the
+word "priority", the one plausible way the two could get merged back together),
+retitle the `_4`/`_5` test to describe its inputs rather than the render it can't
+see, add the two cross-reference comments in point 2 above, and fix this note's own
+stale `speedTierNote` mentions (this update, and the table/list correction below).
+See the verification line under "What it touches" above for the final, current
+passing count.
 
 ## What it touches
 
@@ -44,16 +88,18 @@ Verification run against this exact tree: `tsc -b --force` clean,
 `npm --prefix web run lint` 0 errors / 6 pre-existing warnings (none in touched
 files), `npm --prefix web test` **782/782 passing**. Re-verified 2026-09-15 after
 the review-findings batch above: same three checks clean, **783/783 passing** (one
-net new test).
+net new test). Re-verified again 2026-09-15 after the browser-review follow-up
+batch below: same three checks clean, **784/784 passing**.
 
 ## Newest and least-examined part: the forced-double banner
 
 Three independent facts can be true of one fight, rendered as TWO separate
 banners in `MatchupReportView.tsx` plus the speed-tier note (not three banners --
-**correction: Trick Room gets no banner of its own**, only `speedTierNote`'s text
-next to the speed-tier table; see resolveTrickRoomActive's own doc for why it never
-touches a damage number and so needs no separate banner the way Inverse Battle
-does):
+**correction: Trick Room gets no banner of its own**, only `TRICK_ROOM_SPEED_TIER_NOTE`
+(imported directly by the view, not carried on `MatchupReport` -- see that
+constant's own doc for the 2026-09-15 browser-review color split) next to the
+speed-tier table; see resolveTrickRoomActive's own doc for why it never touches a
+damage number and so needs no separate banner the way Inverse Battle does):
 1. **Trick Room** (`isTrickRoomActive`) -- presentation only, reverses
    `speedTiers`'s sort order and swaps in `TRICK_ROOM_SPEED_TIER_NOTE`. The report
    DOES account for this. No banner.

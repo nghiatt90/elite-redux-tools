@@ -41,9 +41,16 @@ export const MATCHUP_REPORT_CAVEATS: string[] = [
   'ActsAfter-style moves (Payback, Bolt Beak, Assurance) are evaluated as if the user moves first, matching this calculator’s existing default.',
   "The enemy level shown assumes HELL_MODE_EXTRA_LEVELS_FLAG is unset -- Hell-tier fights under that flag add a further per-trainer level bonus this report doesn't add (battle_main.c:1819-1827).",
   "Assumes the save's enableEvs setting is on. If it's off, neither side has EVs and the enemy's real stats are lower than shown (src/pokemon.c:996-997).",
-  "Assumes the save's Double Battle Mode option is off. If it's on, every trainer with two or more Pokemon fights as a double " +
-    'regardless of forcedDouble (option_plus_menu.c:1038, battle_main.c:1757-1758) -- see the double-battle banner above for what a ' +
-    'double battle invalidates in this report.',
+  // Stands on its own rather than pointing at the double-battle banner -- a
+  // 2026-09-15 browser review caught that the banner only renders for
+  // trainer.forcedDouble, so on an ordinary singles trainer (most of them) that
+  // cross-reference pointed at nothing on the page. This wording is a SUBSET of the
+  // banner's own text (MatchupReportView.tsx's isForcedDouble block) -- keep the two
+  // in sync.
+  "Assumes the save's Double Battle Mode option is off. If it's on, EVERY trainer with two or more Pokemon fights as a double, " +
+    "regardless of this trainer's own forcedDouble setting (option_plus_menu.c:1038, battle_main.c:1757-1758) -- for such a fight " +
+    'this report still describes a one-on-one shape: no partner on either side, no targeting, and any move that would hit both ' +
+    'foes is shown at full power where a double battle cuts it to 0.75x.',
 ]
 
 export type TrainerTier = 'ace' | 'elite' | 'hell'
@@ -256,23 +263,45 @@ export interface SpeedEntry {
   speed: number
 }
 
-/** Printed alongside the speed-tier table itself (MatchupReport.speedTierNote), not
+/** Printed alongside the speed-tier table itself by the view (imported directly,
+ * the same way it imports MATCHUP_REPORT_CAVEATS -- NOT carried on MatchupReport;
+ * see the 2026-09-15 browser-review finding below for why it no longer is), not
  * just folded into the general MATCHUP_REPORT_CAVEATS list -- a reader glancing at an
  * ordering titled "who moves first" will otherwise assume it's the final answer.
  * Each move's own `priority` field (MatchupMoveEntry.priority) is the correction, and
- * it only works if the table tells the reader to go look for it. */
-export const SPEED_TIER_CAVEAT = 'Ordered by raw Speed stat only -- ignores move priority. Check each move’s own priority in the damage tables below: a lower-Speed mon using a priority move still acts first.'
+ * it only works if the table tells the reader to go look for it. Rendered in the
+ * danger color, unconditionally, regardless of Trick Room -- this is a genuine
+ * limitation (priority is never modelled in the ordering) whether or not Trick Room
+ * happens to also be active for this fight. */
+// The example is deliberately phrased by TABLE POSITION ("listed lower"), not by
+// raw Speed magnitude ("lower-Speed") -- a 2026-09-15 browser review caught that the
+// old wording ("a lower-Speed mon using a priority move still acts first") reads
+// backwards on a Trick Room page, where this text renders directly beneath
+// TRICK_ROOM_SPEED_TIER_NOTE: under Trick Room the lower-Speed mon already moves
+// first on its own, so a priority move is what lets a HIGHER-Speed one jump ahead
+// instead. "Listed lower in the table" is true under both orderings, since the
+// table itself is already sorted correctly for whichever one applies.
+export const SPEED_TIER_CAVEAT = 'Ordered by raw Speed stat only -- ignores move priority. Check each move’s own priority in the damage tables below: a Pokemon listed lower in the table using a priority move can still act first.'
 
-/** Same shape as SPEED_TIER_CAVEAT, for the one real fight where the ordering itself
- * is reversed rather than merely priority-blind. Presentation only -- Trick Room
- * doesn't touch any damage number (nothing in CalculateStat/CalcFinalDmg branches on
- * it), so this stays entirely inside speedTiers's own sort, never reaching the
- * engine. Kept as a SEPARATE note from SPEED_TIER_CAVEAT/the Inverse Battle banner
- * rather than combined text: a reader has to be able to tell "the order is flipped"
- * apart from "the damage numbers are inverted" (see MatchupReport.isInverseBattleActive's
- * own doc) -- they are different kinds of fact about the same fight. */
-export const TRICK_ROOM_SPEED_TIER_NOTE =
-  'Trick Room is active in this fight -- LOWER Speed acts first, the reverse of normal order. Still ignores move priority: a priority move still acts first regardless of Speed.'
+/** The Trick-Room-active fact, rendered by the view ONLY when `isTrickRoomActive`,
+ * ABOVE SPEED_TIER_CAVEAT and in a NEUTRAL color (no danger styling) -- unlike
+ * SPEED_TIER_CAVEAT above, this describes a condition the report correctly accounts
+ * for (speedTiers really does reverse the sort for this fight), not a limitation, so
+ * it shouldn't share SPEED_TIER_CAVEAT's red. A 2026-09-15 browser review caught this
+ * note's earlier version doing exactly that -- it used to merge this fact with a
+ * second copy of SPEED_TIER_CAVEAT's own "still ignores priority" sentence into one
+ * red string, which meant an APPLIED effect (matching the Inverse Battle banner's own
+ * neutral styling, see MatchupReport.isInverseBattleActive's own doc) was sharing a
+ * color meant to mean "this doesn't fully apply". Split apart: this constant now
+ * states only the applied fact; SPEED_TIER_CAVEAT above carries the actual limitation
+ * and is rendered unconditionally, so no information was dropped, only recolored.
+ * Presentation only -- Trick Room doesn't touch any damage number (nothing in
+ * CalculateStat/CalcFinalDmg branches on it), so this stays entirely inside
+ * speedTiers's own sort, never reaching the engine. Kept as a SEPARATE fact from
+ * isInverseBattleActive's own banner -- a reader has to be able to tell "the order is
+ * flipped" apart from "the damage numbers are inverted", different kinds of fact
+ * about the same fight. */
+export const TRICK_ROOM_SPEED_TIER_NOTE = 'Trick Room is active in this fight -- the table above is sorted with LOWER Speed first, the reverse of normal order.'
 
 /** "Exact speed tiers": every battler's real, post-nature/EV/IV/level Speed stat
  * (neutral stage, per MATCHUP_REPORT_CAVEATS), sorted fastest-first -- or slowest-
@@ -553,15 +582,12 @@ export interface MatchupReport {
   tier: TrainerTier
   enemyLevel: number
   speedTiers: SpeedEntry[]
-  /** SPEED_TIER_CAVEAT, or TRICK_ROOM_SPEED_TIER_NOTE when `isTrickRoomActive` --
-   * carried on the result itself (not just the general MATCHUP_REPORT_CAVEATS list)
-   * so the UI renders it right next to the table it qualifies, rather than relying
-   * on a reader to have read the caveats section first. */
-  speedTierNote: string
   /** Whether this specific trainer fight runs under a permanent Trick Room, per
    * encounters.json (see resolveTrickRoomActive). Presentation only -- already
-   * folded into `speedTiers`'s own ordering and `speedTierNote`'s own text; exposed
-   * here too so the UI can render its own banner without re-deriving the lookup. */
+   * folded into `speedTiers`'s own ordering; exposed here so the UI can render
+   * TRICK_ROOM_SPEED_TIER_NOTE (imported directly, like MATCHUP_REPORT_CAVEATS and
+   * SPEED_TIER_CAVEAT -- see those constants' own docs for why neither is carried on
+   * this result) without re-deriving the lookup. */
   isTrickRoomActive: boolean
   /** Whether the field ACTUALLY USED to compute `mons` below has
    * `isInverseBattleFlagSet` set -- read back off that field, not re-derived from
@@ -650,7 +676,6 @@ export function buildMatchupReport(input: MatchupReportInput): MatchupReport {
       enemies.map((e) => ({ speciesId: e.speciesId, battler: e.battler })),
       isTrickRoomActive,
     ),
-    speedTierNote: isTrickRoomActive ? TRICK_ROOM_SPEED_TIER_NOTE : SPEED_TIER_CAVEAT,
     isTrickRoomActive,
     isInverseBattleActive,
     isForcedDouble: trainer.forcedDouble,
