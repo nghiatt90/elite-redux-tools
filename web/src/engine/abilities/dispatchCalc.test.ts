@@ -38,7 +38,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST')
     const defender = slots('ABILITY_TEST_HALVE')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerIsGrounded: true, attackerTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -57,7 +57,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST2')
     const defender = slots('ABILITY_TEST_FORTKNOX')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerIsGrounded: true, attackerTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -232,7 +232,7 @@ describe('computeOnStatModifier', () => {
   it('the stat owner\'s own onStat hook applies by default (APPLY_ON_SELF)', () => {
     const ownHook: AbilityImpl = { id: 'ABILITY_TEST_OWNSTAT', src: 'test', onStat: (ctx) => (ctx.stat += 10) }
     registerAbilities([ownHook])
-    const modify = computeOnStatModifier(slots('ABILITY_TEST_OWNSTAT'), slots(null), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
+    const modify = computeOnStatModifier(slots('ABILITY_TEST_OWNSTAT'), slots(null), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false, isGrounded: true })
     expect(modify(100)).toBe(110)
   })
 
@@ -242,13 +242,13 @@ describe('computeOnStatModifier', () => {
     // affecting your stat (e.g. an aura effect) must opt in explicitly.
     const unscoped: AbilityImpl = { id: 'ABILITY_TEST_OTHERSTAT_UNSCOPED', src: 'test', onStat: (ctx) => (ctx.stat *= 2) }
     registerAbilities([unscoped])
-    const unscopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_UNSCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
+    const unscopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_UNSCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false, isGrounded: true })
     expect(unscopedModify(100)).toBe(100) // no-op: the other battler's ability never applied
 
     _resetRegistryForTests()
     const scoped: AbilityImpl = { id: 'ABILITY_TEST_OTHERSTAT_SCOPED', src: 'test', applyOn: { onStatFor: APPLY_ON_ANY }, onStat: (ctx) => (ctx.stat *= 2) }
     registerAbilities([scoped])
-    const scopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_SCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false })
+    const scopedModify = computeOnStatModifier(slots(null), slots('ABILITY_TEST_OTHERSTAT_SCOPED'), { battlerId: 'x', moveId: 'MOVE_TACKLE', statId: 'atk', weather: 'NONE', terrain: null, hp: 100, maxHp: 100, hasAnyStatus: false, status1: new Set(), isHighestAttackingStat: false, isHighestStat: false, abilityOn: false, boostedStat: null, alliesFainted: 0, isMegaEvolved: false, isGrounded: true })
     expect(scopedModify(100)).toBe(200)
   })
 })

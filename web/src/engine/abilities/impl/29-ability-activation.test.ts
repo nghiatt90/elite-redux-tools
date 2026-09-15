@@ -48,6 +48,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
     ...overrides,
   }
 }
@@ -97,6 +98,7 @@ function statCtx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     alliesFainted: 0,
     isMegaEvolved: false,
     statOwnerHasEternalFlower: false,
+    isGrounded: true,
     ...overrides,
   }
 }

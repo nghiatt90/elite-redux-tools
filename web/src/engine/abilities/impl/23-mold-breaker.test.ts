@@ -80,6 +80,7 @@ describe('mold breaker batch W', () => {
       defenderHasBloodStainEffect: false,
       attackerIsUnaware: false,
       defenderHasAnyLoweredStat: false,
+      attackerIsGrounded: true,
     }
     const defensiveCtx = {
       defenderId: 'defender',

@@ -47,6 +47,7 @@ function offCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
   }
 }
 

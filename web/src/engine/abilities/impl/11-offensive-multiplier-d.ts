@@ -321,7 +321,7 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     id: 'ABILITY_FLOURISH',
     src: 'src/abilities.cc:7631',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveType === 'GRASS' && ctx.terrain === 'TERRAIN_GRASSY') MUL(ctx, 1.5)
+      if (ctx.moveType === 'GRASS' && ctx.terrain === 'TERRAIN_GRASSY' && ctx.attackerIsGrounded) MUL(ctx, 1.5)
     },
   },
   {

@@ -46,6 +46,7 @@ function offCtx(overrides: Partial<{ moveType: string; isAuraBreakActive: boolea
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
     ...overrides,
   }
 }

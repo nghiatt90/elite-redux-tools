@@ -189,11 +189,12 @@ export interface DamageContext {
 export interface BattlerBattleState {
   condition: ConditionBattlerContext
   types: string[] // 1-3 bare type names, in dex order (type1, type2, type3)
-  isGrounded: boolean // species-only baseline (false for pure Flying-type); calculate.ts further
-  // reduces this with the Levitate ABILITY flag (mold-breaker-aware) to match
-  // IsBattlerGroundedIgnoreType (:6699-6701) -- Air Balloon/Magnet Rise/Telekinesis
-  // (also levitating effects) and Gravity/Iron Ball/Ingrain/Smacked Down (grounding
-  // effects, which override everything) have no scenario state and stay unmodelled.
+  isGrounded: boolean // species-only baseline (false for pure Flying-type). calculate.ts's
+  // computeIsGrounded resolves the REAL IsBattlerGroundedIgnoreType (:6699-6701)
+  // from this: Iron Ball/Gravity force grounded, Air Balloon/Levitate (mold-breaker-
+  // aware) force airborne otherwise. Magnet Rise/Telekinesis (levitating) and
+  // Ingrain/Smacked Down (grounding) are volatile statuses with no scenario field
+  // here and stay genuinely unmodelled.
   /** gStatuses3[battler] & STATUS3_UNDERGROUND/UNDERWATER/ON_AIR -- Dig/Dive/Fly-style
    * semi-invulnerability. A per-turn battle state this calculator can't derive (it
    * has no turn simulation), so it's a scenario toggle rather than computed --

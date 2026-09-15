@@ -47,6 +47,7 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     attackerHasStab: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
     ...overrides,
   }
 }

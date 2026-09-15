@@ -112,6 +112,7 @@ describe('infiltrate batch AA', () => {
       defenderHasBloodStainEffect: false,
       attackerIsUnaware: false,
       defenderHasAnyLoweredStat: false,
+      attackerIsGrounded: true,
     })
     const grass = offCtx(['GRASS'])
     kotj.onOffensiveMultiplier!(grass)

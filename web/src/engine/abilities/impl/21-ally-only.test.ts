@@ -51,6 +51,7 @@ describe('ally-only batch S', () => {
         defenderHasBloodStainEffect: false,
         attackerIsUnaware: false,
         defenderHasAnyLoweredStat: false,
+        attackerIsGrounded: true,
       },
       {
         defenderId: 'defender',
@@ -94,6 +95,7 @@ describe('ally-only batch S', () => {
       boostedStat: null,
       alliesFainted: 0,
       isMegaEvolved: false,
+      isGrounded: true,
     })
     expect(modify(100)).toBe(100)
   })
