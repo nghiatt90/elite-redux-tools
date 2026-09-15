@@ -13,6 +13,7 @@ import {
   buildMatchupReport,
   MATCHUP_REPORT_CAVEATS,
   SPEED_TIER_CAVEAT,
+  TRICK_ROOM_SPEED_TIER_NOTE,
   movesForMon,
   neutralField,
   resolveEnemyLevel,
@@ -20,7 +21,7 @@ import {
   speedTiers,
   type MatchupContext,
 } from './matchupReport'
-import type { BattleConstants, Item, Move, MoveBehaviorsFile, Species, Trainer, TrainerMon, TypeChart } from './types'
+import type { BattleConstants, Encounters, Item, Move, MoveBehaviorsFile, Species, Trainer, TrainerMon, TypeChart } from './types'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', 'data', 'v2.65beta')
 const load = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf-8')) as T
@@ -33,6 +34,7 @@ const typeChart = load<TypeChart>('types.json')
 const inverseTypeChart = load<TypeChart>('typesInverse.json')
 const moveBehaviorsFile = load<MoveBehaviorsFile>('moveBehaviors.json')
 const trainers = load<Trainer[]>('trainers.json')
+const encounters = load<Encounters>('encounters.json')
 
 const speciesById = new Map(species.map((s) => [s.id, s]))
 const itemsById = new Map(items.map((i) => [i.id, i]))
@@ -49,6 +51,8 @@ const ctx: MatchupContext = {
   // doc) -- this is the one cast site, same as features/damageCalc/scenario.ts's
   // buildScenario.
   moveBehaviors: moveBehaviorsFile.behaviors as unknown as MoveBehaviors,
+  fieldEffects: encounters.fieldEffects,
+  inverseBattles: encounters.inverseBattles,
 }
 
 const sawyer = trainers.find((t) => t.id === 'TRAINER_SAWYER_1')!
@@ -154,9 +158,17 @@ describe('speedTiers', () => {
   it('sorts fastest-first and labels the player row "You"', () => {
     const player = buildEnemyBattlerState(trainerMon({ species: 'SPECIES_SLOWPOKE' }), 50, ctx)
     const fast = buildEnemyBattlerState(trainerMon({ species: 'SPECIES_ELECTRODE' }), 50, ctx)
-    const tiers = speedTiers(player, [{ speciesId: 'SPECIES_ELECTRODE', battler: fast }])
+    const tiers = speedTiers(player, [{ speciesId: 'SPECIES_ELECTRODE', battler: fast }], false)
     expect(tiers[0]).toEqual({ label: 'SPECIES_ELECTRODE', speed: fast.condition.speed })
     expect(tiers[1]).toEqual({ label: 'You', speed: player.condition.speed })
+  })
+
+  it('reverses the order under Trick Room -- lower Speed acts first', () => {
+    const player = buildEnemyBattlerState(trainerMon({ species: 'SPECIES_SLOWPOKE' }), 50, ctx)
+    const fast = buildEnemyBattlerState(trainerMon({ species: 'SPECIES_ELECTRODE' }), 50, ctx)
+    const tiers = speedTiers(player, [{ speciesId: 'SPECIES_ELECTRODE', battler: fast }], true)
+    expect(tiers[0]).toEqual({ label: 'You', speed: player.condition.speed })
+    expect(tiers[1]).toEqual({ label: 'SPECIES_ELECTRODE', speed: fast.condition.speed })
   })
 })
 
@@ -354,6 +366,149 @@ describe('buildMatchupReport', () => {
       ctx,
     })
     expect(report.mons.map((m) => m.speciesId)).toEqual(emptyTierTrainer.parties.ace.map((m) => m.species))
+  })
+
+  // Three real trainers, covering every combination this data actually has (see
+  // docs/battle-sim/encounters-guard-field-semantics.md's flag census): both effects,
+  // Trick Room alone, and neither -- confirming resolveTrickRoomActive/
+  // resolveInverseBattleActive are wired into buildMatchupReport correctly rather
+  // than just unit-testable in isolation.
+  it('TRAINER_TATE_AND_LIZA_1: Trick Room, Inverse Battle, AND forced-double, all wired through', () => {
+    const tateAndLiza1 = trainers.find((t) => t.id === 'TRAINER_TATE_AND_LIZA_1')!
+    // Re-measured directly rather than assumed once the trainer data was checked
+    // for it: Gym 7 is itself a forced double, so the report's own singles-only
+    // reading of it is unreliable regardless of the other two effects.
+    expect(tateAndLiza1.forcedDouble).toBe(true)
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: tateAndLiza1,
+      tier: 'ace',
+      playerHighestLevel: 57,
+      ctx,
+    })
+    expect(report.isTrickRoomActive).toBe(true)
+    expect(report.isInverseBattleActive).toBe(true)
+    expect(report.isForcedDouble).toBe(true)
+    expect(report.speedTierNote).toBe(TRICK_ROOM_SPEED_TIER_NOTE)
+    // Ascending (lowest Speed first), not descending -- confirms buildMatchupReport
+    // actually threads isTrickRoomActive into speedTiers's own reversal, not just
+    // that the flag and the note are set independently of the ordering.
+    for (let i = 1; i < report.speedTiers.length; i++) {
+      expect(report.speedTiers[i].speed).toBeGreaterThanOrEqual(report.speedTiers[i - 1].speed)
+    }
+  })
+
+  it(
+    'TRAINER_TATE_AND_LIZA_1: the damage comparison guards the engine call itself, not just the flag -- ' +
+      'a field whose isInverseBattleFlagSet is set correctly but never reaches calculateMoveDamage would still ' +
+      'pass every isInverseBattleActive/isTrickRoomActive assertion above and below; only the maxRollDamage ' +
+      'comparison at the end of this test would catch that disconnection',
+    () => {
+      const tateAndLiza1 = trainers.find((t) => t.id === 'TRAINER_TATE_AND_LIZA_1')!
+      const lunatone = tateAndLiza1.parties.ace.find((m) => m.species === 'SPECIES_LUNATONE')!
+      expect(lunatone).toBeDefined()
+      // Re-measured directly rather than assumed: Body Slam is TYPE_NORMAL, Lunatone
+      // is ROCK/PSYCHIC, and TYPE_NORMAL->TYPE_ROCK is 0.5 forward (types.json) and
+      // 2.0 inverse (typesInverse.json) -- an unambiguous, easily-checked direction.
+      expect(movesById.get('MOVE_BODY_SLAM')?.type).toBe('TYPE_NORMAL')
+      expect(speciesById.get('SPECIES_LUNATONE')?.types).toEqual(['TYPE_ROCK', 'TYPE_PSYCHIC'])
+      expect(typeChart.NORMAL.ROCK).toBe(0.5)
+      expect(inverseTypeChart.NORMAL.ROCK).toBe(2.0)
+
+      const withRealField = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+        trainer: tateAndLiza1,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+      })
+      // A caller-supplied field takes the place of the encounters.json lookup
+      // entirely (MatchupReportInput.field's own doc) -- passing a plain neutral
+      // field here is exactly what a caller that skipped the inverse lookup would
+      // produce, and isInverseBattleActive must read FALSE for it (matchupReport.ts's
+      // buildMatchupReport: the flag is read back off the field actually used, not
+      // re-derived from encounters.json independently -- otherwise the banner would
+      // claim an inversion these numbers don't have).
+      const withNeutralField = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+        trainer: tateAndLiza1,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+        field: neutralField(),
+      })
+      expect(withRealField.isInverseBattleActive).toBe(true)
+      expect(withNeutralField.isInverseBattleActive).toBe(false)
+
+      const lunatoneInverse = withRealField.mons.find((m) => m.speciesId === 'SPECIES_LUNATONE')!
+      const lunatoneNeutral = withNeutralField.mons.find((m) => m.speciesId === 'SPECIES_LUNATONE')!
+      const bodySlamInverse = lunatoneInverse.yourMoves.find((m) => m.moveId === 'MOVE_BODY_SLAM')!
+      const bodySlamNeutral = lunatoneNeutral.yourMoves.find((m) => m.moveId === 'MOVE_BODY_SLAM')!
+
+      expect(bodySlamInverse.maxRollDamage).not.toBeNull()
+      expect(bodySlamNeutral.maxRollDamage).not.toBeNull()
+      // The load-bearing assertion: the SAME move against the SAME mon produces a
+      // HIGHER max roll once the inverse chart is actually wired into the engine
+      // call, not just reflected in the flag.
+      expect(bodySlamInverse.maxRollDamage!).toBeGreaterThan(bodySlamNeutral.maxRollDamage!)
+    },
+  )
+
+  it('TRAINER_TATE_AND_LIZA_3 (the rematch): Trick Room AND forced-double, no Inverse Battle', () => {
+    // The rematch is still a double (forcedDouble is per-trainer, unrelated to which
+    // field effects that trainer's own script happens to set) -- confirming this
+    // combination exists in real data, not just the all-three case above and the
+    // ordinary-trainer case below.
+    const rematch = trainers.find((t) => t.id === 'TRAINER_TATE_AND_LIZA_3')!
+    expect(rematch.forcedDouble).toBe(true)
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: rematch,
+      tier: 'ace',
+      playerHighestLevel: 57,
+      ctx,
+    })
+    expect(report.isTrickRoomActive).toBe(true)
+    expect(report.isInverseBattleActive).toBe(false)
+    expect(report.isForcedDouble).toBe(true)
+  })
+
+  it('an ordinary trainer (TRAINER_SAWYER_1): neither effect active, not a forced double', () => {
+    expect(sawyer.forcedDouble).toBe(false)
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: sawyer,
+      tier: 'ace',
+      playerHighestLevel: 57,
+      ctx,
+    })
+    expect(report.isTrickRoomActive).toBe(false)
+    expect(report.isInverseBattleActive).toBe(false)
+    expect(report.isForcedDouble).toBe(false)
+    expect(report.speedTierNote).toBe(SPEED_TIER_CAVEAT)
+  })
+
+  it('isForcedDouble is a general trainer-data passthrough, not special-cased to Gym 7', () => {
+    // Measured directly rather than special-cased: 78 of 932 trainers carry
+    // forcedDouble, and 74 of those have at least one non-empty party tier (932-37
+    // all-tiers-empty trainers = 895 usable; matches the plan's own "895 ace
+    // parties" figure). Spot-check one unrelated forced-double trainer to confirm
+    // this isn't wired to Tate & Liza specifically.
+    const forcedDoubleTrainers = trainers.filter((t) => t.forcedDouble)
+    expect(forcedDoubleTrainers.length).toBe(78)
+    const usable = (t: Trainer) => t.parties.ace.length > 0 || t.parties.elite.length > 0 || t.parties.hell.length > 0
+    expect(forcedDoubleTrainers.filter(usable).length).toBe(74)
+
+    const gabbyAndTy = trainers.find((t) => t.id === 'TRAINER_GABBY_AND_TY_1')!
+    expect(gabbyAndTy.forcedDouble).toBe(true)
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: gabbyAndTy,
+      tier: 'ace',
+      playerHighestLevel: 57,
+      ctx,
+    })
+    expect(report.isForcedDouble).toBe(true)
   })
 })
 

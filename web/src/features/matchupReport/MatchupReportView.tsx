@@ -201,6 +201,29 @@ export default function MatchupReportView({ report }: { report: MatchupReport })
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Rendered FIRST and ahead of the scope box below -- unlike every other banner
+          and caveat on this page, this one isn't a condition layered onto an
+          otherwise-valid singles reading, it's a statement that the reading below
+          doesn't apply to the real fight at all (singles-only by the plan's own
+          literal FieldBattleState.isDoubleBattle: false). A reader has to see this
+          before the "what this report is" box tells them what the numbers mean, not
+          after. This is also the only banner styled with the danger color -- see the
+          Inverse Battle banner below for why that one is informational instead. */}
+      {report.isForcedDouble && (
+        <div className="rounded-md border-2 p-3 text-xs" style={{ borderColor: 'var(--color-danger)', background: 'var(--color-bg-elevated)' }}>
+          <div className="font-semibold mb-1" style={{ color: 'var(--color-danger)' }}>
+            ⚠ This is a double battle
+          </div>
+          <p>
+            Two Pokemon are active per side at once in this fight. This report models a one-on-one fight, so it cannot tell you
+            how this battle plays out: no partner on either side (no ally abilities such as Friend Guard, no Helping Hand or
+            redirection), no targeting, and moves that hit both foes are shown at full power where a double battle cuts them to
+            0.75x. What still holds: each Pokemon's Speed stat, and the per-hit damage of a single-target move from one named
+            Pokemon to another before any partner effect.
+          </p>
+        </div>
+      )}
+
       <div className="rounded-md border p-3 text-xs" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-elevated)' }}>
         <div className="font-semibold mb-1">What this report is -- and isn't</div>
         <p className="mb-2">
@@ -216,6 +239,27 @@ export default function MatchupReportView({ report }: { report: MatchupReport })
           ))}
         </ul>
       </div>
+
+      {/* Deliberately its OWN banner, not folded into the speed-tier note below --
+          Trick Room only reorders a table; this changes every damage number on the
+          page. A reader has to be able to tell those two apart, and the wording is
+          scoped tightly to "the type chart" so this doesn't read as a claim that the
+          whole report is field-adjusted (it isn't -- see the caveats above, which
+          still apply in full: no stat stages, no status, no hazards, turn-one only).
+          Styled as INFORMATIONAL (normal border, no danger color), unlike the double
+          banner above -- this report genuinely does apply the inversion to every
+          number below, so nothing here should read as "distrust this page" the way
+          the double banner correctly does. */}
+      {report.isInverseBattleActive && (
+        <div className="rounded-md border p-3 text-xs" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-elevated)' }}>
+          <div className="font-semibold mb-1">This is an Inverse Battle</div>
+          <p>
+            The type chart is inverted for this specific fight (a real per-battle setting, not a general feature of this report).
+            Every damage number below already reflects that. Nothing else about this report changes -- it's still the same
+            turn-one snapshot described above, with the same caveats.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-md border p-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-elevated)' }}>
         <h2 className="text-sm font-semibold mb-1">Speed tiers</h2>

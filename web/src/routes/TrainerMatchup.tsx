@@ -44,6 +44,8 @@ export default function TrainerMatchup() {
       inverseTypeChart: gameData.inverseTypeChart,
       moveBehaviors: reportData.data.moveBehaviors.behaviors as unknown as import('../engine/basePower').MoveBehaviors,
       natures: reportData.data.natures,
+      fieldEffects: reportData.data.encounters.fieldEffects,
+      inverseBattles: reportData.data.encounters.inverseBattles,
     }
     const battler = buildBattlerState(playerConfig, ctx)
     const moves = playerConfig.moveIds.filter((id): id is string => id !== null).map((id) => toMoveData(ctx.movesById.get(id)!))
@@ -75,6 +77,8 @@ export default function TrainerMatchup() {
     inverseTypeChart: gameData.inverseTypeChart,
     moveBehaviors: reportData.data.moveBehaviors.behaviors as unknown as import('../engine/basePower').MoveBehaviors,
     natures: reportData.data.natures,
+    fieldEffects: reportData.data.encounters.fieldEffects,
+    inverseBattles: reportData.data.encounters.inverseBattles,
   }
 
   return (

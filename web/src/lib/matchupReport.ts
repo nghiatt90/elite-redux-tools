@@ -24,7 +24,7 @@ import { calculateBattleStat, DEFAULT_STAT_STAGE } from '../engine/battleStat'
 import { idiv } from '../engine/fixed'
 import type { TypeChart } from '../engine/typeEffectiveness'
 import { bareType, toMoveData } from './moveData'
-import type { BattleConstants, Item, Move, Species, Trainer, TrainerMon } from './types'
+import type { BattleConstants, FieldEffect, InverseBattle, Item, Move, Species, Trainer, TrainerMon } from './types'
 
 /**
  * Turn-one caveats this report deliberately does not model -- printed on the page
@@ -41,6 +41,9 @@ export const MATCHUP_REPORT_CAVEATS: string[] = [
   'ActsAfter-style moves (Payback, Bolt Beak, Assurance) are evaluated as if the user moves first, matching this calculator’s existing default.',
   "The enemy level shown assumes HELL_MODE_EXTRA_LEVELS_FLAG is unset -- Hell-tier fights under that flag add a further per-trainer level bonus this report doesn't add (battle_main.c:1819-1827).",
   "Assumes the save's enableEvs setting is on. If it's off, neither side has EVs and the enemy's real stats are lower than shown (src/pokemon.c:996-997).",
+  "Assumes the save's Double Battle Mode option is off. If it's on, every trainer with two or more Pokemon fights as a double " +
+    'regardless of forcedDouble (option_plus_menu.c:1038, battle_main.c:1757-1758) -- see the double-battle banner above for what a ' +
+    'double battle invalidates in this report.',
 ]
 
 export type TrainerTier = 'ace' | 'elite' | 'hell'
@@ -53,12 +56,48 @@ export interface MatchupContext {
   typeChart: TypeChart
   inverseTypeChart: TypeChart
   moveBehaviors: MoveBehaviors
+  /** encounters.json's own two lists carrying this fight's real per-battle
+   * conditions -- see resolveTrickRoomActive/resolveInverseBattleActive's own docs
+   * for how they're consulted. Two independent facts from two independent lists
+   * (Trick Room is a VAR_BATTLE_FIELD_* write, Inverse Battle a separate
+   * FLAG_SYS_INVERSE_BATTLE setflag), not one inferred from the other, even though
+   * the one real inverse fight also happens to have Trick Room active. */
+  fieldEffects: FieldEffect[]
+  inverseBattles: InverseBattle[]
+}
+
+/** Whether `trainerId` fights under a permanent Trick Room, per encounters.json's own
+ * "fieldEffects" list -- restricted to UNGUARDED (guard === null) rows: a guarded row
+ * (e.g. Steven's two save-state-dependent Gravity variants, or the Monotype Champion
+ * rooms' own dialogue-guarded ones) belongs to a fight this report has no way to
+ * confirm is the one being resolved, so it's treated as out of scope rather than
+ * guessed at. Pure presentation fact -- see speedTiers's own doc for why this
+ * touches no damage number, only that function's own sort order and note. */
+export function resolveTrickRoomActive(trainerId: string, fieldEffects: FieldEffect[]): boolean {
+  return fieldEffects.some(
+    (fe) => fe.guard === null && fe.effectType === 'BATTLE_FIELD_EFFECT_ROOM' && fe.fieldId === 'STATUS_FIELD_TRICK_ROOM' && fe.trainers.includes(trainerId),
+  )
+}
+
+/** Whether `trainerId` fights as a genuine Inverse Battle, per encounters.json's own
+ * "inverseBattles" list (FLAG_SYS_INVERSE_BATTLE, battle_util.c:8028) -- same
+ * unguarded-only restriction as resolveTrickRoomActive, for the same reason. Unlike
+ * Trick Room, this is NOT presentation: it maps directly to
+ * FieldBattleState.isInverseBattleFlagSet, which the engine's own GetTypeModifier
+ * XORs into the type-chart selection (typeEffectiveness.ts) -- every damage number
+ * the report computes for this fight is affected, not just how a table is sorted. */
+export function resolveInverseBattleActive(trainerId: string, inverseBattles: InverseBattle[]): boolean {
+  return inverseBattles.some((ib) => ib.guard === null && ib.trainers.includes(trainerId))
 }
 
 /** A turn-one, no-weather/terrain/hazard/screen field -- the neutral default this
- * report always starts from (see MATCHUP_REPORT_CAVEATS). Exported so the optional
- * per-battle-field-effect follow-up (encounters.json's fieldEffect, not built here)
- * has a documented starting point to override rather than reconstructing one. */
+ * report always starts from (see MATCHUP_REPORT_CAVEATS), EXCEPT for
+ * isInverseBattleFlagSet, which buildMatchupReport resolves per-trainer from
+ * encounters.json's own data before falling back to this default (see
+ * resolveInverseBattleActive). Exported so a caller that wants to override the field
+ * entirely (tests, or a future per-battle-field-effect extension beyond Trick
+ * Room/Inverse Battle) has a documented starting point rather than reconstructing
+ * one. */
 export function neutralField(): FieldBattleState {
   return {
     gravityActive: false,
@@ -224,19 +263,33 @@ export interface SpeedEntry {
  * it only works if the table tells the reader to go look for it. */
 export const SPEED_TIER_CAVEAT = 'Ordered by raw Speed stat only -- ignores move priority. Check each move’s own priority in the damage tables below: a lower-Speed mon using a priority move still acts first.'
 
+/** Same shape as SPEED_TIER_CAVEAT, for the one real fight where the ordering itself
+ * is reversed rather than merely priority-blind. Presentation only -- Trick Room
+ * doesn't touch any damage number (nothing in CalculateStat/CalcFinalDmg branches on
+ * it), so this stays entirely inside speedTiers's own sort, never reaching the
+ * engine. Kept as a SEPARATE note from SPEED_TIER_CAVEAT/the Inverse Battle banner
+ * rather than combined text: a reader has to be able to tell "the order is flipped"
+ * apart from "the damage numbers are inverted" (see MatchupReport.isInverseBattleActive's
+ * own doc) -- they are different kinds of fact about the same fight. */
+export const TRICK_ROOM_SPEED_TIER_NOTE =
+  'Trick Room is active in this fight -- LOWER Speed acts first, the reverse of normal order. Still ignores move priority: a priority move still acts first regardless of Speed.'
+
 /** "Exact speed tiers": every battler's real, post-nature/EV/IV/level Speed stat
- * (neutral stage, per MATCHUP_REPORT_CAVEATS), sorted fastest-first. Real ties are
- * kept adjacent and flagged by the caller via matching `speed` values -- the ROM
- * breaks a real Speed tie with Random() (battle_main.c), not something a static
- * report can resolve, so this deliberately doesn't guess a winner. Priority is
+ * (neutral stage, per MATCHUP_REPORT_CAVEATS), sorted fastest-first -- or slowest-
+ * first under Trick Room, real Pokemon's own turn-order reversal, per
+ * `isTrickRoomActive` (see resolveTrickRoomActive). Real ties are kept adjacent and
+ * flagged by the caller via matching `speed` values -- the ROM breaks a real Speed
+ * tie with Random() (battle_main.c), not something a static report can resolve, so
+ * this deliberately doesn't guess a winner, under either ordering. Priority is
  * DELIBERATELY not folded in here -- see SPEED_TIER_CAVEAT's own doc for why this is
  * a separate, narrower fact than "who actually moves first for a given move pair". */
-export function speedTiers(player: BattlerBattleState, enemies: { speciesId: string; battler: BattlerBattleState }[]): SpeedEntry[] {
+export function speedTiers(player: BattlerBattleState, enemies: { speciesId: string; battler: BattlerBattleState }[], isTrickRoomActive: boolean): SpeedEntry[] {
   const entries: SpeedEntry[] = [
     { label: 'You', speed: player.condition.speed },
     ...enemies.map((e) => ({ label: e.speciesId, speed: e.battler.condition.speed })),
   ]
-  return entries.sort((a, b) => b.speed - a.speed)
+  const fastestFirst = entries.sort((a, b) => b.speed - a.speed)
+  return isTrickRoomActive ? fastestFirst.reverse() : fastestFirst
 }
 
 export interface MatchupMoveEntry {
@@ -500,11 +553,36 @@ export interface MatchupReport {
   tier: TrainerTier
   enemyLevel: number
   speedTiers: SpeedEntry[]
-  /** SPEED_TIER_CAVEAT -- carried on the result itself (not just the general
-   * MATCHUP_REPORT_CAVEATS list) so the UI renders it right next to the table it
-   * qualifies, rather than relying on a reader to have read the caveats section
-   * first. */
+  /** SPEED_TIER_CAVEAT, or TRICK_ROOM_SPEED_TIER_NOTE when `isTrickRoomActive` --
+   * carried on the result itself (not just the general MATCHUP_REPORT_CAVEATS list)
+   * so the UI renders it right next to the table it qualifies, rather than relying
+   * on a reader to have read the caveats section first. */
   speedTierNote: string
+  /** Whether this specific trainer fight runs under a permanent Trick Room, per
+   * encounters.json (see resolveTrickRoomActive). Presentation only -- already
+   * folded into `speedTiers`'s own ordering and `speedTierNote`'s own text; exposed
+   * here too so the UI can render its own banner without re-deriving the lookup. */
+  isTrickRoomActive: boolean
+  /** Whether the field ACTUALLY USED to compute `mons` below has
+   * `isInverseBattleFlagSet` set -- read back off that field, not re-derived from
+   * encounters.json independently (a caller-supplied `field` can disagree with the
+   * lookup; see buildMatchupReport's own comment on why this has to be the field's
+   * own value). NOT presentation -- every damage number under `mons` below already
+   * reflects the inverted type chart when this is true; this flag exists so the UI
+   * can (and must) render a SEPARATE, explicit banner making that plain, rather
+   * than a reader discovering it only from the numbers looking unusual. */
+  isInverseBattleActive: boolean
+  /** trainer.forcedDouble, already-parsed trainer data -- no lookup needed, this is
+   * a straight passthrough. A forced-double fight puts two Pokemon per side on the
+   * field at once; this report (like the plan's own literal `isDoubleBattle: false`
+   * engine type) is singles-only, so for a fight flagged this way the whole report
+   * -- speed order, both damage columns, all of it -- describes a battle shape that
+   * does not occur. NOT the same kind of fact as isTrickRoomActive/
+   * isInverseBattleActive, which describe conditions this report DOES account for:
+   * this one describes a fight the report CANNOT account for at all. Keep its own
+   * banner separate from those two for exactly that reason -- see
+   * MatchupReportView's own doc on why the three don't collapse into one block. */
+  isForcedDouble: boolean
   mons: MatchupMonReport[]
 }
 
@@ -532,7 +610,14 @@ export function resolveParty(trainer: Trainer, tier: TrainerTier): TrainerMon[] 
 
 export function buildMatchupReport(input: MatchupReportInput): MatchupReport {
   const { player, trainer, tier, playerHighestLevel, ctx } = input
-  const field = input.field ?? neutralField()
+  const isTrickRoomActive = resolveTrickRoomActive(trainer.id, ctx.fieldEffects)
+  // Only used to build the DEFAULT field below, not reported directly -- a caller
+  // that supplies its own `field` (tests, or a future extension) can disagree with
+  // this lookup, and the report must describe the field it actually computed `mons`
+  // with, not this independent fact. See isInverseBattleActive's own doc below.
+  const lookedUpInverseBattleActive = resolveInverseBattleActive(trainer.id, ctx.inverseBattles)
+  const field = input.field ?? { ...neutralField(), isInverseBattleFlagSet: lookedUpInverseBattleActive }
+  const isInverseBattleActive = field.isInverseBattleFlagSet
   const enemyLevel = resolveEnemyLevel(playerHighestLevel)
   const party = resolveParty(trainer, tier)
 
@@ -563,8 +648,12 @@ export function buildMatchupReport(input: MatchupReportInput): MatchupReport {
     speedTiers: speedTiers(
       player.battler,
       enemies.map((e) => ({ speciesId: e.speciesId, battler: e.battler })),
+      isTrickRoomActive,
     ),
-    speedTierNote: SPEED_TIER_CAVEAT,
+    speedTierNote: isTrickRoomActive ? TRICK_ROOM_SPEED_TIER_NOTE : SPEED_TIER_CAVEAT,
+    isTrickRoomActive,
+    isInverseBattleActive,
+    isForcedDouble: trainer.forcedDouble,
     mons,
   }
 }

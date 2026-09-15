@@ -265,6 +265,64 @@ export interface Trainer {
   parties: TrainerParties
 }
 
+// Mirrors pipeline/src/erdata/encounters.py's scrape_encounters() output exactly --
+// per-battle environment facts scraped from map scripts, not proto data. "guard" is
+// the innermost enclosing condition's own source text (or its negation, for an
+// `else`), or null when unconditional -- see that module's own doc for the
+// innermost-only limitation and the frame-compatible "trainers" aggregation.
+export interface FieldEffect {
+  map: string
+  script: string
+  effectType: string // e.g. "BATTLE_FIELD_EFFECT_ROOM", "BATTLE_FIELD_EFFECT_MONOCHAMP"
+  fieldId: string // e.g. "STATUS_FIELD_TRICK_ROOM" for ROOM, "TYPE_NORMAL" for MONOCHAMP
+  guard: string | null
+  trainers: string[]
+}
+
+export interface BattleEvent {
+  map: string
+  script: string
+  event: string // e.g. "BATTLE_EVENT_SPIKES" -- a gym's per-trainer Hell-mode skill
+  data0: number | null
+  data1: number | null
+  guard: string | null
+}
+
+export interface TrainerChain {
+  map: string
+  script: string
+  trainers: string[] // 2+ distinct ids, reachable together in one playthrough
+  healFree: boolean // FLAG_SYS_DISABLE_AUTOHEAL bracketed every member but the first
+}
+
+export interface TagBattle {
+  map: string
+  script: string
+  trainers: [string, string] // starttagbattle's own two ids, in call order
+  guard: string | null
+}
+
+// FLAG_SYS_INVERSE_BATTLE (aliased B_FLAG_INVERSE_BATTLE) activations -- a
+// battle-format flag, not a VAR_BATTLE_FIELD_* write, so it's tracked and emitted
+// separately from "fieldEffects" even though the one real occurrence sits alongside
+// a Trick Room fieldEffects row for the same trainer. See _pair_inverse_battles's
+// own doc (encounters.py) for why this is the same {map, script, guard, trainers}
+// shape as FieldEffect rather than a bespoke one.
+export interface InverseBattle {
+  map: string
+  script: string
+  guard: string | null
+  trainers: string[]
+}
+
+export interface Encounters {
+  fieldEffects: FieldEffect[]
+  battleEvents: BattleEvent[]
+  trainerChains: TrainerChain[]
+  tagBattles: TagBattle[]
+  inverseBattles: InverseBattle[]
+}
+
 // typeChart[attackingType][defendingType] = multiplier
 export type TypeChart = Record<string, Record<string, number>>
 

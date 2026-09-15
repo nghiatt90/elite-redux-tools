@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { loadAbilityHooks, loadMoveBehaviors, loadNatures, loadTrainers } from '../../lib/data'
-import type { AbilityHooks, BattleConstants, MoveBehaviorsFile, Trainer } from '../../lib/types'
+import { loadAbilityHooks, loadEncounters, loadMoveBehaviors, loadNatures, loadTrainers } from '../../lib/data'
+import type { AbilityHooks, BattleConstants, Encounters, MoveBehaviorsFile, Trainer } from '../../lib/types'
 
 export interface MatchupReportData {
   trainers: Trainer[]
   moveBehaviors: MoveBehaviorsFile
   natures: BattleConstants
   abilityHooks: AbilityHooks
+  encounters: Encounters
 }
 
 type State = { status: 'loading' } | { status: 'error'; error: Error } | { status: 'ready'; data: MatchupReportData }
@@ -18,12 +19,15 @@ let cachedPromise: Promise<MatchupReportData> | null = null
 
 function loadMatchupReportData(): Promise<MatchupReportData> {
   if (!cachedPromise) {
-    cachedPromise = Promise.all([loadTrainers(), loadMoveBehaviors(), loadNatures(), loadAbilityHooks()]).then(([trainers, moveBehaviors, natures, abilityHooks]) => ({
-      trainers,
-      moveBehaviors,
-      natures,
-      abilityHooks,
-    }))
+    cachedPromise = Promise.all([loadTrainers(), loadMoveBehaviors(), loadNatures(), loadAbilityHooks(), loadEncounters()]).then(
+      ([trainers, moveBehaviors, natures, abilityHooks, encounters]) => ({
+        trainers,
+        moveBehaviors,
+        natures,
+        abilityHooks,
+        encounters,
+      }),
+    )
   }
   return cachedPromise
 }

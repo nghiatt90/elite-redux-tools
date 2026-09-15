@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildBattlerState, defaultBattlerConfig, toMoveData } from '../damageCalc/scenario'
 import { buildMatchupReport } from '../../lib/matchupReport'
-import type { BattleConstants, Item, Move, MoveBehaviorsFile, Species, Trainer, TypeChart } from '../../lib/types'
+import type { BattleConstants, Encounters, Item, Move, MoveBehaviorsFile, Species, Trainer, TypeChart } from '../../lib/types'
 import type { MoveBehaviors } from '../../engine/basePower'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
@@ -32,6 +32,7 @@ const typeChart = load<TypeChart>('types.json')
 const inverseTypeChart = load<TypeChart>('typesInverse.json')
 const moveBehaviorsFile = load<MoveBehaviorsFile>('moveBehaviors.json')
 const trainers = load<Trainer[]>('trainers.json')
+const encounters = load<Encounters>('encounters.json')
 
 const speciesById = new Map(species.map((s) => [s.id, s]))
 const itemsById = new Map(items.map((i) => [i.id, i]))
@@ -45,6 +46,8 @@ const ctx = {
   inverseTypeChart,
   moveBehaviors: moveBehaviorsFile.behaviors as unknown as MoveBehaviors,
   natures,
+  fieldEffects: encounters.fieldEffects,
+  inverseBattles: encounters.inverseBattles,
 }
 
 describe('features/matchupReport composition: scenario.ts -> lib/matchupReport.ts, the exact seam routes/TrainerMatchup.tsx depends on', () => {
