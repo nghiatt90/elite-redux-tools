@@ -180,6 +180,23 @@ def _learnset(species, species_map, tutors) -> dict:
     return {"levelUp": level_up, "tutor": tutor_moves}
 
 
+# EvolutionsGenerator.kt:68-71 turns each `allow_deevolution_to` species' evo targets
+# into an EVO_DEEVOLUTION row on the TARGET (the child can de-evolve back to its
+# parent). Those rows are ordinary gEvolutionTable entries, so battle_util.c's
+# CanEvolve() -- which Eviolite reads at this pin -- returns TRUE for them even
+# though the child has no forward evolution of its own. er-config carries the flag
+# on the parent only, so the derived per-child fact has to be emitted explicitly.
+_DEEVO_TARGETS: dict[int, frozenset[int]] = {}
+
+
+def _can_deevolve(species, species_map) -> bool:
+    targets = _DEEVO_TARGETS.get(id(species_map))
+    if targets is None:
+        targets = frozenset(e.to for s in species_map.values() if s.allow_deevolution_to for e in s.evo)
+        _DEEVO_TARGETS[id(species_map)] = targets
+    return species.id in targets
+
+
 def species_to_dict(species, species_map, tutors) -> dict:
     dex = resolve_dex_info(species, species_map)
     is_form = species.WhichOneof("base_species_info") == "form_of"
@@ -217,6 +234,8 @@ def species_to_dict(species, species_map, tutors) -> dict:
         entry["longName"] = species.long_name
     if species.heads:
         entry["heads"] = species.heads
+    if _can_deevolve(species, species_map):
+        entry["canDeevolve"] = True
     return entry
 
 
@@ -345,6 +364,13 @@ def _build_near_groups(name_index: dict) -> dict[str, list[str]]:
     return groups
 
 
+# Names and descriptions come straight from er-config. At the pinned (released-build)
+# commit ABILITY_ABOMINABLE_MONSTER and ABILITY_ICICLE_FIST have theirs SWAPPED --
+# ABOMINABLE_MONSTER is displayed as "Icicle Fist" with the Iron-Fist text, and vice
+# versa. That is upstream's own bug and it is what the shipped ROM shows, so the
+# emitted data reproduces it faithfully; er-config only corrected it later, in
+# b5aaee6bbeb3 (2026-04-21), which is not in this release. Do not "fix" it here.
+# Pinned by tests/test_emit.py::test_abominable_monster_and_icicle_fist_names_are_swapped.
 def ability_to_dict(
     ability,
     name_index: dict,
