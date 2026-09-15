@@ -38,7 +38,10 @@ import {
   MAGNITUDE_PROBABILITY_PERCENT,
   percentToModifier,
   UNMODELLED_BASE_POWER_EFFECTS,
+  UNMODELLED_BASE_POWER_MOVE_IDS,
   weatherBallType,
+  ZERO_DAMAGE_BASE_POWER_EFFECTS,
+  ZERO_DAMAGE_BASE_POWER_MOVE_IDS,
   type BasePowerModifierContext,
   type MoveBehaviors,
 } from './basePower'
@@ -929,6 +932,19 @@ function calcInternal(
   // (Super Fang/Endeavor/Final Gambit/etc. need a real, unported formula, not
   // turn-history state), so a single reason no longer fits every member.
   if (move.effect && UNMODELLED_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: not modelled`)
+  // Move-ID-keyed twin of the check above -- see UNMODELLED_BASE_POWER_MOVE_IDS's
+  // own doc (basePower.ts) for why Seismic Toss needs this instead of an effect-
+  // keyed entry: it shares EFFECT_SKY_DROP with Sky Drop, whose own damage this
+  // formula computes correctly, so warning by effect would wrongly catch Sky Drop.
+  if (UNMODELLED_BASE_POWER_MOVE_IDS.has(move.id)) unmodelled.push(`${move.id}: not modelled`)
+  // A DIFFERENT message from the two checks above -- see ZERO_DAMAGE_BASE_POWER_
+  // EFFECTS's own doc (basePower.ts) for why "not modelled" would be a false claim
+  // here: the real damage for these is a known, script-confirmed zero, not an
+  // unknown nonzero number. Still warning-only -- the small nonzero number this
+  // formula's power floor prints for them is unchanged; making it print the real
+  // 0 instead is a separate, reviewed decision.
+  if (move.effect && ZERO_DAMAGE_BASE_POWER_EFFECTS.has(move.effect)) unmodelled.push(`${move.effect}: its battle script deals no damage in this build`)
+  if (ZERO_DAMAGE_BASE_POWER_MOVE_IDS.has(move.id)) unmodelled.push(`${move.id}: its battle script deals no damage in this build`)
   const preModifierResult = applyPreModifierBasePower(
     behaviorResult.power,
     move.effect,

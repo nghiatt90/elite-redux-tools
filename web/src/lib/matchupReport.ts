@@ -18,6 +18,7 @@
 import { calculateMoveDamage } from '../engine/calculate'
 import type { BattlerBattleState, FieldBattleState } from '../engine/types'
 import type { MoveData } from '../engine/calculate'
+import { ZERO_DAMAGE_BASE_POWER_EFFECTS, ZERO_DAMAGE_BASE_POWER_MOVE_IDS } from '../engine/basePower'
 import type { MoveBehaviors } from '../engine/basePower'
 import { calcHp, calcStat } from '../engine/stats'
 import { calculateBattleStat, DEFAULT_STAT_STAGE } from '../engine/battleStat'
@@ -443,12 +444,54 @@ const DYNAMIC_DAMAGE_EFFECTS = new Set([
  * moves.json description claims ("Inflicts level damage") isn't verifiable from the
  * available decompiled source; nulling the true-damage column is the honest response
  * either way, matching AI_CalcDamage's own lack of a special case for it too.
+ *
+ * EFFECT_METAL_BURST (MOVE_METAL_BURST, MOVE_COMEUPPANCE) added 2026-09-15,
+ * alongside basePower.ts's own UNMODELLED_BASE_POWER_EFFECTS -- same retaliation
+ * shape as Counter, confirmed absent from both CalcMoveBasePower's switch and
+ * AI_CalcDamage's dynamic-damage switch the same way. Declares power=0, not
+ * power=1 like the other three here, so it takes the EARLY-RETURN branch in
+ * evaluateMoveEntry below (`!move.power`) rather than reaching this function's own
+ * call site -- that branch has its own, separate check for this set, added at the
+ * same time (a review caught that adding the effect here ALONE would do nothing
+ * for a power=0 move: this function is only ever called downstream of the early
+ * return, never for a move that took it).
+ *
+ * MOVE_SQUALL_HAMMER is NOT in this set (a 2026-09-15 review caught an earlier
+ * version of this file putting it here, which is the exact mislabel
+ * ZERO_DAMAGE_BASE_POWER_MOVE_IDS below exists to avoid): Squall Hammer's real
+ * damage isn't "exists but uncomputed" like Counter/Mirror Coat/Bide/Metal
+ * Burst/Seismic Toss above, it's a script-confirmed ZERO (BattleScript_EffectDefog,
+ * battle_scripts_1.s:1560-1592, has no damage step on any path) -- see
+ * isZeroDamageBasePower's own doc below for that distinction and where it's
+ * actually handled.
  */
-const TRUE_DAMAGE_UNAVAILABLE_EFFECTS = new Set(['EFFECT_COUNTER', 'EFFECT_MIRROR_COAT', 'EFFECT_BIDE'])
+const TRUE_DAMAGE_UNAVAILABLE_EFFECTS = new Set(['EFFECT_COUNTER', 'EFFECT_MIRROR_COAT', 'EFFECT_BIDE', 'EFFECT_METAL_BURST'])
 const TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS = new Set(['MOVE_SEISMIC_TOSS'])
 
 function isTrueDamageUnavailable(move: MoveData): boolean {
   return TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS.has(move.id) || Boolean(move.effect && TRUE_DAMAGE_UNAVAILABLE_EFFECTS.has(move.effect))
+}
+
+/** basePower.ts's ZERO_DAMAGE_BASE_POWER_EFFECTS/_MOVE_IDS, imported directly
+ * rather than copied -- a 2026-09-15 review caught that this file's OWN copy of
+ * the equivalent sets (TRUE_DAMAGE_UNAVAILABLE_* above, DYNAMIC_DAMAGE_EFFECTS
+ * below) is exactly how EFFECT_METAL_BURST/MOVE_SQUALL_HAMMER ended up added to
+ * basePower.ts first and only reached this file in a follow-up once the two
+ * surfaces were caught disagreeing (a bare, unexplained dash here while the
+ * calculator had already started warning). Importing these two specific sets
+ * closes that gap for good rather than adding a third copy that can drift the
+ * same way again: MOVE_AIRBORNE_SLAM/MOVE_FETCH/MOVE_SQUALL_HAMMER now read the
+ * SAME zero-damage fact this file's own damage computation already reflects
+ * (see evaluateMoveEntry below), from one source. A DIFFERENT class from
+ * isTrueDamageUnavailable above: not "real damage exists, this engine can't
+ * compute it" (a real, nonzero, unported number), but "the real damage IS
+ * zero, script-confirmed" -- MOVE_SQUALL_HAMMER's own AI-belief column still
+ * runs the ordinary formula and shows a real (if "wrong") number, same as
+ * Counter/Mirror Coat/Bide/Metal Burst above, because AI_CalcDamage computes
+ * from the formula, not from the script -- only the TRUE-damage column is
+ * affected. */
+function isZeroDamageBasePower(move: MoveData): boolean {
+  return ZERO_DAMAGE_BASE_POWER_MOVE_IDS.has(move.id) || Boolean(move.effect && ZERO_DAMAGE_BASE_POWER_EFFECTS.has(move.effect))
 }
 
 /** One move's report row. `estimateAiBelief` should be true only for the enemy's own
@@ -490,7 +533,38 @@ function evaluateMoveEntry(
     // actually the exact same class of engine gap as Counter/Mirror Coat/Bide/
     // Seismic Toss below, which DO get a warning. See MatchupReportView.tsx's own
     // "dash means three different things" note.
-    const unmodelled = isDynamicDamageEffect ? [`${move.effect}: not modelled`] : []
+    //
+    // A THIRD source added 2026-09-15: isTrueDamageUnavailable(move) below is
+    // ALSO checked here, not only past this early return -- EFFECT_METAL_BURST
+    // declares power=0 (Counter/Mirror Coat/Bide/Seismic Toss are all power=1, so
+    // they never took this branch and were already covered by the isImmune=false
+    // return further down), so a caller that only added it to
+    // TRUE_DAMAGE_UNAVAILABLE_EFFECTS without this check would see it hit `!move.power`
+    // above and take this branch with the isDynamicDamageEffect ternary skipping it
+    // silently -- the exact divergence a review caught between this file and
+    // basePower.ts's own UNMODELLED_BASE_POWER_EFFECTS after that set gained
+    // EFFECT_METAL_BURST first.
+    //
+    // A FOURTH source added the same day: isZeroDamageBasePower(move) below,
+    // for MOVE_AIRBORNE_SLAM/MOVE_FETCH (also power=0, so they take this same
+    // branch). Unlike the other three sources, calculateMoveDamage is never
+    // invoked here (this branch returns before scenarioBase even exists), so
+    // there's no `result.unmodelled` to draw the engine's own zero-damage
+    // message from -- built inline instead, using the exact literal
+    // basePower.ts's own calculate.ts uses, so a reader sees the identical
+    // wording whichever code path produced it.
+    const trueDamageUnavailableAtZeroPower = isTrueDamageUnavailable(move)
+    const zeroDamageEffect = move.effect && ZERO_DAMAGE_BASE_POWER_EFFECTS.has(move.effect) ? move.effect : null
+    const zeroDamageMoveId = ZERO_DAMAGE_BASE_POWER_MOVE_IDS.has(move.id) ? move.id : null
+    const unmodelled = isDynamicDamageEffect
+      ? [`${move.effect}: not modelled`]
+      : trueDamageUnavailableAtZeroPower
+        ? [`${move.id}: real damage not modelled (unported battle-script effect -- see matchupReport.ts's TRUE_DAMAGE_UNAVAILABLE_* doc)`]
+        : zeroDamageEffect
+          ? [`${zeroDamageEffect}: its battle script deals no damage in this build`]
+          : zeroDamageMoveId
+            ? [`${zeroDamageMoveId}: its battle script deals no damage in this build`]
+            : []
     return { ...base, maxRollDamage: null, maxRollPercent: null, aiEstimatedDamage: null, aiEstimatedPercent: null, isImmune: false, unmodelled }
   }
 
@@ -523,7 +597,12 @@ function evaluateMoveEntry(
   // does NOT special-case them, so only THIS column (the real, in-game outcome) is
   // suppressed; aiEstimatedDamage below still runs the ordinary formula.
   const trueDamageUnavailable = isTrueDamageUnavailable(move)
-  const maxRollDamage = trueDamageUnavailable ? null : result.isImmune ? 0 : result.rolls[result.rolls.length - 1]
+  // MOVE_SQUALL_HAMMER (power=95) reaches here rather than the early-return branch
+  // above -- same treatment: suppress the true-damage column, keep the AI-belief
+  // one, since isZeroDamageBasePower's own doc explains why the AI's belief is
+  // still a real (if "wrong") number, computed from the formula, not the script.
+  const zeroDamage = isZeroDamageBasePower(move)
+  const maxRollDamage = trueDamageUnavailable || zeroDamage ? null : result.isImmune ? 0 : result.rolls[result.rolls.length - 1]
 
   let aiEstimatedDamage: number | null = null
   if (estimateAiBelief) {
@@ -534,16 +613,34 @@ function evaluateMoveEntry(
     aiEstimatedDamage = aiCritBlend(normalDmg, critDmg, aiResult.critChanceDenominator)
   }
 
+  // The engine's own calculateMoveDamage call above already pushes the right
+  // message into result.unmodelled for BOTH isTrueDamageUnavailable and
+  // isZeroDamageBasePower moves (UNMODELLED_BASE_POWER_EFFECTS/_MOVE_IDS and
+  // ZERO_DAMAGE_BASE_POWER_EFFECTS/_MOVE_IDS in basePower.ts, reached via
+  // move.effect/move.id inside calculateMoveDamage -- see calculate.ts's own
+  // checks). This file's own extra append below is therefore only needed for
+  // TRUE_DAMAGE_UNAVAILABLE_* entries the engine does NOT ALSO warn on by
+  // move id -- guarded by the `!result.unmodelled.includes(...)` check so
+  // MOVE_SEISMIC_TOSS (in BOTH this file's TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS
+  // and basePower.ts's own UNMODELLED_BASE_POWER_MOVE_IDS) doesn't carry two
+  // notes saying the same thing in different words -- a 2026-09-15 review
+  // caught exactly that duplicate. Counter/Mirror Coat/Bide/Metal Burst are
+  // effect-keyed on the engine side (`${move.effect}: not modelled`) but
+  // move-id-keyed on this file's own extra note, so they don't collide and
+  // keep both (the extra note's "see matchupReport.ts's TRUE_DAMAGE_UNAVAILABLE_*
+  // doc" pointer is genuinely additional context for those, not a restatement).
+  const engineAlreadyNotedThisMoveId = result.unmodelled.includes(`${move.id}: not modelled`)
   return {
     ...base,
     maxRollDamage,
     maxRollPercent: maxRollDamage === null ? null : toPercent(maxRollDamage, maxHp),
     aiEstimatedDamage,
     aiEstimatedPercent: aiEstimatedDamage === null ? null : toPercent(aiEstimatedDamage, maxHp),
-    isImmune: trueDamageUnavailable ? false : result.isImmune,
-    unmodelled: trueDamageUnavailable
-      ? [...result.unmodelled, `${move.id}: real damage not modelled (unported battle-script effect -- see matchupReport.ts's TRUE_DAMAGE_UNAVAILABLE_* doc)`]
-      : result.unmodelled,
+    isImmune: trueDamageUnavailable || zeroDamage ? false : result.isImmune,
+    unmodelled:
+      trueDamageUnavailable && !engineAlreadyNotedThisMoveId
+        ? [...result.unmodelled, `${move.id}: real damage not modelled (unported battle-script effect -- see matchupReport.ts's TRUE_DAMAGE_UNAVAILABLE_* doc)`]
+        : result.unmodelled,
   }
 }
 

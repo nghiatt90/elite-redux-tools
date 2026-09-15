@@ -2102,16 +2102,84 @@ describe('calculateMoveDamage -- UNMODELLED_BASE_POWER_EFFECTS warns instead of 
     },
   )
 
+  // 2026-09-15 systematic re-sweep (basePower.ts's own doc on
+  // UNMODELLED_BASE_POWER_EFFECTS): the earlier audit only ever checked
+  // moves.json's power===1 moves, never power===0 -- this one was found by
+  // widening that to every damaging move with declared power 0 OR 1, then
+  // checking each one against this file's own handling. Same "not modelled"
+  // family as Counter/Mirror Coat/Bide above -- a real, nonzero, retaliation-
+  // style damage number this engine can't compute, just power=0 instead of
+  // power=1.
+  it.each(['MOVE_METAL_BURST', 'MOVE_COMEUPPANCE'])(
+    '%s carries an "unmodelled" note -- same legacyConfig-only, no-AI_CalcDamage-special-case gap as Counter/Mirror Coat/Bide, just power=0 instead of power=1',
+    (moveId) => {
+      expect(moveById[moveId].power).toBe(0)
+      const result = calculateMoveDamage(scenario({ move: moveData(moveId) }))
+      expect(result.unmodelled).toContain(`${moveById[moveId].effect}: not modelled`)
+    },
+  )
+
   it('does NOT warn on an ordinary move sharing no effect with the unmodelled set (Tackle, the scenario() default)', () => {
     const result = calculateMoveDamage(scenario())
     expect(result.unmodelled).toEqual([])
   })
 
+  // A DIFFERENT class from every case above: the real damage for these is a
+  // known, script-confirmed ZERO (see ZERO_DAMAGE_BASE_POWER_EFFECTS's own doc,
+  // basePower.ts), so "not modelled" would be a false claim -- there's no
+  // unknown nonzero number here, just this formula's power floor printing a
+  // small one anyway. Still warning-only: the small wrong number itself is
+  // untouched by this batch, only the note explaining it is new.
+  it.each(['MOVE_AIRBORNE_SLAM', 'MOVE_FETCH'])(
+    '%s carries a "deals no damage in this build" note, not "not modelled" -- its battle script has no damage step on any path',
+    (moveId) => {
+      expect(moveById[moveId].power).toBe(0)
+      const result = calculateMoveDamage(scenario({ move: moveData(moveId) }))
+      expect(result.unmodelled).toContain(`${moveById[moveId].effect}: its battle script deals no damage in this build`)
+      expect(result.unmodelled).not.toContain(`${moveById[moveId].effect}: not modelled`)
+    },
+  )
+
   it(
-    'does NOT warn on Sky Drop just because it shares EFFECT_SKY_DROP with Seismic Toss -- Sky Drop\'s own ' +
-      'final hit (power=60) IS computed correctly by this formula, unlike Seismic Toss (power=1); the set is ' +
-      'deliberately keyed by effect, not move id, and EFFECT_SKY_DROP is deliberately excluded from it (see the ' +
-      "set's own doc in basePower.ts) so Sky Drop can't be caught by a broader fix aimed at Seismic Toss",
+    'MOVE_SQUALL_HAMMER carries the same "deals no damage in this build" note via ZERO_DAMAGE_BASE_POWER_MOVE_IDS -- ' +
+      'its declared power (95) looks entirely ordinary, no low-power signal at all, because it shares EFFECT_DEFOG ' +
+      "with the status move Defog, whose script (BattleScript_EffectDefog) never deals damage on any path; this is " +
+      "the case that disproved the power<=1 heuristic (see basePower.ts's own module doc), so it's keyed by move id " +
+      'to avoid also flagging Defog itself',
+    () => {
+      expect(moveById.MOVE_SQUALL_HAMMER.effect).toBe('EFFECT_DEFOG')
+      expect(moveById.MOVE_SQUALL_HAMMER.power).toBeGreaterThan(1)
+      expect(moveById.MOVE_DEFOG.effect).toBe('EFFECT_DEFOG')
+      expect(moveById.MOVE_DEFOG.split).toBe('STATUS')
+      const result = calculateMoveDamage(scenario({ move: moveData('MOVE_SQUALL_HAMMER') }))
+      expect(result.unmodelled).toContain('MOVE_SQUALL_HAMMER: its battle script deals no damage in this build')
+    },
+  )
+
+  it('does NOT warn on Defog just because it shares EFFECT_DEFOG with Squall Hammer -- the move-id-keyed set above cannot spill onto it', () => {
+    const result = calculateMoveDamage(scenario({ move: moveData('MOVE_DEFOG') }))
+    expect(result.unmodelled).toEqual([])
+  })
+
+  it(
+    "MOVE_SEISMIC_TOSS carries an \"unmodelled\" note via UNMODELLED_BASE_POWER_MOVE_IDS -- the move-id-keyed twin " +
+      'of the effect-keyed set above, added because EFFECT_SKY_DROP itself can\'t be added there without also ' +
+      "catching Sky Drop (see the next test). Previously left open deliberately; matchupReport.ts's own " +
+      'TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS had already solved the identical problem there, reused here rather than a ' +
+      'second invention.',
+    () => {
+      expect(moveById.MOVE_SEISMIC_TOSS.effect).toBe('EFFECT_SKY_DROP')
+      expect(moveById.MOVE_SEISMIC_TOSS.power).toBe(1)
+      const result = calculateMoveDamage(scenario({ move: moveData('MOVE_SEISMIC_TOSS') }))
+      expect(result.unmodelled).toContain('MOVE_SEISMIC_TOSS: not modelled')
+    },
+  )
+
+  it(
+    "does NOT warn on Sky Drop just because it shares EFFECT_SKY_DROP with Seismic Toss -- Sky Drop's own " +
+      'final hit (power=60) IS computed correctly by this formula, unlike Seismic Toss (power=1); ' +
+      'UNMODELLED_BASE_POWER_MOVE_IDS above is keyed by move id specifically so the Seismic Toss fix ' +
+      "can't spill over onto Sky Drop the way an effect-keyed entry would",
     () => {
       expect(moveById.MOVE_SKY_DROP.effect).toBe('EFFECT_SKY_DROP')
       expect(moveById.MOVE_SKY_DROP.power).toBeGreaterThan(1)

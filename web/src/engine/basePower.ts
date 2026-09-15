@@ -471,17 +471,112 @@ export function applyAngelsWrathBasePower(basePower: number, moveId: string, att
 // - EFFECT_COUNTER, EFFECT_MIRROR_COAT, EFFECT_BIDE -- also confirmed absent
 //   from the switch above; their real damage (double whatever was received, or
 //   double a 2-turn accumulated total) is `legacyConfig`-only in
-//   moveBehaviors.json (battle-script bytecode, out of this pipeline's reach --
-//   see docs/battle-sim's own finding on that), and AI_CalcDamage doesn't
-//   special-case them either, so it too falls through to the ordinary formula.
+//   moveBehaviors.json (battle-script bytecode -- `data/battle_scripts_1.s`/
+//   `_2.s` under `pipeline/.upstream/eliteredux-source/`, directly readable),
+//   and AI_CalcDamage doesn't special-case them either, so it too falls
+//   through to the ordinary formula.
 //
-// Deliberately NOT included: EFFECT_SKY_DROP (Seismic Toss's real effect in
-// this ER build, also power=1 and equally unmodelled) -- it's shared with
-// MOVE_SKY_DROP (power=60), whose own final hit IS computed correctly by the
-// ordinary formula, and this set is keyed by effect, not move id, so adding it
-// here would wrongly warn on Sky Drop too. Seismic Toss's calculator-surface
-// gap is therefore still open; matchupReport.ts's own TRUE_DAMAGE_UNAVAILABLE_
-// MOVE_IDS handles it there by move id instead.
+// A 2026-09-15 systematic re-sweep (the audit above only ever checked
+// moves.json's power===1 moves, never power===0) found three more the same
+// way: every damaging (split PHYSICAL/SPECIAL) move in moves.json with
+// declared power 0 OR 1 -- 24 real moves total, not counting the MOVE_NONE
+// placeholder slot (split defaults to PHYSICAL on that empty-slot sentinel,
+// which is never actually evaluated by any caller) -- cross-checked one at a
+// time against this file's own handling. 20 of the 24 were already accounted
+// for: the ten effects above, plus EFFECT_BEAT_UP/EFFECT_MAGNITUDE/
+// EFFECT_NATURAL_GIFT (applyPreModifierBasePower below) and EFFECT_LOW_KICK/
+// EFFECT_HEAT_CRASH/EFFECT_ELECTRO_BALL/EFFECT_GYRO_BALL (moveBehaviors.json's
+// own declarative `attack.damage` with a `custom` modifier, routed through
+// CUSTOM_MOVE_DAMAGE above -- MOVE_GRASS_KNOT/MOVE_LOW_KICK, MOVE_HEAT_CRASH/
+// MOVE_HEAVY_SLAM/MOVE_SPLASH, and MOVE_ELECTRO_BALL/MOVE_GYRO_BALL
+// respectively). The remaining 4 are new -- EFFECT_METAL_BURST
+// (MOVE_METAL_BURST, MOVE_COMEUPPANCE) has the identical signature as
+// EFFECT_COUNTER above (real damage proportional to the last hit taken, same
+// retaliation family), added to the set below. EFFECT_PLACEHOLDER
+// (MOVE_AIRBORNE_SLAM) and EFFECT_FETCH (MOVE_FETCH) are NOT added here --
+// see ZERO_DAMAGE_BASE_POWER_EFFECTS below for why "not modelled" is the wrong
+// label for those two.
+//
+// A first pass at a broader per-effect sweep -- every one of the 192 distinct
+// effects used by a damaging move, not just the power<=1 slice -- inferred
+// from declared power alone that no further candidate existed: reasoning that
+// every effect lacking a declarative `attack.damage` block but with NORMAL
+// (>1) power must have a `legacyConfig` script covering only a secondary
+// effect, never the move's own damage. A 2026-09-15 review DISPROVED that
+// inference by reading the actual battle scripts rather than inferring from
+// declared power: MOVE_SQUALL_HAMMER (PHYSICAL, power=95 -- an entirely
+// ordinary-looking value, no low-power signal at all) shares EFFECT_DEFOG
+// with the status move MOVE_DEFOG, and BattleScript_EffectDefog
+// (`battle_scripts_1.s:1560-1592`) has no damage-dealing step on ANY path --
+// an evasion drop and a hazard clear, nothing else -- so Squall Hammer deals
+// zero real damage despite its normal-looking power. Declared power is
+// therefore NOT a safe proxy once an effect is shared with a STATUS move (a
+// damaging move can inherit a pure-status script wholesale).
+//
+// A follow-up re-measured this directly rather than trust a count relayed
+// secondhand (this project's own standing lesson --
+// docs/battle-sim/verify-cited-numbers-and-corpus-claims.md): traced, by
+// script, all 126 legacy-config effects used by a damaging move, following
+// every fallthrough, goto and call from each one's own label, checking each
+// visited block against 15 damage-applying opcodes found across both script
+// files (damagecalc, adjustdamage, calculatesetdamage,
+// counterdamagecalculator, mirrorcoatdamagecalculator,
+// metalburstdamagecalculator, setdamagetohealthdifference,
+// dmgtocurrattackerhp, dmgtomaxattackerhp, hpfractiontodamage,
+// presentdamagecalculation, magnitudedamagecalculation,
+// stockpiletobasedamage, painsplitdmgcalc, manipulatedamage -- excluding
+// dohazarddamage/weatherdamage, end-of-turn/hazard mechanics unrelated to a
+// move's own attack). That traced FIVE effects whose own label never reaches
+// any of those opcodes: EFFECT_BIDE, EFFECT_DEFOG, EFFECT_FETCH,
+// EFFECT_FUTURE_SIGHT, EFFECT_PLACEHOLDER.
+//
+// The relayed count was thirteen, not five -- these do NOT disagree, they
+// answer DIFFERENT questions, and both are correct for the question each one
+// asks. Thirteen is every legacy-config effect (of the 126) whose script
+// never reaches the ORDINARY `damagecalc` opcode specifically. Of those
+// thirteen, nine deal real damage through their OWN special calculator
+// instead -- Bide, Counter, Mirror Coat, Endeavor, Final Gambit, Level
+// Damage, Super Fang, Super Fang Haze, and Metal Burst (added by this same
+// batch) -- which is exactly why they never touch the ordinary formula; all
+// nine are in the "not modelled" sets below. Three deal no damage at all --
+// Defog (whose only damaging user is Squall Hammer), Fetch, Placeholder --
+// the "zero damage" sets below. One is NOT a gap: Future Sight
+// (MOVE_FUTURE_SIGHT/MOVE_DOOM_DESIRE). 9 + 3 + 1 = 13.
+//
+// Five is the NARROWER, more thorough question this file's own trace asked --
+// which of those thirteen never reach ANY damage-applying opcode, special
+// calculators included -- and it disagrees with the nine-effect "not
+// modelled" group above for a specific, explainable reason: Bide and Future
+// Sight's real damage happens through a SEPARATE, delayed script the game's
+// own future-attack scheduling triggers (`setbide`/`trysetfutureattack` set
+// up the delayed hit; the actual damage step is a different label, not
+// reachable via any goto/call FROM the effect's own starting label at all).
+// Bide's delayed damage is still genuinely unported (correctly in the "not
+// modelled" set below). Future Sight's is NOT: `BattleScript_MonTookFutureAttack`
+// (`battle_scripts_1.s:8008-8017`) reaches `damagecalc`/`adjustdamage` -- the
+// ordinary formula -- when the delayed hit actually lands, so this engine's
+// existing (already-correct, never-flagged) ordinary computation for it is
+// right; only the TIMING differs (computed immediately here, landing two
+// turns later in the ROM), which a turn-one snapshot calculator doesn't
+// represent regardless and isn't a base-power gap. Not treated as a
+// candidate; not added to any set.
+//
+// Seismic Toss is in neither the thirteen nor the five, for the same reason
+// it needs UNMODELLED_BASE_POWER_MOVE_IDS below rather than an effect entry:
+// its own script branch (`battle_scripts_1.s:5822-5827`, `jumpifmove
+// MOVE_SEISMIC_TOSS`) DOES reach a damage step (`calculatesetdamage` for its
+// real level-based fixed damage, then `adjustdamage`) -- the ordinary
+// ATK/DEF formula still can't reproduce that fixed value, but the script
+// itself is not silent about it the way Fetch/Placeholder/Defog are.
+//
+// The honest limit of the script trace above: it covers legacy-config
+// effects reachable from a damaging move; a move in the STATUS split whose
+// own script might still carry a real damage step of its own was not
+// checked, since a status move's damage was already out of scope. Re-verify
+// by reading the scripts directly, not by re-running the power<=1 filter, if
+// moveBehaviors.json's legacyConfig set changes on a repin -- see
+// [[reference_unmodelled-base-power-sweep-method]] (this project's own agent
+// memory) for why the power heuristic was retired rather than reused.
 // ---------------------------------------------------------------------------
 
 export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([
@@ -495,7 +590,59 @@ export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([
   'EFFECT_COUNTER',
   'EFFECT_MIRROR_COAT',
   'EFFECT_BIDE',
+  'EFFECT_METAL_BURST',
 ])
+
+// Move-ID-keyed twin of the effect-keyed set above, for a move whose effect is
+// ALSO used by a different move that the ordinary formula computes correctly --
+// adding the shared effect to the set above would falsely warn on that other
+// move too. Same mechanism matchupReport.ts already built for this exact
+// problem (TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS, lib/matchupReport.ts) reused here
+// rather than invented a second time.
+//
+// - MOVE_SEISMIC_TOSS shares EFFECT_SKY_DROP with MOVE_SKY_DROP (power=60) --
+//   confirmed by checking every move using EFFECT_SKY_DROP directly
+//   (moves.json): Sky Drop's own final hit is a real, ordinary-formula power
+//   value the multi-hit/semi-invulnerable machinery already computes
+//   correctly, while Seismic Toss (power=1, "deals damage based on level")
+//   shares only the id, not the real mechanic. Previously left open
+//   deliberately (see this file's git history) because the effect-keyed set
+//   above can't discriminate the two; this move-id set is exactly the
+//   discriminator that was missing.
+export const UNMODELLED_BASE_POWER_MOVE_IDS = new Set<string>(['MOVE_SEISMIC_TOSS'])
+
+// A DIFFERENT class of gap from both sets above: not "a real nonzero number
+// exists and this engine can't produce it" (which is what "not modelled"
+// says), but "the real number IS zero, confirmed by reading the move's own
+// battle script directly, and this engine's Math.max(power, 1) floor
+// (calculate.ts) prints a small nonzero one anyway." "Not modelled" would be
+// a FALSE claim for these -- there's nothing uncomputed, the real answer is
+// simply not what this formula produces. Kept warning-only, same as every
+// other set on this page: making the calculator print the correct 0 instead
+// of the small wrong number is a real, separate, reviewed decision (a shipped
+// number would change), not something to fold into a warning-only batch.
+//
+// - EFFECT_PLACEHOLDER (MOVE_AIRBORNE_SLAM) -- BattleScript_EffectPlaceholder
+//   (`battle_scripts_1.s:2847-2853`) prints STRINGID_NOTDONEYET and ends; no
+//   damage step. (Also 0 PP, unselectable in a real game regardless -- kept
+//   warned anyway rather than assumed dead data.)
+// - EFFECT_FETCH (MOVE_FETCH) -- BattleScript_EffectFetch
+//   (`battle_scripts_1.s:5316-5343`) retrieves the held item and switches out
+//   (or fails outright with no item to retrieve); no damage step on any path.
+export const ZERO_DAMAGE_BASE_POWER_EFFECTS = new Set<string>(['EFFECT_PLACEHOLDER', 'EFFECT_FETCH'])
+
+// Move-ID-keyed twin of ZERO_DAMAGE_BASE_POWER_EFFECTS, for the same reason
+// UNMODELLED_BASE_POWER_MOVE_IDS exists above.
+//
+// - MOVE_SQUALL_HAMMER shares EFFECT_DEFOG with the status move MOVE_DEFOG --
+//   BattleScript_EffectDefog (`battle_scripts_1.s:1560-1592`) has no damage
+//   step on any path (an evasion drop and a hazard clear), so Squall Hammer
+//   deals zero real damage despite its own declared power (95) looking
+//   entirely ordinary -- see this file's module comment above for why this
+//   one disproved the power<=1 heuristic outright. Keyed by move id because
+//   EFFECT_DEFOG is also Defog's own effect, and Defog is a genuine STATUS
+//   move this warning has no business flagging.
+export const ZERO_DAMAGE_BASE_POWER_MOVE_IDS = new Set<string>(['MOVE_SQUALL_HAMMER'])
 
 // ---------------------------------------------------------------------------
 // 2. CalcMoveBasePowerAfterModifiers's own chain (src/battle_util.c:6995-7117).

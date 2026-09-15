@@ -280,6 +280,146 @@ describe('buildMatchupReport', () => {
     },
   )
 
+  it(
+    "2026-09-15: Metal Burst/Comeuppance (power=0, the EARLY-RETURN branch) carry the same real-damage-not-modelled " +
+      "note as Counter/Mirror Coat/Bide above, not a bare unexplained dash -- the exact divergence a review caught " +
+      "between this file and basePower.ts after that file added EFFECT_METAL_BURST to its own sets first",
+    () => {
+      // Re-measured directly: Metal Burst/Comeuppance declare power 0, so they take
+      // evaluateMoveEntry's `!move.power` early-return branch, unlike the power=1
+      // moves above.
+      for (const id of ['MOVE_METAL_BURST', 'MOVE_COMEUPPANCE']) expect(movesById.get(id)?.power).toBe(0)
+
+      const trainer: Trainer = {
+        id: 'TRAINER_TEST_METAL_BURST',
+        trainerNum: 3,
+        name: 'Test',
+        gender: 'MALE',
+        hasTrainerFlag: false,
+        forcedDouble: false,
+        risky: false,
+        preferStatus: false,
+        preferStall: false,
+        noSwitching: false,
+        class: null,
+        pic: null,
+        music: null,
+        parties: {
+          ace: [
+            trainerMon({
+              species: 'SPECIES_SNORLAX',
+              moves: ['MOVE_METAL_BURST', 'MOVE_COMEUPPANCE', 'MOVE_SQUALL_HAMMER', 'MOVE_NONE'],
+            }),
+          ],
+          elite: [],
+          hell: [],
+        },
+      }
+
+      const report = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+        trainer,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+      })
+      const mon = report.mons[0]
+      for (const moveId of ['MOVE_METAL_BURST', 'MOVE_COMEUPPANCE']) {
+        const entry = mon.itsMoves.find((m) => m.moveId === moveId)!
+        expect(entry.maxRollDamage, `${moveId} maxRollDamage`).toBeNull()
+        expect(entry.unmodelled, `${moveId} unmodelled`).toContain(
+          `${moveId}: real damage not modelled (unported battle-script effect -- see matchupReport.ts's TRUE_DAMAGE_UNAVAILABLE_* doc)`,
+        )
+      }
+
+      // Squall Hammer is NOT in TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS -- its real
+      // damage is a script-confirmed ZERO (EFFECT_DEFOG), not "exists but
+      // uncomputed", so "real damage not modelled" would be the exact mislabel
+      // a review caught and had already been removed from basePower.ts's own
+      // calculator warning. It's gated instead through the imported
+      // ZERO_DAMAGE_BASE_POWER_MOVE_IDS, and its note comes from the ENGINE's
+      // own result.unmodelled (calculateMoveDamage actually ran, power=95 took
+      // the normal path, not the early return) rather than a report-level
+      // append -- so no "TRUE_DAMAGE_UNAVAILABLE_*" text appears for it at all.
+      const squallHammer = mon.itsMoves.find((m) => m.moveId === 'MOVE_SQUALL_HAMMER')!
+      expect(squallHammer.maxRollDamage, 'MOVE_SQUALL_HAMMER maxRollDamage').toBeNull()
+      // Keyed by MOVE ID, not effect (ZERO_DAMAGE_BASE_POWER_MOVE_IDS, not
+      // ZERO_DAMAGE_BASE_POWER_EFFECTS -- EFFECT_DEFOG itself stays out of the
+      // effect-keyed set specifically so Defog isn't caught by it), so the
+      // message names the move, not the effect.
+      expect(squallHammer.unmodelled, 'MOVE_SQUALL_HAMMER unmodelled').toContain('MOVE_SQUALL_HAMMER: its battle script deals no damage in this build')
+      expect(squallHammer.unmodelled.join(' ')).not.toContain('TRUE_DAMAGE_UNAVAILABLE')
+    },
+  )
+
+  it(
+    'MOVE_AIRBORNE_SLAM and MOVE_FETCH (power=0, the early-return branch) carry the SAME zero-damage note the ' +
+      "engine's own calculateMoveDamage call would produce for them -- built inline since that branch never calls " +
+      'calculateMoveDamage at all, so there is no result.unmodelled to draw the message from',
+    () => {
+      for (const id of ['MOVE_AIRBORNE_SLAM', 'MOVE_FETCH']) expect(movesById.get(id)?.power).toBe(0)
+      const moves = movesForMon(trainerMon({ moves: ['MOVE_AIRBORNE_SLAM', 'MOVE_FETCH', 'MOVE_NONE', 'MOVE_NONE'] }), movesById)
+      const report = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves },
+        trainer: sawyer,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+      })
+      const marowakReport = report.mons.find((m) => m.speciesId === 'SPECIES_MAROWAK')!
+      for (const moveId of ['MOVE_AIRBORNE_SLAM', 'MOVE_FETCH']) {
+        const entry = marowakReport.yourMoves.find((m) => m.moveId === moveId)!
+        const expectedEffect = movesById.get(moveId)?.effect
+        expect(entry.maxRollDamage, `${moveId} maxRollDamage`).toBeNull()
+        expect(entry.unmodelled, `${moveId} unmodelled`).toContain(`${expectedEffect}: its battle script deals no damage in this build`)
+      }
+    },
+  )
+
+  it(
+    "MOVE_SEISMIC_TOSS carries exactly ONE unmodelled note, not two saying the same thing -- it's in BOTH this " +
+      "file's TRUE_DAMAGE_UNAVAILABLE_MOVE_IDS and basePower.ts's own UNMODELLED_BASE_POWER_MOVE_IDS, so the " +
+      "engine's calculateMoveDamage call already pushes 'MOVE_SEISMIC_TOSS: not modelled' into result.unmodelled " +
+      "before this file's own extra append would otherwise duplicate it",
+    () => {
+      const seismicTossMoves = movesForMon(trainerMon({ moves: ['MOVE_SEISMIC_TOSS', 'MOVE_NONE', 'MOVE_NONE', 'MOVE_NONE'] }), movesById)
+      const report = buildMatchupReport({
+        player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: seismicTossMoves },
+        trainer: sawyer,
+        tier: 'ace',
+        playerHighestLevel: 57,
+        ctx,
+      })
+      const marowakReport = report.mons.find((m) => m.speciesId === 'SPECIES_MAROWAK')!
+      const seismicToss = marowakReport.yourMoves.find((m) => m.moveId === 'MOVE_SEISMIC_TOSS')!
+      expect(seismicToss.maxRollDamage).toBeNull()
+      // Unrelated ability-coverage notes (Marowak's own abilities not in the
+      // manifest) also legitimately ride along in this array -- the load-bearing
+      // check is that the "not modelled" text for THIS move appears exactly
+      // once, not that the array is empty of anything else.
+      const seismicTossNotes = seismicToss.unmodelled.filter((u) => u.includes('MOVE_SEISMIC_TOSS'))
+      expect(seismicTossNotes).toEqual(['MOVE_SEISMIC_TOSS: not modelled'])
+    },
+  )
+
+  it('does NOT null Defog\'s real damage (it has none -- STATUS, power 0) just because it shares an effect with Squall Hammer', () => {
+    const defogMoves = movesForMon(trainerMon({ moves: ['MOVE_DEFOG', 'MOVE_NONE', 'MOVE_NONE', 'MOVE_NONE'] }), movesById)
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: defogMoves },
+      trainer: sawyer,
+      tier: 'ace',
+      playerHighestLevel: 57,
+      ctx,
+    })
+    const marowakReport = report.mons.find((m) => m.speciesId === 'SPECIES_MAROWAK')!
+    const defog = marowakReport.yourMoves.find((m) => m.moveId === 'MOVE_DEFOG')!
+    // A genuine STATUS move: no direct damage AND nothing to warn about, same as
+    // the Reflect case above -- the move-id-keyed set can't spill onto it the way
+    // an effect-keyed entry would have.
+    expect(defog.maxRollDamage).toBeNull()
+    expect(defog.unmodelled).toEqual([])
+  })
+
   it('does NOT null Sky Drop\'s real damage just because it shares an effect with Seismic Toss', () => {
     const skyDropMoves = movesForMon(trainerMon({ moves: ['MOVE_SKY_DROP', 'MOVE_NONE', 'MOVE_NONE', 'MOVE_NONE'] }), movesById)
     const report = buildMatchupReport({
