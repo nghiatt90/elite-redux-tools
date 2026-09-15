@@ -272,6 +272,11 @@ interface ComputeStatOptions {
   isWonderRoomActive: boolean
   field: FieldBattleState
   statStageRatios: [number, number][]
+  // IsBattlerGroundedIgnoreType(battler) for `battler` (see computeGrounding's own
+  // doc) -- computed by the caller since only it knows whether `battler` is the
+  // move's actual attacker (Mold Breaker can never suppress its own holder) or
+  // the defender (suppressible by attackerHasMoldBreaker).
+  isGrounded: boolean
 }
 
 /** The parts of CalculateStat this engine can run without the ability registry:
@@ -332,6 +337,7 @@ function computeStat(opts: ComputeStatOptions): number {
       boostedStat: battler.boostedStat,
       alliesFainted: battler.alliesFainted,
       isMegaEvolved: battler.condition.isMegaEvolved,
+      isGrounded: opts.isGrounded,
     }),
     secondaryStatPercent: 0, // the OWN-stat self-buff variant (secondaryStat[statEnum]) -- no ability in the census ever targets its own chosen stat this way, so this stays 0; see applySecondaryStatBlend for the (used) other-stat blend
     statStageRatios: opts.statStageRatios,
@@ -399,10 +405,43 @@ function computeAttackStat(
         })
 
   const statOpponent = statBattler === attacker ? defender : attacker
+  // computeGrounding's mold-breaker gate is keyed on whether `statBattler` IS the
+  // move's actual attacker (Foul Play can make it the defender instead) -- see
+  // computeGrounding's own doc.
+  const statBattlerIsGrounded = computeGrounding(
+    statBattler.isGrounded,
+    statBattler.condition.resolvedHoldEffect,
+    field.gravityActive,
+    statBattler.abilitySlots,
+    statBattler === attacker ? false : attackerHasMoldBreaker,
+  ).isGrounded
   const rawAtkStat = applySecondaryStatBlend(
-    computeStat({ battler: statBattler, opponent: statOpponent, stat: atkStat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+    computeStat({
+      battler: statBattler,
+      opponent: statOpponent,
+      stat: atkStat,
+      move,
+      isAttackRole: true,
+      isCrit: forcedCrit,
+      isWonderRoomActive: false,
+      field,
+      statStageRatios,
+      isGrounded: statBattlerIsGrounded,
+    }),
     atkSecondaryStat,
-    (stat) => computeStat({ battler: statBattler, opponent: statOpponent, stat, move, isAttackRole: true, isCrit: forcedCrit, isWonderRoomActive: false, field, statStageRatios }),
+    (stat) =>
+      computeStat({
+        battler: statBattler,
+        opponent: statOpponent,
+        stat,
+        move,
+        isAttackRole: true,
+        isCrit: forcedCrit,
+        isWonderRoomActive: false,
+        field,
+        statStageRatios,
+        isGrounded: statBattlerIsGrounded,
+      }),
   )
 
   const isGhostDefenderInFog = defender.types.includes('GHOST') && field.weather === 'FOG'
@@ -420,7 +459,13 @@ function computeAttackStat(
   return { value: finalAtk, unmodelled }
 }
 
-function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
+function computeDefenseStat(
+  scenario: DamageCalcScenario,
+  split: 'PHYSICAL' | 'SPECIAL',
+  isCrit: boolean,
+  statStageRatios: [number, number][],
+  attackerHasMoldBreaker: boolean,
+) {
   const { attacker, defender, move } = scenario
   const unmodelled: string[] = []
 
@@ -441,10 +486,42 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     attackerIsConfused: attacker.condition.isConfused,
   })
 
+  // The defender is never the move's own attacker, so its Levitate IS
+  // suppressible by the attacker's Mold Breaker -- see computeGrounding's doc.
+  const defenderIsGrounded = computeGrounding(
+    defender.isGrounded,
+    defender.condition.resolvedHoldEffect,
+    scenario.field.gravityActive,
+    defender.abilitySlots,
+    attackerHasMoldBreaker,
+  ).isGrounded
   const rawDefStat = applySecondaryStatBlend(
-    computeStat({ battler: defender, opponent: attacker, stat: defStat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+    computeStat({
+      battler: defender,
+      opponent: attacker,
+      stat: defStat,
+      move,
+      isAttackRole: false,
+      isCrit: noPositive,
+      isWonderRoomActive: false,
+      field: scenario.field,
+      statStageRatios,
+      isGrounded: defenderIsGrounded,
+    }),
     defSecondaryStat,
-    (stat) => computeStat({ battler: defender, opponent: attacker, stat, move, isAttackRole: false, isCrit: noPositive, isWonderRoomActive: false, field: scenario.field, statStageRatios }),
+    (stat) =>
+      computeStat({
+        battler: defender,
+        opponent: attacker,
+        stat,
+        move,
+        isAttackRole: false,
+        isCrit: noPositive,
+        isWonderRoomActive: false,
+        field: scenario.field,
+        statStageRatios,
+        isGrounded: defenderIsGrounded,
+      }),
   )
 
   const finalDef = calcDefenseStatModifiers(rawDefStat, {
@@ -538,6 +615,36 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
 }
 
 /**
+ * IsBattlerGroundedIgnoreType (:6651-6653): CheckGroundingEffects (:6624-6633,
+ * Iron Ball/Gravity, short-circuiting) first, then only if not already forced
+ * grounded, CheckLevitatingEffects (:6639-6647, Air Balloon/Levitate). Ingrain/
+ * Smacked Down (grounding) and Magnet Rise/Telekinesis (levitating) are volatile
+ * statuses with no scenario field here and stay unmodelled.
+ *
+ * `levitateSuppressedByMoldBreaker` mirrors IsSuppressed's own `battler !=
+ * gBattlerAttacker` gate (:9217-9219): Mold Breaker only ever suppresses the
+ * OTHER battler's abilities, never its own holder's -- so this is
+ * `attackerHasMoldBreaker` when resolving the DEFENDER's grounding, and always
+ * `false` when resolving the ATTACKER's own (the attacker's Mold Breaker can't
+ * suppress the attacker's own Levitate).
+ *
+ * `isForcedGrounded` is returned alongside the final `isGrounded` since
+ * resolveTypeEffectiveness's caller also needs it standalone, fed into the
+ * PER-COMPONENT type-fold check (see its own doc below).
+ */
+function computeGrounding(
+  baseGrounded: boolean,
+  resolvedHoldEffect: string | null,
+  gravityActive: boolean,
+  abilitySlots: AbilitySlots,
+  levitateSuppressedByMoldBreaker: boolean,
+): { isForcedGrounded: boolean; isGrounded: boolean } {
+  const isForcedGrounded = resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || gravityActive
+  const isForcedAirborne = !isForcedGrounded && (resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(abilitySlots, 'levitate', levitateSuppressedByMoldBreaker))
+  return { isForcedGrounded, isGrounded: isForcedGrounded || (baseGrounded && !isForcedAirborne) }
+}
+
+/**
  * The grounding + type-chart-fold + onAfterTypeEffectiveness pipeline
  * (battle_util.c:6672-6701 grounding, MulByTypeEffectiveness/
  * CalcTypeEffectivenessMultiplierInternal for the fold+after-hooks), factored out
@@ -585,10 +692,13 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   // isForcedGrounded below) distinct from this WHOLE-modifier isGrounded
   // override, which stays ability/item-only (IsBattlerGroundedIgnoreType,
   // genuinely type-blind) as originally described.
-  const isForcedGrounded = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || field.gravityActive
-  const isForcedAirborne =
-    !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
-  const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
+  const { isForcedGrounded, isGrounded } = computeGrounding(
+    defender.isGrounded,
+    defender.condition.resolvedHoldEffect,
+    field.gravityActive,
+    defender.abilitySlots,
+    attackerHasMoldBreaker,
+  )
   const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
   // UpdateTypeModifier's own two fields (battle_util.c:7904), codegen'd from
   // moveBehaviors.json's attack.superEffectiveVs/attack.ignoreTypeImmunity --
@@ -827,7 +937,7 @@ function calcInternal(
   }
 
   const atk = computeAttackStat(scenario, split, isCrit, statStageRatios, attackerHasMoldBreaker)
-  const def = computeDefenseStat(scenario, split, isCrit, statStageRatios)
+  const def = computeDefenseStat(scenario, split, isCrit, statStageRatios, attackerHasMoldBreaker)
   unmodelled.push(...atk.unmodelled, ...def.unmodelled)
 
   let dmg = idiv(attacker.level * 2, 5) + 2
@@ -875,6 +985,9 @@ function calcInternal(
       attackerSlowStartTimer: attacker.slowStartTimer,
       attackerIsUnaware: hasFlag(attacker.abilitySlots, 'unaware'),
       defenderHasAnyLoweredStat: defender.condition.negativeStatStageCount > 0,
+      // The attacker's own Mold Breaker can't suppress the attacker's own
+      // Levitate -- see computeGrounding's doc.
+      attackerIsGrounded: computeGrounding(attacker.isGrounded, attacker.condition.resolvedHoldEffect, field.gravityActive, attacker.abilitySlots, false).isGrounded,
     },
     {
       defenderId: 'defender',

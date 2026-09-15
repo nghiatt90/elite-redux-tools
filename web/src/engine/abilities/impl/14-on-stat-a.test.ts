@@ -28,6 +28,7 @@ function ctx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     alliesFainted: 0,
     isMegaEvolved: false,
     statOwnerHasEternalFlower: false,
+    isGrounded: true,
     ...overrides,
   }
 }
@@ -58,6 +59,18 @@ describe('onStat batch A', () => {
     expect(run('ABILITY_GRASS_PELT', { statId: 'def', terrain: 'TERRAIN_GRASSY' })).toBe(150)
     expect(run('ABILITY_JUNGLE_FEVER', { statId: 'spe', terrain: 'TERRAIN_GRASSY' })).toBe(150)
     expect(run('ABILITY_HADRON_ENGINE', { statId: 'spatk', terrain: 'TERRAIN_ELECTRIC', stat: 300 })).toBe(400)
+  })
+
+  it('IsBattlerTerrainAffected abilities require the stat owner to be grounded, unlike the plain IsTerrainActive ones', () => {
+    // Biofilm/Grass Pelt/Flower Necklace/Hadron Engine: src/abilities.cc:10169,2445,2453,7464
+    expect(run('ABILITY_BIOFILM', { statId: 'spdef', terrain: 'TERRAIN_TOXIC', isGrounded: false })).toBe(100)
+    expect(run('ABILITY_GRASS_PELT', { statId: 'def', terrain: 'TERRAIN_GRASSY', isGrounded: false })).toBe(100)
+    expect(run('ABILITY_FLOWER_NECKLACE', { statId: 'spdef', terrain: 'TERRAIN_GRASSY', isGrounded: false })).toBe(100)
+    expect(run('ABILITY_HADRON_ENGINE', { statId: 'spatk', terrain: 'TERRAIN_ELECTRIC', stat: 300, isGrounded: false })).toBe(300)
+    // Surge Surfer/Jungle Fever: src/abilities.cc:2823,12560 use the bare
+    // IsTerrainActive -- no grounding requirement, still boosted while airborne.
+    expect(run('ABILITY_SURGE_SURFER', { statId: 'spe', terrain: 'TERRAIN_ELECTRIC', isGrounded: false })).toBe(150)
+    expect(run('ABILITY_JUNGLE_FEVER', { statId: 'spe', terrain: 'TERRAIN_GRASSY', isGrounded: false })).toBe(150)
   })
 
   it('the highest-attacking-stat family', () => {

@@ -115,6 +115,12 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   attackerHasStab: boolean
   attackerIsUnaware: boolean // IsUnaware(battler) -- Pretty Princess's OWN Unaware check (self, not the defender's)
   defenderHasAnyLoweredStat: boolean // HasAnyLoweredStat(target) -- Pretty Princess
+  /** IsBattlerGroundedIgnoreType(battler), src/battle_util.c:6651-6653 -- this
+   * hook's `battler` param is ALWAYS the move's actual user (see this
+   * interface's own doc comment above), so this is the ATTACKER's own resolved
+   * grounding, computed by calculate.ts's computeIsGrounded. Flourish's
+   * IsBattlerTerrainAffected(battler, GRASSY_TERRAIN) needs it. */
+  attackerIsGrounded: boolean
 }
 
 export interface DefensiveMultiplierContext extends ModifierAccumulator {
@@ -168,6 +174,14 @@ export interface OnStatContext {
    * computeOnStatModifier from statOwnerSlots since ctx has no other way to see
    * the stat owner's own ability slots.) */
   statOwnerHasEternalFlower: boolean
+  /** IsBattlerGroundedIgnoreType(battler), src/battle_util.c:6651-6653, for the
+   * STAT OWNER (this hook's `battler` -- see CalculateStat's own ON_ABILITY call,
+   * battle_util.c:7143-7148 -- is always whoever's stat is being computed, not
+   * the ability holder). computed by calculate.ts's computeIsGrounded. Biofilm/
+   * Grass Pelt/Flower Necklace/Hadron Engine's IsBattlerTerrainAffected calls
+   * need it; Surge Surfer/Jungle Fever do NOT (their C uses the bare
+   * IsTerrainActive, no grounding check). */
+  isGrounded: boolean
 }
 
 export interface OnStabContext {

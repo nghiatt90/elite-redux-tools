@@ -28,6 +28,7 @@ function ctx(overrides: Partial<OnStatContext> = {}): OnStatContext {
     alliesFainted: 0,
     isMegaEvolved: false,
     statOwnerHasEternalFlower: false,
+    isGrounded: true,
     ...overrides,
   }
 }

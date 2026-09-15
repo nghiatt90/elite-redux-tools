@@ -47,6 +47,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
     ...overrides,
   }
 }
@@ -180,6 +181,11 @@ describe('offensive multiplier batch D', () => {
     expect(runOff('ABILITY_FLOURISH', { moveType: 'GRASS', terrain: null })).toBe(uq(1.0))
     expect(runOff('ABILITY_MANA_COAT', { moveSplit: 'PHYSICAL', terrain: 'TERRAIN_PSYCHIC' })).toBe(uq(1.3))
     expect(runOff('ABILITY_MANA_COAT', { moveSplit: 'SPECIAL', terrain: 'TERRAIN_PSYCHIC' })).toBe(uq(1.0))
+  })
+
+  it('Flourish requires the attacker to be grounded (IsBattlerTerrainAffected, src/abilities.cc:7653)', () => {
+    expect(runOff('ABILITY_FLOURISH', { moveType: 'GRASS', terrain: 'TERRAIN_GRASSY', attackerIsGrounded: true })).toBe(uq(1.5))
+    expect(runOff('ABILITY_FLOURISH', { moveType: 'GRASS', terrain: 'TERRAIN_GRASSY', attackerIsGrounded: false })).toBe(uq(1.0))
   })
 
   it('Rhythmic adds a flat 10 raw UQ units per same-move streak turn (bypasses MUL)', () => {

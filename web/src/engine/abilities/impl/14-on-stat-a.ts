@@ -39,15 +39,11 @@ export const ON_STAT_BATCH_A: AbilityImpl[] = [
     // At this pin the C is IsBattlerTerrainAffected(battler, TOXIC) -- terrain up AND
     // the holder grounded (upstream later relaxed it to a bare IsTerrainActive in
     // d014a89fa090, 2026-04-15 "Fix Biofilm not working when user is not grounded",
-    // which is NOT in the released build). OnStatContext has no grounded-ness input,
-    // so this renders as the plain terrain check -- exactly how Grass Pelt, Flower
-    // Necklace and Hadron Engine below already render their own
-    // IsBattlerTerrainAffected calls. Uniform pre-existing simplification, not a
-    // regression introduced by the pin.
+    // which is NOT in the released build).
     id: 'ABILITY_BIOFILM',
     src: 'src/abilities.cc:10166',
     onStat: (ctx) => {
-      if (ctx.statId === 'spdef' && ctx.terrain === 'TERRAIN_TOXIC') ctx.stat = Math.trunc(ctx.stat * 1.5)
+      if (ctx.statId === 'spdef' && ctx.terrain === 'TERRAIN_TOXIC' && ctx.isGrounded) ctx.stat = Math.trunc(ctx.stat * 1.5)
     },
   },
   {
@@ -111,21 +107,21 @@ export const ON_STAT_BATCH_A: AbilityImpl[] = [
     id: 'ABILITY_FLOWER_NECKLACE',
     src: 'src/abilities.cc:2428',
     onStat: (ctx) => {
-      if (ctx.statId === 'spdef' && ctx.terrain === 'TERRAIN_GRASSY') ctx.stat = Math.trunc(ctx.stat * 1.5)
+      if (ctx.statId === 'spdef' && ctx.terrain === 'TERRAIN_GRASSY' && ctx.isGrounded) ctx.stat = Math.trunc(ctx.stat * 1.5)
     },
   },
   {
     id: 'ABILITY_GRASS_PELT',
     src: 'src/abilities.cc:2420',
     onStat: (ctx) => {
-      if (ctx.statId === 'def' && ctx.terrain === 'TERRAIN_GRASSY') ctx.stat = Math.trunc(ctx.stat * 1.5)
+      if (ctx.statId === 'def' && ctx.terrain === 'TERRAIN_GRASSY' && ctx.isGrounded) ctx.stat = Math.trunc(ctx.stat * 1.5)
     },
   },
   {
     id: 'ABILITY_HADRON_ENGINE',
     src: 'src/abilities.cc:7441',
     onStat: (ctx) => {
-      if (ctx.statId === 'spatk' && ctx.terrain === 'TERRAIN_ELECTRIC') ctx.stat = Math.trunc(Math.trunc((ctx.stat * 4) / 3))
+      if (ctx.statId === 'spatk' && ctx.terrain === 'TERRAIN_ELECTRIC' && ctx.isGrounded) ctx.stat = Math.trunc(Math.trunc((ctx.stat * 4) / 3))
     },
   },
   { id: 'ABILITY_HUGE_POWER', src: 'src/abilities.cc:953', onStat: (ctx) => { if (ctx.statId === 'atk') ctx.stat = Math.trunc(ctx.stat * 2) } },

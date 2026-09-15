@@ -47,6 +47,7 @@ function offCtx(defenderIsConfused: boolean, defenderIsEnraged: boolean): Offens
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    attackerIsGrounded: true,
   }
 }
 

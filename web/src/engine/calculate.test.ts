@@ -1859,3 +1859,76 @@ describe('calculateMoveDamage -- ability dispatch is actually wired in', () => {
     ).not.toThrow()
   })
 })
+
+describe('IsBattlerTerrainAffected abilities need the holder grounded, not just the terrain up (src/abilities.cc:2445,2453,7464,7653,10169)', () => {
+  // MOVE_ICE_BEAM (Special, Ice-type) is used for the onStat cases below rather
+  // than an Electric/Poison move: basePower.ts's OWN generic terrain move-power
+  // boost (terrain type == move type, independent of any ability) would otherwise
+  // confound the comparison, and Hadron Engine/Biofilm's own condition never
+  // checks the move's type anyway (only statId + terrain).
+  it("Hadron Engine (onStat) only boosts the ATTACKER's own SpAtk on Electric Terrain while the attacker itself is grounded", async () => {
+    await import('./abilities/impl/index')
+    const hadronAttacker = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_HADRON_ENGINE', innates: [null, null, null] } })
+    const noTerrain = calculateMoveDamage(scenario({ move: moveData('MOVE_ICE_BEAM'), attacker: hadronAttacker })).rolls[15]
+    const grounded = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ICE_BEAM'), attacker: hadronAttacker, field: fieldState({ terrain: 'TERRAIN_ELECTRIC' }) }),
+    ).rolls[15]
+    expect(grounded).toBeGreaterThan(noTerrain)
+
+    // Same attacker, same terrain, but airborne via an innate Levitate slot --
+    // targetGrounded (the DEFENDER's resolved grounding) would have wrongly let
+    // this case through, since the ability holder here is the ATTACKER.
+    const airborneHadronAttacker = battler('SPECIES_GARCHOMP', {
+      abilitySlots: { ability: 'ABILITY_HADRON_ENGINE', innates: ['ABILITY_LEVITATE', null, null] },
+    })
+    const airborne = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ICE_BEAM'), attacker: airborneHadronAttacker, field: fieldState({ terrain: 'TERRAIN_ELECTRIC' }) }),
+    ).rolls[15]
+    expect(airborne).toBe(noTerrain)
+  })
+
+  it('Flourish (onOffensiveMultiplier, always the attacker) only boosts Grass moves on Grassy Terrain while grounded', async () => {
+    await import('./abilities/impl/index')
+    // A plain attacker (no Flourish) isolates basePower.ts's own generic Grassy
+    // Terrain move-power boost (Grass-type move on Grassy Terrain, independent of
+    // any ability) so the assertions below measure Flourish's OWN extra boost.
+    const plainAttacker = battler('SPECIES_GARCHOMP')
+    const genericTerrainOnly = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ENERGY_BALL'), attacker: plainAttacker, field: fieldState({ terrain: 'TERRAIN_GRASSY' }) }),
+    ).rolls[15]
+
+    const flourishAttacker = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_FLOURISH', innates: [null, null, null] } })
+    const grounded = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ENERGY_BALL'), attacker: flourishAttacker, field: fieldState({ terrain: 'TERRAIN_GRASSY' }) }),
+    ).rolls[15]
+    expect(grounded).toBeGreaterThan(genericTerrainOnly)
+
+    // Same attacker, same terrain, but airborne via an innate Levitate slot --
+    // Flourish's own boost drops out, leaving just the generic terrain boost.
+    const airborneFlourishAttacker = battler('SPECIES_GARCHOMP', {
+      abilitySlots: { ability: 'ABILITY_FLOURISH', innates: ['ABILITY_LEVITATE', null, null] },
+    })
+    const airborne = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ENERGY_BALL'), attacker: airborneFlourishAttacker, field: fieldState({ terrain: 'TERRAIN_GRASSY' }) }),
+    ).rolls[15]
+    expect(airborne).toBe(genericTerrainOnly)
+  })
+
+  it('Biofilm (onStat, DEFENDER role here) only boosts SpDef on Toxic Terrain while the defender is grounded', async () => {
+    await import('./abilities/impl/index')
+    const biofilmDefender = battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_BIOFILM', innates: [null, null, null] } })
+    const noTerrain = calculateMoveDamage(scenario({ move: moveData('MOVE_ICE_BEAM'), defender: biofilmDefender })).rolls[15]
+    const grounded = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ICE_BEAM'), defender: biofilmDefender, field: fieldState({ terrain: 'TERRAIN_TOXIC' }) }),
+    ).rolls[15]
+    expect(grounded).toBeLessThan(noTerrain) // higher SpDef -> less damage taken
+
+    const airborneBiofilmDefender = battler('SPECIES_GARCHOMP', {
+      abilitySlots: { ability: 'ABILITY_BIOFILM', innates: ['ABILITY_LEVITATE', null, null] },
+    })
+    const airborne = calculateMoveDamage(
+      scenario({ move: moveData('MOVE_ICE_BEAM'), defender: airborneBiofilmDefender, field: fieldState({ terrain: 'TERRAIN_TOXIC' }) }),
+    ).rolls[15]
+    expect(airborne).toBe(noTerrain)
+  })
+})
