@@ -125,10 +125,6 @@ export default function FieldBar({ field, onChange }: Props) {
           <span>{field.attackerRolloutCounter}</span>
         </label>
         <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          <input type="checkbox" checked={field.attackerHasDefenseCurl} onChange={(e) => onChange({ ...field, attackerHasDefenseCurl: e.target.checked })} />
-          Defense Curl active {/* only matters at Rollout counter 0 */}
-        </label>
-        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           <input type="checkbox" checked={field.attackerWasHitThisTurn} onChange={(e) => onChange({ ...field, attackerWasHitThisTurn: e.target.checked })} />
           Attacker was hit this turn {/* Focus Punch, Self-Destruct */}
         </label>

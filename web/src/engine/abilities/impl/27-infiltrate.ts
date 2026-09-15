@@ -13,12 +13,23 @@
 // real entry for a different hook elsewhere and were patched in place.
 
 import { aliasInfiltrate } from './alias'
+import { RESISTANCE } from '../macros'
 import type { AbilityImpl } from '../types'
 
 export const INFILTRATE_ABILITIES: AbilityImpl[] = [
   { id: 'ABILITY_INFILTRATOR', src: 'src/abilities.cc:2150', onInfiltrate: () => true },
   { id: 'ABILITY_DUALITY', src: 'src/abilities.cc:12531', onInfiltrate: aliasInfiltrate('ABILITY_INFILTRATOR') },
-  { id: 'ABILITY_KING_OF_THE_JUNGLE', src: 'src/abilities.cc:12559', onInfiltrate: aliasInfiltrate('ABILITY_INFILTRATOR') },
+  {
+    // At this pin, King of the Jungle has NO Grassy Surge onEntry -- that arrived in
+    // a later, unreleased commit. Here it's just onInfiltrate plus a Grass-type
+    // damage boost (src/abilities.cc:12567-12570).
+    id: 'ABILITY_KING_OF_THE_JUNGLE',
+    src: 'src/abilities.cc:12565',
+    onInfiltrate: aliasInfiltrate('ABILITY_INFILTRATOR'),
+    onOffensiveMultiplier: (ctx) => {
+      if (ctx.defenderTypes.includes('GRASS')) RESISTANCE(ctx, 1.5)
+    },
+  },
   {
     id: 'ABILITY_PINNACLE_BLADE',
     src: 'src/abilities.cc:8661',

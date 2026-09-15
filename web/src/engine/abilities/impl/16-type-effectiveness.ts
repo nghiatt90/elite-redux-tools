@@ -209,12 +209,18 @@ TYPE_EFFECTIVENESS_ABILITIES.push(
     onAfterTypeEffectiveness: () => {},
   },
   {
+    // At this pin (pre c8d64d01292a, 2026-04-12 "Fix Tera Shell using the wrong
+    // battler's HP"), the C reads BATTLER_MAX_HP(battler) -- and battle_util.c:7931
+    // always passes the ATTACKER as `battler` for this hook, so Tera Shell's halving
+    // is gated on the ATTACKER being at full HP, not the holder itself. This is a
+    // real upstream bug, faithfully reproduced because it's what the shipped ROM
+    // does -- do not "fix" it back to defenderAtMaxHp.
     id: 'ABILITY_TERA_SHELL',
-    src: 'src/abilities.cc:7662',
+    src: 'src/abilities.cc:7684',
     flags: { breakable: true },
     applyOn: { onAfterTypeEffectivenessFor: 'APPLY_ON_TARGET' },
     onAfterTypeEffectiveness: (ctx) => {
-      if (ctx.modifier >= uq(1.0) && ctx.defenderAtMaxHp) ctx.modifier = uq(0.5)
+      if (ctx.modifier >= uq(1.0) && ctx.attackerAtMaxHp) ctx.modifier = uq(0.5)
     },
   },
   {

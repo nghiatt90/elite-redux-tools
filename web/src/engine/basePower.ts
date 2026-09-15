@@ -334,14 +334,12 @@ export function applyPreModifierBasePower(
     return { power: MAGNITUDE_POWER[ctx.magnitudeTier], unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_ROLLOUT') {
-    // battle_util.c:6838-6844. counter===0: only Defense Curl doubles it (an
-    // otherwise-unboosted first use is left at its declared power, matching the
-    // C's guard clause exactly -- there's no case where counter 0 alone changes
-    // anything). counter>=1: a left SHIFT by (counter-1), i.e. x2^(counter-1) --
-    // 1/2/4x for counter 1/2/3, not a linear x1/x2/x3 like Triple Kick.
-    if (ctx.attackerRolloutCounter === 0) {
-      return { power: ctx.attackerHasDefenseCurl ? basePower * 2 : basePower, unmodelled: [] }
-    }
+    // battle_util.c:6790-6793 -- `REQUIRE(rolloutCounter)` then a left SHIFT by
+    // (counter-1), i.e. x2^(counter-1): 1/2/4x for counter 1/2/3, not a linear
+    // x1/x2/x3 like Triple Kick. counter===0 falls out of the REQUIRE with power
+    // untouched. The released build has NO Defense Curl branch here -- upstream
+    // added one after this pin, so do not reintroduce a STATUS2_DEFENSE_CURL input.
+    if (ctx.attackerRolloutCounter === 0) return { power: basePower, unmodelled: [] }
     return { power: basePower * 2 ** (ctx.attackerRolloutCounter - 1), unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_FOCUS_PUNCH') {

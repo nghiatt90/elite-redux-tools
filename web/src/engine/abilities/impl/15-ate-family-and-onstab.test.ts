@@ -112,6 +112,7 @@ describe('ate family + onStab batch', () => {
       weather: 'NONE',
       targetGrounded: true,
       defenderAtMaxHp: true,
+      attackerAtMaxHp: true,
       defenderAbilityOn: false,
     })
     const c1 = mk()
@@ -142,10 +143,10 @@ describe('ate family + onStab batch', () => {
   })
 
   it('Unown Power forces Hidden Power/Secret Power up to super-effective', () => {
-    const ctx: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_HIDDEN_POWER', moveType: 'NORMAL', moveFlags: {}, modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true, defenderAbilityOn: false }
+    const ctx: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_HIDDEN_POWER', moveType: 'NORMAL', moveFlags: {}, modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true, attackerAtMaxHp: true, defenderAbilityOn: false }
     findAbility('ABILITY_UNOWN_POWER').onAfterTypeEffectiveness!(ctx)
     expect(ctx.modifier).toBe(uq(2.0))
-    const ctx2: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveFlags: {}, modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true, defenderAbilityOn: false }
+    const ctx2: OnAfterTypeEffectivenessContext = { attackerId: 'a', defenderId: 'd', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveFlags: {}, modifier: uq(0.5), perTypeModifiers: [0, 0, 0], defenderTypes: [], weather: 'NONE', targetGrounded: true, defenderAtMaxHp: true, attackerAtMaxHp: true, defenderAbilityOn: false }
     findAbility('ABILITY_UNOWN_POWER').onAfterTypeEffectiveness!(ctx2)
     expect(ctx2.modifier).toBe(uq(0.5))
   })

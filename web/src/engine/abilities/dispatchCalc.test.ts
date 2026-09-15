@@ -359,6 +359,7 @@ describe('computeAfterTypeEffectiveness', () => {
       weather: 'NONE',
       targetGrounded: true,
       defenderAtMaxHp: true,
+      attackerAtMaxHp: true,
       defenderAbilityOn: false,
       ...overrides,
     }

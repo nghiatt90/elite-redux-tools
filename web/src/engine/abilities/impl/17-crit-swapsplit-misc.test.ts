@@ -130,6 +130,15 @@ describe('crit + swapSplit + misc batch O', () => {
     expect(isTargettedApplyOnFlagAppropriate(true, false, true, false, badLuckScope)).toBe(false) // holder IS the attacker (isSelf true)
   })
 
+  it('Scarecrow (Bad Luck clone at this pin) forces NEVER_CRIT with the same onCritFor scope, but no foesMinRoll', () => {
+    const scarecrow = findAbility('ABILITY_SCARECROW')
+    expect(scarecrow.onCrit!(critCtx())).toBe(NEVER_CRIT)
+    const scarecrowScope = scarecrow.applyOn!.onCritFor!
+    expect(isTargettedApplyOnFlagAppropriate(false, true, false, false, scarecrowScope)).toBe(true)
+    expect(isTargettedApplyOnFlagAppropriate(true, false, true, false, scarecrowScope)).toBe(false)
+    expect(scarecrow.flags?.foesMinRoll).toBeUndefined()
+  })
+
   it('Hyper Cutter/Precise Fist key off move flags, Perfectionist off basePower', () => {
     expect(findAbility('ABILITY_HYPER_CUTTER').onCrit!(critCtx({ moveFlags: { contact: true } }))).toBe(1)
     expect(findAbility('ABILITY_HYPER_CUTTER').onCrit!(critCtx())).toBe(0)

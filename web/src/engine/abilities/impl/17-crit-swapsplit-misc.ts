@@ -11,7 +11,7 @@
 
 import { NEVER_CRIT } from '../../crit'
 import { APPLY_ON_FOE } from '../applyOn'
-import { aliasOffensiveMultiplier, aliasDefensiveMultiplier, aliasSwapSplit } from './alias'
+import { aliasOffensiveMultiplier, aliasDefensiveMultiplier, aliasSwapSplit, aliasCrit } from './alias'
 import type { AbilityImpl } from '../types'
 
 export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
@@ -21,6 +21,19 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
     flags: { breakable: true, foesMinRoll: true },
     applyOn: { onCritFor: APPLY_ON_FOE },
     onCrit: () => NEVER_CRIT,
+  },
+  {
+    // Bad Luck clone: onEntry is a Scare (Intimidate-clone) drop, non-damage. Of Bad
+    // Luck's own onAccuracy/onCrit/onModifyEffectChance trio, only onCrit is
+    // modelled by this engine at all (see 09-hub-abilities.ts/23-mold-breaker.ts's
+    // own "onAccuracy has no modelling target here" precedent) -- so onCrit plus
+    // its onCritFor scope is the only piece that matters for damage. Unlike Bad
+    // Luck itself, Scarecrow's own C block does NOT set foesMinRoll -- do not add it.
+    id: 'ABILITY_SCARECROW',
+    src: 'src/abilities.cc:9972',
+    flags: { breakable: true },
+    applyOn: { onCritFor: APPLY_ON_FOE },
+    onCrit: aliasCrit('ABILITY_BAD_LUCK'),
   },
   {
     id: 'ABILITY_HYPER_CUTTER',

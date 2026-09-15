@@ -275,7 +275,7 @@ export function buildBattlerState(config: BattlerConfig, ctx: BuildContext): Bat
     naturalGift: item?.naturalGift ? { power: item.naturalGift.power, type: bareType(item.naturalGift.type) } : null,
     hiddenPowerType: config.hiddenPowerType,
     isTransformed: false,
-    canEvolveStrict: species.evolutions.length > 0,
+    canEvolve: species.evolutions.length > 0 || species.canDeevolve === true,
     isInfatuatedWithOpponent: false,
     moveSlotPp: {},
     abilitySlots: {
@@ -328,8 +328,6 @@ export interface FieldConfig {
   magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
   /** See DamageContext.attackerRolloutCounter's own doc (EFFECT_ROLLOUT). */
   attackerRolloutCounter: 0 | 1 | 2 | 3
-  /** See DamageContext.attackerHasDefenseCurl's own doc (EFFECT_ROLLOUT). */
-  attackerHasDefenseCurl: boolean
   /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
    * MOVE_SELF_DESTRUCT). */
   attackerWasHitThisTurn: boolean
@@ -354,7 +352,6 @@ export function defaultFieldConfig(): FieldConfig {
     defenderIsSwitching: false,
     magnitudeTier: null,
     attackerRolloutCounter: 0,
-    attackerHasDefenseCurl: false,
     attackerWasHitThisTurn: false,
     beatUpBaseAttack: 80, // a mid-range representative value -- see its own doc
     beatUpHitCount: 5,
@@ -396,7 +393,6 @@ export function buildScenario(
     defenderIsSwitching: field.defenderIsSwitching,
     magnitudeTier: field.magnitudeTier,
     attackerRolloutCounter: field.attackerRolloutCounter,
-    attackerHasDefenseCurl: field.attackerHasDefenseCurl,
     attackerWasHitThisTurn: field.attackerWasHitThisTurn,
     beatUpBaseAttack: field.beatUpBaseAttack,
     beatUpHitCount: field.beatUpHitCount,

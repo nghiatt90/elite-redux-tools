@@ -123,8 +123,6 @@ export interface DamageCalcScenario {
   magnitudeTier: 4 | 5 | 6 | 7 | 8 | 9 | 10 | null
   /** See DamageContext.attackerRolloutCounter's own doc (EFFECT_ROLLOUT). */
   attackerRolloutCounter: 0 | 1 | 2 | 3
-  /** See DamageContext.attackerHasDefenseCurl's own doc (EFFECT_ROLLOUT). */
-  attackerHasDefenseCurl: boolean
   /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
    * MOVE_SELF_DESTRUCT). */
   attackerWasHitThisTurn: boolean
@@ -197,7 +195,6 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     defenderIsSwitching: scenario.defenderIsSwitching,
     magnitudeTier: scenario.magnitudeTier,
     attackerRolloutCounter: scenario.attackerRolloutCounter,
-    attackerHasDefenseCurl: scenario.attackerHasDefenseCurl,
     attackerWasHitThisTurn: scenario.attackerWasHitThisTurn,
     beatUpBaseAttack: scenario.beatUpBaseAttack,
     beatUpHitCount: scenario.beatUpHitCount,
@@ -455,7 +452,7 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     speciesId: defender.condition.speciesId,
     baseSpeciesId: defender.condition.baseSpeciesId,
     isTransformed: defender.isTransformed,
-    canEvolveStrict: defender.canEvolveStrict,
+    canEvolve: defender.canEvolve,
     defStatToUse: defStat,
   })
   return { value: finalDef, unmodelled }
@@ -562,6 +559,10 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
  * every single Pokemon can use.
  */
 function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string, defenderTypes: string[], attackerHasMoldBreaker: boolean): number {
+  // The gate's other half (`moveType != TYPE_MYSTERY`, battle_util.c:7951 at this
+  // pin) is deliberately NOT implemented: the only MYSTERY-typed move in the emitted
+  // data is MOVE_PRESENT, and types.json's whole MYSTERY attacking row is 1.0, so
+  // folding the chart for it already yields the neutral result the skip would.
   if (scenario.move.id === 'MOVE_STRUGGLE') return uq(1.0)
   const { attacker, defender, move, field, typeChart } = scenario
   // isGrounded mirrors IsBattlerGroundedIgnoreType (:6699-6701), which checks
@@ -645,6 +646,7 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
     weather: field.weather,
     targetGrounded: isGrounded,
     defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
+    attackerAtMaxHp: attacker.condition.hp === attacker.condition.maxHp,
     defenderAbilityOn: defender.abilityOn,
   })
 }

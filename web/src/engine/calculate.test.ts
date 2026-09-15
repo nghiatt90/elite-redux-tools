@@ -92,7 +92,7 @@ function battler(speciesId: string, overrides: Partial<BattlerBattleState> = {})
     naturalGift: null,
     hiddenPowerType: null,
     isTransformed: false,
-    canEvolveStrict: false,
+    canEvolve: false,
     isInfatuatedWithOpponent: false,
     moveSlotPp: {},
     abilitySlots: { ability: null, innates: [null, null, null] },
@@ -150,7 +150,6 @@ function scenario(overrides: Partial<DamageCalcScenario> = {}): DamageCalcScenar
     defenderIsSwitching: false,
     magnitudeTier: null,
     attackerRolloutCounter: 0,
-    attackerHasDefenseCurl: false,
     attackerWasHitThisTurn: false,
     beatUpBaseAttack: 80,
     beatUpHitCount: 5,
@@ -1429,17 +1428,10 @@ describe('calculateMoveDamage -- Wake-Up Slap/Smelling Salts and single-snapshot
 
 })
 
-describe('calculateMoveDamage -- Rollout/Ice Ball (EFFECT_ROLLOUT), a direct rolloutCounter input rather than a derived turn count (battle_util.c:6838-6844)', () => {
-  it('counter 0, no Defense Curl: unboosted, same as the declared base power', () => {
+describe('calculateMoveDamage -- Rollout/Ice Ball (EFFECT_ROLLOUT), a direct rolloutCounter input rather than a derived turn count (battle_util.c:6790-6793)', () => {
+  it('counter 0: unboosted, same as the declared base power (the released build has no Defense Curl branch)', () => {
     const result = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT') }))
     expect(result.unmodelled).toHaveLength(0)
-  })
-
-  it('counter 0 WITH Defense Curl doubles power, roughly doubling damage (some drift from truncation elsewhere in the pipeline)', () => {
-    const withoutCurl = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT') }))
-    const withCurl = calculateMoveDamage(scenario({ move: moveData('MOVE_ROLLOUT'), attackerHasDefenseCurl: true }))
-    expect(withCurl.rolls[15]).toBeGreaterThan(withoutCurl.rolls[15] * 1.8)
-    expect(withCurl.rolls[15]).toBeLessThan(withoutCurl.rolls[15] * 2.2)
   })
 
   it('counter 1/2/3 scale by roughly 2^(counter-1) -- 1x/2x/4x, NOT a linear 1x/2x/3x like Triple Kick', () => {

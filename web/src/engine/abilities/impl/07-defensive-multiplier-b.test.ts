@@ -56,10 +56,10 @@ describe('defensive multiplier batch B', () => {
     expect(run('ABILITY_LIQUIFIED', { moveFlags: { contact: true } })).toBe(uq(0.5))
   })
 
-  it('Feathercoat: x0.7 when resisted (<1x), x0.85 otherwise (neutral or worse)', () => {
-    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(0.5) })).toBe(uq(0.7))
-    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(1.0) })).toBe(uq(0.85))
-    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(2.0) })).toBe(uq(0.85))
+  it('Feathercoat: x0.8 when resisted (<1x), x0.9 otherwise (neutral or worse)', () => {
+    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(0.5) })).toBe(uq(0.8))
+    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(1.0) })).toBe(uq(0.9))
+    expect(run('ABILITY_FEATHERCOAT', { typeEffectiveness: uq(2.0) })).toBe(uq(0.9))
   })
 
   it('Aegis Ward resists Ghost/Dark/Psychic; Elemental Aegis resists Fire/Water/Electric', () => {

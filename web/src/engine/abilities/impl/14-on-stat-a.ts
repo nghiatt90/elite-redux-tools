@@ -36,8 +36,16 @@ export const ON_STAT_BATCH_A: AbilityImpl[] = [
     },
   },
   {
+    // At this pin the C is IsBattlerTerrainAffected(battler, TOXIC) -- terrain up AND
+    // the holder grounded (upstream later relaxed it to a bare IsTerrainActive in
+    // d014a89fa090, 2026-04-15 "Fix Biofilm not working when user is not grounded",
+    // which is NOT in the released build). OnStatContext has no grounded-ness input,
+    // so this renders as the plain terrain check -- exactly how Grass Pelt, Flower
+    // Necklace and Hadron Engine below already render their own
+    // IsBattlerTerrainAffected calls. Uniform pre-existing simplification, not a
+    // regression introduced by the pin.
     id: 'ABILITY_BIOFILM',
-    src: 'src/abilities.cc:10143',
+    src: 'src/abilities.cc:10166',
     onStat: (ctx) => {
       if (ctx.statId === 'spdef' && ctx.terrain === 'TERRAIN_TOXIC') ctx.stat = Math.trunc(ctx.stat * 1.5)
     },
