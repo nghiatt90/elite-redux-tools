@@ -20,7 +20,10 @@ def _by_name(species, name):
 
 def test_playable_count_matches_published_dex():
     species = parse_species()
-    assert len(playable_species(species)) == 1907
+    # At the v2.65.3b (March) pin, SPECIES_DURALUDON_PARTNER_MEGA still carries
+    # randomizer_banned: SPECIES_HIDDEN (unhidden in a later, unreleased commit),
+    # so it's excluded here -- one fewer than the April tip's 1907.
+    assert len(playable_species(species)) == 1906
 
 
 def test_form_inherits_dex_but_not_stats():

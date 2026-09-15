@@ -1,19 +1,19 @@
 {
   "game_version": "v2.65beta",
-  "pin_policy": "Pin the upstream commits that match the RELEASED build players run, not the tip of `upcoming`. Elite Redux develops on `upcoming` and cuts ROM releases from it without tags or a release branch, so branch tip runs ahead of every playable ROM. That is invisible in a Pokedex but fatal for the randomizer: its LCG modulus is ABILITIES_COUNT (= max ability enum id + 1), so a single unreleased ability makes 100% of PID results wrong. These SHAs are the newest pair with ABILITIES_COUNT == 1034, matching v2.65beta; ABILITY_BUTTERFLY_WINGS = 1034 landed in er-config on 2026-04-26 and is the boundary. tests/test_oracle.py asserts the count against ER-nextdex's published (released-game) data -- keep that green when repinning.",
+  "pin_policy": "Pin the upstream commits matching the RELEASED build players run, not the tip of `upcoming`. Elite Redux cuts releases from `upcoming` with no tag or release branch. ABILITIES_COUNT == 1034 is a necessary but NOT sufficient check -- it holds across a month of unreleased commits (2026-03-27 through 2026-04-24). These SHAs were fixed by direct observation of a real v2.65.3b ROM: it shows Feathercoat at 10%/20% (changed upstream 2026-04-20), Scarecrow as \"Scare + Bad Luck\" (changed 2026-04-21), and the ability \"Menacing Situation\" (renamed to \"Phobia\" 2026-04-06), so the ROM predates 2026-04-06; and the v2.65.3b changelog names the Munchlax Redux adoption-center entry, whose commit is 2026-03-27T01:49Z, setting the lower bound. eliteredux.net states v2.65.3b was last updated 2026-03-26. tests/test_oracle.py asserts ABILITIES_COUNT against ER-nextdex's published (released-game) data -- keep that green when repinning, but do not rely on it alone to pick a SHA.",
   "sources": {
     "er-config": {
       "repo": "https://github.com/Elite-Redux/er-config",
       "branch": "upcoming",
-      "sha": "1b8e2cc4a8096d7ec90616f87fbf771bfa732447",
-      "date": "2026-04-24T18:50:41Z",
+      "sha": "123fc66099ad19e1599837c72774a563cf797694",
+      "date": "2026-03-27T01:49:27Z",
       "sparse_paths": []
     },
     "eliteredux-source": {
       "repo": "https://github.com/Elite-Redux/eliteredux-source",
       "branch": "upcoming",
-      "sha": "bdebcbbff9760cdd41a02c425bea4857fa0eee26",
-      "date": "2026-04-24T18:50:44Z",
+      "sha": "bff60e048c614d4fda431d6c20b3e135dd99cd53",
+      "date": "2026-03-27T01:49:31Z",
       "sparse_paths": [
         "graphics/pokemon",
         "src/data",
