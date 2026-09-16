@@ -29,3 +29,10 @@ checkout and should not be re-derived; re-check them after a repin.
 - [What the React layer's checks do and do not catch](react-layer-review-gates.md) — Run oxlint by hand on every React-layer review -- build and vitest cannot catch rules-of-hooks or any render-time defect in this repo
 - [Verifying npm and shell behaviour on Windows](windows-npm-and-shell-verification.md) — Measured -- npm runs package.json scripts through cmd.exe on this machine, and plain `npm` fails in Windows PowerShell; use npm.cmd to verify a build
 - [Trick Room, forced doubles and Double Battle Mode](trick-room-and-forced-double-facts.md) — Settled C facts for matchup-report field effects: Trick Room never touches damage, forced doubles are always doubles, Double Battle Mode doubles everyone; plus measured counts (78/74)
+
+## Scope measurements
+
+Sizing a planned section against real data rather than against an assumption. Re-measure
+after a repin — every count here moves with the pinned SHAs and the engine's own coverage.
+
+- [Boss-fight coverage: the 40 Elite-difficulty fights](boss-fight-coverage.md) — Measured — the solver's fixed opponent set is 55 trainer ids fielding 228 species / 402 moves / 361 abilities / 102 items; the damage engine covers nearly all of it, so Section D's real content is turn-loop work, doubles, and Mega Evolution (24.6% of the mons)
