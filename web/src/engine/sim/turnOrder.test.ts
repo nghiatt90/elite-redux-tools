@@ -13,7 +13,7 @@ import {
   getMoveSpeed,
   getWhoStrikesFirst,
   recalculateMoveOrder,
-  resolveTurnOrder,
+  resolveTurnOrderAssumingNoMidTurnChanges,
   setActionsAndBattlersTurnOrder,
 } from './turnOrder'
 import type { ChosenAction, TurnOrderContext, TurnOrderMoveView } from './turnOrder'
@@ -165,6 +165,34 @@ describe('getMoveSpeed packing', () => {
     expect(getMoveSpeed(state, 1, useMove(), false, lagging, RATIOS).goesLastNegation).toBe(3)
   })
 
+  it('lowers goesLastNegation for a Mycelium Might status move', () => {
+    // :4319. The ONLY positive assertion for this path -- every other test that
+    // mentions the flag asserts its ABSENCE (dropped under quash, not read off
+    // moveToBeUsed), so without this one the line implementing it can be deleted
+    // with the whole suite still green. That is exactly what happened once.
+    const state = battle([100, 100])
+    const m = move({ isStatus: true, myceliumMightAffected: true })
+    expect(getMoveSpeed(state, 0, useMove(m), false, ctx, RATIOS).goesLastNegation).toBe(2)
+  })
+
+  it('stacks Mycelium Might with Lagging Tail, since both feed the same counter', () => {
+    // Two contributions before the complement: ~2 & 3 === 1.
+    const state = battle([100, 100])
+    const m = move({ isStatus: true, myceliumMightAffected: true })
+    const lagging = withCtx({ holdEffectOf: () => 'HOLD_EFFECT_LAGGING_TAIL' })
+    expect(getMoveSpeed(state, 0, useMove(m), false, lagging, RATIOS).goesLastNegation).toBe(1)
+  })
+
+  it('makes a Mycelium Might user lose to a SLOWER battler', () => {
+    // Battler 0 is twice as fast, so the only thing that can cost it the turn is
+    // goesLastNegation outranking speed by bit position. Equal speeds would not
+    // work here: without the effect the two would tie and the RNG tie-break
+    // would pass this test roughly half the time by luck.
+    const state = battle([200, 100])
+    const m = move({ isStatus: true, myceliumMightAffected: true })
+    expect(getWhoStrikesFirst(state, 0, 1, [useMove(m), useMove()], false, ctx, RATIOS)).toBe(1)
+  })
+
   it('adds exactly one for drenched however large the counter is', () => {
     // :4320 is a plain ++, not += drenched.
     const state = battle([1, 1])
@@ -204,10 +232,17 @@ describe('Trick Room', () => {
   })
 
   it('does not override priority, because it only touches the low 16 bits', () => {
+    // The battler with priority must also be the one Trick Room DISADVANTAGES,
+    // or a naive priority-then-speed model passes this too. Battler 0 is the
+    // faster (so Trick Room ranks it last on speed) and holds the +1 move; the
+    // only reason it still goes first is that priority sits at bits 20-23, above
+    // the complemented speed at bits 0-15.
     const state = battle([200, 50])
     const tr = withCtx({ isTrickRoomActive: true })
-    // Battler 0 is fast (bad under Trick Room) but uses a +1 priority move.
     const order = [useMove(move({ priority: 1 })), useMove()]
+    expect(getMoveSpeed(state, 0, order[0], false, tr, RATIOS).effectiveSpeed).toBeLessThan(
+      getMoveSpeed(state, 1, order[1], false, tr, RATIOS).effectiveSpeed,
+    )
     expect(getWhoStrikesFirst(state, 0, 1, order, false, tr, RATIOS)).toBe(0)
   })
 
@@ -365,6 +400,83 @@ describe('getBattlerTotalSpeedStat', () => {
     expect(total).toBe(120000)
     expect(getMoveSpeed(state, 0, useMove(), false, scarf, RATIOS).effectiveSpeed).toBe(120000 & 0xffff)
   })
+
+  it('lets a wrapped speed actually LOSE to a slower battler', () => {
+    // Asserting the wrapped field value alone does not show the wrap changes any
+    // decision. Battler 0's real speed is 70000, which wraps to 4464; battler 1
+    // is genuinely slower at 5000 but wins the comparison because of it.
+    const state = battle([70000, 5000])
+    expect(getMoveSpeed(state, 0, useMove(), false, ctx, RATIOS).effectiveSpeed).toBe(70000 & 0xffff)
+    expect(getWhoStrikesFirst(state, 0, 1, [useMove(), useMove()], false, ctx, RATIOS)).toBe(1)
+  })
+
+  it('slows a grounded battler in Swamp and leaves an ungrounded one alone', () => {
+    // :4208 requires the timer AND IsBattlerGrounded; gating on the timer alone
+    // silently slows Flying-types.
+    const state = battle([100, 100])
+    state.sides[0].timers.swampTimer = 3
+    state.sides[1].timers.swampTimer = 3
+    const grounded = withCtx({ isBattlerGrounded: () => true })
+    const airborne = withCtx({ isBattlerGrounded: () => false })
+    expect(getBattlerTotalSpeedStat(state, 0, 0, null, grounded, RATIOS)).toBe(66)
+    expect(getBattlerTotalSpeedStat(state, 1, 0, null, airborne, RATIOS)).toBe(100)
+  })
+})
+
+describe('what Quash actually gates', () => {
+  // The guards in GetMoveSpeed are per-field, not a blanket. afterYou and
+  // dazedNegation sit inside `if (!quash)` (:4302-4305), the Mycelium Might and
+  // drenched increments are individually guarded (:4319-4320), and the Trick Room
+  // complement is guarded (:4325) -- but goesFirst (:4317) and the Lagging Tail
+  // assignment (:4318) are NOT, and neither is the priority field itself, which
+  // instead takes GetMovePriority's quash floor of -4 (:4262).
+  function quashed(): BattleState {
+    const state = battle([100, 100])
+    state.field.timers.quashTimer = 1
+    return state
+  }
+
+  it('zeroes afterYou and dazedNegation', () => {
+    const state = quashed()
+    state.battlers[0]!.round.afterYou = true
+    state.battlers[0]!.volatiles.dazed = 0
+    const v = getMoveSpeed(state, 0, useMove(), false, ctx, RATIOS)
+    expect(v.afterYou).toBe(0)
+    // Undazed would normally be 3; under quash the field is never assigned.
+    expect(v.dazedNegation).toBe(0)
+  })
+
+  it('keeps goesFirst, which sits outside the guards', () => {
+    const state = quashed()
+    state.battlers[0]!.round.quickDraw = true
+    state.battlers[0]!.round.usedCustapBerry = true
+    expect(getMoveSpeed(state, 0, useMove(), false, ctx, RATIOS).goesFirst).toBe(2)
+  })
+
+  it('keeps the Lagging Tail bit but drops the Mycelium Might and drenched ones', () => {
+    const state = quashed()
+    state.battlers[0]!.volatiles.drenched = 2
+    const lagging = withCtx({ holdEffectOf: () => 'HOLD_EFFECT_LAGGING_TAIL' })
+    const m = move({ myceliumMightAffected: true })
+    // Only Lagging Tail counts: ~1 & 3 === 2. All three would give ~3 & 3 === 0.
+    expect(getMoveSpeed(state, 0, { action: 'USE_MOVE', moveToBeUsed: m, chosenMove: m, target: null }, false, lagging, RATIOS).goesLastNegation).toBe(2)
+  })
+
+  it('forces the packed priority to its floor value', () => {
+    // GetMovePriority returns min(-4, priority), and GetMoveSpeed offsets by 7,
+    // so a +3 move lands at 3 rather than 10.
+    const state = quashed()
+    expect(getMoveSpeed(state, 0, useMove(move({ priority: 3 })), false, ctx, RATIOS).priority).toBe(3)
+  })
+
+  it('makes a quashed battler lose to an identical unquashed one', () => {
+    // Quash is field-wide in this build (gFieldTimers.quashTimer), so it cannot
+    // be shown by comparing two battlers within one state. Compare the same
+    // battler's packed word across two states instead.
+    const plain = getMoveSpeed(battle([100, 100]), 0, useMove(), false, ctx, RATIOS)
+    const quash = getMoveSpeed(quashed(), 0, useMove(), false, ctx, RATIOS)
+    expect(quash.comparable).toBeLessThan(plain.comparable)
+  })
 })
 
 describe('getWhoStrikesFirst', () => {
@@ -462,29 +574,72 @@ describe('turn order assembly', () => {
     expect(order.battlerByTurnOrder[1]).toBe(2)
   })
 
-  it('resolveTurnOrder runs the lazy algorithm to completion', () => {
+  it('resolveTurnOrderAssumingNoMidTurnChanges runs the lazy algorithm to completion', () => {
     const state = battle([50, 300])
-    const order = resolveTurnOrder(state, [useMove(), useMove()], ctx, RATIOS)
+    const order = resolveTurnOrderAssumingNoMidTurnChanges(state, [useMove(), useMove()], ctx, RATIOS)
     expect(order.battlerByTurnOrder).toEqual([1, 0])
   })
 
   it('orders a switch ahead of a faster opponent move', () => {
     const state = battle([1, 400])
     const actions: ChosenAction[] = [{ action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }, useMove()]
-    const order = resolveTurnOrder(state, actions, ctx, RATIOS)
+    const order = resolveTurnOrderAssumingNoMidTurnChanges(state, actions, ctx, RATIOS)
     expect(order.battlerByTurnOrder).toEqual([0, 1])
   })
 })
 
-describe('the Encore divergence', () => {
-  it('takes priority from moveToBeUsed but Mycelium Might from chosenMove', () => {
-    // GetMoveSpeed reads GetMoveToBeUsed for priority (:4308) and GetChosenMove
-    // for Mycelium Might (:4319). Under Encore those are different moves.
+describe('which accessor each value comes from', () => {
+  // GetMoveToBeUsed is called once (battle_main.c:4308) and its result feeds ONLY
+  // GetFullChosenTarget. Priority (:4309, via GetChosenMovePriority, which calls
+  // GetChosenMove at :4252), Mycelium Might (:4319) and the speed-stat move
+  // argument (:4324) all read GetChosenMove. These tests give the two fields
+  // DIFFERENT moves so the assertion can only be satisfied by the right one --
+  // the earlier version set both to the same object and proved nothing.
+  //
+  // The two accessors diverge on STATUS2_MULTIPLETURNS / STATUS2_RECHARGE, where
+  // GetMoveToBeUsed returns gLockedMoves (battle_util.c:152-160), and on
+  // gProcessingExtraAttacks, where GetChosenMove returns the queued extra attack
+  // (:4242). Not on ordinary Encore, which writes gChosenMoveByBattler at
+  // selection time so both agree.
+  const locked = move({ id: 'MOVE_OUTRAGE', priority: 3, myceliumMightAffected: true })
+  const chosen = move({ id: 'MOVE_THUNDER_WAVE', priority: 0, isStatus: true })
+
+  it('takes priority from chosenMove, not moveToBeUsed', () => {
     const state = battle([100, 100])
-    const encored = move({ id: 'MOVE_QUICK_ATTACK', priority: 1 })
-    const chosen = move({ id: 'MOVE_THUNDER_WAVE', isStatus: true, myceliumMightAffected: true })
-    const v = getMoveSpeed(state, 0, { action: 'USE_MOVE', moveToBeUsed: encored, chosenMove: chosen, target: null }, false, ctx, RATIOS)
-    expect(v.priority).toBe(8)
+    const v = getMoveSpeed(state, 0, { action: 'USE_MOVE', moveToBeUsed: locked, chosenMove: chosen, target: null }, false, ctx, RATIOS)
+    // chosenMove's priority is 0, so the packed field stays neutral at 7. Reading
+    // moveToBeUsed instead would give 10.
+    expect(v.priority).toBe(7)
+  })
+
+  it('takes Mycelium Might from chosenMove, not moveToBeUsed', () => {
+    // Flag the CHOSEN move and assert the effect is PRESENT. Asserting absence
+    // off the locked move would pass just as well against code that never reads
+    // the field at all, so it discriminated against nothing.
+    const state = battle([100, 100])
+    const flaggedChosen = move({ id: 'MOVE_THUNDER_WAVE', isStatus: true, myceliumMightAffected: true })
+    const unflaggedLocked = move({ id: 'MOVE_OUTRAGE' })
+    const v = getMoveSpeed(
+      state,
+      0,
+      { action: 'USE_MOVE', moveToBeUsed: unflaggedLocked, chosenMove: flaggedChosen, target: null },
+      false,
+      ctx,
+      RATIOS,
+    )
+    // 2 only if chosenMove was read; reading moveToBeUsed OR reading neither
+    // would both leave it at 3.
     expect(v.goesLastNegation).toBe(2)
+  })
+
+  it('takes the speed-stat move argument from chosenMove, not moveToBeUsed', () => {
+    // MOVE_STEAMROLLER is the one move the speed stat reads by name (:4212).
+    const state = battle([100, 100])
+    const steamroller = move({ id: 'MOVE_STEAMROLLER' })
+    const plain = move({ id: 'MOVE_TACKLE' })
+    const asChosen = getMoveSpeed(state, 0, { action: 'USE_MOVE', moveToBeUsed: plain, chosenMove: steamroller, target: null }, false, ctx, RATIOS)
+    const asToBeUsed = getMoveSpeed(state, 0, { action: 'USE_MOVE', moveToBeUsed: steamroller, chosenMove: plain, target: null }, false, ctx, RATIOS)
+    expect(asChosen.effectiveSpeed).toBe(150)
+    expect(asToBeUsed.effectiveSpeed).toBe(100)
   })
 })

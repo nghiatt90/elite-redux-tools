@@ -21,17 +21,49 @@
 // `effectiveSpeed` -- declared first -- occupies the low half.
 //
 // Also ported: turn order is resolved LAZILY, one action at a time.
-// SetActionsAndBattlersTurnOrder groups by action and then
-// RecalculateMoveOrder(gCurrentTurnActionNumber) is called after every action
-// (battle_util.c:839, :851) to pull the fastest remaining battler into the next
-// slot. Speeds are therefore re-read mid-turn: a Speed drop inflicted by the
-// first action changes who moves second.
+// SetActionsAndBattlersTurnOrder groups by action, and RecalculateMoveOrder then
+// pulls the fastest remaining battler into a slot as that slot is reached.
+// All four call sites, because two of them explain parameters nothing else does:
+//
+//   battle_main.c:4546  TryChangeTurnOrder, index 0, after Mega Evolution has
+//                       been offered -- the turn-start sort. Gen 7 recomputes
+//                       priority and speed on the turn a mon mega-evolves, which
+//                       is why the first slot is sorted here and not earlier.
+//   battle_util.c:839   HandleAction_NothingIsFainted, index = the NEXT action
+//   battle_util.c:851   HandleAction_ActionFinished, index = the NEXT action
+//   battle_main.c:3361  the switch-in ability loop, with ignoreChosenMove TRUE
+//                       ("check all switch in abilities from the fastest mon to
+//                       slowest", :3358) -- this is the ONLY caller that passes
+//                       TRUE, and the only reason the parameter exists. At
+//                       switch-in no move has been chosen, so priority is held
+//                       at its neutral 7 and the sort is on raw speed alone.
+//
+// Speeds are therefore re-read mid-turn: a Speed drop inflicted by the first
+// action changes who moves second.
 //
 // Scope: this module decides ORDER only. It does not execute anything, does not
 // roll Quick Draw / Quick Claw / Custap (that is the start-of-turn phase, which
 // writes the RoundState flags this module reads), and does not resolve move
 // data or ability hooks -- see TurnOrderMoveView for the caller-resolved inputs
 // and why they are inputs.
+//
+// Known loose ends, recorded so they are not rediscovered as findings:
+//   - TurnOrderMoveView.isStatus is never read here. IS_MOVE_STATUS matters to
+//     turn order only through MYCELIUM_MIGHT_AFFECTED, which the caller has
+//     already folded into myceliumMightAffected. Kept because a caller building
+//     the view has it to hand and the next consumer (move execution) needs it;
+//     delete it if that turns out false.
+//   - speedFromAbilities takes `state` and does not use it (`void state`). It is
+//     there because GetSpeedFromAbilities loops over every battler on the field
+//     (battle_main.c:4170-4176), which this port delegates to
+//     ctx.applySpeedAbilities; when that seam is filled the loop comes back here
+//     and will need the state.
+//   - Nothing ties ctx.isTrickRoomActive to ctx.monotypeChampFlying. A Flying
+//     Monotype Champion suppresses Trick Room outright (battle_util.c:8672), so
+//     both true at once is a state the game cannot reach, and no invariant
+//     rejects it. Deliberate: the same caller-consistency contract
+//     engine/types.ts already accepts for isInverseRoomActive. Worth an assert
+//     if these two ever get more than one caller.
 
 import type { BattleState, BattlerState } from './state'
 import { applyExtraStatLevels, applyStatStage } from '../stats'
@@ -93,22 +125,44 @@ export interface TurnOrderMoveView {
   myceliumMightAffected: boolean
   /** The summed `ON_ABILITY(... onPriority ...)` contribution at
    * battle_main.c:4264. **Not ported yet** -- see this module's own note and the
-   * batch report: 19 abilities in abilityHooks.json declare an onPriority hook,
-   * the engine's ability registry has no onPriority hook type to hold them, and
-   * several of their bodies need move fields and helper predicates the engine
-   * does not expose. Supply 0 to model "no priority abilities". */
+   * batch report. Two populations, both measured, because they size different
+   * things and neither substitutes for the other:
+   *   - **19 of the 1016** abilities in abilityHooks.json declare an onPriority
+   *     hook at all. That is what a new registry hook type has to cover.
+   *   - **8 of those 19** are fielded by the 40 boss fights AND absent from the
+   *     registry -- a strict subset. That is the work the solver's target set
+   *     actually needs. (9 are fielded; Perfectionist is already present for a
+   *     damage hook, so only 8 are new entries. 9 and 8 are different
+   *     predicates, not disagreeing counts.)
+   * The engine's ability registry has no onPriority hook type to hold either
+   * group, and several of the bodies need move fields (accuracy is absent from
+   * MoveData) and helper predicates the engine does not expose. Supply 0 to
+   * model "no priority abilities". */
   abilityPriorityBonus: number
 }
 
-/** One battler's chosen action for the turn. `moveToBeUsed` and `chosenMove` are
- * deliberately separate: GetMoveSpeed reads priority from `GetMoveToBeUsed`
- * (battle_main.c:4308), which honours Encore and multi-turn/recharge locks
- * (battle_util.c:152-160), but reads Mycelium Might and the speed-stat move
- * argument from `GetChosenMove` (:4319, :4324), which does not. Under Encore the
- * two are different moves and the ROM really does mix them. */
+/** One battler's chosen action for the turn.
+ *
+ * `moveToBeUsed` and `chosenMove` are separate because GetMoveSpeed reads two
+ * different accessors, but NOT in the way the names suggest. Every value it
+ * derives from a move -- priority (battle_main.c:4309, via GetChosenMovePriority,
+ * which calls GetChosenMove itself at :4252), Mycelium Might (:4319) and the
+ * speed-stat move argument (:4324) -- comes from `GetChosenMove`.
+ * `GetMoveToBeUsed` is called once, at :4308, and its result feeds ONLY
+ * `GetFullChosenTarget`. So `moveToBeUsed` here is "the move the target is
+ * resolved against", nothing more.
+ *
+ * The two diverge on STATUS2_MULTIPLETURNS / STATUS2_RECHARGE, where
+ * GetMoveToBeUsed returns gLockedMoves (battle_util.c:152-160), and on
+ * gProcessingExtraAttacks, where GetChosenMove returns the queued extra attack
+ * (:4242). NOT on Encore in the ordinary case: Encore writes
+ * gChosenMoveByBattler at selection time, so both accessors agree. */
 export interface ChosenAction {
   action: 'USE_MOVE' | 'USE_ITEM' | 'SWITCH'
+  /** GetMoveToBeUsed's result. Used only to resolve `target`; no value read for
+   * ordering comes from it. */
   moveToBeUsed: TurnOrderMoveView | null
+  /** GetChosenMove's result -- the move every ordering value is read from. */
   chosenMove: TurnOrderMoveView | null
   /** The battler id GetFullChosenTarget resolves to -- only read by
    * EFFECT_THIEF's item comparison at battle_main.c:4270. */
@@ -146,17 +200,50 @@ export interface TurnOrderContext {
    * from the paralysis speed drop (battle_main.c:4185). A single named ability
    * check rather than a registry call, because the registry has no hook for it. */
   hasQuickFeet(battlerId: number): boolean
+  /** `IsBattlerGrounded(battler)` -- the second half of Swamp's condition at
+   * battle_main.c:4208. The state model has no grounding derivation (types,
+   * Levitate, Air Balloon, Iron Ball, Gravity, Ingrain and Smacked Down all feed
+   * it), so it is a seam.
+   *
+   * It gets a seam rather than an inline `true` for a reason worth stating,
+   * because it is the rule for anything added to this interface later: every
+   * other unported input here defaults to the NEUTRAL answer -- no ability
+   * contribution, no hold effect, no Trick Room -- so a caller that supplies
+   * nothing gets a battle with those effects absent, which is wrong only in the
+   * direction of "less happens". Grounding is not like that. Most battlers are
+   * grounded, so the neutral-looking default of `false` would silently exempt
+   * everyone from Swamp, and the opposite default of `true` would silently slow
+   * every Flying-type. Either way the error is invisible: there is no missing
+   * effect to notice, just a wrong number. So it is a required method with no
+   * default, and the neutral context below answers `true` explicitly, which is
+   * right for the grounded majority and wrong loudly rather than quietly. */
+  isBattlerGrounded(battlerId: number): boolean
 }
 
-/** A turn-order context that contributes nothing from abilities or items --
- * every seam returns its neutral value. Use it in tests and wherever the
- * unported hooks are knowingly being skipped. */
+/** A turn-order context for TESTS and for callers knowingly skipping the
+ * unported hooks. Every seam returns its neutral value.
+ *
+ * **A turn loop must not use this.** `isBattlerGrounded` here answers `true`
+ * unconditionally, which is the majority case and therefore wrong for exactly
+ * the battlers Swamp is not supposed to slow. The type system does not stop
+ * this: making `isBattlerGrounded` a required method only bites a caller
+ * building a context from scratch, and reaching for this constant is the path of
+ * least resistance. So the constraint is stated rather than enforced -- a real
+ * battle must supply a real grounding predicate (type, Levitate, Air Balloon,
+ * Iron Ball, Gravity, Ingrain, Smacked Down), and spreading over this constant
+ * to get the other defaults leaves that one wrong.
+ *
+ * The same caveat applies to `applySpeedAbilities` and `holdEffectOf`, but less
+ * sharply: those default to "the effect is absent", so their failure is a
+ * missing behaviour rather than a wrong number. See TurnOrderContext's
+ * isBattlerGrounded doc for the rule. */
 export const NEUTRAL_TURN_ORDER_CONTEXT: TurnOrderContext = {
   isTrickRoomActive: false,
   monotypeChampFlying: false,
   holdEffectOf: () => null,
   applySpeedAbilities: (_battlerId, _moveId, speed) => speed,
   hasQuickFeet: () => false,
+  isBattlerGrounded: () => true,
 }
 
 function idiv(a: number, b: number): number {
@@ -228,14 +315,14 @@ export function getBattlerTotalSpeedStat(
     if (hasFlag(state.sides[battlerSide(battlerId)].statuses, SIDE_STATUS_TAILWIND)) speed *= 2
     else if (battlerSide(battlerId) !== B_SIDE_PLAYER && ctx.monotypeChampFlying) speed *= 2
 
-    // :4208 -- `speed /= 1.5` on a u32 in the C, which promotes to double,
-    // divides and truncates on the way back. NOT integer division by 1 or a
-    // *2/3: trunc(speed / 1.5) and idiv(speed * 2, 3) agree for most inputs but
-    // the C really does go through floating point here, so this mirrors it.
-    // Grounded-ness is the caller's to decide; Swamp only applies to grounded
-    // battlers, and the state model has no grounding derivation, so this is
-    // gated on the timer alone and noted as a known narrowing.
-    if (state.sides[battlerSide(battlerId)].timers.swampTimer) speed = Math.trunc(speed / 1.5)
+    // :4208 -- Swamp requires BOTH the timer and IsBattlerGrounded(battler);
+    // gating on the timer alone silently slows Flying-types.
+    //
+    // `speed /= 1.5` on a u32 in the C promotes to double, divides and truncates
+    // on the way back. trunc(speed / 1.5) and idiv(speed * 2, 3) agree for most
+    // inputs, but the C really does go through floating point, so this mirrors
+    // that rather than the integer-arithmetic lookalike.
+    if (state.sides[battlerSide(battlerId)].timers.swampTimer && ctx.isBattlerGrounded(battlerId)) speed = Math.trunc(speed / 1.5)
 
     if (calcType === TOTAL_SPEED_SECONDARY) return speed
 
@@ -362,8 +449,10 @@ export function getMoveSpeed(
   // move priorities -7..+8 before clamping. ignoreChosenMove leaves it at 7,
   // which is how RecalculateMoveOrder compares raw speed during switch-in.
   let priority = 7
-  if (!ignoreChosenMove && action?.moveToBeUsed && battler) {
-    priority += getMovePriority(state, battlerId, action.moveToBeUsed, action.target)
+  if (!ignoreChosenMove && action?.chosenMove && battler) {
+    // :4309 -- GetChosenMovePriority reads GetChosenMove, not the move
+    // GetMoveToBeUsed returned one line earlier; that one only picks the target.
+    priority += getMovePriority(state, battlerId, action.chosenMove, action.target)
     if (priority > 15) priority = 15
     else if (priority < 0) priority = 0
   }
@@ -549,16 +638,17 @@ export function setActionsAndBattlersTurnOrder(state: BattleState, actions: (Cho
   return { battlerByTurnOrder, actionsByTurnOrder }
 }
 
-/** Resolves a whole turn's order eagerly, by running the game's own lazy
- * algorithm to completion: build the grouped order, then call
- * recalculateMoveOrder for each slot in turn.
+/** Runs the lazy algorithm to completion against a state that is ASSUMED NOT TO
+ * CHANGE, and is named for that assumption because it is otherwise the first
+ * thing a caller reaches for and the failure is silent.
  *
- * This is a convenience for tests and for callers that want the order up front.
- * It is only equivalent to the game when nothing changes between actions -- the
- * real loop re-reads speeds after every action, which is the whole point of the
- * lazy design, so a turn loop must call recalculateMoveOrder itself rather than
- * use this. */
-export function resolveTurnOrder(
+ * The real loop calls recalculateMoveOrder after every action
+ * (battle_util.c:839, :851) and re-reads speeds each time, so any Speed change,
+ * paralysis, faint or item trigger during the turn makes this function's answer
+ * diverge from the game's. A turn loop must drive recalculateMoveOrder itself.
+ * This exists for tests and for callers that genuinely want a snapshot; it
+ * should be deleted once the turn loop lands if nothing else uses it. */
+export function resolveTurnOrderAssumingNoMidTurnChanges(
   state: BattleState,
   actions: (ChosenAction | null)[],
   ctx: TurnOrderContext,
