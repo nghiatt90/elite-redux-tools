@@ -1,6 +1,6 @@
 ---
 name: rival-starter-suffix-semantics
-description: TRAINER_MAY_*_TREECKO/TORCHIC/MUDKIP names the PLAYER's starter for opponent entries but MAY's own starter for the Meteor Falls partner entries -- verify against the party, never the label
+description: TRAINER_MAY_*_TREECKO/TORCHIC/MUDKIP names the PLAYER's starter for opponent entries but MAY's own starter for the Meteor Falls partner entries -- verify against the party, never the label; the player's save is settled as TORCHIC over ROUTE_103/RUSTBORO/ROUTE_110/ROUTE_119
 metadata:
   type: reference
 ---
@@ -33,5 +33,18 @@ statement and cannot both be true of the same save. Resolve from the party conte
 say which reading you used. There are also **five** distinct story May ids, not four
 (ROUTE_103, RUSTBORO, ROUTE_110, ROUTE_119, LILYCOVE); LILYCOVE's id is reused by the
 Route 103 daily rematch (`Route103:142`).
+
+**Settled 2026-09-16 by the user, do not re-derive:** the player picked **Torchic** (so
+`_TORCHIC` throughout), and their four rival fights are **ROUTE_103, RUSTBORO, ROUTE_110,
+ROUTE_119** — Lilycove is NOT counted. An earlier revision of
+`docs/battle-sim/boss-fight-coverage.md` had this backwards and every union count in it
+had to be redone.
+
+Lilycove is the odd one out and is worth more than six slots: its party (Smeargle,
+Phantowl, Gyarados, Hisuian Goodra, Pikachu Pop Star, Swampert) shares nothing with the
+Swellow / Empoleon Redux / Swampert / Tsareena / Goodra / Golurk line that RUSTBORO,
+ROUTE_110 and ROUTE_119 all draw from. ROUTE_103 is 2 mons (Mudkip + Goomy) and, like
+LILYCOVE, has `parties.elite == parties.ace` — so swapping them keeps the
+"three trainers with Elite identical to Ace" count at three rather than dropping it to two.
 
 See [[map-script-battle-macros-and-engine-introspection]].

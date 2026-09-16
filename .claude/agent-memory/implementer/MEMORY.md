@@ -6,4 +6,4 @@
 - [Section B batch 3, landed](project_battle-sim-section-b-batch-3-held.md) — field-effect banners reviewed twice, browser-checked, committed (c72c173, 612b60e, 3324d54); Tate & Liza's 5 entries are 2 banners + a speed note, not 3 banners
 - [Unmodelled base-power sweep method](reference_unmodelled-base-power-sweep-method.md) — power<=1 proxy DISPROVED by Squall Hammer; read scripts directly; 5 vs 13 are different predicates, not disagreeing counts
 - [Map-script battle macros and engine introspection](reference_map-script-battle-macros-and-engine-introspection.md) — `trainerbattle*` misses starttagbattle/multi_2_vs_2 (and all of gym 8); use jiti to load the real ability registry, not grep
-- [Rival starter-suffix semantics](reference_rival-starter-suffix-semantics.md) — `TRAINER_MAY_*_TORCHIC` means the PLAYER chose Torchic, except the Meteor Falls partner ids, which invert it
+- [Rival starter-suffix semantics](reference_rival-starter-suffix-semantics.md) — `TRAINER_MAY_*_TORCHIC` means the PLAYER chose Torchic, except the Meteor Falls partner ids, which invert it; settled set is ROUTE_103/RUSTBORO/ROUTE_110/ROUTE_119, no Lilycove

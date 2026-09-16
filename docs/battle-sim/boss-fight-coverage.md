@@ -1,11 +1,18 @@
 # Boss-fight coverage: the 40 Elite-difficulty fights
 
-_Measured — the solver's fixed opponent set resolves to 55 trainer ids fielding 228 species / 402 moves / 361 abilities / 102 items; the damage engine already covers almost all of it, and what is left is turn-loop work, not damage work_
+_Measured — the solver's fixed opponent set resolves to 55 trainer ids fielding 227 species / 399 moves / 357 abilities / 100 items; the damage engine already covers almost all of it, and what is left is turn-loop work, not damage work_
 
 Measured 2026-09-16 against the committed `data/v2.65beta` snapshot and the pinned
 `eliteredux-source` / `er-config` checkouts in `pipeline/.upstream/` (SHAs in
 `sources.lock.json`). **Every count and every list here must be re-measured after a
 repin** — trainer parties, the ability census and the engine registry all move.
+
+**The rival set was corrected on 2026-09-16, after the first measurement.** The player
+does not count the Lilycove fight; their four rival battles are Route 103, Rustboro,
+Route 110 and Route 119. Every number in this document was recomputed over the corrected
+set. An earlier revision counted Lilycove instead of Route 103 and therefore reported
+228 species / 402 moves / 361 abilities / 102 items over 289 party slots — those figures
+are superseded, not mistaken measurements of the same thing.
 
 This exists to turn the battle-simulator plan's Section D ("widen the engine to cover move
 behaviours, ability hooks, accuracy and field effects") from an open-ended estimate into a
@@ -17,22 +24,22 @@ Elite difficulty only. Against a fixed opponent set the required coverage is cou
 
 **"Zero ability gaps" is a statement about damage, and only about damage.** The ability
 registry under `web/src/engine/abilities/` deliberately holds only the abilities
-`abilityHooks.json` marks `damageRelevant` — the ones that change a damage number. 220 of the
-361 abilities these parties field are in it and ported. The other 141 are absent **because
+`abilityHooks.json` marks `damageRelevant` — the ones that change a damage number. 217 of the
+357 abilities these parties field are in it and ported. The other 140 are absent **because
 the census says they do not affect damage**, not because they were missed. They are
 Intimidate, Drizzle, Speed Boost, Moxie, Regenerator, Prankster, Gale Wings, Shadow Tag,
-Serene Grace, Rough Skin, Static, Weak Armor and 129 more: entry effects, end-of-turn
+Serene Grace, Rough Skin, Static, Weak Armor and 128 more: entry effects, end-of-turn
 effects, priority modifiers, accuracy modifiers, switch triggers, faint triggers. Every one
 of them is **turn-loop work that has not started**. Nobody should read the ability section
 below as "abilities are done".
 
-The same applies to moves: 4 of 345 damaging moves are flagged gaps, but 57 of the 402 moves
+The same applies to moves: 4 of 344 damaging moves are flagged gaps, but 55 of the 399 moves
 are STATUS-split (Stealth Rock, Protect, Shell Smash, Recover, Toxic, Leech Seed, Tailwind,
 …). The damage engine has nothing to say about any of them, and they are the substance of
 what these trainers actually do on a turn.
 
 **The largest single item is Mega Evolution, and it is a scope finding rather than a bug.**
-71 of the 289 party slots in these fights (24.6%) hold a Mega Stone or a Primal/Origin Orb
+70 of the 285 party slots in these fights (24.6%) hold a Mega Stone or a Primal/Origin Orb
 and change form during the battle. Nothing in `web/src/` models that change. This is
 *disclosed*, not silent: the matchup report lists "No Mega Evolution and no on-switch-in
 ('entry') abilities" as one of its turn-one caveats (`web/src/lib/matchupReport.ts:38`,
@@ -56,21 +63,24 @@ entries of which only the `_1` is the first-visit fight.
 Citations are `Map:line` in
 `pipeline/.upstream/eliteredux-source/data/maps/<Map>/scripts.pory`.
 
-43 script-level fights, **55 distinct trainer ids**, 289 party slots. All 55 exist in
+43 script-level fights, **55 distinct trainer ids**, 285 party slots. All 55 exist in
 `trainers.json`. **No Elite party is empty**, so the usual fall-back-to-Ace case never fires
-here; three have an Elite party identical to Ace (`TRAINER_MAY_LILYCOVE_TORCHIC`,
+here; three have an Elite party identical to Ace (`TRAINER_MAY_ROUTE_103_TORCHIC`,
 `TRAINER_GRUNT_MUSEUM_1`, `TRAINER_WALLY_VR_2`).
 
 ### Rival — 4 fights
 
 | Fight | Trainer id | Mons | Evidence |
 |---|---|---|---|
+| May, Route 103 | `TRAINER_MAY_ROUTE_103_TORCHIC` | 2 | `Route103:108`, from the `switch VAR_STARTER_MON` at `:44-47` inside `Route103_EventScript_RivalMay` (`:33` branches away once `FLAG_SYS_GAME_CLEAR` is set) |
 | May, Route 104 / Rustboro | `TRAINER_MAY_RUSTBORO_TORCHIC` | 6 | `Route104:183` and `RustboroCity:900` |
 | May, Route 110 | `TRAINER_MAY_ROUTE_110_TORCHIC` | 6 | `Route110:445` |
 | May, Route 119 | `TRAINER_MAY_ROUTE_119_TORCHIC` | 6 | `Route119:101` |
-| May, Lilycove | `TRAINER_MAY_LILYCOVE_TORCHIC` | 6 | `LilycoveCity:309`; the same id is reused by the Route 103 daily rematch, `Route103:142` |
 
-The `_TORCHIC` suffix is a choice under uncertainty — see [Unresolved](#unresolved).
+The player's own four, confirmed 2026-09-16. `TRAINER_MAY_LILYCOVE_TORCHIC` — the fifth
+story May id, reused by the Route 103 daily rematch at `Route103:142` — is **not** counted;
+see [Unresolved](#unresolved) for what excluding it costs. The `_TORCHIC` suffix names the
+*player's* starter, so this is the Mudkip-line May: the Route 103 party is Mudkip + Goomy.
 
 ### Gym leaders — 8 fights, 11 trainer ids
 
@@ -150,7 +160,7 @@ treating it as one trainer with one party is wrong by a factor of four.
 | Fight | Trainer id | Mons | Evidence |
 |---|---|---|---|
 | Wally, Victory Road entrance | `TRAINER_WALLY_VR_1` | 6 | `VictoryRoadRework:100`; `VictoryRoad_1F:48` is the same id on the legacy map |
-| Wally, immediate rematch | `TRAINER_WALLY_VR_2` | 6 | `VictoryRoadRework:104`, `trainerbattle_rematch`; `gRematchTable[REMATCH_WALLY_3] = {WALLY_VR_2, _3, _4, _5}` at `src/battle_setup.c:311`. **Disputed — see [Unresolved](#unresolved)** |
+| Wally, immediate rematch | `TRAINER_WALLY_VR_2` | 6 | `VictoryRoadRework:104`, `trainerbattle_rematch`; `gRematchTable[REMATCH_WALLY_3] = {WALLY_VR_2, _3, _4, _5}` at `src/battle_setup.c:311`. **The player's observation of this fight contradicts the data — see [Unresolved](#unresolved)** |
 
 ### Gym 8's own trainers — 10 trainer ids
 
@@ -181,68 +191,91 @@ variants in each room are post-game `VAR_ELITE_4_MODE` rematches
 
 ## Unresolved
 
-Three cases where the evidence does not pin a single answer. They are stated rather than
+Three cases where the script evidence alone does not pin the answer. Two are now settled by
+the player; the third is a discrepancy that stands unexplained. They are stated rather than
 guessed, because a wrong id silently yields the wrong party.
 
-**1. Which starter suffix.** Every rival battle dispatches on
+**1. Which starter suffix — settled: `_TORCHIC`.** Every rival battle dispatches on
 `switch VAR_STARTER_MON` with `case 0/1/2` reaching `...Treecko/Torchic/Mudkip`
-(`Route103:78-81`), so the suffix names the **player's** starter and May fields the
-counter-starter. Verified against the 2-mon Route 103 parties: `_TREECKO` = Torchic + Goomy,
-`_TORCHIC` = Mudkip + Goomy, `_MUDKIP` = Treecko + Goomy. So "May had the Mudkip line" and
-"the player chose Treecko" describe different saves and cannot both be true. This document
-uses `_TORCHIC` (the Mudkip line, which is the directly observable fact). If `_TREECKO` is
-right instead, the union becomes 229 species / 409 moves / 362 abilities / 103 items —
-6 species, 10 moves, 5 abilities and 2 items appear that are not in the lists below, and 5,
-3, 4 and 1 respectively drop out.
+(`Route103:44-47` for the first fight, `:78-81` for the daily rematch), so the suffix names
+the **player's** starter and May fields the counter-starter. Verified against the 2-mon
+Route 103 parties: `_TREECKO` = Torchic + Goomy, `_TORCHIC` = Mudkip + Goomy, `_MUDKIP` =
+Treecko + Goomy. So "May had the Mudkip line" and "the player chose Treecko" describe
+different saves and cannot both be true. The player confirmed Torchic on 2026-09-16, so
+`_TORCHIC` (the Mudkip-line May) is used throughout and is not an assumption. Kept only as a
+re-measure hook: under `_TREECKO` the union would instead be 228 species / 404 moves /
+358 abilities / 101 items — 6 species, 10 moves, 3 abilities and 2 items appear that are not
+in the lists below, and 5, 5, 2 and 1 respectively drop out.
 
 Note that the Meteor Falls **partner** ids invert the convention:
 `MAY_TREECKO_METEOR_FALLS` (reached from the same `case 0`) fields Sceptile, i.e. the ally
 May carries the player's own starter line. Upstream inconsistency; do not generalise one
 rule to both.
 
-**2. Which four rival fights.** Five distinct story May ids exist: `ROUTE_103`, `RUSTBORO`,
-`ROUTE_110`, `ROUTE_119`, `LILYCOVE`. The brief named four. `ROUTE_103`, the two-Pokemon
-opening battle, is excluded here as the most likely non-boss. Including it would add 2
-species, 2 moves, 1 ability and 0 items.
+**2. Which four rival fights — settled on 2026-09-16: Route 103, Rustboro, Route 110,
+Route 119.** Five distinct story May ids exist: `ROUTE_103`, `RUSTBORO`, `ROUTE_110`,
+`ROUTE_119`, `LILYCOVE`. The first measurement of this document guessed wrong, excluding
+`ROUTE_103` as the most likely non-boss and counting `LILYCOVE`; the player has since said
+they do not count the Lilycove fight. Adding `TRAINER_MAY_LILYCOVE_TORCHIC` back would add
+3 species, 5 moves, 5 abilities and 2 items over 6 more party slots.
 
-**3. Wally's second fight.** The brief describes it as bugged, fielding Juan's three
-Pokemon as a double battle. The script and rematch-table chain resolve unambiguously to
-`TRAINER_WALLY_VR_2/3/4/5`, which are four copies of the same six-Pokemon singles party in
-`trainers.json` (`forcedDouble: false`). No mechanism producing the reported symptom was
-found; the trainer enum values are not adjacent either (`TRAINER_WALLY_VR_2 = 657`,
-`TRAINER_JUAN_5 = 801`, `er-config/TrainerEnum.proto`). The closest match in the whole
-dataset to "Juan's three Pokemon as a double" is `TRAINER_JUAN_5` itself — 3 Elite mons,
-`forcedDouble: true`. If the observation is right, the id in the table above is probably
-wrong, and the cause most likely lies in the Kotlin codegen rather than the textproto (see
-[Textproto versus codegen divergence](textproto-vs-codegen-divergence.md)).
+Lilycove is worth more than its six slots suggest, because its party is unlike every other
+May party: Smeargle, Phantowl, Gyarados, Hisuian Goodra, Pikachu Pop Star and Swampert,
+against the Swellow / Empoleon Redux / Swampert / Tsareena / Goodra / Golurk line the
+Rustboro, Route 110 and Route 119 parties share. Excluding it is what drops Smeargle,
+Phantowl and Pikachu Pop Star from the species list, Tinted Lens, Moon Spirit, Pixie Power,
+Own Tempo and Subdue from the ability list, Electroweb, Giga Impact, Lunar Dance, Mist Ball
+and Moonlight from the move list, and Dragon Gem and Kasib Berry from the item list.
+Smeargle's Simple and Swampert's Swampertite survive the cut because other trainers in the
+set carry them.
 
-## The union (Elite tier, 55 trainers, 289 party slots)
+**3. Wally's second fight — a known discrepancy, unexplained.** The player reports this
+fight as bugged, fielding Juan's three Pokemon as a double battle, and is certain of the
+observation. The data does not account for it: the script and rematch-table chain resolve
+unambiguously to `TRAINER_WALLY_VR_2/3/4/5`, which are four copies of the same six-Pokemon
+singles party in `trainers.json` (`forcedDouble: false`). No mechanism producing the
+reported symptom was found; the trainer enum values are not adjacent either
+(`TRAINER_WALLY_VR_2 = 657`, `TRAINER_JUAN_5 = 801`, `er-config/TrainerEnum.proto`). The
+closest match in the whole dataset to "Juan's three Pokemon as a double" is
+`TRAINER_JUAN_5` itself — 3 Elite mons, `forcedDouble: true`.
 
-- **228 distinct species**
-- **402 distinct moves** — 345 damaging, 57 STATUS split
-- **361 distinct abilities** — 161 distinct chosen `.ability` values, 291 distinct species
-  innates, 91 appearing as both
-- **102 distinct held items**
+**The observation stands; the data does not explain it.** That is recorded deliberately
+rather than resolved toward `trainers.json`, because `trainers.json` is textproto truth and
+not necessarily ROM truth: the Kotlin codegen sits between the two and is already documented
+to drop a field the textproto sets (see
+[Textproto versus codegen divergence](textproto-vs-codegen-divergence.md)). That makes the
+codegen a likelier place for the cause than the textproto. Until someone finds the
+mechanism, treat the `TRAINER_WALLY_VR_2` row in the table above as the best available id
+and not as a confirmed one, and treat this fight's contribution to the union counts below
+as provisional.
+
+## The union (Elite tier, 55 trainers, 285 party slots)
+
+- **227 distinct species**
+- **399 distinct moves** — 344 damaging, 55 STATUS split
+- **357 distinct abilities** — 161 distinct chosen `.ability` values, 289 distinct species
+  innates, 93 appearing as both
+- **100 distinct held items**
 
 Abilities are counted as "chosen ability plus all three species innates", since innates are
 fixed per species and always active for the AI (`docs/battle-sim/er-level-asymmetries.md` —
 the level gating on innates is player-only).
 
-## Gap 1 — abilities: 220 of 361 ported, 0 stubs, 0 gate holes
+## Gap 1 — abilities: 217 of 357 ported, 0 stubs, 0 gate holes
 
 Measured against the live registry (`web/src/engine/abilities/registry.ts` with
 `impl/index.ts` loaded), not against a grep of the source. The live registry holds **591**
 entries; grepping `id: 'ABILITY_…'` out of `impl/*.ts` finds only 558, because 33 are
 registered through macros and generators with no literal id string.
 
-- **220 ported.** Real implementations, not stubs.
-- **0 explicit `UNMODELLED` stubs** among these 361.
+- **217 ported.** Real implementations, not stubs.
+- **0 explicit `UNMODELLED` stubs** among these 357.
 - **0 abilities that are damage-relevant but missing from the registry** — i.e. the coverage
   gate in `abilities/coverage.test.ts` is not hiding anything for this opponent set.
-- **141 with no registry entry, all of them marked not damage-relevant** by
+- **140 with no registry entry, all of them marked not damage-relevant** by
   `data/v2.65beta/abilityHooks.json`.
 
-Those 141, grouped by the hook they declare. **This is the turn-loop backlog**, and it is
+Those 140, grouped by the hook they declare. **This is the turn-loop backlog**, and it is
 the honest measure of what Section D still owes for these fights.
 
 | Hook | Count | Abilities |
@@ -262,20 +295,20 @@ the honest measure of what Section D still owes for these fights.
 | `onModifyTargetFlag` | 1 | Artillery |
 | `onBlockStatDrops` | 1 | Full Metal Body |
 | `onRevive` | 1 | Recurring Nightmare |
-| none | 12 | Accelerate, Eject Pack, Gluttony, Grappler, Nosferatu, Pickpocket, Poison Heal, Ripen, Simple, Subdue, Unseen Fist, Weather Double Boost |
+| none | 11 | Accelerate, Eject Pack, Gluttony, Grappler, Nosferatu, Pickpocket, Poison Heal, Ripen, Simple, Unseen Fist, Weather Double Boost |
 
-(Abilities with two hooks appear on both rows, so the column sums to more than 141.)
+(Abilities with two hooks appear on both rows, so the column sums to more than 140.)
 
-Of the twelve with no hook: four carry a bitfield the census records but no lambda
+Of the eleven with no hook: four carry a bitfield the census records but no lambda
 (`Eject Pack` → `persistent`, `Grappler` → `grappler`, `Poison Heal` →
-`toxicTerrainImmune`, `Ripen` → `ripen`) and the other eight
-(Accelerate, Gluttony, Nosferatu, Pickpocket, Simple, Subdue, Unseen Fist, Weather Double
+`toxicTerrainImmune`, `Ripen` → `ripen`) and the other seven
+(Accelerate, Gluttony, Nosferatu, Pickpocket, Simple, Unseen Fist, Weather Double
 Boost) are **absent from `abilityHooks.json` entirely** — the scraper found no
 `src/abilities.cc` definition for them. Whether that is a scraper gap or genuinely
 unimplemented upstream abilities was not investigated here and is worth a look before
 anyone relies on them being inert.
 
-## Gap 2 — moves: 4 of 345 damaging moves flagged, 57 status moves untouched
+## Gap 2 — moves: 4 of 344 damaging moves flagged, 55 status moves untouched
 
 Four moves in the union hit an existing warning set in `web/src/engine/basePower.ts`. All
 four are already documented there and are warning-only:
@@ -292,34 +325,33 @@ Nothing in the union reaches an unported `CustomMoveDamage`, an unported
 `ZERO_DAMAGE_BASE_POWER_EFFECTS` / `_MOVE_IDS` (no Squall Hammer, Fetch or Airborne Slam)
 or `UNMODELLED_BASE_POWER_MOVE_IDS` (no Seismic Toss).
 
-The 402 moves use **152 distinct MoveBehavior effects**, 113 of which are legacy-script-only
+The 399 moves use **150 distinct MoveBehavior effects**, 111 of which are legacy-script-only
 (a `legacyConfig` battle script, no structured `attack` block). The damage path does not
-need those 113 — but a turn loop needs whatever each script does besides damage.
+need those 111 — but a turn loop needs whatever each script does besides damage.
 
-**The 57 STATUS-split moves**, which the damage engine models not at all:
+**The 55 STATUS-split moves**, which the damage engine models not at all:
 
 Amnesia, Baneful Bunker, Barrier, Belly Drum, Bulk Up, Burning Bulwark, Calm Mind, Cotton
 Guard, Curse, Dark Void, Destiny Bond, Dragon Cheer, Dragon Dance, Eerie Fog, Gear Up,
 Growth, Helping Hand, Hypnosis, Iron Defense, Karma, King's Shield, Leech Seed, Life Dew,
-Light Screen, Lunar Dance, Moonlight, Morning Sun, Mystic Dance, Nasty Plot, Pain Split,
-Protect, Quiver Dance, Rain Dance, Recover, Recycle, Reflect, Rock Polish, Roost, Sharpen,
-Shell Smash, Shelter, Shore Up, Slack Off, Sleep Powder, Spiky Shield, Stealth Rock,
-Strength Sap, Sunny Day, Swagger, Swords Dance, Tailwind, Tail Glow, Toxic, Toxic Spikes,
-Victory Dance, Will-O-Wisp, Yawn.
+Light Screen, Morning Sun, Mystic Dance, Nasty Plot, Pain Split, Protect, Quiver Dance,
+Rain Dance, Recover, Recycle, Reflect, Rock Polish, Roost, Sharpen, Shell Smash, Shelter,
+Shore Up, Slack Off, Sleep Powder, Spiky Shield, Stealth Rock, Strength Sap, Sunny Day,
+Swagger, Swords Dance, Tailwind, Tail Glow, Toxic, Toxic Spikes, Victory Dance,
+Will-O-Wisp, Yawn.
 
 That list is a fair summary of the turn loop's job: hazards, screens, protection, setup,
 recovery, status infliction, weather, speed control.
 
-## Gap 3 — items: 22 of 102 read by the damage path
+## Gap 3 — items: 20 of 100 read by the damage path
 
-The 102 items resolve to 40 distinct hold effects. The engine references 30 `HOLD_EFFECT_*`
-constants anywhere under `web/src/engine/`; 16 of those 40 are among them, covering 22 of
-the 102 items. The other 24 hold effects, covering 80 items, are never mentioned.
+The 100 items resolve to 40 distinct hold effects. The engine references 30 `HOLD_EFFECT_*`
+constants anywhere under `web/src/engine/`; 16 of those 40 are among them, covering 20 of
+the 100 items. The other 24 hold effects, covering 80 items, are never mentioned.
 
-**Covered (22):** Air Balloon, Assault Vest, Choice Band, Choice Specs, Eviolite, Dragon /
-Fire / Normal / Rock / Water Gem, Life Orb, Light Ball, Loaded Dice, Muscle Band, Punching
-Glove, Kasib Berry, Occa Berry, Scope Lens, Swirly Glasses, Tactical Vest, Charcoal, Soft
-Sand.
+**Covered (20):** Air Balloon, Assault Vest, Choice Band, Choice Specs, Eviolite, Fire /
+Normal / Rock / Water Gem, Life Orb, Light Ball, Loaded Dice, Muscle Band, Punching Glove,
+Occa Berry, Scope Lens, Swirly Glasses, Tactical Vest, Charcoal, Soft Sand.
 
 **Not covered (80):**
 
@@ -338,15 +370,15 @@ essential to a turn loop.
 
 ## Mega Evolution and primal/origin forms
 
-**71 of 289 party slots (24.6%) hold a Mega Stone or a Primal Orb**, resolving to **59
+**70 of 285 party slots (24.6%) hold a Mega Stone or a Primal Orb**, resolving to **59
 distinct post-change forms**. Zero are unresolvable: every `(species, item)` pair has a
 matching species in `species.json` whose `megas[].from`/`.item` or `primals[].from`/`.item`
 names it. (The one mega in the whole dataset keyed by move rather than item,
 `SPECIES_RAYQUAZA_MEGA` via Dragon Ascent, does not appear in these fights.) So the fix is a
 reverse lookup over data that is already emitted, not a pipeline change.
 
-If those forms were resolved, the union would gain **59 species** and **76 abilities**, of
-which 47 are already ported and **29 are not**: Balloon Bomber, Clueless, Cold Rebound,
+If those forms were resolved, the union would gain **59 species** and **75 abilities**, of
+which 46 are already ported and **29 are not**: Balloon Bomber, Clueless, Cold Rebound,
 Crowned Shield, Crowned Sword, Desolate Land, Early Grave, Electromorphosis, Flame Body,
 Flame Coat, Frost Burn, Funeral Pyre, Hardened Sheath, Haunting Frenzy, Loose Rocks,
 Malodor, Natural Recovery, Permanence, Primordial Sea, Pure Love, Soul Linker, Surprise,
@@ -360,7 +392,7 @@ always on, not a one-in-three slot choice. Groudon appears in `TRAINER_MAXIE_MAG
 and `TRAINER_MAXIE_MOSSDEEP`, Kyogre in `TRAINER_ARCHIE` and `TRAINER_WALLACE_5` — four of
 these fights contain a mon that zeroes an entire damage type the moment it changes form.
 
-Every one of the 71 slots, for reference:
+Every one of the 70 slots, for reference:
 
 | Trainer | Base species | Item | Becomes |
 |---|---|---|---|
@@ -403,7 +435,6 @@ Every one of the 71 slots, for reference:
 | `TRAINER_MAXIE_MOSSDEEP` | Skarmory Redux | Skarmorite R | Skarmory Mega Redux |
 | `TRAINER_MAXIE_MT_CHIMNEY` | Camerupt | Cameruptite | Camerupt Mega |
 | `TRAINER_MAXIE_MT_CHIMNEY` | Meganium | Meganiumite | Meganium Mega |
-| `TRAINER_MAY_LILYCOVE_TORCHIC` | Swampert | Swampertite | Swampert Mega |
 | `TRAINER_MAY_ROUTE_119_TORCHIC` | Empoleon Redux | Empoleonite R | Empoleon Redux Mega |
 | `TRAINER_MAY_ROUTE_119_TORCHIC` | Swampert | Swampertite | Swampert Mega |
 | `TRAINER_NORMAN_1` | Banette | Banettite | Banette Mega |
@@ -464,18 +495,18 @@ AI-controlled ally with its own party, and the player brings only a chosen subse
 (`choose_mons`). Those partner parties are ordinary trainer entries — some spelled without
 the `TRAINER_` prefix, e.g. `MAY_TORCHIC_METEOR_FALLS = 70` in `TrainerEnum.proto` — so
 `trainers.json` already has them. Together (`MAY_TORCHIC_METEOR_FALLS` +
-`TRAINER_STEVEN_MOSSDEEP`, 6 mons) they add 2 species, 6 moves and 2 abilities beyond the
+`TRAINER_STEVEN_MOSSDEEP`, 6 mons) they add 3 species, 6 moves and 4 abilities beyond the
 opponent union, and 0 items.
 
 Double-only damage terms the engine would need: the 0.75x spread multiplier
 (`battle_util.c:7498`), partner Friend Guard / Caretaker / Food Lovers at 0.5x (`:7638-7640`)
 and screens at 0.66 instead of 0.5 (`:7625`) — see
 [Trick Room, forced doubles and Double Battle Mode](trick-room-and-forced-double-facts.md).
-**35 of the 345 damaging moves in the union are spread moves** and would take the 0.75x:
+**34 of the 344 damaging moves in the union are spread moves** and would take the 0.75x:
 Acid, Air Cutter, Avalanche, Bleakwind Storm, Blizzard, Boomburst, Dazzling Gleam, Double
-Lariat, Dragon Energy, Earthquake, Electroweb, Eruption, Explosion, Fissure, Glacial Lance,
-Heat Wave, Hyper Voice, Icy Wind, Make It Rain, Muddy Water, Ominous Wind, Origin Pulse,
-Outburst, Parabolic Charge, Precipice Blades, Rock Slide, Searing Shot, Sludge Wave, Snarl,
+Lariat, Dragon Energy, Earthquake, Eruption, Explosion, Fissure, Glacial Lance, Heat Wave,
+Hyper Voice, Icy Wind, Make It Rain, Muddy Water, Ominous Wind, Origin Pulse, Outburst,
+Parabolic Charge, Precipice Blades, Rock Slide, Searing Shot, Sludge Wave, Snarl,
 Sparkling Aria, Splishy Splash, Surf, Synchronoise, Water Spout, Wildbolt Storm.
 
 ## Caveats
@@ -491,9 +522,12 @@ Sparkling Aria, Splishy Splash, Surf, Synchronoise, Water Spout, Wildbolt Storm.
   document into the doubles column.
 - **Levels are derived, not parsed** — enemy level is the player's highest party level
   (`battle_main.c:1819-1827`), so nothing here depends on a level field.
-- **The rival-suffix choice is unresolved**, and the lists above would shift slightly under
-  the other reading. See [Unresolved](#unresolved) for the exact deltas.
-- **The Wally #2 id is disputed** and may be wrong.
+- **The rival set was corrected on 2026-09-16** — Route 103 in, Lilycove out. The starter is
+  confirmed as Torchic, so the `_TORCHIC` suffix is settled too. See
+  [Unresolved](#unresolved) for the deltas either choice is worth.
+- **The Wally #2 fight is a known unexplained discrepancy.** The player observes Juan's
+  three Pokemon as a double; the scripts and `trainers.json` give a six-Pokemon singles
+  party. The id used above may be wrong.
 - The three gym-8 group fights each have four branches; the union is branch-independent but
   the healing and battle shape are not.
 
