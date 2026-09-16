@@ -160,6 +160,31 @@ If the user later builds the ROM, the highest-value use is not re-verifying dama
 already solid, but checking the AI's chosen move turn by turn on a shared seed. That is the one
 thing reading cannot establish.
 
+### How an oracle would actually be reached — **backlog, low priority**
+
+Recorded because it is less impractical than it sounds, not because it is planned. The user's
+position is that this probably will not happen.
+
+You would not have to play to each fight. `src/debug.c` has a battle submenu that starts a
+battle directly: it sets the format (singles, doubles, two opponents, and the multi format with
+an in-game partner that two of these fights use), sets the terrain, sets the AI behaviour flags,
+and calls `BattleSetup_StartTrainerBattle_Debug()` (`debug.c:1519-1573`).
+
+Its limitation is the important part. **It does not take a trainer id.** It copies the enemy
+party out of the player's party or a PC box (`debug.c:1548-1563`), so each opponent would have to
+be rebuilt by hand — species, moves, ability, nature, EVs and held item, per Pokemon, per fight.
+That is laborious and, worse, circular: the thing an oracle is most wanted for is confirming
+that our reading of the trainer data is right, and this path requires asserting that reading as
+the input.
+
+The better shape is the one the old plan proposed: a small patch that starts a real trainer
+battle by id through the ordinary entry point, so the game builds the party from its own tables.
+Short, because that entry point already exists, and it removes the circularity.
+
+Two things to check before trusting any diff produced this way, both answerable from source:
+debug battles set `gIsDebugBattle`, and their AI flags come from `gDebugAIFlags` rather than the
+trainer's own entry, so a debug battle is not automatically the same battle.
+
 ## Known unexplained
 
 **Wally's second Victory Road fight.** The user is certain it fields Juan's three Pokemon as a

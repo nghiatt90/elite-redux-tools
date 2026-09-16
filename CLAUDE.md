@@ -105,9 +105,14 @@ proportionate to that.
   **omits `.ability` entirely** when that returns -1 (the mon does not have the ability the
   textproto names, which the codegen reports as a validation error rather than fixing). An
   earlier revision of this file had these two backwards.
-- `sparse_paths` in `sources.lock.json` currently omits `data/`, so upstream map scripts
-  and battle-script bytecode are not fetched. Widen it if you need per-battle field
-  effects, gym-skill assignment, or the move-behaviour scripts.
+- `sparse_paths` in `sources.lock.json` **includes `data/`** (added in `a97bc64`), so the
+  upstream map scripts and battle scripts are on disk and directly readable:
+  `pipeline/.upstream/eliteredux-source/data/maps/*/scripts.pory` (Poryscript source — there
+  is no compiled `.inc` in this tree) and `data/battle_scripts_1.s` / `_2.s`. Read them.
+  An earlier revision of this line said they were not fetched, and that cost real work: an
+  agent reasoned about whether a move deals damage from its description rather than from its
+  script. `docs/battle-sim/boss-fight-coverage.md` shows what the scripts settle that the
+  declared data cannot — a 95-power move whose script has no damage step at all.
 - **Agent roles** live in `.claude/agents/` (`plan-reviewer`, `implementer` on Sonnet,
   `code-reviewer`). They are deliberately role-generic and rely on this file for project
   facts, so keep this file current. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is already
