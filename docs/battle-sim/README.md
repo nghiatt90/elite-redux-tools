@@ -1,5 +1,9 @@
 # Battle simulator research notes
 
+**Start here: [the plan](plan.md).** It states the goal, the settled scope decisions, the
+ordered work and the risks this approach accepts. It supersedes the earlier draft that lived
+outside the repository. Everything below is the verified research it rests on.
+
 Verified findings behind the battle simulator and team-build solver plan, produced by
 the `plan-reviewer` agent and checked against the pinned upstream checkouts under
 `pipeline/.upstream/` rather than against memory of vanilla Pokemon. Every claim is
