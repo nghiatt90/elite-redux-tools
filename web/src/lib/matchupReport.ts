@@ -25,6 +25,8 @@ import { calculateBattleStat, DEFAULT_STAT_STAGE } from '../engine/battleStat'
 import { idiv } from '../engine/fixed'
 import type { TypeChart } from '../engine/typeEffectiveness'
 import { bareType, toMoveData } from './moveData'
+import type { FormChange, FormIndex } from './formResolution'
+import { resolveForm } from './formResolution'
 import type { BattleConstants, FieldEffect, InverseBattle, Item, Move, Species, Trainer, TrainerMon } from './types'
 
 /**
@@ -35,7 +37,10 @@ import type { BattleConstants, FieldEffect, InverseBattle, Item, Move, Species, 
  */
 export const MATCHUP_REPORT_CAVEATS: string[] = [
   'Turn-one state only: no stat stages, status conditions, hazards, screens, or weather/terrain set mid-battle.',
-  'No Mega Evolution and no on-switch-in ("entry") abilities.',
+  "No Mega Evolution and no on-switch-in (\"entry\") abilities during the fight -- turn one is before either happens, so every " +
+    "stat, type and ability below is the opposing mon's BASE form. If it's holding a Mega Stone or Primal/Origin/Crowned trigger, " +
+    "its card below names the form it would become (lib/formResolution.ts) -- that fact alone, not that form's own stats, types, " +
+    'abilities or the damage they would do, which stay unmodelled here.',
   'No residual (end-of-turn) damage -- Leftovers, poison, sandstorm, etc.',
   'No accuracy -- every move is assumed to hit.',
   "No move priority beyond what's shown per move -- turn order for a specific move pair isn't resolved, only each side's raw Speed stat.",
@@ -72,6 +77,14 @@ export interface MatchupContext {
    * the one real inverse fight also happens to have Trick Room active. */
   fieldEffects: FieldEffect[]
   inverseBattles: InverseBattle[]
+  /** formResolution.ts's reverse (species, item) -> form lookup, built once by the
+   * caller over the full species list (same "caller builds the map" convention as
+   * speciesById/itemsById/movesById above) and reused per mon in buildMatchupReport
+   * below. Turn one is before any transformation actually happens (MATCHUP_REPORT_
+   * CAVEATS), so this is used ONLY to report what a held Mega Stone/Primal Orb would
+   * turn a mon into -- never to change that mon's own stats, types or abilities,
+   * which stay its base form's throughout this report. */
+  formIndex: FormIndex
 }
 
 /** Whether `trainerId` fights under a permanent Trick Room, per encounters.json's own
@@ -666,6 +679,17 @@ export interface MatchupMonReport {
   level: number
   speed: number
   maxHp: number
+  /** TrainerMon.item, verbatim -- "ITEM_NONE" for no item, otherwise a real ItemEnum
+   * id. Not resolved to a display name here, same convention as speciesId above (the
+   * view looks names up via GameDataContext). */
+  itemId: string
+  /** What `itemId` turns this mon into, per formResolution.ts -- null for an ordinary
+   * item (including ITEM_NONE) or a move-triggered mega (Rayquaza/Dragon Ascent) this
+   * report has no held-item state for anyway. This is REPORTED information only: it
+   * does not change speed/maxHp/yourMoves/itsMoves above, all of which are computed
+   * from the mon's BASE form throughout, since turn one is before any transformation
+   * happens (MATCHUP_REPORT_CAVEATS). */
+  transformsInto: FormChange | null
   /** Your moves landing on this mon -- maxRoll only, no AI-belief column (there is no
    * AI evaluating your side of the exchange). */
   yourMoves: MatchupMoveEntry[]
@@ -759,6 +783,8 @@ export function buildMatchupReport(input: MatchupReportInput): MatchupReport {
       level: enemyLevel,
       speed: battler.condition.speed,
       maxHp: battler.condition.maxHp,
+      itemId: mon.item,
+      transformsInto: resolveForm(ctx.formIndex, mon.species, mon.item),
       yourMoves: player.moves.map((move) => evaluateMoveEntry(move, player.battler, battler, field, ctx, false, null)),
       itsMoves: enemyMoves.map((move) => evaluateMoveEntry(move, battler, player.battler, field, ctx, true, playerItemHidden)),
     }

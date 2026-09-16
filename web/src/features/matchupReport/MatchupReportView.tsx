@@ -175,6 +175,33 @@ function ItsMovesTable({ entries }: { entries: MatchupMoveEntry[] }) {
   )
 }
 
+/** The held item, plus -- when it's a Mega Stone/Primal Orb/Origin Orb/Crowned Sword
+ * or Shield -- the form it would turn this mon into. Reported information only: per
+ * MATCHUP_REPORT_CAVEATS, turn one is before that transformation happens, so nothing
+ * about the transformed form (its stats, types, abilities, or the damage they'd do)
+ * is computed anywhere on this page -- see mon.transformsInto's own doc
+ * (lib/matchupReport.ts) for why this stays a bare name, not a second set of numbers. */
+function HeldItemLine({ mon }: { mon: MatchupMonReport }) {
+  const { itemsById, speciesById } = useGameData()
+  if (mon.itemId === 'ITEM_NONE') return null
+  const itemName = itemsById.get(mon.itemId)?.name ?? mon.itemId
+  if (!mon.transformsInto) {
+    return (
+      <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
+        Holding {itemName}
+      </p>
+    )
+  }
+  const form = speciesById.get(mon.transformsInto.formId)
+  const formName = form ? displayName(form, speciesById) : mon.transformsInto.formId
+  return (
+    <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
+      Holding {itemName} -- becomes <strong>{formName}</strong> once it transforms (not modelled above; see the scope note at the
+      top of this page).
+    </p>
+  )
+}
+
 function MonSection({ mon, playerSpeed }: { mon: MatchupMonReport; playerSpeed: number }) {
   const { speciesById } = useGameData()
   const species = speciesById.get(mon.speciesId)
@@ -198,6 +225,7 @@ function MonSection({ mon, playerSpeed }: { mon: MatchupMonReport; playerSpeed: 
           Lv{mon.level} · Spe {mon.speed} ({speedComparison}) · {mon.maxHp} HP
         </span>
       </div>
+      <HeldItemLine mon={mon} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <YourMovesTable entries={mon.yourMoves} />
         <ItsMovesTable entries={mon.itsMoves} />

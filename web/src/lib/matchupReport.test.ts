@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { MoveBehaviors } from '../engine/basePower'
+import { buildFormIndex } from './formResolution'
 import {
   buildEnemyBattlerState,
   buildMatchupReport,
@@ -52,6 +53,7 @@ const ctx: MatchupContext = {
   moveBehaviors: moveBehaviorsFile.behaviors as unknown as MoveBehaviors,
   fieldEffects: encounters.fieldEffects,
   inverseBattles: encounters.inverseBattles,
+  formIndex: buildFormIndex(species),
 }
 
 const sawyer = trainers.find((t) => t.id === 'TRAINER_SAWYER_1')!
@@ -663,6 +665,62 @@ describe('buildMatchupReport', () => {
       ctx,
     })
     expect(report.isForcedDouble).toBe(true)
+  })
+})
+
+// Battle-sim plan step 2 (docs/battle-sim/plan.md) -- TRAINER_ARCHIE's Elite party is
+// one of the real 70 mega/primal-holding slots in docs/battle-sim/boss-fight-coverage.md
+// (Kyogre + Blue Orb -> Kyogre Primal), so this exercises the real reverse lookup
+// through buildMatchupReport end to end, not a synthetic fixture.
+describe('MatchupMonReport.itemId / transformsInto', () => {
+  const archie = trainers.find((t) => t.id === 'TRAINER_ARCHIE')!
+  const playerBattler = buildEnemyBattlerState(
+    trainerMon({ species: 'SPECIES_SNORLAX', item: 'ITEM_CHILAN_BERRY', ability: 'ABILITY_THICK_FAT' }),
+    100,
+    ctx,
+  )
+  const playerMoves = movesForMon(trainerMon({ moves: ['MOVE_BODY_SLAM', 'MOVE_NONE', 'MOVE_NONE', 'MOVE_NONE'] }), movesById)
+
+  it('reports the held item verbatim and the form a real Primal Orb resolves to', () => {
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: archie,
+      tier: 'elite',
+      playerHighestLevel: 100,
+      ctx,
+    })
+    const kyogre = report.mons.find((m) => m.speciesId === 'SPECIES_KYOGRE')!
+    expect(kyogre.itemId).toBe('ITEM_BLUE_ORB')
+    expect(kyogre.transformsInto).toEqual({ formId: 'SPECIES_KYOGRE_PRIMAL', kind: 'primal' })
+
+    // The same party also carries Garchomp Redux + Garchompite R -> Garchomp Mega
+    // Redux, whose base Speed genuinely differs from its mega's (110 vs. 140,
+    // re-measured directly against species.json) -- unlike Kyogre/Kyogre Primal,
+    // which happen to share the same base Speed and so can't tell a base-form
+    // computation apart from a transformed one. This is the real regression guard for
+    // "changes no number": the reported Speed must match a battler built from
+    // Garchomp Redux's OWN stats, not one built as if it already were the mega,
+    // since turn one is before the transformation happens (MATCHUP_REPORT_CAVEATS).
+    const garchompMon = archie.parties.elite.find((m) => m.species === 'SPECIES_GARCHOMP_REDUX')!
+    const garchomp = report.mons.find((m) => m.speciesId === 'SPECIES_GARCHOMP_REDUX')!
+    expect(garchomp.transformsInto).toEqual({ formId: 'SPECIES_GARCHOMP_MEGA_REDUX', kind: 'mega' })
+    const baseFormBattler = buildEnemyBattlerState(garchompMon, 100, ctx)
+    const megaFormBattler = buildEnemyBattlerState({ ...garchompMon, species: 'SPECIES_GARCHOMP_MEGA_REDUX' }, 100, ctx)
+    expect(baseFormBattler.condition.speed).not.toBe(megaFormBattler.condition.speed)
+    expect(garchomp.speed).toBe(baseFormBattler.condition.speed)
+  })
+
+  it('reports null for an ordinary held item, and for ITEM_NONE', () => {
+    const report = buildMatchupReport({
+      player: { speciesId: 'SPECIES_SNORLAX', battler: playerBattler, moves: playerMoves },
+      trainer: sawyer,
+      tier: 'ace',
+      playerHighestLevel: 100,
+      ctx,
+    })
+    for (const mon of report.mons) {
+      if (mon.transformsInto !== null) throw new Error(`unexpected transform for ${mon.speciesId}`)
+    }
   })
 })
 

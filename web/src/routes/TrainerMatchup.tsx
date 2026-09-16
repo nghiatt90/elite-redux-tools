@@ -5,6 +5,7 @@ import MatchupReportView from '../features/matchupReport/MatchupReportView'
 import TrainerPicker from '../features/matchupReport/TrainerPicker'
 import { useMatchupReportData } from '../features/matchupReport/useMatchupReportData'
 import { buildMatchupReport, type TrainerTier } from '../lib/matchupReport'
+import { buildFormIndex } from '../lib/formResolution'
 import { useGameData } from '../lib/GameDataContext'
 import type { Trainer } from '../lib/types'
 import '../engine/abilities/impl/index' // populates the ability registry
@@ -46,6 +47,7 @@ export default function TrainerMatchup() {
       natures: reportData.data.natures,
       fieldEffects: reportData.data.encounters.fieldEffects,
       inverseBattles: reportData.data.encounters.inverseBattles,
+      formIndex: buildFormIndex(gameData.species),
     }
     const battler = buildBattlerState(playerConfig, ctx)
     const moves = playerConfig.moveIds.filter((id): id is string => id !== null).map((id) => toMoveData(ctx.movesById.get(id)!))
