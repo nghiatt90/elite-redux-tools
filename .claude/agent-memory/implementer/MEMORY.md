@@ -7,3 +7,4 @@
 - [Unmodelled base-power sweep method](reference_unmodelled-base-power-sweep-method.md) — power<=1 proxy DISPROVED by Squall Hammer; read scripts directly; 5 vs 13 are different predicates, not disagreeing counts
 - [Map-script battle macros and engine introspection](reference_map-script-battle-macros-and-engine-introspection.md) — `trainerbattle*` misses starttagbattle/multi_2_vs_2 (and all of gym 8); use jiti to load the real ability registry, not grep
 - [Rival starter-suffix semantics](reference_rival-starter-suffix-semantics.md) — `TRAINER_MAY_*_TORCHIC` means the PLAYER chose Torchic, except the Meteor Falls partner ids, which invert it; settled set is ROUTE_103/RUSTBORO/ROUTE_110/ROUTE_119, no Lilycove
+- [Mega/primal form schema](reference_mega-primal-form-schema.md) — the FORM's own species.json entry (not the base species) carries `{from, item|move}`; only Rayquaza-Mega is move-triggered; TRAINER_DRAKE's base Rayquaza is a trap for a naive exclusion test
