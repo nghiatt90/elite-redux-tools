@@ -1,0 +1,87 @@
+// The simulator's view of the committed data snapshot.
+//
+// A PURE INTERFACE OF LOOKUPS. Nothing in `engine/` reads a file, parses JSON,
+// knows a path or imports a loader, and that is not an accident of the current
+// implementation -- it is the layering rule this module exists to protect.
+//
+// ==========================================================================
+// IF YOU ARE HERE TO ADD A LOADER, DON'T.
+//
+// The pressure is real and will recur: it is inconvenient that every caller has
+// to assemble one of these, and adding `loadSimDataContext()` that reads
+// data/<version>/*.json would remove that inconvenience in about fifteen lines.
+// It would also:
+//
+//   - make `engine/` depend on a filesystem, which kills its use from a Web
+//     Worker and from the browser build, where there is no filesystem at all;
+//   - hard-code a snapshot version inside the engine, so the engine would need
+//     a change to read a repinned snapshot;
+//   - invert the layering. `lib/moveData.ts` already imports FROM engine. An
+//     engine-side loader would make engine import lib (or duplicate it), and
+//     `engine/` currently imports nothing from `lib/` or `features/` -- checked,
+//     not assumed.
+//
+// Callers own the loading. Tests build a context from the committed snapshot
+// directly, the way `features/matchupReport/composition.test.ts` already does.
+// The solver will do the same. If assembling one is too tedious, put a helper in
+// the CALLER's layer, not here.
+// ==========================================================================
+
+import type { BaseStats } from '../types'
+
+/** The species fields the bridge needs. A subset of species.json's entry, named
+ * here so the engine does not depend on `lib/types.ts`'s full `Species` shape
+ * (which carries learnsets, descriptions and sprite metadata the engine has no
+ * use for). */
+export interface SimSpeciesData {
+  id: string
+  baseStats: BaseStats
+  types: string[]
+  abilities: (string | null)[]
+  innates: (string | null)[]
+  /** Hectograms. ConditionBattlerContext.weight. */
+  weight: number
+  /** species.json's `heads` (F_TWO_HEADED / F_THREE_HEADED, pokemon.h:209-210),
+   * default 1 -- Multi Headed's onParentalBond trigger. */
+  heads?: number
+  /** Non-empty when this species IS a Mega/Primal form -- the reverse lookup
+   * ConditionBattlerContext.isMegaEvolved reads. */
+  megas?: unknown[]
+  primals?: unknown[]
+  /** GET_BASE_SPECIES_ID's source. */
+  formOf?: string | null
+  /** Eviolite eligibility (canEvolveStrict). */
+  evolutions?: unknown[]
+}
+
+/** The item fields the bridge needs. */
+export interface SimItemData {
+  id: string
+  resolvedHoldEffect: string | null
+  holdEffectStrength: number | null
+  holdEffectType: string | null
+  naturalGift: { power: number; type: string } | null
+}
+
+/** The move fields the bridge needs beyond what a TurnOrderMoveView carries. */
+export interface SimMoveData {
+  id: string
+  power: number
+  type: string | null
+  split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  effect: string | null
+  priority?: number
+  flags: Record<string, true>
+}
+
+/**
+ * Lookups the bridge performs. Every method may return undefined; the bridge
+ * treats a miss as a GAP rather than substituting a default, so a context
+ * missing an entry produces a visibly incomplete answer instead of a plausible
+ * one.
+ */
+export interface SimDataContext {
+  species(id: string): SimSpeciesData | undefined
+  item(id: string): SimItemData | undefined
+  move(id: string): SimMoveData | undefined
+}
