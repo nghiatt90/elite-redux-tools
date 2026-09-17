@@ -75,9 +75,43 @@ describe('features/matchupReport composition: scenario.ts -> lib/matchupReport.t
       expect(mon.itsMoves.length).toBeGreaterThan(0)
     }
 
-    // Dragon Claw into the Rock/Fairy Carbink is a real chart immunity (Fairy blocks
-    // Dragon) -- a sanity check that the composed pipeline reaches the real type
-    // chart, not a stub.
+    // Dragon Claw into the Rock/Fairy Carbink is a chart immunity (Fairy blocks
+    // Dragon) that this Garchomp's own ability then REMOVES.
+    //
+    // This assertion used to expect `true`, and passed only because the ability
+    // registry was empty in tests: nothing outside the two React routes imported
+    // impl/index, so every hook was inert here while the app ran with them
+    // active. The test was therefore not exercising what shipped. Now that
+    // dispatchCalc populates the registry itself, the real behaviour shows:
+    // defaultBattlerConfig takes species.abilities[0], which for Garchomp is
+    // ABILITY_OVERWHELM, whose whole hook is "Dragon move, Fairy defending type,
+    // modifier currently 0 -> set it to 1.0x" (src/abilities.cc, onTypeEffectiveness,
+    // wired at dispatchCalc.ts:305-307). So the immunity is genuinely gone.
+    const carbink = report.mons.find((m) => m.speciesId === 'SPECIES_CARBINK')!
+    const dragonClaw = carbink.yourMoves.find((m) => m.moveId === 'MOVE_DRAGON_CLAW')!
+    expect(dragonClaw.isImmune).toBe(false)
+  })
+
+  it('still reports the Dragon-into-Fairy chart immunity for an attacker WITHOUT Overwhelm', () => {
+    // The other half of the assertion above, and the one that actually checks the
+    // pipeline reaches the real type chart rather than a stub: strip the ability
+    // that overrides the immunity and it comes back. Without this pair, the
+    // `false` above is indistinguishable from the chart never being consulted.
+    const playerConfig = defaultBattlerConfig('SPECIES_GARCHOMP')
+    playerConfig.moveIds = ['MOVE_EARTHQUAKE', 'MOVE_DRAGON_CLAW', null, null]
+    const battler = buildBattlerState(playerConfig, ctx)
+    battler.abilitySlots = { ability: null, innates: [null, null, null] }
+    const playerMoves = playerConfig.moveIds.filter((id): id is string => id !== null).map((id) => toMoveData(ctx.movesById.get(id)!))
+
+    const trainer = trainers.find((t) => t.id === 'TRAINER_SAWYER_1')!
+    const report = buildMatchupReport({
+      player: { speciesId: playerConfig.speciesId, battler, moves: playerMoves },
+      trainer,
+      tier: 'ace',
+      playerHighestLevel: 100,
+      ctx,
+    })
+
     const carbink = report.mons.find((m) => m.speciesId === 'SPECIES_CARBINK')!
     const dragonClaw = carbink.yourMoves.find((m) => m.moveId === 'MOVE_DRAGON_CLAW')!
     expect(dragonClaw.isImmune).toBe(true)

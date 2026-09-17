@@ -30,8 +30,17 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
   },
   {
     id: 'ABILITY_PERFECTIONIST',
-    src: 'src/abilities.cc:3806',
+    // Was cited as :3806, which is the tail of a DIFFERENT ability's
+    // onChooseDefensiveStat. `Impl<ABILITY_PERFECTIONIST>` opens at :3833, which
+    // is also what abilityHooks.json's own sourceLine says. Corrected while
+    // adding the onPriority half; the onCrit port itself was right.
+    src: 'src/abilities.cc:3833',
     onCrit: (ctx) => (ctx.basePower > 0 && ctx.basePower <= 50 ? 1 : 0),
+    // The onPriority half, :3834-3838. Note the thresholds DIFFER between the two
+    // hooks on the same ability: priority needs power <= 25, the crit bonus
+    // allows power <= 50. Both also require nonzero power, which excludes status
+    // moves -- so this never stacks with Prankster on the same move.
+    onPriority: (ctx) => (ctx.movePower > 0 && ctx.movePower <= 25 ? 1 : 0),
   },
   {
     // IsIronFistBoosted(battler, move) == DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH),

@@ -67,6 +67,7 @@
 
 import type { BattleState, BattlerState } from './state'
 import { applyExtraStatLevels, applyStatStage } from '../stats'
+import { computeAbilityPriorityBonus } from '../abilities/dispatchPriority'
 import {
   B_SIDE_PLAYER,
   DEFAULT_STAT_STAGE,
@@ -105,6 +106,17 @@ export interface TurnOrderMoveView {
   effect: string | null
   /** `IS_MOVE_STATUS(move)` -- split === STATUS. */
   isStatus: boolean
+  /** `GetTypeBeforeUsingMove(move, battler)` -- the move's RESOLVED type. Read by
+   * the Gale Wings ability family through onPriority. */
+  resolvedType: string
+  /** `gBattleMoves[move].power` -- read by Perfectionist through onPriority. */
+  power: number
+  /** `gBattleMoves[move].flags` -- moves.json's own shape. Read by the onPriority
+   * dispatch (Blitz Boxer's punch check). */
+  flags: Record<string, true>
+  /** GetBattleMoveSplit(move). Needed alongside `flags` because
+   * DoesMoveMatchFlag's ability-granted half is split-sensitive. */
+  split: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   /** `gBattleMoves[move].flags & FLAG_STRONG_JAW_BOOST` -- pairs with
    * STATUS4_COILED at battle_main.c:4274-4276. */
   hasStrongJawBoostFlag: boolean
@@ -123,22 +135,6 @@ export interface TurnOrderMoveView {
    * holder has Mycelium Might, the move is status, and it is not self-targeting.
    * Feeds goesLastNegation, NOT priority. */
   myceliumMightAffected: boolean
-  /** The summed `ON_ABILITY(... onPriority ...)` contribution at
-   * battle_main.c:4264. **Not ported yet** -- see this module's own note and the
-   * batch report. Two populations, both measured, because they size different
-   * things and neither substitutes for the other:
-   *   - **19 of the 1016** abilities in abilityHooks.json declare an onPriority
-   *     hook at all. That is what a new registry hook type has to cover.
-   *   - **8 of those 19** are fielded by the 40 boss fights AND absent from the
-   *     registry -- a strict subset. That is the work the solver's target set
-   *     actually needs. (9 are fielded; Perfectionist is already present for a
-   *     damage hook, so only 8 are new entries. 9 and 8 are different
-   *     predicates, not disagreeing counts.)
-   * The engine's ability registry has no onPriority hook type to hold either
-   * group, and several of the bodies need move fields (accuracy is absent from
-   * MoveData) and helper predicates the engine does not expose. Supply 0 to
-   * model "no priority abilities". */
-  abilityPriorityBonus: number
 }
 
 /** One battler's chosen action for the turn.
@@ -192,7 +188,7 @@ export interface TurnOrderContext {
   holdEffectParamOf?(battlerId: number): number
   /** The summed `ON_ABILITY(... onStat ... STAT_SPEED ...)` contribution from
    * GetSpeedFromAbilities' loop over every battler (battle_main.c:4170-4176).
-   * **Not ported yet**, same reason as abilityPriorityBonus: OnStatContext needs
+   * **Not ported yet** (unlike onPriority, which batch AS wired in): OnStatContext needs
    * a sim-state-to-engine-context bridge that does not exist. Return `speed`
    * unchanged to model "no speed abilities". */
   applySpeedAbilities(battlerId: number, moveId: string | null, speed: number): number
@@ -367,8 +363,24 @@ export function getMovePriority(state: BattleState, battlerId: number, move: Tur
   // rather than forcing it.
   if (state.field.timers.quashTimer) return Math.min(-4, priority)
 
-  // :4264 -- the ON_ABILITY sum. Not ported; see TurnOrderMoveView.
-  priority += move.abilityPriorityBonus
+  // :4264 -- the ON_ABILITY sum, computed from the holder's own ability slots
+  // rather than supplied. It is deliberately NOT a field on TurnOrderContext:
+  // that interface has a neutral constant tests reach for, and routing abilities
+  // through it would make "no priority abilities" the easy default again.
+  priority += computeAbilityPriorityBonus({
+    battlerId: String(battlerId),
+    holderSlots: battler.mon.abilities,
+    moveId: move.id,
+    moveType: move.resolvedType,
+    movePower: move.power,
+    movePriority: move.priority,
+    moveSplit: move.split,
+    moveFlags: move.flags,
+    holderHp: battler.mon.hp,
+    holderMaxHp: battler.mon.maxHp,
+    targetHp: targetId === null ? null : (state.battlers[targetId]?.mon.hp ?? null),
+    targetMaxHp: targetId === null ? null : (state.battlers[targetId]?.mon.maxHp ?? null),
+  })
 
   if (move.effect === 'EFFECT_GRASSY_GLIDE' && move.isGrassyTerrainAffected) priority++
 

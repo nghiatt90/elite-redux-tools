@@ -12,6 +12,18 @@ import type { AbilitySlots } from './dispatch'
 import { forEachAbility, battlerHasAbility } from './dispatch'
 import { lookupAbility } from './registry'
 import { isUnmodelled } from './types'
+// Populates the registry. Until this line, the ONLY things that did were the two
+// React routes (DamageCalculator.tsx, TrainerMatchup.tsx), each carrying their
+// own side-effect import -- which made every ability in the damage path
+// conditional on a page having been loaded first. lib/matchupReport.ts is
+// headless by design and sits behind this module; it worked in the app solely
+// because its route happened to import the registry, and a headless caller got
+// an empty registry, zero ability contributions, no error and no failing test.
+// The routes keep their imports (harmless, and they document the dependency at
+// the point of use); this makes the module self-sufficient so the guarantee does
+// not depend on who reached it. No cycle: no impl/*.ts imports dispatchCalc or
+// dispatch, verified before adding this.
+import './impl/index'
 import type {
   AbilityEntry,
   DefensiveMultiplierContext,

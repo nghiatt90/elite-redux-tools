@@ -417,7 +417,17 @@ describe('ability registry coverage gate', () => {
     //             Remaining 2 (Deadly Precision, Victory Bomb) are permanently
     //             unmodelled by design -- see OnMoldBreaker's and OnMoveTypeContext's
     //             own doc comments for why.
-    expect(unmodelledCount).toBeLessThanOrEqual(2)
+    //     -> 0   (tightened from <= 2 to 0. The bound was left at 2 after batch
+    //             AR brought the real count down to 0, which meant two abilities
+    //             could silently lose their ports with the gate still green --
+    //             a gate that cannot come out differently is not a gate. The
+    //             remaining 2 named above (Deadly Precision, Victory Bomb) are
+    //             not stubs: they are documented as permanently unmodelled on
+    //             OnMoldBreaker's and OnMoveTypeContext's own doc comments and
+    //             carry no registry entry in the damage-relevant population.
+    //             Found while a non-damage batch quoted this gate as evidence;
+    //             pre-existing slack, fixed at the point someone looked.
+    expect(unmodelledCount).toBe(0)
     console.log(`ability coverage: ${damageRelevantIds.length - unmodelledCount}/${damageRelevantIds.length} damage-relevant abilities ported`)
   })
 })

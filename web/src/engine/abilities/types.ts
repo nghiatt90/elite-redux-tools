@@ -305,6 +305,67 @@ export interface OnRecoilContext {
   moveType: string
 }
 
+/** ON_PRIORITY's own parameter list, src/abilities.cc:86:
+ * `opt u8 battler, opt u8 target, opt MoveEnum move`. Unlike every other hook in
+ * this file, onPriority is NOT a damage hook -- it is read once per battler per
+ * turn by GetMovePriority (src/battle_main.c:4264) to order the turn, and it
+ * never touches a damage number.
+ *
+ * It lives in this registry anyway rather than in a parallel one. Three of the
+ * 19 abilities that declare it (Flame Bubble, Iron Barrage, Perfectionist) are
+ * damage-relevant and already have entries here, and `registerAbilities` throws
+ * on a duplicate id precisely so exactly one batch owns an ability -- a second
+ * registry would put those three in both and make that guarantee meaningless.
+ *
+ * The coverage gate is unaffected, for a structural reason rather than an
+ * observed one: it derives its population from abilityHooks.json's
+ * `damageRelevant` flag and never enumerates the registry, none of the added
+ * entries is damage-relevant, none was previously a stub, and the one
+ * damage-relevant ability this touched already had a real entry -- so the
+ * population and the stub count are both unreachable from here. (The gate's
+ * reported number is NOT evidence of this: it comes from committed hook data a
+ * registry change cannot move, so it reads the same either way.) A SEPARATE
+ * gate covers the priority family, in priorityCoverage.test.ts. */
+export interface OnPriorityContext {
+  /** The ability holder, whose move's priority is being computed. */
+  battlerId: string
+  /** `GetTypeBeforeUsingMove(move, battler)` -- the move's RESOLVED type, not its
+   * declared one. The Gale Wings family compares against it. */
+  moveType: string
+  moveId: string
+  /** `gBattleMoves[move].power` -- Perfectionist's whole condition. */
+  movePower: number
+  /** `gBattleMoves[move].priority`, the DECLARED value -- Temporal Rupture
+   * returns its negation to cancel it. */
+  movePriority: number
+  /** `IS_MOVE_STATUS(move)` -- Prankster's whole condition. */
+  isStatus: boolean
+  moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+  /** `BATTLER_MAX_HP(battler)` (include/battle.h:749) -- hp === maxHP. The Gale
+   * Wings family and Blitz Boxer all gate on the HOLDER being undamaged. */
+  holderAtMaxHp: boolean
+  /** `IsIronFistBoosted(battler, move)` (src/battle_util.c:9375), precomputed by
+   * the dispatcher because the hook body needs the HOLDER's own ability slots to
+   * resolve it (an ability can grant the punch flag) and ctx has no other way to
+   * see them -- the same reason computeOnStatModifier precomputes
+   * statOwnerHasEternalFlower. Blitz Boxer's first CHECK. */
+  isIronFistBoosted: boolean
+  /** The move's target's current and maximum HP. Opportunist compares
+   * `hp <= maxHP / 2` with the C's INTEGER division, so these are passed raw
+   * rather than as a ratio. null when no target is resolved, which fails
+   * Opportunist's CHECK the same way a healthy target would. */
+  targetHp: number | null
+  targetMaxHp: number | null
+}
+
+/** Returns the priority DELTA this ability contributes, which GetMovePriority
+ * adds (src/battle_main.c:4264). 0 means "no contribution" -- that is what the
+ * C's own `CHECK(...)` macro produces on failure, since it expands to
+ * `if (!(effect)) return __EnumHack();` (include/type_utils.hh:63) and an
+ * int-returning lambda's __EnumHack() is 0. */
+export type OnPriority = (ctx: OnPriorityContext) => number
+
 export interface OnMoldBreakerContext {
   battlerId: string
   moveId: string
@@ -559,6 +620,8 @@ export interface AbilityImpl {
   onSwapSplit?: OnSwapSplit
   onMoveType?: OnMoveType
   onRecoil?: OnRecoil
+  /** Turn-order, not damage -- see OnPriorityContext for why it lives here. */
+  onPriority?: OnPriority
   onMoldBreaker?: OnMoldBreaker
   onParentalBond?: OnParentalBond
   onAbsorb?: OnAbsorb

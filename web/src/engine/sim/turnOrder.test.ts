@@ -88,7 +88,10 @@ function move(overrides: Partial<TurnOrderMoveView> = {}): TurnOrderMoveView {
     naturalGiftPriority: 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
-    abilityPriorityBonus: 0,
+    resolvedType: 'NORMAL',
+    power: 40,
+    flags: {},
+    split: 'PHYSICAL',
     ...overrides,
   }
 }
@@ -100,6 +103,13 @@ function useMove(m: TurnOrderMoveView = move(), target: number | null = null): C
 const ctx = NEUTRAL_TURN_ORDER_CONTEXT
 function withCtx(overrides: Partial<TurnOrderContext>): TurnOrderContext {
   return { ...NEUTRAL_TURN_ORDER_CONTEXT, ...overrides }
+}
+
+/** Gives a battler an ability. Deliberately NOT routed through
+ * TurnOrderContext: priority abilities are read off the battler's own slots, so
+ * the neutral context cannot supply (or suppress) them. */
+function withAbility(state: BattleState, battlerId: number, abilityId: string): void {
+  state.battlers[battlerId]!.mon.abilities = { ability: abilityId, innates: [null, null, null] }
 }
 
 describe('getMoveSpeed packing', () => {
@@ -259,7 +269,10 @@ describe('getMovePriority', () => {
   it('floors at -4 under Quash and skips every later modifier', () => {
     const state = battle([100, 100])
     state.field.timers.quashTimer = 1
-    expect(getMovePriority(state, 0, move({ priority: 3, abilityPriorityBonus: 5 }), null)).toBe(-4)
+    // Prankster would add +1 to a status move; the quash return at :4262 is
+    // BEFORE the ON_ABILITY line at :4264, so it never runs.
+    withAbility(state, 0, 'ABILITY_PRANKSTER')
+    expect(getMovePriority(state, 0, move({ priority: 3, isStatus: true, split: 'STATUS' }), null)).toBe(-4)
     // min(-4, priority) keeps an already-lower value.
     expect(getMovePriority(state, 0, move({ priority: -6 }), null)).toBe(-6)
   })
@@ -298,14 +311,20 @@ describe('getMovePriority', () => {
     expect(getMovePriority(state, 0, move({ priority: 1 }), null)).toBe(2)
     // Negative: subtract the declared priority, cancelling it.
     expect(getMovePriority(state, 0, move({ priority: -3 }), null)).toBe(0)
-    // With another modifier on top, the negative branch still subtracts -3 from
-    // the running total rather than from the declared value.
-    expect(getMovePriority(state, 0, move({ priority: -3, abilityPriorityBonus: 2 }), null)).toBe(2)
+    // With an ability bonus on top, the negative branch still subtracts the
+    // DECLARED -3 from the running total rather than from the declared value:
+    // -3, +1 from Prankster, then -(-3) = +1.
+    withAbility(state, 0, 'ABILITY_PRANKSTER')
+    expect(getMovePriority(state, 0, move({ priority: -3, isStatus: true, split: 'STATUS' }), null)).toBe(1)
   })
 
-  it('applies the ability bonus before the move-effect modifiers', () => {
+  it('applies the ability bonus before the move-effect modifiers, and they stack', () => {
+    // :4264 (ON_ABILITY) runs before :4266 (Grassy Glide). Opportunist supplies
+    // the ability half off the TARGET's HP, Grassy Glide the move half.
     const state = battle([100, 100])
-    expect(getMovePriority(state, 0, move({ abilityPriorityBonus: 1, effect: 'EFFECT_GRASSY_GLIDE', isGrassyTerrainAffected: true }), null)).toBe(2)
+    withAbility(state, 0, 'ABILITY_OPPORTUNIST')
+    state.battlers[1]!.mon.hp = 50
+    expect(getMovePriority(state, 0, move({ effect: 'EFFECT_GRASSY_GLIDE', isGrassyTerrainAffected: true }), 1)).toBe(2)
   })
 })
 
