@@ -396,7 +396,7 @@ describe('getBattlerTotalSpeedStat', () => {
 
   it('doubles for Tailwind and does not also apply the Flying champion bonus', () => {
     const state = battle([100, 100])
-    const flying = withCtx({ monotypeChampFlying: true })
+    const flying = withCtx({ monotypeChampType: 'FLYING' })
     state.sides[1].statuses = setFlag(state.sides[1].statuses, SIDE_STATUS_TAILWIND)
     // Opponent side with Tailwind: doubled once by the if, not again by the else.
     expect(getBattlerTotalSpeedStat(state, 1, 0, null, flying, RATIOS)).toBe(200)
@@ -404,7 +404,7 @@ describe('getBattlerTotalSpeedStat', () => {
 
   it('gives the Flying champion bonus to the opponent side only', () => {
     const state = battle([100, 100])
-    const flying = withCtx({ monotypeChampFlying: true })
+    const flying = withCtx({ monotypeChampType: 'FLYING' })
     expect(getBattlerTotalSpeedStat(state, 0, 0, null, flying, RATIOS)).toBe(100)
     expect(getBattlerTotalSpeedStat(state, 1, 0, null, flying, RATIOS)).toBe(200)
   })

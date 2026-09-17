@@ -58,12 +58,14 @@
 //     (battle_main.c:4170-4176), which this port delegates to
 //     ctx.applySpeedAbilities; when that seam is filled the loop comes back here
 //     and will need the state.
-//   - Nothing ties ctx.isTrickRoomActive to ctx.monotypeChampFlying. A Flying
-//     Monotype Champion suppresses Trick Room outright (battle_util.c:8672), so
-//     both true at once is a state the game cannot reach, and no invariant
-//     rejects it. Deliberate: the same caller-consistency contract
-//     engine/types.ts already accepts for isInverseRoomActive. Worth an assert
-//     if these two ever get more than one caller.
+//   - ctx.isTrickRoomActive and ctx.monotypeChampType can still disagree: a
+//     FLYING champion suppresses Trick Room outright (battle_util.c:8672), so
+//     both set at once is unreachable in the game and no invariant rejects it
+//     here. Narrower than it was -- monotypeChampType replaced a separate
+//     `monotypeChampFlying` boolean when the grounding port needed the GROUND
+//     case, which removed the worse hazard of two booleans for one underlying
+//     value. What remains is the same caller-consistency contract
+//     engine/types.ts already accepts for isInverseRoomActive.
 
 import type { BattleState, BattlerState } from './state'
 import { applyExtraStatLevels, applyStatStage } from '../stats'
@@ -175,11 +177,17 @@ export interface TurnOrderContext {
    * fact because Clueless-on-field and the champion type are not in the state --
    * the same line this project drew for Inverse and Wonder Room. */
   isTrickRoomActive: boolean
-  /** `getMonotypeChampType() == TYPE_FLYING` -- doubles the OPPONENT side's speed
-   * at battle_main.c:4205 when that side has no Tailwind. A separate fact from
-   * isTrickRoomActive even though the same champion type feeds both; the caller
-   * keeps them consistent. */
-  monotypeChampFlying: boolean
+  /** `getMonotypeChampType()` -- a bare type name, or null when no Monotype
+   * Champion is active.
+   *
+   * Was a `monotypeChampFlying` boolean. Generalised because the grounding port
+   * needs the GROUND case too (battle_util.c:6656), and two independent booleans
+   * for one underlying value is a consistency hazard: nothing would have
+   * rejected flying-and-ground-at-once. FLYING doubles the OPPONENT side's speed
+   * at battle_main.c:4205 when that side has no Tailwind, and also suppresses
+   * Trick Room (battle_util.c:8672) -- which is why `isTrickRoomActive` below
+   * stays the caller's to keep consistent with this. */
+  monotypeChampType: string | null
   /** `GetBattlerHoldEffect(battler, TRUE)` -- the caller resolves items to hold
    * effects. Returns a bare HOLD_EFFECT_* name, or null. */
   holdEffectOf(battlerId: number): string | null
@@ -235,7 +243,7 @@ export interface TurnOrderContext {
  * isBattlerGrounded doc for the rule. */
 export const NEUTRAL_TURN_ORDER_CONTEXT: TurnOrderContext = {
   isTrickRoomActive: false,
-  monotypeChampFlying: false,
+  monotypeChampType: null,
   holdEffectOf: () => null,
   applySpeedAbilities: (_battlerId, _moveId, speed) => speed,
   hasQuickFeet: () => false,
@@ -309,7 +317,7 @@ export function getBattlerTotalSpeedStat(
     // :4203-4206 -- Tailwind doubles; failing that, a Flying Monotype Champion
     // doubles the OPPONENT side only. else-if, so they never stack.
     if (hasFlag(state.sides[battlerSide(battlerId)].statuses, SIDE_STATUS_TAILWIND)) speed *= 2
-    else if (battlerSide(battlerId) !== B_SIDE_PLAYER && ctx.monotypeChampFlying) speed *= 2
+    else if (battlerSide(battlerId) !== B_SIDE_PLAYER && ctx.monotypeChampType === 'FLYING') speed *= 2
 
     // :4208 -- Swamp requires BOTH the timer and IsBattlerGrounded(battler);
     // gating on the timer alone silently slows Flying-types.
