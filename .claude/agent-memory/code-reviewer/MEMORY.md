@@ -1,0 +1,16 @@
+- [Textproto vs codegen divergence](project_textproto-vs-codegen-divergence.md) — emitting the textproto faithfully can still misstate what the ROM does; read the Kotlin generator.
+- [Verify cited numbers and corpus claims](feedback_verify-cited-numbers-and-corpus-claims.md) — re-measure every count and "holds across the corpus" claim; several were wrong.
+- [Encounters guard-field semantics](project_encounters-guard-field-semantics.md) — settled else-style corpus counts, plus the settled FLAG_SYS_INVERSE_BATTLE census (one set, seven clears).
+- [CalculateStat line map and the speed blend](project_calculatestat-line-map-and-speed-blend.md) — settled 7105-7217 line map; the same-stat skip drops the unmodelled STAT_SPEED branch for 6 species.
+- [React-layer review gates](project_react-layer-review-gates.md) — build skips lint and there is no DOM test env, so run oxlint by hand or hook-order crashes ship.
+- [ER data breaks React list keys](project_er-data-breaks-react-list-keys.md) — never key on species/move ids; trainer `id` IS unique (932/932) but name+class collides for 487.
+- [Trick Room and forced-double facts](project_trick-room-and-forced-double-facts.md) — TR never touches damage; forced doubles always double; Double Battle Mode option; 78/74 counts.
+- [Battle-script damage sweep](project_battle-script-damage-sweep.md) — scripts ARE fetched; Squall Hammer/Fetch/Airborne Slam deal no damage; power is not a proxy.
+- [Windows npm and shell verification](project_windows-npm-and-shell-verification.md) — npm scripts run through cmd.exe; use `npm.cmd` from PowerShell or a build check is a false failure.
+- [Turn-order accessor direction](project_turn-order-accessor-direction.md) — priority and speed both come from GetChosenMove; GetMoveToBeUsed only picks the target.
+- [Turn-order line map](project_turn-order-line-map.md) — settled battle_main.c:4160-4566 map, SpeedValue bit layout and the source bitfield widths.
+- [Gate evidence and ceilings](project_gate-evidence-and-ceilings.md) — a gate's headline number often can't move; check every one-directional bound against its measured value.
+- [Registry population footgun](project_registry-population-footgun.md) — CLOSED in d9bd93b; both dispatchers import impl/index. Re-grep the current tree before ever raising it.
+- [isGrounded is a baseline, not an answer](project_isgrounded-is-a-baseline-not-an-answer.md) — calculate.ts re-applies Levitate/Gravity on top; check scenario fields against their doc, not their name.
+- [Gap versus value: the battle-start test](project_gap-versus-value-battle-start-test.md) — "can a real battle-start source set this?" is the project standard; statStages and moveSlotPp are gaps.
+- [Derived authority is not authority](feedback_derived-authority-is-not-authority.md) — self-referential tests and copied citations: ask whether a check hit the source or something that had.

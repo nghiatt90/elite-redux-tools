@@ -1,0 +1,5 @@
+- [ER level asymmetries](er-level-asymmetries.md) — party level is not neutral; innate gating, level caps and EV dilution all penalise the player at low level.
+- [ER AI score-function state deps](er-ai-score-function-state-deps.md) — measured branch/RNG dependence of the five live AI score functions; why a damaging-moves-only turn loop is not drivable.
+- [ER descriptive report viability](er-descriptive-report-viability.md) — the AI's damage estimate is the max roll, so max-roll thresholding is exact; Wonder/Inverse Room gaps are wider than the plan says.
+- [ER stat and damage formulas](er-stat-and-damage-formulas.md) — CALC_STAT and the damage equation at the pinned SHA, plus why 252 EVs are worth less damage at low level.
+- [Battle-sim plan corrections](battle-sim-plan-corrections.md) — which plan claims were checked and held, and the seven that did not; do not re-derive.
