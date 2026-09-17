@@ -56,6 +56,12 @@ partial, never as done.
 Flag anything you had to guess at, anything the plan did not cover, and anything in the
 reference that contradicted the plan.
 
+**Report once.** If you have already sent your report with `SendMessage`, end your turn with a
+single line — "reported, holding" or the commit hash. Do not restate it. Your final output is
+delivered to the lead a second time as a completion notice, so a restated report is the same
+text charged twice, and the lead then spends a reply saying it was a duplicate. Say it in one
+place: either the message or the final output, never both.
+
 ## This repository
 
 Read `CLAUDE.md` first; it carries scope, stack and standing constraints.

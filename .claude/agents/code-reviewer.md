@@ -70,6 +70,17 @@ mainline behaviour is a finding. Upstream truth lives in `pipeline/.upstream/` a
 while `web/src/features/` and `web/src/routes/` are the React layer; a leak across that boundary
 is a finding. `erasableSyntaxOnly` bans TypeScript `enum`.
 
+## Report once
+
+If you have already sent your verdict with `SendMessage`, end your turn with a single line.
+Do not restate it. Your final output is delivered to the lead a second time as a completion
+notice, so a restated verdict is the same text charged twice, and the lead then spends a reply
+saying it was a duplicate. Say it in one place: either the message or the final output, never
+both.
+
+Put your recommendations first and your evidence second, for the same reason — long messages
+are truncated from the end, and a verdict whose actionable half survives costs no round trip.
+
 ## Memory
 
 Record recurring defect patterns and conventions you have established, so later reviews get
