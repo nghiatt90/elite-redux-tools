@@ -64,7 +64,15 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),
         ...gapsToUnmodelled(field.gaps),
       ]
-      if (move.id === 'MOVE_ECHOED_VOICE') unmodelled.push('sameMoveTurnsInARow is not tracked by the simulator')
+      // attackerFinalItemMultiplier (calculate.ts:1219-1222) is the ONLY real
+      // consumer of sameMoveTurnsInARow -- HOLD_EFFECT_METRONOME's per-move-in-
+      // a-row damage boost, for ANY move the attacker uses. It is not keyed on
+      // Echoed Voice: this dataset's MOVE_ECHOED_VOICE has effect
+      // EFFECT_TRIPLE_KICK (not EFFECT_ECHOED_VOICE, which appears nowhere in
+      // moves.json), so basePower.ts's EFFECT_ECHOED_VOICE case is unreachable
+      // and Echoed Voice's own power scaling is Triple-Kick-shaped, not tied to
+      // this toggle at all.
+      if (attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_METRONOME') unmodelled.push('sameMoveTurnsInARow is not tracked by the simulator')
       if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
       if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
       if (move.effect === 'EFFECT_FOCUS_PUNCH' || move.id === 'MOVE_SELF_DESTRUCT') unmodelled.push('attackerWasHitThisTurn is not tracked by the simulator')
