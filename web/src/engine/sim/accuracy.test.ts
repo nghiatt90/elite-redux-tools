@@ -466,3 +466,32 @@ describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
   })
 })
 
+// Oracle test, same discipline as abilities/coverage.test.ts's registry
+// coverage gate: re-derive the truth from the committed snapshot every run,
+// rather than trusting the hand-maintained array above it. This list SHRINKS
+// only when an ability is really ported (removed from UNPORTED_ACCURACY_
+// ABILITIES AND given a real onAccuracy check in getTotalAccuracy, the way
+// HasAuroraBorealis was above), and GROWS if the snapshot is repinned to an
+// eliteredux-source commit that adds new onAccuracy hooks. Either direction
+// must fail this test until the array is updated to match.
+describe('UNPORTED_ACCURACY_ABILITIES oracle -- data/v2.65beta/abilityHooks.json', () => {
+  const abilityHooks = snapshot<Record<string, { hooks?: Record<string, unknown> }>>('abilityHooks.json')
+
+  // Abilities this module genuinely ports a real onAccuracy-equivalent check
+  // for, even though they carry a live `.onAccuracy` hook in the C -- see
+  // getTotalAccuracy's HasAuroraBorealis branch, which is NOT the unported
+  // ability loop and is NOT in UNPORTED_ACCURACY_ABILITIES.
+  const GENUINELY_PORTED = new Set(['ABILITY_AURORA_BOREALIS'])
+
+  it('every ability declaring an onAccuracy hook is genuinely ported or in UNPORTED_ACCURACY_ABILITIES, and nothing extra is listed', () => {
+    const withOnAccuracy = Object.entries(abilityHooks)
+      .filter(([, entry]) => entry.hooks && 'onAccuracy' in entry.hooks)
+      .map(([id]) => id)
+      .sort()
+
+    const expected = withOnAccuracy.filter((id) => !GENUINELY_PORTED.has(id))
+    const actual = [...UNPORTED_ACCURACY_ABILITIES].sort()
+
+    expect(actual).toEqual(expected)
+  })
+})
