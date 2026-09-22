@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
@@ -7,6 +9,7 @@ import type { GroundingContext } from './grounding'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import { isBattlerGrounded } from './grounding'
 import type { BridgeDeps, CalculationRoles } from './bridge'
+import type { SimDataContext, SimItemData, SimSpeciesData } from './dataContext'
 import {
   GAP_REASONS,
   buildBattlerBattleState,
@@ -70,7 +73,24 @@ const GROUNDING: GroundingContext = {
   attackerHasMoldBreaker: false,
 }
 
-const DEPS: BridgeDeps = { grounding: GROUNDING, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: RATIOS }
+const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
+const snapshot = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
+const speciesData = snapshot<Array<Record<string, unknown>>>('species.json')
+const itemData = snapshot<Array<Record<string, unknown>>>('items.json')
+const speciesById = new Map(speciesData.map((entry) => [entry.id as string, entry]))
+const itemsById = new Map(itemData.map((entry) => [entry.id as string, entry]))
+const DATA_CONTEXT: SimDataContext = {
+  species: (id) => {
+    const entry = speciesById.get(id)
+    return entry as unknown as SimSpeciesData | undefined
+  },
+  item: (id) => {
+    const entry = itemsById.get(id)
+    return entry as unknown as SimItemData | undefined
+  },
+  move: () => undefined,
+}
+const DEPS: BridgeDeps = { grounding: GROUNDING, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
 
 /** Battler 0 attacking battler 1, unless a test says otherwise. */
 const ROLES: CalculationRoles = { attackerId: 0, defenderId: 1 }
@@ -313,38 +333,26 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
   const EXPECTED_GAP_FIELDS = [
     'abilityOn',
     'boostedStat',
-    'canEvolveStrict',
-    'condition.baseSpeciesId',
     'condition.chargedUp',
     'condition.fear',
     'condition.ghastlyEcho',
-    'condition.hasBloodStainEffect',
-    'condition.hasComatose',
-    'condition.heads',
     'condition.helpingHand',
     'condition.isConfused',
     'condition.isEnraged',
     'condition.isInfatuated',
-    'condition.isMegaEvolved',
     'condition.itemNegated',
-    'condition.itemResolvedHoldEffectStrength',
     'condition.lastMoveFailed',
     'condition.meFirst',
     'condition.negativeStatStageCount',
     'condition.positiveStatStageCount',
     'condition.recentlyFainted',
-    'condition.resolvedHoldEffect',
     'condition.safePassage',
     'condition.speed',
     'condition.wasDamagedThisTurnBy',
-    'condition.weight',
     'extraStatLevel',
     'hasMiracleEye',
-    'holdEffectStrength',
-    'holdEffectType',
     'isInfatuatedWithOpponent',
     'isTransformed',
-    'naturalGift',
     'semiInvulnerable',
     'slowStartTimer',
     'statStages',
@@ -400,10 +408,10 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat', 'condition.lastMoveFailed']))
   })
 
-  it('gaps everything that needs the data context, which batch 1 does not take', () => {
+  it('derives everything available from the committed data context', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const needsData = gaps.filter((g) => g.reason === 'NEEDS_DATA').map((g) => g.field)
-    expect(needsData).toEqual(expect.arrayContaining(['condition.weight', 'condition.resolvedHoldEffect', 'holdEffectStrength', 'canEvolveStrict']))
+    expect(needsData).toEqual([])
   })
 
   it('never reports the same field twice', () => {
@@ -500,6 +508,50 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     const lines = gapsToUnmodelled(gaps)
     expect(lines).toHaveLength(gaps.length)
     expect(lines[0]).toMatch(/^[\w.]+: .+ \((NEVER_UPDATED|NO_SOURCE|NEEDS_DATA|AMBIGUOUS)\)$/)
+  })
+})
+
+describe('buildBattlerBattleState: data-backed fields', () => {
+  it('derives species, item, and ability facts from the snapshot', () => {
+    const mega = buildBattlerBattleState(battle({ speciesId: 'SPECIES_VENUSAUR_MEGA' }), 0, ROLES, DEPS).battler
+    expect(mega.condition.baseSpeciesId).toBe('SPECIES_VENUSAUR')
+    expect(mega.condition.isMegaEvolved).toBe(true)
+    expect(mega.condition.weight).toBeGreaterThan(0)
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_DUGTRIO' }), 0, ROLES, DEPS).battler.condition.heads).toBeGreaterThan(1)
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_BULBASAUR' }), 0, ROLES, DEPS).battler.canEvolveStrict).toBe(true)
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_VENUSAUR' }), 0, ROLES, DEPS).battler.canEvolveStrict).toBe(false)
+
+    const item = buildBattlerBattleState(battle({ itemId: 'ITEM_MYSTIC_WATER' }), 0, ROLES, DEPS).battler
+    expect(item.holdEffectStrength).toBe(30)
+    expect(item.holdEffectType).toBe('WATER')
+    const berry = buildBattlerBattleState(battle({ itemId: 'ITEM_AGUAV_BERRY' }), 0, ROLES, DEPS).battler
+    expect(berry.naturalGift?.type).toBe('GROUND')
+    expect(buildBattlerBattleState(battle({ itemId: 'ITEM_LEFTOVERS' }), 0, ROLES, DEPS).battler.condition.resolvedHoldEffect).toBe('HOLD_EFFECT_LEFTOVERS')
+    const enigma = buildBattlerBattleState(battle({ itemId: 'ITEM_ENIGMA_BERRY' }), 0, ROLES, DEPS).battler
+    // battle_main.c:721-735 zeroes e-Reader data in non-link battles.
+    expect(enigma.condition.resolvedHoldEffect).toBe('HOLD_EFFECT_NONE')
+    expect(enigma.holdEffectStrength).toBeNull()
+    expect(enigma.condition.itemResolvedHoldEffectStrength).toBeNull()
+  })
+
+  it('derives Comatose, Dreamscape, and Blood Stain predicates', () => {
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_SNORLAX', abilities: { ability: 'ABILITY_COMATOSE', innates: [null, null, null] } }), 0, ROLES, DEPS).battler.condition.hasComatose).toBe(true)
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_MUSHARNA', abilities: { ability: 'ABILITY_DREAMSCAPE', innates: [null, null, null] } }), 0, ROLES, DEPS).battler.condition.hasComatose).toBe(true)
+    const blood = buildBattlerBattleState(battle({ types: ['WATER', 'MYSTERY', 'MYSTERY'], abilities: { ability: 'ABILITY_BLOOD_STAIN', innates: [null, null, null] } }), 0, ROLES, DEPS).battler
+    expect(blood.condition.hasBloodStainEffect).toBe(true)
+    const ghost = buildBattlerBattleState(battle({ types: ['GHOST', 'MYSTERY', 'MYSTERY'], abilities: { ability: 'ABILITY_BLOOD_STAIN', innates: [null, null, null] } }), 0, ROLES, DEPS).battler
+    expect(ghost.condition.hasBloodStainEffect).toBe(false)
+  })
+
+  it('reports exactly species and item lookup misses as NEEDS_DATA gaps', () => {
+    const missing: BridgeDeps = { ...DEPS, dataContext: { species: () => undefined, item: () => undefined, move: () => undefined } }
+    const { gaps } = buildBattlerBattleState(battle({ itemId: 'ITEM_MYSTIC_WATER' }), 0, ROLES, missing)
+    const needs = gaps.filter((gap) => gap.reason === 'NEEDS_DATA')
+    expect(needs.map((gap) => gap.field).sort()).toEqual([
+      'canEvolveStrict', 'condition.baseSpeciesId', 'condition.heads', 'condition.isMegaEvolved', 'condition.resolvedHoldEffect',
+      'condition.weight', 'condition.itemResolvedHoldEffectStrength', 'holdEffectStrength', 'holdEffectType', 'naturalGift',
+    ].sort())
+    expect(needs.every((gap) => gap.detail.includes('SPECIES_MUDKIP') || gap.detail.includes('ITEM_MYSTIC_WATER'))).toBe(true)
   })
 })
 

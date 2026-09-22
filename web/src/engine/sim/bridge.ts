@@ -58,6 +58,7 @@
 import type { BattlerBattleState, BattleStatKey, ConditionBattlerContext, WeatherKind } from '../types'
 import { BATTLE_STAT_KEYS } from '../types'
 import type { BattleState } from './state'
+import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 // Only isGravityActive: the full grounding port belongs to the simulator's own
 // consumers, not to BattlerBattleState.isGrounded -- see that field's comment.
@@ -293,6 +294,7 @@ export interface BridgeDeps {
   /** Reused for the Speed stat, which turnOrder.ts already ports in full. */
   turnOrder: TurnOrderContext
   statStageRatios: [number, number][]
+  dataContext: SimDataContext
 }
 
 export interface BridgeResult {
@@ -301,8 +303,8 @@ export interface BridgeResult {
 }
 
 /** Every field this batch does not derive, with the reason. Declared as data so
- * the test can assert the list exactly, and so batches 2 and 3 delete entries
- * from one place as they fill them in. */
+ * the test can assert the list exactly; data-backed fields are added per call
+ * below when a supplied context misses an entry. */
 const BATCH1_GAPS: BridgeGap[] = [
   // --- stat stages, and the three fields computed from them ---------------
   // No battle-start source sets a stage, and createBattlerState:364 overwrites
@@ -338,20 +340,9 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'boostedStat', reason: 'NO_SOURCE', detail: "Protosynthesis/Quark Drive's chosen stat; nothing in the sim tracks paradox activation" },
   { field: 'condition.lastMoveFailed', reason: 'NO_SOURCE', detail: 'gBattleStruct->lastMoveFailed is absent from the state model entirely' },
 
-  // --- needs the data context (batch 3) -----------------------------------
-  { field: 'holdEffectStrength', reason: 'NEEDS_DATA', detail: 'items.json lookup' },
-  { field: 'holdEffectType', reason: 'NEEDS_DATA', detail: 'items.json lookup' },
-  { field: 'naturalGift', reason: 'NEEDS_DATA', detail: 'items.json lookup' },
-  { field: 'canEvolveStrict', reason: 'NEEDS_DATA', detail: 'species.json evolutions' },
-  { field: 'condition.baseSpeciesId', reason: 'NEEDS_DATA', detail: 'species.json formOf' },
-  { field: 'condition.heads', reason: 'NEEDS_DATA', detail: 'species.json heads' },
-  { field: 'condition.isMegaEvolved', reason: 'NEEDS_DATA', detail: 'species.json megas/primals reverse lookup' },
-  { field: 'condition.resolvedHoldEffect', reason: 'NEEDS_DATA', detail: 'items.json lookup' },
-  { field: 'condition.weight', reason: 'NEEDS_DATA', detail: 'species.json weight' },
-  { field: 'condition.itemResolvedHoldEffectStrength', reason: 'NEEDS_DATA', detail: 'items.json lookup' },
-  { field: 'condition.hasComatose', reason: 'NEEDS_DATA', detail: 'ability identity check' },
-  { field: 'condition.hasBloodStainEffect', reason: 'NEEDS_DATA', detail: 'ability identity check' },
 ]
+
+const bareType = (type: string): string => type.replace(/^TYPE_/, '')
 
 function countStages(stages: Record<BattleStatKey, number>, positive: boolean): number {
   return BATTLE_STAT_KEYS.reduce((n, k) => n + (positive ? (stages[k] > 0 ? stages[k] : 0) : stages[k] < 0 ? -stages[k] : 0), 0)
@@ -390,6 +381,22 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
   if (!battler) throw new Error(`no battler at id ${battlerId}`)
 
   const mon = battler.mon
+  const species = deps.dataContext.species(mon.speciesId)
+  const item = mon.itemId === null ? null : deps.dataContext.item(mon.itemId)
+  const missGaps: BridgeGap[] = []
+  if (!species) {
+    for (const field of ['canEvolveStrict', 'condition.baseSpeciesId', 'condition.heads', 'condition.isMegaEvolved', 'condition.weight']) {
+      missGaps.push({ field, reason: 'NEEDS_DATA', detail: `species.json lookup missed ${mon.speciesId}` })
+    }
+  }
+  if (mon.itemId !== null && !item) {
+    for (const field of ['holdEffectStrength', 'holdEffectType', 'naturalGift', 'condition.resolvedHoldEffect', 'condition.itemResolvedHoldEffectStrength']) {
+      missGaps.push({ field, reason: 'NEEDS_DATA', detail: `items.json lookup missed ${mon.itemId}` })
+    }
+  }
+  const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
+  const hasComatose = abilityIds.includes('ABILITY_COMATOSE') || abilityIds.includes('ABILITY_DREAMSCAPE')
+  const hasBloodStainEffect = !mon.types.includes('GHOST') && !mon.types.includes('ROCK') && abilityIds.includes('ABILITY_BLOOD_STAIN')
   const statStages = statStagesToExternal(mon.statStages)
 
   /* DERIVED, but goes stale -- the same shape as weather and terrain in
@@ -416,20 +423,18 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
 
   const condition: ConditionBattlerContext = {
     speciesId: mon.speciesId,
-    // GAP -- see BATCH1_GAPS. Placeholder is the species itself, which is right
-    // only for a non-form; it is not evidence.
-    baseSpeciesId: mon.speciesId,
-    heads: 1,
-    isMegaEvolved: false,
+    baseSpeciesId: species?.formOf ?? mon.speciesId,
+    heads: species?.heads ?? 1,
+    isMegaEvolved: (species?.megas?.length ?? 0) > 0 || (species?.primals?.length ?? 0) > 0,
     itemId: mon.itemId,
-    resolvedHoldEffect: null,
+    resolvedHoldEffect: item?.resolvedHoldEffect ?? null,
     // Embargo only. Magic Room and Klutz are the other two causes and are not
     // read here, so this is a PARTIAL predicate -- which is a second reason it
     // stays gapped, on top of nothing writing statuses3.
     itemNegated: hasEmbargo(battler.statuses3),
     status1: status1ToSet(mon.status1),
-    hasComatose: false,
-    hasBloodStainEffect: false,
+    hasComatose,
+    hasBloodStainEffect,
     isInfatuated: isInfatuated(mon.status2),
     isConfused: isConfused(mon.status2),
     isEnraged: isEnraged(mon.status2),
@@ -453,7 +458,7 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     recentlyFainted: recentlyFainted(state.sides[battlerId & 1].timers),
     hp: mon.hp,
     maxHp: mon.maxHp,
-    weight: 0,
+    weight: species?.weight ?? 0,
     // Derived, and a real port: turnOrder.ts's GetBattlerTotalSpeedStat.
     speed: getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios),
     positiveStatStageCount: countStages(statStages, true),
@@ -467,7 +472,7 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     // Each battler carries its own; basePower.ts reads the DEFENDER's.
     fear: battlerFear(battler.volatiles),
     safePassage: hasSafePassage(battler.round),
-    itemResolvedHoldEffectStrength: null,
+    itemResolvedHoldEffectStrength: item?.holdEffectStrength ?? null,
     lastMoveFailed: false,
   }
 
@@ -510,19 +515,19 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     rawStats: mon.rawStats,
     statStages,
     extraStatLevel: extraStatLevels(battler.volatiles),
-    holdEffectStrength: null,
-    holdEffectType: null,
-    naturalGift: null,
+    holdEffectStrength: item?.holdEffectStrength ?? null,
+    holdEffectType: item?.holdEffectType ? bareType(item.holdEffectType) : null,
+    naturalGift: item?.naturalGift ? { power: item.naturalGift.power, type: bareType(item.naturalGift.type) } : null,
     hiddenPowerType: mon.hiddenPowerType,
     isTransformed: isTransformed(mon.status2),
-    canEvolveStrict: false,
+    canEvolveStrict: (species?.evolutions?.length ?? 0) > 0,
     isInfatuatedWithOpponent: isInfatuatedWith(mon.status2, opponentId),
     moveSlotPp,
     abilitySlots: mon.abilities,
     hasMiracleEye: hasMiracleEye(battler.statuses3),
   }
 
-  return { battler: result, gaps: [...BATCH1_GAPS] }
+  return { battler: result, gaps: [...BATCH1_GAPS, ...missGaps] }
 }
 
 /** The field-level facts this batch derives. Unlike the per-battler state
