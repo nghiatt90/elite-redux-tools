@@ -5,7 +5,8 @@ import { createRandomSource } from './rng'
 import type { BattleState, SimBattleMon } from './state'
 import type { GroundingContext } from './grounding'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
-import type { BridgeDeps } from './bridge'
+import { isBattlerGrounded } from './grounding'
+import type { BridgeDeps, CalculationRoles } from './bridge'
 import {
   GAP_REASONS,
   buildBattlerBattleState,
@@ -28,7 +29,11 @@ import {
   STATUS1_BURN,
   STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
+  STATUS2_TRANSFORMED,
+  STATUS3_MIRACLE_EYED,
+  STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRAVITY,
   WEATHER_HAIL_PERMANENT,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_NONE,
@@ -39,6 +44,7 @@ import {
   WEATHER_SUN_TEMPORARY,
   setCounter,
   setFlag,
+  statusInfatuatedWith,
 } from './constants'
 
 const RATIOS: [number, number][] = [
@@ -65,6 +71,9 @@ const GROUNDING: GroundingContext = {
 }
 
 const DEPS: BridgeDeps = { grounding: GROUNDING, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: RATIOS }
+
+/** Battler 0 attacking battler 1, unless a test says otherwise. */
+const ROLES: CalculationRoles = { attackerId: 0, defenderId: 1 }
 
 function mon(overrides: Partial<SimBattleMon> = {}): SimBattleMon {
   return {
@@ -205,7 +214,7 @@ describe('terrain', () => {
 describe('buildBattlerBattleState: what it derives', () => {
   it('carries the fields that come straight from the sim mon', () => {
     const state = battle()
-    const { battler } = buildBattlerBattleState(state, 0, DEPS)
+    const { battler } = buildBattlerBattleState(state, 0, ROLES, DEPS)
     expect(battler.level).toBe(50)
     expect(battler.nature).toBe('NATURE_HARDY')
     expect(battler.rawStats.atk).toBe(100)
@@ -217,7 +226,7 @@ describe('buildBattlerBattleState: what it derives', () => {
   })
 
   it('builds moveSlotPp from the parallel move and pp arrays', () => {
-    const { battler } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { battler } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     expect(battler.moveSlotPp).toEqual({ MOVE_TACKLE: 35, MOVE_WATER_GUN: 25 })
   })
 
@@ -226,36 +235,137 @@ describe('buildBattlerBattleState: what it derives', () => {
     // if the bridge copied the raw value.
     const state = battle()
     state.battlers[0]!.mon.statStages[STAT_SPEED] = DEFAULT_STAT_STAGE + 2
-    const { battler } = buildBattlerBattleState(state, 0, DEPS)
+    const { battler } = buildBattlerBattleState(state, 0, ROLES, DEPS)
     expect(battler.condition.speed).toBe(140)
     expect(battler.statStages.spe).toBe(2)
   })
 
-  it('derives grounding through the real port', () => {
+  it('supplies the SPECIES-ONLY grounding baseline, not the full port', () => {
     const flying = battle({ types: ['FLYING', 'MYSTERY', 'MYSTERY'] })
-    expect(buildBattlerBattleState(flying, 0, DEPS).battler.isGrounded).toBe(false)
-    expect(buildBattlerBattleState(battle(), 0, DEPS).battler.isGrounded).toBe(true)
+    expect(buildBattlerBattleState(flying, 0, ROLES, DEPS).battler.isGrounded).toBe(false)
+    expect(buildBattlerBattleState(battle(), 0, ROLES, DEPS).battler.isGrounded).toBe(true)
+  })
+
+  it('does not fold Levitate into isGrounded, because calculate.ts does that itself', () => {
+    // The case that inverts. sim/grounding.ts's full port says a Levitate holder
+    // is NOT grounded; calculate.ts:720-723 applies Levitate itself and does so
+    // mould-breaker-aware, so this field must stay the species baseline. Feeding
+    // the full answer here would make a Mold Breaker Earthquake read as immune
+    // against a Levitate defender that it should hit.
+    const state = battle()
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_LEVITATE', innates: [null, null, null] }
+
+    // The simulator's own answer, for its own consumers: airborne.
+    expect(isBattlerGrounded(state, 0, GROUNDING)).toBe(false)
+    // ...and with a mould-breaking attacker, grounded again.
+    expect(isBattlerGrounded(state, 0, { ...GROUNDING, attackerHasMoldBreaker: true })).toBe(true)
+
+    // The scenario field is neither of those: it is the species baseline, and a
+    // non-Flying Levitate holder is `true` regardless of Mold Breaker, because
+    // this field does not know about abilities at all.
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.isGrounded).toBe(true)
+  })
+
+  it('does not fold Gravity or Iron Ball into isGrounded either', () => {
+    // Both are calculate.ts's forced-grounded branch, and its Iron Ball check
+    // reads condition.resolvedHoldEffect -- which this batch gaps to null. The
+    // full port applies Iron Ball from a hold effect the scenario does not yet
+    // carry, so applying it here would put half of one mechanic on each side of
+    // the boundary.
+    const flying = battle({ types: ['FLYING', 'MYSTERY', 'MYSTERY'] })
+    flying.field.statuses = setFlag(flying.field.statuses, STATUS_FIELD_GRAVITY)
+    expect(isBattlerGrounded(flying, 0, GROUNDING)).toBe(true)
+    expect(buildBattlerBattleState(flying, 0, ROLES, DEPS).battler.isGrounded).toBe(false)
   })
 
   it('derives alliesFainted from the count the turn loop maintains', () => {
     const state = battle()
     state.sides[0].faintedCount = 3
-    expect(buildBattlerBattleState(state, 0, DEPS).battler.alliesFainted).toBe(3)
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.alliesFainted).toBe(3)
   })
 
   it('counts raised and lowered stages separately', () => {
     const state = battle()
     state.battlers[0]!.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
     state.battlers[0]!.mon.statStages[STAT_SPEED] = DEFAULT_STAT_STAGE - 3
-    const { battler } = buildBattlerBattleState(state, 0, DEPS)
+    const { battler } = buildBattlerBattleState(state, 0, ROLES, DEPS)
     expect(battler.condition.positiveStatStageCount).toBe(2)
     expect(battler.condition.negativeStatStageCount).toBe(3)
   })
 })
 
 describe('buildBattlerBattleState: what it reports as a gap', () => {
+  /** Walks a dotted path and reports whether the KEY exists -- not whether it is
+   * truthy, since a legitimate gap placeholder is often null. */
+  function pathExists(root: unknown, path: string): boolean {
+    let node: unknown = root
+    for (const part of path.split('.')) {
+      if (typeof node !== 'object' || node === null || !(part in node)) return false
+      node = (node as Record<string, unknown>)[part]
+    }
+    return true
+  }
+
+  /** The gap list, asserted EXACTLY. The list is data specifically so batches 2
+   * and 3 delete entries from it as they fill fields in; a membership check
+   * would pass just as well if they deleted nothing, which is the drift the
+   * list exists to prevent. Update this when a gap is genuinely closed. */
+  const EXPECTED_GAP_FIELDS = [
+    'abilityOn',
+    'boostedStat',
+    'canEvolveStrict',
+    'condition.baseSpeciesId',
+    'condition.chargedUp',
+    'condition.fear',
+    'condition.ghastlyEcho',
+    'condition.hasBloodStainEffect',
+    'condition.hasComatose',
+    'condition.heads',
+    'condition.helpingHand',
+    'condition.isConfused',
+    'condition.isEnraged',
+    'condition.isInfatuated',
+    'condition.isMegaEvolved',
+    'condition.itemNegated',
+    'condition.itemResolvedHoldEffectStrength',
+    'condition.lastMoveFailed',
+    'condition.meFirst',
+    'condition.negativeStatStageCount',
+    'condition.positiveStatStageCount',
+    'condition.recentlyFainted',
+    'condition.resolvedHoldEffect',
+    'condition.safePassage',
+    'condition.speed',
+    'condition.wasDamagedThisTurnBy',
+    'condition.weight',
+    'extraStatLevel',
+    'hasMiracleEye',
+    'holdEffectStrength',
+    'holdEffectType',
+    'isInfatuatedWithOpponent',
+    'isTransformed',
+    'naturalGift',
+    'semiInvulnerable',
+    'slowStartTimer',
+    'statStages',
+  ]
+
+  it('reports EXACTLY the expected gap list, no more and no fewer', () => {
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
+    expect(gaps.map((g) => g.field).sort()).toEqual([...EXPECTED_GAP_FIELDS].sort())
+  })
+
+  it('every gap names a field that actually exists on the built scenario', () => {
+    // Catches a gap left behind under a renamed or removed field, which a
+    // membership check cannot see.
+    const { battler, gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
+    for (const g of gaps) {
+      expect(pathExists(battler, g.field), `${g.field} does not resolve on BattlerBattleState`).toBe(true)
+    }
+  })
+
   it('returns a gap for every field it did not derive', () => {
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     expect(gaps.length).toBeGreaterThan(0)
     for (const g of gaps) {
       expect(GAP_REASONS).toContain(g.reason)
@@ -268,49 +378,178 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     // model and correctly zeroed; they are still gaps, because nothing in the
     // sim ever writes them and a mapped `false` would be indistinguishable from
     // a modelled one.
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { battler, gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const neverUpdated = gaps.filter((g) => g.reason === 'NEVER_UPDATED').map((g) => g.field)
     expect(neverUpdated).toContain('condition.wasDamagedThisTurnBy')
     expect(neverUpdated).toContain('condition.helpingHand')
     expect(neverUpdated).toContain('condition.safePassage')
     expect(neverUpdated).toContain('isTransformed')
+
+    // The other half, which the comment claimed and nothing asserted: these
+    // really are present and zeroed on a fresh battler. That is what makes them
+    // dangerous -- a consumer reading the value alone sees a modelled answer.
+    expect(battler.condition.wasDamagedThisTurnBy).toBe('none')
+    expect(battler.condition.helpingHand).toBe(false)
+    expect(battler.condition.safePassage).toBe(false)
+    expect(battler.isTransformed).toBe(false)
   })
 
   it('gaps the four fields with no honest source anywhere', () => {
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const noSource = gaps.filter((g) => g.reason === 'NO_SOURCE').map((g) => g.field)
     expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat', 'condition.lastMoveFailed']))
   })
 
   it('gaps everything that needs the data context, which batch 1 does not take', () => {
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const needsData = gaps.filter((g) => g.reason === 'NEEDS_DATA').map((g) => g.field)
     expect(needsData).toEqual(expect.arrayContaining(['condition.weight', 'condition.resolvedHoldEffect', 'holdEffectStrength', 'canEvolveStrict']))
   })
 
   it('never reports the same field twice', () => {
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     expect(new Set(gaps.map((g) => g.field)).size).toBe(gaps.length)
   })
 
   it('does not gap anything it actually derived', () => {
     // The two lists must be disjoint, or a gap is noise and a derived value is
     // a lie.
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const gapped = new Set(gaps.map((g) => g.field))
-    for (const derived of ['level', 'nature', 'rawStats', 'statStages', 'gender', 'isGrounded', 'alliesFainted', 'moveSlotPp', 'abilitySlots', 'types']) {
+    // statStages, condition.speed and the two stage counts are NOT in this list
+    // any more: they moved to the gap side, because no battle-start source can
+    // set a stage and createBattlerState:364 overwrites one that is passed.
+    for (const derived of ['level', 'nature', 'rawStats', 'gender', 'isGrounded', 'alliesFainted', 'moveSlotPp', 'abilitySlots', 'types']) {
       expect(gapped.has(derived)).toBe(false)
     }
-    for (const derived of ['condition.hp', 'condition.maxHp', 'condition.speed', 'condition.speciesId', 'condition.status1']) {
+    for (const derived of ['condition.hp', 'condition.maxHp', 'condition.speciesId', 'condition.status1']) {
       expect(gapped.has(derived)).toBe(false)
     }
   })
 
+  it('gaps stat stages and everything computed from them', () => {
+    // The discriminator: can a real battle-start source set this? encounters
+    // and trainer parties set weather, terrain, status and full PP; NOTHING
+    // sets a stat stage, and the constructor destroys one that is passed. So
+    // this is not "right at battle start then stale" -- it is unsettable, and
+    // the three fields computed from it inherit that.
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
+    const gapped = new Set(gaps.filter((g) => g.reason === 'NEVER_UPDATED').map((g) => g.field))
+    expect(gapped.has('statStages')).toBe(true)
+    expect(gapped.has('condition.speed')).toBe(true)
+    expect(gapped.has('condition.positiveStatStageCount')).toBe(true)
+    expect(gapped.has('condition.negativeStatStageCount')).toBe(true)
+  })
+
+  it('does NOT gap PP or status, which a trainer party really does set', () => {
+    // The other side of the same discriminator. A Pokemon can enter battle
+    // burned and with full PP, so these are derived; they carry a staleness
+    // note instead, like weather.
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
+    const gapped = new Set(gaps.map((g) => g.field))
+    expect(gapped.has('moveSlotPp')).toBe(false)
+    expect(gapped.has('condition.status1')).toBe(false)
+  })
+
+  it('computes the unpacked value AND still reports the gap', () => {
+    // The invariant that separates "wired" from "promoted". Batch 2 made the
+    // bridge call the unpackers, so a caller-set status2 now produces a real
+    // `true` instead of a hardcoded `false` -- and the gap is STILL there,
+    // because nothing in the sim writes status2, so the value is right only for
+    // as long as the caller's own setting is.
+    const state = battle()
+    state.battlers[0]!.mon.status2 = setFlag(0, STATUS2_TRANSFORMED)
+    state.battlers[0]!.statuses3 = setFlag(0, STATUS3_MIRACLE_EYED)
+    state.battlers[0]!.volatiles.fear = true
+    state.battlers[0]!.round.helpingHand = true
+
+    const { battler, gaps } = buildBattlerBattleState(state, 0, ROLES, DEPS)
+    expect(battler.isTransformed).toBe(true)
+    expect(battler.hasMiracleEye).toBe(true)
+    expect(battler.condition.fear).toBe(true)
+    expect(battler.condition.helpingHand).toBe(true)
+
+    const gapped = new Set(gaps.map((g) => g.field))
+    expect(gapped.has('isTransformed')).toBe(true)
+    expect(gapped.has('hasMiracleEye')).toBe(true)
+    expect(gapped.has('condition.fear')).toBe(true)
+    expect(gapped.has('condition.helpingHand')).toBe(true)
+  })
+
+  it('takes fear from the volatile struct, not from STATUS4_FEAR', () => {
+    // The two exist and are different; the damage path reads the struct field
+    // (battle_util.c:7062). Setting only the status bit must NOT show up.
+    const state = battle()
+    state.battlers[0]!.statuses4 = setFlag(0, STATUS4_FEAR)
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.fear).toBe(false)
+    state.battlers[0]!.volatiles.fear = true
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.fear).toBe(true)
+  })
+
+  it('reads infatuation against the OPPONENT specifically', () => {
+    const state = battle()
+    // Infatuated with itself is not infatuated with the opponent.
+    state.battlers[0]!.mon.status2 = statusInfatuatedWith(0)
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.isInfatuatedWithOpponent).toBe(false)
+    state.battlers[0]!.mon.status2 = statusInfatuatedWith(1)
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.isInfatuatedWithOpponent).toBe(true)
+  })
+
   it('formats gaps for the damage engine own unmodelled channel', () => {
-    const { gaps } = buildBattlerBattleState(battle(), 0, DEPS)
+    const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const lines = gapsToUnmodelled(gaps)
     expect(lines).toHaveLength(gaps.length)
     expect(lines[0]).toMatch(/^[\w.]+: .+ \((NEVER_UPDATED|NO_SOURCE|NEEDS_DATA|AMBIGUOUS)\)$/)
+  })
+})
+
+describe('wasDamagedThisTurnBy is role-relative', () => {
+  /** Battler 1 was damaged by battler 0 earlier this turn. */
+  function damagedState(): BattleState {
+    const state = battle()
+    const round = state.battlers[1]!.round
+    round.damaged = true
+    round.physicalBattlerId = 0
+    round.specialBattlerId = 0
+    return state
+  }
+
+  it('labels the damager by its ROLE in the pending calculation, not by id', () => {
+    // The enum names the damager as the attacker or defender OF THIS
+    // CALCULATION (conditions.ts:58's evalDamaged). Battler 1 was hit by
+    // battler 0; when battler 0 is the attacker, that reads 'attacker'.
+    const state = damagedState()
+    const built = buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, DEPS)
+    expect(built.battler.condition.wasDamagedThisTurnBy).toBe('attacker')
+  })
+
+  it('INVERTS when the same battle state is read from the other side', () => {
+    // Same state, same battler, roles swapped: battler 0 is now the defender of
+    // the pending calculation, so the identical damage reads 'defender'. This
+    // is why the roles parameter is required -- without it the function would
+    // have to assume one, and would be silently wrong for the other.
+    const state = damagedState()
+    const built = buildBattlerBattleState(state, 1, { attackerId: 1, defenderId: 0 }, DEPS)
+    expect(built.battler.condition.wasDamagedThisTurnBy).toBe('defender')
+  })
+
+  it('reports none when the damager is neither role', () => {
+    // The C's own `by == BATTLER_NONE` guard, script_conditions.cc:45.
+    const state = damagedState()
+    state.battlers[1]!.round.physicalBattlerId = 3
+    state.battlers[1]!.round.specialBattlerId = 3
+    const built = buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, DEPS)
+    expect(built.battler.condition.wasDamagedThisTurnBy).toBe('none')
+  })
+
+  it('resolves the infatuation opponent from the declared roles too', () => {
+    const state = battle()
+    state.battlers[0]!.mon.status2 = statusInfatuatedWith(1)
+    expect(buildBattlerBattleState(state, 0, { attackerId: 0, defenderId: 1 }, DEPS).battler.isInfatuatedWithOpponent).toBe(true)
+    // With battler 0 as the DEFENDER of a calculation against battler 1, the
+    // opponent is still battler 1, so this holds either way here -- but the id
+    // now comes from the declared roles rather than from `battlerId ^ 1`.
+    expect(buildBattlerBattleState(state, 0, { attackerId: 1, defenderId: 0 }, DEPS).battler.isInfatuatedWithOpponent).toBe(true)
   })
 })
 

@@ -197,7 +197,7 @@ export interface BattlerBattleState {
    * semi-invulnerability. A per-turn battle state this calculator can't derive (it
    * has no turn simulation), so it's a scenario toggle rather than computed --
    * see BattlerConfig.semiInvulnerable. Only the DEFENDER's value is ever read
-   * (battle_util.c:7707-7709: FLAG_DMG_UNDERGROUND/UNDERWATER/2X_IN_AIR check
+   * (battle_util.c:7680-7682: FLAG_DMG_UNDERGROUND/UNDERWATER/2X_IN_AIR check
    * gStatuses3[battlerDef] specifically). */
   semiInvulnerable: 'NONE' | 'UNDERGROUND' | 'UNDERWATER' | 'AIRBORNE'
   /** A generic "is this battler's ability currently in its boosted/active state"

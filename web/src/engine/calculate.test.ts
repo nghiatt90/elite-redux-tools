@@ -246,7 +246,7 @@ describe('calculateMoveDamage -- Garchomp vs Skarmory, real species/move data', 
   })
 })
 
-describe('calculateMoveDamage -- semi-invulnerable double damage (battle_util.c:7707-7709)', () => {
+describe('calculateMoveDamage -- semi-invulnerable double damage (battle_util.c:7680-7682)', () => {
   it('Earthquake doubles damage against an UNDERGROUND (Dig) defender', () => {
     const grounded = scenario({ move: moveData('MOVE_EARTHQUAKE'), defender: battler('SPECIES_GARCHOMP') })
     const underground = scenario({

@@ -28,10 +28,20 @@
 // placeholder is never evidence of anything, and `gaps` is the record. A caller
 // that ignores `gaps` is claiming a completeness this module did not give it.
 //
-// The distinction that keeps `gaps` meaningful: field-level facts a CALLER
-// legitimately supplies at battle start (weather, terrain, side statuses, which
-// encounters.json actually sets) are derived, not gapped. Per-battler state that
-// only ever arises from move and ability effects the sim does not run is gapped.
+// The discriminator that keeps `gaps` meaningful: CAN A REAL BATTLE-START
+// SOURCE SET THIS? encounters.json sets weather and terrain, trainer parties set
+// status and full PP -- so those are derived, with a staleness note, because the
+// value is genuinely right when the battle opens and only drifts because nothing
+// updates it.
+//
+// Nothing sets stat stages. `createBattlerState` overwrites whatever is passed
+// with the neutral set (create.ts:364), and no sim code changes a stage
+// afterwards because there are no stat-change effects yet. So `statStages` is
+// not "right at battle start and then stale" -- it is a value no caller can even
+// supply, permanently neutral, reading as a modelled answer. It is a gap, and so
+// is everything computed from it: `condition.speed` (the stat tail scales by
+// stage) and the two stage counts that feed Punishment, Stored Power and Lash
+// Out. Those are real damage numbers that would read zero forever.
 //
 // ## What this batch retires
 //
@@ -49,9 +59,31 @@ import type { BattlerBattleState, BattleStatKey, ConditionBattlerContext, Weathe
 import { BATTLE_STAT_KEYS } from '../types'
 import type { BattleState } from './state'
 import type { GroundingContext } from './grounding'
-import { isBattlerGrounded, isGravityActive } from './grounding'
+// Only isGravityActive: the full grounding port belongs to the simulator's own
+// consumers, not to BattlerBattleState.isGrounded -- see that field's comment.
+import { isGravityActive } from './grounding'
 import type { TurnOrderContext } from './turnOrder'
 import { TOTAL_SPEED_FULL, getBattlerTotalSpeedStat } from './turnOrder'
+import {
+  battlerFear,
+  damagedBy,
+  extraStatLevels,
+  hasEmbargo,
+  hasGhastlyEcho,
+  hasHelpingHand,
+  hasMeFirst,
+  hasMiracleEye,
+  hasSafePassage,
+  isChargedUp,
+  isConfused,
+  isEnraged,
+  isInfatuated,
+  isInfatuatedWith,
+  isTransformed,
+  recentlyFainted,
+  semiInvulnerableState,
+  slowStartTimer,
+} from './unpack'
 import {
   DEFAULT_STAT_STAGE,
   STAT_ATK,
@@ -272,6 +304,15 @@ export interface BridgeResult {
  * the test can assert the list exactly, and so batches 2 and 3 delete entries
  * from one place as they fill them in. */
 const BATCH1_GAPS: BridgeGap[] = [
+  // --- stat stages, and the three fields computed from them ---------------
+  // No battle-start source sets a stage, and createBattlerState:364 overwrites
+  // whatever is passed with the neutral set, so this is not merely stale --
+  // a caller cannot supply it at all.
+  { field: 'statStages', reason: 'NEVER_UPDATED', detail: 'createBattlerState forces neutral and no sim code applies a stat change' },
+  { field: 'condition.speed', reason: 'NEVER_UPDATED', detail: "GetBattlerTotalSpeedStat's tail scales by the Speed stage, which is permanently neutral" },
+  { field: 'condition.positiveStatStageCount', reason: 'NEVER_UPDATED', detail: 'counted from statStages; feeds Punishment and Stored Power, so it reads 0 forever' },
+  { field: 'condition.negativeStatStageCount', reason: 'NEVER_UPDATED', detail: 'counted from statStages; feeds Lash Out, so it reads 0 forever' },
+
   // --- state the sim has, correctly zeroed, and never updates -------------
   { field: 'semiInvulnerable', reason: 'NEVER_UPDATED', detail: 'gStatuses3 semi-invulnerability; no sim code writes statuses3' },
   { field: 'slowStartTimer', reason: 'NEVER_UPDATED', detail: 'volatiles.slowStartTimer; no sim code writes volatiles' },
@@ -324,16 +365,54 @@ function countStages(stages: Record<BattleStatKey, number>, positive: boolean): 
  * either find it empty or surface it -- `gapsToUnmodelled` exists for exactly
  * that, so the engine's own channel carries it.
  */
-export function buildBattlerBattleState(state: BattleState, battlerId: number, deps: BridgeDeps): BridgeResult {
+/**
+ * Which battler plays which ROLE in the calculation this state is being built
+ * for.
+ *
+ * Required, not optional, because `ConditionBattlerContext.wasDamagedThisTurnBy`
+ * is role-relative -- it names the damager as 'attacker' or 'defender' OF THE
+ * PENDING CALCULATION, not by battler id (see `evalDamaged`, conditions.ts:58).
+ * Without this, building the state for one battler and for the other produce
+ * opposite labels from the same battle state, and the function has no way to
+ * know which it should give.
+ *
+ * `unpack.ts`'s `damagedBy` deliberately refuses to collapse this, since it has
+ * no notion of a pending calculation. This is the layer that does, and this is
+ * the input it needs to do it honestly rather than assuming a role.
+ */
+export interface CalculationRoles {
+  attackerId: number
+  defenderId: number
+}
+
+export function buildBattlerBattleState(state: BattleState, battlerId: number, roles: CalculationRoles, deps: BridgeDeps): BridgeResult {
   const battler = state.battlers[battlerId]
   if (!battler) throw new Error(`no battler at id ${battlerId}`)
 
   const mon = battler.mon
   const statStages = statStagesToExternal(mon.statStages)
+
+  /* DERIVED, but goes stale -- the same shape as weather and terrain in
+   * buildFieldFacts. A trainer party really does set full PP, so this is right
+   * when the battle opens; the turn loop lists PP deduction among the things it
+   * deliberately does not do, so nothing decrements it afterwards. Its only
+   * damage consumer is Trump Card, whose power is entirely PP-derived and which
+   * will therefore read the opening PP for the whole battle. Not gapped,
+   * because a real battle-start source sets it and a caller can change it. */
   const moveSlotPp: Record<string, number> = {}
   mon.moves.forEach((moveId, slot) => {
     if (moveId) moveSlotPp[moveId] = mon.pp[slot]
   })
+
+  // Batch 2's unpackers. These are CALLED rather than hardcoded, so the value is
+  // right for any state a caller does set -- but every field below them stays in
+  // BATCH1_GAPS, because nothing in the sim writes the words they read. Computing
+  // a value is not the same as maintaining one; see unpack.ts's own header.
+  const damaged = damagedBy(battler.round)
+  // The battler on the other side of THIS calculation, from the roles the
+  // caller declared -- not `battlerId ^ 1`, which assumes singles and assumes
+  // this battler's role.
+  const opponentId = battlerId === roles.attackerId ? roles.defenderId : roles.attackerId
 
   const condition: ConditionBattlerContext = {
     speciesId: mon.speciesId,
@@ -344,15 +423,34 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, d
     isMegaEvolved: false,
     itemId: mon.itemId,
     resolvedHoldEffect: null,
-    itemNegated: false,
+    // Embargo only. Magic Room and Klutz are the other two causes and are not
+    // read here, so this is a PARTIAL predicate -- which is a second reason it
+    // stays gapped, on top of nothing writing statuses3.
+    itemNegated: hasEmbargo(battler.statuses3),
     status1: status1ToSet(mon.status1),
     hasComatose: false,
     hasBloodStainEffect: false,
-    isInfatuated: false,
-    isConfused: false,
-    isEnraged: false,
-    wasDamagedThisTurnBy: 'none',
-    recentlyFainted: false,
+    isInfatuated: isInfatuated(mon.status2),
+    isConfused: isConfused(mon.status2),
+    isEnraged: isEnraged(mon.status2),
+    // The 3-way collapse unpack.ts declines to make, made here because this is
+    // the layer the caller told which battler holds which role. Each recorded
+    // damager id is matched against the DECLARED roles; a damager that is
+    // neither is 'none', which is what the C's own `by == BATTLER_NONE` guard
+    // produces (script_conditions.cc:45).
+    //
+    // 'attacker' is tested first, so a battler damaged by BOTH roles this turn
+    // reports 'attacker'. The C answers TRUE to either query and the enum holds
+    // only one, so something must be lost; this states which. Unreachable in
+    // singles, reachable in doubles.
+    wasDamagedThisTurnBy: !damaged.damaged
+      ? 'none'
+      : damaged.byBattlerIds.includes(roles.attackerId)
+        ? 'attacker'
+        : damaged.byBattlerIds.includes(roles.defenderId)
+          ? 'defender'
+          : 'none',
+    recentlyFainted: recentlyFainted(state.sides[battlerId & 1].timers),
     hp: mon.hp,
     maxHp: mon.maxHp,
     weight: 0,
@@ -361,12 +459,14 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, d
     positiveStatStageCount: countStages(statStages, true),
     negativeStatStageCount: countStages(statStages, false),
     usedMovePpRemaining: null,
-    helpingHand: false,
-    ghastlyEcho: false,
-    chargedUp: false,
-    meFirst: false,
-    fear: false,
-    safePassage: false,
+    helpingHand: hasHelpingHand(battler.round),
+    ghastlyEcho: hasGhastlyEcho(battler.statuses4),
+    chargedUp: isChargedUp(battler.statuses3),
+    meFirst: hasMeFirst(battler.statuses3),
+    // The VolatileStruct field, not STATUS4_FEAR -- see unpack.ts's battlerFear.
+    // Each battler carries its own; basePower.ts reads the DEFENDER's.
+    fear: battlerFear(battler.volatiles),
+    safePassage: hasSafePassage(battler.round),
     itemResolvedHoldEffectStrength: null,
     lastMoveFailed: false,
   }
@@ -374,30 +474,52 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, d
   const result: BattlerBattleState = {
     condition,
     types: mon.types,
-    // Derived, and a real port: sim/grounding.ts.
-    isGrounded: isBattlerGrounded(state, battlerId, deps.grounding),
-    semiInvulnerable: 'NONE',
+    /* THE NAME IS A TRAP. `BattlerBattleState.isGrounded` is NOT "is this
+     * battler grounded" -- it is the SPECIES-ONLY BASELINE, exactly
+     * `!types.includes('FLYING')`, matching the existing builder
+     * (features/damageCalc/scenario.ts:257) and this field's own doc in
+     * engine/types.ts.
+     *
+     * calculate.ts:720-723 folds in the rest ITSELF: Iron Ball and Gravity as
+     * forced-grounded, Air Balloon and the Levitate ability flag as
+     * forced-airborne -- and the Levitate check is mould-breaker-aware. Passing
+     * the full grounding answer here would double-apply all of that and INVERT
+     * the one case that matters: a Levitate defender against a Mold Breaker
+     * attacker is grounded (Levitate suppressed), so Earthquake hits, but the
+     * full port returns airborne and the hit would read as immune.
+     *
+     * It would also be incoherent with this module's own gaps: the full port
+     * applies Iron Ball, while calculate.ts's Iron Ball check reads
+     * `condition.resolvedHoldEffect`, which batch 1 gaps to null -- half of one
+     * mechanic on each side of the line.
+     *
+     * sim/grounding.ts's full port is still the right answer for the
+     * SIMULATOR's own consumers, which is what turnOrder.ts's Swamp gate uses.
+     * Two different questions, two different functions; only this one belongs
+     * in this field. */
+    isGrounded: !mon.types.includes('FLYING'),
+    semiInvulnerable: semiInvulnerableState(battler.statuses3),
     abilityOn: false,
     gender: mon.gender,
     boostedStat: null,
     // Derived: the turn loop maintains this one.
     alliesFainted: state.sides[battlerId & 1].faintedCount,
-    slowStartTimer: 0,
+    slowStartTimer: slowStartTimer(battler.volatiles),
     level: mon.level,
     nature: mon.nature,
     rawStats: mon.rawStats,
     statStages,
-    extraStatLevel: { atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 },
+    extraStatLevel: extraStatLevels(battler.volatiles),
     holdEffectStrength: null,
     holdEffectType: null,
     naturalGift: null,
     hiddenPowerType: mon.hiddenPowerType,
-    isTransformed: false,
+    isTransformed: isTransformed(mon.status2),
     canEvolveStrict: false,
-    isInfatuatedWithOpponent: false,
+    isInfatuatedWithOpponent: isInfatuatedWith(mon.status2, opponentId),
     moveSlotPp,
     abilitySlots: mon.abilities,
-    hasMiracleEye: false,
+    hasMiracleEye: hasMiracleEye(battler.statuses3),
   }
 
   return { battler: result, gaps: [...BATCH1_GAPS] }

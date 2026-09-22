@@ -1088,7 +1088,7 @@ function calcInternal(
     // 4/3x whenever they happened to be super effective.
     hasSuperEffectiveBoost: isSuperEffective && move.miscEffect === 'MISC_EFFECT_SUPEREFFECTIVE_BOOST',
     glaiveRushActive: scenario.defenderUsedGlaiveRush,
-    // battle_util.c:7707-7709 -- both the move's own flag AND the defender's
+    // battle_util.c:7680-7682 -- both the move's own flag AND the defender's
     // semi-invulnerable state (a scenario toggle, see BattlerBattleState's doc)
     // must hold. hitsAir only doubles for the FLAG_DMG_2X_IN_AIR variant --
     // hitsAir === 'HITS' (FLAG_DMG_IN_AIR) only lets the move connect at all,
