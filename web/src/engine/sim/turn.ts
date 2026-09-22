@@ -16,10 +16,9 @@
 // Accuracy (Cmd_accuracycheck, battle_script_commands.c:1398-1447) and PP
 // deduction (Cmd_ppreduce, :1460-1506) are ported for every USE_MOVE action
 // with a living target, in that C order: the accuracy draw happens first (its
-// own RandomSource draw), then PP is deducted UNCONDITIONALLY -- the C's
-// JumpIfMoveFailed only short-circuits on MOVE_RESULT_NO_EFFECT (ability
-// absorption, :1213-1218), never on MOVE_RESULT_MISSED, so a miss still costs
-// PP. Two branches of Cmd_accuracycheck are NOT reachable by this loop, by
+// own RandomSource draw), then PP is deducted UNCONDITIONALLY -- the miss
+// branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-3094) runs
+// ppreduce as well, so a miss still costs PP. Two branches of Cmd_accuracycheck are NOT reachable by this loop, by
 // construction rather than by omission, and are documented rather than
 // gapped at runtime:
 //   - the multi-hit/Parental-Bond second-hit accuracy exemption (:1412-1416)
@@ -302,6 +301,10 @@ function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abi
  * notFirstStrike, and sameMoveTurns (state.ts's own field doc explains why
  * the latter is always reset to 0 in this batch, never incremented).
  *
+ * Not reachable: the HITMARKER_NO_PPDEDUCT / HITMARKER_NO_ATTACKSTRING early
+ * returns (:1467-1472). gHitMarker is not modelled and nothing in this loop
+ * would set either bit, so both guards are always false.
+ *
  * Gapped: Stockpile's Spit Up/Swallow PP-refund branch (:1476-1483 --
  * TryUseStockpile has no port anywhere in this codebase; this falls through
  * to the ordinary deduction, the correct answer whenever Stockpile was never
@@ -407,14 +410,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
     const unmodelled: string[] = []
 
-    // Cmd_ppreduce, battle_script_commands.c:1460-1506 -- runs regardless of
-    // the accuracy result below; see this module's header for why.
-    deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
-
     // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
     // state.rng BEFORE the damage resolver's own crit/roll draws, matching
-    // the C's script order (accuracycheck runs, then ppreduce already ran
-    // above, then critcalc/damagecalc inside deps.damage.resolve below).
+    // BattleScript_EffectHit (battle_scripts_1.s:2857-2863): accuracycheck,
+    // then attackstring/ppreduce, then critcalc/damagecalc inside
+    // deps.damage.resolve below.
     const { inputs: accInputs, gaps: accGaps, defenderHasAnticipation } = buildAccuracyInputs(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps)
     unmodelled.push(...gapsToUnmodelled(accGaps))
     if (defenderHasAnticipation) {
@@ -428,6 +428,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // is not special-cased: Random() % 100 is at most 99, so the comparison
     // can never be true, and the arithmetic alone carries the sentinel.
     const missed = state.rng.random16() % 100 >= accResult.accuracy
+
+    // Cmd_ppreduce, :1460-1506 -- after the accuracy check, on both paths:
+    // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
+    // 3094) runs ppreduce too, so a miss still costs PP.
+    deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
 
     if (missed) {
       outcomes.push({ turnOrderIndex: index, battlerId, action: actionKind, skippedBecauseFainted: false, missed: true, targetId, targetDamage: null, attackerDamage: null, unmodelled, fainted: [] })
