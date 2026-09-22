@@ -1,0 +1,32 @@
+{
+  // Codex here is logged in via a ChatGPT-plan token (~/.codex/auth.json has no
+  // OPENAI_API_KEY). Set to gpt-5.6-luna per the user's explicit request
+  // (2026-09-22). This value has NO effect on the real bug that made Codex
+  // workers look dead under omc team: with OMC_STATE_DIR set (centralized
+  // state), every `omc team api <op>` call silently resolves to the wrong
+  // project directory (a path-marker bug in stateRootToWorkingDirectory) and
+  // fails worker_not_found/team_not_found regardless of codexModel -- the
+  // worker was actually alive and working the whole time, just unable to
+  // prove it via claim-task within the evidence-wait budget. Root-caused and
+  // the workaround (run with OMC_STATE_DIR unset) verified end-to-end
+  // 2026-09-22; see team-pilot SKILL.md's "Inherited from team-distribute"
+  // section for the full writeup.
+  //
+  // Gemini's default (gemini-3.1-pro-preview) has ZERO free-tier quota on this
+  // account (`generate_content_free_tier_requests, limit: 0`) -- confirmed
+  // 2026-09-22 by calling the CLI directly. gemini-2.5-flash works on the free
+  // tier. This is a real quality tradeoff (Flash vs Pro), accepted because the
+  // account has no Gemini billing.
+  //
+  // Antigravity's default (Gemini 3.1 Pro (High)) hit its own separate 429
+  // (RESOURCE_EXHAUSTED, "Individual quota reached", ~6.5-day reset) on
+  // 2026-09-22 -- confirmed via ~/.gemini/antigravity-cli/cli.log. Switched to
+  // the Flash tier per the user's explicit request.
+  "externalModels": {
+    "defaults": {
+      "codexModel": "gpt-5.6-luna",
+      "geminiModel": "gemini-2.5-flash",
+      "antigravityModel": "Gemini 3.8 Flash (Medium)"
+    }
+  }
+}
