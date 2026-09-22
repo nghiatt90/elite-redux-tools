@@ -55,7 +55,7 @@
 // way. The bridge is not plumbing; it retires guesses, and that is the first
 // concrete payoff of the simulator work.
 
-import type { BattlerBattleState, BattleStatKey, ConditionBattlerContext, WeatherKind } from '../types'
+import type { BattlerBattleState, BattleStatKey, ConditionBattlerContext, FieldBattleState, WeatherKind } from '../types'
 import { BATTLE_STAT_KEYS } from '../types'
 import type { BattleState } from './state'
 import type { SimDataContext } from './dataContext'
@@ -105,6 +105,10 @@ import {
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_LUCKY_CHANT,
+  SIDE_STATUS_REFLECT,
   WEATHER_FOG_PERMANENT,
   WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_PERMANENT,
@@ -295,6 +299,26 @@ export interface BridgeDeps {
   turnOrder: TurnOrderContext
   statStageRatios: [number, number][]
   dataContext: SimDataContext
+}
+
+/**
+ * Side screens are not a battle-start source in encounters.json: its field
+ * effects contain screens as battle events (Mossdeep's BATTLE_EVENT_* entries),
+ * while create.ts only zeroes the side statuses and timers. They are therefore
+ * honest values only when a future turn loop maintains them; until then each is
+ * reported as NEVER_UPDATED even though the zeroed placeholder is returned.
+ */
+export function buildFieldSides(state: BattleState, roles: CalculationRoles): FieldBattleState['sides'] {
+  const side = (battlerId: number) => {
+    const statuses = state.sides[battlerId & 1].statuses
+    return {
+      reflect: hasFlag(statuses, SIDE_STATUS_REFLECT),
+      lightScreen: hasFlag(statuses, SIDE_STATUS_LIGHTSCREEN),
+      auroraVeil: hasFlag(statuses, SIDE_STATUS_AURORA_VEIL),
+      luckyChant: hasFlag(statuses, SIDE_STATUS_LUCKY_CHANT),
+    }
+  }
+  return { attacker: side(roles.attackerId), defender: side(roles.defenderId) }
 }
 
 export interface BridgeResult {

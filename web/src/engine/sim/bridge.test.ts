@@ -13,6 +13,7 @@ import type { SimDataContext, SimItemData, SimSpeciesData } from './dataContext'
 import {
   GAP_REASONS,
   buildBattlerBattleState,
+  buildFieldSides,
   buildFieldFacts,
   gapsToUnmodelled,
   statStageToExternal,
@@ -37,6 +38,10 @@ import {
   STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_LUCKY_CHANT,
+  SIDE_STATUS_REFLECT,
   WEATHER_HAIL_PERMANENT,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_NONE,
@@ -618,5 +623,29 @@ describe('buildFieldFacts', () => {
 
     state.field.weather = setFlag(WEATHER_SUN_TEMPORARY, WEATHER_RAIN_TEMPORARY)
     expect(buildFieldFacts(state, DEPS).gaps).toHaveLength(1)
+  })
+})
+
+describe('buildFieldSides', () => {
+  it('reads all side flags role-relatively when the attacker is on side 0', () => {
+    const state = battle()
+    state.sides[0].statuses = SIDE_STATUS_REFLECT | SIDE_STATUS_AURORA_VEIL
+    state.sides[1].statuses = SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_LUCKY_CHANT
+
+    expect(buildFieldSides(state, { attackerId: 0, defenderId: 1 })).toEqual({
+      attacker: { reflect: true, lightScreen: false, auroraVeil: true, luckyChant: false },
+      defender: { reflect: false, lightScreen: true, auroraVeil: false, luckyChant: true },
+    })
+  })
+
+  it('reads all side flags role-relatively when the attacker is on side 1', () => {
+    const state = battle()
+    state.sides[0].statuses = SIDE_STATUS_REFLECT | SIDE_STATUS_AURORA_VEIL
+    state.sides[1].statuses = SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_LUCKY_CHANT
+
+    expect(buildFieldSides(state, { attackerId: 1, defenderId: 0 })).toEqual({
+      attacker: { reflect: false, lightScreen: true, auroraVeil: false, luckyChant: true },
+      defender: { reflect: true, lightScreen: false, auroraVeil: true, luckyChant: false },
+    })
   })
 })
