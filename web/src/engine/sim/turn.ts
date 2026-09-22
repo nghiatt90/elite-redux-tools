@@ -165,8 +165,13 @@ export interface DamageResolution {
   unmodelled: string[]
 }
 
+export interface DamageResolveContext {
+  /** Whether the target's action slot was already reached this turn. */
+  targetHasActedThisTurn: boolean
+}
+
 export interface DamageResolver {
-  resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context?: { targetHasActedThisTurn: boolean }): DamageResolution
+  resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context?: DamageResolveContext): DamageResolution
 }
 
 /** A resolver that THROWS rather than returning zero.

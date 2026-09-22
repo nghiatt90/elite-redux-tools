@@ -6,7 +6,7 @@ import type { TypeChart } from '../typeEffectiveness'
 import type { BattleState, RandomSource } from './state'
 import type { BridgeDeps } from './bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from './bridge'
-import type { DamageResolution, DamageResolver } from './turn'
+import type { DamageResolution, DamageResolveContext, DamageResolver } from './turn'
 import type { ChosenAction } from './turnOrder'
 
 export interface BridgeDamageResolverDeps extends BridgeDeps {
@@ -45,7 +45,7 @@ function variableHitCount(random: RandomSource): number {
 
 export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): DamageResolver {
   return {
-    resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context = { targetHasActedThisTurn: false }): DamageResolution {
+    resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context: DamageResolveContext = { targetHasActedThisTurn: false }): DamageResolution {
       if (action.action !== 'USE_MOVE' || !action.chosenMove) return { targetDamage: null, attackerDamage: null, unmodelled: [] }
       const move = deps.moveData(action.chosenMove.id)
       if (!move) return { targetDamage: null, attackerDamage: null, unmodelled: [`move ${action.chosenMove.id}: move data is unavailable`] }
@@ -87,8 +87,11 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       unmodelled.push(...result.unmodelled)
       if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled }
 
+      // Cmd_critcalc runs before Cmd_damagecalc (battle_script_commands.c:1568-1585).
       const denominator = result.critChanceDenominator
       const crit = denominator === 1 || (denominator !== null && deps.random.random16() % denominator === 0)
+      // battle_util.c:7790-7795 uses r = Random()%16 and indexes the ascending
+      // 85..100% result arrays as 15-r; Bad Luck forces r=15.
       const roll = result.isForcedMinRoll ? 15 : deps.random.random16() % 16
       const values = result.hitCount === null
         ? (crit ? result.critRolls : result.rolls)
