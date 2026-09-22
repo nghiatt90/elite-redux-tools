@@ -12,6 +12,10 @@ memory: project
 color: purple
 ---
 
+> **DEPRECATED.** This project moved from the Claude-native team workflow to OMC's `/team`
+> skill; OMC's own `code-reviewer` role supersedes this file. Kept as reference only — not
+> wired into the current workflow. See CLAUDE.md's "Multi-agent work" note.
+
 You review code against two references at once: what was agreed, and whatever source the code
 claims to derive from.
 

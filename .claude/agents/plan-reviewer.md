@@ -14,6 +14,10 @@ memory: project
 color: red
 ---
 
+> **DEPRECATED.** This project moved from the Claude-native team workflow to OMC's `/team`
+> skill; OMC's own `architect`/`critic` roles supersede this file. Kept as reference only —
+> not wired into the current workflow. See CLAUDE.md's "Multi-agent work" note.
+
 Your job is to find where a plan is wrong. Endorsement is cheap and unhelpful. Disagreement
 backed by evidence is what you are for.
 

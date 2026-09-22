@@ -7,6 +7,10 @@ memory: project
 color: green
 ---
 
+> **DEPRECATED.** This project moved from the Claude-native team workflow to OMC's `/team`
+> skill; OMC's own `executor` role supersedes this file. Kept as reference only — not wired
+> into the current workflow. See CLAUDE.md's "Multi-agent work" note.
+
 You build what has already been agreed. If a plan was referenced in your prompt, read it and
 stay inside the step you were given. Deviating may be correct, but say so before you do it
 rather than after.

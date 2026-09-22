@@ -113,14 +113,10 @@ proportionate to that.
   agent reasoned about whether a move deals damage from its description rather than from its
   script. `docs/battle-sim/boss-fight-coverage.md` shows what the scripts settle that the
   declared data cannot — a 95-power move whose script has no damage step at all.
-- **Agent roles** live in `.claude/agents/` (`plan-reviewer`, `implementer` on Sonnet,
-  `code-reviewer`). They are deliberately role-generic and rely on this file for project
-  facts, so keep this file current. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is already
-  set in `~/.claude/settings.json`, but the flag alone is not enough — **run team work
-  from an interactive terminal `claude` session, not the desktop app's Code tab.** The
-  Code tab is an Agent SDK child session (`CLAUDE_CODE_CHILD_SESSION=1`), and per the
-  docs an SDK/`-p` session never spawns teammates; a named subagent there launches as an
-  ordinary subagent. It also has the `SendMessage` tool removed outright — subagents
-  included — so agents can only report back to the lead, with no mid-flight
-  coordination. `ListAgents` still works there, and cross-session messaging to your other
-  sessions is reachable through the session-management MCP server.
+- **Multi-agent work runs through OMC's `/team` skill**, not the Claude-native team setup this
+  project used earlier. `.claude/agents/plan-reviewer.md`, `implementer.md` and
+  `code-reviewer.md` are kept only as deprecated reference — they predate OMC and are not
+  wired into the current workflow. OMC's own roster (`planner`, `executor`, `code-reviewer`,
+  `verifier`, etc., see the `wiki` skill) already carries the plan → execute → review → verify
+  discipline this project relies on, driven by this file's project facts the same way the old
+  agents were.
