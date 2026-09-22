@@ -30,6 +30,7 @@ describe('real ids used below exist in the snapshot', () => {
   it('abilities, including every UNPORTED_ACCURACY_ABILITIES entry', () => {
     for (const id of UNPORTED_ACCURACY_ABILITIES) requireAbility(id)
     requireAbility('ABILITY_UNAWARE')
+    requireAbility('ABILITY_AURORA_BOREALIS')
   })
 })
 
@@ -56,7 +57,6 @@ function baseInputs(overrides: Partial<AccuracyInputs> = {}): AccuracyInputs {
     attackerHoldEffectParam: 0,
     attackerAccStage: 6,
     attackerAbilitySlots: NO_SLOTS,
-    attackerUnawareMoldBroken: false,
     attackerActsAfterDefender: false,
     attackerUsedMicleBerry: false,
     myceliumMightActive: false,
@@ -262,6 +262,18 @@ describe('ACCURACY_HITS_IF_POSSIBLE exceptions, :1286-1331', () => {
     expect(getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_SHEER_COLD'), moveAccuracy: 30, weather: 'NONE' })).accuracy).not.toBe(101)
   })
 
+  it('MOVE_BLIZZARD without hail but attacker holds Aurora Borealis: 101 (HasAuroraBorealis, battle_util.c:9345-9348)', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_AURORA_BOREALIS'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_BLIZZARD'), moveAccuracy: 70, weather: 'NONE', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('MOVE_BLIZZARD: Aurora Borealis on the DEFENDER does not trigger it (the C checks battlerAtk only)', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_AURORA_BOREALIS'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_BLIZZARD'), moveAccuracy: 70, weather: 'NONE', defenderAbilitySlots: slots }))
+    expect(result.accuracy).not.toBe(101)
+  })
+
   it('MOVE_EERIE_SPELL in fog: 101', () => {
     expect(getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_EERIE_SPELL'), moveAccuracy: 100, weather: 'FOG' })).accuracy).toBe(101)
   })
@@ -453,3 +465,4 @@ describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
     expect(new Set(UNPORTED_ACCURACY_ABILITIES).size).toBe(UNPORTED_ACCURACY_ABILITIES.length)
   })
 })
+

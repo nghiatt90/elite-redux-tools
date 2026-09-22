@@ -35,11 +35,16 @@
 //     the ambiguity is reported as a gap whenever the berry was actually used.
 //   - The onAccuracy ability loop (:1354-1362) iterates every ability slot on
 //     the attacker and defender (in singles, the only two battlers the C's own
-//     FILTER admits) and runs each one's onAccuracy hook. Of the 31 abilities
-//     in the pinned checkout that declare one (grepped from src/abilities.cc),
-//     NONE has a port: web/src/engine/abilities/impl/09-hub-abilities.ts and
+//     FILTER admits) and runs each one's onAccuracy hook. Of the 50 abilities
+//     in the pinned checkout that declare one -- cross-checked mechanically
+//     both against data/v2.65beta/abilityHooks.json's `hooks.onAccuracy` and
+//     against a grep of every `constexpr Ability Impl<ABILITY_X>` block in
+//     src/abilities.cc that declares `.onAccuracy` (aliases count: an alias
+//     assignment like `Impl<ABILITY_RADIANCE>.onAccuracy =
+//     Impl<ABILITY_ILLUMINATE>.onAccuracy` is a live hook, not a gap) -- NONE
+//     has a port: web/src/engine/abilities/impl/09-hub-abilities.ts and
 //     23-mold-breaker.ts each say so explicitly in a comment. Every slot that
-//     names one of the 31 is gapped by ability id.
+//     names one of the 50 is gapped by ability id.
 //
 // One ability check IS ported for real, because its flag already exists in
 // the registry: IsUnaware (:9006) is exactly `RETURN_ABILITY_IF_FLAG(battler,
@@ -93,44 +98,64 @@ export const ACCURACY_STAGE_RATIOS: [number, number][] = [
   [3, 1], // +6
 ]
 
-/** The 31 abilities in the pinned checkout whose `.onAccuracy` hook
+/** The 50 abilities in the pinned checkout whose `.onAccuracy` hook
  * GetTotalAccuracy's ability loop (:1354-1362) would run, none of which has a
- * port. Grepped from src/abilities.cc: every `constexpr Ability
- * Impl<ABILITY_X>` block that declares `.onAccuracy`. Kept as data (not a
- * hardcoded switch) so the gap-scan and its test can iterate it. */
+ * port. Mechanically derived -- see accuracy.test.ts's oracle test, which
+ * re-derives this set from data/v2.65beta/abilityHooks.json and fails if it
+ * ever drifts. Aliases (e.g. Radiance/Illuminate, Hunters Mark/Deadeye) count
+ * as live hooks, same as a hand-written one. Kept as data (not a hardcoded
+ * switch) so the gap-scan and its test can iterate it. */
 export const UNPORTED_ACCURACY_ABILITIES = [
-  'ABILITY_SAND_VEIL',
+  'ABILITY_ANGELS_WRATH',
+  'ABILITY_ARTILLERY',
+  'ABILITY_BAD_LUCK',
+  'ABILITY_BRAWLING_WYVERN',
+  'ABILITY_CHANDELIER',
+  'ABILITY_COMMANDER',
   'ABILITY_COMPOUND_EYES',
+  'ABILITY_DEADEYE',
+  'ABILITY_DEADLY_PRECISION',
+  'ABILITY_DEPTH_EXPLORER',
+  'ABILITY_ECHOLOCATION',
+  'ABILITY_ENLIGHTENED',
+  'ABILITY_FATAL_PRECISION',
+  'ABILITY_FINAL_BLOW',
+  'ABILITY_FLAWLESS_PRECISION',
+  'ABILITY_GIFTED_MIND',
+  'ABILITY_GLACIAL_GHOST',
+  'ABILITY_GRIP_PINCER',
+  'ABILITY_HUNTERS_MARK',
+  'ABILITY_HUSTLE',
+  'ABILITY_HYPNOTIC_TRANCE',
+  'ABILITY_HYPNOTIST',
   'ABILITY_ILLUMINATE',
   'ABILITY_INNER_FOCUS',
+  'ABILITY_IRON_BARRAGE',
   'ABILITY_KEEN_EYE',
-  'ABILITY_HUSTLE',
-  'ABILITY_SNOW_CLOAK',
+  'ABILITY_LULLABY',
+  'ABILITY_LUNAR_ECLIPSE',
+  'ABILITY_MACH_3',
   'ABILITY_NO_GUARD',
-  'ABILITY_VICTORY_STAR',
-  'ABILITY_HYPNOTIST',
-  'ABILITY_BAD_LUCK',
-  'ABILITY_FATAL_PRECISION',
-  'ABILITY_SIGHTING_SYSTEM',
-  'ABILITY_GRIP_PINCER',
-  'ABILITY_DEADEYE',
-  'ABILITY_ARTILLERY',
-  'ABILITY_ROUNDHOUSE',
-  'ABILITY_SWEEPING_EDGE',
-  'ABILITY_GIFTED_MIND',
-  'ABILITY_ANGELS_WRATH',
+  'ABILITY_OLE',
   'ABILITY_PIXIE_POWER',
   'ABILITY_PLASMA_LAMP',
-  'ABILITY_COMMANDER',
-  'ABILITY_OLE',
-  'ABILITY_SHINY_LIGHTNING',
-  'ABILITY_SMOKEY_MANEUVERS',
   'ABILITY_QIGONG',
-  'ABILITY_LULLABY',
-  'ABILITY_DEADLY_PRECISION',
-  'ABILITY_ECHOLOCATION',
+  'ABILITY_RADIANCE',
   'ABILITY_RAIN_SHROUD',
-  'ABILITY_HYPNOTIC_TRANCE',
+  'ABILITY_REFRIGERATOR',
+  'ABILITY_ROUNDHOUSE',
+  'ABILITY_SAND_VEIL',
+  'ABILITY_SHINY_LIGHTNING',
+  'ABILITY_SIGHTING_SYSTEM',
+  'ABILITY_SMOKEY_MANEUVERS',
+  'ABILITY_SNOW_CLOAK',
+  'ABILITY_SUPER_SCOPE',
+  'ABILITY_SWEEPING_EDGE',
+  'ABILITY_SWEEPING_EDGE_PLUS',
+  'ABILITY_UNLOCKED_POTENTIAL',
+  'ABILITY_VICTORY_STAR',
+  'ABILITY_WAY_OF_PRECISION',
+  'ABILITY_WORLD_SERPENT',
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -208,16 +233,6 @@ export interface AccuracyInputs {
    * makes: IsUnaware (:1338, via abilities/dispatchCalc.hasFlag) and the
    * unported onAccuracy loop's gap scan (:1354-1362). */
   attackerAbilitySlots: AbilitySlots
-  /** RETURN_ABILITY_IF_FLAG's own checkMoldBreaker=TRUE argument to IsUnaware
-   * (:9007) -- is battlerAtk's OWN Unaware currently suppressed by an
-   * opposing Mold Breaker holder? Same plumbing shape as grounding.ts's
-   * GroundingContext.attackerHasMoldBreaker, but named for THIS battler's own
-   * suppression rather than the grounding check's (there the "attacker" whose
-   * Mold Breaker matters is always the move's user; here it can be either
-   * side, since IsUnaware is called on battlerAtk to gate ITS OWN read of
-   * the defender's evasion). Almost always false (no Mold Breaker holder
-   * currently opposing the attacker). */
-  attackerUnawareMoldBroken: boolean
   /** GetBattlerTurnOrderNum(battlerAtk) > GetBattlerTurnOrderNum(battlerDef)
    * (:1380) -- does the attacker act AFTER the defender this turn? Zoom
    * Lens's own condition; Wide Lens has no such gate. A turn-order fact the
@@ -386,14 +401,16 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
           // one 'HAIL' kind (bridge.ts's WEATHER_BIT_TO_KIND) -- a single
           // equality check against 'HAIL' is therefore the correct transcription
           // of `IsBattlerWeatherAffected(battlerDef, WEATHER_HAIL_ANY)`.
-          // HasAuroraBorealis(battlerAtk) is another unported ability check
-          // (src/battle_util.c:9345, RETURN_ABILITY_IF_FLAG-shaped) -- no
-          // `auroraBorealis`-style flag exists in AbilityFlags, so only the
-          // weather half of this OR is portable. Any battler that actually
-          // holds the ability is silently read as "no" rather than gapped
-          // per-call, since AbilityFlags has no slot to report it against;
-          // noted here as a standing, unconditional limitation instead.
-          if (inputs.weather === 'HAIL') prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+          // HasAuroraBorealis(battlerAtk) (src/battle_util.c:9345-9348) is
+          // `BattlerHasAbility(battler, ABILITY_AURORA_BOREALIS, FALSE)` --
+          // a PLAIN ability-id check, checkMoldBreaker=FALSE, not the
+          // RETURN_ABILITY_IF_FLAG/AbilityFlags shape the header's other two
+          // gaps need. battlerHasAbility already answers exactly this
+          // question (see calculate.ts's identical check for Weather Ball),
+          // so this IS ported for real.
+          if (inputs.weather === 'HAIL' || battlerHasAbility(inputs.attackerAbilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)) {
+            prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+          }
           break
         case 'MOVE_EERIE_SPELL':
         case 'MOVE_VEXING_VOID':
@@ -418,7 +435,14 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
     reason: 'NO_SOURCE',
     detail: 'IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC needs the onBlockStatDrops ability hook chain, which has no type, dispatch or registry entry anywhere in web/src/engine/abilities/; treated as false',
   })
-  const attackerIsUnaware = abilityHasFlag(inputs.attackerAbilitySlots, 'unaware', inputs.attackerUnawareMoldBroken)
+  // IsUnaware(battlerAtk) (:9006) -- checkMoldBreaker=TRUE in the C, but
+  // IsSuppressed's mold-breaker branch (battle_util.c:9254-9261) only ever
+  // fires when `battler != gBattlerAttacker`, and battlerAtk IS
+  // gBattlerAttacker on this real-battle call path (Cmd_accuracycheck:1424),
+  // so the suppression can never trigger here. Always FALSE, not a caller
+  // input -- an argument that must always take one value invites a future
+  // caller to pass the other.
+  const attackerIsUnaware = abilityHasFlag(inputs.attackerAbilitySlots, 'unaware', false)
   if (inputs.moveFlagStatStagesIgnored) {
     evasionStage = Math.min(evasionStage, DEFAULT_STAT_STAGE)
   } else if (attackerIsUnaware) {
@@ -436,7 +460,7 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
 
   // -- the onAccuracy ability loop, :1354-1362 --------------------------------
   // No hook is ported (see header); gap by name whenever a battler actually
-  // holds one of the 31 abilities that declare onAccuracy, in EITHER slot set
+  // holds one of the 50 abilities that declare onAccuracy, in EITHER slot set
   // (singles: the C's own FILTER only ever admits battlerAtk and battlerDef).
   for (const abilityId of UNPORTED_ACCURACY_ABILITIES) {
     const onAttacker = battlerHasAbility(inputs.attackerAbilitySlots, abilityId, () => false)
