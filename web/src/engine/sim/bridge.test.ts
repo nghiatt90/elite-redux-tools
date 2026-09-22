@@ -516,8 +516,8 @@ describe('buildBattlerBattleState: data-backed fields', () => {
     const mega = buildBattlerBattleState(battle({ speciesId: 'SPECIES_VENUSAUR_MEGA' }), 0, ROLES, DEPS).battler
     expect(mega.condition.baseSpeciesId).toBe('SPECIES_VENUSAUR')
     expect(mega.condition.isMegaEvolved).toBe(true)
-    expect(mega.condition.weight).toBeGreaterThan(0)
-    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_DUGTRIO' }), 0, ROLES, DEPS).battler.condition.heads).toBeGreaterThan(1)
+    expect(mega.condition.weight).toBe(1000)
+    expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_DUGTRIO' }), 0, ROLES, DEPS).battler.condition.heads).toBe(3)
     expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_BULBASAUR' }), 0, ROLES, DEPS).battler.canEvolveStrict).toBe(true)
     expect(buildBattlerBattleState(battle({ speciesId: 'SPECIES_VENUSAUR' }), 0, ROLES, DEPS).battler.canEvolveStrict).toBe(false)
 
