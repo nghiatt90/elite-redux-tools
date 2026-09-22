@@ -187,7 +187,7 @@ describe('gStatuses3', () => {
 
   it('reads Phantom Force as NONE for damage, but reports it separately', () => {
     // It is in STATUS3_SEMI_INVULNERABLE but has no FLAG_DMG_* counterpart
-    // (battle_util.c:7680-7682), so the damage path sees nothing.
+    // (battle_util.c:7643-7645), so the damage path sees nothing.
     expect(semiInvulnerableState(STATUS3_PHANTOM_FORCE)).toBe('NONE')
     expectExactlyBit(isPhantomForce, STATUS3_PHANTOM_FORCE, 'STATUS3_PHANTOM_FORCE')
   })

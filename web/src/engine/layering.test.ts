@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest'
  */
 
 const ENGINE_DIR = fileURLToPath(new URL('.', import.meta.url))
+const SELF = fileURLToPath(import.meta.url)
 
 function collectTsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -63,6 +64,7 @@ describe('engine layering', () => {
   it('no file under engine/ imports from lib/, features/ or routes/', () => {
     const offenders: string[] = []
     for (const file of files) {
+      if (file === SELF) continue // its own example specifiers in the assertions below would match
       const bad = forbiddenImports(readFileSync(file, 'utf-8'))
       for (const spec of bad) offenders.push(`${file.slice(ENGINE_DIR.length)} imports ${spec}`)
     }

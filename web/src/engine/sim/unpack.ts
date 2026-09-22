@@ -97,7 +97,9 @@ export function isTransformed(status2: number): boolean {
 }
 
 /** STATUS2_DEFENSE_CURL, at bit 30. Only changes EFFECT_ROLLOUT's own
- * counter===0 branch (battle_util.c:6838-6841). */
+ * counter===0 branch (battle_util.c:6838-6841). Not called from bridge.ts:
+ * EFFECT_ROLLOUT has no caller yet, so this is for the turn-loop batch that
+ * ports it, not unused code. */
 export function hasDefenseCurl(status2: number): boolean {
   return hasFlag(status2, STATUS2_DEFENSE_CURL)
 }
@@ -110,7 +112,7 @@ export function hasDefenseCurl(status2: number): boolean {
  *
  * STATUS3_SEMI_INVULNERABLE is four bits (UNDERGROUND | ON_AIR | UNDERWATER |
  * PHANTOM_FORCE, constants/battle.h:240), but only three have a damage
- * counterpart: battle_util.c:7680-7682's FLAG_DMG_UNDERGROUND /
+ * counterpart: battle_util.c:7643-7645's FLAG_DMG_UNDERGROUND /
  * FLAG_DMG_UNDERWATER / FLAG_DMG_2X_IN_AIR. PHANTOM_FORCE has no such flag, so a
  * battler in Phantom Force reads as 'NONE' here -- correct for the damage
  * multiplier, and NOT a statement that it is hittable. Returned separately by
@@ -206,7 +208,9 @@ export function extraStatLevels(volatiles: VolatileState): Record<BattleStatKey,
 
 /** gVolatileStructs[battler].rolloutCounter -- a 2-BIT counter (0..3), returned
  * as its value because EFFECT_ROLLOUT's power doubles per step. Cmd_handlerollout's
- * own increment gate (`rolloutCounter < 3`) makes 3 the ceiling in normal play. */
+ * own increment gate (`rolloutCounter < 3`) makes 3 the ceiling in normal play.
+ * Same deferral as `hasDefenseCurl`: not called from bridge.ts until Rollout
+ * itself is ported. */
 export function rolloutCounter(volatiles: VolatileState): number {
   return volatiles.rolloutCounter
 }
