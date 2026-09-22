@@ -14,6 +14,7 @@ import {
   GAP_REASONS,
   buildBattlerBattleState,
   buildFieldSides,
+  buildFieldBattleState,
   buildFieldFacts,
   gapsToUnmodelled,
   statStageToExternal,
@@ -38,6 +39,8 @@ import {
   STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_INVERSE_ROOM,
+  STATUS_FIELD_WONDER_ROOM,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_LUCKY_CHANT,
@@ -95,7 +98,7 @@ const DATA_CONTEXT: SimDataContext = {
   },
   move: () => undefined,
 }
-const DEPS: BridgeDeps = { grounding: GROUNDING, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
+const DEPS: BridgeDeps = { grounding: GROUNDING, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: RATIOS, dataContext: DATA_CONTEXT, inverseBattle: false }
 
 /** Battler 0 attacking battler 1, unless a test says otherwise. */
 const ROLES: CalculationRoles = { attackerId: 0, defenderId: 1 }
@@ -647,5 +650,46 @@ describe('buildFieldSides', () => {
       attacker: { reflect: false, lightScreen: true, auroraVeil: false, luckyChant: true },
       defender: { reflect: true, lightScreen: false, auroraVeil: true, luckyChant: false },
     })
+  })
+})
+
+describe('buildFieldBattleState', () => {
+  it('assembles role-relative sides and preserves the exact fresh-battle gap list', () => {
+    const built = buildFieldBattleState(battle(), ROLES, DEPS)
+    expect(built.field.sides).toEqual({
+      attacker: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
+      defender: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
+    })
+    expect(built.gaps.map((gap) => gap.field)).toEqual([
+      'field.sides.attacker.auroraVeil',
+      'field.sides.defender.auroraVeil',
+    ])
+  })
+
+  it('matches the inverse and wonder room predicates, including Normal Champion parity', () => {
+    const state = battle()
+    state.field.statuses = STATUS_FIELD_INVERSE_ROOM | STATUS_FIELD_WONDER_ROOM
+    expect(buildFieldBattleState(state, ROLES, DEPS).field.isInverseRoomActive).toBe(true)
+    expect(buildFieldBattleState(state, ROLES, DEPS).field.isWonderRoomActive).toBe(true)
+
+    state.field.statuses = 0
+    expect(buildFieldBattleState(state, ROLES, DEPS).field.isInverseRoomActive).toBe(false)
+    expect(buildFieldBattleState(state, ROLES, DEPS).field.isWonderRoomActive).toBe(false)
+
+    state.turnCount = 2
+    const championDeps = { ...DEPS, grounding: { ...GROUNDING, monotypeChampType: 'NORMAL' } }
+    expect(buildFieldBattleState(state, ROLES, championDeps).field.isWonderRoomActive).toBe(true)
+    state.turnCount = 1
+    expect(buildFieldBattleState(state, ROLES, championDeps).field.isWonderRoomActive).toBe(false)
+  })
+
+  it('suppresses both rooms under Clueless and follows the inverse-battle dependency', () => {
+    const state = battle()
+    state.field.statuses = STATUS_FIELD_INVERSE_ROOM | STATUS_FIELD_WONDER_ROOM
+    const deps = { ...DEPS, inverseBattle: true, grounding: { ...GROUNDING, isCluelessOnField: true } }
+    const built = buildFieldBattleState(state, ROLES, deps)
+    expect(built.field.isInverseRoomActive).toBe(false)
+    expect(built.field.isWonderRoomActive).toBe(false)
+    expect(built.field.isInverseBattleFlagSet).toBe(true)
   })
 })

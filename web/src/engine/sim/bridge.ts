@@ -102,9 +102,11 @@ import {
   STATUS1_TOXIC_POISON,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_INVERSE_ROOM,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_WONDER_ROOM,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_LUCKY_CHANT,
@@ -299,6 +301,8 @@ export interface BridgeDeps {
   turnOrder: TurnOrderContext
   statStageRatios: [number, number][]
   dataContext: SimDataContext
+  /** Caller-supplied FlagGet(FLAG_SYS_INVERSE_BATTLE), sourced from encounters.json inverseBattles. */
+  inverseBattle: boolean
 }
 
 /**
@@ -567,5 +571,44 @@ export function buildFieldFacts(state: BattleState, deps: BridgeDeps): { weather
     terrain: terrainFromFieldStatuses(state.field.statuses),
     gravityActive: isGravityActive(state, deps.grounding),
     gaps: gap ? [gap] : [],
+  }
+}
+
+/** Builds the complete field shape consumed by calculateMoveDamage. Side flags
+ * are derived from gSideStatuses: encounters.json has battle-event sources for
+ * Light Screen, Reflect and Lucky Chant (Mossdeep Gym), so they are valid at
+ * battle start but can go stale because the sim turn loop does not update them.
+ * Aurora Veil has no encounter start source, so its two fields remain explicit
+ * NEVER_UPDATED gaps until such a source is modelled.
+ *
+ * IsInverseRoomActive and isWonderRoomActive mirror battle_util.c:8680-8687 and
+ * :8707-8714 respectively. Clueless suppresses both; Wonder Room also comes
+ * from Normal Monotype Champion on even battle turns, represented by the
+ * existing grounding monotype fact and state.turnCount.
+ */
+export function buildFieldBattleState(state: BattleState, roles: CalculationRoles, deps: BridgeDeps): { field: FieldBattleState; gaps: BridgeGap[] } {
+  const facts = buildFieldFacts(state, deps)
+  const clueless = deps.grounding.isCluelessOnField
+  const inverseRoom = !clueless && hasFlag(state.field.statuses, STATUS_FIELD_INVERSE_ROOM)
+  const wonderRoom = !clueless && (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) ||
+    (deps.grounding.monotypeChampType === 'NORMAL' && state.turnCount % 2 === 0))
+
+  const gaps = [...facts.gaps,
+    { field: 'field.sides.attacker.auroraVeil', reason: 'NEVER_UPDATED' as const, detail: 'gSideStatuses AURORA_VEIL; encounters.json has no battle-start source and the sim loop does not write side statuses' },
+    { field: 'field.sides.defender.auroraVeil', reason: 'NEVER_UPDATED' as const, detail: 'gSideStatuses AURORA_VEIL; encounters.json has no battle-start source and the sim loop does not write side statuses' },
+  ]
+
+  return {
+    field: {
+      weather: facts.weather,
+      terrain: facts.terrain,
+      gravityActive: facts.gravityActive,
+      sides: buildFieldSides(state, roles),
+      isDoubleBattle: false,
+      isInverseRoomActive: inverseRoom,
+      isInverseBattleFlagSet: deps.inverseBattle,
+      isWonderRoomActive: wonderRoom,
+    },
+    gaps,
   }
 }
