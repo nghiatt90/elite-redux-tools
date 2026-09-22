@@ -72,6 +72,17 @@ export interface SimMoveData {
   effect: string | null
   priority?: number
   flags: Record<string, true>
+  /** moves.json's own `accuracy` (MoveList.proto `accuracy`, GetTotalAccuracy's
+   * moveAcc source, battle_script_commands.c:1284). 0 means "no accuracy
+   * check" (ACCURACY_HITS_IF_POSSIBLE), same as the AccuracyInputs field it
+   * feeds. Not carried by `MoveData` (calculate.ts) -- the damage path never
+   * needed it -- so accuracyBridge.ts reads this shape instead. */
+  accuracy: number
+  /** moves.json's `hitsAir` (HitsAir enum: DOESNT_HIT_AIR/HITS/DOUBLE_DAMAGE,
+   * MoveList.proto). HITS is FLAG_DMG_IN_AIR, DOUBLE_DAMAGE is
+   * FLAG_DMG_2X_IN_AIR -- see accuracy.ts's AccuracyInputs doc for why they
+   * are two separate bits. Undefined/absent means neither flag is set. */
+  hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
 }
 
 /**
