@@ -300,6 +300,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop; state.turnCount is therefore the zero-based counter while resolving
   // this turn (turn 1 is 0), matching bridge.ts's parity checks.
-  state.turnCount++
+  // battle_main.c:3512-3513 saturates the u8 counter at 0xFF.
+  state.turnCount = Math.min(0xFF, state.turnCount + 1)
   return { actions: outcomes, order }
 }

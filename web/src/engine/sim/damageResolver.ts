@@ -1,3 +1,15 @@
+// DamageResolver bridge: assembles the simulator's role-relative state for the
+// existing calculateMoveDamage port, then applies the game's final crit and
+// random-roll draws. The C order is crit first, then the damage percentile.
+// Immune is 0 because the move happened but dealt no HP damage; a missing move
+// is null because no move happened. Multi-hit totals deliberately share one
+// percentile and one crit decision because calculate.ts documents that
+// simplification rather than drawing each hit independently.
+//
+// Deliberately absent here: accuracy, move effects/status, recoil/drain,
+// switching, residuals, and the simulator's untracked turn-history toggles.
+// Those remain in unmodelled[] so this seam never presents an incomplete
+// number as complete.
 import type { MoveData, DamageCalcScenario } from '../calculate'
 import { calculateMoveDamage } from '../calculate'
 import type { BattleConstants } from '../types'
@@ -18,15 +30,7 @@ export interface BridgeDamageResolverDeps extends BridgeDeps {
   random: RandomSource
 }
 
-const variableEffects = new Set(['EFFECT_MULTI_HIT'])
-const neutralToggleNotes: Record<string, string> = {
-  EFFECT_ECHOED_VOICE: 'sameMoveTurnsInARow is not tracked by the simulator',
-  EFFECT_ROLLOUT: 'attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator',
-  EFFECT_BEAT_UP: 'beatUpBaseAttack and beatUpHitCount are not tracked by the simulator',
-  EFFECT_FOCUS_PUNCH: 'attackerWasHitThisTurn is not tracked by the simulator',
-  EFFECT_SELF_DESTRUCT: 'attackerWasHitThisTurn is not tracked by the simulator',
-  EFFECT_PURSUIT: 'defenderIsSwitching is false because switching is not modelled',
-}
+const recoilEffects = new Set(['EFFECT_RECOIL_25', 'EFFECT_RECOIL_33', 'EFFECT_RECOIL_50', 'EFFECT_RECOIL_HP_25', 'EFFECT_FLINCH_RECOIL_33'])
 
 function magnitudeTier(random: RandomSource): 4 | 5 | 6 | 7 | 8 | 9 | 10 {
   const roll = random.random16() % 100
@@ -60,8 +64,11 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),
         ...gapsToUnmodelled(field.gaps),
       ]
-      const toggleNote = neutralToggleNotes[move.effect ?? '']
-      if (toggleNote) unmodelled.push(toggleNote)
+      if (move.id === 'MOVE_ECHOED_VOICE') unmodelled.push('sameMoveTurnsInARow is not tracked by the simulator')
+      if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
+      if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
+      if (move.effect === 'EFFECT_FOCUS_PUNCH' || move.id === 'MOVE_SELF_DESTRUCT') unmodelled.push('attackerWasHitThisTurn is not tracked by the simulator')
+      if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
       const scenario: DamageCalcScenario = {
         move,
         attacker: attacker.battler,
@@ -73,12 +80,19 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         battleConstants: deps.battleConstants,
         attackerActsFirst: !context.targetHasActedThisTurn,
         sameMoveTurnsInARow: 0,
-        hitCount: variableEffects.has(move.effect ?? '') ? variableHitCount(deps.random) : 3,
+        // This scenario is also consumed by Parental-Bond TWO_TO_FIVE, not
+        // only EFFECT_MULTI_HIT. Loaded Dice uses the game's 4-or-5 draw.
+        hitCount: attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LOADED_DICE'
+          ? 4 + (deps.random.random16() % 2)
+          : variableHitCount(deps.random),
         defenderIsSwitching: false,
         magnitudeTier: move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
         attackerRolloutCounter: 0,
         attackerHasDefenseCurl: false,
         attackerWasHitThisTurn: attacker.battler.condition.wasDamagedThisTurnBy !== 'none',
+        // DamageContext documents this as a representative party member's
+        // base Attack; no party roster exists, so keep the attacker as the
+        // explicit representative and report the gap for Beat Up.
         beatUpBaseAttack: attacker.battler.rawStats.atk,
         beatUpHitCount: 1,
         defenderUsedGlaiveRush: false,
@@ -98,7 +112,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         : (crit ? result.totalCritRolls : result.totalRolls)
       if (!values) return { targetDamage: null, attackerDamage: null, unmodelled }
       if (result.hitCount !== null) unmodelled.push('multi-hit per-hit rolls and crits are not independently drawn')
-      if (move.effect === 'EFFECT_RECOIL' || move.effect === 'EFFECT_ABSORB' || attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LIFE_ORB') {
+      if (recoilEffects.has(move.effect ?? '') || move.effect === 'EFFECT_ABSORB' || attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LIFE_ORB') {
         unmodelled.push('recoil, drain, and Life Orb attacker damage are not modelled yet')
       }
       return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled }
