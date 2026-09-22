@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
 import { createRandomSource } from './rng'
-import type { BattleState, SimBattleMon } from './state'
+import type { BattleState, RandomSource, SimBattleMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -10,6 +12,10 @@ import { THROWING_DAMAGE_RESOLVER, assertNoPerBattlerQuash, buildTurnOrderContex
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { STATUS3_ROOTED, STATUS_FIELD_GRAVITY, setFlag } from './constants'
+import { buildBattlerBattleState, buildFieldBattleState, type BridgeDeps } from './bridge'
+import type { SimDataContext, SimItemData, SimSpeciesData } from './dataContext'
+import { createBridgeDamageResolver, type BridgeDamageResolverDeps } from './damageResolver'
+import { calculateMoveDamage, type DamageCalcScenario } from '../calculate'
 
 const RATIOS: [number, number][] = [
   [2, 8],
@@ -405,5 +411,136 @@ describe('quash is field-wide', () => {
     const outQuashed = executeTurn(quashed, [useMove(1), useMove(0)], deps(fixedDamage(0)))
     expect(outPlain.order.battlerByTurnOrder).toEqual([0, 1])
     expect(outQuashed.order.battlerByTurnOrder).toEqual([0, 1])
+  })
+})
+
+describe('turn counter and resolver ordering context', () => {
+  it('advances 0 to 1 to 2 and flips Normal champion Wonder Room parity', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }])
+    const bridge: BridgeDeps = {
+      grounding: { ...GROUNDING, monotypeChampType: 'NORMAL' },
+      turnOrder: NEUTRAL_TURN_ORDER_CONTEXT,
+      statStageRatios: RATIOS,
+      inverseBattle: false,
+      dataContext: { species: () => undefined, item: () => undefined, move: () => undefined },
+    }
+    const field = () => buildFieldBattleState(state, { attackerId: 0, defenderId: 1 }, bridge).field.isWonderRoomActive
+    expect(state.turnCount).toBe(0)
+    expect(field()).toBe(true)
+    executeTurn(state, [useMove(1), useMove(0)], deps(fixedDamage(0)))
+    expect(state.turnCount).toBe(1)
+    expect(field()).toBe(false)
+    executeTurn(state, [useMove(1), useMove(0)], deps(fixedDamage(0)))
+    expect(state.turnCount).toBe(2)
+    expect(field()).toBe(true)
+  })
+
+  it('passes attackerActsFirst through the loop order', () => {
+    const seen: boolean[] = []
+    const resolver: DamageResolver = { resolve: (_state, _attacker, _target, _action, context) => {
+      seen.push(!(context?.targetHasActedThisTurn ?? false))
+      return { targetDamage: 0, attackerDamage: null, unmodelled: [] }
+    } }
+    const state = battle([{ spe: 200 }, { spe: 50 }])
+    executeTurn(state, [useMove(1), useMove(0)], deps(resolver))
+    expect(seen).toEqual([true, false])
+  })
+})
+
+describe('integration: executeTurn with the real damage resolver', () => {
+  const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
+  const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
+  const moves = read<Array<Record<string, any>>>('moves.json')
+  const moveById = new Map(moves.map((m) => [m.id as string, m]))
+  const species = read<Array<Record<string, any>>>('species.json')
+  const items = read<Array<Record<string, any>>>('items.json')
+  const speciesById = new Map(species.map((s) => [s.id as string, s]))
+  const itemsById = new Map(items.map((i) => [i.id as string, i]))
+  const natures = read<any>('natures.json')
+  const moveBehaviors = read<any>('moveBehaviors.json').behaviors
+  const chart = Object.fromEntries(Object.entries(read<Record<string, Record<string, number>>>('types.json')).map(([k, v]) => [k, v]))
+  const inverseChart = Object.fromEntries(Object.entries(read<Record<string, Record<string, number>>>('typesInverse.json')).map(([k, v]) => [k, v]))
+
+  if (!moveById.has('MOVE_TACKLE')) throw new Error('snapshot is missing MOVE_TACKLE')
+
+  function toMoveData(id: string): any {
+    const move = moveById.get(id)
+    if (!move) throw new Error(`snapshot is missing ${id}`)
+    const arg = move.argument as Record<string, unknown> | undefined
+    return {
+      id, power: move.power, type: String(move.type).replace('TYPE_', ''), type2: move.type2 ? String(move.type2).replace('TYPE_', '') : null,
+      split: move.split, effectChance: move.effectChance, splitFlag: move.splitFlag, effect: move.effect, customBehavior: move.customBehavior,
+      crit: move.crit, flags: move.flags ?? {}, priority: move.priority, changeTypeHoldEffect: arg?.kind === 'holdEffect' ? arg.value : null,
+      miscEffect: arg?.kind === 'misc' ? arg.value : null, multiHitArgument: arg?.kind === 'int' ? arg.value : null,
+    }
+  }
+
+  const realBridge: BridgeDeps = {
+    grounding: { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false },
+    turnOrder: NEUTRAL_TURN_ORDER_CONTEXT,
+    statStageRatios: natures.statStageRatios,
+    dataContext: {
+      species: (id) => speciesById.get(id) as SimSpeciesData | undefined,
+      item: (id) => itemsById.get(id) as SimItemData | undefined,
+      move: () => undefined,
+    } satisfies SimDataContext,
+    inverseBattle: false,
+  }
+
+  function realResolverDeps(random: RandomSource): BridgeDamageResolverDeps {
+    return { ...realBridge, moveData: (id) => moveById.has(id) ? toMoveData(id) : undefined, typeChart: chart, inverseTypeChart: inverseChart, moveBehaviors, battleConstants: natures, random }
+  }
+
+  /** Independent ground truth for the damage range, built the same way
+   * damageResolver.ts assembles a scenario, but calling calculateMoveDamage
+   * directly with no RNG draws of its own -- so the executeTurn integration
+   * result below is checked against calculateMoveDamage's own output, not
+   * against the resolver re-deriving the same number a second time. */
+  function directRolls(state: BattleState, attackerId: number, targetId: number, moveId: string) {
+    const roles = { attackerId, defenderId: targetId }
+    const attacker = buildBattlerBattleState(state, attackerId, roles, realBridge)
+    const defender = buildBattlerBattleState(state, targetId, roles, realBridge)
+    const field = buildFieldBattleState(state, roles, realBridge)
+    const move = toMoveData(moveId)
+    const scenario: DamageCalcScenario = {
+      move, attacker: attacker.battler, defender: defender.battler, field: field.field,
+      typeChart: chart, inverseTypeChart: inverseChart, moveBehaviors, battleConstants: natures,
+      attackerActsFirst: true, sameMoveTurnsInARow: 0, hitCount: 3, defenderIsSwitching: false,
+      magnitudeTier: null, attackerRolloutCounter: 0, attackerHasDefenseCurl: false,
+      attackerWasHitThisTurn: false, beatUpBaseAttack: attacker.battler.rawStats.atk, beatUpHitCount: 1,
+      defenderUsedGlaiveRush: false,
+    }
+    return calculateMoveDamage(scenario)
+  }
+
+  it('deals damage inside calculateMoveDamage\'s own roll range for both attackers', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }])
+    const resolver = createBridgeDamageResolver(realResolverDeps(createRandomSource(7)))
+    const out = executeTurn(state, [useMove(1), useMove(0)], deps(resolver))
+
+    const rangeFor = (attackerId: number, targetId: number) => {
+      const direct = directRolls(battle([{ spe: 200 }, { spe: 50 }]), attackerId, targetId, 'MOVE_TACKLE')
+      return { min: Math.min(...direct.rolls, ...(direct.critRolls ?? [])), max: Math.max(...direct.rolls, ...(direct.critRolls ?? [])) }
+    }
+    const range0 = rangeFor(0, 1)
+    const range1 = rangeFor(1, 0)
+
+    expect(out.actions[0].targetDamage).not.toBeNull()
+    expect(out.actions[0].targetDamage!).toBeGreaterThanOrEqual(range0.min)
+    expect(out.actions[0].targetDamage!).toBeLessThanOrEqual(range0.max)
+    expect(out.actions[1].targetDamage).not.toBeNull()
+    expect(out.actions[1].targetDamage!).toBeGreaterThanOrEqual(range1.min)
+    expect(out.actions[1].targetDamage!).toBeLessThanOrEqual(range1.max)
+  })
+
+  it('faints a low-HP target and skips its own action for the rest of the turn', () => {
+    // Battler 0 is faster and Tackle's minimum non-crit roll is well above 1 HP.
+    const state = battle([{ spe: 200 }, { spe: 50, hp: 1 }])
+    const resolver = createBridgeDamageResolver(realResolverDeps(createRandomSource(7)))
+    const out = executeTurn(state, [useMove(1), useMove(0)], deps(resolver))
+
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(out.actions[0].fainted).toEqual([1])
+    expect(out.actions[1].skippedBecauseFainted).toBe(true)
   })
 })
