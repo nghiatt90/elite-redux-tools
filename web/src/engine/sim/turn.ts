@@ -166,7 +166,7 @@ export interface DamageResolution {
 }
 
 export interface DamageResolver {
-  resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction): DamageResolution
+  resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context?: { targetHasActedThisTurn: boolean }): DamageResolution
 }
 
 /** A resolver that THROWS rather than returning zero.
@@ -283,7 +283,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       continue
     }
 
-    const { targetDamage, attackerDamage, unmodelled } = deps.damage.resolve(state, battlerId, targetId, action)
+    const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
+    const { targetDamage, attackerDamage, unmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn: targetIndex >= 0 && targetIndex < index })
     const fainted: number[] = []
     applyDamage(state, targetId, targetDamage, fainted)
     applyDamage(state, battlerId, attackerDamage, fainted)
@@ -291,5 +292,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     outcomes.push({ turnOrderIndex: index, battlerId, action: actionKind, skippedBecauseFainted: false, targetId, targetDamage, attackerDamage, unmodelled, fainted })
   }
 
+  // battle_main.c increments gBattleResults.battleTurnCounter after the action
+  // loop; state.turnCount is therefore the zero-based counter while resolving
+  // this turn (turn 1 is 0), matching bridge.ts's parity checks.
+  state.turnCount++
   return { actions: outcomes, order }
 }
