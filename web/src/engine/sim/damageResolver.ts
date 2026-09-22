@@ -72,7 +72,15 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // moves.json), so basePower.ts's EFFECT_ECHOED_VOICE case is unreachable
       // and Echoed Voice's own power scaling is Triple-Kick-shaped, not tied to
       // this toggle at all.
-      if (attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_METRONOME') unmodelled.push('sameMoveTurnsInARow is not tracked by the simulator')
+      //
+      // No longer a gap: turn.ts's deductPp now maintains
+      // BattlerState.sameMoveTurns for real (Cmd_ppreduce,
+      // battle_script_commands.c:1486-1493). It is always 0 in this batch --
+      // the C's own increment branch needs gTurnStructs.parentalBondOn > 0,
+      // which nothing in this codebase's turn loop writes (multi-hit/Parental
+      // Bond sequencing is not modelled) -- which is the CORRECT value for
+      // every scenario this batch can represent, not a guess: see
+      // state.ts's sameMoveTurns doc.
       if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
       if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
       if (move.effect === 'EFFECT_FOCUS_PUNCH' || move.id === 'MOVE_SELF_DESTRUCT') unmodelled.push('attackerWasHitThisTurn is not tracked by the simulator')
@@ -87,7 +95,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         moveBehaviors: deps.moveBehaviors,
         battleConstants: deps.battleConstants,
         attackerActsFirst: !context.targetHasActedThisTurn,
-        sameMoveTurnsInARow: 0,
+        sameMoveTurnsInARow: state.battlers[attackerId]!.sameMoveTurns,
         // This scenario is also consumed by Parental-Bond TWO_TO_FIVE, not
         // only EFFECT_MULTI_HIT. Loaded Dice uses the game's 4-or-5 draw.
         hitCount: attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LOADED_DICE'

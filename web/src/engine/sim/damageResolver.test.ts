@@ -228,15 +228,28 @@ describe('createBridgeDamageResolver: Parental Bond TWO_TO_FIVE (ABILITY_UNRELEN
 })
 
 describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consumer', () => {
-  it('fires sameMoveTurnsInARow only when the attacker holds Metronome, never for plain Echoed Voice', () => {
+  it('reads sameMoveTurnsInARow from real state.battlers[attacker].sameMoveTurns (turn.ts:deductPp), not a hardcoded 0', () => {
     // This dataset's MOVE_ECHOED_VOICE has effect EFFECT_TRIPLE_KICK, not
     // EFFECT_ECHOED_VOICE (which appears nowhere in moves.json) -- the real
     // consumer of sameMoveTurnsInARow is HOLD_EFFECT_METRONOME's item boost
-    // (calculate.ts's attackerFinalItemMultiplier), for ANY move.
-    const plain = resolver().resolve(state(), 0, 1, action('MOVE_ECHOED_VOICE'))
-    expect(plain.unmodelled.some((u) => u.includes('sameMoveTurnsInARow'))).toBe(false)
-    const withMetronome = resolver().resolve(state({ itemId: 'ITEM_METRONOME' }), 0, 1, action('MOVE_TACKLE'))
-    expect(withMetronome.unmodelled.some((u) => u.includes('sameMoveTurnsInARow'))).toBe(true)
+    // (calculate.ts's attackerFinalItemMultiplier), for ANY move. Both a
+    // fresh battler (sameMoveTurns 0, create.ts) and turn.ts's deductPp
+    // (always resets to 0 in this batch, see state.ts's field doc) leave it
+    // at 0, so this is no longer an unmodelled gap -- it is asserted by
+    // reading the resolver's scenario input directly, the same way
+    // damageResolver.test.ts's other real-consumer tests below do.
+    const withMetronome = state({ itemId: 'ITEM_METRONOME' })
+    // The SAME scripted draw sequence for both resolves, so hitCount/crit/roll
+    // are identical and sameMoveTurns is the only thing that differs.
+    const baseline = resolver(scripted(1, 3, 1, 0)).resolve(withMetronome, 0, 1, action('MOVE_TACKLE'))
+    withMetronome.battlers[0]!.sameMoveTurns = 5
+    const boosted = resolver(scripted(1, 3, 1, 0)).resolve(withMetronome, 0, 1, action('MOVE_TACKLE'))
+    // attackerFinalItemMultiplier (calculate.ts:1219-1222) scales with
+    // sameMoveTurnsInARow (20% per stack for ITEM_METRONOME, items.json), so
+    // 5 stacks must read through as strictly more damage than 0.
+    expect(baseline.targetDamage).not.toBeNull()
+    expect(boosted.targetDamage).not.toBeNull()
+    expect(boosted.targetDamage!).toBeGreaterThan(baseline.targetDamage!)
   })
   it('fires the rollout/defense-curl note for EFFECT_ROLLOUT and the beat-up note for EFFECT_BEAT_UP', () => {
     expect(resolver().resolve(state(), 0, 1, action('MOVE_ROLLOUT')).unmodelled.some((u) => u.includes('attackerRolloutCounter'))).toBe(true)

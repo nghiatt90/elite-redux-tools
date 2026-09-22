@@ -335,6 +335,14 @@ export interface BattlerState {
    * battle_main.c:2710. The research note lists only `monToSwitchIntoId`; both
    * are required. */
   aiMonToSwitchIntoId: number
+  /** `gBattleStruct->sameMoveTurns[MAX_BATTLERS_COUNT]` (battle.h, read/written
+   * by Cmd_ppreduce, battle_script_commands.c:1486-1493) -- another
+   * per-battler gBattleStruct field, same precedent as monToSwitchIntoId
+   * above. Cmd_ppreduce's own increment branch requires
+   * `gTurnStructs[battler].parentalBondOn > 0`, which this sim never sets
+   * (multi-hit/Parental Bond sequencing is not modelled), so ppreduce's port
+   * always takes the reset-to-0 branch -- see turn.ts's deductPp. */
+  sameMoveTurns: number
 }
 
 // ---------------------------------------------------------------------------

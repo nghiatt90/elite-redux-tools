@@ -427,13 +427,13 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
   const hasBloodStainEffect = !mon.types.includes('GHOST') && !mon.types.includes('ROCK') && abilityIds.includes('ABILITY_BLOOD_STAIN')
   const statStages = statStagesToExternal(mon.statStages)
 
-  /* DERIVED, but goes stale -- the same shape as weather and terrain in
-   * buildFieldFacts. A trainer party really does set full PP, so this is right
-   * when the battle opens; the turn loop lists PP deduction among the things it
-   * deliberately does not do, so nothing decrements it afterwards. Its only
-   * damage consumer is Trump Card, whose power is entirely PP-derived and which
-   * will therefore read the opening PP for the whole battle. Not gapped,
-   * because a real battle-start source sets it and a caller can change it. */
+  /* DERIVED, and no longer stale for the attacker's OWN moves: turn.ts's
+   * deductPp (Cmd_ppreduce, battle_script_commands.c:1460-1506) now decrements
+   * `mon.pp` on every USE_MOVE action that reaches a living target, so this
+   * reads `mon.pp` directly and reflects real usage. Trump Card, its only
+   * damage consumer, therefore sees the CURRENT PP rather than the opening
+   * PP for the whole battle. Still not gapped -- a real battle-start source
+   * sets it and the turn loop now maintains it too. */
   const moveSlotPp: Record<string, number> = {}
   mon.moves.forEach((moveId, slot) => {
     if (moveId) moveSlotPp[moveId] = mon.pp[slot]

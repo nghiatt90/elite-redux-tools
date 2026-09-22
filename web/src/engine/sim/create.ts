@@ -378,6 +378,7 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     // (battle_ai_switch_items.c:662-665) would exclude the lead's replacement.
     monToSwitchIntoId: PARTY_SIZE,
     aiMonToSwitchIntoId: PARTY_SIZE,
+    sameMoveTurns: 0,
   }
 }
 

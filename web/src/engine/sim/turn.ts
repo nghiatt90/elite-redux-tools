@@ -8,9 +8,35 @@
 // Those three are the whole shape of this module.
 //
 // DELIBERATELY ABSENT, all of it the next batches: move effects, status,
-// switching, end-of-turn residuals, the AI, PP deduction, accuracy checks,
-// multi-hit sequencing, and every battle-script behaviour. A damaging move
-// hits, damage lands, a battler may faint. Nothing else happens.
+// switching, end-of-turn residuals, the AI, multi-hit sequencing, and every
+// battle-script behaviour besides the accuracy check and PP deduction below.
+// A move may miss; PP is deducted; a hit deals damage; a battler may faint.
+// Nothing else happens.
+//
+// Accuracy (Cmd_accuracycheck, battle_script_commands.c:1398-1447) and PP
+// deduction (Cmd_ppreduce, :1460-1506) are ported for every USE_MOVE action
+// with a living target, in that C order: the accuracy draw happens first (its
+// own RandomSource draw), then PP is deducted UNCONDITIONALLY -- the C's
+// JumpIfMoveFailed only short-circuits on MOVE_RESULT_NO_EFFECT (ability
+// absorption, :1213-1218), never on MOVE_RESULT_MISSED, so a miss still costs
+// PP. Two branches of Cmd_accuracycheck are NOT reachable by this loop, by
+// construction rather than by omission, and are documented rather than
+// gapped at runtime:
+//   - the multi-hit/Parental-Bond second-hit accuracy exemption (:1412-1416)
+//     needs gTurnStructs.multiHitsUsed/parentalBondOn, which nothing in this
+//     loop ever sets (multi-hit sequencing is not modelled), so the
+//     condition is always false and the standard accuracy-check branch
+//     always runs -- exactly the behaviour this loop can represent anyway.
+//   - JumpIfMoveAffectedByProtect (:1422) needs a Protecting target, which
+//     RoundState.protectMove can represent but which nothing in this loop
+//     ever sets (Protect is not modelled), so it is always unset.
+// Cmd_accuracycheck's own Anticipation miss branch (:1427-1432, distinct from
+// GetTotalAccuracy's ability loop that accuracy.ts already gaps) needs
+// GetSingleUseAbilityCounter, a per-battle "already triggered" flag with no
+// home in the state model, and the move's type-effectiveness multiplier,
+// which is not known until the damage resolver runs afterwards -- gapped by
+// name (accuracyBridge.ts's defenderHasAnticipation) only when the defender
+// actually holds the ability.
 //
 // Absent from the three functions above SPECIFICALLY, listed because a reader
 // comparing this loop against them should not have to spot the gaps:
@@ -61,6 +87,11 @@ import type { ChosenAction, TurnOrderContext, TurnOrder } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
+import type { SimDataContext } from './dataContext'
+import { gapsToUnmodelled } from './bridge'
+import { buildAccuracyInputs } from './accuracyBridge'
+import { getTotalAccuracy } from './accuracy'
+import { battlerHasAbility } from '../abilities/dispatch'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -102,6 +133,14 @@ export interface ActionOutcome {
   /** True when HandleAction_UseMove's own liveness guard (:181-186) aborted the
    * action because its battler was not alive. */
   skippedBecauseFainted: boolean
+  /** Cmd_accuracycheck's own miss roll (battle_script_commands.c:1433), via
+   * buildAccuracyInputs/getTotalAccuracy. Kept separate from `targetDamage`
+   * being null rather than overloading it: null already means "nothing was
+   * attempted" (no living target, a status move with no resolver support),
+   * which is a different outcome from "the move was attempted and the
+   * accuracy roll failed". False for every action that never reached the
+   * accuracy check at all (skipped, no living target). */
+  missed: boolean
   targetId: number | null
   /** HP removed from the TARGET. null means nothing happened at all, which is
    * distinct from 0. */
@@ -197,6 +236,10 @@ export interface TurnLoopDeps {
   grounding: GroundingContext
   damage: DamageResolver
   statStageRatios: [number, number][]
+  /** accuracyBridge.ts's move/item lookups for the accuracy check. Separate
+   * from the DamageResolver's own data access, which the loop has no
+   * visibility into. */
+  dataContext: SimDataContext
 }
 
 /** Assembles the TurnOrderContext the loop actually runs with: the caller's
@@ -234,6 +277,78 @@ export function assertNoPerBattlerQuash(state: BattleState): void {
  * action is visible to the second. That is the whole reason this is a loop with
  * a re-sort inside it and not a sorted array.
  */
+/** Every battler, alive, on the SIDE OPPOSITE `battlerId` -- IsAbilityOnSide's
+ * own scan (battle_util.c:4792-4799), generalised past singles' one opponent
+ * since nothing here assumes battlersCount === 2. Does not apply the C's
+ * mold-breaker exception (BATTLER_HAS_ABILITY_AND_ALIVE's checkMoldBreaker=
+ * TRUE, :4793/4795); see deductPp's own gap note for why. */
+function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abilityId: string): boolean {
+  const side = battlerId & 1
+  for (let id = 0; id < state.battlersCount; id++) {
+    if ((id & 1) === side) continue
+    if (!isBattlerAlive(state, id)) continue
+    const battler = state.battlers[id]
+    if (battler && battlerHasAbility(battler.mon.abilities, abilityId, () => false)) return true
+  }
+  return false
+}
+
+/**
+ * Cmd_ppreduce, battle_script_commands.c:1460-1506. Runs for every USE_MOVE
+ * action that reaches this point (a living attacker with a living target),
+ * UNCONDITIONALLY of the accuracy result -- see this module's header.
+ *
+ * Ported: the base-1 deduction, Pressure's extra PP, the PP floor,
+ * notFirstStrike, and sameMoveTurns (state.ts's own field doc explains why
+ * the latter is always reset to 0 in this batch, never incremented).
+ *
+ * Gapped: Stockpile's Spit Up/Swallow PP-refund branch (:1476-1483 --
+ * TryUseStockpile has no port anywhere in this codebase; this falls through
+ * to the ordinary deduction, the correct answer whenever Stockpile was never
+ * used) and the transformed/mimicked-move branch (:1500-1504, a pure
+ * UI/link-battle controller sync call with no gameplay effect for a headless
+ * sim to model -- not a gap, since there is nothing for it to be wrong
+ * about).
+ */
+function deductPp(state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]): void {
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return
+  const slot = attacker.mon.moves.findIndex((id) => id === moveId)
+  if (slot === -1) return
+
+  let ppToDeduct = 1
+  // Pressure, :1474. The attacker's OWN ability check needs no mold-breaker
+  // exception (a battler cannot Mold-Break itself); the OPPOSING side's check
+  // does (IsAbilityOnSide's BATTLER_HAS_ABILITY_AND_ALIVE, checkMoldBreaker=
+  // TRUE at :4793/4795), which isAbilityAliveOnOpposingSide does not apply --
+  // gapped by name only when Pressure was actually found, so an ordinary
+  // battle without Mold Breaker never sees the note.
+  const attackerHasPressure = battlerHasAbility(attacker.mon.abilities, 'ABILITY_PRESSURE', () => false)
+  const opposingHasPressure = isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PRESSURE')
+  if (!attackerHasPressure && opposingHasPressure) {
+    ppToDeduct++
+    unmodelled.push(
+      "Pressure's mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793) is not applied; an opposing Mold-Breaker-class attacker would bypass Pressure's extra PP cost here",
+    )
+  }
+
+  if (moveEffect === 'EFFECT_SPIT_UP' || moveEffect === 'EFFECT_SWALLOW') {
+    unmodelled.push('Spit Up/Swallow PP refund via TryUseStockpile (battle_script_commands.c:1476-1483) is not modelled; PP was deducted as if Stockpile were empty')
+  }
+
+  // :1485. Reads the PP slot BEFORE deduction; a slot already at 0 deducts
+  // nothing and sets neither notFirstStrike nor sameMoveTurns.
+  if (attacker.mon.pp[slot] > 0) {
+    attacker.round.notFirstStrike = true
+    // gBattleStruct->sameMoveTurns[attacker], :1486-1493 -- the increment
+    // branch needs gTurnStructs.parentalBondOn > 0, which nothing in this
+    // loop ever writes (see state.ts's field doc), so the reset branch
+    // always runs.
+    attacker.sameMoveTurns = 0
+    attacker.mon.pp[slot] = Math.max(0, attacker.mon.pp[slot] - ppToDeduct)
+  }
+}
+
 /** Removes HP from one battler, floors at 0, and records a faint. Shared by the
  * target and attacker halves so they cannot drift apart. */
 function applyDamage(state: BattleState, battlerId: number, damage: number | null, fainted: number[]): void {
@@ -267,7 +382,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
     // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
     // does not act. Its slot is still consumed; the action is simply finished.
-    const blank = { turnOrderIndex: index, battlerId, action: actionKind, targetId: null, targetDamage: null, attackerDamage: null, unmodelled: [], fainted: [] }
+    const blank = { turnOrderIndex: index, battlerId, action: actionKind, missed: false, targetId: null, targetDamage: null, attackerDamage: null, unmodelled: [], fainted: [] }
 
     if (!isBattlerAlive(state, battlerId)) {
       outcomes.push({ ...blank, skippedBecauseFainted: true })
@@ -289,12 +404,53 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
 
     const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
-    const { targetDamage, attackerDamage, unmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn: targetIndex >= 0 && targetIndex < index })
+    const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
+    const unmodelled: string[] = []
+
+    // Cmd_ppreduce, battle_script_commands.c:1460-1506 -- runs regardless of
+    // the accuracy result below; see this module's header for why.
+    deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
+
+    // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
+    // state.rng BEFORE the damage resolver's own crit/roll draws, matching
+    // the C's script order (accuracycheck runs, then ppreduce already ran
+    // above, then critcalc/damagecalc inside deps.damage.resolve below).
+    const { inputs: accInputs, gaps: accGaps, defenderHasAnticipation } = buildAccuracyInputs(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps)
+    unmodelled.push(...gapsToUnmodelled(accGaps))
+    if (defenderHasAnticipation) {
+      unmodelled.push(
+        "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+      )
+    }
+    const accResult = getTotalAccuracy(accInputs)
+    unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+    // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
+    // is not special-cased: Random() % 100 is at most 99, so the comparison
+    // can never be true, and the arithmetic alone carries the sentinel.
+    const missed = state.rng.random16() % 100 >= accResult.accuracy
+
+    if (missed) {
+      outcomes.push({ turnOrderIndex: index, battlerId, action: actionKind, skippedBecauseFainted: false, missed: true, targetId, targetDamage: null, attackerDamage: null, unmodelled, fainted: [] })
+      continue
+    }
+
+    const { targetDamage, attackerDamage, unmodelled: damageUnmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
     const fainted: number[] = []
     applyDamage(state, targetId, targetDamage, fainted)
     applyDamage(state, battlerId, attackerDamage, fainted)
 
-    outcomes.push({ turnOrderIndex: index, battlerId, action: actionKind, skippedBecauseFainted: false, targetId, targetDamage, attackerDamage, unmodelled, fainted })
+    outcomes.push({
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      skippedBecauseFainted: false,
+      missed: false,
+      targetId,
+      targetDamage,
+      attackerDamage,
+      unmodelled: [...unmodelled, ...damageUnmodelled],
+      fainted,
+    })
   }
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action

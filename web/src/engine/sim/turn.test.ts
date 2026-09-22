@@ -117,11 +117,19 @@ function fixedDamage(amount: number, extra: Partial<{ attackerDamage: number | n
   }
 }
 
-function deps(damage: DamageResolver): TurnLoopDeps {
+// A data-less SimDataContext: every lookup misses. accuracyBridge.ts turns a
+// missing move into moveAccuracy 0 -- ACCURACY_HITS_IF_POSSIBLE, accuracy 101,
+// "cannot miss" -- so this suite's turn-order/damage-flow tests (none of which
+// care about accuracy) keep their existing deterministic outcomes; the miss
+// path itself is exercised by its own describe block below with a real
+// SimDataContext.
+const NO_DATA: SimDataContext = { species: () => undefined, item: () => undefined, move: () => undefined }
+
+function deps(damage: DamageResolver, dataContext: SimDataContext = NO_DATA): TurnLoopDeps {
   // NEUTRAL_TURN_ORDER_CONTEXT is spread for the OTHER fields only; its
   // isBattlerGrounded is dropped by the Omit and replaced by the real port.
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
-  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS }
+  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext }
 }
 
 describe('isBattlerAlive', () => {
@@ -270,7 +278,12 @@ describe('the resolver return shape', () => {
     // not failing silently.
     const state = battle([{ spe: 200 }, { spe: 50 }])
     const out = executeTurn(state, [useMove(1), useMove(0)], deps(fixedDamage(10, { unmodelled: ['EFFECT_SOMETHING: not modelled'] })))
-    expect(out.actions[0].unmodelled).toEqual(['EFFECT_SOMETHING: not modelled'])
+    // Not toEqual: the accuracy check's own gap channel (accuracyBridge.ts's
+    // structural gaps, always present with this suite's data-less DATA_CONTEXT)
+    // shares the same array now that the loop wires accuracy in ahead of the
+    // damage resolver -- see this suite's own accuracy describe block for that
+    // channel's own coverage.
+    expect(out.actions[0].unmodelled).toContain('EFFECT_SOMETHING: not modelled')
   })
 
   it('damages the attacker too, and can faint it on its own action', () => {
