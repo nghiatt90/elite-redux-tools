@@ -385,10 +385,13 @@ export interface SimPartyMon {
    * 5016-5020, at the moment a mon takes the field). Added here (batch: faint
    * replacement) because switchIn.ts has to build a full SimBattleMon from a
    * SimPartyMon and every other required field already existed on this
-   * interface -- types was the one gap. A reserve mon's types do not change
-   * while it sits in the party (no form-change/Multitype mechanic reaches a
-   * benched mon), so this is a battle-start-derivable fact like `rawStats`,
-   * not state that goes stale mid-battle. */
+   * interface -- types was the one gap. RandomizeType (pokemon.c:5020-5021)
+   * returns its input unchanged unless gSaveBlock2Ptr->typeRandomizedMode == 1,
+   * an opt-in randomizer save mode this tool does not model, so "recomputed at
+   * switch-in" and "the species' own types" are the same value here. A reserve
+   * mon's types do not change while it sits in the party (no form-change/
+   * Multitype mechanic reaches a benched mon), so this is a battle-start-
+   * derivable fact like `rawStats`, not state that goes stale mid-battle. */
   types: [string, string, string]
 }
 

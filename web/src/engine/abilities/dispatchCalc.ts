@@ -428,10 +428,10 @@ export function computeAfterTypeEffectiveness(
  * anywhere in its 4 slots" checks in the C (RETURN_ABILITY_IF_FLAG). `moldBroken`
  * defaults to false (matching every pre-existing call site, which all check a
  * battler's own flags against itself); pass `true` only when checking a battler
- * OTHER than the one holding an active mold breaker -- of the 7 flags this
- * function reads, only `unaware` (Unaware) and `levitate` (Levitate) are ever
- * `breakable`, so this only actually matters for those two flags in the current
- * data. */
+ * OTHER than the one holding an active mold breaker. It only matters for a flag
+ * carried by a `breakable` ability, and only at a C call site that passes
+ * checkMoldBreaker=TRUE; e.g. TakesNoBurnDamage passes FALSE, so `noBurnDamage`
+ * is never mold-broken even though Heatproof is breakable. */
 export function hasFlag(
   slots: AbilitySlots,
   flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak' | 'noBurnDamage',

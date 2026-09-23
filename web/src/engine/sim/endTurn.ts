@@ -718,15 +718,14 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       `battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented`,
     )
 
-    // battle-over short-circuit (faint-replacement batch): this battler's own
-    // ladder pass just finished, matching the C's own turnEffectsBattlerId/
-    // turnEffectsTracker nesting (this module's header: "ALL entries for one
-    // battler run ... before the next battler is even looked at"). If THIS
-    // battler's poison/toxic/burn damage (applyEndTurnHp, above) just decided
-    // the outcome, the next battler in `battlerOrder` gets none of its own
-    // ladder -- the real C achieves this by re-entering BattleTurnPassed and
-    // finding gBattleOutcome != 0 before DoBattlerEndTurnEffects resumes (see
-    // turn.ts's own citation at its executeTurn call site).
+    // battle-over short-circuit (faint-replacement batch). The C does NOT
+    // finish this battler's case list first: DoBattlerEndTurnEffects returns
+    // the moment any case fires an effect, and the next BattleTurnPassed call
+    // sees gBattleOutcome != 0 (battle_main.c:3479) and never re-enters it, so
+    // the state machine is abandoned mid-list. Checking here, after the
+    // battler's cases, gives the same observable result: the case that
+    // decided the outcome fainted a battler, and a fainted battler's own
+    // remaining cases are skipped anyway. Later battlers get nothing either way.
     state.battleOutcome = computeBattleOutcome(state)
     if (state.battleOutcome) break
   }
