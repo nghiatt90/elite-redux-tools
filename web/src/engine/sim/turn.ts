@@ -14,12 +14,16 @@
 // is even attempted; a move may miss; PP is deducted; a hit deals damage; a
 // battler may faint. Nothing else happens during the action loop itself.
 //
-// End-of-turn residuals are PARTIALLY present: DoBattlerEndTurnEffects
-// (battle_util.c:2398-2992) runs once after the action loop, ported for
-// poison/toxic/burn only -- see endTurn.ts's own header for the full
-// enum-ordered classification (ported/unreachable/gapped) of every other
-// ENDTURN_* case. DoFieldEndTurnEffects (weather/terrain/field timers) is
-// entirely absent; endTurn.ts documents that gap too.
+// End-of-turn residuals: DoFieldEndTurnEffects (weather/terrain/field timers,
+// battle_util.c:1768-2318) runs FIRST -- see fieldEndTurn.ts's own header for
+// its enum-ordered classification and the loop-suspension mechanism it shares
+// with the battler ladder below. Its own ENDTURN_ORDER case recomputes
+// gBattlerByTurnOrder; that recomputed order (fieldEndTurn.ts's `order`, NOT
+// this module's own action-loop `order`) is what DoBattlerEndTurnEffects
+// (battle_util.c:2398-2992, endTurn.ts) then iterates, matching the C's single
+// shared array -- ported for poison/toxic/burn only, see endTurn.ts's own
+// header for the full enum-ordered classification of every other ENDTURN_*
+// case.
 //
 // Cmd_attackcanceler (battle_script_commands.c:1046-1081, its own call to
 // AtkCanceller_UnableToUseMove at :1081) is ported in attackCanceller.ts --
@@ -119,6 +123,7 @@ import { runAttackCanceller } from './attackCanceller'
 import { createTurnState } from './create'
 import type { EndTurnEffectResult } from './endTurn'
 import { runEndTurnEffects } from './endTurn'
+import { runFieldEndTurnEffects } from './fieldEndTurn'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -214,6 +219,20 @@ export interface TurnOutcome {
    * `unmodelled` because these gaps belong to the end-of-turn phase, not to
    * any one action. */
   endTurnUnmodelled: string[]
+  /** DoFieldEndTurnEffects's residual HP effects (sandstorm/hail damage) --
+   * see fieldEndTurn.ts. Runs BEFORE `endTurn` above, matching the real C's
+   * DoFieldEndTurnEffects-before-DoBattlerEndTurnEffects order. */
+  fieldEndTurn: EndTurnEffectResult[]
+  /** fieldEndTurn.ts's own gap channel, kept apart from `endTurnUnmodelled`
+   * because these gaps belong to the FIELD phase specifically. */
+  fieldEndTurnUnmodelled: string[]
+  /** fieldEndTurn.ts's own ENDTURN_ORDER result -- the recomputed
+   * gBattlerByTurnOrder the C threads into BOTH the weather-damage loop above
+   * AND the battler ladder afterwards. Distinct from `order` above (this
+   * module's own action-loop order, established before either end-turn ladder
+   * runs). Exposed so a test can assert the field ladder's own re-sort
+   * happened, the same way `order` lets a test assert the action loop's. */
+  endTurnOrder: number[]
 }
 
 /**
@@ -578,19 +597,26 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   turnStructsClear(state)
 
   // BattleTurnPassed, battle_main.c:3465-3481: TurnValuesCleanUp(TRUE), then
-  // DoFieldEndTurnEffects (absent, see endTurn.ts's header) and
-  // DoBattlerEndTurnEffects (endTurn.ts), THEN HandleFaintedMonActions (absent
-  // -- switching is out of scope) and HandleWishPerishSongOnTurnEnd (absent),
-  // and only after all of that does gBattleResults.battleTurnCounter++ run
-  // (:3508-3511). The residual ladder therefore belongs HERE, before the
-  // counter increment below -- not after it.
-  const { results: endTurn, unmodelled: endTurnUnmodelled } = runEndTurnEffects(state, order.battlerByTurnOrder, deps.dataContext)
+  // DoFieldEndTurnEffects (fieldEndTurn.ts) and DoBattlerEndTurnEffects
+  // (endTurn.ts), in that order, THEN HandleFaintedMonActions (absent --
+  // switching is out of scope) and HandleWishPerishSongOnTurnEnd (absent), and
+  // only after all of that does gBattleResults.battleTurnCounter++ run
+  // (:3508-3511). Both residual ladders therefore belong HERE, before the
+  // counter increment below -- not after it. fieldEndTurn's own ENDTURN_ORDER
+  // recomputes gBattlerByTurnOrder; endTurn's battler ladder receives THAT
+  // order, not this function's own `order` (see fieldEndTurn.ts's header).
+  const {
+    order: endTurnOrder,
+    results: fieldEndTurn,
+    unmodelled: fieldEndTurnUnmodelled,
+  } = runFieldEndTurnEffects(state, ctx, deps.statStageRatios, deps.grounding, deps.dataContext)
+  const { results: endTurn, unmodelled: endTurnUnmodelled } = runEndTurnEffects(state, endTurnOrder, deps.dataContext)
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
-  // loop and the end-turn ladder above; state.turnCount is therefore the
+  // loop and the end-turn ladders above; state.turnCount is therefore the
   // zero-based counter while resolving this turn (turn 1 is 0), matching
   // bridge.ts's parity checks. battle_main.c:3512-3513 saturates the u8
   // counter at 0xFF.
   state.turnCount = Math.min(0xFF, state.turnCount + 1)
-  return { actions: outcomes, order, endTurn, endTurnUnmodelled }
+  return { actions: outcomes, order, endTurn, endTurnUnmodelled, fieldEndTurn, fieldEndTurnUnmodelled, endTurnOrder }
 }

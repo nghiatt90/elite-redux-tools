@@ -4,12 +4,11 @@
 // HandleFaintedMonActions/HandleWishPerishSongOnTurnEnd and the
 // gBattleResults.battleTurnCounter increment (:3508-3511) -- see turn.ts's own
 // citation at the call site, which places this phase in that exact slot.
-// DoFieldEndTurnEffects (weather/terrain/field timers, battle_util.c:1750-1766
-// ff.) runs BEFORE this and is NOT modelled here or anywhere else in this
-// codebase yet: if any field effect can damage a battler before this phase
-// runs (sandstorm/hail chip damage), this phase's HP numbers are incomplete
-// whenever `state.field` carries active weather. Gapped at runtime below
-// (WEATHER_RESIDUAL_UNMODELLED) rather than silently ignored.
+// DoFieldEndTurnEffects (weather/terrain/field timers, battle_util.c:1730-2318)
+// runs BEFORE this -- see fieldEndTurn.ts, ported in cycle 9. Its own
+// ENDTURN_ORDER case re-sorts gBattlerByTurnOrder (SortBattlersBySpeed), and
+// that re-sorted order -- not the action loop's own order -- is what this
+// ladder receives from turn.ts, matching the C's single shared array.
 //
 // LOOP STRUCTURE (read, not assumed): the C is one big while loop keyed on TWO
 // trackers on gBattleStruct, turnEffectsBattlerId (which battler) and
@@ -390,7 +389,7 @@ const NO_SUPPRESSION = () => false
  * isCluelessOnField is a caller-supplied fact for exactly this reason, not
  * computed in sim/). A Clueless-on-field battle where Magic Room is up will
  * therefore incorrectly treat every battler as Magic-Guard-protected here. */
-function isMagicGuardProtected(state: BattleState, battler: BattlerState): boolean {
+export function isMagicGuardProtected(state: BattleState, battler: BattlerState): boolean {
   if (abilitySlotsHaveFlag(battler.mon.abilities, 'magicGuard')) return true
   return hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
 }
@@ -449,7 +448,10 @@ function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerS
  * into TurnOutcome. */
 export interface EndTurnEffectResult {
   battlerId: number
-  effect: 'POISON' | 'TOXIC' | 'BURN'
+  /** 'SANDSTORM'/'HAIL' are the field ladder's own entries (fieldEndTurn.ts's
+   * Cmd_weatherdamage port) -- reusing this same shape rather than a parallel
+   * one, since both are "one residual HP effect for one battler". */
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -713,17 +715,6 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       `battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented`,
     )
   }
-
-  // DoFieldEndTurnEffects runs BEFORE this ladder in the C and is entirely
-  // absent from this codebase (turn.ts's own header, and see this module's
-  // own header). Any active weather means residual HP ordering above is
-  // incomplete relative to the real game, since sandstorm/hail chip damage
-  // would have already landed.
-  gapIf(
-    state.field.weather !== 0,
-    unmodelled,
-    'DoFieldEndTurnEffects (battle_util.c:1750 ff.) is not modelled; active weather means any sandstorm/hail residual damage that would run before this battler ladder is absent from these results',
-  )
 
   return { results, unmodelled }
 }
