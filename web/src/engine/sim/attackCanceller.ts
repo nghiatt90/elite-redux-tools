@@ -186,13 +186,13 @@ const HIT_COUNT_OVERRIDE_MOVES = new Set([
 
 /** GetMultihitType's own return enum (battle_util.c:3568-3605), minus
  * MULTIHIT_SINGLE which this port represents as `null` (see resolveMultihitType). */
-type MultihitType = 'TWO' | 'THREE' | 'FIVE' | 'TEN' | 'TEN_CAN_MISS' | 'FOUR_OR_FIVE' | 'TWO_TO_FIVE' | 'TRIPLE_KICK' | 'BEAT_UP'
+export type MultihitType = 'TWO' | 'THREE' | 'FIVE' | 'TEN' | 'TEN_CAN_MISS' | 'FOUR_OR_FIVE' | 'TWO_TO_FIVE' | 'TRIPLE_KICK' | 'BEAT_UP'
 
 /**
  * GetMultihitType, battle_util.c:3568-3605. Returns null for MULTIHIT_SINGLE
  * (every move this function does not recognise as multi-hit).
  */
-function resolveMultihitType(attacker: BattlerState, moveId: string, move: SimMoveData | undefined, attackerHoldEffect: string | null, unmodelled: string[]): MultihitType | null {
+export function resolveMultihitType(attacker: BattlerState, moveId: string, move: SimMoveData | undefined, attackerHoldEffect: string | null, unmodelled: string[]): MultihitType | null {
   // :3569-3575 -- gapped, see this module's header.
   if (HIT_COUNT_OVERRIDE_MOVES.has(moveId)) {
     unmodelled.push(
