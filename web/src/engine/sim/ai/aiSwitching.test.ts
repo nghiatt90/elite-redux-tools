@@ -313,14 +313,33 @@ describe('createAiOpponentReplacement: the caller-level fallback (OpponentHandle
       scripted(),
     )
     const rep = createAiOpponentReplacement(deps)
-    const chosen = rep.chooseReplacement(state, 1)
+    const gaps: string[] = []
+    const chosen = rep.chooseReplacement(state, 1, gaps)
     expect(chosen).toBe(2) // slot 1 is dead (hp 0), slot 2 is the first live non-active slot
   })
 
   it('throws when asked to choose for a player (non-opponent) battler', () => {
     const state = battle([{ spe: 200, hp: 100 }, { spe: 50, hp: 0 }], [partyMon({ hp: 0 }), partyMon({ hp: 40 })], [partyMon({ hp: 100 })], scripted())
     const rep = createAiOpponentReplacement(deps)
-    expect(() => rep.chooseReplacement(state, 0)).toThrow(/not on the opponent side/)
+    expect(() => rep.chooseReplacement(state, 0, [])).toThrow(/not on the opponent side/)
+  })
+
+  it("pushes the decision's own gap lines (e.g. a Choice-Band-style bridge gap) into the caller's unmodelled array", () => {
+    // Any AI_CalcDamage/AI_GetTypeEffectiveness call made while REACHING this
+    // decision reports bridge.ts's own BATCH1_GAPS (e.g. statStages) through
+    // this path -- so a Dmg-step decision (which calls AI_CalcPartyMonDamage,
+    // which calls AI_CalcDamage) always carries at least those gap lines.
+    const state = battle(
+      [{ spe: 200, hp: 100 }, { spe: 50, hp: 0 }],
+      [partyMon({ hp: 100 })],
+      [partyMon({ hp: 0 }), partyMon({ hp: 40, rawStats: { atk: 10, def: 90, spatk: 80, spdef: 85, spe: 100 } }), partyMon({ hp: 40, rawStats: { atk: 300, def: 90, spatk: 80, spdef: 85, spe: 100 } })],
+      scripted(),
+    )
+    const rep = createAiOpponentReplacement(deps)
+    const gaps: string[] = []
+    rep.chooseReplacement(state, 1, gaps)
+    expect(gaps.length).toBeGreaterThan(0)
+    expect(gaps.some((g) => g.includes('statStages'))).toBe(true)
   })
 })
 
@@ -352,5 +371,14 @@ describe('end-to-end: an opponent fainting mid-battle is replaced by the AI\'s o
     expect(out.outcome).toBe(null) // opponent still has a live reserve
     expect(state.battlers[1]!.partyIndex).toBe(2) // the higher-Attack reserve, via GetBestMonDmg
     expect(state.battlers[1]!.mon.hp).toBe(60)
+
+    // The Dmg step's own AI_CalcPartyMonDamage calls report bridge.ts's own
+    // gaps (e.g. statStages) -- and executeTurn's own replacementUnmodelled
+    // is exactly the array createAiOpponentReplacement pushed them into, via
+    // applyEndOfTurnReplacements' shared `unmodelled` parameter (switchIn.ts).
+    // This is the fix for the reviewed gap: an AI-decision gap line now
+    // reaches executeTurn's own output, not just the switch's own effects.
+    expect(out.replacementUnmodelled.length).toBeGreaterThan(0)
+    expect(out.replacementUnmodelled.some((g) => g.includes('statStages'))).toBe(true)
   })
 })

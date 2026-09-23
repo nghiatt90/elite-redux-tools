@@ -130,10 +130,16 @@ const SWITCH_IN_HOLD_EFFECTS: ReadonlySet<string> = new Set([
 ])
 
 /** A validated party-slot choice for a fainted battler, from the caller (the
- * AI's real `GetMostSuitableMonToSwitchInto` is a later batch per this
- * batch's brief; the player's own choice is solver input either way). */
+ * player's own choice is solver input; the opponent's is
+ * `ai/aiSwitching.ts`'s `createAiOpponentReplacement`, which runs a real
+ * `GetMostSuitableMonToSwitchInto` port). `unmodelled` is the SAME channel
+ * `applyEndOfTurnReplacements` already threads for the switch's own
+ * ability/item gaps -- an implementation that reaches a decision by running
+ * real AI logic (rather than being handed one, as tests do) pushes its own
+ * gap lines here too, so a caller inspecting `unmodelled` sees the whole
+ * decision, not just the switch that followed it. */
 export interface ReplacementDeps {
-  chooseReplacement(state: BattleState, battlerId: number): number
+  chooseReplacement(state: BattleState, battlerId: number, unmodelled: string[]): number
 }
 
 /** Any OTHER party slot on this battler's side that is alive and not an empty
@@ -242,7 +248,7 @@ export function applyEndOfTurnReplacements(state: BattleState, deps: Replacement
     if (!battler || battler.mon.hp !== 0) continue
     if (!hasLiveReserve(state, battlerId)) continue
 
-    const partyIndex = deps.chooseReplacement(state, battlerId)
+    const partyIndex = deps.chooseReplacement(state, battlerId, unmodelled)
     const party = state.sides[battlerId & 1].party
     const incoming = party[partyIndex]
     switchIn(state, battlerId, partyIndex, unmodelled)

@@ -14,14 +14,27 @@
 // above, so it is not ported as its own function; every caller here just uses
 // the literal range.
 //
-// WIRING GAP, stated up front rather than only in the report: `chooseReplacement`
-// (switchIn.ts's `ReplacementDeps`) has no unmodelled/gap output channel --
-// it returns a bare party index. `createAiOpponentReplacement` below therefore
-// DISCARDS whatever unmodelled notes this module's own functions would have
-// reported for that one decision (a Truant WhoStrikesFirst approximation, a
-// bridge gap from an AI_GetTypeEffectiveness call, ...). The switch-in ITSELF
-// (switchIn.ts's own ability/item gap reporting) is unaffected -- only the
-// AI's REASONING gaps for the choice are lost, not the switch's own effects.
+// WIRING NOTE: `chooseReplacement` (switchIn.ts's `ReplacementDeps`) takes an
+// `unmodelled: string[]` output parameter -- the SAME array
+// `applyEndOfTurnReplacements` already threads for the switch's own
+// ability/item gaps. `createAiOpponentReplacement` below pushes every gap
+// this module's own functions collect while REACHING the decision (a Truant
+// `WhoStrikesFirst` approximation, a bridge gap from an
+// `AI_GetTypeEffectiveness` call, ...) into that same array, so a caller
+// inspecting `executeTurn`'s `replacementUnmodelled` sees the whole decision,
+// not just the switch that followed it.
+//
+// `createAiOpponentReplacement` does NOT read `aiMonToSwitchIntoId`
+// (`BattlerState.aiMonToSwitchIntoId`, `gBattleStruct->AI_monToSwitchIntoId`).
+// `OpponentHandleChoosePokemon` (battle_controller_opponent.c:1652) consumes
+// that field FIRST, before ever calling `GetMostSuitableMonToSwitchInto`, when
+// it isn't `PARTY_SIZE` (a switch already decided by an earlier AI step, e.g.
+// a mid-turn `ShouldSwitch`/`ShouldPivot` choice, carried into the
+// end-of-turn replacement). Nothing in this sim writes that field yet --
+// `create.ts` only ever sets it to the `PARTY_SIZE` sentinel -- so skipping
+// it here is currently a no-op, not a missing branch. It stops being a no-op,
+// and this port must start reading it, the moment a future `ShouldPivot`-style
+// batch gives it a real writer.
 
 import type { BattleState, SimPartyMon } from '../state'
 import { hasFlag, PARTY_SIZE, STATUS3_MIRACLE_EYED, STATUS_FIELD_INVERSE_ROOM } from '../constants'
@@ -319,14 +332,15 @@ function fallbackFirstLiveSlot(party: SimPartyMon[], activePartyIndex: number): 
  */
 export function createAiOpponentReplacement(deps: AiSwitchingDeps): ReplacementDeps {
   return {
-    chooseReplacement(state: BattleState, battlerId: number): number {
+    chooseReplacement(state: BattleState, battlerId: number, unmodelled: string[]): number {
       if ((battlerId & 1) !== 1) {
         throw new Error(`createAiOpponentReplacement: battler ${battlerId} is not on the opponent side`)
       }
       const battler = state.battlers[battlerId]
       if (!battler) throw new Error(`createAiOpponentReplacement: no battler at id ${battlerId}`)
-      const { partyIndex } = getMostSuitableMonToSwitchInto(state, battlerId, deps)
-      if (partyIndex !== PARTY_SIZE) return partyIndex
+      const result = getMostSuitableMonToSwitchInto(state, battlerId, deps)
+      unmodelled.push(...result.unmodelled)
+      if (result.partyIndex !== PARTY_SIZE) return result.partyIndex
       return fallbackFirstLiveSlot(state.sides[battlerId & 1].party, battler.partyIndex)
     },
   }
