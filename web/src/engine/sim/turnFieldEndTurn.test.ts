@@ -16,7 +16,10 @@ import {
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SANDSTORM_PERMANENT,
   WEATHER_HAIL_TEMPORARY,
+  WEATHER_FOG_TEMPORARY,
   STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STAT_ATK,
   hasFlag,
 } from './constants'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
@@ -58,6 +61,7 @@ const MUDKIP = requireSpecies('SPECIES_MUDKIP')
 const SAND_VEIL = requireAbility('ABILITY_SAND_VEIL')
 const ICE_BODY = requireAbility('ABILITY_ICE_BODY')
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
+const STENCH = requireAbility('ABILITY_STENCH')
 const SAFETY_GOGGLES = requireItem('ITEM_SAFETY_GOGGLES')
 if (SAFETY_GOGGLES.resolvedHoldEffect !== 'HOLD_EFFECT_SAFETY_GOGGLES') throw new Error('ITEM_SAFETY_GOGGLES no longer resolves to HOLD_EFFECT_SAFETY_GOGGLES')
 
@@ -283,64 +287,155 @@ describe('executeTurn: field end-turn ladder -- hail (own immunities)', () => {
   })
 })
 
+describe('executeTurn: field end-turn ladder -- Grassy Terrain heal (VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS, battle_script_commands.c:6876-6886)', () => {
+  it('heals floor(maxHp/16), minimum 1, to a grounded battler not at full HP', () => {
+    const state = battle([{ spe: 100, maxHp: 15, hp: 10 }, { spe: 50, maxHp: 100, hp: 50 }], scripted())
+    state.field.statuses = STATUS_FIELD_GRASSY_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    // floor(15/16) = 0 -> minimum-1 rule applies.
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'GRASSY_TERRAIN')).toEqual([
+      { battlerId: 0, effect: 'GRASSY_TERRAIN', hpChange: 1, fainted: false },
+      { battlerId: 1, effect: 'GRASSY_TERRAIN', hpChange: 6, fainted: false },
+    ])
+    expect(state.battlers[0]!.mon.hp).toBe(11)
+    expect(state.battlers[1]!.mon.hp).toBe(56)
+  })
+
+  it('does not heal a battler already at max HP', () => {
+    const state = battle([{ spe: 100, maxHp: 100, hp: 100 }, { spe: 50, maxHp: 100, hp: 50 }], scripted())
+    state.field.statuses = STATUS_FIELD_GRASSY_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'GRASSY_TERRAIN' && r.battlerId === 0)).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('does not heal an ungrounded (Flying-type) battler', () => {
+    const state = battle([{ spe: 100, maxHp: 100, hp: 50, types: ['FLYING', 'MYSTERY', 'MYSTERY'] }, { spe: 50, maxHp: 100, hp: 50 }], scripted())
+    state.field.statuses = STATUS_FIELD_GRASSY_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'GRASSY_TERRAIN' && r.battlerId === 0)).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('still heals on the same turn the terrain timer expires to zero', () => {
+    const state = battle([{ spe: 100, maxHp: 160, hp: 50 }, { spe: 50, maxHp: 100 }], scripted())
+    state.field.statuses = STATUS_FIELD_GRASSY_TERRAIN
+    state.field.timers.terrainTimer = 1
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.field.timers.terrainTimer).toBe(0)
+    expect(hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(false)
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'GRASSY_TERRAIN' && r.battlerId === 0)).toEqual([
+      { battlerId: 0, effect: 'GRASSY_TERRAIN', hpChange: 10, fainted: false },
+    ])
+  })
+})
+
+describe('executeTurn: field end-turn ladder -- Toxic Terrain damage (VARIOUS_HP_FRACTION_TO_DAMAGE, battle_script_commands.c:9017-9022)', () => {
+  it('deals floor(maxHp/16), minimum 1, capped at the battler\'s CURRENT hp', () => {
+    // floor(160/16) = 10, but current hp is only 5 -- the cap wins.
+    const state = battle([{ spe: 100, maxHp: 160, hp: 5 }, { spe: 50, maxHp: 100 }], scripted())
+    state.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN' && r.battlerId === 0)).toEqual([
+      { battlerId: 0, effect: 'TOXIC_TERRAIN', hpChange: -5, fainted: true },
+    ])
+    expect(state.battlers[0]!.mon.hp).toBe(0)
+  })
+
+  it('a Poison- or Steel-typed battler takes no damage', () => {
+    const state = battle([{ spe: 100, maxHp: 160, types: ['POISON', 'MYSTERY', 'MYSTERY'] }, { spe: 50, maxHp: 100, types: ['STEEL', 'MYSTERY', 'MYSTERY'] }], scripted())
+    state.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN')).toEqual([])
+  })
+
+  it('an ability immunity (Stench, abilityHooks.json bitfields.toxicTerrainImmune) takes no damage', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, abilities: { ability: STENCH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN' && r.battlerId === 0)).toEqual([])
+    // Stench on the field ALSO blocks the terrain timer's own decrement (:2126-2127).
+    expect(state.field.timers.terrainTimer).toBe(5)
+  })
+
+  it('damages in raw battler-id order, NOT gBattlerByTurnOrder -- observable when speed order differs from id order', () => {
+    // battler 1 is faster (spe 200) than battler 0 (spe 50); id order is [0, 1].
+    const state = battle([{ spe: 50, maxHp: 160 }, { spe: 200, maxHp: 320 }], scripted())
+    state.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    state.field.timers.terrainTimer = 5
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurnOrder).toEqual([1, 0]) // speed order, for reference
+    const toxicOutcomes = out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN')
+    expect(toxicOutcomes.map((r) => r.battlerId)).toEqual([0, 1]) // raw id order
+  })
+})
+
+describe('executeTurn: field end-turn ladder -- Fog stat drops (VARIOUS_DO_FOG_STAT_DROPS, battle_script_commands.c:8601-8623)', () => {
+  it('drops every stat stage above neutral by exactly 1', () => {
+    const state = battle([{ spe: 100 }, { spe: 50 }], scripted())
+    state.field.weather = WEATHER_FOG_TEMPORARY
+    state.field.timers.started.weather = true // avoid the expiry branch for this assertion
+    state.field.weatherDuration = 5
+    state.battlers[0]!.mon.statStages[STAT_ATK] = 8
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+  })
+
+  it('does not drop a stat stage already at or below neutral', () => {
+    const state = battle([{ spe: 100 }, { spe: 50 }], scripted())
+    state.field.weather = WEATHER_FOG_TEMPORARY
+    state.field.timers.started.weather = true
+    state.field.weatherDuration = 5
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(6) // DEFAULT_STAT_STAGE
+  })
+
+  it('a Ghost-type battler is exempt unless Trick-or-Treated', () => {
+    const exempt = battle([{ spe: 100, types: ['GHOST', 'MYSTERY', 'MYSTERY'] }, { spe: 50 }], scripted())
+    exempt.field.weather = WEATHER_FOG_TEMPORARY
+    exempt.field.timers.started.weather = true
+    exempt.field.weatherDuration = 5
+    exempt.battlers[0]!.mon.statStages[STAT_ATK] = 8
+    executeTurn(exempt, [null, null], deps())
+    expect(exempt.battlers[0]!.mon.statStages[STAT_ATK]).toBe(8)
+
+    const trickedGhost = battle([{ spe: 100, types: ['GHOST', 'MYSTERY', 'MYSTERY'] }, { spe: 50 }], scripted())
+    trickedGhost.field.weather = WEATHER_FOG_TEMPORARY
+    trickedGhost.field.timers.started.weather = true
+    trickedGhost.field.weatherDuration = 5
+    trickedGhost.battlers[0]!.mon.statStages[STAT_ATK] = 8
+    trickedGhost.battlers[0]!.volatiles.trickOrTreat = true
+    executeTurn(trickedGhost, [null, null], deps())
+    expect(trickedGhost.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+  })
+})
+
+describe('executeTurn: field end-turn ladder -- Clear Skies (nothing to gap: it never touches gBattleWeather)', () => {
+  it('decrements the timer without producing any gap line, and does not touch active weather', () => {
+    const state = battle([{ spe: 100 }, { spe: 50 }], scripted())
+    state.field.weather = WEATHER_SANDSTORM_PERMANENT
+    state.field.timers.clearSkiesTimer = 1
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.field.timers.clearSkiesTimer).toBe(0)
+    expect(state.field.weather).toBe(WEATHER_SANDSTORM_PERMANENT) // untouched
+    expect(out.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_CLEARSKIES'))).toBe(false)
+    // clearSkiesTimer suppresses weather damage while it's up -- confirms
+    // WEATHER_HAS_EFFECT's own clause is what actually does the work here,
+    // not some hidden ClearSkies mutation.
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'SANDSTORM')).toEqual([])
+  })
+})
+
 describe('executeTurn: field end-turn ladder -- runtime gap lines (fieldEndTurn.ts header table)', () => {
-  it('gaps ENDTURN_FOG exactly when Fog weather is active, and not otherwise', () => {
-    const withFog = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    withFog.field.weather = 1 << 13 // WEATHER_FOG_TEMPORARY
-    const out1 = executeTurn(withFog, [null, null], deps())
-    expect(out1.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_FOG'))).toBe(true)
-
-    const withoutFog = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    const out2 = executeTurn(withoutFog, [null, null], deps())
-    expect(out2.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_FOG'))).toBe(false)
-  })
-
-  it('gaps ENDTURN_GRASSY_TERRAIN\'s heal exactly per alive battler when Grassy Terrain is active, and not otherwise', () => {
-    const withTerrain = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    withTerrain.field.statuses = 1 << 6 // STATUS_FIELD_GRASSY_TERRAIN
-    withTerrain.field.timers.terrainTimer = 5
-    const out1 = executeTurn(withTerrain, [null, null], deps())
-    expect(out1.fieldEndTurnUnmodelled.filter((m) => m.includes('ENDTURN_GRASSY_TERRAIN'))).toHaveLength(2)
-
-    const withoutTerrain = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    const out2 = executeTurn(withoutTerrain, [null, null], deps())
-    expect(out2.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_GRASSY_TERRAIN'))).toBe(false)
-  })
-
-  it('gaps ENDTURN_TOXIC_TERRAIN\'s damage exactly for a grounded, non-immune battler, and not otherwise', () => {
-    const withTerrain = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    withTerrain.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
-    withTerrain.field.timers.terrainTimer = 5
-    const out1 = executeTurn(withTerrain, [null, null], deps())
-    expect(out1.fieldEndTurnUnmodelled.filter((m) => m.includes('ENDTURN_TOXIC_TERRAIN'))).toHaveLength(2)
-
-    const poisonTypeImmune = battle([{ spe: 100, types: ['POISON', 'MYSTERY', 'MYSTERY'] }, { spe: 50, types: ['STEEL', 'MYSTERY', 'MYSTERY'] }], scripted())
-    poisonTypeImmune.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
-    poisonTypeImmune.field.timers.terrainTimer = 5
-    const out2 = executeTurn(poisonTypeImmune, [null, null], deps())
-    expect(out2.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_TOXIC_TERRAIN'))).toBe(false)
-
-    const withoutTerrain = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    const out3 = executeTurn(withoutTerrain, [null, null], deps())
-    expect(out3.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_TOXIC_TERRAIN'))).toBe(false)
-  })
-
-  it('gaps ENDTURN_CLEARSKIES exactly when its timer reaches zero this turn, and not otherwise', () => {
-    const expiring = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    expiring.field.timers.clearSkiesTimer = 1
-    const out1 = executeTurn(expiring, [null, null], deps())
-    expect(out1.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_CLEARSKIES'))).toBe(true)
-
-    const notExpiring = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    notExpiring.field.timers.clearSkiesTimer = 3
-    const out2 = executeTurn(notExpiring, [null, null], deps())
-    expect(out2.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_CLEARSKIES'))).toBe(false)
-
-    const inactive = battle([{ spe: 100 }, { spe: 50 }], scripted())
-    const out3 = executeTurn(inactive, [null, null], deps())
-    expect(out3.fieldEndTurnUnmodelled.some((m) => m.includes('ENDTURN_CLEARSKIES'))).toBe(false)
-  })
-
   it('a battle with no active field/side state carries NO field end-turn gap lines at all -- nothing gaps unconditionally', () => {
     const state = battle([{ spe: 100 }, { spe: 50 }], scripted())
     const out = executeTurn(state, [null, null], deps())
