@@ -448,10 +448,11 @@ function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerS
  * into TurnOutcome. */
 export interface EndTurnEffectResult {
   battlerId: number
-  /** 'SANDSTORM'/'HAIL' are the field ladder's own entries (fieldEndTurn.ts's
-   * Cmd_weatherdamage port) -- reusing this same shape rather than a parallel
-   * one, since both are "one residual HP effect for one battler". */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL'
+  /** 'SANDSTORM'/'HAIL'/'GRASSY_TERRAIN'/'TOXIC_TERRAIN' are the field
+   * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
+   * than a parallel one, since all are "one residual HP effect for one
+   * battler". */
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number

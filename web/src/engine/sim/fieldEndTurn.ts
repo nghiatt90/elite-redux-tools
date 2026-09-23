@@ -69,16 +69,28 @@
 //                            below).
 //   ENDTURN_SUN              PORTED (timer only; sun never damages).
 //   ENDTURN_HAIL              PORTED (timer + damage, see below).
-//   ENDTURN_FOG               Gapped -- the timer/fogReturnTimer bookkeeping
-//                            is real state and portable, but the "continues"
-//                            branch runs `dofogstatdrops` (BattleScript_
-//                            FogContinues, data/battle_scripts_1.s:7369-7373),
-//                            an actual per-battler stat-stage change with no
-//                            port anywhere in this codebase's stat-stage
-//                            machinery. Gapped whenever Fog is actually active
-//                            or about to return (state.field.weather has a
-//                            FOG bit, or fogReturnTimer is nonzero) rather
-//                            than mutating the timer only halfway.
+//   ENDTURN_FOG               PORTED, including the "continues" branch's stat
+//                            drops. `dofogstatdrops` (BattleScript_FogContinues,
+//                            data/battle_scripts_1.s:7364-7377) is, like
+//                            checkgrassyterrainheal/hpfractiontodamage above,
+//                            secretly `various BS_ATTACKER,
+//                            VARIOUS_DO_FOG_STAT_DROPS` (value 171) --
+//                            Cmd_various's own case IS present at
+//                            battle_script_commands.c:8601-8623: every stat
+//                            stage above neutral (ATK..SPDEF) drops by 1,
+//                            skipped for a Ghost/Psychic battler unless
+//                            Trick-or-Treated (volatiles.trickOrTreat, real
+//                            state), gated by IsBattlerWeatherAffected (=
+//                            WEATHER_HAS_EFFECT for a non-sun/rain flag). The
+//                            loop itself is raw battler id order, skipping
+//                            absent battlers via `jumpifabsent` -- ported as
+//                            `isAlive`, since the macro's own body (whether it
+//                            tests gAbsentBattlerFlags alone or also hp) is
+//                            not resolvable: asm/macros is NOT in
+//                            sources.lock.json's sparse_paths for
+//                            eliteredux-source, so no macro .inc file is
+//                            fetched at all, only the VARIOUS_* constants and
+//                            Cmd_various's C body they resolve to.
 //   ENDTURN_GRAVITY          PORTED.
 //   ENDTURN_WATER_SPORT      PORTED. NOTE: the C's own condition has NO
 //                            `!started.waterSport` gate (unlike ENDTURN_MUD_
@@ -99,28 +111,49 @@
 //                            reading the case body, reproduced as written.
 //   ENDTURN_ELECTRIC_TERRAIN PORTED.
 //   ENDTURN_MISTY_TERRAIN    PORTED.
-//   ENDTURN_GRASSY_TERRAIN   PORTED (timer only) -- the heal itself is gapped:
-//                            `checkgrassyterrainheal` (data/battle_scripts_1.
-//                            s:10152) has NO handler anywhere in the pinned
-//                            eliteredux-source checkout's src/ (grepped the
-//                            whole tree; only the .s call site exists), so its
-//                            heal amount and immunities cannot be transcribed,
-//                            only guessed -- gapped rather than guessed.
+//   ENDTURN_GRASSY_TERRAIN   PORTED, including the heal. `checkgrassyterrainheal`
+//                            is not a hand-written battle-script command --
+//                            it expands to `various BS_ATTACKER,
+//                            VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS` (value 77,
+//                            include/constants/battle_script_commands.h:160),
+//                            whose Cmd_various case IS present at
+//                            battle_script_commands.c:6876-6886 (an earlier
+//                            pass here missed this: it grepped for a
+//                            standalone `checkgrassyterrainheal`/
+//                            `Cmd_checkgrassyterrainheal` symbol instead of
+//                            resolving the macro to its VARIOUS_* constant and
+//                            Cmd_various case first). Heals maxHP/16 (min 1),
+//                            skipped for STATUS3_SEMI_INVULNERABLE, at max HP,
+//                            hp == 0, or not grounded (the real
+//                            isBattlerGrounded port, grounding.ts). The loop
+//                            (BattleScript_GrassyTerrainHeals, data/
+//                            battle_scripts_1.s:10148-10165) reads
+//                            gBattlerByTurnOrder -- this case's own `order`.
 //   ENDTURN_PSYCHIC_TERRAIN  PORTED.
-//   ENDTURN_TOXIC_TERRAIN    PORTED (timer only, including the `!IsAbilityOnField
-//                            (ABILITY_STENCH)` gate on the DECREMENT itself,
-//                            :2126-2127 -- Stench on the field keeps toxic
-//                            terrain's timer from ticking down at all, not
-//                            just from damaging). The damage loop is gapped:
-//                            `hpfractiontodamage` (data/battle_scripts_1.s:
-//                            10168, BattleScript_ToxicTerrainDamages) has the
-//                            same problem as checkgrassyterrainheal above --
-//                            no handler in src/battle_script_commands.c.
-//                            Gapped per battler, only when this battler's own
-//                            real damage condition (alive, not Magic-Guard-
-//                            protected, terrain-affected via the real
-//                            isBattlerGrounded port, not Stench-immune, not
-//                            Poison/Steel-typed) is actually true.
+//   ENDTURN_TOXIC_TERRAIN    PORTED, including the damage. `hpfractiontodamage`
+//                            likewise expands to `various BS_STACK_1,
+//                            VARIOUS_HP_FRACTION_TO_DAMAGE` (value 191), whose
+//                            Cmd_various case IS present at :9017-9022:
+//                            damage = maxHP/16 (the fraction argument at the
+//                            script call site, data/battle_scripts_1.s:10168),
+//                            capped at the battler's CURRENT hp, minimum 1.
+//                            The FILTER chain around it (:2134-2140 --
+//                            IsBattlerAlive, !IsMagicGuardProtected,
+//                            IsBattlerTerrainAffected, !AbilityBlocksToxicTerrain
+//                            i.e. the ability's own toxicTerrainImmune
+//                            bitfield, not Poison/Steel-typed) is ported in
+//                            full. This loop iterates RAW BATTLER ID
+//                            0..gBattlersCount-1 (`for (i = 0; i <
+//                            gBattlersCount; i++)`), NOT gBattlerByTurnOrder --
+//                            unlike Grassy Terrain above, confirmed by reading
+//                            the C loop itself, not assumed; an earlier pass
+//                            wrongly used `order` here (moot while the case
+//                            was fully gapped, fixed now that it isn't).
+//                            Also includes the `!IsAbilityOnField
+//                            (ABILITY_STENCH)` gate on the timer's DECREMENT
+//                            itself, :2126-2127 -- Stench on the field keeps
+//                            toxic terrain's timer from ticking down at all,
+//                            not just from damaging.
 //   ENDTURN_ION_DELUGE       PORTED (unconditional clear every turn, :2143).
 //   ENDTURN_FAIRY_LOCK       PORTED.
 //   ENDTURN_RETALIATE        PORTED (both sides, no started gate -- plain
@@ -139,17 +172,21 @@
 //   ENDTURN_QUASH            PORTED (field-wide, per turn.ts's own quash
 //                            invariant).
 //   ENDTURN_SMOKESCREEN      PORTED.
-//   ENDTURN_CLEARSKIES       PORTED (timer only) -- the actual "which weather
-//                            just ended" resolution
-//                            (BattleScript_ClearSkiesEnds -> BattleScript_
-//                            MoveWeatherChangeRet -> BattleScript_
-//                            OnWeatherChange) does not, in the portion of this
-//                            codebase's pinned source reachable from here,
-//                            show WHERE gBattleWeather itself gets cleared --
-//                            gapped whenever clearSkiesTimer actually reaches
-//                            zero this call, rather than guessing which bits
-//                            a chain of `goto`s three scripts deep would
-//                            clear.
+//   ENDTURN_CLEARSKIES       PORTED, nothing to gap. Clear Skies
+//                            (VARIOUS_SET_CLEAR_SKIES, battle_script_commands.
+//                            c:8682-8689) only ever SETS clearSkiesTimer; it
+//                            never touches gBattleWeather. WEATHER_HAS_EFFECT's
+//                            own `!clearSkiesTimer` clause (already ported)
+//                            and the RAIN/SUN cases' `REQUIRE(!clearSkiesTimer)`
+//                            gates (already ported) are the entire suppression
+//                            mechanism -- weather resumes automatically the
+//                            instant the timer expires, no separate "restore"
+//                            step exists. BattleScript_ClearSkiesEnds's own
+//                            `switch (gBattleWeather)` only picks a MESSAGE
+//                            (which weather is "returning"); it reads
+//                            gBattleWeather, never writes it -- read to its
+//                            end (-> MoveWeatherChangeRet -> OnWeatherChange)
+//                            to confirm.
 //   ENDTURN_MISC_SIDE_TIMERS PORTED (quickGuardTimer and rainbowTimer, both
 //                            sides, both started-gated -- see ENDTURN_RAINBOW's
 //                            note above for the rainbowTimer double-decrement
@@ -219,6 +256,11 @@ import {
   WEATHER_HAIL_TEMPORARY,
   WEATHER_HAIL_PERMANENT,
   WEATHER_FOG_ANY,
+  WEATHER_FOG_TEMPORARY,
+  WEATHER_FOG_PERMANENT,
+  STAT_ATK,
+  STAT_SPDEF,
+  DEFAULT_STAT_STAGE,
   STATUS_FIELD_TRICK_ROOM,
   STATUS_FIELD_INVERSE_ROOM,
   STATUS_FIELD_WONDER_ROOM,
@@ -348,6 +390,26 @@ function weatherHasEffect(state: BattleState, grounding: GroundingContext): bool
   if (isAbilityOnField(state, 'ABILITY_CLOUD_NINE')) return false
   if (isAbilityOnField(state, 'ABILITY_AIR_LOCK')) return false
   return true
+}
+
+/** VARIOUS_DO_FOG_STAT_DROPS, battle_script_commands.c:8601-8623 -- what
+ * `dofogstatdrops` (data/battle_scripts_1.s:7371, BattleScript_FogContinues)
+ * expands to, same "hand-written mnemonic that is secretly a `various`
+ * opcode" shape as checkgrassyterrainheal/hpfractiontodamage (see this
+ * module's header). `IsBattlerWeatherAffected(b, WEATHER_FOG_ANY)` is
+ * `hasFlag(weather, FOG_ANY) && WEATHER_HAS_EFFECT` for a non-sun/rain flag
+ * (the Utility Umbrella clause only applies to WEATHER_SUN_ANY|WEATHER_RAIN_ANY)
+ * -- already known true by the caller's own branch, so only weatherHasEffect
+ * is checked here. Every stat stage ABOVE neutral (STAT_ATK..STAT_SPDEF, i.e.
+ * NOT accuracy/evasion) drops by exactly 1, unconditionally of how far above
+ * neutral it is -- not a percentage, not a full reset. */
+function applyFogStatDrops(battler: BattlerState, grounding: GroundingContext, state: BattleState): void {
+  if (!weatherHasEffect(state, grounding)) return
+  const isGhostOrPsychic = battler.mon.types.includes('GHOST') || battler.mon.types.includes('PSYCHIC')
+  if (isGhostOrPsychic && !battler.volatiles.trickOrTreat) return
+  for (let stat = STAT_ATK; stat <= STAT_SPDEF; stat++) {
+    if (battler.mon.statStages[stat] > DEFAULT_STAT_STAGE) battler.mon.statStages[stat]--
+  }
 }
 
 /** IsBattlerTerrainAffected, battle_util.c:4901-4925, specialised to the one
@@ -538,11 +600,41 @@ export function runFieldEndTurnEffects(
     }
   }
 
-  // ENDTURN_FOG, :2020-2037 -- gapped, see this module's header.
-  if (hasFlag(state.field.weather, WEATHER_FOG_ANY) || state.field.timers.fogReturnTimer !== 0) {
-    unmodelled.push(
-      'ENDTURN_FOG (battle_util.c:2020-2037) is not applied -- dofogstatdrops (data/battle_scripts_1.s:7369-7373) has no port anywhere in this codebase',
-    )
+  // ENDTURN_FOG, :2020-2037. See this module's header for why
+  // dofogstatdrops/VARIOUS_DO_FOG_STAT_DROPS is now ported instead of gapped.
+  {
+    let ended = false
+    if (hasFlag(state.field.weather, WEATHER_FOG_TEMPORARY) && !state.field.timers.started.weather) {
+      state.field.weatherDuration--
+      if (state.field.weatherDuration === 0) {
+        state.field.weather = clearFlag(state.field.weather, WEATHER_FOG_ANY)
+        ended = true // BattleScript_FogEnds -- no stat drops this turn.
+      }
+    }
+    if (!ended && hasFlag(state.field.weather, WEATHER_FOG_ANY)) {
+      // BattleScript_FogContinues, data/battle_scripts_1.s:7364-7377 -- raw
+      // battler id order (0..gBattlersCount-1), NOT gBattlerByTurnOrder,
+      // skipping absent battlers (`jumpifabsent`; this port uses `isAlive`,
+      // the same "should this battler be processed" gate the rest of this
+      // module already uses, since the macro itself is not in the pinned
+      // checkout to confirm whether it tests gAbsentBattlerFlags alone or
+      // also hp -- see this module's header on asm/macros not being fetched).
+      for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+        if (!isAlive(state, battlerId)) continue
+        const battler = state.battlers[battlerId]
+        if (!battler) continue
+        applyFogStatDrops(battler, grounding, state)
+      }
+    } else if (!ended && state.field.weather === 0 && state.field.timers.fogReturnTimer) {
+      // BattleScript_FogReturns -- no stat drops the turn fog returns.
+      if (state.field.timers.fogReturnTimer > 50) {
+        state.field.weather = WEATHER_FOG_PERMANENT
+      } else {
+        state.field.weather = WEATHER_FOG_TEMPORARY
+        state.field.weatherDuration = state.field.timers.fogReturnTimer
+      }
+      state.field.timers.fogReturnTimer = 0
+    }
   }
 
   // ENDTURN_GRAVITY, :2117-2124 (enum position; the file places this AFTER the terrains).
@@ -607,17 +699,36 @@ export function runFieldEndTurnEffects(
     if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)
   }
 
-  // ENDTURN_GRASSY_TERRAIN, :2070-2081 -- timer only, heal gapped (see header).
+  // ENDTURN_GRASSY_TERRAIN, :2070-2081. checkgrassyterrainheal expands to
+  // `various BS_ATTACKER, VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS` (value 77,
+  // include/constants/battle_script_commands.h:160) -- Cmd_various's own case,
+  // battle_script_commands.c:6876-6886: skip if STATUS3_SEMI_INVULNERABLE, at
+  // max HP (BATTLER_MAX_HP), hp == 0, or !IsBattlerGrounded; else heal
+  // maxHP/16 (min 1). The loop itself (BattleScript_GrassyTerrainHeals, data/
+  // battle_scripts_1.s:10148-10165) reads `gBattlerByTurnOrder` via
+  // copyarraywithindex, i.e. THIS case's own `order` -- unlike Toxic Terrain
+  // below, which iterates raw battler id.
   if (hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)) {
     if (!hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) && !state.field.timers.started.terrain) {
       state.field.timers.terrainTimer--
       if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
     }
     for (const battlerId of order) {
-      if (!isAlive(state, battlerId)) continue
-      unmodelled.push(
-        `battler ${battlerId}: ENDTURN_GRASSY_TERRAIN's heal (checkgrassyterrainheal, data/battle_scripts_1.s:10152) is not applied -- the command has no handler anywhere in the pinned eliteredux-source checkout`,
-      )
+      // The C's own gate here (battle_script_commands.c:6877-6879) is exactly
+      // these four checks, in this order -- NOT IsBattlerAlive (no
+      // gAbsentBattlerFlags check at all; a battler is skipped by its own
+      // `hp == 0` clause instead).
+      const battler = state.battlers[battlerId]
+      if (!battler) continue
+      if (hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE)) continue
+      if (battler.mon.hp === battler.mon.maxHp) continue // BATTLER_MAX_HP
+      if (battler.mon.hp === 0) continue
+      if (!isBattlerGrounded(state, battlerId, { ...grounding, attackerHasMoldBreaker: false })) continue
+      const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 16))
+      const next = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+      const applied = next - battler.mon.hp
+      battler.mon.hp = next
+      results.push({ battlerId, effect: 'GRASSY_TERRAIN', hpChange: applied, fainted: false })
     }
   }
 
@@ -631,15 +742,23 @@ export function runFieldEndTurnEffects(
     if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_PSYCHIC_TERRAIN)
   }
 
-  // ENDTURN_TOXIC_TERRAIN, :2093-2140 -- timer (with the Stench decrement gate) is
-  // ported; the damage loop is gapped per battler (see header).
+  // ENDTURN_TOXIC_TERRAIN, :2093-2140 (the FILTER chain is :2134-2140). The
+  // loop iterates RAW BATTLER ID 0..gBattlersCount-1 (`for (i = 0; i <
+  // gBattlersCount; i++)`), NOT gBattlerByTurnOrder -- unlike Grassy Terrain
+  // above, confirmed by reading the C loop itself, not assumed. hpfractiontodamage
+  // expands to `various BS_STACK_1, VARIOUS_HP_FRACTION_TO_DAMAGE` (value
+  // 191) with fraction=16 (the byte literal at the script call site, data/
+  // battle_scripts_1.s:10168) -- Cmd_various's own case,
+  // battle_script_commands.c:9017-9022: damage = maxHP/16, capped at the
+  // battler's CURRENT hp (not just floored at 0 by the caller -- the cap is
+  // in this command itself), minimum 1.
   if (hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)) {
     const stenchOnField = isAbilityOnField(state, 'ABILITY_STENCH')
     if (!hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) && !state.field.timers.started.terrain && !stenchOnField) {
       state.field.timers.terrainTimer--
       if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)
     }
-    for (const battlerId of order) {
+    for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
       if (!isAlive(state, battlerId)) continue
       const battler = state.battlers[battlerId]
       if (!battler) continue
@@ -647,9 +766,12 @@ export function runFieldEndTurnEffects(
       if (!isBattlerTerrainAffectedByToxicTerrain(state, battlerId, battler, grounding)) continue
       if (hasAnyAbility(battler.mon.abilities, TOXIC_TERRAIN_IMMUNE_ABILITY_IDS)) continue
       if (battler.mon.types.includes('POISON') || battler.mon.types.includes('STEEL')) continue
-      unmodelled.push(
-        `battler ${battlerId}: ENDTURN_TOXIC_TERRAIN's damage (hpfractiontodamage, data/battle_scripts_1.s:10168) is not applied -- the command has no handler anywhere in the pinned eliteredux-source checkout`,
-      )
+      const dmg = Math.max(1, Math.min(battler.mon.hp, Math.trunc(battler.mon.maxHp / 16)))
+      const next = battler.mon.hp - dmg
+      battler.mon.hp = next
+      const fainted = next === 0
+      if (fainted) state.sides[battlerId & 1].faintedCount++
+      results.push({ battlerId, effect: 'TOXIC_TERRAIN', hpChange: -dmg, fainted })
     }
   }
 
@@ -702,14 +824,24 @@ export function runFieldEndTurnEffects(
     }
   }
 
-  // ENDTURN_CLEARSKIES, :2256-2276 -- timer only, see header.
+  // ENDTURN_CLEARSKIES, :2256-2276. Fully ported, nothing to gap: Clear Skies
+  // (EFFECT_CLEAR_SKIES, VARIOUS_SET_CLEAR_SKIES, battle_script_commands.c:
+  // 8682-8689) only ever SETS clearSkiesTimer -- it never touches
+  // gBattleWeather at all. `WEATHER_HAS_EFFECT`'s own `!clearSkiesTimer`
+  // clause (already ported, see weatherHasEffect above) and the
+  // `REQUIRE(!clearSkiesTimer)` gates on ENDTURN_RAIN/ENDTURN_SUN (already
+  // ported) are the ENTIRE mechanism -- weather effects are suppressed while
+  // the timer is up and resume automatically the instant it expires, with no
+  // separate "restore" mutation needed. BattleScript_ClearSkiesEnds's own
+  // `switch (gBattleWeather)` (:2263-2273) only picks which "weather returns"
+  // MESSAGE to show (Strong Winds/Primal Sun/Primal Rain); it reads
+  // gBattleWeather, never writes it -- confirmed by reading
+  // BattleScript_ClearSkiesEnds -> BattleScript_MoveWeatherChangeRet ->
+  // BattleScript_OnWeatherChange to their ends. An earlier pass gapped this
+  // case assuming a hidden weather mutation existed; verified against the
+  // source that it does not.
   if (state.field.timers.clearSkiesTimer && !state.field.timers.started.clearSkiesTimer) {
     state.field.timers.clearSkiesTimer--
-    if (state.field.timers.clearSkiesTimer === 0) {
-      unmodelled.push(
-        'ENDTURN_CLEARSKIES (battle_util.c:2256-2276) reached zero, but which weather bits BattleScript_ClearSkiesEnds actually clears is not determinable from the reachable pinned source -- the field weather word was left unchanged',
-      )
-    }
   }
 
   // ENDTURN_MISC_SIDE_TIMERS, :2278-2287.
