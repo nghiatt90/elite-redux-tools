@@ -280,6 +280,18 @@ describe('createBattleState', () => {
     expect(state.sides[1].party).toHaveLength(1)
   })
 
+  it('rejects a supplied-but-empty party, which outcome.ts would read as a side that can never lose', () => {
+    expect(() => createBattleState({ battlers: [], playerParty: [], rng })).toThrow(/side 0: a supplied party must not be empty/)
+    expect(() => createBattleState({ battlers: [], opponentParty: [], rng })).toThrow(/side 1: a supplied party must not be empty/)
+    expect(() => createBattleState({ battlers: [], rng })).not.toThrow()
+  })
+
+  it("rejects an active battler whose partyIndex is outside its own side's party", () => {
+    const battlers = [createBattlerState(0, stubMon(), 0), createBattlerState(1, stubMon(), 1)]
+    expect(() => createBattleState({ battlers, opponentParty: [stubPartyMon()], rng })).toThrow(/side 1: battler 1 has partyIndex 1, outside its 1-mon party/)
+    expect(() => createBattleState({ battlers, opponentParty: [stubPartyMon(), stubPartyMon()], rng })).not.toThrow()
+  })
+
   it('leaves battleTypeFlags and aiFlags at 0 unless told', () => {
     // Defaulting either would silently decide the battle format or the AI's
     // behaviour set; both come from the fight's own data.

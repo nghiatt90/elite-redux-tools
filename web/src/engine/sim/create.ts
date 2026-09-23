@@ -401,9 +401,24 @@ export interface CreateBattleStateOptions {
  * party entry into a SimBattleMon needs stat calculation and ability
  * resolution, which are not this batch's job) and fills in everything that
  * starts empty. */
+function assertRosterHoldsActiveBattlers(party: SimPartyMon[] | undefined, battlers: (BattlerState | null)[], side: 0 | 1): void {
+  if (party === undefined) return
+  if (party.length === 0) throw new Error(`side ${side}: a supplied party must not be empty (omit it to opt out of outcome tracking)`)
+  battlers.forEach((battler, id) => {
+    if (battler && (id & 1) === side && battler.partyIndex >= party.length) {
+      throw new Error(`side ${side}: battler ${id} has partyIndex ${battler.partyIndex}, outside its ${party.length}-mon party`)
+    }
+  })
+}
+
 export function createBattleState(options: CreateBattleStateOptions): BattleState {
   const battlers = options.battlers.slice(0, MAX_BATTLERS_COUNT)
   while (battlers.length < MAX_BATTLERS_COUNT) battlers.push(null)
+  // outcome.ts reads an EMPTY party as "no roster data", so a side whose
+  // roster was supplied but came out empty (a mapping bug) could never lose.
+  // Omitting the party is the only way to opt out; a supplied one must be real.
+  assertRosterHoldsActiveBattlers(options.playerParty, battlers, 0)
+  assertRosterHoldsActiveBattlers(options.opponentParty, battlers, 1)
 
   return {
     battlers,
