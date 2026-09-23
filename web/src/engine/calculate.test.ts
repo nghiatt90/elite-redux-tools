@@ -2189,3 +2189,21 @@ describe('calculateMoveDamage -- UNMODELLED_BASE_POWER_EFFECTS warns instead of 
     },
   )
 })
+
+describe('calculateMoveDamage -- Unrelenting grants no bonus hit', () => {
+  it(
+    "an Unrelenting attacker's damage equals the same attacker's damage without the ability -- " +
+      "Unrelenting's onParentalBond returns MULTIHIT_TWO_TO_FIVE (src/abilities.cc:12247-12249), but " +
+      'GetParentalBondCount (battle_script_commands.c:1010-1044) has no case for that value, so it falls ' +
+      "through to the switch's own return 1 and Cmd_attackcanceler's i > 1 check (:1082-1090) never fires -- " +
+      'the bonus hit never actually triggers in the real game',
+    () => {
+      const baseline = calculateMoveDamage(scenario())
+      const withUnrelenting = calculateMoveDamage(
+        scenario({ attacker: battler('SPECIES_GARCHOMP', { abilitySlots: { ability: 'ABILITY_UNRELENTING', innates: [null, null, null] } }) }),
+      )
+      expect(withUnrelenting.hitCount).toBeNull()
+      expect(withUnrelenting.rolls).toEqual(baseline.rolls)
+    },
+  )
+})

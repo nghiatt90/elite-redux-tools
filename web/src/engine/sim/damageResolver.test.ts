@@ -222,27 +222,23 @@ describe('createBridgeDamageResolver: Loaded Dice (battle_util.c:3578-3586)', ()
   })
 })
 
-describe('createBridgeDamageResolver: Parental Bond TWO_TO_FIVE (ABILITY_UNRELENTING) -- a found, unfixed gap', () => {
-  it('with no canceller run first, multiHitCounter is 0 and multiHit.ts\'s own (pre-existing, unfixed) clamp floors it to 2, not a real draw', () => {
-    // See damageResolver.ts's own header for the full citation trail:
+describe('createBridgeDamageResolver: Unrelenting (ABILITY_UNRELENTING) never grants a bonus hit', () => {
+  it('resolves like an ordinary single-hit move -- no hitCount, no totalRolls, no multi-hit unmodelled note', () => {
     // GetParentalBondCount (battle_script_commands.c:1010-1044) has NO case
     // for MULTIHIT_TWO_TO_FIVE (the value Unrelenting's onParentalBond hook
     // returns), so it falls to the switch's own `return 1` default and
-    // Cmd_attackcanceler's `i > 1` check (:1086) never fires -- Unrelenting's
-    // Parental Bond bonus hit never actually triggers in the real game, and
-    // there is no Random() draw anywhere for it to have. multiHit.ts's own
-    // parentalBondHitCount still clamps whatever it is given into [2, 5]
-    // regardless (a separate, pre-existing bug outside this fix's two named
-    // defects and outside engine/sim/), so this resolver -- now correctly
-    // NOT drawing anything -- still passes through a spurious 2-hit result
-    // instead of the true single hit. Asserted here so the gap has a failing
-    // canary if multiHit.ts is ever corrected without updating this test.
+    // Cmd_attackcanceler's `i > 1` check (:1082-1090) never fires -- the bonus
+    // hit never actually triggers in the real game, and there is no Random()
+    // draw anywhere for it. multiHit.ts's parentalBondHitCount now returns
+    // hitCount 1 for this trigger, so resolveHitPlan returns null (no plan)
+    // regardless of the scenario's own hitCount toggle.
     const a = { abilities: { ability: 'ABILITY_UNRELENTING', innates: [null, null, null] as [string | null, string | null, string | null] } }
     const direct = directResult('MOVE_TACKLE', a, {}, { hitCount: 2 })
-    expect(direct.hitCount).toBe(2)
+    expect(direct.hitCount).toBeNull()
+    expect(direct.totalRolls).toBeNull()
     const out = resolver(scripted(1, 0)).resolve(state(a), 0, 1, action('MOVE_TACKLE'))
-    expect(out.targetDamage).toBe(direct.totalRolls![15])
-    expect(out.unmodelled).toContain('multi-hit per-hit rolls and crits are not independently drawn')
+    expect(out.targetDamage).toBe(direct.rolls[15])
+    expect(out.unmodelled).not.toContain('multi-hit per-hit rolls and crits are not independently drawn')
   })
 })
 

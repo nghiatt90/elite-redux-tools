@@ -40,15 +40,20 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * GetParentalBondCount, src/battle_script_commands.c:1011-1040. MINION_CONTROL's
+ * GetParentalBondCount, src/battle_script_commands.c:1010-1044. MINION_CONTROL's
  * own count is a live count of the attacker's non-fainted, non-egg, non-status
  * party members -- this v1 singles engine has no party/team concept (same class
  * of gap as Soul Harvest/Supreme Overlord before alliesFainted existed), so it's
- * surfaced as unmodelled rather than guessed. TWO_TO_FIVE reuses the SAME
- * scenario hitCount toggle as EFFECT_MULTI_HIT's own variable spread, clamped to
- * its own valid range.
+ * surfaced as unmodelled rather than guessed. TWO_TO_FIVE (Unrelenting,
+ * src/abilities.cc:12247-12249's onParentalBond) has NO case in that switch --
+ * only PARENTAL_BOND_HYPER_AGGRESSIVE/PRIMAL_MAW/DUAL_WIELD/ICE_COLD_HUNTER/
+ * THREE_HEADED/MINION_CONTROL are handled (include/abilities.hh:36-54's
+ * PARENTAL_BOND_* values), so it falls through to the switch's own `return 1`,
+ * and Cmd_attackcanceler's `i > 1` gate (:1082-1090) then never sets
+ * multiHitCounter/parentalBondOn at all -- Unrelenting never actually grants a
+ * bonus hit in the real game.
  */
-function parentalBondHitCount(trigger: ParentalBondTrigger, scenarioHitCount: number): { hitCount: number } | { unmodelled: string } {
+function parentalBondHitCount(trigger: ParentalBondTrigger): { hitCount: number } | { unmodelled: string } {
   switch (trigger) {
     case 'HYPER_AGGRESSIVE':
     case 'PRIMAL_MAW':
@@ -60,7 +65,7 @@ function parentalBondHitCount(trigger: ParentalBondTrigger, scenarioHitCount: nu
     case 'THREE_HEADED':
       return { hitCount: 3 }
     case 'TWO_TO_FIVE':
-      return { hitCount: clamp(scenarioHitCount, 2, 5) }
+      return { hitCount: 1 }
     case 'MINION_CONTROL':
       return { unmodelled: 'Minion Control: party-based hit count not modelled (no team concept in this engine)' }
   }
@@ -123,7 +128,7 @@ export function resolveHitPlan(
   if (move.split === 'STATUS' || move.flags.noParentalBond) return null
   const trigger = computeParentalBondTrigger(attackerSlots, defenderSlots, parentalBondCtx)
   if (!trigger) return null
-  const countResult = parentalBondHitCount(trigger, scenarioHitCount)
+  const countResult = parentalBondHitCount(trigger)
   if ('unmodelled' in countResult) return countResult
   if (countResult.hitCount <= 1) return null
   return {

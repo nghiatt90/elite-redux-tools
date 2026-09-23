@@ -452,11 +452,13 @@ export interface OnParentalBondContext {
  * GetParentalBondMultiplier (src/battle_util.c:7483-7513) -- 'ICE_COLD_HUNTER' and
  * 'TWO_TO_FIVE' are real MultihitType values an onParentalBond hook can return, but
  * NEITHER has a case in that switch, so getParentalBondMultiplier (dispatchCalc.ts)
- * correctly falls through to its default 1.0x for both: Ice Cold Hunter's two hits
- * are genuinely full-power (no reduction, just a second complete hit), and
- * Unrelenting's TWO_TO_FIVE is a Skill-Link-style variable-hit-count mechanic --
- * a different multi-hit family from Parental Bond's "one bonus hit at a fixed
- * reduced power" pattern, just returned through the same onParentalBond slot.
+ * correctly falls through to its default 1.0x for both. Ice Cold Hunter's bonus hit
+ * is genuinely full-power (no reduction, just a second complete hit). Unrelenting's
+ * TWO_TO_FIVE is different: GetParentalBondCount (battle_script_commands.c:1010-1044)
+ * has no case for MULTIHIT_TWO_TO_FIVE either, so the bonus hit never triggers at
+ * all in the real game -- multiHit.ts's parentalBondHitCount returns hitCount 1 for
+ * it, matching that fall-through, so this multiplier's 1.0x default for TWO_TO_FIVE
+ * is moot in practice (there is no second hit to apply it to).
  */
 export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_CONTROL' | 'PRIMAL_MAW' | 'DUAL_WIELD' | 'FAMILIA_BOND' | 'MAGUS_BLADES' | 'ICE_COLD_HUNTER' | 'TWO_TO_FIVE'
 

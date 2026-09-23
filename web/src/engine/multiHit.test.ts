@@ -102,4 +102,22 @@ describe('resolveHitPlan -- Parental Bond family', () => {
     // Double Hit's own 2-hit, full-power plan, NOT Parental Bond's 0.25x bonus hit.
     expect(result.hitModifier(1)).toBe(uq(1.0))
   })
+
+  it('Unrelenting (TWO_TO_FIVE) never grants a bonus hit -- GetParentalBondCount (battle_script_commands.c:1010-1044) has no case for MULTIHIT_TWO_TO_FIVE, so it falls through to the switch\'s own return 1, and Cmd_attackcanceler\'s i > 1 check (:1082-1090) never fires', () => {
+    for (const scenarioHitCount of [0, 2, 3, 5, 99]) {
+      expect(resolveHitPlan(move(), slots('ABILITY_UNRELENTING'), slots(null), false, null, scenarioHitCount, pbCtx(), 5)).toBeNull()
+    }
+  })
+
+  it('Unrelenting found FIRST (innate3, checked before the main ability slot in forEachAbility\'s reverse order) blocks a genuine Parental Bond ability in a LATER slot from resolving at all -- GetParentalBondType returns the first nonzero onParentalBond result (battle_script_commands.c:991-1004)', () => {
+    const attackerWithBoth: AbilitySlots = { ability: 'ABILITY_HYPER_AGGRESSIVE', innates: [null, null, 'ABILITY_UNRELENTING'] }
+    expect(resolveHitPlan(move(), attackerWithBoth, slots(null), false, null, 3, pbCtx(), 5)).toBeNull()
+
+    // The same genuine ability alone (no Unrelenting ahead of it) still gets its extra hit.
+    const attackerAlone: AbilitySlots = { ability: 'ABILITY_HYPER_AGGRESSIVE', innates: [null, null, null] }
+    const result = resolveHitPlan(move(), attackerAlone, slots(null), false, null, 3, pbCtx(), 5)
+    if (!result || 'unmodelled' in result) throw new Error('expected a hit plan')
+    expect(result.hitCount).toBe(2)
+    expect(result.hitModifier(1)).toBe(uq(0.25))
+  })
 })

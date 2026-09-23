@@ -8,10 +8,12 @@
 // THREE_HEADED (3 hits) all resolve to a real hitCount/hitModifier. MINION_CONTROL
 // (a live party-member count) stays unmodelled -- no team concept in this v1
 // singles engine, same class of gap Soul Harvest/Supreme Overlord had before
-// alliesFainted existed. TWO_TO_FIVE reuses the scenario hitCount toggle, same as
-// EFFECT_MULTI_HIT's own variable spread. See OnParentalBond's own doc in types.ts
-// for why ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's
-// default (their bonus hit(s) are full power, not reduced).
+// alliesFainted existed. TWO_TO_FIVE (Unrelenting) has NO case in
+// GetParentalBondCount (battle_script_commands.c:1010-1044) either, so
+// multiHit.ts's parentalBondHitCount returns hitCount 1 for it -- the bonus hit
+// never triggers in the real game. See OnParentalBond's own doc in types.ts for
+// why ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's
+// default.
 //
 // 17 of this batch's 24 census abilities get a fresh entry here; the other 7
 // (3_GT_1, DEVOURER, HAND_BARNACLES, MAGUS_BLADES, METALLIC_JAWS, STEEL_BEETLE,
@@ -116,11 +118,12 @@ export const PARENTAL_BOND_ABILITIES: AbilityImpl[] = [
     onParentalBond: (ctx) => (ctx.moveType === 'FIRE' ? 'DUAL_WIELD' : null),
   },
   {
-    // Returns MULTIHIT_TWO_TO_FIVE, not a Parental-Bond-reduced-power trigger -- a
-    // Skill-Link-style variable 2-5 hit count, a genuinely different multi-hit family
-    // that happens to share the onParentalBond slot. See ParentalBondTrigger's doc.
+    // Returns MULTIHIT_TWO_TO_FIVE -- but GetParentalBondCount (battle_script_
+    // commands.c:1010-1044) has no case for it, so it never actually grants a
+    // bonus hit in the real game; multiHit.ts's parentalBondHitCount returns 1
+    // for this trigger for that reason. See ParentalBondTrigger's own doc.
     id: 'ABILITY_UNRELENTING',
-    src: 'src/abilities.cc:12226',
+    src: 'src/abilities.cc:12247',
     onParentalBond: () => 'TWO_TO_FIVE',
   },
   {

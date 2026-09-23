@@ -22,24 +22,13 @@
 // contract as a UI-style "scenario toggle" (this resolver is the ONE caller
 // that fills it from a real draw rather than a calculator-page selection).
 //
-// A found-but-unfixed gap surfaced while tracing this: multiHit.ts's own
-// parentalBondHitCount TWO_TO_FIVE case (a Magus Blades/Familia Bond-style
-// ability) clamps `scenarioHitCount` into [2, 5] unconditionally. But
-// GetParentalBondCount (battle_script_commands.c:1010-1044) has NO case for
-// MULTIHIT_TWO_TO_FIVE -- only PARENTAL_BOND_HYPER_AGGRESSIVE/PRIMAL_MAW/
-// DUAL_WIELD/ICE_COLD_HUNTER/THREE_HEADED/MINION_CONTROL are handled, so a
-// trigger that resolves to MULTIHIT_TWO_TO_FIVE falls through to the switch's
-// own `return 1` default -- GetParentalBondCount never grants more than 1 hit
-// for it, and Cmd_attackcanceler's own `i > 1` check (:1086) then never sets
-// multiHitCounter/parentalBondOn at all. In other words, THIS SPECIFIC parental
-// bond family never actually triggers a bonus hit in the real game -- and
-// there is no Random() draw for it anywhere, so there was never a hidden draw
-// to port here. multiHit.ts still grants one regardless of what this resolver
-// passes as hitCount (clamp(x, 2, 5) is always >= 2), which is a real,
-// pre-existing bug in multiHit.ts, not something this fix's two named defects
-// cover or something this file's own hitCount value can prevent -- reported,
-// not fixed in this batch (same precedent as leaving the Magnitude tier draw
-// alone below).
+// Unrelenting (MULTIHIT_TWO_TO_FIVE) never actually grants a bonus hit in the
+// real game -- GetParentalBondCount (battle_script_commands.c:1010-1044) has no
+// case for it, so it falls through to `return 1` and Cmd_attackcanceler's
+// `i > 1` gate (:1082-1090) never sets multiHitCounter/parentalBondOn. There is
+// no Random() draw for it anywhere, so there is no hidden draw for this
+// resolver to port; multiHit.ts's parentalBondHitCount returns hitCount 1 for
+// this trigger, matching the C's fall-through.
 import type { MoveData, DamageCalcScenario } from '../calculate'
 import { calculateMoveDamage } from '../calculate'
 import type { BattleConstants } from '../types'
