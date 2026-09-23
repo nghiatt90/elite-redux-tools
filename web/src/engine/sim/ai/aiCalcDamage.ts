@@ -321,7 +321,7 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
   // is UNREACHABLE on this pinned build, not merely absent from the emitted
   // data -- not a gap. gBattleMoves is only `extern`-declared in
   // include/pokemon.h; every entry's `.flags` is written entirely by the
-  // codegen, and tools/codegen/src/er/move/BattleMovesGenerator.kt:94-107's
+  // codegen, and tools/codegen/src/er/move/BattleMovesGenerator.kt:94-126's
   // `bitFlags` list is built from exactly two sources: three HARDCODED names
   // (FLAG_PROTECT_AFFECTED, FLAG_KINGS_ROCK_AFFECTED, FLAG_SHEER_FORCE_BOOST)
   // plus whatever `flag_code_value`/`enum_flag_code_value` each MoveList.proto
