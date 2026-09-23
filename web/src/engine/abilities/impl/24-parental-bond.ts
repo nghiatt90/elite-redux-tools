@@ -4,18 +4,26 @@
 // fixed (or trigger-dependent) reduced power, on top of the move's normal single hit.
 //
 // Wired into calculate.ts via multiHit.ts's resolveHitPlan -- HYPER_AGGRESSIVE,
-// PRIMAL_MAW, DUAL_WIELD, ICE_COLD_HUNTER, FAMILIA_BOND, MAGUS_BLADES (2 hits) and
-// THREE_HEADED (3 hits) all resolve to a real hitCount/hitModifier. MINION_CONTROL
-// (a live party-member count) stays unmodelled -- no team concept in this v1
-// singles engine, same class of gap Soul Harvest/Supreme Overlord had before
-// alliesFainted existed. TWO_TO_FIVE (Unrelenting) has NO case in
-// GetParentalBondCount (battle_script_commands.c:1010-1044) either, so
-// multiHit.ts's parentalBondHitCount returns hitCount 1 for it -- the bonus hit
-// never triggers in the real game. See OnParentalBond's own doc in types.ts for
-// why ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's
+// PRIMAL_MAW, DUAL_WIELD, ICE_COLD_HUNTER (2 hits) and THREE_HEADED (3 hits) all
+// resolve to a real hitCount/hitModifier. MINION_CONTROL (a live party-member
+// count) stays unmodelled -- no team concept in this v1 singles engine, same
+// class of gap Soul Harvest/Supreme Overlord had before alliesFainted existed.
+// TWO_TO_FIVE (Unrelenting) has NO case in GetParentalBondCount
+// (battle_script_commands.c:1010-1044) either, so multiHit.ts's
+// parentalBondHitCount returns hitCount 1 for it -- the bonus hit never
+// triggers in the real game. See OnParentalBond's own doc in types.ts for why
+// ICE_COLD_HUNTER and TWO_TO_FIVE fall through getParentalBondMultiplier's
 // default.
 //
-// 17 of this batch's 24 census abilities get a fresh entry here; the other 7
+// FAMILIA_BOND and MAGUS_BLADES ParentalBondTrigger values were removed (dead
+// code): ABILITY_FAMILIA_BOND exists in neither the pinned abilities.cc nor
+// data/v2.65beta/abilities.json -- no such ability was ever released --
+// and ABILITY_MAGUS_BLADES's own onParentalBond is a function-pointer alias of
+// Dual Wield's (abilities.cc:10235's `.onParentalBond = Impl<ABILITY_DUAL_WIELD>
+// .onParentalBond`), already ported that way in 10-aliases.ts, so it resolves
+// to DUAL_WIELD and never had a MAGUS_BLADES-typed trigger of its own to serve.
+//
+// 16 of this batch's 24 census abilities get a fresh entry here; the other 7
 // (3_GT_1, DEVOURER, HAND_BARNACLES, MAGUS_BLADES, METALLIC_JAWS, STEEL_BEETLE,
 // WITCH_BROOM) already had a real entry for a DIFFERENT hook elsewhere and were
 // patched in place to add onParentalBond, not duplicated here.
@@ -71,12 +79,6 @@ export const PARENTAL_BOND_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_DUAL_WIELD',
     src: 'src/abilities.cc:5459',
     onParentalBond: (ctx) => (ctx.moveFlags.bulletBased || ctx.moveFlags.sliceBased ? 'DUAL_WIELD' : null),
-  },
-  {
-    id: 'ABILITY_FAMILIA_BOND',
-    src: 'src/abilities.cc:12604',
-    flags: { resistsFortKnox: true },
-    onParentalBond: () => 'FAMILIA_BOND',
   },
   {
     id: 'ABILITY_ICE_COLD_HUNTER',

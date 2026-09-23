@@ -59,8 +59,6 @@ function parentalBondHitCount(trigger: ParentalBondTrigger): { hitCount: number 
     case 'PRIMAL_MAW':
     case 'DUAL_WIELD':
     case 'ICE_COLD_HUNTER':
-    case 'FAMILIA_BOND':
-    case 'MAGUS_BLADES':
       return { hitCount: 2 }
     case 'THREE_HEADED':
       return { hitCount: 3 }

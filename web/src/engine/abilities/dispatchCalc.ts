@@ -160,12 +160,6 @@ export function getParentalBondMultiplier(trigger: ParentalBondTrigger | null, t
       break
     case 'DUAL_WIELD':
       return uq(0.7)
-    case 'FAMILIA_BOND':
-      if (turn) return uq(0.5)
-      break
-    case 'MAGUS_BLADES':
-      if (turn) return uq(0.6)
-      break
   }
   return uq(1.0)
 }

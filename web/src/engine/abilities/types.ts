@@ -460,7 +460,7 @@ export interface OnParentalBondContext {
  * it, matching that fall-through, so this multiplier's 1.0x default for TWO_TO_FIVE
  * is moot in practice (there is no second hit to apply it to).
  */
-export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_CONTROL' | 'PRIMAL_MAW' | 'DUAL_WIELD' | 'FAMILIA_BOND' | 'MAGUS_BLADES' | 'ICE_COLD_HUNTER' | 'TWO_TO_FIVE'
+export type ParentalBondTrigger = 'HYPER_AGGRESSIVE' | 'THREE_HEADED' | 'MINION_CONTROL' | 'PRIMAL_MAW' | 'DUAL_WIELD' | 'ICE_COLD_HUNTER' | 'TWO_TO_FIVE'
 
 /**
  * onParentalBond returns which bonus-hit trigger this ability grants for the given

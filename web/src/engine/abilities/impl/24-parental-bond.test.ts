@@ -59,8 +59,7 @@ describe('parental bond batch X', () => {
     expect(computeParentalBondTrigger(slots('ABILITY_RAGING_MOTH'), slots(null), ctx({ moveType: 'WATER' }))).toBeNull()
   })
 
-  it('Familia Bond is unconditional FAMILIA_BOND; Minion Control is unconditional MINION_CONTROL', () => {
-    expect(computeParentalBondTrigger(slots('ABILITY_FAMILIA_BOND'), slots(null), ctx())).toBe('FAMILIA_BOND')
+  it('Minion Control is unconditional MINION_CONTROL', () => {
     expect(computeParentalBondTrigger(slots('ABILITY_MINION_CONTROL'), slots(null), ctx())).toBe('MINION_CONTROL')
   })
 
@@ -122,8 +121,6 @@ describe('parental bond batch X', () => {
     expect(getParentalBondMultiplier('MINION_CONTROL', 1)).toBe(uq(0.1))
     expect(getParentalBondMultiplier('PRIMAL_MAW', 1)).toBe(uq(0.4))
     expect(getParentalBondMultiplier('DUAL_WIELD', 0)).toBe(uq(0.7)) // no REQUIRE gate at all
-    expect(getParentalBondMultiplier('FAMILIA_BOND', 1)).toBe(uq(0.5))
-    expect(getParentalBondMultiplier('MAGUS_BLADES', 1)).toBe(uq(0.6))
     expect(getParentalBondMultiplier('ICE_COLD_HUNTER', 1)).toBe(uq(1.0)) // no case -> full power both hits
     expect(getParentalBondMultiplier(null, 1)).toBe(uq(1.0))
   })
