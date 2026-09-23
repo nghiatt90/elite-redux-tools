@@ -78,6 +78,7 @@ function stubPartyMon(): SimPartyMon {
     speedDown: false,
     gender: 'FEMALE',
     status1: 0,
+    types: ['NORMAL', 'FLYING', 'MYSTERY'],
   }
 }
 

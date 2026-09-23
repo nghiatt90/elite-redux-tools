@@ -379,6 +379,17 @@ export interface SimPartyMon {
   /** Carried on the party mon because status1 persists across switches -- unlike
    * status2, which is cleared on switch out. */
   status1: number
+  /** `Type type1/type2/type3` -- NOT carried by `struct BattlePokemon` on the
+   * reserve side (types are computed from species+personality via
+   * Cmd_switchindataupdate's own RandomizeType calls, battle_script_commands.c:
+   * 5016-5020, at the moment a mon takes the field). Added here (batch: faint
+   * replacement) because switchIn.ts has to build a full SimBattleMon from a
+   * SimPartyMon and every other required field already existed on this
+   * interface -- types was the one gap. A reserve mon's types do not change
+   * while it sits in the party (no form-change/Multitype mechanic reaches a
+   * benched mon), so this is a battle-start-derivable fact like `rawStats`,
+   * not state that goes stale mid-battle. */
+  types: [string, string, string]
 }
 
 // ---------------------------------------------------------------------------
@@ -550,10 +561,26 @@ export interface BattleHistoryState {
 // The whole battle
 // ---------------------------------------------------------------------------
 
+/** `gBattleOutcome`'s bit values (include/constants/battle.h:91-93), restricted
+ * to the three this sim can ever produce -- switching, forfeiting, capturing,
+ * fleeing and every link-battle outcome need mechanics this sim does not
+ * model. `null` is the C's 0 ("undecided"). Cmd_checkteamslost's own
+ * `gBattleOutcome |= B_OUTCOME_LOST` / `|= B_OUTCOME_WON` (battle_script_
+ * commands.c:3729-3730) is why DREW is representable at all: WON (1) | LOST
+ * (2) = 3, which IS B_OUTCOME_DREW's literal value (battle.h:93) -- not a
+ * separate case this sim invents, the same OR the C performs. */
+export type BattleOutcome = 'WON' | 'LOST' | 'DREW' | null
+
 export interface BattleState {
   /** Indexed by battler id 0-3 (B_POSITION_*). `null` is an empty slot -- in
    * singles that is ids 2 and 3. Not a sparse array: the index IS the id. */
   battlers: (BattlerState | null)[]
+  /** `gBattleOutcome`, restricted to the three values this sim can produce --
+   * see `BattleOutcome`'s own doc. Set by `outcome.ts`'s `computeBattleOutcome`
+   * whenever a faint changes it, never cleared once set (the C's own
+   * `gBattleOutcome = 0` resets belong to a NEW battle, battle_main.c:2741,
+   * not to anything mid-battle). */
+  battleOutcome: BattleOutcome
   /** `gBattlersCount` (battle.h:957) -- 2 in singles, 4 in doubles. */
   battlersCount: number
   /** `gAbsentBattlerFlags` (battle.h:981) -- a battler bitmask for "fainted or

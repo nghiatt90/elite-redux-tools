@@ -235,6 +235,7 @@
 import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
 import { isAbilityAliveOnOpposingSide } from './turn'
+import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
 import {
@@ -468,6 +469,7 @@ export interface EndTurnEffectResult {
 function applyEndTurnHp(state: BattleState, battlerId: number, battler: BattlerState, hpChange: number): boolean {
   const next = Math.max(0, Math.min(battler.mon.maxHp, battler.mon.hp + hpChange))
   battler.mon.hp = next
+  syncPartyHp(state, battlerId)
   if (next === 0) {
     state.sides[battlerId & 1].faintedCount++
     return true
@@ -715,6 +717,18 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       unmodelled,
       `battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented`,
     )
+
+    // battle-over short-circuit (faint-replacement batch): this battler's own
+    // ladder pass just finished, matching the C's own turnEffectsBattlerId/
+    // turnEffectsTracker nesting (this module's header: "ALL entries for one
+    // battler run ... before the next battler is even looked at"). If THIS
+    // battler's poison/toxic/burn damage (applyEndTurnHp, above) just decided
+    // the outcome, the next battler in `battlerOrder` gets none of its own
+    // ladder -- the real C achieves this by re-entering BattleTurnPassed and
+    // finding gBattleOutcome != 0 before DoBattlerEndTurnEffects resumes (see
+    // turn.ts's own citation at its executeTurn call site).
+    state.battleOutcome = computeBattleOutcome(state)
+    if (state.battleOutcome) break
   }
 
   return { results, unmodelled }

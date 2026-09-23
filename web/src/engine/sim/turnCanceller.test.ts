@@ -394,6 +394,7 @@ function partyMon(overrides: Partial<SimPartyMon> = {}): SimPartyMon {
     speedDown: false,
     gender: 'MALE',
     status1: 0,
+    types: ['WATER', 'MYSTERY', 'MYSTERY'],
     ...overrides,
   }
 }

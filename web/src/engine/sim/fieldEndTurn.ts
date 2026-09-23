@@ -229,6 +229,7 @@ import type { SimDataContext } from './dataContext'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { isMagicGuardProtected, type EndTurnEffectResult } from './endTurn'
+import { computeBattleOutcome, syncPartyHp } from './outcome'
 import {
   hasFlag,
   clearFlag,
@@ -452,9 +453,21 @@ function applyWeatherDamage(state: BattleState, battlerId: number, battler: Batt
   const dmg = Math.max(1, Math.trunc(battler.mon.maxHp / 16))
   const next = Math.max(0, battler.mon.hp - dmg)
   battler.mon.hp = next
+  syncPartyHp(state, battlerId)
   const fainted = next === 0
   if (fainted) state.sides[battlerId & 1].faintedCount++
   results.push({ battlerId, effect, hpChange: -dmg, fainted })
+}
+
+/** battle-over short-circuit (faint-replacement batch): recomputes
+ * state.battleOutcome and reports whether the caller's per-battler loop
+ * should stop -- see turn.ts's own citation on why the field ladder's
+ * per-battler damage loops (sandstorm/hail/toxic terrain, all below) are the
+ * granularity this batch checks at, matching the C's own
+ * one-battler-at-a-time damage application within a single ladder case. */
+function outcomeStopsLoop(state: BattleState): boolean {
+  state.battleOutcome = computeBattleOutcome(state)
+  return state.battleOutcome !== null
 }
 
 /**
@@ -572,6 +585,7 @@ export function runFieldEndTurnEffects(
         if (isMagicGuardProtected(state, battler)) continue
         if (isSandImmune(state, battler, dataContext)) continue
         applyWeatherDamage(state, battlerId, battler, 'SANDSTORM', results)
+        if (outcomeStopsLoop(state)) break
       }
     }
   }
@@ -605,6 +619,7 @@ export function runFieldEndTurnEffects(
         if (isMagicGuardProtected(state, battler)) continue
         if (isHailImmune(state, battler, dataContext)) continue
         applyWeatherDamage(state, battlerId, battler, 'HAIL', results)
+        if (outcomeStopsLoop(state)) break
       }
     }
   }
@@ -737,6 +752,7 @@ export function runFieldEndTurnEffects(
       const next = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
       const applied = next - battler.mon.hp
       battler.mon.hp = next
+      syncPartyHp(state, battlerId)
       results.push({ battlerId, effect: 'GRASSY_TERRAIN', hpChange: applied, fainted: false })
     }
   }
@@ -778,9 +794,11 @@ export function runFieldEndTurnEffects(
       const dmg = Math.max(1, Math.min(battler.mon.hp, Math.trunc(battler.mon.maxHp / 16)))
       const next = battler.mon.hp - dmg
       battler.mon.hp = next
+      syncPartyHp(state, battlerId)
       const fainted = next === 0
       if (fainted) state.sides[battlerId & 1].faintedCount++
       results.push({ battlerId, effect: 'TOXIC_TERRAIN', hpChange: -dmg, fainted })
+      if (outcomeStopsLoop(state)) break
     }
   }
 

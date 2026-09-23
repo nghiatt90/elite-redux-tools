@@ -8,11 +8,18 @@
 // Those three are the whole shape of this module.
 //
 // DELIBERATELY ABSENT, all of it the next batches: move EFFECTS (status
-// application, stat changes, hazards, ...), switching, the AI, multi-hit
-// sequencing, and every battle-script behaviour besides the attack canceller,
-// the accuracy check and PP deduction below. A move may be cancelled before it
-// is even attempted; a move may miss; PP is deducted; a hit deals damage; a
-// battler may faint. Nothing else happens during the action loop itself.
+// application, stat changes, hazards, ...), the AI, multi-hit sequencing, and
+// every battle-script behaviour besides the attack canceller, the accuracy
+// check and PP deduction below. A move may be cancelled before it is even
+// attempted; a move may miss; PP is deducted; a hit deals damage; a battler
+// may faint. Nothing else happens during the action loop itself.
+//
+// SWITCHING is now PARTIAL, not absent: this batch (faint-replacement) ports
+// end-of-turn replacement only -- see switchIn.ts's own header. Still absent:
+// mid-turn switching (a chosen SWITCH action, U-turn/Baton-Pass/Roar-class
+// forced switches), and the AI's own replacement choice
+// (GetMostSuitableMonToSwitchInto) -- this batch takes the replacement choice
+// as an injected dependency (TurnLoopDeps.replacement) instead.
 //
 // End-of-turn residuals: DoFieldEndTurnEffects (weather/terrain/field timers,
 // battle_util.c:1768-2318) runs FIRST -- see fieldEndTurn.ts's own header for
@@ -90,10 +97,15 @@
 //
 //   RunTurnActionsFunctions (:4654) opens with
 //   `if (gBattleOutcome != 0) gCurrentActionFuncId = B_ACTION_FINISHED;` -- the
-//   battle-over short-circuit, and the loop's real termination condition. Not
-//   modelled: nothing in this batch can set an outcome, since deciding a battle
-//   is over needs the reserve party and switching. It becomes load-bearing the
-//   moment a faint can end a battle, and this loop will need it then.
+//   battle-over short-circuit, and the loop's real termination condition.
+//   PORTED (faint-replacement batch): state.battleOutcome is recomputed after
+//   every damage application (applyDamage below, via outcome.ts's
+//   computeBattleOutcome) and checked at the top of every remaining slot in
+//   THIS loop -- see the loop body's own citation on why that is a deliberate
+//   extension past the literal C timing (checkteamslost is not actually
+//   called after an ordinary move's tryfaintmon in the real game) rather than
+//   a guess. Both end-turn ladders and end-of-turn replacement are gated on
+//   it too -- see executeTurn's own citation at the bottom of this file.
 //
 // Two constraints this batch was given, and how each is met:
 //
@@ -108,7 +120,7 @@
 //     buildTurnOrderContext below assembles a context whose isBattlerGrounded is
 //     the real port.
 
-import type { BattleState } from './state'
+import type { BattleOutcome, BattleState } from './state'
 import type { ChosenAction, TurnOrderContext, TurnOrder } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
@@ -124,6 +136,9 @@ import { createTurnState } from './create'
 import type { EndTurnEffectResult } from './endTurn'
 import { runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
+import { computeBattleOutcome, syncPartyHp } from './outcome'
+import type { ReplacementDeps } from './switchIn'
+import { applyEndOfTurnReplacements } from './switchIn'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -165,6 +180,15 @@ export interface ActionOutcome {
   /** True when HandleAction_UseMove's own liveness guard (:181-186) aborted the
    * action because its battler was not alive. */
   skippedBecauseFainted: boolean
+  /** True when RunTurnActionsFunctions's own short-circuit (battle_main.c:4654,
+   * `if (gBattleOutcome != 0) gCurrentActionFuncId = B_ACTION_FINISHED;`) ran
+   * for this slot -- the outcome was already decided (by an earlier action's
+   * faint this SAME turn) before this slot was even reached. Distinct from
+   * `skippedBecauseFainted`: THIS battler may well still be alive; its action
+   * simply never runs because the battle is already over. Not attempted, not
+   * cancelled, not missed -- every other outcome field stays at its blank
+   * default. */
+  battleOver: boolean
   /** Cmd_accuracycheck's own miss roll (battle_script_commands.c:1433), via
    * buildAccuracyInputs/getTotalAccuracy. Kept separate from `targetDamage`
    * being null rather than overloading it: null already means "nothing was
@@ -231,8 +255,24 @@ export interface TurnOutcome {
    * AND the battler ladder afterwards. Distinct from `order` above (this
    * module's own action-loop order, established before either end-turn ladder
    * runs). Exposed so a test can assert the field ladder's own re-sort
-   * happened, the same way `order` lets a test assert the action loop's. */
+   * happened, the same way `order` lets a test assert the action loop's. Empty
+   * when the field ladder never ran at all (the outcome was already decided
+   * before this turn's end-turn phases started -- see `outcome` below). */
   endTurnOrder: number[]
+  /** `state.battleOutcome` as it stands when this turn finishes -- see
+   * state.ts's own `BattleOutcome` doc and outcome.ts's `computeBattleOutcome`
+   * for how it gets set. Mirrors the state field rather than replacing it, the
+   * same precedent as `order`/`endTurn` exposing state the loop mutates in
+   * place. */
+  outcome: BattleOutcome
+  /** switchIn.ts's own gap channel (switch-in abilities/items whose real C
+   * condition was true for the mon that just took the field) -- kept apart
+   * from `endTurnUnmodelled` because these gaps belong to the replacement
+   * phase, which runs after both end-turn ladders, not to either ladder
+   * itself. Empty when no replacement happened this turn (nothing fainted, no
+   * live reserve, the battle was already decided, or the caller supplied no
+   * `deps.replacement` at all). */
+  replacementUnmodelled: string[]
 }
 
 /**
@@ -307,6 +347,14 @@ export interface TurnLoopDeps {
    * from the DamageResolver's own data access, which the loop has no
    * visibility into. */
   dataContext: SimDataContext
+  /** switchIn.ts's own injected choice for which reserve replaces a fainted
+   * active battler at end of turn. Optional and defaulting to "no
+   * replacement": every caller that predates this batch (every existing test
+   * in this directory) supplies no party roster at all, so there is never a
+   * live reserve to replace regardless -- but making this optional rather
+   * than mandatory keeps those callers' `TurnLoopDeps` literals compiling
+   * unchanged. */
+  replacement?: ReplacementDeps
 }
 
 /** Assembles the TurnOrderContext the loop actually runs with: the caller's
@@ -428,7 +476,17 @@ function deductPp(state: BattleState, attackerId: number, moveId: string, moveEf
 }
 
 /** Removes HP from one battler, floors at 0, and records a faint. Shared by the
- * target and attacker halves so they cannot drift apart. */
+ * target and attacker halves so they cannot drift apart.
+ *
+ * Also syncs the battler's party slot (outcome.ts's `syncPartyHp`) and
+ * recomputes `state.battleOutcome` (outcome.ts's `computeBattleOutcome`) --
+ * this is this batch's own "after each action's faints" call site (see this
+ * module's header and outcome.ts's own header on why party HP, not battler
+ * HP, is what checkteamslost actually sums). Recomputing unconditionally
+ * (not just when `fainted` grew) matches Cmd_checkteamslost's own
+ * unconditional call: a damage application that does NOT faint anyone cannot
+ * change the outcome, but computing it fresh every time is cheaper than a
+ * second conditional and cannot disagree with one. */
 function applyDamage(state: BattleState, battlerId: number, damage: number | null, fainted: number[]): void {
   if (damage === null) return
   const battler = state.battlers[battlerId]
@@ -441,6 +499,8 @@ function applyDamage(state: BattleState, battlerId: number, damage: number | nul
     // Supreme Overlord read.
     state.sides[battlerId & 1].faintedCount++
   }
+  syncPartyHp(state, battlerId)
+  state.battleOutcome = computeBattleOutcome(state)
 }
 
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
@@ -478,13 +538,30 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       fainted: [],
     }
 
+    // RunTurnActionsFunctions, battle_main.c:4654 -- `if (gBattleOutcome != 0)
+    // gCurrentActionFuncId = B_ACTION_FINISHED;`, checked BEFORE the action
+    // handler for this slot ever runs (so it takes priority over the
+    // liveness check right below: a battler that is still alive but whose
+    // opponent has no mons left does not act either). This batch's own
+    // extension of the C's timing -- see outcome.ts's header and this
+    // module's own header on "after each action's faints" -- means
+    // state.battleOutcome can already be set here even in a case the literal
+    // C would not have decided until later (checkteamslost is not called
+    // after an ordinary move's tryfaintmon in the real game); that is a
+    // deliberate simplification this batch's brief asks for, not an
+    // oversight.
+    if (state.battleOutcome) {
+      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: true })
+      continue
+    }
+
     if (!isBattlerAlive(state, battlerId)) {
-      outcomes.push({ ...blank, skippedBecauseFainted: true })
+      outcomes.push({ ...blank, skippedBecauseFainted: true, battleOver: false })
       continue
     }
 
     if (actionKind !== 'USE_MOVE' || !action || action.chosenMove === null) {
-      outcomes.push({ ...blank, skippedBecauseFainted: false })
+      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false })
       continue
     }
 
@@ -509,6 +586,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         battlerId,
         action: actionKind,
         skippedBecauseFainted: false,
+        battleOver: false,
         missed: false,
         targetId,
         targetDamage: null,
@@ -525,7 +603,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       // No living target: the move resolves to nothing here. The real game runs
       // a fail branch with messages and effect-specific behaviour; this batch
       // models only that no damage is dealt.
-      outcomes.push({ ...blank, skippedBecauseFainted: false, targetId, unmodelled })
+      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false, targetId, unmodelled })
       continue
     }
 
@@ -562,6 +640,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         battlerId,
         action: actionKind,
         skippedBecauseFainted: false,
+        battleOver: false,
         missed: true,
         targetId,
         targetDamage: null,
@@ -584,6 +663,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       battlerId,
       action: actionKind,
       skippedBecauseFainted: false,
+      battleOver: false,
       missed: false,
       targetId,
       targetDamage,
@@ -598,19 +678,51 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
   // BattleTurnPassed, battle_main.c:3465-3481: TurnValuesCleanUp(TRUE), then
   // DoFieldEndTurnEffects (fieldEndTurn.ts) and DoBattlerEndTurnEffects
-  // (endTurn.ts), in that order, THEN HandleFaintedMonActions (absent --
-  // switching is out of scope) and HandleWishPerishSongOnTurnEnd (absent), and
-  // only after all of that does gBattleResults.battleTurnCounter++ run
-  // (:3508-3511). Both residual ladders therefore belong HERE, before the
-  // counter increment below -- not after it. fieldEndTurn's own ENDTURN_ORDER
-  // recomputes gBattlerByTurnOrder; endTurn's battler ladder receives THAT
-  // order, not this function's own `order` (see fieldEndTurn.ts's header).
-  const {
-    order: endTurnOrder,
-    results: fieldEndTurn,
-    unmodelled: fieldEndTurnUnmodelled,
-  } = runFieldEndTurnEffects(state, ctx, deps.statStageRatios, deps.grounding, deps.dataContext)
-  const { results: endTurn, unmodelled: endTurnUnmodelled } = runEndTurnEffects(state, endTurnOrder, deps.dataContext)
+  // (endTurn.ts), in that order, THEN HandleFaintedMonActions (switchIn.ts's
+  // applyEndOfTurnReplacements, below) and HandleWishPerishSongOnTurnEnd
+  // (absent), and only after all of that does
+  // gBattleResults.battleTurnCounter++ run (:3508-3511). Both residual
+  // ladders therefore belong HERE, before the counter increment below -- not
+  // after it. fieldEndTurn's own ENDTURN_ORDER recomputes gBattlerByTurnOrder;
+  // endTurn's battler ladder receives THAT order, not this function's own
+  // `order` (see fieldEndTurn.ts's header).
+  //
+  // BattleTurnPassed's own gate, `if (gBattleOutcome == 0 && !ranEndTurnEffects)
+  // { if (DoFieldEndTurnEffects()) return; if (DoBattlerEndTurnEffects())
+  // return; ... }` (:3479): when the outcome is ALREADY decided going into
+  // this phase (a mid-turn action faint, per this batch's own extension --
+  // see the action loop's own citation above), NEITHER ladder runs at all.
+  // When the outcome becomes decided PARTWAY THROUGH the field ladder (a
+  // fainting weather/terrain tick), fieldEndTurn.ts's own per-battler loops
+  // stop early (see that module's own citation), and the battler ladder
+  // (endTurn.ts) is skipped entirely here -- the real C achieves the same
+  // result via re-entering BattleTurnPassed on its next call and finding
+  // gBattleOutcome != 0 before DoBattlerEndTurnEffects ever runs.
+  let endTurnOrder: number[] = []
+  let fieldEndTurn: EndTurnEffectResult[] = []
+  let fieldEndTurnUnmodelled: string[] = []
+  let endTurn: EndTurnEffectResult[] = []
+  let endTurnUnmodelled: string[] = []
+  if (!state.battleOutcome) {
+    const fieldResult = runFieldEndTurnEffects(state, ctx, deps.statStageRatios, deps.grounding, deps.dataContext)
+    endTurnOrder = fieldResult.order
+    fieldEndTurn = fieldResult.results
+    fieldEndTurnUnmodelled = fieldResult.unmodelled
+    if (!state.battleOutcome) {
+      const battlerResult = runEndTurnEffects(state, endTurnOrder, deps.dataContext)
+      endTurn = battlerResult.results
+      endTurnUnmodelled = battlerResult.unmodelled
+    }
+  }
+
+  // HandleFaintedMonActions's state-3 gate is exactly "the whole turn (both
+  // ladders) is done" -- see switchIn.ts's own header for why this is the one
+  // place this batch calls applyEndOfTurnReplacements, and why it is a no-op
+  // both when deps.replacement was never supplied (every pre-this-batch
+  // caller) and when state.battleOutcome is already set (no switch-in UI
+  // exists once the battle is decided).
+  const replacementUnmodelled: string[] = []
+  if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps.dataContext, replacementUnmodelled)
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop and the end-turn ladders above; state.turnCount is therefore the
@@ -618,5 +730,5 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // bridge.ts's parity checks. battle_main.c:3512-3513 saturates the u8
   // counter at 0xFF.
   state.turnCount = Math.min(0xFF, state.turnCount + 1)
-  return { actions: outcomes, order, endTurn, endTurnUnmodelled, fieldEndTurn, fieldEndTurnUnmodelled, endTurnOrder }
+  return { actions: outcomes, order, endTurn, endTurnUnmodelled, fieldEndTurn, fieldEndTurnUnmodelled, endTurnOrder, outcome: state.battleOutcome, replacementUnmodelled }
 }

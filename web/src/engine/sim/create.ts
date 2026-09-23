@@ -412,6 +412,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     // disagree with the array it describes.
     battlersCount: battlers.filter((b) => b !== null).length,
     absentBattlerFlags: 0,
+    battleOutcome: null,
     sides: [createSideState(options.playerParty ?? []), createSideState(options.opponentParty ?? [])],
     field: createFieldState(),
     battleHistory: createBattleHistoryState(),
