@@ -83,6 +83,14 @@ export interface SimMoveData {
    * FLAG_DMG_2X_IN_AIR -- see accuracy.ts's AccuracyInputs doc for why they
    * are two separate bits. Undefined/absent means neither flag is set. */
   hitsAir?: 'HITS' | 'DOUBLE_DAMAGE'
+  /** moves.json's `argument` when its kind is `int` -- `gBattleMoves[move].argument`
+   * (MoveList.proto field 12's sibling `argument` field, ArgumentCase.INT),
+   * read by GetMultihitType's EFFECT_DOUBLE_HIT case (battle_util.c:3589) to
+   * tell Surging Strikes/Sparkling Barrage's own 3-hit variant (argument==3)
+   * apart from every other Double-Hit-family move (2 hits). null when
+   * moves.json's argument is absent or a non-int kind (type/effect/status/
+   * misc/other) -- those aren't read by anything attackCanceller.ts needs. */
+  argumentInt?: number | null
 }
 
 /**

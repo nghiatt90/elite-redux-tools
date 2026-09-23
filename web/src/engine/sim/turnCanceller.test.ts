@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
-import type { BattleState, RandomSource, SimBattleMon } from './state'
+import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import { STATUS1_FREEZE, STATUS1_PARALYSIS, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_FLINCHED, STATUS2_POWDER, setCounter } from './constants'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
@@ -21,10 +21,13 @@ const snapshot = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, na
 const rawMoves = snapshot<Array<Record<string, unknown>>>('moves.json')
 const movesById = new Map(rawMoves.map((m) => [m.id as string, m]))
 const abilityIds = new Set(snapshot<Array<{ id: string }>>('abilities.json').map((a) => a.id))
+const rawItems = snapshot<Array<Record<string, unknown>>>('items.json')
+const itemsById = new Map(rawItems.map((i) => [i.id as string, i]))
 
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
   if (!m) throw new Error(`moves.json has no ${id}`)
+  const arg = m.argument as { kind: string; value: unknown } | undefined
   return {
     id,
     power: m.power as number,
@@ -34,11 +37,23 @@ function requireMove(id: string): SimMoveData {
     flags: (m.flags as Record<string, true>) ?? {},
     accuracy: m.accuracy as number,
     hitsAir: m.hitsAir as SimMoveData['hitsAir'],
+    argumentInt: arg?.kind === 'int' ? (arg.value as number) : null,
   }
 }
 function requireAbility(id: string): string {
   if (!abilityIds.has(id)) throw new Error(`abilities.json has no ${id}`)
   return id
+}
+function requireItem(id: string): { id: string; resolvedHoldEffect: string | null; holdEffectStrength: number | null; holdEffectType: string | null; naturalGift: { power: number; type: string } | null } {
+  const it = itemsById.get(id)
+  if (!it) throw new Error(`items.json has no ${id}`)
+  return {
+    id,
+    resolvedHoldEffect: (it.resolvedHoldEffect as string | null) ?? null,
+    holdEffectStrength: (it.holdEffectStrength as number | null) ?? null,
+    holdEffectType: (it.holdEffectType as string | null) ?? null,
+    naturalGift: (it.naturalGift as { power: number; type: string } | null) ?? null,
+  }
 }
 
 // Fail loudly here, not by a silently-vacuous test later, if any of these ids
@@ -50,8 +65,12 @@ const SCALD = requireMove('MOVE_SCALD') // thawUser, not EFFECT_BURN_UP
 const BURN_UP = requireMove('MOVE_BURN_UP') // thawUser AND EFFECT_BURN_UP
 const POISON_POWDER = requireMove('MOVE_POISON_POWDER') // powderAffected, status split
 const EMBER = requireMove('MOVE_EMBER') // TYPE_FIRE, accuracy 100
+const ARM_THRUST = requireMove('MOVE_ARM_THRUST') // EFFECT_MULTI_HIT, accuracy 100
 const EARLY_BIRD = requireAbility('ABILITY_EARLY_BIRD')
 const TRUANT = requireAbility('ABILITY_TRUANT')
+const SKILL_LINK = requireAbility('ABILITY_SKILL_LINK')
+const LOADED_DICE = requireItem('ITEM_LOADED_DICE')
+if (LOADED_DICE.resolvedHoldEffect !== 'HOLD_EFFECT_LOADED_DICE') throw new Error('ITEM_LOADED_DICE no longer resolves to HOLD_EFFECT_LOADED_DICE')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -60,7 +79,7 @@ const RATIOS: [number, number][] = [
 const GROUNDING: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
 const DATA_CONTEXT: SimDataContext = {
   species: () => undefined,
-  item: () => undefined,
+  item: (id) => (itemsById.has(id) ? requireItem(id) : undefined),
   move: (id) => (movesById.has(id) ? requireMove(id) : undefined),
 }
 
@@ -87,7 +106,22 @@ function mon(overrides: Partial<SimBattleMon> = {}): SimBattleMon {
   }
 }
 
-function battle(specs: { spe: number; hp?: number; abilities?: SimBattleMon['abilities']; moves?: SimBattleMon['moves']; pp?: SimBattleMon['pp']; status1?: number; status2?: number; types?: SimBattleMon['types'] }[], rng: RandomSource): BattleState {
+function battle(
+  specs: {
+    spe: number
+    hp?: number
+    abilities?: SimBattleMon['abilities']
+    moves?: SimBattleMon['moves']
+    pp?: SimBattleMon['pp']
+    status1?: number
+    status2?: number
+    types?: SimBattleMon['types']
+    itemId?: string | null
+    speciesId?: string
+  }[],
+  rng: RandomSource,
+  playerParty?: SimPartyMon[],
+): BattleState {
   return createBattleState({
     battlers: specs.map((s, i) =>
       createBattlerState(
@@ -101,11 +135,14 @@ function battle(specs: { spe: number; hp?: number; abilities?: SimBattleMon['abi
           status1: s.status1 ?? 0,
           status2: s.status2 ?? 0,
           types: s.types ?? ['WATER', 'MYSTERY', 'MYSTERY'],
+          itemId: s.itemId ?? null,
+          speciesId: s.speciesId ?? 'SPECIES_MUDKIP',
         }),
         0,
       ),
     ),
     rng,
+    playerParty,
   })
 }
 
@@ -321,5 +358,103 @@ describe('executeTurn: attack canceller -- gapped branches, only emitted when ac
     const nonFireMove = battle([{ spe: 200, status2: STATUS2_POWDER }, { spe: 50 }], scripted(50))
     const out2 = executeTurn(nonFireMove, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
     expect(out2.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_STATUS'))).toBe(false)
+  })
+})
+
+const TWINEEDLE = requireMove('MOVE_TWINEEDLE') // one of the six hitCountOverride moves, gapped -- see attackCanceller.ts header
+const BEAT_UP = requireMove('MOVE_BEAT_UP')
+
+function partyMon(overrides: Partial<SimPartyMon> = {}): SimPartyMon {
+  return {
+    speciesId: 'SPECIES_MUDKIP',
+    hp: 100,
+    maxHp: 100,
+    level: 50,
+    moves: ['MOVE_TACKLE', null, null, null],
+    pp: [35, 0, 0, 0],
+    itemId: null,
+    abilities: { ability: null, innates: [null, null, null] },
+    rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 },
+    nature: 'NATURE_HARDY',
+    hiddenPowerType: null,
+    speedDown: false,
+    gender: 'MALE',
+    status1: 0,
+    ...overrides,
+  }
+}
+
+describe('executeTurn: attack canceller -- CANCELLER_MULTIHIT_MOVES (battle_util.c:3491-3541, GetMultihitType :3568-3605), ported fix cycle 6', () => {
+  it('MULTIHIT_TWO_TO_FIVE draws two values, consumed AFTER the canceller status draws and BEFORE the accuracy draw, and sets multiHitCounter to the C formula', () => {
+    // No status conditions, so the ladder falls straight through to the
+    // multi-hit step with zero status draws first. 1 and 3 are the two
+    // hit-count draws (2 + 1%2 + 2*(3%3==0) = 5); 50 is the accuracy draw.
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(1, 3, 50))
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    expect(out.actions[0].missed).toBe(false) // proves the 3rd scripted value (50) was consumed by accuracy, not a 3rd hit-count draw
+    expect(out.actions[0].targetDamage).toBe(10)
+  })
+
+  it('MULTIHIT_TWO_TO_FIVE: the other draw pair (0, 1) rolls a hit count of 2', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0, 1, 50)) // 2 + 0%2 + 2*(1%3==0) = 2
+    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(2)
+  })
+
+  it('MULTIHIT_FOUR_OR_FIVE (Loaded Dice) draws exactly ONE value, not the two-draw formula', () => {
+    const state = battle([{ spe: 200, itemId: 'ITEM_LOADED_DICE' }, { spe: 50 }], scripted(1, 50)) // 4 + 1%2 = 5, then accuracy
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    expect(out.actions[0].missed).toBe(false) // proves only ONE draw was consumed before accuracy's 50
+  })
+
+  it('MULTIHIT_FOUR_OR_FIVE (Loaded Dice): a 0 draw rolls a hit count of 4', () => {
+    const state = battle([{ spe: 200, itemId: 'ITEM_LOADED_DICE' }, { spe: 50 }], scripted(0, 50))
+    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(4)
+  })
+
+  it('Skill Link sets multiHitCounter to 5 with NO RNG draw at all', () => {
+    const state = battle([{ spe: 200, abilities: { ability: SKILL_LINK, innates: [null, null, null] } }, { spe: 50 }], scripted(50)) // ONLY the accuracy draw
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    expect(out.actions[0].missed).toBe(false) // proves the single scripted value (50) was consumed by accuracy, not a hit-count draw
+  })
+
+  it('a single-hit move (Tackle) never sets multiHitCounter and draws nothing for it', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(50)) // ONLY the accuracy draw
+    const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(0)
+    expect(out.actions[0].missed).toBe(false)
+  })
+
+  it('MULTIHIT_BEAT_UP counts the attacker\'s own live, non-statused party (no RNG draw)', () => {
+    // The C's own loop (battle_script_commands.c:1030-1038) iterates the whole
+    // PARTY_SIZE array with no exclusion for the active battler's own slot --
+    // two of these five pass the HP/species/status filter, so 2 is the count,
+    // not a headline-count-plus-one.
+    const party: SimPartyMon[] = [
+      partyMon(), // live -- counted (this is also the active battler's own party record)
+      partyMon({ hp: 0 }), // fainted -- excluded
+      partyMon({ speciesId: null }), // empty slot -- excluded
+      partyMon({ status1: STATUS1_PARALYSIS }), // statused -- excluded
+      partyMon(), // live -- counted
+    ]
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(50), party)
+    const out = executeTurn(state, [useMove(1, BEAT_UP), null], deps(fixedDamage(10)))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(2)
+    expect(out.actions[0].missed).toBe(false) // proves the single scripted value (50) was consumed by accuracy, not a draw
+  })
+
+  it('gaps hitCountOverride by name only for the six moves.json cannot represent, absent for an ordinary EFFECT_MULTI_HIT move', () => {
+    const withOverride = battle([{ spe: 200, moves: ['MOVE_TWINEEDLE', null, null, null] }, { spe: 50 }], scripted(50))
+    const out = executeTurn(withOverride, [useMove(1, TWINEEDLE), null], deps(fixedDamage(10)))
+    expect(out.actions[0].unmodelled.some((u) => u.startsWith('MOVE_TWINEEDLE'))).toBe(true)
+    expect(withOverride.battlers[0]!.turn.multiHitCounter).toBe(0) // the override itself is not applied, per the gap
+
+    const withoutOverride = battle([{ spe: 200 }, { spe: 50 }], scripted(1, 3, 50))
+    const out2 = executeTurn(withoutOverride, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    expect(out2.actions[0].unmodelled.some((u) => u.startsWith('MOVE_'))).toBe(false)
   })
 })

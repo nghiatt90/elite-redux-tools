@@ -445,7 +445,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // only ever tests the ATTACKER's own state (status1/status2/abilities), so a
     // sleeping/frozen/paralysed/flinched/confused/loafing attacker is cancelled
     // even when its target has already fainted this turn.
-    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled)
+    // attackerHoldEffect: attackCanceller.ts's own CANCELLER_MULTIHIT_MOVES
+    // needs GetBattlerHoldEffect (battle_util.c:3586) for the Loaded Dice
+    // check, same item-lookup precedent as accuracyBridge.ts's
+    // attackerHoldEffect.
+    const attackerMon = state.battlers[battlerId]?.mon
+    const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
+    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect)
     if (cancelResult.cancelledBy) {
       outcomes.push({
         turnOrderIndex: index,

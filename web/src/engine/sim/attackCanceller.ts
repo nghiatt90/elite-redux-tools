@@ -83,20 +83,54 @@
 //                          file than CANCELLER_PARALYSED/THAW/POWDER_*, but its
 //                          ENUM value (20) places it near the very end of the
 //                          ladder; ported in ENUM order, not source order.
-//   CANCELLER_MULTIHIT_MOVES Never stops the ladder in the C either -- no case
-//                          in it sets `effect`, only gTurnStructs.multiHitCounter.
-//                          Not ported here. It DOES draw RNG for some multi-hit
-//                          types (MULTIHIT_FOUR_OR_FIVE, MULTIHIT_TWO_TO_FIVE,
-//                          :3520-3529) whenever a multi-hit move survives the
-//                          rest of the ladder, which this port does not
-//                          reproduce -- already covered by turn.ts's own
-//                          "multi-hit sequencing is not modelled" note, not
-//                          re-gapped per-call here.
+//   CANCELLER_MULTIHIT_MOVES Ported (fix cycle 6). Never stops the ladder in
+//                          the C either -- no case in GetMultihitType's own
+//                          switch (:3568-3605) or the CANCELLER_MULTIHIT_MOVES
+//                          switch (:3491-3541) sets `effect`, only
+//                          gTurnStructs.multiHitCounter. Draws RNG from
+//                          state.rng for MULTIHIT_FOUR_OR_FIVE (one draw,
+//                          :3516) and MULTIHIT_TWO_TO_FIVE (two draws, :3520)
+//                          -- every other MultihitType is a fixed count with
+//                          no draw at all. GetMultihitType's `hitCountOverride`
+//                          check (:3569-3575) is GAPPED, only when the move is
+//                          one of the six moves.json/er-config's own MoveList
+//                          textproto (pinned SHA) actually sets it on
+//                          (MOVE_TWINEEDLE, MOVE_CROSS_POISON,
+//                          MOVE_DOUBLE_IRON_BASH, MOVE_DOUBLE_SHOCK,
+//                          MOVE_RAPID_RIVER: hit_count=2; MOVE_CHILLER:
+//                          hit_count=3) -- the field exists in the C
+//                          (pokemon.h:290) and in the source proto
+//                          (MoveList.proto:135 hit_count) but nothing in the
+//                          pipeline emits it into moves.json/SimMoveData, and
+//                          none of these six moves' own effects
+//                          (EFFECT_POISON_HIT/FLINCH_HIT/BURN_UP/DRENCH_HIT/
+//                          FROSTBITE_HIT) is one GetMultihitType's effect
+//                          switch recognises either, so without the override
+//                          this port sees them as MULTIHIT_SINGLE. Both of the
+//                          override's own values (2, 3) are fixed counts with
+//                          NO Random() call, so this gap costs multiHitCounter
+//                          fidelity for exactly these six moves, never an RNG
+//                          draw. EFFECT_DOUBLE_HIT's own `argument == 3` check
+//                          (:3589) is ported for real via SimMoveData's new
+//                          `argumentInt` (moves.json already carries it; see
+//                          dataContext.ts) -- also a fixed count either way,
+//                          no draw. MULTIHIT_BEAT_UP (:3523-3538) is ported
+//                          for real from `state.sides[...].party`: HP,
+//                          species-presence and status are all real
+//                          SimPartyMon fields; the C's egg check
+//                          (MON_DATA_IS_EGG) is always false here, matching
+//                          state.ts's SimPartyMon doc ("Eggs cannot occur in
+//                          the 40 fights and are not modelled"), not a
+//                          per-call gap. PREPARE_BYTE_NUMBER_BUFFER (:3540) is
+//                          a UI-only display-string prep with no gameplay
+//                          effect, same "nothing to be wrong about" precedent
+//                          as turn.ts's deductPp transformed/mimicked-move
+//                          branch -- not modelled, not a gap.
 //
 // Every RNG draw below is state.rng.random16(), in this exact order, matching
 // the C's Random() call sites cited on each branch.
 
-import type { BattleState } from './state'
+import type { BattleState, BattlerState } from './state'
 import type { SimMoveData } from './dataContext'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -134,6 +168,65 @@ export interface AttackCancellerResult {
 
 const bareType = (type: string | null | undefined): string => (type ?? '').replace(/^TYPE_/, '')
 
+/** The six moves whose C hitCountOverride (pokemon.h:290) is nonzero, read
+ * directly off er-config's MoveList.textproto at the pinned SHA (sources.lock.json)
+ * because the pipeline does not emit this field into moves.json/SimMoveData --
+ * see this module's header. Used ONLY to know when to emit the gap line, never
+ * to apply a value: applying the value without a real data field would be
+ * exactly the kind of guess CLAUDE.md's "verify game-mechanic claims" note
+ * warns against, so the override itself stays unported. */
+const HIT_COUNT_OVERRIDE_MOVES = new Set([
+  'MOVE_TWINEEDLE',
+  'MOVE_CROSS_POISON',
+  'MOVE_DOUBLE_IRON_BASH',
+  'MOVE_DOUBLE_SHOCK',
+  'MOVE_RAPID_RIVER',
+  'MOVE_CHILLER',
+])
+
+/** GetMultihitType's own return enum (battle_util.c:3568-3605), minus
+ * MULTIHIT_SINGLE which this port represents as `null` (see resolveMultihitType). */
+type MultihitType = 'TWO' | 'THREE' | 'FIVE' | 'TEN' | 'TEN_CAN_MISS' | 'FOUR_OR_FIVE' | 'TWO_TO_FIVE' | 'TRIPLE_KICK' | 'BEAT_UP'
+
+/**
+ * GetMultihitType, battle_util.c:3568-3605. Returns null for MULTIHIT_SINGLE
+ * (every move this function does not recognise as multi-hit).
+ */
+function resolveMultihitType(attacker: BattlerState, moveId: string, move: SimMoveData | undefined, attackerHoldEffect: string | null, unmodelled: string[]): MultihitType | null {
+  // :3569-3575 -- gapped, see this module's header.
+  if (HIT_COUNT_OVERRIDE_MOVES.has(moveId)) {
+    unmodelled.push(
+      `${moveId}'s C hitCountOverride (pokemon.h:290, from er-config's MoveList.textproto hit_count) is not in moves.json/SimMoveData; multiHitCounter was not set for it here`,
+    )
+  }
+
+  switch (move?.effect) {
+    case 'EFFECT_MULTI_HIT': {
+      // :3579 -- Giant Shuriken cancels Water Shuriken's own multi-hit entirely.
+      if (moveId === 'MOVE_WATER_SHURIKEN' && battlerHasAbility(attacker.mon.abilities, 'ABILITY_GIANT_SHURIKEN', () => false)) return null
+      // :3581.
+      if (battlerHasAbility(attacker.mon.abilities, 'ABILITY_SKILL_LINK', () => false)) return 'FIVE'
+      // :3583-3584.
+      if (moveId === 'MOVE_WATER_SHURIKEN' && battlerHasAbility(attacker.mon.abilities, 'ABILITY_BATTLE_BOND', () => false) && attacker.mon.speciesId === 'SPECIES_GRENINJA_ASH') return 'THREE'
+      // :3586.
+      return attackerHoldEffect === 'HOLD_EFFECT_LOADED_DICE' ? 'FOUR_OR_FIVE' : 'TWO_TO_FIVE'
+    }
+    case 'EFFECT_DOUBLE_HIT':
+      // :3589 -- argumentInt is a real SimMoveData field (dataContext.ts), not gapped.
+      return move.argumentInt === 3 ? 'THREE' : 'TWO'
+    case 'EFFECT_TRIPLE_KICK':
+      // :3593.
+      return battlerHasAbility(attacker.mon.abilities, 'ABILITY_SKILL_LINK', () => false) ? 'THREE' : 'TRIPLE_KICK'
+    case 'EFFECT_TEN_HITS':
+      // :3597.
+      return battlerHasAbility(attacker.mon.abilities, 'ABILITY_SKILL_LINK', () => false) ? 'TEN' : 'TEN_CAN_MISS'
+    case 'EFFECT_BEAT_UP':
+      return 'BEAT_UP'
+    default:
+      return null
+  }
+}
+
 /** GetAbilityIndex's own linear scan (battle_util.c:9299-9313), minus its
  * suppression check (GetAbilityState's caller passes checkMoldBreaker=FALSE at
  * every call site relevant to CANCELLER_TRUANT) -- just "which of the four
@@ -163,6 +256,7 @@ export function runAttackCanceller(
   moveId: string,
   move: SimMoveData | undefined,
   unmodelled: string[],
+  attackerHoldEffect: string | null = null,
 ): AttackCancellerResult {
   const attacker = state.battlers[attackerId]
   if (!attacker) return NO_CANCEL
@@ -307,8 +401,55 @@ export function runAttackCanceller(
     return NO_CANCEL
   }
 
-  // CANCELLER_MULTIHIT_MOVES (:3491-3541) -- never stops the ladder in the C
-  // either; not ported, see header.
+  // CANCELLER_MULTIHIT_MOVES, :3491-3541 -- never stops the ladder in the C
+  // either (see header); ported for real here (fix cycle 6). Runs even after
+  // CANCELLER_CONFUSED resolves without cancelling, matching the C's own enum
+  // order (21 comes after 20).
+  const multihitType = resolveMultihitType(attacker, moveId, move, attackerHoldEffect, unmodelled)
+  if (multihitType) {
+    switch (multihitType) {
+      case 'TWO':
+        attacker.turn.multiHitCounter = 2
+        break
+      case 'THREE':
+      case 'TRIPLE_KICK':
+        attacker.turn.multiHitCounter = 3
+        break
+      case 'FIVE':
+        attacker.turn.multiHitCounter = 5
+        break
+      case 'TEN':
+      case 'TEN_CAN_MISS':
+        attacker.turn.multiHitCounter = 10
+        break
+      case 'FOUR_OR_FIVE':
+        // :3516 -- one Random() draw.
+        attacker.turn.multiHitCounter = 4 + (state.rng.random16() % 2)
+        break
+      case 'TWO_TO_FIVE': {
+        // :3520 -- `2 + (Random() % 2) + 2 * (Random() % 3 == 0)` is one C
+        // expression with two Random() calls; their evaluation order is
+        // unspecified by the C standard. ASSUMPTION: drawn left to right, the
+        // same order the expression is written in.
+        const first = state.rng.random16() % 2
+        const second = state.rng.random16() % 3 === 0 ? 2 : 0
+        attacker.turn.multiHitCounter = 2 + first + second
+        break
+      }
+      case 'BEAT_UP': {
+        // :3523-3538 -- a live count of the attacker's own party: HP nonzero,
+        // a real species (SPECIES_NONE excluded), not an egg (never true here,
+        // see header) and no non-volatile status. No Random() draw.
+        const party = state.sides[attackerId & 1].party
+        let count = 0
+        for (const mon of party) {
+          if (mon.hp !== 0 && mon.speciesId !== null && mon.status1 === 0) count++
+        }
+        attacker.turn.multiHitCounter = count
+        break
+      }
+    }
+  }
 
   return NO_CANCEL
 }
