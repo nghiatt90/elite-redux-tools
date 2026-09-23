@@ -19,7 +19,7 @@
 // see that module's header for the full enum-ordered ladder (ported/
 // unreachable/gapped) and the RNG draws it makes. It runs BEFORE the accuracy
 // check, matching BattleScript_EffectHit's own script order (data/
-// battle_scripts_1.s:216-219): attackcanceler -> accuracycheck -> attackstring
+// battle_scripts_1.s:2857-2863): attackcanceler -> accuracycheck -> attackstring
 // -> ppreduce. A cancelled action draws no accuracy, deals no damage, and
 // deducts no PP -- its own cancel script (e.g. BattleScript_MoveUsedIsAsleep)
 // `goto`s straight to BattleScript_MoveEnd, verified by reading each cancel
@@ -54,12 +54,15 @@
 // comparing this loop against them should not have to spot the gaps:
 //
 //   HandleAction_ActionFinished (:848-861) -- this loop ports only the advance
-//   and the re-sort. Its other six statements are all omitted:
+//   and the re-sort, plus TurnStructsClear:
+//     :856  TurnStructsClear() -- ported as turnStructsClear() below. ZERO(
+//           gTurnStructs) (battle_main.c:4511) wipes EVERY battler's turn
+//           struct after every action; without it a Bullet Seed's
+//           multiHitCounter would leak into the attacker's next move.
+//   Its other five statements are omitted:
 //     :849  monToSwitchIntoId[...] = 6, resetting the pending-switch slot to the
 //           PARTY_SIZE sentinel. Belongs with switching; noted because the
 //           sentinel's value is itself a trap (see state.ts's own doc).
-//     :856  TurnStructsClear() -- per-action reset of gTurnStructs. This loop
-//           never writes TurnState, so there is nothing yet to clear.
 //     :857  gLastLandedMoves[gBattlerAttacker] = 0
 //     :858  gLastHitByType[gBattlerAttacker] = 0
 //     :859  ClearMiscTurnFlags()
@@ -106,6 +109,7 @@ import { getTotalAccuracy } from './accuracy'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
+import { createTurnState } from './create'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -320,6 +324,13 @@ function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abi
   return false
 }
 
+/** TurnStructsClear, battle_main.c:4511 -- ZERO(gTurnStructs) for every battler. */
+function turnStructsClear(state: BattleState): void {
+  for (const battler of state.battlers) {
+    if (battler) battler.turn = createTurnState()
+  }
+}
+
 /**
  * Cmd_ppreduce, battle_script_commands.c:1460-1506. Runs for every USE_MOVE
  * action that reaches this point (a living attacker with a living target),
@@ -404,6 +415,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   const outcomes: ActionOutcome[] = []
 
   for (let index = 0; index < order.battlerByTurnOrder.length; index++) {
+    // HandleAction_ActionFinished's TurnStructsClear (:856) runs after every
+    // action; clearing at the top of each iteration (and once after the loop)
+    // is equivalent and survives every `continue` below.
+    turnStructsClear(state)
     // :4546 / :839 / :851 -- re-sort THIS slot before reading who is in it.
     recalculateMoveOrder(order, state, actions, index, false, ctx, deps.statStageRatios)
 
@@ -543,6 +558,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       fainted,
     })
   }
+  turnStructsClear(state)
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop; state.turnCount is therefore the zero-based counter while resolving

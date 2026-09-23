@@ -165,6 +165,20 @@ function fixedDamage(amount: number): DamageResolver & { calls: number } {
   return r
 }
 
+// Records the attacker's multiHitCounter at the moment the resolver consumes
+// it. executeTurn clears every TurnState after each action (TurnStructsClear),
+// so reading it off the state after the call would always see 0.
+function counterRecorder(): DamageResolver & { seen: number[] } {
+  const r = {
+    seen: [] as number[],
+    resolve: (state: BattleState, attackerId: number) => {
+      r.seen.push(state.battlers[attackerId]!.turn.multiHitCounter)
+      return { targetDamage: 10, attackerDamage: null, unmodelled: [] }
+    },
+  }
+  return r
+}
+
 function deps(damage: DamageResolver): TurnLoopDeps {
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
   return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
@@ -386,50 +400,57 @@ function partyMon(overrides: Partial<SimPartyMon> = {}): SimPartyMon {
 
 describe('executeTurn: attack canceller -- CANCELLER_MULTIHIT_MOVES (battle_util.c:3491-3541, GetMultihitType :3568-3605), ported fix cycle 6', () => {
   it('MULTIHIT_TWO_TO_FIVE draws two values, consumed AFTER the canceller status draws and BEFORE the accuracy draw, and sets multiHitCounter to the C formula', () => {
+    const rec = counterRecorder()
     // No status conditions, so the ladder falls straight through to the
     // multi-hit step with zero status draws first. 1 and 3 are the two
     // hit-count draws (2 + 1%2 + 2*(3%3==0) = 5); 50 is the accuracy draw.
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(1, 3, 50))
-    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(rec.seen[0]).toBe(5)
     expect(out.actions[0].missed).toBe(false) // proves the 3rd scripted value (50) was consumed by accuracy, not a 3rd hit-count draw
     expect(out.actions[0].targetDamage).toBe(10)
   })
 
   it('MULTIHIT_TWO_TO_FIVE: the other draw pair (0, 1) rolls a hit count of 2', () => {
+    const rec = counterRecorder()
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0, 1, 50)) // 2 + 0%2 + 2*(1%3==0) = 2
-    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(2)
+    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(rec.seen[0]).toBe(2)
   })
 
   it('MULTIHIT_FOUR_OR_FIVE (Loaded Dice) draws exactly ONE value, not the two-draw formula', () => {
+    const rec = counterRecorder()
     const state = battle([{ spe: 200, itemId: 'ITEM_LOADED_DICE' }, { spe: 50 }], scripted(1, 50)) // 4 + 1%2 = 5, then accuracy
-    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(rec.seen[0]).toBe(5)
     expect(out.actions[0].missed).toBe(false) // proves only ONE draw was consumed before accuracy's 50
   })
 
   it('MULTIHIT_FOUR_OR_FIVE (Loaded Dice): a 0 draw rolls a hit count of 4', () => {
+    const rec = counterRecorder()
     const state = battle([{ spe: 200, itemId: 'ITEM_LOADED_DICE' }, { spe: 50 }], scripted(0, 50))
-    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(4)
+    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(rec.seen[0]).toBe(4)
   })
 
   it('Skill Link sets multiHitCounter to 5 with NO RNG draw at all', () => {
+    const rec = counterRecorder()
     const state = battle([{ spe: 200, abilities: { ability: SKILL_LINK, innates: [null, null, null] } }, { spe: 50 }], scripted(50)) // ONLY the accuracy draw
-    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(5)
+    const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(rec.seen[0]).toBe(5)
     expect(out.actions[0].missed).toBe(false) // proves the single scripted value (50) was consumed by accuracy, not a hit-count draw
   })
 
   it('a single-hit move (Tackle) never sets multiHitCounter and draws nothing for it', () => {
+    const rec = counterRecorder()
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(50)) // ONLY the accuracy draw
-    const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(0)
+    const out = executeTurn(state, [useMove(1, TACKLE), null], deps(rec))
+    expect(rec.seen[0]).toBe(0)
     expect(out.actions[0].missed).toBe(false)
   })
 
   it('MULTIHIT_BEAT_UP counts the attacker\'s own live, non-statused party (no RNG draw)', () => {
+    const rec = counterRecorder()
     // The C's own loop (battle_script_commands.c:1030-1038) iterates the whole
     // PARTY_SIZE array with no exclusion for the active battler's own slot --
     // two of these five pass the HP/species/status filter, so 2 is the count,
@@ -442,19 +463,28 @@ describe('executeTurn: attack canceller -- CANCELLER_MULTIHIT_MOVES (battle_util
       partyMon(), // live -- counted
     ]
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(50), party)
-    const out = executeTurn(state, [useMove(1, BEAT_UP), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.turn.multiHitCounter).toBe(2)
+    const out = executeTurn(state, [useMove(1, BEAT_UP), null], deps(rec))
+    expect(rec.seen[0]).toBe(2)
     expect(out.actions[0].missed).toBe(false) // proves the single scripted value (50) was consumed by accuracy, not a draw
   })
 
   it('gaps hitCountOverride by name only for the six moves.json cannot represent, absent for an ordinary EFFECT_MULTI_HIT move', () => {
+    const rec = counterRecorder()
     const withOverride = battle([{ spe: 200, moves: ['MOVE_TWINEEDLE', null, null, null] }, { spe: 50 }], scripted(50))
-    const out = executeTurn(withOverride, [useMove(1, TWINEEDLE), null], deps(fixedDamage(10)))
+    const out = executeTurn(withOverride, [useMove(1, TWINEEDLE), null], deps(rec))
     expect(out.actions[0].unmodelled.some((u) => u.startsWith('MOVE_TWINEEDLE'))).toBe(true)
-    expect(withOverride.battlers[0]!.turn.multiHitCounter).toBe(0) // the override itself is not applied, per the gap
+    expect(rec.seen[0]).toBe(0) // the override itself is not applied, per the gap
 
     const withoutOverride = battle([{ spe: 200 }, { spe: 50 }], scripted(1, 3, 50))
-    const out2 = executeTurn(withoutOverride, [useMove(1, ARM_THRUST), null], deps(fixedDamage(10)))
+    const out2 = executeTurn(withoutOverride, [useMove(1, ARM_THRUST), null], deps(rec))
     expect(out2.actions[0].unmodelled.some((u) => u.startsWith('MOVE_'))).toBe(false)
+  })
+  it('TurnStructsClear (battle_util.c:856): a multi-hit move\'s counter does not leak into the next turn\'s single-hit move', () => {
+    const rec = counterRecorder()
+    const state = battle([{ spe: 200, moves: ['MOVE_ARM_THRUST', 'MOVE_TACKLE', null, null] }, { spe: 50 }], scripted(1, 3, 50, 50))
+    executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
+    expect(state.battlers[0]!.turn.multiHitCounter).toBe(0) // cleared after the action, as ZERO(gTurnStructs) does
+    executeTurn(state, [useMove(1, TACKLE), null], deps(rec))
+    expect(rec.seen).toEqual([5, 0])
   })
 })
