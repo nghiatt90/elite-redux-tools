@@ -434,7 +434,7 @@ export function computeAfterTypeEffectiveness(
  * data. */
 export function hasFlag(
   slots: AbilitySlots,
-  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak',
+  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak' | 'noBurnDamage',
   moldBroken = false,
 ): boolean {
   let found = false

@@ -128,7 +128,9 @@ export const DEFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_HEATPROOF',
     src: 'src/abilities.cc:1459',
-    flags: { breakable: true },
+    // TakesNoBurnDamage's RETURN_ABILITY_IF_FLAG(battler, FALSE, noBurnDamage)
+    // (battle_util.c:2374-2377) reads this same bitfield -- see endTurn.ts.
+    flags: { breakable: true, noBurnDamage: true },
     onDefensiveMultiplier: (ctx) => {
       if (ctx.moveType === 'FIRE') RESISTANCE(ctx, 0.5)
     },

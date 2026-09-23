@@ -85,6 +85,9 @@ export const ON_STAT_BATCH_A: AbilityImpl[] = [
   {
     id: 'ABILITY_FLARE_BOOST',
     src: 'src/abilities.cc:1989',
+    // TakesNoBurnDamage's RETURN_ABILITY_IF_FLAG(battler, FALSE, noBurnDamage)
+    // (battle_util.c:2374-2377) reads this same bitfield -- see endTurn.ts.
+    flags: { noBurnDamage: true },
     onStat: (ctx) => {
       if (ctx.statId !== 'spatk') return
       if (ctx.status1.has('STATUS1_BURN')) ctx.stat = Math.trunc(ctx.stat * 1.5)

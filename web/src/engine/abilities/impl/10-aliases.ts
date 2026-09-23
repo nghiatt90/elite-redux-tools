@@ -341,7 +341,9 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_IRON_GIANT',
     src: 'src/abilities.cc:8472',
-    flags: { breakable: true },
+    // noBurnDamage: abilityHooks.json bitfields -- aliasDefensiveMultiplier does
+    // not carry flags across, so this needs its own copy (see endTurn.ts).
+    flags: { breakable: true, noBurnDamage: true },
     onChooseOffensiveStat: aliasChooseOffensiveStat('ABILITY_JUGGERNAUT'),
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
   },
@@ -730,7 +732,9 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_THERMAL_ENTROPY',
     src: 'src/abilities.cc:12383',
-    flags: { breakable: true },
+    // noBurnDamage: abilityHooks.json bitfields -- aliasDefensiveMultiplier does
+    // not carry flags across, so this needs its own copy (see endTurn.ts).
+    flags: { breakable: true, noBurnDamage: true },
     onDefensiveMultiplier: aliasDefensiveMultiplier('ABILITY_HEATPROOF'),
   },
   {

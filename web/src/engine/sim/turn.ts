@@ -8,11 +8,18 @@
 // Those three are the whole shape of this module.
 //
 // DELIBERATELY ABSENT, all of it the next batches: move EFFECTS (status
-// application, stat changes, hazards, ...), switching, end-of-turn residuals,
-// the AI, multi-hit sequencing, and every battle-script behaviour besides the
-// attack canceller, the accuracy check and PP deduction below. A move may be
-// cancelled before it is even attempted; a move may miss; PP is deducted; a
-// hit deals damage; a battler may faint. Nothing else happens.
+// application, stat changes, hazards, ...), switching, the AI, multi-hit
+// sequencing, and every battle-script behaviour besides the attack canceller,
+// the accuracy check and PP deduction below. A move may be cancelled before it
+// is even attempted; a move may miss; PP is deducted; a hit deals damage; a
+// battler may faint. Nothing else happens during the action loop itself.
+//
+// End-of-turn residuals are PARTIALLY present: DoBattlerEndTurnEffects
+// (battle_util.c:2398-2992) runs once after the action loop, ported for
+// poison/toxic/burn only -- see endTurn.ts's own header for the full
+// enum-ordered classification (ported/unreachable/gapped) of every other
+// ENDTURN_* case. DoFieldEndTurnEffects (weather/terrain/field timers) is
+// entirely absent; endTurn.ts documents that gap too.
 //
 // Cmd_attackcanceler (battle_script_commands.c:1046-1081, its own call to
 // AtkCanceller_UnableToUseMove at :1081) is ported in attackCanceller.ts --
@@ -110,6 +117,8 @@ import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
 import { createTurnState } from './create'
+import type { EndTurnEffectResult } from './endTurn'
+import { runEndTurnEffects } from './endTurn'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -197,6 +206,14 @@ export interface TurnOutcome {
   /** The final turn order, after every lazy re-sort. Exposed because the order
    * is the thing this batch is really testing. */
   order: TurnOrder
+  /** DoBattlerEndTurnEffects's residual HP effects (poison/toxic/burn) -- see
+   * endTurn.ts. Separate from `actions`: these happen in their own phase after
+   * the action loop, not as part of any battler's chosen action. */
+  endTurn: EndTurnEffectResult[]
+  /** endTurn.ts's own gap channel, kept apart from each ActionOutcome's
+   * `unmodelled` because these gaps belong to the end-of-turn phase, not to
+   * any one action. */
+  endTurnUnmodelled: string[]
 }
 
 /**
@@ -313,7 +330,7 @@ export function assertNoPerBattlerQuash(state: BattleState): void {
  * since nothing here assumes battlersCount === 2. Does not apply the C's
  * mold-breaker exception (BATTLER_HAS_ABILITY_AND_ALIVE's checkMoldBreaker=
  * TRUE, :4793/4795); see deductPp's own gap note for why. */
-function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abilityId: string): boolean {
+export function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abilityId: string): boolean {
   const side = battlerId & 1
   for (let id = 0; id < state.battlersCount; id++) {
     if ((id & 1) === side) continue
@@ -560,10 +577,20 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   }
   turnStructsClear(state)
 
+  // BattleTurnPassed, battle_main.c:3465-3481: TurnValuesCleanUp(TRUE), then
+  // DoFieldEndTurnEffects (absent, see endTurn.ts's header) and
+  // DoBattlerEndTurnEffects (endTurn.ts), THEN HandleFaintedMonActions (absent
+  // -- switching is out of scope) and HandleWishPerishSongOnTurnEnd (absent),
+  // and only after all of that does gBattleResults.battleTurnCounter++ run
+  // (:3508-3511). The residual ladder therefore belongs HERE, before the
+  // counter increment below -- not after it.
+  const { results: endTurn, unmodelled: endTurnUnmodelled } = runEndTurnEffects(state, order.battlerByTurnOrder, deps.dataContext)
+
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
-  // loop; state.turnCount is therefore the zero-based counter while resolving
-  // this turn (turn 1 is 0), matching bridge.ts's parity checks.
-  // battle_main.c:3512-3513 saturates the u8 counter at 0xFF.
+  // loop and the end-turn ladder above; state.turnCount is therefore the
+  // zero-based counter while resolving this turn (turn 1 is 0), matching
+  // bridge.ts's parity checks. battle_main.c:3512-3513 saturates the u8
+  // counter at 0xFF.
   state.turnCount = Math.min(0xFF, state.turnCount + 1)
-  return { actions: outcomes, order }
+  return { actions: outcomes, order, endTurn, endTurnUnmodelled }
 }

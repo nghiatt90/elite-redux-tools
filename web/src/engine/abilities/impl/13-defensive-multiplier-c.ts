@@ -164,7 +164,8 @@ export const DEFENSIVE_MULTIPLIER_BATCH_C: AbilityImpl[] = [
     // Real gap fix: `.breakable = TRUE` (:12456) was also missing.
     id: 'ABILITY_DROIDEKA',
     src: 'src/abilities.cc:12450',
-    flags: { breakable: true },
+    // noBurnDamage: abilityHooks.json bitfields (see endTurn.ts's TakesNoBurnDamage port).
+    flags: { breakable: true, noBurnDamage: true },
     applyOn: { onCritFor: 'APPLY_ON_TARGET' },
     onDefensiveMultiplier: composeDefensive('ABILITY_HEATPROOF', 'ABILITY_SHELL_ARMOR'),
     onCrit: aliasCrit('ABILITY_SHELL_ARMOR'),
