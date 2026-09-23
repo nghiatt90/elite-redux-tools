@@ -317,10 +317,20 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
     }
   }
 
-  // Handle other multi-strike moves, :750-754. FLAG_TWO_STRIKES has no
-  // moves.json/SimMoveData field at all (grep-verified against the pipeline's
-  // emitted flag set) -- gapped as a standing limitation rather than per-call,
-  // since there is no data to test the real condition against.
+  // Handle other multi-strike moves, :750-754. FLAG_TWO_STRIKES's own branch
+  // is UNREACHABLE on this pinned build, not merely absent from the emitted
+  // data -- not a gap. gBattleMoves is only `extern`-declared in
+  // include/pokemon.h; every entry's `.flags` is written entirely by the
+  // codegen, and tools/codegen/src/er/move/BattleMovesGenerator.kt:94-107's
+  // `bitFlags` list is built from exactly two sources: three HARDCODED names
+  // (FLAG_PROTECT_AFFECTED, FLAG_KINGS_ROCK_AFFECTED, FLAG_SHEER_FORCE_BOOST)
+  // plus whatever `flag_code_value`/`enum_flag_code_value` each MoveList.proto
+  // field declares. FLAG_TWO_STRIKES appears in neither (grep-verified against
+  // er-config/MoveList.proto's full option list) -- so `gBattleMoves[move].flags
+  // & FLAG_TWO_STRIKES` can never be true for any move the codegen can ever
+  // emit, and this branch never fires on the pinned build. Ported as dead code
+  // stays dead code, same precedent as GetBestMonDefensive's own commented-out
+  // C body (aiSwitching.ts).
   if (moveId === 'MOVE_WATER_SHURIKEN' && attackerBattler.mon.speciesId === 'SPECIES_GRENINJA_ASH') {
     dmg *= 3
   }
