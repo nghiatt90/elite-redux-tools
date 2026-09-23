@@ -7,18 +7,31 @@
 // HandleAction_UseMove (:177-186) aborts the action if its battler is not alive.
 // Those three are the whole shape of this module.
 //
-// DELIBERATELY ABSENT, all of it the next batches: move effects, status,
-// switching, end-of-turn residuals, the AI, multi-hit sequencing, and every
-// battle-script behaviour besides the accuracy check and PP deduction below.
-// A move may miss; PP is deducted; a hit deals damage; a battler may faint.
-// Nothing else happens.
+// DELIBERATELY ABSENT, all of it the next batches: move EFFECTS (status
+// application, stat changes, hazards, ...), switching, end-of-turn residuals,
+// the AI, multi-hit sequencing, and every battle-script behaviour besides the
+// attack canceller, the accuracy check and PP deduction below. A move may be
+// cancelled before it is even attempted; a move may miss; PP is deducted; a
+// hit deals damage; a battler may faint. Nothing else happens.
+//
+// Cmd_attackcanceler (battle_script_commands.c:1046-1081, its own call to
+// AtkCanceller_UnableToUseMove at :1081) is ported in attackCanceller.ts --
+// see that module's header for the full enum-ordered ladder (ported/
+// unreachable/gapped) and the RNG draws it makes. It runs BEFORE the accuracy
+// check, matching BattleScript_EffectHit's own script order (data/
+// battle_scripts_1.s:216-219): attackcanceler -> accuracycheck -> attackstring
+// -> ppreduce. A cancelled action draws no accuracy, deals no damage, and
+// deducts no PP -- its own cancel script (e.g. BattleScript_MoveUsedIsAsleep)
+// `goto`s straight to BattleScript_MoveEnd, verified by reading each cancel
+// script rather than assumed.
 //
 // Accuracy (Cmd_accuracycheck, battle_script_commands.c:1398-1447) and PP
 // deduction (Cmd_ppreduce, :1460-1506) are ported for every USE_MOVE action
-// with a living target, in that C order: the accuracy draw happens first (its
-// own RandomSource draw), then PP is deducted UNCONDITIONALLY -- the miss
-// branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-3094) runs
-// ppreduce as well, so a miss still costs PP. Two branches of Cmd_accuracycheck are NOT reachable by this loop, by
+// that reaches them (not cancelled, with a living target), in that C order:
+// the accuracy draw happens first (its own RandomSource draw), then PP is
+// deducted UNCONDITIONALLY -- the miss branch BattleScript_PrintMoveMissed
+// (battle_scripts_1.s:3092-3094) runs ppreduce as well, so a miss still costs
+// PP. Two branches of Cmd_accuracycheck are NOT reachable by this loop, by
 // construction rather than by omission, and are documented rather than
 // gapped at runtime:
 //   - the multi-hit/Parental-Bond second-hit accuracy exemption (:1412-1416)
@@ -91,6 +104,8 @@ import { gapsToUnmodelled } from './bridge'
 import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 import { battlerHasAbility } from '../abilities/dispatch'
+import type { CancelReason } from './attackCanceller'
+import { runAttackCanceller } from './attackCanceller'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -149,6 +164,19 @@ export interface ActionOutcome {
    * retrofitting it would change this interface, every resolver and every test,
    * and because the game's faint handling branches on WHICH battler fainted. */
   attackerDamage: number | null
+  /** attackCanceller.ts's AtkCanceller_UnableToUseMove -- non-null means the
+   * move was stopped before the accuracy check ever ran (no accuracy draw, no
+   * damage, no PP deducted). Distinct from `missed` (the move was attempted
+   * and failed its accuracy roll) and from "nothing was attempted" (no living
+   * target, a status move with no resolver support, both still `targetDamage:
+   * null` with `cancelledBy: null`). */
+  cancelledBy: CancelReason | null
+  /** HP removed from the ATTACKER by a CANCELLER_CONFUSED self-hit -- distinct
+   * from `targetDamage` and from `attackerDamage` (which is the damage
+   * engine's own recoil/Life-Orb/etc. channel for a move that was NOT
+   * cancelled). Always null in this batch: see attackCanceller.ts's own doc on
+   * why the self-hit's damage is gapped rather than computed. */
+  confusionSelfHitDamage: number | null
   /** The damage engine's own "I could not model this" channel, passed through
    * rather than dropped at the boundary. Anything in here means the numbers
    * above are incomplete. */
@@ -385,7 +413,19 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
     // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
     // does not act. Its slot is still consumed; the action is simply finished.
-    const blank = { turnOrderIndex: index, battlerId, action: actionKind, missed: false, targetId: null, targetDamage: null, attackerDamage: null, unmodelled: [], fainted: [] }
+    const blank = {
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      missed: false,
+      targetId: null,
+      targetDamage: null,
+      attackerDamage: null,
+      cancelledBy: null,
+      confusionSelfHitDamage: null,
+      unmodelled: [],
+      fainted: [],
+    }
 
     if (!isBattlerAlive(state, battlerId)) {
       outcomes.push({ ...blank, skippedBecauseFainted: true })
@@ -398,17 +438,42 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
 
     const targetId = action.target
+    const unmodelled: string[] = []
+
+    // Cmd_attackcanceler, battle_script_commands.c:1046-1081 -- runs BEFORE any
+    // target-liveness consideration, matching the C: AtkCanceller_UnableToUseMove
+    // only ever tests the ATTACKER's own state (status1/status2/abilities), so a
+    // sleeping/frozen/paralysed/flinched/confused/loafing attacker is cancelled
+    // even when its target has already fainted this turn.
+    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled)
+    if (cancelResult.cancelledBy) {
+      outcomes.push({
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        missed: false,
+        targetId,
+        targetDamage: null,
+        attackerDamage: null,
+        cancelledBy: cancelResult.cancelledBy,
+        confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
+        unmodelled,
+        fainted: [],
+      })
+      continue
+    }
+
     if (targetId === null || !isBattlerAlive(state, targetId)) {
       // No living target: the move resolves to nothing here. The real game runs
       // a fail branch with messages and effect-specific behaviour; this batch
       // models only that no damage is dealt.
-      outcomes.push({ ...blank, skippedBecauseFainted: false, targetId })
+      outcomes.push({ ...blank, skippedBecauseFainted: false, targetId, unmodelled })
       continue
     }
 
     const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
     const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
-    const unmodelled: string[] = []
 
     // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
     // state.rng BEFORE the damage resolver's own crit/roll draws, matching
@@ -435,7 +500,20 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
 
     if (missed) {
-      outcomes.push({ turnOrderIndex: index, battlerId, action: actionKind, skippedBecauseFainted: false, missed: true, targetId, targetDamage: null, attackerDamage: null, unmodelled, fainted: [] })
+      outcomes.push({
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        missed: true,
+        targetId,
+        targetDamage: null,
+        attackerDamage: null,
+        cancelledBy: null,
+        confusionSelfHitDamage: null,
+        unmodelled,
+        fainted: [],
+      })
       continue
     }
 
@@ -453,6 +531,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       targetId,
       targetDamage,
       attackerDamage,
+      cancelledBy: null,
+      confusionSelfHitDamage: null,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })
