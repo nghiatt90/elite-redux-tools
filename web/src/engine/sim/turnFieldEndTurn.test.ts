@@ -26,6 +26,7 @@ import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn, THROWING_DAMAGE_RESOLVER } from './turn'
 import type { GroundingContext } from './grounding'
+import { TOXIC_TERRAIN_AIRBORNE_ABILITIES } from './fieldEndTurn'
 import type { SimDataContext, SimItemData } from './dataContext'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
@@ -62,6 +63,7 @@ const SAND_VEIL = requireAbility('ABILITY_SAND_VEIL')
 const ICE_BODY = requireAbility('ABILITY_ICE_BODY')
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 const STENCH = requireAbility('ABILITY_STENCH')
+const TOXIC_SURGE = requireAbility('ABILITY_TOXIC_SURGE')
 const SAFETY_GOGGLES = requireItem('ITEM_SAFETY_GOGGLES')
 if (SAFETY_GOGGLES.resolvedHoldEffect !== 'HOLD_EFFECT_SAFETY_GOGGLES') throw new Error('ITEM_SAFETY_GOGGLES no longer resolves to HOLD_EFFECT_SAFETY_GOGGLES')
 
@@ -376,6 +378,34 @@ describe('executeTurn: field end-turn ladder -- Toxic Terrain damage (VARIOUS_HP
     expect(out.endTurnOrder).toEqual([1, 0]) // speed order, for reference
     const toxicOutcomes = out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN')
     expect(toxicOutcomes.map((r) => r.battlerId)).toEqual([0, 1]) // raw id order
+  })
+
+  it('an airborne (Flying) battler is unaffected, unless it has an allowTerrainIfAirborne TERRAIN_TOXIC ability (IsBattlerTerrainAffected, battle_util.c:4926)', () => {
+    const flying = battle([{ spe: 100, maxHp: 160, types: ['FLYING', 'MYSTERY', 'MYSTERY'] }, { spe: 50, maxHp: 100, types: ['STEEL', 'MYSTERY', 'MYSTERY'] }], scripted())
+    flying.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    flying.field.timers.terrainTimer = 5
+    const out = executeTurn(flying, [null, null], deps())
+    expect(out.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN')).toEqual([])
+
+    const surge = battle(
+      [{ spe: 100, maxHp: 160, types: ['FLYING', 'MYSTERY', 'MYSTERY'], abilities: { ability: TOXIC_SURGE, innates: [null, null, null] } }, { spe: 50, maxHp: 100, types: ['STEEL', 'MYSTERY', 'MYSTERY'] }],
+      scripted(),
+    )
+    surge.field.statuses = STATUS_FIELD_TOXIC_TERRAIN
+    surge.field.timers.terrainTimer = 5
+    const out2 = executeTurn(surge, [null, null], deps())
+    expect(out2.fieldEndTurn.filter((r) => r.effect === 'TOXIC_TERRAIN')).toEqual([
+      { battlerId: 0, effect: 'TOXIC_TERRAIN', hpChange: -10, fainted: false },
+    ])
+  })
+
+  it('TOXIC_TERRAIN_AIRBORNE_ABILITIES matches every abilityHooks.json ability whose allowTerrainIfAirborne includes TERRAIN_TOXIC', () => {
+    const hooks = snapshot<Record<string, { bitfields?: Record<string, string> }>>('abilityHooks.json')
+    const expected = Object.entries(hooks)
+      .filter(([, h]) => (h.bitfields?.allowTerrainIfAirborne ?? '').split('|').map((s) => s.trim()).includes('TERRAIN_TOXIC'))
+      .map(([id]) => id)
+      .sort()
+    expect([...TOXIC_TERRAIN_AIRBORNE_ABILITIES].sort()).toEqual(expected)
   })
 })
 

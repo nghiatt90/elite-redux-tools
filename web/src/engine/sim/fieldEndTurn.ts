@@ -137,9 +137,11 @@
 //                            damage = maxHP/16 (the fraction argument at the
 //                            script call site, data/battle_scripts_1.s:10168),
 //                            capped at the battler's CURRENT hp, minimum 1.
-//                            The FILTER chain around it (:2134-2140 --
+//                            The FILTER chain around it (:2134-2139 --
 //                            IsBattlerAlive, !IsMagicGuardProtected,
-//                            IsBattlerTerrainAffected, !AbilityBlocksToxicTerrain
+//                            IsBattlerTerrainAffected incl. its airborne
+//                            allowTerrainIfAirborne exception (:4926, Toxic
+//                            Surge), !AbilityBlocksToxicTerrain
 //                            i.e. the ability's own toxicTerrainImmune
 //                            bitfield, not Poison/Steel-typed) is ported in
 //                            full. This loop iterates RAW BATTLER ID
@@ -420,8 +422,15 @@ function applyFogStatDrops(battler: BattlerState, grounding: GroundingContext, s
 function isBattlerTerrainAffectedByToxicTerrain(state: BattleState, battlerId: number, battler: BattlerState, grounding: GroundingContext): boolean {
   if (grounding.isCluelessOnField) return false // TERRAIN_HAS_EFFECT
   if (hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE)) return false
-  return isBattlerGrounded(state, battlerId, { ...grounding, attackerHasMoldBreaker: false })
+  if (isBattlerGrounded(state, battlerId, { ...grounding, attackerHasMoldBreaker: false })) return true
+  // :4926 -- ON_ABILITY(..., allowTerrainIfAirborne & type, return TRUE): an
+  // airborne battler is still affected when one of its abilities opts in.
+  return TOXIC_TERRAIN_AIRBORNE_ABILITIES.some((id) => battlerHasAbility(battler.mon.abilities, id, () => false))
 }
+
+/** Abilities whose abilityHooks.json `allowTerrainIfAirborne` includes
+ * TERRAIN_TOXIC. Pinned to the snapshot by turnFieldEndTurn.test.ts. */
+export const TOXIC_TERRAIN_AIRBORNE_ABILITIES: readonly string[] = ['ABILITY_TOXIC_SURGE']
 
 /** SortBattlersBySpeed(gBattlerByTurnOrder, FALSE) -> SortBattlersExcept(arr,
  * TRUE, 0), battle_util.c/battle_main.c -- see this module's header for why
@@ -742,7 +751,7 @@ export function runFieldEndTurnEffects(
     if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_PSYCHIC_TERRAIN)
   }
 
-  // ENDTURN_TOXIC_TERRAIN, :2093-2140 (the FILTER chain is :2134-2140). The
+  // ENDTURN_TOXIC_TERRAIN, :2124-2146 (the FILTER chain is :2134-2139). The
   // loop iterates RAW BATTLER ID 0..gBattlersCount-1 (`for (i = 0; i <
   // gBattlersCount; i++)`), NOT gBattlerByTurnOrder -- unlike Grassy Terrain
   // above, confirmed by reading the C loop itself, not assumed. hpfractiontodamage
