@@ -131,40 +131,42 @@ describe('createBridgeDamageResolver: crit and roll draw order', () => {
   // while 0 always does (0 % n === 0 for every n). This is what makes the two
   // halves of this describe block distinguishable rather than coincidentally
   // agreeing.
-  // Every move -- multi-hit or not -- draws the shared hitCount toggle FIRST
-  // (damageResolver.ts always rolls it, so a consumer can never read an
-  // unrolled constant); Tackle never reads it, but the draws are still
-  // consumed. (0, 0) here are those two irrelevant hitCount draws.
+  // FIX CYCLE 6: the resolver no longer draws a hit count at all (see
+  // damageResolver.ts's own header) -- CANCELLER_MULTIHIT_MOVES
+  // (attackCanceller.ts) is the real draw site now, exercised in
+  // turnCanceller.test.ts, not here. These scripts used to lead with two
+  // irrelevant hitCount draws (0, 0); they no longer do.
   it('maps a non-crit r=0 draw to exactly rolls[15] (the maximum)', () => {
     const direct = directResult('MOVE_TACKLE')
-    const out = resolver(scripted(0, 0, 1, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
+    const out = resolver(scripted(1, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
     expect(out.targetDamage).toBe(direct.rolls[15])
   })
   it('maps a non-crit r=15 draw to exactly rolls[0] (the minimum)', () => {
     const direct = directResult('MOVE_TACKLE')
-    const out = resolver(scripted(0, 0, 1, 15)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
+    const out = resolver(scripted(1, 15)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
     expect(out.targetDamage).toBe(direct.rolls[0])
   })
   it('draws crit BEFORE the damage roll: a forced-crit r=0 draw uses critRolls, not rolls', () => {
     const direct = directResult('MOVE_TACKLE')
     expect(direct.critRolls).not.toBeNull()
-    const crit = resolver(scripted(0, 0, 0, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
+    const crit = resolver(scripted(0, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE'))
     expect(crit.targetDamage).toBe(direct.critRolls![15])
     // A crit changes the outcome versus the same roll index without one.
     expect(crit.targetDamage).not.toBe(direct.rolls[15])
   })
   it('consumes exactly one draw for the crit check before the roll draw (a 2nd scripted value alone flips the outcome)', () => {
-    const forcedCrit = resolver(scripted(0, 0, 0, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE')).targetDamage
-    const noCrit = resolver(scripted(0, 0, 1, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE')).targetDamage
+    const forcedCrit = resolver(scripted(0, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE')).targetDamage
+    const noCrit = resolver(scripted(1, 0)).resolve(state(), 0, 1, action('MOVE_TACKLE')).targetDamage
     expect(forcedCrit).not.toBe(noCrit)
   })
 })
 
 describe('createBridgeDamageResolver: Magnitude tier thresholds', () => {
   // magnitudeTier()'s table (damageResolver.ts): <5:4 <15:5 <35:6 <65:7 <85:8 <95:9 else:10.
-  // Draw order for MOVE_MAGNITUDE: hitCount's two draws (irrelevant here, scripted
-  // 0,0), the magnitude roll, a non-crit draw (1), then a max damage roll (0), so
-  // each case reduces to comparing against a tier forced directly through
+  // FIX CYCLE 6: no leading hitCount draws any more (see the crit/roll describe
+  // block above) -- draw order for MOVE_MAGNITUDE is now just the magnitude
+  // roll, a non-crit draw (1), then a max damage roll (0), so each case
+  // reduces to comparing against a tier forced directly through
   // calculateMoveDamage -- independent ground truth, not the resolver's own math.
   it.each([
     [4, 4],
@@ -173,55 +175,72 @@ describe('createBridgeDamageResolver: Magnitude tier thresholds', () => {
     [95, 10],
   ] as const)('a magnitude roll of %i resolves to tier %i', (roll, tier) => {
     const direct = directResult('MOVE_MAGNITUDE', {}, {}, { magnitudeTier: tier as 4 | 5 | 6 | 7 | 8 | 9 | 10 })
-    const out = resolver(scripted(0, 0, roll, 1, 0)).resolve(state(), 0, 1, action('MOVE_MAGNITUDE'))
+    const out = resolver(scripted(roll, 1, 0)).resolve(state(), 0, 1, action('MOVE_MAGNITUDE'))
     expect(out.targetDamage).toBe(direct.rolls[15])
   })
   it('a magnitude roll one below a boundary does NOT resolve to the tier above it', () => {
     const tier4 = directResult('MOVE_MAGNITUDE', {}, {}, { magnitudeTier: 4 })
     const tier5 = directResult('MOVE_MAGNITUDE', {}, {}, { magnitudeTier: 5 })
     expect(tier4.rolls[15]).not.toBe(tier5.rolls[15])
-    const belowBoundary = resolver(scripted(0, 0, 4, 1, 0)).resolve(state(), 0, 1, action('MOVE_MAGNITUDE'))
+    const belowBoundary = resolver(scripted(4, 1, 0)).resolve(state(), 0, 1, action('MOVE_MAGNITUDE'))
     expect(belowBoundary.targetDamage).toBe(tier4.rolls[15])
     expect(belowBoundary.targetDamage).not.toBe(tier5.rolls[15])
   })
 })
 
-describe('createBridgeDamageResolver: variable multi-hit formula (MULTIHIT_TWO_TO_FIVE, battle_util.c:3523)', () => {
-  it.each([
-    [1, 3, 5], // 2 + 1%2 + 2*(3%3==0) = 2 + 1 + 2 = 5
-    [0, 1, 2], // 2 + 0%2 + 2*(1%3==0) = 2 + 0 + 0 = 2
-  ] as const)('draws (%i, %i) roll a hit count of %i', (r1, r2, expected) => {
-    const direct = directResult('MOVE_ARM_THRUST', {}, {}, { hitCount: expected })
-    expect(direct.hitCount).toBe(expected)
-    // Non-crit (1), max damage roll (0) after the two hit-count draws.
-    const out = resolver(scripted(r1, r2, 1, 0)).resolve(state(), 0, 1, action('MOVE_ARM_THRUST'))
+// FIX CYCLE 6: MULTIHIT_TWO_TO_FIVE and MULTIHIT_FOUR_OR_FIVE's own RNG draws
+// (formerly duplicated here) moved to their real C site, CANCELLER_MULTIHIT_MOVES
+// (attackCanceller.ts, exercised by turnCanceller.test.ts) -- see
+// damageResolver.ts's own header. This resolver now just READS
+// BattlerState.turn.multiHitCounter, already drawn by the time it runs; these
+// two describe blocks assert that reading, not a draw, by setting
+// multiHitCounter directly rather than scripting the old formula's RNG values.
+describe('createBridgeDamageResolver: reads multiHitCounter, does not draw it (MULTIHIT_TWO_TO_FIVE, battle_util.c:3523)', () => {
+  it.each([5, 2] as const)('passes an already-set multiHitCounter of %i straight through as scenario.hitCount', (count) => {
+    const direct = directResult('MOVE_ARM_THRUST', {}, {}, { hitCount: count })
+    expect(direct.hitCount).toBe(count)
+    const s = state()
+    s.battlers[0]!.turn.multiHitCounter = count
+    // Only crit (1) then a max damage roll (0) -- no hitCount draws at all.
+    const out = resolver(scripted(1, 0)).resolve(s, 0, 1, action('MOVE_ARM_THRUST'))
     expect(out.targetDamage).toBe(direct.totalRolls![15])
   })
 })
 
 describe('createBridgeDamageResolver: Loaded Dice (battle_util.c:3578-3586)', () => {
-  it.each([
-    [1, 5], // 4 + 1%2 = 5
-    [0, 4], // 4 + 0%2 = 4
-  ] as const)('draws a single value (%i) for a 4-or-5 hit count of %i, not the two-draw formula', (r, expected) => {
+  it.each([5, 4] as const)('an already-set multiHitCounter of %i (as the canceller\'s own Loaded Dice draw would set) passes straight through', (count) => {
     const a = { itemId: 'ITEM_LOADED_DICE' }
-    const direct = directResult('MOVE_ARM_THRUST', a, {}, { hitCount: expected })
-    expect(direct.hitCount).toBe(expected)
-    // Only ONE draw for the dice roll, then non-crit (1), then max roll (0) --
-    // if the resolver mistakenly used the two-draw formula here, this 3-value
-    // script would desync and the comparison below would fail.
-    const out = resolver(scripted(r, 1, 0)).resolve(state(a), 0, 1, action('MOVE_ARM_THRUST'))
+    const direct = directResult('MOVE_ARM_THRUST', a, {}, { hitCount: count })
+    expect(direct.hitCount).toBe(count)
+    const s = state(a)
+    s.battlers[0]!.turn.multiHitCounter = count
+    // No dice-roll draw here either -- attackCanceller.ts's own Loaded Dice
+    // branch (GetMultihitType, battle_util.c:3586) draws that; this resolver
+    // just reads its result. Only crit (1) then a max damage roll (0).
+    const out = resolver(scripted(1, 0)).resolve(s, 0, 1, action('MOVE_ARM_THRUST'))
     expect(out.targetDamage).toBe(direct.totalRolls![15])
   })
 })
 
-describe('createBridgeDamageResolver: Parental Bond TWO_TO_FIVE (ABILITY_UNRELENTING)', () => {
-  it('rolls a shared TWO_TO_FIVE hit count for a non-multi-hit move via Unrelenting', () => {
+describe('createBridgeDamageResolver: Parental Bond TWO_TO_FIVE (ABILITY_UNRELENTING) -- a found, unfixed gap', () => {
+  it('with no canceller run first, multiHitCounter is 0 and multiHit.ts\'s own (pre-existing, unfixed) clamp floors it to 2, not a real draw', () => {
+    // See damageResolver.ts's own header for the full citation trail:
+    // GetParentalBondCount (battle_script_commands.c:1010-1044) has NO case
+    // for MULTIHIT_TWO_TO_FIVE (the value Unrelenting's onParentalBond hook
+    // returns), so it falls to the switch's own `return 1` default and
+    // Cmd_attackcanceler's `i > 1` check (:1086) never fires -- Unrelenting's
+    // Parental Bond bonus hit never actually triggers in the real game, and
+    // there is no Random() draw anywhere for it to have. multiHit.ts's own
+    // parentalBondHitCount still clamps whatever it is given into [2, 5]
+    // regardless (a separate, pre-existing bug outside this fix's two named
+    // defects and outside engine/sim/), so this resolver -- now correctly
+    // NOT drawing anything -- still passes through a spurious 2-hit result
+    // instead of the true single hit. Asserted here so the gap has a failing
+    // canary if multiHit.ts is ever corrected without updating this test.
     const a = { abilities: { ability: 'ABILITY_UNRELENTING', innates: [null, null, null] as [string | null, string | null, string | null] } }
-    // MOVE_TACKLE is not itself multi-hit, so this ONLY happens via Parental Bond.
-    const direct = directResult('MOVE_TACKLE', a, {}, { hitCount: 5 })
-    expect(direct.hitCount).toBe(5)
-    const out = resolver(scripted(1, 3, 1, 0)).resolve(state(a), 0, 1, action('MOVE_TACKLE')) // 2 + 1%2 + 2*(3%3==0) = 5
+    const direct = directResult('MOVE_TACKLE', a, {}, { hitCount: 2 })
+    expect(direct.hitCount).toBe(2)
+    const out = resolver(scripted(1, 0)).resolve(state(a), 0, 1, action('MOVE_TACKLE'))
     expect(out.targetDamage).toBe(direct.totalRolls![15])
     expect(out.unmodelled).toContain('multi-hit per-hit rolls and crits are not independently drawn')
   })

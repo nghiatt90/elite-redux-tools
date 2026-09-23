@@ -10,6 +10,36 @@
 // switching, residuals, and the simulator's untracked turn-history toggles.
 // Those remain in unmodelled[] so this seam never presents an incomplete
 // number as complete.
+//
+// FIX CYCLE 6: this resolver no longer draws its own hit count. Before this
+// fix it drew 1-2 `deps.random` calls for EVERY move (including single-hit
+// ones), which is not where the C draws them at all -- CANCELLER_MULTIHIT_MOVES
+// (battle_util.c:3491-3541, ported in attackCanceller.ts) is the real site,
+// and it runs BEFORE the accuracy check, not inside damage calc. `scenario.hitCount`
+// below now reads attackCanceller.ts's own multiHitCounter, already drawn and
+// written onto BattlerState.turn by the time this resolver runs -- see
+// DamageCalcScenario.hitCount's own doc (calculate.ts) for the field's wider
+// contract as a UI-style "scenario toggle" (this resolver is the ONE caller
+// that fills it from a real draw rather than a calculator-page selection).
+//
+// A found-but-unfixed gap surfaced while tracing this: multiHit.ts's own
+// parentalBondHitCount TWO_TO_FIVE case (a Magus Blades/Familia Bond-style
+// ability) clamps `scenarioHitCount` into [2, 5] unconditionally. But
+// GetParentalBondCount (battle_script_commands.c:1010-1044) has NO case for
+// MULTIHIT_TWO_TO_FIVE -- only PARENTAL_BOND_HYPER_AGGRESSIVE/PRIMAL_MAW/
+// DUAL_WIELD/ICE_COLD_HUNTER/THREE_HEADED/MINION_CONTROL are handled, so a
+// trigger that resolves to MULTIHIT_TWO_TO_FIVE falls through to the switch's
+// own `return 1` default -- GetParentalBondCount never grants more than 1 hit
+// for it, and Cmd_attackcanceler's own `i > 1` check (:1086) then never sets
+// multiHitCounter/parentalBondOn at all. In other words, THIS SPECIFIC parental
+// bond family never actually triggers a bonus hit in the real game -- and
+// there is no Random() draw for it anywhere, so there was never a hidden draw
+// to port here. multiHit.ts still grants one regardless of what this resolver
+// passes as hitCount (clamp(x, 2, 5) is always >= 2), which is a real,
+// pre-existing bug in multiHit.ts, not something this fix's two named defects
+// cover or something this file's own hitCount value can prevent -- reported,
+// not fixed in this batch (same precedent as leaving the Magnitude tier draw
+// alone below).
 import type { MoveData, DamageCalcScenario } from '../calculate'
 import { calculateMoveDamage } from '../calculate'
 import type { BattleConstants } from '../types'
@@ -41,10 +71,6 @@ function magnitudeTier(random: RandomSource): 4 | 5 | 6 | 7 | 8 | 9 | 10 {
   if (roll < 85) return 8
   if (roll < 95) return 9
   return 10
-}
-
-function variableHitCount(random: RandomSource): number {
-  return 2 + (random.random16() % 2) + ((random.random16() % 3 === 0) ? 2 : 0)
 }
 
 export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): DamageResolver {
@@ -96,11 +122,14 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         battleConstants: deps.battleConstants,
         attackerActsFirst: !context.targetHasActedThisTurn,
         sameMoveTurnsInARow: state.battlers[attackerId]!.sameMoveTurns,
-        // This scenario is also consumed by Parental-Bond TWO_TO_FIVE, not
-        // only EFFECT_MULTI_HIT. Loaded Dice uses the game's 4-or-5 draw.
-        hitCount: attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LOADED_DICE'
-          ? 4 + (deps.random.random16() % 2)
-          : variableHitCount(deps.random),
+        // CANCELLER_MULTIHIT_MOVES (attackCanceller.ts) already drew this and
+        // wrote it onto TurnState before the accuracy check ran -- see this
+        // module's own header. 0 when unset: resolveHitPlan (multiHit.ts)
+        // does not read scenarioHitCount at all for an ordinary single-hit
+        // move with no Parental Bond ability, so the placeholder is inert for
+        // every move this batch's own defects actually touch (see header for
+        // the one pre-existing exception this value cannot fix).
+        hitCount: state.battlers[attackerId]!.turn.multiHitCounter,
         defenderIsSwitching: false,
         magnitudeTier: move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
         attackerRolloutCounter: 0,
