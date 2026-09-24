@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
-import { STATUS1_BURN, STATUS1_POISON, DEFAULT_STAT_STAGE, WEATHER_SANDSTORM_PERMANENT } from './constants'
+import { STATUS1_BURN, STATUS1_POISON, STATUS2_CONFUSION, STAT_ATK, DEFAULT_STAT_STAGE, WEATHER_SANDSTORM_PERMANENT } from './constants'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -419,5 +419,92 @@ describe('applyEndOfTurnReplacements', () => {
     executeTurn(state, [null, useMove(0)], deps(lethalToTarget(999), rep))
     expect(rep.calls).toEqual([]) // never called: no live reserve regardless, and the battle is over
     expect(state.battlers[0]!.mon.hp).toBe(0)
+  })
+})
+
+describe('executeTurn: a mid-turn CHOSEN switch (performSwitchAction)', () => {
+  function replacementDeps(chosenIndex: number): ReplacementDeps & { calls: { battlerId: number }[] } {
+    const calls: { battlerId: number }[] = []
+    return {
+      calls,
+      chooseReplacement(_state, battlerId) {
+        calls.push({ battlerId })
+        return chosenIndex
+      },
+    }
+  }
+
+  it('the switch happens before the opponent\'s (slower) move: the resolver never sees the outgoing mon as a target', () => {
+    // Battler 0 chooses SWITCH; battler 1 (faster) chooses a move targeting
+    // battler 0. SWITCH actions are grouped first by
+    // setActionsAndBattlersTurnOrder regardless of speed, so the switch must
+    // still resolve before battler 1's move -- proven by the resolver
+    // recording which mon (by HP) it actually hit.
+    const reserve = partyMon({ hp: 77, maxHp: 90, moves: ['MOVE_EMBER', null, null, null] })
+    const state = battle([{ spe: 50, hp: 100 }, { spe: 200, hp: 100 }], scripted(), [partyMon({ hp: 100 }), reserve], [partyMon({ hp: 100 })])
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const seenTargetHp: number[] = []
+    const recordingResolver: DamageResolver = {
+      resolve(s, _attackerId, targetId) {
+        seenTargetHp.push(s.battlers[targetId]!.mon.hp)
+        return { targetDamage: 10, attackerDamage: null, unmodelled: [] }
+      },
+    }
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    const out = executeTurn(state, [switchAction, useMove(0)], deps(recordingResolver))
+
+    expect(out.actions[0].action).toBe('SWITCH')
+    expect(out.actions[1].action).toBe('USE_MOVE')
+    // The move (battler 1's, targeting battler 0) resolved AFTER the switch --
+    // it saw the INCOMING mon's HP (77), not the outgoing mon's (100).
+    expect(seenTargetHp).toEqual([77])
+    expect(state.battlers[0]!.partyIndex).toBe(1)
+  })
+
+  it('the outgoing mon\'s HP and status1 persist on its party record; status2 and stat stages do not carry over', () => {
+    const reserve = partyMon({ hp: 50 })
+    const state = battle([{ spe: 200, hp: 63, status1: STATUS1_BURN }, { spe: 50, hp: 100 }], scripted(), [partyMon({ hp: 63, status1: STATUS1_BURN }), reserve], [partyMon({ hp: 100 })])
+    state.battlers[0]!.mon.status2 = STATUS2_CONFUSION
+    state.battlers[0]!.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    // Outgoing mon's own party record.
+    expect(state.sides[0].party[0]!.hp).toBe(63)
+    expect(state.sides[0].party[0]!.status1).toBe(STATUS1_BURN)
+
+    // Incoming battler is a fresh switch-in: no status2, neutral stat stages.
+    const battler0 = state.battlers[0]!
+    expect(battler0.partyIndex).toBe(1)
+    expect(battler0.mon.hp).toBe(50)
+    expect(battler0.mon.status2).toBe(0)
+    expect(battler0.mon.statStages.every((s) => s === DEFAULT_STAT_STAGE)).toBe(true)
+  })
+
+  it('resolves the target slot via deps.replacement when monToSwitchIntoId was left at PARTY_SIZE (the second switch check\'s own shape)', () => {
+    const reserve = partyMon({ hp: 88 })
+    const state = battle([{ spe: 200, hp: 100 }, { spe: 50, hp: 100 }], scripted(), [partyMon({ hp: 100 }), reserve], [partyMon({ hp: 100 })])
+    expect(state.battlers[0]!.monToSwitchIntoId).toBe(6) // PARTY_SIZE sentinel, never set
+
+    const rep = replacementDeps(1)
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    const out = executeTurn(state, [switchAction, null], deps(lethalToTarget(0), rep))
+
+    expect(rep.calls).toEqual([{ battlerId: 0 }])
+    expect(state.battlers[0]!.partyIndex).toBe(1)
+    expect(out.actions[0].unmodelled).toEqual([])
+  })
+
+  it('emits a gap line and switches nothing when monToSwitchIntoId is PARTY_SIZE and no deps.replacement is supplied', () => {
+    const reserve = partyMon({ hp: 88 })
+    const state = battle([{ spe: 200, hp: 100 }, { spe: 50, hp: 100 }], scripted(), [partyMon({ hp: 100 }), reserve], [partyMon({ hp: 100 })])
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    const out = executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(out.actions[0].unmodelled.some((g) => g.includes('nothing to switch into'))).toBe(true)
+    expect(state.battlers[0]!.partyIndex).toBe(0) // unchanged
   })
 })

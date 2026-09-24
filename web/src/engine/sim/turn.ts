@@ -138,7 +138,8 @@ import { runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
-import { applyEndOfTurnReplacements } from './switchIn'
+import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
+import { PARTY_SIZE } from './constants'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -348,12 +349,17 @@ export interface TurnLoopDeps {
    * visibility into. */
   dataContext: SimDataContext
   /** switchIn.ts's own injected choice for which reserve replaces a fainted
-   * active battler at end of turn. Optional and defaulting to "no
-   * replacement": every caller that predates this batch (every existing test
-   * in this directory) supplies no party roster at all, so there is never a
-   * live reserve to replace regardless -- but making this optional rather
-   * than mandatory keeps those callers' `TurnLoopDeps` literals compiling
-   * unchanged. */
+   * active battler at end of turn -- AND (cycle 15) for resolving a chosen
+   * SWITCH action's target party slot when `state.battlers[id].monToSwitchIntoId`
+   * was left at PARTY_SIZE (ChooseMoveOrAction_Singles' own second switch
+   * check does not resolve a specific mon itself, matching
+   * OpponentHandleChoosePokemon reaching the SAME `GetMostSuitableMonToSwitchInto`
+   * + fallback this deps object already runs for end-of-turn replacement).
+   * Optional and defaulting to "no replacement": every caller that predates
+   * this batch (every existing test in this directory) supplies no party
+   * roster at all, so there is never a live reserve to replace regardless --
+   * but making this optional rather than mandatory keeps those callers'
+   * `TurnLoopDeps` literals compiling unchanged. */
   replacement?: ReplacementDeps
 }
 
@@ -503,6 +509,87 @@ function applyDamage(state: BattleState, battlerId: number, damage: number | nul
   state.battleOutcome = computeBattleOutcome(state)
 }
 
+/**
+ * HandleAction_Switch, battle_util.c:378-410, through BattleScript_ActionSwitch
+ * (data/battle_scripts_1.s:7194-7224) to `switchindataupdate`/
+ * `SwitchInClearSetData` -- a CHOSEN (not faint-triggered) mid-turn switch.
+ *
+ * Reuses switchIn.ts's `switchIn` for the incoming half exactly as the brief
+ * requires ("don't write a second one") -- that function already performs
+ * everything `Cmd_switchindataupdate` does (species/stats/moves/pp/hp/item/
+ * status1 copied in, stat stages and volatiles reset, switch-in ability/item
+ * gap reporting). The one thing `switchIn` does NOT do, because the
+ * end-of-turn faint-replacement caller never needs it (a fainted mon's status1
+ * is moot), is persist the OUTGOING mon's own current state back to its party
+ * record before it is overwritten -- `saveattackerandtargetto34` plus the
+ * party sync every other HP writer in this file already performs (outcome.ts's
+ * `syncPartyHp`) covers HP, but `status1` (state.ts's own doc: "Persists
+ * across switches ... copied back to the party mon") has no writer until now,
+ * since nothing previously switched OUT a still-living battler mid-turn.
+ *
+ * The target party slot comes from `battler.monToSwitchIntoId`
+ * (`gBattleStruct->monToSwitchIntoId[gActiveBattler]`) when a caller already
+ * resolved it (aiShouldSwitch.ts's `aiTrySwitchOrUseItem` writes this as a
+ * side effect of `ShouldSwitch` deciding TRUE); when it is still `PARTY_SIZE`
+ * (ChooseMoveOrAction_Singles' own second switch check never resolves a
+ * specific mon -- see chooseAiAction.ts's own citation), `deps.replacement` is
+ * asked instead, reusing the SAME `GetMostSuitableMonToSwitchInto` + fallback
+ * mechanism `applyEndOfTurnReplacements` already runs, matching
+ * `OpponentHandleChoosePokemon` being the one real function both call sites
+ * reach in the C.
+ *
+ * NOT ported, gapped by name only when reached: `switchoutabilities`
+ * (Regenerator/Natural Cure-style switch-OUT ability hooks, a real
+ * mechanism distinct from switchIn.ts's own switch-IN hook scan) and the
+ * Pursuit-style `jumpifnopursuitswitchdmg` branch (an opposing Pursuit user
+ * damaging the switching mon before it leaves) -- neither has a hook wired
+ * anywhere in this sim (no OnSwitchOut ability context exists, and Pursuit's
+ * own switch-detection needs `defenderIsSwitching`, which aiCalcDamage.ts's
+ * own header already notes is hardcoded false). Hazards on entry stay
+ * unreachable, same precedent as switchIn.ts's own header.
+ */
+const SWITCH_OUT_HOOK_ABILITIES: ReadonlySet<string> = new Set(['ABILITY_REGENERATOR', 'ABILITY_NATURAL_CURE', 'ABILITY_SELF_REPAIR', 'ABILITY_NATURAL_RECOVERY'])
+
+function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLoopDeps): string[] {
+  const unmodelled: string[] = []
+  const battler = state.battlers[battlerId]
+  if (!battler) return unmodelled
+
+  let partyIndex = battler.monToSwitchIntoId
+  if (partyIndex === PARTY_SIZE) {
+    if (!deps.replacement) {
+      unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} had no monToSwitchIntoId set and no deps.replacement was supplied -- nothing to switch into`)
+      return unmodelled
+    }
+    partyIndex = deps.replacement.chooseReplacement(state, battlerId, unmodelled)
+  }
+  if (partyIndex === PARTY_SIZE) {
+    unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} could not resolve a replacement party slot`)
+    return unmodelled
+  }
+
+  const party = state.sides[battlerId & 1].party
+  const outgoingSlot = party[battler.partyIndex]
+  if (outgoingSlot) {
+    // saveattackerandtargetto34 + status1's own "persists across switches"
+    // rule (state.ts) -- HP is already current via syncPartyHp, carried here
+    // too defensively so this function does not depend on every damage path
+    // upstream having synced it.
+    outgoingSlot.hp = battler.mon.hp
+    outgoingSlot.status1 = battler.mon.status1
+  }
+
+  const outgoingAbilities = [battler.mon.abilities.ability, ...battler.mon.abilities.innates]
+  if (outgoingAbilities.some((id) => id !== null && SWITCH_OUT_HOOK_ABILITIES.has(id))) {
+    unmodelled.push(`battler ${battlerId}: switchoutabilities (battle_scripts_1.s:7211) is not applied -- a switch-out ability hook was present on the outgoing mon`)
+  }
+
+  const incoming = party[partyIndex]
+  switchIn(state, battlerId, partyIndex, unmodelled)
+  if (incoming) switchInItemGap(deps.dataContext, battlerId, incoming, unmodelled)
+  return unmodelled
+}
+
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
   assertNoPerBattlerQuash(state)
 
@@ -557,6 +644,15 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
     if (!isBattlerAlive(state, battlerId)) {
       outcomes.push({ ...blank, skippedBecauseFainted: true, battleOver: false })
+      continue
+    }
+
+    // HandleAction_Switch, battle_util.c:378 -- runs in this slot, before any
+    // USE_MOVE slot (SWITCH actions are grouped first by
+    // setActionsAndBattlersTurnOrder; see performSwitchAction's own header).
+    if (actionKind === 'SWITCH') {
+      const switchUnmodelled = performSwitchAction(state, battlerId, deps)
+      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false, unmodelled: switchUnmodelled })
       continue
     }
 
