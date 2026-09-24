@@ -2,8 +2,8 @@
 // battle_controller_opponent.c:1557-1568 (OpponentHandleChooseAction falling
 // through to ComputeBattleAiScores/BattleAI_ChooseMoveOrAction, then
 // OpponentHandleChooseMove reading the result) for the pre-scoring
-// AI_TrySwitchOrUseItem step's trainer-battle STUB only -- see this module's
-// own header below.
+// AI_TrySwitchOrUseItem step -- see aiShouldSwitch.ts for ShouldSwitch/
+// ShouldUseItem's own port (cycle 15).
 //
 // WIRING: in the real game the AI decides its action BEFORE the player's menu
 // even opens (there is no "the AI reacts to what the player chose" step at
@@ -14,26 +14,12 @@
 // `executeTurn`'s own signature is unchanged by this batch.
 
 import type { AiSwitchingDeps } from './aiSwitching'
+import { getMostSuitableMonToSwitchInto } from './aiSwitching'
 import type { BattleState } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
 import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingles } from './aiPipeline'
-
-/**
- * AI_TrySwitchOrUseItem, battle_ai_switch_items.c:699+ -- runs BEFORE move
- * scoring on every trainer turn (this batch's diagnose-output finding,
- * cycle13). Its `ShouldSwitch()` half (a pre-scoring switch, distinct from
- * ChooseMoveOrAction_Singles' OWN second-switch-check this batch DOES port in
- * aiPipeline.ts) and its `ShouldUseItem()` half are BOTH the next batch's
- * scope, per the brief ("stub it as 'does not switch', with a gap line").
- * Trainer items are always empty (CLAUDE.md, the codegen emits no `.items`),
- * so `ShouldUseItem` can never actually use an item regardless -- but its own
- * RNG-drawing behaviour with an empty item list is unverified, and is exactly
- * what the next batch has to settle before this stub can be replaced.
- */
-function aiTrySwitchOrUseItemStub(): string[] {
-  return ['AI_TrySwitchOrUseItem (battle_ai_switch_items.c:699+) is not ported -- the pre-scoring switch/item check always defers to move scoring (next batch)']
-}
+import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
  * sim does not have yet (dynamic move type resolution, terrain grounding, the
@@ -95,7 +81,18 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
     throw new Error(`chooseAiAction: battler ${battlerId} is not on the opponent side`)
   }
   const battlerTarget = setRandomTargetSingles(battlerId)
-  const unmodelled: string[] = [...aiTrySwitchOrUseItemStub()]
+
+  // AI_TrySwitchOrUseItem, battle_ai_switch_items.c:699+ -- runs BEFORE move
+  // scoring on every trainer turn (cycle13's diagnose-output finding). A TRUE
+  // ShouldSwitch here writes `state.battlers[battlerId].monToSwitchIntoId`
+  // itself (aiShouldSwitch.ts's own side effect, matching the C's in-place
+  // global write) and skips scoring entirely, exactly like the C's own early
+  // `return;` inside AI_TrySwitchOrUseItem's trainer branch.
+  const trySwitchResult = aiTrySwitchOrUseItem(state, battlerId, deps, getMostSuitableMonToSwitchInto)
+  const unmodelled: string[] = [...trySwitchResult.unmodelled]
+  if (trySwitchResult.switched) {
+    return { action: { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }, unmodelled }
+  }
 
   const aiFlags = battleAiSetupFlags(deps.trainer, state.battleTypeFlags)
   const flaggedState: BattleState = { ...state, aiFlags }
@@ -107,6 +104,16 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
   unmodelled.push(...choiceUnmodelled)
 
   if (choice.kind === 'switch') {
+    // ChooseMoveOrAction_Singles' OWN second switch check (battle_ai_main.c:
+    // 294-318) does NOT resolve or store a specific party slot -- it only sets
+    // AI_THINKING_STRUCT->switchMon and returns AI_CHOICE_SWITCH; the actual
+    // mon is picked later, when OpponentHandleChoosePokemon runs (a SEPARATE,
+    // later call to GetMostSuitableMonToSwitchInto plus its own fallback --
+    // exactly what aiSwitching.ts's `createAiOpponentReplacement` already
+    // ports). `state.battlers[battlerId].monToSwitchIntoId` is left at
+    // PARTY_SIZE here on purpose; `executeTurn`'s SWITCH handling resolves it
+    // via `deps.replacement`, reusing that same mechanism rather than
+    // duplicating it.
     return { action: { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }, unmodelled }
   }
 

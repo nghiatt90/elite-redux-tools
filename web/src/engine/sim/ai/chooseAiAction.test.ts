@@ -88,10 +88,14 @@ describe('chooseAiAction', () => {
     expect(() => chooseAiAction(s, 0, deps)).toThrow(/not on the opponent side/)
   })
 
-  it('pushes the AI_TrySwitchOrUseItem stub gap line every call', () => {
+  it('pushes the ShouldUseItem gap line when ShouldSwitch has no reserves to switch into', () => {
+    // No opponentParty supplied -- ShouldSwitch's own availableToSwitch count
+    // is 0, so it returns FALSE and AI_TrySwitchOrUseItem falls to
+    // ShouldUseItem, which always reports its own "always FALSE" gap (see
+    // aiShouldSwitch.ts).
     const s = state()
     const { unmodelled } = chooseAiAction(s, 1, deps)
-    expect(unmodelled.some((u) => u.includes('AI_TrySwitchOrUseItem'))).toBe(true)
+    expect(unmodelled.some((u) => u.includes('ShouldUseItem'))).toBe(true)
   })
 
   it('produces a USE_MOVE action naming one of the battler\'s own moves, targeting the opposite battler', () => {
