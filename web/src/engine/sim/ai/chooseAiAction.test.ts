@@ -12,6 +12,7 @@ import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext
 import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import type { ChosenAction } from '../turnOrder'
+import { STATUS1_SLEEP } from '../constants'
 import type { DamageResolver, TurnLoopDeps } from '../turn'
 import { executeTurn } from '../turn'
 import { type AiDamageDeps } from './aiCalcDamage'
@@ -154,5 +155,42 @@ describe('end-to-end: chooseAiAction then executeTurn, with the AI\'s move actua
 
     expect(out.actions.length).toBe(2)
     expect(resolvedMoveIdByAttacker.get(1)).toBe(aiAction.chosenMove?.id)
+  })
+})
+
+describe('end-to-end: chooseAiAction decides a switch (ShouldSwitch, not the second switch check), executeTurn carries it out', () => {
+  function scripted(...values: number[]): RandomSource {
+    let i = 0
+    return { random16: () => values[i++] ?? 0 }
+  }
+
+  it('a hand-built bad matchup (asleep + Natural Cure) makes the AI switch, and executeTurn brings in the chosen reserve', () => {
+    const reserve = partyMon({ hp: 77, maxHp: 90, moves: ['MOVE_EMBER', null, null, null] })
+    const s = state(
+      { hp: 100, maxHp: 100 },
+      { hp: 100, maxHp: 100, status1: STATUS1_SLEEP, abilities: { ability: 'ABILITY_NATURAL_CURE', innates: [null, null, null] } },
+      scripted(1), // ShouldSwitchIfNaturalCure's own first Random()&1 draw: odd -- switches immediately
+      [partyMon({ hp: 100 }), reserve],
+    )
+    const { action: aiAction, unmodelled } = chooseAiAction(s, 1, deps)
+    expect(aiAction).toEqual({ action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null })
+    expect(unmodelled.some((u) => u.includes('ShouldSwitchIfNaturalCure'))).toBe(true)
+    // aiTrySwitchOrUseItem already resolved the target via
+    // GetMostSuitableMonToSwitchInto (the only reserve, party slot 1) --
+    // executeTurn needs no deps.replacement to carry this switch out.
+    expect(s.battlers[1]!.monToSwitchIntoId).toBe(1)
+
+    const turnDeps: TurnLoopDeps = { turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, grounding, damage: { resolve: () => ({ targetDamage: 0, attackerDamage: null, unmodelled: [] }) }, statStageRatios: natures.statStageRatios, dataContext }
+    const out = executeTurn(s, [null, aiAction], turnDeps)
+
+    // SWITCH actions are grouped FIRST by setActionsAndBattlersTurnOrder,
+    // regardless of battler id -- battler 1's SWITCH is turn-order slot 0.
+    expect(out.actions[0].battlerId).toBe(1)
+    expect(out.actions[0].action).toBe('SWITCH')
+    expect(s.battlers[1]!.partyIndex).toBe(1)
+    expect(s.battlers[1]!.mon.hp).toBe(77)
+    expect(s.battlers[1]!.mon.moves).toEqual(['MOVE_EMBER', null, null, null])
+    // The outgoing (now-benched) mon's own party record still shows its HP.
+    expect(s.sides[1].party[0]!.hp).toBe(100)
   })
 })
