@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { createBattleState, createBattlerState } from '../create'
 import { createRandomSource } from '../rng'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
+import { WEATHER_STRONG_WINDS } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon } from '../state'
 import type { GroundingContext } from '../grounding'
 import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext'
@@ -207,6 +208,25 @@ describe('aiTryToFaint', () => {
     const s = state({}, {})
     const { score } = aiTryToFaint(s, 0, 1, 'MOVE_SWORDS_DANCE', 0, 100, deps)
     expect(score).toBe(100)
+  })
+
+  it('Strong Winds withholds the x2 bonus against a Flying target only while WEATHER_HAS_EFFECT (:2192) -- Air Lock restores it', () => {
+    expect(moveById.get('MOVE_THUNDER_SHOCK')?.type).toBe('TYPE_ELECTRIC')
+    const airLock = 'ABILITY_AIR_LOCK'
+    const attacker = (ability: string | null): Partial<SimBattleMon> => ({
+      moves: ['MOVE_THUNDER_SHOCK', null, null, null],
+      rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 },
+      abilities: { ability, innates: [null, null, null] },
+    })
+    const flyer: Partial<SimBattleMon> = { types: ['FLYING', 'MYSTERY', 'MYSTERY'], hp: 1000, maxHp: 1000, rawStats: { atk: 100, def: 500, spatk: 80, spdef: 500, spe: 40 } }
+    const scoreWith = (weather: number, ability: string | null) => {
+      const s = state(attacker(ability), flyer, scripted())
+      s.field.weather = weather
+      return aiTryToFaint(s, 0, 1, 'MOVE_THUNDER_SHOCK', 0, 100, deps).score
+    }
+    const calm = scoreWith(0, null)
+    expect(scoreWith(WEATHER_STRONG_WINDS, null)).toBe(calm - 2)
+    expect(scoreWith(WEATHER_STRONG_WINDS, airLock)).toBe(scoreWith(0, airLock))
   })
 })
 

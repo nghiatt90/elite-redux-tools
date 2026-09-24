@@ -387,7 +387,7 @@ function isHailImmune(state: BattleState, battler: BattlerState, dataContext: Si
 }
 
 /** WEATHER_HAS_EFFECT, include/battle_util.h:45-46. */
-function weatherHasEffect(state: BattleState, grounding: GroundingContext): boolean {
+export function weatherHasEffect(state: BattleState, grounding: GroundingContext): boolean {
   if (state.field.timers.clearSkiesTimer) return false
   if (grounding.isCluelessOnField) return false
   if (isAbilityOnField(state, 'ABILITY_CLOUD_NINE')) return false

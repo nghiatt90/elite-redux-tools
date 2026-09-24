@@ -38,6 +38,7 @@ import { idiv } from '../../fixed'
 import type { BattleState } from '../state'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { WEATHER_STRONG_WINDS, hasFlag } from '../constants'
+import { weatherHasEffect } from '../fieldEndTurn'
 import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, type AiDamageDeps } from './aiCalcDamage'
 
 // ---------------------------------------------------------------------------
@@ -383,7 +384,10 @@ export function aiTryToFaint(state: BattleState, battlerAtk: number, battlerDef:
 
     const effectivenessResult = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
     unmodelled.push(...effectivenessResult.unmodelled)
-    const strongWindsFlyingImmune = hasFlag(state.field.weather, WEATHER_STRONG_WINDS) && state.battlers[battlerDef]?.mon.types.includes('FLYING')
+    // :2185/:2192 -- WEATHER_HAS_EFFECT gates this, so Cloud Nine / Air Lock /
+    // Clueless / Clear Skies suppress the discount.
+    const strongWindsFlyingImmune =
+      weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_STRONG_WINDS) && state.battlers[battlerDef]?.mon.types.includes('FLYING')
     if (effectivenessResult.effectiveness === 6) {
       // AI_EFFECTIVENESS_x4
       score += strongWindsFlyingImmune ? 2 : 4
