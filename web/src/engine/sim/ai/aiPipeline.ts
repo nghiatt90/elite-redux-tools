@@ -184,7 +184,7 @@ const TRAPPING_ABILITIES = new Set(['ABILITY_ARENA_TRAP', 'ABILITY_FRENZIED_PHAN
  * `onTrap`-hooked abilities in ANY slot (`TRAPPING_ABILITIES` above) -- i.e.
  * only when the missing check could actually have changed the answer.
  */
-function isAbilityPreventingEscape(state: BattleState, battlerId: number): { prevents: boolean; unmodelled: string[] } {
+export function isAbilityPreventingEscape(state: BattleState, battlerId: number): { prevents: boolean; unmodelled: string[] } {
   const opposingId = battlerId ^ 1
   const opposing = state.battlers[opposingId]
   const unmodelled: string[] = []
