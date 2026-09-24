@@ -94,10 +94,13 @@ proportionate to that.
   oracle (see `pipeline/tests/test_oracle.py` and `pipeline/src/erdata/oracle.py`) —
   legitimate to use as a fact-check even though its repo is GPL-3.0, since game data
   facts aren't the copyrighted thing; don't reuse its parser code.
-- **Trainer parties are not emitted yet.** `pipeline/.upstream/er-config/TrainerList.textproto`
-  is 2.8MB of parties with items, natures, EVs, abilities, movesets and three difficulty
-  tiers (`ace` / `elite` / `hell`), and `TrainerList_pb2.py` is already compiled — but
-  nothing writes a `trainers.json`. **`.ability` in the textproto is a real ability id, not
+- **Trainer parties ARE emitted**, as `data/v2.65beta/trainers.json` (932 trainers, since
+  `a97bc64`): parties with natures, EVs, abilities and movesets across the three difficulty
+  tiers (`ace` / `elite` / `hell`), plus the per-trainer AI toggles `risky`, `preferStall`,
+  `preferStatus`, `noSwitching` and `forcedDouble`. `TrainerPartyGenerator.kt:180-194` turns
+  those toggles into `gTrainers[].aiFlags` on top of an always-on base set. An earlier
+  revision of this line said nothing wrote a `trainers.json`; an agent later trusted it and
+  called real AI flags underivable. **`.ability` in the textproto is a real ability id, not
   a slot index** — `TrainerList.proto:248` declares it `AbilityEnum ability = 5`, so parse it
   the same way as every other `AbilityEnum` field. The slot index exists only downstream, in
   the generated C: `TrainerPartyGenerator.kt:147-156` converts the id with
