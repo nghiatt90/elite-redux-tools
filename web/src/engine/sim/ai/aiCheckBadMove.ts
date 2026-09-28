@@ -1,7 +1,24 @@
-// AI_CheckBadMove, battle_ai_main.c:488-1298 -- PART 1 ONLY, through the
-// EFFECT_PERISH_SONG case. Part 2 (:1299 EFFECT_SANDSTORM onward) is the next
-// batch; PART2_EFFECTS below names every case label that lives there so a
-// move whose effect falls in that set gets one gap line instead of silence.
+// AI_CheckBadMove, battle_ai_main.c:488-2164 -- the FULL function. Cycle16
+// ported :488-1298 (through EFFECT_PERISH_SONG, "part 1"); this batch
+// (cycle17) ports :1299-2164 -- EFFECT_SANDSTORM through the end of the
+// effect switch (:2149) plus the function's tail (the recoil-discouragement
+// block and the `if (score < 0) score = 0` floor, :2151-2163). The former
+// PART2_EFFECTS gap set (every part-2 case label pushing one named "handled
+// in part 2" line instead of scoring) is gone now that part 2 is real code --
+// removed rather than left dead, per the brief's own instruction.
+//
+// PART2_EFFECTS' own extraction turned up a latent defect worth recording:
+// it was built by a comment-blind `grep -o "case EFFECT_..."` over
+// :1299-2163, which also matched SEVEN case labels that only exist inside
+// commented-out code at the end of the switch (:2121-2148 -- EFFECT_
+// PLASMA_FISTS, EFFECT_SHELL_TRAP, EFFECT_BEAK_BLAST as `//`-commented TODOs,
+// and EFFECT_SKY_DROP/EFFECT_NO_RETREAT/EFFECT_EXTREME_EVOBOOST/EFFECT_
+// CLANGOROUS_SOUL inside a `/* */` block). None of those seven are live case
+// labels in the compiled C -- they fall to `default` there, exactly as they
+// do in this port's real switch below (which only contains labels the C
+// switch statement itself contains). This was invisible while PART2_EFFECTS
+// only gapped moves; it would have become a real scoring bug had a future
+// batch trusted that set as "the real part-2 label list" for anything else.
 //
 // This batch is singles-only (this project's own scope, CLAUDE.md). Every
 // `if (isDoubleBattle) { ... }` block in the C (the def-partner-ability
@@ -53,6 +70,51 @@
 //     this codebase either (turn.ts's own admission, word for word) -- the
 //     whole Anticipation check is gapped by name whenever battlerDef holds
 //     the ability.
+//
+// PART 2 (cycle17) approximations, gapped by name at each site:
+//   - `sAiAbilityRatings[]` (IsAbilityOfRating, EFFECT_ROLE_PLAY) is a
+//     per-ability AI-quality-rating table with no JSON export anywhere in
+//     this codebase's data pipeline (abilityHooks.json carries hook bodies
+//     and bitfields, not a rating score) -- always treated as below the
+//     rating-5 threshold.
+//   - `GetBattlerSecondaryDamage` (leech seed + nightmare + curse + trap +
+//     poison + weather damage summed) has no port: reproducing it exactly
+//     would need every one of those five end-of-turn damage formulas
+//     re-derived outside endTurn.ts's own module-private helpers. Always
+//     treated as 0 at its three call sites (EFFECT_ENDURE, EFFECT_
+//     HIT_SWITCH_TARGET, EFFECT_PROTECT).
+//   - `GetUsedHeldItem` (the item consumed so far this battle) has no
+//     tracking anywhere in state.ts -- always ITEM_NONE, at EFFECT_RECYCLE
+//     and EFFECT_BELCH.
+//   - `ItemId_GetPocket(...) != POCKET_BERRIES` (EFFECT_NATURAL_GIFT,
+//     EFFECT_BELCH) reuses part 1's EFFECT_STUFF_CHEEKS approximation: an
+//     item-id substring check for `BERRY` rather than a real pocket lookup.
+//   - `gWishFutureKnock.wishCounter[battlerAtk]` (EFFECT_WISH) has no state
+//     (FieldState's own doc: "Wish, Future Sight... not modelled yet") --
+//     always treated as 0 (no Wish pending).
+//   - `IsMyceliumMightActive` (inside CanBeBurned/CanGetFrostbite/CanBleed/
+//     CanBeConfused/CanInfatuate) needs "does the CURRENT move ignore type
+//     immunity" tracking this batch does not wire -- always false, gapped
+//     only when the attacker actually holds Mycelium Might (the only way it
+//     could matter).
+//   - `IsTrickRoomActive`'s `getMonotypeChampType() == TYPE_FLYING/NORMAL`
+//     extensions (a Monotype-challenge-format concept, not modelled anywhere)
+//     are dropped; only the plain `STATUS_FIELD_TRICK_ROOM` flag is checked.
+//   - `AI_DATA->predictedMoves` (EFFECT_SPITE/MIMIC, EFFECT_ME_FIRST,
+//     EFFECT_INSTRUCT, EFFECT_SUCKER_PUNCH, EFFECT_SEMI_INVULNERABLE) reuses
+//     part 1's own gap: always MOVE_NONE (no prediction), which is the C's
+//     own "no prediction" branch, not an invented substitute.
+//   - `CanBattlerGetOrLoseItem`'s species-locked-item exclusions (Genesect+
+//     Drive, Silvally+Memory, Arceus+Plate) are ported directly (cheap,
+//     3 species checks); `IsItemNegated` (Embargo/Magic Room/Klutz
+//     suppression of fling-eligibility) has no port -- always treated as
+//     not negated, the common case.
+//   - `DoesBattlerHaveAbilityShield`'s ability-loop (`blocksAbilitySuppression`)
+//     is ported as a real bitfield scan, but the current abilityHooks.json
+//     snapshot has zero abilities with that bitfield set, so the loop is
+//     live code that never fires on this data -- not dead code by
+//     construction, just empty by data, same distinction MOLD_BREAKABLE_
+//     ABILITIES' own doc draws.
 
 import type { BattleState, BattlerState } from '../state'
 import {
@@ -65,6 +127,10 @@ import {
   STATUS1_POISON_ANY,
   STATUS1_ANY,
   STATUS1_FREEZE,
+  STATUS1_BURN,
+  STATUS1_PARALYSIS,
+  STATUS1_FROSTBITE,
+  STATUS1_BLEED,
   STATUS2_SUBSTITUTE,
   STATUS2_NIGHTMARE,
   STATUS2_CURSED,
@@ -72,6 +138,10 @@ import {
   STATUS2_WRAPPED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_RECHARGE,
+  STATUS2_TORMENT,
+  STATUS2_TRANSFORMED,
+  STATUS2_DESTINY_BOND,
+  STATUS2_INFATUATION,
   STATUS3_LEECHSEED,
   STATUS3_PERISH_SONG,
   STATUS3_ON_AIR,
@@ -80,6 +150,17 @@ import {
   STATUS3_PHANTOM_FORCE,
   STATUS3_ROOTED,
   STATUS3_CHARGED_UP,
+  STATUS3_AQUA_RING,
+  STATUS3_MAGNET_RISE,
+  STATUS3_POWER_TRICK,
+  STATUS3_IMPRISONED_OTHERS,
+  STATUS3_YAWN,
+  STATUS3_GASTRO_ACID,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_LASER_FOCUS,
+  STATUS3_TELEKINESIS,
+  STATUS3_SMACKED_DOWN,
+  STATUS3_EMBARGO,
   STATUS4_COMMANDED,
   STATUS4_FORESIGHT,
   SIDE_STATUS_LIGHTSCREEN,
@@ -89,14 +170,28 @@ import {
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_FUTUREATTACK,
+  SIDE_STATUS_HAZARDS_ANY,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TERRAIN_ANY,
   STATUS_FIELD_FAIRY_LOCK,
+  STATUS_FIELD_MUDSPORT,
+  STATUS_FIELD_WATERSPORT,
+  STATUS_FIELD_ION_DELUGE,
+  STATUS_FIELD_WONDER_ROOM,
+  STATUS_FIELD_MAGIC_ROOM,
+  STATUS_FIELD_TRICK_ROOM,
+  STATUS_FIELD_GRAVITY,
   WEATHER_PRIMAL_ANY,
   WEATHER_SUN_ANY,
   WEATHER_SUN_PRIMAL,
   WEATHER_RAIN_PRIMAL,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_FOG_ANY,
 } from '../constants'
@@ -104,12 +199,14 @@ import { battlerHasAbility } from '../../abilities/dispatch'
 import { computeIsAbsorbed, computeIsImmune } from '../../abilities/dispatchCalc'
 import { isMagicGuardProtected } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
-import { getWhoStrikesFirst } from '../turnOrder'
+import { getWhoStrikesFirst, getBattlerTotalSpeedStat, TOTAL_SPEED_FULL } from '../turnOrder'
 import { buildFieldFacts } from '../bridge'
-import { aiGetMoveEffectiveness, getHealthPercentage, isTargetingPartner } from './aiScorers'
+import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getHealthPercentage, getRecoilFraction, isTargetingPartner } from './aiScorers'
 import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
-import type { AiDamageDeps } from './aiCalcDamage'
+import { aiCalcDamage, type AiDamageDeps } from './aiCalcDamage'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
+import { applyStatStage } from '../../stats'
+import { idiv } from '../../fixed'
 
 type Result = { score: number; unmodelled: string[] }
 
@@ -532,70 +629,411 @@ function partnerMoveIsSameNoTarget(state: BattleState, battlerAtk: number): bool
   return isValidDoubleBattle(state, battlerAtk)
 }
 
-/**
- * PART2_EFFECTS -- every case label handled ONLY in part 2 (:1299 onward,
- * EFFECT_SANDSTORM through the function's closing brace at :2163). An
- * earlier revision of this set was hand-typed from partial reading and
- * covered barely a third of the real labels, with several names
- * (EFFECT_ENCORE_2, EFFECT_ROAR_2, EFFECT_FIRE_PLEDGE/WATER_PLEDGE/
- * GRASS_PLEDGE, EFFECT_RECOVER, EFFECT_JUDGMENT, EFFECT_TECHNO_BLAST,
- * EFFECT_MULTI_ATTACK) that never matched any real case label or moves.json
- * effect value at all -- caught by review, not by a test, which is why this
- * set is now extracted mechanically instead of transcribed by eye, and
- * pinned by an oracle test in aiCheckBadMove.test.ts.
+// ---------------------------------------------------------------------------
+// Part 2 (cycle17) helpers -- battle_ai_util.c / battle_util.c / battle_script_
+// commands.c functions AI_CheckBadMove's :1299-2163 range calls that part 1
+// did not already need. Grouped in C source order of first use, not
+// alphabetically, so a reader can match this section against the switch below.
+// ---------------------------------------------------------------------------
+
+/** PartnerMoveEffectIsWeather/PartnerMoveEffectIsTerrain/PartnerMoveIs/
+ * PartnerMoveIsSameAsAttacker, battle_ai_util.c:2325-2364 -- all four start
+ * `if (!IsDoubleBattle()) return FALSE;`, so all four always return false on
+ * this singles-only build, same as part 1's `partnerHasSameMoveEffectWithoutTarget`
+ * family. Ported as real (if unreachable) calls through `isValidDoubleBattle`
+ * for the same symmetry reason those are. */
+function partnerMoveEffectIsWeather(state: BattleState, battlerAtk: number): boolean {
+  return isValidDoubleBattle(state, battlerAtk)
+}
+function partnerMoveEffectIsTerrain(state: BattleState, battlerAtk: number): boolean {
+  return isValidDoubleBattle(state, battlerAtk)
+}
+function partnerMoveIs(state: BattleState, battlerAtk: number): boolean {
+  return isValidDoubleBattle(state, battlerAtk)
+}
+function partnerMoveIsSameAsAttacker(state: BattleState, battlerAtk: number): boolean {
+  return isValidDoubleBattle(state, battlerAtk)
+}
+
+/** AnyStatIsRaised, battle_ai_util.c:1313-1320. */
+function anyStatIsRaised(battler: BattlerState): boolean {
+  for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+    if (battler.mon.statStages[i] > 6 /* DEFAULT_STAT_STAGE */) return true
+  }
+  return false
+}
+
+/** CountPositiveStatStages / CountNegativeStatStages, battle_ai_util.c:1322-1338. */
+function countPositiveStatStages(battler: BattlerState): number {
+  let count = 0
+  for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (battler.mon.statStages[i] > 6) count++
+  return count
+}
+function countNegativeStatStages(battler: BattlerState): number {
+  let count = 0
+  for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (battler.mon.statStages[i] < 6) count++
+  return count
+}
+
+/** IsStickyHold, battle_util.c:9329-9333 -- `BattlerHasAbility(battler, X,
+ * TRUE)` on the DEFENDER, so it goes through `defAbility` (real Mold-Breaker
+ * gating; both Sticky Hold and Supersweet Syrup are in MOLD_BREAKABLE_ABILITIES). */
+function isStickyHold(defender: BattlerState, attackerHasMoldBreaker: boolean): boolean {
+  return defAbility(defender, 'ABILITY_STICKY_HOLD', attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SUPERSWEET_SYRUP', attackerHasMoldBreaker)
+}
+
+/** AI_CanBurn/CanBeBurned, battle_ai_util.c:2079-2084 + battle_util.c:5061-5069.
+ * IsMyceliumMightActive and IsStatusImmune(CHECK_BURN) both need ability-hook
+ * wiring this batch does not have -- same gap shape as part 1's canBePoisoned/
+ * canSleep/canBeParalyzedBase/canBeConfused. */
+function aiCanBurn(defender: BattlerState, unmodelled: string[]): boolean {
+  if (hasFlag(defender.mon.status1, STATUS1_ANY)) return false
+  if (isBattlerOfType(defender, 'FIRE')) return false
+  unmodelled.push('AI_CanBurn/CanBeBurned: IsMyceliumMightActive is gapped (no current-move-ignores-immunity tracking) and IsStatusImmune(battlerDef, CHECK_BURN) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
+  return true
+}
+
+/** AI_CanGiveFrostbite/CanGetFrostbite, battle_ai_util.c:2086-2093 +
+ * battle_util.c:5096-5104. `gVolatileStructs[battlerId].iceStatue` (a
+ * Crystallize-family volatile) has no port anywhere in this sim -- treated as
+ * false (the common case), gapped only when the defender is actually Ice-type
+ * (the only way the missing exemption could matter). Effectiveness/Substitute
+ * are re-checked the same way part 1's aiCanParalyze does for its own status. */
+function aiCanGiveFrostbite(state: BattleState, attacker: BattlerState, defender: BattlerState, moveId: string, deps: AiDamageDeps): { can: boolean; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  if (hasFlag(defender.mon.status1, STATUS1_ANY)) return { can: false, unmodelled }
+  if (isBattlerOfType(defender, 'ICE')) {
+    unmodelled.push('AI_CanGiveFrostbite/CanGetFrostbite: gVolatileStructs[battlerDef].iceStatue has no port anywhere in this sim; treated as false, so an Ice-type defender is always immune here')
+    return { can: false, unmodelled }
+  }
+  unmodelled.push('AI_CanGiveFrostbite/CanGetFrostbite: IsStatusImmune(battlerDef, CHECK_FROSTBITE) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
+  const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, defender.id, deps)
+  unmodelled.push(...effResult.unmodelled)
+  if (effResult.effectiveness === 0) return { can: false, unmodelled }
+  if (doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
+  return { can: true, unmodelled }
+}
+
+/** AI_CanCauseBleed/CanBleed, battle_ai_util.c:2095-2102 + battle_util.c:5106-5114. */
+function aiCanCauseBleed(state: BattleState, attacker: BattlerState, defender: BattlerState, moveId: string, deps: AiDamageDeps): { can: boolean; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  if (hasFlag(defender.mon.status1, STATUS1_ANY)) return { can: false, unmodelled }
+  unmodelled.push('AI_CanCauseBleed/CanBleed: IsStatusImmune(battlerDef, CHECK_BLEED) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
+  if (isBattlerOfType(defender, 'ROCK') || isBattlerOfType(defender, 'GHOST')) return { can: false, unmodelled }
+  const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, defender.id, deps)
+  unmodelled.push(...effResult.unmodelled)
+  if (effResult.effectiveness === 0) return { can: false, unmodelled }
+  if (doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
+  return { can: true, unmodelled }
+}
+
+/** AI_CanBeInfatuated/CanInfatuate, battle_ai_util.c:2104 + battle_util.c:5135-5143. */
+function canInfatuate(attacker: BattlerState, defender: BattlerState, unmodelled: string[]): boolean {
+  if (hasFlag(defender.mon.status2, STATUS2_INFATUATION)) return false
+  if (attacker.id === defender.id) return false
+  unmodelled.push('AI_CanBeInfatuated/CanInfatuate: IsAbilityStatusProtected(battlerDef, CHECK_INFATUATE) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
+  return true
+}
+
+/** Every ability whose abilityHooks.json marks `persistent` or `unsuppressable`
+ * -- IsPersistentOrUnsuppressableAbility, battle_util.c:4790
+ * (`gAbilities[ability].unsuppressable || gAbilities[ability].persistent`).
+ * Feeds IsRolePlayBannedAbility(Atk)/IsWorrySeedBannedAbility/
+ * IsEntrainmentBannedAbilityAttacker/IsEntrainmentTargetOrSimpleBeamBannedAbility
+ * below -- every one of those is this same predicate plus (for four of them) a
+ * short literal extra-abilities array taken straight from the C's own static
+ * tables. Pinned by an oracle test in aiCheckBadMove.test.ts.
  *
- * Extraction (run from the repo root, against the pinned eliteredux-source
- * checkout): `awk 'NR>=1299 && NR<=2163' pipeline/.upstream/eliteredux-source/
- * src/battle_ai_main.c | grep -o "case EFFECT_[A-Za-z0-9_]*" | sed 's/case //'
- * | sort -u` -- 147 distinct labels, exactly matching this set's size
- * (asserted by aiCheckBadMove.test.ts).
- */
-export const PART2_EFFECTS = new Set([
-  'EFFECT_ABSORB', 'EFFECT_AFTER_YOU', 'EFFECT_AQUA_RING', 'EFFECT_AROMATIC_MIST', 'EFFECT_ASSIST', 'EFFECT_ATTRACT',
-  'EFFECT_BATON_PASS', 'EFFECT_BEAK_BLAST', 'EFFECT_BELCH', 'EFFECT_BELLY_DRUM', 'EFFECT_BESTOW', 'EFFECT_BIDE',
-  'EFFECT_BURN_UP', 'EFFECT_CAMOUFLAGE', 'EFFECT_CLANGOROUS_SOUL', 'EFFECT_CONVERSION', 'EFFECT_COPYCAT', 'EFFECT_CORE_ENFORCER',
-  'EFFECT_DEFOG', 'EFFECT_DESTINY_BOND', 'EFFECT_DO_NOTHING', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_ELECTRIFY', 'EFFECT_EMBARGO',
-  'EFFECT_ENDEAVOR', 'EFFECT_ENDURE', 'EFFECT_ENTRAINMENT', 'EFFECT_ERUPTION', 'EFFECT_EXTREME_EVOBOOST', 'EFFECT_FAIRY_LOCK',
-  'EFFECT_FAKE_OUT', 'EFFECT_FALSE_SWIPE', 'EFFECT_FINAL_GAMBIT', 'EFFECT_FLAIL', 'EFFECT_FLING', 'EFFECT_FLOWER_SHIELD',
-  'EFFECT_FOLLOW_ME', 'EFFECT_FUTURE_SIGHT', 'EFFECT_GASTRO_ACID', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_GRAVITY', 'EFFECT_GUARD_SPLIT',
-  'EFFECT_GUARD_SWAP', 'EFFECT_HAIL', 'EFFECT_HEAL_BELL', 'EFFECT_HEAL_BLOCK', 'EFFECT_HEALING_WISH', 'EFFECT_HEAL_PULSE',
-  'EFFECT_HEART_SWAP', 'EFFECT_HELPING_HAND', 'EFFECT_HIT_ENEMY_HEAL_ALLY', 'EFFECT_HIT_ESCAPE', 'EFFECT_HIT_PREVENT_ESCAPE',
-  'EFFECT_HIT_SWITCH_TARGET', 'EFFECT_IMPRISON', 'EFFECT_INGRAIN', 'EFFECT_INSTRUCT', 'EFFECT_ION_DELUGE', 'EFFECT_KNOCK_OFF',
-  'EFFECT_LASER_FOCUS', 'EFFECT_LAST_RESORT', 'EFFECT_LOCK_ON', 'EFFECT_LUCKY_CHANT', 'EFFECT_MAGIC_COAT', 'EFFECT_MAGIC_ROOM',
-  'EFFECT_MAGNET_RISE', 'EFFECT_ME_FIRST', 'EFFECT_MEMENTO', 'EFFECT_METRONOME', 'EFFECT_MIMIC', 'EFFECT_MIRROR_MOVE',
-  'EFFECT_MISTY_TERRAIN', 'EFFECT_MOONLIGHT', 'EFFECT_MORNING_SUN', 'EFFECT_MUD_SPORT', 'EFFECT_NATURAL_GIFT',
-  'EFFECT_NATURE_POWER', 'EFFECT_NO_RETREAT', 'EFFECT_PAIN_SPLIT', 'EFFECT_PARTING_SHOT', 'EFFECT_PLASMA_FISTS',
-  'EFFECT_PLEDGE', 'EFFECT_POLTERGEIST', 'EFFECT_POWDER', 'EFFECT_POWER_SPLIT', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK',
-  'EFFECT_PROTECT', 'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_PSYCHO_SHIFT', 'EFFECT_PSYCH_UP', 'EFFECT_PURIFY', 'EFFECT_QUASH',
-  'EFFECT_RAIN_DANCE', 'EFFECT_RAPID_SPIN', 'EFFECT_RECHARGE', 'EFFECT_RECOIL_IF_MISS', 'EFFECT_RECYCLE', 'EFFECT_REFRESH',
-  'EFFECT_REST', 'EFFECT_RESTORE_HP', 'EFFECT_ROLE_PLAY', 'EFFECT_ROOST', 'EFFECT_SAFEGUARD', 'EFFECT_SANDSTORM',
-  'EFFECT_SEMI_INVULNERABLE', 'EFFECT_SHELL_TRAP', 'EFFECT_SIMPLE_BEAM', 'EFFECT_SKETCH', 'EFFECT_SKILL_SWAP',
-  'EFFECT_SKY_DROP', 'EFFECT_SNATCH', 'EFFECT_SOAK', 'EFFECT_SOFTBOILED', 'EFFECT_SOLARBEAM', 'EFFECT_SPECTRAL_THIEF',
-  'EFFECT_SPEED_SWAP', 'EFFECT_SPITE', 'EFFECT_STOCKPILE', 'EFFECT_STRENGTH_SAP', 'EFFECT_SUCKER_PUNCH', 'EFFECT_SUNNY_DAY',
-  'EFFECT_SUPER_FANG', 'EFFECT_SWALLOW', 'EFFECT_SWITCH_ARGUMENT', 'EFFECT_SYNCHRONOISE', 'EFFECT_SYNTHESIS', 'EFFECT_TAILWIND',
-  'EFFECT_TAUNT', 'EFFECT_TEETER_DANCE', 'EFFECT_TELEKINESIS', 'EFFECT_THIRD_TYPE', 'EFFECT_THROAT_CHOP', 'EFFECT_TOPSY_TURVY',
-  'EFFECT_TORMENT', 'EFFECT_TOXIC_TERRAIN', 'EFFECT_TRANSFORM', 'EFFECT_TRICK', 'EFFECT_TRICK_ROOM', 'EFFECT_TWO_TURNS_ATTACK',
-  'EFFECT_VITAL_THROW', 'EFFECT_WATER_SPORT', 'EFFECT_WILL_O_WISP', 'EFFECT_WISH', 'EFFECT_WONDER_ROOM', 'EFFECT_WORRY_SEED',
-  'EFFECT_YAWN',
+ * Extraction: `python3 -c "import json; d=json.load(open('data/v2.65beta/
+ * abilityHooks.json')); b=lambda v:v.get('bitfields',{}); print(sorted(k for
+ * k,v in d.items() if b(v).get('persistent') or b(v).get('unsuppressable')))"`
+ * -- 47 entries. */
+export const PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES: readonly string[] = [
+  'ABILITY_ANTICIPATION', 'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER', 'ABILITY_BACKUP_POWER', 'ABILITY_BATTLE_BOND',
+  'ABILITY_BLOOD_STAIN', 'ABILITY_BLOOD_STIGMA', 'ABILITY_CHEATING_DEATH', 'ABILITY_CLUELESS', 'ABILITY_COMATOSE',
+  'ABILITY_COMMANDER', 'ABILITY_COWARD', 'ABILITY_CROWNED_KING', 'ABILITY_DISGUISE', 'ABILITY_DNA_SCRAMBLE',
+  'ABILITY_DRAKELP_HEAD', 'ABILITY_DREAMSCAPE', 'ABILITY_DUAL_SHADOW', 'ABILITY_EJECT_PACK_ABILITY', 'ABILITY_ENERGIZED',
+  'ABILITY_ETERNAL_BLESSING', 'ABILITY_FLAMMABLE_COAT', 'ABILITY_FLOWER_GIFT', 'ABILITY_FORECAST', 'ABILITY_GALLANTRY',
+  'ABILITY_GENERATOR', 'ABILITY_GULP_MISSILE', 'ABILITY_HUNGER_SWITCH', 'ABILITY_ICE_FACE', 'ABILITY_JUMP_SCARE',
+  'ABILITY_LOCUST_SWARM', 'ABILITY_MULTITYPE', 'ABILITY_NEUTRALIZING_GAS', 'ABILITY_PATCHWORK', 'ABILITY_POWER_CONSTRUCT',
+  'ABILITY_POWER_OUTAGE', 'ABILITY_RECURRING_NIGHTMARE', 'ABILITY_REVELATION', 'ABILITY_RKS_SYSTEM', 'ABILITY_SCHOOLING',
+  'ABILITY_SHIELDS_DOWN', 'ABILITY_SOOTHSAYER', 'ABILITY_STALWART', 'ABILITY_STANCE_CHANGE', 'ABILITY_WISHMAKER',
+  'ABILITY_ZEN_MODE', 'ABILITY_ZERO_TO_HERO',
+]
+const PERSISTENT_OR_UNSUPPRESSABLE_SET = new Set(PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES)
+
+/** IsRolePlayBannedAbilityAtk, battle_util.c:8422-8425. */
+function isRolePlayBannedAbilityAtk(ability: string | null): boolean {
+  return !!ability && PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability)
+}
+/** IsRolePlayBannedAbility, battle_util.c:8428-8436 -- `sRolePlayBannedAbilities`
+ * (:90-95) transcribed literally (4 entries, unchanged from vanilla; Prismatic
+ * Fur is this game's own addition). `!ability` (ABILITY_NONE) is also banned. */
+const ROLE_PLAY_BANNED_EXTRA = new Set(['ABILITY_TRACE', 'ABILITY_WONDER_GUARD', 'ABILITY_RECEIVER', 'ABILITY_PRISMATIC_FUR'])
+function isRolePlayBannedAbility(ability: string | null): boolean {
+  if (!ability || ability === 'ABILITY_NONE') return true
+  return PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ROLE_PLAY_BANNED_EXTRA.has(ability)
+}
+/** IsWorrySeedBannedAbility, battle_util.c:8438-8441. */
+function isWorrySeedBannedAbility(ability: string | null): boolean {
+  return !!ability && PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability)
+}
+/** IsEntrainmentBannedAbilityAttacker, battle_util.c:8448-8455 --
+ * `sSkillSwapBannedAbilities` (:85-88) transcribed literally. */
+const SKILL_SWAP_BANNED = new Set(['ABILITY_WONDER_GUARD', 'ABILITY_PRISMATIC_FUR'])
+function isEntrainmentBannedAbilityAttacker(ability: string | null): boolean {
+  return !!ability && (PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || SKILL_SWAP_BANNED.has(ability))
+}
+/** IsEntrainmentTargetOrSimpleBeamBannedAbility, battle_util.c:8457-8464 --
+ * `sEntrainmentTargetSimpleBeamBannedAbilities` (:97-99) is just Truant. */
+function isEntrainmentTargetOrSimpleBeamBannedAbility(ability: string | null): boolean {
+  return !!ability && (PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ability === 'ABILITY_TRUANT')
+}
+
+/** GetBattlerAbility, battle_util.c:9327 -- the primary ability SLOT only
+ * (`abilities[0]`), unlike `defAbility`/`selfAbility`'s innate-inclusive
+ * scans. `ABILITY_NONE` for a battler with no ability set. */
+function battlerAbility(battler: BattlerState): string {
+  return battler.mon.abilities.ability ?? 'ABILITY_NONE'
+}
+
+/** DoesBattlerHaveAbilityShield, battle_util.c:6539-6545. The
+ * `blocksAbilitySuppression` bitfield scan is real (not hardcoded false) but
+ * the current abilityHooks.json snapshot has zero abilities carrying it, so
+ * this loop never actually fires on this data -- see this module's header. */
+const BLOCKS_ABILITY_SUPPRESSION_ABILITIES: readonly string[] = []
+function doesBattlerHaveAbilityShield(battler: BattlerState, deps: AiDamageDeps): boolean {
+  const abilitySlots = [battler.mon.abilities.ability, ...battler.mon.abilities.innates].filter((x): x is string => !!x)
+  if (abilitySlots.some((id) => BLOCKS_ABILITY_SUPPRESSION_ABILITIES.includes(id))) return true
+  if (getBattlerHoldEffect(battler, deps) !== 'HOLD_EFFECT_ABILITY_SHIELD') return false
+  return !hasFlag(battler.statuses3, STATUS3_EMBARGO)
+}
+
+/** IsInstructBannedMove / MoveRequiresRecharging / MoveCallsOtherMove,
+ * battle_ai_util.c:392-419 (`sInstructBannedMoves`/`sRechargeMoves`/
+ * `sOtherMoveCallingMoves`), transcribed literally. */
+const INSTRUCT_BANNED_MOVES = new Set([
+  'MOVE_INSTRUCT', 'MOVE_BIDE', 'MOVE_FOCUS_PUNCH', 'MOVE_BEAK_BLAST', 'MOVE_SHELL_TRAP', 'MOVE_SKETCH', 'MOVE_TRANSFORM',
+  'MOVE_MIMIC', 'MOVE_KINGS_SHIELD', 'MOVE_STRUGGLE', 'MOVE_BOUNCE', 'MOVE_DIG', 'MOVE_DIVE', 'MOVE_FLY',
+  'MOVE_FREEZE_SHOCK', 'MOVE_GEOMANCY', 'MOVE_ICE_BURN', 'MOVE_PHANTOM_FORCE', 'MOVE_RAZOR_WIND', 'MOVE_SHADOW_FORCE', 'MOVE_SKULL_BASH',
+  'MOVE_SKY_ATTACK', 'MOVE_SKY_DROP', 'MOVE_SOLAR_BEAM', 'MOVE_SOLAR_BLADE',
 ])
-// EFFECT_HIT/EFFECT_POISON_HIT/EFFECT_BURN_HIT/EFFECT_PARALYZE_HIT/
-// EFFECT_CONFUSE_HIT fall through to `default` (the damage path, :798-804),
-// never part 2 -- excluded above on purpose. Every OTHER moves.json effect
-// value that is neither a part-1 case label (handled explicitly in the
-// switch below) nor in this set is, by construction, not a case label
-// anywhere in AI_CheckBadMove's switch at all (verified: the full :488-2163
-// label extraction has exactly 246 distinct entries = this set's 147 plus
-// the 99 part-1 labels, with zero overlap) -- so it legitimately falls to
-// `default` in the real C too, the same as EFFECT_HIT. aiCheckBadMove.test.ts
-// asserts this for a sample of such effects (e.g. EFFECT_HEX, EFFECT_PAYBACK)
-// to distinguish "correctly silent" from "incorrectly silent".
+const RECHARGE_MOVES = new Set([
+  'MOVE_HYPER_BEAM', 'MOVE_BLAST_BURN', 'MOVE_HYDRO_CANNON', 'MOVE_FRENZY_PLANT', 'MOVE_GIGA_IMPACT',
+  'MOVE_ROCK_WRECKER', 'MOVE_ROAR_OF_TIME', 'MOVE_PRISMATIC_LASER', 'MOVE_METEOR_ASSAULT', 'MOVE_ETERNABEAM',
+])
+const OTHER_MOVE_CALLING_MOVES = new Set(['MOVE_ASSIST', 'MOVE_COPYCAT', 'MOVE_ME_FIRST', 'MOVE_METRONOME', 'MOVE_MIRROR_MOVE', 'MOVE_NATURE_POWER', 'MOVE_SLEEP_TALK'])
+function isInstructBannedMove(moveId: string | null): boolean {
+  return !!moveId && INSTRUCT_BANNED_MOVES.has(moveId)
+}
+function moveRequiresRecharging(moveId: string | null): boolean {
+  return !!moveId && RECHARGE_MOVES.has(moveId)
+}
+function moveCallsOtherMove(moveId: string | null): boolean {
+  return !!moveId && OTHER_MOVE_CALLING_MOVES.has(moveId)
+}
+
+/** IsHazardMoveEffect, battle_ai_util.c:1118-1127 -- EFFECT_DEFOG's own call
+ * site (:1677) is inside the isDoubleBattle-gated "partner is about to set up
+ * hazards" pre-empt, which is dead code in singles (this module's header),
+ * so this helper has no live call site here; kept undefined intentionally
+ * (not ported as unreachable dead code, unlike the isValidDoubleBattle-gated
+ * helpers, since there is nothing here that would ever call it). */
+
+/** TERRAIN_HAS_EFFECT, include/battle_util.h:47 -- `!IsAbilityOnField(ABILITY_CLUELESS)`. */
+function terrainHasEffect(state: BattleState): boolean {
+  return !isAbilityOnField(state, 'ABILITY_CLUELESS')
+}
+/** GetCurrentTerrain, battle_util.c:8665-8669. Returns one of the
+ * STATUS_FIELD_*_TERRAIN bit values, or 0 for no terrain / Clueless on field. */
+function getCurrentTerrain(state: BattleState): number {
+  if (!terrainHasEffect(state)) return 0
+  return state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+}
+/** GetNaturePowerMove, battle_script_commands.c:11634-11645. The
+ * `sNaturePowerMoves[gBattleTerrain]` map-location fallback (used when no
+ * battle terrain is active) needs overworld-map terrain data this sim has no
+ * concept of -- gapped, defaulting to the C's own MOVE_TRI_ATTACK fallback
+ * (its `sNaturePowerMoves[gBattleTerrain] == MOVE_NONE` branch), rather than
+ * the specific per-location move the C would actually pick. */
+function getNaturePowerMove(state: BattleState, unmodelled: string[]): string {
+  const terrain = getCurrentTerrain(state)
+  if (terrain === STATUS_FIELD_MISTY_TERRAIN) return 'MOVE_MOONBLAST'
+  if (terrain === STATUS_FIELD_ELECTRIC_TERRAIN) return 'MOVE_THUNDERBOLT'
+  if (terrain === STATUS_FIELD_GRASSY_TERRAIN) return 'MOVE_ENERGY_BALL'
+  if (terrain === STATUS_FIELD_PSYCHIC_TERRAIN) return 'MOVE_PSYCHIC'
+  unmodelled.push('GetNaturePowerMove: sNaturePowerMoves[gBattleTerrain] (the overworld-map-location fallback) has no port -- this sim has no map-terrain concept; defaulting to MOVE_TRI_ATTACK, the C\'s own fallback for an unmapped location')
+  return 'MOVE_TRI_ATTACK'
+}
+
+/** IsGravityActive, battle_util.c:8689-8695. */
+function isGravityActive(state: BattleState): boolean {
+  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
+}
+/** isMagicRoomActive, battle_util.c:8698-8704 (same shape as IsGravityActive). */
+function isMagicRoomActive(state: BattleState): boolean {
+  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
+}
+/** IsTrickRoomActive, battle_util.c:8671-8677 -- `getMonotypeChampType() ==
+ * TYPE_FLYING/TYPE_NORMAL` (a Monotype-challenge-format concept) is not
+ * modelled anywhere in this codebase; only the plain field-status flag is
+ * checked (this module's header). */
+function isTrickRoomActive(state: BattleState): boolean {
+  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+}
+/** GetBattlerSideSpeedAverage, battle_ai_util.c:2181-2196 -- in singles
+ * (`IsDoubleBattle()` false) this is just the battler's own fully-resolved
+ * speed stat (numBattlersAlive always 1), so `getBattlerTotalSpeedStat` with
+ * TOTAL_SPEED_FULL and no move context is reused directly rather than
+ * re-deriving the averaging (which is dead code on this build anyway). */
+function getBattlerSideSpeedAverage(state: BattleState, battlerId: number, deps: AiDamageDeps): number {
+  return getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+}
+
+/** CanFling, battle_util.c:8414-8420. `IsItemNegated` (Embargo/Magic Room/
+ * Klutz suppression of fling-eligibility) has no port -- treated as not
+ * negated (the common case), gapped by name. The species-locked-item
+ * exclusions inside CanBattlerGetOrLoseItem (:8250-8270 -- Enigma Berry,
+ * Primal Orb, Mega Stone, and the three species+hold-effect pairs) ARE
+ * ported since they are three cheap direct comparisons, not a scan. */
+function canBattlerGetOrLoseItemApprox(battler: BattlerState, itemId: string, deps: AiDamageDeps): boolean {
+  if (itemId === 'ITEM_ENIGMA_BERRY') return false
+  const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
+  if (holdEffect === 'HOLD_EFFECT_PRIMAL_ORB' || holdEffect === 'HOLD_EFFECT_MEGA_STONE') return false
+  const species = battler.mon.speciesId
+  if (species.startsWith('SPECIES_GENESECT') && holdEffect === 'HOLD_EFFECT_DRIVE') return false
+  if (species.startsWith('SPECIES_SILVALLY') && holdEffect === 'HOLD_EFFECT_MEMORY') return false
+  if (species.startsWith('SPECIES_ARCEUS') && holdEffect === 'HOLD_EFFECT_PLATE') return false
+  return true
+}
+function canFling(attacker: BattlerState, deps: AiDamageDeps, unmodelled: string[]): boolean {
+  const itemId = attacker.mon.itemId
+  if (!itemId) return false
+  unmodelled.push('CanFling: IsItemNegated (Embargo/Magic Room/Klutz suppression) has no port; treated as not negated')
+  return canBattlerGetOrLoseItemApprox(attacker, itemId, deps)
+}
+
+/** CanCamouflage, battle_script_commands.c:12313-12316 -- `sTerrainToType[gBattleTerrain]`
+ * is the SAME overworld-map-location concept GetNaturePowerMove's fallback
+ * needs and this sim has no port for; approximated as "always able to
+ * Camouflage" (the C's own default when no terrain-changing type applies),
+ * gapped by name. */
+function canCamouflage(unmodelled: string[]): boolean {
+  unmodelled.push("CanCamouflage: sTerrainToType[gBattleTerrain] (overworld-map-location type) has no port; treated as the map's type never matching the attacker's own, i.e. Camouflage is always usable")
+  return true
+}
+
+/** CanUseLastResort, battle_script_commands.c:6481-6489 -- `usedMoves` is a
+ * per-slot reveal BITMASK on `gVolatileStructs`, distinct from
+ * BattleHistoryState's own `usedMoves` (see state.ts's own doc). Checked via
+ * `battler.volatiles.usedMoves` bit `1 << i`. */
+function canUseLastResort(battler: BattlerState): boolean {
+  for (let i = 0; i < battler.mon.moves.length; i++) {
+    const moveId = battler.mon.moves[i]
+    if (!moveId) continue
+    if (moveId === 'MOVE_LAST_RESORT') continue
+    if (hasFlag(battler.volatiles.usedMoves, 1 << i)) continue
+    return false
+  }
+  return true
+}
+
+/** IsTelekinesisBannedSpecies, battle_script_commands.c:13007-13022
+ * (`sTelekinesisBanList`), restricted to the base-game entries -- the
+ * `#ifdef POKEMON_EXPANSION` entries (Alolan Diglett/Dugtrio, Sandygast/
+ * Palossand, Mega Gengar) are compiled in on this build (Elite Redux is a
+ * post-Gen-7-content hack), so all eight are included. */
+const TELEKINESIS_BANNED_SPECIES = new Set([
+  'SPECIES_DIGLETT', 'SPECIES_DUGTRIO', 'SPECIES_DIGLETT_ALOLAN', 'SPECIES_DUGTRIO_ALOLAN', 'SPECIES_SANDYGAST', 'SPECIES_PALOSSAND', 'SPECIES_GENGAR_MEGA',
+])
+function isTelekinesisBannedSpecies(speciesId: string): boolean {
+  return TELEKINESIS_BANNED_SPECIES.has(speciesId)
+}
+
+/** Every ability whose abilityHooks.json marks `noRecoil` -- BlocksRecoil,
+ * battle_ai_main.c:476-479 (`RETURN_ABILITY_IF_FLAG(battler, FALSE, noRecoil)`,
+ * checkMoldBreaker=FALSE, so `selfAbility` -- never suppressed). Pinned by an
+ * oracle test. Extraction: same query as PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES
+ * with `bitfields.noRecoil` -- 3 entries. */
+export const NO_RECOIL_ABILITIES: readonly string[] = ['ABILITY_BRUTEFORCE', 'ABILITY_ROCK_HEAD', 'ABILITY_STEEL_BARREL']
+/** Every ability whose abilityHooks.json marks `halfRecoil` -- ReducesRecoil,
+ * battle_ai_main.c:481-484. Extraction: `bitfields.halfRecoil` -- 2 entries. */
+export const HALF_RECOIL_ABILITIES: readonly string[] = ['ABILITY_DAREDEVIL', 'ABILITY_LIMBER']
+function blocksRecoil(battler: BattlerState): boolean {
+  return NO_RECOIL_ABILITIES.some((id) => selfAbility(battler, id))
+}
+function reducesRecoil(battler: BattlerState): boolean {
+  return HALF_RECOIL_ABILITIES.some((id) => selfAbility(battler, id))
+}
+
+/** CanAIFaintTarget, battle_ai_util.c:972-989, called with numHits=0 at this
+ * batch's one call site (the recoil tail). `AI_DATA->moveLimitations` is not
+ * modelled (nothing is limited), same precedent aiScorers.ts's own
+ * `canTargetFaintAi` doc already establishes for the identical dependency --
+ * this is the mirror-image helper (the AI's OWN moves against the target,
+ * where canTargetFaintAi checks the target's moves against the AI). */
+function canAiFaintTargetOwnMoves(state: BattleState, battlerAtk: number, battlerDef: number, deps: AiDamageDeps): { canFaint: boolean; unmodelled: string[] } {
+  const attackerMon = state.battlers[battlerAtk]?.mon
+  const defenderMon = state.battlers[battlerDef]?.mon
+  if (!attackerMon || !defenderMon) return { canFaint: false, unmodelled: [] }
+  const unmodelled: string[] = []
+  for (const moveId of attackerMon.moves) {
+    if (!moveId) continue
+    const { dmg, unmodelled: u } = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
+    unmodelled.push(...u)
+    if (defenderMon.hp <= dmg) return { canFaint: true, unmodelled }
+  }
+  return { canFaint: false, unmodelled }
+}
+/** ShouldUseRecoilMove, battle_ai_util.c:2199-2210. */
+function shouldUseRecoilMove(state: BattleState, battlerAtk: number, battlerDef: number, recoilDmg: number, deps: AiDamageDeps): { should: boolean; unmodelled: string[] } {
+  const atkHp = state.battlers[battlerAtk]?.mon.hp ?? 0
+  const defHp = state.battlers[battlerDef]?.mon.hp ?? 0
+  if (recoilDmg >= atkHp && countUsablePartyMons(state, battlerDef) !== 0) {
+    if (recoilDmg >= defHp) {
+      const faintCheck = canAiFaintTargetOwnMoves(state, battlerAtk, battlerDef, deps)
+      if (!faintCheck.canFaint) return { should: false, unmodelled: faintCheck.unmodelled }
+      return { should: true, unmodelled: faintCheck.unmodelled }
+    }
+    return { should: false, unmodelled: [] }
+  }
+  return { should: true, unmodelled: [] }
+}
+
+/** `ItemId_GetPocket(item) != POCKET_BERRIES`, reused from part 1's
+ * EFFECT_STUFF_CHEEKS approximation (a berry-name substring check, not a
+ * real pocket lookup) for EFFECT_NATURAL_GIFT and EFFECT_BELCH. */
+function looksLikeBerry(itemId: string | null): boolean {
+  return !!itemId && itemId.includes('BERRY')
+}
+
+/** AtMaxHp, battle_ai_util.c:561-563. */
+function atMaxHp(battler: BattlerState): boolean {
+  return battler.mon.hp === battler.mon.maxHp
+}
+
+/** Applies a stat stage to a NON-speed stat, mirroring stats.ts's own
+ * `applyStatStage` (speed's own version, reused via `getBattlerTotalSpeedStat`
+ * for the swap/split/trick effects below that need the ATK/DEF/SPA/SPD
+ * CURRENT (stage-adjusted) value the C's `gBattleMons[...].attack` etc. field
+ * already carries, not `rawStats`'s pre-stage value). */
+function effectiveStat(mon: BattlerState['mon'], statKey: 'atk' | 'def' | 'spatk' | 'spdef', stage: number, statStageRatios: [number, number][]): number {
+  return applyStatStage(mon.rawStats[statKey], stage, statStageRatios)
+}
+
+/** Every ability whose abilityHooks.json marks `chloroplast` -- HasChloroplast,
+ * battle_util.c:9340-9343 (`RETURN_ABILITY_IF_FLAG(battler, FALSE, chloroplast)`).
+ * Extraction: same query as PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES with
+ * `bitfields.chloroplast` -- 3 entries. */
+export const CHLOROPLAST_ABILITIES: readonly string[] = ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE']
 
 /**
- * AI_CheckBadMove, battle_ai_main.c:488-1298. See this module's header for
- * scope and approximations. `moveIndex` is the caller's own slot 0-3, needed
- * for nothing in part 1 (part 2's EFFECT_HIDDEN_POWER-family cases would use
- * it) -- kept in the signature for symmetry with the DISPATCH table's Scorer
- * shape in aiPipeline.ts.
+ * AI_CheckBadMove, battle_ai_main.c:488-2164 (the full function, part 1 +
+ * part 2). See this module's header for scope and approximations. Neither
+ * part ever needs the caller's own move-slot index: no EFFECT_HIDDEN_POWER
+ * case label exists anywhere in this switch (Hidden Power's variable type is
+ * handled once, generically, by `moveType`/`VARIABLE_TYPE_EFFECTS` above),
+ * so there is nothing for a `moveIndex` parameter to do here.
  */
 export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps): Result {
   const unmodelled: string[] = []
@@ -817,12 +1255,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     }
   }
 
-  // :797-1298 -- move effects.
-  if (effect && PART2_EFFECTS.has(effect)) {
-    unmodelled.push(`AI_CheckBadMove: ${effect} is handled only in part 2 (battle_ai_main.c:1299+); not scored by this batch`)
-    return { score, unmodelled }
-  }
-
+  // :797-2149 -- move effects.
   switch (effect) {
     case 'EFFECT_SLEEP': {
       const r = canSleep(state, defender, deps)
@@ -1237,12 +1670,875 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       unmodelled.push("AI_CheckBadMove: IsSoundproof is narrowed to a plain ABILITY_SOUNDPROOF check on the named battler (no partner-side scan, since singles has no partner)")
       break
     }
+    // -------------------------------------------------------------------
+    // Part 2 (cycle17), battle_ai_main.c:1299-2149.
+    // -------------------------------------------------------------------
+    case 'EFFECT_SANDSTORM':
+      if (hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY | WEATHER_PRIMAL_ANY) || partnerMoveEffectIsWeather(state, battlerAtk)) score -= 8
+      break
+    case 'EFFECT_SUNNY_DAY':
+      if (hasFlag(state.field.weather, WEATHER_SUN_ANY | WEATHER_PRIMAL_ANY) || partnerMoveEffectIsWeather(state, battlerAtk)) score -= 8
+      break
+    case 'EFFECT_RAIN_DANCE':
+      if (hasFlag(state.field.weather, WEATHER_RAIN_ANY | WEATHER_PRIMAL_ANY) || partnerMoveEffectIsWeather(state, battlerAtk)) score -= 8
+      break
+    case 'EFFECT_HAIL':
+      if (hasFlag(state.field.weather, WEATHER_HAIL_ANY | WEATHER_PRIMAL_ANY) || partnerMoveEffectIsWeather(state, battlerAtk)) score -= 8
+      break
+    case 'EFFECT_ATTRACT':
+      if (!canInfatuate(attacker, defender, unmodelled)) score -= 10
+      break
+    case 'EFFECT_SAFEGUARD':
+      if (hasFlag(state.sides[battlerAtk & 1].statuses, SIDE_STATUS_SAFEGUARD) || partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_PARTING_SHOT':
+      if (countUsablePartyMons(state, battlerAtk) === 0) score -= 10
+      break
+    case 'EFFECT_BATON_PASS':
+      if (countUsablePartyMons(state, battlerAtk) === 0) {
+        score -= 10
+      } else if (
+        hasFlag(attacker.mon.status2, STATUS2_SUBSTITUTE) ||
+        hasFlag(attacker.statuses3, STATUS3_ROOTED | STATUS3_AQUA_RING | STATUS3_MAGNET_RISE | STATUS3_POWER_TRICK) ||
+        anyStatIsRaised(attacker)
+      ) {
+        // no score change -- matches the C's bare `break` here.
+      } else {
+        score -= 6
+      }
+      break
+    case 'EFFECT_HIT_ESCAPE':
+      break
+    case 'EFFECT_RAPID_SPIN':
+      if (hasFlag(attacker.mon.status2, STATUS2_WRAPPED) || hasFlag(attacker.statuses3, STATUS3_LEECHSEED)) {
+        // check damage/accuracy -- break, no change.
+      } else if (!hasFlag(state.sides[battlerAtk & 1].statuses, SIDE_STATUS_HAZARDS_ANY)) {
+        score -= 6
+      }
+      break
+    case 'EFFECT_BELLY_DRUM':
+      if (selfAbility(attacker, 'ABILITY_CONTRARY')) score -= 10
+      else if (getHealthPercentage(state, battlerAtk) <= 60) score -= 10
+      break
+    case 'EFFECT_FUTURE_SIGHT':
+      if (hasFlag(state.sides[battlerDef & 1].statuses, SIDE_STATUS_FUTUREATTACK) || hasFlag(state.sides[battlerAtk & 1].statuses, SIDE_STATUS_FUTUREATTACK)) {
+        score -= 12
+      } else {
+        score += 5
+      }
+      break
+    case 'EFFECT_SWITCH_ARGUMENT':
+      score -= 10
+      break
+    case 'EFFECT_FAKE_OUT': {
+      if (!attacker.volatiles.isFirstTurn) {
+        score -= 30
+      } else if (moveId === 'MOVE_FAKE_OUT') {
+        // filter out First Impression, which shares this effect.
+        const holdEffect = getBattlerHoldEffect(attacker, deps)
+        if (holdEffect === 'HOLD_EFFECT_CHOICE_BAND' || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS')) {
+          const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+          unmodelled.push(...faintCheck.unmodelled)
+          if (countUsablePartyMons(state, battlerDef) > 0 || !faintCheck.faints) {
+            if (countUsablePartyMons(state, battlerAtk) === 0) score -= 10
+          }
+        }
+      }
+      break
+    }
+    case 'EFFECT_STOCKPILE':
+      if (attacker.volatiles.stockpileCounter >= 3) score -= 10
+      break
+    case 'EFFECT_SWALLOW':
+      if (attacker.volatiles.stockpileCounter === 0) {
+        score -= 10
+      } else if (atMaxHp(attacker)) {
+        score -= 10
+      } else if (getHealthPercentage(state, battlerAtk) >= 80) {
+        score -= 5 // do it if nothing better
+      }
+      break
+    case 'EFFECT_TORMENT': {
+      if (hasFlag(defender.mon.status2, STATUS2_TORMENT) || doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
+        score -= 10
+        break
+      }
+      if (getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_MENTAL_HERB') {
+        unmodelled.push("AI_CheckBadMove: B_MENTAL_HERB >= GEN_5 is assumed true, same modern-gen-ruleset assumption as EFFECT_SUBSTITUTE's B_SOUND_SUBSTITUTE check")
+        score -= 6
+      }
+      break
+    }
+    case 'EFFECT_WILL_O_WISP':
+      if (!aiCanBurn(defender, unmodelled) || isMagicGuardProtected(state, defender)) score -= 10
+      break
+    case 'EFFECT_MEMENTO':
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
+        score -= 10
+      } else if (!shouldLowerStat(defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled) || !shouldLowerStat(defender, 4 /* STAT_SPATK */, atkMoldBreaker, unmodelled)) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_FOLLOW_ME':
+    case 'EFFECT_HELPING_HAND':
+      // isDoubleBattle is always false -- `!isDoubleBattle` (the C's first OR
+      // operand) is always true, so every other operand (partner alive,
+      // partner's move, partner switching) is unreachable; always -10.
+      score -= 10
+      break
+    case 'EFFECT_TRICK':
+    case 'EFFECT_KNOCK_OFF':
+      if (isStickyHold(defender, atkMoldBreaker)) score -= 10
+      break
+    case 'EFFECT_POLTERGEIST':
+      if (!defender.mon.itemId) score -= 20
+      break
+    case 'EFFECT_INGRAIN':
+      if (hasFlag(attacker.statuses3, STATUS3_ROOTED)) score -= 10
+      break
+    case 'EFFECT_AQUA_RING':
+      if (hasFlag(attacker.statuses3, STATUS3_AQUA_RING)) score -= 10
+      break
+    case 'EFFECT_RECYCLE':
+      unmodelled.push('AI_CheckBadMove: GetUsedHeldItem has no consumed-item tracking anywhere in state.ts; treated as ITEM_NONE, so this condition is always true regardless of the attacker\'s current item')
+      score -= 10
+      break
+    case 'EFFECT_IMPRISON':
+      if (hasFlag(attacker.statuses3, STATUS3_IMPRISONED_OTHERS)) score -= 10
+      break
+    case 'EFFECT_REFRESH':
+      if (!hasFlag(defender.mon.status1, STATUS1_POISON_ANY | STATUS1_BURN | STATUS1_PARALYSIS | STATUS1_FROSTBITE | STATUS1_BLEED)) score -= 10
+      break
+    case 'EFFECT_PSYCHO_SHIFT': {
+      if (hasFlag(attacker.mon.status1, STATUS1_POISON_ANY)) {
+        const r = canBePoisoned(state, attacker, defender, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.canPoison) score -= 10
+      } else if (hasFlag(attacker.mon.status1, STATUS1_BURN)) {
+        if (!aiCanBurn(defender, unmodelled)) score -= 10
+      } else if (hasFlag(attacker.mon.status1, STATUS1_FROSTBITE)) {
+        const r = aiCanGiveFrostbite(state, attacker, defender, moveId, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.can) score -= 10
+      } else if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS)) {
+        const r = aiCanParalyze(state, attacker, defender, moveId, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.canParalyze) score -= 10
+      } else if (hasFlag(attacker.mon.status1, STATUS1_SLEEP)) {
+        const r = canSleep(state, defender, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.canSleep) score -= 10
+      } else if (hasFlag(attacker.mon.status1, STATUS1_BLEED)) {
+        const r = aiCanCauseBleed(state, attacker, defender, moveId, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.can) score -= 10
+      } else {
+        score -= 10 // attacker has no status to transmit
+      }
+      break
+    }
+    case 'EFFECT_MUD_SPORT':
+      if (hasFlag(state.field.statuses, STATUS_FIELD_MUDSPORT) || partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_WATER_SPORT':
+      if (hasFlag(state.field.statuses, STATUS_FIELD_WATERSPORT) || partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_ABSORB':
+      if (defAbility(defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) score -= 6
+      break
+    case 'EFFECT_STRENGTH_SAP':
+      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score -= 10
+      else if (!shouldLowerStat(defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled)) score -= 10
+      break
+    case 'EFFECT_COPYCAT':
+    case 'EFFECT_MIRROR_MOVE': {
+      unmodelled.push("AI_CheckBadMove: AI_DATA->predictedMoves has no equivalent anywhere in state.ts; treated as MOVE_NONE (no prediction), so this recurses into AI_CheckBadMove with no move data -- the C's own MOVE_NONE default-path branch, not an invented substitute")
+      const r = aiCheckBadMove(state, battlerAtk, battlerDef, 'MOVE_NONE', score, deps)
+      return { score: r.score, unmodelled: [...unmodelled, ...r.unmodelled] }
+    }
+    case 'EFFECT_FLOWER_SHIELD':
+      // isDoubleBattle is always false -- the partner-of-attacker half is dead code.
+      if (!isBattlerOfType(attacker, 'GRASS')) score -= 10
+      break
+    case 'EFFECT_AROMATIC_MIST':
+      // isDoubleBattle is always false -- `!isDoubleBattle` (the C's first OR
+      // operand) is always true, so this always scores -10.
+      score -= 10
+      break
+    case 'EFFECT_BIDE': {
+      const defHasDamagingMove = defender.mon.moves.some((m) => m && (deps.moveData(m)?.power ?? 0) !== 0)
+      if (!defHasDamagingMove || getHealthPercentage(state, battlerAtk) < 30 || hasFlag(defender.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) score -= 10
+      break
+    }
+    case 'EFFECT_HIT_SWITCH_TARGET': {
+      if (doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
+        score -= 10 // don't scare away pokemon twice
+      } else {
+        if (getHealthPercentage(state, battlerDef) < 10) {
+          unmodelled.push("AI_CheckBadMove: GetBattlerSecondaryDamage(battlerDef) has no port; treated as 0 (falsy), so the \"target about to faint from secondary damage\" branch never fires even when the target is below 10% HP")
+        }
+        if (hasFlag(defender.statuses3, STATUS3_PERISH_SONG)) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_CONVERSION': {
+      // Check first move type.
+      const firstMove = attacker.mon.moves[0]
+      const firstMoveType = firstMove ? (deps.moveData(firstMove)?.type ?? null) : null
+      if (firstMoveType && isBattlerOfType(attacker, firstMoveType)) score -= 10
+      break
+    }
+    case 'EFFECT_REST':
+    case 'EFFECT_RESTORE_HP':
+    case 'EFFECT_SOFTBOILED':
+    case 'EFFECT_ROOST': {
+      // EFFECT_REST additionally checks AI_CanSleep first (the C's own
+      // FALLTHROUGH into this shared healing-move body); the other three
+      // skip straight to the shared body, matching the C's own case grouping.
+      if (effect === 'EFFECT_REST') {
+        const r = canSleep(state, attacker, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.canSleep) score -= 10
+      }
+      if (atMaxHp(attacker)) score -= 10
+      else if (getHealthPercentage(state, battlerAtk) >= 90) score -= 9 // no point healing, but do it if nothing better
+      break
+    }
+    case 'EFFECT_MORNING_SUN':
+    case 'EFFECT_SYNTHESIS':
+    case 'EFFECT_MOONLIGHT':
+      if (weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_RAIN_ANY | WEATHER_SANDSTORM_ANY | WEATHER_HAIL_ANY)) {
+        score -= 3
+      } else if (atMaxHp(attacker)) {
+        score -= 10
+      } else if (getHealthPercentage(state, battlerAtk) >= 90) {
+        score -= 9
+      }
+      break
+    case 'EFFECT_PURIFY':
+      if (!hasFlag(defender.mon.status1, STATUS1_ANY)) {
+        score -= 10
+      } else if (battlerDef === battlePartner(battlerAtk)) {
+        // Always heal your ally.
+      } else if (atMaxHp(attacker)) {
+        score -= 10
+      } else if (getHealthPercentage(state, battlerAtk) >= 90) {
+        score -= 8
+      }
+      break
+    case 'EFFECT_SUPER_FANG':
+      if (getHealthPercentage(state, battlerDef) < 50) score -= 4
+      break
+    case 'EFFECT_RECOIL_IF_MISS': {
+      unmodelled.push("AI_CheckBadMove: AI_GetMoveAccuracy(battlerAtk, battlerDef, move) is approximated by the move's own declared accuracy (dataContext.move's raw accuracy field, no stat-stage/weather/ability adjustment) -- reusing accuracy.ts's full pipeline was out of scope for this one case")
+      const acc = deps.dataContext.move(moveId)?.accuracy ?? 100
+      if (!isMagicGuardProtected(state, attacker) && acc < 75) score -= 6
+      break
+    }
+    case 'EFFECT_TEETER_DANCE': {
+      unmodelled.push("AI_CheckBadMove: EFFECT_TEETER_DANCE's partner-of-target half (:1537-1541) is NOT gated on IsDoubleBattle in the C; approximated as vacuously true (an absent partner slot never blocks) since this sim's battler slots 2/3 are always null in singles -- matching this move's real singles behavior of only the lone target mattering")
+      const ignoresAbility = doesBattlerIgnoreAbilityChecks(battlerAtk, battlerDef, deps)
+      const groundedInMistyTerrain = deps.turnOrder.isBattlerGrounded(battlerDef) && getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN
+      const targetBlocked =
+        hasFlag(defender.mon.status2, STATUS2_CONFUSION) ||
+        (!ignoresAbility && defAbility(defender, 'ABILITY_OWN_TEMPO', atkMoldBreaker)) ||
+        (!ignoresAbility && defAbility(defender, 'ABILITY_DISCIPLINE', atkMoldBreaker)) ||
+        groundedInMistyTerrain ||
+        doesSubstituteBlockMove(attacker, defender, move, unmodelled)
+      if (targetBlocked) score -= 10
+      break
+    }
+    case 'EFFECT_TRANSFORM':
+      if (hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED) || hasFlag(defender.mon.status2, STATUS2_TRANSFORMED | STATUS2_SUBSTITUTE)) score -= 10
+      break
+    case 'EFFECT_TWO_TURNS_ATTACK': {
+      const holdEffect = getBattlerHoldEffect(attacker, deps)
+      const faintCheck = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+      unmodelled.push(...faintCheck.unmodelled)
+      if (holdEffect !== 'HOLD_EFFECT_POWER_HERB' && faintCheck.canFaint) score -= 6
+      break
+    }
+    case 'EFFECT_RECHARGE': {
+      const effResult = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
+      unmodelled.push(...effResult.unmodelled)
+      if (defAbility(defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker) && effResult.effectiveness > 5) {
+        score -= 10
+      } else if (!selfAbility(attacker, 'ABILITY_TRUANT')) {
+        const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+        unmodelled.push(...faintCheck.unmodelled)
+        if (!faintCheck.faints) score -= 2
+      }
+      break
+    }
+    case 'EFFECT_SPITE':
+    case 'EFFECT_MIMIC': {
+      const attackerGoesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
+      if (attackerGoesFirst) {
+        if (defender.lastMove === null) score -= 10
+      } else {
+        unmodelled.push('AI_CheckBadMove: AI_DATA->predictedMoves has no equivalent anywhere in state.ts; treated as MOVE_NONE (no prediction), so this always scores -10 when the opponent goes first')
+        score -= 10
+      }
+      break
+    }
+    case 'EFFECT_METRONOME':
+      break
+    case 'EFFECT_ENDEAVOR':
+    case 'EFFECT_PAIN_SPLIT':
+      if (attacker.mon.hp > idiv(attacker.mon.hp + defender.mon.hp, 2)) score -= 10
+      break
+    case 'EFFECT_LOCK_ON':
+      if (
+        hasFlag(defender.statuses3, STATUS3_ALWAYS_HITS) ||
+        selfAbility(attacker, 'ABILITY_NO_GUARD') ||
+        defAbility(defender, 'ABILITY_NO_GUARD', atkMoldBreaker) ||
+        doesPartnerHaveSameMoveEffect(state, battlerAtk)
+      ) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_LASER_FOCUS':
+      if (hasFlag(attacker.statuses3, STATUS3_LASER_FOCUS)) score -= 10
+      else if (defAbility(defender, 'ABILITY_SHELL_ARMOR', atkMoldBreaker) || defAbility(defender, 'ABILITY_BATTLE_ARMOR', atkMoldBreaker)) score -= 8
+      break
+    case 'EFFECT_SKETCH':
+      if (defender.lastMove === null) score -= 10
+      break
+    case 'EFFECT_DESTINY_BOND':
+      if (hasFlag(defender.mon.status2, STATUS2_DESTINY_BOND)) score -= 10
+      break
+    case 'EFFECT_FALSE_SWIPE':
+      // TODO in the C itself -- no scoring exists for this case there either.
+      break
+    case 'EFFECT_HEAL_BELL':
+      unmodelled.push('AI_CheckBadMove: AnyPartyMemberStatused has no party-wide status scan anywhere in this sim (only active battlers are modelled, not the full reserve party); treated as false (no party member statused), so this always scores -10')
+      score -= 10
+      break
+    case 'EFFECT_HIT_PREVENT_ESCAPE':
+      break
+    case 'EFFECT_ENDURE':
+      unmodelled.push('AI_CheckBadMove: GetBattlerSecondaryDamage(battlerAtk) has no port; treated as 0 (falsy)')
+      if (attacker.mon.hp === 1) score -= 10
+      break
+    case 'EFFECT_PROTECT': {
+      let decreased = false
+      if (moveId === 'MOVE_QUICK_GUARD' || moveId === 'MOVE_WIDE_GUARD' || moveId === 'MOVE_CRAFTY_SHIELD') {
+        // isDoubleBattle is always false -- `!isDoubleBattle` is always true.
+        score -= 10
+        decreased = true
+      } else if (moveId === 'MOVE_MAT_BLOCK' && !attacker.volatiles.isFirstTurn) {
+        score -= 10
+        decreased = true
+      }
+
+      if (!decreased) {
+        if (isBattlerIncapacitated(defender, deps)) {
+          score -= 10
+        } else if (moveId !== 'MOVE_QUICK_GUARD' && moveId !== 'MOVE_WIDE_GUARD' && moveId !== 'MOVE_CRAFTY_SHIELD') {
+          unmodelled.push("AI_CheckBadMove: GetBattlerSecondaryDamage(battlerAtk) has no port; treated as 0, so the \"will faint after protecting\" branch (>= the attacker's own HP) never fires")
+          if (attacker.volatiles.protectUses === 1 && state.rng.random16() % 100 < 50) {
+            // isDoubleBattle is always false -- always the singles (-6) half.
+            score -= 6
+          } else if (attacker.volatiles.protectUses >= 2) {
+            score -= 10
+          }
+        }
+      }
+      break
+    }
+    case 'EFFECT_BURN_UP':
+      if (!isBattlerOfType(attacker, resolvedType ?? 'NORMAL')) score -= 10
+      break
+    case 'EFFECT_DEFOG': {
+      const defSide = state.sides[battlerDef & 1]
+      const atkSide = state.sides[battlerAtk & 1]
+      const defHasScreensOrHazards =
+        hasFlag(defSide.statuses, SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_AURORA_VEIL | SIDE_STATUS_SAFEGUARD | SIDE_STATUS_MIST) ||
+        defSide.timers.auroraVeilTimer !== 0 ||
+        hasFlag(atkSide.statuses, SIDE_STATUS_HAZARDS_ANY)
+      let handled = false
+      if (defHasScreensOrHazards && partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) {
+        score -= 10 // Only need one hazards removal.
+        handled = true
+      }
+      if (!handled && hasFlag(defSide.statuses, SIDE_STATUS_HAZARDS_ANY)) {
+        score -= 10 // Don't blow away opposing hazards.
+        handled = true
+      }
+      // isDoubleBattle is always false -- the "partner is about to set up
+      // hazards" pre-empt check (:1676-1683) is dead code in singles.
+      if (!handled) {
+        if (defender.mon.statStages[7] /* STAT_EVASION */ === MIN_STAT_STAGE || (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker) && !isTargetingPartner(battlerAtk, battlerDef))) {
+          score -= 10
+        }
+      }
+      break
+    }
+    case 'EFFECT_PSYCH_UP': {
+      // isDoubleBattle is always false -- the partner-of-each-side half of
+      // every OR below is dead code.
+      for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+        if (attacker.mon.statStages[i] > 6 /* DEFAULT_STAT_STAGE */) score -= 10 // don't reset our boosted stats
+      }
+      for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+        if (defender.mon.statStages[i] < 6) score -= 10 // don't copy enemy lowered stats
+      }
+      break
+    }
+    case 'EFFECT_SPECTRAL_THIEF':
+      break
+    case 'EFFECT_SOLARBEAM': {
+      const holdEffect = getBattlerHoldEffect(attacker, deps)
+      const sunActive = weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA'
+      const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(attacker, id))
+      if (holdEffect === 'HOLD_EFFECT_POWER_HERB' || sunActive || hasChloroplast) {
+        // no-op.
+      } else {
+        const faintCheck = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+        unmodelled.push(...faintCheck.unmodelled)
+        if (faintCheck.canFaint) score -= 4 // attacker can be knocked out
+        score -= 10
+      }
+      break
+    }
+    case 'EFFECT_SEMI_INVULNERABLE':
+      unmodelled.push("AI_CheckBadMove: AI_DATA->predictedMoves is always MOVE_NONE, so the \"opponent will use its own semi-invulnerable move\" branch (:1715-1717) never fires")
+      if (moveId === 'MOVE_FLY' || moveId === 'MOVE_BOUNCE') {
+        unmodelled.push('AI_CheckBadMove: BattlerWillFaintFromWeather has no port (BattlerAffectedBySandstorm/Hail are not ported); treated as false')
+      }
+      break
+    case 'EFFECT_HEALING_WISH': // healing wish, lunar dance
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
+        score -= 10
+      } else {
+        unmodelled.push('AI_CheckBadMove: IsPartyFullyHealedExceptBattler has no party-wide scan anywhere in this sim (only active battlers are modelled); treated as false')
+      }
+      break
+    case 'EFFECT_FINAL_GAMBIT':
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_NATURE_POWER': {
+      const naturePowerMove = getNaturePowerMove(state, unmodelled)
+      const r = aiCheckBadMove(state, battlerAtk, battlerDef, naturePowerMove, score, deps)
+      return { score: r.score, unmodelled: [...unmodelled, ...r.unmodelled] }
+    }
+    case 'EFFECT_TAUNT':
+      if (defender.volatiles.tauntTimer > 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) score -= 1
+      if (defender.volatiles.tauntTimer !== 0) score -= 10
+      break
+    case 'EFFECT_BESTOW':
+      if (!attacker.mon.itemId || !canBattlerGetOrLoseItemApprox(attacker, attacker.mon.itemId, deps)) score -= 10 // AI knows its own item
+      break
+    case 'EFFECT_ROLE_PLAY': {
+      const atkAbility = battlerAbility(attacker)
+      const defAbilityId = battlerAbility(defender)
+      if (atkAbility === defAbilityId || defAbilityId === 'ABILITY_NONE' || isRolePlayBannedAbilityAtk(atkAbility) || isRolePlayBannedAbility(defAbilityId)) {
+        score -= 10
+      } else {
+        unmodelled.push('AI_CheckBadMove: IsAbilityOfRating(ability, 5) has no port (sAiAbilityRatings has no JSON export anywhere in this data pipeline); treated as below the rating-5 threshold, so this -4 penalty never applies')
+      }
+      break
+    }
+    case 'EFFECT_WISH':
+      unmodelled.push("AI_CheckBadMove: gWishFutureKnock.wishCounter has no state anywhere in this sim (FieldState's own doc: Wish/Future Sight not modelled yet); treated as 0 (no Wish pending)")
+      break
+    case 'EFFECT_ASSIST':
+      if (countUsablePartyMons(state, battlerAtk) === 0) score -= 10 // no teammates to assist from
+      break
+    case 'EFFECT_MAGIC_COAT': {
+      const hasMagicCoatAffectedMove = defender.mon.moves.some((m) => m && hasMoveFlag(deps.moveData(m), 'magicCoatAffected'))
+      if (!hasMagicCoatAffectedMove) score -= 10
+      break
+    }
+    case 'EFFECT_BELCH':
+      unmodelled.push('AI_CheckBadMove: GetUsedHeldItem has no consumed-item tracking; treated as ITEM_NONE, whose pocket is never POCKET_BERRIES, so this always scores -10')
+      score -= 10 // attacker has not consumed a berry
+      break
+    case 'EFFECT_YAWN': {
+      if (hasFlag(defender.statuses3, STATUS3_YAWN)) {
+        score -= 10
+      } else {
+        const r = canSleep(state, defender, deps)
+        unmodelled.push(...r.unmodelled)
+        if (!r.canSleep) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_SKILL_SWAP': {
+      const atkAbility = battlerAbility(attacker)
+      const defAbilityId = battlerAbility(defender)
+      if (atkAbility === defAbilityId || defAbilityId === 'ABILITY_NONE' || isRolePlayBannedAbility(defAbilityId)) score -= 10
+      break
+    }
+    case 'EFFECT_WORRY_SEED':
+      if (defAbility(defender, 'ABILITY_INSOMNIA', atkMoldBreaker) || isWorrySeedBannedAbility(battlerAbility(defender))) score -= 10
+      break
+    case 'EFFECT_GASTRO_ACID':
+      if (hasFlag(defender.statuses3, STATUS3_GASTRO_ACID) || doesBattlerHaveAbilityShield(defender, deps)) score -= 10
+      break
+    case 'EFFECT_ENTRAINMENT': {
+      const atkAbility = battlerAbility(attacker)
+      if (atkAbility === 'ABILITY_NONE' || isEntrainmentBannedAbilityAttacker(atkAbility) || isEntrainmentTargetOrSimpleBeamBannedAbility(battlerAbility(defender))) {
+        score -= 10
+      }
+      break
+    }
+    case 'EFFECT_CORE_ENFORCER':
+      break
+    case 'EFFECT_SIMPLE_BEAM':
+      if (battlerAbility(attacker) === 'ABILITY_SIMPLE' || isEntrainmentTargetOrSimpleBeamBannedAbility(battlerAbility(defender))) score -= 10
+      break
+    case 'EFFECT_SNATCH': {
+      const hasSnatchAffectedMove = defender.mon.moves.some((m) => m && hasMoveFlag(deps.moveData(m), 'snatchAffected'))
+      if (!hasSnatchAffectedMove || partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 10
+      break
+    }
+    case 'EFFECT_POWER_TRICK': {
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else {
+        const atkDef = effectiveStat(attacker.mon, 'def', attacker.mon.statStages[2], deps.statStageRatios)
+        const atkAtk = effectiveStat(attacker.mon, 'atk', attacker.mon.statStages[1], deps.statStageRatios)
+        if (atkDef >= atkAtk && !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_POWER_SWAP': // don't use if attacker's stat stages are higher than the target's
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else if (attacker.mon.statStages[1] >= defender.mon.statStages[1] && attacker.mon.statStages[4] >= defender.mon.statStages[4]) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_GUARD_SWAP':
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else if (attacker.mon.statStages[2] >= defender.mon.statStages[2] && attacker.mon.statStages[5] >= defender.mon.statStages[5]) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_SPEED_SWAP': {
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else {
+        const atkSpeed = getBattlerTotalSpeedStat(state, battlerAtk, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+        const defSpeed = getBattlerTotalSpeedStat(state, battlerDef, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+        if (isTrickRoomActive(state) && atkSpeed <= defSpeed) score -= 10
+        else if (atkSpeed >= defSpeed) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_HEART_SWAP': {
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else {
+        const atkPos = countPositiveStatStages(attacker)
+        const atkNeg = countNegativeStatStages(attacker)
+        const defPos = countPositiveStatStages(defender)
+        const defNeg = countNegativeStatStages(defender)
+        if (atkPos >= defPos && atkNeg <= defNeg) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_POWER_SPLIT': {
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else {
+        const atkAtk = effectiveStat(attacker.mon, 'atk', attacker.mon.statStages[1], deps.statStageRatios)
+        const defAtk = effectiveStat(defender.mon, 'atk', defender.mon.statStages[1], deps.statStageRatios)
+        const atkSpa = effectiveStat(attacker.mon, 'spatk', attacker.mon.statStages[4], deps.statStageRatios)
+        const defSpa = effectiveStat(defender.mon, 'spatk', defender.mon.statStages[4], deps.statStageRatios)
+        if (atkAtk + atkSpa >= defAtk + defSpa) score -= 10 // combined attacker stats are >= combined target stats
+      }
+      break
+    }
+    case 'EFFECT_GUARD_SPLIT': {
+      if (isTargetingPartner(battlerAtk, battlerDef)) {
+        score -= 10
+      } else {
+        const atkDef = effectiveStat(attacker.mon, 'def', attacker.mon.statStages[2], deps.statStageRatios)
+        const defDef = effectiveStat(defender.mon, 'def', defender.mon.statStages[2], deps.statStageRatios)
+        const atkSpd = effectiveStat(attacker.mon, 'spdef', attacker.mon.statStages[5], deps.statStageRatios)
+        const defSpd = effectiveStat(defender.mon, 'spdef', defender.mon.statStages[5], deps.statStageRatios)
+        if (atkDef + atkSpd >= defDef + defSpd) score -= 10
+      }
+      break
+    }
+    case 'EFFECT_ME_FIRST':
+      // AI_DATA->predictedMoves is always MOVE_NONE (no prediction) -- the
+      // "predicted move known" branch (:1867-1871) is unreachable; only the
+      // "target is predicted to switch" else always fires.
+      unmodelled.push('AI_CheckBadMove: AI_DATA->predictedMoves has no equivalent anywhere in state.ts; treated as MOVE_NONE, so EFFECT_ME_FIRST always scores -10')
+      score -= 10
+      break
+    case 'EFFECT_NATURAL_GIFT':
+      unmodelled.push("AI_CheckBadMove: ItemId_GetPocket is approximated via a berry-name substring check (same as part 1's EFFECT_STUFF_CHEEKS), not a real pocket lookup")
+      if (selfAbility(attacker, 'ABILITY_KLUTZ') || !looksLikeBerry(attacker.mon.itemId)) score -= 10
+      break
+    case 'EFFECT_GRASSY_TERRAIN':
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_GRASSY_TERRAIN) score -= 20
+      if (!terrainHasEffect(state)) score -= 20
+      break
+    case 'EFFECT_ELECTRIC_TERRAIN':
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_ELECTRIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state)) score -= 20
+      break
+    case 'EFFECT_PSYCHIC_TERRAIN':
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_PSYCHIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state)) score -= 20
+      break
+    case 'EFFECT_MISTY_TERRAIN':
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN) score -= 20
+      if (!terrainHasEffect(state)) score -= 20
+      break
+    case 'EFFECT_TOXIC_TERRAIN':
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_TOXIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state)) score -= 20
+      break
+    case 'EFFECT_PLEDGE':
+      // isDoubleBattle is always false -- this combo-move check (which only
+      // applies when a partner exists) is entirely dead code in singles.
+      break
+    case 'EFFECT_TRICK_ROOM':
+      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) {
+        score -= 10
+      } else if (partnerMoveIs(state, battlerAtk)) {
+        score -= 10
+      } else if (isTrickRoomActive(state)) {
+        if (getBattlerSideSpeedAverage(state, battlerAtk, deps) < getBattlerSideSpeedAverage(state, battlerDef, deps)) score -= 10 // keep Trick Room up
+      } else {
+        if (getBattlerSideSpeedAverage(state, battlerAtk, deps) >= getBattlerSideSpeedAverage(state, battlerDef, deps)) score -= 10 // keep Trick Room down
+      }
+      break
+    case 'EFFECT_MAGIC_ROOM':
+      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) score -= 10
+      else if (isMagicRoomActive(state) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_WONDER_ROOM':
+      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) score -= 10
+      else if (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_GRAVITY': {
+      const holdEffect = getBattlerHoldEffect(attacker, deps)
+      if ((isGravityActive(state) && !isBattlerOfType(attacker, 'FLYING') && holdEffect !== 'HOLD_EFFECT_AIR_BALLOON') || partnerMoveIsSameNoTarget(state, battlerAtk)) {
+        score -= 10 // should revert Gravity in the air-balloon case
+      }
+      break
+    }
+    case 'EFFECT_ION_DELUGE':
+      if (hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_FLING':
+      if (!canFling(attacker, deps, unmodelled)) score -= 10 // no item to fling
+      break
+    case 'EFFECT_EMBARGO':
+      if (defAbility(defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_POWDER':
+      if (!hasMoveWithType(defender, 'FIRE', deps) || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_TELEKINESIS': {
+      const holdEffect = getBattlerHoldEffect(defender, deps)
+      if (
+        hasFlag(defender.statuses3, STATUS3_TELEKINESIS | STATUS3_ROOTED | STATUS3_SMACKED_DOWN) ||
+        isGravityActive(state) ||
+        holdEffect === 'HOLD_EFFECT_IRON_BALL' ||
+        isTelekinesisBannedSpecies(defender.mon.speciesId) ||
+        partnerMoveIsSameAsAttacker(state, battlerAtk)
+      ) {
+        score -= 10
+      }
+      break
+    }
+    case 'EFFECT_THROAT_CHOP':
+      break
+    case 'EFFECT_HEAL_BLOCK':
+      if (defender.volatiles.healBlockTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_SOAK':
+      // The C's own IS_BATTLER_OF_TYPE-style all-three-types comparison means
+      // a target whose type3 is TYPE_MYSTERY (no third type) matches the
+      // "type3 == TYPE_MYSTERY" leg of this check the same way a genuine
+      // Water/Water/(none) target would -- reproduced as-is via `.types.includes`.
+      if (
+        partnerMoveIsSameAsAttacker(state, battlerAtk) ||
+        (defender.mon.types[0] === 'WATER' && defender.mon.types[1] === 'WATER' && defender.mon.types[2] === 'MYSTERY')
+      ) {
+        score -= 10 // target is already water-only
+      }
+      break
+    case 'EFFECT_THIRD_TYPE':
+      if (moveId === 'MOVE_TRICK_OR_TREAT') {
+        if (isBattlerOfType(defender, 'GHOST') || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      } else if (moveId === 'MOVE_FORESTS_CURSE') {
+        if (isBattlerOfType(defender, 'GRASS') || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      }
+      break
+    case 'EFFECT_HIT_ENEMY_HEAL_ALLY': // pollen puff
+      // isTargetingPartner is always false in singles -- FALLTHROUGH into the
+      // shared EFFECT_HEAL_PULSE body below, exactly as the C's own
+      // FALLTHROUGH does when the (unreachable-here) partner branch is skipped.
+      // eslint-disable-next-line no-fallthrough
+    case 'EFFECT_HEAL_PULSE': // and Floral Healing
+      // !IsTargetingPartner is always true in singles -- always "don't heal enemies".
+      score -= 10
+      break
+    case 'EFFECT_ELECTRIFY':
+      if (
+        getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0 ||
+        partnerMoveIsSameAsAttacker(state, battlerAtk)
+      ) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_TOPSY_TURVY': {
+      if (!isTargetingPartner(battlerAtk, battlerDef)) {
+        const defPos = countPositiveStatStages(defender)
+        const defNeg = countNegativeStatStages(defender)
+        if (defPos === 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) {
+          score -= 10 // no good stat changes to make bad
+        } else if (defNeg < defPos) {
+          score -= 5 // more stages would be made positive than negative
+        }
+      }
+      break
+    }
+    case 'EFFECT_FAIRY_LOCK':
+      if (hasFlag(state.field.statuses, STATUS_FIELD_FAIRY_LOCK) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_DO_NOTHING':
+      score -= 10
+      break
+    case 'EFFECT_INSTRUCT': {
+      const opponentGoesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1
+      let instructedMove: string | null
+      if (opponentGoesFirst) {
+        unmodelled.push('AI_CheckBadMove: AI_DATA->predictedMoves has no equivalent anywhere in state.ts; treated as MOVE_NONE (no prediction)')
+        instructedMove = null
+      } else {
+        instructedMove = defender.lastMove
+      }
+
+      if (
+        instructedMove === null ||
+        isInstructBannedMove(instructedMove) ||
+        moveRequiresRecharging(instructedMove) ||
+        moveCallsOtherMove(instructedMove) ||
+        partnerMoveIsSameAsAttacker(state, battlerAtk)
+      ) {
+        unmodelled.push('AI_CheckBadMove: gLockedMoves[battlerDef] and STATUS2_MULTIPLETURNS are not checked here (no port for either); this is a widening-safe omission since both would only ADD more -10 triggers to an already-true OR chain')
+        score -= 10
+      } else {
+        // isDoubleBattle is always false -- the doubles branch (:2051-2052) is dead code.
+        const instructedMoveData = deps.moveData(instructedMove)
+        const wideTarget = instructedMoveData?.target && ['SELECTED', 'DEPENDS', 'RANDOM', 'BOTH', 'FOES_AND_ALLY', 'OPPONENTS_FIELD'].includes(instructedMoveData.target)
+        if (wideTarget && instructedMove !== 'MOVE_MIND_BLOWN' && instructedMove !== 'MOVE_STEEL_BEAM') {
+          score -= 10 // don't force the enemy to attack you again unless it can kill itself
+        } else if (instructedMove !== 'MOVE_MIND_BLOWN') {
+          score -= 5 // do something better
+        }
+      }
+      break
+    }
+    case 'EFFECT_QUASH':
+      // isDoubleBattle is always false -- `!isDoubleBattle` is always true.
+      score -= 10
+      break
+    case 'EFFECT_AFTER_YOU':
+      // isTargetingPartner is always false in singles -- `!IsTargetingPartner`
+      // is always true, so this always scores -10.
+      score -= 10
+      break
+    case 'EFFECT_SUCKER_PUNCH':
+      unmodelled.push("AI_CheckBadMove: AI_DATA->predictedMoves is always MOVE_NONE, so EFFECT_SUCKER_PUNCH's whole scoring body (:2073-2078, an RNG draw plus a strikes-first check) is unreachable and never applies a penalty")
+      break
+    case 'EFFECT_TAILWIND':
+      if (
+        state.sides[battlerAtk & 1].timers.tailwindTimer !== 0 ||
+        partnerMoveIs(state, battlerAtk) ||
+        (isTrickRoomActive(state) && state.field.timers.trickRoomTimer > 1)
+      ) {
+        score -= 10
+      }
+      break
+    case 'EFFECT_LUCKY_CHANT':
+      if (state.sides[battlerAtk & 1].timers.luckyChantTimer !== 0 || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      break
+    case 'EFFECT_MAGNET_RISE': {
+      const holdEffect = getBattlerHoldEffect(attacker, deps)
+      const grounded = deps.turnOrder.isBattlerGrounded(battlerAtk)
+      if (
+        isGravityActive(state) ||
+        attacker.volatiles.magnetRiseTimer !== 0 ||
+        holdEffect === 'HOLD_EFFECT_IRON_BALL' ||
+        hasFlag(attacker.statuses3, STATUS3_ROOTED | STATUS3_MAGNET_RISE | STATUS3_SMACKED_DOWN) ||
+        !grounded
+      ) {
+        score -= 10
+      }
+      break
+    }
+    case 'EFFECT_CAMOUFLAGE':
+      if (!canCamouflage(unmodelled)) score -= 10
+      break
+    case 'EFFECT_LAST_RESORT':
+      if (!canUseLastResort(attacker)) score -= 10
+      break
+    case 'EFFECT_SYNCHRONOISE': {
+      // Check holding Ring Target or is of same type.
+      const holdEffect = getBattlerHoldEffect(defender, deps)
+      const sameType = attacker.mon.types.some((t) => defender.mon.types.includes(t))
+      if (!(holdEffect === 'HOLD_EFFECT_RING_TARGET' || sameType)) score -= 10
+      break
+    }
+    case 'EFFECT_ERUPTION': {
+      const effResult = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
+      unmodelled.push(...effResult.unmodelled)
+      if (effResult.effectiveness <= 3 /* AI_EFFECTIVENESS_x0_5 */) score--
+      if (getHealthPercentage(state, battlerDef) < 50) score--
+      break
+    }
+    case 'EFFECT_VITAL_THROW':
+      unmodelled.push("AI_CheckBadMove: IsAiFaster(AI_CHECK_FASTER) is a distinct enum branch aiScorers.ts's own isAiFaster does not implement (that one is restricted to the AI_IS_FASTER case, per its own doc); treated as false, so this -1 penalty never applies")
+      break
+    case 'EFFECT_FLAIL':
+      if (
+        getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1 || // opponent should go first
+        getHealthPercentage(state, battlerAtk) > 50
+      ) {
+        score -= 4
+      }
+      break
     default:
       // EFFECT_HIT/EFFECT_POISON_HIT/EFFECT_BURN_HIT/EFFECT_PARALYZE_HIT/
       // EFFECT_CONFUSE_HIT and any other unlisted effect -- :798-804, the
-      // damage path. Nothing to score here.
+      // damage path. Nothing to score here. This also covers the seven
+      // case labels that exist only in commented-out code at :2121-2148
+      // (EFFECT_PLASMA_FISTS, EFFECT_SHELL_TRAP, EFFECT_BEAK_BLAST, EFFECT_
+      // SKY_DROP, EFFECT_NO_RETREAT, EFFECT_EXTREME_EVOBOOST, EFFECT_
+      // CLANGOROUS_SOUL) -- see this module's header.
       break
   }
+
+  // :2151-2158 -- recoil discouragement, applies regardless of which case
+  // above fired (every branch either falls through to here via `break` or
+  // `return`s earlier, matching the C's own control flow into this shared tail).
+  const recoilFraction = getRecoilFraction(effect, deps.moveBehaviors)
+  if (recoilFraction) {
+    if (!isMagicGuardProtected(state, attacker) && !blocksRecoil(attacker)) {
+      let frac = recoilFraction
+      if (reducesRecoil(attacker)) frac *= 2
+      const simDmg = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
+      unmodelled.push(...simDmg.unmodelled)
+      const recoilDmg = Math.max(1, idiv(simDmg.dmg, frac))
+      const recoilCheck = shouldUseRecoilMove(state, battlerAtk, battlerDef, recoilDmg, deps)
+      unmodelled.push(...recoilCheck.unmodelled)
+      if (!recoilCheck.should) score -= 10
+    }
+  }
+
+  // :2160 -- score floor.
+  if (score < 0) score = 0
 
   return { score, unmodelled }
 }

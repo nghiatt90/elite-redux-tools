@@ -8,7 +8,7 @@ import { createBattleState, createBattlerState } from '../create'
 import { createRandomSource } from '../rng'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
-import { STATUS_FIELD_ELECTRIC_TERRAIN, STATUS_FIELD_MISTY_TERRAIN, STATUS_FIELD_PSYCHIC_TERRAIN, WEATHER_RAIN_PRIMAL, WEATHER_SUN_PRIMAL, SIDE_STATUS_SAFEGUARD } from '../constants'
+import { STATUS_FIELD_ELECTRIC_TERRAIN, STATUS_FIELD_MISTY_TERRAIN, STATUS_FIELD_PSYCHIC_TERRAIN, WEATHER_RAIN_PRIMAL, WEATHER_SUN_PRIMAL, WEATHER_SANDSTORM_TEMPORARY, SIDE_STATUS_SAFEGUARD } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
 import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext'
@@ -16,7 +16,17 @@ import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
-import { aiCheckBadMove, PART2_EFFECTS, MOLD_BREAKABLE_ABILITIES, ON_STAT_LOWERED_ABILITIES, SUCTION_CUPS_ABILITIES, ALWAYS_SLEEPING_ABILITIES } from './aiCheckBadMove'
+import {
+  aiCheckBadMove,
+  MOLD_BREAKABLE_ABILITIES,
+  ON_STAT_LOWERED_ABILITIES,
+  SUCTION_CUPS_ABILITIES,
+  ALWAYS_SLEEPING_ABILITIES,
+  PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES,
+  NO_RECOIL_ABILITIES,
+  HALF_RECOIL_ABILITIES,
+  CHLOROPLAST_ABILITIES,
+} from './aiCheckBadMove'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -361,11 +371,11 @@ describe('AI_CheckBadMove part 1 -- move effect switch', () => {
     expect(check(s, 'MOVE_PERISH_SONG').score).toBe(100) // both sides have 0 usable party mons here -- neither branch fires
   })
 
-  it('part 2 gap: EFFECT_SANDSTORM (handled only in part 2) is reported as a named gap, not scored', () => {
+  it('EFFECT_SANDSTORM (now real, cycle17): unchanged with no weather active, -8 when Sandstorm is already up', () => {
     const s = state()
-    const r = check(s, 'MOVE_SANDSTORM')
-    expect(r.score).toBe(100)
-    expect(r.unmodelled.some((u) => u.includes('EFFECT_SANDSTORM') && u.includes('part 2'))).toBe(true)
+    expect(check(s, 'MOVE_SANDSTORM').score).toBe(100)
+    s.field.weather = WEATHER_SANDSTORM_TEMPORARY
+    expect(check(s, 'MOVE_SANDSTORM').score).toBe(92)
   })
 
   it('EFFECT_HIT (the default/damage-path case) is a pure passthrough', () => {
@@ -398,51 +408,65 @@ describe('AI_CheckBadMove wired into chooseAiAction/chooseMoveOrActionSingles', 
 // flag, and the RETURN_ABILITY_IF_FLAG full-ability-set scans.
 // ---------------------------------------------------------------------------
 
-describe('PART2_EFFECTS -- oracle test against the pinned C source', () => {
-  it('has exactly 147 entries, matching a fresh extraction of battle_ai_main.c:1299-2163', () => {
-    // Extraction command (see PART2_EFFECTS's own doc in aiCheckBadMove.ts):
-    // awk 'NR>=1299 && NR<=2163' pipeline/.upstream/eliteredux-source/src/battle_ai_main.c \
-    //   | grep -o "case EFFECT_[A-Za-z0-9_]*" | sed 's/case //' | sort -u | wc -l
-    expect(PART2_EFFECTS.size).toBe(147)
+describe('cycle17 (part 2) -- effects that used to push a "handled in part 2" gap now score for real', () => {
+  it('EFFECT_RAPID_SPIN scores -6 when the attacker has no hazards to spin away, and pushes no part-2 gap', () => {
+    const s = state()
+    const r = check(s, 'MOVE_RAPID_SPIN')
+    expect(r.score).toBe(94)
+    expect(r.unmodelled.some((u) => u.includes('part 2'))).toBe(false)
   })
 
-  it('previously-missing effects now push a named part-2 gap: EFFECT_RAPID_SPIN, EFFECT_FAKE_OUT, EFFECT_TRICK', () => {
-    for (const moveId of ['MOVE_RAPID_SPIN', 'MOVE_FAKE_OUT', 'MOVE_TRICK']) {
-      const s = state()
-      const r = check(s, moveId)
-      const effect = moveById.get(moveId)!.effect as string
-      expect(PART2_EFFECTS.has(effect)).toBe(true)
-      expect(r.score).toBe(100)
-      expect(r.unmodelled.some((u) => u.includes(effect) && u.includes('part 2'))).toBe(true)
-    }
+  it('EFFECT_FAKE_OUT scores -30 on a non-first turn, and pushes no part-2 gap', () => {
+    const s = state()
+    s.battlers[0]!.volatiles.isFirstTurn = 0
+    const r = check(s, 'MOVE_FAKE_OUT')
+    expect(r.score).toBe(70)
+    expect(r.unmodelled.some((u) => u.includes('part 2'))).toBe(false)
   })
 
-  it('a real default-path effect not in either part1 or part2 (EFFECT_HEX, EFFECT_PAYBACK) is correctly silent -- no gap naming the effect', () => {
+  it('EFFECT_TRICK scores -10 against a Sticky Hold defender, and pushes no part-2 gap', () => {
+    const s = stateWithDefenderParty({}, { abilities: { ability: 'ABILITY_STICKY_HOLD', innates: [null, null, null] } })
+    const move = rawMoves.find((m) => m.effect === 'EFFECT_TRICK')!.id as string
+    const r = aiCheckBadMove(s, 0, 1, move, 100, depsWithMoldBreaker(false))
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('part 2'))).toBe(false)
+  })
+
+  it('a real default-path effect not handled anywhere in the switch (EFFECT_HEX, EFFECT_PAYBACK) is correctly silent -- no gap naming the effect', () => {
     // Water is neutral against both Ghost (Hex) and Dark (Payback) -- avoids
     // an unrelated type-immunity RETURN_SCORE_MINUS(20) from masking the
     // classification assertion this test is actually about.
     for (const moveId of ['MOVE_HEX', 'MOVE_PAYBACK']) {
       const s = state({}, { types: ['WATER', 'MYSTERY', 'MYSTERY'] })
       const r = check(s, moveId)
-      const effect = moveById.get(moveId)!.effect as string
-      expect(PART2_EFFECTS.has(effect)).toBe(false)
       expect(r.score).toBe(100)
+      const effect = moveById.get(moveId)!.effect as string
       expect(r.unmodelled.some((u) => u.includes(effect))).toBe(false)
     }
   })
 
-  it('a Pledge move (the naming-mismatch class of bug) is classified correctly: EFFECT_ARGUMENT_HIT is the real effect, not EFFECT_FIRE_PLEDGE, and is not in PART2_EFFECTS (falls to default)', () => {
+  it('a Pledge move (the naming-mismatch class of bug cycle16 caught) is classified correctly: EFFECT_ARGUMENT_HIT is the real effect, not EFFECT_FIRE_PLEDGE, and falls to the damage-path default, not EFFECT_PLEDGE', () => {
     const m = moveById.get('MOVE_FIRE_PLEDGE')!
     expect(m.effect).toBe('EFFECT_ARGUMENT_HIT')
-    expect(PART2_EFFECTS.has('EFFECT_ARGUMENT_HIT')).toBe(false)
     const s = state()
     const r = check(s, 'MOVE_FIRE_PLEDGE')
     expect(r.score).toBe(100)
     // Damage-path gaps from the shared calculateMoveDamage engine (stat
     // stages, condition flags, ...) are expected for any damaging move and
     // are out of this batch's scope -- only assert no gap names the Pledge
-    // effect itself or claims a part-2 classification.
-    expect(r.unmodelled.some((u) => u.includes('EFFECT_ARGUMENT_HIT') || u.includes('EFFECT_FIRE_PLEDGE') || u.includes('part 2'))).toBe(false)
+    // effect itself.
+    expect(r.unmodelled.some((u) => u.includes('EFFECT_ARGUMENT_HIT') || u.includes('EFFECT_FIRE_PLEDGE'))).toBe(false)
+  })
+
+  it('the seven case labels that exist only in commented-out C code (EFFECT_PLASMA_FISTS et al) are not live case labels here either -- fall to default, matching the real compiled C', () => {
+    // These ARE real moves.json effect values (Sky Drop, No Retreat, etc. are
+    // genuine moves elsewhere in the game) -- the point is narrower: none of
+    // them is a live `case` label inside THIS function's switch, because the
+    // C's own AI_CheckBadMove has them commented out (:2121-2148).
+    const src = readFileSync(join(import.meta.dirname, 'aiCheckBadMove.ts'), 'utf8')
+    for (const label of ['EFFECT_PLASMA_FISTS', 'EFFECT_SHELL_TRAP', 'EFFECT_BEAK_BLAST', 'EFFECT_SKY_DROP', 'EFFECT_NO_RETREAT', 'EFFECT_EXTREME_EVOBOOST', 'EFFECT_CLANGOROUS_SOUL']) {
+      expect(src.includes(`case '${label}'`)).toBe(false)
+    }
   })
 })
 
@@ -537,5 +561,47 @@ describe('RETURN_ABILITY_IF_FLAG scans -- full ability-set oracle tests', () => 
     // Not asleep, but Dreamscape's alwaysSleeping flag should be treated like Comatose -- score -8.
     const r = check(s, 'MOVE_DREAM_EATER')
     expect(r.score).toBe(92)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Cycle17 (part 2) -- new ability-set oracle tests, same convention as above.
+// ---------------------------------------------------------------------------
+
+describe('cycle17 ability-set oracle tests against abilityHooks.json', () => {
+  it('PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES matches every ability whose bitfields.persistent or bitfields.unsuppressable is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.persistent || !!h.bitfields?.unsuppressable)
+      .map(([id]) => id)
+      .sort()
+    expect([...PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('NO_RECOIL_ABILITIES matches every ability whose bitfields.noRecoil is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.noRecoil)
+      .map(([id]) => id)
+      .sort()
+    expect([...NO_RECOIL_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('HALF_RECOIL_ABILITIES matches every ability whose bitfields.halfRecoil is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.halfRecoil)
+      .map(([id]) => id)
+      .sort()
+    expect([...HALF_RECOIL_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('CHLOROPLAST_ABILITIES matches every ability whose bitfields.chloroplast is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.chloroplast)
+      .map(([id]) => id)
+      .sort()
+    expect([...CHLOROPLAST_ABILITIES].sort()).toEqual(expected)
   })
 })
