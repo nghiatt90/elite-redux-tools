@@ -51,7 +51,9 @@ import {
 import { battlerHasAbility } from '../../abilities/dispatch'
 import { UQ_ONE, idiv } from '../../fixed'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
-import { isAbilityPreventingEscape } from './aiPipeline'
+import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
+import { canIndexMoveFaintTarget } from './aiScorers'
+import { getWhoStrikesFirst, type ChosenAction, type TurnOrderMoveView } from '../turnOrder'
 
 /** `include/constants/battle.h:66` -- see this module's own citation on the
  * DISABLE_SWITCHING quirk below for why this is the constant `ShouldSwitch`'s
@@ -384,30 +386,68 @@ export function shouldSwitch(state: BattleState, battlerId: number, deps: AiDama
  *
  * `AiExpectsToFaintPlayer` (:1065-1080) is called UNCONDITIONALLY before that
  * loop whenever `ShouldSwitch()` was FALSE (this function's only caller),
- * regardless of item contents, and its own early return reads
+ * regardless of item contents. Its own early return reads
  * `gBattleStruct->aiMoveOrAction[gActiveBattler]` -- a value the real game
  * populates via `ComputeBattleAiScores`, called at `STATE_TURN_START_RECORD`
  * (battle_main.c:3636-3638, "Do AI score computations here so we can use them
  * in AI_TrySwitchOrUseItem") BEFORE `AI_TrySwitchOrUseItem` ever runs
- * (`STATE_BEFORE_ACTION_CHOSEN`). This sim's `chooseAiAction` wiring runs the
- * opposite way round: move scoring is gated behind `ShouldSwitch` returning
- * false (per this batch's own brief -- "otherwise move scoring runs as
- * today"), so a real `aiMoveOrAction` is never available at THIS call site.
- * `AiExpectsToFaintPlayer`'s own `CanIndexMoveFaintTarget`/`GetWhoStrikesFirst`
- * calls (and any RNG the latter draws on a speed tie) are therefore
- * UNREACHABLE from this port's wiring by construction, not evaluated at all --
- * named here so a future batch that reorders the pipeline to match the C's
- * real timing knows to revisit this. Since the function's answer is FALSE
- * either way (both of AiExpectsToFaintPlayer's outcomes lead to FALSE, given
- * the item loop is a guaranteed no-op), `shouldUseItem` is ported as that
- * constant rather than as a partial reproduction of a check whose result
- * cannot change the answer.
+ * (`STATE_BEFORE_ACTION_CHOSEN`). Cycle15's fix pass reordered
+ * `chooseAiAction` to match this: move scoring (`chooseMoveOrActionSingles`)
+ * now runs BEFORE `AI_TrySwitchOrUseItem`, so its result (`choice`, the same
+ * value as `aiMoveOrAction`) IS available here, and `AiExpectsToFaintPlayer`
+ * is REACHABLE -- ported below as `aiExpectsToFaintPlayer` and called
+ * unconditionally, exactly like the C.
+ *
+ * Despite being reachable, `ShouldUseItem`'s own answer is STILL always
+ * FALSE: `AiExpectsToFaintPlayer` returning TRUE only makes the C return
+ * FALSE one line earlier (:1085-1086, before the item loop), and returning
+ * FALSE just falls into the item loop, which is a guaranteed no-op (trainer
+ * item lists are always empty -- `CLAUDE.md`, the codegen emits no `.items`).
+ * Both of `AiExpectsToFaintPlayer`'s outcomes therefore lead to the same
+ * final answer -- `aiExpectsToFaintPlayer` is still evaluated for its RNG/
+ * state effects (matching the C calling it unconditionally), but its result
+ * does not gate anything further here.
  */
-export function shouldUseItem(): { usedItem: false; unmodelled: string[] } {
+function aiExpectsToFaintPlayer(state: BattleState, battlerId: number, target: number, choice: AiChoice, moveView: TurnOrderMoveView | null, deps: AiDamageDeps): { expects: boolean; unmodelled: string[] } {
+  // :1069 -- `if (aiMoveOrAction > 3) return FALSE;`. AI_CHOICE_SWITCH/WATCH/
+  // FLEE and the mega-evolution marker (case 6, OpponentHandleChooseMove)
+  // are all > 3 as MoveEnum-shaped constants; only a real move slot (0-3)
+  // continues.
+  if (choice.kind !== 'move') return { expects: false, unmodelled: [] }
+
+  const battler = state.battlers[battlerId]
+  const moveId = battler?.mon.moves[choice.moveIndex]
+  if (!battler || !moveId) return { expects: false, unmodelled: [] }
+
+  // :1071 -- `GetBattlerSide(target) != GetBattlerSide(gActiveBattler)`. In
+  // this sim's singles battles the AI's own chosen target (setRandomTargetSingles)
+  // is always the opponent, so this is always TRUE here -- reproduced anyway
+  // rather than assumed, matching aiSwitching.ts's own precedent for
+  // structurally-always-true C conditions.
+  if ((target & 1) === (battlerId & 1)) return { expects: false, unmodelled: [] }
+
+  // :1073 -- CanIndexMoveFaintTarget(gActiveBattler, target, aiMoveOrAction, 0).
+  const faintCheck = canIndexMoveFaintTarget(state, battlerId, target, moveId, 0, deps)
+  if (!faintCheck.faints) return { expects: false, unmodelled: faintCheck.unmodelled }
+
+  // :1074 -- GetWhoStrikesFirst(gActiveBattler, target, FALSE). Unlike every
+  // other GetWhoStrikesFirst call in this file (aiScorers.ts's aiTryToFaint/
+  // isAiFaster, both ignoreChosenMoves=TRUE), this one uses FALSE -- the AI's
+  // REAL chosen move (Mycelium Might / drenched goesLast adjustments apply).
+  // Still draws state.rng on a speed tie, same mechanism as every other call.
+  const actions: (ChosenAction | null)[] = [null, null, null, null]
+  if (moveView) actions[battlerId] = { action: 'USE_MOVE', moveToBeUsed: moveView, chosenMove: moveView, target }
+  const strikesFirst = getWhoStrikesFirst(state, battlerId, target, actions, false, deps.turnOrder, deps.statStageRatios)
+  return { expects: strikesFirst === 0, unmodelled: faintCheck.unmodelled }
+}
+
+export function shouldUseItem(state: BattleState, battlerId: number, target: number, choice: AiChoice, moveView: TurnOrderMoveView | null, deps: AiDamageDeps): { usedItem: false; unmodelled: string[] } {
+  const expects = aiExpectsToFaintPlayer(state, battlerId, target, choice, moveView, deps)
   return {
     usedItem: false,
     unmodelled: [
-      'ShouldUseItem (battle_ai_switch_items.c:1082) always returns FALSE -- trainer item lists are always empty, so its MAX_TRAINER_ITEMS loop is a guaranteed no-op; AiExpectsToFaintPlayer (:1065) is unreachable from this wiring (needs aiMoveOrAction, populated only by move scoring, which this sim runs AFTER the switch decision) and is not evaluated',
+      ...expects.unmodelled,
+      'ShouldUseItem (battle_ai_switch_items.c:1082) always returns FALSE -- trainer item lists are always empty, so its MAX_TRAINER_ITEMS loop is a guaranteed no-op regardless of AiExpectsToFaintPlayer\'s own answer',
     ],
   }
 }
@@ -427,8 +467,22 @@ export function shouldUseItem(): { usedItem: false; unmodelled: string[] } {
  * fallback for end-of-turn replacement) -- this one additionally excludes the
  * slot already queued in `monToSwitchIntoId`, which the end-of-turn fallback
  * does not need to.
+ *
+ * `target`/`choice`/`moveView` are step 1's own results (`chooseMoveOrActionSingles`'s
+ * chosen target/action and, when it chose a move, the built `TurnOrderMoveView`)
+ * -- threaded through only so `ShouldUseItem`'s `AiExpectsToFaintPlayer` can
+ * read them, matching `gBattleStruct->aiMoveOrAction`/`aiChosenTarget` being
+ * populated before `AI_TrySwitchOrUseItem` runs (see `shouldUseItem`'s own doc).
  */
-export function aiTrySwitchOrUseItem(state: BattleState, battlerId: number, deps: AiDamageDeps, getMostSuitableMonToSwitchInto: (state: BattleState, battlerId: number, deps: AiDamageDeps) => { partyIndex: number; unmodelled: string[] }): { switched: boolean; unmodelled: string[] } {
+export function aiTrySwitchOrUseItem(
+  state: BattleState,
+  battlerId: number,
+  deps: AiDamageDeps,
+  getMostSuitableMonToSwitchInto: (state: BattleState, battlerId: number, deps: AiDamageDeps) => { partyIndex: number; unmodelled: string[] },
+  target: number,
+  choice: AiChoice,
+  moveView: TurnOrderMoveView | null,
+): { switched: boolean; unmodelled: string[] } {
   const battler = state.battlers[battlerId]
   if (!battler) return { switched: false, unmodelled: [] }
 
@@ -458,7 +512,7 @@ export function aiTrySwitchOrUseItem(state: BattleState, battlerId: number, deps
     return { switched: true, unmodelled }
   }
 
-  const itemResult = shouldUseItem()
+  const itemResult = shouldUseItem(state, battlerId, target, choice, moveView, deps)
   unmodelled.push(...itemResult.unmodelled)
   return { switched: false, unmodelled }
 }

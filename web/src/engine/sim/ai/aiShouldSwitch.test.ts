@@ -356,8 +356,19 @@ describe('shouldSwitch: AreAttackingStatsLowered', () => {
 })
 
 describe('shouldUseItem', () => {
-  it('always returns FALSE and reports why', () => {
-    const { usedItem, unmodelled } = shouldUseItem()
+  it('always returns FALSE and reports why, when step 1 chose a switch (AiExpectsToFaintPlayer not reached)', () => {
+    const s = battle({}, { hp: 100 }, scripted())
+    const { usedItem, unmodelled } = shouldUseItem(s, 1, 0, { kind: 'switch' }, null, deps)
+    expect(usedItem).toBe(false)
+    expect(unmodelled.some((u) => u.includes('ShouldUseItem'))).toBe(true)
+  })
+
+  it('AiExpectsToFaintPlayer is reached and runs (CanIndexMoveFaintTarget/GetWhoStrikesFirst) when step 1 chose a move, but still does not change the FALSE answer', () => {
+    // MOVE_TACKLE vs a 1 HP target -- CanIndexMoveFaintTarget is TRUE, so
+    // GetWhoStrikesFirst runs too (a speed tie here draws state.rng).
+    const s = battle({ rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 } }, { hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 } }, scripted(0))
+    const moveView = { id: 'MOVE_TACKLE', priority: 0, effect: null, isStatus: false, resolvedType: 'NORMAL', power: 40, flags: {}, split: 'PHYSICAL', hasStrongJawBoostFlag: false, isKeenEdge: false, naturalGiftPriority: 0, isGrassyTerrainAffected: false, myceliumMightAffected: false } as const
+    const { usedItem, unmodelled } = shouldUseItem(s, 1, 0, { kind: 'move', moveIndex: 0 }, moveView, deps)
     expect(usedItem).toBe(false)
     expect(unmodelled.some((u) => u.includes('ShouldUseItem'))).toBe(true)
   })
@@ -373,7 +384,7 @@ describe('aiTrySwitchOrUseItem', () => {
     )
     const absorbVsWater = aiGetTypeEffectiveness(s, 'MOVE_ABSORB', 1, 0, deps).effectiveness
     if (absorbVsWater < UQ_ONE * 2) throw new Error('MOVE_ABSORB is no longer super-effective vs pure Water on this data snapshot -- pick a different fixture move/type')
-    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto)
+    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto, 0, { kind: 'move', moveIndex: 0 }, null)
     expect(result.switched).toBe(true)
     expect(s.battlers[1]!.monToSwitchIntoId).toBe(1)
   })
@@ -382,7 +393,7 @@ describe('aiTrySwitchOrUseItem', () => {
     const s = battle({}, { hp: 100, status1: STATUS1_SLEEP, abilities: { ability: NATURAL_CURE, innates: [null, null, null] } }, scripted(1), [
       partyMon({ hp: 100, moves: ['MOVE_TACKLE', null, null, null] }),
     ])
-    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto)
+    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto, 0, { kind: 'move', moveIndex: 0 }, null)
     expect(result.switched).toBe(true)
     expect(s.battlers[1]!.monToSwitchIntoId).toBe(1) // the only reserve
     expect(s.battlers[1]!.aiMonToSwitchIntoId).toBe(1)
@@ -390,7 +401,7 @@ describe('aiTrySwitchOrUseItem', () => {
 
   it('when ShouldSwitch is FALSE, does not switch and reports the ShouldUseItem gap', () => {
     const s = battle({}, { hp: 100 }, scripted()) // no reserves at all
-    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto)
+    const result = aiTrySwitchOrUseItem(s, 1, deps, getMostSuitableMonToSwitchInto, 0, { kind: 'switch' }, null)
     expect(result.switched).toBe(false)
     expect(result.unmodelled.some((u) => u.includes('ShouldUseItem'))).toBe(true)
   })
