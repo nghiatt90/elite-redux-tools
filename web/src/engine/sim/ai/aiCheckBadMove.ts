@@ -18,31 +18,34 @@
 // `if (!IsDoubleBattle()) return FALSE;` in the C, so every one of them
 // always returns false here.
 //
-// Approximations, applied uniformly rather than per-branch (see each site's
-// own inline note for why):
-//   - `BattlerHasAbility(x, ABILITY, TRUE)` (checkMoldBreaker=TRUE) checks on
-//     battlerDef's ability are suppressed exactly when battlerAtk has Mold
-//     Breaker (`deps.grounding.attackerHasMoldBreaker`), NOT per-ability
-//     `breakable` flag the way abilities/dispatchCalc.ts's own
-//     suppressedByMoldBreaker does for the damage path -- this batch has no
-//     per-ability breakable lookup wired for AI scoring specifically, so a
-//     Mold-Breaker attacker is treated as bypassing EVERY one of these
-//     checks, not just the breakable ones. The same calls on battlerAtk's OWN
-//     ability (BattlerStatCanRise's own Contrary read, etc.) are NEVER
-//     suppressed -- an attacker's Mold Breaker does not affect its own
-//     abilities (SetMoldBreaker's real guard is `battler != gBattlerAttacker`).
+// FIX PASS (post-review, cycle16): three findings from the first review
+// pass are corrected here rather than left as approximations --
+//   1. `PART2_EFFECTS` was hand-typed and covered barely a third of the
+//      real :1299-2163 case labels, with several entries that never matched
+//      any real effect name at all. Replaced with the full, mechanically
+//      extracted 147-label set (see PART2_EFFECTS's own doc for the exact
+//      extraction command), pinned by an oracle test.
+//   2. Mold Breaker's `defAbility` used to suppress EVERY `checkMoldBreaker=
+//      TRUE` ability check uniformly. It now reads the real per-ability
+//      `breakable` bitfield (`MOLD_BREAKABLE_ABILITIES`, extracted from
+//      abilityHooks.json the same way), matching `IsSuppressed`'s actual gate
+//      and `abilities/dispatchCalc.ts`'s own `suppressedByMoldBreaker`
+//      treatment of the same field for the damage path.
+//   3. The three `RETURN_ABILITY_IF_FLAG`/`ON_ABILITY` scans (onStatLowered,
+//      suctionCups, alwaysSleeping) that were narrowed to one hardcoded
+//      ability now check the FULL ability list for that hook flag
+//      (`ON_STAT_LOWERED_ABILITIES`, `SUCTION_CUPS_ABILITIES`,
+//      `ALWAYS_SLEEPING_ABILITIES`), each pinned by its own oracle test.
+//
+// Remaining approximations (see each site's own inline note for why):
 //   - `gBattleMoves[move].type` (the move's OWN declared type from
 //     moves.json) stands in for `GET_MOVE_TYPE`'s dynamically-resolved type.
 //     Reported as a gap only for the handful of moves whose type is
-//     genuinely variable (Hidden Power, Weather Ball, Judgment, Techno
-//     Blast, Multi-Attack, Natural Gift, Revelation Dance -- effect-name
-//     matched below) since every other move's declared and resolved type
-//     are the same value.
-//   - A `RETURN_ABILITY_IF_FLAG`/`ON_ABILITY` scan across every ability that
-//     carries a given hook flag (onStatLowered, suctionCups, alwaysSleeping,
-//     ...) is narrowed to the one vanilla ability that flag is best known
-//     for, since this batch does not read abilityHooks.json's flag lists --
-//     see each site's own note.
+//     genuinely variable (Hidden Power, Weather Ball, Natural Gift,
+//     Revelation Dance, and Judgment/Techno Blast/Multi-Attack under their
+//     real shared effect name `EFFECT_CHANGE_TYPE_ON_ITEM` -- see
+//     VARIABLE_TYPE_EFFECTS's own doc) since every other move's declared and
+//     resolved type are the same value.
 //   - `IsStatDropBlocked` has no port anywhere in this codebase (confirmed:
 //     accuracy.ts's own header makes the same admission for its ACC case) --
 //     always false, gapped by name whenever `shouldLowerStat` is evaluated.
@@ -149,10 +152,70 @@ function getBattlerHoldEffect(battler: BattlerState, deps: AiDamageDeps): string
   return battler.mon.itemId ? (deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
 }
 
-/** `BattlerHasAbility(battlerDef, ABILITY_X, TRUE)` -- see this module's
- * header for the uniform Mold-Breaker-suppresses-everything approximation. */
+/** Every ability whose `abilityHooks.json` `bitfields.breakable` is TRUE --
+ * `IsSuppressed`'s own gate (`battle_util.c:9254-9261`,
+ * `checkMoldBreaker && battler != gBattlerAttacker && HITMARKER_MOLD_BREAKER
+ * && gAbilities[ability].breakable`). `defAbility` below reads this per
+ * ability id, matching `abilities/dispatchCalc.ts`'s own
+ * `suppressedByMoldBreaker` treatment of the SAME bitfield for the damage
+ * path -- this list exists because `defAbility` checks bare ability ids
+ * rather than going through that module's per-registered-ability dispatch,
+ * so it needs its own flat lookup rather than reusing `hasFlag`'s registry
+ * scan. Pinned to the snapshot by `aiCheckBadMove.test.ts`'s own oracle test.
+ *
+ * Extraction: `python3 -c "import json; d=json.load(open('data/v2.65beta/
+ * abilityHooks.json')); print(sorted(k for k,v in d.items() if
+ * v.get('bitfields',{}).get('breakable')))"` -- 196 entries. */
+export const MOLD_BREAKABLE_ABILITIES: readonly string[] = [
+  'ABILITY_AERIALIST', 'ABILITY_AERODYNAMICS', 'ABILITY_ANGELIC_WINGS', 'ABILITY_ANTICIPATION', 'ABILITY_APPLE_ENLIGHTENMENT',
+  'ABILITY_ARCTIC_FUR', 'ABILITY_ARMOR_TAIL', 'ABILITY_AROMA_VEIL', 'ABILITY_ATLANTIC_RULER', 'ABILITY_AURA_BREAK',
+  'ABILITY_BAD_LUCK', 'ABILITY_BAD_OMEN', 'ABILITY_BASS_BOOSTED', 'ABILITY_BATTLE_ARMOR', 'ABILITY_BLIGHT_SCALE',
+  'ABILITY_BLOODLUST', 'ABILITY_BLOOD_BATH', 'ABILITY_BRAIN_MASS', 'ABILITY_BREAKWATER', 'ABILITY_BULLETPROOF',
+  'ABILITY_CHESTNUT_SHIELD', 'ABILITY_CHRISTMAS_SPIRIT', 'ABILITY_CHROME_COAT', 'ABILITY_CLEAR_BODY', 'ABILITY_CONJOURER_OF_DECEIT',
+  'ABILITY_CONTRARY', 'ABILITY_CRUST_COAT', 'ABILITY_CRYSTALLINE_ARMOR', 'ABILITY_DAZZLING', 'ABILITY_DEEP_FREEZE',
+  'ABILITY_DESERT_CLOAK', 'ABILITY_DISCIPLINE', 'ABILITY_DISGUISE', 'ABILITY_DRAGONFLY', 'ABILITY_DRAGONSLAYER',
+  'ABILITY_DREAM_STATE', 'ABILITY_DROIDEKA', 'ABILITY_DRY_SKIN', 'ABILITY_DUNE_TERROR', 'ABILITY_DUNE_VEIL', 'ABILITY_EARTH_EATER',
+  'ABILITY_EFFECT_SPORE', 'ABILITY_EMPRESS', 'ABILITY_ENLIGHTENED', 'ABILITY_EVAPORATE', 'ABILITY_FAE_HUNTER',
+  'ABILITY_FARADAY_CAGE', 'ABILITY_FEATHERCOAT', 'ABILITY_FEY_FLIGHT', 'ABILITY_FILTER', 'ABILITY_FIREFIGHTER',
+  'ABILITY_FIRE_ASPECT', 'ABILITY_FIRE_RULER', 'ABILITY_FIRE_SCALES', 'ABILITY_FLAME_BUBBLE', 'ABILITY_FLAME_SHIELD',
+  'ABILITY_FLASH_FIRE', 'ABILITY_FLOWER_GIFT', 'ABILITY_FLOWER_VEIL', 'ABILITY_FLUFFIEST', 'ABILITY_FLUFFY', 'ABILITY_FOOD_LOVERS',
+  'ABILITY_FORTRESS', 'ABILITY_FOSSILIZED', 'ABILITY_FRIEND_GUARD', 'ABILITY_FUR_COAT', 'ABILITY_GALLANTRY', 'ABILITY_GIFTED_MIND',
+  'ABILITY_GLACIAL_GHOST', 'ABILITY_GOOD_AS_GOLD', 'ABILITY_GUARDIAN_COAT', 'ABILITY_GUARD_DOG', 'ABILITY_HASTE_MAKES_WASTE',
+  'ABILITY_HEADSTRONG', 'ABILITY_HEATPROOF', 'ABILITY_HEAT_SINK', 'ABILITY_HEAVY_METAL', 'ABILITY_HOVER', 'ABILITY_HUGE_WINGS',
+  'ABILITY_HYPER_CLEANSE', 'ABILITY_HYPER_CUTTER', 'ABILITY_ICE_DEW', 'ABILITY_ICE_FACE', 'ABILITY_ICE_PLUMES',
+  'ABILITY_ICE_SCALES', 'ABILITY_IMMUNITY', 'ABILITY_INNER_FOCUS', 'ABILITY_INSOMNIA', 'ABILITY_IRON_GIANT', 'ABILITY_JUGGERNAUT',
+  'ABILITY_JUNGLES_GUARD', 'ABILITY_KEEN_EYE', 'ABILITY_LEAD_COAT', 'ABILITY_LEPIDOPTERAN', 'ABILITY_LEVITATE',
+  'ABILITY_LIGHTNING_ASPECT', 'ABILITY_LIGHTNING_ROD', 'ABILITY_LIMBER', 'ABILITY_LIQUIFIED', 'ABILITY_LUCHA_LIBRE',
+  'ABILITY_LUMBERJACK', 'ABILITY_MAGIC_BOUNCE', 'ABILITY_MAGMA_ARMOR', 'ABILITY_MASSIVE_PELT', 'ABILITY_MINDS_EYE',
+  'ABILITY_MIRROR_ARMOR', 'ABILITY_MOLTEN_CORE', 'ABILITY_MONSTER_HUNTER', 'ABILITY_MOTOR_DRIVE', 'ABILITY_MOUNTAINEER',
+  'ABILITY_MUCUS_MEMBRANE', 'ABILITY_MULTISCALE', 'ABILITY_NIHIL_BLASTER', 'ABILITY_NOCTURNAL', 'ABILITY_NOISE_CANCEL',
+  'ABILITY_OBLIVIOUS', 'ABILITY_OLD_MARINER', 'ABILITY_OVERCOAT', 'ABILITY_OWN_TEMPO', 'ABILITY_PARROTING', 'ABILITY_PATCHWORK',
+  'ABILITY_PERMAFROST', 'ABILITY_PERMAFROST_CLONE', 'ABILITY_POISON_ABSORB', 'ABILITY_POLLINATE', 'ABILITY_PRIMAL_ARMOR',
+  'ABILITY_PRISM_SCALES', 'ABILITY_PUFFY', 'ABILITY_PUNK_ROCK', 'ABILITY_PURIFYING_SALT', 'ABILITY_PURIFYING_WATERS',
+  'ABILITY_QUEENLY_MAJESTY', 'ABILITY_RADIANCE', 'ABILITY_RAINBOW_SCALES', 'ABILITY_RAIN_SHROUD', 'ABILITY_RAW_WOOD',
+  'ABILITY_RELIC_STONE', 'ABILITY_RESERVOIR', 'ABILITY_RIVALRY', 'ABILITY_ROCK_HEAD', 'ABILITY_ROYAL_DECREE', 'ABILITY_SAND_FIEND',
+  'ABILITY_SAND_GUARD', 'ABILITY_SAND_VEIL', 'ABILITY_SAP_SIPPER', 'ABILITY_SEAWEED', 'ABILITY_SEPIA_LENS', 'ABILITY_SHATTERED_ARMOR',
+  'ABILITY_SHELL_ARMOR', 'ABILITY_SHIELD_DUST', 'ABILITY_SLIME_MOLD', 'ABILITY_SLUDGY_MIX', 'ABILITY_SMOKEY_MANEUVERS',
+  'ABILITY_SMOLDERING_WOOD', 'ABILITY_SNOW_CLOAK', 'ABILITY_SOLID_ROCK', 'ABILITY_SOOTHSAYER', 'ABILITY_SOUL_HARVEST',
+  'ABILITY_SOUNDPROOF', 'ABILITY_STAINLESS_STEEL', 'ABILITY_STALL', 'ABILITY_STEELWORKER', 'ABILITY_STEEL_BEETLE',
+  'ABILITY_STICKY_HOLD', 'ABILITY_STONECUTTER', 'ABILITY_STORM_DRAIN', 'ABILITY_STURDY', 'ABILITY_SUCTION_CUPS',
+  'ABILITY_SUMO_GUARD', 'ABILITY_SUN_BASKING', 'ABILITY_SUPERSWEET_SYRUP', 'ABILITY_SURVIVOR_BIAS', 'ABILITY_SWEET_VEIL',
+  'ABILITY_TELEPATHY', 'ABILITY_TERAFORM_ZERO', 'ABILITY_TERASTAL_TREASURE', 'ABILITY_TERA_SHELL', 'ABILITY_THERMAL_ENTROPY',
+  'ABILITY_THERMAL_EXCHANGE', 'ABILITY_THICK_FAT', 'ABILITY_TOXIC_SHELL', 'ABILITY_TUMMYACHE', 'ABILITY_UNAWARE',
+  'ABILITY_VITAL_SPIRIT', 'ABILITY_VOLTRON', 'ABILITY_VOLT_ABSORB', 'ABILITY_WATER_ABSORB', 'ABILITY_WATER_BUBBLE',
+  'ABILITY_WATER_COMPACTION', 'ABILITY_WATER_VEIL', 'ABILITY_WAY_OF_PRECISION', 'ABILITY_WEATHER_CONTROL', 'ABILITY_WELL_BAKED_BODY',
+  'ABILITY_WIND_RIDER', 'ABILITY_WITCH_BROOM', 'ABILITY_WONDER_GUARD',
+]
+const MOLD_BREAKABLE_SET = new Set(MOLD_BREAKABLE_ABILITIES)
+
+/** `BattlerHasAbility(battlerDef, ABILITY_X, TRUE)` -- suppressed by Mold
+ * Breaker only when the checked ability is actually `breakable`
+ * (`MOLD_BREAKABLE_ABILITIES` above), matching `IsSuppressed`'s real gate
+ * instead of the uniform "Mold Breaker bypasses every checkMoldBreaker=TRUE
+ * read" approximation an earlier revision of this file used. */
 function defAbility(battler: BattlerState, abilityId: string, attackerHasMoldBreaker: boolean): boolean {
-  return battlerHasAbility(battler.mon.abilities, abilityId, () => attackerHasMoldBreaker)
+  const suppressed = attackerHasMoldBreaker && MOLD_BREAKABLE_SET.has(abilityId)
+  return battlerHasAbility(battler.mon.abilities, abilityId, () => suppressed)
 }
 /** `BattlerHasAbility(battler, ABILITY_X, FALSE)` or a self-check -- never
  * suppressed (see this module's header). */
@@ -180,9 +243,19 @@ function isBattlerWeatherAffected(state: BattleState, weatherFlag: number, deps:
   return hasFlag(state.field.weather, weatherFlag) && weatherHasEffect(state, deps.grounding)
 }
 
-/** GetMoveDynamicType, approximated as the move's own declared type --
- * see this module's header for the variable-type-move gap. */
-const VARIABLE_TYPE_EFFECTS = new Set(['EFFECT_HIDDEN_POWER', 'EFFECT_WEATHER_BALL', 'EFFECT_JUDGMENT', 'EFFECT_TECHNO_BLAST', 'EFFECT_MULTI_ATTACK', 'EFFECT_NATURAL_GIFT', 'EFFECT_REVELATION_DANCE'])
+/** GetMoveDynamicType, approximated as the move's own declared type -- see
+ * this module's header for the variable-type-move gap. Verified against
+ * data/v2.65beta/moves.json's real `effect` values (an earlier revision of
+ * this set used 'EFFECT_JUDGMENT'/'EFFECT_TECHNO_BLAST'/'EFFECT_MULTI_ATTACK',
+ * none of which any move in this snapshot actually carries -- MOVE_JUDGMENT,
+ * MOVE_TECHNO_BLAST and MOVE_MULTI_ATTACK all share the real effect
+ * `EFFECT_CHANGE_TYPE_ON_ITEM` instead, which is what changes their type by
+ * held Plate/Drive/Memory). `EFFECT_CHANGE_TYPE_ON_ITEM` is not a case label
+ * anywhere in AI_CheckBadMove's switch (grepped against the same extraction
+ * this module's PART2_EFFECTS doc cites), so it correctly falls to the
+ * default damage path in both part 1 and part 2 -- it only needs to be here,
+ * for the pre-switch ladder's own `resolvedType` reads. */
+const VARIABLE_TYPE_EFFECTS = new Set(['EFFECT_HIDDEN_POWER', 'EFFECT_WEATHER_BALL', 'EFFECT_NATURAL_GIFT', 'EFFECT_REVELATION_DANCE', 'EFFECT_CHANGE_TYPE_ON_ITEM'])
 function moveType(moveId: string, deps: AiDamageDeps, unmodelled: string[]): string | null {
   const move = deps.moveData(moveId)
   if (move?.effect && VARIABLE_TYPE_EFFECTS.has(move.effect)) {
@@ -259,17 +332,47 @@ function battlerStatCanRise(state: BattleState, battler: BattlerState, stat: num
   return battler.mon.statStages[stat] < MAX_STAT_STAGE
 }
 
+/** Every ability whose `abilityHooks.json` `hooks.onStatLowered` is present --
+ * `RETURN_ABILITY_IF_FLAG(battlerDef, FALSE, onStatLowered)`'s real flag
+ * scan. `FALSE` is the macro's `checkMoldBreaker` argument, so this is NEVER
+ * suppressed by Mold Breaker (unlike `SUCTION_CUPS_ABILITIES` below, whose
+ * own C call passes `TRUE`). Pinned to the snapshot by
+ * `aiCheckBadMove.test.ts`'s own oracle test.
+ *
+ * Extraction: `python3 -c "import json; d=json.load(open('data/v2.65beta/
+ * abilityHooks.json')); print(sorted(k for k,v in d.items() if
+ * 'onStatLowered' in v.get('hooks',{})))"` -- 11 entries. */
+export const ON_STAT_LOWERED_ABILITIES: readonly string[] = [
+  'ABILITY_COMPETITIVE', 'ABILITY_CONTEMPT', 'ABILITY_DEFIANT', 'ABILITY_DUALITY', 'ABILITY_EMPERORS_WRATH',
+  'ABILITY_FIRE_RULER', 'ABILITY_KINGS_WRATH', 'ABILITY_LUCHA_LIBRE', 'ABILITY_NARCISSIST', 'ABILITY_QUEENS_MOURNING',
+  'ABILITY_RUN_AWAY',
+]
+
+/** Every ability whose `abilityHooks.json` `bitfields.suctionCups` is set --
+ * `ON_ABILITY(battlerDef, TRUE, gAbilities[ability].suctionCups, ...)`'s
+ * flag scan (EFFECT_ROAR). `TRUE` here is checkMoldBreaker, so each is still
+ * individually gated by `defAbility`'s own real `breakable` lookup (Guard Dog
+ * and Suction Cups are breakable; Strong Foundation and Superheavy are not --
+ * see MOLD_BREAKABLE_ABILITIES). Pinned by aiCheckBadMove.test.ts.
+ *
+ * Extraction: same query as ON_STAT_LOWERED_ABILITIES with `bitfields.
+ * suctionCups` in place of `'onStatLowered' in hooks` -- 4 entries. */
+export const SUCTION_CUPS_ABILITIES: readonly string[] = ['ABILITY_GUARD_DOG', 'ABILITY_STRONG_FOUNDATION', 'ABILITY_SUCTION_CUPS', 'ABILITY_SUPERHEAVY']
+
+/** Every ability whose `abilityHooks.json` `bitfields.alwaysSleeping` is set
+ * -- `IsComatose`'s real flag scan (`RETURN_ABILITY_IF_FLAG(battler, FALSE,
+ * alwaysSleeping)`), read without Mold-Breaker suppression (the macro's
+ * `FALSE` argument) via `selfAbility`. Pinned by aiCheckBadMove.test.ts.
+ *
+ * Extraction: same query with `bitfields.alwaysSleeping` -- 2 entries. */
+export const ALWAYS_SLEEPING_ABILITIES: readonly string[] = ['ABILITY_COMATOSE', 'ABILITY_DREAMSCAPE']
+
 /** LoweringStatsPointlessOrBad, battle_ai_util.c:1274-1279 -- IsStatDropBlocked
- * has no port anywhere in this codebase (see this module's header); the
- * `onStatLowered` ability-flag scan is narrowed to Defiant (the flag's best
- * known holder) rather than a real abilityHooks.json flag scan. */
+ * has no port anywhere in this codebase (see this module's header). */
 function loweringStatsPointlessOrBad(defender: BattlerState, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
   unmodelled.push('LoweringStatsPointlessOrBad: IsStatDropBlocked(battlerDef, STAT_HP, FALSE) has no port anywhere in this codebase (same admission as accuracy.ts\'s own header); treated as not blocked')
   if (defAbility(defender, 'ABILITY_CONTRARY', attackerHasMoldBreaker)) return true
-  if (defAbility(defender, 'ABILITY_DEFIANT', attackerHasMoldBreaker)) {
-    unmodelled.push("LoweringStatsPointlessOrBad: RETURN_ABILITY_IF_FLAG(battlerDef, FALSE, onStatLowered) is narrowed to ABILITY_DEFIANT (this flag's best-known holder) rather than a real abilityHooks.json onStatLowered scan")
-    return true
-  }
+  if (ON_STAT_LOWERED_ABILITIES.some((id) => selfAbility(defender, id))) return true
   return false
 }
 
@@ -429,25 +532,63 @@ function partnerMoveIsSameNoTarget(state: BattleState, battlerAtk: number): bool
   return isValidDoubleBattle(state, battlerAtk)
 }
 
-// PART2_EFFECTS -- every case label handled ONLY in part 2 (:1299 onward,
-// EFFECT_SANDSTORM through the end of the function). Transcribed from a full
-// read of :1299-2164's switch labels.
-const PART2_EFFECTS = new Set([
-  'EFFECT_SANDSTORM', 'EFFECT_HAIL', 'EFFECT_RAIN_DANCE', 'EFFECT_SUNNY_DAY', 'EFFECT_WEATHER_BALL',
-  'EFFECT_ATTRACT', 'EFFECT_SAFEGUARD', 'EFFECT_ENDURE', 'EFFECT_DESTINY_BOND', 'EFFECT_ENCORE_2', 'EFFECT_HELPING_HAND',
-  'EFFECT_PROTECT', 'EFFECT_ENDEAVOR', 'EFFECT_FALSE_SWIPE', 'EFFECT_EMBARGO', 'EFFECT_TAUNT', 'EFFECT_TORMENT', 'EFFECT_IMPRISON',
-  'EFFECT_GRASS_PLEDGE', 'EFFECT_WATER_PLEDGE', 'EFFECT_FIRE_PLEDGE', 'EFFECT_NATURAL_GIFT', 'EFFECT_FLING', 'EFFECT_SWITCHEROO',
-  'EFFECT_HEAL_BLOCK', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_MISTY_TERRAIN', 'EFFECT_PSYCHIC_TERRAIN',
-  'EFFECT_PLEDGE', 'EFFECT_TRICK_ROOM', 'EFFECT_MAGIC_ROOM', 'EFFECT_WONDER_ROOM', 'EFFECT_GRAVITY', 'EFFECT_ROOM_SERVICE',
-  'EFFECT_YAWN', 'EFFECT_TERRAIN_PULSE', 'EFFECT_PSYCH_UP', 'EFFECT_ME_FIRST', 'EFFECT_SNATCH', 'EFFECT_HIT_ESCAPE',
-  'EFFECT_RECOVER', 'EFFECT_MORNING_SUN', 'EFFECT_SYNTHESIS', 'EFFECT_MOONLIGHT', 'EFFECT_ROOST', 'EFFECT_SOFTBOILED',
-  'EFFECT_SHORE_UP', 'EFFECT_PURIFY', 'EFFECT_HEALING_WISH', 'EFFECT_LUNAR_DANCE', 'EFFECT_REST', 'EFFECT_WISH', 'EFFECT_INGRAIN',
-  'EFFECT_AQUA_RING', 'EFFECT_STOCKPILE', 'EFFECT_SPIT_UP', 'EFFECT_SWALLOW', 'EFFECT_STRENGTH_SAP', 'EFFECT_PAIN_SPLIT',
-  'EFFECT_HIDDEN_POWER', 'EFFECT_JUDGMENT', 'EFFECT_TECHNO_BLAST', 'EFFECT_MULTI_ATTACK', 'EFFECT_REVELATION_DANCE',
-  'EFFECT_BATON_PASS', 'EFFECT_VOLT_SWITCH', 'EFFECT_PARTING_SHOT', 'EFFECT_TELEPORT', 'EFFECT_ROAR_2', 'EFFECT_HEAL_PULSE',
+/**
+ * PART2_EFFECTS -- every case label handled ONLY in part 2 (:1299 onward,
+ * EFFECT_SANDSTORM through the function's closing brace at :2163). An
+ * earlier revision of this set was hand-typed from partial reading and
+ * covered barely a third of the real labels, with several names
+ * (EFFECT_ENCORE_2, EFFECT_ROAR_2, EFFECT_FIRE_PLEDGE/WATER_PLEDGE/
+ * GRASS_PLEDGE, EFFECT_RECOVER, EFFECT_JUDGMENT, EFFECT_TECHNO_BLAST,
+ * EFFECT_MULTI_ATTACK) that never matched any real case label or moves.json
+ * effect value at all -- caught by review, not by a test, which is why this
+ * set is now extracted mechanically instead of transcribed by eye, and
+ * pinned by an oracle test in aiCheckBadMove.test.ts.
+ *
+ * Extraction (run from the repo root, against the pinned eliteredux-source
+ * checkout): `awk 'NR>=1299 && NR<=2163' pipeline/.upstream/eliteredux-source/
+ * src/battle_ai_main.c | grep -o "case EFFECT_[A-Za-z0-9_]*" | sed 's/case //'
+ * | sort -u` -- 147 distinct labels, exactly matching this set's size
+ * (asserted by aiCheckBadMove.test.ts).
+ */
+export const PART2_EFFECTS = new Set([
+  'EFFECT_ABSORB', 'EFFECT_AFTER_YOU', 'EFFECT_AQUA_RING', 'EFFECT_AROMATIC_MIST', 'EFFECT_ASSIST', 'EFFECT_ATTRACT',
+  'EFFECT_BATON_PASS', 'EFFECT_BEAK_BLAST', 'EFFECT_BELCH', 'EFFECT_BELLY_DRUM', 'EFFECT_BESTOW', 'EFFECT_BIDE',
+  'EFFECT_BURN_UP', 'EFFECT_CAMOUFLAGE', 'EFFECT_CLANGOROUS_SOUL', 'EFFECT_CONVERSION', 'EFFECT_COPYCAT', 'EFFECT_CORE_ENFORCER',
+  'EFFECT_DEFOG', 'EFFECT_DESTINY_BOND', 'EFFECT_DO_NOTHING', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_ELECTRIFY', 'EFFECT_EMBARGO',
+  'EFFECT_ENDEAVOR', 'EFFECT_ENDURE', 'EFFECT_ENTRAINMENT', 'EFFECT_ERUPTION', 'EFFECT_EXTREME_EVOBOOST', 'EFFECT_FAIRY_LOCK',
+  'EFFECT_FAKE_OUT', 'EFFECT_FALSE_SWIPE', 'EFFECT_FINAL_GAMBIT', 'EFFECT_FLAIL', 'EFFECT_FLING', 'EFFECT_FLOWER_SHIELD',
+  'EFFECT_FOLLOW_ME', 'EFFECT_FUTURE_SIGHT', 'EFFECT_GASTRO_ACID', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_GRAVITY', 'EFFECT_GUARD_SPLIT',
+  'EFFECT_GUARD_SWAP', 'EFFECT_HAIL', 'EFFECT_HEAL_BELL', 'EFFECT_HEAL_BLOCK', 'EFFECT_HEALING_WISH', 'EFFECT_HEAL_PULSE',
+  'EFFECT_HEART_SWAP', 'EFFECT_HELPING_HAND', 'EFFECT_HIT_ENEMY_HEAL_ALLY', 'EFFECT_HIT_ESCAPE', 'EFFECT_HIT_PREVENT_ESCAPE',
+  'EFFECT_HIT_SWITCH_TARGET', 'EFFECT_IMPRISON', 'EFFECT_INGRAIN', 'EFFECT_INSTRUCT', 'EFFECT_ION_DELUGE', 'EFFECT_KNOCK_OFF',
+  'EFFECT_LASER_FOCUS', 'EFFECT_LAST_RESORT', 'EFFECT_LOCK_ON', 'EFFECT_LUCKY_CHANT', 'EFFECT_MAGIC_COAT', 'EFFECT_MAGIC_ROOM',
+  'EFFECT_MAGNET_RISE', 'EFFECT_ME_FIRST', 'EFFECT_MEMENTO', 'EFFECT_METRONOME', 'EFFECT_MIMIC', 'EFFECT_MIRROR_MOVE',
+  'EFFECT_MISTY_TERRAIN', 'EFFECT_MOONLIGHT', 'EFFECT_MORNING_SUN', 'EFFECT_MUD_SPORT', 'EFFECT_NATURAL_GIFT',
+  'EFFECT_NATURE_POWER', 'EFFECT_NO_RETREAT', 'EFFECT_PAIN_SPLIT', 'EFFECT_PARTING_SHOT', 'EFFECT_PLASMA_FISTS',
+  'EFFECT_PLEDGE', 'EFFECT_POLTERGEIST', 'EFFECT_POWDER', 'EFFECT_POWER_SPLIT', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK',
+  'EFFECT_PROTECT', 'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_PSYCHO_SHIFT', 'EFFECT_PSYCH_UP', 'EFFECT_PURIFY', 'EFFECT_QUASH',
+  'EFFECT_RAIN_DANCE', 'EFFECT_RAPID_SPIN', 'EFFECT_RECHARGE', 'EFFECT_RECOIL_IF_MISS', 'EFFECT_RECYCLE', 'EFFECT_REFRESH',
+  'EFFECT_REST', 'EFFECT_RESTORE_HP', 'EFFECT_ROLE_PLAY', 'EFFECT_ROOST', 'EFFECT_SAFEGUARD', 'EFFECT_SANDSTORM',
+  'EFFECT_SEMI_INVULNERABLE', 'EFFECT_SHELL_TRAP', 'EFFECT_SIMPLE_BEAM', 'EFFECT_SKETCH', 'EFFECT_SKILL_SWAP',
+  'EFFECT_SKY_DROP', 'EFFECT_SNATCH', 'EFFECT_SOAK', 'EFFECT_SOFTBOILED', 'EFFECT_SOLARBEAM', 'EFFECT_SPECTRAL_THIEF',
+  'EFFECT_SPEED_SWAP', 'EFFECT_SPITE', 'EFFECT_STOCKPILE', 'EFFECT_STRENGTH_SAP', 'EFFECT_SUCKER_PUNCH', 'EFFECT_SUNNY_DAY',
+  'EFFECT_SUPER_FANG', 'EFFECT_SWALLOW', 'EFFECT_SWITCH_ARGUMENT', 'EFFECT_SYNCHRONOISE', 'EFFECT_SYNTHESIS', 'EFFECT_TAILWIND',
+  'EFFECT_TAUNT', 'EFFECT_TEETER_DANCE', 'EFFECT_TELEKINESIS', 'EFFECT_THIRD_TYPE', 'EFFECT_THROAT_CHOP', 'EFFECT_TOPSY_TURVY',
+  'EFFECT_TORMENT', 'EFFECT_TOXIC_TERRAIN', 'EFFECT_TRANSFORM', 'EFFECT_TRICK', 'EFFECT_TRICK_ROOM', 'EFFECT_TWO_TURNS_ATTACK',
+  'EFFECT_VITAL_THROW', 'EFFECT_WATER_SPORT', 'EFFECT_WILL_O_WISP', 'EFFECT_WISH', 'EFFECT_WONDER_ROOM', 'EFFECT_WORRY_SEED',
+  'EFFECT_YAWN',
 ])
-// EFFECT_HIT/EFFECT_POISON_HIT/... fall through to `default` (the damage
-// path, :798-804), never part 2 -- excluded above on purpose.
+// EFFECT_HIT/EFFECT_POISON_HIT/EFFECT_BURN_HIT/EFFECT_PARALYZE_HIT/
+// EFFECT_CONFUSE_HIT fall through to `default` (the damage path, :798-804),
+// never part 2 -- excluded above on purpose. Every OTHER moves.json effect
+// value that is neither a part-1 case label (handled explicitly in the
+// switch below) nor in this set is, by construction, not a case label
+// anywhere in AI_CheckBadMove's switch at all (verified: the full :488-2163
+// label extraction has exactly 246 distinct entries = this set's 147 plus
+// the 99 part-1 labels, with zero overlap) -- so it legitimately falls to
+// `default` in the real C too, the same as EFFECT_HIT. aiCheckBadMove.test.ts
+// asserts this for a sample of such effects (e.g. EFFECT_HEX, EFFECT_PAYBACK)
+// to distinguish "correctly silent" from "incorrectly silent".
 
 /**
  * AI_CheckBadMove, battle_ai_main.c:488-1298. See this module's header for
@@ -659,6 +800,13 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     unmodelled.push('AI_CheckBadMove: IsHealBlockPreventingMove is narrowed to EFFECT_RESTORE_HP/EFFECT_REST; other healing-adjacent effects it covers (Wish, Rest-family, Pain Split heal half, ...) are not enumerated')
     return { score: 0, unmodelled }
   }
+  // A heal-blocked part-2 healing effect this narrowing doesn't name (EFFECT_
+  // WISH, EFFECT_PAIN_SPLIT, ...) is NOT caught here -- it falls through and
+  // is instead caught by the PART2_EFFECTS gap below, which returns the
+  // UNMODIFIED `score`, not the C's real hard `0`. This is a genuine behavior
+  // difference in that specific interaction (heal-blocked + part-2 healing
+  // effect), not just a granularity-of-disclosure difference, though the move
+  // is still gapped (never silently mis-scored with no signal at all).
   if (weatherHasEffect(state, deps.grounding)) {
     if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
       if (['MOVE_SUNNY_DAY', 'MOVE_RAIN_DANCE', 'MOVE_HAIL', 'MOVE_SANDSTORM', 'MOVE_EERIE_FOG'].includes(moveId)) return { score: score - 30, unmodelled }
@@ -699,8 +847,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     }
     case 'EFFECT_DREAM_EATER': {
       const asleep = hasFlag(defender.mon.status1, STATUS1_SLEEP)
-      const comatose = selfAbility(defender, 'ABILITY_COMATOSE')
-      unmodelled.push("AI_CheckBadMove: IsComatose is narrowed to a plain ABILITY_COMATOSE check rather than a real 'alwaysSleeping' abilityHooks.json flag scan")
+      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(defender, id))
       if (!asleep || comatose) {
         score -= 8
       } else {
@@ -928,8 +1075,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_ROAR':
       if (countUsablePartyMons(state, battlerDef) === 0) score -= 10
       else if (hasFlag(defender.statuses4, STATUS4_COMMANDED)) score -= 10
-      else if (defAbility(defender, 'ABILITY_SUCTION_CUPS', atkMoldBreaker)) {
-        unmodelled.push("AI_CheckBadMove: EFFECT_ROAR's ON_ABILITY(suctionCups) scan is narrowed to ABILITY_SUCTION_CUPS rather than a real abilityHooks.json suctionCups flag scan")
+      else if (SUCTION_CUPS_ABILITIES.some((id) => defAbility(defender, id, atkMoldBreaker))) {
         score -= 10
       }
       break
@@ -1018,9 +1164,8 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_SNORE':
     case 'EFFECT_SLEEP_TALK': {
       const asleep = hasFlag(attacker.mon.status1, STATUS1_SLEEP)
-      const comatose = selfAbility(attacker, 'ABILITY_COMATOSE')
+      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(attacker, id))
       unmodelled.push("AI_CheckBadMove: IsWakeupTurn is not modelled (no move-history-by-turn tracking exists in this sim -- FindMoveUsedXTurnsAgo has no port); treated as false")
-      unmodelled.push("AI_CheckBadMove: IsComatose is narrowed to a plain ABILITY_COMATOSE check rather than a real 'alwaysSleeping' abilityHooks.json flag scan")
       const isWakeupTurn = false
       if (isWakeupTurn || !asleep || !comatose) score -= 10
       break
@@ -1034,8 +1179,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_NIGHTMARE':
       if (hasFlag(defender.mon.status2, STATUS2_NIGHTMARE)) {
         score -= 10
-      } else if (!hasFlag(defender.mon.status1, STATUS1_SLEEP) || selfAbility(defender, 'ABILITY_COMATOSE')) {
-        unmodelled.push("AI_CheckBadMove: IsComatose is narrowed to a plain ABILITY_COMATOSE check rather than a real 'alwaysSleeping' abilityHooks.json flag scan")
+      } else if (!hasFlag(defender.mon.status1, STATUS1_SLEEP) || ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(defender, id))) {
         score -= 8
       } else if (doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         score -= 10
