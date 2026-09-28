@@ -82,6 +82,10 @@ function partyMon(overrides: Partial<SimPartyMon> = {}): SimPartyMon {
 function state(a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, rng: RandomSource = createRandomSource(1), opponentParty?: SimPartyMon[]): BattleState {
   return createBattleState({ battlers: [createBattlerState(0, mon(a), 0), createBattlerState(1, mon(d), 0)], rng, opponentParty })
 }
+function scripted(...values: number[]): RandomSource {
+  let i = 0
+  return { random16: () => values[i++] ?? 0 }
+}
 
 describe('chooseAiAction', () => {
   it('throws for a battler on the player side', () => {
@@ -158,18 +162,53 @@ describe('end-to-end: chooseAiAction then executeTurn, with the AI\'s move actua
   })
 })
 
-describe('end-to-end: chooseAiAction decides a switch (ShouldSwitch, not the second switch check), executeTurn carries it out', () => {
-  function scripted(...values: number[]): RandomSource {
-    let i = 0
-    return { random16: () => values[i++] ?? 0 }
-  }
+describe('chooseAiAction: draw order -- step 1 (scoring/tie-break) is consumed before step 2 (ShouldSwitch)', () => {
+  it('the scoring draws (indices 0-2) are consumed before ShouldSwitchIfEncored\'s own draw (index 3)', () => {
+    // With this fixture (full-HP battlers, both MOVE_TACKLE/MOVE_EMBER able
+    // to faint the opponent), chooseAiAction draws state.rng exactly 4 times,
+    // in this order (verified via instrumented rng -- see the fix-brief's own
+    // "trace every draw" requirement):
+    //   0, 1: AI_TryToFaint's own GetWhoStrikesFirst speed-tie draw
+    //         (battle_ai_main.c:2172), once per move slot that can faint
+    //   2:    ChooseMoveOrAction_Singles' own tie-break (battle_ai_main.c:338,
+    //         a 2-way tie between the two equally-scored moves)
+    //   3:    ShouldSwitchIfEncored's own Random()&1 draw
+    //         (battle_ai_switch_items.c:310): odd -- switches immediately
+    // If chooseAiAction still ran ShouldSwitch BEFORE scoring (the pre-fix
+    // order), index 0 would instead be ShouldSwitchIfEncored's own draw
+    // (Encored decides on a single draw, with no scoring draws preceding it)
+    // -- an EVEN value at index 0 would then NOT switch under the old order,
+    // while the new (correct) order still switches on index 3 regardless of
+    // what index 0 holds. Scripting index 0 EVEN and index 3 ODD therefore
+    // distinguishes the two orders.
+    const s = state({ hp: 1000, maxHp: 1000 }, { hp: 100, maxHp: 100 }, scripted(0, 0, 0, 1), [partyMon({ hp: 100 }), partyMon({ hp: 100 })])
+    s.battlers[1]!.volatiles.encoredMove = 'MOVE_TACKLE'
+    const { action, unmodelled } = chooseAiAction(s, 1, deps)
+    expect(action.action).toBe('SWITCH')
+    expect(unmodelled.some((u) => u.includes('shouldSwitchIfEncored') || u.includes('ShouldSwitchIfEncored'))).toBe(false) // no gap line -- this helper is fully ported
+  })
+})
 
+describe('end-to-end: chooseAiAction decides a switch (ShouldSwitch, not the second switch check), executeTurn carries it out', () => {
   it('a hand-built bad matchup (asleep + Natural Cure) makes the AI switch, and executeTurn brings in the chosen reserve', () => {
     const reserve = partyMon({ hp: 77, maxHp: 90, moves: ['MOVE_EMBER', null, null, null] })
     const s = state(
       { hp: 100, maxHp: 100 },
       { hp: 100, maxHp: 100, status1: STATUS1_SLEEP, abilities: { ability: 'ABILITY_NATURAL_CURE', innates: [null, null, null] } },
-      scripted(1), // ShouldSwitchIfNaturalCure's own first Random()&1 draw: odd -- switches immediately
+      // cycle15's fix pass reorders chooseAiAction: step 1 (scoring, including
+      // the tie-break's own Random() % numOfBestMoves draw) now runs BEFORE
+      // step 2 (ShouldSwitch) -- state.rng is drawn in this order, verified
+      // via the draw-order test below:
+      //   0, 1: AI_TryToFaint's own GetWhoStrikesFirst speed-tie draw
+      //         (battle_ai_main.c:2172), once per move slot that can faint
+      //         this fixture's full-HP opponent (both MOVE_TACKLE and
+      //         MOVE_EMBER can, and both battlers share the same Speed stat,
+      //         so each draws a tie-break)
+      //   2:    ChooseMoveOrAction_Singles' own tie-break (battle_ai_main.c:338,
+      //         a 2-way tie between the two equally-scored moves)
+      //   3:    ShouldSwitchIfNaturalCure's own first Random()&1 draw
+      //         (battle_ai_switch_items.c:275): odd -- switches immediately
+      scripted(0, 0, 0, 1),
       [partyMon({ hp: 100 }), reserve],
     )
     const { action: aiAction, unmodelled } = chooseAiAction(s, 1, deps)
