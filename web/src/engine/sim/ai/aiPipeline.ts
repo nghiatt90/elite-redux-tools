@@ -5,17 +5,19 @@
 // in ChooseMoveOrAction_Singles (:294-318). Singles only, per this batch's own
 // scope -- ChooseMoveOrAction_Doubles (:341-440) is not ported.
 //
-// AI_CheckBadMove and AI_CheckViability are STUBBED pass-through here (score
-// unchanged) -- they are batches 2-5. A stub still occupies its dispatch slot
-// (bits 0 and 2), so the score-zeroing behaviour for an unusable move slot
-// (PP exhausted, or MOVE_NONE) still applies identically to the real function,
-// only the scorer body itself does nothing.
+// AI_CheckBadMove PART 1 is wired for real as of the ai-checkbadmove-1 batch
+// (aiCheckBadMove.ts, battle_ai_main.c:488-1298 through EFFECT_PERISH_SONG).
+// AI_CheckViability is still STUBBED pass-through here -- batches 4-5. A stub
+// still occupies its dispatch slot (bit 2), so the score-zeroing behaviour for
+// an unusable move slot (PP exhausted, or MOVE_NONE) still applies identically
+// to the real function, only the scorer body itself does nothing.
 
 import type { BattleState, BattlerState } from '../state'
 import type { BaseStats } from '../../types'
 import { hasFlag, PARTY_SIZE, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS3_ROOTED, STATUS4_COMMANDED } from '../constants'
 import { AI_FLAG_CHECK_BAD_MOVE, AI_FLAG_CHECK_VIABILITY, AI_FLAG_PREFER_BATON_PASS, AI_FLAG_TRY_TO_FAINT } from './aiFlags'
 import { aiHPAware, aiRisky, aiTryToFaint } from './aiScorers'
+import { aiCheckBadMove } from './aiCheckBadMove'
 import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitching'
 import type { AiDamageDeps } from './aiCalcDamage'
 
@@ -30,9 +32,6 @@ const BATTLE_TYPE_PALACE = 1 << 17
 type ScorerResult = { score: number; unmodelled: string[] }
 type Scorer = (state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, moveIndex: number, score: number, deps: AiDamageDeps) => ScorerResult
 
-function checkBadMoveStub(_s: BattleState, _a: number, _d: number, _m: string, _i: number, score: number): ScorerResult {
-  return { score, unmodelled: [] }
-}
 function checkViabilityStub(_s: BattleState, _a: number, _d: number, _m: string, _i: number, score: number): ScorerResult {
   return { score, unmodelled: [] }
 }
@@ -50,7 +49,7 @@ function checkViabilityStub(_s: BattleState, _a: number, _d: number, _m: string,
  * 3, 5, 6, 7, 29-31), the OBSERVABLE effect on a trainer battle's scores is
  * identical, so this table only needs entries for bits a trainer can set. */
 const DISPATCH: Record<number, Scorer> = {
-  0: checkBadMoveStub, // AI_FLAG_CHECK_BAD_MOVE -- stub (batches 2-3)
+  0: (s, a, d, m, _i, sc, deps) => aiCheckBadMove(s, a, d, m, sc, deps), // AI_FLAG_CHECK_BAD_MOVE -- part 1 (this batch), part 2 to follow
   1: (s, a, d, m, i, sc, deps) => aiTryToFaint(s, a, d, m, i, sc, deps), // AI_FLAG_TRY_TO_FAINT
   2: checkViabilityStub, // AI_FLAG_CHECK_VIABILITY -- stub (batches 4-5)
   4: (s, a, d, m, _i, sc, deps) => aiRisky(s, a, d, m, sc, deps), // AI_FLAG_RISKY
