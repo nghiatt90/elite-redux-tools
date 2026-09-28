@@ -15,9 +15,14 @@ import {
   STATUS_FIELD_MAGIC_ROOM,
   STATUS_FIELD_WONDER_ROOM,
   STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_MUDSPORT,
+  STATUS_FIELD_WATERSPORT,
+  STATUS_FIELD_ION_DELUGE,
+  STATUS_FIELD_FAIRY_LOCK,
   WEATHER_RAIN_PRIMAL,
   WEATHER_SUN_PRIMAL,
   WEATHER_SANDSTORM_TEMPORARY,
+  WEATHER_RAIN_TEMPORARY,
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
   STATUS1_SLEEP,
@@ -25,6 +30,14 @@ import {
   STATUS2_INFATUATION,
   STATUS2_TORMENT,
   STATUS2_TRANSFORMED,
+  STATUS2_DESTINY_BOND,
+  STATUS3_AQUA_RING,
+  STATUS3_IMPRISONED_OTHERS,
+  STATUS3_LASER_FOCUS,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_YAWN,
+  STATUS3_PERISH_SONG,
+  STATUS3_ROOTED,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -770,6 +783,397 @@ describe('cycle17 (part 2) -- case-by-case coverage', () => {
     expect(scores[1]).toBeLessThan(scores[0])
     const { choice } = chooseMoveOrActionSingles(s, 0, scores, deps)
     expect(choice).toEqual({ kind: 'move', moveIndex: 0 })
+  })
+
+  // -------------------------------------------------------------------
+  // Remaining part-2 case labels, one assertion each. Siblings that share
+  // the exact same code shape (e.g. every EFFECT_*_TERRAIN, every weather
+  // move, TRICK/KNOCK_OFF) are exercised once and noted, not each retested,
+  // matching cycle16's own "mechanically identical siblings" precedent.
+  // -------------------------------------------------------------------
+
+  it('EFFECT_ABSORB: -6 against Liquid Ooze (MOVE_ABSORB itself is EFFECT_CLEAR_SMOG on this snapshot -- use MOVE_DRAIN_PUNCH, a real EFFECT_ABSORB move)', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_LIQUID_OOZE', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_DRAIN_PUNCH').score).toBe(94)
+  })
+
+  it('EFFECT_AQUA_RING: -10 while already active', () => {
+    const s = state()
+    s.battlers[0]!.statuses3 |= STATUS3_AQUA_RING
+    expect(check(s, 'MOVE_AQUA_RING').score).toBe(90)
+  })
+
+  it('EFFECT_AROMATIC_MIST always scores -10 in singles (isDoubleBattle is always false)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_AROMATIC_MIST').score).toBe(90)
+  })
+
+  it('EFFECT_ASSIST: -10 with no usable party mons (the default fixture has none)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_ASSIST').score).toBe(90)
+  })
+
+  it('EFFECT_BELCH is gapped (GetUsedHeldItem untracked) and always scores -10', () => {
+    const s = state()
+    const r = check(s, 'MOVE_BELCH')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('GetUsedHeldItem'))).toBe(true)
+  })
+
+  it('EFFECT_BELLY_DRUM: -10 with Contrary', () => {
+    const s = state({ abilities: { ability: 'ABILITY_CONTRARY', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_BELLY_DRUM').score).toBe(90)
+  })
+
+  it('EFFECT_BESTOW: -10 holding no item', () => {
+    const s = state({ itemId: null })
+    expect(check(s, 'MOVE_BESTOW').score).toBe(90)
+  })
+
+  it('EFFECT_BIDE: -10 when the attacker is below 30% HP', () => {
+    const s = state({ hp: 20, maxHp: 100 })
+    expect(check(s, 'MOVE_BIDE').score).toBe(90)
+  })
+
+  it('EFFECT_BURN_UP: -10 when the attacker is not the move\'s own type (Fire)', () => {
+    const s = state({ types: ['NORMAL', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_BURN_UP').score).toBe(90)
+  })
+
+  it('EFFECT_CONVERSION: -10 when the attacker is already the type of its own first move', () => {
+    const s = state({ moves: ['MOVE_TACKLE', null, null, null], types: ['NORMAL', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_CONVERSION').score).toBe(90)
+  })
+
+  it('EFFECT_COPYCAT/EFFECT_MIRROR_MOVE recurse with predictedMove always MOVE_NONE, matching the C\'s own no-prediction default path (no score change)', () => {
+    const s = state()
+    const r = check(s, eff('EFFECT_COPYCAT'))
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('recurses into AI_CheckBadMove'))).toBe(true)
+  })
+
+  it('EFFECT_DESTINY_BOND: -10 while already active on the target', () => {
+    const s = state()
+    s.battlers[1]!.mon.status2 = STATUS2_DESTINY_BOND
+    expect(check(s, 'MOVE_DESTINY_BOND').score).toBe(90)
+  })
+
+  it('EFFECT_ELECTRIC_TERRAIN (representative of all five *_TERRAIN-setting effects): -20 when that terrain is already active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+    expect(check(s, 'MOVE_ELECTRIC_TERRAIN').score).toBe(80)
+  })
+
+  it('EFFECT_EMBARGO: -10 against Klutz', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_KLUTZ', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_EMBARGO').score).toBe(90)
+  })
+
+  it('EFFECT_ENDEAVOR/EFFECT_PAIN_SPLIT: -10 when the attacker\'s HP already exceeds the post-split average', () => {
+    const s = state({ hp: 100, maxHp: 100 }, { hp: 10, maxHp: 100 })
+    expect(check(s, 'MOVE_ENDEAVOR').score).toBe(90)
+  })
+
+  it('EFFECT_ENDURE: -10 at 1 HP', () => {
+    const s = state({ hp: 1, maxHp: 100 })
+    expect(check(s, 'MOVE_ENDURE').score).toBe(90)
+  })
+
+  it('EFFECT_FAIRY_LOCK: -10 while already active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_FAIRY_LOCK
+    expect(check(s, 'MOVE_FAIRY_LOCK').score).toBe(90)
+  })
+
+  it('EFFECT_FINAL_GAMBIT: -10 with no usable party mons', () => {
+    const s = state()
+    expect(check(s, 'MOVE_FINAL_GAMBIT').score).toBe(90)
+  })
+
+  it('EFFECT_FLOWER_SHIELD: -10 when the attacker is not Grass-type', () => {
+    const s = state({ types: ['NORMAL', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_FLOWER_SHIELD').score).toBe(90)
+  })
+
+  it('EFFECT_FOLLOW_ME/EFFECT_HELPING_HAND always score -10 in singles', () => {
+    const s = state()
+    expect(check(s, 'MOVE_FOLLOW_ME').score).toBe(90)
+    expect(check(s, eff('EFFECT_HELPING_HAND')).score).toBe(90)
+  })
+
+  it('EFFECT_FUTURE_SIGHT: +5 when neither side already has a future attack pending', () => {
+    const s = state()
+    expect(check(s, 'MOVE_FUTURE_SIGHT').score).toBe(105)
+  })
+
+  it('EFFECT_GUARD_SWAP/EFFECT_POWER_SWAP: -10 when the attacker\'s relevant stat stages already tie or exceed the target\'s (the neutral/neutral default)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_GUARD_SWAP').score).toBe(90)
+    expect(check(s, 'MOVE_POWER_SWAP').score).toBe(90)
+  })
+
+  it('EFFECT_GUARD_SPLIT/EFFECT_POWER_SPLIT: -10 when the attacker\'s combined stats already tie or exceed the target\'s (the identical-stat default)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_GUARD_SPLIT').score).toBe(90)
+    expect(check(s, 'MOVE_POWER_SPLIT').score).toBe(90)
+  })
+
+  it('EFFECT_RAIN_DANCE (a weather sibling of EFFECT_SANDSTORM): -8 while Rain is already up', () => {
+    const s = state()
+    s.field.weather = WEATHER_RAIN_TEMPORARY
+    expect(check(s, 'MOVE_RAIN_DANCE').score).toBe(92)
+  })
+
+  it('EFFECT_HEAL_BELL is gapped (no party-wide status scan) and always scores -10', () => {
+    const s = state()
+    const r = check(s, 'MOVE_HEAL_BELL')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('AnyPartyMemberStatused'))).toBe(true)
+  })
+
+  it('EFFECT_HEAL_BLOCK: -10 while already active on the target', () => {
+    const s = state()
+    s.battlers[1]!.volatiles.healBlockTimer = 3
+    expect(check(s, 'MOVE_HEAL_BLOCK').score).toBe(90)
+  })
+
+  it('EFFECT_HEALING_WISH: -10 with no usable party mons', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_HEALING_WISH')).score).toBe(90)
+  })
+
+  it('EFFECT_HEAL_PULSE/EFFECT_HIT_ENEMY_HEAL_ALLY always score -10 in singles ("don\'t heal enemies")', () => {
+    const s = state()
+    expect(check(s, 'MOVE_HEAL_PULSE').score).toBe(90)
+    expect(check(s, eff('EFFECT_HIT_ENEMY_HEAL_ALLY')).score).toBe(90)
+  })
+
+  it('EFFECT_HIT_SWITCH_TARGET: -10 when the target already has Perish Song counting down', () => {
+    const s = state()
+    s.battlers[1]!.statuses3 |= STATUS3_PERISH_SONG
+    expect(check(s, eff('EFFECT_HIT_SWITCH_TARGET')).score).toBe(90)
+  })
+
+  it('EFFECT_IMPRISON: -10 while already active', () => {
+    const s = state()
+    s.battlers[0]!.statuses3 |= STATUS3_IMPRISONED_OTHERS
+    expect(check(s, 'MOVE_IMPRISON').score).toBe(90)
+  })
+
+  it('EFFECT_INGRAIN: -10 while already active', () => {
+    const s = state()
+    s.battlers[0]!.statuses3 |= STATUS3_ROOTED
+    expect(check(s, 'MOVE_INGRAIN').score).toBe(90)
+  })
+
+  it('EFFECT_INSTRUCT: -10 by default (no last move revealed, and predictedMove is always MOVE_NONE, so both strikes-first branches give an unusable instructedMove)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_INSTRUCT').score).toBe(90)
+  })
+
+  it('EFFECT_ION_DELUGE: -10 while already active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_ION_DELUGE
+    expect(check(s, 'MOVE_ION_DELUGE').score).toBe(90)
+  })
+
+  it('EFFECT_LASER_FOCUS: -10 while already active', () => {
+    const s = state()
+    s.battlers[0]!.statuses3 |= STATUS3_LASER_FOCUS
+    expect(check(s, 'MOVE_LASER_FOCUS').score).toBe(90)
+  })
+
+  it('EFFECT_LOCK_ON: -10 when the target already always-hits', () => {
+    const s = state()
+    s.battlers[1]!.statuses3 |= STATUS3_ALWAYS_HITS
+    expect(check(s, 'MOVE_LOCK_ON').score).toBe(90)
+  })
+
+  it('EFFECT_LUCKY_CHANT: -10 while already active', () => {
+    const s = state()
+    s.sides[0].timers.luckyChantTimer = 3
+    expect(check(s, 'MOVE_LUCKY_CHANT').score).toBe(90)
+  })
+
+  it('EFFECT_MAGIC_COAT: -10 when the target has no Magic-Coat-affected move', () => {
+    const s = state({}, { moves: ['MOVE_TACKLE', null, null, null] })
+    expect(check(s, 'MOVE_MAGIC_COAT').score).toBe(90)
+  })
+
+  it('EFFECT_ME_FIRST always scores -10 (predictedMove is always MOVE_NONE)', () => {
+    const s = state()
+    const r = check(s, 'MOVE_ME_FIRST')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('EFFECT_ME_FIRST'))).toBe(true)
+  })
+
+  it('EFFECT_MEMENTO: -10 with no usable party mons', () => {
+    const s = state()
+    expect(check(s, 'MOVE_MEMENTO').score).toBe(90)
+  })
+
+  it('EFFECT_MIMIC/EFFECT_SPITE: -10 by default (a fresh state has no revealed last move either way)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_MIMIC').score).toBe(90)
+    expect(check(s, eff('EFFECT_SPITE')).score).toBe(90)
+  })
+
+  it('EFFECT_MOONLIGHT (representative of the EFFECT_MORNING_SUN/EFFECT_SYNTHESIS healing-move family): -10 at max HP with no bad weather active', () => {
+    const s = state({ hp: 100, maxHp: 100 })
+    expect(check(s, 'MOVE_MOONLIGHT').score).toBe(90)
+  })
+
+  it('EFFECT_MUD_SPORT/EFFECT_WATER_SPORT: -10 while already active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_MUDSPORT
+    expect(check(s, 'MOVE_MUD_SPORT').score).toBe(90)
+    const s2 = state()
+    s2.field.statuses |= STATUS_FIELD_WATERSPORT
+    expect(check(s2, 'MOVE_WATER_SPORT').score).toBe(90)
+  })
+
+  it('EFFECT_NATURAL_GIFT: -10 when the attacker is not holding a berry', () => {
+    const s = state({ itemId: null })
+    const r = check(s, 'MOVE_NATURAL_GIFT')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('ItemId_GetPocket'))).toBe(true)
+  })
+
+  it('EFFECT_NATURE_POWER recurses via GetNaturePowerMove\'s gapped map-terrain fallback (MOVE_TRI_ATTACK, no score change) -- MOVE_NATURE_POWER itself is EFFECT_TERRAIN_PULSE on this snapshot, so no real move carries EFFECT_NATURE_POWER; exercised via a synthetic move', () => {
+    const s = state()
+    const r = aiCheckBadMove(s, 0, 1, 'MOVE_SYNTHETIC_EFFECT', 100, depsWithSyntheticEffect('EFFECT_NATURE_POWER'))
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('GetNaturePowerMove'))).toBe(true)
+  })
+
+  it('EFFECT_PARTING_SHOT: -10 with no usable party mons', () => {
+    const s = state()
+    expect(check(s, 'MOVE_PARTING_SHOT').score).toBe(90)
+  })
+
+  it('EFFECT_POLTERGEIST: -20 when the target holds no item', () => {
+    const s = state({}, { itemId: null })
+    expect(check(s, 'MOVE_POLTERGEIST').score).toBe(80)
+  })
+
+  it('EFFECT_POWDER: -10 when the target has no Fire-type move', () => {
+    const s = state({}, { moves: ['MOVE_TACKLE', null, null, null] })
+    expect(check(s, 'MOVE_POWDER').score).toBe(90)
+  })
+
+  it('EFFECT_PSYCH_UP: -10 for each of the attacker\'s own raised stats and each of the target\'s own lowered stats', () => {
+    const s = state()
+    s.battlers[0]!.mon.statStages[1] = 8 // attacker ATK raised
+    s.battlers[1]!.mon.statStages[2] = 4 // target DEF lowered
+    expect(check(s, 'MOVE_PSYCH_UP').score).toBe(80)
+  })
+
+  it('EFFECT_PURIFY: -10 when the target has no status to cure', () => {
+    const s = state({}, { status1: 0 })
+    expect(check(s, 'MOVE_PURIFY').score).toBe(90)
+  })
+
+  it('EFFECT_RECOIL_IF_MISS is gapped (accuracy approximated by the declared value) and never penalised by any real move on this snapshot (every EFFECT_RECOIL_IF_MISS move here has accuracy >=90, never below the 75 threshold)', () => {
+    const s = state()
+    const r = check(s, eff('EFFECT_RECOIL_IF_MISS'))
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('AI_GetMoveAccuracy'))).toBe(true)
+  })
+
+  it('EFFECT_RECYCLE is gapped (GetUsedHeldItem untracked) and always scores -10', () => {
+    const s = state()
+    const r = check(s, 'MOVE_RECYCLE')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((u) => u.includes('GetUsedHeldItem'))).toBe(true)
+  })
+
+  it('EFFECT_REFRESH: -10 when the target has no status to cure', () => {
+    const s = state({}, { status1: 0 })
+    expect(check(s, 'MOVE_REFRESH').score).toBe(90)
+  })
+
+  it('EFFECT_REST/EFFECT_RESTORE_HP/EFFECT_SOFTBOILED/EFFECT_ROOST: -10 at max HP', () => {
+    const s = state({ hp: 100, maxHp: 100 })
+    expect(check(s, 'MOVE_REST').score).toBe(90)
+    expect(check(s, eff('EFFECT_RESTORE_HP')).score).toBe(90)
+  })
+
+  it('EFFECT_SEMI_INVULNERABLE: the predictedMove branch is always unreachable (gapped); BattlerWillFaintFromWeather is additionally gapped for Fly/Bounce', () => {
+    const s = state()
+    const r = check(s, 'MOVE_FLY')
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('opponent will use its own semi-invulnerable move'))).toBe(true)
+    expect(r.unmodelled.some((u) => u.includes('BattlerWillFaintFromWeather'))).toBe(true)
+  })
+
+  it('EFFECT_SKETCH: -10 when the target has no revealed last move', () => {
+    const s = state()
+    expect(check(s, 'MOVE_SKETCH').score).toBe(90)
+  })
+
+  it('EFFECT_SOAK: -10 against a target that is already water-only', () => {
+    const s = state({}, { types: ['WATER', 'WATER', 'MYSTERY'] })
+    expect(check(s, 'MOVE_SOAK').score).toBe(90)
+  })
+
+  it('EFFECT_STOCKPILE: -10 at 3+ stacks', () => {
+    const s = state()
+    s.battlers[0]!.volatiles.stockpileCounter = 3
+    expect(check(s, 'MOVE_STOCKPILE').score).toBe(90)
+  })
+
+  it('EFFECT_STRENGTH_SAP: -10 when the target\'s Attack is already low enough that lowering it further is pointless', () => {
+    const s = state({}, { statStages: [] })
+    s.battlers[1]!.mon.statStages[1] = 3 // below the shouldLowerStat stage<4 floor
+    expect(check(s, 'MOVE_STRENGTH_SAP').score).toBe(90)
+  })
+
+  it('EFFECT_SUPER_FANG: -4 when the target is below 50% HP', () => {
+    const s = state({}, { hp: 40, maxHp: 100 })
+    expect(check(s, 'MOVE_SUPER_FANG').score).toBe(96)
+  })
+
+  it('EFFECT_SWALLOW: -10 with no Stockpile stacks', () => {
+    const s = state()
+    expect(check(s, 'MOVE_SWALLOW').score).toBe(90)
+  })
+
+  it('EFFECT_SWITCH_ARGUMENT always scores -10', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_SWITCH_ARGUMENT')).score).toBe(90)
+  })
+
+  it('EFFECT_TEETER_DANCE: no penalty by default (target not confused/immune/grounded-in-Misty-Terrain/Substituted), plus the always-present partner-slot gap note', () => {
+    const s = state()
+    const r = check(s, 'MOVE_TEETER_DANCE')
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes("partner-of-target half"))).toBe(true)
+  })
+
+  it('EFFECT_THIRD_TYPE (Trick-or-Treat): -10 when the target is ALREADY Ghost-type (redundant), unchanged otherwise', () => {
+    const s = state({}, { types: ['NORMAL', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_TRICK_OR_TREAT').score).toBe(100)
+    const s2 = state({}, { types: ['GHOST', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s2, 'MOVE_TRICK_OR_TREAT').score).toBe(90)
+  })
+
+  it('EFFECT_TWO_TURNS_ATTACK: -6 when the attacker can be knocked out before the charge move fires (no real move carries this effect on this snapshot -- exercised via a synthetic move)', () => {
+    const s = state({ hp: 1, maxHp: 1 })
+    const r = aiCheckBadMove(s, 0, 1, 'MOVE_SYNTHETIC_EFFECT', 100, depsWithSyntheticEffect('EFFECT_TWO_TURNS_ATTACK'))
+    expect(r.score).toBe(94)
+  })
+
+  it('EFFECT_WISH is gapped (no wishCounter state) and applies no penalty', () => {
+    const s = state()
+    const r = check(s, 'MOVE_WISH')
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('wishCounter'))).toBe(true)
+  })
+
+  it('EFFECT_YAWN: -10 when the target already has Yawn pending', () => {
+    const s = state()
+    s.battlers[1]!.statuses3 |= STATUS3_YAWN
+    expect(check(s, 'MOVE_YAWN').score).toBe(90)
   })
 })
 
