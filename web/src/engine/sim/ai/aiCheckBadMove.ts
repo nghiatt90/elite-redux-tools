@@ -991,11 +991,12 @@ function shouldUseRecoilMove(state: BattleState, battlerAtk: number, battlerDef:
   const defHp = state.battlers[battlerDef]?.mon.hp ?? 0
   if (recoilDmg >= atkHp && countUsablePartyMons(state, battlerDef) !== 0) {
     if (recoilDmg >= defHp) {
+      // If this recoil move is the only way to KO the target, use it anyway.
       const faintCheck = canAiFaintTargetOwnMoves(state, battlerAtk, battlerDef, deps)
-      if (!faintCheck.canFaint) return { should: false, unmodelled: faintCheck.unmodelled }
-      return { should: true, unmodelled: faintCheck.unmodelled }
+      if (!faintCheck.canFaint) return { should: true, unmodelled: faintCheck.unmodelled }
+      return { should: false, unmodelled: faintCheck.unmodelled } // a non-recoil move can already win -- prefer it
     }
-    return { should: false, unmodelled: [] }
+    return { should: false, unmodelled: [] } // will faint and not win -- not worth it
   }
   return { should: true, unmodelled: [] }
 }

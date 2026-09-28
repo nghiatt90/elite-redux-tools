@@ -8,7 +8,24 @@ import { createBattleState, createBattlerState } from '../create'
 import { createRandomSource } from '../rng'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
-import { STATUS_FIELD_ELECTRIC_TERRAIN, STATUS_FIELD_MISTY_TERRAIN, STATUS_FIELD_PSYCHIC_TERRAIN, WEATHER_RAIN_PRIMAL, WEATHER_SUN_PRIMAL, WEATHER_SANDSTORM_TEMPORARY, SIDE_STATUS_SAFEGUARD } from '../constants'
+import {
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_MAGIC_ROOM,
+  STATUS_FIELD_WONDER_ROOM,
+  STATUS_FIELD_GRAVITY,
+  WEATHER_RAIN_PRIMAL,
+  WEATHER_SUN_PRIMAL,
+  WEATHER_SANDSTORM_TEMPORARY,
+  SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_SPIKES,
+  STATUS1_SLEEP,
+  STATUS1_POISON,
+  STATUS2_INFATUATION,
+  STATUS2_TORMENT,
+  STATUS2_TRANSFORMED,
+} from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
 import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext'
@@ -107,6 +124,16 @@ function check(s: BattleState, moveId: string, score = 100) {
 }
 function depsWithMoldBreaker(attackerHasMoldBreaker: boolean): AiDamageDeps {
   return { ...deps, grounding: { ...grounding, attackerHasMoldBreaker } }
+}
+/** No moves.json move carries EFFECT_CAMOUFLAGE or EFFECT_VITAL_THROW on this
+ * snapshot (MOVE_CAMOUFLAGE is EFFECT_PROTECT here, and MOVE_VITAL_THROW
+ * carries no listed effect at all) -- both case labels are still real,
+ * reachable code (ported faithfully from the C's own switch), just untestable
+ * through a real move id. This builds a synthetic move so the case itself is
+ * still exercised and asserted on directly. */
+function depsWithSyntheticEffect(effect: string): AiDamageDeps {
+  const synthetic: MoveData = { ...toMoveData('MOVE_TACKLE'), id: 'MOVE_SYNTHETIC_EFFECT', effect }
+  return { ...deps, moveData: (id) => (id === 'MOVE_SYNTHETIC_EFFECT' ? synthetic : moveById.has(id) ? toMoveData(id) : undefined) }
 }
 function partyMon(overrides: Partial<SimBattleMon> = {}): SimPartyMon {
   return {
@@ -467,6 +494,282 @@ describe('cycle17 (part 2) -- effects that used to push a "handled in part 2" ga
     for (const label of ['EFFECT_PLASMA_FISTS', 'EFFECT_SHELL_TRAP', 'EFFECT_BEAK_BLAST', 'EFFECT_SKY_DROP', 'EFFECT_NO_RETREAT', 'EFFECT_EXTREME_EVOBOOST', 'EFFECT_CLANGOROUS_SOUL']) {
       expect(src.includes(`case '${label}'`)).toBe(false)
     }
+  })
+})
+
+describe('cycle17 (part 2) -- case-by-case coverage', () => {
+  const eff = (name: string) => rawMoves.find((m) => m.effect === name)!.id as string
+
+  it('EFFECT_ATTRACT: -10 when the target cannot be infatuated (already infatuated), unchanged otherwise', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_ATTRACT')).score).toBe(100)
+    s.battlers[1]!.mon.status2 = STATUS2_INFATUATION
+    expect(check(s, eff('EFFECT_ATTRACT')).score).toBe(90)
+  })
+
+  it('EFFECT_SAFEGUARD: -10 when the attacker\'s own side already has Safeguard up', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_SAFEGUARD')).score).toBe(100)
+    s.sides[0].statuses |= SIDE_STATUS_SAFEGUARD
+    expect(check(s, eff('EFFECT_SAFEGUARD')).score).toBe(90)
+  })
+
+  it('EFFECT_BATON_PASS: -10 with no usable party mons (the default fixture has none)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_BATON_PASS').score).toBe(90)
+  })
+
+  it('EFFECT_BATON_PASS: with usable reserves, -6 with nothing worth passing on, unchanged once a stat is raised', () => {
+    const s = createBattleState({
+      battlers: [createBattlerState(0, mon(), 0), createBattlerState(1, mon(), 0)],
+      rng: createRandomSource(1),
+      playerParty: [partyMon({ hp: 100 }), partyMon({ hp: 100 })], // slot 0 is the active battler itself; slot 1 is the usable reserve
+    })
+    expect(check(s, 'MOVE_BATON_PASS').score).toBe(94) // no raised stat, no substitute/rooted -- the -6 branch
+    s.battlers[0]!.mon.statStages[1] = 8 // STAT_ATK raised -- AnyStatIsRaised true
+    expect(check(s, 'MOVE_BATON_PASS').score).toBe(100) // no score change
+  })
+
+  it('EFFECT_WILL_O_WISP: -10 when the target cannot be burned (Fire-type)', () => {
+    const s = state({}, { types: ['FIRE', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_WILL_O_WISP').score).toBe(90)
+  })
+
+  it('EFFECT_TORMENT: -10 when the target already has Torment', () => {
+    const s = state()
+    s.battlers[1]!.mon.status2 = STATUS2_TORMENT
+    expect(check(s, eff('EFFECT_TORMENT')).score).toBe(90)
+  })
+
+  it('EFFECT_PSYCHO_SHIFT: transmits the attacker\'s own poison, scoring -10 when the target cannot be poisoned (Poison-type)', () => {
+    const s = state({ status1: STATUS1_POISON }, { types: ['POISON', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, eff('EFFECT_PSYCHO_SHIFT')).score).toBe(90)
+  })
+
+  it('EFFECT_PSYCHO_SHIFT: -10 unconditionally when the attacker has no status to transmit', () => {
+    const s = state({ status1: 0 })
+    expect(check(s, eff('EFFECT_PSYCHO_SHIFT')).score).toBe(90)
+  })
+
+  it('EFFECT_TRANSFORM: -10 when the attacker is already transformed', () => {
+    const s = state()
+    s.battlers[0]!.mon.status2 = STATUS2_TRANSFORMED
+    expect(check(s, eff('EFFECT_TRANSFORM')).score).toBe(90)
+  })
+
+  it('EFFECT_RECHARGE: -2 when the attacker lacks Truant and cannot faint the target this turn', () => {
+    const s = state({}, { hp: 999, maxHp: 999 })
+    const r = check(s, 'MOVE_HYPER_BEAM')
+    expect(r.score).toBe(98)
+  })
+
+  it('EFFECT_PROTECT: the protectUses===1 RNG draw scores -6 on a hit and 0 on a miss (scripted rng)', () => {
+    const s1 = state({}, {}, scripted(49)) // 49 % 100 < 50 -- hits
+    s1.battlers[0]!.volatiles.protectUses = 1
+    expect(check(s1, 'MOVE_PROTECT').score).toBe(94)
+    const s2 = state({}, {}, scripted(50)) // 50 % 100 < 50 is false -- misses
+    s2.battlers[0]!.volatiles.protectUses = 1
+    expect(check(s2, 'MOVE_PROTECT').score).toBe(100)
+  })
+
+  it('EFFECT_PROTECT: -10 with 2+ prior uses, -10 when the target is incapacitated', () => {
+    const s = state()
+    s.battlers[0]!.volatiles.protectUses = 2
+    expect(check(s, 'MOVE_PROTECT').score).toBe(90)
+    const s2 = state()
+    s2.battlers[1]!.mon.status1 = STATUS1_SLEEP
+    expect(check(s2, 'MOVE_PROTECT').score).toBe(90)
+  })
+
+  it('EFFECT_DEFOG: -10 when the opposing side already has hazards up (don\'t blow them away)', () => {
+    const s = state()
+    s.sides[1].statuses |= SIDE_STATUS_SPIKES
+    expect(check(s, 'MOVE_DEFOG').score).toBe(90)
+  })
+
+  it('EFFECT_SOLARBEAM: no penalty holding Power Herb, -14 otherwise when the attacker can be knocked out first', () => {
+    const s1 = state({ itemId: 'ITEM_POWER_HERB' })
+    expect(check(s1, 'MOVE_SOLAR_BEAM').score).toBe(100)
+  })
+
+  it('EFFECT_TRICK_ROOM: -10 when Clueless is on the field', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_CLUELESS', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_TRICK_ROOM').score).toBe(90)
+  })
+
+  it('EFFECT_MAGIC_ROOM / EFFECT_WONDER_ROOM: -10 when already active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_MAGIC_ROOM
+    expect(check(s, 'MOVE_MAGIC_ROOM').score).toBe(90)
+    const s2 = state()
+    s2.field.statuses |= STATUS_FIELD_WONDER_ROOM
+    expect(check(s2, 'MOVE_WONDER_ROOM').score).toBe(90)
+  })
+
+  it('EFFECT_GRAVITY: -10 when Gravity is already active and the attacker is grounded', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_GRAVITY
+    expect(check(s, 'MOVE_GRAVITY').score).toBe(90)
+  })
+
+  it('EFFECT_TELEKINESIS: -10 against a telekinesis-banned species (Diglett)', () => {
+    const s = state({}, { speciesId: 'SPECIES_DIGLETT' })
+    expect(check(s, 'MOVE_TELEKINESIS').score).toBe(90)
+  })
+
+  it('EFFECT_FLING: -10 with no item to fling', () => {
+    const s = state({ itemId: null })
+    expect(check(s, 'MOVE_FLING').score).toBe(90)
+  })
+
+  it('EFFECT_ROLE_PLAY: -10 when the target has no ability (ABILITY_NONE)', () => {
+    const s = state({ abilities: { ability: 'ABILITY_TORRENT', innates: [null, null, null] } }, { abilities: { ability: null, innates: [null, null, null] } })
+    expect(check(s, 'MOVE_ROLE_PLAY').score).toBe(90)
+  })
+
+  it('EFFECT_SKILL_SWAP: -10 when both battlers share the same ability', () => {
+    const s = state({ abilities: { ability: 'ABILITY_TORRENT', innates: [null, null, null] } }, { abilities: { ability: 'ABILITY_TORRENT', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_SKILL_SWAP').score).toBe(90)
+  })
+
+  it('EFFECT_ENTRAINMENT: -10 when the attacker has no ability', () => {
+    const s = state({ abilities: { ability: null, innates: [null, null, null] } })
+    expect(check(s, 'MOVE_ENTRAINMENT').score).toBe(90)
+  })
+
+  it('EFFECT_GASTRO_ACID: -10 against an Ability Shield holder', () => {
+    const s = state({}, { itemId: 'ITEM_ABILITY_SHIELD' })
+    expect(check(s, 'MOVE_GASTRO_ACID').score).toBe(90)
+  })
+
+  it('EFFECT_WORRY_SEED: -10 against Insomnia', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_INSOMNIA', innates: [null, null, null] } })
+    expect(check(s, 'MOVE_WORRY_SEED').score).toBe(90)
+  })
+
+  it('EFFECT_SIMPLE_BEAM: -10 when the attacker already has Simple', () => {
+    const s = state({ abilities: { ability: 'ABILITY_SIMPLE', innates: [null, null, null] } })
+    expect(check(s, eff('EFFECT_SIMPLE_BEAM')).score).toBe(90)
+  })
+
+  it('EFFECT_POWER_TRICK: -10 when the attacker\'s Defense already exceeds its Attack and it has no physical move', () => {
+    const s = state({ rawStats: { atk: 50, def: 200, spatk: 80, spdef: 85, spe: 100 }, moves: ['MOVE_WATER_GUN', null, null, null] })
+    expect(check(s, eff('EFFECT_POWER_TRICK')).score).toBe(90)
+  })
+
+  it('EFFECT_SPEED_SWAP: -10 when the attacker is already faster', () => {
+    const s = state({ rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 200 } }, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 50 } })
+    expect(check(s, eff('EFFECT_SPEED_SWAP')).score).toBe(90)
+  })
+
+  it('EFFECT_HEART_SWAP: -10 when the attacker has more positive and no more negative stages than the target', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_HEART_SWAP')).score).toBe(90) // both 0/0 -- 0>=0 && 0<=0
+  })
+
+  it('EFFECT_TOPSY_TURVY: -10 when the target has no positive stat changes to invert', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_TOPSY_TURVY')).score).toBe(90)
+  })
+
+  it('EFFECT_TAUNT: -1 then an additional -10 while Taunt is already active on the target', () => {
+    const s = state()
+    s.battlers[1]!.volatiles.tauntTimer = 3
+    expect(check(s, 'MOVE_TAUNT').score).toBe(89)
+  })
+
+  it('EFFECT_CAMOUFLAGE is gapped (no overworld-map-terrain port) and never penalised (no real move carries this effect -- exercised via a synthetic move)', () => {
+    const s = state()
+    const r = aiCheckBadMove(s, 0, 1, 'MOVE_SYNTHETIC_EFFECT', 100, depsWithSyntheticEffect('EFFECT_CAMOUFLAGE'))
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('CanCamouflage'))).toBe(true)
+  })
+
+  it('EFFECT_LAST_RESORT: -10 when the attacker has an unused, non-Last-Resort move slot', () => {
+    const s = state({ moves: ['MOVE_LAST_RESORT', 'MOVE_TACKLE', null, null] })
+    expect(check(s, 'MOVE_LAST_RESORT').score).toBe(90)
+  })
+
+  it('EFFECT_SYNCHRONOISE quirk (real in the C, not a porting bug): a mono-typed target is ALWAYS "same type" via the shared, unfilled TYPE_MYSTERY slot -- IS_BATTLER_OF_TYPE has no TYPE_MYSTERY guard', () => {
+    const s = state({ types: ['FIRE', 'MYSTERY', 'MYSTERY'] }, { types: ['WATER', 'MYSTERY', 'MYSTERY'] })
+    expect(check(s, 'MOVE_SYNCHRONOISE').score).toBe(100) // "same type" via the shared MYSTERY slot, not a real type match
+  })
+
+  it('EFFECT_SYNCHRONOISE: -10 when neither battler has an empty type slot to coincidentally share (both fully triple-typed, no overlap)', () => {
+    const s = state({ types: ['FIRE', 'FLYING', 'STEEL'] }, { types: ['WATER', 'GROUND', 'ICE'] })
+    expect(check(s, 'MOVE_SYNCHRONOISE').score).toBe(90)
+  })
+
+  it('EFFECT_ERUPTION: -1 when not-very-effective, another -1 when the target is below 50% HP (stacking to -2)', () => {
+    const s = state({ types: ['FIRE', 'MYSTERY', 'MYSTERY'] }, { types: ['FIRE', 'MYSTERY', 'MYSTERY'], hp: 40, maxHp: 100 })
+    const r = check(s, 'MOVE_ERUPTION')
+    expect(r.score).toBe(98)
+  })
+
+  it('EFFECT_VITAL_THROW is gapped (AI_CHECK_FASTER has no port) and never penalised (no real move carries this effect -- exercised via a synthetic move)', () => {
+    const s = state()
+    const r = aiCheckBadMove(s, 0, 1, 'MOVE_SYNTHETIC_EFFECT', 100, depsWithSyntheticEffect('EFFECT_VITAL_THROW'))
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('AI_CHECK_FASTER'))).toBe(true)
+  })
+
+  it('EFFECT_FLAIL: -4 when the attacker is above 50% HP', () => {
+    const s = state({ hp: 80, maxHp: 100 })
+    expect(check(s, 'MOVE_FLAIL').score).toBe(96)
+  })
+
+  it('EFFECT_DO_NOTHING always scores -10', () => {
+    const s = state()
+    expect(check(s, eff('EFFECT_DO_NOTHING')).score).toBe(90)
+  })
+
+  it('EFFECT_QUASH always scores -10 in singles (isDoubleBattle is always false)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_QUASH').score).toBe(90)
+  })
+
+  it('EFFECT_AFTER_YOU always scores -10 in singles (isTargetingPartner is always false)', () => {
+    const s = state()
+    expect(check(s, 'MOVE_AFTER_YOU').score).toBe(90)
+  })
+
+  it('EFFECT_SUCKER_PUNCH is gapped unreachable (predictedMove always MOVE_NONE) and never penalised', () => {
+    const s = state()
+    const r = check(s, 'MOVE_SUCKER_PUNCH')
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((u) => u.includes('EFFECT_SUCKER_PUNCH'))).toBe(true)
+  })
+
+  it('EFFECT_TAILWIND: -10 when Tailwind is already up on the attacker\'s side', () => {
+    const s = state()
+    s.sides[0].timers.tailwindTimer = 3
+    expect(check(s, 'MOVE_TAILWIND').score).toBe(90)
+  })
+
+  it('EFFECT_MAGNET_RISE: -10 while Gravity is active', () => {
+    const s = state()
+    s.field.statuses |= STATUS_FIELD_GRAVITY
+    expect(check(s, 'MOVE_MAGNET_RISE').score).toBe(90)
+  })
+
+  it('recoil tail: a recoil move (Take Down-class, EFFECT_RECOIL_25) is discouraged via ShouldUseRecoilMove when the recoil would faint the attacker and there is another target left', () => {
+    const recoilMoveId = rawMoves.find((m) => m.effect === 'EFFECT_RECOIL_25')!.id as string
+    const s = stateWithDefenderParty({ hp: 1, maxHp: 100 })
+    const r = check(s, recoilMoveId)
+    // hp=1 guarantees recoilDmg (>=1) >= attacker hp; the target is at full
+    // HP so recoilDmg < defHp, taking ShouldUseRecoilMove's unconditional
+    // "will faint and not win" FALSE branch -- no CanAIFaintTarget call needed.
+    expect(r.score).toBe(90)
+  })
+
+  it('pipeline-level: chooseAiAction avoids a move part 2 penalises (Belly Drum below 60% HP) in favour of a clean move', () => {
+    const s = state({ moves: ['MOVE_TACKLE', 'MOVE_BELLY_DRUM', null, null], pp: [35, 10, 0, 0], hp: 50, maxHp: 100 })
+    const scores: [number, number, number, number] = [100, 100, 100, 100]
+    scores[0] = aiCheckBadMove(s, 0, 1, 'MOVE_TACKLE', scores[0], deps).score
+    scores[1] = aiCheckBadMove(s, 0, 1, 'MOVE_BELLY_DRUM', scores[1], deps).score
+    expect(scores[1]).toBeLessThan(scores[0])
+    const { choice } = chooseMoveOrActionSingles(s, 0, scores, deps)
+    expect(choice).toEqual({ kind: 'move', moveIndex: 0 })
   })
 })
 
