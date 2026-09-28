@@ -30,6 +30,7 @@ import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
 import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingles } from './aiPipeline'
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
+import { PARTY_SIZE } from '../constants'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
  * sim does not have yet (dynamic move type resolution, terrain grounding, the
@@ -153,6 +154,10 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
     }
     moveView = buildMoveView(moveId, deps, unmodelled)
   }
+
+  // STATE_BEFORE_ACTION_CHOSEN (battle_main.c:3641) resets the pending-switch
+  // slot after scoring and before CHOOSEACTION.
+  if (battler) battler.monToSwitchIntoId = PARTY_SIZE
 
   // Step 2, battle_ai_switch_items.c:699+ (AI_TrySwitchOrUseItem, run from
   // OpponentHandleChooseAction, battle_controller_opponent.c:1557-1561) --

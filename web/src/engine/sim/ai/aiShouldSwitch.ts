@@ -43,6 +43,7 @@ import {
   STATUS1_SLEEP,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_WRAPPED,
+  STATUS3_EMBARGO,
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
   STATUS4_COMMANDED,
@@ -442,6 +443,10 @@ function aiExpectsToFaintPlayer(state: BattleState, battlerId: number, target: n
 }
 
 export function shouldUseItem(state: BattleState, battlerId: number, target: number, choice: AiChoice, moveView: TurnOrderMoveView | null, deps: AiDamageDeps): { usedItem: false; unmodelled: string[] } {
+  // :1089 (BATTLE_TYPE_INGAME_PARTNER at PLAYER_RIGHT) is doubles-only, never an
+  // opponent in singles. :1092 returns before AiExpectsToFaintPlayer, so an
+  // Embargoed AI draws none of its speed-tie RNG.
+  if (hasFlag(state.battlers[battlerId]?.statuses3 ?? 0, STATUS3_EMBARGO)) return { usedItem: false, unmodelled: [] }
   const expects = aiExpectsToFaintPlayer(state, battlerId, target, choice, moveView, deps)
   return {
     usedItem: false,

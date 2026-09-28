@@ -15,6 +15,7 @@ import {
   STATUS1_SLEEP,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_WRAPPED,
+  STATUS3_EMBARGO,
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
   STATUS4_COMMANDED,
@@ -371,6 +372,26 @@ describe('shouldUseItem', () => {
     const { usedItem, unmodelled } = shouldUseItem(s, 1, 0, { kind: 'move', moveIndex: 0 }, moveView, deps)
     expect(usedItem).toBe(false)
     expect(unmodelled.some((u) => u.includes('ShouldUseItem'))).toBe(true)
+  })
+
+  it('an Embargoed AI returns FALSE at :1092 before AiExpectsToFaintPlayer, drawing no RNG on the speed tie', () => {
+    let draws = 0
+    const counting: RandomSource = { random16: () => { draws++; return 0 } }
+    const tie = { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 }
+    const moveView = { id: 'MOVE_TACKLE', priority: 0, effect: null, isStatus: false, resolvedType: 'NORMAL', power: 40, flags: {}, split: 'PHYSICAL', hasStrongJawBoostFlag: false, isKeenEdge: false, naturalGiftPriority: 0, isGrassyTerrainAffected: false, myceliumMightAffected: false } as const
+
+    // The AI is battler 1; its target (battler 0) is at 1 HP so Tackle faints it
+    // and GetWhoStrikesFirst runs on an exact speed tie.
+    const free = battle({ hp: 1, maxHp: 100, rawStats: tie }, { rawStats: tie }, counting)
+    shouldUseItem(free, 1, 0, { kind: 'move', moveIndex: 0 }, moveView, deps)
+    expect(draws).toBeGreaterThan(0)
+
+    draws = 0
+    const embargoed = battle({ hp: 1, maxHp: 100, rawStats: tie }, { rawStats: tie }, counting)
+    embargoed.battlers[1]!.statuses3 = STATUS3_EMBARGO
+    const { usedItem } = shouldUseItem(embargoed, 1, 0, { kind: 'move', moveIndex: 0 }, moveView, deps)
+    expect(usedItem).toBe(false)
+    expect(draws).toBe(0)
   })
 })
 

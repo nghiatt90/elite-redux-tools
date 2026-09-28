@@ -77,10 +77,10 @@
 //           gTurnStructs) (battle_main.c:4511) wipes EVERY battler's turn
 //           struct after every action; without it a Bullet Seed's
 //           multiHitCounter would leak into the attacker's next move.
-//   Its other five statements are omitted:
-//     :849  monToSwitchIntoId[...] = 6, resetting the pending-switch slot to the
-//           PARTY_SIZE sentinel. Belongs with switching; noted because the
-//           sentinel's value is itself a trap (see state.ts's own doc).
+//     :849  monToSwitchIntoId[...] = 6 -- ported as resetPendingSwitch();
+//           once chosen switches exist, a stale slot would be reused by every
+//           later GetMostSuitableMonToSwitchInto call.
+//   Its other four statements are omitted:
 //     :857  gLastLandedMoves[gBattlerAttacker] = 0
 //     :858  gLastHitByType[gBattlerAttacker] = 0
 //     :859  ClearMiscTurnFlags()
@@ -421,6 +421,12 @@ function turnStructsClear(state: BattleState): void {
   }
 }
 
+/** HandleAction_ActionFinished:849 -- monToSwitchIntoId[battler] = PARTY_SIZE. */
+function resetPendingSwitch(state: BattleState, battlerId: number): void {
+  const battler = state.battlers[battlerId]
+  if (battler) battler.monToSwitchIntoId = PARTY_SIZE
+}
+
 /**
  * Cmd_ppreduce, battle_script_commands.c:1460-1506. Runs for every USE_MOVE
  * action that reaches this point (a living attacker with a living target),
@@ -602,6 +608,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // action; clearing at the top of each iteration (and once after the loop)
     // is equivalent and survives every `continue` below.
     turnStructsClear(state)
+    // :849 -- the finished action's battler gets its pending-switch slot reset
+    // to PARTY_SIZE before the re-sort; recalculateMoveOrder only touches slots
+    // >= index, so [index - 1] is still that battler.
+    if (index > 0) resetPendingSwitch(state, order.battlerByTurnOrder[index - 1])
     // :4546 / :839 / :851 -- re-sort THIS slot before reading who is in it.
     recalculateMoveOrder(order, state, actions, index, false, ctx, deps.statStageRatios)
 
@@ -771,6 +781,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     })
   }
   turnStructsClear(state)
+  const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
+  if (lastActor !== undefined) resetPendingSwitch(state, lastActor)
 
   // BattleTurnPassed, battle_main.c:3465-3481: TurnValuesCleanUp(TRUE), then
   // DoFieldEndTurnEffects (fieldEndTurn.ts) and DoBattlerEndTurnEffects

@@ -462,6 +462,17 @@ describe('executeTurn: a mid-turn CHOSEN switch (performSwitchAction)', () => {
     expect(state.battlers[0]!.partyIndex).toBe(1)
   })
 
+  it('HandleAction_ActionFinished:849 resets monToSwitchIntoId after ANY action, so a pending slot never goes stale', () => {
+    // A slot left pending on a battler that then MOVES (not switches) would
+    // otherwise make every later GetMostSuitableMonToSwitchInto short-circuit.
+    const state = battle([{ spe: 200, hp: 100 }, { spe: 50, hp: 100 }], scripted(), [partyMon({ hp: 100 }), partyMon({ hp: 80 })], [partyMon({ hp: 100 })])
+    state.battlers[0]!.monToSwitchIntoId = 1
+    state.battlers[1]!.monToSwitchIntoId = 0
+    executeTurn(state, [useMove(1), useMove(0)], deps(lethalToTarget(10)))
+    expect(state.battlers[0]!.monToSwitchIntoId).toBe(6)
+    expect(state.battlers[1]!.monToSwitchIntoId).toBe(6)
+  })
+
   it('the outgoing mon\'s HP and status1 persist on its party record; status2 and stat stages do not carry over', () => {
     const reserve = partyMon({ hp: 50 })
     const state = battle([{ spe: 200, hp: 63, status1: STATUS1_BURN }, { spe: 50, hp: 100 }], scripted(), [partyMon({ hp: 63, status1: STATUS1_BURN }), reserve], [partyMon({ hp: 100 })])
