@@ -9,14 +9,14 @@ import { createRandomSource } from '../rng'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
 import { STATUS_FIELD_ELECTRIC_TERRAIN, STATUS_FIELD_MISTY_TERRAIN, STATUS_FIELD_PSYCHIC_TERRAIN, WEATHER_RAIN_PRIMAL, WEATHER_SUN_PRIMAL, SIDE_STATUS_SAFEGUARD } from '../constants'
-import type { BattleState, RandomSource, SimBattleMon } from '../state'
+import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
 import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext'
 import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
-import { aiCheckBadMove } from './aiCheckBadMove'
+import { aiCheckBadMove, PART2_EFFECTS, MOLD_BREAKABLE_ABILITIES, ON_STAT_LOWERED_ABILITIES, SUCTION_CUPS_ABILITIES, ALWAYS_SLEEPING_ABILITIES } from './aiCheckBadMove'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -94,6 +94,28 @@ function scripted(...values: number[]): RandomSource {
 }
 function check(s: BattleState, moveId: string, score = 100) {
   return aiCheckBadMove(s, 0, 1, moveId, score, deps)
+}
+function depsWithMoldBreaker(attackerHasMoldBreaker: boolean): AiDamageDeps {
+  return { ...deps, grounding: { ...grounding, attackerHasMoldBreaker } }
+}
+function partyMon(overrides: Partial<SimBattleMon> = {}): SimPartyMon {
+  return {
+    speciesId: 'SPECIES_MUDKIP', hp: 100, maxHp: 100, level: 50, moves: ['MOVE_TACKLE', null, null, null],
+    pp: [35, 0, 0, 0], itemId: null, abilities: { ability: null, innates: [null, null, null] },
+    rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 }, nature: 'NATURE_HARDY', hiddenPowerType: null, speedDown: false,
+    gender: 'MALE', status1: 0, types: ['NORMAL', 'MYSTERY', 'MYSTERY'], ...overrides,
+  }
+}
+/** Same as `state`, but with a live reserve mon on the DEFENDER's side, so
+ * `countUsablePartyMons(state, 1)` is 1 rather than 0 -- needed whenever a
+ * test wants to isolate an EFFECT_ROAR/EFFECT_PERISH_SONG ability check from
+ * the "no usable party mons" branch that would otherwise fire unconditionally. */
+function stateWithDefenderParty(a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, rng: RandomSource = createRandomSource(1)): BattleState {
+  return createBattleState({
+    battlers: [createBattlerState(0, mon(a), 0), createBattlerState(1, mon(d), 0)],
+    rng,
+    opponentParty: [partyMon({ hp: 100 }), partyMon({ hp: 100 })],
+  })
 }
 
 describe('AI_CheckBadMove part 1 -- non-user-target checks', () => {
@@ -368,5 +390,152 @@ describe('AI_CheckBadMove wired into chooseAiAction/chooseMoveOrActionSingles', 
     expect(scores[1]).toBe(80)
     const { choice } = chooseMoveOrActionSingles(s, 0, scores, deps)
     expect(choice).toEqual({ kind: 'move', moveIndex: 0 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fix pass (post-review): PART2_EFFECTS accuracy, Mold Breaker breakable
+// flag, and the RETURN_ABILITY_IF_FLAG full-ability-set scans.
+// ---------------------------------------------------------------------------
+
+describe('PART2_EFFECTS -- oracle test against the pinned C source', () => {
+  it('has exactly 147 entries, matching a fresh extraction of battle_ai_main.c:1299-2163', () => {
+    // Extraction command (see PART2_EFFECTS's own doc in aiCheckBadMove.ts):
+    // awk 'NR>=1299 && NR<=2163' pipeline/.upstream/eliteredux-source/src/battle_ai_main.c \
+    //   | grep -o "case EFFECT_[A-Za-z0-9_]*" | sed 's/case //' | sort -u | wc -l
+    expect(PART2_EFFECTS.size).toBe(147)
+  })
+
+  it('previously-missing effects now push a named part-2 gap: EFFECT_RAPID_SPIN, EFFECT_FAKE_OUT, EFFECT_TRICK', () => {
+    for (const moveId of ['MOVE_RAPID_SPIN', 'MOVE_FAKE_OUT', 'MOVE_TRICK']) {
+      const s = state()
+      const r = check(s, moveId)
+      const effect = moveById.get(moveId)!.effect as string
+      expect(PART2_EFFECTS.has(effect)).toBe(true)
+      expect(r.score).toBe(100)
+      expect(r.unmodelled.some((u) => u.includes(effect) && u.includes('part 2'))).toBe(true)
+    }
+  })
+
+  it('a real default-path effect not in either part1 or part2 (EFFECT_HEX, EFFECT_PAYBACK) is correctly silent -- no gap naming the effect', () => {
+    // Water is neutral against both Ghost (Hex) and Dark (Payback) -- avoids
+    // an unrelated type-immunity RETURN_SCORE_MINUS(20) from masking the
+    // classification assertion this test is actually about.
+    for (const moveId of ['MOVE_HEX', 'MOVE_PAYBACK']) {
+      const s = state({}, { types: ['WATER', 'MYSTERY', 'MYSTERY'] })
+      const r = check(s, moveId)
+      const effect = moveById.get(moveId)!.effect as string
+      expect(PART2_EFFECTS.has(effect)).toBe(false)
+      expect(r.score).toBe(100)
+      expect(r.unmodelled.some((u) => u.includes(effect))).toBe(false)
+    }
+  })
+
+  it('a Pledge move (the naming-mismatch class of bug) is classified correctly: EFFECT_ARGUMENT_HIT is the real effect, not EFFECT_FIRE_PLEDGE, and is not in PART2_EFFECTS (falls to default)', () => {
+    const m = moveById.get('MOVE_FIRE_PLEDGE')!
+    expect(m.effect).toBe('EFFECT_ARGUMENT_HIT')
+    expect(PART2_EFFECTS.has('EFFECT_ARGUMENT_HIT')).toBe(false)
+    const s = state()
+    const r = check(s, 'MOVE_FIRE_PLEDGE')
+    expect(r.score).toBe(100)
+    // Damage-path gaps from the shared calculateMoveDamage engine (stat
+    // stages, condition flags, ...) are expected for any damaging move and
+    // are out of this batch's scope -- only assert no gap names the Pledge
+    // effect itself or claims a part-2 classification.
+    expect(r.unmodelled.some((u) => u.includes('EFFECT_ARGUMENT_HIT') || u.includes('EFFECT_FIRE_PLEDGE') || u.includes('part 2'))).toBe(false)
+  })
+})
+
+describe('Mold Breaker -- per-ability breakable flag (not a uniform bypass)', () => {
+  it('suppresses a breakable ability (Wonder Guard) but not one that is not breakable (Speed Boost is not checked mid-switch without a real move -- use Suction Cups vs Strong Foundation on EFFECT_ROAR instead, which exercises both in one effect)', () => {
+    // MOLD_BREAKABLE_ABILITIES sanity: Wonder Guard is breakable, Strong
+    // Foundation and Superheavy are not (per abilityHooks.json).
+    expect(MOLD_BREAKABLE_ABILITIES.includes('ABILITY_WONDER_GUARD')).toBe(true)
+    expect(MOLD_BREAKABLE_ABILITIES.includes('ABILITY_STRONG_FOUNDATION')).toBe(false)
+  })
+
+  it('Wonder Guard (breakable): RETURN_SCORE_MINUS(20) without Mold Breaker, no penalty with it', () => {
+    const s = state({}, { types: ['DRAGON', 'FLYING', 'MYSTERY'], abilities: { ability: 'ABILITY_WONDER_GUARD', innates: [null, null, null] } })
+    const move = moveById.get('MOVE_ICE_BEAM')!
+    expect(move.power).toBeGreaterThan(0)
+    const withoutMB = aiCheckBadMove(s, 0, 1, 'MOVE_ICE_BEAM', 100, depsWithMoldBreaker(false))
+    expect(withoutMB.score).toBe(80)
+    const withMB = aiCheckBadMove(s, 0, 1, 'MOVE_ICE_BEAM', 100, depsWithMoldBreaker(true))
+    expect(withMB.score).toBe(100)
+  })
+
+  it('Strong Foundation (suctionCups but NOT breakable): EFFECT_ROAR still penalises it even with a Mold-Breaker attacker', () => {
+    const s = stateWithDefenderParty({}, { abilities: { ability: 'ABILITY_STRONG_FOUNDATION', innates: [null, null, null] } })
+    const withMB = aiCheckBadMove(s, 0, 1, 'MOVE_ROAR', 100, depsWithMoldBreaker(true))
+    expect(withMB.score).toBe(90) // NOT suppressed -- Strong Foundation has no breakable bitfield
+  })
+
+  it('Suction Cups (suctionCups AND breakable): EFFECT_ROAR penalises it without Mold Breaker, but Mold Breaker suppresses it', () => {
+    const s = stateWithDefenderParty({}, { abilities: { ability: 'ABILITY_SUCTION_CUPS', innates: [null, null, null] } })
+    const withoutMB = aiCheckBadMove(s, 0, 1, 'MOVE_ROAR', 100, depsWithMoldBreaker(false))
+    expect(withoutMB.score).toBe(90)
+    const withMB = aiCheckBadMove(s, 0, 1, 'MOVE_ROAR', 100, depsWithMoldBreaker(true))
+    expect(withMB.score).toBe(100) // suppressed -- Suction Cups IS breakable
+  })
+})
+
+describe('RETURN_ABILITY_IF_FLAG scans -- full ability-set oracle tests', () => {
+  it('ON_STAT_LOWERED_ABILITIES matches every abilityHooks.json ability whose hooks carry onStatLowered', () => {
+    const hooks = readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')
+    const parsed = JSON.parse(hooks) as Record<string, { hooks?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => 'onStatLowered' in (h.hooks ?? {}))
+      .map(([id]) => id)
+      .sort()
+    expect([...ON_STAT_LOWERED_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('SUCTION_CUPS_ABILITIES matches every abilityHooks.json ability whose bitfields.suctionCups is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.suctionCups)
+      .map(([id]) => id)
+      .sort()
+    expect([...SUCTION_CUPS_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('ALWAYS_SLEEPING_ABILITIES matches every abilityHooks.json ability whose bitfields.alwaysSleeping is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.alwaysSleeping)
+      .map(([id]) => id)
+      .sort()
+    expect([...ALWAYS_SLEEPING_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('MOLD_BREAKABLE_ABILITIES matches every abilityHooks.json ability whose bitfields.breakable is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed)
+      .filter(([, h]) => !!h.bitfields?.breakable)
+      .map(([id]) => id)
+      .sort()
+    expect([...MOLD_BREAKABLE_ABILITIES].sort()).toEqual(expected)
+  })
+
+  it('EFFECT_ROAR now recognises a Run-Away/Guard-Dog-class ability beyond the old single-ability narrowing (Run Away is onStatLowered, not suctionCups -- Guard Dog IS suctionCups and was previously missed entirely)', () => {
+    const s = stateWithDefenderParty({}, { abilities: { ability: 'ABILITY_GUARD_DOG', innates: [null, null, null] } })
+    const r = aiCheckBadMove(s, 0, 1, 'MOVE_ROAR', 100, depsWithMoldBreaker(false))
+    expect(r.score).toBe(90) // previously: only ABILITY_SUCTION_CUPS matched, so this would have been 100
+  })
+
+  it('ShouldLowerStat now recognises a Run-Away holder (onStatLowered) beyond the old Defiant-only narrowing', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_RUN_AWAY', innates: [null, null, null] } })
+    // EFFECT_ATTACK_DOWN's move penalises when ShouldLowerStat is false --
+    // Run Away's onStatLowered hook makes lowering pointless/bad, same as Defiant.
+    const move = rawMoves.find((m) => m.effect === 'EFFECT_ATTACK_DOWN')!.id as string
+    const r = check(s, move)
+    expect(r.score).toBe(90) // previously: only ABILITY_DEFIANT matched, so this would have been 100
+  })
+
+  it('EFFECT_DREAM_EATER now recognises Dreamscape (alwaysSleeping) beyond the old Comatose-only narrowing', () => {
+    const s = state({}, { status1: 0, abilities: { ability: 'ABILITY_DREAMSCAPE', innates: [null, null, null] } })
+    // Not asleep, but Dreamscape's alwaysSleeping flag should be treated like Comatose -- score -8.
+    const r = check(s, 'MOVE_DREAM_EATER')
+    expect(r.score).toBe(92)
   })
 })
