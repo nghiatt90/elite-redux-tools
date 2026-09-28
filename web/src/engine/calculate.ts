@@ -103,6 +103,13 @@ export interface MoveData {
    * 1063-1064) -- MULTIHIT_THREE when 3, MULTIHIT_TWO (the default) otherwise.
    * Narrowed from Move.argument's `int` variant. `null` for every other move. */
   multiHitArgument: number | null
+  /** moves.json's own `target` (MoveTargetEnum bare spelling -- 'USER',
+   * 'SELECTED', 'BOTH', ...), not the C's packed `MOVE_TARGET_*` bitfield.
+   * Added for aiCheckBadMove.ts's `moveTarget & MOVE_TARGET_USER`-shaped
+   * checks (battle_ai_main.c:516, 764); optional because every other
+   * MoveData caller/fixture predates this field, and `undefined` is the
+   * correct default ("not MOVE_TARGET_USER") for the vast majority of moves. */
+  target?: string
 }
 
 export interface DamageCalcScenario {
