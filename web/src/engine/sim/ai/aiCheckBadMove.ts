@@ -226,11 +226,11 @@ function foeOf(battlerId: number): number {
  * build (see this module's header). Ported as a real (if unreachable) check
  * rather than a hardcoded `false` so a future doubles batch has a single
  * place to fix. */
-function isValidDoubleBattle(_state: BattleState, _battlerAtk: number): boolean {
+export function isValidDoubleBattle(_state: BattleState, _battlerAtk: number): boolean {
   return false
 }
 
-function hasMoveFlag(move: ReturnType<AiDamageDeps['moveData']>, flag: string): boolean {
+export function hasMoveFlag(move: ReturnType<AiDamageDeps['moveData']>, flag: string): boolean {
   return !!move?.flags?.[flag]
 }
 
@@ -240,11 +240,11 @@ function moveTargetsUser(move: ReturnType<AiDamageDeps['moveData']>): boolean {
   return move?.target === 'USER'
 }
 
-function isBattlerOfType(battler: BattlerState, type: string): boolean {
+export function isBattlerOfType(battler: BattlerState, type: string): boolean {
   return battler.mon.types.includes(type)
 }
 
-function getBattlerHoldEffect(battler: BattlerState, deps: AiDamageDeps): string | null {
+export function getBattlerHoldEffect(battler: BattlerState, deps: AiDamageDeps): string | null {
   return battler.mon.itemId ? (deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
 }
 
@@ -309,13 +309,13 @@ const MOLD_BREAKABLE_SET = new Set(MOLD_BREAKABLE_ABILITIES)
  * (`MOLD_BREAKABLE_ABILITIES` above), matching `IsSuppressed`'s real gate
  * instead of the uniform "Mold Breaker bypasses every checkMoldBreaker=TRUE
  * read" approximation an earlier revision of this file used. */
-function defAbility(battler: BattlerState, abilityId: string, attackerHasMoldBreaker: boolean): boolean {
+export function defAbility(battler: BattlerState, abilityId: string, attackerHasMoldBreaker: boolean): boolean {
   const suppressed = attackerHasMoldBreaker && MOLD_BREAKABLE_SET.has(abilityId)
   return battlerHasAbility(battler.mon.abilities, abilityId, () => suppressed)
 }
 /** `BattlerHasAbility(battler, ABILITY_X, FALSE)` or a self-check -- never
  * suppressed (see this module's header). */
-function selfAbility(battler: BattlerState, abilityId: string): boolean {
+export function selfAbility(battler: BattlerState, abilityId: string): boolean {
   return battlerHasAbility(battler.mon.abilities, abilityId, () => false)
 }
 
@@ -335,7 +335,7 @@ function isAbilityOnField(state: BattleState, abilityId: string): boolean {
  * Umbrella exemption only applies to WEATHER_SUN_ANY/WEATHER_RAIN_ANY, per
  * fieldEndTurn.ts's own VARIOUS_DO_FOG_STAT_DROPS note) -- `hasFlag(weather,
  * W) && weatherHasEffect`. */
-function isBattlerWeatherAffected(state: BattleState, weatherFlag: number, deps: AiDamageDeps): boolean {
+export function isBattlerWeatherAffected(state: BattleState, weatherFlag: number, deps: AiDamageDeps): boolean {
   return hasFlag(state.field.weather, weatherFlag) && weatherHasEffect(state, deps.grounding)
 }
 
@@ -475,7 +475,7 @@ function loweringStatsPointlessOrBad(defender: BattlerState, attackerHasMoldBrea
 /** ShouldLowerStat, battle_ai_util.c:1283-1291. `stat < 4` is the C's own
  * literal (statStages are 0..12, DEFAULT 6 -- already lowered two stages or
  * more). */
-function shouldLowerStat(defender: BattlerState, stat: number, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
+export function shouldLowerStat(defender: BattlerState, stat: number, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
   if (defender.mon.statStages[stat] < 4) return false
   if (loweringStatsPointlessOrBad(defender, attackerHasMoldBreaker, unmodelled)) return false
   unmodelled.push('ShouldLowerStat: IsStatDropBlocked(battlerDef, stat, FALSE) has no port anywhere in this codebase; treated as not blocked')
@@ -493,18 +493,18 @@ function areBattlersStatsMaxed(battler: BattlerState): boolean {
 /** HasMoveWithSplit, battle_ai_util.c:1371-1380 -- GetMovesArray always
  * returns the real moveset on this build (every trainer carries
  * AI_FLAG_CHECK_FOE, aiScorers.ts's own canTargetFaintAi doc). */
-function hasMoveWithSplit(battler: BattlerState, split: 'PHYSICAL' | 'SPECIAL' | 'STATUS', deps: AiDamageDeps): boolean {
+export function hasMoveWithSplit(battler: BattlerState, split: 'PHYSICAL' | 'SPECIAL' | 'STATUS', deps: AiDamageDeps): boolean {
   return battler.mon.moves.some((m) => m && deps.moveData(m)?.split === split)
 }
 
 /** HasMoveWithType, battle_ai_util.c:1382-1391. */
-function hasMoveWithType(battler: BattlerState, type: string, deps: AiDamageDeps): boolean {
+export function hasMoveWithType(battler: BattlerState, type: string, deps: AiDamageDeps): boolean {
   return battler.mon.moves.some((m) => m && deps.moveData(m)?.type === type)
 }
 
 /** IsBattlerIncapacitated, battle_ai_util.c:2019-2028. HasThawingMove is a
  * real moveset scan (moves.json's `thawUser` flag), not a gap. */
-function isBattlerIncapacitated(battler: BattlerState, deps: AiDamageDeps): boolean {
+export function isBattlerIncapacitated(battler: BattlerState, deps: AiDamageDeps): boolean {
   const hasThawingMove = battler.mon.moves.some((m) => m && deps.moveData(m)?.flags?.thawUser)
   if (hasFlag(battler.mon.status1, STATUS1_FREEZE) && !hasThawingMove) return true
   if (hasFlag(battler.mon.status1, STATUS1_SLEEP)) return true
@@ -514,7 +514,7 @@ function isBattlerIncapacitated(battler: BattlerState, deps: AiDamageDeps): bool
 
 /** IsBattlerTrapped, battle_ai_util.c:566-580. `checkSwitch` is always TRUE
  * at both of this batch's call sites (the EFFECT_MEAN_LOOK branch below). */
-function isBattlerTrapped(state: BattleState, battler: BattlerState, checkSwitch: boolean, deps: AiDamageDeps): { trapped: boolean; unmodelled: string[] } {
+export function isBattlerTrapped(state: BattleState, battler: BattlerState, checkSwitch: boolean, deps: AiDamageDeps): { trapped: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
   const holdEffect = getBattlerHoldEffect(battler, deps)
   if (battler.volatiles.skyDropped) return { trapped: true, unmodelled }
@@ -539,7 +539,7 @@ function isBattlerTrapped(state: BattleState, battler: BattlerState, checkSwitch
  * the latter: Limber/Insomnia/Immunity/-class status-immunity abilities).
  * Gapped by name whenever reached, matching the codebase's own precedent for
  * an unwired ability-hook chain (accuracy.ts's IsStatDropBlocked). */
-function canBePoisoned(state: BattleState, attacker: BattlerState, target: BattlerState, _deps: AiDamageDeps): { canPoison: boolean; unmodelled: string[] } {
+export function canBePoisoned(state: BattleState, attacker: BattlerState, target: BattlerState, _deps: AiDamageDeps): { canPoison: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return { canPoison: false, unmodelled }
   if (hasFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)) return { canPoison: false, unmodelled }
@@ -553,7 +553,7 @@ function canBePoisoned(state: BattleState, attacker: BattlerState, target: Battl
 
 /** CanBeParalyzed, battle_util.c mirrors CanBePoisoned's shape; ELECTRIC-type
  * targets are immune (CanParalyzeType), same onCanStatusType gap. */
-function canBeParalyzedBase(state: BattleState, target: BattlerState, _deps: AiDamageDeps): { canParalyze: boolean; unmodelled: string[] } {
+export function canBeParalyzedBase(state: BattleState, target: BattlerState, _deps: AiDamageDeps): { canParalyze: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return { canParalyze: false, unmodelled }
   if (hasFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)) return { canParalyze: false, unmodelled }
@@ -568,7 +568,7 @@ function canBeParalyzedBase(state: BattleState, target: BattlerState, _deps: AiD
  * (AI_CanPutToSleep/AI_CanPoison are bare passthroughs to CanSleep/
  * CanBePoisoned, per the C's own one-line bodies). PartnerMoveEffectIsStatusSameTarget
  * always returns false (see this module's doubles-only helpers). */
-function aiCanParalyze(state: BattleState, attacker: BattlerState, target: BattlerState, moveId: string, deps: AiDamageDeps): { canParalyze: boolean; unmodelled: string[] } {
+export function aiCanParalyze(state: BattleState, attacker: BattlerState, target: BattlerState, moveId: string, deps: AiDamageDeps): { canParalyze: boolean; unmodelled: string[] } {
   const base = canBeParalyzedBase(state, target, deps)
   if (!base.canParalyze) return base
   const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, target.id, deps)
@@ -579,7 +579,7 @@ function aiCanParalyze(state: BattleState, attacker: BattlerState, target: Battl
 }
 
 /** CanSleep, battle_util.c:5029-5038. */
-function canSleep(state: BattleState, target: BattlerState, _deps: AiDamageDeps): { canSleep: boolean; unmodelled: string[] } {
+export function canSleep(state: BattleState, target: BattlerState, _deps: AiDamageDeps): { canSleep: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return { canSleep: false, unmodelled }
   if (hasFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)) return { canSleep: false, unmodelled }
@@ -591,7 +591,7 @@ function canSleep(state: BattleState, target: BattlerState, _deps: AiDamageDeps)
 
 /** CanBeConfused, battle_util.c:5116-5123 -- IsAbilityStatusProtected(CHECK_CONFUSION)
  * covers Own Tempo and similar; same gap treatment. */
-function canBeConfused(target: BattlerState, unmodelled: string[]): boolean {
+export function canBeConfused(target: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(target.mon.status2, STATUS2_CONFUSION)) return false
   unmodelled.push('CanBeConfused: IsAbilityStatusProtected(battlerDef, CHECK_CONFUSION) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
   return true
@@ -601,7 +601,7 @@ function canBeConfused(target: BattlerState, unmodelled: string[]): boolean {
  * is narrowed to the Infiltrator ability check (its dominant real-world
  * path); the move-specific Sub-piercing exemptions inside the real
  * `Infiltrates` are not modelled. */
-function doesSubstituteBlockMove(attacker: BattlerState, defender: BattlerState, move: ReturnType<AiDamageDeps['moveData']>, unmodelled: string[]): boolean {
+export function doesSubstituteBlockMove(attacker: BattlerState, defender: BattlerState, move: ReturnType<AiDamageDeps['moveData']>, unmodelled: string[]): boolean {
   if (!hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE)) return false
   if (hasMoveFlag(move, 'sound')) return false
   if (hasMoveFlag(move, 'ignoresSubstitute')) return false
@@ -618,7 +618,7 @@ function doesSubstituteBlockMove(attacker: BattlerState, defender: BattlerState,
  * this module's other partner helpers even though `isValidDoubleBattle`
  * (this module's own copy of the same fact) makes every call here return
  * false on this build. */
-function partnerHasSameMoveEffectWithoutTarget(state: BattleState, battlerAtk: number): boolean {
+export function partnerHasSameMoveEffectWithoutTarget(state: BattleState, battlerAtk: number): boolean {
   return isValidDoubleBattle(state, battlerAtk)
 }
 function doesPartnerHaveSameMoveEffect(state: BattleState, battlerAtk: number): boolean {
@@ -655,7 +655,7 @@ function partnerMoveIsSameAsAttacker(state: BattleState, battlerAtk: number): bo
 }
 
 /** AnyStatIsRaised, battle_ai_util.c:1313-1320. */
-function anyStatIsRaised(battler: BattlerState): boolean {
+export function anyStatIsRaised(battler: BattlerState): boolean {
   for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
     if (battler.mon.statStages[i] > 6 /* DEFAULT_STAT_STAGE */) return true
   }
@@ -663,7 +663,7 @@ function anyStatIsRaised(battler: BattlerState): boolean {
 }
 
 /** CountPositiveStatStages / CountNegativeStatStages, battle_ai_util.c:1322-1338. */
-function countPositiveStatStages(battler: BattlerState): number {
+export function countPositiveStatStages(battler: BattlerState): number {
   let count = 0
   for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (battler.mon.statStages[i] > 6) count++
   return count
@@ -677,7 +677,7 @@ function countNegativeStatStages(battler: BattlerState): number {
 /** IsStickyHold, battle_util.c:9329-9333 -- `BattlerHasAbility(battler, X,
  * TRUE)` on the DEFENDER, so it goes through `defAbility` (real Mold-Breaker
  * gating; both Sticky Hold and Supersweet Syrup are in MOLD_BREAKABLE_ABILITIES). */
-function isStickyHold(defender: BattlerState, attackerHasMoldBreaker: boolean): boolean {
+export function isStickyHold(defender: BattlerState, attackerHasMoldBreaker: boolean): boolean {
   return defAbility(defender, 'ABILITY_STICKY_HOLD', attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SUPERSWEET_SYRUP', attackerHasMoldBreaker)
 }
 
@@ -895,7 +895,7 @@ function getBattlerSideSpeedAverage(state: BattleState, battlerId: number, deps:
  * exclusions inside CanBattlerGetOrLoseItem (:8250-8270 -- Enigma Berry,
  * Primal Orb, Mega Stone, and the three species+hold-effect pairs) ARE
  * ported since they are three cheap direct comparisons, not a scan. */
-function canBattlerGetOrLoseItemApprox(battler: BattlerState, itemId: string, deps: AiDamageDeps): boolean {
+export function canBattlerGetOrLoseItemApprox(battler: BattlerState, itemId: string, deps: AiDamageDeps): boolean {
   if (itemId === 'ITEM_ENIGMA_BERRY') return false
   const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
   if (holdEffect === 'HOLD_EFFECT_PRIMAL_ORB' || holdEffect === 'HOLD_EFFECT_MEGA_STONE') return false
@@ -1008,12 +1008,12 @@ function looksLikeBerry(itemId: string | null): boolean {
 }
 
 /** AtMaxHp, battle_ai_util.c:561-563. */
-function atMaxHp(battler: BattlerState): boolean {
+export function atMaxHp(battler: BattlerState): boolean {
   return battler.mon.hp === battler.mon.maxHp
 }
 
 /** C `u8` truncation, for locals the C declares `u8` (Power/Guard Split). */
-function u8(value: number): number {
+export function u8(value: number): number {
   return value & 0xff
 }
 
