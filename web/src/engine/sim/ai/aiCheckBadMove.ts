@@ -205,7 +205,6 @@ import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getH
 import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
 import { aiCalcDamage, type AiDamageDeps } from './aiCalcDamage'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
-import { applyStatStage } from '../../stats'
 import { idiv } from '../../fixed'
 
 type Result = { score: number; unmodelled: string[] }
@@ -1013,13 +1012,9 @@ function atMaxHp(battler: BattlerState): boolean {
   return battler.mon.hp === battler.mon.maxHp
 }
 
-/** Applies a stat stage to a NON-speed stat, mirroring stats.ts's own
- * `applyStatStage` (speed's own version, reused via `getBattlerTotalSpeedStat`
- * for the swap/split/trick effects below that need the ATK/DEF/SPA/SPD
- * CURRENT (stage-adjusted) value the C's `gBattleMons[...].attack` etc. field
- * already carries, not `rawStats`'s pre-stage value). */
-function effectiveStat(mon: BattlerState['mon'], statKey: 'atk' | 'def' | 'spatk' | 'spdef', stage: number, statStageRatios: [number, number][]): number {
-  return applyStatStage(mon.rawStats[statKey], stage, statStageRatios)
+/** C `u8` truncation, for locals the C declares `u8` (Power/Guard Split). */
+function u8(value: number): number {
+  return value & 0xff
 }
 
 /** Every ability whose abilityHooks.json marks `chloroplast` -- HasChloroplast,
@@ -2198,9 +2193,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (isTargetingPartner(battlerAtk, battlerDef)) {
         score -= 10
       } else {
-        const atkDef = effectiveStat(attacker.mon, 'def', attacker.mon.statStages[2], deps.statStageRatios)
-        const atkAtk = effectiveStat(attacker.mon, 'atk', attacker.mon.statStages[1], deps.statStageRatios)
-        if (atkDef >= atkAtk && !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
+        // :1798 reads gBattleMons[].defense/.attack -- the raw battle stats
+        // (GetMonData(MON_DATA_ATK), battle_script_commands.c:6627), stage-blind.
+        if (attacker.mon.rawStats.def >= attacker.mon.rawStats.atk && !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
       }
       break
     }
@@ -2245,10 +2240,12 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (isTargetingPartner(battlerAtk, battlerDef)) {
         score -= 10
       } else {
-        const atkAtk = effectiveStat(attacker.mon, 'atk', attacker.mon.statStages[1], deps.statStageRatios)
-        const defAtk = effectiveStat(defender.mon, 'atk', defender.mon.statStages[1], deps.statStageRatios)
-        const atkSpa = effectiveStat(attacker.mon, 'spatk', attacker.mon.statStages[4], deps.statStageRatios)
-        const defSpa = effectiveStat(defender.mon, 'spatk', defender.mon.statStages[4], deps.statStageRatios)
+        // :1842-1845 copies the raw, stage-blind battle stats into u8 locals, so
+        // a stat above 255 wraps before the sums are compared. Reproduced.
+        const atkAtk = u8(attacker.mon.rawStats.atk)
+        const defAtk = u8(defender.mon.rawStats.atk)
+        const atkSpa = u8(attacker.mon.rawStats.spatk)
+        const defSpa = u8(defender.mon.rawStats.spatk)
         if (atkAtk + atkSpa >= defAtk + defSpa) score -= 10 // combined attacker stats are >= combined target stats
       }
       break
@@ -2257,10 +2254,11 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (isTargetingPartner(battlerAtk, battlerDef)) {
         score -= 10
       } else {
-        const atkDef = effectiveStat(attacker.mon, 'def', attacker.mon.statStages[2], deps.statStageRatios)
-        const defDef = effectiveStat(defender.mon, 'def', defender.mon.statStages[2], deps.statStageRatios)
-        const atkSpd = effectiveStat(attacker.mon, 'spdef', attacker.mon.statStages[5], deps.statStageRatios)
-        const defSpd = effectiveStat(defender.mon, 'spdef', defender.mon.statStages[5], deps.statStageRatios)
+        // :1856-1859 -- same u8 truncation of raw stats as Power Split.
+        const atkDef = u8(attacker.mon.rawStats.def)
+        const defDef = u8(defender.mon.rawStats.def)
+        const atkSpd = u8(attacker.mon.rawStats.spdef)
+        const defSpd = u8(defender.mon.rawStats.spdef)
         if (atkDef + atkSpd >= defDef + defSpd) score -= 10
       }
       break

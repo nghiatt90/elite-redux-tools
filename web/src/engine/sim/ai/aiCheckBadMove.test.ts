@@ -670,6 +670,14 @@ describe('cycle17 (part 2) -- case-by-case coverage', () => {
     expect(check(s, eff('EFFECT_POWER_TRICK')).score).toBe(90)
   })
 
+  it('EFFECT_POWER_TRICK compares RAW stats, ignoring stat stages (:1798 reads gBattleMons[].defense/.attack)', () => {
+    // Raw Def 100 >= raw Atk 80 -> penalty. A +2 Atk stage would make the
+    // stage-adjusted Atk 160 and wrongly skip it.
+    const s = state({ rawStats: { atk: 80, def: 100, spatk: 80, spdef: 85, spe: 100 }, moves: ['MOVE_WATER_GUN', null, null, null] })
+    s.battlers[0]!.mon.statStages[1] = 8
+    expect(check(s, eff('EFFECT_POWER_TRICK')).score).toBe(90)
+  })
+
   it('EFFECT_SPEED_SWAP: -10 when the attacker is already faster', () => {
     const s = state({ rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 200 } }, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 50 } })
     expect(check(s, eff('EFFECT_SPEED_SWAP')).score).toBe(90)
@@ -916,6 +924,18 @@ describe('cycle17 (part 2) -- case-by-case coverage', () => {
     const s = state()
     expect(check(s, 'MOVE_GUARD_SPLIT').score).toBe(90)
     expect(check(s, 'MOVE_POWER_SPLIT').score).toBe(90)
+  })
+
+  it('EFFECT_POWER_SPLIT/EFFECT_GUARD_SPLIT truncate each raw stat to u8 before summing (:1842-1845, :1856-1859)', () => {
+    // Attacker Atk 300 -> u8 44, +SpA 10 = 54 < defender 100 + 100 = 200: no
+    // penalty. Unwrapped (310 >= 200) would wrongly penalise. Same shape for
+    // Def/SpD with Guard Split.
+    const s = state(
+      { rawStats: { atk: 300, def: 300, spatk: 10, spdef: 10, spe: 100 } },
+      { rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 100 } },
+    )
+    expect(check(s, 'MOVE_POWER_SPLIT').score).toBe(100)
+    expect(check(s, 'MOVE_GUARD_SPLIT').score).toBe(100)
   })
 
   it('EFFECT_RAIN_DANCE (a weather sibling of EFFECT_SANDSTORM): -8 while Rain is already up', () => {
