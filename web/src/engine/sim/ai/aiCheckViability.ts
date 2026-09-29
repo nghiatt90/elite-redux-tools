@@ -113,9 +113,13 @@ import {
   STATUS3_LEECHSEED,
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
+  STATUS3_AQUA_RING,
+  STATUS3_MAGNET_RISE,
+  STATUS3_POWER_TRICK,
   STATUS3_ALWAYS_HITS,
   STATUS3_YAWN,
   STATUS3_HEAL_BLOCK,
+  STATUS4_COMMANDED,
   STATUS1_PARALYSIS,
   STATUS2_CONFUSION,
   SIDE_STATUS_REFLECT,
@@ -792,6 +796,10 @@ function increaseSleepScore(state: BattleState, battlerAtk: number, battlerDef: 
   if ((hasMoveEffect(attacker, 'EFFECT_DREAM_EATER', deps) || hasMoveEffect(attacker, 'EFFECT_NIGHTMARE', deps)) && !(hasMoveEffect(defender, 'EFFECT_SNORE', deps) || hasMoveEffect(defender, 'EFFECT_SLEEP_TALK', deps))) {
     score++
   }
+  // C also ORs `HasMoveEffect(BATTLE_PARTNER(battlerAtk), EFFECT_HEX)` here --
+  // dead code on this singles-only build (no partner slot exists in this sim's
+  // battler state), same doubles-dead-code treatment as this file's other
+  // partner reads (e.g. `partnerHasSameMoveEffectWithoutTarget`).
   if (hasMoveEffect(attacker, 'EFFECT_HEX', deps)) score++
   return score
 }
@@ -1111,11 +1119,37 @@ function applyMoveEffectSwitch(
       }
       break
 
-    case 'EFFECT_MIRROR_MOVE':
+    case 'EFFECT_MIRROR_MOVE': {
+      // C: `return AI_CheckViability(battlerAtk, battlerDef, gLastMoves[battlerDef],
+      // score);` -- re-enters the TOP-LEVEL function (review finding, CRITICAL), not
+      // just the effect switch: the mirrored move gets its OWN fresh pre-switch
+      // ladder (always-hits/high-crit RNG, already-dead, damage-weak, status-move
+      // preference, thaw/burn/frostbite, both KO-forcing checks, the Choice-lock
+      // check, the attacker-ability loop) and its own `effectiveness`/HP context,
+      // not the ORIGINAL Mirror Move's. An earlier revision of this file recursed
+      // into `applyMoveEffectSwitch` directly, reusing Mirror Move's own (always
+      // AI_EFFECTIVENESS_x1, since it's STATUS-split) effectiveness and skipping
+      // every pre-switch RNG draw for the mirrored move -- a real RNG-order and
+      // scoring bug, not a stylistic difference.
+      //
+      // Guard: if the mirrored move's OWN effect is again EFFECT_MIRROR_MOVE or
+      // EFFECT_MIMIC, recursing would look up the SAME `gLastMoves[battlerDef]`
+      // and hit the identical branch again with unchanged inputs -- a genuine
+      // infinite loop in the C itself (a real bug there too, not something this
+      // port invents), so it is the one case worth refusing rather than
+      // reproducing as an unbounded JS call stack.
       if (predictedMoveId !== null) {
-        return applyMoveEffectSwitch(state, battlerAtk, battlerDef, predictedMoveId, deps.moveData(predictedMoveId)?.effect ?? null, score, effectiveness, atkHpPercent, defHpPercent, predictedMoveId, deps, unmodelled)
+        const targetEffect = deps.moveData(predictedMoveId)?.effect ?? null
+        if (targetEffect === 'EFFECT_MIRROR_MOVE' || targetEffect === 'EFFECT_MIMIC') {
+          unmodelled.push(`EFFECT_MIRROR_MOVE: gLastMoves[battlerDef] (${predictedMoveId}) is itself ${targetEffect}, which would recurse into the same lookup forever (a real infinite loop in the C too); refused instead of reproducing the hang`)
+          break
+        }
+        const recursed = aiCheckViability(state, battlerAtk, battlerDef, predictedMoveId, score, deps)
+        unmodelled.push(...recursed.unmodelled)
+        return recursed.score
       }
       break
+    }
 
     case 'EFFECT_ATTACK_UP':
     case 'EFFECT_ATTACK_UP_2':
@@ -1413,7 +1447,11 @@ function applyMoveEffectSwitch(
       unmodelled.push(...recover.unmodelled)
       if (recover.should) {
         const holdEffect = getBattlerHoldEffect(attacker, deps)
-        unmodelled.push('EFFECT_REST: IsWakeupTurn-adjacent hydration/weather combo reuses this batch\'s existing weather/ability reads directly')
+        // `gWishFutureKnock.weatherDuration != 1` -- rain ending NEXT turn
+        // shouldn't count as a reliable Hydration cure; this sim tracks the
+        // same countdown at `state.field.weatherDuration` (fieldEndTurn.ts),
+        // so this is a real read, not a gap (an earlier revision of this file
+        // dropped the term without naming it).
         const hasWakeupHelp =
           holdEffect === 'HOLD_EFFECT_CURE_SLP' ||
           holdEffect === 'HOLD_EFFECT_CURE_STATUS' ||
@@ -1421,7 +1459,7 @@ function applyMoveEffectSwitch(
           hasMoveEffect(attacker, 'EFFECT_SNORE', deps) ||
           selfAbility(attacker, 'ABILITY_SHED_SKIN') ||
           selfAbility(attacker, 'ABILITY_EARLY_BIRD') ||
-          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && selfAbility(attacker, 'ABILITY_HYDRATION') && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA')
+          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && state.field.weatherDuration !== 1 && selfAbility(attacker, 'ABILITY_HYDRATION') && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA')
         score += hasWakeupHelp ? 2 : 1
       }
       break
@@ -1434,7 +1472,10 @@ function applyMoveEffectSwitch(
     case 'EFFECT_TRAP':
     case 'EFFECT_WHIRLPOOL':
     case 'EFFECT_MEAN_LOOK':
-      if (hasMoveEffect(defender, 'EFFECT_RAPID_SPIN', deps) || hasFlag(defender.mon.status2, STATUS2_WRAPPED)) {
+      // `B_GHOSTS_ESCAPE >= GEN_6 && IS_BATTLER_OF_TYPE(battlerDef, TYPE_GHOST)` --
+      // `B_GHOSTS_ESCAPE` is `GEN_7` on this build (battle_config.h:45), so this
+      // term is compile-time live, not dead code.
+      if (hasMoveEffect(defender, 'EFFECT_RAPID_SPIN', deps) || isBattlerOfType(defender, 'GHOST') || hasFlag(defender.mon.status2, STATUS2_WRAPPED)) {
         break
       } else if (shouldTrap(state, battlerAtk, battlerDef, deps, unmodelled)) {
         score += 5
@@ -1503,25 +1544,56 @@ function applyMoveEffectSwitch(
       ) {
         score += 2
       }
-      if (!hasFlag(defender.mon.status2, STATUS2_WRAPPED | STATUS2_ESCAPE_PREVENTION) && getHealthPercentage(state, battlerAtk) > 70) score++
+      // C: `(!(status2 & (WRAPPED|ESCAPE_PREVENTION)) || !(gStatuses4[battlerDef] &
+      // STATUS4_COMMANDED)) && ...` -- the `|| !commanded` term was dropped in an
+      // earlier revision of this file, which changes the result whenever the
+      // defender is wrapped/escape-prevented but NOT Commanded (the common case
+      // for any ordinary Wrap/Bind/Fire Spin, not just Dondozo/Tatsugiri).
+      if ((!hasFlag(defender.mon.status2, STATUS2_WRAPPED | STATUS2_ESCAPE_PREVENTION) || !hasFlag(defender.statuses4, STATUS4_COMMANDED)) && getHealthPercentage(state, battlerAtk) > 70) score++
       break
     }
 
     case 'EFFECT_MIMIC':
+      // C: `return AI_CheckViability(battlerAtk, battlerDef, gLastMoves[battlerDef],
+      // score);` -- same top-level re-entry as EFFECT_MIRROR_MOVE above (review
+      // finding, CRITICAL); same self-referential-recursion guard applies.
       if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
         if (defender.lastMove !== null) {
-          return applyMoveEffectSwitch(state, battlerAtk, battlerDef, defender.lastMove, deps.moveData(defender.lastMove)?.effect ?? null, score, effectiveness, atkHpPercent, defHpPercent, predictedMoveId, deps, unmodelled)
+          const targetEffect = deps.moveData(defender.lastMove)?.effect ?? null
+          if (targetEffect === 'EFFECT_MIRROR_MOVE' || targetEffect === 'EFFECT_MIMIC') {
+            unmodelled.push(`EFFECT_MIMIC: gLastMoves[battlerDef] (${defender.lastMove}) is itself ${targetEffect}, which would recurse into the same lookup forever (a real infinite loop in the C too); refused instead of reproducing the hang`)
+            break
+          }
+          const recursed = aiCheckViability(state, battlerAtk, battlerDef, defender.lastMove, score, deps)
+          unmodelled.push(...recursed.unmodelled)
+          return recursed.score
         }
       }
       break
 
-    case 'EFFECT_LEECH_SEED':
-      if (isBattlerOfType(defender, 'GRASS') || hasFlag(defender.statuses3, STATUS3_LEECHSEED) || hasMoveEffect(defender, 'EFFECT_RAPID_SPIN', deps)) {
+    case 'EFFECT_LEECH_SEED': {
+      // C: `IS_BATTLER_OF_TYPE(battlerDef,GRASS) || LEECHSEED || RAPID_SPIN ||
+      // BattlerHasAbility(battlerDef, ABILITY_LIQUID_OOZE, TRUE) ||
+      // IsMagicGuardProtected(battlerDef)` -- the Liquid Ooze and Magic Guard
+      // terms were dropped in an earlier revision of this file.
+      if (
+        isBattlerOfType(defender, 'GRASS') ||
+        hasFlag(defender.statuses3, STATUS3_LEECHSEED) ||
+        hasMoveEffect(defender, 'EFFECT_RAPID_SPIN', deps) ||
+        defAbility(defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker) ||
+        isMagicGuardProtected(state, defender)
+      ) {
         break
       }
       score += 3
-      if (!hasDamagingMove(defender, deps)) score += 2
+      // C: `if (!HasDamagingMove(battlerDef) || IsBattlerTrapped(battlerDef, FALSE))
+      // score += 2;` -- the IsBattlerTrapped OR-term was dropped in an earlier
+      // revision of this file. `checkSwitch=FALSE` matches the C's literal arg.
+      const trapped = isBattlerTrapped(state, defender, false, deps)
+      unmodelled.push(...trapped.unmodelled)
+      if (!hasDamagingMove(defender, deps) || trapped.trapped) score += 2
       break
+    }
 
     case 'EFFECT_DO_NOTHING':
       break
@@ -1548,9 +1620,13 @@ function applyMoveEffectSwitch(
     case 'EFFECT_BATON_PASS': {
       const switchResult = shouldSwitch(state, battlerAtk, deps)
       unmodelled.push(...switchResult.unmodelled)
+      // C ORs `STATUS3_ROOTED | STATUS3_AQUA_RING | STATUS3_MAGNET_RISE |
+      // STATUS3_POWER_TRICK` as one combined-flag read (same pattern
+      // aiCheckBadMove.ts:1698 already uses) -- an earlier revision of this file
+      // checked only STATUS3_ROOTED.
       if (
         switchResult.shouldSwitch &&
-        (hasFlag(attacker.mon.status2, STATUS2_SUBSTITUTE) || hasFlag(attacker.statuses3, STATUS3_ROOTED) || anyStatIsRaised(attacker))
+        (hasFlag(attacker.mon.status2, STATUS2_SUBSTITUTE) || hasFlag(attacker.statuses3, STATUS3_ROOTED | STATUS3_AQUA_RING | STATUS3_MAGNET_RISE | STATUS3_POWER_TRICK) || anyStatIsRaised(attacker))
       ) {
         score += 5
       }
@@ -1558,7 +1634,11 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_DISABLE': {
-      if (defender.volatiles.disableTimer === 0) {
+      // `B_MENTAL_HERB >= GEN_5 && holdEffects[battlerDef] != HOLD_EFFECT_MENTAL_HERB`
+      // -- `B_MENTAL_HERB` is `GEN_5` on this build (battle_config.h:102), so the
+      // compile-time half is always true and the hold-effect check is live; an
+      // earlier revision of this file dropped it entirely.
+      if (defender.volatiles.disableTimer === 0 && getBattlerHoldEffect(defender, deps) !== 'HOLD_EFFECT_MENTAL_HERB') {
         if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
           if (defender.lastMove !== null) {
             const faints = canMoveFaintBattler(state, defender.lastMove, battlerDef, battlerAtk, deps)
@@ -1573,7 +1653,8 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_ENCORE':
-      if (defender.volatiles.encoreTimer === 0) {
+      // Same Mental Herb exclusion as EFFECT_DISABLE above.
+      if (defender.volatiles.encoreTimer === 0 && getBattlerHoldEffect(defender, deps) !== 'HOLD_EFFECT_MENTAL_HERB') {
         const lastEffect = defender.lastMove ? (deps.moveData(defender.lastMove)?.effect ?? null) : null
         if (isEncoreEncouragedEffect(lastEffect)) score += 3
       }
@@ -1635,9 +1716,19 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_THIEF': {
-      let canSteal = false
-      unmodelled.push('EFFECT_THIEF: B_TRAINERS_KNOCK_OFF_ITEMS is a compile-time flag whose current setting is not threaded into this sim; treated as unset (the vanilla default)')
-      if (battlerAtk & 1) canSteal = true // GetBattlerSide(battlerAtk) !== B_SIDE_PLAYER (AI is always side 1)
+      // `canSteal = FALSE; #if B_TRAINERS_KNOCK_OFF_ITEMS == TRUE canSteal = TRUE;
+      // #endif; if (BATTLE_TYPE_FRONTIER || GetBattlerSide(battlerAtk) ==
+      // B_SIDE_PLAYER) canSteal = TRUE;` -- `B_TRAINERS_KNOCK_OFF_ITEMS` is `TRUE`
+      // on this pinned build (battle_config.h:103, "trainers can steal/swap your
+      // items"), so the `#if` block is compile-time LIVE and sets canSteal
+      // unconditionally, before the BATTLE_TYPE_FRONTIER/B_SIDE_PLAYER OR-check
+      // ever runs -- that check can only ALSO set it true, never back to false,
+      // so it is dead code on THIS build regardless of side (an earlier revision
+      // of this file assumed the vanilla default of B_TRAINERS_KNOCK_OFF_ITEMS
+      // unset, which is wrong for Elite Redux specifically; also assumed the
+      // dead OR-check was the reason canSteal ends up true, when it is really
+      // the compile-time flag).
+      const canSteal = true
       const atkItem = attacker.mon.itemId
       const defItem = defender.mon.itemId
       if (canSteal && !atkItem && defItem && canBattlerGetOrLoseItemApprox(defender, defItem, deps) && canBattlerGetOrLoseItemApprox(attacker, defItem, deps) && !hasMoveEffect(attacker, 'EFFECT_ACROBATICS', deps) && !isStickyHold(defender, atkMoldBreaker)) {

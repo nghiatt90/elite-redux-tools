@@ -17,7 +17,10 @@ import {
   STATUS1_FROSTBITE,
   STATUS2_WRAPPED,
   STATUS2_SUBSTITUTE,
+  STATUS4_COMMANDED,
   STATUS3_ALWAYS_HITS,
+  WEATHER_RAIN_ANY,
+  STATUS3_AQUA_RING,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -369,24 +372,38 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const highHpResult = check(highHp, 'MOVE_SELF_DESTRUCT', 100) // atkHpPercent<50 fails, so WILL_SUICIDE's own bonus never fires either
     expect(withoutResult.score).toBe(highHpResult.score)
   })
-  it('EFFECT_MIRROR_MOVE recurses into the defender\'s real last move', () => {
+  it('EFFECT_MIRROR_MOVE recurses into the FULL aiCheckViability (fresh pre-switch ladder), not just the switch', () => {
     // A second, real physical move (Tackle) keeps EFFECT_ATTACK_UP_2's own
     // MovesWithSplitUnusable check from firing its -8 "no usable physical
     // move" penalty -- Mirror Move itself is a STATUS move, so an
     // attacker whose ONLY move is Mirror Move genuinely has zero physical
     // moves, which is a real (if incidental to this test) quirk this port
     // reproduces faithfully; giving it Tackle isolates the recursion itself.
-    // AI_FLAG_PREFER_STATUS_MOVES is checked in the PRE-SWITCH using Mirror
-    // Move's OWN data (not the recursed move), so comparing with/without the
-    // flag isolates that +1 from Swords Dance's own (recursion-independent)
-    // -1 contribution, without needing to predict the exact absolute score.
+    //
+    // AI_FLAG_PREFER_STATUS_MOVES is a PRE-SWITCH check, so with the flag on
+    // it fires TWICE here: once for Mirror Move's own top-level call (Mirror
+    // Move is itself STATUS-split), and again for the RECURSED call scoring
+    // Swords Dance (also STATUS-split) -- because the C's own
+    // `return AI_CheckViability(battlerAtk, battlerDef, gLastMoves[battlerDef],
+    // score)` re-enters the top-level function, running a FRESH pre-switch
+    // ladder for the mirrored move, not just its switch case. Seeing +2 (not
+    // +1) is exactly what proves the recursion target is the full function:
+    // recursing into just the switch (an earlier, incorrect revision of this
+    // file) could only ever apply the flag once.
     const s = state({ moves: ['MOVE_MIRROR_MOVE', 'MOVE_TACKLE', null, null] }, {}, repeating(RNG_HIGH))
     s.battlers[1]!.lastMove = 'MOVE_SWORDS_DANCE'
     const withFlag: BattleState = { ...s, aiFlags: AI_FLAG_PREFER_STATUS_MOVES }
     const withoutFlag: BattleState = { ...s, aiFlags: 0 }
     const withResult = check(withFlag, 'MOVE_MIRROR_MOVE', 100)
     const withoutResult = check(withoutFlag, 'MOVE_MIRROR_MOVE', 100)
-    expect(withResult.score).toBe(withoutResult.score + 1)
+    expect(withResult.score).toBe(withoutResult.score + 2)
+  })
+  it('EFFECT_MIRROR_MOVE refuses to recurse into a self-referential Mirror Move/Mimic chain (would hang the C too)', () => {
+    const s = state({ moves: ['MOVE_MIRROR_MOVE', 'MOVE_TACKLE', null, null] }, {}, repeating(RNG_HIGH))
+    s.battlers[1]!.lastMove = 'MOVE_MIRROR_MOVE'
+    const result = check(s, 'MOVE_MIRROR_MOVE', 100)
+    expect(result.score).toBe(100)
+    expect(result.unmodelled.some((u) => u.includes('would recurse into the same lookup forever'))).toBe(true)
   })
   it('EFFECT_MIRROR_MOVE does nothing when there is no last move', () => {
     const s = state({ moves: ['MOVE_MIRROR_MOVE', null, null, null] }, {}, repeating(RNG_HIGH))
@@ -513,6 +530,24 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const result = check(s, 'MOVE_RECOVER', 100)
     expect(result.score).toBeGreaterThanOrEqual(100)
   })
+  it('EFFECT_REST\'s Hydration/rain wakeup bonus is denied when rain ends next turn (weatherDuration == 1)', () => {
+    // `gWishFutureKnock.weatherDuration != 1` -- rain ending NEXT turn
+    // shouldn't count as a reliable Hydration cure. Both scenarios share
+    // Hydration + rain + a ShouldRecover-triggering low-HP fast attacker;
+    // only weatherDuration differs, isolating that one term's own +1
+    // ("hasWakeupHelp" 2 vs the bare 1).
+    const fast = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 999 }, abilities: { ability: 'ABILITY_HYDRATION', innates: [null, null, null] as [string | null, string | null, string | null] } }
+    const weak = { rawStats: { atk: 1, def: 90, spatk: 1, spdef: 85, spe: 1 } }
+    const endingNextTurn = state({ hp: 50, maxHp: 100, ...fast }, weak, repeating(1))
+    endingNextTurn.field.weather = WEATHER_RAIN_ANY
+    endingNextTurn.field.weatherDuration = 1
+    const stillGoing = state({ hp: 50, maxHp: 100, ...fast }, weak, repeating(1))
+    stillGoing.field.weather = WEATHER_RAIN_ANY
+    stillGoing.field.weatherDuration = 2
+    const endingResult = check(endingNextTurn, 'MOVE_REST', 100)
+    const stillGoingResult = check(stillGoing, 'MOVE_REST', 100)
+    expect(stillGoingResult.score).toBe(endingResult.score + 1)
+  })
   it('EFFECT_TOXIC/POISON is scored through IncreasePoisonScore', () => {
     const s = state({ moves: ['MOVE_TOXIC', null, null, null] })
     const result = check(s, 'MOVE_TOXIC', 100)
@@ -537,6 +572,19 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const s = state({}, {}, createRandomSource(1), 0)
     const result = check(s, 'MOVE_MEAN_LOOK', 100)
     expect(result).toBeDefined()
+  })
+  it('EFFECT_MEAN_LOOK never scores against a Ghost-type target (B_GHOSTS_ESCAPE >= GEN_6 on this build)', () => {
+    // AI_FLAG_STALL + a defender that cannot faint the AI is ShouldTrap's own
+    // TRUE branch; the Ghost-type target must still score 0 (break) despite
+    // that, since the Ghost-type escape-immunity check runs BEFORE ShouldTrap
+    // is ever consulted.
+    const stallFlag = 1 << 13 // AI_FLAG_STALL
+    const normal = state({ rawStats: { atk: 100, def: 999, spatk: 80, spdef: 999, spe: 100 }, hp: 100, maxHp: 100 }, { rawStats: { atk: 1, def: 90, spatk: 1, spdef: 85, spe: 100 }, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] }, createRandomSource(1), stallFlag)
+    const ghost = state({ rawStats: { atk: 100, def: 999, spatk: 80, spdef: 999, spe: 100 }, hp: 100, maxHp: 100 }, { rawStats: { atk: 1, def: 90, spatk: 1, spdef: 85, spe: 100 }, types: ['GHOST', 'MYSTERY', 'MYSTERY'] }, createRandomSource(1), stallFlag)
+    const normalResult = check(normal, 'MOVE_MEAN_LOOK', 100)
+    const ghostResult = check(ghost, 'MOVE_MEAN_LOOK', 100)
+    expect(normalResult.score).toBe(105) // ShouldTrap fires: +5
+    expect(ghostResult.score).toBe(100) // Ghost-type immunity: no bonus regardless
   })
   it('EFFECT_MIST rewards +2 under AI_FLAG_SCREENER', () => {
     const s = state({}, {}, createRandomSource(1), 1 << 14) // AI_FLAG_SCREENER
@@ -582,6 +630,22 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const result = check(s, 'MOVE_SUBSTITUTE', 100)
     expect(result.score).toBeGreaterThanOrEqual(100)
   })
+  it('EFFECT_SUBSTITUTE still grants +1 when wrapped but NOT Commanded (only wrapped+Commanded together deny it)', () => {
+    // `(!(status2 & (WRAPPED|ESCAPE_PREVENTION)) || !commanded) && HP > 70` --
+    // this is a disjunction, so the +1 is denied ONLY when BOTH wrapped AND
+    // Commanded are true at once (e.g. Dondozo commanding Tatsugiri while
+    // also wrapped by something else); wrapped alone (the ordinary Wrap/Bind/
+    // Fire Spin case, ~Commanded) still grants it via the restored `||
+    // !commanded` term. An earlier revision of this file checked only
+    // `!wrapped`, which denied the +1 for EVERY wrapped defender regardless
+    // of Commanded.
+    const wrappedNotCommanded = state({ hp: 100, maxHp: 100, moves: ['MOVE_SUBSTITUTE', null, null, null] }, { status2: STATUS2_WRAPPED })
+    const wrappedAndCommanded = state({ hp: 100, maxHp: 100, moves: ['MOVE_SUBSTITUTE', null, null, null] }, { status2: STATUS2_WRAPPED })
+    wrappedAndCommanded.battlers[1]!.statuses4 = STATUS4_COMMANDED
+    const notCommandedResult = check(wrappedNotCommanded, 'MOVE_SUBSTITUTE', 100)
+    const commandedResult = check(wrappedAndCommanded, 'MOVE_SUBSTITUTE', 100)
+    expect(notCommandedResult.score).toBe(commandedResult.score + 1)
+  })
   it('EFFECT_LEECH_SEED does not score against a Grass-type target', () => {
     const s = state({}, { types: ['GRASS', 'MYSTERY', 'MYSTERY'] })
     const result = check(s, 'MOVE_LEECH_SEED', 100)
@@ -591,6 +655,27 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const s = state({}, { moves: ['MOVE_BABY_DOLL_EYES', null, null, null] })
     const result = check(s, 'MOVE_LEECH_SEED', 100)
     expect(result.score).toBeGreaterThanOrEqual(105)
+  })
+  it('EFFECT_LEECH_SEED does not score against a Liquid Ooze holder', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_LIQUID_OOZE', innates: [null, null, null] } })
+    const result = check(s, 'MOVE_LEECH_SEED', 100)
+    expect(result.score).toBe(100)
+  })
+  it('EFFECT_LEECH_SEED does not score against a Magic-Guard-protected target', () => {
+    const s = state({}, { abilities: { ability: 'ABILITY_MAGIC_GUARD', innates: [null, null, null] } })
+    const result = check(s, 'MOVE_LEECH_SEED', 100)
+    expect(result.score).toBe(100)
+  })
+  it('EFFECT_LEECH_SEED scores +2 for an already-trapped target even with a damaging move', () => {
+    // `!HasDamagingMove(battlerDef) || IsBattlerTrapped(battlerDef, FALSE)` --
+    // a damaging moveset alone would skip the +2, but STATUS2_WRAPPED (checked
+    // via isBattlerTrapped) should still grant it.
+    const notTrapped = state({}, { moves: ['MOVE_TACKLE', null, null, null] })
+    const trapped = state({}, { moves: ['MOVE_TACKLE', null, null, null], status2: STATUS2_WRAPPED })
+    const notTrappedResult = check(notTrapped, 'MOVE_LEECH_SEED', 100)
+    const trappedResult = check(trapped, 'MOVE_LEECH_SEED', 100)
+    expect(notTrappedResult.score).toBe(103) // +3 only, no +2 (has a damaging move, not trapped)
+    expect(trappedResult.score).toBe(105) // +3 and +2 (trapped)
   })
   it('EFFECT_DO_NOTHING never changes the score', () => {
     const s = state()
@@ -605,18 +690,25 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     // EFFECT_HIT_ESCAPE, so this exercises that case directly instead.
     expect(result).toBeDefined()
   })
-  it('EFFECT_BATON_PASS is scored without exception (gated on ShouldSwitch, not independently triggerable from this fixture)', () => {
-    // `shouldSwitch` (aiShouldSwitch.ts) never returned true from any battler
-    // shape this fixture set could construct (checked directly -- low HP
-    // alone, and a Natural-Cure-with-status setup, both still returned
-    // false), so the EFFECT_BATON_PASS `+5` branch could not be isolated
-    // through this move alone within this batch's test budget. This is a
-    // coverage gap, called out in the execute report, not a passing
-    // behavioral assertion.
-    const s = stateWithAttackerParty({ hp: 5, maxHp: 100 })
-    s.battlers[0]!.mon.statStages[1] = 10 // STAT_ATK raised
-    const result = check(s, 'MOVE_BATON_PASS', 100)
-    expect(result).toBeDefined()
+  it('EFFECT_BATON_PASS rewards +5 when Aqua Ring/Magnet Rise/Power Trick is set, even with no raised stat', () => {
+    // `shouldSwitchIfEncored` (aiShouldSwitch.ts) returns TRUE deterministically
+    // when `volatiles.encoredMove` is set and the RNG's low bit is 1 -- the one
+    // ShouldSwitch path this fixture set could reliably force true (Fix pass:
+    // an earlier session's own EFFECT_BATON_PASS test gave up on isolating the
+    // `+5` branch at all; encoredMove unblocks it). No stat is raised here, so
+    // seeing +5 proves the STATUS3_AQUA_RING/MAGNET_RISE/POWER_TRICK terms this
+    // fix restores are actually being read (an earlier revision of this file
+    // checked only STATUS3_ROOTED, matching none of these three).
+    const base = () => stateWithAttackerParty({ hp: 100, maxHp: 100 }, {}, { random16: () => 1 })
+    const withAquaRing = base()
+    withAquaRing.battlers[0]!.volatiles.encoredMove = 'MOVE_TACKLE'
+    withAquaRing.battlers[0]!.statuses3 = STATUS3_AQUA_RING
+    const withoutAnyFlag = base()
+    withoutAnyFlag.battlers[0]!.volatiles.encoredMove = 'MOVE_TACKLE'
+    const withResult = check(withAquaRing, 'MOVE_BATON_PASS', 100)
+    const withoutResult = check(withoutAnyFlag, 'MOVE_BATON_PASS', 100)
+    expect(withResult.score).toBe(105)
+    expect(withoutResult.score).toBe(100)
   })
   it('EFFECT_DISABLE rewards +2 when the defender\'s last move can faint the AI', () => {
     // Both scenarios share the same moveset/HP/speed (so the unrelated
@@ -643,6 +735,21 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     s.battlers[1]!.lastMove = 'MOVE_TACKLE' // EFFECT_HIT is not in the table
     const result = check(s, 'MOVE_ENCORE', 100)
     expect(result.score).toBe(100)
+  })
+  it('EFFECT_ENCORE does not reward when the defender holds Mental Herb (B_MENTAL_HERB >= GEN_5 on this build)', () => {
+    const s = state({}, { itemId: 'ITEM_MENTAL_HERB' })
+    s.battlers[1]!.lastMove = 'MOVE_TOXIC'
+    const result = check(s, 'MOVE_ENCORE', 100)
+    expect(result.score).toBe(100)
+  })
+  it('EFFECT_DISABLE does not reward when the defender holds Mental Herb', () => {
+    const s = state({ hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 500 } }, { rawStats: { atk: 500, def: 90, spatk: 80, spdef: 85, spe: 1 }, itemId: 'ITEM_MENTAL_HERB' })
+    s.battlers[1]!.lastMove = 'MOVE_TACKLE'
+    const result = check(s, 'MOVE_DISABLE', 100)
+    const control = state({ hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 500 } }, { rawStats: { atk: 500, def: 90, spatk: 80, spdef: 85, spe: 1 } })
+    control.battlers[1]!.lastMove = 'MOVE_TACKLE'
+    const controlResult = check(control, 'MOVE_DISABLE', 100)
+    expect(result.score).toBe(controlResult.score - 2) // loses Disable's own +2, keeps the shared -20 baseline
   })
   it('EFFECT_PAIN_SPLIT is scored without exception', () => {
     const s = state({ hp: 100, maxHp: 100 }, { hp: 10, maxHp: 100 })
@@ -686,10 +793,22 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     const result = check(s, 'MOVE_WISH', 100)
     expect(result.score).toBe(107)
   })
-  it('EFFECT_THIEF is scored without exception (AI side, side 1)', () => {
-    const s = state({ itemId: null }, { itemId: 'ITEM_LEFTOVERS' })
+  it('EFFECT_THIEF scores +2 for a Choice item target -- canSteal is TRUE on this build (B_TRAINERS_KNOCK_OFF_ITEMS)', () => {
+    // Regression test for the canSteal bug: an earlier revision of this file
+    // derived canSteal from an inverted battler-side check that happened to
+    // also land on `true`, then a fix attempt that set it to `false`
+    // unconditionally (matching vanilla's B_TRAINERS_KNOCK_OFF_ITEMS default)
+    // would ALSO be wrong for this specific pinned build, where
+    // B_TRAINERS_KNOCK_OFF_ITEMS is TRUE (battle_config.h:103) and makes
+    // canSteal always true regardless of battler side. Choice Band -> +2.
+    const s = state({ itemId: null }, { itemId: 'ITEM_CHOICE_BAND' })
     const result = check(s, 'MOVE_THIEF', 100)
-    expect(result).toBeDefined()
+    expect(result.score).toBe(102)
+  })
+  it('EFFECT_THIEF does not score when the attacker already holds an item', () => {
+    const s = state({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_CHOICE_BAND' })
+    const result = check(s, 'MOVE_THIEF', 100)
+    expect(result.score).toBe(100)
   })
   it('EFFECT_NIGHTMARE rewards +5 against a sleeping target', () => {
     const s = state({}, { status1: STATUS1_SLEEP })
