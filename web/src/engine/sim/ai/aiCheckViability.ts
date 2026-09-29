@@ -880,9 +880,12 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   // :2536 -- check high crit. RNG line :2536.
   if (move?.crit === 'HIGH' && effectiveness >= 5 /* AI_EFFECTIVENESS_x2 */ && aiRandLessThan(state, 128)) score++
 
-  // :2538-2546 -- check already dead.
+  // :2538-2546 -- check already dead. C: `CanTargetFaintAi(battlerAtk, battlerDef)`
+  // (this specific call is written battlerAtk-first, unlike the other
+  // CanTargetFaintAi call sites in this function -- see the two "player can
+  // KO the AI" checks below, both battlerDef-first).
   if (!isBattlerIncapacitated(defender, deps)) {
-    const canFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+    const canFaint = canTargetFaintAi(state, battlerAtk, battlerDef, deps)
     unmodelled.push(...canFaint.unmodelled)
     if (canFaint.canFaint && getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1) {
       if (atkPriority > 0) score++
@@ -927,16 +930,17 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
     }
   }
 
-  // :2581 -- Player can defeat the AI next turn, force a damaging move.
+  // :2581 -- Player can defeat the AI next turn, force a damaging move. C:
+  // `CanTargetFaintAi(battlerDef, battlerAtk)`.
   if (move?.split === 'STATUS') {
-    const faintsAtk = canTargetFaintAi(state, battlerAtk, battlerDef, deps)
+    const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
     unmodelled.push(...faintsAtk.unmodelled)
     if (faintsAtk.canFaint) score -= 20
   }
 
   // :2584 -- Player can defeat the AI next turn and is faster, force priority.
   if ((move?.priority ?? 0) > 0) {
-    const faintsAtk = canTargetFaintAi(state, battlerAtk, battlerDef, deps)
+    const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
     unmodelled.push(...faintsAtk.unmodelled)
     if (faintsAtk.canFaint && getWhoStrikesFirst(state, battlerDef, battlerAtk, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
       score += 8
@@ -1012,6 +1016,48 @@ const NEGATES_FRZ_SPATK_DROP_ABILITIES: readonly string[] = ['ABILITY_DETERMINAT
 function ignoresFrostbiteSpatkDrop(battler: BattlerState): boolean {
   return NEGATES_FRZ_SPATK_DROP_ABILITIES.some((id) => selfAbility(battler, id))
 }
+
+/**
+ * Every EFFECT_* case label AI_CheckViability's switch declares in its part-2
+ * range (battle_ai_main.c:3224-3986, EFFECT_SANDSTORM through the function's
+ * end), mechanically extracted and comment-stripped (both `//` and `/* * /`
+ * forms) so the four labels that only exist inside a commented-out TODO block
+ * at the very end of the switch (EFFECT_EXTREME_EVOBOOST, EFFECT_CLANGOROUS_
+ * SOUL, EFFECT_NO_RETREAT, EFFECT_SKY_DROP -- all four `// case EFFECT_...:
+ * // TODO`) are correctly excluded, the same mistake cycle17's own
+ * PART2_EFFECTS doc (aiCheckBadMove.ts) found and fixed for AI_CheckBadMove's
+ * switch. 117 entries. Used only by this module's own oracle test --
+ * `applyMoveEffectSwitch`'s `default` case reports a gap for ANY unhandled
+ * effect dynamically (not by consulting this list), so this list can never
+ * silently drift out of sync with real scoring behavior; it exists purely so
+ * a test can pin the count and check for overlap with the labels this batch
+ * DOES handle. */
+export const PART2_EFFECTS: readonly string[] = [
+  'EFFECT_ATTACK_UP_HIT', 'EFFECT_ATTRACT', 'EFFECT_BELLY_DRUM', 'EFFECT_BESTOW', 'EFFECT_BRICK_BREAK',
+  'EFFECT_BUG_BITE', 'EFFECT_BULK_UP', 'EFFECT_CALM_MIND', 'EFFECT_CAMOUFLAGE', 'EFFECT_CHARGE',
+  'EFFECT_CONVERSION', 'EFFECT_CONVERSION_2', 'EFFECT_COSMIC_POWER', 'EFFECT_COUNTER', 'EFFECT_DEFENSE_CURL',
+  'EFFECT_DEFOG', 'EFFECT_DRAGON_DANCE', 'EFFECT_EERIE_FOG', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_ELECTRIFY',
+  'EFFECT_EMBARGO', 'EFFECT_ENDEAVOR', 'EFFECT_ENTRAINMENT', 'EFFECT_FACADE', 'EFFECT_FAIRY_LOCK',
+  'EFFECT_FAKE_OUT', 'EFFECT_FEINT', 'EFFECT_FELL_STINGER', 'EFFECT_FLAIL', 'EFFECT_FLAME_BURST',
+  'EFFECT_FLATTER', 'EFFECT_FLING', 'EFFECT_FOCUS_PUNCH', 'EFFECT_FOLLOW_ME', 'EFFECT_GASTRO_ACID',
+  'EFFECT_GEAR_UP', 'EFFECT_GEOMANCY', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_GRAVITY', 'EFFECT_GRUDGE',
+  'EFFECT_GUARD_SPLIT', 'EFFECT_GUARD_SWAP', 'EFFECT_HAIL', 'EFFECT_HEAL_BLOCK', 'EFFECT_HEART_SWAP',
+  'EFFECT_IMPRISON', 'EFFECT_INCINERATE', 'EFFECT_INGRAIN', 'EFFECT_ION_DELUGE', 'EFFECT_KNOCK_OFF',
+  'EFFECT_LUCKY_CHANT', 'EFFECT_MAGIC_COAT', 'EFFECT_MAGIC_ROOM', 'EFFECT_MAGNET_RISE', 'EFFECT_METAL_BURST',
+  'EFFECT_MIRROR_COAT', 'EFFECT_MISTY_TERRAIN', 'EFFECT_MUD_SPORT', 'EFFECT_NATURE_POWER', 'EFFECT_OVERHEAT',
+  'EFFECT_PLEDGE', 'EFFECT_POWDER', 'EFFECT_POWER_SPLIT', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK',
+  'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_PSYCHO_SHIFT', 'EFFECT_PSYCH_UP', 'EFFECT_PURSUIT', 'EFFECT_QUASH',
+  'EFFECT_QUIVER_DANCE', 'EFFECT_RAIN_DANCE', 'EFFECT_RAPID_SPIN', 'EFFECT_RECHARGE', 'EFFECT_RECYCLE',
+  'EFFECT_REFRESH', 'EFFECT_REVENGE', 'EFFECT_ROLE_PLAY', 'EFFECT_ROLLOUT', 'EFFECT_SAFEGUARD',
+  'EFFECT_SANDSTORM', 'EFFECT_SEMI_INVULNERABLE', 'EFFECT_SHELL_SMASH', 'EFFECT_SHIFT_GEAR', 'EFFECT_SHORE_UP',
+  'EFFECT_SIMPLE_BEAM', 'EFFECT_SKILL_SWAP', 'EFFECT_SKULL_BASH', 'EFFECT_SMACK_DOWN', 'EFFECT_SMELLINGSALT',
+  'EFFECT_SNATCH', 'EFFECT_SOAK', 'EFFECT_SOLARBEAM', 'EFFECT_SPECTRAL_THIEF', 'EFFECT_SPEED_SWAP',
+  'EFFECT_STOCKPILE', 'EFFECT_STORED_POWER', 'EFFECT_SUNNY_DAY', 'EFFECT_SUPERPOWER', 'EFFECT_SWAGGER',
+  'EFFECT_TAILWIND', 'EFFECT_TAUNT', 'EFFECT_TELEKINESIS', 'EFFECT_THIRD_TYPE', 'EFFECT_THROAT_CHOP',
+  'EFFECT_TICKLE', 'EFFECT_TOPSY_TURVY', 'EFFECT_TORMENT', 'EFFECT_TOXIC_THREAD', 'EFFECT_TRICK',
+  'EFFECT_TRICK_ROOM', 'EFFECT_TWO_TURNS_ATTACK', 'EFFECT_WAKE_UP_SLAP', 'EFFECT_WATER_SPORT', 'EFFECT_WILL_O_WISP',
+  'EFFECT_WONDER_ROOM', 'EFFECT_WORRY_SEED',
+]
 
 /**
  * The move-effect switch itself, battle_ai_main.c:2627-3223 -- from
@@ -1099,11 +1145,17 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_SPEED_UP':
     case 'EFFECT_SPEED_UP_2':
+      // `IsAiFaster(AI_CHECK_SLOWER)` -- "is the TARGET faster" -- is exactly
+      // `!isAiFaster(AI_CHECK_FASTER)` (see this module's header equivalence
+      // note). The C's true branch (target faster) is the bonus-check branch;
+      // its else (AI faster or tied) is the flat -3.
       if (!isAiFaster(state, battlerAtk, battlerDef, moveId, deps)) {
+        if (!aiRandLessThan(state, 70) && compareStatLessThan(attacker, STAT_SPEED, MAX_STAT_STAGE)) {
+          // RNG line :2682.
+          score += 3
+        }
+      } else {
         score -= 3
-      } else if (!aiRandLessThan(state, 70) && compareStatLessThan(attacker, STAT_SPEED, MAX_STAT_STAGE)) {
-        // RNG line :2682.
-        score += 3
       }
       break
 
