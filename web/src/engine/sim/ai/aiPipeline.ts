@@ -7,10 +7,12 @@
 //
 // AI_CheckBadMove PART 1 is wired for real as of the ai-checkbadmove-1 batch
 // (aiCheckBadMove.ts, battle_ai_main.c:488-1298 through EFFECT_PERISH_SONG).
-// AI_CheckViability is still STUBBED pass-through here -- batches 4-5. A stub
-// still occupies its dispatch slot (bit 2), so the score-zeroing behaviour for
-// an unusable move slot (PP exhausted, or MOVE_NONE) still applies identically
-// to the real function, only the scorer body itself does nothing.
+// AI_CheckViability PART 1 (battle_ai_main.c:2515-3223, through
+// EFFECT_PERISH_SONG) is wired for real as of the ai-checkviability-1 batch
+// (aiCheckViability.ts). Part 2 (:3224-3986, EFFECT_SANDSTORM through the
+// function's end) still falls through `applyMoveEffectSwitch`'s own `default`
+// case there, which reports a named per-effect gap rather than silently
+// scoring 0 -- see that module's own header.
 
 import type { BattleState, BattlerState } from '../state'
 import type { BaseStats } from '../../types'
@@ -18,6 +20,7 @@ import { hasFlag, PARTY_SIZE, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS
 import { AI_FLAG_CHECK_BAD_MOVE, AI_FLAG_CHECK_VIABILITY, AI_FLAG_PREFER_BATON_PASS, AI_FLAG_TRY_TO_FAINT } from './aiFlags'
 import { aiHPAware, aiRisky, aiTryToFaint } from './aiScorers'
 import { aiCheckBadMove } from './aiCheckBadMove'
+import { aiCheckViability } from './aiCheckViability'
 import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitching'
 import type { AiDamageDeps } from './aiCalcDamage'
 
@@ -31,10 +34,6 @@ const BATTLE_TYPE_PALACE = 1 << 17
 /** MOVE_POWER-style stub score, unchanged. */
 type ScorerResult = { score: number; unmodelled: string[] }
 type Scorer = (state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, moveIndex: number, score: number, deps: AiDamageDeps) => ScorerResult
-
-function checkViabilityStub(_s: BattleState, _a: number, _d: number, _m: string, _i: number, score: number): ScorerResult {
-  return { score, unmodelled: [] }
-}
 
 /** sBattleAiFuncTable, battle_ai_main.c:60-93 -- restricted to the bits this
  * batch's `state.aiFlags` can ever carry (this module's own aiFlags finding:
@@ -51,7 +50,7 @@ function checkViabilityStub(_s: BattleState, _a: number, _d: number, _m: string,
 const DISPATCH: Record<number, Scorer> = {
   0: (s, a, d, m, _i, sc, deps) => aiCheckBadMove(s, a, d, m, sc, deps), // AI_FLAG_CHECK_BAD_MOVE -- part 1 (this batch), part 2 to follow
   1: (s, a, d, m, i, sc, deps) => aiTryToFaint(s, a, d, m, i, sc, deps), // AI_FLAG_TRY_TO_FAINT
-  2: checkViabilityStub, // AI_FLAG_CHECK_VIABILITY -- stub (batches 4-5)
+  2: (s, a, d, m, _i, sc, deps) => aiCheckViability(s, a, d, m, sc, deps), // AI_FLAG_CHECK_VIABILITY -- part 1 (this batch), part 2 to follow
   4: (s, a, d, m, _i, sc, deps) => aiRisky(s, a, d, m, sc, deps), // AI_FLAG_RISKY
   8: (s, a, d, m, _i, sc, deps) => aiHPAware(s, a, d, m, sc, deps), // AI_FLAG_HP_AWARE
 }

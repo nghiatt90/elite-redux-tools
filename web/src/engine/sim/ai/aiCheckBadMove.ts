@@ -236,7 +236,7 @@ export function hasMoveFlag(move: ReturnType<AiDamageDeps['moveData']>, flag: st
 
 /** `moveTarget & MOVE_TARGET_USER` -- moves.json's own `target` enum spells
  * this bare 'USER' (dataContext.ts's own SimMoveData.target doc). */
-function moveTargetsUser(move: ReturnType<AiDamageDeps['moveData']>): boolean {
+export function moveTargetsUser(move: ReturnType<AiDamageDeps['moveData']>): boolean {
   return move?.target === 'USER'
 }
 
