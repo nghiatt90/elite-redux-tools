@@ -43,6 +43,32 @@ def parse_items() -> list:
     return items
 
 
+# ITEMS_LIST order from eliteredux-source tools/codegen/src/er/GeneratorUtils.kt:25-45:
+# pocket files in Pocket enum order (NONE excluded), UnusedList last, then only items with
+# a non-empty name, image and palette. parse_items() sorts by filename instead, which is
+# not the order the codegen numbers HOLD_EFFECT_* in.
+_CODEGEN_POCKET_FILES = (
+    "ItemsList",
+    "MedicineList",
+    "BattleList",
+    "TmHmList",
+    "BerriesList",
+    "PokeBallsList",
+    "KeyItemsList",
+    "MegaStonesList",
+    "UnusedList",
+)
+
+
+def parse_items_codegen_order() -> list:
+    items = []
+    for stem in _CODEGEN_POCKET_FILES:
+        path = ER_CONFIG / "items" / f"{stem}.textproto"
+        if path.exists():
+            items.extend(_parse(path, ItemList_pb2.ItemList).item)
+    return [i for i in items if i.name and i.image and i.palette]
+
+
 def parse_move_behaviors() -> list:
     return list(
         _parse_config("MoveBehaviorConfigList.textproto", MoveBehaviorConfigList_pb2.MoveBehaviorConfigList).config

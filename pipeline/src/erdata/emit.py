@@ -28,7 +28,7 @@ from erdata.encounters import encounters_to_dict
 from erdata.move_behavior import behavior_config_to_dict
 from erdata.natures import battle_constants_to_dict
 from erdata.paths import load_lock, output_dir
-from erdata.parse import parse_abilities, parse_items, parse_moves, parse_species
+from erdata.parse import parse_abilities, parse_items, parse_items_codegen_order, parse_moves, parse_species
 from erdata.randomizer import parse_randomizer_banned
 from erdata.resolve import (
     build_species_map,
@@ -426,6 +426,16 @@ def _resolved_hold_effect(item) -> str:
     return f"HOLD_EFFECT_{suffix}"
 
 
+# The numeric HOLD_EFFECT_* enum, per tools/codegen/src/er/defines/HoldEffectGenerator.kt:
+# NONE = 0, then each distinct resolved name in ITEMS_LIST order (first occurrence wins),
+# numbered from 1. `items` must already be in codegen order (parse_items_codegen_order).
+def hold_effect_ids(items) -> dict[str, int]:
+    ids = {"HOLD_EFFECT_NONE": 0}
+    for item in items:
+        ids.setdefault(_resolved_hold_effect(item), len(ids))
+    return ids
+
+
 def item_to_dict(item) -> dict:
     entry = {
         "id": _I(item.id),
@@ -601,9 +611,9 @@ def inverse_type_chart_to_dict() -> dict:
     }
 
 
-def _write_json(path, data) -> None:
+def _write_json(path, data, sort_keys=True) -> None:
     path.write_text(
-        json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+        json.dumps(data, sort_keys=sort_keys, separators=(",", ":")) + "\n", encoding="utf-8"
     )
 
 
@@ -655,6 +665,7 @@ def build() -> None:
     # (see typechart.py's module comment). Sibling file, same TypeChart shape.
     _write_json(out / "typesInverse.json", inverse_type_chart_to_dict())
     _write_json(out / "items.json", [item_to_dict(i) for i in sorted(items, key=lambda i: _I(i.id))])
+    _write_json(out / "holdEffectIds.json", hold_effect_ids(parse_items_codegen_order()), sort_keys=False)
     move_behaviors = move_behaviors_to_dict()
     _write_json(out / "moveBehaviors.json", move_behaviors)
     _write_json(out / "natures.json", battle_constants_to_dict())

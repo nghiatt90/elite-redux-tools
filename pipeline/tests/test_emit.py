@@ -519,3 +519,82 @@ def test_emit_is_deterministic(tmp_path, monkeypatch):
     emit_mod.build()
     second = (tmp_path / paths_mod.game_version() / "species.json").read_bytes()
     assert first == second
+
+
+def _item(item_id, hold_effect, alias=""):
+    from erdata.generated import ItemEnum_pb2, ItemList_pb2
+
+    return ItemList_pb2.Item(
+        id=ItemEnum_pb2.ItemEnum.Value(item_id),
+        hold_effect=ItemList_pb2.HoldEffect.Value(hold_effect),
+        hold_effect_alias=alias,
+    )
+
+
+def test_hold_effect_ids_none_is_zero_and_first_occurrence_wins():
+    from erdata.emit import hold_effect_ids
+
+    items = [
+        _item("ITEM_LEFTOVERS", "HOLD_EFFECT_RESTORE_HP"),
+        _item("ITEM_ORAN_BERRY", "HOLD_EFFECT_NONE"),
+        _item("ITEM_CHOICE_BAND", "HOLD_EFFECT_CUSTOM"),
+        _item("ITEM_BLACK_SLUDGE", "HOLD_EFFECT_FLINCH"),
+        _item("ITEM_SHELL_BELL", "HOLD_EFFECT_RESTORE_HP"),
+        _item("ITEM_CHOICE_SPECS", "HOLD_EFFECT_CUSTOM", "CHOICE_BAND"),
+    ]
+    assert list(hold_effect_ids(items).items()) == [
+        ("HOLD_EFFECT_NONE", 0),
+        ("HOLD_EFFECT_RESTORE_HP", 1),
+        ("HOLD_EFFECT_CHOICE_BAND", 2),
+        ("HOLD_EFFECT_FLINCH", 3),
+    ]
+
+
+def test_codegen_order_is_pocket_order_with_unused_last():
+    from erdata.generated import ItemList_pb2
+    from erdata.parse import _parse, parse_items_codegen_order
+    from erdata.paths import ER_CONFIG
+
+    pockets = ["ItemsList", "MedicineList", "BattleList", "TmHmList", "BerriesList", "PokeBallsList", "KeyItemsList", "MegaStonesList", "UnusedList"]
+    expected = []
+    for stem in pockets:
+        expected += [i.id for i in _parse(ER_CONFIG / "items" / f"{stem}.textproto", ItemList_pb2.ItemList).item if i.name and i.image and i.palette]
+    items = parse_items_codegen_order()
+    assert [i.id for i in items] == expected
+    assert len(items) == 929
+    assert [i.id for i in items] != [i.id for i in parse_items()]
+
+
+def test_hold_effect_ids_real_snapshot():
+    from erdata.emit import _resolved_hold_effect, hold_effect_ids
+    from erdata.parse import parse_items_codegen_order
+
+    ids = hold_effect_ids(parse_items_codegen_order())
+    assert len(ids) == 134
+    assert list(ids.values()) == list(range(134))
+    expected = {
+        "HOLD_EFFECT_NONE": 0,
+        "HOLD_EFFECT_GEMS": 10,
+        "HOLD_EFFECT_POWER_HERB": 15,
+        "HOLD_EFFECT_RESTORE_STATS": 16,
+        "HOLD_EFFECT_LEFTOVERS": 21,
+        "HOLD_EFFECT_BLACK_SLUDGE": 22,
+        "HOLD_EFFECT_FOCUS_SASH": 23,
+        "HOLD_EFFECT_CHOICE_SCARF": 30,
+        "HOLD_EFFECT_ROCKY_HELMET": 31,
+        "HOLD_EFFECT_SMOOTH_ROCK": 42,
+        "HOLD_EFFECT_PROTECTIVE_PADS": 46,
+        "HOLD_EFFECT_TERRAIN_EXTENDER": 50,
+        "HOLD_EFFECT_UTILITY_UMBRELLA": 129,
+    }
+    for name, value in expected.items():
+        assert ids[name] == value, name
+
+
+def test_every_resolved_hold_effect_in_items_json_has_an_id():
+    from erdata.emit import hold_effect_ids, item_to_dict
+    from erdata.parse import parse_items, parse_items_codegen_order
+
+    ids = hold_effect_ids(parse_items_codegen_order())
+    for item in parse_items():
+        assert item_to_dict(item)["resolvedHoldEffect"] in ids
