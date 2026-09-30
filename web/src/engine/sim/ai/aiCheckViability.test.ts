@@ -45,6 +45,17 @@ import {
   STATUS1_POISON,
   STATUS1_TOXIC_POISON,
   STATUS1_BLEED,
+  STATUS3_YAWN,
+  STATUS3_POWER_TRICK,
+  STATUS_FIELD_TRICK_ROOM,
+  STATUS_FIELD_GRAVITY,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPEED,
+  STAT_SPATK,
+  STAT_SPDEF,
+  STAT_ACC,
+  STAT_EVASION,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -1949,5 +1960,842 @@ describe('part 2a RNG order (AI_CheckViability part 2 draws none of its own; its
       aiCheckViability(state({}, { itemId: 'ITEM_LEFTOVERS' }, c.rng), 0, 1, id, 100, deps)
       expect(c.calls(), id).toBe(0)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Part 2b -- battle_ai_main.c:3607-3984 (EFFECT_GRUDGE .. EFFECT_RECHARGE)
+// ---------------------------------------------------------------------------
+for (const id of [
+  'MOVE_GRUDGE', 'MOVE_SNATCH', 'MOVE_MUD_SPORT', 'MOVE_WATER_SPORT', 'MOVE_TICKLE', 'MOVE_COSMIC_POWER', 'MOVE_BULK_UP', 'MOVE_CALM_MIND', 'MOVE_GEOMANCY',
+  'MOVE_QUIVER_DANCE', 'MOVE_CONVERSION', 'MOVE_CONVERSION_2', 'MOVE_GEAR_UP', 'MOVE_SHELL_SMASH', 'MOVE_DRAGON_DANCE', 'MOVE_SHIFT_GEAR', 'MOVE_GUARD_SWAP',
+  'MOVE_POWER_SWAP', 'MOVE_POWER_TRICK', 'MOVE_HEART_SWAP', 'MOVE_SPEED_SWAP', 'MOVE_GUARD_SPLIT', 'MOVE_POWER_SPLIT', 'MOVE_BUG_BITE', 'MOVE_PLUCK',
+  'MOVE_INCINERATE', 'MOVE_SMACK_DOWN', 'MOVE_ELECTRIC_TERRAIN', 'MOVE_MISTY_TERRAIN', 'MOVE_GRASSY_TERRAIN', 'MOVE_PSYCHIC_TERRAIN', 'MOVE_TRICK_ROOM',
+  'MOVE_MAGIC_ROOM', 'MOVE_WONDER_ROOM', 'MOVE_GRAVITY', 'MOVE_ION_DELUGE', 'MOVE_FLING', 'MOVE_FEINT', 'MOVE_EMBARGO', 'MOVE_POWDER', 'MOVE_TELEKINESIS',
+  'MOVE_THROAT_CHOP', 'MOVE_HEAL_BLOCK', 'MOVE_SOAK', 'MOVE_TRICK_OR_TREAT', 'MOVE_ELECTRIFY', 'MOVE_TOPSY_TURVY', 'MOVE_FAIRY_LOCK', 'MOVE_QUASH', 'MOVE_TAILWIND',
+  'MOVE_LUCKY_CHANT', 'MOVE_MAGNET_RISE', 'MOVE_FLAME_BURST', 'MOVE_TOXIC_THREAD', 'MOVE_SOLAR_BEAM', 'MOVE_COUNTER', 'MOVE_MIRROR_COAT', 'MOVE_METAL_BURST',
+  'MOVE_FLAIL', 'MOVE_SHORE_UP', 'MOVE_FACADE', 'MOVE_FOCUS_PUNCH', 'MOVE_SMELLING_SALTS', 'MOVE_WAKE_UP_SLAP', 'MOVE_REVENGE', 'MOVE_ENDEAVOR', 'MOVE_HYPER_BEAM',
+  'MOVE_HYPER_VOICE', 'MOVE_HYPNOSIS', 'MOVE_SCREECH', 'MOVE_THUNDER', 'MOVE_THUNDERBOLT', 'MOVE_EARTHQUAKE', 'MOVE_FREEZE_DRY', 'MOVE_ENERGY_BALL', 'MOVE_GIGA_DRAIN',
+  'MOVE_RECOVER', 'MOVE_ROOST', 'MOVE_PROTECT', 'MOVE_DETECT', 'MOVE_NONE', 'MOVE_WILL_O_WISP', 'MOVE_EMBER', 'MOVE_WATER_GUN', 'MOVE_SPORE',
+]) {
+  if (!moveById.has(id)) throw new Error(`moves.json is missing ${id}`)
+}
+{
+  const expectEffect: Record<string, string> = {
+    MOVE_GRUDGE: 'EFFECT_GRUDGE', MOVE_SNATCH: 'EFFECT_SNATCH', MOVE_TICKLE: 'EFFECT_TICKLE', MOVE_GEOMANCY: 'EFFECT_GEOMANCY', MOVE_QUIVER_DANCE: 'EFFECT_QUIVER_DANCE',
+    MOVE_SHELL_SMASH: 'EFFECT_SHELL_SMASH', MOVE_HEART_SWAP: 'EFFECT_HEART_SWAP', MOVE_BUG_BITE: 'EFFECT_BUG_BITE', MOVE_PLUCK: 'EFFECT_BUG_BITE', MOVE_INCINERATE: 'EFFECT_INCINERATE',
+    MOVE_TRICK_ROOM: 'EFFECT_TRICK_ROOM', MOVE_GRAVITY: 'EFFECT_GRAVITY', MOVE_ION_DELUGE: 'EFFECT_ION_DELUGE', MOVE_FEINT: 'EFFECT_FEINT', MOVE_THROAT_CHOP: 'EFFECT_THROAT_CHOP',
+    MOVE_HEAL_BLOCK: 'EFFECT_HEAL_BLOCK', MOVE_COUNTER: 'EFFECT_COUNTER', MOVE_MIRROR_COAT: 'EFFECT_MIRROR_COAT', MOVE_METAL_BURST: 'EFFECT_METAL_BURST',
+    MOVE_HYPER_BEAM: 'EFFECT_RECHARGE', MOVE_FOCUS_PUNCH: 'EFFECT_FOCUS_PUNCH', MOVE_HYPNOSIS: 'EFFECT_SLEEP', MOVE_GIGA_DRAIN: 'EFFECT_ABSORB', MOVE_FREEZE_DRY: 'EFFECT_FREEZE_DRY',
+  }
+  for (const [id, effect] of Object.entries(expectEffect)) if (moveById.get(id)?.effect !== effect) throw new Error(`${id} is no longer ${effect}`)
+  // Flags the case bodies read (TestMoveFlags), and the MOVE_NONE row the unguarded predictedMove reads hit.
+  if (!moveById.get('MOVE_CALM_MIND')?.flags?.snatchAffected || moveById.get('MOVE_TACKLE')?.flags?.snatchAffected) throw new Error('snatchAffected fixture changed')
+  if (!moveById.get('MOVE_HYPER_VOICE')?.flags?.sound || moveById.get('MOVE_TACKLE')?.flags?.sound) throw new Error('sound fixture changed')
+  const none = moveById.get('MOVE_NONE')
+  if (none?.type !== 'TYPE_NORMAL' || none?.effect !== null || none?.power !== 0) throw new Error('gBattleMoves[MOVE_NONE] changed shape')
+}
+for (const id of ['ITEM_POWER_HERB', 'ITEM_WHITE_HERB', 'ITEM_SITRUS_BERRY', 'ITEM_NORMAL_GEM', 'ITEM_LEFTOVERS', 'ITEM_BLACK_SLUDGE', 'ITEM_TERRAIN_EXTENDER', 'ITEM_ABILITY_CAPSULE', 'ITEM_IRON_BALL']) {
+  if (!itemsById.has(id)) throw new Error(`items.json is missing ${id}`)
+}
+for (const [id, hold] of Object.entries({ ITEM_POWER_HERB: 'HOLD_EFFECT_POWER_HERB', ITEM_WHITE_HERB: 'HOLD_EFFECT_RESTORE_STATS', ITEM_NORMAL_GEM: 'HOLD_EFFECT_GEMS', ITEM_TERRAIN_EXTENDER: 'HOLD_EFFECT_TERRAIN_EXTENDER', ITEM_LEFTOVERS: 'HOLD_EFFECT_LEFTOVERS', ITEM_BLACK_SLUDGE: 'HOLD_EFFECT_BLACK_SLUDGE', ITEM_ABILITY_CAPSULE: 'HOLD_EFFECT_NONE' })) {
+  if (itemsById.get(id)?.resolvedHoldEffect !== hold) throw new Error(`${id} is no longer ${hold}`)
+}
+if (itemsById.get('ITEM_SITRUS_BERRY')?.grouping !== 'POCKET_BERRIES' || itemsById.get('ITEM_LEFTOVERS')?.grouping === 'POCKET_BERRIES') throw new Error('items.json grouping fixture changed')
+for (const id of ['ABILITY_VOLT_ABSORB', 'ABILITY_MOTOR_DRIVE', 'ABILITY_LIGHTNING_ROD', 'ABILITY_RAMPAGE', 'ABILITY_BERSERKER_RAGE', 'ABILITY_RAGING_GODDESS', 'ABILITY_MASTER_HAND', 'ABILITY_CLUELESS', 'ABILITY_WONDER_GUARD', 'ABILITY_STICKY_HOLD', 'ABILITY_CHLOROPLAST']) {
+  if (!abilityHooks[id]) throw new Error(`abilityHooks.json is missing ${id}`)
+}
+
+/** effectDelta against an arbitrary deps (a custom turn-order/grounding context, or a move-data override). */
+function effectDeltaWith(d: AiDamageDeps, mk: () => BattleState, moveId: string, baseline = 'EFFECT_HIT'): number {
+  const real = aiCheckViability(mk(), 0, 1, moveId, 100, d).score
+  const plainDeps: AiDamageDeps = { ...d, moveData: (m) => (m === moveId ? ({ ...d.moveData(m)!, effect: baseline } as MoveData) : d.moveData(m)) }
+  return real - aiCheckViability(mk(), 0, 1, moveId, 100, plainDeps).score
+}
+/** A real damaging move (Tackle) wearing `effect`: for effects no real move carries and that need a non-status move. */
+const tackleAs = (effect: string, over: Partial<MoveData> = {}): AiDamageDeps => depsOverride('MOVE_TACKLE', { effect, ...over })
+const ungroundedDefender: AiDamageDeps = { ...deps, turnOrder: { ...NEUTRAL_TURN_ORDER_CONTEXT, isBattlerGrounded: (b: number) => b !== 1 } }
+const ungroundedAttacker: AiDamageDeps = { ...deps, turnOrder: { ...NEUTRAL_TURN_ORDER_CONTEXT, isBattlerGrounded: (b: number) => b !== 0 } }
+const moldBreaker: AiDamageDeps = { ...deps, grounding: { ...grounding, attackerHasMoldBreaker: true } }
+const lastMove = (m: string | null) => (s: BattleState) => { s.battlers[1]!.lastMove = m }
+const both = (...fns: Array<(s: BattleState) => void>) => (s: BattleState) => { for (const f of fns) f(s) }
+/** Counts every random16() call; the first `values` are scripted, the rest read RNG_HIGH. */
+function countingRng(...values: number[]): { rng: RandomSource; calls: () => number } {
+  let i = 0
+  return { rng: { random16: () => values[i++] ?? RNG_HIGH }, calls: () => i }
+}
+const stateWithRng = (rng: RandomSource, a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, tweak: (s: BattleState) => void = () => {}) => {
+  const s = state(a, d, rng)
+  tweak(s)
+  return s
+}
+
+describe('EFFECT_GRUDGE / EFFECT_FLING (:3607, :3780) -- no-ops', () => {
+  it('EFFECT_GRUDGE scores 0', () => {
+    expect(effectDelta(mkState(), 'MOVE_GRUDGE')).toBe(0)
+  })
+  it('EFFECT_FLING\'s body is commented out in the C: it scores 0 even holding an Iron Ball against an Iron Ball', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_IRON_BALL' }, { itemId: 'ITEM_IRON_BALL' }), 'MOVE_FLING')).toBe(0)
+  })
+})
+
+describe('EFFECT_SNATCH (:3609-3611)', () => {
+  it('scores +3 when the predicted (last-used) move is Snatch-affected', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_CALM_MIND')), 'MOVE_SNATCH')).toBe(3)
+  })
+  it('scores 0 for a non-Snatchable predicted move, and with no predicted move at all', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_TACKLE')), 'MOVE_SNATCH')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_SNATCH')).toBe(0)
+  })
+})
+
+describe('EFFECT_MUD_SPORT / EFFECT_WATER_SPORT (:3612-3617)', () => {
+  it('Mud Sport: +1 only when the target has an Electric move and the attacker does not', () => {
+    expect(effectDelta(mkState({}, moves('MOVE_THUNDERBOLT')), 'MOVE_MUD_SPORT')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_THUNDERBOLT'), moves('MOVE_THUNDERBOLT')), 'MOVE_MUD_SPORT')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_MUD_SPORT')).toBe(0)
+  })
+  it('Water Sport: the same, for Fire', () => {
+    expect(effectDelta(mkState({}, moves('MOVE_EMBER')), 'MOVE_WATER_SPORT')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_EMBER'), moves('MOVE_EMBER')), 'MOVE_WATER_SPORT')).toBe(0)
+    expect(effectDelta(mkState({}, moves('MOVE_THUNDERBOLT')), 'MOVE_WATER_SPORT')).toBe(0)
+  })
+})
+
+describe('EFFECT_TICKLE (:3618-3624)', () => {
+  it('+2 with a Physical move and a lowerable Defense', () => {
+    expect(effectDelta(mkState(), 'MOVE_TICKLE')).toBe(2)
+  })
+  it('falls to the Attack branch (+2) without a Physical move, or when Defense cannot be lowered', () => {
+    expect(effectDelta(mkState(moves('MOVE_WATER_GUN')), 'MOVE_TICKLE')).toBe(2)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 1, STAT_DEF, 3)), 'MOVE_TICKLE')).toBe(2)
+  })
+  it('scores 0 when neither applies; the Defense branch needs the Physical move (a special-only attacker with only Defense lowerable scores 0)', () => {
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 1, STAT_DEF, 3); stage(s, 1, STAT_ATK, 3) }), 'MOVE_TICKLE')).toBe(0)
+    expect(effectDelta(mkState(moves('MOVE_WATER_GUN'), {}, (s) => stage(s, 1, STAT_ATK, 3)), 'MOVE_TICKLE')).toBe(0)
+  })
+})
+
+describe('stat-raising status moves (:3625-3662): each IncreaseStatUpScore contributes its own +2', () => {
+  it('Cosmic Power: Defense (+2 vs a Physical foe) then Sp.Def (+2 vs a Special foe)', () => {
+    expect(effectDelta(mkState({}, moves('MOVE_TACKLE', 'MOVE_WATER_GUN')), 'MOVE_COSMIC_POWER')).toBe(4)
+    expect(effectDelta(mkState(), 'MOVE_COSMIC_POWER')).toBe(2)
+    expect(effectDelta(mkState({}, moves('MOVE_WATER_GUN')), 'MOVE_COSMIC_POWER')).toBe(2)
+  })
+  it('Bulk Up: Attack (+2 with a Physical move) then Defense (+2 vs a Physical foe)', () => {
+    expect(effectDelta(mkState(), 'MOVE_BULK_UP')).toBe(4)
+    expect(effectDelta(mkState(moves('MOVE_WATER_GUN')), 'MOVE_BULK_UP')).toBe(2)
+  })
+  it('Calm Mind: Sp.Atk (+2 with a Special move) then Sp.Def (+2 vs a Special foe)', () => {
+    expect(effectDelta(mkState(moves('MOVE_WATER_GUN'), moves('MOVE_WATER_GUN')), 'MOVE_CALM_MIND')).toBe(4)
+    expect(effectDelta(mkState(), 'MOVE_CALM_MIND')).toBe(0)
+  })
+  it.each(['MOVE_CONVERSION', 'MOVE_CONVERSION_2', 'MOVE_GEAR_UP'])('%s: Speed (+2 when slower) then Sp.Atk (+2 with a Special move)', (id) => {
+    expect(effectDelta(mkState({ ...SLOW, ...moves('MOVE_WATER_GUN') }), id)).toBe(4)
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_WATER_GUN') }), id)).toBe(2)
+  })
+  it.each(['MOVE_DRAGON_DANCE', 'MOVE_SHIFT_GEAR'])('%s: Speed (+2 when slower) then Attack (+2 with a Physical move)', (id) => {
+    expect(effectDelta(mkState(SLOW), id)).toBe(4)
+    expect(effectDelta(mkState(FAST), id)).toBe(2)
+  })
+  it('Shell Smash: Speed + Sp.Atk + Attack (+6), and +3 more holding a White Herb (RESTORE_STATS)', () => {
+    const atk = { ...SLOW, ...moves('MOVE_WATER_GUN', 'MOVE_TACKLE') }
+    expect(effectDelta(mkState(atk), 'MOVE_SHELL_SMASH')).toBe(6)
+    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_WHITE_HERB' }), 'MOVE_SHELL_SMASH')).toBe(9)
+    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_POWER_HERB' }), 'MOVE_SHELL_SMASH')).toBe(6)
+  })
+})
+
+describe('EFFECT_GEOMANCY -> EFFECT_QUIVER_DANCE fallthrough (:3637-3644)', () => {
+  const dancer = { ...SLOW, ...moves('MOVE_WATER_GUN') }
+  const foe = moves('MOVE_WATER_GUN')
+  it('Quiver Dance: Speed + Sp.Atk + Sp.Def (+2 each)', () => {
+    expect(effectDelta(mkState(dancer, foe), 'MOVE_QUIVER_DANCE')).toBe(6)
+  })
+  it('Geomancy without a Power Herb is exactly Quiver Dance (+6)', () => {
+    expect(effectDelta(mkState(dancer, foe), 'MOVE_GEOMANCY')).toBe(6)
+  })
+  it('Geomancy with a Power Herb gets BOTH the +10 and the stat-up scores (+16); Quiver Dance ignores the herb', () => {
+    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_GEOMANCY')).toBe(16)
+    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_QUIVER_DANCE')).toBe(6)
+  })
+  it('the +10 needs the target NOT to be able to KO the AI (a 1-HP attacker facing Tackle scores 0: the stat-ups bail too)', () => {
+    expect(effectDelta(mkState({ ...dancer, hp: 1, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_GEOMANCY')).toBe(0)
+  })
+  it('names the holdEffects[] param-vs-enum quirk when a herb is held', () => {
+    const r = aiCheckViability(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe)(), 0, 1, 'MOVE_GEOMANCY', 100, deps)
+    expect(r.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
+  })
+})
+
+describe('EFFECT_GUARD_SWAP / EFFECT_POWER_SWAP (:3663-3678) -- stage comparisons, and the >= on the second stat', () => {
+  const swap = (id: string, hi: number, lo: number) => {
+    const cases: Array<[string, Array<[number, number, number, number]>, number]> = [
+      // [defenderHi, defenderLo, attackerHi, attackerLo] stage values for (first stat, second stat)
+      ['first stat higher, second equal', [[8, 6, 6, 6]], 1],
+      ['second stat higher, first equal', [[6, 8, 6, 6]], 1],
+      ['both higher', [[8, 8, 6, 6]], 1],
+      ['first higher but second LOWER', [[8, 5, 6, 6]], 0],
+      ['first higher, second lower than a raised attacker stat', [[8, 6, 6, 7]], 0],
+      ['equal', [[6, 6, 6, 6]], 0],
+      ['defender lower', [[4, 4, 6, 6]], 0],
+    ]
+    for (const [label, [[dHi, dLo, aHi, aLo]], expected] of cases) {
+      const tweak = both((s) => { stage(s, 1, hi, dHi); stage(s, 1, lo, dLo); stage(s, 0, hi, aHi); stage(s, 0, lo, aLo) })
+      expect(effectDelta(mkState({}, {}, tweak), id), `${id}: ${label}`).toBe(expected)
+    }
+  }
+  it('Guard Swap compares Defense first, then Sp.Def', () => swap('MOVE_GUARD_SWAP', STAT_DEF, STAT_SPDEF))
+  it('Power Swap compares Attack first, then Sp.Atk', () => swap('MOVE_POWER_SWAP', STAT_ATK, STAT_SPATK))
+})
+
+describe('EFFECT_POWER_TRICK (:3679-3684) -- raw Defense > raw Attack', () => {
+  const stats = (atk: number, def: number) => ({ rawStats: { atk, def, spatk: 80, spdef: 85, spe: 100 } })
+  it('+2 with Defense > Attack and a Physical move', () => {
+    expect(effectDelta(mkState(stats(100, 120)), 'MOVE_POWER_TRICK')).toBe(2)
+  })
+  it('0 when already Power Tricked, when Defense <= Attack (equal is 0), or without a Physical move', () => {
+    expect(effectDelta(mkState(stats(100, 120), {}, (s) => { s.battlers[0]!.statuses3 |= STATUS3_POWER_TRICK }), 'MOVE_POWER_TRICK')).toBe(0)
+    expect(effectDelta(mkState(stats(100, 100)), 'MOVE_POWER_TRICK')).toBe(0)
+    expect(effectDelta(mkState(stats(120, 100)), 'MOVE_POWER_TRICK')).toBe(0)
+    expect(effectDelta(mkState({ ...stats(100, 120), ...moves('MOVE_WATER_GUN') }), 'MOVE_POWER_TRICK')).toBe(0)
+  })
+  it('reads the RAW stat, not the staged one (+6 Attack stages do not change the answer)', () => {
+    expect(effectDelta(mkState(stats(100, 120), {}, (s) => stage(s, 0, STAT_ATK, 12)), 'MOVE_POWER_TRICK')).toBe(2)
+  })
+})
+
+describe('EFFECT_HEART_SWAP (:3685-3693) -- STAT_ATK..NUM_BATTLE_STATS is 7 stats, the loop breaks early, `i == NUM_BATTLE_STATS` is part of the condition', () => {
+  const heart = (defStages: Record<number, number>) => effectDelta(mkState({}, {}, (s) => { for (const [i, v] of Object.entries(defStages)) stage(s, 1, Number(i), v) }), 'MOVE_HEART_SWAP')
+  it('+1 when every target stat is >= and at least one is higher', () => {
+    expect(heart({ [STAT_ATK]: 7 })).toBe(1)
+    expect(heart({ [STAT_SPDEF]: 8, [STAT_SPEED]: 6 })).toBe(1)
+  })
+  it('the range includes Accuracy and Evasion: a higher Evasion alone scores', () => {
+    expect(heart({ [STAT_ACC]: 7 })).toBe(1)
+    expect(heart({ [STAT_EVASION]: 7 })).toBe(1)
+  })
+  it('0 when all equal, and 0 when ANY stat is lower -- including a lower LAST stat (Evasion) after a higher first one', () => {
+    expect(heart({})).toBe(0)
+    expect(heart({ [STAT_SPEED]: 5 })).toBe(0)
+    expect(heart({ [STAT_ATK]: 7, [STAT_EVASION]: 5 })).toBe(0)
+    expect(heart({ [STAT_ATK]: 7, [STAT_DEF]: 5 })).toBe(0)
+  })
+})
+
+describe('EFFECT_SPEED_SWAP (:3694-3697) -- raw speed', () => {
+  it('+3 only when the target\'s raw Speed is strictly higher', () => {
+    expect(effectDelta(mkState({}, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 101 } }), 'MOVE_SPEED_SWAP')).toBe(3)
+    expect(effectDelta(mkState(), 'MOVE_SPEED_SWAP')).toBe(0)
+  })
+  it('ignores stages: a +6 target with LOWER raw Speed scores 0, a -6 target with HIGHER raw Speed scores +3', () => {
+    expect(effectDelta(mkState({}, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 90 } }, (s) => stage(s, 1, STAT_SPEED, 12)), 'MOVE_SPEED_SWAP')).toBe(0)
+    expect(effectDelta(mkState({}, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 150 } }, (s) => stage(s, 1, STAT_SPEED, 0)), 'MOVE_SPEED_SWAP')).toBe(3)
+  })
+})
+
+describe('EFFECT_GUARD_SPLIT / EFFECT_POWER_SPLIT (:3698-3714) -- raw stats, u16 averages', () => {
+  const st = (atk: number, def: number, spatk: number, spdef: number) => ({ rawStats: { atk, def, spatk, spdef, spe: 100 } })
+  it('Guard Split: +1 when the average raises Defense without lowering Sp.Def, or vice versa', () => {
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 200, 80, 200)), 'MOVE_GUARD_SPLIT')).toBe(1)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 90, 80, 200)), 'MOVE_GUARD_SPLIT'), 'Def average == own Def counts via >=').toBe(1)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 200, 80, 85)), 'MOVE_GUARD_SPLIT')).toBe(1)
+  })
+  it('Guard Split: 0 when raising one lowers the other, or nothing changes', () => {
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 200, 80, 10)), 'MOVE_GUARD_SPLIT')).toBe(0)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 10, 80, 200)), 'MOVE_GUARD_SPLIT')).toBe(0)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 90, 80, 85)), 'MOVE_GUARD_SPLIT')).toBe(0)
+  })
+  it('Power Split: the same over Attack / Sp.Atk', () => {
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(300, 90, 300, 85)), 'MOVE_POWER_SPLIT')).toBe(1)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 90, 300, 85)), 'MOVE_POWER_SPLIT')).toBe(1)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(300, 90, 10, 85)), 'MOVE_POWER_SPLIT')).toBe(0)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(10, 90, 300, 85)), 'MOVE_POWER_SPLIT')).toBe(0)
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 90, 80, 85)), 'MOVE_POWER_SPLIT')).toBe(0)
+  })
+  it('the split ignores stat stages (a +6 Attack target with equal raw Attack scores 0)', () => {
+    expect(effectDelta(mkState(st(100, 90, 80, 85), st(100, 90, 80, 85), (s) => stage(s, 1, STAT_ATK, 12)), 'MOVE_POWER_SPLIT')).toBe(0)
+  })
+})
+
+describe('EFFECT_BUG_BITE / EFFECT_INCINERATE (:3715-3726) -- ItemId_GetPocket == POCKET_BERRIES', () => {
+  it.each(['MOVE_BUG_BITE', 'MOVE_PLUCK'])('%s: +3 against a held berry only', (id) => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY' }), id)).toBe(3)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), id)).toBe(0)
+    expect(effectDelta(mkState(), id)).toBe(0)
+  })
+  it.each(['MOVE_BUG_BITE', 'MOVE_INCINERATE'])('%s: 0 through a Substitute or Sticky Hold', (id) => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY', status2: STATUS2_SUBSTITUTE }), id)).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY', abilities: ab('ABILITY_STICKY_HOLD') }), id)).toBe(0)
+  })
+  it('Sticky Hold is suppressed by a Mold Breaker attacker (BattlerHasAbility(..., TRUE))', () => {
+    expect(effectDeltaWith(moldBreaker, mkState({}, { itemId: 'ITEM_SITRUS_BERRY', abilities: ab('ABILITY_STICKY_HOLD') }), 'MOVE_BUG_BITE')).toBe(3)
+  })
+  it('Incinerate: +3 against a berry OR a Gem (HOLD_EFFECT_GEMS), 0 against other items', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY' }), 'MOVE_INCINERATE')).toBe(3)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_NORMAL_GEM' }), 'MOVE_INCINERATE')).toBe(3)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_INCINERATE')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_NORMAL_GEM' }), 'MOVE_BUG_BITE'), 'Bug Bite has no Gem clause').toBe(0)
+  })
+  it('a data context with no grouping for the held item reads as not-a-berry and says so', () => {
+    const noGrouping: AiDamageDeps = { ...deps, dataContext: { ...dataContext, item: (id) => ({ ...(itemsById.get(id) as SimItemData), grouping: undefined }) } }
+    const r = aiCheckViability(mkState({}, { itemId: 'ITEM_SITRUS_BERRY' })(), 0, 1, 'MOVE_BUG_BITE', 100, noGrouping)
+    expect(effectDeltaWith(noGrouping, mkState({}, { itemId: 'ITEM_SITRUS_BERRY' }), 'MOVE_BUG_BITE')).toBe(0)
+    expect(r.unmodelled.some((u) => u.includes('ItemId_GetPocket(ITEM_SITRUS_BERRY)'))).toBe(true)
+  })
+})
+
+describe('EFFECT_SMACK_DOWN (:3727-3729)', () => {
+  it('+3 only against an ungrounded target', () => {
+    expect(effectDelta(mkState(), 'MOVE_SMACK_DOWN')).toBe(0)
+    expect(effectDeltaWith(ungroundedDefender, mkState(), 'MOVE_SMACK_DOWN')).toBe(3)
+    expect(effectDeltaWith(ungroundedAttacker, mkState(), 'MOVE_SMACK_DOWN')).toBe(0)
+  })
+})
+
+describe('terrain moves (:3730-3738) -- Electric/Misty fall through into the Grassy/Psychic body', () => {
+  const yawn = (s: BattleState) => { s.battlers[0]!.statuses3 |= STATUS3_YAWN }
+  it.each(['MOVE_ELECTRIC_TERRAIN', 'MOVE_MISTY_TERRAIN'])('%s: +2, +10 more when yawning AND grounded (both terms), +2 for a Terrain Extender', (id) => {
+    expect(effectDelta(mkState(), id)).toBe(2)
+    expect(effectDelta(mkState({}, {}, yawn), id)).toBe(12)
+    expect(effectDeltaWith(ungroundedAttacker, mkState({}, {}, yawn), id), 'yawning but airborne').toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }), id)).toBe(4)
+    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }, {}, yawn), id), 'both bonuses stack').toBe(14)
+  })
+  it.each(['MOVE_GRASSY_TERRAIN', 'MOVE_PSYCHIC_TERRAIN'])('%s: +2 and the Extender +2, but no yawn bonus', (id) => {
+    expect(effectDelta(mkState(), id)).toBe(2)
+    expect(effectDelta(mkState({}, {}, yawn), id)).toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }), id)).toBe(4)
+  })
+})
+
+describe('EFFECT_TRICK_ROOM (:3744-3749) -- raw gFieldStatuses flag, u16 side-speed averages', () => {
+  const room = (s: BattleState) => { s.field.statuses |= STATUS_FIELD_TRICK_ROOM }
+  it('sets Trick Room (+5) only when the attacker is strictly slower', () => {
+    expect(effectDelta(mkState(SLOW), 'MOVE_TRICK_ROOM')).toBe(5)
+    expect(effectDelta(mkState(), 'MOVE_TRICK_ROOM'), 'equal speed').toBe(0)
+    expect(effectDelta(mkState(FAST), 'MOVE_TRICK_ROOM')).toBe(0)
+  })
+  it('with Trick Room already up, keeps it (+5) when the attacker is faster OR equal (>=), not when slower', () => {
+    expect(effectDelta(mkState(FAST, {}, room), 'MOVE_TRICK_ROOM')).toBe(5)
+    expect(effectDelta(mkState({}, {}, room), 'MOVE_TRICK_ROOM')).toBe(5)
+    expect(effectDelta(mkState(SLOW, {}, room), 'MOVE_TRICK_ROOM')).toBe(0)
+  })
+  it('reads the raw flag, not IsTrickRoomActive: Clueless on the field does not switch it off here', () => {
+    expect(effectDelta(mkState(FAST, { abilities: ab('ABILITY_CLUELESS') }, room), 'MOVE_TRICK_ROOM')).toBe(5)
+  })
+})
+
+describe('EFFECT_MAGIC_ROOM (:3750-3756)', () => {
+  it('+1 always, +1 more when the AI holds nothing and the target holds something', () => {
+    expect(effectDelta(mkState(), 'MOVE_MAGIC_ROOM')).toBe(1)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(1)
+    expect(effectDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(1)
+  })
+  it('an item with HOLD_EFFECT_NONE counts as holding nothing', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_ABILITY_CAPSULE' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(2)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_ABILITY_CAPSULE' }), 'MOVE_MAGIC_ROOM')).toBe(1)
+  })
+})
+
+describe('EFFECT_WONDER_ROOM (:3757-3761) -- raw Defense vs Sp.Def', () => {
+  const st = (def: number, spdef: number) => ({ rawStats: { atk: 100, def, spatk: 80, spdef, spe: 100 } })
+  it('+2 when the target has Physical moves and the AI\'s Defense is the lower one', () => {
+    expect(effectDelta(mkState(st(80, 120)), 'MOVE_WONDER_ROOM')).toBe(2)
+  })
+  it('+2 when the target has Special moves and the AI\'s Sp.Def is the lower one', () => {
+    expect(effectDelta(mkState(st(120, 80), moves('MOVE_WATER_GUN')), 'MOVE_WONDER_ROOM')).toBe(2)
+  })
+  it('0 when the split of the target\'s moves does not match, or the stats are equal', () => {
+    expect(effectDelta(mkState(st(80, 120), moves('MOVE_WATER_GUN')), 'MOVE_WONDER_ROOM')).toBe(0)
+    expect(effectDelta(mkState(st(120, 80)), 'MOVE_WONDER_ROOM')).toBe(0)
+    expect(effectDelta(mkState(st(100, 100)), 'MOVE_WONDER_ROOM')).toBe(0)
+  })
+})
+
+describe('EFFECT_GRAVITY (:3762-3773) -- RETURN_SCORE_MINUS(20) leaves the whole function', () => {
+  it('-20 when Clueless is on the field (either side), and nothing else is scored', () => {
+    expect(effectDelta(mkState({}, { abilities: ab('ABILITY_CLUELESS') }), 'MOVE_GRAVITY')).toBe(-20)
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_CLUELESS'), ...moves('MOVE_HYPNOSIS') }), 'MOVE_GRAVITY')).toBe(-20)
+  })
+  it('0 when Gravity is already up (raw flag)', () => {
+    expect(effectDelta(mkState({}, {}, (s) => { s.field.statuses |= STATUS_FIELD_GRAVITY }), 'MOVE_GRAVITY')).toBe(0)
+  })
+  it('+1 with nothing to gain', () => {
+    expect(effectDelta(mkState(), 'MOVE_GRAVITY')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_SPORE')), 'MOVE_GRAVITY'), 'a 100% sleep move is not low accuracy').toBe(1)
+  })
+  it('a sleep move under 85% accuracy runs IncreaseSleepScore (+3) and skips the accuracy branches', () => {
+    expect(effectDelta(mkState(moves('MOVE_HYPNOSIS', 'MOVE_THUNDER')), 'MOVE_GRAVITY')).toBe(3)
+  })
+  it('an un-sleepable target still takes the sleep branch (IncreaseSleepScore adds nothing) -- it is an else-if chain', () => {
+    expect(effectDelta(mkState(moves('MOVE_HYPNOSIS'), { status1: STATUS1_BURN }), 'MOVE_GRAVITY')).toBe(0)
+  })
+  it('a <=90% move (status moves count, ignoreStatus is FALSE) scores +2', () => {
+    expect(effectDelta(mkState(moves('MOVE_THUNDER')), 'MOVE_GRAVITY')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_SCREECH')), 'MOVE_GRAVITY')).toBe(2)
+  })
+  it('HasSleepMoveWithLowAccuracy stops at the first empty slot; the accuracy scan does not', () => {
+    // [Tackle, -, Hypnosis, -]: the sleep scan breaks at slot 1 (no sleep branch: not +3), the accuracy scan still finds Hypnosis (60) -> +2.
+    expect(effectDelta(mkState({ moves: ['MOVE_TACKLE', null, 'MOVE_HYPNOSIS', null] }), 'MOVE_GRAVITY')).toBe(2)
+  })
+  it('names the accuracy approximation whenever a sleep move is examined', () => {
+    const r = aiCheckViability(mkState(moves('MOVE_HYPNOSIS'))(), 0, 1, 'MOVE_GRAVITY', 100, deps)
+    expect(r.unmodelled.some((u) => u.includes('HasSleepMoveWithLowAccuracy'))).toBe(true)
+  })
+})
+
+describe('EFFECT_ION_DELUGE (:3774-3779) -- unguarded gBattleMoves[predictedMove]', () => {
+  const absorber = (id: string) => ({ abilities: ab(id) })
+  it.each(['ABILITY_VOLT_ABSORB', 'ABILITY_MOTOR_DRIVE', 'ABILITY_LIGHTNING_ROD'])('%s + a predicted Normal move: +2', (id) => {
+    expect(effectDelta(mkState(absorber(id), {}, lastMove('MOVE_TACKLE')), 'MOVE_ION_DELUGE')).toBe(2)
+  })
+  it('0 for a non-Normal predicted move, or without the ability', () => {
+    expect(effectDelta(mkState(absorber('ABILITY_VOLT_ABSORB'), {}, lastMove('MOVE_EMBER')), 'MOVE_ION_DELUGE')).toBe(0)
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_TACKLE')), 'MOVE_ION_DELUGE')).toBe(0)
+  })
+  it('with NO predicted move it reads gBattleMoves[MOVE_NONE] (type Normal): still +2', () => {
+    expect(effectDelta(mkState(absorber('ABILITY_VOLT_ABSORB')), 'MOVE_ION_DELUGE')).toBe(2)
+  })
+  it('BattlerHasAbility(..., TRUE): a Mold Breaker attacker suppresses its own breakable Volt Absorb', () => {
+    expect(effectDeltaWith(moldBreaker, mkState(absorber('ABILITY_VOLT_ABSORB'), {}, lastMove('MOVE_TACKLE')), 'MOVE_ION_DELUGE')).toBe(0)
+  })
+})
+
+describe('EFFECT_FEINT (:3803-3805) -- unguarded gBattleMoves[predictedMove].effect', () => {
+  it('+3 when the predicted move is a Protect-effect move', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_PROTECT')), 'MOVE_FEINT')).toBe(3)
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_DETECT')), 'MOVE_FEINT')).toBe(3)
+  })
+  it('0 for anything else, including no predicted move (MOVE_NONE has no effect)', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_TACKLE')), 'MOVE_FEINT')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_FEINT')).toBe(0)
+  })
+})
+
+describe('EFFECT_EMBARGO / EFFECT_POWDER / EFFECT_TELEKINESIS (:3806-3816)', () => {
+  it('Embargo: +1 when the target holds something with a hold effect; 0 for nothing or a HOLD_EFFECT_NONE item', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_EMBARGO')).toBe(1)
+    expect(effectDelta(mkState(), 'MOVE_EMBARGO')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_ABILITY_CAPSULE' }), 'MOVE_EMBARGO')).toBe(0)
+  })
+  it('Powder: +3 when the predicted move is a damaging Fire move', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_EMBER')), 'MOVE_POWDER')).toBe(3)
+  })
+  it('Powder: 0 for a status Fire move, a non-Fire move, or no predicted move', () => {
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_WILL_O_WISP')), 'MOVE_POWDER')).toBe(0)
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_TACKLE')), 'MOVE_POWDER')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_POWDER')).toBe(0)
+  })
+  it('Telekinesis: +1 for an ungrounded target, or for any <=90% accuracy move (status included)', () => {
+    expect(effectDelta(mkState(), 'MOVE_TELEKINESIS')).toBe(0)
+    expect(effectDeltaWith(ungroundedDefender, mkState(), 'MOVE_TELEKINESIS')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_THUNDER')), 'MOVE_TELEKINESIS')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_SCREECH')), 'MOVE_TELEKINESIS')).toBe(1)
+  })
+  it('Telekinesis: +1 once, not twice, when both hold', () => {
+    expect(effectDeltaWith(ungroundedDefender, mkState(moves('MOVE_THUNDER')), 'MOVE_TELEKINESIS')).toBe(1)
+  })
+})
+
+describe('EFFECT_THROAT_CHOP (:3817-3822)', () => {
+  const chop = (a: Partial<SimBattleMon>, d: Partial<SimBattleMon>, last: string | null) => effectDelta(mkState(a, d, lastMove(last)), 'MOVE_THROAT_CHOP')
+  it('+3 when the AI is faster and the predicted move is a sound move', () => {
+    expect(chop(FAST, {}, 'MOVE_HYPER_VOICE')).toBe(3)
+  })
+  it('a slower AI falls to the moveset check: +3 only if the target KNOWS a sound move', () => {
+    expect(chop(SLOW, {}, 'MOVE_HYPER_VOICE')).toBe(0)
+    expect(chop(SLOW, moves('MOVE_HYPER_VOICE'), 'MOVE_HYPER_VOICE')).toBe(3)
+    expect(chop(FAST, moves('MOVE_HYPER_VOICE'), 'MOVE_TACKLE')).toBe(3)
+  })
+  it('0 with no sound move predicted or known', () => {
+    expect(chop(FAST, {}, 'MOVE_TACKLE')).toBe(0)
+    expect(chop(FAST, {}, null)).toBe(0)
+  })
+  it('RNG (:3818): a speed tie draws once, only when the predicted move is a sound move', () => {
+    const tie = countingRng(0)
+    aiCheckViability(stateWithRng(tie.rng, {}, {}, lastMove('MOVE_HYPER_VOICE')), 0, 1, 'MOVE_THROAT_CHOP', 100, deps)
+    expect(tie.calls()).toBe(1)
+    for (const last of ['MOVE_TACKLE', null]) {
+      const none = countingRng()
+      aiCheckViability(stateWithRng(none.rng, {}, {}, lastMove(last)), 0, 1, 'MOVE_THROAT_CHOP', 100, deps)
+      expect(none.calls(), String(last)).toBe(0)
+    }
+  })
+  it('RNG: the tie result decides the branch (draw 0 = AI first -> +3; draw 1 = target first -> 0)', () => {
+    const run = (draw: number) => aiCheckViability(stateWithRng(scripted(draw), {}, {}, lastMove('MOVE_HYPER_VOICE')), 0, 1, 'MOVE_THROAT_CHOP', 100, deps).score
+    expect(run(0) - run(1)).toBe(3)
+  })
+})
+
+describe('EFFECT_HEAL_BLOCK (:3823-3829)', () => {
+  const block = (a: Partial<SimBattleMon>, d: Partial<SimBattleMon>, last: string | null) => effectDelta(mkState(a, d, lastMove(last)), 'MOVE_HEAL_BLOCK')
+  it('+3 when the AI is faster and the predicted move is a healing effect (Recover, and Giga Drain\'s EFFECT_ABSORB)', () => {
+    expect(block(FAST, {}, 'MOVE_RECOVER')).toBe(3)
+    expect(block(FAST, {}, 'MOVE_GIGA_DRAIN')).toBe(3)
+  })
+  it('otherwise +2 if the target KNOWS a healing move, holds Leftovers, or holds Black Sludge while Poison-type', () => {
+    expect(block(SLOW, {}, 'MOVE_RECOVER')).toBe(0)
+    expect(block(SLOW, moves('MOVE_ROOST'), 'MOVE_RECOVER')).toBe(2)
+    expect(block(FAST, moves('MOVE_ROOST'), 'MOVE_TACKLE')).toBe(2)
+    expect(block(SLOW, { itemId: 'ITEM_LEFTOVERS' }, null)).toBe(2)
+    expect(block(SLOW, { itemId: 'ITEM_BLACK_SLUDGE', types: ['POISON', 'MYSTERY', 'MYSTERY'] }, null)).toBe(2)
+    expect(block(SLOW, { itemId: 'ITEM_BLACK_SLUDGE' }, null), 'Black Sludge on a non-Poison type').toBe(0)
+  })
+  it('RNG (:3824): GetWhoStrikesFirst is the FIRST operand, so a speed tie draws even with no predicted move', () => {
+    const c = countingRng(0)
+    aiCheckViability(stateWithRng(c.rng), 0, 1, 'MOVE_HEAL_BLOCK', 100, deps)
+    expect(c.calls()).toBe(1)
+    const fast = countingRng()
+    aiCheckViability(stateWithRng(fast.rng, FAST), 0, 1, 'MOVE_HEAL_BLOCK', 100, deps)
+    expect(fast.calls()).toBe(0)
+  })
+})
+
+describe('EFFECT_SOAK / EFFECT_THIRD_TYPE / EFFECT_ELECTRIFY / EFFECT_TOPSY_TURVY (:3830-3846)', () => {
+  it('Soak: +2 for an Electric move, a Grass move, or Freeze-Dry; 0 otherwise', () => {
+    expect(effectDelta(mkState(moves('MOVE_THUNDERBOLT')), 'MOVE_SOAK')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_ENERGY_BALL')), 'MOVE_SOAK')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_FREEZE_DRY')), 'MOVE_SOAK')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_EMBER')), 'MOVE_SOAK')).toBe(0)
+  })
+  it('Third-type moves: +2 against Wonder Guard, suppressed by Mold Breaker (breakable)', () => {
+    expect(effectDelta(mkState({}, { abilities: ab('ABILITY_WONDER_GUARD') }), 'MOVE_TRICK_OR_TREAT')).toBe(2)
+    expect(effectDelta(mkState(), 'MOVE_TRICK_OR_TREAT')).toBe(0)
+    expect(effectDeltaWith(moldBreaker, mkState({}, { abilities: ab('ABILITY_WONDER_GUARD') }), 'MOVE_TRICK_OR_TREAT')).toBe(0)
+  })
+  it('Electrify: +3 for a predicted Normal move against an electric-absorbing AI; guarded by predictedMove != MOVE_NONE', () => {
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_MOTOR_DRIVE') }, {}, lastMove('MOVE_TACKLE')), 'MOVE_ELECTRIFY')).toBe(3)
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_MOTOR_DRIVE') }), 'MOVE_ELECTRIFY'), 'contrast: Ion Deluge is unguarded, Electrify is not').toBe(0)
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_MOTOR_DRIVE') }, {}, lastMove('MOVE_EMBER')), 'MOVE_ELECTRIFY')).toBe(0)
+    expect(effectDelta(mkState({}, {}, lastMove('MOVE_TACKLE')), 'MOVE_ELECTRIFY')).toBe(0)
+  })
+  it('Topsy-Turvy: +1 when the target has strictly more raised than lowered stats', () => {
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 1, STAT_ATK, 7)), 'MOVE_TOPSY_TURVY')).toBe(1)
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 1, STAT_ATK, 7); stage(s, 1, STAT_DEF, 5) }), 'MOVE_TOPSY_TURVY')).toBe(0)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 1, STAT_ATK, 5)), 'MOVE_TOPSY_TURVY')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_TOPSY_TURVY')).toBe(0)
+  })
+})
+
+describe('EFFECT_FAIRY_LOCK (:3847-3851) -- !IsBattlerTrapped(def, TRUE) then ShouldTrap', () => {
+  it('+8 for a Stall AI whose target cannot KO it and is not already trapped', () => {
+    expect(effectDelta(mkState({}, {}, () => {}, AI_FLAG_STALL), 'MOVE_FAIRY_LOCK')).toBe(8)
+  })
+  it('0 without AI_FLAG_STALL, when the target is already trapped, or when the target can KO the AI', () => {
+    expect(effectDelta(mkState(), 'MOVE_FAIRY_LOCK')).toBe(0)
+    expect(effectDelta(mkState({}, { status2: STATUS2_WRAPPED }, () => {}, AI_FLAG_STALL), 'MOVE_FAIRY_LOCK')).toBe(0)
+    expect(effectDelta(mkState({ hp: 1 }, {}, () => {}, AI_FLAG_STALL), 'MOVE_FAIRY_LOCK')).toBe(0)
+  })
+  it('a Ghost target is not trapped, so it still scores', () => {
+    expect(effectDelta(mkState({}, { types: ['GHOST', 'MYSTERY', 'MYSTERY'] }, () => {}, AI_FLAG_STALL), 'MOVE_FAIRY_LOCK')).toBe(8)
+  })
+})
+
+describe('EFFECT_TAILWIND / EFFECT_LUCKY_CHANT / EFFECT_QUASH (:3852-3865) -- singles side of the doubles branches', () => {
+  it('Tailwind: +2 only when the attacker\'s side speed average is strictly lower', () => {
+    expect(effectDelta(mkState(SLOW), 'MOVE_TAILWIND')).toBe(2)
+    expect(effectDelta(mkState(), 'MOVE_TAILWIND')).toBe(0)
+    expect(effectDelta(mkState(FAST), 'MOVE_TAILWIND')).toBe(0)
+  })
+  it('Lucky Chant: +1 in singles (the `else` +8 party branch is doubles-only), even with a party to switch to', () => {
+    expect(effectDelta(mkState(), 'MOVE_LUCKY_CHANT')).toBe(1)
+    expect(effectDelta(() => stateWithDefenderParty({}, {}, repeating(RNG_HIGH)), 'MOVE_LUCKY_CHANT')).toBe(1)
+  })
+  it('Quash: 0 in singles even when the target is faster (its speed check needs a partner slot)', () => {
+    expect(effectDelta(mkState(SLOW), 'MOVE_QUASH')).toBe(0)
+    expect(effectDelta(mkState(FAST), 'MOVE_QUASH')).toBe(0)
+  })
+  it('Quash makes no RNG draw in singles', () => {
+    const c = countingRng()
+    aiCheckViability(stateWithRng(c.rng), 0, 1, 'MOVE_QUASH', 100, deps)
+    expect(c.calls()).toBe(0)
+  })
+})
+
+describe('EFFECT_PLEDGE / EFFECT_FLAME_BURST / partner-side MAGIC_ROOM -- doubles-only, dead in singles', () => {
+  it('Pledge scores 0 in singles (no effect-carrying real move exists; a Tackle wearing the effect stands in)', () => {
+    expect(effectDeltaWith(tackleAs('EFFECT_PLEDGE'), mkState(), 'MOVE_TACKLE')).toBe(0)
+  })
+  it('Flame Burst scores 0 in singles', () => {
+    expect(effectDelta(mkState(), 'MOVE_FLAME_BURST')).toBe(0)
+    expect(effectDelta(mkState({}, { hp: 5 }), 'MOVE_FLAME_BURST')).toBe(0)
+  })
+})
+
+describe('EFFECT_MAGNET_RISE (:3866-3880) -- AI_GetTypeEffectiveness(MOVE_EARTHQUAKE, battlerDef, battlerAtk)', () => {
+  const zap = moves('MOVE_THUNDERBOLT')
+  const rise = (a: Partial<SimBattleMon>, d: Partial<SimBattleMon>, last: string | null = null, dd: AiDamageDeps = deps) => effectDeltaWith(dd, mkState(a, d, lastMove(last)), 'MOVE_MAGNET_RISE')
+  it('AI first: +3 when the predicted move is Ground; 0 for another move and for no predicted move (MOVE_NONE is Normal)', () => {
+    expect(rise(FAST, zap, 'MOVE_EARTHQUAKE')).toBe(3)
+    expect(rise(FAST, zap, 'MOVE_TACKLE')).toBe(0)
+    expect(rise(FAST, zap, null)).toBe(0)
+  })
+  it('AI second: +2 when the target knows a damaging Ground move', () => {
+    expect(rise(SLOW, moves('MOVE_THUNDERBOLT', 'MOVE_EARTHQUAKE'))).toBe(2)
+    expect(rise(SLOW, zap)).toBe(0)
+  })
+  it('needs a damaging Electric move on the target', () => {
+    expect(rise(FAST, moves('MOVE_EARTHQUAKE'), 'MOVE_EARTHQUAKE')).toBe(0)
+    expect(rise(FAST, moves('MOVE_WILL_O_WISP'), 'MOVE_EARTHQUAKE')).toBe(0)
+  })
+  it('needs a grounded AI', () => {
+    expect(rise(FAST, zap, 'MOVE_EARTHQUAKE', ungroundedAttacker)).toBe(0)
+  })
+  it('an AI that is already immune to Earthquake (Flying) scores 0: the probe has the target as ATTACKER', () => {
+    expect(rise({ ...FAST, types: ['FLYING', 'MYSTERY', 'MYSTERY'] }, zap, 'MOVE_EARTHQUAKE')).toBe(0)
+    expect(rise({ ...FAST, types: ['FIRE', 'MYSTERY', 'MYSTERY'] }, zap, 'MOVE_EARTHQUAKE'), 'a Fire type takes normal damage from Earthquake').toBe(3)
+  })
+  it('RNG (:3870): a speed tie draws once, and only when every earlier condition held', () => {
+    const c = countingRng(0)
+    aiCheckViability(stateWithRng(c.rng, {}, zap, lastMove('MOVE_EARTHQUAKE')), 0, 1, 'MOVE_MAGNET_RISE', 100, deps)
+    expect(c.calls()).toBe(1)
+    const noZap = countingRng()
+    aiCheckViability(stateWithRng(noZap.rng, {}, {}, lastMove('MOVE_EARTHQUAKE')), 0, 1, 'MOVE_MAGNET_RISE', 100, deps)
+    expect(noZap.calls()).toBe(0)
+  })
+})
+
+describe('EFFECT_CAMOUFLAGE (:3881-3885) -- no real move carries it; a Tackle wearing the effect stands in', () => {
+  const camo = (a: Partial<SimBattleMon>, last: string | null, over: Partial<MoveData> = {}) => effectDeltaWith(tackleAs('EFFECT_CAMOUFLAGE', over), mkState(a, {}, lastMove(last)), 'MOVE_TACKLE')
+  it('+1 when the AI is faster, a move was predicted, the scored move is not a status move, and the predicted move can hit the AI', () => {
+    expect(camo(FAST, 'MOVE_TACKLE')).toBe(1)
+  })
+  it('0 when slower, with no predicted move, or when the scored move is a status move (`!IS_MOVE_STATUS(move)`)', () => {
+    expect(camo(SLOW, 'MOVE_TACKLE')).toBe(0)
+    expect(camo(FAST, null)).toBe(0)
+    expect(camo(FAST, 'MOVE_TACKLE', { split: 'STATUS' })).toBe(0)
+  })
+  it('0 when the predicted move cannot hit the AI (AI_GetTypeEffectiveness(predicted, battlerDef, battlerAtk) == x0)', () => {
+    expect(camo({ ...FAST, types: ['FLYING', 'MYSTERY', 'MYSTERY'] }, 'MOVE_EARTHQUAKE')).toBe(0)
+  })
+  it('RNG (:3882): a speed tie draws once, only when a move was predicted', () => {
+    const c = countingRng(0)
+    aiCheckViability(stateWithRng(c.rng, {}, {}, lastMove('MOVE_TACKLE')), 0, 1, 'MOVE_TACKLE', 100, tackleAs('EFFECT_CAMOUFLAGE'))
+    expect(c.calls()).toBe(1)
+    const none = countingRng()
+    aiCheckViability(stateWithRng(none.rng), 0, 1, 'MOVE_TACKLE', 100, tackleAs('EFFECT_CAMOUFLAGE'))
+    expect(none.calls()).toBe(0)
+  })
+})
+
+describe('EFFECT_TOXIC_THREAD (:3893-3896)', () => {
+  it('poison (+1 baseline) then Speed (+2 when slower)', () => {
+    expect(effectDelta(mkState(SLOW), 'MOVE_TOXIC_THREAD')).toBe(3)
+    expect(effectDelta(mkState(FAST), 'MOVE_TOXIC_THREAD')).toBe(1)
+  })
+  it('a Steel target cannot be poisoned: only the Speed raise remains', () => {
+    expect(effectDelta(mkState(SLOW, { types: ['STEEL', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TOXIC_THREAD')).toBe(2)
+  })
+})
+
+describe('EFFECT_TWO_TURNS_ATTACK / SKULL_BASH / SOLARBEAM (:3897-3903)', () => {
+  it.each(['EFFECT_TWO_TURNS_ATTACK', 'EFFECT_SKULL_BASH'])('%s: +2 holding a Power Herb, else 0', (effect) => {
+    expect(synDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), effect)).toBe(2)
+    expect(synDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }), effect)).toBe(0)
+    expect(synDelta(mkState(), effect)).toBe(0)
+  })
+  it('Solar Beam: +2 with a Power Herb OR Chloroplast, never +4', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_CHLOROPLAST') }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_POWER_HERB', abilities: ab('ABILITY_CHLOROPLAST') }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    expect(effectDelta(mkState(), 'MOVE_SOLAR_BEAM')).toBe(0)
+  })
+})
+
+describe('EFFECT_COUNTER / EFFECT_MIRROR_COAT (:3904-3915)', () => {
+  const strong = ['MOVE_HYPER_VOICE'] as const
+  const counter = (id: string, last: string | null, over: (s: BattleState) => void = () => {}, d: AiDamageDeps = deps) =>
+    effectDeltaWith(d, mkState({ ...moves(id, ...strong) }, {}, both(lastMove(last), over)), id)
+  it('Counter: +3 when the predicted move is Physical and the result is not BEST', () => {
+    expect(counter('MOVE_COUNTER', 'MOVE_TACKLE')).toBe(3)
+  })
+  it('Mirror Coat: +3 for a predicted Special move; neither scores for the other split or a status move', () => {
+    expect(counter('MOVE_MIRROR_COAT', 'MOVE_WATER_GUN')).toBe(3)
+    expect(counter('MOVE_COUNTER', 'MOVE_WATER_GUN')).toBe(0)
+    expect(counter('MOVE_MIRROR_COAT', 'MOVE_TACKLE')).toBe(0)
+    expect(counter('MOVE_COUNTER', 'MOVE_PROTECT')).toBe(0)
+  })
+  it('a Taunted target adds +1 (it must use a damaging move)', () => {
+    expect(counter('MOVE_COUNTER', 'MOVE_TACKLE', (s) => { s.battlers[1]!.volatiles.tauntTimer = 2 })).toBe(4)
+    expect(counter('MOVE_COUNTER', 'MOVE_PROTECT', (s) => { s.battlers[1]!.volatiles.tauntTimer = 2 })).toBe(1)
+  })
+  it('nothing scores without a predicted move (even Taunted), or against an incapacitated target', () => {
+    expect(counter('MOVE_COUNTER', null, (s) => { s.battlers[1]!.volatiles.tauntTimer = 2 })).toBe(0)
+    expect(counter('MOVE_COUNTER', 'MOVE_TACKLE', (s) => { s.battlers[1]!.mon.status1 = STATUS1_SLEEP })).toBe(0)
+  })
+  it('QUIRK: `>= MOVE_POWER_GOOD` (2) excludes BEST (1) -- when Counter is itself the AI\'s best move it scores 0', () => {
+    const buffed = depsOverride('MOVE_COUNTER', { power: 250 })
+    expect(effectDeltaWith(buffed, mkState(moves('MOVE_COUNTER', 'MOVE_TACKLE'), {}, lastMove('MOVE_TACKLE')), 'MOVE_COUNTER')).toBe(0)
+    // Same predicted move, Counter no longer the best (unbuffed, next to a strong move): +3 -- the result is WEAK/GOOD, both >= 2.
+    expect(counter('MOVE_COUNTER', 'MOVE_TACKLE')).toBe(3)
+  })
+})
+
+describe('EFFECT_METAL_BURST (:3916-3924) -- the `else score -= 10` binds to the inner if', () => {
+  const burst = (a: Partial<SimBattleMon>, last: string | null, over: (s: BattleState) => void = () => {}) =>
+    effectDelta(mkState({ ...a, ...moves('MOVE_METAL_BURST', 'MOVE_HYPER_VOICE') }, {}, both(lastMove(last), over)), 'MOVE_METAL_BURST')
+  it('+3 when the predicted move is strong enough and the AI is NOT first', () => {
+    expect(burst(SLOW, 'MOVE_TACKLE')).toBe(3)
+  })
+  it('-10 when the AI is first (even with a strong predicted move)', () => {
+    expect(burst(FAST, 'MOVE_TACKLE')).toBe(-10)
+  })
+  it('a predicted status move (power 0) reads WEAK from GetMoveDamageResult, which is >= GOOD, so it scores +3 too', () => {
+    expect(burst(SLOW, 'MOVE_PROTECT')).toBe(3)
+  })
+  it('a Taunted target adds +1 before the +3/-10', () => {
+    expect(burst(SLOW, 'MOVE_TACKLE', (s) => { s.battlers[1]!.volatiles.tauntTimer = 2 })).toBe(4)
+    expect(burst(FAST, 'MOVE_TACKLE', (s) => { s.battlers[1]!.volatiles.tauntTimer = 2 })).toBe(-9)
+  })
+  it('nothing without a predicted move or against an incapacitated target', () => {
+    expect(burst(SLOW, null)).toBe(0)
+    expect(burst(SLOW, 'MOVE_TACKLE', (s) => { s.battlers[1]!.mon.status1 = STATUS1_SLEEP })).toBe(0)
+  })
+  it('RNG (:3919): GetWhoStrikesFirst draws on a tie exactly once when GetMoveDamageResult qualified, and not at all when Metal Burst is the BEST move', () => {
+    const c = countingRng(0)
+    aiCheckViability(stateWithRng(c.rng, moves('MOVE_METAL_BURST', 'MOVE_HYPER_VOICE'), {}, lastMove('MOVE_TACKLE')), 0, 1, 'MOVE_METAL_BURST', 100, deps)
+    expect(c.calls()).toBe(1)
+    const best = countingRng()
+    // A big-HP target: the buffed Metal Burst must not KO it, or the pre-switch already-dead check would draw its own speed tie.
+    aiCheckViability(stateWithRng(best.rng, moves('MOVE_METAL_BURST', 'MOVE_TACKLE'), { hp: 999, maxHp: 999 }, lastMove('MOVE_TACKLE')), 0, 1, 'MOVE_METAL_BURST', 100, depsOverride('MOVE_METAL_BURST', { power: 250 }))
+    expect(best.calls()).toBe(0)
+  })
+  it('QUIRK: with Metal Burst as the BEST move the qualifying test fails, so the else branch scores -10 whatever the speed', () => {
+    const buffed = depsOverride('MOVE_METAL_BURST', { power: 250 })
+    expect(effectDeltaWith(buffed, mkState({ ...SLOW, ...moves('MOVE_METAL_BURST', 'MOVE_TACKLE') }, {}, lastMove('MOVE_TACKLE')), 'MOVE_METAL_BURST')).toBe(-10)
+  })
+})
+
+describe('EFFECT_FLAIL / EFFECT_ENDEAVOR (:3925-3930, :3959-3966) -- GetWhoStrikesFirst and HP thresholds', () => {
+  const hpOf = (n: number) => ({ hp: n })
+  it('Flail: +1 only when the AI is first AND below 50% HP (50 exactly does not count)', () => {
+    expect(effectDelta(mkState({ ...FAST, ...hpOf(49) }), 'MOVE_FLAIL')).toBe(1)
+    expect(effectDelta(mkState({ ...FAST, ...hpOf(50) }), 'MOVE_FLAIL')).toBe(0)
+    expect(effectDelta(mkState({ ...SLOW, ...hpOf(10) }), 'MOVE_FLAIL')).toBe(0)
+  })
+  it('Endeavor: a slower AI needs < 40% HP, a faster one < 50% (both strict)', () => {
+    expect(effectDelta(mkState({ ...SLOW, ...hpOf(39) }), 'MOVE_ENDEAVOR')).toBe(1)
+    expect(effectDelta(mkState({ ...SLOW, ...hpOf(40) }), 'MOVE_ENDEAVOR')).toBe(0)
+    expect(effectDelta(mkState({ ...SLOW, ...hpOf(45) }), 'MOVE_ENDEAVOR')).toBe(0)
+    expect(effectDelta(mkState({ ...FAST, ...hpOf(49) }), 'MOVE_ENDEAVOR')).toBe(1)
+    expect(effectDelta(mkState({ ...FAST, ...hpOf(45) }), 'MOVE_ENDEAVOR')).toBe(1)
+    expect(effectDelta(mkState({ ...FAST, ...hpOf(50) }), 'MOVE_ENDEAVOR')).toBe(0)
+  })
+  it('RNG (:3926, :3960): a speed tie draws once for each, and the result picks the branch', () => {
+    for (const id of ['MOVE_FLAIL', 'MOVE_ENDEAVOR']) {
+      const c = countingRng(0)
+      aiCheckViability(stateWithRng(c.rng, hpOf(45)), 0, 1, id, 100, deps)
+      expect(c.calls(), id).toBe(1)
+    }
+    const run = (draw: number) => aiCheckViability(stateWithRng(scripted(draw), hpOf(45)), 0, 1, 'MOVE_ENDEAVOR', 100, deps).score
+    expect(run(1) - run(0), 'draw 1 = opponent first -> <40 threshold -> 45% does not score').toBe(0 - 1)
+  })
+})
+
+describe('EFFECT_SHORE_UP (:3931-3936) -- two ShouldRecover calls when the first does not score', () => {
+  const sand = (s: BattleState) => setWeather(s, WEATHER_SANDSTORM_TEMPORARY)
+  it('+2 (ShouldRecover 50) for a faster AI below 60% HP that the target cannot KO', () => {
+    expect(effectDelta(mkState({ ...FAST, hp: 50 }), 'MOVE_SHORE_UP')).toBe(2)
+  })
+  it('+3 (ShouldRecover 67) in a sandstorm that has effect', () => {
+    expect(effectDelta(mkState({ ...FAST, hp: 50 }, {}, sand), 'MOVE_SHORE_UP')).toBe(3)
+    expect(effectDelta(mkState({ ...FAST, hp: 50 }, { abilities: ab('ABILITY_CLOUD_NINE') }, sand), 'MOVE_SHORE_UP'), 'weather without effect falls to the 50% call').toBe(2)
+  })
+  it('0 at full HP, when slower, or when the target can KO the AI', () => {
+    expect(effectDelta(mkState({ ...FAST, hp: 100 }), 'MOVE_SHORE_UP')).toBe(0)
+    expect(effectDelta(mkState({ ...SLOW, hp: 50 }), 'MOVE_SHORE_UP')).toBe(0)
+    expect(effectDelta(mkState({ ...FAST, hp: 20 }), 'MOVE_SHORE_UP')).toBe(0)
+  })
+  it('RNG: each ShouldRecover draws its own speed-tie and its own `Random() % 3` (2 calls when the first fails, 1 when there is no sandstorm)', () => {
+    const draws = (a: Partial<SimBattleMon>, tweak: (s: BattleState) => void) => {
+      const c = countingRng(0, 1, 0, 1)
+      aiCheckViability(stateWithRng(c.rng, a, {}, tweak), 0, 1, 'MOVE_SHORE_UP', 100, deps)
+      return c.calls()
+    }
+    expect(draws({ hp: 50 }, sand), 'sand, recovers at 67: tie + %3').toBe(2)
+    expect(draws({ hp: 50 }, () => {}), 'no sand: tie + %3').toBe(2)
+    expect(draws({ hp: 100 }, sand), 'sand, hp 100: 67 call ties, 50 call ties again').toBe(2)
+    expect(draws({ hp: 100 }, () => {}), 'no sand, hp 100: one tie').toBe(1)
+  })
+})
+
+describe('status-condition damage moves (:3937-3957)', () => {
+  it.each([STATUS1_PARALYSIS, STATUS1_FROSTBITE, STATUS1_POISON, STATUS1_TOXIC_POISON, STATUS1_BLEED])('Facade: +1 while the attacker has status1 %i', (status) => {
+    expect(effectDelta(mkState({ status1: status }), 'MOVE_FACADE')).toBe(1)
+  })
+  it('Facade while burned: +1 from the case body plus +2 from the pre-switch burn penalty Facade is exempt from (effect != EFFECT_FACADE, :2564)', () => {
+    expect(effectDelta(mkState({ status1: STATUS1_BURN }), 'MOVE_FACADE')).toBe(3)
+  })
+  it('Facade: 0 unstatused, asleep or frozen', () => {
+    expect(effectDelta(mkState(), 'MOVE_FACADE')).toBe(0)
+    expect(effectDelta(mkState({ status1: STATUS1_SLEEP }), 'MOVE_FACADE')).toBe(0)
+    expect(effectDelta(mkState({ status1: STATUS1_FREEZE }), 'MOVE_FACADE')).toBe(0)
+  })
+  // Focus Punch is in sDiscouragedPowerfulMoveEffects (pre-switch damage check reads WEAK), so its baseline is another discouraged
+  // effect with no case label (EFFECT_ERUPTION) -- the pre-switch terms then cancel exactly.
+  const punch = (a: Partial<SimBattleMon>, d: Partial<SimBattleMon>, tweak: (s: BattleState) => void = () => {}) => effectDeltaWith(deps, mkState(a, d, tweak), 'MOVE_FOCUS_PUNCH', 'EFFECT_ERUPTION')
+  it('Focus Punch: +2 against an incapacitated target, +1 against a confused one or when the AI has a Substitute (else-if)', () => {
+    expect(punch({}, { status1: STATUS1_SLEEP })).toBe(2)
+    expect(punch({}, { status2: STATUS2_CONFUSION })).toBe(1)
+    expect(punch({ status2: STATUS2_SUBSTITUTE }, {})).toBe(1)
+    expect(punch({}, { status1: STATUS1_SLEEP, status2: STATUS2_CONFUSION }), 'sleeping AND confused: the first branch wins').toBe(2)
+    expect(punch({}, {})).toBe(0)
+  })
+  it('Focus Punch needs effectiveness > x0.5: a not-very-effective hit scores 0 even against a sleeper (x0.5 is 3, not > 3)', () => {
+    expect(punch({}, { status1: STATUS1_SLEEP, types: ['POISON', 'MYSTERY', 'MYSTERY'] })).toBe(0)
+    expect(punch({}, { status1: STATUS1_SLEEP, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] })).toBe(2)
+  })
+  it('Smelling Salts: +2 against paralysis; Wake-Up Slap: +2 against sleep', () => {
+    expect(effectDelta(mkState({}, { status1: STATUS1_PARALYSIS }), 'MOVE_SMELLING_SALTS')).toBe(2)
+    expect(effectDelta(mkState({}, { status1: STATUS1_SLEEP }), 'MOVE_SMELLING_SALTS')).toBe(0)
+    expect(effectDelta(mkState({}, { status1: STATUS1_SLEEP }), 'MOVE_WAKE_UP_SLAP')).toBe(2)
+    expect(effectDelta(mkState({}, { status1: STATUS1_PARALYSIS }), 'MOVE_WAKE_UP_SLAP')).toBe(0)
+  })
+  it('Revenge: +2 unless the target is asleep or confused (either)', () => {
+    expect(effectDelta(mkState(), 'MOVE_REVENGE')).toBe(2)
+    expect(effectDelta(mkState({}, { status1: STATUS1_SLEEP }), 'MOVE_REVENGE')).toBe(0)
+    expect(effectDelta(mkState({}, { status2: STATUS2_CONFUSION }), 'MOVE_REVENGE')).toBe(0)
+    expect(effectDelta(mkState({}, { status1: STATUS1_SLEEP, status2: STATUS2_CONFUSION }), 'MOVE_REVENGE')).toBe(0)
+  })
+})
+
+describe('EFFECT_RECHARGE (:3967-3972)', () => {
+  const recharge = (a: Partial<SimBattleMon>, d: Partial<SimBattleMon> = {}, dd: AiDamageDeps = deps) => effectDeltaWith(dd, mkState(a, d), 'MOVE_HYPER_BEAM', 'EFFECT_ERUPTION')
+  it.each(['ABILITY_RAMPAGE', 'ABILITY_BERSERKER_RAGE', 'ABILITY_RAGING_GODDESS', 'ABILITY_MASTER_HAND'])('%s + a KO with this move: +4', (id) => {
+    expect(recharge({ ...moves('MOVE_HYPER_BEAM'), abilities: ab(id) }, { hp: 1 })).toBe(4)
+  })
+  it('0 without the ability, or when the move does not KO', () => {
+    expect(recharge(moves('MOVE_HYPER_BEAM'), { hp: 1 })).toBe(0)
+    expect(recharge({ ...moves('MOVE_HYPER_BEAM'), abilities: ab('ABILITY_RAMPAGE') })).toBe(0)
+  })
+  it('none of the four is breakable, so a Mold Breaker attacker keeps them', () => {
+    expect(recharge({ ...moves('MOVE_HYPER_BEAM'), abilities: ab('ABILITY_RAMPAGE') }, { hp: 1 }, moldBreaker)).toBe(4)
+  })
+})
+
+describe('part 2b RNG order -- every speed-tie draw is a real state.rng draw, in C order', () => {
+  it('a plain non-drawing effect leaves the stream untouched (Grudge, Snatch, Facade, Recharge)', () => {
+    for (const id of ['MOVE_GRUDGE', 'MOVE_SNATCH', 'MOVE_FACADE', 'MOVE_HYPER_BEAM', 'MOVE_TRICK_ROOM', 'MOVE_TAILWIND']) {
+      const c = countingRng()
+      aiCheckViability(stateWithRng(c.rng), 0, 1, id, 100, deps)
+      expect(c.calls(), id).toBe(0)
+    }
+  })
+  it('the stat-raising moves draw only through IncreaseStatUpScore\'s HP<80% AI_RandLessThan(128), once per raised stat, in order', () => {
+    const low = countingRng()
+    aiCheckViability(stateWithRng(low.rng, { hp: 75, ...SLOW }), 0, 1, 'MOVE_DRAGON_DANCE', 100, deps)
+    expect(low.calls()).toBe(2)
+    const full = countingRng()
+    aiCheckViability(stateWithRng(full.rng, SLOW), 0, 1, 'MOVE_DRAGON_DANCE', 100, deps)
+    expect(full.calls()).toBe(0)
+  })
+  it('Gravity\'s sleep branch draws IncreaseSleepScore\'s AI_RandLessThan(128) exactly once', () => {
+    const c = countingRng(RNG_LOW)
+    const s = aiCheckViability(stateWithRng(c.rng, moves('MOVE_HYPNOSIS')), 0, 1, 'MOVE_GRAVITY', 100, deps).score
+    expect(c.calls()).toBe(1)
+    const no = aiCheckViability(stateWithRng(scripted(RNG_HIGH), moves('MOVE_HYPNOSIS')), 0, 1, 'MOVE_GRAVITY', 100, deps).score
+    expect(s - no).toBe(2)
   })
 })

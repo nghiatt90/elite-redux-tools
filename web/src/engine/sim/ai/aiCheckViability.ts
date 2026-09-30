@@ -2939,7 +2939,7 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_SPEED_SWAP':
-      // TODO in the C -- "this is cheating a bit": raw `.speed`, not the total speed stat.
+      // The C flags this as "cheating a bit": raw `.speed`, not the total speed stat.
       if (defender.mon.rawStats.spe > attacker.mon.rawStats.spe) score += 3
       break
 
@@ -3057,7 +3057,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_FLING':
-      // The whole body is commented out in the C (`/* TODO ... */`): just `break`.
+      // The whole body is commented out in the C: just `break`.
       break
 
     case 'EFFECT_FEINT':
