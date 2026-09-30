@@ -181,9 +181,6 @@ import {
   hasMoveFlag,
   moveTargetsUser,
   isBattlerOfType,
-  aiHoldEffectParam,
-  aiHoldEffectIs,
-  holdEffectId,
   defAbility,
   selfAbility,
   isBattlerWeatherAffected,
@@ -230,7 +227,7 @@ import {
   MOVE_POWER_GOOD,
   isAiFaster,
 } from './aiScorers'
-import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, type AiDamageDeps } from './aiCalcDamage'
+import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
 import { shouldSwitch } from './aiShouldSwitch'
 import { countUsablePartyMons } from './aiPipeline'
 import { aiCheckBadMove } from './aiCheckBadMove'

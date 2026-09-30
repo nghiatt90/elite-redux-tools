@@ -25,6 +25,7 @@ import {
   getMoveDamageResult,
   isTargetingPartner,
   MOVE_POWER_BEST,
+  MOVE_POWER_GOOD,
   MOVE_POWER_WEAK,
 } from './aiScorers'
 
@@ -293,3 +294,29 @@ describe('aiHPAware', () => {
     expect(score).toBe(100)
   })
 })
+
+// WhichMoveBetter's first check (battle_ai_util.c:770) is `AI_GetHoldEffect(gBattlerTarget) != HOLD_EFFECT_PROTECTIVE_PADS`, and
+// AI_GetHoldEffect is the held item's PARAM. The real Protective Pads has param 0, so it exempts nothing; an item whose param is
+// HOLD_EFFECT_PROTECTIVE_PADS's enum id (46) does.
+describe('WhichMoveBetter via getMoveDamageResult -- Protective Pads is matched by param', () => {
+  if ((itemsById.get('ITEM_PROTECTIVE_PADS')?.holdEffectStrength ?? 0) !== 0) throw new Error('ITEM_PROTECTIVE_PADS param is no longer 0')
+  for (const id of ['MOVE_TACKLE', 'MOVE_DRAGON_PULSE']) if (!moveById.has(id) || moveById.get(id)!.effect) throw new Error(`${id} no longer exists with effect 0`)
+  if (moveById.get('MOVE_DRAGON_PULSE')!.split !== 'SPECIAL' || moveById.get('MOVE_TACKLE')!.split !== 'PHYSICAL') throw new Error('Tackle/Dragon Pulse splits changed')
+  if (holdEffectIds.HOLD_EFFECT_PROTECTIVE_PADS !== 46) throw new Error('HOLD_EFFECT_PROTECTIVE_PADS is no longer 46')
+  const padsParamItem: SimItemData = { id: 'ITEM_PARAM_IS_PADS', resolvedHoldEffect: null, holdEffectStrength: 46, holdEffectType: null, naturalGift: null }
+  const withPadsParam: AiDamageDeps = { ...deps, dataContext: { ...dataContext, item: (id) => (id === padsParamItem.id ? padsParamItem : dataContext.item(id)) } }
+  // Tackle and Dragon Pulse both have effect 0, so only the hurt-back check separates them (Water Gun's own effect would decide the tie by itself).
+  // A 1-HP target clamps both moves' damage to the same ceiling (1), forcing the WhichMoveBetter tie-break between Tackle (physical) and Dragon Pulse (special).
+  const tie = (itemId: string) => state({ moves: ['MOVE_TACKLE', 'MOVE_DRAGON_PULSE', null, null] }, { hp: 1, maxHp: 100, itemId, abilities: { ability: 'ABILITY_ROUGH_SKIN', innates: [null, null, null] } }, scripted(1))
+
+  it('the real Protective Pads (param 0) does not exempt a Rough Skin target, so the special move wins the tie outright (BEST, no RNG)', () => {
+    expect(getMoveDamageResult(tie('ITEM_PROTECTIVE_PADS'), 0, 1, 'MOVE_DRAGON_PULSE', 1, deps).result).toBe(MOVE_POWER_BEST)
+    expect(getMoveDamageResult(tie('ITEM_PROTECTIVE_PADS'), 0, 1, 'MOVE_TACKLE', 0, deps).result).toBe(MOVE_POWER_WEAK)
+  })
+
+  it('a param-46 item skips the hurt-back check: no preference (2), the scripted odd draw keeps Tackle, and Dragon Pulse is only GOOD', () => {
+    expect(getMoveDamageResult(tie(padsParamItem.id), 0, 1, 'MOVE_TACKLE', 0, withPadsParam).result).toBe(MOVE_POWER_BEST)
+    expect(getMoveDamageResult(tie(padsParamItem.id), 0, 1, 'MOVE_DRAGON_PULSE', 1, withPadsParam).result).toBe(MOVE_POWER_GOOD)
+  })
+})
+

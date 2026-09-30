@@ -39,7 +39,7 @@ import type { BattleState } from '../state'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { WEATHER_STRONG_WINDS, hasFlag } from '../constants'
 import { weatherHasEffect } from '../fieldEndTurn'
-import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, type AiDamageDeps } from './aiCalcDamage'
+import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, type AiDamageDeps } from './aiCalcDamage'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -168,10 +168,10 @@ function isMovePhysical(moveId: string, deps: AiDamageDeps): boolean {
  * NARROWED to abilities only -- the C's own condition also ORs in
  * `BATTLE_HISTORY->itemEffects[gBattlerTarget] == HOLD_EFFECT_ROCKY_HELMET`
  * (the AI's OBSERVED knowledge that the target holds Rocky Helmet), but
- * `BattleHistoryState.itemEffects` is a numeric hold-effect id
- * (`0` = "not yet seen") this sim's item data has no id<->HOLD_EFFECT_* table
- * to resolve against (`SimItemData.resolvedHoldEffect` is a bare string, not
- * the numeric id the C compares). Dropping the item half is the conservative
+ * `BattleHistoryState.itemEffects` is a numeric REAL hold-effect id
+ * (`0` = "not yet seen"), not the `holdEffects[]` param -- `holdEffectIds` now
+ * gives the id table, but nothing wires an observed-item writer to it yet, so
+ * the item half stays unported. Dropping the item half is the conservative
  * direction: Rocky Helmet is rare and "not yet observed" (0) is by far the
  * common case even in the C. The ability half is ALSO read WITHOUT Mold
  * Breaker/Neutralizing Gas suppression -- `battlerHasAbility` needs an
@@ -185,7 +185,8 @@ function isMovePhysical(moveId: string, deps: AiDamageDeps): boolean {
  */
 function whichMoveBetter(state: BattleState, battlerAtk: number, battlerDef: number, move1: string, move2: string, deps: AiDamageDeps): { result: 0 | 1 | 2; unmodelled: string[] } {
   const unmodelled: string[] = []
-  const target = state.battlers[battlerDef]?.mon
+  const targetBattler = state.battlers[battlerDef]
+  const target = targetBattler?.mon
   const attacker = state.battlers[battlerAtk]?.mon
   const targetHasHurtBackAbility =
     !!target &&
@@ -195,7 +196,8 @@ function whichMoveBetter(state: BattleState, battlerAtk: number, battlerDef: num
       target.abilities.innates.includes('ABILITY_IRON_BARBS') ||
       target.abilities.innates.includes('ABILITY_ROUGH_SKIN') ||
       target.abilities.innates.includes('ABILITY_DOUBLE_IRON_BARBS'))
-  if (target && target.itemId !== 'ITEM_PROTECTIVE_PADS' && targetHasHurtBackAbility) {
+  // `AI_GetHoldEffect(gBattlerTarget) != HOLD_EFFECT_PROTECTIVE_PADS` (:770) reads the item PARAM, see `aiHoldEffectParam`.
+  if (targetBattler && !aiHoldEffectIs(targetBattler, 'HOLD_EFFECT_PROTECTIVE_PADS', deps) && targetHasHurtBackAbility) {
     unmodelled.push('WhichMoveBetter: physical-move-hurts-back check does not model Mold Breaker/Neutralizing Gas suppression of the target ability')
     const move1Physical = isMovePhysical(move1, deps)
     const move2Physical = isMovePhysical(move2, deps)
