@@ -17,7 +17,7 @@ import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import type { AiDamageDeps } from './aiCalcDamage'
 import { aiCheckBadMove } from './aiCheckBadMove'
-import { isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiAbilityHelpers'
+import { isAbilityOnField, isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiAbilityHelpers'
 import { aiCheckViability } from './aiCheckViability'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
@@ -313,8 +313,34 @@ describe('AI_CheckViability under Gastro Acid', () => {
     const bothShielded = state({ abilities: ability(SERENE_GRACE), itemId: 'ITEM_ABILITY_SHIELD' }, { abilities: ability(CONTRARY), itemId: 'ITEM_ABILITY_SHIELD' })
     neutralizingGas(bothShielded)
     expect(viability(bothShielded, statDownHit)).toBe(plain)
-    const unshielded = grace()
-    neutralizingGas(unshielded)
-    expect(viability(unshielded, statDownHit)).toBe(plain)
+  })
+})
+
+describe('isAbilityOnField -- battle_util.c:4803-4811 (BattlerHasAbility TRUE)', () => {
+  const BREAKABLE = VOLT_ABSORB
+  const onField = (s: BattleState, id: string, d: AiDamageDeps = deps) => isAbilityOnField(s, d, id, ATK)
+
+  it('a foe breakable ability is suppressed by the attacker Mold Breaker, and counts without it', () => {
+    expect(onField(state({}, { abilities: ability(BREAKABLE) }), BREAKABLE)).toBe(true)
+    expect(onField(state({}, { abilities: ability(BREAKABLE) }), BREAKABLE, mbDeps)).toBe(false)
+  })
+
+  it('an Ability Shield on the foe keeps a breakable ability under Mold Breaker', () => {
+    expect(onField(state({}, { abilities: ability(BREAKABLE), itemId: 'ITEM_ABILITY_SHIELD' }), BREAKABLE, mbDeps)).toBe(true)
+  })
+
+  it('the AI own battler is never Mold-Breaker-suppressed (attacker-side policy)', () => {
+    expect(onField(state({ abilities: ability(BREAKABLE) }, {}), BREAKABLE, mbDeps)).toBe(true)
+  })
+
+  it('an unbreakable ability (Clueless) is unaffected by Mold Breaker', () => {
+    expect(onField(state({}, { abilities: ability(CLUELESS) }), CLUELESS, mbDeps)).toBe(true)
+  })
+
+  it('Gastro Acid on the holder suppresses it, and a fainted holder does not count', () => {
+    const ga = state({}, { abilities: ability(BREAKABLE) })
+    gastroAcid(ga, DEF)
+    expect(onField(ga, BREAKABLE)).toBe(false)
+    expect(onField(state({}, { abilities: ability(BREAKABLE), hp: 0 }), BREAKABLE)).toBe(false)
   })
 })

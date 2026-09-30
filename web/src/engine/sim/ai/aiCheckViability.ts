@@ -3017,7 +3017,7 @@ function applyMoveEffectSwitch(
       // `RETURN_SCORE_MINUS(20)` is `{ score -= 20; return score; }` -- an early
       // return from the whole function, but `return score;` (:3983) is all that
       // follows the switch, so leaving it with `break` is identical.
-      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) {
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) {
         score -= 20
       } else if (!hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)) {
         if (hasSleepMoveWithLowAccuracy(attacker, deps, unmodelled)) score = increaseSleepScore(state, battlerAtk, battlerDef, score, deps, unmodelled) // Has Gravity for a move like Hypnosis

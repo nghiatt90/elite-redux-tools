@@ -745,7 +745,7 @@ function moveCallsOtherMove(moveId: string | null): boolean {
 
 /** TERRAIN_HAS_EFFECT, include/battle_util.h:47 -- `!IsAbilityOnField(ABILITY_CLUELESS)`. */
 function terrainHasEffect(state: BattleState, deps: AiDamageDeps): boolean {
-  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS')
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS', null)
 }
 /** GetCurrentTerrain, battle_util.c:8665-8669. Returns one of the
  * STATUS_FIELD_*_TERRAIN bit values, or 0 for no terrain / Clueless on field. */
@@ -771,18 +771,18 @@ export function getNaturePowerMove(state: BattleState, deps: AiDamageDeps, unmod
 
 /** IsGravityActive, battle_util.c:8689-8695. */
 function isGravityActive(state: BattleState, deps: AiDamageDeps): boolean {
-  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS', null) && hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
 }
 /** isMagicRoomActive, battle_util.c:8698-8704 (same shape as IsGravityActive). */
 function isMagicRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
-  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS', null) && hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
 }
 /** IsTrickRoomActive, battle_util.c:8671-8677 -- `getMonotypeChampType() ==
  * TYPE_FLYING/TYPE_NORMAL` (a Monotype-challenge-format concept) is not
  * modelled anywhere in this codebase; only the plain field-status flag is
  * checked (this module's header). */
 function isTrickRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
-  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS', null) && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
 }
 /** GetBattlerSideSpeedAverage, battle_ai_util.c:2181-2196 -- in singles
  * (`IsDoubleBattle()` false) this is just the battler's own fully-resolved
@@ -965,7 +965,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     if (resolvedType === 'POISON' && defAbility(state, deps, defender, 'ABILITY_POISON_ABSORB', atkMoldBreaker)) return { score: score - 30, unmodelled }
     if ((resolvedType === 'FLYING' || resolvedType === 'FIRE') && defAbility(state, deps, defender, 'ABILITY_INFLATABLE', atkMoldBreaker)) return { score: score - 20, unmodelled }
     if (resolvedType === 'ROCK' && defAbility(state, deps, defender, 'ABILITY_MOUNTAINEER', atkMoldBreaker) && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'DARK' && isAbilityOnField(state, deps, 'ABILITY_RADIANCE') && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'DARK' && isAbilityOnField(state, deps, 'ABILITY_RADIANCE', battlerAtk) && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
     if (resolvedType === 'ICE' && defAbility(state, deps, defender, 'ABILITY_ICE_DEW', atkMoldBreaker)) return { score: score - 20, unmodelled }
     // :547-551 -- Lightning Rod on the defender OR its (always-absent-in-singles) partner.
     if (resolvedType === 'ELECTRIC' && defAbility(state, deps, defender, 'ABILITY_LIGHTNING_ROD', atkMoldBreaker)) return { score: score - 20, unmodelled }
@@ -1170,7 +1170,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       unmodelled.push(...effResult3.unmodelled)
       if (effResult3.effectiveness === 0) {
         score -= 10
-      } else if (isAbilityOnField(state, deps, 'ABILITY_DAMP') && !doesBattlerIgnoreAbilityChecks(state, battlerAtk, battlerDef, deps)) {
+      } else if (isAbilityOnField(state, deps, 'ABILITY_DAMP', battlerAtk) && !doesBattlerIgnoreAbilityChecks(state, battlerAtk, battlerDef, deps)) {
         score -= 10
       } else if (countUsablePartyMons(state, battlerAtk) === 0) {
         if (countUsablePartyMons(state, battlerDef) !== 0) score -= 10
@@ -2203,7 +2203,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       // applies when a partner exists) is entirely dead code in singles.
       break
     case 'EFFECT_TRICK_ROOM':
-      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) {
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) {
         score -= 10
       } else if (partnerMoveIs(state, battlerAtk)) {
         score -= 10
@@ -2214,11 +2214,11 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_MAGIC_ROOM':
-      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) score -= 10
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) score -= 10
       else if (isMagicRoomActive(state, deps) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_WONDER_ROOM':
-      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) score -= 10
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) score -= 10
       else if (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_GRAVITY': {

@@ -132,13 +132,18 @@ export function selfAbility(state: BattleState, deps: AiDamageDeps, battler: Bat
 
 /** IsAbilityOnField, battle_util.c:4803-4811 -- copied rather than imported
  * because fieldEndTurn.ts's own copy is module-private. The C reads
- * `BattlerHasAbility(i, ability, TRUE)`, i.e. checkMoldBreaker TRUE; this copy
- * keeps that copy's own choice of never applying Mold Breaker (no single
- * "attacker" for a field-wide scan) and applies Gastro Acid / Neutralizing Gas. */
-export function isAbilityOnField(state: BattleState, deps: AiDamageDeps, abilityId: string): boolean {
+ * `BattlerHasAbility(i, ability, TRUE)`, so every live battler other than the
+ * AI's own `battlerAtk` is read through `defAbility` (Mold Breaker applies, per
+ * `isSuppressed`'s `battler != gBattlerAttacker`); `battlerAtk` itself goes
+ * through `selfAbility` (the lead's attacker-side policy: the AI never writes
+ * gBattlerAttacker). `battlerAtk` null = no AI battler in scope; only valid for
+ * an ability that is not `breakable` (Clueless), where the split is moot. */
+export function isAbilityOnField(state: BattleState, deps: AiDamageDeps, abilityId: string, battlerAtk: number | null): boolean {
   for (let i = 0; i < state.battlersCount; i++) {
     const battler = state.battlers[i]
-    if (battler && battler.mon.hp !== 0 && selfAbility(state, deps, battler, abilityId)) return true
+    if (!battler || battler.mon.hp === 0) continue
+    const has = i === battlerAtk ? selfAbility(state, deps, battler, abilityId) : defAbility(state, deps, battler, abilityId, deps.grounding.attackerHasMoldBreaker)
+    if (has) return true
   }
   return false
 }
