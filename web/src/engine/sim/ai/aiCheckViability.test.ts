@@ -1424,7 +1424,7 @@ describe('EFFECT_SAFEGUARD / EFFECT_PURSUIT / EFFECT_TORMENT / EFFECT_FOLLOW_ME'
     expect(real - plain).toBe(1)
     expect(effectDelta(mkState({}, {}, (st) => { st.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN }), 'MOVE_SAFEGUARD')).toBe(1) // another terrain: still +1
   })
-  it('Pursuit (a /*TODO*/ block in the C), Torment and Follow Me (doubles-only) score nothing and are not gaps', () => {
+  it('Pursuit (its whole body is commented out in the C), Torment and Follow Me (doubles-only) score nothing and are not gaps', () => {
     for (const id of ['MOVE_PURSUIT', 'MOVE_TORMENT', 'MOVE_FOLLOW_ME']) {
       expect(effectDelta(mkState(), id), id).toBe(0)
       expect(check(state(), id).unmodelled.some((u) => u.includes('gap')), id).toBe(false)
@@ -1738,6 +1738,20 @@ describe('EFFECT_RECYCLE (:3532-3546)', () => {
     // param 10 (Oran) heals a flat 10: hp = dmg - 9 -> hp+10 > dmg -> +1; hp = dmg - 10 -> hp+10 == dmg -> still KO -> no +1
     expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: dmg - 9, maxHp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(2)
     expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: dmg - 10, maxHp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(1)
+  })
+  it('IsStatBoostingBerry: exactly Liechi, Ganlon, Salac, Petaya, Apicot, Starf, Micle (Lansat is commented out in the C)', () => {
+    const expected: Record<string, number> = { ITEM_LIECHI_BERRY: 2, ITEM_GANLON_BERRY: 2, ITEM_SALAC_BERRY: 2, ITEM_PETAYA_BERRY: 2, ITEM_APICOT_BERRY: 2, ITEM_STARF_BERRY: 3, ITEM_MICLE_BERRY: 3, ITEM_LANSAT_BERRY: 1 }
+    for (const [id, delta] of Object.entries(expected)) {
+      expect(itemsById.has(id), id).toBe(true)
+      expect(effectDelta(rec({ abilities: RIPEN }, id), 'MOVE_RECYCLE'), id).toBe(delta) // used +1 (+1 Starf/Micle are also Recycle-encouraged) (+1 stat-boosting)
+    }
+  })
+  it('ShouldRestoreHpBerry: Sitrus, Figy, Wiki, Mago, Aguav, Iapapa (param 2 -> half of max HP)', () => {
+    const expected: Record<string, number> = { ITEM_SITRUS_BERRY: 3, ITEM_FIGY_BERRY: 2, ITEM_WIKI_BERRY: 2, ITEM_MAGO_BERRY: 2, ITEM_AGUAV_BERRY: 2, ITEM_IAPAPA_BERRY: 2 }
+    for (const [id, delta] of Object.entries(expected)) {
+      expect(itemsById.has(id), id).toBe(true)
+      expect(effectDelta(rec({ ...FAST, abilities: RIPEN }, id), 'MOVE_RECYCLE'), id).toBe(delta) // used +1 (+1 Sitrus encouraged) +1 berry branch
+    }
   })
   it('Oran only counts as an HP berry at maxHP <= 50', () => {
     expect(effectDelta(rec({ ...FAST, abilities: RIPEN, maxHp: 50, hp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(2)

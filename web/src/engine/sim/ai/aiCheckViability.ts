@@ -1524,7 +1524,7 @@ function ignoresFrostbiteSpatkDrop(battler: BattlerState): boolean {
  * :3224-3606 (EFFECT_SANDSTORM through EFFECT_PSYCHO_SHIFT, whose `break` is at
  * :3606) -- the labels this batch (part 2a) ports. Mechanically extracted with both
  * `//` and `/* * /` comments stripped (the four labels that exist only inside a
- * commented-out TODO block at the end of the switch -- EFFECT_EXTREME_EVOBOOST,
+ * commented-out block at the end of the switch -- EFFECT_EXTREME_EVOBOOST,
  * EFFECT_CLANGOROUS_SOUL, EFFECT_NO_RETREAT, EFFECT_SKY_DROP -- are outside this
  * range anyway). 47 entries. Used only by this module's own oracle test.
  */
@@ -2547,7 +2547,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_PURSUIT':
-      // The whole body is a `/*TODO ... */` block in the C: nothing executes.
+      // The whole body is commented out in the C: nothing executes.
       break
 
     case 'EFFECT_RAPID_SPIN':
