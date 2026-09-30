@@ -217,12 +217,11 @@ function whichMoveBetter(state: BattleState, battlerAtk: number, battlerDef: num
   const effect2 = deps.moveData(move2)?.effect ?? null
   if (effect1 === 'EFFECT_RECHARGE' && effect2 !== 'EFFECT_RECHARGE') return { result: 1, unmodelled }
   if (effect2 === 'EFFECT_RECHARGE' && effect1 !== 'EFFECT_RECHARGE') return { result: 0, unmodelled }
-  // `gBattleMoves[move].effect == 0` -- EFFECT_NONE (a plain damaging move with
-  // no additional effect), not "move data missing". `deps.moveData` returning
-  // undefined (an unknown move id) is treated the same as EFFECT_NONE would be
-  // for this comparison's purposes, since neither move "has" an effect.
-  const hasEffect1 = !!effect1 && effect1 !== 'EFFECT_NONE'
-  const hasEffect2 = !!effect2 && effect2 !== 'EFFECT_NONE'
+  // `gBattleMoves[move].effect == 0` -- effect 0 is EFFECT_HIT
+  // (er-config MoveBehavior.proto:19). moves.json usually omits it (null), but
+  // a few moves (Dragon Dash, Godspeed, Molten Strike) spell it out.
+  const hasEffect1 = !!effect1 && effect1 !== 'EFFECT_HIT'
+  const hasEffect2 = !!effect2 && effect2 !== 'EFFECT_HIT'
   if (!hasEffect1 && hasEffect2) return { result: 1, unmodelled }
   if (!hasEffect2 && hasEffect1) return { result: 0, unmodelled }
 

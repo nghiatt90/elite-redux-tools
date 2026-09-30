@@ -2845,6 +2845,15 @@ describe('getMoveDamageResult RNG stream (battle_ai_util.c:822-833)', () => {
     expect(getMoveDamageResult(stateWithRng(scripted(0, 0, 0), {}, ghost), 0, 1, 'MOVE_TACKLE', 0, deps).result).toBe(MOVE_POWER_GOOD)
     expect(getMoveDamageResult(stateWithRng(scripted(1, 1, 1), {}, ghost), 0, 1, 'MOVE_TACKLE', 0, deps).result).toBe(MOVE_POWER_BEST)
   })
+  it('an explicit EFFECT_HIT counts as effect 0 in WhichMoveBetter (MoveBehavior.proto:19), same as an omitted effect', () => {
+    // Tackle (effect omitted) vs Dragon Dash (effect spelled 'EFFECT_HIT'), both clamped to hp=1 on a 1-HP target, so they tie.
+    // i=1: WhichMoveBetter(Tackle, Dragon Dash): no recoil, no recharge, both effect 0 -> 2 -> one draw. i=2, i=3: 0 < 1, no draw.
+    if (moveById.get('MOVE_DRAGON_DASH')?.effect !== 'EFFECT_HIT') throw new Error('MOVE_DRAGON_DASH no longer spells out EFFECT_HIT')
+    if (moveById.get('MOVE_TACKLE')?.effect != null) throw new Error('MOVE_TACKLE effect is no longer omitted')
+    const c = countingRng()
+    getMoveDamageResult(stateWithRng(c.rng, moves('MOVE_TACKLE', 'MOVE_DRAGON_DASH'), { hp: 1, maxHp: 100 }), 0, 1, 'MOVE_TACKLE', 0, deps)
+    expect(c.calls()).toBe(1)
+  })
   it('an empty slot against a status move with an effect is decided without a draw (MOVE_NONE has effect 0: WhichMoveBetter returns 0)', () => {
     const c = countingRng()
     getMoveDamageResult(stateWithRng(c.rng, moves('MOVE_SWORDS_DANCE')), 0, 1, 'MOVE_TACKLE', 0, deps)
