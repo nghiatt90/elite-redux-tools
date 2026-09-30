@@ -54,7 +54,7 @@ import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
 import { aiCalcDamage } from './aiCalcDamage'
-import { aiCheckViability, PART2A_EFFECTS, PART2B_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
+import { aiCheckViability, PART2A_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
 import { AI_ABILITY_RATINGS, getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
@@ -204,56 +204,84 @@ function syntheticEffectDeps(effect: string, extra: Partial<MoveData> = {}): AiD
   return { ...deps, moveData: (id) => (id === 'MOVE_SYNTHETIC' ? ({ ...toMoveData('MOVE_TACKLE'), id: 'MOVE_SYNTHETIC', effect, power: 0, split: 'STATUS', ...extra } as MoveData) : moveById.has(id) ? toMoveData(id) : undefined) }
 }
 
-describe('PART2A_EFFECTS / PART2B_EFFECTS oracle -- mechanical, comment-stripped extraction', () => {
+/** The 70 labels of battle_ai_main.c:3607-3984 (EFFECT_GRUDGE .. EFFECT_RECHARGE), the list the
+ * module's PART2B_EFFECTS held while they were still gapped. Mechanical extraction: the segment
+ * with `//` and block comments stripped, then every `case (EFFECT_\w+):`. */
+const OLD_PART2B_EFFECTS: readonly string[] = [
+  'EFFECT_GRUDGE', 'EFFECT_SNATCH', 'EFFECT_MUD_SPORT', 'EFFECT_WATER_SPORT', 'EFFECT_TICKLE', 'EFFECT_COSMIC_POWER', 'EFFECT_BULK_UP',
+  'EFFECT_CALM_MIND', 'EFFECT_GEOMANCY', 'EFFECT_QUIVER_DANCE', 'EFFECT_CONVERSION', 'EFFECT_CONVERSION_2', 'EFFECT_GEAR_UP',
+  'EFFECT_SHELL_SMASH', 'EFFECT_DRAGON_DANCE', 'EFFECT_SHIFT_GEAR', 'EFFECT_GUARD_SWAP', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK',
+  'EFFECT_HEART_SWAP', 'EFFECT_SPEED_SWAP', 'EFFECT_GUARD_SPLIT', 'EFFECT_POWER_SPLIT', 'EFFECT_BUG_BITE', 'EFFECT_INCINERATE',
+  'EFFECT_SMACK_DOWN', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_MISTY_TERRAIN', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_PLEDGE',
+  'EFFECT_TRICK_ROOM', 'EFFECT_MAGIC_ROOM', 'EFFECT_WONDER_ROOM', 'EFFECT_GRAVITY', 'EFFECT_ION_DELUGE', 'EFFECT_FLING', 'EFFECT_FEINT',
+  'EFFECT_EMBARGO', 'EFFECT_POWDER', 'EFFECT_TELEKINESIS', 'EFFECT_THROAT_CHOP', 'EFFECT_HEAL_BLOCK', 'EFFECT_SOAK', 'EFFECT_THIRD_TYPE',
+  'EFFECT_ELECTRIFY', 'EFFECT_TOPSY_TURVY', 'EFFECT_FAIRY_LOCK', 'EFFECT_QUASH', 'EFFECT_TAILWIND', 'EFFECT_LUCKY_CHANT', 'EFFECT_MAGNET_RISE',
+  'EFFECT_CAMOUFLAGE', 'EFFECT_FLAME_BURST', 'EFFECT_TOXIC_THREAD', 'EFFECT_TWO_TURNS_ATTACK', 'EFFECT_SKULL_BASH', 'EFFECT_SOLARBEAM',
+  'EFFECT_COUNTER', 'EFFECT_MIRROR_COAT', 'EFFECT_METAL_BURST', 'EFFECT_FLAIL', 'EFFECT_SHORE_UP', 'EFFECT_FACADE', 'EFFECT_FOCUS_PUNCH',
+  'EFFECT_SMELLINGSALT', 'EFFECT_WAKE_UP_SLAP', 'EFFECT_REVENGE', 'EFFECT_ENDEAVOR', 'EFFECT_RECHARGE',
+]
+const VIABILITY_SOURCE = readFileSync(join(import.meta.dirname, 'aiCheckViability.ts'), 'utf8')
+const SWITCH_CASE_LABELS = new Set([...VIABILITY_SOURCE.matchAll(/^\s*case '(EFFECT_\w+)':/gm)].map((m) => m[1]))
+
+describe('PART2A_EFFECTS / old PART2B label list oracle -- mechanical, comment-stripped extraction', () => {
   it('PART2A has exactly 47 entries (battle_ai_main.c:3224-3606)', () => {
     expect(PART2A_EFFECTS.length).toBe(47)
   })
-  it('PART2B has exactly 70 entries (battle_ai_main.c:3607-3984)', () => {
-    expect(PART2B_EFFECTS.length).toBe(70)
+  it('the old PART2B list has exactly 70 entries (battle_ai_main.c:3607-3984), no duplicates', () => {
+    expect(OLD_PART2B_EFFECTS.length).toBe(70)
+    expect(new Set(OLD_PART2B_EFFECTS).size).toBe(70)
   })
   it('the two lists are disjoint and together are the 117 labels of the old PART2_EFFECTS', () => {
-    expect(PART2A_EFFECTS.filter((e) => PART2B_EFFECTS.includes(e))).toEqual([])
-    expect(PART2A_EFFECTS.length + PART2B_EFFECTS.length).toBe(117)
+    expect(PART2A_EFFECTS.filter((e) => OLD_PART2B_EFFECTS.includes(e))).toEqual([])
+    expect(PART2A_EFFECTS.length + OLD_PART2B_EFFECTS.length).toBe(117)
   })
   it('excludes the four labels that only exist inside a commented-out TODO block', () => {
     for (const commentedOut of ['EFFECT_EXTREME_EVOBOOST', 'EFFECT_CLANGOROUS_SOUL', 'EFFECT_NO_RETREAT', 'EFFECT_SKY_DROP']) {
       expect(PART2A_EFFECTS).not.toContain(commentedOut)
-      expect(PART2B_EFFECTS).not.toContain(commentedOut)
+      expect(OLD_PART2B_EFFECTS).not.toContain(commentedOut)
     }
   })
-  it('has no duplicate entries in either list', () => {
-    expect(new Set(PART2A_EFFECTS).size).toBe(PART2A_EFFECTS.length)
-    expect(new Set(PART2B_EFFECTS).size).toBe(PART2B_EFFECTS.length)
-  })
-  it('anchors: PART2A starts at EFFECT_SANDSTORM and ends at EFFECT_PSYCHO_SHIFT; PART2B holds EFFECT_GRUDGE', () => {
+  it('anchors: PART2A starts at EFFECT_SANDSTORM and ends at EFFECT_PSYCHO_SHIFT; the old PART2B runs EFFECT_GRUDGE .. EFFECT_RECHARGE', () => {
     expect(PART2A_EFFECTS).toContain('EFFECT_SANDSTORM')
     expect(PART2A_EFFECTS).toContain('EFFECT_PSYCHO_SHIFT')
-    expect(PART2B_EFFECTS).toContain('EFFECT_GRUDGE')
+    expect(OLD_PART2B_EFFECTS[0]).toBe('EFFECT_GRUDGE')
+    expect(OLD_PART2B_EFFECTS[69]).toBe('EFFECT_RECHARGE')
     expect(PART2A_EFFECTS).not.toContain('EFFECT_GRUDGE')
-    expect(PART2B_EFFECTS).not.toContain('EFFECT_PSYCHO_SHIFT')
+    expect(OLD_PART2B_EFFECTS).not.toContain('EFFECT_PSYCHO_SHIFT')
   })
   it('does not overlap with a label part 1 handles', () => {
     for (const part1 of ['EFFECT_SLEEP', 'EFFECT_PERISH_SONG', 'EFFECT_MIRACLE_EYE']) {
       expect(PART2A_EFFECTS).not.toContain(part1)
-      expect(PART2B_EFFECTS).not.toContain(part1)
+      expect(OLD_PART2B_EFFECTS).not.toContain(part1)
     }
   })
-  it('every PART2A effect is handled: none reaches the part-2b gap', () => {
+  it('every PART2A effect is handled: none produces a part-2 gap line', () => {
     for (const effect of PART2A_EFFECTS) {
       const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(effect))
-      expect(result.unmodelled.some((u) => u.includes('part 2b gap')), effect).toBe(false)
+      expect(result.unmodelled.some((u) => u.includes('part 2')), effect).toBe(false)
     }
   })
-  it('every PART2B effect still reaches the part-2b gap, naming its own label', () => {
-    for (const effect of PART2B_EFFECTS) {
+  it('every effect of the old PART2B list produces no part-2 gap line (the gap and PART2B_EFFECTS are gone)', () => {
+    for (const effect of OLD_PART2B_EFFECTS) {
       const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(effect))
-      expect(result.unmodelled.some((u) => u.includes('part 2b gap') && u.includes(effect)), effect).toBe(true)
+      expect(result.unmodelled.some((u) => u.includes('part 2') || u.includes('not yet ported')), effect).toBe(false)
     }
   })
-  it('EFFECT_GRUDGE (the first :3607 label) is reported as a gap, not silently scored', () => {
+  it('every label of the old PART2B list is a real `case` label of the switch (none falls to `default`)', () => {
+    for (const effect of OLD_PART2B_EFFECTS) expect(SWITCH_CASE_LABELS.has(effect), effect).toBe(true)
+  })
+  it('the four commented-out labels are NOT case labels: they are ordinary no-ops, not gaps', () => {
+    for (const commentedOut of ['EFFECT_EXTREME_EVOBOOST', 'EFFECT_CLANGOROUS_SOUL', 'EFFECT_NO_RETREAT', 'EFFECT_SKY_DROP']) {
+      expect(SWITCH_CASE_LABELS.has(commentedOut), commentedOut).toBe(false)
+      const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(commentedOut))
+      expect(result.score, commentedOut).toBe(100)
+      expect(result.unmodelled.some((u) => u.includes(commentedOut) || u.includes('part 2')), commentedOut).toBe(false)
+    }
+  })
+  it('EFFECT_GRUDGE (the first :3607 label) scores 0 with no gap line', () => {
     const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_GRUDGE'))
     expect(result.score).toBe(100)
-    expect(result.unmodelled.some((u) => u.includes('EFFECT_GRUDGE'))).toBe(true)
+    expect(result.unmodelled.some((u) => u.includes('EFFECT_GRUDGE'))).toBe(false)
   })
   it('EFFECT_SANDSTORM (the first :3224 label) is no longer a gap', () => {
     const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_SANDSTORM'))

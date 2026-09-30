@@ -323,7 +323,7 @@ export function selfAbility(battler: BattlerState, abilityId: string): boolean {
  * because fieldEndTurn.ts's own copy is module-private. Mold Breaker is
  * never applied here, matching that copy's own note: there is no single
  * "attacker" for a field-wide scan. */
-function isAbilityOnField(state: BattleState, abilityId: string): boolean {
+export function isAbilityOnField(state: BattleState, abilityId: string): boolean {
   for (let i = 0; i < state.battlersCount; i++) {
     const battler = state.battlers[i]
     if (battler && battler.mon.hp !== 0 && selfAbility(battler, abilityId)) return true
@@ -668,7 +668,7 @@ export function countPositiveStatStages(battler: BattlerState): number {
   for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (battler.mon.statStages[i] > 6) count++
   return count
 }
-function countNegativeStatStages(battler: BattlerState): number {
+export function countNegativeStatStages(battler: BattlerState): number {
   let count = 0
   for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (battler.mon.statStages[i] < 6) count++
   return count
@@ -886,7 +886,7 @@ function isTrickRoomActive(state: BattleState): boolean {
  * speed stat (numBattlersAlive always 1), so `getBattlerTotalSpeedStat` with
  * TOTAL_SPEED_FULL and no move context is reused directly rather than
  * re-deriving the averaging (which is dead code on this build anyway). */
-function getBattlerSideSpeedAverage(state: BattleState, battlerId: number, deps: AiDamageDeps): number {
+export function getBattlerSideSpeedAverage(state: BattleState, battlerId: number, deps: AiDamageDeps): number {
   return getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
 }
 

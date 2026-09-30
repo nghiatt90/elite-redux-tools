@@ -61,6 +61,9 @@ export interface SimItemData {
   holdEffectStrength: number | null
   holdEffectType: string | null
   naturalGift: { power: number; type: string } | null
+  /** items.json's `grouping` (ItemList.proto Pocket, e.g. POCKET_BERRIES) --
+   * `gItems[id].pocket` (ItemGenerator.kt:25), read by ItemId_GetPocket. */
+  grouping?: string | null
 }
 
 /** The move fields the bridge needs beyond what a TurnOrderMoveView carries. */
