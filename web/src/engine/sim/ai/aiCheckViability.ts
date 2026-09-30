@@ -25,8 +25,9 @@
 //
 // PART 2a additions worth knowing before reading the case bodies:
 //   - `AI_DATA->holdEffects[]` is filled from ItemId_GetHoldEffectParam
-//     (battle_ai_main.c:216), not the hold effect -- see `aiHoldEffect`. Not
-//     reproduced (numeric enum values unavailable); named in `unmodelled`.
+//     (battle_ai_main.c:216), not the hold effect. Reproduced: every read goes
+//     through `aiHoldEffectParam` and compares with `holdEffectId(...)`, the
+//     numeric HOLD_EFFECT_* enum (data/<version>/holdEffectIds.json).
 //   - `gBattleMoves[m].target & (MOVE_TARGET_SELECTED | ...)` in EFFECT_MAGIC_COAT
 //     treats SELECTED as the 0x0 it is, so it only ever matches BOTH/OPPONENTS_FIELD.
 //   - `GetUsedHeldItem` reads `BattlerState.usedHeldItem`, which nothing in the sim
@@ -67,7 +68,7 @@
 //
 // Reused rather than rewritten (per the brief): `MOLD_BREAKABLE_ABILITIES`,
 // `ALWAYS_SLEEPING_ABILITIES`, `defAbility`/`selfAbility`, `u8`, `atMaxHp`,
-// `isBattlerOfType`, `getBattlerHoldEffect`, `hasMoveWithSplit`/
+// `isBattlerOfType`, `aiHoldEffectParam`, `hasMoveWithSplit`/
 // `hasMoveWithType`, `isBattlerIncapacitated`, `isBattlerTrapped`,
 // `canBePoisoned`/`canBeParalyzedBase`/`aiCanParalyze`/`canSleep`/
 // `canBeConfused`, `doesSubstituteBlockMove`, `shouldLowerStat`,
@@ -180,7 +181,9 @@ import {
   hasMoveFlag,
   moveTargetsUser,
   isBattlerOfType,
-  getBattlerHoldEffect,
+  aiHoldEffectParam,
+  aiHoldEffectIs,
+  holdEffectId,
   defAbility,
   selfAbility,
   isBattlerWeatherAffected,
@@ -406,13 +409,20 @@ function hasMoveWithLowAccuracy(battler: BattlerState, accCheck: number, ignoreS
   return false
 }
 
-/** `IsPinchBerryItemEffect(holdEffect)`, item.c:383-397. */
-const PINCH_BERRY_EFFECTS = new Set([
+/** `IsPinchBerryItemEffect(u16 holdEffect)`, item.c:383-397. Its caller passes the
+ * `holdEffects[]` PARAM (battle_ai_main.c:3194), so this compares a param with the
+ * enum ids. The two `#ifdef`'d cases are both defined in the generated header. */
+const PINCH_BERRY_EFFECTS = [
   'HOLD_EFFECT_ATTACK_UP', 'HOLD_EFFECT_DEFENSE_UP', 'HOLD_EFFECT_SPEED_UP', 'HOLD_EFFECT_SP_ATTACK_UP',
   'HOLD_EFFECT_SP_DEFENSE_UP', 'HOLD_EFFECT_CRITICAL_UP', 'HOLD_EFFECT_RANDOM_STAT_UP', 'HOLD_EFFECT_CUSTAP_BERRY', 'HOLD_EFFECT_MICLE_BERRY',
-])
-function isPinchBerryItemEffect(holdEffect: string | null): boolean {
-  return !!holdEffect && PINCH_BERRY_EFFECTS.has(holdEffect)
+]
+function isPinchBerryItemEffect(holdEffect: number, deps: AiDamageDeps): boolean {
+  return PINCH_BERRY_EFFECTS.map((name) => holdEffectId(name, deps)).includes(holdEffect)
+}
+
+/** `HOLD_EFFECT_CHOICE(holdEffect)`, include/constants/hold_effects.h:6. */
+function holdEffectChoice(holdEffect: number, deps: AiDamageDeps): boolean {
+  return holdEffect === holdEffectId('HOLD_EFFECT_CHOICE_BAND', deps) || holdEffect === holdEffectId('HOLD_EFFECT_CHOICE_SCARF', deps) || holdEffect === holdEffectId('HOLD_EFFECT_CHOICE_SPECS', deps)
 }
 
 /** `ShouldAbsorb(battlerAtk, battlerDef, move, damage)`, battle_ai_util.c:
@@ -621,8 +631,7 @@ function shouldPivot(state: BattleState, battlerAtk: number, battlerDef: number,
   const attackerGoesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
   unmodelled.push('ShouldPivot: IsUnnerveAbilityOnOpposingSide has no port anywhere in this codebase; treated as false')
   const sashOrSturdyBreak = () => {
-    const holdEffect = getBattlerHoldEffect(defender, deps)
-    return atMaxHp(defender) && (holdEffect === 'HOLD_EFFECT_FOCUS_SASH' || defAbility(defender, 'ABILITY_STURDY', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_MULTISCALE', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SHADOW_SHIELD', deps.grounding.attackerHasMoldBreaker))
+    return atMaxHp(defender) && (aiHoldEffectIs(defender, 'HOLD_EFFECT_FOCUS_SASH', deps) || defAbility(defender, 'ABILITY_STURDY', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_MULTISCALE', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SHADOW_SHIELD', deps.grounding.attackerHasMoldBreaker))
   }
 
   if (attackerGoesFirst) {
@@ -667,8 +676,7 @@ function shouldPivot(state: BattleState, battlerAtk: number, battlerDef: number,
         const faintIn2 = canAiFaintTarget(state, battlerAtk, battlerDef, 2, deps)
         unmodelled.push(...faintIn2.unmodelled)
         if (faintIn2.canFaint) {
-          const holdEffect = getBattlerHoldEffect(defender, deps)
-          if (isStatus && (doesSwitch || (holdEffect === 'HOLD_EFFECT_FOCUS_SASH' && atMaxHp(defender)))) {
+          if (isStatus && (doesSwitch || (aiHoldEffectIs(defender, 'HOLD_EFFECT_FOCUS_SASH', deps) && atMaxHp(defender)))) {
             return { result: DONT_PIVOT, unmodelled }
           }
           return { result: CAN_TRY_PIVOT, unmodelled }
@@ -878,10 +886,9 @@ function increaseConfusionScore(state: BattleState, battlerAtk: number, battlerD
     if (faint.canFaint) return score
   }
   const canConfuse = canBeConfused(defender, unmodelled)
-  const holdEffect = getBattlerHoldEffect(defender, deps)
   const move = deps.moveData(moveId)
   const secondaryOk = moveConfusionThresholdOk(move)
-  if (canConfuse && holdEffect !== 'HOLD_EFFECT_CURE_CONFUSION' && holdEffect !== 'HOLD_EFFECT_CURE_STATUS' && secondaryOk) {
+  if (canConfuse && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_CONFUSION', deps) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_STATUS', deps) && secondaryOk) {
     if (hasFlag(defender.mon.status1, STATUS1_PARALYSIS) || (selfAbility(attacker, 'ABILITY_SERENE_GRACE') && hasMoveEffect(attacker, 'EFFECT_FLINCH_HIT', deps))) {
       score += 3
     } else {
@@ -905,8 +912,8 @@ function moveConfusionThresholdOk(move: ReturnType<AiDamageDeps['moveData']> | u
  * AND the battler has Long Reach (which normally REMOVES contact) AND isn't
  * holding Protective Pads -- an inverted-looking quirk reproduced exactly as
  * written, not "fixed" to the intuitive `!LONG_REACH` reading. */
-function aiMoveMakesContact(battler: BattlerState, holdEffect: string | null, move: ReturnType<AiDamageDeps['moveData']>): boolean {
-  return !!hasMoveFlag(move, 'contact') && selfAbility(battler, 'ABILITY_LONG_REACH') && holdEffect !== 'HOLD_EFFECT_PROTECTIVE_PADS'
+function aiMoveMakesContact(battler: BattlerState, holdEffect: number, move: ReturnType<AiDamageDeps['moveData']>, deps: AiDamageDeps): boolean {
+  return !!hasMoveFlag(move, 'contact') && selfAbility(battler, 'ABILITY_LONG_REACH') && holdEffect !== holdEffectId('HOLD_EFFECT_PROTECTIVE_PADS', deps)
 }
 
 // ---------------------------------------------------------------------------
@@ -957,26 +964,6 @@ function hasDamagingMoveOfType(battler: BattlerState, type: string, deps: AiDama
 function isWeatherActive(state: BattleState, weatherFlag: number, deps: AiDamageDeps): boolean {
   if (!hasFlag(state.field.weather, weatherFlag)) return false
   return weatherHasEffect(state, deps.grounding)
-}
-
-/** `AI_DATA->holdEffects[battler]` / `AI_GetHoldEffect(battler)`.
- *
- * QUIRK NOT REPRODUCED (named, exactly when it applies): battle_ai_main.c:216
- * fills `AI_DATA->holdEffects[battlerId]` from `ItemId_GetHoldEffectParam(
- * gBattleMons[battlerId].item)` -- the item's numeric PARAM, not
- * `ItemId_GetHoldEffect`. Every `holdEffects[b] == HOLD_EFFECT_X` comparison in
- * the C therefore compares a param against an enum value. The numeric
- * HOLD_EFFECT_* values live in `generated/constants/hold_effects.h`, which is
- * not fetched, so the real comparison cannot be evaluated; this port (like part
- * 1 and aiCheckBadMove.ts before it) reads the item's real resolved hold
- * effect. For an item-less battler the two agree (param 0 == HOLD_EFFECT_NONE),
- * so the note is only pushed when an item is held. */
-function aiHoldEffect(battler: BattlerState, deps: AiDamageDeps, unmodelled: string[]): string | null {
-  if (battler.mon.itemId) {
-    const note = 'AI_DATA->holdEffects[] is filled from ItemId_GetHoldEffectParam (battle_ai_main.c:216), not the hold effect itself; the C compares an item PARAM against HOLD_EFFECT_* enum values (numeric values live in the unfetched generated/constants/hold_effects.h). This port reads the real resolved hold effect instead'
-    if (!unmodelled.includes(note)) unmodelled.push(note)
-  }
-  return getBattlerHoldEffect(battler, deps)
 }
 
 /** `HasChloroplast(battler)`, battle_util.c:9340-9343
@@ -1163,11 +1150,11 @@ function increaseFrostbiteScore(state: BattleState, battlerAtk: number, battlerD
 }
 
 /** `ShouldFakeOut(battlerAtk, battlerDef, move)`, battle_ai_util.c:2129-2138.
- * `AI_GetHoldEffect` is the holdEffects[] read (see aiHoldEffect). */
+ * `AI_GetHoldEffect` is the holdEffects[] read (an item param, see `aiHoldEffectParam`). */
 function shouldFakeOut(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, deps: AiDamageDeps, unmodelled: string[]): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
-  if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_CHOICE_BAND' && countUsablePartyMons(state, battlerAtk) === 0) return false
+  if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_CHOICE_BAND', deps) && countUsablePartyMons(state, battlerAtk) === 0) return false
   if (
     attacker.volatiles.isFirstTurn &&
     shouldTryToFlinch(state, battlerAtk, battlerDef, moveId, deps, unmodelled) !== 0 &&
@@ -1281,50 +1268,50 @@ function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, m
  * battle_ai_main.c:3437-3512. Two nested `switch (holdEffects[...])`es over the
  * attacker's then (in the outer `default:`) the defender's item. Bestow differs
  * only in the outer `default:`'s `move != MOVE_BESTOW` gate. Every hold-effect
- * read is `AI_DATA->holdEffects[]` (see aiHoldEffect's quirk note). */
+ * read is `AI_DATA->holdEffects[]`, an item param compared with the enum ids. */
 function applyTrickBestow(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
   const atkMoldBreaker = deps.grounding.attackerHasMoldBreaker
   const isDoubleBattle = isValidDoubleBattle(state, battlerAtk)
 
-  switch (aiHoldEffect(attacker, deps, unmodelled)) {
-    case 'HOLD_EFFECT_CHOICE_SCARF':
+  switch (aiHoldEffectParam(attacker, deps)) {
+    case holdEffectId('HOLD_EFFECT_CHOICE_SCARF', deps):
       score += 2 // assume its beneficial
       break
-    case 'HOLD_EFFECT_CHOICE_BAND':
+    case holdEffectId('HOLD_EFFECT_CHOICE_BAND', deps):
       if (!hasMoveWithSplit(defender, 'PHYSICAL', deps)) score += 2
       break
-    case 'HOLD_EFFECT_CHOICE_SPECS':
+    case holdEffectId('HOLD_EFFECT_CHOICE_SPECS', deps):
       if (!hasMoveWithSplit(defender, 'SPECIAL', deps)) score += 2
       break
-    case 'HOLD_EFFECT_TOXIC_ORB':
+    case holdEffectId('HOLD_EFFECT_TOXIC_ORB', deps):
       if (!shouldPoisonSelf(state, battlerAtk, deps, unmodelled)) score += 2
       break
-    case 'HOLD_EFFECT_FLAME_ORB':
+    case holdEffectId('HOLD_EFFECT_FLAME_ORB', deps):
       if (!shouldBurnSelf(state, battlerAtk, deps, unmodelled)) score += 2
       break
-    case 'HOLD_EFFECT_FROST_ORB':
+    case holdEffectId('HOLD_EFFECT_FROST_ORB', deps):
       if (!shouldFrostbiteSelf(state, battlerAtk, deps, unmodelled)) score += 2
       break
-    case 'HOLD_EFFECT_BLACK_SLUDGE':
+    case holdEffectId('HOLD_EFFECT_BLACK_SLUDGE', deps):
       if (!isBattlerOfType(defender, 'POISON') && !isMagicGuardProtected(state, defender)) score += 3
       break
-    case 'HOLD_EFFECT_IRON_BALL':
+    case holdEffectId('HOLD_EFFECT_IRON_BALL', deps):
       if (!hasMoveEffect(defender, 'EFFECT_FLING', deps) || !deps.turnOrder.isBattlerGrounded(battlerDef)) score += 2
       break
-    case 'HOLD_EFFECT_LAGGING_TAIL':
-    case 'HOLD_EFFECT_STICKY_BARB':
+    case holdEffectId('HOLD_EFFECT_LAGGING_TAIL', deps):
+    case holdEffectId('HOLD_EFFECT_STICKY_BARB', deps):
       score += 3
       break
-    case 'HOLD_EFFECT_UTILITY_UMBRELLA':
+    case holdEffectId('HOLD_EFFECT_UTILITY_UMBRELLA', deps):
       if (!selfAbility(attacker, 'ABILITY_SOLAR_POWER') && !selfAbility(attacker, 'ABILITY_DRY_SKIN') && weatherHasEffect(state, deps.grounding)) {
         if (defAbility(defender, 'ABILITY_SWIFT_SWIM', atkMoldBreaker) && isWeatherActive(state, WEATHER_RAIN_ANY, deps)) score += 3 // Slow 'em down
         if (defAbility(defender, 'ABILITY_CHLOROPHYLL', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
         if (defAbility(defender, 'ABILITY_FLOWER_GIFT', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
       }
       break
-    case 'HOLD_EFFECT_EJECT_BUTTON': {
+    case holdEffectId('HOLD_EFFECT_EJECT_BUTTON', deps): {
       // The C's `if (!IsRaidBattle() && IsDynamaxed(battlerDef) && ...` is a comment.
       const partner = battlePartner(battlerAtk)
       const partnerBattler = state.battlers[partner]
@@ -1333,26 +1320,26 @@ function applyTrickBestow(state: BattleState, battlerAtk: number, battlerDef: nu
     }
     default:
       if (moveId !== 'MOVE_BESTOW' && attacker.mon.itemId === null) {
-        switch (aiHoldEffect(defender, deps, unmodelled)) {
-          case 'HOLD_EFFECT_CHOICE_BAND':
+        switch (aiHoldEffectParam(defender, deps)) {
+          case holdEffectId('HOLD_EFFECT_CHOICE_BAND', deps):
             break
-          case 'HOLD_EFFECT_TOXIC_ORB':
+          case holdEffectId('HOLD_EFFECT_TOXIC_ORB', deps):
             if (shouldPoisonSelf(state, battlerAtk, deps, unmodelled)) score += 2
             break
-          case 'HOLD_EFFECT_FLAME_ORB':
+          case holdEffectId('HOLD_EFFECT_FLAME_ORB', deps):
             if (shouldBurnSelf(state, battlerAtk, deps, unmodelled)) score += 2
             break
-          case 'HOLD_EFFECT_FROST_ORB':
+          case holdEffectId('HOLD_EFFECT_FROST_ORB', deps):
             if (shouldFrostbiteSelf(state, battlerAtk, deps, unmodelled)) score += 2
             break
-          case 'HOLD_EFFECT_BLACK_SLUDGE':
+          case holdEffectId('HOLD_EFFECT_BLACK_SLUDGE', deps):
             if (isBattlerOfType(attacker, 'POISON') || isMagicGuardProtected(state, attacker)) score += 3
             break
-          case 'HOLD_EFFECT_IRON_BALL':
+          case holdEffectId('HOLD_EFFECT_IRON_BALL', deps):
             if (hasMoveEffect(attacker, 'EFFECT_FLING', deps)) score += 2
             break
-          case 'HOLD_EFFECT_LAGGING_TAIL':
-          case 'HOLD_EFFECT_STICKY_BARB':
+          case holdEffectId('HOLD_EFFECT_LAGGING_TAIL', deps):
+          case holdEffectId('HOLD_EFFECT_STICKY_BARB', deps):
             break
           default:
             score++ // other hold effects generally universally good
@@ -1367,14 +1354,6 @@ function applyTrickBestow(state: BattleState, battlerAtk: number, battlerDef: nu
 // ---------------------------------------------------------------------------
 // Part 2b helpers (battle_ai_main.c:3607-3984's own callees)
 // ---------------------------------------------------------------------------
-
-/** `AI_DATA->holdEffects[b] == HOLD_EFFECT_NONE` -- an item-less battler reads
- * null from `aiHoldEffect`, an item with no hold effect reads
- * 'HOLD_EFFECT_NONE'; both are NONE (HOLD_EFFECT_NONE is 0, and so is the
- * param of an item-less battler -- see aiHoldEffect's quirk note). */
-function isHoldEffectNone(holdEffect: string | null): boolean {
-  return holdEffect === null || holdEffect === 'HOLD_EFFECT_NONE'
-}
 
 /** `gBattleMoves[predictedMove]` -- deliberately UNGUARDED: with `predictedMove ==
  * MOVE_NONE` (a defender that has not moved yet) the C reads move 0's own row
@@ -1451,9 +1430,9 @@ function applyQuiverDance(state: BattleState, battlerAtk: number, battlerDef: nu
 /** The shared tail of `case EFFECT_ELECTRIC_TERRAIN` / `MISTY_TERRAIN` (which
  * enter it by FALLTHROUGH) and `GRASSY_TERRAIN` / `PSYCHIC_TERRAIN`,
  * battle_ai_main.c:3736-3737. */
-function applyTerrainSetup(attacker: BattlerState, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
+function applyTerrainSetup(attacker: BattlerState, score: number, deps: AiDamageDeps): number {
   score += 2
-  if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_TERRAIN_EXTENDER') score += 2
+  if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_TERRAIN_EXTENDER', deps)) score += 2
   return score
 }
 
@@ -1565,9 +1544,7 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   }
 
   // :2586-2592 -- Choice item/Gorilla Tactics/Sage Power switch-forcing check.
-  const atkHoldEffect = getBattlerHoldEffect(attacker, deps)
-  const hasChoiceLock = atkHoldEffect === 'HOLD_EFFECT_CHOICE_BAND' || atkHoldEffect === 'HOLD_EFFECT_CHOICE_SCARF' || atkHoldEffect === 'HOLD_EFFECT_CHOICE_SPECS'
-  if (hasChoiceLock || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS') || selfAbility(attacker, 'ABILITY_SAGE_POWER')) {
+  if (holdEffectChoice(aiHoldEffectParam(attacker, deps), deps) || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS') || selfAbility(attacker, 'ABILITY_SAGE_POWER')) {
     if (countUsablePartyMons(state, battlerAtk) > 1) {
       const badMoveResult = aiCheckBadMove(state, battlerAtk, battlerDef, moveId, score, deps)
       unmodelled.push(...badMoveResult.unmodelled)
@@ -1705,8 +1682,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_ABSORB': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
-      if (holdEffect === 'HOLD_EFFECT_BIG_ROOT') score++
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_BIG_ROOT', deps)) score++
       // RNG line :2640.
       if (effectiveness <= 3 /* AI_EFFECTIVENESS_x0_5 */ && aiRandLessThan(state, 50)) score -= 3
       break
@@ -1945,9 +1921,8 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_GROWTH': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
       const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(attacker, id))
-      if ((weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA') || hasChloroplast) {
+      if ((weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps)) || hasChloroplast) {
         score++
       }
       // FALLTHROUGH to EFFECT_ATTACK_SPATK_UP's own body in the C -- written
@@ -1984,9 +1959,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_MULTI_HIT':
     case 'EFFECT_DOUBLE_HIT':
     case 'EFFECT_TRIPLE_KICK': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
-      const defHoldEffect = getBattlerHoldEffect(defender, deps)
-      if (aiMoveMakesContact(attacker, holdEffect, deps.moveData(moveId)) && !isMagicGuardProtected(state, attacker) && defHoldEffect === 'HOLD_EFFECT_ROCKY_HELMET') {
+      if (aiMoveMakesContact(attacker, aiHoldEffectParam(attacker, deps), deps.moveData(moveId), deps) && !isMagicGuardProtected(state, attacker) && aiHoldEffectIs(defender, 'HOLD_EFFECT_ROCKY_HELMET', deps)) {
         score -= 2
       }
       break
@@ -2018,7 +1991,7 @@ function applyMoveEffectSwitch(
       const recover = shouldRecover(state, battlerAtk, battlerDef, moveId, 50, deps)
       unmodelled.push(...recover.unmodelled)
       if (recover.should) score += 3
-      if (getBattlerHoldEffect(attacker, deps) === 'HOLD_EFFECT_BIG_ROOT') score++
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_BIG_ROOT', deps)) score++
       break
     }
 
@@ -2032,7 +2005,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_AURORA_VEIL':
       if (shouldSetScreen(state, battlerAtk, battlerDef, moveEffect, deps)) {
         score += 5
-        if (getBattlerHoldEffect(attacker, deps) === 'HOLD_EFFECT_LIGHT_CLAY') score += 2
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_LIGHT_CLAY', deps)) score += 2
         if (hasFlag(state.aiFlags, AI_FLAG_SCREENER)) score += 2
       }
       break
@@ -2047,20 +2020,19 @@ function applyMoveEffectSwitch(
       const recover = shouldRecover(state, battlerAtk, battlerDef, moveId, 100, deps)
       unmodelled.push(...recover.unmodelled)
       if (recover.should) {
-        const holdEffect = getBattlerHoldEffect(attacker, deps)
         // `gWishFutureKnock.weatherDuration != 1` -- rain ending NEXT turn
         // shouldn't count as a reliable Hydration cure; this sim tracks the
         // same countdown at `state.field.weatherDuration` (fieldEndTurn.ts),
         // so this is a real read, not a gap (an earlier revision of this file
         // dropped the term without naming it).
         const hasWakeupHelp =
-          holdEffect === 'HOLD_EFFECT_CURE_SLP' ||
-          holdEffect === 'HOLD_EFFECT_CURE_STATUS' ||
+          aiHoldEffectIs(attacker, 'HOLD_EFFECT_CURE_SLP', deps) ||
+          aiHoldEffectIs(attacker, 'HOLD_EFFECT_CURE_STATUS', deps) ||
           hasMoveEffect(attacker, 'EFFECT_SLEEP_TALK', deps) ||
           hasMoveEffect(attacker, 'EFFECT_SNORE', deps) ||
           selfAbility(attacker, 'ABILITY_SHED_SKIN') ||
           selfAbility(attacker, 'ABILITY_EARLY_BIRD') ||
-          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && state.field.weatherDuration !== 1 && selfAbility(attacker, 'ABILITY_HYDRATION') && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA')
+          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && state.field.weatherDuration !== 1 && selfAbility(attacker, 'ABILITY_HYDRATION') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps))
         score += hasWakeupHelp ? 2 : 1
       }
       break
@@ -2089,8 +2061,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_FOCUS_ENERGY':
     case 'EFFECT_LASER_FOCUS': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
-      if (selfAbility(attacker, 'ABILITY_SUPER_LUCK') || selfAbility(attacker, 'ABILITY_SNIPER') || holdEffect === 'HOLD_EFFECT_SCOPE_LENS' || testMoveFlagsInMoveset(attacker, 'highCrit', deps)) {
+      if (selfAbility(attacker, 'ABILITY_SUPER_LUCK') || selfAbility(attacker, 'ABILITY_SNIPER') || aiHoldEffectIs(attacker, 'HOLD_EFFECT_SCOPE_LENS', deps) || testMoveFlagsInMoveset(attacker, 'highCrit', deps)) {
         score += 2
       }
       break
@@ -2239,7 +2210,7 @@ function applyMoveEffectSwitch(
       // -- `B_MENTAL_HERB` is `GEN_5` on this build (battle_config.h:102), so the
       // compile-time half is always true and the hold-effect check is live; an
       // earlier revision of this file dropped it entirely.
-      if (defender.volatiles.disableTimer === 0 && getBattlerHoldEffect(defender, deps) !== 'HOLD_EFFECT_MENTAL_HERB') {
+      if (defender.volatiles.disableTimer === 0 && !aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)) {
         if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
           if (defender.lastMove !== null) {
             const faints = canMoveFaintBattler(state, defender.lastMove, battlerDef, battlerAtk, deps)
@@ -2255,7 +2226,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_ENCORE':
       // Same Mental Herb exclusion as EFFECT_DISABLE above.
-      if (defender.volatiles.encoreTimer === 0 && getBattlerHoldEffect(defender, deps) !== 'HOLD_EFFECT_MENTAL_HERB') {
+      if (defender.volatiles.encoreTimer === 0 && !aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)) {
         const lastEffect = defender.lastMove ? (deps.moveData(defender.lastMove)?.effect ?? null) : null
         if (isEncoreEncouragedEffect(lastEffect)) score += 3
       }
@@ -2335,33 +2306,31 @@ function applyMoveEffectSwitch(
       const atkItem = attacker.mon.itemId
       const defItem = defender.mon.itemId
       if (canSteal && !atkItem && defItem && canBattlerGetOrLoseItemApprox(defender, defItem, deps) && canBattlerGetOrLoseItemApprox(attacker, defItem, deps) && !hasMoveEffect(attacker, 'EFFECT_ACROBATICS', deps) && !isStickyHold(defender, atkMoldBreaker)) {
-        const defHoldEffect = getBattlerHoldEffect(defender, deps)
-        switch (defHoldEffect) {
-          case null:
-          case 'HOLD_EFFECT_NONE':
+        switch (aiHoldEffectParam(defender, deps)) {
+          case holdEffectId('HOLD_EFFECT_NONE', deps):
             break
-          case 'HOLD_EFFECT_CHOICE_BAND':
-          case 'HOLD_EFFECT_CHOICE_SCARF':
-          case 'HOLD_EFFECT_CHOICE_SPECS':
+          case holdEffectId('HOLD_EFFECT_CHOICE_BAND', deps):
+          case holdEffectId('HOLD_EFFECT_CHOICE_SCARF', deps):
+          case holdEffectId('HOLD_EFFECT_CHOICE_SPECS', deps):
             score += 2
             break
-          case 'HOLD_EFFECT_TOXIC_ORB':
+          case holdEffectId('HOLD_EFFECT_TOXIC_ORB', deps):
             unmodelled.push('EFFECT_THIEF: ShouldPoisonSelf has no port anywhere in this codebase; treated as false')
             break
-          case 'HOLD_EFFECT_FLAME_ORB':
+          case holdEffectId('HOLD_EFFECT_FLAME_ORB', deps):
             unmodelled.push('EFFECT_THIEF: ShouldBurnSelf has no port anywhere in this codebase; treated as false')
             break
-          case 'HOLD_EFFECT_FROST_ORB':
+          case holdEffectId('HOLD_EFFECT_FROST_ORB', deps):
             unmodelled.push('EFFECT_THIEF: ShouldFrostbiteSelf has no port anywhere in this codebase; treated as false')
             break
-          case 'HOLD_EFFECT_BLACK_SLUDGE':
+          case holdEffectId('HOLD_EFFECT_BLACK_SLUDGE', deps):
             if (isBattlerOfType(attacker, 'POISON')) score += 2
             break
-          case 'HOLD_EFFECT_IRON_BALL':
+          case holdEffectId('HOLD_EFFECT_IRON_BALL', deps):
             if (hasMoveEffect(attacker, 'EFFECT_FLING', deps)) score += 2
             break
-          case 'HOLD_EFFECT_LAGGING_TAIL':
-          case 'HOLD_EFFECT_STICKY_BARB':
+          case holdEffectId('HOLD_EFFECT_LAGGING_TAIL', deps):
+          case holdEffectId('HOLD_EFFECT_STICKY_BARB', deps):
             break
           default:
             score++
@@ -2450,7 +2419,7 @@ function applyMoveEffectSwitch(
       const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
       unmodelled.push(...faintsAtk.unmodelled)
       if (faintsAtk.canFaint) {
-        if (attacker.mon.hp > Math.floor(attacker.mon.maxHp / 4) && isPinchBerryItemEffect(getBattlerHoldEffect(attacker, deps))) {
+        if (attacker.mon.hp > Math.floor(attacker.mon.maxHp / 4) && isPinchBerryItemEffect(aiHoldEffectParam(attacker, deps), deps)) {
           score += 3
         }
       }
@@ -2494,7 +2463,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_SANDSTORM':
       if (shouldSetSandstorm(state, battlerAtk, deps)) {
         score++
-        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_SMOOTH_ROCK') score++
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_SMOOTH_ROCK', deps)) score++
         if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
       }
       break
@@ -2508,7 +2477,7 @@ function applyMoveEffectSwitch(
           score += 3
         }
         score++
-        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_ICY_ROCK') score++
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_ICY_ROCK', deps)) score++
         if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
       }
       break
@@ -2516,7 +2485,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_RAIN_DANCE':
       if (shouldSetRain(state, battlerAtk, deps)) {
         score++
-        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_DAMP_ROCK') score++
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_DAMP_ROCK', deps)) score++
         if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
         if (hasMoveWithType(defender, 'FIRE', deps) || hasMoveWithTypeOf(state, battlePartner(battlerDef), 'FIRE', deps)) score++
       }
@@ -2525,7 +2494,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_SUNNY_DAY':
       if (shouldSetSun(state, battlerAtk, deps)) {
         score++
-        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_HEAT_ROCK') score++
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_HEAT_ROCK', deps)) score++
         if (hasMoveWithType(defender, 'WATER', deps) || hasMoveWithTypeOf(state, battlePartner(battlerDef), 'WATER', deps)) score++
         if (hasMoveEffect(defender, 'EFFECT_THUNDER', deps) || hasMoveEffectOf(state, battlePartner(battlerDef), 'EFFECT_THUNDER', deps)) score++
       }
@@ -2719,7 +2688,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_INGRAIN':
-      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_BIG_ROOT') score += 3
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_BIG_ROOT', deps)) score += 3
       else score++
       break
 
@@ -2791,12 +2760,12 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_KNOCK_OFF':
       if (canKnockOffItem(defender, defender.mon.itemId, deps)) {
-        switch (aiHoldEffect(defender, deps, unmodelled)) {
-          case 'HOLD_EFFECT_IRON_BALL':
+        switch (aiHoldEffectParam(defender, deps)) {
+          case holdEffectId('HOLD_EFFECT_IRON_BALL', deps):
             if (hasMoveEffect(defender, 'EFFECT_FLING', deps)) score += 4
             break
-          case 'HOLD_EFFECT_LAGGING_TAIL':
-          case 'HOLD_EFFECT_STICKY_BARB':
+          case holdEffectId('HOLD_EFFECT_LAGGING_TAIL', deps):
+          case holdEffectId('HOLD_EFFECT_STICKY_BARB', deps):
             break
           default:
             score += 3
@@ -2882,7 +2851,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_GEOMANCY': {
-      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_POWER_HERB') {
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps)) {
         const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
         unmodelled.push(...faintsAtk.unmodelled)
         if (!faintsAtk.canFaint) score += 10
@@ -2905,7 +2874,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_SHELL_SMASH':
-      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_RESTORE_STATS') score += 3
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_RESTORE_STATS', deps)) score += 3
       score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPEED, moveId, score, deps, unmodelled)
       score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPATK, moveId, score, deps, unmodelled)
       score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_ATK, moveId, score, deps, unmodelled)
@@ -2987,7 +2956,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_INCINERATE':
       if (hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE) || isStickyHold(defender, atkMoldBreaker)) break
-      else if (itemPocket(defender.mon.itemId, deps, unmodelled) === 'POCKET_BERRIES' || aiHoldEffect(defender, deps, unmodelled) === 'HOLD_EFFECT_GEMS') score += 3
+      else if (itemPocket(defender.mon.itemId, deps, unmodelled) === 'POCKET_BERRIES' || aiHoldEffectIs(defender, 'HOLD_EFFECT_GEMS', deps)) score += 3
       break
 
     case 'EFFECT_SMACK_DOWN':
@@ -2998,12 +2967,12 @@ function applyMoveEffectSwitch(
     case 'EFFECT_MISTY_TERRAIN':
       if (hasFlag(attacker.statuses3, STATUS3_YAWN) && deps.turnOrder.isBattlerGrounded(battlerAtk)) score += 10
       // FALLTHROUGH to EFFECT_GRASSY_TERRAIN / EFFECT_PSYCHIC_TERRAIN's body.
-      score = applyTerrainSetup(attacker, score, deps, unmodelled)
+      score = applyTerrainSetup(attacker, score, deps)
       break
 
     case 'EFFECT_GRASSY_TERRAIN':
     case 'EFFECT_PSYCHIC_TERRAIN':
-      score = applyTerrainSetup(attacker, score, deps, unmodelled)
+      score = applyTerrainSetup(attacker, score, deps)
       break
 
     case 'EFFECT_PLEDGE':
@@ -3025,15 +2994,15 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_MAGIC_ROOM': {
       score++
-      if (isHoldEffectNone(aiHoldEffect(attacker, deps, unmodelled)) && !isHoldEffectNone(aiHoldEffect(defender, deps, unmodelled))) score++
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_NONE', deps) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_NONE', deps)) score++
       const atkPartner = state.battlers[battlePartner(battlerAtk)]
       const defPartner = state.battlers[battlePartner(battlerDef)]
       if (
         isDoubleBattle &&
         !!atkPartner &&
         !!defPartner &&
-        isHoldEffectNone(aiHoldEffect(atkPartner, deps, unmodelled)) &&
-        !isHoldEffectNone(aiHoldEffect(defPartner, deps, unmodelled))
+        aiHoldEffectIs(atkPartner, 'HOLD_EFFECT_NONE', deps) &&
+        !aiHoldEffectIs(defPartner, 'HOLD_EFFECT_NONE', deps)
       ) {
         score++
       }
@@ -3076,7 +3045,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_EMBARGO':
-      if (!isHoldEffectNone(aiHoldEffect(defender, deps, unmodelled))) score++
+      if (!aiHoldEffectIs(defender, 'HOLD_EFFECT_NONE', deps)) score++
       break
 
     case 'EFFECT_POWDER':
@@ -3116,8 +3085,7 @@ function applyMoveEffectSwitch(
       } else if (hasHealingEffect(defender, deps)) {
         score += 2
       } else {
-        const defHoldEffect = aiHoldEffect(defender, deps, unmodelled)
-        if (defHoldEffect === 'HOLD_EFFECT_LEFTOVERS' || (defHoldEffect === 'HOLD_EFFECT_BLACK_SLUDGE' && isBattlerOfType(defender, 'POISON'))) score += 2
+        if (aiHoldEffectIs(defender, 'HOLD_EFFECT_LEFTOVERS', deps) || (aiHoldEffectIs(defender, 'HOLD_EFFECT_BLACK_SLUDGE', deps) && isBattlerOfType(defender, 'POISON'))) score += 2
       }
       break
 
@@ -3218,11 +3186,11 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_TWO_TURNS_ATTACK':
     case 'EFFECT_SKULL_BASH':
-      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_POWER_HERB') score += 2
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps)) score += 2
       break
 
     case 'EFFECT_SOLARBEAM':
-      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_POWER_HERB' || hasChloroplast(attacker)) score += 2
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) || hasChloroplast(attacker)) score += 2
       break
 
     case 'EFFECT_COUNTER':

@@ -144,10 +144,41 @@ for (const [id, expected] of Object.entries(REQUIRED_MOVES)) {
   if (expected?.target && m.target !== expected.target) throw new Error(`${id} is no longer target=${expected.target}`)
 }
 
+// battle_ai_main.c:216 fills AI_DATA->holdEffects[] from the held item's PARAM, so the AI "sees" an
+// item as HOLD_EFFECT_X only when that param equals X's numeric enum id. Almost no real item's
+// param equals its own effect's id (Choice Band's is 0, its enum id is 28), so the tests that
+// exercise an effect's branch hold `readsAs('HOLD_EFFECT_X')`: a synthetic item whose param is
+// exactly holdEffectIds[X]. The real-item cases below the quirk describe block cover the rest.
+const paramItems = new Map<string, SimItemData>()
+function readsAs(effect: string): string {
+  const id = `ITEM_PARAM_IS_${effect}`
+  if (!paramItems.has(id)) {
+    const param = holdEffectIds[effect]
+    if (param === undefined) throw new Error(`holdEffectIds has no ${effect}`)
+    paramItems.set(id, { id, resolvedHoldEffect: null, holdEffectStrength: param, holdEffectType: null, naturalGift: null, grouping: 'POCKET_ITEMS' })
+  }
+  return id
+}
+// Params of the real fixture items whose expectations below rely on them (items.json holdEffectStrength).
+for (const [id, param] of [
+  ['ITEM_LEFTOVERS', 10], ['ITEM_ABILITY_CAPSULE', 0], ['ITEM_FOCUS_SASH', 0], ['ITEM_POWER_HERB', 0], ['ITEM_MENTAL_HERB', 0],
+  ['ITEM_CHOICE_BAND', 0], ['ITEM_CHOICE_SCARF', 0], ['ITEM_BIG_ROOT', 30], ['ITEM_MUSCLE_BAND', 15], ['ITEM_NORMAL_GEM', 50],
+  ['ITEM_SITRUS_BERRY', 25], ['ITEM_ORAN_BERRY', 10], ['ITEM_ROCKY_HELMET', 0], ['ITEM_SMOOTH_ROCK', 0], ['ITEM_TERRAIN_EXTENDER', 0],
+  ['ITEM_PROTECTIVE_PADS', 0], ['ITEM_WHITE_HERB', 0],
+] as const) {
+  if ((itemsById.get(id)?.holdEffectStrength ?? 0) !== param) throw new Error(`${id} holdEffectStrength is no longer ${param}`)
+}
+for (const [name, id] of [
+  ['HOLD_EFFECT_NONE', 0], ['HOLD_EFFECT_GEMS', 10], ['HOLD_EFFECT_POWER_HERB', 15], ['HOLD_EFFECT_LEFTOVERS', 21], ['HOLD_EFFECT_CHOICE_BAND', 28],
+  ['HOLD_EFFECT_CHOICE_SCARF', 30], ['HOLD_EFFECT_TERRAIN_EXTENDER', 50], ['HOLD_EFFECT_FLAME_ORB', 25], ['HOLD_EFFECT_BIG_ROOT', 13],
+] as const) {
+  if (holdEffectIds[name] !== id) throw new Error(`${name} is no longer ${id}`)
+}
+
 const grounding: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
 const dataContext: SimDataContext = {
   species: (id) => speciesById.get(id) as SimSpeciesData | undefined,
-  item: (id) => itemsById.get(id) as SimItemData | undefined,
+  item: (id) => paramItems.get(id) ?? (itemsById.get(id) as SimItemData | undefined),
   move: (id) => {
     const m = moveById.get(id)
     if (!m) return undefined
@@ -414,7 +445,7 @@ describe('pre-switch checks -- thaw / burn / frostbite', () => {
 
 describe('pre-switch checks -- Choice/Gorilla Tactics/Sage Power forcing', () => {
   it('penalizes -20 when Choice-locked into a bad (type-immune) move with 2+ usable reserves', () => {
-    const s = stateWithAttackerParty({ itemId: 'ITEM_CHOICE_BAND', types: ['NORMAL', 'MYSTERY', 'MYSTERY'] }, { types: ['GHOST', 'MYSTERY', 'MYSTERY'] })
+    const s = stateWithAttackerParty({ itemId: readsAs('HOLD_EFFECT_CHOICE_BAND'), types: ['NORMAL', 'MYSTERY', 'MYSTERY'] }, { types: ['GHOST', 'MYSTERY', 'MYSTERY'] })
     const result = check(s, 'MOVE_TACKLE', 100) // Normal vs Ghost -- immune, AI_CheckBadMove scores it 80
     expect(result.score).toBeLessThanOrEqual(80)
   })
@@ -440,7 +471,7 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     expect(result.score).toBeGreaterThan(100)
   })
   it('EFFECT_ABSORB gives +1 for Big Root', () => {
-    const s = state({ itemId: 'ITEM_BIG_ROOT', moves: ['MOVE_GIGA_DRAIN', null, null, null] }, {}, repeating(RNG_HIGH))
+    const s = state({ itemId: readsAs('HOLD_EFFECT_BIG_ROOT'), moves: ['MOVE_GIGA_DRAIN', null, null, null] }, {}, repeating(RNG_HIGH))
     const result = check(s, 'MOVE_GIGA_DRAIN', 100)
     expect(result.score).toBeGreaterThanOrEqual(101)
   })
@@ -612,7 +643,7 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     expect(result.score).toBeGreaterThan(100)
   })
   it('EFFECT_MULTI_HIT penalizes -2 for Rocky Helmet contact', () => {
-    const s = state({ moves: ['MOVE_FURY_ATTACK', null, null, null] }, { itemId: 'ITEM_ROCKY_HELMET' })
+    const s = state({ moves: ['MOVE_FURY_ATTACK', null, null, null] }, { itemId: readsAs('HOLD_EFFECT_ROCKY_HELMET') })
     const result = check(s, 'MOVE_FURY_ATTACK', 100)
     expect(result.score).toBeLessThanOrEqual(100)
   })
@@ -627,7 +658,7 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     expect(result.score).toBe(100)
   })
   it('EFFECT_RESTORE_HP gives +1 for Big Root regardless of ShouldRecover', () => {
-    const s = state({ itemId: 'ITEM_BIG_ROOT', hp: 100, maxHp: 100 })
+    const s = state({ itemId: readsAs('HOLD_EFFECT_BIG_ROOT'), hp: 100, maxHp: 100 })
     const result = check(s, 'MOVE_RECOVER', 100)
     expect(result.score).toBeGreaterThanOrEqual(100)
   })
@@ -838,13 +869,13 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     expect(result.score).toBe(100)
   })
   it('EFFECT_ENCORE does not reward when the defender holds Mental Herb (B_MENTAL_HERB >= GEN_5 on this build)', () => {
-    const s = state({}, { itemId: 'ITEM_MENTAL_HERB' })
+    const s = state({}, { itemId: readsAs('HOLD_EFFECT_MENTAL_HERB') })
     s.battlers[1]!.lastMove = 'MOVE_TOXIC'
     const result = check(s, 'MOVE_ENCORE', 100)
     expect(result.score).toBe(100)
   })
   it('EFFECT_DISABLE does not reward when the defender holds Mental Herb', () => {
-    const s = state({ hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 500 } }, { rawStats: { atk: 500, def: 90, spatk: 80, spdef: 85, spe: 1 }, itemId: 'ITEM_MENTAL_HERB' })
+    const s = state({ hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 500 } }, { rawStats: { atk: 500, def: 90, spatk: 80, spdef: 85, spe: 1 }, itemId: readsAs('HOLD_EFFECT_MENTAL_HERB') })
     s.battlers[1]!.lastMove = 'MOVE_TACKLE'
     const result = check(s, 'MOVE_DISABLE', 100)
     const control = state({ hp: 1, maxHp: 100, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 500 } }, { rawStats: { atk: 500, def: 90, spatk: 80, spdef: 85, spe: 1 } })
@@ -902,12 +933,12 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     // would ALSO be wrong for this specific pinned build, where
     // B_TRAINERS_KNOCK_OFF_ITEMS is TRUE (battle_config.h:103) and makes
     // canSteal always true regardless of battler side. Choice Band -> +2.
-    const s = state({ itemId: null }, { itemId: 'ITEM_CHOICE_BAND' })
+    const s = state({ itemId: null }, { itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') })
     const result = check(s, 'MOVE_THIEF', 100)
     expect(result.score).toBe(102)
   })
   it('EFFECT_THIEF does not score when the attacker already holds an item', () => {
-    const s = state({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_CHOICE_BAND' })
+    const s = state({ itemId: 'ITEM_LEFTOVERS' }, { itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') })
     const result = check(s, 'MOVE_THIEF', 100)
     expect(result.score).toBe(100)
   })
@@ -943,7 +974,7 @@ describe('move-effect switch -- representative case-by-case coverage', () => {
     expect(result.score).toBeLessThan(100)
   })
   it('EFFECT_ENDURE rewards +3 with a pinch berry when the target could KO', () => {
-    const s = state({ hp: 100, maxHp: 100, itemId: 'ITEM_LIECHI_BERRY', rawStats: { atk: 100, def: 1, spatk: 80, spdef: 1, spe: 1 } }, { rawStats: { atk: 999, def: 90, spatk: 80, spdef: 85, spe: 999 } })
+    const s = state({ hp: 100, maxHp: 100, itemId: readsAs('HOLD_EFFECT_ATTACK_UP'), rawStats: { atk: 100, def: 1, spatk: 80, spdef: 1, spe: 1 } }, { rawStats: { atk: 999, def: 90, spatk: 80, spdef: 85, spe: 999 } })
     const result = check(s, 'MOVE_ENDURE', 100)
     expect(result).toBeDefined()
   })
@@ -1096,12 +1127,12 @@ describe('EFFECT_SANDSTORM (:3224-3231)', () => {
     s.field.timers.clearSkiesTimer = 3
     expect(check(s, 'MOVE_SANDSTORM').score).toBe(100)
   })
-  it('Smooth Rock adds +1 only inside the branch, and reports the holdEffects[] quirk', () => {
+  it('Smooth Rock (param read as HOLD_EFFECT_SMOOTH_ROCK) adds +1 only inside the branch, and the holdEffects[] gap is closed', () => {
     const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
-    const withRock = check(state({ ...rock, itemId: 'ITEM_SMOOTH_ROCK' }), 'MOVE_SANDSTORM')
+    const withRock = check(state({ ...rock, itemId: readsAs('HOLD_EFFECT_SMOOTH_ROCK') }), 'MOVE_SANDSTORM')
     expect(withRock.score).toBe(102)
-    expect(withRock.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
-    expect(sand({ itemId: 'ITEM_SMOOTH_ROCK' }).score).toBe(100)
+    expect(withRock.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(false)
+    expect(sand({ itemId: readsAs('HOLD_EFFECT_SMOOTH_ROCK') }).score).toBe(100)
   })
   it.each(['MOVE_SYNTHESIS', 'MOVE_MORNING_SUN', 'MOVE_MOONLIGHT'])('a defender with %s adds +2 inside the branch only', (heal) => {
     const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
@@ -1118,8 +1149,8 @@ describe('EFFECT_HAIL (:3232-3243)', () => {
   })
   it('scores +1 for an Ice-type attacker, and Icy Rock adds +1 only inside the branch', () => {
     expect(hail(ice).score).toBe(101)
-    expect(hail({ ...ice, itemId: 'ITEM_ICY_ROCK' }).score).toBe(102)
-    expect(hail({ itemId: 'ITEM_ICY_ROCK' }).score).toBe(100)
+    expect(hail({ ...ice, itemId: readsAs('HOLD_EFFECT_ICY_ROCK') }).score).toBe(102)
+    expect(hail({ itemId: readsAs('HOLD_EFFECT_ICY_ROCK') }).score).toBe(100)
   })
   it('every ability with bitfields.hailImmune makes the attacker want hail; a non-listed ability does not', () => {
     const list = Object.entries(abilityHooks).filter(([, v]) => v.bitfields?.hailImmune).map(([k]) => k)
@@ -1168,11 +1199,11 @@ describe('EFFECT_RAIN_DANCE (:3244-3252)', () => {
   })
   it('Damp Rock (+1), a defender Fire move (+1) and defender healing (+2) stack inside the branch only', () => {
     const wet = { abilities: ab('ABILITY_SWIFT_SWIM') }
-    expect(rain({ ...wet, itemId: 'ITEM_DAMP_ROCK' }).score).toBe(102)
+    expect(rain({ ...wet, itemId: readsAs('HOLD_EFFECT_DAMP_ROCK') }).score).toBe(102)
     expect(rain(wet, { moves: ['MOVE_EMBER', null, null, null] }).score).toBe(102)
     expect(rain(wet, { moves: ['MOVE_SYNTHESIS', null, null, null] }).score).toBe(103)
     expect(rain({}, { moves: ['MOVE_EMBER', null, null, null] }).score).toBe(100)
-    expect(rain({ itemId: 'ITEM_DAMP_ROCK' }).score).toBe(100)
+    expect(rain({ itemId: readsAs('HOLD_EFFECT_DAMP_ROCK') }).score).toBe(100)
   })
   it('scores 0 when rain or a primal weather is already up', () => {
     expect(rain({ abilities: ab('ABILITY_SWIFT_SWIM') }, {}, WEATHER_RAIN_TEMPORARY).score).toBe(100)
@@ -1203,11 +1234,11 @@ describe('EFFECT_SUNNY_DAY (:3253-3260)', () => {
   })
   it('Heat Rock (+1), defender Water move (+1) and defender Thunder (+1) stack inside the branch only', () => {
     const bright = { abilities: ab('ABILITY_CHLOROPHYLL') }
-    expect(sun({ ...bright, itemId: 'ITEM_HEAT_ROCK' }).score).toBe(102)
+    expect(sun({ ...bright, itemId: readsAs('HOLD_EFFECT_HEAT_ROCK') }).score).toBe(102)
     expect(sun(bright, { moves: ['MOVE_WATER_GUN', null, null, null] }).score).toBe(102)
     expect(sun(bright, { moves: ['MOVE_THUNDER', null, null, null] }).score).toBe(102)
     expect(sun({}, { moves: ['MOVE_WATER_GUN', null, null, null] }).score).toBe(100)
-    expect(sun({ itemId: 'ITEM_HEAT_ROCK' }).score).toBe(100)
+    expect(sun({ itemId: readsAs('HOLD_EFFECT_HEAT_ROCK') }).score).toBe(100)
   })
   it('scores 0 when sun is already up', () => {
     expect(sun({ abilities: ab('ABILITY_CHLOROPHYLL') }, {}, WEATHER_SUN_TEMPORARY).score).toBe(100)
@@ -1388,9 +1419,9 @@ describe('EFFECT_FAKE_OUT (:3323-3327)', () => {
     expect(effectDelta(fo({}, { status1: 3 }), 'MOVE_FAKE_OUT')).toBe(0)
   })
   it('a Choice Band holder with nothing to switch to does not lock itself into Fake Out', () => {
-    expect(effectDelta(fo({ itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_FAKE_OUT')).toBe(0)
+    expect(effectDelta(fo({ itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }), 'MOVE_FAKE_OUT')).toBe(0)
     const withParty = () => {
-      const s = stateWithAttackerParty({ ...FAST, itemId: 'ITEM_CHOICE_BAND' }, {}, repeating(RNG_HIGH))
+      const s = stateWithAttackerParty({ ...FAST, itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }, {}, repeating(RNG_HIGH))
       return s
     }
     expect(effectDelta(withParty, 'MOVE_FAKE_OUT')).toBe(16)
@@ -1436,8 +1467,8 @@ describe('EFFECT_SWAGGER / EFFECT_FLATTER (:3338-3352)', () => {
   it('the confusion term scores +3 vs a paralyzed target and 0 vs an already-confused or cure-item holder', () => {
     expect(effectDelta(mkState({}, { status1: STATUS1_PARALYSIS }), 'MOVE_SWAGGER')).toBe(3)
     expect(effectDelta(mkState({}, { status2: STATUS2_CONFUSION & 1 }), 'MOVE_SWAGGER')).toBe(0)
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_LUM_BERRY' }), 'MOVE_SWAGGER')).toBe(0)
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_PERSIM_BERRY' }), 'MOVE_SWAGGER')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: readsAs('HOLD_EFFECT_CURE_STATUS') }), 'MOVE_SWAGGER')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: readsAs('HOLD_EFFECT_CURE_CONFUSION') }), 'MOVE_SWAGGER')).toBe(0)
   })
   it('the confusion term is skipped when AI_FLAG_TRY_TO_FAINT and the attacker already KOs', () => {
     expect(effectDelta(mkState({ ...moves('MOVE_TACKLE') }, { hp: 1 }, () => {}, AI_FLAG_TRY_TO_FAINT), 'MOVE_SWAGGER')).toBe(0)
@@ -1583,56 +1614,56 @@ for (const id of ['ITEM_CHOICE_SCARF', 'ITEM_CHOICE_BAND', 'ITEM_CHOICE_SPECS', 
 describe('EFFECT_TRICK / EFFECT_BESTOW (:3437-3512)', () => {
   const trick = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, tweak: (s: BattleState) => void = () => {}) => mkState(a, d, tweak)
   it('Choice Scarf: +2 always', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_SCARF') }), 'MOVE_TRICK')).toBe(2)
   })
   it('Choice Band: +2 only if the target has no Physical move; Choice Specs: only if no Special move', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_BAND' }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SPECS' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SPECS' }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_SPECS') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_SPECS') }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(0)
   })
   it('Toxic Orb: +2 unless ShouldPoisonSelf (Poison Heal, Marvel Scale, Quick Feet, Magic Guard, Facade, Psycho Shift, Toxic Boost/Guts + Physical)', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB') }), 'MOVE_TRICK')).toBe(2)
     for (const id of ['ABILITY_POISON_HEAL', 'ABILITY_MARVEL_SCALE', 'ABILITY_QUICK_FEET', 'ABILITY_MAGIC_GUARD', 'ABILITY_TOXIC_BOOST', 'ABILITY_GUTS']) {
-      expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+      expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB'), abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
     }
-    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', ...moves('MOVE_PSYCHO_SHIFT') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab('ABILITY_GUTS'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(2) // Guts needs a Physical move
-    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab('ABILITY_POISON_HEAL'), types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // cannot be poisoned at all
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB'), ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB'), ...moves('MOVE_PSYCHO_SHIFT') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB'), abilities: ab('ABILITY_GUTS'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(2) // Guts needs a Physical move
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_TOXIC_ORB'), abilities: ab('ABILITY_POISON_HEAL'), types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // cannot be poisoned at all
   })
   it('Flame Orb: +2 unless ShouldBurnSelf; Frost Orb: +2 unless ShouldFrostbiteSelf', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(2)
-    for (const id of ['ABILITY_QUICK_FEET', 'ABILITY_HEATPROOF', 'ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_FLARE_BOOST'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_GUTS'), types: ['FIRE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // Fire cannot burn
-    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(2)
-    for (const id of ['ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab('ABILITY_GUTS'), types: ['ICE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FLAME_ORB') }), 'MOVE_TRICK')).toBe(2)
+    for (const id of ['ABILITY_QUICK_FEET', 'ABILITY_HEATPROOF', 'ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FLAME_ORB'), abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FLAME_ORB'), abilities: ab('ABILITY_FLARE_BOOST'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FLAME_ORB'), abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FLAME_ORB'), abilities: ab('ABILITY_GUTS'), types: ['FIRE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // Fire cannot burn
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FROST_ORB') }), 'MOVE_TRICK')).toBe(2)
+    for (const id of ['ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FROST_ORB'), abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FROST_ORB'), abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FROST_ORB'), ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_FROST_ORB'), abilities: ab('ABILITY_GUTS'), types: ['ICE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2)
   })
   it('Black Sludge: +3 unless the target is Poison-type or Magic-Guard-protected', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
-    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }, { types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }, { abilities: ab('ABILITY_MAGIC_GUARD') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }, { types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }, { abilities: ab('ABILITY_MAGIC_GUARD') }), 'MOVE_TRICK')).toBe(0)
   })
   it('Iron Ball: +2 unless the target has Fling AND is grounded', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({ itemId: 'ITEM_IRON_BALL' }, moves('MOVE_FLING')), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_IRON_BALL') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_IRON_BALL') }, moves('MOVE_FLING')), 'MOVE_TRICK')).toBe(0)
     const airborne: AiDamageDeps = { ...deps, turnOrder: { ...NEUTRAL_TURN_ORDER_CONTEXT, isBattlerGrounded: () => false } }
-    const mk = trick({ itemId: 'ITEM_IRON_BALL' }, moves('MOVE_FLING'))
+    const mk = trick({ itemId: readsAs('HOLD_EFFECT_IRON_BALL') }, moves('MOVE_FLING'))
     const real = aiCheckViability(mk(), 0, 1, 'MOVE_TRICK', 100, airborne).score
     const plain = aiCheckViability(mk(), 0, 1, 'MOVE_TRICK', 100, { ...airborne, moveData: (m) => (m === 'MOVE_TRICK' ? ({ ...toMoveData(m), effect: 'EFFECT_HIT' } as MoveData) : toMoveData(m)) }).score
     expect(real - plain).toBe(2)
   })
   it('Lagging Tail and Sticky Barb: +3', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_TRICK')).toBe(3)
-    expect(effectDelta(trick({ itemId: 'ITEM_STICKY_BARB' }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_LAGGING_TAIL') }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_STICKY_BARB') }), 'MOVE_TRICK')).toBe(3)
   })
   it('Utility Umbrella: +3 per Slow-em-down pairing (Swift Swim+rain, Chlorophyll+sun, Flower Gift+sun) when weather has effect', () => {
-    const umb = { itemId: 'ITEM_UTILITY_UMBRELLA' }
+    const umb = { itemId: readsAs('HOLD_EFFECT_UTILITY_UMBRELLA') }
     const w = (weather: number) => (s: BattleState) => { s.field.weather = weather }
     expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM') }, w(WEATHER_RAIN_TEMPORARY)), 'MOVE_TRICK')).toBe(3)
     expect(effectDelta(trick(umb, { abilities: ab('ABILITY_CHLOROPHYLL') }, w(WEATHER_SUN_TEMPORARY)), 'MOVE_TRICK')).toBe(3)
@@ -1647,37 +1678,37 @@ describe('EFFECT_TRICK / EFFECT_BESTOW (:3437-3512)', () => {
     expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM') }, (s) => { w(WEATHER_RAIN_TEMPORARY)(s); s.field.timers.clearSkiesTimer = 2 }), 'MOVE_TRICK')).toBe(0)
   })
   it('Eject Button: +2 if the attacker has a damaging move', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_EJECT_BUTTON' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({ itemId: 'ITEM_EJECT_BUTTON', ...moves('MOVE_SWORDS_DANCE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_EJECT_BUTTON') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_EJECT_BUTTON'), ...moves('MOVE_SWORDS_DANCE') }), 'MOVE_TRICK')).toBe(0)
   })
   it('itemless attacker (Trick only): the target item decides; an itemless target still scores +1 via the default arm (NONE is not a case)', () => {
     expect(effectDelta(trick(), 'MOVE_TRICK')).toBe(1)
     expect(effectDelta(trick({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_TRICK')).toBe(1)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_STICKY_BARB' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick({ types: ['POISON', 'MYSTERY', 'MYSTERY'] }, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
-    expect(effectDelta(trick({ abilities: ab('ABILITY_MAGIC_GUARD') }, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(0)
-    expect(effectDelta(trick(moves('MOVE_FLING'), { itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(2)
-    expect(effectDelta(trick({}, { itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_LAGGING_TAIL') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_STICKY_BARB') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: readsAs('HOLD_EFFECT_TOXIC_ORB') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_TOXIC_ORB') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: readsAs('HOLD_EFFECT_FLAME_ORB') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: readsAs('HOLD_EFFECT_FROST_ORB') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_FLAME_ORB') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_FROST_ORB') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ types: ['POISON', 'MYSTERY', 'MYSTERY'] }, { itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_MAGIC_GUARD') }, { itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick(moves('MOVE_FLING'), { itemId: readsAs('HOLD_EFFECT_IRON_BALL') }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: readsAs('HOLD_EFFECT_IRON_BALL') }), 'MOVE_TRICK')).toBe(0)
   })
   it('an attacker holding an unlisted item does not enter the target-item arm', () => {
     expect(effectDelta(trick({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_TRICK')).toBe(0)
   })
   it('Bestow shares the attacker-item arm but never the target-item default (move != MOVE_BESTOW)', () => {
-    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_BESTOW')).toBe(2)
+    expect(effectDelta(trick({ itemId: readsAs('HOLD_EFFECT_CHOICE_SCARF') }), 'MOVE_BESTOW')).toBe(2)
     expect(effectDelta(trick(), 'MOVE_BESTOW')).toBe(0)
     expect(effectDelta(trick({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_BESTOW')).toBe(0)
   })
-  it('reports the holdEffects[] quirk whenever an item is involved', () => {
-    expect(check(state({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_TRICK').unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
+  it('no longer reports a holdEffects[] gap, with or without an item', () => {
+    expect(check(state({ itemId: readsAs('HOLD_EFFECT_CHOICE_SCARF') }), 'MOVE_TRICK').unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(false)
     expect(check(state(), 'MOVE_TRICK').unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(false)
   })
 })
@@ -1704,7 +1735,7 @@ describe('EFFECT_ROLE_PLAY (:3513-3517)', () => {
 
 describe('EFFECT_INGRAIN / EFFECT_SUPERPOWER / EFFECT_OVERHEAT (:3518-3527)', () => {
   it('Ingrain scores +3 with a Big Root, +1 otherwise', () => {
-    expect(effectDelta(mkState({ itemId: 'ITEM_BIG_ROOT' }), 'MOVE_INGRAIN')).toBe(3)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_BIG_ROOT') }), 'MOVE_INGRAIN')).toBe(3)
     expect(effectDelta(mkState(), 'MOVE_INGRAIN')).toBe(1)
     expect(effectDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }), 'MOVE_INGRAIN')).toBe(1)
   })
@@ -1829,10 +1860,10 @@ describe('EFFECT_KNOCK_OFF (:3558-3572) -- B_TRAINERS_KNOCK_OFF_ITEMS (battle_co
     expect(effectDelta(ko({}), 'MOVE_KNOCK_OFF')).toBe(0)
   })
   it('Iron Ball: +4 if the holder has Fling, else 0; Lagging Tail / Sticky Barb: 0', () => {
-    expect(effectDelta(ko({ itemId: 'ITEM_IRON_BALL', ...moves('MOVE_FLING') }), 'MOVE_KNOCK_OFF')).toBe(4)
-    expect(effectDelta(ko({ itemId: 'ITEM_IRON_BALL' }), 'MOVE_KNOCK_OFF')).toBe(0)
-    expect(effectDelta(ko({ itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_KNOCK_OFF')).toBe(0)
-    expect(effectDelta(ko({ itemId: 'ITEM_STICKY_BARB' }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: readsAs('HOLD_EFFECT_IRON_BALL'), ...moves('MOVE_FLING') }), 'MOVE_KNOCK_OFF')).toBe(4)
+    expect(effectDelta(ko({ itemId: readsAs('HOLD_EFFECT_IRON_BALL') }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: readsAs('HOLD_EFFECT_LAGGING_TAIL') }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: readsAs('HOLD_EFFECT_STICKY_BARB') }), 'MOVE_KNOCK_OFF')).toBe(0)
   })
   it('Sticky Hold / Supersweet Syrup protect the item, unless the attacker has Mold Breaker (both are breakable)', () => {
     for (const id of ['ABILITY_STICKY_HOLD', 'ABILITY_SUPERSWEET_SYRUP']) {
@@ -2106,8 +2137,8 @@ describe('stat-raising status moves (:3625-3662): each IncreaseStatUpScore contr
   it('Shell Smash: Speed + Sp.Atk + Attack (+6), and +3 more holding a White Herb (RESTORE_STATS)', () => {
     const atk = { ...SLOW, ...moves('MOVE_WATER_GUN', 'MOVE_TACKLE') }
     expect(effectDelta(mkState(atk), 'MOVE_SHELL_SMASH')).toBe(6)
-    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_WHITE_HERB' }), 'MOVE_SHELL_SMASH')).toBe(9)
-    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_POWER_HERB' }), 'MOVE_SHELL_SMASH')).toBe(6)
+    expect(effectDelta(mkState({ ...atk, itemId: readsAs('HOLD_EFFECT_RESTORE_STATS') }), 'MOVE_SHELL_SMASH')).toBe(9)
+    expect(effectDelta(mkState({ ...atk, itemId: readsAs('HOLD_EFFECT_POWER_HERB') }), 'MOVE_SHELL_SMASH')).toBe(6)
   })
 })
 
@@ -2121,15 +2152,15 @@ describe('EFFECT_GEOMANCY -> EFFECT_QUIVER_DANCE fallthrough (:3637-3644)', () =
     expect(effectDelta(mkState(dancer, foe), 'MOVE_GEOMANCY')).toBe(6)
   })
   it('Geomancy with a Power Herb gets BOTH the +10 and the stat-up scores (+16); Quiver Dance ignores the herb', () => {
-    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_GEOMANCY')).toBe(16)
-    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_QUIVER_DANCE')).toBe(6)
+    expect(effectDelta(mkState({ ...dancer, itemId: readsAs('HOLD_EFFECT_POWER_HERB') }, foe), 'MOVE_GEOMANCY')).toBe(16)
+    expect(effectDelta(mkState({ ...dancer, itemId: readsAs('HOLD_EFFECT_POWER_HERB') }, foe), 'MOVE_QUIVER_DANCE')).toBe(6)
   })
   it('the +10 needs the target NOT to be able to KO the AI (a 1-HP attacker facing Tackle scores 0: the stat-ups bail too)', () => {
-    expect(effectDelta(mkState({ ...dancer, hp: 1, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_GEOMANCY')).toBe(0)
+    expect(effectDelta(mkState({ ...dancer, hp: 1, itemId: readsAs('HOLD_EFFECT_POWER_HERB') }, foe), 'MOVE_GEOMANCY')).toBe(0)
   })
-  it('names the holdEffects[] param-vs-enum quirk when a herb is held', () => {
-    const r = aiCheckViability(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe)(), 0, 1, 'MOVE_GEOMANCY', 100, deps)
-    expect(r.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
+  it('no longer names a holdEffects[] param-vs-enum gap when a herb is held', () => {
+    const r = aiCheckViability(mkState({ ...dancer, itemId: readsAs('HOLD_EFFECT_POWER_HERB') }, foe)(), 0, 1, 'MOVE_GEOMANCY', 100, deps)
+    expect(r.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(false)
   })
 })
 
@@ -2236,11 +2267,15 @@ describe('EFFECT_BUG_BITE / EFFECT_INCINERATE (:3715-3726) -- ItemId_GetPocket =
   it('Sticky Hold is suppressed by a Mold Breaker attacker (BattlerHasAbility(..., TRUE))', () => {
     expect(effectDeltaWith(moldBreaker, mkState({}, { itemId: 'ITEM_SITRUS_BERRY', abilities: ab('ABILITY_STICKY_HOLD') }), 'MOVE_BUG_BITE')).toBe(3)
   })
-  it('Incinerate: +3 against a berry OR a Gem (HOLD_EFFECT_GEMS), 0 against other items', () => {
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY' }), 'MOVE_INCINERATE')).toBe(3)
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_NORMAL_GEM' }), 'MOVE_INCINERATE')).toBe(3)
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_INCINERATE')).toBe(0)
-    expect(effectDelta(mkState({}, { itemId: 'ITEM_NORMAL_GEM' }), 'MOVE_BUG_BITE'), 'Bug Bite has no Gem clause').toBe(0)
+  it('Incinerate (:3724): +3 against a berry OR an item whose param is the HOLD_EFFECT_GEMS id (10), 0 against others', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_SITRUS_BERRY' }), 'MOVE_INCINERATE')).toBe(3) // berry pocket
+    expect(effectDelta(mkState({}, { itemId: readsAs('HOLD_EFFECT_GEMS') }), 'MOVE_INCINERATE')).toBe(3)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_ABILITY_CAPSULE' }), 'MOVE_INCINERATE')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: readsAs('HOLD_EFFECT_GEMS') }), 'MOVE_BUG_BITE'), 'Bug Bite has no Gem clause').toBe(0)
+  })
+  it('Incinerate: Leftovers (param 10) reads as a Gem, and the real Normal Gem (param 50) does not', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_INCINERATE')).toBe(3)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_NORMAL_GEM' }), 'MOVE_INCINERATE')).toBe(0)
   })
   it('a data context with no grouping for the held item reads as not-a-berry and says so', () => {
     const noGrouping: AiDamageDeps = { ...deps, dataContext: { ...dataContext, item: (id) => ({ ...(itemsById.get(id) as SimItemData), grouping: undefined }) } }
@@ -2264,13 +2299,13 @@ describe('terrain moves (:3730-3738) -- Electric/Misty fall through into the Gra
     expect(effectDelta(mkState(), id)).toBe(2)
     expect(effectDelta(mkState({}, {}, yawn), id)).toBe(12)
     expect(effectDeltaWith(ungroundedAttacker, mkState({}, {}, yawn), id), 'yawning but airborne').toBe(2)
-    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }), id)).toBe(4)
-    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }, {}, yawn), id), 'both bonuses stack').toBe(14)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_TERRAIN_EXTENDER') }), id)).toBe(4)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_TERRAIN_EXTENDER') }, {}, yawn), id), 'both bonuses stack').toBe(14)
   })
   it.each(['MOVE_GRASSY_TERRAIN', 'MOVE_PSYCHIC_TERRAIN'])('%s: +2 and the Extender +2, but no yawn bonus', (id) => {
     expect(effectDelta(mkState(), id)).toBe(2)
     expect(effectDelta(mkState({}, {}, yawn), id)).toBe(2)
-    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }), id)).toBe(4)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_TERRAIN_EXTENDER') }), id)).toBe(4)
   })
 })
 
@@ -2444,9 +2479,10 @@ describe('EFFECT_HEAL_BLOCK (:3823-3829)', () => {
     expect(block(SLOW, {}, 'MOVE_RECOVER')).toBe(0)
     expect(block(SLOW, moves('MOVE_ROOST'), 'MOVE_RECOVER')).toBe(2)
     expect(block(FAST, moves('MOVE_ROOST'), 'MOVE_TACKLE')).toBe(2)
-    expect(block(SLOW, { itemId: 'ITEM_LEFTOVERS' }, null)).toBe(2)
-    expect(block(SLOW, { itemId: 'ITEM_BLACK_SLUDGE', types: ['POISON', 'MYSTERY', 'MYSTERY'] }, null)).toBe(2)
-    expect(block(SLOW, { itemId: 'ITEM_BLACK_SLUDGE' }, null), 'Black Sludge on a non-Poison type').toBe(0)
+    expect(block(SLOW, { itemId: readsAs('HOLD_EFFECT_LEFTOVERS') }, null)).toBe(2)
+    expect(block(SLOW, { itemId: 'ITEM_LEFTOVERS' }, null), 'the real Leftovers has param 10, not 21').toBe(0)
+    expect(block(SLOW, { itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE'), types: ['POISON', 'MYSTERY', 'MYSTERY'] }, null)).toBe(2)
+    expect(block(SLOW, { itemId: readsAs('HOLD_EFFECT_BLACK_SLUDGE') }, null), 'Black Sludge on a non-Poison type').toBe(0)
   })
   it('RNG (:3824): GetWhoStrikesFirst is the FIRST operand, so a speed tie draws even with no predicted move', () => {
     const c = countingRng(0)
@@ -2597,14 +2633,14 @@ describe('EFFECT_TOXIC_THREAD (:3893-3896)', () => {
 
 describe('EFFECT_TWO_TURNS_ATTACK / SKULL_BASH / SOLARBEAM (:3897-3903)', () => {
   it.each(['EFFECT_TWO_TURNS_ATTACK', 'EFFECT_SKULL_BASH'])('%s: +2 holding a Power Herb, else 0', (effect) => {
-    expect(synDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), effect)).toBe(2)
+    expect(synDelta(mkState({ itemId: readsAs('HOLD_EFFECT_POWER_HERB') }), effect)).toBe(2)
     expect(synDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }), effect)).toBe(0)
     expect(synDelta(mkState(), effect)).toBe(0)
   })
   it('Solar Beam: +2 with a Power Herb OR Chloroplast, never +4', () => {
-    expect(effectDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_POWER_HERB') }), 'MOVE_SOLAR_BEAM')).toBe(2)
     expect(effectDelta(mkState({ abilities: ab('ABILITY_CHLOROPLAST') }), 'MOVE_SOLAR_BEAM')).toBe(2)
-    expect(effectDelta(mkState({ itemId: 'ITEM_POWER_HERB', abilities: ab('ABILITY_CHLOROPLAST') }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_POWER_HERB'), abilities: ab('ABILITY_CHLOROPLAST') }), 'MOVE_SOLAR_BEAM')).toBe(2)
     expect(effectDelta(mkState(), 'MOVE_SOLAR_BEAM')).toBe(0)
   })
 })
@@ -2859,5 +2895,190 @@ describe('getMoveDamageResult RNG stream (battle_ai_util.c:822-833)', () => {
     const c = countingRng()
     getMoveDamageResult(stateWithRng(c.rng, moves('MOVE_SWORDS_DANCE')), 0, 1, 'MOVE_TACKLE', 0, deps)
     expect(c.calls()).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// battle_ai_main.c:216 quirk: AI_DATA->holdEffects[] is the held item's PARAM, so `== HOLD_EFFECT_X`
+// compares that param with X's numeric enum id. Real items' params (items.json holdEffectStrength):
+// Choice Band/Scarf, Power Herb, Mental Herb, Focus Sash, Protective Pads, Smooth Rock, Terrain
+// Extender, Rocky Helmet, Iron Ball, Lagging Tail, Sticky Barb, Lum/White Herb all 0; Big Root and
+// Flame Plate 30; Leftovers/Oran Berry 10; Muscle Band 15; Power Anklet 16; Assault Vest and Normal
+// Gem 50. Enum ids (holdEffectIds.json): NONE 0, GEMS 10, POWER_HERB 15, RESTORE_STATS 16,
+// CHOICE_BAND 28, CHOICE_SCARF 30, TERRAIN_EXTENDER 50, PROTECTIVE_PADS 46.
+// ---------------------------------------------------------------------------
+describe('AI_CheckViability -- holdEffects[] is an item param, not a hold effect', () => {
+  for (const [id, param] of [
+    ['ITEM_POWER_ANKLET', 16], ['ITEM_ASSAULT_VEST', 50], ['ITEM_LUM_BERRY', 0], ['ITEM_IRON_BALL', 0], ['ITEM_LAGGING_TAIL', 0],
+    ['ITEM_STICKY_BARB', 0], ['ITEM_LIECHI_BERRY', 4], ['ITEM_FLAME_PLATE', 30],
+  ] as const) {
+    if ((itemsById.get(id)?.holdEffectStrength ?? 0) !== param) throw new Error(`${id} holdEffectStrength is no longer ${param}`)
+  }
+  for (const [name, id] of [['HOLD_EFFECT_RESTORE_STATS', 16], ['HOLD_EFFECT_PROTECTIVE_PADS', 46], ['HOLD_EFFECT_ATTACK_UP', 87], ['HOLD_EFFECT_DEEP_SEA_TOOTH', 4]] as const) {
+    if (holdEffectIds[name] !== id) throw new Error(`${name} is no longer ${id}`)
+  }
+  const trick = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}) => mkState(a, d)
+
+  it(':2586 HOLD_EFFECT_CHOICE(): a real Choice Scarf is not choice-locked, an item with param 30 (Big Root) is', () => {
+    const at = (itemId: string | null) => stateWithAttackerParty({ itemId, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] }, { types: ['GHOST', 'MYSTERY', 'MYSTERY'] })
+    const none = check(at(null), 'MOVE_TACKLE', 100).score
+    expect(check(at('ITEM_CHOICE_SCARF'), 'MOVE_TACKLE', 100).score).toBe(none)
+    expect(check(at('ITEM_BIG_ROOT'), 'MOVE_TACKLE', 100).score).toBe(none - 20) // Normal vs Ghost: AI_CheckBadMove scores 80, so -20
+  })
+
+  it(':3439 Trick/Bestow: the CHOICE_SCARF arm (+2) fires for a param-30 item; the real Choice Scarf falls to the outer default', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_BIG_ROOT' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_PLATE' }), 'MOVE_BESTOW')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SCARF' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_TRICK')).toBe(0) // holding an item: the target-item default is skipped
+    expect(effectDelta(trick({}, { itemId: 'ITEM_BIG_ROOT' }), 'MOVE_TRICK')).toBe(1) // itemless attacker: the inner switch has no CHOICE_SCARF case, so param 30 takes `default: score++`
+  })
+
+  it(':3485 Trick, itemless attacker: a real Choice Band target (param 0) falls to the inner default (+1), not the CHOICE_BAND arm (0)', () => {
+    expect(effectDelta(trick({}, { itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_TRICK')).toBe(1)
+  })
+
+  it('battle_ai_util.c:2130 ShouldFakeOut: the real Choice Band (param 0) is not a Choice Band, so nothing to switch to does not stop the +16', () => {
+    const fo = (itemId: string) => () => {
+      const s = state({ itemId, ...FAST }, {}, repeating(RNG_HIGH))
+      return s
+    }
+    expect(effectDelta(fo('ITEM_CHOICE_BAND'), 'MOVE_FAKE_OUT')).toBe(16)
+    expect(effectDelta(fo(readsAs('HOLD_EFFECT_CHOICE_BAND')), 'MOVE_FAKE_OUT')).toBe(0)
+  })
+
+  it(':3752-3754 Magic Room: the NONE term fires for a param-0 item (Focus Sash) and not for a param-10 one (Leftovers)', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_FOCUS_SASH' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_MAGIC_ROOM')).toBe(1)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_FOCUS_SASH' }), 'MOVE_MAGIC_ROOM')).toBe(1) // defender param 0 counts as NONE
+  })
+
+  it(':3807 Embargo: the real Focus Sash (param 0) reads as no item', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_FOCUS_SASH' }), 'MOVE_EMBARGO')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_EMBARGO')).toBe(1)
+  })
+
+  it(':3638/:3899/:3902 Power Herb: the real Power Herb (param 0) earns nothing, Muscle Band (param 15) earns +2 / +10', () => {
+    for (const effect of ['EFFECT_TWO_TURNS_ATTACK', 'EFFECT_SKULL_BASH']) {
+      expect(synDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), effect), effect).toBe(0)
+      expect(synDelta(mkState({ itemId: 'ITEM_MUSCLE_BAND' }), effect), effect).toBe(2)
+    }
+    expect(effectDelta(mkState({ itemId: 'ITEM_POWER_HERB' }), 'MOVE_SOLAR_BEAM')).toBe(0)
+    expect(effectDelta(mkState({ itemId: 'ITEM_MUSCLE_BAND' }), 'MOVE_SOLAR_BEAM')).toBe(2)
+    const dancer = { ...SLOW, ...moves('MOVE_WATER_GUN') }
+    const foe = moves('MOVE_WATER_GUN')
+    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_POWER_HERB' }, foe), 'MOVE_GEOMANCY')).toBe(6)
+    expect(effectDelta(mkState({ ...dancer, itemId: 'ITEM_MUSCLE_BAND' }, foe), 'MOVE_GEOMANCY')).toBe(16)
+  })
+
+  it(':3652 Shell Smash: the real White Herb (param 0) earns nothing, Power Anklet (param 16 = RESTORE_STATS) earns +3', () => {
+    const atk = { ...SLOW, ...moves('MOVE_WATER_GUN', 'MOVE_TACKLE') }
+    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_WHITE_HERB' }), 'MOVE_SHELL_SMASH')).toBe(6)
+    expect(effectDelta(mkState({ ...atk, itemId: 'ITEM_POWER_ANKLET' }), 'MOVE_SHELL_SMASH')).toBe(9)
+  })
+
+  it(':3024/:3043 Disable/Encore: the real Mental Herb (param 0) does not block the reward', () => {
+    const s = () => {
+      const st = state({}, { itemId: 'ITEM_MENTAL_HERB' })
+      st.battlers[1]!.lastMove = 'MOVE_TOXIC'
+      return st
+    }
+    expect(check(s(), 'MOVE_ENCORE', 100).score).toBe(103)
+  })
+
+  it(':3096 Thief: the real Choice Band (param 0) is NONE-like only via param 0, so it takes the NONE arm (0), not the Choice arm (+2)', () => {
+    expect(check(state({ itemId: null }, { itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_THIEF', 100).score).toBe(100)
+    expect(check(state({ itemId: null }, { itemId: readsAs('HOLD_EFFECT_CHOICE_BAND') }), 'MOVE_THIEF', 100).score).toBe(102)
+  })
+
+  it(':3560 Knock Off: real Iron Ball / Lagging Tail / Sticky Barb (param 0) all take the default +3', () => {
+    const ko = (itemId: string) => mkState({}, { itemId })
+    for (const id of ['ITEM_IRON_BALL', 'ITEM_LAGGING_TAIL', 'ITEM_STICKY_BARB']) expect(effectDelta(ko(id), 'MOVE_KNOCK_OFF'), id).toBe(3)
+  })
+
+  it(':3519 Ingrain: the real Big Root (param 30) scores +1, not +3', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_BIG_ROOT' }), 'MOVE_INGRAIN')).toBe(1)
+    expect(effectDelta(mkState({ itemId: readsAs('HOLD_EFFECT_BIG_ROOT') }), 'MOVE_INGRAIN')).toBe(3)
+  })
+
+  it(':2639 / :2881 Big Root: only a param-13 item adds +1 to Absorb-family and Recover', () => {
+    const giga = (itemId: string | null) => mkState({ itemId, moves: ['MOVE_GIGA_DRAIN', null, null, null] })
+    expect(effectDelta(giga(readsAs('HOLD_EFFECT_BIG_ROOT')), 'MOVE_GIGA_DRAIN') - effectDelta(giga(null), 'MOVE_GIGA_DRAIN')).toBe(1)
+    expect(effectDelta(giga('ITEM_BIG_ROOT'), 'MOVE_GIGA_DRAIN') - effectDelta(giga(null), 'MOVE_GIGA_DRAIN')).toBe(0)
+    const rec = (itemId: string | null) => mkState({ itemId })
+    expect(effectDelta(rec(readsAs('HOLD_EFFECT_BIG_ROOT')), 'MOVE_RECOVER') - effectDelta(rec(null), 'MOVE_RECOVER')).toBe(1)
+    expect(effectDelta(rec('ITEM_BIG_ROOT'), 'MOVE_RECOVER') - effectDelta(rec(null), 'MOVE_RECOVER')).toBe(0)
+  })
+
+  it('weather rocks: the real Smooth Rock (param 0) adds nothing inside the branch', () => {
+    const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    expect(check(state({ ...rock, itemId: 'ITEM_SMOOTH_ROCK' }), 'MOVE_SANDSTORM').score).toBe(101)
+  })
+
+  it('terrain setup: the real Terrain Extender (param 0) adds nothing, Assault Vest (param 50) adds +2', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_TERRAIN_EXTENDER' }), 'MOVE_GRASSY_TERRAIN')).toBe(2)
+    expect(effectDelta(mkState({ itemId: 'ITEM_ASSAULT_VEST' }), 'MOVE_GRASSY_TERRAIN')).toBe(4)
+  })
+
+  it(':3194 IsPinchBerryItemEffect(param): Endure rewards a param-87 item, not the real Liechi Berry (param 4)', () => {
+    const endure = (itemId: string) => mkState({ hp: 100, maxHp: 100, itemId, rawStats: { atk: 100, def: 1, spatk: 80, spdef: 1, spe: 1 } }, { rawStats: { atk: 999, def: 90, spatk: 80, spdef: 85, spe: 999 } })
+    expect(effectDelta(endure(readsAs('HOLD_EFFECT_ATTACK_UP')), 'MOVE_ENDURE') - effectDelta(endure('ITEM_LIECHI_BERRY'), 'MOVE_ENDURE')).toBe(3)
+  })
+
+  it('IncreaseConfusionScore (util:2737): a real Lum Berry (param 0) does not read as a cure item, so Swagger still scores its confusion +2', () => {
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LUM_BERRY' }), 'MOVE_SWAGGER')).toBe(2)
+    expect(effectDelta(mkState({}, { itemId: readsAs('HOLD_EFFECT_CURE_STATUS') }), 'MOVE_SWAGGER')).toBe(0)
+  })
+
+  it('AI_MoveMakesContact (:2845, util:2773): needs Long Reach and not a param-46 item; the real Protective Pads (param 0) does not stop the -2', () => {
+    const hit = (itemId: string | null) => mkState({ abilities: ab('ABILITY_LONG_REACH'), moves: ['MOVE_FURY_ATTACK', null, null, null], itemId }, { itemId: readsAs('HOLD_EFFECT_ROCKY_HELMET') })
+    expect(effectDelta(hit(null), 'MOVE_FURY_ATTACK')).toBe(-2)
+    expect(effectDelta(hit('ITEM_PROTECTIVE_PADS'), 'MOVE_FURY_ATTACK')).toBe(-2)
+    expect(effectDelta(hit(readsAs('HOLD_EFFECT_PROTECTIVE_PADS')), 'MOVE_FURY_ATTACK')).toBe(0)
+    // Rocky Helmet on the defender is itself read by param: the real one (0) is not it.
+    const realHelmet = mkState({ abilities: ab('ABILITY_LONG_REACH'), moves: ['MOVE_FURY_ATTACK', null, null, null] }, { itemId: 'ITEM_ROCKY_HELMET' })
+    expect(effectDelta(realHelmet, 'MOVE_FURY_ATTACK')).toBe(0)
+  })
+
+  it(':2818 / :2904 Utility Umbrella (Growth, Rest+Hydration): a param-129 item cancels the sun/rain term, the real Utility Umbrella (param 0) does not', () => {
+    const growth = (itemId: string) => check(setWeather(state({ itemId, moves: ['MOVE_GROWTH', null, null, null] }), WEATHER_SUN_TEMPORARY), 'MOVE_GROWTH', 100).score
+    expect(growth('ITEM_UTILITY_UMBRELLA') - growth(readsAs('HOLD_EFFECT_UTILITY_UMBRELLA'))).toBe(1)
+    const fast = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 999 }, abilities: ab('ABILITY_HYDRATION') }
+    const weak = { rawStats: { atk: 1, def: 90, spatk: 1, spdef: 85, spe: 1 } }
+    const rest = (itemId: string) => {
+      const s = state({ hp: 50, maxHp: 100, ...fast, itemId }, weak, repeating(1))
+      s.field.weather = WEATHER_RAIN_ANY
+      s.field.weatherDuration = 2
+      return check(s, 'MOVE_REST', 100).score
+    }
+    expect(rest('ITEM_UTILITY_UMBRELLA') - rest(readsAs('HOLD_EFFECT_UTILITY_UMBRELLA'))).toBe(1)
+  })
+
+  it(':2900 Rest: a param-73 item (CURE_SLP) adds the wakeup +1, the real Chesto Berry (param 0) does not', () => {
+    const fast = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 999 } }
+    const weak = { rawStats: { atk: 1, def: 90, spatk: 1, spdef: 85, spe: 1 } }
+    const rest = (itemId: string) => check(state({ hp: 50, maxHp: 100, ...fast, itemId }, weak, repeating(1)), 'MOVE_REST', 100).score
+    expect(rest(readsAs('HOLD_EFFECT_CURE_SLP')) - rest('ITEM_CHESTO_BERRY')).toBe(1)
+    expect(rest(readsAs('HOLD_EFFECT_CURE_STATUS')) - rest('ITEM_LUM_BERRY')).toBe(1)
+  })
+
+  it(':2892 Light Clay and :2930 Scope Lens: only a param match scores, the real items (param 0) do not', () => {
+    const screen = (itemId: string) => check(state({ itemId }, { moves: ['MOVE_EMBER', null, null, null] }), 'MOVE_LIGHT_SCREEN', 100).score
+    expect(screen(readsAs('HOLD_EFFECT_LIGHT_CLAY')) - screen('ITEM_LIGHT_CLAY')).toBe(2)
+    const focus = (itemId: string) => check(state({ itemId }), 'MOVE_FOCUS_ENERGY', 100).score
+    expect(focus(readsAs('HOLD_EFFECT_SCOPE_LENS')) - focus('ITEM_SCOPE_LENS')).toBe(2)
+  })
+
+  it('ShouldPivot (util:1907-1950): a param-23 defender item is a Focus Sash for the pivot, the real Focus Sash (param 0) is not', () => {
+    const dmg = aiCalcDamage(stateWithAttackerParty(FAST, {}), 'MOVE_TACKLE', 0, 1, deps).dmg
+    const hp = dmg + 1 // one Tackle cannot KO from full, two can
+    const u = (itemId: string | null) => () => {
+      const s = stateWithAttackerParty({ ...FAST, hp: 999, maxHp: 999 }, { hp, maxHp: hp, itemId })
+      return s
+    }
+    // AI goes first, cannot KO now but can in 2 hits, the target cannot KO it: PIVOT (+7) only when the sash/sturdy check
+    // passes, otherwise the block falls out to DONT_PIVOT (-10).
+    expect(effectDelta(u(readsAs('HOLD_EFFECT_FOCUS_SASH')), 'MOVE_U_TURN')).toBe(7)
+    expect(effectDelta(u('ITEM_FOCUS_SASH'), 'MOVE_U_TURN')).toBe(-10)
+    expect(effectDelta(u(null), 'MOVE_U_TURN')).toBe(-10)
   })
 })
