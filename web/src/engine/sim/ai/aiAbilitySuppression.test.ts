@@ -20,6 +20,7 @@ import { aiCheckBadMove } from './aiCheckBadMove'
 import { isAbilityOnField, isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiAbilityHelpers'
 import { aiCheckViability } from './aiCheckViability'
 import { isAbilityPreventingEscape } from './aiPipeline'
+import { getMoveDamageResult, MOVE_POWER_WEAK } from './aiScorers'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -365,5 +366,78 @@ describe('isAbilityPreventingEscape reads the opposing trap ability through IsSu
     const s = state({}, { abilities: ability(SHADOW_TAG), itemId: 'ITEM_ABILITY_SHIELD' })
     gastroAcid(s, DEF)
     expect(gaps(s)).toBe(1)
+  })
+})
+
+describe('whichMoveBetter hurt-back abilities (battle_ai_util.c:768-777) under suppression, via getMoveDamageResult', () => {
+  const specialHit = rawMoves.find((m) => m.split === 'SPECIAL' && (m.power ?? 0) > 0 && (m.effect == null || m.effect === 'EFFECT_HIT'))?.id as string
+  if (!specialHit) throw new Error('no plain special damaging move in the snapshot')
+  const HURT_BACK = ['ABILITY_IRON_BARBS', 'ABILITY_ROUGH_SKIN', 'ABILITY_DOUBLE_IRON_BARBS']
+  for (const id of HURT_BACK) if (!hooks[id] || isUnsuppressable(id)) throw new Error(`${id} is missing or unsuppressable`)
+  // A 1-HP target caps both moves' damage at the same hpCeiling, forcing the WhichMoveBetter tie-break.
+  const tie = (foeAbility: string | null, extra: Partial<SimBattleMon> = {}) =>
+    state({ moves: ['MOVE_TACKLE', specialHit, null, null] }, { hp: 1, maxHp: 100, abilities: { ability: foeAbility, innates: [null, null, null] }, ...extra })
+  const tackle = (s: BattleState, d: AiDamageDeps = deps) => getMoveDamageResult(s, ATK, DEF, 'MOVE_TACKLE', 0, d).result
+
+  it('baseline: every hurt-back ability makes the AI rank the physical move below the special one', () => {
+    for (const id of HURT_BACK) expect(tackle(tie(id))).toBe(MOVE_POWER_WEAK)
+  })
+
+  it('without a hurt-back ability the tie is a coin flip and the physical move is never WEAK', () => {
+    expect(tackle(tie(null))).toBeLessThan(MOVE_POWER_WEAK)
+  })
+
+  it('Gastro Acid on the target suppresses each hurt-back ability', () => {
+    for (const id of HURT_BACK) {
+      const s = tie(id)
+      gastroAcid(s, DEF)
+      expect(tackle(s)).toBeLessThan(MOVE_POWER_WEAK)
+    }
+  })
+
+  it('Neutralizing Gas suppresses each hurt-back ability', () => {
+    for (const id of HURT_BACK) {
+      const s = tie(id)
+      neutralizingGas(s)
+      expect(tackle(s)).toBeLessThan(MOVE_POWER_WEAK)
+    }
+  })
+
+  it('an Ability Shield on the target keeps the ability under Gastro Acid and Neutralizing Gas', () => {
+    const ga = tie('ABILITY_IRON_BARBS', { itemId: 'ITEM_ABILITY_SHIELD' })
+    gastroAcid(ga, DEF)
+    expect(tackle(ga)).toBe(MOVE_POWER_WEAK)
+    const ng = tie('ABILITY_ROUGH_SKIN', { itemId: 'ITEM_ABILITY_SHIELD' })
+    neutralizingGas(ng)
+    expect(tackle(ng)).toBe(MOVE_POWER_WEAK)
+  })
+
+  it('Mold Breaker does not suppress them (they are not breakable)', () => {
+    expect(tackle(tie('ABILITY_IRON_BARBS'), mbDeps)).toBe(MOVE_POWER_WEAK)
+  })
+})
+
+describe('doesBattlerIgnoreAbilityChecks Ability Shield early return (battle_ai_util.c:1046-1052)', () => {
+  const DAMP = 'ABILITY_DAMP'
+  const explosion = (d: Partial<SimBattleMon>, deps_: AiDamageDeps) => bad(state({}, d), 'MOVE_EXPLOSION', deps_)
+  const noDamp = bad(state({}, {}), 'MOVE_EXPLOSION')
+  const dampPenalised = bad(state({}, { abilities: ability(DAMP) }), 'MOVE_EXPLOSION')
+
+  it('the fixture separates the two outcomes (Damp penalises Explosion)', () => {
+    expect(dampPenalised).toBeLessThan(noDamp)
+  })
+
+  it('a Mold Breaker attacker ignores the defender Damp', () => {
+    expect(explosion({ abilities: ability(DAMP) }, mbDeps)).toBe(noDamp)
+  })
+
+  it('a defender holding an Ability Shield is never ignored, so Damp still penalises Explosion', () => {
+    expect(explosion({ abilities: ability(DAMP), itemId: 'ITEM_ABILITY_SHIELD' }, mbDeps)).toBe(dampPenalised)
+  })
+
+  it('Embargo cancels the shield, so Mold Breaker ignores Damp again', () => {
+    const s = state({}, { abilities: ability(DAMP), itemId: 'ITEM_ABILITY_SHIELD' })
+    embargo(s, DEF)
+    expect(bad(s, 'MOVE_EXPLOSION', mbDeps)).toBe(noDamp)
   })
 })
