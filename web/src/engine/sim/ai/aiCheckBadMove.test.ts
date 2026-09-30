@@ -51,6 +51,7 @@ import {
   aiCheckBadMove,
   isBattlerTrapped,
   MOLD_BREAKABLE_ABILITIES,
+  SOUNDPROOF_ABILITIES,
   ON_STAT_LOWERED_ABILITIES,
   SUCTION_CUPS_ABILITIES,
   ALWAYS_SLEEPING_ABILITIES,
@@ -412,6 +413,22 @@ describe('AI_CheckBadMove part 1 -- move effect switch', () => {
   it('EFFECT_PERISH_SONG: -10 when the attacker has no usable party mons and the target does', () => {
     const s = state()
     expect(check(s, 'MOVE_PERISH_SONG').score).toBe(100) // both sides have 0 usable party mons here -- neither branch fires
+  })
+
+  it('EFFECT_PERISH_SONG: the attacker-side IsSoundproof covers every isSoundproof ability (battle_util.c:8864-8866)', () => {
+    // The foe-side read (:1296) is not observable: a Soundproof/Noise Cancel foe already triggers the
+    // earlier ability-immunity RETURN_SCORE_MINUS(20), and a Mold Breaker attacker breaks both reads.
+    // Attacker has no usable party, defender has one: the first branch (:1294) fires (-10).
+    const ab = (id: string) => ({ abilities: { ability: id, innates: [null, null, null] as [null, null, null] } })
+    expect(check(stateWithDefenderParty(), 'MOVE_PERISH_SONG').score).toBe(90)
+    // :1294 !IsSoundproof(battlerAtk): a Noise Cancel attacker skips the first penalty.
+    expect(check(stateWithDefenderParty(ab('ABILITY_NOISE_CANCEL')), 'MOVE_PERISH_SONG').score).toBe(100)
+  })
+
+  it('SOUNDPROOF_ABILITIES matches every abilityHooks.json ability whose bitfields.isSoundproof is set', () => {
+    const parsed = JSON.parse(readFileSync(join(DATA_DIR, 'abilityHooks.json'), 'utf8')) as Record<string, { bitfields?: Record<string, unknown> }>
+    const expected = Object.entries(parsed).filter(([, h]) => !!h.bitfields?.isSoundproof).map(([id]) => id).sort()
+    expect([...SOUNDPROOF_ABILITIES].sort()).toEqual(expected)
   })
 
   it('EFFECT_SANDSTORM (now real, cycle17): unchanged with no weather active, -8 when Sandstorm is already up', () => {

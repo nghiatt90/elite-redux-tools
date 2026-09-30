@@ -699,7 +699,7 @@ function increaseStatUpScore(state: BattleState, battlerAtk: number, battlerDef:
   unmodelled.push(...canFaint.unmodelled)
   if (canFaint.canFaint) return score
 
-  if (defAbility(state, deps, attacker, 'ABILITY_CONTRARY', atkMoldBreaker) || (isUnaware(state, deps, defender, atkMoldBreaker) && statId !== STAT_SPEED)) return score
+  if (selfAbility(state, deps, attacker, 'ABILITY_CONTRARY') || (isUnaware(state, deps, defender, atkMoldBreaker) && statId !== STAT_SPEED)) return score
 
   const atkHp = getHealthPercentage(state, battlerAtk)
   if (atkHp < 80 && aiRandLessThan(state, 128)) return score
@@ -3288,10 +3288,10 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_RECHARGE': {
       if (
-        defAbility(state, deps, attacker, 'ABILITY_RAMPAGE', atkMoldBreaker) ||
-        defAbility(state, deps, attacker, 'ABILITY_BERSERKER_RAGE', atkMoldBreaker) ||
-        defAbility(state, deps, attacker, 'ABILITY_RAGING_GODDESS', atkMoldBreaker) ||
-        defAbility(state, deps, attacker, 'ABILITY_MASTER_HAND', atkMoldBreaker)
+        selfAbility(state, deps, attacker, 'ABILITY_RAMPAGE') ||
+        selfAbility(state, deps, attacker, 'ABILITY_BERSERKER_RAGE') ||
+        selfAbility(state, deps, attacker, 'ABILITY_RAGING_GODDESS') ||
+        selfAbility(state, deps, attacker, 'ABILITY_MASTER_HAND')
       ) {
         const faints = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faints.unmodelled)

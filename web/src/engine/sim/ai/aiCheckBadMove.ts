@@ -304,6 +304,10 @@ export const MOLD_BREAKABLE_ABILITIES: readonly string[] = [
 ]
 const MOLD_BREAKABLE_SET = new Set(MOLD_BREAKABLE_ABILITIES)
 
+/** Every `abilityHooks.json` ability with `bitfields.isSoundproof` (IsSoundproof's
+ * `gAbilities[ability].isSoundproof`); both have `onImmuneFor` unset. Pinned by an oracle test. */
+export const SOUNDPROOF_ABILITIES: readonly string[] = ['ABILITY_NOISE_CANCEL', 'ABILITY_SOUNDPROOF']
+
 /** Every ability whose `abilityHooks.json` `bitfields.unsuppressable` is TRUE --
  * `IsUnsuppressableAbility`, battle_util.c:4788 (`gAbilities[ability].
  * unsuppressable`). Gates the Gastro Acid / Neutralizing Gas half of
@@ -1244,7 +1248,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     // :727-730 -- Anticipation. GetSingleUseAbilityCounter has no state
     // anywhere in this codebase (turn.ts's own admission) -- gapped
     // wholesale whenever the defender holds the ability.
-    if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', false)) {
+    if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', atkMoldBreaker)) {
       unmodelled.push('AI_CheckBadMove: Anticipation (battle_ai_main.c:727-730) needs GetSingleUseAbilityCounter, which has no state anywhere in this codebase (same admission as turn.ts\'s own header); not scored')
     }
 
@@ -1706,13 +1710,16 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_PERISH_SONG': {
       // Doubles branch (:1282-1292) is dead code in singles -- only the else
       // branch (:1293-1297) is reachable.
-      if (countUsablePartyMons(state, battlerAtk) === 0 && !selfAbility(state, deps, attacker, 'ABILITY_SOUNDPROOF') && countUsablePartyMons(state, battlerDef) >= 1) {
+      // IsSoundproof (battle_util.c:8864-8866): ON_ABILITY(battler, TRUE, isSoundproof) -- every
+      // isSoundproof ability, read with checkMoldBreaker TRUE. The attacker's own read follows
+      // this file's attacker-side policy (selfAbility); the foe's is a defender read. The
+      // partner scan never fires in singles.
+      if (countUsablePartyMons(state, battlerAtk) === 0 && !SOUNDPROOF_ABILITIES.some((id) => selfAbility(state, deps, attacker, id)) && countUsablePartyMons(state, battlerDef) >= 1) {
         score -= 10
       }
       const foe = foeOf(battlerAtk)
       const foeBattler = state.battlers[foe]
-      if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || selfAbility(state, deps, defender, 'ABILITY_SOUNDPROOF')) score -= 10
-      unmodelled.push("AI_CheckBadMove: IsSoundproof is narrowed to a plain ABILITY_SOUNDPROOF check on the named battler (no partner-side scan, since singles has no partner)")
+      if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || SOUNDPROOF_ABILITIES.some((id) => defAbility(state, deps, defender, id, atkMoldBreaker))) score -= 10
       break
     }
     // -------------------------------------------------------------------
