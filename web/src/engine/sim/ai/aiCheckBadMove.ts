@@ -248,6 +248,27 @@ export function getBattlerHoldEffect(battler: BattlerState, deps: AiDamageDeps):
   return battler.mon.itemId ? (deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
 }
 
+/** `AI_DATA->holdEffects[battler]` / `AI_GetHoldEffect(battler)`. battle_ai_main.c:216
+ * fills it from `ItemId_GetHoldEffectParam` (`gItems[item].holdEffectParam`, u8,
+ * item.c:362), i.e. items.json's `holdEffectStrength` (0 when absent), NOT the hold
+ * effect. Compare it with `holdEffectId(...)`, never with a hold-effect name. */
+export function aiHoldEffectParam(battler: BattlerState, deps: AiDamageDeps): number {
+  return battler.mon.itemId ? (deps.dataContext.item(battler.mon.itemId)?.holdEffectStrength ?? 0) : 0
+}
+
+/** The numeric value of `HOLD_EFFECT_X` in the generated `hold_effects.h`. Every name
+ * the C uses exists there or the C would not compile, so an unknown name is a bug. */
+export function holdEffectId(name: string, deps: AiDamageDeps): number {
+  const id = deps.holdEffectIds[name]
+  if (id === undefined) throw new Error(`holdEffectIds has no ${name}`)
+  return id
+}
+
+/** `AI_DATA->holdEffects[battler] == HOLD_EFFECT_X`. */
+export function aiHoldEffectIs(battler: BattlerState, name: string, deps: AiDamageDeps): boolean {
+  return aiHoldEffectParam(battler, deps) === holdEffectId(name, deps)
+}
+
 /** Every ability whose `abilityHooks.json` `bitfields.breakable` is TRUE --
  * `IsSuppressed`'s own gate (`battle_util.c:9254-9261`,
  * `checkMoldBreaker && battler != gBattlerAttacker && HITMARKER_MOLD_BREAKER

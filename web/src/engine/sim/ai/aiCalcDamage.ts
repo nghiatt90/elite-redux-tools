@@ -42,6 +42,10 @@ export interface AiDamageDeps extends BridgeDeps {
   inverseTypeChart: TypeChart
   moveBehaviors: MoveBehaviors
   battleConstants: BattleConstants
+  /** data/<version>/holdEffectIds.json: the numeric HOLD_EFFECT_* enum
+   * (HoldEffectGenerator.kt), which the AI's `holdEffects[]` param compares
+   * against. Unknown names throw -- see `holdEffectId`. */
+  holdEffectIds: Readonly<Record<string, number>>
 }
 
 export interface AiDamageResult {

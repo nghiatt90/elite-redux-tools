@@ -29,6 +29,7 @@ const rawItems = read<Array<Record<string, any>>>('items.json')
 const itemsById = new Map(rawItems.map((i) => [i.id as string, i]))
 const abilityIds = new Set(read<Array<{ id: string }>>('abilities.json').map((a) => a.id))
 const natures = read<any>('natures.json')
+const holdEffectIds = read<Record<string, number>>('holdEffectIds.json')
 const moveBehaviors = read<any>('moveBehaviors.json').behaviors
 const chart = read<Record<string, Record<string, number>>>('types.json')
 const inverseChart = read<Record<string, Record<string, number>>>('typesInverse.json')
@@ -86,7 +87,7 @@ const dataContext: SimDataContext = {
   },
 }
 const bridge: BridgeDeps = { grounding, turnOrder: NEUTRAL_TURN_ORDER_CONTEXT, statStageRatios: natures.statStageRatios, dataContext, inverseBattle: false }
-const deps: AiDamageDeps = { ...bridge, moveData: (id) => (moveById.has(id) ? toMoveData(id) : undefined), typeChart: chart, inverseTypeChart: inverseChart, moveBehaviors, battleConstants: natures }
+const deps: AiDamageDeps = { ...bridge, moveData: (id) => (moveById.has(id) ? toMoveData(id) : undefined), typeChart: chart, inverseTypeChart: inverseChart, moveBehaviors, battleConstants: natures, holdEffectIds }
 
 function mon(overrides: Partial<SimBattleMon> = {}): SimBattleMon {
   return {
