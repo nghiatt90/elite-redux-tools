@@ -273,18 +273,24 @@ export function getMoveDamageResult(state: BattleState, battlerAtk: number, batt
     if (moveDmgs[i] > hpCeiling) moveDmgs[i] = hpCeiling
   }
 
+  // An empty slot is MOVE_NONE, whose gBattleMoves row (effect 0, power 0) WhichMoveBetter reads like any other.
+  const slotMove = (i: number) => attacker.moves[i] ?? 'MOVE_NONE'
+  const compare = (m1: string, m2: string) => {
+    if (m1 === 'MOVE_NONE' || m2 === 'MOVE_NONE') {
+      if (!deps.moveData('MOVE_NONE')) unmodelled.push('WhichMoveBetter: gBattleMoves[MOVE_NONE] is unavailable in the move data; an empty slot is read as effect 0')
+    }
+    const r = whichMoveBetter(state, battlerAtk, battlerDef, m1, m2, deps)
+    unmodelled.push(...r.unmodelled)
+    return r.result
+  }
+
   let bestId = 0
   for (let i = 1; i < moveDmgs.length; i++) {
-    if (moveDmgs[i] > moveDmgs[bestId]) {
-      bestId = i
-      continue
-    }
+    if (moveDmgs[i] > moveDmgs[bestId]) bestId = i
+    // No `continue`: the C's second `if` runs after an update too (moveDmgs[i] == moveDmgs[bestId] is then trivially true, and
+    // WhichMoveBetter(moves[i], moves[i]) returns 2, so it draws).
     if (moveDmgs[i] === moveDmgs[bestId]) {
-      const bestMoveId = attacker.moves[bestId]
-      const iMoveId = attacker.moves[i]
-      if (!bestMoveId || !iMoveId) continue
-      const { result: cmp, unmodelled: u } = whichMoveBetter(state, battlerAtk, battlerDef, bestMoveId, iMoveId, deps)
-      unmodelled.push(...u)
+      const cmp = compare(slotMove(bestId), slotMove(i))
       if (cmp === 2) {
         if (state.rng.random16() & 1) continue
         bestId = i
@@ -299,20 +305,9 @@ export function getMoveDamageResult(state: BattleState, battlerAtk: number, batt
   if (currId === bestId) {
     result = MOVE_POWER_BEST
   } else {
-    const currMoveId = attacker.moves[currId]
-    const bestMoveId = attacker.moves[bestId]
     const percentDiff = idiv(moveDmgs[bestId] * 100, hpCeiling) - idiv(moveDmgs[currId] * 100, hpCeiling)
-    let notWorse = 0
-    if (currMoveId && bestMoveId) {
-      const { result: cmp, unmodelled: u } = whichMoveBetter(state, battlerAtk, battlerDef, bestMoveId, currMoveId, deps)
-      unmodelled.push(...u)
-      notWorse = cmp
-    }
-    if ((moveDmgs[currId] >= hpCeiling || moveDmgs[bestId] < hpCeiling) && percentDiff <= 30 && notWorse !== 0) {
-      result = MOVE_POWER_GOOD
-    } else {
-      result = MOVE_POWER_WEAK
-    }
+    const notWorse = (moveDmgs[currId] >= hpCeiling || moveDmgs[bestId] < hpCeiling) && percentDiff <= 30 ? compare(slotMove(bestId), slotMove(currId)) : 0
+    result = (moveDmgs[currId] >= hpCeiling || moveDmgs[bestId] < hpCeiling) && percentDiff <= 30 && notWorse !== 0 ? MOVE_POWER_GOOD : MOVE_POWER_WEAK
   }
 
   return { result, unmodelled }

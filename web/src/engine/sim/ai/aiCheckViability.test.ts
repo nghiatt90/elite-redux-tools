@@ -66,6 +66,7 @@ import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
 import { aiCalcDamage } from './aiCalcDamage'
 import { aiCheckViability as aiCheckViabilityAt, PART2A_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
+import { getMoveDamageResult, MOVE_POWER_BEST, MOVE_POWER_GOOD } from './aiScorers'
 import { AI_ABILITY_RATINGS, getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 
 /** `movesetIndex` defaults to slot 0, the slot most fixtures score from; tests that care pass it explicitly. */
@@ -2656,10 +2657,12 @@ describe('EFFECT_METAL_BURST (:3916-3924) -- the `else score -= 10` binds to the
     expect(burst(SLOW, null)).toBe(0)
     expect(burst(SLOW, 'MOVE_TACKLE', (s) => { s.battlers[1]!.mon.status1 = STATUS1_SLEEP })).toBe(0)
   })
-  it('RNG (:3919): GetWhoStrikesFirst draws on a tie exactly once when GetMoveDamageResult qualified, and not at all when Metal Burst is the BEST move', () => {
+  it('RNG (:3919): GetWhoStrikesFirst draws on a tie once (after GetMoveDamageResult own strict-greater draw) when it qualified, and not at all when Metal Burst is the BEST move', () => {
+    // Hand derivation (battle_ai_util.c:822-833): moveDmgs = [0, X, 0, 0]. i=1: X > 0 updates bestId, and the C's second `if` still runs
+    // (WhichMoveBetter(HV, HV) == 2 -> Random() & 1): draw 1. i=2, i=3: 0 != X, no draw. Then the tie in GetWhoStrikesFirst (:3919): draw 2.
     const c = countingRng(0)
     aiCheckViability(stateWithRng(c.rng, moves('MOVE_METAL_BURST', 'MOVE_HYPER_VOICE'), {}, lastMove('MOVE_TACKLE')), 0, 1, 'MOVE_METAL_BURST', 100, deps)
-    expect(c.calls()).toBe(1)
+    expect(c.calls()).toBe(2)
     const best = countingRng()
     // A big-HP target: the buffed Metal Burst must not KO it, or the pre-switch already-dead check would draw its own speed tie.
     aiCheckViability(stateWithRng(best.rng, moves('MOVE_METAL_BURST', 'MOVE_TACKLE'), { hp: 999, maxHp: 999 }, lastMove('MOVE_TACKLE')), 0, 1, 'MOVE_METAL_BURST', 100, depsOverride('MOVE_METAL_BURST', { power: 250 }))
@@ -2819,5 +2822,32 @@ describe('AI_THINKING_STRUCT->movesetIndex is the CALLER\'s slot: threaded, and 
     expect(run(nature, 'ABILITY_MOXIE', 0, ['MOVE_TACKLE', 'MOVE_WATER_GUN']) - run(nature, null, 0, ['MOVE_TACKLE', 'MOVE_WATER_GUN'])).toBe(0)
     // Control: Thunderbolt scored from its own slot 1 does earn the +8 (the index path is live).
     expect(run(deps, 'ABILITY_MOXIE', 1, ['MOVE_TACKLE', 'MOVE_THUNDERBOLT']) - run(deps, null, 1, ['MOVE_TACKLE', 'MOVE_THUNDERBOLT'])).toBe(8)
+  })
+})
+
+describe('getMoveDamageResult RNG stream (battle_ai_util.c:822-833)', () => {
+  it('a strict-greater update still runs the tie check: WhichMoveBetter(m, m) == 2 draws exactly once', () => {
+    // moves [Tackle, Hyper Voice]: moveDmgs = [T, HV, 0, 0], HV > T. i=1: bestId=1, then the second `if` (HV == HV) draws once.
+    // i=2, i=3: 0 differs from HV's damage, no draw. Total 1.
+    const c = countingRng()
+    getMoveDamageResult(stateWithRng(c.rng, moves('MOVE_TACKLE', 'MOVE_HYPER_VOICE')), 0, 1, 'MOVE_TACKLE', 0, deps)
+    expect(c.calls()).toBe(1)
+  })
+  it('an empty slot tying at 0 damage is WhichMoveBetter(move, MOVE_NONE): both effect 0 -> 2 -> one draw per empty slot', () => {
+    // Tackle into a Ghost deals 0. moveDmgs = [0,0,0,0]. i=1: 0 == 0 -> compare(Tackle, NONE) == 2 -> draw. Same for i=2 (best may have moved to slot 1) and i=3: 3 draws.
+    const ghost = { types: ['GHOST', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    const c = countingRng()
+    getMoveDamageResult(stateWithRng(c.rng, {}, ghost), 0, 1, 'MOVE_TACKLE', 0, deps)
+    expect(c.calls()).toBe(3)
+  })
+  it('the empty-slot draws decide bestId: an even draw moves it onto the empty slot (result GOOD), an odd draw keeps slot 0 (BEST)', () => {
+    const ghost = { types: ['GHOST', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    expect(getMoveDamageResult(stateWithRng(scripted(0, 0, 0), {}, ghost), 0, 1, 'MOVE_TACKLE', 0, deps).result).toBe(MOVE_POWER_GOOD)
+    expect(getMoveDamageResult(stateWithRng(scripted(1, 1, 1), {}, ghost), 0, 1, 'MOVE_TACKLE', 0, deps).result).toBe(MOVE_POWER_BEST)
+  })
+  it('an empty slot against a status move with an effect is decided without a draw (MOVE_NONE has effect 0: WhichMoveBetter returns 0)', () => {
+    const c = countingRng()
+    getMoveDamageResult(stateWithRng(c.rng, moves('MOVE_SWORDS_DANCE')), 0, 1, 'MOVE_TACKLE', 0, deps)
+    expect(c.calls()).toBe(0)
   })
 })
