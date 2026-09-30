@@ -343,6 +343,13 @@ export interface BattlerState {
    * (multi-hit/Parental Bond sequencing is not modelled), so ppreduce's port
    * always takes the reset-to-0 branch -- see turn.ts's deductPp. */
   sameMoveTurns: number
+  /** `gBattleStruct->usedHeldItems[gBattlerPartyIndexes[b]][side]` (battle_util.c:8637,
+   * GetUsedHeldItem) -- the item this battler's mon last consumed, which Recycle
+   * restores. The C array is keyed by party slot and side; carried per battler
+   * here. Nothing in the sim writes it (item consumption is unmodelled), so
+   * absent/null means ITEM_NONE, exactly what a fresh battle reads. Optional so
+   * every existing BattlerState construction stays valid. */
+  usedHeldItem?: string | null
 }
 
 // ---------------------------------------------------------------------------

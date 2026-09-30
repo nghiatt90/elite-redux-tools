@@ -373,7 +373,7 @@ function isSemiInvulnerable(defender: BattlerState, move: ReturnType<AiDamageDep
  * is immune; Safety Goggles is a held-item exemption this port also checks
  * via resolvedHoldEffect. checkMoldBreaker is threaded through for the
  * Overcoat read (the only ability half of this check). */
-function isPowderImmune(defender: BattlerState, attackerHasMoldBreaker: boolean, deps: AiDamageDeps): boolean {
+export function isPowderImmune(defender: BattlerState, attackerHasMoldBreaker: boolean, deps: AiDamageDeps): boolean {
   if (isBattlerOfType(defender, 'GRASS')) return true
   if (defAbility(defender, 'ABILITY_OVERCOAT', attackerHasMoldBreaker)) return true
   if (getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_SAFETY_GOGGLES') return true
@@ -685,7 +685,7 @@ export function isStickyHold(defender: BattlerState, attackerHasMoldBreaker: boo
  * IsMyceliumMightActive and IsStatusImmune(CHECK_BURN) both need ability-hook
  * wiring this batch does not have -- same gap shape as part 1's canBePoisoned/
  * canSleep/canBeParalyzedBase/canBeConfused. */
-function aiCanBurn(defender: BattlerState, unmodelled: string[]): boolean {
+export function aiCanBurn(defender: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(defender.mon.status1, STATUS1_ANY)) return false
   if (isBattlerOfType(defender, 'FIRE')) return false
   unmodelled.push('AI_CanBurn/CanBeBurned: IsMyceliumMightActive is gapped (no current-move-ignores-immunity tracking) and IsStatusImmune(battlerDef, CHECK_BURN) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
@@ -693,19 +693,20 @@ function aiCanBurn(defender: BattlerState, unmodelled: string[]): boolean {
 }
 
 /** AI_CanGiveFrostbite/CanGetFrostbite, battle_ai_util.c:2086-2093 +
- * battle_util.c:5096-5104. `gVolatileStructs[battlerId].iceStatue` (a
- * Crystallize-family volatile) has no port anywhere in this sim -- treated as
- * false (the common case), gapped only when the defender is actually Ice-type
- * (the only way the missing exemption could matter). Effectiveness/Substitute
- * are re-checked the same way part 1's aiCanParalyze does for its own status. */
-function aiCanGiveFrostbite(state: BattleState, attacker: BattlerState, defender: BattlerState, moveId: string, deps: AiDamageDeps): { can: boolean; unmodelled: string[] } {
-  const unmodelled: string[] = []
-  if (hasFlag(defender.mon.status1, STATUS1_ANY)) return { can: false, unmodelled }
-  if (isBattlerOfType(defender, 'ICE')) {
-    unmodelled.push('AI_CanGiveFrostbite/CanGetFrostbite: gVolatileStructs[battlerDef].iceStatue has no port anywhere in this sim; treated as false, so an Ice-type defender is always immune here')
-    return { can: false, unmodelled }
-  }
+ * battle_util.c:5096-5104. `iceStatue` is read from the real
+ * `volatiles.iceStatue` field (an earlier revision gapped it as unported; the
+ * field exists on VolatileState, default false). IsMyceliumMightActive stays
+ * gapped, as for the other CanBe* helpers. Effectiveness/Substitute are
+ * re-checked the same way part 1's aiCanParalyze does for its own status. */
+export function canGetFrostbite(battler: BattlerState, unmodelled: string[]): boolean {
+  if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
+  if (!battler.volatiles.iceStatue && isBattlerOfType(battler, 'ICE')) return false
   unmodelled.push('AI_CanGiveFrostbite/CanGetFrostbite: IsStatusImmune(battlerDef, CHECK_FROSTBITE) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
+  return true
+}
+export function aiCanGiveFrostbite(state: BattleState, attacker: BattlerState, defender: BattlerState, moveId: string, deps: AiDamageDeps): { can: boolean; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  if (!canGetFrostbite(defender, unmodelled)) return { can: false, unmodelled }
   const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, defender.id, deps)
   unmodelled.push(...effResult.unmodelled)
   if (effResult.effectiveness === 0) return { can: false, unmodelled }
@@ -762,14 +763,14 @@ export const PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES: readonly string[] = [
 const PERSISTENT_OR_UNSUPPRESSABLE_SET = new Set(PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES)
 
 /** IsRolePlayBannedAbilityAtk, battle_util.c:8422-8425. */
-function isRolePlayBannedAbilityAtk(ability: string | null): boolean {
+export function isRolePlayBannedAbilityAtk(ability: string | null): boolean {
   return !!ability && PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability)
 }
 /** IsRolePlayBannedAbility, battle_util.c:8428-8436 -- `sRolePlayBannedAbilities`
  * (:90-95) transcribed literally (4 entries, unchanged from vanilla; Prismatic
  * Fur is this game's own addition). `!ability` (ABILITY_NONE) is also banned. */
 const ROLE_PLAY_BANNED_EXTRA = new Set(['ABILITY_TRACE', 'ABILITY_WONDER_GUARD', 'ABILITY_RECEIVER', 'ABILITY_PRISMATIC_FUR'])
-function isRolePlayBannedAbility(ability: string | null): boolean {
+export function isRolePlayBannedAbility(ability: string | null): boolean {
   if (!ability || ability === 'ABILITY_NONE') return true
   return PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ROLE_PLAY_BANNED_EXTRA.has(ability)
 }
@@ -792,7 +793,7 @@ function isEntrainmentTargetOrSimpleBeamBannedAbility(ability: string | null): b
 /** GetBattlerAbility, battle_util.c:9327 -- the primary ability SLOT only
  * (`abilities[0]`), unlike `defAbility`/`selfAbility`'s innate-inclusive
  * scans. `ABILITY_NONE` for a battler with no ability set. */
-function battlerAbility(battler: BattlerState): string {
+export function battlerAbility(battler: BattlerState): string {
   return battler.mon.abilities.ability ?? 'ABILITY_NONE'
 }
 
@@ -845,7 +846,7 @@ function terrainHasEffect(state: BattleState): boolean {
 }
 /** GetCurrentTerrain, battle_util.c:8665-8669. Returns one of the
  * STATUS_FIELD_*_TERRAIN bit values, or 0 for no terrain / Clueless on field. */
-function getCurrentTerrain(state: BattleState): number {
+export function getCurrentTerrain(state: BattleState): number {
   if (!terrainHasEffect(state)) return 0
   return state.field.statuses & STATUS_FIELD_TERRAIN_ANY
 }
@@ -855,7 +856,7 @@ function getCurrentTerrain(state: BattleState): number {
  * concept of -- gapped, defaulting to the C's own MOVE_TRI_ATTACK fallback
  * (its `sNaturePowerMoves[gBattleTerrain] == MOVE_NONE` branch), rather than
  * the specific per-location move the C would actually pick. */
-function getNaturePowerMove(state: BattleState, unmodelled: string[]): string {
+export function getNaturePowerMove(state: BattleState, unmodelled: string[]): string {
   const terrain = getCurrentTerrain(state)
   if (terrain === STATUS_FIELD_MISTY_TERRAIN) return 'MOVE_MOONBLAST'
   if (terrain === STATUS_FIELD_ELECTRIC_TERRAIN) return 'MOVE_THUNDERBOLT'

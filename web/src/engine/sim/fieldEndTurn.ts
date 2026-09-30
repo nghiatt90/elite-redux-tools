@@ -363,7 +363,7 @@ function hasAnyAbility(slots: AbilitySlots, ids: Set<string>): boolean {
 
 /** IsSandImmune, battle_script_commands.c:10376-10385 -- every clause except
  * Desert Cloak's ally check (see this module's header). */
-function isSandImmune(state: BattleState, battler: BattlerState, dataContext: SimDataContext): boolean {
+export function isSandImmune(state: BattleState, battler: BattlerState, dataContext: SimDataContext): boolean {
   if (battler.mon.types.includes('ROCK')) return true
   if (battler.mon.types.includes('GROUND')) return true
   if (battler.mon.types.includes('STEEL')) return true
@@ -376,7 +376,7 @@ function isSandImmune(state: BattleState, battler: BattlerState, dataContext: Si
 }
 
 /** IsHailImmune, battle_script_commands.c:10388-10395. */
-function isHailImmune(state: BattleState, battler: BattlerState, dataContext: SimDataContext): boolean {
+export function isHailImmune(state: BattleState, battler: BattlerState, dataContext: SimDataContext): boolean {
   if (battler.mon.types.includes('ICE')) return true
   if (hasFlag(battler.statuses3, STATUS3_UNDERGROUND) || hasFlag(battler.statuses3, STATUS3_UNDERWATER)) return true
   const heldEffect = battler.mon.itemId ? (dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null

@@ -21,6 +21,14 @@ import {
   STATUS3_ALWAYS_HITS,
   WEATHER_RAIN_ANY,
   STATUS3_AQUA_RING,
+  STATUS3_UNDERGROUND,
+  WEATHER_SANDSTORM_TEMPORARY,
+  WEATHER_HAIL_TEMPORARY,
+  WEATHER_SUN_TEMPORARY,
+  WEATHER_FOG_TEMPORARY,
+  WEATHER_RAIN_PRIMAL,
+  WEATHER_RAIN_TEMPORARY,
+  SIDE_STATUS_REFLECT,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -29,7 +37,8 @@ import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
-import { aiCheckViability, PART2_EFFECTS } from './aiCheckViability'
+import { aiCheckViability, PART2A_EFFECTS, PART2B_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
+import { AI_ABILITY_RATINGS, getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -173,34 +182,65 @@ function stateWithAttackerParty(a: Partial<SimBattleMon> = {}, d: Partial<SimBat
 const RNG_LOW = 40 // 40 % 255 = 40 -- true against every AI_RandLessThan(v>=41) used here
 const RNG_HIGH = 250 // 250 % 255 = 250 -- false against every threshold used here (max 200)
 
-describe('PART2_EFFECTS oracle -- mechanical, comment-stripped extraction', () => {
-  it('has exactly 117 entries (battle_ai_main.c:3224-3986)', () => {
-    expect(PART2_EFFECTS.length).toBe(117)
+/** A synthetic move (base: Tackle) carrying the given effect, for effects no real move needs to be picked for. */
+function syntheticEffectDeps(effect: string, extra: Partial<MoveData> = {}): AiDamageDeps {
+  return { ...deps, moveData: (id) => (id === 'MOVE_SYNTHETIC' ? ({ ...toMoveData('MOVE_TACKLE'), id: 'MOVE_SYNTHETIC', effect, power: 0, split: 'STATUS', ...extra } as MoveData) : moveById.has(id) ? toMoveData(id) : undefined) }
+}
+
+describe('PART2A_EFFECTS / PART2B_EFFECTS oracle -- mechanical, comment-stripped extraction', () => {
+  it('PART2A has exactly 47 entries (battle_ai_main.c:3224-3606)', () => {
+    expect(PART2A_EFFECTS.length).toBe(47)
+  })
+  it('PART2B has exactly 70 entries (battle_ai_main.c:3607-3984)', () => {
+    expect(PART2B_EFFECTS.length).toBe(70)
+  })
+  it('the two lists are disjoint and together are the 117 labels of the old PART2_EFFECTS', () => {
+    expect(PART2A_EFFECTS.filter((e) => PART2B_EFFECTS.includes(e))).toEqual([])
+    expect(PART2A_EFFECTS.length + PART2B_EFFECTS.length).toBe(117)
   })
   it('excludes the four labels that only exist inside a commented-out TODO block', () => {
     for (const commentedOut of ['EFFECT_EXTREME_EVOBOOST', 'EFFECT_CLANGOROUS_SOUL', 'EFFECT_NO_RETREAT', 'EFFECT_SKY_DROP']) {
-      expect(PART2_EFFECTS).not.toContain(commentedOut)
+      expect(PART2A_EFFECTS).not.toContain(commentedOut)
+      expect(PART2B_EFFECTS).not.toContain(commentedOut)
     }
   })
-  it('has no duplicate entries', () => {
-    expect(new Set(PART2_EFFECTS).size).toBe(PART2_EFFECTS.length)
+  it('has no duplicate entries in either list', () => {
+    expect(new Set(PART2A_EFFECTS).size).toBe(PART2A_EFFECTS.length)
+    expect(new Set(PART2B_EFFECTS).size).toBe(PART2B_EFFECTS.length)
   })
-  it('does not overlap with a label this batch actually handles (EFFECT_SLEEP is part 1)', () => {
-    expect(PART2_EFFECTS).not.toContain('EFFECT_SLEEP')
-    expect(PART2_EFFECTS).not.toContain('EFFECT_PERISH_SONG')
+  it('anchors: PART2A starts at EFFECT_SANDSTORM and ends at EFFECT_PSYCHO_SHIFT; PART2B holds EFFECT_GRUDGE', () => {
+    expect(PART2A_EFFECTS).toContain('EFFECT_SANDSTORM')
+    expect(PART2A_EFFECTS).toContain('EFFECT_PSYCHO_SHIFT')
+    expect(PART2B_EFFECTS).toContain('EFFECT_GRUDGE')
+    expect(PART2A_EFFECTS).not.toContain('EFFECT_GRUDGE')
+    expect(PART2B_EFFECTS).not.toContain('EFFECT_PSYCHO_SHIFT')
   })
-  it('reaches the dynamic part-2 gap for every one of its own entries', () => {
-    const s = state()
-    const withEffect: AiDamageDeps = { ...deps, moveData: (id) => (id === 'MOVE_SYNTHETIC' ? ({ ...toMoveData('MOVE_TACKLE'), id: 'MOVE_SYNTHETIC', effect: PART2_EFFECTS[0] } as MoveData) : moveById.has(id) ? toMoveData(id) : undefined) }
-    const result = aiCheckViability(s, 0, 1, 'MOVE_SYNTHETIC', 100, withEffect)
-    expect(result.unmodelled.some((u) => u.includes(PART2_EFFECTS[0]))).toBe(true)
+  it('does not overlap with a label part 1 handles', () => {
+    for (const part1 of ['EFFECT_SLEEP', 'EFFECT_PERISH_SONG', 'EFFECT_MIRACLE_EYE']) {
+      expect(PART2A_EFFECTS).not.toContain(part1)
+      expect(PART2B_EFFECTS).not.toContain(part1)
+    }
   })
-  it('EFFECT_SANDSTORM (the first part-2 label) is reported as a gap, not silently scored', () => {
-    const s = state()
-    const withEffect: AiDamageDeps = { ...deps, moveData: (id) => (id === 'MOVE_SYNTHETIC' ? ({ ...toMoveData('MOVE_SANDSTORM'), id: 'MOVE_SYNTHETIC' } as MoveData) : moveById.has(id) ? toMoveData(id) : undefined) }
-    const result = aiCheckViability(s, 0, 1, 'MOVE_SYNTHETIC', 100, withEffect)
+  it('every PART2A effect is handled: none reaches the part-2b gap', () => {
+    for (const effect of PART2A_EFFECTS) {
+      const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(effect))
+      expect(result.unmodelled.some((u) => u.includes('part 2b gap')), effect).toBe(false)
+    }
+  })
+  it('every PART2B effect still reaches the part-2b gap, naming its own label', () => {
+    for (const effect of PART2B_EFFECTS) {
+      const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(effect))
+      expect(result.unmodelled.some((u) => u.includes('part 2b gap') && u.includes(effect)), effect).toBe(true)
+    }
+  })
+  it('EFFECT_GRUDGE (the first :3607 label) is reported as a gap, not silently scored', () => {
+    const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_GRUDGE'))
     expect(result.score).toBe(100)
-    expect(result.unmodelled.some((u) => u.includes('EFFECT_SANDSTORM'))).toBe(true)
+    expect(result.unmodelled.some((u) => u.includes('EFFECT_GRUDGE'))).toBe(true)
+  })
+  it('EFFECT_SANDSTORM (the first :3224 label) is no longer a gap', () => {
+    const result = aiCheckViability(state(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_SANDSTORM'))
+    expect(result.unmodelled.some((u) => u.includes('gap: EFFECT_SANDSTORM'))).toBe(false)
   })
 })
 
@@ -897,5 +937,241 @@ describe('AI_CheckViability wired into chooseAiAction/chooseMoveOrActionSingles'
     const scores: [number, number, number, number] = [100, 130, 0, 0] // MOVE_TOXIC pre-boosted to simulate CheckViability's own IncreasePoisonScore result
     const { choice } = chooseMoveOrActionSingles(s, 0, scores, deps)
     expect(choice).toEqual({ kind: 'move', moveIndex: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Part 2a (battle_ai_main.c:3224-3606)
+// ---------------------------------------------------------------------------
+
+/** Verify every id/effect the part-2a tests lean on, at module load. */
+const REQUIRED_2A_MOVES: Record<string, string> = {
+  MOVE_SANDSTORM: 'EFFECT_SANDSTORM', MOVE_HAIL: 'EFFECT_HAIL', MOVE_RAIN_DANCE: 'EFFECT_RAIN_DANCE', MOVE_SUNNY_DAY: 'EFFECT_SUNNY_DAY',
+  MOVE_EERIE_FOG: 'EFFECT_EERIE_FOG', MOVE_SYNTHESIS: 'EFFECT_SYNTHESIS', MOVE_MORNING_SUN: 'EFFECT_MORNING_SUN', MOVE_MOONLIGHT: 'EFFECT_MOONLIGHT',
+  MOVE_SHORE_UP: 'EFFECT_SHORE_UP', MOVE_WEATHER_BALL: 'EFFECT_WEATHER_BALL', MOVE_AURORA_VEIL: 'EFFECT_AURORA_VEIL', MOVE_THUNDER: 'EFFECT_THUNDER',
+  MOVE_HURRICANE: 'EFFECT_HURRICANE', MOVE_SOLAR_BEAM: 'EFFECT_SOLARBEAM', MOVE_GROWTH: 'EFFECT_GROWTH',
+}
+for (const [id, effect] of Object.entries(REQUIRED_2A_MOVES)) {
+  if (moveById.get(id)?.effect !== effect) throw new Error(`${id} is no longer ${effect}`)
+}
+for (const id of ['MOVE_BLIZZARD', 'MOVE_OMINOUS_WIND', 'MOVE_EMBER', 'MOVE_WATER_GUN', 'MOVE_SURF']) {
+  if (!moveById.has(id)) throw new Error(`moves.json is missing ${id}`)
+}
+for (const id of ['ITEM_SAFETY_GOGGLES', 'ITEM_SMOOTH_ROCK', 'ITEM_ICY_ROCK', 'ITEM_DAMP_ROCK', 'ITEM_HEAT_ROCK']) {
+  if (!itemsById.has(id)) throw new Error(`items.json is missing ${id}`)
+}
+for (const id of ['ABILITY_CLOUD_NINE', 'ABILITY_AIR_LOCK', 'ABILITY_CLUELESS', 'ABILITY_MAGIC_GUARD', 'ABILITY_CHLOROPLAST', 'ABILITY_AURORA_BOREALIS', 'ABILITY_SAND_VEIL']) {
+  if (!abilityHooks[id]) throw new Error(`abilityHooks.json is missing ${id}`)
+}
+
+const ab = (id: string | null, innates: [string | null, string | null, string | null] = [null, null, null]) => ({ ability: id, innates })
+const setWeather = (s: BattleState, w: number) => {
+  s.field.weather = w
+  return s
+}
+
+describe('AI ability rating table (sAiAbilityRatings, battle_ai_util.c:30-300)', () => {
+  it('has 268 designated entries, every one an ability id in abilities.json', () => {
+    const ids = new Set(read<Array<{ id: string }>>('abilities.json').map((a) => a.id))
+    const keys = Object.keys(AI_ABILITY_RATINGS)
+    expect(keys.length).toBe(268)
+    expect(keys.filter((k) => !ids.has(k))).toEqual([])
+  })
+  it('spot values incl. negatives and the commented-out ABILITY_PORTAL_POWER (absent -> 0)', () => {
+    expect(getAbilityRating('ABILITY_ADAPTABILITY')).toBe(8)
+    expect(getAbilityRating('ABILITY_DEFEATIST')).toBe(-1)
+    expect(getAbilityRating('ABILITY_DELTA_STREAM')).toBe(10)
+    expect(getAbilityRating('ABILITY_PORTAL_POWER')).toBe(0)
+    expect(getAbilityRating(null)).toBe(0)
+  })
+  it('IsAbilityOfRating is >=, not >', () => {
+    expect(isAbilityOfRating('ABILITY_ANALYTIC', 5)).toBe(true) // exactly 5
+    expect(isAbilityOfRating('ABILITY_ANGER_POINT', 5)).toBe(false) // 4
+  })
+  it('RIPEN_ABILITIES matches bitfields.ripen exactly', () => {
+    const expected = Object.entries(abilityHooks).filter(([, v]) => v.bitfields?.ripen).map(([k]) => k).sort()
+    expect([...RIPEN_ABILITIES].sort()).toEqual(expected)
+  })
+})
+
+describe('EFFECT_SANDSTORM (:3224-3231)', () => {
+  const sand = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, weather = 0) => check(setWeather(state(a, d), weather), 'MOVE_SANDSTORM')
+  it('scores 0 when the attacker takes sandstorm damage and has no reason to want it', () => {
+    expect(sand().score).toBe(100)
+  })
+  it.each(['ROCK', 'GROUND', 'STEEL'])('scores +1 for a %s-type attacker (IsSandImmune type clause)', (type) => {
+    expect(sand({ types: [type, 'MYSTERY', 'MYSTERY'] }).score).toBe(101)
+  })
+  it('scores +1 for Safety Goggles, Magic Guard, and being underground', () => {
+    expect(sand({ itemId: 'ITEM_SAFETY_GOGGLES' }).score).toBe(101)
+    expect(sand({ abilities: ab('ABILITY_MAGIC_GUARD') }).score).toBe(101)
+    const s = state()
+    s.battlers[0]!.statuses3 |= STATUS3_UNDERGROUND
+    expect(check(s, 'MOVE_SANDSTORM').score).toBe(101)
+  })
+  it('every ability with bitfields.sandImmune makes the attacker want sand; a non-listed ability does not', () => {
+    const list = Object.entries(abilityHooks).filter(([, v]) => v.bitfields?.sandImmune).map(([k]) => k)
+    expect(list.length).toBe(14)
+    for (const id of list) expect(sand({ abilities: ab(id) }).score, id).toBe(101)
+    expect(sand({ abilities: ab('ABILITY_BLAZE') }).score).toBe(100)
+  })
+  it('Shore Up and Weather Ball each make it +1; Chloroplast or Aurora Borealis cancels only Weather Ball', () => {
+    expect(sand({ moves: ['MOVE_SHORE_UP', null, null, null] }).score).toBe(101)
+    expect(sand({ moves: ['MOVE_WEATHER_BALL', null, null, null] }).score).toBe(101)
+    expect(sand({ moves: ['MOVE_WEATHER_BALL', null, null, null], abilities: ab('ABILITY_CHLOROPLAST') }).score).toBe(100)
+    expect(sand({ moves: ['MOVE_WEATHER_BALL', null, null, null], abilities: ab('ABILITY_AURORA_BOREALIS') }).score).toBe(100)
+    expect(sand({ moves: ['MOVE_SHORE_UP', null, null, null], abilities: ab('ABILITY_CHLOROPLAST') }).score).toBe(101)
+  })
+  it('scores 0 when sandstorm or a primal weather is already up, or weather has no effect', () => {
+    const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    expect(sand(rock, {}, WEATHER_SANDSTORM_TEMPORARY).score).toBe(100)
+    expect(sand(rock, {}, WEATHER_RAIN_PRIMAL).score).toBe(100)
+    expect(sand(rock, { abilities: ab('ABILITY_CLOUD_NINE') }).score).toBe(100)
+    expect(sand(rock, { abilities: ab('ABILITY_AIR_LOCK') }).score).toBe(100)
+    // Clueless is a caller-supplied fact on the grounding context (weatherHasEffect), not an ability scan.
+    const clueless: AiDamageDeps = { ...deps, grounding: { ...grounding, isCluelessOnField: true } }
+    expect(aiCheckViability(state(rock), 0, 1, 'MOVE_SANDSTORM', 100, clueless).score).toBe(100)
+    const s = state(rock)
+    s.field.timers.clearSkiesTimer = 3
+    expect(check(s, 'MOVE_SANDSTORM').score).toBe(100)
+  })
+  it('Smooth Rock adds +1 only inside the branch, and reports the holdEffects[] quirk', () => {
+    const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    const withRock = check(state({ ...rock, itemId: 'ITEM_SMOOTH_ROCK' }), 'MOVE_SANDSTORM')
+    expect(withRock.score).toBe(102)
+    expect(withRock.unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
+    expect(sand({ itemId: 'ITEM_SMOOTH_ROCK' }).score).toBe(100)
+  })
+  it.each(['MOVE_SYNTHESIS', 'MOVE_MORNING_SUN', 'MOVE_MOONLIGHT'])('a defender with %s adds +2 inside the branch only', (heal) => {
+    const rock = { types: ['ROCK', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+    expect(sand(rock, { moves: [heal, null, null, null] }).score).toBe(103)
+    expect(sand({}, { moves: [heal, null, null, null] }).score).toBe(100)
+  })
+})
+
+describe('EFFECT_HAIL (:3232-3243)', () => {
+  const hail = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, weather = 0) => check(setWeather(state(a, d), weather), 'MOVE_HAIL')
+  const ice = { types: ['ICE', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+  it('scores 0 for a non-immune attacker with no hail synergy', () => {
+    expect(hail().score).toBe(100)
+  })
+  it('scores +1 for an Ice-type attacker, and Icy Rock adds +1 only inside the branch', () => {
+    expect(hail(ice).score).toBe(101)
+    expect(hail({ ...ice, itemId: 'ITEM_ICY_ROCK' }).score).toBe(102)
+    expect(hail({ itemId: 'ITEM_ICY_ROCK' }).score).toBe(100)
+  })
+  it('every ability with bitfields.hailImmune makes the attacker want hail; a non-listed ability does not', () => {
+    const list = Object.entries(abilityHooks).filter(([, v]) => v.bitfields?.hailImmune).map(([k]) => k)
+    expect(list.length).toBe(17)
+    for (const id of list) expect(hail({ abilities: ab(id) }).score >= 101, id).toBe(true)
+    expect(hail({ abilities: ab('ABILITY_BLAZE') }).score).toBe(100)
+  })
+  it('Blizzard and Aurora Veil make it +1; Weather Ball too unless Chloroplast', () => {
+    expect(hail({ moves: ['MOVE_BLIZZARD', null, null, null] }).score).toBe(101)
+    expect(hail({ moves: ['MOVE_AURORA_VEIL', null, null, null] }).score).toBe(101)
+    expect(hail({ moves: ['MOVE_WEATHER_BALL', null, null, null] }).score).toBe(101)
+    expect(hail({ moves: ['MOVE_WEATHER_BALL', null, null, null], abilities: ab('ABILITY_CHLOROPLAST') }).score).toBe(100)
+  })
+  it('Aurora Veil earns the extra +3 only when ShouldSetScreen(AURORA_VEIL) holds (Aurora Borealis, no screen up)', () => {
+    const veil = { moves: ['MOVE_AURORA_VEIL', null, null, null] as SimBattleMon['moves'] }
+    expect(hail({ ...veil, abilities: ab('ABILITY_AURORA_BOREALIS') }).score).toBe(104)
+    const withReflect = state({ ...veil, abilities: ab('ABILITY_AURORA_BOREALIS') })
+    withReflect.sides[0].statuses |= SIDE_STATUS_REFLECT
+    expect(check(withReflect, 'MOVE_HAIL').score).toBe(101)
+  })
+  it('scores 0 when hail or a primal weather is up, or weather has no effect', () => {
+    expect(hail(ice, {}, WEATHER_HAIL_TEMPORARY).score).toBe(100)
+    expect(hail(ice, {}, WEATHER_RAIN_PRIMAL).score).toBe(100)
+    expect(hail(ice, { abilities: ab('ABILITY_CLOUD_NINE') }).score).toBe(100)
+  })
+  it.each(['MOVE_SYNTHESIS', 'MOVE_MORNING_SUN', 'MOVE_MOONLIGHT'])('a defender with %s adds +2 inside the branch only', (heal) => {
+    expect(hail(ice, { moves: [heal, null, null, null] }).score).toBe(103)
+    expect(hail({}, { moves: [heal, null, null, null] }).score).toBe(100)
+  })
+})
+
+describe('EFFECT_RAIN_DANCE (:3244-3252)', () => {
+  const rain = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, weather = 0) => check(setWeather(state(a, d), weather), 'MOVE_RAIN_DANCE')
+  it('scores 0 with nothing that wants rain', () => {
+    expect(rain().score).toBe(100)
+  })
+  it.each(['ABILITY_SWIFT_SWIM', 'ABILITY_FORECAST', 'ABILITY_HYDRATION', 'ABILITY_RAIN_DISH', 'ABILITY_DRY_SKIN'])('%s wants rain (+1)', (id) => {
+    expect(rain({ abilities: ab(id) }).score).toBe(101)
+  })
+  it('Thunder, Hurricane, a Water move, and Weather Ball each want rain (+1)', () => {
+    expect(rain({ moves: ['MOVE_THUNDER', null, null, null] }).score).toBe(101)
+    expect(rain({ moves: ['MOVE_HURRICANE', null, null, null] }).score).toBe(101)
+    expect(rain({ moves: ['MOVE_WATER_GUN', null, null, null] }).score).toBe(101)
+    expect(rain({ moves: ['MOVE_WEATHER_BALL', null, null, null] }).score).toBe(101)
+    expect(rain({ moves: ['MOVE_WEATHER_BALL', null, null, null], abilities: ab('ABILITY_AURORA_BOREALIS') }).score).toBe(100)
+  })
+  it('Damp Rock (+1), a defender Fire move (+1) and defender healing (+2) stack inside the branch only', () => {
+    const wet = { abilities: ab('ABILITY_SWIFT_SWIM') }
+    expect(rain({ ...wet, itemId: 'ITEM_DAMP_ROCK' }).score).toBe(102)
+    expect(rain(wet, { moves: ['MOVE_EMBER', null, null, null] }).score).toBe(102)
+    expect(rain(wet, { moves: ['MOVE_SYNTHESIS', null, null, null] }).score).toBe(103)
+    expect(rain({}, { moves: ['MOVE_EMBER', null, null, null] }).score).toBe(100)
+    expect(rain({ itemId: 'ITEM_DAMP_ROCK' }).score).toBe(100)
+  })
+  it('scores 0 when rain or a primal weather is already up', () => {
+    expect(rain({ abilities: ab('ABILITY_SWIFT_SWIM') }, {}, WEATHER_RAIN_TEMPORARY).score).toBe(100)
+    expect(rain({ abilities: ab('ABILITY_SWIFT_SWIM') }, {}, WEATHER_RAIN_PRIMAL).score).toBe(100)
+  })
+})
+
+describe('EFFECT_SUNNY_DAY (:3253-3260)', () => {
+  const sun = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, weather = 0) => check(setWeather(state(a, d), weather), 'MOVE_SUNNY_DAY')
+  it('scores 0 with nothing that wants sun', () => {
+    expect(sun().score).toBe(100)
+  })
+  it.each(['ABILITY_CHLOROPHYLL', 'ABILITY_FLOWER_GIFT', 'ABILITY_FORECAST', 'ABILITY_LEAF_GUARD', 'ABILITY_SOLAR_POWER', 'ABILITY_HARVEST'])('%s wants sun (+1)', (id) => {
+    expect(sun({ abilities: ab(id) }).score).toBe(101)
+  })
+  it('a Fire move, Weather Ball, and each sun-dependent move want sun (+1)', () => {
+    expect(sun({ moves: ['MOVE_EMBER', null, null, null] }).score).toBe(101)
+    expect(sun({ moves: ['MOVE_WEATHER_BALL', null, null, null] }).score).toBe(101)
+    for (const m of ['MOVE_SOLAR_BEAM', 'MOVE_MORNING_SUN', 'MOVE_SYNTHESIS', 'MOVE_MOONLIGHT', 'MOVE_GROWTH']) {
+      expect(sun({ moves: [m, null, null, null] }).score, m).toBe(101)
+    }
+  })
+  it('Chloroplast-family abilities cancel the sun-dependent-move clause but not a Fire move', () => {
+    for (const id of ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE']) {
+      expect(sun({ moves: ['MOVE_SOLAR_BEAM', null, null, null], abilities: ab(id) }).score, id).toBe(100)
+      expect(sun({ moves: ['MOVE_EMBER', null, null, null], abilities: ab(id) }).score, id).toBe(101)
+    }
+  })
+  it('Heat Rock (+1), defender Water move (+1) and defender Thunder (+1) stack inside the branch only', () => {
+    const bright = { abilities: ab('ABILITY_CHLOROPHYLL') }
+    expect(sun({ ...bright, itemId: 'ITEM_HEAT_ROCK' }).score).toBe(102)
+    expect(sun(bright, { moves: ['MOVE_WATER_GUN', null, null, null] }).score).toBe(102)
+    expect(sun(bright, { moves: ['MOVE_THUNDER', null, null, null] }).score).toBe(102)
+    expect(sun({}, { moves: ['MOVE_WATER_GUN', null, null, null] }).score).toBe(100)
+    expect(sun({ itemId: 'ITEM_HEAT_ROCK' }).score).toBe(100)
+  })
+  it('scores 0 when sun is already up', () => {
+    expect(sun({ abilities: ab('ABILITY_CHLOROPHYLL') }, {}, WEATHER_SUN_TEMPORARY).score).toBe(100)
+  })
+})
+
+describe('EFFECT_EERIE_FOG (:3261-3265)', () => {
+  const fog = (a: Partial<SimBattleMon> = {}, weather = 0) => check(setWeather(state(a), weather), 'MOVE_EERIE_FOG')
+  const ghost = { types: ['GHOST', 'MYSTERY', 'MYSTERY'] as [string, string, string] }
+  it('scores 0 with nothing that wants fog', () => {
+    expect(fog().score).toBe(100)
+  })
+  it('a Ghost-type attacker wants fog, unless it is Trick-or-Treated', () => {
+    expect(fog(ghost).score).toBe(101)
+    const s = state(ghost)
+    s.battlers[0]!.volatiles.trickOrTreat = true
+    expect(check(s, 'MOVE_EERIE_FOG').score).toBe(100)
+  })
+  it('Ominous Wind and each of the five fog abilities want fog (+1)', () => {
+    expect(fog({ moves: ['MOVE_OMINOUS_WIND', null, null, null] }).score).toBe(101)
+    for (const id of ['ABILITY_ECTOPLASM', 'ABILITY_ETHEREAL_RUSH', 'ABILITY_WHITE_NOISE', 'ABILITY_PEACEFUL_REST', 'ABILITY_SURPRISE']) {
+      expect(fog({ abilities: ab(id) }).score, id).toBe(101)
+    }
+  })
+  it('scores 0 when fog is already up', () => {
+    expect(fog(ghost, WEATHER_FOG_TEMPORARY).score).toBe(100)
   })
 })

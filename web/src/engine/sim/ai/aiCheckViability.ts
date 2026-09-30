@@ -130,6 +130,19 @@ import {
   WEATHER_SUN_ANY,
   WEATHER_RAIN_ANY,
   STATUS2_NIGHTMARE,
+  NUM_BATTLE_STATS,
+  STATUS1_ANY,
+  STATUS2_DEFENSE_CURL,
+  STATUS3_GASTRO_ACID,
+  STATUS3_SEMI_INVULNERABLE,
+  SIDE_STATUS_HAZARDS_ANY,
+  SIDE_STATUS_SCREEN_ANY,
+  SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_MIST,
+  SIDE_STATUS_SPIKES,
+  STATUS_FIELD_MISTY_TERRAIN,
+  WEATHER_SANDSTORM_ANY,
+  WEATHER_PRIMAL_ANY,
 } from '../constants'
 import { getWhoStrikesFirst, getBattlerTotalSpeedStat, TOTAL_SPEED_FULL } from '../turnOrder'
 import {
@@ -159,6 +172,15 @@ import {
   atMaxHp,
   ALWAYS_SLEEPING_ABILITIES,
   CHLOROPLAST_ABILITIES,
+  isPowderImmune,
+  getCurrentTerrain,
+  getNaturePowerMove,
+  isRolePlayBannedAbility,
+  isRolePlayBannedAbilityAtk,
+  aiCanBurn,
+  canGetFrostbite,
+  aiCanGiveFrostbite,
+  battlerAbility,
 } from './aiCheckBadMove'
 import {
   isTargetingPartner,
@@ -175,7 +197,8 @@ import { shouldSwitch } from './aiShouldSwitch'
 import { countUsablePartyMons } from './aiPipeline'
 import { aiCheckBadMove } from './aiCheckBadMove'
 import { isMagicGuardProtected } from '../endTurn'
-import { weatherHasEffect } from '../fieldEndTurn'
+import { weatherHasEffect, isSandImmune, isHailImmune } from '../fieldEndTurn'
+import { getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 import { AI_FLAG_PREFER_STATUS_MOVES, AI_FLAG_WILL_SUICIDE, AI_FLAG_SMART_SWITCHING, AI_FLAG_STALL, AI_FLAG_SCREENER, AI_FLAG_TRY_TO_FAINT } from './aiFlags'
 
 type Result = { score: number; unmodelled: string[] }
@@ -848,6 +871,461 @@ function aiMoveMakesContact(battler: BattlerState, holdEffect: string | null, mo
   return !!hasMoveFlag(move, 'contact') && selfAbility(battler, 'ABILITY_LONG_REACH') && holdEffect !== 'HOLD_EFFECT_PROTECTIVE_PADS'
 }
 
+// ---------------------------------------------------------------------------
+// Part 2a helpers (battle_ai_main.c:3224-3606's own battle_ai_util.c callees)
+// ---------------------------------------------------------------------------
+
+/** `BATTLE_PARTNER(battler)`, constants/battle.h:37. */
+function battlePartner(battlerId: number): number {
+  return battlerId ^ 2
+}
+
+/** `IsBattlerAlive(battlerId)`, battle_util.c:6685-6694. The partner slot in
+ * singles is `>= gBattlersCount` / absent, so a partner read is FALSE. */
+function isBattlerAlive(state: BattleState, battlerId: number): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0) return false
+  if (battlerId >= state.battlersCount) return false
+  return !hasFlag(state.absentBattlerFlags, 1 << battlerId)
+}
+
+/** `HasMoveEffect(battlerId, effect)` for a battler slot that may be empty (the
+ * doubles-only `BATTLE_PARTNER(...)` reads; an empty slot has no moves). */
+function hasMoveEffectOf(state: BattleState, battlerId: number, effect: string, deps: AiDamageDeps): boolean {
+  const battler = state.battlers[battlerId]
+  return !!battler && hasMoveEffect(battler, effect, deps)
+}
+
+/** `HasMoveWithType(battlerId, type)` for a possibly-empty slot. */
+function hasMoveWithTypeOf(state: BattleState, battlerId: number, type: string, deps: AiDamageDeps): boolean {
+  const battler = state.battlers[battlerId]
+  return !!battler && hasMoveWithType(battler, type, deps)
+}
+
+/** `HasMove(battlerId, move)`, battle_ai_util.c:1416-1425. */
+function hasMove(battler: BattlerState, moveId: string): boolean {
+  return battler.mon.moves.some((m) => m === moveId)
+}
+
+/** `HasDamagingMoveOfType(battlerId, type)`, battle_ai_util.c:1642-1651. */
+function hasDamagingMoveOfType(battler: BattlerState, type: string, deps: AiDamageDeps): boolean {
+  return battler.mon.moves.some((m) => {
+    const md = m ? deps.moveData(m) : undefined
+    return !!md && md.type === type && md.power !== 0
+  })
+}
+
+/** `IsWeatherActive(weather)`, battle_util.c:8639-8642. */
+function isWeatherActive(state: BattleState, weatherFlag: number, deps: AiDamageDeps): boolean {
+  if (!hasFlag(state.field.weather, weatherFlag)) return false
+  return weatherHasEffect(state, deps.grounding)
+}
+
+/** `AI_DATA->holdEffects[battler]` / `AI_GetHoldEffect(battler)`.
+ *
+ * QUIRK NOT REPRODUCED (named, exactly when it applies): battle_ai_main.c:216
+ * fills `AI_DATA->holdEffects[battlerId]` from `ItemId_GetHoldEffectParam(
+ * gBattleMons[battlerId].item)` -- the item's numeric PARAM, not
+ * `ItemId_GetHoldEffect`. Every `holdEffects[b] == HOLD_EFFECT_X` comparison in
+ * the C therefore compares a param against an enum value. The numeric
+ * HOLD_EFFECT_* values live in `generated/constants/hold_effects.h`, which is
+ * not fetched, so the real comparison cannot be evaluated; this port (like part
+ * 1 and aiCheckBadMove.ts before it) reads the item's real resolved hold
+ * effect. For an item-less battler the two agree (param 0 == HOLD_EFFECT_NONE),
+ * so the note is only pushed when an item is held. */
+function aiHoldEffect(battler: BattlerState, deps: AiDamageDeps, unmodelled: string[]): string | null {
+  if (battler.mon.itemId) {
+    const note = 'AI_DATA->holdEffects[] is filled from ItemId_GetHoldEffectParam (battle_ai_main.c:216), not the hold effect itself; the C compares an item PARAM against HOLD_EFFECT_* enum values (numeric values live in the unfetched generated/constants/hold_effects.h). This port reads the real resolved hold effect instead'
+    if (!unmodelled.includes(note)) unmodelled.push(note)
+  }
+  return getBattlerHoldEffect(battler, deps)
+}
+
+/** `HasChloroplast(battler)`, battle_util.c:9340-9343
+ * (`RETURN_ABILITY_IF_FLAG(battler, FALSE, chloroplast)`, never suppressed). */
+function hasChloroplast(battler: BattlerState): boolean {
+  return CHLOROPLAST_ABILITIES.some((id) => selfAbility(battler, id))
+}
+
+/** `HasWeatherBallAndNoForcedTyping(battler)`, battle_ai_util.c:1155-1157.
+ * `HasAuroraBorealis` is `BattlerHasAbility(battler, ABILITY_AURORA_BOREALIS,
+ * FALSE)` (battle_util.c:9345-9348). */
+function hasWeatherBallAndNoForcedTyping(battler: BattlerState, deps: AiDamageDeps): boolean {
+  return !hasChloroplast(battler) && !selfAbility(battler, 'ABILITY_AURORA_BOREALIS') && hasMoveEffect(battler, 'EFFECT_WEATHER_BALL', deps)
+}
+
+/** `ShouldSetSandstorm(battler, holdEffect)`, battle_ai_util.c:1159-1169
+ * (`holdEffect` is never read). `BATTLER_HAS_ABILITY`-family reads here are on
+ * the attacker itself, so never suppressed. No RNG. */
+function shouldSetSandstorm(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  if (!weatherHasEffect(state, deps.grounding)) return false
+  if (hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY | WEATHER_PRIMAL_ANY)) return false
+  return isSandImmune(state, attacker, deps.dataContext) || hasMoveEffect(attacker, 'EFFECT_SHORE_UP', deps) || hasWeatherBallAndNoForcedTyping(attacker, deps)
+}
+
+/** `ShouldSetHail`, battle_ai_util.c:1171-1182. */
+function shouldSetHail(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  if (!weatherHasEffect(state, deps.grounding)) return false
+  if (hasFlag(state.field.weather, WEATHER_HAIL_ANY | WEATHER_PRIMAL_ANY)) return false
+  return (
+    isHailImmune(state, attacker, deps.dataContext) ||
+    (!selfAbility(attacker, 'ABILITY_AURORA_BOREALIS') && (hasMove(attacker, 'MOVE_BLIZZARD') || hasMoveEffect(attacker, 'EFFECT_AURORA_VEIL', deps))) ||
+    hasWeatherBallAndNoForcedTyping(attacker, deps)
+  )
+}
+
+/** `ShouldSetRain`, battle_ai_util.c:1184-1197. */
+function shouldSetRain(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  if (!weatherHasEffect(state, deps.grounding)) return false
+  if (hasFlag(state.field.weather, WEATHER_RAIN_ANY | WEATHER_PRIMAL_ANY)) return false
+  return (
+    selfAbility(attacker, 'ABILITY_SWIFT_SWIM') ||
+    selfAbility(attacker, 'ABILITY_FORECAST') ||
+    selfAbility(attacker, 'ABILITY_HYDRATION') ||
+    selfAbility(attacker, 'ABILITY_RAIN_DISH') ||
+    selfAbility(attacker, 'ABILITY_DRY_SKIN') ||
+    hasMoveEffect(attacker, 'EFFECT_THUNDER', deps) ||
+    hasMoveEffect(attacker, 'EFFECT_HURRICANE', deps) ||
+    hasWeatherBallAndNoForcedTyping(attacker, deps) ||
+    hasMoveWithType(attacker, 'WATER', deps)
+  )
+}
+
+/** `ShouldSetSun`, battle_ai_util.c:1199-1215. */
+function shouldSetSun(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  if (!weatherHasEffect(state, deps.grounding)) return false
+  if (hasFlag(state.field.weather, WEATHER_SUN_ANY | WEATHER_PRIMAL_ANY)) return false
+  return (
+    selfAbility(attacker, 'ABILITY_CHLOROPHYLL') ||
+    selfAbility(attacker, 'ABILITY_FLOWER_GIFT') ||
+    selfAbility(attacker, 'ABILITY_FORECAST') ||
+    selfAbility(attacker, 'ABILITY_LEAF_GUARD') ||
+    selfAbility(attacker, 'ABILITY_SOLAR_POWER') ||
+    selfAbility(attacker, 'ABILITY_HARVEST') ||
+    hasMoveWithType(attacker, 'FIRE', deps) ||
+    (!hasChloroplast(attacker) &&
+      (hasMoveEffect(attacker, 'EFFECT_SOLARBEAM', deps) ||
+        hasMoveEffect(attacker, 'EFFECT_MORNING_SUN', deps) ||
+        hasMoveEffect(attacker, 'EFFECT_SYNTHESIS', deps) ||
+        hasMoveEffect(attacker, 'EFFECT_MOONLIGHT', deps) ||
+        hasMoveEffect(attacker, 'EFFECT_GROWTH', deps))) ||
+    hasWeatherBallAndNoForcedTyping(attacker, deps)
+  )
+}
+
+/** `sFogAbilities[]`, battle_ai_util.c:1217-1223, transcribed literally. */
+const FOG_ABILITIES: readonly string[] = ['ABILITY_ECTOPLASM', 'ABILITY_ETHEREAL_RUSH', 'ABILITY_WHITE_NOISE', 'ABILITY_PEACEFUL_REST', 'ABILITY_SURPRISE']
+/** `ShouldSetFog`, battle_ai_util.c:1225-1240. */
+function shouldSetFog(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  if (!weatherHasEffect(state, deps.grounding)) return false
+  if (hasFlag(state.field.weather, WEATHER_FOG_ANY | WEATHER_PRIMAL_ANY)) return false
+  if (isBattlerOfType(attacker, 'GHOST') && !attacker.volatiles.trickOrTreat) return true
+  if (hasMove(attacker, 'MOVE_OMINOUS_WIND')) return true
+  return FOG_ABILITIES.some((id) => selfAbility(attacker, id))
+}
+
+/** `ShouldPoisonSelf(battler)`, battle_ai_util.c:2034-2043. `CanBePoisoned(battler,
+ * battler, MOVE_NONE)` keeps canBePoisoned's own gaps. Every ability read is
+ * `BattlerHasAbility(..., FALSE)` on the battler itself. */
+function shouldPoisonSelf(state: BattleState, battlerId: number, deps: AiDamageDeps, unmodelled: string[]): boolean {
+  const battler = state.battlers[battlerId] as BattlerState
+  const poison = canBePoisoned(state, battler, battler, deps)
+  unmodelled.push(...poison.unmodelled)
+  if (!poison.canPoison) return false
+  return (
+    selfAbility(battler, 'ABILITY_POISON_HEAL') ||
+    selfAbility(battler, 'ABILITY_MARVEL_SCALE') ||
+    selfAbility(battler, 'ABILITY_QUICK_FEET') ||
+    isMagicGuardProtected(state, battler) ||
+    hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
+    hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
+    (selfAbility(battler, 'ABILITY_TOXIC_BOOST') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps))
+  )
+}
+
+/** `ShouldBurnSelf(battler)`, battle_ai_util.c:2059-2068. */
+function shouldBurnSelf(state: BattleState, battlerId: number, deps: AiDamageDeps, unmodelled: string[]): boolean {
+  const battler = state.battlers[battlerId] as BattlerState
+  if (!aiCanBurn(battler, unmodelled)) return false
+  return (
+    selfAbility(battler, 'ABILITY_QUICK_FEET') ||
+    selfAbility(battler, 'ABILITY_HEATPROOF') ||
+    isMagicGuardProtected(state, battler) ||
+    hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
+    hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
+    (selfAbility(battler, 'ABILITY_FLARE_BOOST') && hasMoveWithSplit(battler, 'SPECIAL', deps)) ||
+    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
+  )
+}
+
+/** `ShouldFrostbiteSelf(battler)`, battle_ai_util.c:2070-2077. */
+function shouldFrostbiteSelf(state: BattleState, battlerId: number, deps: AiDamageDeps, unmodelled: string[]): boolean {
+  const battler = state.battlers[battlerId] as BattlerState
+  if (!canGetFrostbite(battler, unmodelled)) return false
+  return (
+    isMagicGuardProtected(state, battler) ||
+    hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
+    hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
+    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
+  )
+}
+
+/** `IncreaseBurnScore(battlerAtk, battlerDef, move, score)`, battle_ai_util.c:
+ * 2688-2699. `AI_CanBurn`'s `partnerMove` term is always MOVE_NONE on this
+ * singles-only build (structural). No RNG. */
+function increaseBurnScore(state: BattleState, battlerAtk: number, battlerDef: number, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  const defender = state.battlers[battlerDef] as BattlerState
+  if (hasFlag(state.aiFlags, AI_FLAG_TRY_TO_FAINT)) {
+    const faint = canAiFaintTarget(state, battlerAtk, battlerDef, 0, deps)
+    unmodelled.push(...faint.unmodelled)
+    if (faint.canFaint) return score
+  }
+  if (aiCanBurn(defender, unmodelled)) {
+    score++
+    if (hasMoveWithSplit(defender, 'PHYSICAL', deps)) {
+      const canFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+      unmodelled.push(...canFaint.unmodelled)
+      if (canFaint.canFaint) score += 2
+    }
+    if (hasMoveEffect(attacker, 'EFFECT_HEX', deps) || hasMoveEffectOf(state, battlePartner(battlerAtk), 'EFFECT_HEX', deps)) score++
+  }
+  return score
+}
+
+/** `IncreaseFrostbiteScore`, battle_ai_util.c:2747-2758. */
+function increaseFrostbiteScore(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  const defender = state.battlers[battlerDef] as BattlerState
+  if (hasFlag(state.aiFlags, AI_FLAG_TRY_TO_FAINT)) {
+    const faint = canAiFaintTarget(state, battlerAtk, battlerDef, 0, deps)
+    unmodelled.push(...faint.unmodelled)
+    if (faint.canFaint) return score
+  }
+  const frostbite = aiCanGiveFrostbite(state, attacker, defender, moveId, deps)
+  unmodelled.push(...frostbite.unmodelled)
+  if (frostbite.can) {
+    score++
+    if (hasMoveWithSplit(defender, 'SPECIAL', deps)) {
+      const canFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+      unmodelled.push(...canFaint.unmodelled)
+      if (canFaint.canFaint) score += 2
+    }
+    if (hasMoveEffect(attacker, 'EFFECT_HEX', deps) || hasMoveEffectOf(state, battlePartner(battlerAtk), 'EFFECT_HEX', deps)) score++
+  }
+  return score
+}
+
+/** `ShouldFakeOut(battlerAtk, battlerDef, move)`, battle_ai_util.c:2129-2138.
+ * `AI_GetHoldEffect` is the holdEffects[] read (see aiHoldEffect). */
+function shouldFakeOut(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, deps: AiDamageDeps, unmodelled: string[]): boolean {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  const defender = state.battlers[battlerDef] as BattlerState
+  if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_CHOICE_BAND' && countUsablePartyMons(state, battlerAtk) === 0) return false
+  if (
+    attacker.volatiles.isFirstTurn &&
+    shouldTryToFlinch(state, battlerAtk, battlerDef, moveId, deps, unmodelled) !== 0 &&
+    !doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)
+  ) {
+    return true
+  }
+  return false
+}
+
+/** `CanKnockOffItem(battler, item)`, battle_ai_util.c:2000-2016. The
+ * `!(gBattleTypeFlags & (EREADER|FRONTIER|LINK|RECORDED_LINK|SECRET_BASE
+ * [|TRAINER])) && side == B_SIDE_PLAYER` early-out cannot fire: `#if defined
+ * B_TRAINERS_KNOCK_OFF_ITEMS` is a DEFINED-ness test, and the macro is defined
+ * (`TRUE`, include/constants/battle_config.h:103), which adds BATTLE_TYPE_TRAINER
+ * to the mask; every fight this sim scores is a trainer battle (aiFlags.ts's own
+ * note on `!(gBattleTypeFlags & BATTLE_TYPE_TRAINER)`), so the mask always
+ * matches and the side check is skipped. */
+function canKnockOffItem(battler: BattlerState, itemId: string | null, deps: AiDamageDeps): boolean {
+  if (!itemId) return false
+  if (isStickyHold(battler, deps.grounding.attackerHasMoldBreaker)) return false
+  return canBattlerGetOrLoseItemApprox(battler, itemId, deps)
+}
+
+/** `GetUsedHeldItem(battler)`, battle_util.c:8637. See `BattlerState.usedHeldItem`. */
+function getUsedHeldItem(battler: BattlerState, unmodelled: string[]): string | null {
+  if (battler.usedHeldItem === undefined) {
+    unmodelled.push('GetUsedHeldItem: gBattleStruct->usedHeldItems is never written by this sim (item consumption is unmodelled); read as ITEM_NONE')
+  }
+  return battler.usedHeldItem ?? null
+}
+
+/** `sRecycleEncouragedItems[]`, battle_ai_util.c:2530-2543 (`ITEM_FOCUS_SASH` is
+ * behind `#ifdef ITEM_EXPANSION`, which is defined: global.h:216). */
+const RECYCLE_ENCOURAGED_ITEMS: readonly string[] = [
+  'ITEM_CHESTO_BERRY', 'ITEM_LUM_BERRY', 'ITEM_STARF_BERRY', 'ITEM_SITRUS_BERRY', 'ITEM_MICLE_BERRY',
+  'ITEM_CUSTAP_BERRY', 'ITEM_MENTAL_HERB', 'ITEM_BERRY_JUICE', 'ITEM_FOCUS_SASH',
+]
+function isRecycleEncouragedItem(itemId: string | null): boolean {
+  return !!itemId && RECYCLE_ENCOURAGED_ITEMS.includes(itemId)
+}
+/** `IsStatBoostingBerry(item)`, battle_ai_util.c:2546-2562 (`ITEM_MICLE_BERRY`
+ * behind the defined `ITEM_EXPANSION`; the Lansat case is commented out). */
+const STAT_BOOSTING_BERRIES: readonly string[] = ['ITEM_LIECHI_BERRY', 'ITEM_GANLON_BERRY', 'ITEM_SALAC_BERRY', 'ITEM_PETAYA_BERRY', 'ITEM_APICOT_BERRY', 'ITEM_STARF_BERRY', 'ITEM_MICLE_BERRY']
+function isStatBoostingBerry(itemId: string | null): boolean {
+  return !!itemId && STAT_BOOSTING_BERRIES.includes(itemId)
+}
+/** `ShouldRestoreHpBerry(battlerAtk, item)`, battle_ai_util.c:2564-2579. */
+const RESTORE_HP_BERRIES: readonly string[] = ['ITEM_SITRUS_BERRY', 'ITEM_FIGY_BERRY', 'ITEM_WIKI_BERRY', 'ITEM_MAGO_BERRY', 'ITEM_AGUAV_BERRY', 'ITEM_IAPAPA_BERRY']
+function shouldRestoreHpBerry(battler: BattlerState, itemId: string | null): boolean {
+  if (itemId === 'ITEM_ORAN_BERRY') return battler.mon.maxHp <= 50
+  return !!itemId && RESTORE_HP_BERRIES.includes(itemId)
+}
+
+/** Every ability whose abilityHooks.json marks `ripen` -- `HasRipenEffect(battler)`,
+ * battle_util.c:5162-5165 (`RETURN_ABILITY_IF_FLAG(battler, FALSE, ripen)`, never
+ * suppressed). Pinned by an oracle test. Extraction: same query as
+ * CHLOROPLAST_ABILITIES with `bitfields.ripen` -- 3 entries. */
+export const RIPEN_ABILITIES: readonly string[] = ['ABILITY_APPLE_PIE', 'ABILITY_RIPEN', 'ABILITY_SUGAR_RUSH']
+function hasRipenEffect(battler: BattlerState): boolean {
+  return RIPEN_ABILITIES.some((id) => selfAbility(battler, id))
+}
+
+/** `CountBattlerStatIncreases(battlerId, countEvasionAcc)`, battle_util.c:
+ * 6736-6747 -- loops from index 0 (STAT_HP, always DEFAULT_STAT_STAGE, so it
+ * contributes nothing) through NUM_BATTLE_STATS. */
+function countBattlerStatIncreases(battler: BattlerState, countEvasionAcc: boolean): number {
+  let count = 0
+  for (let i = 0; i < NUM_BATTLE_STATS; i++) {
+    if ((i === STAT_ACC || i === STAT_EVASION) && !countEvasionAcc) continue
+    if (battler.mon.statStages[i] > DEFAULT_STAT_STAGE) count += battler.mon.statStages[i] - DEFAULT_STAT_STAGE
+  }
+  return count
+}
+
+/** The `EFFECT_DEFOG` body (:3379-3410), which `EFFECT_RAPID_SPIN` (:3375-3378)
+ * enters by `FALLTHROUGH` after its own IncreaseStatUpScore. The C's inner
+ * `break`s all leave the `switch (move)` and then the case -- early returns
+ * here. The `isDoubleBattle` partner-hazard pre-empt (:3390-3394,
+ * `IsHazardMoveEffect(partnerMove effect)`) is dead code on this singles-only
+ * build (`AI_DATA->partnerMove` is MOVE_NONE, structural), so it is not
+ * transcribed and `IsHazardMoveEffect` has no call site to port. */
+function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  const defender = state.battlers[battlerDef] as BattlerState
+  const atkSide = state.sides[battlerAtk & 1].statuses
+  const defSide = state.sides[battlerDef & 1].statuses
+
+  if (hasFlag(atkSide, SIDE_STATUS_HAZARDS_ANY) && countUsablePartyMons(state, battlerAtk) !== 0) return score + 3
+
+  switch (moveId) {
+    case 'MOVE_DEFOG':
+      if (hasFlag(defSide, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SAFEGUARD | SIDE_STATUS_MIST)) {
+        score += 3
+      } else if (!hasFlag(defSide, SIDE_STATUS_SPIKES)) {
+        // Don't blow away hazards if you set them up
+        if (shouldLowerStat(defender, STAT_EVASION, deps.grounding.attackerHasMoldBreaker, unmodelled)) {
+          if (defender.mon.statStages[STAT_EVASION] > 7 || hasMoveWithLowAccuracy(attacker, 90, true, deps, unmodelled)) score += 2
+          else score++
+        }
+      }
+      break
+    case 'MOVE_RAPID_SPIN':
+      if (hasFlag(attacker.statuses3, STATUS3_LEECHSEED) || hasFlag(attacker.mon.status2, STATUS2_WRAPPED)) score += 3
+      break
+  }
+  return score
+}
+
+/** The shared body of `case EFFECT_TRICK` / `case EFFECT_BESTOW`,
+ * battle_ai_main.c:3437-3512. Two nested `switch (holdEffects[...])`es over the
+ * attacker's then (in the outer `default:`) the defender's item. Bestow differs
+ * only in the outer `default:`'s `move != MOVE_BESTOW` gate. Every hold-effect
+ * read is `AI_DATA->holdEffects[]` (see aiHoldEffect's quirk note). */
+function applyTrickBestow(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
+  const attacker = state.battlers[battlerAtk] as BattlerState
+  const defender = state.battlers[battlerDef] as BattlerState
+  const atkMoldBreaker = deps.grounding.attackerHasMoldBreaker
+  const isDoubleBattle = isValidDoubleBattle(state, battlerAtk)
+
+  switch (aiHoldEffect(attacker, deps, unmodelled)) {
+    case 'HOLD_EFFECT_CHOICE_SCARF':
+      score += 2 // assume its beneficial
+      break
+    case 'HOLD_EFFECT_CHOICE_BAND':
+      if (!hasMoveWithSplit(defender, 'PHYSICAL', deps)) score += 2
+      break
+    case 'HOLD_EFFECT_CHOICE_SPECS':
+      if (!hasMoveWithSplit(defender, 'SPECIAL', deps)) score += 2
+      break
+    case 'HOLD_EFFECT_TOXIC_ORB':
+      if (!shouldPoisonSelf(state, battlerAtk, deps, unmodelled)) score += 2
+      break
+    case 'HOLD_EFFECT_FLAME_ORB':
+      if (!shouldBurnSelf(state, battlerAtk, deps, unmodelled)) score += 2
+      break
+    case 'HOLD_EFFECT_FROST_ORB':
+      if (!shouldFrostbiteSelf(state, battlerAtk, deps, unmodelled)) score += 2
+      break
+    case 'HOLD_EFFECT_BLACK_SLUDGE':
+      if (!isBattlerOfType(defender, 'POISON') && !isMagicGuardProtected(state, defender)) score += 3
+      break
+    case 'HOLD_EFFECT_IRON_BALL':
+      if (!hasMoveEffect(defender, 'EFFECT_FLING', deps) || !deps.turnOrder.isBattlerGrounded(battlerDef)) score += 2
+      break
+    case 'HOLD_EFFECT_LAGGING_TAIL':
+    case 'HOLD_EFFECT_STICKY_BARB':
+      score += 3
+      break
+    case 'HOLD_EFFECT_UTILITY_UMBRELLA':
+      if (!selfAbility(attacker, 'ABILITY_SOLAR_POWER') && !selfAbility(attacker, 'ABILITY_DRY_SKIN') && weatherHasEffect(state, deps.grounding)) {
+        if (defAbility(defender, 'ABILITY_SWIFT_SWIM', atkMoldBreaker) && isWeatherActive(state, WEATHER_RAIN_ANY, deps)) score += 3 // Slow 'em down
+        if (defAbility(defender, 'ABILITY_CHLOROPHYLL', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
+        if (defAbility(defender, 'ABILITY_FLOWER_GIFT', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
+      }
+      break
+    case 'HOLD_EFFECT_EJECT_BUTTON': {
+      // The C's `if (!IsRaidBattle() && IsDynamaxed(battlerDef) && ...` is a comment.
+      const partner = battlePartner(battlerAtk)
+      const partnerBattler = state.battlers[partner]
+      if (hasDamagingMove(attacker, deps) || (isDoubleBattle && isBattlerAlive(state, partner) && !!partnerBattler && hasDamagingMove(partnerBattler, deps))) score += 2 // Force 'em out next turn
+      break
+    }
+    default:
+      if (moveId !== 'MOVE_BESTOW' && attacker.mon.itemId === null) {
+        switch (aiHoldEffect(defender, deps, unmodelled)) {
+          case 'HOLD_EFFECT_CHOICE_BAND':
+            break
+          case 'HOLD_EFFECT_TOXIC_ORB':
+            if (shouldPoisonSelf(state, battlerAtk, deps, unmodelled)) score += 2
+            break
+          case 'HOLD_EFFECT_FLAME_ORB':
+            if (shouldBurnSelf(state, battlerAtk, deps, unmodelled)) score += 2
+            break
+          case 'HOLD_EFFECT_FROST_ORB':
+            if (shouldFrostbiteSelf(state, battlerAtk, deps, unmodelled)) score += 2
+            break
+          case 'HOLD_EFFECT_BLACK_SLUDGE':
+            if (isBattlerOfType(attacker, 'POISON') || isMagicGuardProtected(state, attacker)) score += 3
+            break
+          case 'HOLD_EFFECT_IRON_BALL':
+            if (hasMoveEffect(attacker, 'EFFECT_FLING', deps)) score += 2
+            break
+          case 'HOLD_EFFECT_LAGGING_TAIL':
+          case 'HOLD_EFFECT_STICKY_BARB':
+            break
+          default:
+            score++ // other hold effects generally universally good
+            break
+        }
+      }
+      break
+  }
+  return score
+}
+
 /**
  * AI_CheckViability, battle_ai_main.c:2515-3223 (this batch's slice).
  *
@@ -1026,45 +1504,49 @@ function ignoresFrostbiteSpatkDrop(battler: BattlerState): boolean {
 }
 
 /**
- * Every EFFECT_* case label AI_CheckViability's switch declares in its part-2
- * range (battle_ai_main.c:3224-3986, EFFECT_SANDSTORM through the function's
- * end), mechanically extracted and comment-stripped (both `//` and `/* * /`
- * forms) so the four labels that only exist inside a commented-out TODO block
- * at the very end of the switch (EFFECT_EXTREME_EVOBOOST, EFFECT_CLANGOROUS_
- * SOUL, EFFECT_NO_RETREAT, EFFECT_SKY_DROP -- all four `// case EFFECT_...:
- * // TODO`) are correctly excluded, the same mistake cycle17's own
- * PART2_EFFECTS doc (aiCheckBadMove.ts) found and fixed for AI_CheckBadMove's
- * switch. 117 entries. Used only by this module's own oracle test --
- * `applyMoveEffectSwitch`'s `default` case reports a gap for ANY unhandled
- * effect dynamically (not by consulting this list), so this list can never
- * silently drift out of sync with real scoring behavior; it exists purely so
- * a test can pin the count and check for overlap with the labels this batch
- * DOES handle. */
-export const PART2_EFFECTS: readonly string[] = [
+ * Every EFFECT_* case label AI_CheckViability's switch declares in battle_ai_main.c
+ * :3224-3606 (EFFECT_SANDSTORM through EFFECT_PSYCHO_SHIFT, whose `break` is at
+ * :3606) -- the labels this batch (part 2a) ports. Mechanically extracted with both
+ * `//` and `/* * /` comments stripped (the four labels that exist only inside a
+ * commented-out TODO block at the end of the switch -- EFFECT_EXTREME_EVOBOOST,
+ * EFFECT_CLANGOROUS_SOUL, EFFECT_NO_RETREAT, EFFECT_SKY_DROP -- are outside this
+ * range anyway). 47 entries. Used only by this module's own oracle test.
+ */
+export const PART2A_EFFECTS: readonly string[] = [
   'EFFECT_ATTACK_UP_HIT', 'EFFECT_ATTRACT', 'EFFECT_BELLY_DRUM', 'EFFECT_BESTOW', 'EFFECT_BRICK_BREAK',
-  'EFFECT_BUG_BITE', 'EFFECT_BULK_UP', 'EFFECT_CALM_MIND', 'EFFECT_CAMOUFLAGE', 'EFFECT_CHARGE',
-  'EFFECT_CONVERSION', 'EFFECT_CONVERSION_2', 'EFFECT_COSMIC_POWER', 'EFFECT_COUNTER', 'EFFECT_DEFENSE_CURL',
-  'EFFECT_DEFOG', 'EFFECT_DRAGON_DANCE', 'EFFECT_EERIE_FOG', 'EFFECT_ELECTRIC_TERRAIN', 'EFFECT_ELECTRIFY',
-  'EFFECT_EMBARGO', 'EFFECT_ENDEAVOR', 'EFFECT_ENTRAINMENT', 'EFFECT_FACADE', 'EFFECT_FAIRY_LOCK',
-  'EFFECT_FAKE_OUT', 'EFFECT_FEINT', 'EFFECT_FELL_STINGER', 'EFFECT_FLAIL', 'EFFECT_FLAME_BURST',
-  'EFFECT_FLATTER', 'EFFECT_FLING', 'EFFECT_FOCUS_PUNCH', 'EFFECT_FOLLOW_ME', 'EFFECT_GASTRO_ACID',
+  'EFFECT_CHARGE', 'EFFECT_DEFENSE_CURL', 'EFFECT_DEFOG', 'EFFECT_EERIE_FOG', 'EFFECT_ENTRAINMENT',
+  'EFFECT_FAKE_OUT', 'EFFECT_FELL_STINGER', 'EFFECT_FLATTER', 'EFFECT_FOLLOW_ME', 'EFFECT_GASTRO_ACID',
+  'EFFECT_HAIL', 'EFFECT_IMPRISON', 'EFFECT_INGRAIN', 'EFFECT_KNOCK_OFF', 'EFFECT_MAGIC_COAT',
+  'EFFECT_NATURE_POWER', 'EFFECT_OVERHEAT', 'EFFECT_PSYCHO_SHIFT', 'EFFECT_PSYCH_UP', 'EFFECT_PURSUIT',
+  'EFFECT_RAIN_DANCE', 'EFFECT_RAPID_SPIN', 'EFFECT_RECYCLE', 'EFFECT_REFRESH', 'EFFECT_ROLE_PLAY',
+  'EFFECT_ROLLOUT', 'EFFECT_SAFEGUARD', 'EFFECT_SANDSTORM', 'EFFECT_SEMI_INVULNERABLE', 'EFFECT_SIMPLE_BEAM',
+  'EFFECT_SKILL_SWAP', 'EFFECT_SPECTRAL_THIEF', 'EFFECT_STOCKPILE', 'EFFECT_STORED_POWER', 'EFFECT_SUNNY_DAY',
+  'EFFECT_SUPERPOWER', 'EFFECT_SWAGGER', 'EFFECT_TAUNT', 'EFFECT_TORMENT', 'EFFECT_TRICK',
+  'EFFECT_WILL_O_WISP', 'EFFECT_WORRY_SEED',
+]
+
+/**
+ * Every EFFECT_* case label declared in :3607-3984 (EFFECT_GRUDGE to the switch's
+ * closing brace) -- part 2b's scope, still gapped by the `default` branch of
+ * applyMoveEffectSwitch. Same mechanical, comment-stripped extraction (so the four
+ * commented-out labels above are excluded). 70 entries; 47 + 70 == the 117 labels
+ * the old single PART2_EFFECTS list held.
+ */
+export const PART2B_EFFECTS: readonly string[] = [
+  'EFFECT_BUG_BITE', 'EFFECT_BULK_UP', 'EFFECT_CALM_MIND', 'EFFECT_CAMOUFLAGE', 'EFFECT_CONVERSION',
+  'EFFECT_CONVERSION_2', 'EFFECT_COSMIC_POWER', 'EFFECT_COUNTER', 'EFFECT_DRAGON_DANCE', 'EFFECT_ELECTRIC_TERRAIN',
+  'EFFECT_ELECTRIFY', 'EFFECT_EMBARGO', 'EFFECT_ENDEAVOR', 'EFFECT_FACADE', 'EFFECT_FAIRY_LOCK',
+  'EFFECT_FEINT', 'EFFECT_FLAIL', 'EFFECT_FLAME_BURST', 'EFFECT_FLING', 'EFFECT_FOCUS_PUNCH',
   'EFFECT_GEAR_UP', 'EFFECT_GEOMANCY', 'EFFECT_GRASSY_TERRAIN', 'EFFECT_GRAVITY', 'EFFECT_GRUDGE',
-  'EFFECT_GUARD_SPLIT', 'EFFECT_GUARD_SWAP', 'EFFECT_HAIL', 'EFFECT_HEAL_BLOCK', 'EFFECT_HEART_SWAP',
-  'EFFECT_IMPRISON', 'EFFECT_INCINERATE', 'EFFECT_INGRAIN', 'EFFECT_ION_DELUGE', 'EFFECT_KNOCK_OFF',
-  'EFFECT_LUCKY_CHANT', 'EFFECT_MAGIC_COAT', 'EFFECT_MAGIC_ROOM', 'EFFECT_MAGNET_RISE', 'EFFECT_METAL_BURST',
-  'EFFECT_MIRROR_COAT', 'EFFECT_MISTY_TERRAIN', 'EFFECT_MUD_SPORT', 'EFFECT_NATURE_POWER', 'EFFECT_OVERHEAT',
-  'EFFECT_PLEDGE', 'EFFECT_POWDER', 'EFFECT_POWER_SPLIT', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK',
-  'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_PSYCHO_SHIFT', 'EFFECT_PSYCH_UP', 'EFFECT_PURSUIT', 'EFFECT_QUASH',
-  'EFFECT_QUIVER_DANCE', 'EFFECT_RAIN_DANCE', 'EFFECT_RAPID_SPIN', 'EFFECT_RECHARGE', 'EFFECT_RECYCLE',
-  'EFFECT_REFRESH', 'EFFECT_REVENGE', 'EFFECT_ROLE_PLAY', 'EFFECT_ROLLOUT', 'EFFECT_SAFEGUARD',
-  'EFFECT_SANDSTORM', 'EFFECT_SEMI_INVULNERABLE', 'EFFECT_SHELL_SMASH', 'EFFECT_SHIFT_GEAR', 'EFFECT_SHORE_UP',
-  'EFFECT_SIMPLE_BEAM', 'EFFECT_SKILL_SWAP', 'EFFECT_SKULL_BASH', 'EFFECT_SMACK_DOWN', 'EFFECT_SMELLINGSALT',
-  'EFFECT_SNATCH', 'EFFECT_SOAK', 'EFFECT_SOLARBEAM', 'EFFECT_SPECTRAL_THIEF', 'EFFECT_SPEED_SWAP',
-  'EFFECT_STOCKPILE', 'EFFECT_STORED_POWER', 'EFFECT_SUNNY_DAY', 'EFFECT_SUPERPOWER', 'EFFECT_SWAGGER',
-  'EFFECT_TAILWIND', 'EFFECT_TAUNT', 'EFFECT_TELEKINESIS', 'EFFECT_THIRD_TYPE', 'EFFECT_THROAT_CHOP',
-  'EFFECT_TICKLE', 'EFFECT_TOPSY_TURVY', 'EFFECT_TORMENT', 'EFFECT_TOXIC_THREAD', 'EFFECT_TRICK',
-  'EFFECT_TRICK_ROOM', 'EFFECT_TWO_TURNS_ATTACK', 'EFFECT_WAKE_UP_SLAP', 'EFFECT_WATER_SPORT', 'EFFECT_WILL_O_WISP',
-  'EFFECT_WONDER_ROOM', 'EFFECT_WORRY_SEED',
+  'EFFECT_GUARD_SPLIT', 'EFFECT_GUARD_SWAP', 'EFFECT_HEAL_BLOCK', 'EFFECT_HEART_SWAP', 'EFFECT_INCINERATE',
+  'EFFECT_ION_DELUGE', 'EFFECT_LUCKY_CHANT', 'EFFECT_MAGIC_ROOM', 'EFFECT_MAGNET_RISE', 'EFFECT_METAL_BURST',
+  'EFFECT_MIRROR_COAT', 'EFFECT_MISTY_TERRAIN', 'EFFECT_MUD_SPORT', 'EFFECT_PLEDGE', 'EFFECT_POWDER',
+  'EFFECT_POWER_SPLIT', 'EFFECT_POWER_SWAP', 'EFFECT_POWER_TRICK', 'EFFECT_PSYCHIC_TERRAIN', 'EFFECT_QUASH',
+  'EFFECT_QUIVER_DANCE', 'EFFECT_RECHARGE', 'EFFECT_REVENGE', 'EFFECT_SHELL_SMASH', 'EFFECT_SHIFT_GEAR',
+  'EFFECT_SHORE_UP', 'EFFECT_SKULL_BASH', 'EFFECT_SMACK_DOWN', 'EFFECT_SMELLINGSALT', 'EFFECT_SNATCH',
+  'EFFECT_SOAK', 'EFFECT_SOLARBEAM', 'EFFECT_SPEED_SWAP', 'EFFECT_TAILWIND', 'EFFECT_TELEKINESIS',
+  'EFFECT_THIRD_TYPE', 'EFFECT_THROAT_CHOP', 'EFFECT_TICKLE', 'EFFECT_TOPSY_TURVY', 'EFFECT_TOXIC_THREAD',
+  'EFFECT_TRICK_ROOM', 'EFFECT_TWO_TURNS_ATTACK', 'EFFECT_WAKE_UP_SLAP', 'EFFECT_WATER_SPORT', 'EFFECT_WONDER_ROOM',
 ]
 
 /**
@@ -1884,11 +2366,364 @@ function applyMoveEffectSwitch(
       break
     }
 
+    // ======================================================================
+    // Part 2a: EFFECT_SANDSTORM (:3224) through EFFECT_PSYCHO_SHIFT (:3606).
+    // ======================================================================
+
+    case 'EFFECT_SANDSTORM':
+      if (shouldSetSandstorm(state, battlerAtk, deps)) {
+        score++
+        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_SMOOTH_ROCK') score++
+        if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
+      }
+      break
+
+    case 'EFFECT_HAIL':
+      if (shouldSetHail(state, battlerAtk, deps)) {
+        if (
+          (hasMoveEffect(attacker, 'EFFECT_AURORA_VEIL', deps) || hasMoveEffectOf(state, battlePartner(battlerAtk), 'EFFECT_AURORA_VEIL', deps)) &&
+          shouldSetScreen(state, battlerAtk, battlerDef, 'EFFECT_AURORA_VEIL', deps)
+        ) {
+          score += 3
+        }
+        score++
+        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_ICY_ROCK') score++
+        if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
+      }
+      break
+
+    case 'EFFECT_RAIN_DANCE':
+      if (shouldSetRain(state, battlerAtk, deps)) {
+        score++
+        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_DAMP_ROCK') score++
+        if (hasMoveEffect(defender, 'EFFECT_MORNING_SUN', deps) || hasMoveEffect(defender, 'EFFECT_SYNTHESIS', deps) || hasMoveEffect(defender, 'EFFECT_MOONLIGHT', deps)) score += 2
+        if (hasMoveWithType(defender, 'FIRE', deps) || hasMoveWithTypeOf(state, battlePartner(battlerDef), 'FIRE', deps)) score++
+      }
+      break
+
+    case 'EFFECT_SUNNY_DAY':
+      if (shouldSetSun(state, battlerAtk, deps)) {
+        score++
+        if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_HEAT_ROCK') score++
+        if (hasMoveWithType(defender, 'WATER', deps) || hasMoveWithTypeOf(state, battlePartner(battlerDef), 'WATER', deps)) score++
+        if (hasMoveEffect(defender, 'EFFECT_THUNDER', deps) || hasMoveEffectOf(state, battlePartner(battlerDef), 'EFFECT_THUNDER', deps)) score++
+      }
+      break
+
+    case 'EFFECT_EERIE_FOG':
+      if (shouldSetFog(state, battlerAtk, deps)) score++
+      break
+
+    case 'EFFECT_ATTACK_UP_HIT':
+      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE')) score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_ATK, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_FELL_STINGER': {
+      if (attacker.mon.statStages[STAT_ATK] < MAX_STAT_STAGE && !selfAbility(attacker, 'ABILITY_CONTRARY')) {
+        const faints = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+        unmodelled.push(...faints.unmodelled)
+        if (faints.faints) {
+          // `GetWhoStrikesFirst(battlerAtk, battlerDef, TRUE) == 0` -- attacker goes first.
+          if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) score += 9
+          else score += 3
+        }
+      }
+      break
+    }
+
+    case 'EFFECT_BELLY_DRUM': {
+      const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
+      unmodelled.push(...faintsAtk.unmodelled)
+      if (!faintsAtk.canFaint && hasMoveWithSplit(attacker, 'PHYSICAL', deps) && !selfAbility(attacker, 'ABILITY_CONTRARY')) {
+        score += MAX_STAT_STAGE - attacker.mon.statStages[STAT_ATK]
+      }
+      break
+    }
+
+    case 'EFFECT_PSYCH_UP':
+    case 'EFFECT_SPECTRAL_THIEF':
+      // Want to copy positive stat changes
+      for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+        if (defender.mon.statStages[i] > attacker.mon.statStages[i]) {
+          switch (i) {
+            case STAT_ATK:
+              if (hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score++
+              break
+            case STAT_SPATK:
+              if (hasMoveWithSplit(attacker, 'SPECIAL', deps)) score++
+              break
+            case STAT_ACC:
+            case STAT_EVASION:
+            case STAT_SPEED:
+              score++
+              break
+            case STAT_DEF:
+            case STAT_SPDEF:
+              if (hasFlag(state.aiFlags, AI_FLAG_STALL)) score++
+              break
+          }
+        }
+      }
+      break
+
+    case 'EFFECT_SEMI_INVULNERABLE':
+      score++
+      // `predictedMove != MOVE_NONE && !isDoubleBattle`
+      if (predictedMoveId !== null && !isValidDoubleBattle(state, battlerAtk)) {
+        const predictedEffect = deps.moveData(predictedMoveId)?.effect ?? null
+        if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
+          // Attacker goes first
+          if (predictedEffect === 'EFFECT_EXPLOSION' || predictedEffect === 'EFFECT_PROTECT') score += 3
+        } else if (predictedEffect === 'EFFECT_SEMI_INVULNERABLE' && !hasFlag(defender.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+          score += 3
+        }
+      }
+      break
+
+    case 'EFFECT_DEFENSE_CURL':
+      if (hasMoveEffect(attacker, 'EFFECT_ROLLOUT', deps) && !hasFlag(attacker.mon.status2, STATUS2_DEFENSE_CURL)) score++
+      score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_DEF, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_FAKE_OUT':
+      // `move == MOVE_FAKE_OUT` filters out First Impression, which shares the effect.
+      if (moveId === 'MOVE_FAKE_OUT' && shouldFakeOut(state, battlerAtk, battlerDef, moveId, deps, unmodelled)) score += 16
+      break
+
+    case 'EFFECT_STOCKPILE':
+      if (selfAbility(attacker, 'ABILITY_CONTRARY')) break
+      if (hasMoveEffect(attacker, 'EFFECT_SWALLOW', deps) || hasMoveEffect(attacker, 'EFFECT_SPIT_UP', deps)) score += 2
+      score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_DEF, moveId, score, deps, unmodelled)
+      score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPDEF, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_ROLLOUT':
+      if (hasFlag(attacker.mon.status2, STATUS2_DEFENSE_CURL)) score += 8
+      break
+
+    case 'EFFECT_SWAGGER':
+      if (hasMoveEffect(attacker, 'EFFECT_FOUL_PLAY', deps) || hasMoveEffect(attacker, 'EFFECT_PSYCH_UP', deps) || hasMoveEffect(attacker, 'EFFECT_SPECTRAL_THIEF', deps)) score++
+      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
+      score = increaseConfusionScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_FLATTER':
+      if (hasMoveEffect(attacker, 'EFFECT_PSYCH_UP', deps) || hasMoveEffect(attacker, 'EFFECT_SPECTRAL_THIEF', deps)) score += 2
+      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
+      score = increaseConfusionScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_ATTRACT': {
+      // `!isDoubleBattle && BattlerWillFaintFromSecondaryDamage(battlerDef) &&
+      // GetWhoStrikesFirst(...) == 1` -> break. BattlerWillFaintFromSecondaryDamage
+      // reuses the established GetBattlerSecondaryDamage gap (always false).
+      unmodelled.push('EFFECT_ATTRACT: BattlerWillFaintFromSecondaryDamage(battlerDef) needs GetBattlerSecondaryDamage, which has no port anywhere in this codebase; treated as false')
+      const trapped = isBattlerTrapped(state, defender, true, deps)
+      unmodelled.push(...trapped.unmodelled)
+      if (hasFlag(defender.mon.status1, STATUS1_ANY) || hasFlag(defender.mon.status2, STATUS2_CONFUSION) || trapped.trapped) score += 2
+      else score++
+      break
+    }
+
+    case 'EFFECT_SAFEGUARD':
+      if (!(getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN) || !deps.turnOrder.isBattlerGrounded(battlerAtk)) score++
+      // The C's `CountUsablePartyMons(battlerDef) != 0 -> score += 8` is commented out.
+      break
+
+    case 'EFFECT_PURSUIT':
+      // The whole body is a `/*TODO ... */` block in the C: nothing executes.
+      break
+
+    case 'EFFECT_RAPID_SPIN':
+      score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPEED, moveId, score, deps, unmodelled) // Gen 8 increases speed
+      score = defogBody(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_DEFOG':
+      score = defogBody(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_TORMENT':
+      break
+
+    case 'EFFECT_WILL_O_WISP':
+      score = increaseBurnScore(state, battlerAtk, battlerDef, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_FOLLOW_ME':
+      if (
+        isValidDoubleBattle(state, battlerAtk) &&
+        moveId !== 'MOVE_SPOTLIGHT' &&
+        !isBattlerIncapacitated(defender, deps) &&
+        (moveId !== 'MOVE_RAGE_POWDER' || !isPowderImmune(defender, atkMoldBreaker, deps)) && // Rage Powder doesn't affect powder immunities
+        isBattlerAlive(state, battlePartner(battlerAtk))
+      ) {
+        const predictedMoveOnPartner = state.battlers[battlePartner(battlerAtk)]?.lastMove ?? null
+        if (predictedMoveOnPartner !== null && deps.moveData(predictedMoveOnPartner)?.split !== 'STATUS') score += 3
+      }
+      break
+
+    case 'EFFECT_NATURE_POWER': {
+      // C: `return AI_CheckViability(battlerAtk, battlerDef, GetNaturePowerMove(), score)` --
+      // the top-level function, with its own fresh pre-switch ladder.
+      const recursed = aiCheckViability(state, battlerAtk, battlerDef, getNaturePowerMove(state, unmodelled), score, deps)
+      unmodelled.push(...recursed.unmodelled)
+      return recursed.score
+    }
+
+    case 'EFFECT_CHARGE':
+      if (hasDamagingMoveOfType(attacker, 'ELECTRIC', deps)) score += 2
+      score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPDEF, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_TAUNT':
+      if (predictedMoveId !== null && deps.moveData(predictedMoveId)?.split === 'STATUS') score += 10 // was 3
+      else if (hasMoveWithSplit(defender, 'STATUS', deps)) score += 2
+      break
+
+    case 'EFFECT_TRICK':
+    case 'EFFECT_BESTOW':
+      score = applyTrickBestow(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
+    case 'EFFECT_ROLE_PLAY':
+      if (
+        !isRolePlayBannedAbilityAtk(battlerAbility(attacker)) &&
+        !isRolePlayBannedAbility(battlerAbility(defender)) &&
+        !isAbilityOfRating(battlerAbility(attacker), 5) &&
+        isAbilityOfRating(battlerAbility(defender), 5)
+      ) {
+        score += 2
+      }
+      break
+
+    case 'EFFECT_INGRAIN':
+      if (aiHoldEffect(attacker, deps, unmodelled) === 'HOLD_EFFECT_BIG_ROOT') score += 3
+      else score++
+      break
+
+    case 'EFFECT_SUPERPOWER':
+    case 'EFFECT_OVERHEAT':
+      if (selfAbility(attacker, 'ABILITY_CONTRARY')) score += 10
+      break
+
+    case 'EFFECT_MAGIC_COAT': {
+      // `gBattleMoves[predictedMove].target & (MOVE_TARGET_SELECTED |
+      // MOVE_TARGET_OPPONENTS_FIELD | MOVE_TARGET_BOTH)` -- QUIRK: MOVE_TARGET_SELECTED
+      // is 0x0 (include/constants/battle.h:491), so it contributes NOTHING to the
+      // mask; only BOTH (0x8) and OPPONENTS_FIELD (0x40) can match. A predicted
+      // move with the ordinary single-target `SELECTED` spelling never does.
+      const predicted = predictedMoveId !== null ? deps.moveData(predictedMoveId) : undefined
+      if (predicted?.split === 'STATUS' && (predicted.target === 'OPPONENTS_FIELD' || predicted.target === 'BOTH')) score += 3
+      break
+    }
+
+    case 'EFFECT_RECYCLE': {
+      const usedItem = getUsedHeldItem(attacker, unmodelled)
+      if (usedItem !== null) score++
+      if (isRecycleEncouragedItem(usedItem)) score++
+      if (hasRipenEffect(attacker)) {
+        if (isStatBoostingBerry(usedItem) && atkHpPercent > 60) {
+          score++
+        } else if (shouldRestoreHpBerry(attacker, usedItem)) {
+          // C computes `u16 toHeal` BEFORE the branch, whenever HasRipenEffect is
+          // true: `(param == 10) ? 10 : maxHP / param`. param 0 would divide by
+          // zero in the C (reachable for a non-HP-berry used item, but then toHeal
+          // is never read); it is only consumed here, where the item is an HP berry.
+          const param = usedItem ? (deps.dataContext.item(usedItem)?.holdEffectStrength ?? 0) : 0
+          if (param === 0) unmodelled.push(`EFFECT_RECYCLE: ItemId_GetHoldEffectParam(${usedItem}) is 0 in the snapshot, so the C's u16 toHeal = maxHP / 0 is undefined; treated as 0`)
+          const toHeal = param === 10 ? 10 : param === 0 ? 0 : Math.floor(attacker.mon.maxHp / param) & 0xffff
+          const canFaintNow = canAiFaintTarget(state, battlerAtk, battlerDef, 0, deps)
+          unmodelled.push(...canFaintNow.unmodelled)
+          if (!canFaintNow.canFaint) {
+            let cond = false
+            if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
+              const targetFaints = canTargetFaintAiWithMod(state, battlerDef, battlerAtk, 0, 0, deps)
+              unmodelled.push(...targetFaints.unmodelled)
+              cond = targetFaints.canFaint
+            }
+            if (!cond) {
+              const targetFaintsAfterHeal = canTargetFaintAiWithMod(state, battlerDef, battlerAtk, toHeal, 0, deps)
+              unmodelled.push(...targetFaintsAfterHeal.unmodelled)
+              cond = !targetFaintsAfterHeal.canFaint
+            }
+            // Recycle healing berry if we can't otherwise faint the target and the target wont kill us after we activate the berry
+            if (cond) score++
+          }
+        }
+      }
+      break
+    }
+
+    case 'EFFECT_BRICK_BREAK': {
+      const defSide = state.sides[battlerDef & 1].statuses
+      if (hasFlag(defSide, SIDE_STATUS_REFLECT)) score++
+      if (hasFlag(defSide, SIDE_STATUS_LIGHTSCREEN)) score++
+      if (hasFlag(defSide, SIDE_STATUS_AURORA_VEIL)) score++
+      break
+    }
+
+    case 'EFFECT_STORED_POWER':
+      if (countBattlerStatIncreases(attacker, true) < 2) score -= 4
+      else if (countBattlerStatIncreases(attacker, true) > 6) score += 4
+      break
+
+    case 'EFFECT_KNOCK_OFF':
+      if (canKnockOffItem(defender, defender.mon.itemId, deps)) {
+        switch (aiHoldEffect(defender, deps, unmodelled)) {
+          case 'HOLD_EFFECT_IRON_BALL':
+            if (hasMoveEffect(defender, 'EFFECT_FLING', deps)) score += 4
+            break
+          case 'HOLD_EFFECT_LAGGING_TAIL':
+          case 'HOLD_EFFECT_STICKY_BARB':
+            break
+          default:
+            score += 3
+            break
+        }
+      }
+      break
+
+    case 'EFFECT_SKILL_SWAP':
+      if (getAbilityRating(battlerAbility(defender)) > getAbilityRating(battlerAbility(attacker))) score++
+      break
+
+    case 'EFFECT_WORRY_SEED':
+    case 'EFFECT_GASTRO_ACID':
+    case 'EFFECT_SIMPLE_BEAM':
+      if (isAbilityOfRating(battlerAbility(defender), 5)) score += 2
+      break
+
+    case 'EFFECT_ENTRAINMENT':
+      if (isAbilityOfRating(battlerAbility(defender), 5) || getAbilityRating(battlerAbility(attacker)) <= 0) {
+        if (battlerAbility(attacker) !== battlerAbility(defender) && !hasFlag(defender.statuses3, STATUS3_GASTRO_ACID)) score += 2
+      }
+      break
+
+    case 'EFFECT_IMPRISON':
+      if (predictedMoveId !== null && hasMove(attacker, predictedMoveId)) score += 3
+      else if (attacker.volatiles.isFirstTurn === 0) score++
+      break
+
+    case 'EFFECT_REFRESH':
+      if (hasFlag(attacker.mon.status1, STATUS1_POISON_ANY | STATUS1_BURN | STATUS1_PARALYSIS | STATUS1_FROSTBITE | STATUS1_BLEED)) score += 2
+      break
+
+    case 'EFFECT_PSYCHO_SHIFT':
+      if (hasFlag(attacker.mon.status1, STATUS1_POISON_ANY)) score = increasePoisonScore(state, battlerAtk, battlerDef, score, deps, unmodelled)
+      else if (hasFlag(attacker.mon.status1, STATUS1_BURN)) score = increaseBurnScore(state, battlerAtk, battlerDef, score, deps, unmodelled)
+      else if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS)) score = increaseParalyzeScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      else if (hasFlag(attacker.mon.status1, STATUS1_SLEEP)) score = increaseSleepScore(state, battlerAtk, battlerDef, score, deps, unmodelled)
+      else if (hasFlag(attacker.mon.status1, STATUS1_FROSTBITE)) score = increaseFrostbiteScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
+      break
+
     default:
-      // Every remaining label (EFFECT_SANDSTORM onward) is part 2's own scope
-      // -- gapped explicitly rather than silently scored as 0.
-      if (moveEffect) {
-        unmodelled.push(`AI_CheckViability part 2 gap: ${moveEffect} is handled at battle_ai_main.c:3224+, not yet ported`)
+      // Every label from EFFECT_GRUDGE onward (battle_ai_main.c:3607+) is part
+      // 2b's own scope -- gapped explicitly rather than silently scored as 0. An
+      // effect with NO case label anywhere in the C's switch (which has no
+      // top-level `default:`) is a genuine no-op there, so it is not a gap.
+      if (moveEffect && PART2B_EFFECTS.includes(moveEffect)) {
+        unmodelled.push(`AI_CheckViability part 2b gap: ${moveEffect} is handled at battle_ai_main.c:3607+, not yet ported`)
       }
       break
   }
