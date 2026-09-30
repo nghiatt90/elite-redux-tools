@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { createBattleState, createBattlerState } from '../create'
 import { createRandomSource } from '../rng'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
-import { AI_FLAG_PREFER_STATUS_MOVES, AI_FLAG_WILL_SUICIDE, AI_FLAG_SMART_SWITCHING, AI_FLAG_CHECK_VIABILITY, AI_FLAG_CHECK_BAD_MOVE } from './aiFlags'
+import { AI_FLAG_STALL, AI_FLAG_TRY_TO_FAINT, AI_FLAG_PREFER_STATUS_MOVES, AI_FLAG_WILL_SUICIDE, AI_FLAG_SMART_SWITCHING, AI_FLAG_CHECK_VIABILITY, AI_FLAG_CHECK_BAD_MOVE } from './aiFlags'
 import {
   STATUS1_SLEEP,
   STATUS1_FREEZE,
@@ -29,6 +29,18 @@ import {
   WEATHER_RAIN_PRIMAL,
   WEATHER_RAIN_TEMPORARY,
   SIDE_STATUS_REFLECT,
+  SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_MIST,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_AURORA_VEIL,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS1_PARALYSIS,
+  STATUS2_CONFUSION,
+  STATUS2_DEFENSE_CURL,
+  STATUS3_LEECHSEED,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -1173,5 +1185,335 @@ describe('EFFECT_EERIE_FOG (:3261-3265)', () => {
   })
   it('scores 0 when fog is already up', () => {
     expect(fog(ghost, WEATHER_FOG_TEMPORARY).score).toBe(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Part 2a -- stat-boost / status / field-condition cases (differential tests)
+// ---------------------------------------------------------------------------
+
+/** Deps in which `id` keeps its real data except for the given overrides. */
+function depsOverride(id: string, over: Partial<MoveData>): AiDamageDeps {
+  return { ...deps, moveData: (m) => (m === id ? ({ ...toMoveData(id), ...over } as MoveData) : moveById.has(m) ? toMoveData(m) : undefined) }
+}
+/** What the case body itself contributes for a REAL move: the real score minus the score of the very same move with its effect replaced by EFFECT_HIT, on an identically built state. Pre-switch terms cancel. */
+function effectDelta(mk: () => BattleState, moveId: string): number {
+  const real = aiCheckViability(mk(), 0, 1, moveId, 100, deps).score
+  const plain = aiCheckViability(mk(), 0, 1, moveId, 100, depsOverride(moveId, { effect: 'EFFECT_HIT' })).score
+  return real - plain
+}
+/** Same, for an effect no real move carries: a synthetic move, with EFFECT_HIT as the baseline. */
+function synDelta(mk: () => BattleState, effect: string, extra: Partial<MoveData> = {}): number {
+  const real = aiCheckViability(mk(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps(effect, extra)).score
+  const plain = aiCheckViability(mk(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_HIT', extra)).score
+  return real - plain
+}
+const mkState = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, tweak: (s: BattleState) => void = () => {}, aiFlags = 0) => () => {
+  const s = state(a, d, repeating(RNG_HIGH), aiFlags)
+  tweak(s)
+  return s
+}
+const FAST = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 200 } }
+const SLOW = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 50 } }
+const moves = (...m: string[]) => ({ moves: [m[0] ?? null, m[1] ?? null, m[2] ?? null, m[3] ?? null] as SimBattleMon['moves'] })
+const stage = (s: BattleState, battler: number, statIdx: number, value: number) => {
+  s.battlers[battler]!.mon.statStages[statIdx] = value
+}
+
+for (const id of ['MOVE_FELL_STINGER', 'MOVE_BELLY_DRUM', 'MOVE_PSYCH_UP', 'MOVE_SPECTRAL_THIEF', 'MOVE_DIG', 'MOVE_DEFENSE_CURL', 'MOVE_FAKE_OUT', 'MOVE_STOCKPILE', 'MOVE_ROLLOUT', 'MOVE_SWAGGER', 'MOVE_FLATTER', 'MOVE_ATTRACT', 'MOVE_SAFEGUARD', 'MOVE_PURSUIT', 'MOVE_RAPID_SPIN', 'MOVE_DEFOG', 'MOVE_SQUALL_HAMMER', 'MOVE_TORMENT', 'MOVE_WILL_O_WISP', 'MOVE_FOLLOW_ME', 'MOVE_CHARGE', 'MOVE_TAUNT', 'MOVE_FIRST_IMPRESSION', 'MOVE_ASTONISH', 'MOVE_HEX', 'MOVE_THUNDER_WAVE', 'MOVE_SWORDS_DANCE']) {
+  if (!moveById.has(id)) throw new Error(`moves.json is missing ${id}`)
+}
+
+describe('EFFECT_ATTACK_UP_HIT (:3266-3268)', () => {
+  it('scores the Attack raise only for a Serene Grace attacker (+2: Physical move, HP > 40%, stage < 8)', () => {
+    expect(synDelta(mkState({ abilities: ab('ABILITY_SERENE_GRACE') }), 'EFFECT_ATTACK_UP_HIT')).toBe(2)
+    expect(synDelta(mkState(), 'EFFECT_ATTACK_UP_HIT')).toBe(0)
+  })
+  it('Foul Play adds +1; Contrary or a Special-only moveset removes it', () => {
+    expect(synDelta(mkState({ abilities: ab('ABILITY_SERENE_GRACE'), ...moves('MOVE_TACKLE', 'MOVE_FOUL_PLAY') }), 'EFFECT_ATTACK_UP_HIT')).toBe(3)
+    expect(synDelta(mkState({ abilities: ab('ABILITY_SERENE_GRACE'), ...moves('MOVE_WATER_GUN') }), 'EFFECT_ATTACK_UP_HIT')).toBe(0)
+    expect(synDelta(mkState({ abilities: ab('ABILITY_SERENE_GRACE', ['ABILITY_CONTRARY', null, null]) }), 'EFFECT_ATTACK_UP_HIT')).toBe(0)
+  })
+})
+
+describe('EFFECT_FELL_STINGER (:3269-3277)', () => {
+  const kill = (d: Partial<SimBattleMon> = {}) => ({ hp: 1, ...d })
+  it('scores +9 when the attacker goes first and the move KOs, +3 when the target goes first', () => {
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_FELL_STINGER') }, kill()), 'MOVE_FELL_STINGER')).toBe(9)
+    expect(effectDelta(mkState({ ...SLOW, ...moves('MOVE_FELL_STINGER') }, kill()), 'MOVE_FELL_STINGER')).toBe(3)
+  })
+  it('scores 0 without a KO, at max Attack, or with Contrary', () => {
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_FELL_STINGER') }), 'MOVE_FELL_STINGER')).toBe(0)
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_FELL_STINGER') }, kill(), (s) => stage(s, 0, 1, 12)), 'MOVE_FELL_STINGER')).toBe(0)
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_FELL_STINGER'), abilities: ab('ABILITY_CONTRARY') }, kill()), 'MOVE_FELL_STINGER')).toBe(0)
+    expect(effectDelta(mkState({ ...FAST, ...moves('MOVE_FELL_STINGER') }, kill(), (s) => stage(s, 0, 1, 11)), 'MOVE_FELL_STINGER')).toBe(9)
+  })
+})
+
+describe('EFFECT_BELLY_DRUM (:3278-3282)', () => {
+  it('scores MAX_STAT_STAGE minus the current Attack stage', () => {
+    expect(effectDelta(mkState(), 'MOVE_BELLY_DRUM')).toBe(6)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 0, 1, 9)), 'MOVE_BELLY_DRUM')).toBe(3)
+  })
+  it('scores 0 with Contrary, with no Physical move, or when the target can KO the attacker', () => {
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_CONTRARY') }), 'MOVE_BELLY_DRUM')).toBe(0)
+    expect(effectDelta(mkState(moves('MOVE_WATER_GUN')), 'MOVE_BELLY_DRUM')).toBe(0)
+    expect(effectDelta(mkState({ hp: 1 }), 'MOVE_BELLY_DRUM')).toBe(0)
+  })
+})
+
+describe('EFFECT_PSYCH_UP / EFFECT_SPECTRAL_THIEF (:3283-3307)', () => {
+  const raised = (statIdx: number, a: Partial<SimBattleMon> = {}, aiFlags = 0) => mkState(a, {}, (s) => stage(s, 1, statIdx, 7), aiFlags)
+  for (const id of ['MOVE_PSYCH_UP', 'MOVE_SPECTRAL_THIEF']) {
+    it(`${id}: Attack counts with a Physical move, Sp.Atk with a Special move`, () => {
+      expect(effectDelta(raised(1), id)).toBe(1)
+      expect(effectDelta(raised(1, moves('MOVE_WATER_GUN')), id)).toBe(0)
+      expect(effectDelta(raised(4, moves('MOVE_WATER_GUN')), id)).toBe(1)
+      expect(effectDelta(raised(4), id)).toBe(0)
+    })
+    it(`${id}: Speed, Accuracy and Evasion always count`, () => {
+      for (const idx of [3, 6, 7]) expect(effectDelta(raised(idx), id), `stat ${idx}`).toBe(1)
+    })
+    it(`${id}: Defense and Sp.Def count only under AI_FLAG_STALL (inline read)`, () => {
+      for (const idx of [2, 5]) {
+        expect(effectDelta(raised(idx), id), `stat ${idx} flag off`).toBe(0)
+        expect(effectDelta(raised(idx, {}, AI_FLAG_STALL), id), `stat ${idx} flag on`).toBe(1)
+      }
+    })
+    it(`${id}: a stat the target has NOT raised above the attacker's own does not count`, () => {
+      const mk = mkState({}, {}, (s) => { stage(s, 1, 3, 7); stage(s, 0, 3, 7) })
+      expect(effectDelta(mk, id)).toBe(0)
+    })
+    it(`${id}: stats stack`, () => {
+      const mk = mkState({}, {}, (s) => { stage(s, 1, 1, 7); stage(s, 1, 3, 7); stage(s, 1, 7, 7) })
+      expect(effectDelta(mk, id)).toBe(3)
+    })
+  }
+})
+
+describe('EFFECT_SEMI_INVULNERABLE (:3308-3318)', () => {
+  const dig = (a: Partial<SimBattleMon>, lastMove: string | null, tweak: (s: BattleState) => void = () => {}) => mkState(a, {}, (s) => { s.battlers[1]!.lastMove = lastMove; tweak(s) })
+  it('always scores +1', () => {
+    expect(effectDelta(dig(FAST, null), 'MOVE_DIG')).toBe(1)
+  })
+  it('attacker first: +3 more if the predicted move is an Explosion or Protect effect, not otherwise', () => {
+    expect(effectDelta(dig(FAST, 'MOVE_EXPLOSION'), 'MOVE_DIG')).toBe(4)
+    expect(effectDelta(dig(FAST, 'MOVE_PROTECT'), 'MOVE_DIG')).toBe(4)
+    expect(effectDelta(dig(FAST, 'MOVE_TACKLE'), 'MOVE_DIG')).toBe(1)
+  })
+  it('attacker second: +3 more if the predicted move is semi-invulnerable and the target is not already semi-invulnerable', () => {
+    expect(effectDelta(dig(SLOW, 'MOVE_DIG'), 'MOVE_DIG')).toBe(4)
+    expect(effectDelta(dig(SLOW, 'MOVE_DIG', (s) => { s.battlers[1]!.statuses3 |= STATUS3_UNDERGROUND }), 'MOVE_DIG')).toBe(1)
+    expect(effectDelta(dig(SLOW, 'MOVE_EXPLOSION'), 'MOVE_DIG')).toBe(1) // the "attacker first" list does not apply when second
+  })
+})
+
+describe('EFFECT_DEFENSE_CURL (:3319-3322)', () => {
+  it('scores +1 for Rollout in the moveset (no curl yet) plus the Defense raise (+2 vs a Physical foe)', () => {
+    expect(effectDelta(mkState(moves('MOVE_ROLLOUT')), 'MOVE_DEFENSE_CURL')).toBe(3)
+    expect(effectDelta(mkState(), 'MOVE_DEFENSE_CURL')).toBe(2)
+  })
+  it('the Rollout bonus needs the curl NOT already set; the Defense raise needs a Physical foe', () => {
+    expect(effectDelta(mkState({ ...moves('MOVE_ROLLOUT'), status2: STATUS2_DEFENSE_CURL }), 'MOVE_DEFENSE_CURL')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_ROLLOUT'), moves('MOVE_WATER_GUN')), 'MOVE_DEFENSE_CURL')).toBe(1)
+  })
+})
+
+describe('EFFECT_FAKE_OUT (:3323-3327)', () => {
+  const fo = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, tweak: (s: BattleState) => void = () => {}) => mkState({ ...FAST, ...a }, d, tweak)
+  it('scores +16 on the first turn out when the target cannot be pre-empted', () => {
+    expect(effectDelta(fo(), 'MOVE_FAKE_OUT')).toBe(16)
+  })
+  it('scores 0 for First Impression and Astonish, which share the effect (the `move == MOVE_FAKE_OUT` filter)', () => {
+    expect(effectDelta(fo(), 'MOVE_FIRST_IMPRESSION')).toBe(0)
+    expect(effectDelta(fo(), 'MOVE_ASTONISH')).toBe(0)
+  })
+  it('scores 0 after the first turn (isFirstTurn == 0)', () => {
+    expect(effectDelta(fo({}, {}, (s) => { s.battlers[0]!.volatiles.isFirstTurn = 0 }), 'MOVE_FAKE_OUT')).toBe(0)
+  })
+  it('scores 0 when the target moves first (ShouldTryToFlinch: opponent goes first)', () => {
+    expect(effectDelta(mkState({ ...SLOW }), 'MOVE_FAKE_OUT'), 'slow attacker').toBe(0)
+  })
+  it('scores 0 into a Substitute, and against a sleeper without Snore or Sleep Talk', () => {
+    expect(effectDelta(fo({}, { status2: STATUS2_SUBSTITUTE }), 'MOVE_FAKE_OUT')).toBe(0)
+    expect(effectDelta(fo({}, { status1: 3 }), 'MOVE_FAKE_OUT')).toBe(0)
+  })
+  it('a Choice Band holder with nothing to switch to does not lock itself into Fake Out', () => {
+    expect(effectDelta(fo({ itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_FAKE_OUT')).toBe(0)
+    const withParty = () => {
+      const s = stateWithAttackerParty({ ...FAST, itemId: 'ITEM_CHOICE_BAND' }, {}, repeating(RNG_HIGH))
+      return s
+    }
+    expect(effectDelta(withParty, 'MOVE_FAKE_OUT')).toBe(16)
+  })
+})
+
+describe('EFFECT_STOCKPILE / EFFECT_ROLLOUT (:3328-3337)', () => {
+  it('Stockpile: Defense (+2 vs a Physical foe) and Sp.Def (+2 vs a Special foe), +2 for Swallow/Spit Up', () => {
+    expect(effectDelta(mkState(), 'MOVE_STOCKPILE')).toBe(2)
+    expect(effectDelta(mkState({}, moves('MOVE_TACKLE', 'MOVE_WATER_GUN')), 'MOVE_STOCKPILE')).toBe(4)
+    expect(effectDelta(mkState(moves('MOVE_SWALLOW'), moves('MOVE_TACKLE', 'MOVE_WATER_GUN')), 'MOVE_STOCKPILE')).toBe(6)
+    expect(effectDelta(mkState(moves('MOVE_SPIT_UP')), 'MOVE_STOCKPILE')).toBe(4)
+  })
+  it('Stockpile scores nothing for a Contrary attacker, even with Swallow', () => {
+    expect(effectDelta(mkState({ abilities: ab('ABILITY_CONTRARY'), ...moves('MOVE_SWALLOW') }), 'MOVE_STOCKPILE')).toBe(0)
+  })
+  it('Rollout scores +8 only with Defense Curl already set', () => {
+    expect(effectDelta(mkState({ status2: STATUS2_DEFENSE_CURL }), 'MOVE_ROLLOUT')).toBe(8)
+    expect(effectDelta(mkState(), 'MOVE_ROLLOUT')).toBe(0)
+  })
+})
+
+describe('EFFECT_SWAGGER / EFFECT_FLATTER (:3338-3352)', () => {
+  it('Swagger: +2 for the confusion, +1 for Foul Play / Psych Up / Spectral Thief, +2 for a Contrary target', () => {
+    expect(effectDelta(mkState(), 'MOVE_SWAGGER')).toBe(2)
+    for (const m of ['MOVE_FOUL_PLAY', 'MOVE_PSYCH_UP', 'MOVE_SPECTRAL_THIEF']) expect(effectDelta(mkState(moves(m)), 'MOVE_SWAGGER'), m).toBe(3)
+    expect(effectDelta(mkState({}, { abilities: ab('ABILITY_CONTRARY') }), 'MOVE_SWAGGER')).toBe(4)
+  })
+  it('Swagger: a Mold Breaker attacker sees through Contrary (breakable), so no +2 for it', () => {
+    const molded: AiDamageDeps = { ...deps, grounding: { ...grounding, attackerHasMoldBreaker: true } }
+    const mk = mkState({}, { abilities: ab('ABILITY_CONTRARY') })
+    const real = aiCheckViability(mk(), 0, 1, 'MOVE_SWAGGER', 100, molded).score
+    const plain = aiCheckViability(mk(), 0, 1, 'MOVE_SWAGGER', 100, { ...molded, moveData: (m) => (m === 'MOVE_SWAGGER' ? ({ ...toMoveData(m), effect: 'EFFECT_HIT' } as MoveData) : toMoveData(m)) }).score
+    expect(real - plain).toBe(2)
+  })
+  it('Flatter: +2 for Psych Up / Spectral Thief (not Foul Play), +2 Contrary target, +2 confusion', () => {
+    expect(effectDelta(mkState(), 'MOVE_FLATTER')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_PSYCH_UP')), 'MOVE_FLATTER')).toBe(4)
+    expect(effectDelta(mkState(moves('MOVE_SPECTRAL_THIEF')), 'MOVE_FLATTER')).toBe(4)
+    expect(effectDelta(mkState(moves('MOVE_FOUL_PLAY')), 'MOVE_FLATTER')).toBe(2)
+    expect(effectDelta(mkState({}, { abilities: ab('ABILITY_CONTRARY') }), 'MOVE_FLATTER')).toBe(4)
+  })
+  it('the confusion term scores +3 vs a paralyzed target and 0 vs an already-confused or cure-item holder', () => {
+    expect(effectDelta(mkState({}, { status1: STATUS1_PARALYSIS }), 'MOVE_SWAGGER')).toBe(3)
+    expect(effectDelta(mkState({}, { status2: STATUS2_CONFUSION & 1 }), 'MOVE_SWAGGER')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_LUM_BERRY' }), 'MOVE_SWAGGER')).toBe(0)
+    expect(effectDelta(mkState({}, { itemId: 'ITEM_PERSIM_BERRY' }), 'MOVE_SWAGGER')).toBe(0)
+  })
+  it('the confusion term is skipped when AI_FLAG_TRY_TO_FAINT and the attacker already KOs', () => {
+    expect(effectDelta(mkState({ ...moves('MOVE_TACKLE') }, { hp: 1 }, () => {}, AI_FLAG_TRY_TO_FAINT), 'MOVE_SWAGGER')).toBe(0)
+  })
+})
+
+describe('EFFECT_ATTRACT (:3353-3362)', () => {
+  it('scores +1 for a healthy free target, +2 if it has a status, is confused, or is trapped', () => {
+    expect(effectDelta(mkState(), 'MOVE_ATTRACT')).toBe(1)
+    expect(effectDelta(mkState({}, { status1: STATUS1_BURN }), 'MOVE_ATTRACT')).toBe(2)
+    expect(effectDelta(mkState({}, { status2: STATUS2_CONFUSION & 1 }), 'MOVE_ATTRACT')).toBe(2)
+    expect(effectDelta(mkState({}, { status2: STATUS2_WRAPPED }), 'MOVE_ATTRACT')).toBe(2)
+  })
+  it('names the BattlerWillFaintFromSecondaryDamage gap', () => {
+    expect(check(state(), 'MOVE_ATTRACT').unmodelled.some((u) => u.includes('BattlerWillFaintFromSecondaryDamage'))).toBe(true)
+  })
+})
+
+describe('EFFECT_SAFEGUARD / EFFECT_PURSUIT / EFFECT_TORMENT / EFFECT_FOLLOW_ME', () => {
+  const ungrounded: AiDamageDeps = { ...deps, turnOrder: { ...NEUTRAL_TURN_ORDER_CONTEXT, isBattlerGrounded: () => false } }
+  const misty = (s: BattleState) => { s.field.statuses |= STATUS_FIELD_MISTY_TERRAIN }
+  it('Safeguard scores +1 unless Misty Terrain is up and the attacker is grounded', () => {
+    expect(effectDelta(mkState(), 'MOVE_SAFEGUARD')).toBe(1)
+    expect(effectDelta(mkState({}, {}, misty), 'MOVE_SAFEGUARD')).toBe(0)
+    const s = mkState({}, {}, misty)
+    const real = aiCheckViability(s(), 0, 1, 'MOVE_SAFEGUARD', 100, ungrounded).score
+    const plain = aiCheckViability(s(), 0, 1, 'MOVE_SAFEGUARD', 100, { ...ungrounded, moveData: (m) => (m === 'MOVE_SAFEGUARD' ? ({ ...toMoveData(m), effect: 'EFFECT_HIT' } as MoveData) : toMoveData(m)) }).score
+    expect(real - plain).toBe(1)
+    expect(effectDelta(mkState({}, {}, (st) => { st.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN }), 'MOVE_SAFEGUARD')).toBe(1) // another terrain: still +1
+  })
+  it('Pursuit (a /*TODO*/ block in the C), Torment and Follow Me (doubles-only) score nothing and are not gaps', () => {
+    for (const id of ['MOVE_PURSUIT', 'MOVE_TORMENT', 'MOVE_FOLLOW_ME']) {
+      expect(effectDelta(mkState(), id), id).toBe(0)
+      expect(check(state(), id).unmodelled.some((u) => u.includes('gap')), id).toBe(false)
+    }
+  })
+})
+
+describe('EFFECT_RAPID_SPIN / EFFECT_DEFOG (:3375-3410)', () => {
+  const hazards = (bit: number) => (s: BattleState) => { s.sides[0].statuses |= bit }
+  const partyState = (a: Partial<SimBattleMon>, tweak: (s: BattleState) => void) => () => {
+    const s = stateWithAttackerParty(a, {}, repeating(RNG_HIGH))
+    tweak(s)
+    return s
+  }
+  it('Rapid Spin: Speed raise (+2) only when the attacker is the slower one', () => {
+    expect(effectDelta(mkState(SLOW), 'MOVE_RAPID_SPIN')).toBe(2)
+    expect(effectDelta(mkState(FAST), 'MOVE_RAPID_SPIN')).toBe(0)
+  })
+  it('Rapid Spin: +3 to clear your own hazards with a party to switch to (early exit), and only with the party', () => {
+    expect(effectDelta(partyState(FAST, hazards(SIDE_STATUS_STEALTH_ROCK)), 'MOVE_RAPID_SPIN')).toBe(3)
+    expect(effectDelta(mkState(FAST, {}, hazards(SIDE_STATUS_STEALTH_ROCK)), 'MOVE_RAPID_SPIN')).toBe(0)
+    expect(effectDelta(partyState(SLOW, hazards(SIDE_STATUS_SPIKES)), 'MOVE_RAPID_SPIN')).toBe(5)
+  })
+  it('Rapid Spin: +3 for Leech Seed or being wrapped when there are no hazards', () => {
+    expect(effectDelta(mkState(FAST, {}, (s) => { s.battlers[0]!.statuses3 |= STATUS3_LEECHSEED }), 'MOVE_RAPID_SPIN')).toBe(3)
+    expect(effectDelta(mkState({ ...FAST, status2: STATUS2_WRAPPED }), 'MOVE_RAPID_SPIN')).toBe(3)
+  })
+  it('Defog: +3 for clearing own hazards with a party; other-move Defog-effect (Squall Hammer) shares it', () => {
+    expect(effectDelta(partyState({}, hazards(SIDE_STATUS_STEALTH_ROCK)), 'MOVE_DEFOG')).toBe(3)
+    expect(effectDelta(partyState({}, hazards(SIDE_STATUS_STEALTH_ROCK)), 'MOVE_SQUALL_HAMMER')).toBe(3)
+  })
+  it('Defog: +3 for removing the target side screens / Safeguard / Mist', () => {
+    for (const bit of [SIDE_STATUS_REFLECT, SIDE_STATUS_LIGHTSCREEN, SIDE_STATUS_AURORA_VEIL, SIDE_STATUS_SAFEGUARD, SIDE_STATUS_MIST]) {
+      expect(effectDelta(mkState({}, {}, (s) => { s.sides[1].statuses |= bit }), 'MOVE_DEFOG'), `bit ${bit}`).toBe(3)
+    }
+  })
+  it('Defog evasion branch: +1 baseline, +2 vs raised evasion (>7) or with an accuracy<=90 move; none when the target has Spikes', () => {
+    expect(effectDelta(mkState(), 'MOVE_DEFOG')).toBe(1)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 1, 7, 8)), 'MOVE_DEFOG')).toBe(2)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 1, 7, 7)), 'MOVE_DEFOG')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_THUNDER')), 'MOVE_DEFOG')).toBe(2)
+    expect(effectDelta(mkState({}, {}, (s) => { s.sides[1].statuses |= SIDE_STATUS_SPIKES }), 'MOVE_DEFOG')).toBe(0)
+    // QUIRK: only the Spikes bit (1<<4) blocks it; Stealth Rock on the target side does not.
+    expect(effectDelta(mkState({}, {}, (s) => { s.sides[1].statuses |= SIDE_STATUS_STEALTH_ROCK }), 'MOVE_DEFOG')).toBe(1)
+  })
+  it('Squall Hammer (Defog effect, but neither MOVE_DEFOG nor MOVE_RAPID_SPIN) has no inner-switch scoring', () => {
+    expect(effectDelta(mkState(), 'MOVE_SQUALL_HAMMER')).toBe(0)
+  })
+})
+
+describe('EFFECT_WILL_O_WISP (:3413-3415)', () => {
+  it('scores +1 for a burnable target, +2 more when the target has a Physical move and could KO the attacker, +1 for Hex', () => {
+    expect(effectDelta(mkState(), 'MOVE_WILL_O_WISP')).toBe(1)
+    expect(effectDelta(mkState({ hp: 1 }), 'MOVE_WILL_O_WISP')).toBe(3)
+    expect(effectDelta(mkState({ hp: 1 }, moves('MOVE_WATER_GUN')), 'MOVE_WILL_O_WISP')).toBe(1)
+    expect(effectDelta(mkState(moves('MOVE_HEX')), 'MOVE_WILL_O_WISP')).toBe(2)
+  })
+  it('scores 0 vs a Fire type or an already-statused target, and under TRY_TO_FAINT when the attacker KOs anyway', () => {
+    expect(effectDelta(mkState({}, { types: ['FIRE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_WILL_O_WISP')).toBe(0)
+    expect(effectDelta(mkState({}, { status1: STATUS1_PARALYSIS }), 'MOVE_WILL_O_WISP')).toBe(0)
+    expect(effectDelta(mkState({}, { hp: 1 }, () => {}, AI_FLAG_TRY_TO_FAINT), 'MOVE_WILL_O_WISP')).toBe(0)
+  })
+})
+
+describe('EFFECT_NATURE_POWER (:3424-3425)', () => {
+  const np = (tweak: (s: BattleState) => void = () => {}, a: Partial<SimBattleMon> = {}) => mkState(a, {}, tweak)
+  it('with no terrain, recurses into Tri Attack (the C fallback) and names the map-terrain gap', () => {
+    const r = aiCheckViability(np()(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_NATURE_POWER'))
+    expect(r.unmodelled.some((u) => u.includes('GetNaturePowerMove'))).toBe(true)
+    const direct = aiCheckViability(np()(), 0, 1, 'MOVE_TRI_ATTACK', 100, deps)
+    expect(r.score).toBe(direct.score)
+  })
+  it('Electric Terrain -> Thunderbolt, and the recursion is the TOP-LEVEL function (Frostbite penalizes the recursed Special move)', () => {
+    const tweak = (s: BattleState) => { s.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN }
+    const frostbitten = { status1: STATUS1_FROSTBITE }
+    const r = aiCheckViability(np(tweak, frostbitten)(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_NATURE_POWER'))
+    const direct = aiCheckViability(np(tweak, frostbitten)(), 0, 1, 'MOVE_THUNDERBOLT', 100, deps)
+    expect(r.score).toBe(direct.score)
+    const healthy = aiCheckViability(np(tweak)(), 0, 1, 'MOVE_SYNTHETIC', 100, syntheticEffectDeps('EFFECT_NATURE_POWER'))
+    expect(r.score).toBeLessThan(healthy.score)
+  })
+})
+
+describe('EFFECT_CHARGE / EFFECT_TAUNT (:3426-3436)', () => {
+  it('Charge: +2 for a damaging Electric move (a status Electric move does not count), plus the Sp.Def raise', () => {
+    expect(effectDelta(mkState(moves('MOVE_THUNDERBOLT'), moves('MOVE_WATER_GUN')), 'MOVE_CHARGE')).toBe(4)
+    expect(effectDelta(mkState(moves('MOVE_THUNDERBOLT')), 'MOVE_CHARGE')).toBe(2)
+    expect(effectDelta(mkState(moves('MOVE_THUNDER_WAVE'), moves('MOVE_WATER_GUN')), 'MOVE_CHARGE')).toBe(2)
+    expect(effectDelta(mkState(), 'MOVE_CHARGE')).toBe(0)
+  })
+  it('Taunt: +10 if the target last used a status move, else +2 if it knows one, else 0', () => {
+    expect(effectDelta(mkState({}, {}, (s) => { s.battlers[1]!.lastMove = 'MOVE_SWORDS_DANCE' }), 'MOVE_TAUNT')).toBe(10)
+    expect(effectDelta(mkState({}, moves('MOVE_TACKLE', 'MOVE_SWORDS_DANCE'), (s) => { s.battlers[1]!.lastMove = 'MOVE_TACKLE' }), 'MOVE_TAUNT')).toBe(2)
+    expect(effectDelta(mkState({}, {}, (s) => { s.battlers[1]!.lastMove = 'MOVE_TACKLE' }), 'MOVE_TAUNT')).toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_TAUNT')).toBe(0)
   })
 })
