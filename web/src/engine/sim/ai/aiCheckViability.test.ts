@@ -65,8 +65,11 @@ import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
 import { aiCalcDamage } from './aiCalcDamage'
-import { aiCheckViability, PART2A_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
+import { aiCheckViability as aiCheckViabilityAt, PART2A_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
 import { AI_ABILITY_RATINGS, getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
+
+/** `movesetIndex` defaults to slot 0, the slot most fixtures score from; tests that care pass it explicitly. */
+const aiCheckViability = (s: BattleState, a: number, d: number, m: string, sc: number, dp: AiDamageDeps, movesetIndex = 0) => aiCheckViabilityAt(s, a, d, m, sc, dp, movesetIndex)
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -2797,5 +2800,24 @@ describe('part 2b RNG order -- every speed-tie draw is a real state.rng draw, in
     expect(c.calls()).toBe(1)
     const no = aiCheckViability(stateWithRng(scripted(RNG_HIGH), moves('MOVE_HYPNOSIS')), 0, 1, 'MOVE_GRAVITY', 100, deps).score
     expect(s - no).toBe(2)
+  })
+})
+
+describe('AI_THINKING_STRUCT->movesetIndex is the CALLER\'s slot: threaded, and unchanged by recursion', () => {
+  it(':2549 check-damage reads the scored move\'s real slot: Tackle in slot 1 behind a big move is WEAK (-1), in slot 0 it is BEST', () => {
+    const buffed = depsOverride('MOVE_HYPER_VOICE', { power: 250 })
+    const at = (idx: number) => aiCheckViabilityAt(mkState({ ...FAST, ...moves('MOVE_HYPER_VOICE', 'MOVE_TACKLE') })(), 0, 1, 'MOVE_TACKLE', 100, buffed, idx).score
+    expect(at(1)).toBe(at(0) - 1)
+  })
+  it('Nature Power recursion keeps the Nature Power slot: the Moxie KO check (:2619) reads slot 0\'s move (0 damage), not the called Thunderbolt', () => {
+    const terrain = (s: BattleState) => { s.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN }
+    // No real move carries EFFECT_NATURE_POWER (MOVE_NATURE_POWER is EFFECT_TERRAIN_PULSE in this snapshot): a status Tackle stands in.
+    const nature = tackleAs('EFFECT_NATURE_POWER', { power: 0, split: 'STATUS' })
+    const run = (d: AiDamageDeps, ability: string | null, idx: number, m: string[]) =>
+      aiCheckViabilityAt(mkState({ ...FAST, abilities: ab(ability), ...moves(...m) }, { hp: 1 }, terrain)(), 0, 1, m[idx], 100, d, idx).score
+    // Electric Terrain: Nature Power (slot 0) recurses into Thunderbolt, which would KO the 1-HP target; slot 0's own simulated damage is 0.
+    expect(run(nature, 'ABILITY_MOXIE', 0, ['MOVE_TACKLE', 'MOVE_WATER_GUN']) - run(nature, null, 0, ['MOVE_TACKLE', 'MOVE_WATER_GUN'])).toBe(0)
+    // Control: Thunderbolt scored from its own slot 1 does earn the +8 (the index path is live).
+    expect(run(deps, 'ABILITY_MOXIE', 1, ['MOVE_TACKLE', 'MOVE_THUNDERBOLT']) - run(deps, null, 1, ['MOVE_TACKLE', 'MOVE_THUNDERBOLT'])).toBe(8)
   })
 })

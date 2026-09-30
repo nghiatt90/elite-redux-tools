@@ -50,7 +50,7 @@ type Scorer = (state: BattleState, battlerAtk: number, battlerDef: number, moveI
 const DISPATCH: Record<number, Scorer> = {
   0: (s, a, d, m, _i, sc, deps) => aiCheckBadMove(s, a, d, m, sc, deps), // AI_FLAG_CHECK_BAD_MOVE -- part 1 (this batch), part 2 to follow
   1: (s, a, d, m, i, sc, deps) => aiTryToFaint(s, a, d, m, i, sc, deps), // AI_FLAG_TRY_TO_FAINT
-  2: (s, a, d, m, _i, sc, deps) => aiCheckViability(s, a, d, m, sc, deps), // AI_FLAG_CHECK_VIABILITY -- part 1 (this batch), part 2 to follow
+  2: (s, a, d, m, i, sc, deps) => aiCheckViability(s, a, d, m, sc, deps, i), // AI_FLAG_CHECK_VIABILITY -- part 1 (this batch), part 2 to follow
   4: (s, a, d, m, _i, sc, deps) => aiRisky(s, a, d, m, sc, deps), // AI_FLAG_RISKY
   8: (s, a, d, m, _i, sc, deps) => aiHPAware(s, a, d, m, sc, deps), // AI_FLAG_HP_AWARE
 }

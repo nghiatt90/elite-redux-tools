@@ -1466,7 +1466,7 @@ function applyTerrainSetup(attacker: BattlerState, score: number, deps: AiDamage
  * switch-forcing check, and the attacker-ability loop). Then the move-effect
  * switch from EFFECT_HIT through EFFECT_PERISH_SONG.
  */
-export function aiCheckViability(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps): Result {
+export function aiCheckViability(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, movesetIndex: number): Result {
   const unmodelled: string[] = []
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1512,7 +1512,7 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
 
   // :2549 -- check damage.
   if ((move?.power ?? 0) !== 0) {
-    const dmgResult = getMoveDamageResult(state, battlerAtk, battlerDef, moveId, 0, deps)
+    const dmgResult = getMoveDamageResult(state, battlerAtk, battlerDef, moveId, movesetIndex, deps)
     unmodelled.push(...dmgResult.unmodelled)
     if (dmgResult.result === MOVE_POWER_WEAK) score--
   }
@@ -1584,7 +1584,7 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   for (const abilityToCheck of atkSlots) {
     if (STAT_UP_ABILITIES.has(abilityToCheck)) {
       if (getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0) {
-        const faintResult = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+        const faintResult = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faintResult.unmodelled)
         if (faintResult.faints) score += 8
       }
@@ -1592,9 +1592,19 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   }
 
   // :2627 -- the move-effect switch.
-  score = applyMoveEffectSwitch(state, battlerAtk, battlerDef, moveId, moveEffect, score, effectiveness, atkHpPercent, defHpPercent, predictedMoveId, deps, unmodelled)
+  score = applyMoveEffectSwitch(state, battlerAtk, battlerDef, moveId, moveEffect, score, effectiveness, atkHpPercent, defHpPercent, predictedMoveId, deps, unmodelled, movesetIndex)
 
   return { score, unmodelled }
+}
+
+/** `CanIndexMoveFaintTarget(battlerAtk, battlerDef, AI_THINKING_STRUCT->movesetIndex, 0)`
+ * (:2619, :3271, :3970): the damage is `simulatedDmg[..][movesetIndex]`, i.e. the move in the
+ * CALLER's slot -- after a Mirror Move / Nature Power recursion that is still the original
+ * move, not the one being scored. An empty slot simulates 0 damage. */
+function canIndexedMoveFaintTarget(state: BattleState, battlerAtk: number, battlerDef: number, movesetIndex: number, deps: AiDamageDeps): { faints: boolean; unmodelled: string[] } {
+  const slotMove = (state.battlers[battlerAtk] as BattlerState).mon.moves[movesetIndex]
+  if (!slotMove) return { faints: false, unmodelled: [] }
+  return canIndexMoveFaintTarget(state, battlerAtk, battlerDef, slotMove, 0, deps)
 }
 
 /** `HasOnlyMovesWithSplit(battler, SPLIT_SPECIAL, TRUE)`/`SPLIT_PHYSICAL` --
@@ -1675,13 +1685,12 @@ function applyMoveEffectSwitch(
   predictedMoveId: string | null,
   deps: AiDamageDeps,
   unmodelled: string[],
+  movesetIndex: number,
 ): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
   const atkMoldBreaker = deps.grounding.attackerHasMoldBreaker
   const isDoubleBattle = isValidDoubleBattle(state, battlerAtk)
-  // `AI_THINKING_STRUCT->movesetIndex`, the slot of the move being scored.
-  const movesetIndex = attacker.mon.moves.indexOf(moveId)
 
   switch (moveEffect) {
     case 'EFFECT_HIT':
@@ -1736,7 +1745,7 @@ function applyMoveEffectSwitch(
           unmodelled.push(`EFFECT_MIRROR_MOVE: gLastMoves[battlerDef] (${predictedMoveId}) is itself ${targetEffect}, which would recurse into the same lookup forever (a real infinite loop in the C too); refused instead of reproducing the hang`)
           break
         }
-        const recursed = aiCheckViability(state, battlerAtk, battlerDef, predictedMoveId, score, deps)
+        const recursed = aiCheckViability(state, battlerAtk, battlerDef, predictedMoveId, score, deps, movesetIndex)
         unmodelled.push(...recursed.unmodelled)
         return recursed.score
       }
@@ -2156,7 +2165,7 @@ function applyMoveEffectSwitch(
             unmodelled.push(`EFFECT_MIMIC: gLastMoves[battlerDef] (${defender.lastMove}) is itself ${targetEffect}, which would recurse into the same lookup forever (a real infinite loop in the C too); refused instead of reproducing the hang`)
             break
           }
-          const recursed = aiCheckViability(state, battlerAtk, battlerDef, defender.lastMove, score, deps)
+          const recursed = aiCheckViability(state, battlerAtk, battlerDef, defender.lastMove, score, deps, movesetIndex)
           unmodelled.push(...recursed.unmodelled)
           return recursed.score
         }
@@ -2256,7 +2265,9 @@ function applyMoveEffectSwitch(
       const newHp = Math.floor((attacker.mon.hp + defender.mon.hp) / 2)
       const healthBenchmark = Math.floor((attacker.mon.hp * 12) / 10)
       if (newHp > healthBenchmark) {
-        const dmgResult = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
+        // C: `AI_DATA->simulatedDmg[battlerAtk][battlerDef][AI_THINKING_STRUCT->movesetIndex]` -- the caller's slot, which a recursion does not change.
+        const slotMove = attacker.mon.moves[movesetIndex]
+        const dmgResult = slotMove ? aiCalcDamage(state, slotMove, battlerAtk, battlerDef, deps) : { dmg: 0, unmodelled: [] as string[] }
         unmodelled.push(...dmgResult.unmodelled)
         const absorb = shouldAbsorb(state, battlerAtk, battlerDef, moveId, dmgResult.dmg, deps)
         unmodelled.push(...absorb.unmodelled)
@@ -2530,7 +2541,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_FELL_STINGER': {
       if (attacker.mon.statStages[STAT_ATK] < MAX_STAT_STAGE && !selfAbility(attacker, 'ABILITY_CONTRARY')) {
-        const faints = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+        const faints = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faints.unmodelled)
         if (faints.faints) {
           // `GetWhoStrikesFirst(battlerAtk, battlerDef, TRUE) == 0` -- attacker goes first.
@@ -2676,7 +2687,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_NATURE_POWER': {
       // C: `return AI_CheckViability(battlerAtk, battlerDef, GetNaturePowerMove(), score)` --
       // the top-level function, with its own fresh pre-switch ladder.
-      const recursed = aiCheckViability(state, battlerAtk, battlerDef, getNaturePowerMove(state, unmodelled), score, deps)
+      const recursed = aiCheckViability(state, battlerAtk, battlerDef, getNaturePowerMove(state, unmodelled), score, deps, movesetIndex)
       unmodelled.push(...recursed.unmodelled)
       return recursed.score
     }
@@ -3317,7 +3328,7 @@ function applyMoveEffectSwitch(
         defAbility(attacker, 'ABILITY_RAGING_GODDESS', atkMoldBreaker) ||
         defAbility(attacker, 'ABILITY_MASTER_HAND', atkMoldBreaker)
       ) {
-        const faints = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
+        const faints = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faints.unmodelled)
         if (faints.faints) score += 4 // No recharge if Rampage attacker KOs the target
       }
