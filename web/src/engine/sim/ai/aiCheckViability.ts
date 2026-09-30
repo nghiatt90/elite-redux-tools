@@ -547,6 +547,7 @@ function shouldUseWishAromatherapy(state: BattleState, battlerDef: number, moveI
     if (mon.status1 !== 0) {
       const soundproof = mon.abilities.ability === 'ABILITY_SOUNDPROOF' || mon.abilities.innates.includes('ABILITY_SOUNDPROOF')
       const noiseCancel = mon.abilities.ability === 'ABILITY_NOISE_CANCEL' || mon.abilities.innates.includes('ABILITY_NOISE_CANCEL')
+      // battle_ai_util.c:2401-2403 reads GetMonAbility (pokemon.c:2159) on a party mon, not a battler, so IsSuppressed does not apply.
       if (moveId !== 'MOVE_HEAL_BELL' || !soundproof) hasStatus = true
       if (moveId !== 'MOVE_HEAL_BELL' || !noiseCancel) hasStatus = true
     }
@@ -1551,6 +1552,7 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   // `GetBattlerAbilityInSlot` collapse to a scan over the attacker's own
   // ability + innate slots, same simplification aiCheckBadMove.ts's own
   // defender-ability loop (:615-671) already uses.
+  // GetBattlerAbilityInSlot (pokemon.c:6414) is a raw slot read with no IsSuppressed, so no suppression helper (battle_ai_main.c:2606).
   const atkSlots = [attacker.mon.abilities.ability, ...attacker.mon.abilities.innates].filter((x): x is string => !!x)
   const STAT_UP_ABILITIES = new Set(['ABILITY_MOXIE', 'ABILITY_BEAST_BOOST', 'ABILITY_SOUL_HEART', 'ABILITY_CHILLING_NEIGH', 'ABILITY_GRIM_NEIGH', 'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER'])
   for (const abilityToCheck of atkSlots) {

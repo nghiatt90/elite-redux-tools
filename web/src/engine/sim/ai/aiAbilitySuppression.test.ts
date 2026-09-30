@@ -19,6 +19,7 @@ import type { AiDamageDeps } from './aiCalcDamage'
 import { aiCheckBadMove } from './aiCheckBadMove'
 import { isAbilityOnField, isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiAbilityHelpers'
 import { aiCheckViability } from './aiCheckViability'
+import { isAbilityPreventingEscape } from './aiPipeline'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -342,5 +343,27 @@ describe('isAbilityOnField -- battle_util.c:4803-4811 (BattlerHasAbility TRUE)',
     gastroAcid(ga, DEF)
     expect(onField(ga, BREAKABLE)).toBe(false)
     expect(onField(state({}, { abilities: ability(BREAKABLE), hp: 0 }), BREAKABLE)).toBe(false)
+  })
+})
+
+describe('isAbilityPreventingEscape reads the opposing trap ability through IsSuppressed', () => {
+  const SHADOW_TAG = 'ABILITY_SHADOW_TAG'
+  if (!hooks[SHADOW_TAG] || isUnsuppressable(SHADOW_TAG)) throw new Error('Shadow Tag is missing or unsuppressable')
+  const gaps = (s: BattleState) => isAbilityPreventingEscape(s, ATK, deps).unmodelled.length
+
+  it('flags the gap for a live Shadow Tag foe, and not once Gastro Acid or Neutralizing Gas suppresses it', () => {
+    expect(gaps(state({}, { abilities: ability(SHADOW_TAG) }))).toBe(1)
+    const ga = state({}, { abilities: ability(SHADOW_TAG) })
+    gastroAcid(ga, DEF)
+    expect(gaps(ga)).toBe(0)
+    const ng = state({}, { abilities: ability(SHADOW_TAG) })
+    neutralizingGas(ng)
+    expect(gaps(ng)).toBe(0)
+  })
+
+  it('an Ability Shield keeps the gap flagged under Gastro Acid', () => {
+    const s = state({}, { abilities: ability(SHADOW_TAG), itemId: 'ITEM_ABILITY_SHIELD' })
+    gastroAcid(s, DEF)
+    expect(gaps(s)).toBe(1)
   })
 })

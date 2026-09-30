@@ -435,7 +435,7 @@ export function isBattlerTrapped(state: BattleState, battler: BattlerState, chec
   if (isBattlerOfType(battler, 'GHOST') || holdEffect === holdEffectId('HOLD_EFFECT_SHED_SHELL', deps) || (!checkSwitch && selfAbility(state, deps, battler, 'ABILITY_RUN_AWAY'))) {
     return { trapped: false, unmodelled }
   }
-  const escapeCheck = isAbilityPreventingEscape(state, battler.id)
+  const escapeCheck = isAbilityPreventingEscape(state, battler.id, deps)
   unmodelled.push(...escapeCheck.unmodelled)
   const trapped =
     hasFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION | STATUS2_WRAPPED) ||
@@ -1017,6 +1017,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
 
       // :615-671 -- the per-ability-slot switch. `GetNumPossibleAbilitiesForBattler`
       // is the fixed slot count (ability + innates); every slot on `defender.mon.abilities`.
+      // GetBattlerAbilityInSlot (pokemon.c:6414) is a raw slot read with no IsSuppressed (battle_ai_main.c:616).
       const defSlots = [defender.mon.abilities.ability, ...defender.mon.abilities.innates].filter((x): x is string => !!x)
       for (const abilityToCheck of defSlots) {
         switch (abilityToCheck) {

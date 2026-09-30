@@ -274,7 +274,7 @@ export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: 
   let aliveCount = 0
   for (let i = firstId; i < lastId; i++) {
     const mon = party[i]
-    const isTruant = mon?.abilities.ability === 'ABILITY_TRUANT' // GetMonAbility reads the CHOSEN ability slot only, :1020.
+    const isTruant = mon?.abilities.ability === 'ABILITY_TRUANT' // GetMonAbility (pokemon.c:2159) reads the CHOSEN ability slot only, :1020; a party mon, so no IsSuppressed.
     const invalid =
       !mon ||
       mon.speciesId === null ||

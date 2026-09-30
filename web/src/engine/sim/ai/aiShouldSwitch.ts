@@ -50,6 +50,7 @@ import {
   hasFlag,
 } from '../constants'
 import { battlerHasAbility } from '../../abilities/dispatch'
+import { selfAbility } from './aiAbilityHelpers'
 import { UQ_ONE, idiv } from '../../fixed'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
 import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
@@ -163,13 +164,13 @@ function findMonWithFlagsAndSuperEffective(): { result: false; unmodelled: strin
  * one of the three Natural-Cure-family abilities. Every branch below draws
  * from `state.rng` in the C's own order; see this module's header for why the
  * lastLandedMoves-gated branches are deterministic under this sim's gap. */
-function shouldSwitchIfNaturalCure(state: BattleState, battlerId: number): SwitchHelperResult {
+function shouldSwitchIfNaturalCure(state: BattleState, battlerId: number, deps: AiDamageDeps): SwitchHelperResult {
   const battler = state.battlers[battlerId]
   if (!battler) return NOT_DECIDED
   if (!hasFlag(battler.mon.status1, STATUS1_SLEEP)) return NOT_DECIDED
-  const hasNaturalCure = battlerHasAbility(battler.mon.abilities, 'ABILITY_NATURAL_CURE', () => false)
-  const hasSelfRepair = battlerHasAbility(battler.mon.abilities, 'ABILITY_SELF_REPAIR', () => false)
-  const hasNaturalRecovery = battlerHasAbility(battler.mon.abilities, 'ABILITY_NATURAL_RECOVERY', () => false)
+  const hasNaturalCure = selfAbility(state, deps, battler, 'ABILITY_NATURAL_CURE')
+  const hasSelfRepair = selfAbility(state, deps, battler, 'ABILITY_SELF_REPAIR')
+  const hasNaturalRecovery = selfAbility(state, deps, battler, 'ABILITY_NATURAL_RECOVERY')
   if (!hasNaturalCure && !hasSelfRepair && !hasNaturalRecovery) return NOT_DECIDED
 
   const unmodelled = [
@@ -228,7 +229,7 @@ function shouldSwitchIfWonderGuard(state: BattleState, battlerId: number, deps: 
   const opposing = state.battlers[opposingId]
   const unmodelled: string[] = []
   if (!battler || !opposing) return NOT_DECIDED
-  if (!battlerHasAbility(opposing.mon.abilities, 'ABILITY_WONDER_GUARD', () => false)) return NOT_DECIDED
+  if (!selfAbility(state, deps, opposing, 'ABILITY_WONDER_GUARD')) return NOT_DECIDED
 
   for (const moveId of battler.mon.moves) {
     if (!moveId) continue
@@ -298,6 +299,7 @@ function isMonHealthyEnoughToSwitch(state: BattleState, battlerId: number): bool
   const battler = state.battlers[battlerId]
   if (!battler) return true
   let battlerHp = battler.mon.hp
+  // battle_ai_switch_items.c:507 reads GetBattlerAbility (abilities[0], no IsSuppressed), so no suppression helper.
   if (battlerHasAbility(battler.mon.abilities, 'ABILITY_REGENERATOR', () => false)) {
     battlerHp = idiv(battlerHp * 133, 100)
   }
@@ -334,7 +336,7 @@ export function shouldSwitch(state: BattleState, battlerId: number, deps: AiDama
   if (hasFlag(battler.statuses3, STATUS3_ROOTED)) return NEUTRAL_SWITCH
   if (hasFlag(battler.statuses4, STATUS4_COMMANDED)) return NEUTRAL_SWITCH
   if (battler.volatiles.fear) return NEUTRAL_SWITCH
-  const escapeCheck = isAbilityPreventingEscape(state, battlerId)
+  const escapeCheck = isAbilityPreventingEscape(state, battlerId, deps)
   if (escapeCheck.prevents) return { shouldSwitch: false, unmodelled: escapeCheck.unmodelled }
   if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) return { shouldSwitch: false, unmodelled: escapeCheck.unmodelled }
   if (battler.volatiles.skyDropped) return { shouldSwitch: false, unmodelled: escapeCheck.unmodelled }
@@ -358,7 +360,7 @@ export function shouldSwitch(state: BattleState, battlerId: number, deps: AiDama
   if (!isMonHealthyEnoughToSwitch(state, battlerId)) return { shouldSwitch: false, unmodelled }
   if (decide(shouldSwitchIfEncored(state, battlerId))) return { shouldSwitch: true, unmodelled }
   if (decide(shouldSwitchIfWonderGuard(state, battlerId, deps))) return { shouldSwitch: true, unmodelled }
-  if (decide(shouldSwitchIfNaturalCure(state, battlerId))) return { shouldSwitch: true, unmodelled }
+  if (decide(shouldSwitchIfNaturalCure(state, battlerId, deps))) return { shouldSwitch: true, unmodelled }
 
   const seResult = hasSuperEffectiveMoveAgainstOpponents(state, battlerId, false, deps)
   unmodelled.push(...seResult.unmodelled)

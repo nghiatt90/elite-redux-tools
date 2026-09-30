@@ -23,6 +23,7 @@ import { aiCheckBadMove } from './aiCheckBadMove'
 import { aiCheckViability } from './aiCheckViability'
 import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitching'
 import type { AiDamageDeps } from './aiCalcDamage'
+import { selfAbility } from './aiAbilityHelpers'
 
 /** include/constants/battle.h:18, 66. Same values aiSwitching.ts's own module
  * header cites (BATTLE_TYPE_ARENA) and state.ts's aiFlags doc cites
@@ -182,13 +183,13 @@ const TRAPPING_ABILITIES = new Set(['ABILITY_ARENA_TRAP', 'ABILITY_FRENZIED_PHAN
  * `onTrap`-hooked abilities in ANY slot (`TRAPPING_ABILITIES` above) -- i.e.
  * only when the missing check could actually have changed the answer.
  */
-export function isAbilityPreventingEscape(state: BattleState, battlerId: number): { prevents: boolean; unmodelled: string[] } {
+export function isAbilityPreventingEscape(state: BattleState, battlerId: number, deps: AiDamageDeps): { prevents: boolean; unmodelled: string[] } {
   const opposingId = battlerId ^ 1
   const opposing = state.battlers[opposingId]
   const unmodelled: string[] = []
   if (opposing) {
-    const slots = [opposing.mon.abilities.ability, ...opposing.mon.abilities.innates]
-    if (slots.some((id) => id && TRAPPING_ABILITIES.has(id))) {
+    // ON_ABILITY(opponent, FALSE, onTrap, ...) (battle_util.c:4832) goes through IsSuppressed, so selfAbility.
+    if ([...TRAPPING_ABILITIES].some((id) => selfAbility(state, deps, opposing, id))) {
       unmodelled.push(`IsAbilityPreventingEscape (battle_util.c:4826-4834) not ported -- opponent battler ${opposingId} has a trapping-capable ability; escape-prevention not checked, treated as not preventing`)
     }
   }
@@ -221,7 +222,7 @@ export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number
 
   const gateFlags = AI_FLAG_CHECK_VIABILITY | AI_FLAG_CHECK_BAD_MOVE | AI_FLAG_TRY_TO_FAINT | AI_FLAG_PREFER_BATON_PASS
   const usableParty = countUsablePartyMons(state, battlerAtk)
-  const escapeCheck = isAbilityPreventingEscape(state, battlerAtk)
+  const escapeCheck = isAbilityPreventingEscape(state, battlerAtk, deps)
   unmodelled.push(...escapeCheck.unmodelled)
 
   const canConsiderSwitch =
