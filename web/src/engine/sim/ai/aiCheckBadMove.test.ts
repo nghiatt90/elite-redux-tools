@@ -28,6 +28,7 @@ import {
   STATUS1_SLEEP,
   STATUS1_POISON,
   STATUS2_INFATUATION,
+  STATUS2_WRAPPED,
   STATUS2_TORMENT,
   STATUS2_TRANSFORMED,
   STATUS2_DESTINY_BOND,
@@ -48,6 +49,7 @@ import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
 import {
   aiCheckBadMove,
+  isBattlerTrapped,
   MOLD_BREAKABLE_ABILITIES,
   ON_STAT_LOWERED_ABILITIES,
   SUCTION_CUPS_ABILITIES,
@@ -601,9 +603,11 @@ describe('cycle17 (part 2) -- case-by-case coverage', () => {
     expect(check(s, 'MOVE_DEFOG').score).toBe(90)
   })
 
-  it('EFFECT_SOLARBEAM: no penalty holding Power Herb, -14 otherwise when the attacker can be knocked out first', () => {
-    const s1 = state({ itemId: 'ITEM_POWER_HERB' })
-    expect(check(s1, 'MOVE_SOLAR_BEAM').score).toBe(100)
+  // battle_ai_main.c:1706 compares the held item's PARAM with HOLD_EFFECT_POWER_HERB (15). The real
+  // Power Herb's param is 0, so it earns no exemption; Muscle Band's param is 15, so it does.
+  it('EFFECT_SOLARBEAM: -10 holding the real Power Herb (param 0), none holding a param-15 item (Muscle Band)', () => {
+    expect(check(state({ itemId: 'ITEM_POWER_HERB' }), 'MOVE_SOLAR_BEAM').score).toBe(90)
+    expect(check(state({ itemId: 'ITEM_MUSCLE_BAND' }), 'MOVE_SOLAR_BEAM').score).toBe(100)
   })
 
   it('EFFECT_TRICK_ROOM: -10 when Clueless is on the field', () => {
@@ -1331,5 +1335,134 @@ describe('cycle17 ability-set oracle tests against abilityHooks.json', () => {
       .map(([id]) => id)
       .sort()
     expect([...CHLOROPLAST_ABILITIES].sort()).toEqual(expected)
+  })
+})
+
+// AI_DATA->holdEffects[] holds the held item's PARAM (battle_ai_main.c:216), so every
+// `holdEffects[b] == HOLD_EFFECT_X` below compares that param with X's numeric enum id.
+// Expectations are derived from the C branch plus the param, not from the port's output.
+describe('AI_CheckBadMove -- holdEffects[] is an item param, not a hold effect', () => {
+  const paramOf = (id: string): number => itemsById.get(id)?.holdEffectStrength ?? 0
+  for (const [id, param] of [
+    ['ITEM_POWER_HERB', 0], ['ITEM_MENTAL_HERB', 0], ['ITEM_MUSCLE_BAND', 15], ['ITEM_CHOICE_BAND', 0], ['ITEM_UTILITY_UMBRELLA', 0],
+    ['ITEM_IRON_BALL', 0], ['ITEM_AIR_BALLOON', 0], ['ITEM_RING_TARGET', 0], ['ITEM_SHED_SHELL', 0], ['ITEM_FOCUS_SASH', 0], ['ITEM_ORAN_BERRY', 10],
+  ] as const) {
+    if (paramOf(id) !== param) throw new Error(`${id} param is no longer ${param}`)
+  }
+  for (const [name, id] of [
+    ['HOLD_EFFECT_NONE', 0], ['HOLD_EFFECT_MENTAL_HERB', 14], ['HOLD_EFFECT_POWER_HERB', 15], ['HOLD_EFFECT_AIR_BALLOON', 36], ['HOLD_EFFECT_CHOICE_BAND', 28],
+    ['HOLD_EFFECT_SHED_SHELL', 49], ['HOLD_EFFECT_IRON_BALL', 57], ['HOLD_EFFECT_RING_TARGET', 121], ['HOLD_EFFECT_UTILITY_UMBRELLA', 129],
+  ] as const) {
+    if (holdEffectIds[name] !== id) throw new Error(`${name} is no longer ${id}`)
+  }
+
+  const SYNTH = 'ITEM_SYNTHETIC_PARAM'
+  /** An item whose param equals HOLD_EFFECT_<name>'s id -- for effects no real item's param lands on. */
+  function withParamOf(name: string): AiDamageDeps {
+    const item: SimItemData = { id: SYNTH, resolvedHoldEffect: null, holdEffectStrength: holdEffectIds[name]!, holdEffectType: null, naturalGift: null }
+    return { ...deps, dataContext: { ...deps.dataContext, item: (id) => (id === SYNTH ? item : deps.dataContext.item(id)) } }
+  }
+  const slowDefender = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 10 } }
+
+  it('EFFECT_TWO_TURNS_ATTACK (:1551): the real Power Herb still takes -6 when the attacker can faint; a param-15 item does not', () => {
+    const d = depsWithSyntheticEffect('EFFECT_TWO_TURNS_ATTACK')
+    const run = (itemId: string) => aiCheckBadMove(state({ itemId, hp: 1 }), 0, 1, 'MOVE_SYNTHETIC_EFFECT', 100, d).score
+    expect(run('ITEM_POWER_HERB')).toBe(94)
+    expect(run('ITEM_MUSCLE_BAND')).toBe(100)
+  })
+
+  it('EFFECT_LEAF_GUARD via a status move (:666): the real Utility Umbrella (param 0) does not stop the -10; a param-129 item does', () => {
+    const leafGuard = { abilities: { ability: 'ABILITY_LEAF_GUARD', innates: [null, null, null] as [null, null, null] } }
+    const run = (d: AiDamageDeps, itemId: string) => {
+      const s = state({}, { ...leafGuard, itemId })
+      s.field.weather |= WEATHER_SUN_PRIMAL
+      return aiCheckBadMove(s, 0, 1, 'MOVE_TOXIC', 100, d).score
+    }
+    expect(run(deps, 'ITEM_UTILITY_UMBRELLA')).toBe(90)
+    expect(run(withParamOf('HOLD_EFFECT_UTILITY_UMBRELLA'), SYNTH)).toBe(100)
+  })
+
+  it('EFFECT_DISABLE / EFFECT_ENCORE (:1191, :1204): only a param-14 item takes the else branch (-10); the real Mental Herb (param 0) falls through to "attacker goes first, defender has moved" = no penalty', () => {
+    const run = (d: AiDamageDeps, move: string, itemId: string) => {
+      const s = state({}, { itemId, ...slowDefender })
+      s.battlers[1]!.lastMove = 'MOVE_TACKLE'
+      return aiCheckBadMove(s, 0, 1, move, 100, d).score
+    }
+    for (const move of ['MOVE_DISABLE', 'MOVE_ENCORE']) {
+      expect(run(deps, move, 'ITEM_MENTAL_HERB')).toBe(100)
+      expect(run(withParamOf('HOLD_EFFECT_MENTAL_HERB'), move, SYNTH)).toBe(90)
+    }
+  })
+
+  it('EFFECT_TORMENT (:1392): -6 only against a param-14 item, not against the real Mental Herb', () => {
+    expect(check(state({}, { itemId: 'ITEM_MENTAL_HERB' }), 'MOVE_TORMENT').score).toBe(100)
+    expect(aiCheckBadMove(state({}, { itemId: SYNTH }), 0, 1, 'MOVE_TORMENT', 100, withParamOf('HOLD_EFFECT_MENTAL_HERB')).score).toBe(94)
+  })
+
+  it('EFFECT_FAKE_OUT (:1366): the Choice Band branch needs a param-28 item; the real Choice Band (param 0) skips it', () => {
+    const run = (d: AiDamageDeps, itemId: string) => aiCheckBadMove(state({ itemId }), 0, 1, 'MOVE_FAKE_OUT', 100, d).score
+    expect(run(deps, 'ITEM_CHOICE_BAND')).toBe(100)
+    expect(run(withParamOf('HOLD_EFFECT_CHOICE_BAND'), SYNTH)).toBe(90)
+  })
+
+  it('EFFECT_SOLARBEAM (:1707): a param-129 item, not the real Utility Umbrella, cancels the sun exemption', () => {
+    const run = (d: AiDamageDeps, itemId: string) => {
+      const s = state({ itemId })
+      s.field.weather |= WEATHER_SUN_PRIMAL
+      return aiCheckBadMove(s, 0, 1, 'MOVE_SOLAR_BEAM', 100, d).score
+    }
+    expect(run(deps, 'ITEM_UTILITY_UMBRELLA')).toBe(100)
+    expect(run(withParamOf('HOLD_EFFECT_UTILITY_UMBRELLA'), SYNTH)).toBe(90)
+  })
+
+  it('EFFECT_BESTOW (:1740): -10 while holding any param-0 item, including the real Focus Sash; a param-10 item (Oran Berry) is fine', () => {
+    expect(check(state({ itemId: 'ITEM_FOCUS_SASH' }), 'MOVE_BESTOW').score).toBe(90)
+    expect(check(state({ itemId: 'ITEM_ORAN_BERRY' }), 'MOVE_BESTOW').score).toBe(100)
+    expect(check(state({ itemId: null }), 'MOVE_BESTOW').score).toBe(90)
+  })
+
+  it('EFFECT_GRAVITY (:1940): the real Air Balloon (param 0) does not exempt the attacker; a param-36 item does', () => {
+    const run = (d: AiDamageDeps, itemId: string) => {
+      const s = state({ itemId })
+      s.field.statuses |= STATUS_FIELD_GRAVITY
+      return aiCheckBadMove(s, 0, 1, 'MOVE_GRAVITY', 100, d).score
+    }
+    expect(run(deps, 'ITEM_AIR_BALLOON')).toBe(90)
+    expect(run(withParamOf('HOLD_EFFECT_AIR_BALLOON'), SYNTH)).toBe(100)
+  })
+
+  it('EFFECT_TELEKINESIS (:1961): -10 only against a param-57 item, not against the real Iron Ball', () => {
+    expect(check(state({}, { itemId: 'ITEM_IRON_BALL' }), 'MOVE_TELEKINESIS').score).toBe(100)
+    expect(aiCheckBadMove(state({}, { itemId: SYNTH }), 0, 1, 'MOVE_TELEKINESIS', 100, withParamOf('HOLD_EFFECT_IRON_BALL')).score).toBe(90)
+  })
+
+  it('EFFECT_MAGNET_RISE (:2091): -10 only for a param-57 attacker item, not for the real Iron Ball', () => {
+    expect(check(state({ itemId: 'ITEM_IRON_BALL' }), 'MOVE_MAGNET_RISE').score).toBe(100)
+    expect(aiCheckBadMove(state({ itemId: SYNTH }), 0, 1, 'MOVE_MAGNET_RISE', 100, withParamOf('HOLD_EFFECT_IRON_BALL')).score).toBe(90)
+  })
+
+  it('EFFECT_SYNCHRONOISE (:2103): the real Ring Target (param 0) does not rescue a type mismatch; a param-121 item does', () => {
+    // The attacker's type3 is MYSTERY, so a defender carrying MYSTERY would always count as sharing a type.
+    const fire = { types: ['FIRE', 'FIRE', 'FIRE'] as [string, string, string] }
+    const run = (d: AiDamageDeps, itemId: string) => aiCheckBadMove(state({}, { ...fire, itemId }), 0, 1, 'MOVE_SYNCHRONOISE', 100, d).score
+    expect(run(deps, 'ITEM_RING_TARGET')).toBe(90)
+    expect(run(withParamOf('HOLD_EFFECT_RING_TARGET'), SYNTH)).toBe(100)
+  })
+
+  it('IsBattlerTrapped (battle_ai_util.c:567): the real Shed Shell (param 0) does not free a wrapped battler; a param-49 item does', () => {
+    const wrapped = (itemId: string) => state({ itemId, status2: STATUS2_WRAPPED })
+    const trapped = (d: AiDamageDeps, itemId: string) => {
+      const s = wrapped(itemId)
+      return isBattlerTrapped(s, s.battlers[0]!, true, d).trapped
+    }
+    expect(trapped(deps, 'ITEM_SHED_SHELL')).toBe(true)
+    expect(trapped(withParamOf('HOLD_EFFECT_SHED_SHELL'), SYNTH)).toBe(false)
+  })
+
+  it('IsBattlerTrapped: `u8 holdEffect` truncates the u16 param (unobservable with real data, whose params are already u8)', () => {
+    const s = state({ itemId: SYNTH, status2: STATUS2_WRAPPED })
+    const item: SimItemData = { id: SYNTH, resolvedHoldEffect: null, holdEffectStrength: 256 + holdEffectIds['HOLD_EFFECT_SHED_SHELL']!, holdEffectType: null, naturalGift: null }
+    const d: AiDamageDeps = { ...deps, dataContext: { ...deps.dataContext, item: () => item } }
+    expect(isBattlerTrapped(s, s.battlers[0]!, true, d).trapped).toBe(false)
   })
 })

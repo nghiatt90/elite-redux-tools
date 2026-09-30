@@ -537,9 +537,9 @@ export function isBattlerIncapacitated(battler: BattlerState, deps: AiDamageDeps
  * at both of this batch's call sites (the EFFECT_MEAN_LOOK branch below). */
 export function isBattlerTrapped(state: BattleState, battler: BattlerState, checkSwitch: boolean, deps: AiDamageDeps): { trapped: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
-  const holdEffect = getBattlerHoldEffect(battler, deps)
+  const holdEffect = aiHoldEffectParam(battler, deps) & 0xff // `u8 holdEffect`
   if (battler.volatiles.skyDropped) return { trapped: true, unmodelled }
-  if (isBattlerOfType(battler, 'GHOST') || holdEffect === 'HOLD_EFFECT_SHED_SHELL' || (!checkSwitch && selfAbility(battler, 'ABILITY_RUN_AWAY'))) {
+  if (isBattlerOfType(battler, 'GHOST') || holdEffect === holdEffectId('HOLD_EFFECT_SHED_SHELL', deps) || (!checkSwitch && selfAbility(battler, 'ABILITY_RUN_AWAY'))) {
     return { trapped: false, unmodelled }
   }
   const escapeCheck = isAbilityPreventingEscape(state, battler.id)
@@ -1187,7 +1187,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
             // function never rereads for a score delta), so nothing to port.
             break
           case 'ABILITY_LEAF_GUARD':
-            if (weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && getBattlerHoldEffect(defender, deps) !== 'HOLD_EFFECT_UTILITY_UMBRELLA' && isNonVolatileStatusMoveEffect(effect)) {
+            if (weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps) && isNonVolatileStatusMoveEffect(effect)) {
               return { score: score - 10, unmodelled }
             }
             break
@@ -1597,7 +1597,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_DISABLE':
     case 'EFFECT_ENCORE': {
       const timer = effect === 'EFFECT_DISABLE' ? defender.volatiles.disableTimer : defender.volatiles.encoreTimer
-      const mentalHerbBlocks = getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_MENTAL_HERB'
+      const mentalHerbBlocks = aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)
       unmodelled.push('AI_CheckBadMove: B_MENTAL_HERB >= GEN_5 is assumed true, same modern-gen-ruleset assumption as EFFECT_SUBSTITUTE\'s B_SOUND_SUBSTITUTE check')
       if (timer === 0 && !mentalHerbBlocks && !doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         const goesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
@@ -1753,8 +1753,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 30
       } else if (moveId === 'MOVE_FAKE_OUT') {
         // filter out First Impression, which shares this effect.
-        const holdEffect = getBattlerHoldEffect(attacker, deps)
-        if (holdEffect === 'HOLD_EFFECT_CHOICE_BAND' || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS')) {
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_CHOICE_BAND', deps) || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS')) {
           const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
           unmodelled.push(...faintCheck.unmodelled)
           if (countUsablePartyMons(state, battlerDef) > 0 || !faintCheck.faints) {
@@ -1781,7 +1780,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 10
         break
       }
-      if (getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_MENTAL_HERB') {
+      if (aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)) {
         unmodelled.push("AI_CheckBadMove: B_MENTAL_HERB >= GEN_5 is assumed true, same modern-gen-ruleset assumption as EFFECT_SUBSTITUTE's B_SOUND_SUBSTITUTE check")
         score -= 6
       }
@@ -1970,10 +1969,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED) || hasFlag(defender.mon.status2, STATUS2_TRANSFORMED | STATUS2_SUBSTITUTE)) score -= 10
       break
     case 'EFFECT_TWO_TURNS_ATTACK': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
       const faintCheck = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
       unmodelled.push(...faintCheck.unmodelled)
-      if (holdEffect !== 'HOLD_EFFECT_POWER_HERB' && faintCheck.canFaint) score -= 6
+      if (!aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) && faintCheck.canFaint) score -= 6
       break
     }
     case 'EFFECT_RECHARGE': {
@@ -2106,10 +2104,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_SPECTRAL_THIEF':
       break
     case 'EFFECT_SOLARBEAM': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
-      const sunActive = weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && holdEffect !== 'HOLD_EFFECT_UTILITY_UMBRELLA'
+      const sunActive = weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps)
       const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(attacker, id))
-      if (holdEffect === 'HOLD_EFFECT_POWER_HERB' || sunActive || hasChloroplast) {
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) || sunActive || hasChloroplast) {
         // no-op.
       } else {
         const faintCheck = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
@@ -2145,7 +2142,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (defender.volatiles.tauntTimer !== 0) score -= 10
       break
     case 'EFFECT_BESTOW':
-      if (!attacker.mon.itemId || !canBattlerGetOrLoseItemApprox(attacker, attacker.mon.itemId, deps)) score -= 10 // AI knows its own item
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_NONE', deps) || !canBattlerGetOrLoseItemApprox(attacker, attacker.mon.itemId as string, deps)) score -= 10 // AI knows its own item
       break
     case 'EFFECT_ROLE_PLAY': {
       const atkAbility = battlerAbility(attacker)
@@ -2340,8 +2337,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       else if (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_GRAVITY': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
-      if ((isGravityActive(state) && !isBattlerOfType(attacker, 'FLYING') && holdEffect !== 'HOLD_EFFECT_AIR_BALLOON') || partnerMoveIsSameNoTarget(state, battlerAtk)) {
+      if ((isGravityActive(state) && !isBattlerOfType(attacker, 'FLYING') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_AIR_BALLOON', deps)) || partnerMoveIsSameNoTarget(state, battlerAtk)) {
         score -= 10 // should revert Gravity in the air-balloon case
       }
       break
@@ -2359,11 +2355,10 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!hasMoveWithType(defender, 'FIRE', deps) || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_TELEKINESIS': {
-      const holdEffect = getBattlerHoldEffect(defender, deps)
       if (
         hasFlag(defender.statuses3, STATUS3_TELEKINESIS | STATUS3_ROOTED | STATUS3_SMACKED_DOWN) ||
         isGravityActive(state) ||
-        holdEffect === 'HOLD_EFFECT_IRON_BALL' ||
+        aiHoldEffectIs(defender, 'HOLD_EFFECT_IRON_BALL', deps) ||
         isTelekinesisBannedSpecies(defender.mon.speciesId) ||
         partnerMoveIsSameAsAttacker(state, battlerAtk)
       ) {
@@ -2486,12 +2481,11 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (state.sides[battlerAtk & 1].timers.luckyChantTimer !== 0 || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_MAGNET_RISE': {
-      const holdEffect = getBattlerHoldEffect(attacker, deps)
       const grounded = deps.turnOrder.isBattlerGrounded(battlerAtk)
       if (
         isGravityActive(state) ||
         attacker.volatiles.magnetRiseTimer !== 0 ||
-        holdEffect === 'HOLD_EFFECT_IRON_BALL' ||
+        aiHoldEffectIs(attacker, 'HOLD_EFFECT_IRON_BALL', deps) ||
         hasFlag(attacker.statuses3, STATUS3_ROOTED | STATUS3_MAGNET_RISE | STATUS3_SMACKED_DOWN) ||
         !grounded
       ) {
@@ -2507,9 +2501,8 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_SYNCHRONOISE': {
       // Check holding Ring Target or is of same type.
-      const holdEffect = getBattlerHoldEffect(defender, deps)
       const sameType = attacker.mon.types.some((t) => defender.mon.types.includes(t))
-      if (!(holdEffect === 'HOLD_EFFECT_RING_TARGET' || sameType)) score -= 10
+      if (!(aiHoldEffectIs(defender, 'HOLD_EFFECT_RING_TARGET', deps) || sameType)) score -= 10
       break
     }
     case 'EFFECT_ERUPTION': {
