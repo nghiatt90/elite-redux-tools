@@ -39,6 +39,7 @@ import type { BattleState } from '../state'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { WEATHER_STRONG_WINDS, hasFlag } from '../constants'
 import { weatherHasEffect } from '../fieldEndTurn'
+import { defAbility, selfAbility } from './aiCheckBadMove'
 import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, type AiDamageDeps } from './aiCalcDamage'
 
 // ---------------------------------------------------------------------------
@@ -173,39 +174,29 @@ function isMovePhysical(moveId: string, deps: AiDamageDeps): boolean {
  * gives the id table, but nothing wires an observed-item writer to it yet, so
  * the item half stays unported. Dropping the item half is the conservative
  * direction: Rocky Helmet is rare and "not yet observed" (0) is by far the
- * common case even in the C. The ability half is ALSO read WITHOUT Mold
- * Breaker/Neutralizing Gas suppression -- `battlerHasAbility` needs an
- * `isSuppressed` predicate this sim has no wiring for yet (no caller threads
- * gStatuses3 GASTRO_ACID or a Neutralizing-Gas-on-field fact into this batch).
- * The C's own BATTLER_HAS_ABILITY(..., checkMoldBreaker=TRUE) macro WOULD
- * suppress these under Mold Breaker; this port cannot, and the resulting
- * imprecision is reported as a gap only when one of the four abilities is
- * actually present on the target (i.e. only when it could have mattered),
- * rather than unconditionally.
+ * common case even in the C. The ability half goes through `defAbility`
+ * (`BATTLER_HAS_ABILITY`, checkMoldBreaker TRUE: Mold Breaker, Gastro Acid and
+ * Neutralizing Gas suppression, with the Ability Shield exemption) for the
+ * target, and `selfAbility` (checkMoldBreaker FALSE) for the AI's own battler.
  */
 function whichMoveBetter(state: BattleState, battlerAtk: number, battlerDef: number, move1: string, move2: string, deps: AiDamageDeps): { result: 0 | 1 | 2; unmodelled: string[] } {
   const unmodelled: string[] = []
   const targetBattler = state.battlers[battlerDef]
-  const target = targetBattler?.mon
-  const attacker = state.battlers[battlerAtk]?.mon
+  const attackerBattler = state.battlers[battlerAtk]
   const targetHasHurtBackAbility =
-    !!target &&
-    (target.abilities.ability === 'ABILITY_IRON_BARBS' ||
-      target.abilities.ability === 'ABILITY_ROUGH_SKIN' ||
-      target.abilities.ability === 'ABILITY_DOUBLE_IRON_BARBS' ||
-      target.abilities.innates.includes('ABILITY_IRON_BARBS') ||
-      target.abilities.innates.includes('ABILITY_ROUGH_SKIN') ||
-      target.abilities.innates.includes('ABILITY_DOUBLE_IRON_BARBS'))
+    !!targetBattler &&
+    (defAbility(state, deps, targetBattler, 'ABILITY_IRON_BARBS', deps.grounding.attackerHasMoldBreaker) ||
+      defAbility(state, deps, targetBattler, 'ABILITY_ROUGH_SKIN', deps.grounding.attackerHasMoldBreaker) ||
+      defAbility(state, deps, targetBattler, 'ABILITY_DOUBLE_IRON_BARBS', deps.grounding.attackerHasMoldBreaker))
   // `AI_GetHoldEffect(gBattlerTarget) != HOLD_EFFECT_PROTECTIVE_PADS` (:770) reads the item PARAM, see `aiHoldEffectParam`.
   if (targetBattler && !aiHoldEffectIs(targetBattler, 'HOLD_EFFECT_PROTECTIVE_PADS', deps) && targetHasHurtBackAbility) {
-    unmodelled.push('WhichMoveBetter: physical-move-hurts-back check does not model Mold Breaker/Neutralizing Gas suppression of the target ability')
     const move1Physical = isMovePhysical(move1, deps)
     const move2Physical = isMovePhysical(move2, deps)
     if (move1Physical && !move2Physical) return { result: 1, unmodelled }
     if (move2Physical && !move1Physical) return { result: 0, unmodelled }
   }
 
-  const attackerBlocksRecoil = !!attacker && (attacker.abilities.ability === 'ABILITY_ROCK_HEAD' || attacker.abilities.ability === 'ABILITY_STEEL_BARREL')
+  const attackerBlocksRecoil = !!attackerBattler && (selfAbility(state, deps, attackerBattler, 'ABILITY_ROCK_HEAD') || selfAbility(state, deps, attackerBattler, 'ABILITY_STEEL_BARREL'))
   if (!attackerBlocksRecoil) {
     const move1Data = deps.moveData(move1)
     const move2Data = deps.moveData(move2)

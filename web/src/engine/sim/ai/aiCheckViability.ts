@@ -290,15 +290,15 @@ function isEncoreEncouragedEffect(effect: string | null): boolean {
  * Extraction: same query shape as aiCheckBadMove.ts's ON_STAT_LOWERED_ABILITIES
  * with `bitfields.unaware` -- 4 entries. */
 const UNAWARE_ABILITIES: readonly string[] = ['ABILITY_CONTEMPT', 'ABILITY_LEPIDOPTERAN', 'ABILITY_SWORD_OF_DAMNATION', 'ABILITY_UNAWARE']
-function isUnaware(battler: BattlerState, attackerHasMoldBreaker: boolean): boolean {
-  return UNAWARE_ABILITIES.some((id) => defAbility(battler, id, attackerHasMoldBreaker))
+function isUnaware(state: BattleState, deps: AiDamageDeps, battler: BattlerState, attackerHasMoldBreaker: boolean): boolean {
+  return UNAWARE_ABILITIES.some((id) => defAbility(state, deps, battler, id, attackerHasMoldBreaker))
 }
 
 /** `IsBloodStainAffected(battler)`, battle_util.c -- Ghost/Rock immune,
  * otherwise a plain Blood Stain ability check. */
-function isBloodStainAffected(battler: BattlerState): boolean {
+function isBloodStainAffected(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
   if (isBattlerOfType(battler, 'GHOST') || isBattlerOfType(battler, 'ROCK')) return false
-  return selfAbility(battler, 'ABILITY_BLOOD_STAIN')
+  return selfAbility(state, deps, battler, 'ABILITY_BLOOD_STAIN')
 }
 
 /** `CanBattlerHeal(battler)`, battle_util.c:8979-8986. `IsAbilityOnOpposingSide`
@@ -308,10 +308,10 @@ function isBloodStainAffected(battler: BattlerState): boolean {
  * case). Gapped only when the battler is actually asleep/poisoned enough for
  * it to matter is not tracked either; reported once per call as a standing
  * caveat like aiPipeline.ts's own moveLimitations note. */
-function canBattlerHeal(battler: BattlerState, unmodelled: string[]): boolean {
+function canBattlerHeal(state: BattleState, deps: AiDamageDeps, battler: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
-  if (isBloodStainAffected(battler)) return false
+  if (isBloodStainAffected(state, deps, battler)) return false
   unmodelled.push('CanBattlerHeal: IsAbilityOnOpposingSide(battler, ABILITY_PERMANENCE/ABILITY_HEMOLYSIS) has no port anywhere in this codebase; treated as absent')
   return true
 }
@@ -320,8 +320,8 @@ function canBattlerHeal(battler: BattlerState, unmodelled: string[]): boolean {
  * narrowed to this batch's one call shape (`cmpKind = CMP_LESS_THAN`, i.e. the
  * literal `3` at :2682). The Contrary flip is checked as a bare self-ability
  * read (see this module's header gap note on Mold-Breaker direction). */
-function compareStatLessThan(battler: BattlerState, stat: number, cmpTo: number): boolean {
-  const contrary = selfAbility(battler, 'ABILITY_CONTRARY')
+function compareStatLessThan(state: BattleState, deps: AiDamageDeps, battler: BattlerState, stat: number, cmpTo: number): boolean {
+  const contrary = selfAbility(state, deps, battler, 'ABILITY_CONTRARY')
   const value = battler.mon.statStages[stat]
   if (contrary) {
     const flippedCmpTo = cmpTo === MAX_STAT_STAGE ? 0 : cmpTo
@@ -435,7 +435,7 @@ function shouldAbsorb(state: BattleState, battlerAtk: number, battlerDef: number
     const move = deps.dataContext.move(moveId) // `.argumentInt` lives on SimMoveData, not MoveData.
     const healPercent = move?.argumentInt ? move.argumentInt : 50
     let healDmg = Math.floor((healPercent * damage) / 100)
-    if (!canBattlerHeal(attacker, unmodelled)) healDmg = 0
+    if (!canBattlerHeal(state, deps, attacker, unmodelled)) healDmg = 0
     const targetCanFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
     unmodelled.push(...targetCanFaint.unmodelled)
     if (targetCanFaint.canFaint) {
@@ -463,7 +463,7 @@ function shouldRecover(state: BattleState, battlerAtk: number, battlerDef: numbe
   const { dmg, unmodelled: dmgU } = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
   unmodelled.push(...dmgU)
   let healAmount = Math.floor((healPercent * dmg) / 100)
-  if (!canBattlerHeal(attacker, unmodelled)) healAmount = 0
+  if (!canBattlerHeal(state, deps, attacker, unmodelled)) healAmount = 0
   const targetCanFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
   unmodelled.push(...targetCanFaint.unmodelled)
   if (targetCanFaint.canFaint) {
@@ -486,7 +486,7 @@ function shouldSetScreen(state: BattleState, battlerAtk: number, battlerDef: num
   switch (moveEffect) {
     case 'EFFECT_AURORA_VEIL':
       if (
-        (isBattlerWeatherAffected(state, WEATHER_HAIL_ANY, deps) || selfAbility(attacker, 'ABILITY_AURORA_BOREALIS')) &&
+        (isBattlerWeatherAffected(state, WEATHER_HAIL_ANY, deps) || selfAbility(state, deps, attacker, 'ABILITY_AURORA_BOREALIS')) &&
         !hasFlag(atkSideStatuses, SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_AURORA_VEIL)
       ) {
         return true
@@ -523,7 +523,7 @@ function shouldTryToFlinch(state: BattleState, battlerAtk: number, battlerDef: n
   unmodelled.push('ShouldTryToFlinch: IsAbilityStatusProtected(battlerDef, CHECK_FLINCH) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
   const defender = state.battlers[battlerDef] as BattlerState
   const attacker = state.battlers[battlerAtk] as BattlerState
-  if (doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled) || getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1) {
+  if (doesSubstituteBlockMove(state, deps, attacker, defender, deps.moveData(moveId), unmodelled) || getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1) {
     return 0
   }
   if (hasFlag(defender.mon.status1, STATUS1_SLEEP) && !hasMoveEffect(defender, 'EFFECT_SLEEP_TALK', deps) && !hasMoveEffect(defender, 'EFFECT_SNORE', deps)) {
@@ -628,7 +628,7 @@ function shouldPivot(state: BattleState, battlerAtk: number, battlerDef: number,
   const attackerGoesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
   unmodelled.push('ShouldPivot: IsUnnerveAbilityOnOpposingSide has no port anywhere in this codebase; treated as false')
   const sashOrSturdyBreak = () => {
-    return atMaxHp(defender) && (aiHoldEffectIs(defender, 'HOLD_EFFECT_FOCUS_SASH', deps) || defAbility(defender, 'ABILITY_STURDY', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_MULTISCALE', deps.grounding.attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SHADOW_SHIELD', deps.grounding.attackerHasMoldBreaker))
+    return atMaxHp(defender) && (aiHoldEffectIs(defender, 'HOLD_EFFECT_FOCUS_SASH', deps) || defAbility(state, deps, defender, 'ABILITY_STURDY', deps.grounding.attackerHasMoldBreaker) || defAbility(state, deps, defender, 'ABILITY_MULTISCALE', deps.grounding.attackerHasMoldBreaker) || defAbility(state, deps, defender, 'ABILITY_SHADOW_SHIELD', deps.grounding.attackerHasMoldBreaker))
   }
 
   if (attackerGoesFirst) {
@@ -699,7 +699,7 @@ function increaseStatUpScore(state: BattleState, battlerAtk: number, battlerDef:
   unmodelled.push(...canFaint.unmodelled)
   if (canFaint.canFaint) return score
 
-  if (defAbility(attacker, 'ABILITY_CONTRARY', atkMoldBreaker) || (isUnaware(defender, atkMoldBreaker) && statId !== STAT_SPEED)) return score
+  if (defAbility(state, deps, attacker, 'ABILITY_CONTRARY', atkMoldBreaker) || (isUnaware(state, deps, defender, atkMoldBreaker) && statId !== STAT_SPEED)) return score
 
   const atkHp = getHealthPercentage(state, battlerAtk)
   if (atkHp < 80 && aiRandLessThan(state, 128)) return score
@@ -777,7 +777,7 @@ function increaseStatUpScore(state: BattleState, battlerAtk: number, battlerDef:
  * case's own call site). */
 function applyAttackSpatkUp(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
-  if (getHealthPercentage(state, battlerAtk) <= 40 || selfAbility(attacker, 'ABILITY_CONTRARY')) return score
+  if (getHealthPercentage(state, battlerAtk) <= 40 || selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) return score
   if (hasMoveWithSplit(attacker, 'PHYSICAL', deps)) return increaseStatUpScore(state, battlerAtk, battlerDef, STAT_ATK, moveId, score, deps, unmodelled)
   if (hasMoveWithSplit(attacker, 'SPECIAL', deps)) return increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPATK, moveId, score, deps, unmodelled)
   return score
@@ -799,7 +799,7 @@ function increasePoisonScore(state: BattleState, battlerAtk: number, battlerDef:
   if (poison.canPoison && getHealthPercentage(state, battlerDef) > 20) {
     if (!hasDamagingMove(defender, deps)) score += 2
     if (hasFlag(state.aiFlags, AI_FLAG_STALL) && hasMoveEffect(attacker, 'EFFECT_PROTECT', deps)) score++
-    if (hasMoveEffect(attacker, 'EFFECT_VENOSHOCK', deps) || hasMoveEffect(attacker, 'EFFECT_HEX', deps) || hasMoveEffect(attacker, 'EFFECT_VENOM_DRENCH', deps) || selfAbility(attacker, 'ABILITY_MERCILESS')) {
+    if (hasMoveEffect(attacker, 'EFFECT_VENOSHOCK', deps) || hasMoveEffect(attacker, 'EFFECT_HEX', deps) || hasMoveEffect(attacker, 'EFFECT_VENOM_DRENCH', deps) || selfAbility(state, deps, attacker, 'ABILITY_MERCILESS')) {
       score += 2
     } else {
       score++
@@ -886,7 +886,7 @@ function increaseConfusionScore(state: BattleState, battlerAtk: number, battlerD
   const move = deps.moveData(moveId)
   const secondaryOk = moveConfusionThresholdOk(move)
   if (canConfuse && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_CONFUSION', deps) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_STATUS', deps) && secondaryOk) {
-    if (hasFlag(defender.mon.status1, STATUS1_PARALYSIS) || (selfAbility(attacker, 'ABILITY_SERENE_GRACE') && hasMoveEffect(attacker, 'EFFECT_FLINCH_HIT', deps))) {
+    if (hasFlag(defender.mon.status1, STATUS1_PARALYSIS) || (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE') && hasMoveEffect(attacker, 'EFFECT_FLINCH_HIT', deps))) {
       score += 3
     } else {
       score += 2
@@ -909,8 +909,8 @@ function moveConfusionThresholdOk(move: ReturnType<AiDamageDeps['moveData']> | u
  * AND the battler has Long Reach (which normally REMOVES contact) AND isn't
  * holding Protective Pads -- an inverted-looking quirk reproduced exactly as
  * written, not "fixed" to the intuitive `!LONG_REACH` reading. */
-function aiMoveMakesContact(battler: BattlerState, holdEffect: number, move: ReturnType<AiDamageDeps['moveData']>, deps: AiDamageDeps): boolean {
-  return !!hasMoveFlag(move, 'contact') && selfAbility(battler, 'ABILITY_LONG_REACH') && holdEffect !== holdEffectId('HOLD_EFFECT_PROTECTIVE_PADS', deps)
+function aiMoveMakesContact(state: BattleState, battler: BattlerState, holdEffect: number, move: ReturnType<AiDamageDeps['moveData']>, deps: AiDamageDeps): boolean {
+  return !!hasMoveFlag(move, 'contact') && selfAbility(state, deps, battler, 'ABILITY_LONG_REACH') && holdEffect !== holdEffectId('HOLD_EFFECT_PROTECTIVE_PADS', deps)
 }
 
 // ---------------------------------------------------------------------------
@@ -965,15 +965,15 @@ function isWeatherActive(state: BattleState, weatherFlag: number, deps: AiDamage
 
 /** `HasChloroplast(battler)`, battle_util.c:9340-9343
  * (`RETURN_ABILITY_IF_FLAG(battler, FALSE, chloroplast)`, never suppressed). */
-function hasChloroplast(battler: BattlerState): boolean {
-  return CHLOROPLAST_ABILITIES.some((id) => selfAbility(battler, id))
+function hasChloroplast(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return CHLOROPLAST_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
 
 /** `HasWeatherBallAndNoForcedTyping(battler)`, battle_ai_util.c:1155-1157.
  * `HasAuroraBorealis` is `BattlerHasAbility(battler, ABILITY_AURORA_BOREALIS,
  * FALSE)` (battle_util.c:9345-9348). */
-function hasWeatherBallAndNoForcedTyping(battler: BattlerState, deps: AiDamageDeps): boolean {
-  return !hasChloroplast(battler) && !selfAbility(battler, 'ABILITY_AURORA_BOREALIS') && hasMoveEffect(battler, 'EFFECT_WEATHER_BALL', deps)
+function hasWeatherBallAndNoForcedTyping(state: BattleState, battler: BattlerState, deps: AiDamageDeps): boolean {
+  return !hasChloroplast(state, deps, battler) && !selfAbility(state, deps, battler, 'ABILITY_AURORA_BOREALIS') && hasMoveEffect(battler, 'EFFECT_WEATHER_BALL', deps)
 }
 
 /** `ShouldSetSandstorm(battler, holdEffect)`, battle_ai_util.c:1159-1169
@@ -983,7 +983,7 @@ function shouldSetSandstorm(state: BattleState, battlerAtk: number, deps: AiDama
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY | WEATHER_PRIMAL_ANY)) return false
-  return isSandImmune(state, attacker, deps.dataContext) || hasMoveEffect(attacker, 'EFFECT_SHORE_UP', deps) || hasWeatherBallAndNoForcedTyping(attacker, deps)
+  return isSandImmune(state, attacker, deps.dataContext) || hasMoveEffect(attacker, 'EFFECT_SHORE_UP', deps) || hasWeatherBallAndNoForcedTyping(state, attacker, deps)
 }
 
 /** `ShouldSetHail`, battle_ai_util.c:1171-1182. */
@@ -993,8 +993,8 @@ function shouldSetHail(state: BattleState, battlerAtk: number, deps: AiDamageDep
   if (hasFlag(state.field.weather, WEATHER_HAIL_ANY | WEATHER_PRIMAL_ANY)) return false
   return (
     isHailImmune(state, attacker, deps.dataContext) ||
-    (!selfAbility(attacker, 'ABILITY_AURORA_BOREALIS') && (hasMove(attacker, 'MOVE_BLIZZARD') || hasMoveEffect(attacker, 'EFFECT_AURORA_VEIL', deps))) ||
-    hasWeatherBallAndNoForcedTyping(attacker, deps)
+    (!selfAbility(state, deps, attacker, 'ABILITY_AURORA_BOREALIS') && (hasMove(attacker, 'MOVE_BLIZZARD') || hasMoveEffect(attacker, 'EFFECT_AURORA_VEIL', deps))) ||
+    hasWeatherBallAndNoForcedTyping(state, attacker, deps)
   )
 }
 
@@ -1004,14 +1004,14 @@ function shouldSetRain(state: BattleState, battlerAtk: number, deps: AiDamageDep
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_RAIN_ANY | WEATHER_PRIMAL_ANY)) return false
   return (
-    selfAbility(attacker, 'ABILITY_SWIFT_SWIM') ||
-    selfAbility(attacker, 'ABILITY_FORECAST') ||
-    selfAbility(attacker, 'ABILITY_HYDRATION') ||
-    selfAbility(attacker, 'ABILITY_RAIN_DISH') ||
-    selfAbility(attacker, 'ABILITY_DRY_SKIN') ||
+    selfAbility(state, deps, attacker, 'ABILITY_SWIFT_SWIM') ||
+    selfAbility(state, deps, attacker, 'ABILITY_FORECAST') ||
+    selfAbility(state, deps, attacker, 'ABILITY_HYDRATION') ||
+    selfAbility(state, deps, attacker, 'ABILITY_RAIN_DISH') ||
+    selfAbility(state, deps, attacker, 'ABILITY_DRY_SKIN') ||
     hasMoveEffect(attacker, 'EFFECT_THUNDER', deps) ||
     hasMoveEffect(attacker, 'EFFECT_HURRICANE', deps) ||
-    hasWeatherBallAndNoForcedTyping(attacker, deps) ||
+    hasWeatherBallAndNoForcedTyping(state, attacker, deps) ||
     hasMoveWithType(attacker, 'WATER', deps)
   )
 }
@@ -1022,20 +1022,20 @@ function shouldSetSun(state: BattleState, battlerAtk: number, deps: AiDamageDeps
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_SUN_ANY | WEATHER_PRIMAL_ANY)) return false
   return (
-    selfAbility(attacker, 'ABILITY_CHLOROPHYLL') ||
-    selfAbility(attacker, 'ABILITY_FLOWER_GIFT') ||
-    selfAbility(attacker, 'ABILITY_FORECAST') ||
-    selfAbility(attacker, 'ABILITY_LEAF_GUARD') ||
-    selfAbility(attacker, 'ABILITY_SOLAR_POWER') ||
-    selfAbility(attacker, 'ABILITY_HARVEST') ||
+    selfAbility(state, deps, attacker, 'ABILITY_CHLOROPHYLL') ||
+    selfAbility(state, deps, attacker, 'ABILITY_FLOWER_GIFT') ||
+    selfAbility(state, deps, attacker, 'ABILITY_FORECAST') ||
+    selfAbility(state, deps, attacker, 'ABILITY_LEAF_GUARD') ||
+    selfAbility(state, deps, attacker, 'ABILITY_SOLAR_POWER') ||
+    selfAbility(state, deps, attacker, 'ABILITY_HARVEST') ||
     hasMoveWithType(attacker, 'FIRE', deps) ||
-    (!hasChloroplast(attacker) &&
+    (!hasChloroplast(state, deps, attacker) &&
       (hasMoveEffect(attacker, 'EFFECT_SOLARBEAM', deps) ||
         hasMoveEffect(attacker, 'EFFECT_MORNING_SUN', deps) ||
         hasMoveEffect(attacker, 'EFFECT_SYNTHESIS', deps) ||
         hasMoveEffect(attacker, 'EFFECT_MOONLIGHT', deps) ||
         hasMoveEffect(attacker, 'EFFECT_GROWTH', deps))) ||
-    hasWeatherBallAndNoForcedTyping(attacker, deps)
+    hasWeatherBallAndNoForcedTyping(state, attacker, deps)
   )
 }
 
@@ -1048,7 +1048,7 @@ function shouldSetFog(state: BattleState, battlerAtk: number, deps: AiDamageDeps
   if (hasFlag(state.field.weather, WEATHER_FOG_ANY | WEATHER_PRIMAL_ANY)) return false
   if (isBattlerOfType(attacker, 'GHOST') && !attacker.volatiles.trickOrTreat) return true
   if (hasMove(attacker, 'MOVE_OMINOUS_WIND')) return true
-  return FOG_ABILITIES.some((id) => selfAbility(attacker, id))
+  return FOG_ABILITIES.some((id) => selfAbility(state, deps, attacker, id))
 }
 
 /** `ShouldPoisonSelf(battler)`, battle_ai_util.c:2034-2043. `CanBePoisoned(battler,
@@ -1060,14 +1060,14 @@ function shouldPoisonSelf(state: BattleState, battlerId: number, deps: AiDamageD
   unmodelled.push(...poison.unmodelled)
   if (!poison.canPoison) return false
   return (
-    selfAbility(battler, 'ABILITY_POISON_HEAL') ||
-    selfAbility(battler, 'ABILITY_MARVEL_SCALE') ||
-    selfAbility(battler, 'ABILITY_QUICK_FEET') ||
+    selfAbility(state, deps, battler, 'ABILITY_POISON_HEAL') ||
+    selfAbility(state, deps, battler, 'ABILITY_MARVEL_SCALE') ||
+    selfAbility(state, deps, battler, 'ABILITY_QUICK_FEET') ||
     isMagicGuardProtected(state, battler) ||
     hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
     hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
-    (selfAbility(battler, 'ABILITY_TOXIC_BOOST') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
-    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps))
+    (selfAbility(state, deps, battler, 'ABILITY_TOXIC_BOOST') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(state, deps, battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps))
   )
 }
 
@@ -1076,14 +1076,14 @@ function shouldBurnSelf(state: BattleState, battlerId: number, deps: AiDamageDep
   const battler = state.battlers[battlerId] as BattlerState
   if (!aiCanBurn(battler, unmodelled)) return false
   return (
-    selfAbility(battler, 'ABILITY_QUICK_FEET') ||
-    selfAbility(battler, 'ABILITY_HEATPROOF') ||
+    selfAbility(state, deps, battler, 'ABILITY_QUICK_FEET') ||
+    selfAbility(state, deps, battler, 'ABILITY_HEATPROOF') ||
     isMagicGuardProtected(state, battler) ||
     hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
     hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
-    (selfAbility(battler, 'ABILITY_FLARE_BOOST') && hasMoveWithSplit(battler, 'SPECIAL', deps)) ||
-    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
-    (selfAbility(battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
+    (selfAbility(state, deps, battler, 'ABILITY_FLARE_BOOST') && hasMoveWithSplit(battler, 'SPECIAL', deps)) ||
+    (selfAbility(state, deps, battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(state, deps, battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
   )
 }
 
@@ -1095,8 +1095,8 @@ function shouldFrostbiteSelf(state: BattleState, battlerId: number, deps: AiDama
     isMagicGuardProtected(state, battler) ||
     hasMoveEffect(battler, 'EFFECT_FACADE', deps) ||
     hasMoveEffect(battler, 'EFFECT_PSYCHO_SHIFT', deps) ||
-    (selfAbility(battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
-    (selfAbility(battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
+    (selfAbility(state, deps, battler, 'ABILITY_GUTS') && hasMoveWithSplit(battler, 'PHYSICAL', deps)) ||
+    (selfAbility(state, deps, battler, 'ABILITY_DETERMINATION') && hasMoveWithSplit(battler, 'SPECIAL', deps))
   )
 }
 
@@ -1155,7 +1155,7 @@ function shouldFakeOut(state: BattleState, battlerAtk: number, battlerDef: numbe
   if (
     attacker.volatiles.isFirstTurn &&
     shouldTryToFlinch(state, battlerAtk, battlerDef, moveId, deps, unmodelled) !== 0 &&
-    !doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)
+    !doesSubstituteBlockMove(state, deps, attacker, defender, deps.moveData(moveId), unmodelled)
   ) {
     return true
   }
@@ -1170,9 +1170,9 @@ function shouldFakeOut(state: BattleState, battlerAtk: number, battlerDef: numbe
  * to the mask; every fight this sim scores is a trainer battle (aiFlags.ts's own
  * note on `!(gBattleTypeFlags & BATTLE_TYPE_TRAINER)`), so the mask always
  * matches and the side check is skipped. */
-function canKnockOffItem(battler: BattlerState, itemId: string | null, deps: AiDamageDeps): boolean {
+function canKnockOffItem(state: BattleState, battler: BattlerState, itemId: string | null, deps: AiDamageDeps): boolean {
   if (!itemId) return false
-  if (isStickyHold(battler, deps.grounding.attackerHasMoldBreaker)) return false
+  if (isStickyHold(state, deps, battler, deps.grounding.attackerHasMoldBreaker)) return false
   return canBattlerGetOrLoseItemApprox(battler, itemId, deps)
 }
 
@@ -1211,8 +1211,8 @@ function shouldRestoreHpBerry(battler: BattlerState, itemId: string | null): boo
  * suppressed). Pinned by an oracle test. Extraction: same query as
  * CHLOROPLAST_ABILITIES with `bitfields.ripen` -- 3 entries. */
 export const RIPEN_ABILITIES: readonly string[] = ['ABILITY_APPLE_PIE', 'ABILITY_RIPEN', 'ABILITY_SUGAR_RUSH']
-function hasRipenEffect(battler: BattlerState): boolean {
-  return RIPEN_ABILITIES.some((id) => selfAbility(battler, id))
+function hasRipenEffect(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return RIPEN_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
 
 /** `CountBattlerStatIncreases(battlerId, countEvasionAcc)`, battle_util.c:
@@ -1248,7 +1248,7 @@ function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, m
         score += 3
       } else if (!hasFlag(defSide, SIDE_STATUS_SPIKES)) {
         // Don't blow away hazards if you set them up
-        if (shouldLowerStat(defender, STAT_EVASION, deps.grounding.attackerHasMoldBreaker, unmodelled)) {
+        if (shouldLowerStat(state, deps, defender, STAT_EVASION, deps.grounding.attackerHasMoldBreaker, unmodelled)) {
           if (defender.mon.statStages[STAT_EVASION] > 7 || hasMoveWithLowAccuracy(attacker, 90, true, deps, unmodelled)) score += 2
           else score++
         }
@@ -1302,10 +1302,10 @@ function applyTrickBestow(state: BattleState, battlerAtk: number, battlerDef: nu
       score += 3
       break
     case holdEffectId('HOLD_EFFECT_UTILITY_UMBRELLA', deps):
-      if (!selfAbility(attacker, 'ABILITY_SOLAR_POWER') && !selfAbility(attacker, 'ABILITY_DRY_SKIN') && weatherHasEffect(state, deps.grounding)) {
-        if (defAbility(defender, 'ABILITY_SWIFT_SWIM', atkMoldBreaker) && isWeatherActive(state, WEATHER_RAIN_ANY, deps)) score += 3 // Slow 'em down
-        if (defAbility(defender, 'ABILITY_CHLOROPHYLL', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
-        if (defAbility(defender, 'ABILITY_FLOWER_GIFT', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
+      if (!selfAbility(state, deps, attacker, 'ABILITY_SOLAR_POWER') && !selfAbility(state, deps, attacker, 'ABILITY_DRY_SKIN') && weatherHasEffect(state, deps.grounding)) {
+        if (defAbility(state, deps, defender, 'ABILITY_SWIFT_SWIM', atkMoldBreaker) && isWeatherActive(state, WEATHER_RAIN_ANY, deps)) score += 3 // Slow 'em down
+        if (defAbility(state, deps, defender, 'ABILITY_CHLOROPHYLL', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
+        if (defAbility(state, deps, defender, 'ABILITY_FLOWER_GIFT', atkMoldBreaker) && isWeatherActive(state, WEATHER_SUN_ANY, deps)) score += 3 // Slow 'em down
       }
       break
     case holdEffectId('HOLD_EFFECT_EJECT_BUTTON', deps): {
@@ -1412,8 +1412,8 @@ function hasHealingEffect(battler: BattlerState, deps: AiDamageDeps): boolean {
  * ..._LIGHTNING_ROD, TRUE)` (EFFECT_ION_DELUGE :3775, EFFECT_ELECTRIFY :3839).
  * `TRUE` is checkMoldBreaker, so reads go through `defAbility` (all three are
  * `breakable`) exactly as IncreaseStatUpScore's own attacker reads do. */
-function hasElectricAbsorbAbility(battler: BattlerState, atkMoldBreaker: boolean): boolean {
-  return defAbility(battler, 'ABILITY_VOLT_ABSORB', atkMoldBreaker) || defAbility(battler, 'ABILITY_MOTOR_DRIVE', atkMoldBreaker) || defAbility(battler, 'ABILITY_LIGHTNING_ROD', atkMoldBreaker)
+function hasElectricAbsorbAbility(state: BattleState, deps: AiDamageDeps, battler: BattlerState, atkMoldBreaker: boolean): boolean {
+  return defAbility(state, deps, battler, 'ABILITY_VOLT_ABSORB', atkMoldBreaker) || defAbility(state, deps, battler, 'ABILITY_MOTOR_DRIVE', atkMoldBreaker) || defAbility(state, deps, battler, 'ABILITY_LIGHTNING_ROD', atkMoldBreaker)
 }
 
 /** The shared tail of `case EFFECT_GEOMANCY` / `case EFFECT_QUIVER_DANCE`,
@@ -1505,20 +1505,20 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
 
   // :2559-2567 -- check burn.
   if (hasFlag(attacker.mon.status1, STATUS1_BURN)) {
-    const natCure = selfAbility(attacker, 'ABILITY_NATURAL_CURE') || selfAbility(attacker, 'ABILITY_NATURAL_RECOVERY') || selfAbility(attacker, 'ABILITY_SELF_REPAIR')
+    const natCure = selfAbility(state, deps, attacker, 'ABILITY_NATURAL_CURE') || selfAbility(state, deps, attacker, 'ABILITY_NATURAL_RECOVERY') || selfAbility(state, deps, attacker, 'ABILITY_SELF_REPAIR')
     if (natCure && hasFlag(state.aiFlags, AI_FLAG_SMART_SWITCHING) && onlyPhysicalMoves(attacker, deps)) {
       score = 90
-    } else if (move?.split === 'PHYSICAL' && moveEffect !== 'EFFECT_FACADE' && !ignoresBurnAtkDrop(attacker)) {
+    } else if (move?.split === 'PHYSICAL' && moveEffect !== 'EFFECT_FACADE' && !ignoresBurnAtkDrop(state, deps, attacker)) {
       score -= 2
     }
   }
 
   // :2570-2578 -- checks frostbite.
   if (hasFlag(attacker.mon.status1, STATUS1_FROSTBITE)) {
-    const natCure = selfAbility(attacker, 'ABILITY_NATURAL_CURE') || selfAbility(attacker, 'ABILITY_NATURAL_RECOVERY') || selfAbility(attacker, 'ABILITY_SELF_REPAIR')
+    const natCure = selfAbility(state, deps, attacker, 'ABILITY_NATURAL_CURE') || selfAbility(state, deps, attacker, 'ABILITY_NATURAL_RECOVERY') || selfAbility(state, deps, attacker, 'ABILITY_SELF_REPAIR')
     if (natCure) {
       if (hasFlag(state.aiFlags, AI_FLAG_SMART_SWITCHING) && onlySpecialMoves(attacker, deps)) score = 90
-    } else if (move?.split === 'SPECIAL' && moveEffect !== 'EFFECT_FACADE' && !ignoresFrostbiteSpatkDrop(attacker)) {
+    } else if (move?.split === 'SPECIAL' && moveEffect !== 'EFFECT_FACADE' && !ignoresFrostbiteSpatkDrop(state, deps, attacker)) {
       score -= 2
     }
   }
@@ -1541,7 +1541,7 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
   }
 
   // :2586-2592 -- Choice item/Gorilla Tactics/Sage Power switch-forcing check.
-  if (holdEffectChoice(aiHoldEffectParam(attacker, deps), deps) || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS') || selfAbility(attacker, 'ABILITY_SAGE_POWER')) {
+  if (holdEffectChoice(aiHoldEffectParam(attacker, deps), deps) || selfAbility(state, deps, attacker, 'ABILITY_GORILLA_TACTICS') || selfAbility(state, deps, attacker, 'ABILITY_SAGE_POWER')) {
     if (countUsablePartyMons(state, battlerAtk) > 1) {
       const badMoveResult = aiCheckBadMove(state, battlerAtk, battlerDef, moveId, score, deps)
       unmodelled.push(...badMoveResult.unmodelled)
@@ -1608,14 +1608,14 @@ function onlySpecialMoves(battler: BattlerState, deps: AiDamageDeps): boolean {
  * Extraction: same query shape as this module's UNAWARE_ABILITIES with
  * `bitfields.negatesBurnAtkDrop` -- 7 entries. */
 const NEGATES_BURN_ATK_DROP_ABILITIES: readonly string[] = ['ABILITY_DROIDEKA', 'ABILITY_FLARE_BOOST', 'ABILITY_GUTS', 'ABILITY_HEATPROOF', 'ABILITY_IRON_GIANT', 'ABILITY_RAGE_POINT', 'ABILITY_THERMAL_ENTROPY']
-function ignoresBurnAtkDrop(battler: BattlerState): boolean {
-  return NEGATES_BURN_ATK_DROP_ABILITIES.some((id) => selfAbility(battler, id))
+function ignoresBurnAtkDrop(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return NEGATES_BURN_ATK_DROP_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
 /** `IgnoresFrostbiteSpatkDrop(battler)`, battle_util.c:7100-7103 -- same
  * shape, `bitfields.negatesFrzSpatkDrop` -- 2 entries. */
 const NEGATES_FRZ_SPATK_DROP_ABILITIES: readonly string[] = ['ABILITY_DETERMINATION', 'ABILITY_RAGE_POINT']
-function ignoresFrostbiteSpatkDrop(battler: BattlerState): boolean {
-  return NEGATES_FRZ_SPATK_DROP_ABILITIES.some((id) => selfAbility(battler, id))
+function ignoresFrostbiteSpatkDrop(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return NEGATES_FRZ_SPATK_DROP_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
 
 /**
@@ -1758,7 +1758,7 @@ function applyMoveEffectSwitch(
       // note). The C's true branch (target faster) is the bonus-check branch;
       // its else (AI faster or tied) is the flat -3.
       if (!isAiFaster(state, battlerAtk, battlerDef, moveId, deps)) {
-        if (!aiRandLessThan(state, 70) && compareStatLessThan(attacker, STAT_SPEED, MAX_STAT_STAGE)) {
+        if (!aiRandLessThan(state, 70) && compareStatLessThan(state, deps, attacker, STAT_SPEED, MAX_STAT_STAGE)) {
           // RNG line :2682.
           score += 3
         }
@@ -1822,7 +1822,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_ATTACK_DOWN':
     case 'EFFECT_ATTACK_DOWN_2':
-      if (!shouldLowerStat(defender, STAT_ATK, atkMoldBreaker, unmodelled)) score -= 2
+      if (!shouldLowerStat(state, deps, defender, STAT_ATK, atkMoldBreaker, unmodelled)) score -= 2
       if (defender.mon.statStages[STAT_ATK] < DEFAULT_STAT_STAGE) score--
       else if (atkHpPercent <= 90) score--
       // RNG line :2746.
@@ -1832,7 +1832,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_DEFENSE_DOWN':
     case 'EFFECT_DEFENSE_DOWN_2':
-      if (!shouldLowerStat(defender, STAT_DEF, atkMoldBreaker, unmodelled)) score -= 2
+      if (!shouldLowerStat(state, deps, defender, STAT_DEF, atkMoldBreaker, unmodelled)) score -= 2
       // RNG line :2754 (two draws -- the C's `||` short-circuits the second
       // AI_RandLessThan(50) only when the first is already true).
       if ((atkHpPercent < 70 && !aiRandLessThan(state, 50)) || (defender.mon.statStages[STAT_DEF] <= 3 && !aiRandLessThan(state, 50))) score -= 2
@@ -1851,7 +1851,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_SPECIAL_ATTACK_DOWN':
     case 'EFFECT_SPECIAL_ATTACK_DOWN_2':
-      if (!shouldLowerStat(defender, STAT_SPATK, atkMoldBreaker, unmodelled)) score -= 2
+      if (!shouldLowerStat(state, deps, defender, STAT_SPATK, atkMoldBreaker, unmodelled)) score -= 2
       if (defender.mon.statStages[STAT_SPATK] < DEFAULT_STAT_STAGE) score--
       else if (atkHpPercent <= 90) score--
       // RNG line :2771.
@@ -1861,7 +1861,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_SPECIAL_DEFENSE_DOWN':
     case 'EFFECT_SPECIAL_DEFENSE_DOWN_2':
-      if (!shouldLowerStat(defender, STAT_SPDEF, atkMoldBreaker, unmodelled)) score -= 2
+      if (!shouldLowerStat(state, deps, defender, STAT_SPDEF, atkMoldBreaker, unmodelled)) score -= 2
       // RNG line :2779.
       if ((atkHpPercent < 70 && !aiRandLessThan(state, 50)) || (defender.mon.statStages[STAT_SPDEF] <= 3 && !aiRandLessThan(state, 50))) score -= 2
       if (defHpPercent <= 70) score -= 2
@@ -1869,7 +1869,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_ACCURACY_DOWN':
     case 'EFFECT_ACCURACY_DOWN_2': {
-      if (shouldLowerStat(defender, STAT_ACC, atkMoldBreaker, unmodelled)) score -= 2
+      if (shouldLowerStat(state, deps, defender, STAT_ACC, atkMoldBreaker, unmodelled)) score -= 2
       // RNG lines :2785-2789.
       if ((atkHpPercent < 70 || defHpPercent < 70) && aiRandLessThan(state, 100)) score--
       if (defender.mon.statStages[STAT_ACC] <= 4 && !aiRandLessThan(state, 80)) score -= 2
@@ -1889,12 +1889,12 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_EVASION_DOWN':
     case 'EFFECT_EVASION_DOWN_2':
-      if (!shouldLowerStat(defender, STAT_EVASION, atkMoldBreaker, unmodelled)) score -= 2
+      if (!shouldLowerStat(state, deps, defender, STAT_EVASION, atkMoldBreaker, unmodelled)) score -= 2
       // RNG line :2799.
       if ((atkHpPercent < 70 || defender.mon.statStages[STAT_EVASION] <= 3) && !aiRandLessThan(state, 50)) score -= 2
       if (defHpPercent <= 70) score -= 2
       if (attacker.mon.statStages[STAT_ACC] < DEFAULT_STAT_STAGE) score++
-      if (defender.mon.statStages[STAT_EVASION] < 7 || selfAbility(attacker, 'ABILITY_NO_GUARD')) score -= 2
+      if (defender.mon.statStages[STAT_EVASION] < 7 || selfAbility(state, deps, attacker, 'ABILITY_NO_GUARD')) score -= 2
       break
 
     case 'EFFECT_BIDE':
@@ -1918,7 +1918,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_GROWTH': {
-      const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(attacker, id))
+      const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(state, deps, attacker, id))
       if ((weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps)) || hasChloroplast) {
         score++
       }
@@ -1956,7 +1956,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_MULTI_HIT':
     case 'EFFECT_DOUBLE_HIT':
     case 'EFFECT_TRIPLE_KICK': {
-      if (aiMoveMakesContact(attacker, aiHoldEffectParam(attacker, deps), deps.moveData(moveId), deps) && !isMagicGuardProtected(state, attacker) && aiHoldEffectIs(defender, 'HOLD_EFFECT_ROCKY_HELMET', deps)) {
+      if (aiMoveMakesContact(state, attacker, aiHoldEffectParam(attacker, deps), deps.moveData(moveId), deps) && !isMagicGuardProtected(state, attacker) && aiHoldEffectIs(defender, 'HOLD_EFFECT_ROCKY_HELMET', deps)) {
         score -= 2
       }
       break
@@ -2027,9 +2027,9 @@ function applyMoveEffectSwitch(
           aiHoldEffectIs(attacker, 'HOLD_EFFECT_CURE_STATUS', deps) ||
           hasMoveEffect(attacker, 'EFFECT_SLEEP_TALK', deps) ||
           hasMoveEffect(attacker, 'EFFECT_SNORE', deps) ||
-          selfAbility(attacker, 'ABILITY_SHED_SKIN') ||
-          selfAbility(attacker, 'ABILITY_EARLY_BIRD') ||
-          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && state.field.weatherDuration !== 1 && selfAbility(attacker, 'ABILITY_HYDRATION') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps))
+          selfAbility(state, deps, attacker, 'ABILITY_SHED_SKIN') ||
+          selfAbility(state, deps, attacker, 'ABILITY_EARLY_BIRD') ||
+          (hasFlag(state.field.weather, WEATHER_RAIN_ANY) && state.field.weatherDuration !== 1 && selfAbility(state, deps, attacker, 'ABILITY_HYDRATION') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps))
         score += hasWakeupHelp ? 2 : 1
       }
       break
@@ -2058,14 +2058,14 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_FOCUS_ENERGY':
     case 'EFFECT_LASER_FOCUS': {
-      if (selfAbility(attacker, 'ABILITY_SUPER_LUCK') || selfAbility(attacker, 'ABILITY_SNIPER') || aiHoldEffectIs(attacker, 'HOLD_EFFECT_SCOPE_LENS', deps) || testMoveFlagsInMoveset(attacker, 'highCrit', deps)) {
+      if (selfAbility(state, deps, attacker, 'ABILITY_SUPER_LUCK') || selfAbility(state, deps, attacker, 'ABILITY_SNIPER') || aiHoldEffectIs(attacker, 'HOLD_EFFECT_SCOPE_LENS', deps) || testMoveFlagsInMoveset(attacker, 'highCrit', deps)) {
         score += 2
       }
       break
     }
 
     case 'EFFECT_CONFUSE_HIT':
-      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE')) score++
+      if (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE')) score++
       score = increaseConfusionScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
       break
 
@@ -2083,7 +2083,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_SPECIAL_DEFENSE_DOWN_HIT':
     case 'EFFECT_ACCURACY_DOWN_HIT':
     case 'EFFECT_EVASION_DOWN_HIT':
-      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE') && !selfAbility(defender, 'ABILITY_CONTRARY')) score += 2
+      if (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE') && !defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
       break
 
     case 'EFFECT_SPEED_DOWN_HIT':
@@ -2092,7 +2092,7 @@ function applyMoveEffectSwitch(
       } else if (!aiRandLessThan(state, 70)) {
         score++
       }
-      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE') && !selfAbility(defender, 'ABILITY_CONTRARY')) score++
+      if (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE') && !defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score++
       // NOTE: C :458-464 -- a SECOND `if (ShouldLowerStat(...))` block sits
       // AFTER this case's own `break;` (:457), making it unreachable dead
       // code (a quirk, reproduced by simply never evaluating it here).
@@ -2149,7 +2149,7 @@ function applyMoveEffectSwitch(
         isBattlerOfType(defender, 'GRASS') ||
         hasFlag(defender.statuses3, STATUS3_LEECHSEED) ||
         hasMoveEffect(defender, 'EFFECT_RAPID_SPIN', deps) ||
-        defAbility(defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker) ||
+        defAbility(state, deps, defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker) ||
         isMagicGuardProtected(state, defender)
       ) {
         break
@@ -2253,7 +2253,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_LOCK_ON':
       if (hasMoveEffect(attacker, 'EFFECT_OHKO', deps)) {
         score += 3
-      } else if (selfAbility(attacker, 'ABILITY_COMPOUND_EYES') && hasMoveWithLowAccuracy(attacker, 80, true, deps, unmodelled)) {
+      } else if (selfAbility(state, deps, attacker, 'ABILITY_COMPOUND_EYES') && hasMoveWithLowAccuracy(attacker, 80, true, deps, unmodelled)) {
         score += 3
       } else if (hasMoveWithLowAccuracy(attacker, 85, true, deps, unmodelled)) {
         score += 3
@@ -2263,7 +2263,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_SPEED_UP_HIT':
-      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE') && !selfAbility(defender, 'ABILITY_CONTRARY') && !isAiFaster(state, battlerAtk, battlerDef, moveId, deps)) {
+      if (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE') && !defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker) && !isAiFaster(state, battlerAtk, battlerDef, moveId, deps)) {
         score += 3
       }
       break
@@ -2302,7 +2302,7 @@ function applyMoveEffectSwitch(
       const canSteal = true
       const atkItem = attacker.mon.itemId
       const defItem = defender.mon.itemId
-      if (canSteal && !atkItem && defItem && canBattlerGetOrLoseItemApprox(defender, defItem, deps) && canBattlerGetOrLoseItemApprox(attacker, defItem, deps) && !hasMoveEffect(attacker, 'EFFECT_ACROBATICS', deps) && !isStickyHold(defender, atkMoldBreaker)) {
+      if (canSteal && !atkItem && defItem && canBattlerGetOrLoseItemApprox(defender, defItem, deps) && canBattlerGetOrLoseItemApprox(attacker, defItem, deps) && !hasMoveEffect(attacker, 'EFFECT_ACROBATICS', deps) && !isStickyHold(state, deps, defender, atkMoldBreaker)) {
         switch (aiHoldEffectParam(defender, deps)) {
           case holdEffectId('HOLD_EFFECT_NONE', deps):
             break
@@ -2338,7 +2338,7 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_NIGHTMARE': {
-      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(defender, id))
+      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(state, deps, defender, id))
       if (!hasFlag(defender.mon.status2, STATUS2_NIGHTMARE) && (comatose || hasFlag(defender.mon.status1, STATUS1_SLEEP))) {
         score += 5
         const trapped = isBattlerTrapped(state, defender, true, deps)
@@ -2359,7 +2359,7 @@ function applyMoveEffectSwitch(
         // `IsMagicGuardProtected(battlerDef)` -- the DEFENDER, not the
         // self-targeting attacker Curse actually boosts; reproduced exactly
         // as the C writes it (a quirk, not "fixed" to battlerAtk).
-        if (selfAbility(attacker, 'ABILITY_CONTRARY') || isMagicGuardProtected(state, defender)) break
+        if (selfAbility(state, deps, attacker, 'ABILITY_CONTRARY') || isMagicGuardProtected(state, defender)) break
         else if (attacker.mon.statStages[STAT_ATK] < 8) score += 8 - attacker.mon.statStages[STAT_ATK]
         else if (attacker.mon.statStages[STAT_SPEED] < 3) break
         else if (attacker.mon.statStages[STAT_DEF] < 8) score += 8 - attacker.mon.statStages[STAT_DEF]
@@ -2396,7 +2396,7 @@ function applyMoveEffectSwitch(
           break
         }
         case 'MOVE_KINGS_SHIELD':
-          if (attacker.mon.speciesId === 'SPECIES_AEGISLASH_BLADE' && selfAbility(attacker, 'ABILITY_STANCE_CHANGE') && !isBattlerIncapacitated(defender, deps)) {
+          if (attacker.mon.speciesId === 'SPECIES_AEGISLASH_BLADE' && selfAbility(state, deps, attacker, 'ABILITY_STANCE_CHANGE') && !isBattlerIncapacitated(defender, deps)) {
             score += 3
           } else {
             // FALLTHROUGH to `default` in the C -- written as an explicit
@@ -2427,13 +2427,13 @@ function applyMoveEffectSwitch(
     case 'EFFECT_STEALTH_ROCK':
     case 'EFFECT_STICKY_WEB':
     case 'EFFECT_TOXIC_SPIKES':
-      if (defAbility(defender, 'ABILITY_MAGIC_BOUNCE', atkMoldBreaker) || countUsablePartyMons(state, battlerDef) === 0) break
+      if (defAbility(state, deps, defender, 'ABILITY_MAGIC_BOUNCE', atkMoldBreaker) || countUsablePartyMons(state, battlerDef) === 0) break
       if (attacker.volatiles.isFirstTurn) score += 2
       break
 
     case 'EFFECT_FORESIGHT':
-      if (selfAbility(attacker, 'ABILITY_SCRAPPY')) break
-      if (selfAbility(attacker, 'ABILITY_BLIND_RAGE')) {
+      if (selfAbility(state, deps, attacker, 'ABILITY_SCRAPPY')) break
+      if (selfAbility(state, deps, attacker, 'ABILITY_BLIND_RAGE')) {
         break
       } else if (defender.mon.statStages[STAT_EVASION] > DEFAULT_STAT_STAGE || (isBattlerOfType(defender, 'GHOST') && (hasMoveWithType(attacker, 'NORMAL', deps) || hasMoveWithType(attacker, 'FIGHTING', deps)))) {
         score += 2
@@ -2502,11 +2502,11 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_ATTACK_UP_HIT':
-      if (selfAbility(attacker, 'ABILITY_SERENE_GRACE')) score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_ATK, moveId, score, deps, unmodelled)
+      if (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE')) score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_ATK, moveId, score, deps, unmodelled)
       break
 
     case 'EFFECT_FELL_STINGER': {
-      if (attacker.mon.statStages[STAT_ATK] < MAX_STAT_STAGE && !selfAbility(attacker, 'ABILITY_CONTRARY')) {
+      if (attacker.mon.statStages[STAT_ATK] < MAX_STAT_STAGE && !selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) {
         const faints = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faints.unmodelled)
         if (faints.faints) {
@@ -2521,7 +2521,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_BELLY_DRUM': {
       const faintsAtk = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
       unmodelled.push(...faintsAtk.unmodelled)
-      if (!faintsAtk.canFaint && hasMoveWithSplit(attacker, 'PHYSICAL', deps) && !selfAbility(attacker, 'ABILITY_CONTRARY')) {
+      if (!faintsAtk.canFaint && hasMoveWithSplit(attacker, 'PHYSICAL', deps) && !selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) {
         score += MAX_STAT_STAGE - attacker.mon.statStages[STAT_ATK]
       }
       break
@@ -2578,7 +2578,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_STOCKPILE':
-      if (selfAbility(attacker, 'ABILITY_CONTRARY')) break
+      if (selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) break
       if (hasMoveEffect(attacker, 'EFFECT_SWALLOW', deps) || hasMoveEffect(attacker, 'EFFECT_SPIT_UP', deps)) score += 2
       score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_DEF, moveId, score, deps, unmodelled)
       score = increaseStatUpScore(state, battlerAtk, battlerDef, STAT_SPDEF, moveId, score, deps, unmodelled)
@@ -2590,13 +2590,13 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_SWAGGER':
       if (hasMoveEffect(attacker, 'EFFECT_FOUL_PLAY', deps) || hasMoveEffect(attacker, 'EFFECT_PSYCH_UP', deps) || hasMoveEffect(attacker, 'EFFECT_SPECTRAL_THIEF', deps)) score++
-      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
+      if (defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
       score = increaseConfusionScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
       break
 
     case 'EFFECT_FLATTER':
       if (hasMoveEffect(attacker, 'EFFECT_PSYCH_UP', deps) || hasMoveEffect(attacker, 'EFFECT_SPECTRAL_THIEF', deps)) score += 2
-      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
+      if (defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score += 2
       score = increaseConfusionScore(state, battlerAtk, battlerDef, moveId, score, deps, unmodelled)
       break
 
@@ -2613,7 +2613,7 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_SAFEGUARD':
-      if (!(getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN) || !deps.turnOrder.isBattlerGrounded(battlerAtk)) score++
+      if (!(getCurrentTerrain(state, deps) === STATUS_FIELD_MISTY_TERRAIN) || !deps.turnOrder.isBattlerGrounded(battlerAtk)) score++
       // The C's `CountUsablePartyMons(battlerDef) != 0 -> score += 8` is commented out.
       break
 
@@ -2642,7 +2642,7 @@ function applyMoveEffectSwitch(
         isValidDoubleBattle(state, battlerAtk) &&
         moveId !== 'MOVE_SPOTLIGHT' &&
         !isBattlerIncapacitated(defender, deps) &&
-        (moveId !== 'MOVE_RAGE_POWDER' || !isPowderImmune(defender, atkMoldBreaker, deps)) && // Rage Powder doesn't affect powder immunities
+        (moveId !== 'MOVE_RAGE_POWDER' || !isPowderImmune(state, defender, atkMoldBreaker, deps)) && // Rage Powder doesn't affect powder immunities
         isBattlerAlive(state, battlePartner(battlerAtk))
       ) {
         const predictedMoveOnPartner = state.battlers[battlePartner(battlerAtk)]?.lastMove ?? null
@@ -2653,7 +2653,7 @@ function applyMoveEffectSwitch(
     case 'EFFECT_NATURE_POWER': {
       // C: `return AI_CheckViability(battlerAtk, battlerDef, GetNaturePowerMove(), score)` --
       // the top-level function, with its own fresh pre-switch ladder.
-      const recursed = aiCheckViability(state, battlerAtk, battlerDef, getNaturePowerMove(state, unmodelled), score, deps, movesetIndex)
+      const recursed = aiCheckViability(state, battlerAtk, battlerDef, getNaturePowerMove(state, deps, unmodelled), score, deps, movesetIndex)
       unmodelled.push(...recursed.unmodelled)
       return recursed.score
     }
@@ -2691,7 +2691,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_SUPERPOWER':
     case 'EFFECT_OVERHEAT':
-      if (selfAbility(attacker, 'ABILITY_CONTRARY')) score += 10
+      if (selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) score += 10
       break
 
     case 'EFFECT_MAGIC_COAT': {
@@ -2709,7 +2709,7 @@ function applyMoveEffectSwitch(
       const usedItem = getUsedHeldItem(attacker, unmodelled)
       if (usedItem !== null) score++
       if (isRecycleEncouragedItem(usedItem)) score++
-      if (hasRipenEffect(attacker)) {
+      if (hasRipenEffect(state, deps, attacker)) {
         if (isStatBoostingBerry(usedItem) && atkHpPercent > 60) {
           score++
         } else if (shouldRestoreHpBerry(attacker, usedItem)) {
@@ -2756,7 +2756,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_KNOCK_OFF':
-      if (canKnockOffItem(defender, defender.mon.itemId, deps)) {
+      if (canKnockOffItem(state, defender, defender.mon.itemId, deps)) {
         switch (aiHoldEffectParam(defender, deps)) {
           case holdEffectId('HOLD_EFFECT_IRON_BALL', deps):
             if (hasMoveEffect(defender, 'EFFECT_FLING', deps)) score += 4
@@ -2825,9 +2825,9 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_TICKLE':
-      if (hasMoveWithSplit(attacker, 'PHYSICAL', deps) && shouldLowerStat(defender, STAT_DEF, atkMoldBreaker, unmodelled)) {
+      if (hasMoveWithSplit(attacker, 'PHYSICAL', deps) && shouldLowerStat(state, deps, defender, STAT_DEF, atkMoldBreaker, unmodelled)) {
         score += 2
-      } else if (shouldLowerStat(defender, STAT_ATK, atkMoldBreaker, unmodelled)) {
+      } else if (shouldLowerStat(state, deps, defender, STAT_ATK, atkMoldBreaker, unmodelled)) {
         score += 2
       }
       break
@@ -2947,12 +2947,12 @@ function applyMoveEffectSwitch(
     }
 
     case 'EFFECT_BUG_BITE': // And pluck
-      if (hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE) || isStickyHold(defender, atkMoldBreaker)) break
+      if (hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE) || isStickyHold(state, deps, defender, atkMoldBreaker)) break
       else if (itemPocket(defender.mon.itemId, deps, unmodelled) === 'POCKET_BERRIES') score += 3
       break
 
     case 'EFFECT_INCINERATE':
-      if (hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE) || isStickyHold(defender, atkMoldBreaker)) break
+      if (hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE) || isStickyHold(state, deps, defender, atkMoldBreaker)) break
       else if (itemPocket(defender.mon.itemId, deps, unmodelled) === 'POCKET_BERRIES' || aiHoldEffectIs(defender, 'HOLD_EFFECT_GEMS', deps)) score += 3
       break
 
@@ -3019,7 +3019,7 @@ function applyMoveEffectSwitch(
       // `RETURN_SCORE_MINUS(20)` is `{ score -= 20; return score; }` -- an early
       // return from the whole function, but `return score;` (:3983) is all that
       // follows the switch, so leaving it with `break` is identical.
-      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) {
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) {
         score -= 20
       } else if (!hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)) {
         if (hasSleepMoveWithLowAccuracy(attacker, deps, unmodelled)) score = increaseSleepScore(state, battlerAtk, battlerDef, score, deps, unmodelled) // Has Gravity for a move like Hypnosis
@@ -3030,7 +3030,7 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_ION_DELUGE':
       // `gBattleMoves[predictedMove].type` -- unguarded, see predictedMoveData.
-      if (hasElectricAbsorbAbility(attacker, atkMoldBreaker) && predictedMoveData(deps, predictedMoveId, unmodelled)?.type === 'NORMAL') score += 2
+      if (hasElectricAbsorbAbility(state, deps, attacker, atkMoldBreaker) && predictedMoveData(deps, predictedMoveId, unmodelled)?.type === 'NORMAL') score += 2
       break
 
     case 'EFFECT_FLING':
@@ -3091,11 +3091,11 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_THIRD_TYPE':
-      if (defAbility(defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker)) score += 2 // Give target more weaknesses
+      if (defAbility(state, deps, defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker)) score += 2 // Give target more weaknesses
       break
 
     case 'EFFECT_ELECTRIFY':
-      if (predictedMoveId !== null && deps.moveData(predictedMoveId)?.type === 'NORMAL' && hasElectricAbsorbAbility(attacker, atkMoldBreaker)) score += 3
+      if (predictedMoveId !== null && deps.moveData(predictedMoveId)?.type === 'NORMAL' && hasElectricAbsorbAbility(state, deps, attacker, atkMoldBreaker)) score += 3
       break
 
     case 'EFFECT_TOPSY_TURVY':
@@ -3187,7 +3187,7 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_SOLARBEAM':
-      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) || hasChloroplast(attacker)) score += 2
+      if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) || hasChloroplast(state, deps, attacker)) score += 2
       break
 
     case 'EFFECT_COUNTER':
@@ -3288,10 +3288,10 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_RECHARGE': {
       if (
-        defAbility(attacker, 'ABILITY_RAMPAGE', atkMoldBreaker) ||
-        defAbility(attacker, 'ABILITY_BERSERKER_RAGE', atkMoldBreaker) ||
-        defAbility(attacker, 'ABILITY_RAGING_GODDESS', atkMoldBreaker) ||
-        defAbility(attacker, 'ABILITY_MASTER_HAND', atkMoldBreaker)
+        defAbility(state, deps, attacker, 'ABILITY_RAMPAGE', atkMoldBreaker) ||
+        defAbility(state, deps, attacker, 'ABILITY_BERSERKER_RAGE', atkMoldBreaker) ||
+        defAbility(state, deps, attacker, 'ABILITY_RAGING_GODDESS', atkMoldBreaker) ||
+        defAbility(state, deps, attacker, 'ABILITY_MASTER_HAND', atkMoldBreaker)
       ) {
         const faints = canIndexedMoveFaintTarget(state, battlerAtk, battlerDef, movesetIndex, deps)
         unmodelled.push(...faints.unmodelled)

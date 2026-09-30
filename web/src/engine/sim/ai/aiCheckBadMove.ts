@@ -304,29 +304,75 @@ export const MOLD_BREAKABLE_ABILITIES: readonly string[] = [
 ]
 const MOLD_BREAKABLE_SET = new Set(MOLD_BREAKABLE_ABILITIES)
 
-/** `BattlerHasAbility(battlerDef, ABILITY_X, TRUE)` -- suppressed by Mold
- * Breaker only when the checked ability is actually `breakable`
- * (`MOLD_BREAKABLE_ABILITIES` above), matching `IsSuppressed`'s real gate
- * instead of the uniform "Mold Breaker bypasses every checkMoldBreaker=TRUE
- * read" approximation an earlier revision of this file used. */
-export function defAbility(battler: BattlerState, abilityId: string, attackerHasMoldBreaker: boolean): boolean {
-  const suppressed = attackerHasMoldBreaker && MOLD_BREAKABLE_SET.has(abilityId)
-  return battlerHasAbility(battler.mon.abilities, abilityId, () => suppressed)
+/** Every ability whose `abilityHooks.json` `bitfields.unsuppressable` is TRUE --
+ * `IsUnsuppressableAbility`, battle_util.c:4788 (`gAbilities[ability].
+ * unsuppressable`). Gates the Gastro Acid / Neutralizing Gas half of
+ * `isSuppressed`. Pinned to the snapshot by `aiCheckBadMove.test.ts`'s oracle test.
+ *
+ * Extraction: `python3 -c "import json; d=json.load(open('data/v2.65beta/
+ * abilityHooks.json')); print(sorted(k for k,v in d.items() if
+ * v.get('bitfields',{}).get('unsuppressable')))"` -- 32 entries. */
+export const UNSUPPRESSABLE_ABILITIES: readonly string[] = [
+  'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER', 'ABILITY_BATTLE_BOND', 'ABILITY_BLOOD_STAIN', 'ABILITY_BLOOD_STIGMA',
+  'ABILITY_CLUELESS', 'ABILITY_COMATOSE', 'ABILITY_COMMANDER', 'ABILITY_CROWNED_KING', 'ABILITY_DISGUISE', 'ABILITY_DNA_SCRAMBLE',
+  'ABILITY_DREAMSCAPE', 'ABILITY_DUAL_SHADOW', 'ABILITY_FLAMMABLE_COAT', 'ABILITY_FLOWER_GIFT', 'ABILITY_FORECAST',
+  'ABILITY_GULP_MISSILE', 'ABILITY_HUNGER_SWITCH', 'ABILITY_ICE_FACE', 'ABILITY_LOCUST_SWARM', 'ABILITY_MULTITYPE',
+  'ABILITY_NEUTRALIZING_GAS', 'ABILITY_PATCHWORK', 'ABILITY_POWER_CONSTRUCT', 'ABILITY_REVELATION', 'ABILITY_RKS_SYSTEM',
+  'ABILITY_SCHOOLING', 'ABILITY_SHIELDS_DOWN', 'ABILITY_STALWART', 'ABILITY_STANCE_CHANGE', 'ABILITY_ZEN_MODE', 'ABILITY_ZERO_TO_HERO',
+]
+const UNSUPPRESSABLE_SET = new Set(UNSUPPRESSABLE_ABILITIES)
+
+/** IsSuppressed, battle_util.c:9254-9261:
+ *
+ *   if ((checkMoldBreaker && battler != gBattlerAttacker && gHitMarker & HITMARKER_MOLD_BREAKER && gAbilities[ability].breakable) ||
+ *       ((gFieldTimers.neutralizingGas || gStatuses3[battler] & STATUS3_GASTRO_ACID) && !IsUnsuppressableAbility(ability)))
+ *     return !DoesBattlerHaveAbilityShield(battler);
+ *   return FALSE;
+ *
+ * Mold Breaker half: `gHitMarker & HITMARKER_MOLD_BREAKER` is the stale marker
+ * of the last SetMoldBreaker call (no AI code sets it), modelled as the
+ * `attackerHasMoldBreaker` the AI deps already carry. `battler != gBattlerAttacker`
+ * is not modelled (gBattlerAttacker is not written anywhere in the AI's own
+ * sources): callers that mean a defender pass `checkMoldBreaker` TRUE, every
+ * other read passes FALSE. */
+export function isSuppressed(
+  state: BattleState,
+  battler: BattlerState,
+  abilityId: string,
+  checkMoldBreaker: boolean,
+  attackerHasMoldBreaker: boolean,
+  deps: AiDamageDeps,
+): boolean {
+  if (
+    (checkMoldBreaker && attackerHasMoldBreaker && MOLD_BREAKABLE_SET.has(abilityId)) ||
+    ((state.field.timers.neutralizingGas || hasFlag(battler.statuses3, STATUS3_GASTRO_ACID)) && !UNSUPPRESSABLE_SET.has(abilityId))
+  ) {
+    return !doesBattlerHaveAbilityShield(battler, deps)
+  }
+  return false
 }
-/** `BattlerHasAbility(battler, ABILITY_X, FALSE)` or a self-check -- never
- * suppressed (see this module's header). */
-export function selfAbility(battler: BattlerState, abilityId: string): boolean {
-  return battlerHasAbility(battler.mon.abilities, abilityId, () => false)
+
+/** `BattlerHasAbility(battler, ABILITY_X, TRUE)` -- `BATTLER_HAS_ABILITY`.
+ * Mold Breaker suppresses only `breakable` abilities, and Gastro Acid /
+ * Neutralizing Gas suppress every non-`unsuppressable` one (`isSuppressed`). */
+export function defAbility(state: BattleState, deps: AiDamageDeps, battler: BattlerState, abilityId: string, attackerHasMoldBreaker: boolean): boolean {
+  return battlerHasAbility(battler.mon.abilities, abilityId, (id) => isSuppressed(state, battler, id, true, attackerHasMoldBreaker, deps))
+}
+/** `BattlerHasAbility(battler, ABILITY_X, FALSE)` or a self-check -- no Mold
+ * Breaker, but Gastro Acid / Neutralizing Gas still suppress. */
+export function selfAbility(state: BattleState, deps: AiDamageDeps, battler: BattlerState, abilityId: string): boolean {
+  return battlerHasAbility(battler.mon.abilities, abilityId, (id) => isSuppressed(state, battler, id, false, false, deps))
 }
 
 /** IsAbilityOnField, battle_util.c:4803-4811 -- copied rather than imported
- * because fieldEndTurn.ts's own copy is module-private. Mold Breaker is
- * never applied here, matching that copy's own note: there is no single
- * "attacker" for a field-wide scan. */
-export function isAbilityOnField(state: BattleState, abilityId: string): boolean {
+ * because fieldEndTurn.ts's own copy is module-private. The C reads
+ * `BattlerHasAbility(i, ability, TRUE)`, i.e. checkMoldBreaker TRUE; this copy
+ * keeps that copy's own choice of never applying Mold Breaker (no single
+ * "attacker" for a field-wide scan) and applies Gastro Acid / Neutralizing Gas. */
+export function isAbilityOnField(state: BattleState, deps: AiDamageDeps, abilityId: string): boolean {
   for (let i = 0; i < state.battlersCount; i++) {
     const battler = state.battlers[i]
-    if (battler && battler.mon.hp !== 0 && selfAbility(battler, abilityId)) return true
+    if (battler && battler.mon.hp !== 0 && selfAbility(state, deps, battler, abilityId)) return true
   }
   return false
 }
@@ -373,9 +419,9 @@ function isSemiInvulnerable(defender: BattlerState, move: ReturnType<AiDamageDep
  * is immune; Safety Goggles is a held-item exemption this port also checks
  * via resolvedHoldEffect. checkMoldBreaker is threaded through for the
  * Overcoat read (the only ability half of this check). */
-export function isPowderImmune(defender: BattlerState, attackerHasMoldBreaker: boolean, deps: AiDamageDeps): boolean {
+export function isPowderImmune(state: BattleState, defender: BattlerState, attackerHasMoldBreaker: boolean, deps: AiDamageDeps): boolean {
   if (isBattlerOfType(defender, 'GRASS')) return true
-  if (defAbility(defender, 'ABILITY_OVERCOAT', attackerHasMoldBreaker)) return true
+  if (defAbility(state, deps, defender, 'ABILITY_OVERCOAT', attackerHasMoldBreaker)) return true
   if (getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_SAFETY_GOGGLES') return true
   return false
 }
@@ -402,11 +448,13 @@ function isStatLoweringMoveEffect(effect: string | null): boolean {
 }
 
 /** DoesBattlerIgnoreAbilityChecks, battle_ai_util.c:1046-1051 --
- * `DoesBattlerHaveAbilityShield` (an Ability Shield hold-effect check) is not
- * wired; approximated as absent (the common case). `battler === battlerDef`
- * (self-targeting) always returns false, matching the C. */
-function doesBattlerIgnoreAbilityChecks(battlerAtk: number, battlerDef: number, deps: AiDamageDeps): boolean {
+ * `battler === battlerDef` (self-targeting) always returns false, and a
+ * defender holding an Ability Shield (`DoesBattlerHaveAbilityShield`, :1049)
+ * is never ignored, matching the C. */
+function doesBattlerIgnoreAbilityChecks(state: BattleState, battlerAtk: number, battlerDef: number, deps: AiDamageDeps): boolean {
   if (battlerAtk === battlerDef) return false
+  const defender = state.battlers[battlerDef]
+  if (defender && doesBattlerHaveAbilityShield(defender, deps)) return false
   return deps.grounding.attackerHasMoldBreaker
 }
 
@@ -424,7 +472,7 @@ function battlerStatCanRise(state: BattleState, battler: BattlerState, stat: num
   if (isBattlerWeatherAffected(state, WEATHER_FOG_ANY, deps) && (battler.volatiles.trickOrTreat || !(isBattlerOfType(battler, 'GHOST') || isBattlerOfType(battler, 'PSYCHIC')))) {
     return false
   }
-  if (selfAbility(battler, 'ABILITY_CONTRARY')) return battler.mon.statStages[stat] > MIN_STAT_STAGE
+  if (selfAbility(state, deps, battler, 'ABILITY_CONTRARY')) return battler.mon.statStages[stat] > MIN_STAT_STAGE
   return battler.mon.statStages[stat] < MAX_STAT_STAGE
 }
 
@@ -465,19 +513,19 @@ export const ALWAYS_SLEEPING_ABILITIES: readonly string[] = ['ABILITY_COMATOSE',
 
 /** LoweringStatsPointlessOrBad, battle_ai_util.c:1274-1279 -- IsStatDropBlocked
  * has no port anywhere in this codebase (see this module's header). */
-function loweringStatsPointlessOrBad(defender: BattlerState, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
+function loweringStatsPointlessOrBad(state: BattleState, deps: AiDamageDeps, defender: BattlerState, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
   unmodelled.push('LoweringStatsPointlessOrBad: IsStatDropBlocked(battlerDef, STAT_HP, FALSE) has no port anywhere in this codebase (same admission as accuracy.ts\'s own header); treated as not blocked')
-  if (defAbility(defender, 'ABILITY_CONTRARY', attackerHasMoldBreaker)) return true
-  if (ON_STAT_LOWERED_ABILITIES.some((id) => selfAbility(defender, id))) return true
+  if (defAbility(state, deps, defender, 'ABILITY_CONTRARY', attackerHasMoldBreaker)) return true
+  if (ON_STAT_LOWERED_ABILITIES.some((id) => selfAbility(state, deps, defender, id))) return true
   return false
 }
 
 /** ShouldLowerStat, battle_ai_util.c:1283-1291. `stat < 4` is the C's own
  * literal (statStages are 0..12, DEFAULT 6 -- already lowered two stages or
  * more). */
-export function shouldLowerStat(defender: BattlerState, stat: number, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
+export function shouldLowerStat(state: BattleState, deps: AiDamageDeps, defender: BattlerState, stat: number, attackerHasMoldBreaker: boolean, unmodelled: string[]): boolean {
   if (defender.mon.statStages[stat] < 4) return false
-  if (loweringStatsPointlessOrBad(defender, attackerHasMoldBreaker, unmodelled)) return false
+  if (loweringStatsPointlessOrBad(state, deps, defender, attackerHasMoldBreaker, unmodelled)) return false
   unmodelled.push('ShouldLowerStat: IsStatDropBlocked(battlerDef, stat, FALSE) has no port anywhere in this codebase; treated as not blocked')
   return true
 }
@@ -518,7 +566,7 @@ export function isBattlerTrapped(state: BattleState, battler: BattlerState, chec
   const unmodelled: string[] = []
   const holdEffect = aiHoldEffectParam(battler, deps) & 0xff // `u8 holdEffect`
   if (battler.volatiles.skyDropped) return { trapped: true, unmodelled }
-  if (isBattlerOfType(battler, 'GHOST') || holdEffect === holdEffectId('HOLD_EFFECT_SHED_SHELL', deps) || (!checkSwitch && selfAbility(battler, 'ABILITY_RUN_AWAY'))) {
+  if (isBattlerOfType(battler, 'GHOST') || holdEffect === holdEffectId('HOLD_EFFECT_SHED_SHELL', deps) || (!checkSwitch && selfAbility(state, deps, battler, 'ABILITY_RUN_AWAY'))) {
     return { trapped: false, unmodelled }
   }
   const escapeCheck = isAbilityPreventingEscape(state, battler.id)
@@ -539,13 +587,13 @@ export function isBattlerTrapped(state: BattleState, battler: BattlerState, chec
  * the latter: Limber/Insomnia/Immunity/-class status-immunity abilities).
  * Gapped by name whenever reached, matching the codebase's own precedent for
  * an unwired ability-hook chain (accuracy.ts's IsStatDropBlocked). */
-export function canBePoisoned(state: BattleState, attacker: BattlerState, target: BattlerState, _deps: AiDamageDeps): { canPoison: boolean; unmodelled: string[] } {
+export function canBePoisoned(state: BattleState, attacker: BattlerState, target: BattlerState, deps: AiDamageDeps): { canPoison: boolean; unmodelled: string[] } {
   const unmodelled: string[] = []
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return { canPoison: false, unmodelled }
   if (hasFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)) return { canPoison: false, unmodelled }
   if (hasFlag(state.sides[target.id & 1].statuses, SIDE_STATUS_SAFEGUARD)) return { canPoison: false, unmodelled }
   unmodelled.push('CanBePoisoned/IsStatusImmune: IsAbilityStatusProtected(battlerDef, CHECK_POISON) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
-  if ((isBattlerOfType(target, 'POISON') || isBattlerOfType(target, 'STEEL')) && !defAbility(attacker, 'ABILITY_CORROSION', false)) {
+  if ((isBattlerOfType(target, 'POISON') || isBattlerOfType(target, 'STEEL')) && !defAbility(state, deps, attacker, 'ABILITY_CORROSION', false)) {
     return { canPoison: false, unmodelled }
   }
   return { canPoison: true, unmodelled }
@@ -574,7 +622,7 @@ export function aiCanParalyze(state: BattleState, attacker: BattlerState, target
   const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, target.id, deps)
   const unmodelled = [...base.unmodelled, ...effResult.unmodelled]
   if (effResult.effectiveness === 0) return { canParalyze: false, unmodelled }
-  if (doesSubstituteBlockMove(attacker, target, deps.moveData(moveId), unmodelled)) return { canParalyze: false, unmodelled }
+  if (doesSubstituteBlockMove(state, deps, attacker, target, deps.moveData(moveId), unmodelled)) return { canParalyze: false, unmodelled }
   return { canParalyze: true, unmodelled }
 }
 
@@ -601,11 +649,11 @@ export function canBeConfused(target: BattlerState, unmodelled: string[]): boole
  * is narrowed to the Infiltrator ability check (its dominant real-world
  * path); the move-specific Sub-piercing exemptions inside the real
  * `Infiltrates` are not modelled. */
-export function doesSubstituteBlockMove(attacker: BattlerState, defender: BattlerState, move: ReturnType<AiDamageDeps['moveData']>, unmodelled: string[]): boolean {
+export function doesSubstituteBlockMove(state: BattleState, deps: AiDamageDeps, attacker: BattlerState, defender: BattlerState, move: ReturnType<AiDamageDeps['moveData']>, unmodelled: string[]): boolean {
   if (!hasFlag(defender.mon.status2, STATUS2_SUBSTITUTE)) return false
   if (hasMoveFlag(move, 'sound')) return false
   if (hasMoveFlag(move, 'ignoresSubstitute')) return false
-  if (selfAbility(attacker, 'ABILITY_INFILTRATOR')) {
+  if (selfAbility(state, deps, attacker, 'ABILITY_INFILTRATOR')) {
     unmodelled.push("DoesSubstituteBlockMove: Infiltrates() is narrowed to a plain ABILITY_INFILTRATOR check; other Infiltrates paths (move-specific Sub-piercing exemptions) are not modelled")
     return false
   }
@@ -677,8 +725,8 @@ export function countNegativeStatStages(battler: BattlerState): number {
 /** IsStickyHold, battle_util.c:9329-9333 -- `BattlerHasAbility(battler, X,
  * TRUE)` on the DEFENDER, so it goes through `defAbility` (real Mold-Breaker
  * gating; both Sticky Hold and Supersweet Syrup are in MOLD_BREAKABLE_ABILITIES). */
-export function isStickyHold(defender: BattlerState, attackerHasMoldBreaker: boolean): boolean {
-  return defAbility(defender, 'ABILITY_STICKY_HOLD', attackerHasMoldBreaker) || defAbility(defender, 'ABILITY_SUPERSWEET_SYRUP', attackerHasMoldBreaker)
+export function isStickyHold(state: BattleState, deps: AiDamageDeps, defender: BattlerState, attackerHasMoldBreaker: boolean): boolean {
+  return defAbility(state, deps, defender, 'ABILITY_STICKY_HOLD', attackerHasMoldBreaker) || defAbility(state, deps, defender, 'ABILITY_SUPERSWEET_SYRUP', attackerHasMoldBreaker)
 }
 
 /** AI_CanBurn/CanBeBurned, battle_ai_util.c:2079-2084 + battle_util.c:5061-5069.
@@ -710,7 +758,7 @@ export function aiCanGiveFrostbite(state: BattleState, attacker: BattlerState, d
   const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, defender.id, deps)
   unmodelled.push(...effResult.unmodelled)
   if (effResult.effectiveness === 0) return { can: false, unmodelled }
-  if (doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
+  if (doesSubstituteBlockMove(state, deps, attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
   return { can: true, unmodelled }
 }
 
@@ -723,7 +771,7 @@ function aiCanCauseBleed(state: BattleState, attacker: BattlerState, defender: B
   const effResult = aiGetMoveEffectiveness(state, moveId, attacker.id, defender.id, deps)
   unmodelled.push(...effResult.unmodelled)
   if (effResult.effectiveness === 0) return { can: false, unmodelled }
-  if (doesSubstituteBlockMove(attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
+  if (doesSubstituteBlockMove(state, deps, attacker, defender, deps.moveData(moveId), unmodelled)) return { can: false, unmodelled }
   return { can: true, unmodelled }
 }
 
@@ -841,13 +889,13 @@ function moveCallsOtherMove(moveId: string | null): boolean {
  * helpers, since there is nothing here that would ever call it). */
 
 /** TERRAIN_HAS_EFFECT, include/battle_util.h:47 -- `!IsAbilityOnField(ABILITY_CLUELESS)`. */
-function terrainHasEffect(state: BattleState): boolean {
-  return !isAbilityOnField(state, 'ABILITY_CLUELESS')
+function terrainHasEffect(state: BattleState, deps: AiDamageDeps): boolean {
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS')
 }
 /** GetCurrentTerrain, battle_util.c:8665-8669. Returns one of the
  * STATUS_FIELD_*_TERRAIN bit values, or 0 for no terrain / Clueless on field. */
-export function getCurrentTerrain(state: BattleState): number {
-  if (!terrainHasEffect(state)) return 0
+export function getCurrentTerrain(state: BattleState, deps: AiDamageDeps): number {
+  if (!terrainHasEffect(state, deps)) return 0
   return state.field.statuses & STATUS_FIELD_TERRAIN_ANY
 }
 /** GetNaturePowerMove, battle_script_commands.c:11634-11645. The
@@ -856,8 +904,8 @@ export function getCurrentTerrain(state: BattleState): number {
  * concept of -- gapped, defaulting to the C's own MOVE_TRI_ATTACK fallback
  * (its `sNaturePowerMoves[gBattleTerrain] == MOVE_NONE` branch), rather than
  * the specific per-location move the C would actually pick. */
-export function getNaturePowerMove(state: BattleState, unmodelled: string[]): string {
-  const terrain = getCurrentTerrain(state)
+export function getNaturePowerMove(state: BattleState, deps: AiDamageDeps, unmodelled: string[]): string {
+  const terrain = getCurrentTerrain(state, deps)
   if (terrain === STATUS_FIELD_MISTY_TERRAIN) return 'MOVE_MOONBLAST'
   if (terrain === STATUS_FIELD_ELECTRIC_TERRAIN) return 'MOVE_THUNDERBOLT'
   if (terrain === STATUS_FIELD_GRASSY_TERRAIN) return 'MOVE_ENERGY_BALL'
@@ -867,19 +915,19 @@ export function getNaturePowerMove(state: BattleState, unmodelled: string[]): st
 }
 
 /** IsGravityActive, battle_util.c:8689-8695. */
-function isGravityActive(state: BattleState): boolean {
-  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
+function isGravityActive(state: BattleState, deps: AiDamageDeps): boolean {
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
 }
 /** isMagicRoomActive, battle_util.c:8698-8704 (same shape as IsGravityActive). */
-function isMagicRoomActive(state: BattleState): boolean {
-  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
+function isMagicRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
 }
 /** IsTrickRoomActive, battle_util.c:8671-8677 -- `getMonotypeChampType() ==
  * TYPE_FLYING/TYPE_NORMAL` (a Monotype-challenge-format concept) is not
  * modelled anywhere in this codebase; only the plain field-status flag is
  * checked (this module's header). */
-function isTrickRoomActive(state: BattleState): boolean {
-  return !isAbilityOnField(state, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+function isTrickRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
+  return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS') && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
 }
 /** GetBattlerSideSpeedAverage, battle_ai_util.c:2181-2196 -- in singles
  * (`IsDoubleBattle()` false) this is just the battler's own fully-resolved
@@ -959,11 +1007,11 @@ export const NO_RECOIL_ABILITIES: readonly string[] = ['ABILITY_BRUTEFORCE', 'AB
 /** Every ability whose abilityHooks.json marks `halfRecoil` -- ReducesRecoil,
  * battle_ai_main.c:481-484. Extraction: `bitfields.halfRecoil` -- 2 entries. */
 export const HALF_RECOIL_ABILITIES: readonly string[] = ['ABILITY_DAREDEVIL', 'ABILITY_LIMBER']
-function blocksRecoil(battler: BattlerState): boolean {
-  return NO_RECOIL_ABILITIES.some((id) => selfAbility(battler, id))
+function blocksRecoil(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return NO_RECOIL_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
-function reducesRecoil(battler: BattlerState): boolean {
-  return HALF_RECOIL_ABILITIES.some((id) => selfAbility(battler, id))
+function reducesRecoil(state: BattleState, deps: AiDamageDeps, battler: BattlerState): boolean {
+  return HALF_RECOIL_ABILITIES.some((id) => selfAbility(state, deps, battler, id))
 }
 
 /** CanAIFaintTarget, battle_ai_util.c:972-989, called with numHits=0 at this
@@ -1051,32 +1099,32 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
   if (attacker.volatiles.disabledMove === moveId && attacker.volatiles.disableTimer !== 0) return { score: score - 20, unmodelled }
 
   // :511 -- Truant + non-status move.
-  if (move?.split !== 'STATUS' && selfAbility(attacker, 'ABILITY_TRUANT')) return { score: score - 20, unmodelled }
+  if (move?.split !== 'STATUS' && selfAbility(state, deps, attacker, 'ABILITY_TRUANT')) return { score: score - 20, unmodelled }
 
   const resolvedType = moveType(moveId, deps, unmodelled)
 
   // :516-766 -- checks that only apply when the move does NOT target the user.
   if (!moveTargetsUser(move)) {
-    if (hasMoveFlag(move, 'powderAffected') && isPowderImmune(defender, atkMoldBreaker, deps)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'FLYING' && defAbility(defender, 'ABILITY_AERODYNAMICS', atkMoldBreaker)) return { score: score - 30, unmodelled }
-    if (resolvedType === 'POISON' && defAbility(defender, 'ABILITY_POISON_ABSORB', atkMoldBreaker)) return { score: score - 30, unmodelled }
-    if ((resolvedType === 'FLYING' || resolvedType === 'FIRE') && defAbility(defender, 'ABILITY_INFLATABLE', atkMoldBreaker)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'ROCK' && defAbility(defender, 'ABILITY_MOUNTAINEER', atkMoldBreaker) && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'DARK' && isAbilityOnField(state, 'ABILITY_RADIANCE') && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'ICE' && defAbility(defender, 'ABILITY_ICE_DEW', atkMoldBreaker)) return { score: score - 20, unmodelled }
+    if (hasMoveFlag(move, 'powderAffected') && isPowderImmune(state, defender, atkMoldBreaker, deps)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'FLYING' && defAbility(state, deps, defender, 'ABILITY_AERODYNAMICS', atkMoldBreaker)) return { score: score - 30, unmodelled }
+    if (resolvedType === 'POISON' && defAbility(state, deps, defender, 'ABILITY_POISON_ABSORB', atkMoldBreaker)) return { score: score - 30, unmodelled }
+    if ((resolvedType === 'FLYING' || resolvedType === 'FIRE') && defAbility(state, deps, defender, 'ABILITY_INFLATABLE', atkMoldBreaker)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'ROCK' && defAbility(state, deps, defender, 'ABILITY_MOUNTAINEER', atkMoldBreaker) && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'DARK' && isAbilityOnField(state, deps, 'ABILITY_RADIANCE') && !doesBattlerIgnoreAbilityOrInnateChecks(deps)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'ICE' && defAbility(state, deps, defender, 'ABILITY_ICE_DEW', atkMoldBreaker)) return { score: score - 20, unmodelled }
     // :547-551 -- Lightning Rod on the defender OR its (always-absent-in-singles) partner.
-    if (resolvedType === 'ELECTRIC' && defAbility(defender, 'ABILITY_LIGHTNING_ROD', atkMoldBreaker)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'ELECTRIC' && defAbility(defender, 'ABILITY_VOLT_ABSORB', atkMoldBreaker)) return { score: score - 20, unmodelled }
-    if (resolvedType === 'GROUND' && defAbility(defender, 'ABILITY_EARTH_EATER', atkMoldBreaker)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'ELECTRIC' && defAbility(state, deps, defender, 'ABILITY_LIGHTNING_ROD', atkMoldBreaker)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'ELECTRIC' && defAbility(state, deps, defender, 'ABILITY_VOLT_ABSORB', atkMoldBreaker)) return { score: score - 20, unmodelled }
+    if (resolvedType === 'GROUND' && defAbility(state, deps, defender, 'ABILITY_EARTH_EATER', atkMoldBreaker)) return { score: score - 20, unmodelled }
     if (moveId === 'MOVE_LEECH_SEED' && isMagicGuardProtected(state, defender)) return { score: score - 20, unmodelled }
 
-    if (resolvedType === 'FIRE' && isBattlerOfType(defender, 'GRASS') && defAbility(defender, 'ABILITY_SEAWEED', atkMoldBreaker)) score += 2
-    if (hasMoveFlag(move, 'boneBased') && defAbility(defender, 'ABILITY_BONE_ZONE', atkMoldBreaker)) score += 2
-    if (resolvedType === 'GRASS' && isBattlerOfType(defender, 'FIRE') && selfAbility(attacker, 'ABILITY_SEAWEED')) score += 2
-    if (resolvedType === 'ELECTRIC' && isBattlerOfType(defender, 'GROUND') && selfAbility(attacker, 'ABILITY_GROUND_SHOCK')) score += 2
-    if (resolvedType === 'ELECTRIC' && isBattlerOfType(defender, 'ELECTRIC') && selfAbility(attacker, 'ABILITY_OVERCHARGE')) score += 2
-    if (resolvedType === 'FIRE' && isBattlerOfType(defender, 'ROCK') && selfAbility(attacker, 'ABILITY_MOLTEN_DOWN')) score += 2
-    if (resolvedType === 'DRAGON' && isBattlerOfType(defender, 'FAIRY') && selfAbility(attacker, 'ABILITY_OVERWHELM')) score += 2
+    if (resolvedType === 'FIRE' && isBattlerOfType(defender, 'GRASS') && defAbility(state, deps, defender, 'ABILITY_SEAWEED', atkMoldBreaker)) score += 2
+    if (hasMoveFlag(move, 'boneBased') && defAbility(state, deps, defender, 'ABILITY_BONE_ZONE', atkMoldBreaker)) score += 2
+    if (resolvedType === 'GRASS' && isBattlerOfType(defender, 'FIRE') && selfAbility(state, deps, attacker, 'ABILITY_SEAWEED')) score += 2
+    if (resolvedType === 'ELECTRIC' && isBattlerOfType(defender, 'GROUND') && selfAbility(state, deps, attacker, 'ABILITY_GROUND_SHOCK')) score += 2
+    if (resolvedType === 'ELECTRIC' && isBattlerOfType(defender, 'ELECTRIC') && selfAbility(state, deps, attacker, 'ABILITY_OVERCHARGE')) score += 2
+    if (resolvedType === 'FIRE' && isBattlerOfType(defender, 'ROCK') && selfAbility(state, deps, attacker, 'ABILITY_MOLTEN_DOWN')) score += 2
+    if (resolvedType === 'DRAGON' && isBattlerOfType(defender, 'FAIRY') && selfAbility(state, deps, attacker, 'ABILITY_OVERWHELM')) score += 2
 
     // :596 -- semi-invulnerable target, effect isn't the semi-invulnerable
     // charge move itself, and the AI goes first.
@@ -1091,7 +1139,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     if (effResult.effectiveness === 2) return { score: score - 10, unmodelled } // AI_EFFECTIVENESS_x0_25
 
     // :610-707 -- target (and, in doubles, target-partner) ability checks.
-    if (!doesBattlerIgnoreAbilityChecks(battlerAtk, battlerDef, deps)) {
+    if (!doesBattlerIgnoreAbilityChecks(state, battlerAtk, battlerDef, deps)) {
       const built = move
         ? {
             moveType: resolvedType ?? 'NORMAL',
@@ -1196,28 +1244,28 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     // :727-730 -- Anticipation. GetSingleUseAbilityCounter has no state
     // anywhere in this codebase (turn.ts's own admission) -- gapped
     // wholesale whenever the defender holds the ability.
-    if (defAbility(defender, 'ABILITY_ANTICIPATION', false)) {
+    if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', false)) {
       unmodelled.push('AI_CheckBadMove: Anticipation (battle_ai_main.c:727-730) needs GetSingleUseAbilityCounter, which has no state anywhere in this codebase (same admission as turn.ts\'s own header); not scored')
     }
 
     // :733-735 -- Wonder Guard.
-    if (defAbility(defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker)) {
+    if (defAbility(state, deps, defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker)) {
       const effResult2 = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
       unmodelled.push(...effResult2.unmodelled)
       if (effResult2.effectiveness > 5 && (move?.power ?? 0) > 0) return { score: score - 20, unmodelled } // > AI_EFFECTIVENESS_x2
     }
 
     // :738 -- Aroma Veil.
-    if (defAbility(defender, 'ABILITY_AROMA_VEIL', atkMoldBreaker) && isAromaVeilProtectedMove(moveId)) return { score: score - 20, unmodelled }
+    if (defAbility(state, deps, defender, 'ABILITY_AROMA_VEIL', atkMoldBreaker) && isAromaVeilProtectedMove(moveId)) return { score: score - 20, unmodelled }
     // :741 -- Sweet Veil.
-    if (defAbility(defender, 'ABILITY_SWEET_VEIL', atkMoldBreaker) && (effect === 'EFFECT_SLEEP' || effect === 'EFFECT_YAWN')) return { score: score - 10, unmodelled }
+    if (defAbility(state, deps, defender, 'ABILITY_SWEET_VEIL', atkMoldBreaker) && (effect === 'EFFECT_SLEEP' || effect === 'EFFECT_YAWN')) return { score: score - 10, unmodelled }
     // :744 -- Magic Bounce.
-    if (defAbility(defender, 'ABILITY_MAGIC_BOUNCE', atkMoldBreaker) && hasMoveFlag(move, 'magicCoatAffected')) return { score: score - 20, unmodelled }
+    if (defAbility(state, deps, defender, 'ABILITY_MAGIC_BOUNCE', atkMoldBreaker) && hasMoveFlag(move, 'magicCoatAffected')) return { score: score - 20, unmodelled }
     // :746 -- Clear Amulet.
     if (getBattlerHoldEffect(defender, deps) === 'HOLD_EFFECT_CLEAR_AMULET' && isStatLoweringMoveEffect(effect)) return { score: score - 10, unmodelled }
 
     // :749-752 -- Prankster + Dark-type immunity to status-priority moves.
-    if (selfAbility(attacker, 'ABILITY_PRANKSTER') && isBattlerOfType(defender, 'DARK') && move?.split === 'STATUS' && move?.target !== 'OPPONENTS_FIELD' && move?.target !== 'USER') {
+    if (selfAbility(state, deps, attacker, 'ABILITY_PRANKSTER') && isBattlerOfType(defender, 'DARK') && move?.split === 'STATUS' && move?.target !== 'OPPONENTS_FIELD' && move?.target !== 'USER') {
       return { score: score - 10, unmodelled }
     }
 
@@ -1267,7 +1315,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       unmodelled.push(...effResult3.unmodelled)
       if (effResult3.effectiveness === 0) {
         score -= 10
-      } else if (isAbilityOnField(state, 'ABILITY_DAMP') && !doesBattlerIgnoreAbilityChecks(battlerAtk, battlerDef, deps)) {
+      } else if (isAbilityOnField(state, deps, 'ABILITY_DAMP') && !doesBattlerIgnoreAbilityChecks(state, battlerAtk, battlerDef, deps)) {
         score -= 10
       } else if (countUsablePartyMons(state, battlerAtk) === 0) {
         if (countUsablePartyMons(state, battlerDef) !== 0) score -= 10
@@ -1277,7 +1325,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     }
     case 'EFFECT_DREAM_EATER': {
       const asleep = hasFlag(defender.mon.status1, STATUS1_SLEEP)
-      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(defender, id))
+      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(state, deps, defender, id))
       if (!asleep || comatose) {
         score -= 8
       } else {
@@ -1345,7 +1393,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       else if (!battlerStatCanRise(state, attacker, 2, deps)) score -= 6
       break
     case 'EFFECT_ATTACK_ACCURACY_UP':
-      if (!selfAbility(attacker, 'ABILITY_CONTRARY')) {
+      if (!selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) {
         if (attacker.mon.statStages[1] >= MAX_STAT_STAGE && (attacker.mon.statStages[6] >= MAX_STAT_STAGE || !hasMoveWithSplit(attacker, 'PHYSICAL', deps))) score -= 10
       } else {
         score -= 10
@@ -1367,7 +1415,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       else if (!battlerStatCanRise(state, attacker, 3, deps)) score -= 8
       break
     case 'EFFECT_SHELL_SMASH':
-      if (!selfAbility(attacker, 'ABILITY_CONTRARY')) {
+      if (!selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) {
         if (!battlerStatCanRise(state, attacker, 2, deps)) score -= 10
         else if (!battlerStatCanRise(state, attacker, 5, deps)) score -= 8
       } else {
@@ -1386,7 +1434,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!(isBattlerOfType(attacker, 'GRASS') && battlerStatCanRise(state, attacker, 1, deps))) score -= 10
       break
     case 'EFFECT_GEAR_UP': {
-      const plusMinus = selfAbility(attacker, 'ABILITY_PLUS') || selfAbility(attacker, 'ABILITY_MINUS')
+      const plusMinus = selfAbility(state, deps, attacker, 'ABILITY_PLUS') || selfAbility(state, deps, attacker, 'ABILITY_MINUS')
       if (plusMinus) {
         if (!battlerStatCanRise(state, attacker, 1, deps) || !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
         else if (!battlerStatCanRise(state, attacker, 4, deps) || !hasMoveWithSplit(attacker, 'SPECIAL', deps)) score -= 8
@@ -1396,12 +1444,12 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_ACUPRESSURE': {
-      const blocked = doesSubstituteBlockMove(attacker, defender, move, unmodelled) || areBattlersStatsMaxed(defender)
+      const blocked = doesSubstituteBlockMove(state, deps, attacker, defender, move, unmodelled) || areBattlersStatsMaxed(defender)
       if (blocked) score -= 10
       break
     }
     case 'EFFECT_MAGNETIC_FLUX': {
-      const plusMinus2 = selfAbility(attacker, 'ABILITY_PLUS') || selfAbility(attacker, 'ABILITY_MINUS')
+      const plusMinus2 = selfAbility(state, deps, attacker, 'ABILITY_PLUS') || selfAbility(state, deps, attacker, 'ABILITY_MINUS')
       if (plusMinus2) {
         if (!battlerStatCanRise(state, attacker, 2, deps)) score -= 10
         else if (!battlerStatCanRise(state, attacker, 5, deps)) score -= 8
@@ -1412,49 +1460,49 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     }
     case 'EFFECT_ATTACK_DOWN':
     case 'EFFECT_ATTACK_DOWN_2':
-      if (!shouldLowerStat(defender, 1, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 1, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_DEFENSE_DOWN':
     case 'EFFECT_DEFENSE_DOWN_2':
-      if (!shouldLowerStat(defender, 2, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 2, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_SPEED_DOWN':
     case 'EFFECT_SPEED_DOWN_2':
-      if (!shouldLowerStat(defender, 3, atkMoldBreaker, unmodelled)) score -= 10
-      else if (defAbility(defender, 'ABILITY_SPEED_BOOST', atkMoldBreaker)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 3, atkMoldBreaker, unmodelled)) score -= 10
+      else if (defAbility(state, deps, defender, 'ABILITY_SPEED_BOOST', atkMoldBreaker)) score -= 10
       break
     case 'EFFECT_SPECIAL_ATTACK_DOWN':
     case 'EFFECT_SPECIAL_ATTACK_DOWN_2':
-      if (!shouldLowerStat(defender, 4, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 4, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_SPECIAL_DEFENSE_DOWN':
     case 'EFFECT_SPECIAL_DEFENSE_DOWN_2':
-      if (!shouldLowerStat(defender, 5, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 5, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_ACCURACY_DOWN':
     case 'EFFECT_ACCURACY_DOWN_2':
-      if (!shouldLowerStat(defender, 6, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 6, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_EVASION_DOWN':
     case 'EFFECT_EVASION_DOWN_2':
-      if (!shouldLowerStat(defender, 7, atkMoldBreaker, unmodelled)) score -= 10
+      if (!shouldLowerStat(state, deps, defender, 7, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_TICKLE':
-      if (!shouldLowerStat(defender, 1, atkMoldBreaker, unmodelled)) score -= 10
-      else if (!shouldLowerStat(defender, 2, atkMoldBreaker, unmodelled)) score -= 8
+      if (!shouldLowerStat(state, deps, defender, 1, atkMoldBreaker, unmodelled)) score -= 10
+      else if (!shouldLowerStat(state, deps, defender, 2, atkMoldBreaker, unmodelled)) score -= 8
       break
     case 'EFFECT_VENOM_DRENCH':
       if (!hasFlag(defender.mon.status1, STATUS1_POISON_ANY)) {
         score -= 10
       } else {
-        if (!shouldLowerStat(defender, 3, atkMoldBreaker, unmodelled)) score -= 10
-        else if (!shouldLowerStat(defender, 4, atkMoldBreaker, unmodelled)) score -= 8
-        else if (!shouldLowerStat(defender, 1, atkMoldBreaker, unmodelled)) score -= 6
+        if (!shouldLowerStat(state, deps, defender, 3, atkMoldBreaker, unmodelled)) score -= 10
+        else if (!shouldLowerStat(state, deps, defender, 4, atkMoldBreaker, unmodelled)) score -= 8
+        else if (!shouldLowerStat(state, deps, defender, 1, atkMoldBreaker, unmodelled)) score -= 6
       }
       break
     case 'EFFECT_NOBLE_ROAR':
-      if (!shouldLowerStat(defender, 4, atkMoldBreaker, unmodelled)) score -= 10
-      else if (!shouldLowerStat(defender, 1, atkMoldBreaker, unmodelled)) score -= 8
+      if (!shouldLowerStat(state, deps, defender, 4, atkMoldBreaker, unmodelled)) score -= 10
+      else if (!shouldLowerStat(state, deps, defender, 1, atkMoldBreaker, unmodelled)) score -= 8
       break
     case 'EFFECT_CAPTIVATE': {
       const atkGender = attacker.mon.gender
@@ -1482,7 +1530,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_LOW_KICK': {
       const effResult5 = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
       unmodelled.push(...effResult5.unmodelled)
-      if (defAbility(defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker) && effResult5.effectiveness > 5) score -= 10
+      if (defAbility(state, deps, defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker) && effResult5.effectiveness > 5) score -= 10
       break
     }
     case 'EFFECT_FOCUS_PUNCH':
@@ -1505,14 +1553,14 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_ROAR':
       if (countUsablePartyMons(state, battlerDef) === 0) score -= 10
       else if (hasFlag(defender.statuses4, STATUS4_COMMANDED)) score -= 10
-      else if (SUCTION_CUPS_ABILITIES.some((id) => defAbility(defender, id, atkMoldBreaker))) {
+      else if (SUCTION_CUPS_ABILITIES.some((id) => defAbility(state, deps, defender, id, atkMoldBreaker))) {
         score -= 10
       }
       break
     case 'EFFECT_TOXIC_THREAD':
     case 'EFFECT_POISON':
     case 'EFFECT_TOXIC': {
-      if (effect === 'EFFECT_TOXIC_THREAD' && !shouldLowerStat(defender, 3, atkMoldBreaker, unmodelled)) score -= 1
+      if (effect === 'EFFECT_TOXIC_THREAD' && !shouldLowerStat(state, deps, defender, 3, atkMoldBreaker, unmodelled)) score -= 1
       const r = canBePoisoned(state, attacker, defender, deps)
       unmodelled.push(...r.unmodelled)
       if (!r.canPoison) score -= 10
@@ -1557,7 +1605,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_SUBSTITUTE':
-      if (hasFlag(attacker.mon.status2, STATUS2_SUBSTITUTE) || defAbility(defender, 'ABILITY_INFILTRATOR', atkMoldBreaker) || defAbility(defender, 'ABILITY_MARINE_APEX', atkMoldBreaker)) {
+      if (hasFlag(attacker.mon.status2, STATUS2_SUBSTITUTE) || defAbility(state, deps, defender, 'ABILITY_INFILTRATOR', atkMoldBreaker) || defAbility(state, deps, defender, 'ABILITY_MARINE_APEX', atkMoldBreaker)) {
         score -= 10
       } else if (getHealthPercentage(state, battlerAtk) <= 25) {
         score -= 10
@@ -1569,7 +1617,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_LEECH_SEED':
       if (hasFlag(defender.statuses3, STATUS3_LEECHSEED) || isBattlerOfType(defender, 'GRASS') || doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         score -= 20
-      } else if (defAbility(defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) {
+      } else if (defAbility(state, deps, defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) {
         score -= 3
       }
       break
@@ -1594,7 +1642,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_SNORE':
     case 'EFFECT_SLEEP_TALK': {
       const asleep = hasFlag(attacker.mon.status1, STATUS1_SLEEP)
-      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(attacker, id))
+      const comatose = ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(state, deps, attacker, id))
       unmodelled.push("AI_CheckBadMove: IsWakeupTurn is not modelled (no move-history-by-turn tracking exists in this sim -- FindMoveUsedXTurnsAgo has no port); treated as false")
       const isWakeupTurn = false
       if (isWakeupTurn || !asleep || !comatose) score -= 10
@@ -1609,7 +1657,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_NIGHTMARE':
       if (hasFlag(defender.mon.status2, STATUS2_NIGHTMARE)) {
         score -= 10
-      } else if (!hasFlag(defender.mon.status1, STATUS1_SLEEP) || ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(defender, id))) {
+      } else if (!hasFlag(defender.mon.status1, STATUS1_SLEEP) || ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(state, deps, defender, id))) {
         score -= 8
       } else if (doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         score -= 10
@@ -1658,12 +1706,12 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_PERISH_SONG': {
       // Doubles branch (:1282-1292) is dead code in singles -- only the else
       // branch (:1293-1297) is reachable.
-      if (countUsablePartyMons(state, battlerAtk) === 0 && !selfAbility(attacker, 'ABILITY_SOUNDPROOF') && countUsablePartyMons(state, battlerDef) >= 1) {
+      if (countUsablePartyMons(state, battlerAtk) === 0 && !selfAbility(state, deps, attacker, 'ABILITY_SOUNDPROOF') && countUsablePartyMons(state, battlerDef) >= 1) {
         score -= 10
       }
       const foe = foeOf(battlerAtk)
       const foeBattler = state.battlers[foe]
-      if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || selfAbility(defender, 'ABILITY_SOUNDPROOF')) score -= 10
+      if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || selfAbility(state, deps, defender, 'ABILITY_SOUNDPROOF')) score -= 10
       unmodelled.push("AI_CheckBadMove: IsSoundproof is narrowed to a plain ABILITY_SOUNDPROOF check on the named battler (no partner-side scan, since singles has no partner)")
       break
     }
@@ -1714,7 +1762,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_BELLY_DRUM':
-      if (selfAbility(attacker, 'ABILITY_CONTRARY')) score -= 10
+      if (selfAbility(state, deps, attacker, 'ABILITY_CONTRARY')) score -= 10
       else if (getHealthPercentage(state, battlerAtk) <= 60) score -= 10
       break
     case 'EFFECT_FUTURE_SIGHT':
@@ -1732,7 +1780,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 30
       } else if (moveId === 'MOVE_FAKE_OUT') {
         // filter out First Impression, which shares this effect.
-        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_CHOICE_BAND', deps) || selfAbility(attacker, 'ABILITY_GORILLA_TACTICS')) {
+        if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_CHOICE_BAND', deps) || selfAbility(state, deps, attacker, 'ABILITY_GORILLA_TACTICS')) {
           const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
           unmodelled.push(...faintCheck.unmodelled)
           if (countUsablePartyMons(state, battlerDef) > 0 || !faintCheck.faints) {
@@ -1771,7 +1819,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_MEMENTO':
       if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         score -= 10
-      } else if (!shouldLowerStat(defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled) || !shouldLowerStat(defender, 4 /* STAT_SPATK */, atkMoldBreaker, unmodelled)) {
+      } else if (!shouldLowerStat(state, deps, defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled) || !shouldLowerStat(state, deps, defender, 4 /* STAT_SPATK */, atkMoldBreaker, unmodelled)) {
         score -= 10
       }
       break
@@ -1784,7 +1832,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_TRICK':
     case 'EFFECT_KNOCK_OFF':
-      if (isStickyHold(defender, atkMoldBreaker)) score -= 10
+      if (isStickyHold(state, deps, defender, atkMoldBreaker)) score -= 10
       break
     case 'EFFECT_POLTERGEIST':
       if (!defender.mon.itemId) score -= 20
@@ -1840,11 +1888,11 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (hasFlag(state.field.statuses, STATUS_FIELD_WATERSPORT) || partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_ABSORB':
-      if (defAbility(defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) score -= 6
+      if (defAbility(state, deps, defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) score -= 6
       break
     case 'EFFECT_STRENGTH_SAP':
-      if (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score -= 10
-      else if (!shouldLowerStat(defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled)) score -= 10
+      if (defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker)) score -= 10
+      else if (!shouldLowerStat(state, deps, defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled)) score -= 10
       break
     case 'EFFECT_COPYCAT':
     case 'EFFECT_MIRROR_MOVE': {
@@ -1933,14 +1981,14 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     }
     case 'EFFECT_TEETER_DANCE': {
       unmodelled.push("AI_CheckBadMove: EFFECT_TEETER_DANCE's partner-of-target half (:1537-1541) is NOT gated on IsDoubleBattle in the C; approximated as vacuously true (an absent partner slot never blocks) since this sim's battler slots 2/3 are always null in singles -- matching this move's real singles behavior of only the lone target mattering")
-      const ignoresAbility = doesBattlerIgnoreAbilityChecks(battlerAtk, battlerDef, deps)
-      const groundedInMistyTerrain = deps.turnOrder.isBattlerGrounded(battlerDef) && getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN
+      const ignoresAbility = doesBattlerIgnoreAbilityChecks(state, battlerAtk, battlerDef, deps)
+      const groundedInMistyTerrain = deps.turnOrder.isBattlerGrounded(battlerDef) && getCurrentTerrain(state, deps) === STATUS_FIELD_MISTY_TERRAIN
       const targetBlocked =
         hasFlag(defender.mon.status2, STATUS2_CONFUSION) ||
-        (!ignoresAbility && defAbility(defender, 'ABILITY_OWN_TEMPO', atkMoldBreaker)) ||
-        (!ignoresAbility && defAbility(defender, 'ABILITY_DISCIPLINE', atkMoldBreaker)) ||
+        (!ignoresAbility && defAbility(state, deps, defender, 'ABILITY_OWN_TEMPO', atkMoldBreaker)) ||
+        (!ignoresAbility && defAbility(state, deps, defender, 'ABILITY_DISCIPLINE', atkMoldBreaker)) ||
         groundedInMistyTerrain ||
-        doesSubstituteBlockMove(attacker, defender, move, unmodelled)
+        doesSubstituteBlockMove(state, deps, attacker, defender, move, unmodelled)
       if (targetBlocked) score -= 10
       break
     }
@@ -1956,9 +2004,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_RECHARGE': {
       const effResult = aiGetMoveEffectiveness(state, moveId, battlerAtk, battlerDef, deps)
       unmodelled.push(...effResult.unmodelled)
-      if (defAbility(defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker) && effResult.effectiveness > 5) {
+      if (defAbility(state, deps, defender, 'ABILITY_WONDER_GUARD', atkMoldBreaker) && effResult.effectiveness > 5) {
         score -= 10
-      } else if (!selfAbility(attacker, 'ABILITY_TRUANT')) {
+      } else if (!selfAbility(state, deps, attacker, 'ABILITY_TRUANT')) {
         const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, battlerDef, moveId, 0, deps)
         unmodelled.push(...faintCheck.unmodelled)
         if (!faintCheck.faints) score -= 2
@@ -1985,8 +2033,8 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_LOCK_ON':
       if (
         hasFlag(defender.statuses3, STATUS3_ALWAYS_HITS) ||
-        selfAbility(attacker, 'ABILITY_NO_GUARD') ||
-        defAbility(defender, 'ABILITY_NO_GUARD', atkMoldBreaker) ||
+        selfAbility(state, deps, attacker, 'ABILITY_NO_GUARD') ||
+        defAbility(state, deps, defender, 'ABILITY_NO_GUARD', atkMoldBreaker) ||
         doesPartnerHaveSameMoveEffect(state, battlerAtk)
       ) {
         score -= 10
@@ -1994,7 +2042,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_LASER_FOCUS':
       if (hasFlag(attacker.statuses3, STATUS3_LASER_FOCUS)) score -= 10
-      else if (defAbility(defender, 'ABILITY_SHELL_ARMOR', atkMoldBreaker) || defAbility(defender, 'ABILITY_BATTLE_ARMOR', atkMoldBreaker)) score -= 8
+      else if (defAbility(state, deps, defender, 'ABILITY_SHELL_ARMOR', atkMoldBreaker) || defAbility(state, deps, defender, 'ABILITY_BATTLE_ARMOR', atkMoldBreaker)) score -= 8
       break
     case 'EFFECT_SKETCH':
       if (defender.lastMove === null) score -= 10
@@ -2063,7 +2111,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       // isDoubleBattle is always false -- the "partner is about to set up
       // hazards" pre-empt check (:1676-1683) is dead code in singles.
       if (!handled) {
-        if (defender.mon.statStages[7] /* STAT_EVASION */ === MIN_STAT_STAGE || (defAbility(defender, 'ABILITY_CONTRARY', atkMoldBreaker) && !isTargetingPartner(battlerAtk, battlerDef))) {
+        if (defender.mon.statStages[7] /* STAT_EVASION */ === MIN_STAT_STAGE || (defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker) && !isTargetingPartner(battlerAtk, battlerDef))) {
           score -= 10
         }
       }
@@ -2084,7 +2132,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_SOLARBEAM': {
       const sunActive = weatherHasEffect(state, deps.grounding) && hasFlag(state.field.weather, WEATHER_SUN_ANY) && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_UTILITY_UMBRELLA', deps)
-      const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(attacker, id))
+      const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => selfAbility(state, deps, attacker, id))
       if (aiHoldEffectIs(attacker, 'HOLD_EFFECT_POWER_HERB', deps) || sunActive || hasChloroplast) {
         // no-op.
       } else {
@@ -2112,7 +2160,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_NATURE_POWER': {
-      const naturePowerMove = getNaturePowerMove(state, unmodelled)
+      const naturePowerMove = getNaturePowerMove(state, deps, unmodelled)
       const r = aiCheckBadMove(state, battlerAtk, battlerDef, naturePowerMove, score, deps)
       return { score: r.score, unmodelled: [...unmodelled, ...r.unmodelled] }
     }
@@ -2165,7 +2213,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_WORRY_SEED':
-      if (defAbility(defender, 'ABILITY_INSOMNIA', atkMoldBreaker) || isWorrySeedBannedAbility(battlerAbility(defender))) score -= 10
+      if (defAbility(state, deps, defender, 'ABILITY_INSOMNIA', atkMoldBreaker) || isWorrySeedBannedAbility(battlerAbility(defender))) score -= 10
       break
     case 'EFFECT_GASTRO_ACID':
       if (hasFlag(defender.statuses3, STATUS3_GASTRO_ACID) || doesBattlerHaveAbilityShield(defender, deps)) score -= 10
@@ -2217,7 +2265,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       } else {
         const atkSpeed = getBattlerTotalSpeedStat(state, battlerAtk, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
         const defSpeed = getBattlerTotalSpeedStat(state, battlerDef, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
-        if (isTrickRoomActive(state) && atkSpeed <= defSpeed) score -= 10
+        if (isTrickRoomActive(state, deps) && atkSpeed <= defSpeed) score -= 10
         else if (atkSpeed >= defSpeed) score -= 10
       }
       break
@@ -2270,53 +2318,53 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_NATURAL_GIFT':
       unmodelled.push("AI_CheckBadMove: ItemId_GetPocket is approximated via a berry-name substring check (same as part 1's EFFECT_STUFF_CHEEKS), not a real pocket lookup")
-      if (selfAbility(attacker, 'ABILITY_KLUTZ') || !looksLikeBerry(attacker.mon.itemId)) score -= 10
+      if (selfAbility(state, deps, attacker, 'ABILITY_KLUTZ') || !looksLikeBerry(attacker.mon.itemId)) score -= 10
       break
     case 'EFFECT_GRASSY_TERRAIN':
-      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_GRASSY_TERRAIN) score -= 20
-      if (!terrainHasEffect(state)) score -= 20
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state, deps) === STATUS_FIELD_GRASSY_TERRAIN) score -= 20
+      if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_ELECTRIC_TERRAIN':
-      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_ELECTRIC_TERRAIN) score -= 20
-      if (!terrainHasEffect(state)) score -= 20
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state, deps) === STATUS_FIELD_ELECTRIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_PSYCHIC_TERRAIN':
-      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_PSYCHIC_TERRAIN) score -= 20
-      if (!terrainHasEffect(state)) score -= 20
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state, deps) === STATUS_FIELD_PSYCHIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_MISTY_TERRAIN':
-      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_MISTY_TERRAIN) score -= 20
-      if (!terrainHasEffect(state)) score -= 20
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state, deps) === STATUS_FIELD_MISTY_TERRAIN) score -= 20
+      if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_TOXIC_TERRAIN':
-      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state) === STATUS_FIELD_TOXIC_TERRAIN) score -= 20
-      if (!terrainHasEffect(state)) score -= 20
+      if (partnerMoveEffectIsTerrain(state, battlerAtk) || getCurrentTerrain(state, deps) === STATUS_FIELD_TOXIC_TERRAIN) score -= 20
+      if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_PLEDGE':
       // isDoubleBattle is always false -- this combo-move check (which only
       // applies when a partner exists) is entirely dead code in singles.
       break
     case 'EFFECT_TRICK_ROOM':
-      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) {
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) {
         score -= 10
       } else if (partnerMoveIs(state, battlerAtk)) {
         score -= 10
-      } else if (isTrickRoomActive(state)) {
+      } else if (isTrickRoomActive(state, deps)) {
         if (getBattlerSideSpeedAverage(state, battlerAtk, deps) < getBattlerSideSpeedAverage(state, battlerDef, deps)) score -= 10 // keep Trick Room up
       } else {
         if (getBattlerSideSpeedAverage(state, battlerAtk, deps) >= getBattlerSideSpeedAverage(state, battlerDef, deps)) score -= 10 // keep Trick Room down
       }
       break
     case 'EFFECT_MAGIC_ROOM':
-      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) score -= 10
-      else if (isMagicRoomActive(state) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) score -= 10
+      else if (isMagicRoomActive(state, deps) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_WONDER_ROOM':
-      if (isAbilityOnField(state, 'ABILITY_CLUELESS')) score -= 10
+      if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS')) score -= 10
       else if (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_GRAVITY': {
-      if ((isGravityActive(state) && !isBattlerOfType(attacker, 'FLYING') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_AIR_BALLOON', deps)) || partnerMoveIsSameNoTarget(state, battlerAtk)) {
+      if ((isGravityActive(state, deps) && !isBattlerOfType(attacker, 'FLYING') && !aiHoldEffectIs(attacker, 'HOLD_EFFECT_AIR_BALLOON', deps)) || partnerMoveIsSameNoTarget(state, battlerAtk)) {
         score -= 10 // should revert Gravity in the air-balloon case
       }
       break
@@ -2328,7 +2376,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!canFling(attacker, deps, unmodelled)) score -= 10 // no item to fling
       break
     case 'EFFECT_EMBARGO':
-      if (defAbility(defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
+      if (defAbility(state, deps, defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_POWDER':
       if (!hasMoveWithType(defender, 'FIRE', deps) || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
@@ -2336,7 +2384,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_TELEKINESIS': {
       if (
         hasFlag(defender.statuses3, STATUS3_TELEKINESIS | STATUS3_ROOTED | STATUS3_SMACKED_DOWN) ||
-        isGravityActive(state) ||
+        isGravityActive(state, deps) ||
         aiHoldEffectIs(defender, 'HOLD_EFFECT_IRON_BALL', deps) ||
         isTelekinesisBannedSpecies(defender.mon.speciesId) ||
         partnerMoveIsSameAsAttacker(state, battlerAtk)
@@ -2451,7 +2499,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (
         state.sides[battlerAtk & 1].timers.tailwindTimer !== 0 ||
         partnerMoveIs(state, battlerAtk) ||
-        (isTrickRoomActive(state) && state.field.timers.trickRoomTimer > 1)
+        (isTrickRoomActive(state, deps) && state.field.timers.trickRoomTimer > 1)
       ) {
         score -= 10
       }
@@ -2462,7 +2510,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_MAGNET_RISE': {
       const grounded = deps.turnOrder.isBattlerGrounded(battlerAtk)
       if (
-        isGravityActive(state) ||
+        isGravityActive(state, deps) ||
         attacker.volatiles.magnetRiseTimer !== 0 ||
         aiHoldEffectIs(attacker, 'HOLD_EFFECT_IRON_BALL', deps) ||
         hasFlag(attacker.statuses3, STATUS3_ROOTED | STATUS3_MAGNET_RISE | STATUS3_SMACKED_DOWN) ||
@@ -2518,9 +2566,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
   // `return`s earlier, matching the C's own control flow into this shared tail).
   const recoilFraction = getRecoilFraction(effect, deps.moveBehaviors)
   if (recoilFraction) {
-    if (!isMagicGuardProtected(state, attacker) && !blocksRecoil(attacker)) {
+    if (!isMagicGuardProtected(state, attacker) && !blocksRecoil(state, deps, attacker)) {
       let frac = recoilFraction
-      if (reducesRecoil(attacker)) frac *= 2
+      if (reducesRecoil(state, deps, attacker)) frac *= 2
       const simDmg = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
       unmodelled.push(...simDmg.unmodelled)
       const recoilDmg = Math.max(1, idiv(simDmg.dmg, frac))
