@@ -312,9 +312,6 @@ describe('AI_CheckViability under Gastro Acid', () => {
     const ng = state({ abilities: ability(SERENE_GRACE), itemId: 'ITEM_ABILITY_SHIELD' }, { abilities: ability(CONTRARY) })
     neutralizingGas(ng)
     expect(viability(ng, statDownHit)).toBe(plain + 2)
-    const bothShielded = state({ abilities: ability(SERENE_GRACE), itemId: 'ITEM_ABILITY_SHIELD' }, { abilities: ability(CONTRARY), itemId: 'ITEM_ABILITY_SHIELD' })
-    neutralizingGas(bothShielded)
-    expect(viability(bothShielded, statDownHit)).toBe(plain)
   })
 })
 

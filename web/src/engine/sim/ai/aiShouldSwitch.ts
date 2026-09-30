@@ -49,7 +49,6 @@ import {
   STATUS4_COMMANDED,
   hasFlag,
 } from '../constants'
-import { battlerHasAbility } from '../../abilities/dispatch'
 import { selfAbility } from './aiAbilityHelpers'
 import { UQ_ONE, idiv } from '../../fixed'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
@@ -299,8 +298,8 @@ function isMonHealthyEnoughToSwitch(state: BattleState, battlerId: number): bool
   const battler = state.battlers[battlerId]
   if (!battler) return true
   let battlerHp = battler.mon.hp
-  // battle_ai_switch_items.c:507 reads GetBattlerAbility (abilities[0], no IsSuppressed), so no suppression helper.
-  if (battlerHasAbility(battler.mon.abilities, 'ABILITY_REGENERATOR', () => false)) {
+  // battle_ai_switch_items.c:507 reads GetBattlerAbility (abilities[0] only, no IsSuppressed): innates don't count.
+  if (battler.mon.abilities.ability === 'ABILITY_REGENERATOR') {
     battlerHp = idiv(battlerHp * 133, 100)
   }
   return battlerHp >= idiv(battler.mon.maxHp, 8)

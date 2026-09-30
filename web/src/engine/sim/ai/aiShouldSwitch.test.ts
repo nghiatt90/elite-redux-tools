@@ -446,4 +446,10 @@ describe('aiTrySwitchOrUseItem', () => {
     s.battlers[1]!.volatiles.encoredMove = 'MOVE_TACKLE'
     expect(shouldSwitch(s, 1, deps).shouldSwitch).toBe(true)
   })
+
+  it('an innate Regenerator does not count: GetBattlerAbility reads abilities[0] only (battle_util.c:9327)', () => {
+    const s = battle({}, { hp: 10, maxHp: 100, abilities: { ability: null, innates: [REGENERATOR, null, null] } }, scripted(1), [partyMon({ hp: 100 })])
+    s.battlers[1]!.volatiles.encoredMove = 'MOVE_TACKLE'
+    expect(shouldSwitch(s, 1, deps).shouldSwitch).toBe(false)
+  })
 })
