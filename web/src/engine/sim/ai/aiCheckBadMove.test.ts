@@ -50,8 +50,6 @@ import { chooseMoveOrActionSingles } from './aiPipeline'
 import {
   aiCheckBadMove,
   isBattlerTrapped,
-  MOLD_BREAKABLE_ABILITIES,
-  SOUNDPROOF_ABILITIES,
   ON_STAT_LOWERED_ABILITIES,
   SUCTION_CUPS_ABILITIES,
   ALWAYS_SLEEPING_ABILITIES,
@@ -60,6 +58,7 @@ import {
   HALF_RECOIL_ABILITIES,
   CHLOROPLAST_ABILITIES,
 } from './aiCheckBadMove'
+import { MOLD_BREAKABLE_ABILITIES, SOUNDPROOF_ABILITIES } from './aiAbilityHelpers'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')
 const read = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T

@@ -181,8 +181,6 @@ import {
   hasMoveFlag,
   moveTargetsUser,
   isBattlerOfType,
-  defAbility,
-  selfAbility,
   isBattlerWeatherAffected,
   shouldLowerStat,
   hasMoveWithSplit,
@@ -212,7 +210,6 @@ import {
   aiCanGiveFrostbite,
   battlerAbility,
   u8,
-  isAbilityOnField,
   countNegativeStatStages,
   getBattlerSideSpeedAverage,
 } from './aiCheckBadMove'
@@ -231,6 +228,7 @@ import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHo
 import { shouldSwitch } from './aiShouldSwitch'
 import { countUsablePartyMons } from './aiPipeline'
 import { aiCheckBadMove } from './aiCheckBadMove'
+import { defAbility, selfAbility, isAbilityOnField } from './aiAbilityHelpers'
 import { isMagicGuardProtected } from '../endTurn'
 import { weatherHasEffect, isSandImmune, isHailImmune } from '../fieldEndTurn'
 import { getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'

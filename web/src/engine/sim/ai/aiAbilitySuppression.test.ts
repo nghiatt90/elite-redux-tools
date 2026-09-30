@@ -16,7 +16,8 @@ import type { SimDataContext, SimItemData, SimSpeciesData } from '../dataContext
 import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import type { AiDamageDeps } from './aiCalcDamage'
-import { aiCheckBadMove, isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiCheckBadMove'
+import { aiCheckBadMove } from './aiCheckBadMove'
+import { isSuppressed, UNSUPPRESSABLE_ABILITIES } from './aiAbilityHelpers'
 import { aiCheckViability } from './aiCheckViability'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', '..', 'data', 'v2.65beta')

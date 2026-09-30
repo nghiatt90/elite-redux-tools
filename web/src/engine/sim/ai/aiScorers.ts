@@ -39,7 +39,7 @@ import type { BattleState } from '../state'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { WEATHER_STRONG_WINDS, hasFlag } from '../constants'
 import { weatherHasEffect } from '../fieldEndTurn'
-import { defAbility, selfAbility } from './aiCheckBadMove'
+import { defAbility, selfAbility } from './aiAbilityHelpers'
 import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, type AiDamageDeps } from './aiCalcDamage'
 
 // ---------------------------------------------------------------------------
