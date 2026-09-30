@@ -1,10 +1,22 @@
-// AI_CheckViability, battle_ai_main.c:2515-3986 -- PART 1 (this batch,
-// ai-checkviability-1): the pre-switch checks (:2516-2626, including the
-// attacker-ability loop at :2605-2624) and the move-effect switch from its
-// first case (EFFECT_HIT, :2628) through EFFECT_PERISH_SONG (:3221-3223), the
-// last label before EFFECT_SANDSTORM (:3224) where part 2 begins. Every case
-// label the C switch itself declares in this range is transcribed; none are
-// invented.
+// AI_CheckViability, battle_ai_main.c:2515-3986 -- PART 1 (ai-checkviability-1):
+// the pre-switch checks (:2516-2626, including the attacker-ability loop at
+// :2605-2624) and the move-effect switch from its first case (EFFECT_HIT, :2628)
+// through EFFECT_PERISH_SONG (:3221-3223). PART 2a (ai-checkviability-2, this
+// revision) adds :3224-3606, EFFECT_SANDSTORM through EFFECT_PSYCHO_SHIFT (47
+// labels, PART2A_EFFECTS); the 70 labels at :3607-3984 (PART2B_EFFECTS) are still
+// reported as gaps by the switch's `default` arm. Every case label the C switch
+// itself declares in the ported ranges is transcribed; none are invented.
+//
+// PART 2a additions worth knowing before reading the case bodies:
+//   - `AI_DATA->holdEffects[]` is filled from ItemId_GetHoldEffectParam
+//     (battle_ai_main.c:216), not the hold effect -- see `aiHoldEffect`. Not
+//     reproduced (numeric enum values unavailable); named in `unmodelled`.
+//   - `gBattleMoves[m].target & (MOVE_TARGET_SELECTED | ...)` in EFFECT_MAGIC_COAT
+//     treats SELECTED as the 0x0 it is, so it only ever matches BOTH/OPPONENTS_FIELD.
+//   - `GetUsedHeldItem` reads `BattlerState.usedHeldItem`, which nothing in the sim
+//     writes yet (item consumption is unmodelled).
+//   - The switch has no top-level `default:` in the C, so an effect with no case
+//     label anywhere is a real no-op, not a gap.
 //
 // `predictedMove` (the function's own local, declared `u16 predictedMove =
 // gLastMoves[battlerDef]; // for now`) is NOT the same thing as
@@ -181,6 +193,7 @@ import {
   canGetFrostbite,
   aiCanGiveFrostbite,
   battlerAbility,
+  u8,
 } from './aiCheckBadMove'
 import {
   isTargetingPartner,
@@ -781,8 +794,11 @@ function increaseParalyzeScore(state: BattleState, battlerAtk: number, battlerDe
   const paralyze = aiCanParalyze(state, attacker, defender, moveId, deps)
   unmodelled.push(...paralyze.unmodelled)
   if (paralyze.canParalyze) {
-    const atkSpeed = getBattlerSpeedForParalyze(state, battlerAtk, deps)
-    const defSpeed = getBattlerSpeedForParalyze(state, battlerDef, deps)
+    // C: `u8 atkSpeed = GetBattlerTotalSpeedStat(...)` / `u8 defSpeed` -- both
+    // locals are u8, so a total speed above 255 wraps. An earlier revision of this
+    // file compared the untruncated values.
+    const atkSpeed = u8(getBattlerSpeedForParalyze(state, battlerAtk, deps))
+    const defSpeed = u8(getBattlerSpeedForParalyze(state, battlerDef, deps))
     if ((defSpeed >= atkSpeed && defSpeed / 2 < atkSpeed) || hasMoveEffect(attacker, 'EFFECT_HEX', deps) || hasMoveEffect(attacker, 'EFFECT_FLINCH_HIT', deps) || hasFlag(defender.mon.status2, STATUS2_CONFUSION)) {
       score += 4
     } else {
@@ -1550,10 +1566,10 @@ export const PART2B_EFFECTS: readonly string[] = [
 ]
 
 /**
- * The move-effect switch itself, battle_ai_main.c:2627-3223 -- from
- * EFFECT_HIT through EFFECT_PERISH_SONG (the last label before
- * EFFECT_SANDSTORM at :3224, where part 2 begins). One `case` block per C
- * case label, in the C's own order.
+ * The move-effect switch itself, battle_ai_main.c:2627-3606 -- from
+ * EFFECT_HIT through EFFECT_PSYCHO_SHIFT (the last label before EFFECT_GRUDGE at
+ * :3607, where part 2b begins). One `case` block per C case label, in the C's
+ * own order.
  */
 function applyMoveEffectSwitch(
   state: BattleState,

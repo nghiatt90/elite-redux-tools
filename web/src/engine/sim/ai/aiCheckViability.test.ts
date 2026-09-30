@@ -41,6 +41,10 @@ import {
   STATUS2_CONFUSION,
   STATUS2_DEFENSE_CURL,
   STATUS3_LEECHSEED,
+  STATUS3_GASTRO_ACID,
+  STATUS1_POISON,
+  STATUS1_TOXIC_POISON,
+  STATUS1_BLEED,
 } from '../constants'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { GroundingContext } from '../grounding'
@@ -49,6 +53,7 @@ import type { MoveData } from '../../calculate'
 import type { BridgeDeps } from '../bridge'
 import { type AiDamageDeps } from './aiCalcDamage'
 import { chooseMoveOrActionSingles } from './aiPipeline'
+import { aiCalcDamage } from './aiCalcDamage'
 import { aiCheckViability, PART2A_EFFECTS, PART2B_EFFECTS, RIPEN_ABILITIES } from './aiCheckViability'
 import { AI_ABILITY_RATINGS, getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 
@@ -1515,5 +1520,392 @@ describe('EFFECT_CHARGE / EFFECT_TAUNT (:3426-3436)', () => {
     expect(effectDelta(mkState({}, moves('MOVE_TACKLE', 'MOVE_SWORDS_DANCE'), (s) => { s.battlers[1]!.lastMove = 'MOVE_TACKLE' }), 'MOVE_TAUNT')).toBe(2)
     expect(effectDelta(mkState({}, {}, (s) => { s.battlers[1]!.lastMove = 'MOVE_TACKLE' }), 'MOVE_TAUNT')).toBe(0)
     expect(effectDelta(mkState(), 'MOVE_TAUNT')).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Part 2a -- item / ability / recycle cases
+// ---------------------------------------------------------------------------
+for (const id of ['MOVE_TRICK', 'MOVE_BESTOW', 'MOVE_ROLE_PLAY', 'MOVE_INGRAIN', 'MOVE_SUPERPOWER', 'MOVE_OVERHEAT', 'MOVE_MAGIC_COAT', 'MOVE_RECYCLE', 'MOVE_BRICK_BREAK', 'MOVE_STORED_POWER', 'MOVE_KNOCK_OFF', 'MOVE_SKILL_SWAP', 'MOVE_WORRY_SEED', 'MOVE_GASTRO_ACID', 'MOVE_SIMPLE_BEAM', 'MOVE_ENTRAINMENT', 'MOVE_IMPRISON', 'MOVE_REFRESH', 'MOVE_PSYCHO_SHIFT', 'MOVE_LEER', 'MOVE_TOXIC_SPIKES', 'MOVE_THUNDER_WAVE']) {
+  if (!moveById.has(id)) throw new Error(`moves.json is missing ${id}`)
+}
+if ((moveById.get('MOVE_LEER')?.target !== 'BOTH' || moveById.get('MOVE_LEER')?.split !== 'STATUS') || moveById.get('MOVE_TOXIC_SPIKES')?.target !== 'OPPONENTS_FIELD' || moveById.get('MOVE_THUNDER_WAVE')?.target !== 'SELECTED') {
+  throw new Error('a Magic Coat fixture move changed its target')
+}
+for (const id of ['ITEM_CHOICE_SCARF', 'ITEM_CHOICE_BAND', 'ITEM_CHOICE_SPECS', 'ITEM_TOXIC_ORB', 'ITEM_FLAME_ORB', 'ITEM_FROST_ORB', 'ITEM_BLACK_SLUDGE', 'ITEM_IRON_BALL', 'ITEM_LAGGING_TAIL', 'ITEM_STICKY_BARB', 'ITEM_UTILITY_UMBRELLA', 'ITEM_EJECT_BUTTON', 'ITEM_LEFTOVERS', 'ITEM_BIG_ROOT', 'ITEM_LUM_BERRY', 'ITEM_LIECHI_BERRY', 'ITEM_SITRUS_BERRY', 'ITEM_ORAN_BERRY', 'ITEM_ENIGMA_BERRY', 'ITEM_FLAME_PLATE']) {
+  if (!itemsById.has(id)) throw new Error(`items.json is missing ${id}`)
+}
+
+describe('EFFECT_TRICK / EFFECT_BESTOW (:3437-3512)', () => {
+  const trick = (a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, tweak: (s: BattleState) => void = () => {}) => mkState(a, d, tweak)
+  it('Choice Scarf: +2 always', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_TRICK')).toBe(2)
+  })
+  it('Choice Band: +2 only if the target has no Physical move; Choice Specs: only if no Special move', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_BAND' }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SPECS' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SPECS' }, moves('MOVE_WATER_GUN')), 'MOVE_TRICK')).toBe(0)
+  })
+  it('Toxic Orb: +2 unless ShouldPoisonSelf (Poison Heal, Marvel Scale, Quick Feet, Magic Guard, Facade, Psycho Shift, Toxic Boost/Guts + Physical)', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(2)
+    for (const id of ['ABILITY_POISON_HEAL', 'ABILITY_MARVEL_SCALE', 'ABILITY_QUICK_FEET', 'ABILITY_MAGIC_GUARD', 'ABILITY_TOXIC_BOOST', 'ABILITY_GUTS']) {
+      expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+    }
+    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', ...moves('MOVE_PSYCHO_SHIFT') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab('ABILITY_GUTS'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(2) // Guts needs a Physical move
+    expect(effectDelta(trick({ itemId: 'ITEM_TOXIC_ORB', abilities: ab('ABILITY_POISON_HEAL'), types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // cannot be poisoned at all
+  })
+  it('Flame Orb: +2 unless ShouldBurnSelf; Frost Orb: +2 unless ShouldFrostbiteSelf', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(2)
+    for (const id of ['ABILITY_QUICK_FEET', 'ABILITY_HEATPROOF', 'ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_FLARE_BOOST'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FLAME_ORB', abilities: ab('ABILITY_GUTS'), types: ['FIRE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2) // Fire cannot burn
+    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(2)
+    for (const id of ['ABILITY_MAGIC_GUARD', 'ABILITY_GUTS']) expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab(id) }), 'MOVE_TRICK'), id).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab('ABILITY_DETERMINATION'), ...moves('MOVE_WATER_GUN') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', ...moves('MOVE_FACADE') }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_FROST_ORB', abilities: ab('ABILITY_GUTS'), types: ['ICE', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(2)
+  })
+  it('Black Sludge: +3 unless the target is Poison-type or Magic-Guard-protected', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }, { types: ['POISON', 'MYSTERY', 'MYSTERY'] }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ itemId: 'ITEM_BLACK_SLUDGE' }, { abilities: ab('ABILITY_MAGIC_GUARD') }), 'MOVE_TRICK')).toBe(0)
+  })
+  it('Iron Ball: +2 unless the target has Fling AND is grounded', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_IRON_BALL' }, moves('MOVE_FLING')), 'MOVE_TRICK')).toBe(0)
+    const airborne: AiDamageDeps = { ...deps, turnOrder: { ...NEUTRAL_TURN_ORDER_CONTEXT, isBattlerGrounded: () => false } }
+    const mk = trick({ itemId: 'ITEM_IRON_BALL' }, moves('MOVE_FLING'))
+    const real = aiCheckViability(mk(), 0, 1, 'MOVE_TRICK', 100, airborne).score
+    const plain = aiCheckViability(mk(), 0, 1, 'MOVE_TRICK', 100, { ...airborne, moveData: (m) => (m === 'MOVE_TRICK' ? ({ ...toMoveData(m), effect: 'EFFECT_HIT' } as MoveData) : toMoveData(m)) }).score
+    expect(real - plain).toBe(2)
+  })
+  it('Lagging Tail and Sticky Barb: +3', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ itemId: 'ITEM_STICKY_BARB' }), 'MOVE_TRICK')).toBe(3)
+  })
+  it('Utility Umbrella: +3 per Slow-em-down pairing (Swift Swim+rain, Chlorophyll+sun, Flower Gift+sun) when weather has effect', () => {
+    const umb = { itemId: 'ITEM_UTILITY_UMBRELLA' }
+    const w = (weather: number) => (s: BattleState) => { s.field.weather = weather }
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM') }, w(WEATHER_RAIN_TEMPORARY)), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_CHLOROPHYLL') }, w(WEATHER_SUN_TEMPORARY)), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_FLOWER_GIFT') }, w(WEATHER_SUN_TEMPORARY)), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM', ['ABILITY_CHLOROPHYLL', 'ABILITY_FLOWER_GIFT', null]) }, w(WEATHER_SUN_TEMPORARY)), 'MOVE_TRICK')).toBe(6)
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_CHLOROPHYLL') }, w(WEATHER_RAIN_TEMPORARY)), 'MOVE_TRICK')).toBe(0) // wrong weather
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_FLOWER_GIFT') }, w(WEATHER_RAIN_TEMPORARY)), 'MOVE_TRICK')).toBe(0) // wrong weather
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_FLOWER_GIFT') }), 'MOVE_TRICK')).toBe(0) // no weather
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM') }), 'MOVE_TRICK')).toBe(0) // no weather
+    expect(effectDelta(trick({ ...umb, abilities: ab('ABILITY_SOLAR_POWER') }, { abilities: ab('ABILITY_CHLOROPHYLL') }, w(WEATHER_SUN_TEMPORARY)), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ ...umb, abilities: ab('ABILITY_DRY_SKIN') }, { abilities: ab('ABILITY_SWIFT_SWIM') }, w(WEATHER_RAIN_TEMPORARY)), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick(umb, { abilities: ab('ABILITY_SWIFT_SWIM') }, (s) => { w(WEATHER_RAIN_TEMPORARY)(s); s.field.timers.clearSkiesTimer = 2 }), 'MOVE_TRICK')).toBe(0)
+  })
+  it('Eject Button: +2 if the attacker has a damaging move', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_EJECT_BUTTON' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ itemId: 'ITEM_EJECT_BUTTON', ...moves('MOVE_SWORDS_DANCE') }), 'MOVE_TRICK')).toBe(0)
+  })
+  it('itemless attacker (Trick only): the target item decides; an itemless target still scores +1 via the default arm (NONE is not a case)', () => {
+    expect(effectDelta(trick(), 'MOVE_TRICK')).toBe(1)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_TRICK')).toBe(1)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_CHOICE_BAND' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_STICKY_BARB' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_TOXIC_ORB' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_GUTS') }, { itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_FLAME_ORB' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_FROST_ORB' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick({ types: ['POISON', 'MYSTERY', 'MYSTERY'] }, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({ abilities: ab('ABILITY_MAGIC_GUARD') }, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(3)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_BLACK_SLUDGE' }), 'MOVE_TRICK')).toBe(0)
+    expect(effectDelta(trick(moves('MOVE_FLING'), { itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(2)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_IRON_BALL' }), 'MOVE_TRICK')).toBe(0)
+  })
+  it('an attacker holding an unlisted item does not enter the target-item arm', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_TRICK')).toBe(0)
+  })
+  it('Bestow shares the attacker-item arm but never the target-item default (move != MOVE_BESTOW)', () => {
+    expect(effectDelta(trick({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_BESTOW')).toBe(2)
+    expect(effectDelta(trick(), 'MOVE_BESTOW')).toBe(0)
+    expect(effectDelta(trick({}, { itemId: 'ITEM_LEFTOVERS' }), 'MOVE_BESTOW')).toBe(0)
+  })
+  it('reports the holdEffects[] quirk whenever an item is involved', () => {
+    expect(check(state({ itemId: 'ITEM_CHOICE_SCARF' }), 'MOVE_TRICK').unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(true)
+    expect(check(state(), 'MOVE_TRICK').unmodelled.some((u) => u.includes('ItemId_GetHoldEffectParam'))).toBe(false)
+  })
+})
+
+describe('EFFECT_ROLE_PLAY (:3513-3517)', () => {
+  const rp = (a: string | null, d: string | null) => mkState({ abilities: ab(a) }, { abilities: ab(d) })
+  it('+2 when the target has a rating>=5 ability the attacker (rating<5) can take', () => {
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_ADAPTABILITY'), 'MOVE_ROLE_PLAY')).toBe(2)
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_ANALYTIC'), 'MOVE_ROLE_PLAY')).toBe(2) // exactly 5
+    expect(effectDelta(rp(null, 'ABILITY_ADAPTABILITY'), 'MOVE_ROLE_PLAY')).toBe(2) // ABILITY_NONE rates 0 and is not attacker-banned
+  })
+  it('0 when the attacker is already rated >= 5, or the target is under 5', () => {
+    expect(effectDelta(rp('ABILITY_ANALYTIC', 'ABILITY_ADAPTABILITY'), 'MOVE_ROLE_PLAY')).toBe(0)
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_ANGER_POINT'), 'MOVE_ROLE_PLAY')).toBe(0)
+  })
+  it('0 when the attacker ability is un-replaceable (persistent/unsuppressable) or the target ability cannot be copied', () => {
+    expect(effectDelta(rp('ABILITY_ANTICIPATION', 'ABILITY_ADAPTABILITY'), 'MOVE_ROLE_PLAY')).toBe(0)
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_WONDER_GUARD'), 'MOVE_ROLE_PLAY')).toBe(0)
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_TRACE'), 'MOVE_ROLE_PLAY')).toBe(0)
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', 'ABILITY_COMATOSE'), 'MOVE_ROLE_PLAY')).toBe(0) // rating 6 but persistent
+    expect(effectDelta(rp('ABILITY_ANGER_POINT', null), 'MOVE_ROLE_PLAY')).toBe(0) // target has no ability at all
+  })
+})
+
+describe('EFFECT_INGRAIN / EFFECT_SUPERPOWER / EFFECT_OVERHEAT (:3518-3527)', () => {
+  it('Ingrain scores +3 with a Big Root, +1 otherwise', () => {
+    expect(effectDelta(mkState({ itemId: 'ITEM_BIG_ROOT' }), 'MOVE_INGRAIN')).toBe(3)
+    expect(effectDelta(mkState(), 'MOVE_INGRAIN')).toBe(1)
+    expect(effectDelta(mkState({ itemId: 'ITEM_LEFTOVERS' }), 'MOVE_INGRAIN')).toBe(1)
+  })
+  it('Superpower and Overheat (via the shared label) score +10 only for a Contrary attacker', () => {
+    // Compared across the attacker's ability on the real move: Superpower is in
+    // DISCOURAGED_POWERFUL_MOVE_EFFECTS (its own pre-switch -1), so an
+    // EFFECT_HIT baseline would not cancel that term.
+    for (const id of ['MOVE_SUPERPOWER', 'MOVE_OVERHEAT']) {
+      const contrary = aiCheckViability(mkState({ abilities: ab('ABILITY_CONTRARY') })(), 0, 1, id, 100, deps).score
+      const plain = aiCheckViability(mkState()(), 0, 1, id, 100, deps).score
+      expect(contrary - plain, id).toBe(10)
+    }
+  })
+})
+
+describe('EFFECT_MAGIC_COAT (:3528-3531) -- MOVE_TARGET_SELECTED is 0x0', () => {
+  const mc = (last: string | null) => mkState({}, {}, (s) => { s.battlers[1]!.lastMove = last })
+  it('+3 only when the predicted move is a STATUS move targeting OPPONENTS_FIELD or BOTH', () => {
+    expect(effectDelta(mc('MOVE_TOXIC_SPIKES'), 'MOVE_MAGIC_COAT')).toBe(3)
+    expect(effectDelta(mc('MOVE_LEER'), 'MOVE_MAGIC_COAT')).toBe(3)
+  })
+  it('QUIRK: an ordinary single-target status move (target SELECTED) never matches, since SELECTED is 0', () => {
+    expect(effectDelta(mc('MOVE_THUNDER_WAVE'), 'MOVE_MAGIC_COAT')).toBe(0)
+  })
+  it('0 for a damaging predicted move (even a BOTH-target one), or none at all', () => {
+    expect(effectDelta(mc('MOVE_SURF'), 'MOVE_MAGIC_COAT')).toBe(0)
+    expect(effectDelta(mc(null), 'MOVE_MAGIC_COAT')).toBe(0)
+  })
+})
+
+describe('EFFECT_RECYCLE (:3532-3546)', () => {
+  const rec = (a: Partial<SimBattleMon>, used: string | null | undefined, d: Partial<SimBattleMon> = {}) => mkState(a, d, (s) => { if (used !== undefined) s.battlers[0]!.usedHeldItem = used })
+  const RIPEN = ab('ABILITY_RIPEN')
+  it('+1 for any used item, +1 more for a Recycle-encouraged one; nothing for none', () => {
+    expect(effectDelta(rec({}, 'ITEM_LEFTOVERS'), 'MOVE_RECYCLE')).toBe(1)
+    expect(effectDelta(rec({}, 'ITEM_LUM_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+    expect(effectDelta(rec({}, 'ITEM_FOCUS_SASH'), 'MOVE_RECYCLE')).toBe(2)
+    expect(effectDelta(rec({}, null), 'MOVE_RECYCLE')).toBe(0)
+  })
+  it('every recycle-encouraged item id exists and scores 2', () => {
+    for (const id of ['ITEM_CHESTO_BERRY', 'ITEM_LUM_BERRY', 'ITEM_STARF_BERRY', 'ITEM_SITRUS_BERRY', 'ITEM_MICLE_BERRY', 'ITEM_CUSTAP_BERRY', 'ITEM_MENTAL_HERB', 'ITEM_BERRY_JUICE', 'ITEM_FOCUS_SASH']) {
+      expect(itemsById.has(id), id).toBe(true)
+      expect(effectDelta(rec({}, id), 'MOVE_RECYCLE'), id).toBe(2)
+    }
+  })
+  it('reports the never-written usedHeldItems gap only when the field is unset', () => {
+    expect(check(state(), 'MOVE_RECYCLE').unmodelled.some((u) => u.includes('GetUsedHeldItem'))).toBe(true)
+    expect(aiCheckViability(rec({}, null)(), 0, 1, 'MOVE_RECYCLE', 100, deps).unmodelled.some((u) => u.includes('GetUsedHeldItem'))).toBe(false)
+  })
+  it('a Ripen holder recycling a stat berry gets +1 only above 60% HP', () => {
+    expect(effectDelta(rec({ abilities: RIPEN, hp: 61 }, 'ITEM_LIECHI_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+    expect(effectDelta(rec({ abilities: RIPEN, hp: 60 }, 'ITEM_LIECHI_BERRY'), 'MOVE_RECYCLE')).toBe(1)
+    expect(effectDelta(rec({ hp: 61 }, 'ITEM_LIECHI_BERRY'), 'MOVE_RECYCLE')).toBe(1) // no Ripen
+    for (const id of ['ABILITY_APPLE_PIE', 'ABILITY_SUGAR_RUSH']) expect(effectDelta(rec({ abilities: ab(id) }, 'ITEM_LIECHI_BERRY'), 'MOVE_RECYCLE'), id).toBe(2)
+  })
+  it('Ripen + HP berry: +1 when we cannot KO first and the foe cannot KO us even after the heal (Sitrus, param 25 -> 100/25 = 4)', () => {
+    // attacker faster and foe cannot KO now -> +1 via the second disjunct
+    expect(effectDelta(rec({ ...FAST, abilities: RIPEN }, 'ITEM_SITRUS_BERRY'), 'MOVE_RECYCLE')).toBe(3)
+    // without Ripen the berry branch never runs
+    expect(effectDelta(rec({ ...FAST }, 'ITEM_SITRUS_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+  })
+  it('Ripen + HP berry: the first disjunct (attacker first AND foe can KO now) grants +1; the foe KOing us regardless while we are slower denies it', () => {
+    expect(effectDelta(rec({ ...FAST, abilities: RIPEN, hp: 1 }, 'ITEM_SITRUS_BERRY'), 'MOVE_RECYCLE')).toBe(3)
+    expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: 1 }, 'ITEM_SITRUS_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+  })
+  it('Ripen + HP berry: denied when the attacker can already KO the target', () => {
+    expect(effectDelta(rec({ ...FAST, abilities: RIPEN }, 'ITEM_SITRUS_BERRY', { hp: 1 }), 'MOVE_RECYCLE')).toBe(2)
+  })
+  it('toHeal uses the item param: hp exactly at the foe damage is KO-able without the heal but not with it', () => {
+    const probe = state()
+    const dmg = aiCalcDamage(probe, 'MOVE_TACKLE', 1, 0, deps).dmg
+    expect(dmg).toBeGreaterThan(5)
+    // slower attacker, hp == dmg: the foe KOs with toHeal 0, but Sitrus (100/25 = 4) lifts hp above dmg -> no KO -> +1.
+    expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: dmg }, 'ITEM_SITRUS_BERRY'), 'MOVE_RECYCLE')).toBe(3)
+    // param 10 (Oran) heals a flat 10: hp = dmg - 9 -> hp+10 > dmg -> +1; hp = dmg - 10 -> hp+10 == dmg -> still KO -> no +1
+    expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: dmg - 9, maxHp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+    expect(effectDelta(rec({ ...SLOW, abilities: RIPEN, hp: dmg - 10, maxHp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(1)
+  })
+  it('Oran only counts as an HP berry at maxHP <= 50', () => {
+    expect(effectDelta(rec({ ...FAST, abilities: RIPEN, maxHp: 50, hp: 50 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(2)
+    expect(effectDelta(rec({ ...FAST, abilities: RIPEN, maxHp: 51, hp: 51 }, 'ITEM_ORAN_BERRY'), 'MOVE_RECYCLE')).toBe(1)
+  })
+})
+
+describe('EFFECT_BRICK_BREAK / EFFECT_STORED_POWER (:3547-3557)', () => {
+  it('Brick Break: +1 per Reflect / Light Screen / Aurora Veil on the TARGET side only', () => {
+    for (const bit of [SIDE_STATUS_REFLECT, SIDE_STATUS_LIGHTSCREEN, SIDE_STATUS_AURORA_VEIL]) {
+      expect(effectDelta(mkState({}, {}, (s) => { s.sides[1].statuses |= bit }), 'MOVE_BRICK_BREAK'), `bit ${bit}`).toBe(1)
+    }
+    expect(effectDelta(mkState({}, {}, (s) => { s.sides[1].statuses |= SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_AURORA_VEIL }), 'MOVE_BRICK_BREAK')).toBe(3)
+    expect(effectDelta(mkState({}, {}, (s) => { s.sides[0].statuses |= SIDE_STATUS_REFLECT }), 'MOVE_BRICK_BREAK')).toBe(0)
+  })
+  it('Stored Power: -4 below 2 boosts, 0 for 2..6, +4 above 6 (accuracy/evasion count)', () => {
+    expect(effectDelta(mkState(), 'MOVE_STORED_POWER')).toBe(-4)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 0, 1, 7)), 'MOVE_STORED_POWER')).toBe(-4)
+    expect(effectDelta(mkState({}, {}, (s) => stage(s, 0, 1, 8)), 'MOVE_STORED_POWER')).toBe(0)
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 0, 1, 12); stage(s, 0, 7, 6 + 0) }), 'MOVE_STORED_POWER')).toBe(0) // 6 total
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 0, 1, 12); stage(s, 0, 3, 7) }), 'MOVE_STORED_POWER')).toBe(4) // 7 total
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 0, 6, 8); stage(s, 0, 7, 8) }), 'MOVE_STORED_POWER')).toBe(0) // acc+eva = 4 counted
+    expect(effectDelta(mkState({}, {}, (s) => { stage(s, 0, 6, 7); stage(s, 0, 2, 3) }), 'MOVE_STORED_POWER')).toBe(-4) // drops do not count
+  })
+})
+
+describe('EFFECT_KNOCK_OFF (:3558-3572) -- B_TRAINERS_KNOCK_OFF_ITEMS (battle_config.h:103) is defined', () => {
+  const ko = (d: Partial<SimBattleMon>) => mkState({}, d)
+  it('+3 for a knockable ordinary item; nothing without an item', () => {
+    expect(effectDelta(ko({ itemId: 'ITEM_LEFTOVERS' }), 'MOVE_KNOCK_OFF')).toBe(3)
+    expect(effectDelta(ko({}), 'MOVE_KNOCK_OFF')).toBe(0)
+  })
+  it('Iron Ball: +4 if the holder has Fling, else 0; Lagging Tail / Sticky Barb: 0', () => {
+    expect(effectDelta(ko({ itemId: 'ITEM_IRON_BALL', ...moves('MOVE_FLING') }), 'MOVE_KNOCK_OFF')).toBe(4)
+    expect(effectDelta(ko({ itemId: 'ITEM_IRON_BALL' }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: 'ITEM_LAGGING_TAIL' }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: 'ITEM_STICKY_BARB' }), 'MOVE_KNOCK_OFF')).toBe(0)
+  })
+  it('Sticky Hold / Supersweet Syrup protect the item, unless the attacker has Mold Breaker (both are breakable)', () => {
+    for (const id of ['ABILITY_STICKY_HOLD', 'ABILITY_SUPERSWEET_SYRUP']) {
+      expect(effectDelta(ko({ itemId: 'ITEM_LEFTOVERS', abilities: ab(id) }), 'MOVE_KNOCK_OFF'), id).toBe(0)
+      const molded: AiDamageDeps = { ...deps, grounding: { ...grounding, attackerHasMoldBreaker: true } }
+      const mk = ko({ itemId: 'ITEM_LEFTOVERS', abilities: ab(id) })
+      const real = aiCheckViability(mk(), 0, 1, 'MOVE_KNOCK_OFF', 100, molded).score
+      const plain = aiCheckViability(mk(), 0, 1, 'MOVE_KNOCK_OFF', 100, { ...molded, moveData: (m) => (m === 'MOVE_KNOCK_OFF' ? ({ ...toMoveData(m), effect: 'EFFECT_HIT' } as MoveData) : toMoveData(m)) }).score
+      expect(real - plain, id).toBe(3)
+    }
+  })
+  it('an un-removable item (Enigma Berry, Arceus plate) is not knocked off', () => {
+    expect(effectDelta(ko({ itemId: 'ITEM_ENIGMA_BERRY' }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: 'ITEM_FLAME_PLATE', speciesId: 'SPECIES_ARCEUS' }), 'MOVE_KNOCK_OFF')).toBe(0)
+    expect(effectDelta(ko({ itemId: 'ITEM_FLAME_PLATE' }), 'MOVE_KNOCK_OFF')).toBe(3)
+  })
+})
+
+describe('EFFECT_SKILL_SWAP / WORRY_SEED / GASTRO_ACID / SIMPLE_BEAM / ENTRAINMENT (:3573-3585)', () => {
+  const abil = (a: string | null, d: string | null, tweak: (s: BattleState) => void = () => {}) => mkState({ abilities: ab(a) }, { abilities: ab(d) }, tweak)
+  it('Skill Swap: +1 only when the target ability rates strictly higher', () => {
+    expect(effectDelta(abil('ABILITY_BLAZE', 'ABILITY_ADAPTABILITY'), 'MOVE_SKILL_SWAP')).toBe(1)
+    expect(effectDelta(abil('ABILITY_ADAPTABILITY', 'ABILITY_ADAPTABILITY'), 'MOVE_SKILL_SWAP')).toBe(0)
+    expect(effectDelta(abil('ABILITY_ADAPTABILITY', 'ABILITY_BLAZE'), 'MOVE_SKILL_SWAP')).toBe(0)
+    expect(effectDelta(abil('ABILITY_DEFEATIST', 'ABILITY_ANGER_POINT'), 'MOVE_SKILL_SWAP')).toBe(1) // negative rating
+  })
+  for (const id of ['MOVE_WORRY_SEED', 'MOVE_GASTRO_ACID', 'MOVE_SIMPLE_BEAM']) {
+    it(`${id}: +2 when the target ability rates >= 5`, () => {
+      expect(effectDelta(abil(null, 'ABILITY_ADAPTABILITY'), id)).toBe(2)
+      expect(effectDelta(abil(null, 'ABILITY_ANALYTIC'), id)).toBe(2)
+      expect(effectDelta(abil(null, 'ABILITY_ANGER_POINT'), id)).toBe(0)
+    })
+  }
+  it('Entrainment: +2 when the target rates >= 5 OR the attacker rates <= 0, the abilities differ, and no Gastro Acid', () => {
+    expect(effectDelta(abil('ABILITY_ANGER_POINT', 'ABILITY_ADAPTABILITY'), 'MOVE_ENTRAINMENT')).toBe(2)
+    expect(effectDelta(abil(null, 'ABILITY_ANGER_POINT'), 'MOVE_ENTRAINMENT')).toBe(2) // attacker rates 0
+    expect(effectDelta(abil('ABILITY_DEFEATIST', 'ABILITY_ANGER_POINT'), 'MOVE_ENTRAINMENT')).toBe(2) // attacker rates -1
+    expect(effectDelta(abil('ABILITY_BLAZE', 'ABILITY_ANGER_POINT'), 'MOVE_ENTRAINMENT')).toBe(0) // neither
+    expect(effectDelta(abil('ABILITY_ADAPTABILITY', 'ABILITY_ADAPTABILITY'), 'MOVE_ENTRAINMENT')).toBe(0) // same ability
+    expect(effectDelta(abil('ABILITY_ANGER_POINT', 'ABILITY_ADAPTABILITY', (s) => { s.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID }), 'MOVE_ENTRAINMENT')).toBe(0)
+  })
+})
+
+describe('EFFECT_IMPRISON / EFFECT_REFRESH (:3586-3594)', () => {
+  it('Imprison: +3 when the target last used a move we also know; else +1 only after the first turn', () => {
+    const imp = (last: string | null, firstTurn: number) => mkState(moves('MOVE_TACKLE', 'MOVE_SWORDS_DANCE'), {}, (s) => { s.battlers[1]!.lastMove = last; s.battlers[0]!.volatiles.isFirstTurn = firstTurn })
+    expect(effectDelta(imp('MOVE_TACKLE', 2), 'MOVE_IMPRISON')).toBe(3)
+    expect(effectDelta(imp('MOVE_TACKLE', 0), 'MOVE_IMPRISON')).toBe(3) // not 4: it is an else-if
+    expect(effectDelta(imp('MOVE_WATER_GUN', 0), 'MOVE_IMPRISON')).toBe(1)
+    expect(effectDelta(imp(null, 0), 'MOVE_IMPRISON')).toBe(1)
+    expect(effectDelta(imp('MOVE_WATER_GUN', 2), 'MOVE_IMPRISON')).toBe(0)
+    expect(effectDelta(imp('MOVE_WATER_GUN', 1), 'MOVE_IMPRISON')).toBe(0) // isFirstTurn == 0 is exact
+  })
+  it('Refresh: +2 for poison, toxic, burn, paralysis, frostbite or bleed; 0 for sleep, freeze or none', () => {
+    for (const [name, bit] of [['poison', STATUS1_POISON], ['toxic', STATUS1_TOXIC_POISON], ['burn', STATUS1_BURN], ['paralysis', STATUS1_PARALYSIS], ['frostbite', STATUS1_FROSTBITE], ['bleed', STATUS1_BLEED]] as const) {
+      expect(effectDelta(mkState({ status1: bit }), 'MOVE_REFRESH'), name).toBe(2)
+    }
+    expect(effectDelta(mkState({ status1: 3 }), 'MOVE_REFRESH'), 'sleep').toBe(0)
+    expect(effectDelta(mkState({ status1: STATUS1_FREEZE }), 'MOVE_REFRESH'), 'freeze').toBe(0)
+    expect(effectDelta(mkState(), 'MOVE_REFRESH')).toBe(0)
+  })
+})
+
+describe('EFFECT_PSYCHO_SHIFT (:3595-3606)', () => {
+  // A paralyzed attacker's total speed is halved (turnOrder.ts, B_PARALYSIS_SPEED GEN_7), so raw 200 -> 100.
+  const PARA = { status1: STATUS1_PARALYSIS, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 200 } }
+  it('dispatches on the attacker status: poison +1, burn +1, paralysis +4 (speed-tier), sleep +3, frostbite +1, none 0', () => {
+    expect(effectDelta(mkState({ status1: STATUS1_POISON }), 'MOVE_PSYCHO_SHIFT')).toBe(1)
+    expect(effectDelta(mkState({ status1: STATUS1_TOXIC_POISON }), 'MOVE_PSYCHO_SHIFT')).toBe(1)
+    expect(effectDelta(mkState({ status1: STATUS1_BURN }), 'MOVE_PSYCHO_SHIFT')).toBe(1)
+    expect(effectDelta(mkState(PARA), 'MOVE_PSYCHO_SHIFT')).toBe(4)
+    expect(effectDelta(mkState({ status1: 3 }), 'MOVE_PSYCHO_SHIFT')).toBe(3)
+    expect(effectDelta(mkState({ status1: STATUS1_FROSTBITE }), 'MOVE_PSYCHO_SHIFT')).toBe(1)
+    expect(effectDelta(mkState(), 'MOVE_PSYCHO_SHIFT')).toBe(0)
+  })
+  it('the if/else-if order is poison > burn > paralysis > sleep > frostbite', () => {
+    expect(effectDelta(mkState({ ...PARA, status1: STATUS1_BURN | STATUS1_PARALYSIS }), 'MOVE_PSYCHO_SHIFT')).toBe(1) // burn, not paralysis's +4
+    expect(effectDelta(mkState({ ...PARA, status1: STATUS1_PARALYSIS | STATUS1_FROSTBITE }), 'MOVE_PSYCHO_SHIFT')).toBe(4) // paralysis, not frostbite's +1
+    expect(effectDelta(mkState({ ...PARA, status1: STATUS1_POISON | STATUS1_PARALYSIS }), 'MOVE_PSYCHO_SHIFT')).toBe(1)
+  })
+  it('scores 0 when the target cannot take the status (already statused)', () => {
+    expect(effectDelta(mkState({ status1: STATUS1_POISON }, { status1: STATUS1_BURN }), 'MOVE_PSYCHO_SHIFT')).toBe(0)
+  })
+  it('sleep adds +2 more on the AI_RandLessThan(128) draw (line :2724 of battle_ai_util.c)', () => {
+    const lowRng = () => state({ status1: 3 }, {}, repeating(RNG_LOW))
+    const real = aiCheckViability(lowRng(), 0, 1, 'MOVE_PSYCHO_SHIFT', 100, deps).score
+    const plain = aiCheckViability(lowRng(), 0, 1, 'MOVE_PSYCHO_SHIFT', 100, depsOverride('MOVE_PSYCHO_SHIFT', { effect: 'EFFECT_HIT' })).score
+    expect(real - plain).toBe(5)
+  })
+  it('IncreaseParalyzeScore compares u8-truncated speeds: a defender total of 280 wraps to 24 and flips +4 to +2', () => {
+    const atk = { status1: STATUS1_PARALYSIS, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 400 } } // halved: 200
+    const def = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 280 } }
+    expect(effectDelta(mkState(atk, def), 'MOVE_PSYCHO_SHIFT')).toBe(2)
+    // the ATTACKER's total wraps too: halved 600 -> 300 -> 44; a 60-speed defender is then in the +4 tier (60 >= 44, 30 < 44), while an unwrapped 300 would give +2
+    const bigAtk = { status1: STATUS1_PARALYSIS, rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 600 } }
+    expect(effectDelta(mkState(bigAtk, { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 60 } }), 'MOVE_PSYCHO_SHIFT')).toBe(4)
+    // control: a defender total that still fits a u8 keeps the +4 tier (240 >= 200, 120 < 200)
+    const def2 = { rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 240 } }
+    expect(effectDelta(mkState(atk, def2), 'MOVE_PSYCHO_SHIFT')).toBe(4)
+  })
+})
+
+describe('part 2a RNG order (AI_CheckViability part 2 draws none of its own; its helpers do)', () => {
+  function counting(...values: number[]): { rng: RandomSource; calls: () => number } {
+    let i = 0
+    return { rng: { random16: () => values[i++] ?? RNG_HIGH }, calls: () => i }
+  }
+  const stockpile = (rng: RandomSource) => {
+    // attacker at 75% HP: below 80 (each IncreaseStatUpScore draws AI_RandLessThan(128), battle_ai_util.c:2597) yet above the 70 the DEF/SPDEF branches need
+    const s = state({ hp: 75 }, moves('MOVE_WATER_GUN'), rng)
+    return aiCheckViability(s, 0, 1, 'MOVE_STOCKPILE', 100, deps).score
+  }
+  it('Stockpile draws for STAT_DEF first, then STAT_SPDEF -- the order decides which stat is skipped', () => {
+    // defender knows only a Special move: DEF has nothing to score, SPDEF is worth +2.
+    expect(stockpile(scripted(RNG_LOW, RNG_HIGH))).toBe(100 - 0 + 2) // DEF draw true (returns), SPDEF draw false -> +2
+    expect(stockpile(scripted(RNG_HIGH, RNG_LOW))).toBe(100) // DEF draw false (nothing to add), SPDEF draw true -> returns
+  })
+  it('draws only while HP < 80%: none at full HP, two for Stockpile below', () => {
+    const full = counting()
+    aiCheckViability(state({}, moves('MOVE_WATER_GUN'), full.rng), 0, 1, 'MOVE_STOCKPILE', 100, deps)
+    expect(full.calls()).toBe(0)
+    const low = counting()
+    aiCheckViability(state({ hp: 50 }, moves('MOVE_WATER_GUN'), low.rng), 0, 1, 'MOVE_STOCKPILE', 100, deps)
+    expect(low.calls()).toBe(2)
+  })
+  it('the effects that draw nothing at all (Sandstorm, Knock Off, Brick Break, Skill Swap) leave the stream untouched', () => {
+    for (const id of ['MOVE_SANDSTORM', 'MOVE_KNOCK_OFF', 'MOVE_BRICK_BREAK', 'MOVE_SKILL_SWAP']) {
+      const c = counting()
+      // Knock Off / Brick Break are damaging: their pre-switch never draws for a non-always-hit, non-high-crit move.
+      aiCheckViability(state({}, { itemId: 'ITEM_LEFTOVERS' }, c.rng), 0, 1, id, 100, deps)
+      expect(c.calls(), id).toBe(0)
+    }
   })
 })
