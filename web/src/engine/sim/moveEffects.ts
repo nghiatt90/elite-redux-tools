@@ -7,13 +7,16 @@
 import type { BattleState, BattlerState } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { buildAccuracyInputs, getTotalAccuracy } from './turn'
+import { buildAccuracyInputs, getTotalAccuracy, isBattlerProtected, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_WIDE_GUARD,
   STAT_ACC,
   STAT_ATK,
   STAT_DEF,
@@ -159,6 +162,21 @@ function checkAccuracy(
   const { state, battlerId, deps, unmodelled, turnOrderIndex, order } = ctx
   const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
   const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+
+  const moveData = deps.dataContext.move(moveId)
+  const isContact = moveData?.flags?.contact === true
+
+  // Cmd_accuracycheck:1422 calls JumpIfMoveAffectedByProtect(move) before accuracy calculation.
+  const protectType = isBattlerProtected(state, battlerId, targetId, moveId, targetHasActedThisTurn, deps, unmodelled)
+  if (protectType !== ProtectType.PROTECT_NONE) {
+    if (protectType === ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH || isContact) {
+      state.battlers[battlerId]!.round.touchedProtectLike = true
+    }
+  }
+  if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+    return true
+  }
+
   const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
     state,
     battlerId,
@@ -1063,7 +1081,98 @@ function handleSwagger(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, statChanges, statusApplied })
 }
 
+/** sProtectSuccessRates, src/battle_script_commands.c:727 */
+export const PROTECT_SUCCESS_RATES = [65535, 32767, 16383, 8191]
+
+/**
+ * Port of BattleScript_EffectProtect / BattleScript_EffectEndure,
+ * data/battle_scripts_1.s:5034-5046, Cmd_setprotectlike (src/battle_script_commands.c:9161-9205),
+ * and ProtectSucceeds (:6649-6655).
+ */
+export function handleProtect(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp, order, turnOrderIndex } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // Cmd_ppreduce runs before setprotectlike in BattleScript_ProtectLikeAtkString (data/battle_scripts_1.s:5038-5040)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // ProtectSucceeds, battle_script_commands.c:6649-6655
+  // If last resulting move is not a protection move (moves.json flag `isProtection`), reset protectUses to 0
+  const lastMoveId = battler.lastMove
+  const lastMoveData = lastMoveId ? deps.dataContext.move(lastMoveId) : undefined
+  if (!lastMoveData?.flags?.isProtection) {
+    battler.volatiles.protectUses = 0
+  }
+
+  let protectSucceeds = false
+  if (battler.volatiles.protectUses <= 3) {
+    // :6653 -- `sProtectSuccessRates[protectUses] >= Random()`
+    // Compares against the whole Random() 16-bit draw, NOT % 100.
+    const threshold = PROTECT_SUCCESS_RATES[battler.volatiles.protectUses]!
+    const roll = state.rng.random16()
+    if (threshold >= roll) {
+      protectSucceeds = true
+    }
+  }
+
+  // Cmd_setprotectlike, :9161-9205
+  // :9165 -- if (gCurrentTurnActionNumber == (gBattlersCount - 1)) notLastTurn = FALSE;
+  const isLastMover = order ? turnOrderIndex === order.battlerByTurnOrder.length - 1 : false
+  const notLastTurn = !isLastMover
+
+  let fail = true
+  if (protectSucceeds && notLastTurn) {
+    // :9168 -- if (!gBattleMoves[gCurrentMove].argument) Protects one mon only.
+    // Wide Guard, Crafty Shield, Mat Block protect the whole side.
+    if (moveId === 'MOVE_WIDE_GUARD') {
+      const side = battlerId & 1
+      if (!(state.sides[side].statuses & SIDE_STATUS_WIDE_GUARD)) {
+        state.sides[side].statuses |= SIDE_STATUS_WIDE_GUARD
+        battler.volatiles.protectUses++
+        fail = false
+      }
+    } else if (moveId === 'MOVE_CRAFTY_SHIELD') {
+      const side = battlerId & 1
+      if (!(state.sides[side].statuses & SIDE_STATUS_CRAFTY_SHIELD)) {
+        state.sides[side].statuses |= SIDE_STATUS_CRAFTY_SHIELD
+        battler.volatiles.protectUses++
+        fail = false
+      }
+    } else if (moveId === 'MOVE_MAT_BLOCK') {
+      const side = battlerId & 1
+      if (!(state.sides[side].statuses & SIDE_STATUS_MAT_BLOCK)) {
+        state.sides[side].statuses |= SIDE_STATUS_MAT_BLOCK
+        // Mat Block does not increment protectUses in C (:9194)
+        fail = false
+      }
+    } else {
+      if (moveEffect === 'EFFECT_ENDURE') {
+        battler.round.endured = true
+      } else {
+        battler.round.protectMove = moveId
+      }
+      battler.volatiles.protectUses++
+      fail = false
+    }
+  }
+
+  if (fail) {
+    // :9200 -- gVolatileStructs[gBattlerAttacker].protectUses = 0;
+    battler.volatiles.protectUses = 0
+    battler.lastMove = moveId
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.lastMove = moveId
+  return outcome(ctx, { missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
+  EFFECT_PROTECT: handleProtect,
+  EFFECT_ENDURE: handleProtect,
+
   EFFECT_ATTACK_UP: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 1),
   EFFECT_ATTACK_UP_2: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 2),
   EFFECT_DEFENSE_UP: (ctx) => handleSingleStatUp(ctx, STAT_DEF, 1),

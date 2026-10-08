@@ -219,7 +219,7 @@ describe('executeTurn: PP deduction (Cmd_ppreduce, battle_script_commands.c:1460
     const state = battle([{ spe: 200, pp: [10, 0, 0, 0] }, { spe: 50 }], scripted(0))
     state.battlers[0]!.sameMoveTurns = 3
     executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    expect(state.battlers[0]!.round.notFirstStrike).toBe(true)
+    expect(state.battlers[0]!.round.notFirstStrike).toBe(false) // set by ppreduce, then cleared by TurnValuesCleanUp(FALSE) at end of turn (battle_main.c:3492)
     expect(state.battlers[0]!.sameMoveTurns).toBe(0)
   })
 

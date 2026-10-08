@@ -74,6 +74,7 @@ export interface SimMoveData {
   type: string | null
   split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
   effect: string | null
+  target?: string
   priority?: number
   flags: Record<string, true>
   /** moves.json's own `accuracy` (MoveList.proto `accuracy`, GetTotalAccuracy's

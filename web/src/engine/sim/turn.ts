@@ -133,16 +133,44 @@ export { buildAccuracyInputs, getTotalAccuracy }
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
-import { createTurnState } from './create'
+import { createRoundState, createTurnState } from './create'
 import type { EndTurnEffectResult } from './endTurn'
 import { runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
-import { PARTY_SIZE } from './constants'
+import {
+  PARTY_SIZE,
+  SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_MAT_BLOCK,
+  SIDE_STATUS_WIDE_GUARD,
+} from './constants'
 import type { MoveBehaviors } from '../basePower'
 import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
+import {
+  attackerHasMoldBreakerActive,
+  battlerHasSimAbility,
+  changeStatBuffsImplicit,
+  MOVE_EFFECT_ATK_MINUS_1,
+  MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_EFFECT_SPD_MINUS_1,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
+} from './statBuffs'
+import {
+  applyPrimaryStatusEffect,
+  cancelMultiTurnMoves,
+  doesSubstituteBlockMove,
+  isPreventableSecondaryEffect,
+  MOVE_EFFECT_BLEED,
+  MOVE_EFFECT_BURN,
+  MOVE_EFFECT_PARALYSIS,
+  MOVE_EFFECT_POISON,
+  PRIMARY_STATUS_MOVE_EFFECT,
+  testSheerForceFlag,
+  type StatusDeps,
+} from './statusEffects'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -448,6 +476,295 @@ function resetPendingSwitch(state: BattleState, battlerId: number): void {
   if (battler) battler.monToSwitchIntoId = PARTY_SIZE
 }
 
+/** TurnValuesCleanUp(FALSE), battle_main.c:4490 -- ZERO(gRoundStructs[i]) for every battler. */
+export function roundStructsClear(state: BattleState): void {
+  for (const battler of state.battlers) {
+    if (battler) battler.round = createRoundState()
+  }
+}
+
+/**
+ * ProtectType enum, include/battle_util.h:286-291.
+ */
+export const ProtectType = {
+  PROTECT_NONE: 0,
+  PROTECT_BLOCK: 1 << 0,
+  PROTECT_TOUCH_BUT_DAMAGED: 1 << 1,
+  PROTECT_BLOCK_ALWAYS_TOUCH: (1 << 0) | (1 << 2),
+} as const
+export type ProtectType = (typeof ProtectType)[keyof typeof ProtectType]
+
+/** FLAG_PROTECT_AFFECTED as the codegen emits it (BattleMovesGenerator.kt:16-24, :89):
+ * `!move.ignoresProtect && move.target in PROTECT_AFFECTED_TARGETS`. */
+const PROTECT_AFFECTED_TARGETS = new Set(['BOTH', 'DEPENDS', 'FOES_AND_ALLY', 'RANDOM', 'SELECTED', 'USER_OR_SELECTED'])
+function isProtectAffected(moveData: { flags?: Record<string, true>; target?: string } | undefined): boolean {
+  return !moveData?.flags?.ignoresProtect && PROTECT_AFFECTED_TARGETS.has(moveData?.target ?? '')
+}
+
+/**
+ * Port of IsBattlerProtected, src/battle_util.c:6571-6645.
+ */
+export function isBattlerProtected(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  targetHasActedThisTurn: boolean,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): ProtectType {
+  const targetBattler = state.battlers[targetId]
+  const attackerBattler = state.battlers[attackerId]
+  if (!targetBattler || !attackerBattler) return ProtectType.PROTECT_NONE
+
+  const moveData = deps.dataContext.move(moveId)
+  const isStatus = moveData?.split === 'STATUS'
+  const moveType = moveData?.type ?? null
+
+  // :6578 -- if (IS_MOVE_STATUS(move) && !(gBattleMoves[move].flags & FLAG_PROTECT_AFFECTED)) return PROTECT_NONE;
+  const protectAffected = isProtectAffected(moveData)
+  if (isStatus && !protectAffected) {
+    return ProtectType.PROTECT_NONE
+  }
+
+  // :6580-6588 -- switch (gRoundStructs[battlerId].protectMove) for Merculight and Detect
+  switch (targetBattler.round.protectMove) {
+    case 'MOVE_MERCULIGHT': {
+      const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
+        state,
+        attackerId,
+        targetId,
+        moveId,
+        targetHasActedThisTurn,
+        deps,
+      )
+      unmodelled.push(...gapsToUnmodelled(gaps))
+      if (defenderHasAnticipation) {
+        unmodelled.push(
+          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+        )
+      }
+      const accResult = getTotalAccuracy(inputs)
+      unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+      if (accResult.accuracy < 101 && !isStatus) {
+        return ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH
+      }
+      break
+    }
+    case 'MOVE_DETECT': {
+      const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
+        state,
+        attackerId,
+        targetId,
+        moveId,
+        targetHasActedThisTurn,
+        deps,
+      )
+      unmodelled.push(...gapsToUnmodelled(gaps))
+      if (defenderHasAnticipation) {
+        unmodelled.push(
+          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+        )
+      }
+      const accResult = getTotalAccuracy(inputs)
+      unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+      if (accResult.accuracy < 101) {
+        return ProtectType.PROTECT_BLOCK
+      }
+      break
+    }
+  }
+
+  // :6590-6603 -- evadesProtect logic
+  let evadesProtect = false
+  const isContact = moveData?.flags?.contact === true
+
+  if (
+    (battlerHasSimAbility(state, attackerBattler, 'ABILITY_UNSEEN_FIST', false, attackerId, false, deps.dataContext) ||
+      battlerHasSimAbility(state, attackerBattler, 'ABILITY_FINAL_BLOW', false, attackerId, false, deps.dataContext)) &&
+    isContact
+  ) {
+    evadesProtect = true
+  } else if (
+    battlerHasSimAbility(state, attackerBattler, 'ABILITY_DEMOLITIONIST', false, attackerId, false, deps.dataContext) &&
+    attackerBattler.volatiles.readiedAction
+  ) {
+    evadesProtect = true
+  } else if (
+    battlerHasSimAbility(state, attackerBattler, 'ABILITY_PINNACLE_BLADE', false, attackerId, false, deps.dataContext) &&
+    moveData?.flags?.sliceBased === true
+  ) {
+    evadesProtect = true
+  } else if (!protectAffected) {
+    evadesProtect = true
+  } else if (moveData?.effect === 'EFFECT_FEINT') {
+    evadesProtect = true
+  }
+
+  // :6604-6636
+  if (!evadesProtect) {
+    const protectMove = targetBattler.round.protectMove
+    if (protectMove) {
+      switch (protectMove) {
+        case 'MOVE_NONE':
+          break
+
+        case 'MOVE_OBSTRUCT':
+        case 'MOVE_SILK_TRAP':
+        case 'MOVE_BURNING_BULWARK':
+        case 'MOVE_KINGS_SHIELD':
+        case 'MOVE_IRON_DEFENSE':
+          if (!isStatus) return ProtectType.PROTECT_BLOCK
+          break
+
+        case 'MOVE_TANGLING_HUSK':
+          if (moveType !== 'TYPE_FIRE') return ProtectType.PROTECT_BLOCK
+          break
+
+        case 'MOVE_CAMOUFLAGE':
+          return ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH
+
+        case 'MOVE_ICE_BURN':
+        case 'MOVE_FREEZE_SHOCK':
+          break
+
+        default:
+          return ProtectType.PROTECT_BLOCK
+      }
+    }
+
+    const side = targetId & 1
+    const sideStatuses = state.sides[side]?.statuses ?? 0
+    if (
+      (sideStatuses & SIDE_STATUS_WIDE_GUARD) &&
+      (moveData?.target === 'BOTH' || moveData?.target === 'FOES_AND_ALLY')
+    ) {
+      return ProtectType.PROTECT_BLOCK
+    } else if ((sideStatuses & SIDE_STATUS_CRAFTY_SHIELD) && isStatus) {
+      return ProtectType.PROTECT_BLOCK
+    } else if ((sideStatuses & SIDE_STATUS_MAT_BLOCK) && !isStatus) {
+      return ProtectType.PROTECT_BLOCK
+    }
+  }
+
+  // :6638-6642
+  const protectMove = targetBattler.round.protectMove
+  if (protectMove === 'MOVE_ICE_BURN' || protectMove === 'MOVE_FREEZE_SHOCK') {
+    return ProtectType.PROTECT_TOUCH_BUT_DAMAGED
+  }
+
+  return ProtectType.PROTECT_NONE
+}
+
+/**
+ * MOVEEND_PROTECT_LIKE_EFFECT, src/battle_script_commands.c:4343-4433. Every
+ * shield but Camouflage sets gBattleScripting.moveEffect and calls
+ * BattleScript_KingsShieldEffect (data/battle_scripts_1.s:10550-10557), which
+ * swaps attacker and target around `seteffectsecondary` -- SetMoveEffect(FALSE,
+ * FALSE) with the protector as gBattlerAttacker, the contact attacker as
+ * gEffectBattler, and gCurrentMove still the contact attacker's move. The
+ * script's HITMARKER_IGNORE_SUBSTITUTE is never read by DoesSubstituteBlockMove
+ * (:12252-12260), so a Substitute still blocks the effect.
+ *
+ * Not ported: MOVE_IRON_DEFENSE (Angel's Wrath, :4353-4374) is unreachable --
+ * Iron Defense is EFFECT_DEFENSE_UP_2 and never sets protectMove. Mirror
+ * Armor's STAT_BUFF_ALLOW_PTR (:2774) is not applied, as in
+ * applySecondaryMoveEffects.
+ */
+const PROTECT_LIKE_MOVE_EFFECTS: Record<string, number> = {
+  MOVE_BANEFUL_BUNKER: MOVE_EFFECT_POISON,
+  MOVE_SILK_TRAP: MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_TANGLING_HUSK: MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_BURNING_BULWARK: MOVE_EFFECT_BURN,
+  MOVE_ICE_BURN: MOVE_EFFECT_BURN,
+  MOVE_SPIKY_SHIELD: MOVE_EFFECT_BLEED,
+  MOVE_MERCULIGHT: MOVE_EFFECT_PARALYSIS,
+  MOVE_FREEZE_SHOCK: MOVE_EFFECT_PARALYSIS,
+  MOVE_OBSTRUCT: MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_MIND_READER: MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_KINGS_SHIELD: MOVE_EFFECT_ATK_MINUS_1,
+}
+
+export function handleProtectLikeMoveEnd(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  currentMoveId: string,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): { statChanges: StatChangeOutcome[] | null; statusApplied: StatusAppliedOutcome | null } {
+  const none = { statChanges: null, statusApplied: null }
+  const attacker = state.battlers[attackerId]
+  const target = state.battlers[targetId]
+  if (!attacker?.round.touchedProtectLike || !target) return none
+  attacker.round.touchedProtectLike = false
+  const protectMove = target.round.protectMove
+  if (!protectMove) return none
+
+  // :4415-4427
+  if (protectMove === 'MOVE_CAMOUFLAGE') {
+    const moveType = deps.dataContext.move(currentMoveId)?.type
+    if (!moveType) return none
+    const bareType = moveType.replace(/^TYPE_/, '')
+    if (target.mon.types.includes(bareType)) return none
+    target.mon.types[2] = bareType
+    unmodelled.push(
+      "Camouflage's added type reads the move's declared type; GET_MOVE_TYPE's dynamic type changes (:4417) are not applied",
+    )
+    return none
+  }
+
+  const moveEffect = PROTECT_LIKE_MOVE_EFFECTS[protectMove]
+  if (moveEffect === undefined) return none
+
+  const protectorId = targetId
+  const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+
+  if (moveEffect <= PRIMARY_STATUS_MOVE_EFFECT) {
+    const res = applyPrimaryStatusEffect(state, protectorId, attackerId, moveEffect, currentMoveId, statusDeps, unmodelled, false, false)
+    return {
+      statChanges: null,
+      statusApplied: res.applied && res.status ? { battlerId: attackerId, status: res.status } : null,
+    }
+  }
+
+  // SetMoveEffect's preamble (:2348-2388) for the stat drops; Safeguard
+  // (:2352) only covers effects <= MOVE_EFFECT_CONFUSION, so it never applies.
+  if (isPreventableSecondaryEffect(moveEffect)) {
+    const protector = state.battlers[protectorId]
+    const protectorHasMoldBreaker = protector ? attackerHasMoldBreakerActive(protector, statusDeps) : false
+    const hasShieldDust = battlerHasSimAbility(
+      state,
+      attacker,
+      'ABILITY_SHIELD_DUST',
+      true,
+      protectorId,
+      protectorHasMoldBreaker,
+      deps.dataContext,
+    )
+    if (hasShieldDust || deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_COVERT_CLOAK') return none
+  }
+  if (testSheerForceFlag(state, protectorId, currentMoveId, statusDeps)) return none
+  if (attacker.mon.hp === 0) return none
+  if (doesSubstituteBlockMove(state, protectorId, attackerId, currentMoveId, statusDeps, unmodelled)) return none
+
+  // :2765-2781
+  const statId = moveEffect - MOVE_EFFECT_ATK_MINUS_1 + 1
+  const res = changeStatBuffsImplicit(
+    state,
+    protectorId,
+    attackerId,
+    -1,
+    statId,
+    STAT_BUFF_UPDATE_MOVE_EFFECT,
+    true,
+    statusDeps,
+    unmodelled,
+    currentMoveId,
+  )
+  return res.delta !== 0 ? { statChanges: [{ battlerId: attackerId, stat: statId, change: res.delta }], statusApplied: null } : none
+}
+
 /**
  * Cmd_ppreduce, battle_script_commands.c:1460-1506. Runs for every USE_MOVE
  * action that reaches this point (a living attacker with a living target),
@@ -748,6 +1065,18 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         deductPp,
         applyDamage,
       })
+      if (targetId !== null && state.battlers[battlerId]?.round.touchedProtectLike) {
+        const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+        if (protectMoveEnd.statChanges) {
+          effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...protectMoveEnd.statChanges]
+        }
+        if (protectMoveEnd.statusApplied) {
+          effectOutcome.statusApplied = protectMoveEnd.statusApplied
+        }
+      }
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+      }
       outcomes.push(effectOutcome)
       continue
     }
@@ -762,6 +1091,43 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
     const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
     const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
+
+    const moveData = deps.dataContext.move(action.chosenMove.id)
+    const isContact = moveData?.flags?.contact === true
+
+    // Check Protect before accuracy check (battle_util.c:6571-6645, battle_script_commands.c:1198-1210, 1422)
+    const protectType = isBattlerProtected(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps, unmodelled)
+    if (protectType !== ProtectType.PROTECT_NONE) {
+      if (protectType === ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH || isContact) {
+        state.battlers[battlerId]!.round.touchedProtectLike = true
+      }
+    }
+    if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+      cancelMultiTurnMoves(state.battlers[battlerId]!)
+      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
+      const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+      }
+      outcomes.push({
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        battleOver: false,
+        missed: true,
+        targetId,
+        targetDamage: null,
+        attackerDamage: null,
+        cancelledBy: null,
+        confusionSelfHitDamage: null,
+        statChanges: protectMoveEnd.statChanges,
+        statusApplied: protectMoveEnd.statusApplied,
+        unmodelled,
+        fainted: [],
+      })
+      continue
+    }
 
     // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
     // state.rng BEFORE the damage resolver's own crit/roll draws, matching
@@ -788,6 +1154,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
 
     if (missed) {
+      const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+      }
       outcomes.push({
         turnOrderIndex: index,
         battlerId,
@@ -800,15 +1170,22 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         attackerDamage: null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
-        statChanges: null,
-        statusApplied: null,
+        statChanges: protectMoveEnd.statChanges,
+        statusApplied: protectMoveEnd.statusApplied,
         unmodelled,
         fainted: [],
       })
       continue
     }
 
-    const { targetDamage, attackerDamage, unmodelled: damageUnmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+
+    // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure stops HP at 1
+    const targetBattler = state.battlers[targetId]
+    if (targetDamage !== null && targetBattler && targetBattler.mon.hp > 0 && targetBattler.round.endured && targetDamage >= targetBattler.mon.hp) {
+      targetDamage = Math.max(0, targetBattler.mon.hp - 1)
+    }
+
     const fainted: number[] = []
     applyDamage(state, targetId, targetDamage, fainted)
     applyDamage(state, battlerId, attackerDamage, fainted)
@@ -828,6 +1205,17 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       unmodelled,
     })
 
+    // Move-end protect retaliation (e.g. PROTECT_TOUCH_BUT_DAMAGED from Ice Burn / Freeze Shock)
+    const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+    const finalStatChanges: StatChangeOutcome[] = []
+    if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
+    if (protectMoveEnd.statChanges) finalStatChanges.push(...protectMoveEnd.statChanges)
+    const finalStatusApplied = secondaryResult?.statusApplied ?? protectMoveEnd.statusApplied
+
+    if (state.battlers[battlerId]) {
+      state.battlers[battlerId]!.lastMove = action.chosenMove.id
+    }
+
     outcomes.push({
       turnOrderIndex: index,
       battlerId,
@@ -840,8 +1228,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       attackerDamage,
       cancelledBy: null,
       confusionSelfHitDamage: null,
-      statChanges: secondaryResult ? secondaryResult.statChanges : null,
-      statusApplied: secondaryResult ? secondaryResult.statusApplied : null,
+      statChanges: secondaryResult?.statChanges || protectMoveEnd.statChanges ? finalStatChanges : null,
+      statusApplied: finalStatusApplied,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })
@@ -897,6 +1285,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // exists once the battle is decided).
   const replacementUnmodelled: string[] = []
   if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps.dataContext, replacementUnmodelled)
+
+  // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
+  roundStructsClear(state)
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop and the end-turn ladders above; state.turnCount is therefore the

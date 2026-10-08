@@ -196,7 +196,7 @@ describe('executeTurn: attack canceller -- sleep (CANCELLER_ASLEEP, battle_util.
     expect(state.battlers[0]!.mon.pp[0]).toBe(10) // no PP deducted
     expect(dmg.calls).toBe(0) // no damage resolver call
     expect(state.battlers[1]!.mon.hp).toBe(100)
-    expect(state.battlers[0]!.round.attackCancelled).toBe(true)
+    expect(state.battlers[0]!.round.attackCancelled).toBe(false) // set during the action, then cleared by TurnValuesCleanUp(FALSE) at end of turn (battle_main.c:3492)
   })
 
   it('wakes up when the counter reaches zero and acts THIS turn (the C\'s own effect=3 exits the ladder without cancelling)', () => {
@@ -272,7 +272,7 @@ describe('executeTurn: attack canceller -- paralysis (CANCELLER_PARALYSED, battl
     const out = executeTurn(state, [useMove(1, TACKLE), null], deps(dmg))
     expect(out.actions[0].cancelledBy).toBe('PARALYSIS')
     expect(dmg.calls).toBe(0)
-    expect(state.battlers[0]!.round.prlzImmobility).toBe(true)
+    expect(state.battlers[0]!.round.prlzImmobility).toBe(false) // set during the action, then cleared by TurnValuesCleanUp(FALSE) at end of turn (battle_main.c:3492)
   })
 
   it('acts normally on the other 3-in-4 (Random() % 4 !== 0)', () => {
@@ -301,7 +301,7 @@ describe('executeTurn: attack canceller -- confusion (CANCELLER_CONFUSED, battle
     expect(out.actions[0].confusionSelfHitDamage).toBeNull() // gapped, not computed -- see attackCanceller.ts
     expect(dmg.calls).toBe(0)
     expect(state.battlers[0]!.mon.pp[0]).toBe(10)
-    expect(state.battlers[0]!.round.confusionSelfDmg).toBe(true)
+    expect(state.battlers[0]!.round.confusionSelfDmg).toBe(false) // set during the action, then cleared by TurnValuesCleanUp(FALSE) at end of turn (battle_main.c:3492)
     expect(state.battlers[0]!.mon.status2 & STATUS2_CONFUSION).toBe(1) // decremented, still confused
     expect(out.actions[0].unmodelled.some((u) => u.startsWith("CANCELLER_CONFUSED's self-hit damage"))).toBe(true)
   })
@@ -323,7 +323,7 @@ describe('executeTurn: attack canceller -- flinch (CANCELLER_FLINCH, battle_util
     expect(out.actions[0].cancelledBy).toBe('FLINCH')
     expect(dmg.calls).toBe(0)
     expect(state.battlers[0]!.mon.pp[0]).toBe(10)
-    expect(state.battlers[0]!.round.flinchImmobility).toBe(true)
+    expect(state.battlers[0]!.round.flinchImmobility).toBe(false) // set during the action, then cleared by TurnValuesCleanUp(FALSE) at end of turn (battle_main.c:3492)
   })
 })
 
