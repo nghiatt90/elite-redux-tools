@@ -140,6 +140,7 @@ import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
 import { PARTY_SIZE } from './constants'
+import { getMoveEffectHandler } from './moveEffects'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -169,6 +170,12 @@ export function isBattlerAlive(state: BattleState, battlerId: number): boolean {
   if (!battler) return false
   if (battler.mon.hp === 0) return false
   return !(state.absentBattlerFlags & (1 << battlerId))
+}
+
+export interface StatChangeOutcome {
+  battlerId: number
+  stat: number
+  change: number
 }
 
 /** What one battler's action did. Returned rather than logged so tests and the
@@ -220,6 +227,8 @@ export interface ActionOutcome {
    * cancelled). Always null in this batch: see attackCanceller.ts's own doc on
    * why the self-hit's damage is gapped rather than computed. */
   confusionSelfHitDamage: number | null
+  /** Stat changes applied during this action. null when not attempted/applicable (e.g. damaging moves or unhandled actions). */
+  statChanges: StatChangeOutcome[] | null
   /** The damage engine's own "I could not model this" channel, passed through
    * rather than dropped at the boundary. Anything in here means the numbers
    * above are incomplete. */
@@ -448,7 +457,7 @@ function resetPendingSwitch(state: BattleState, battlerId: number): void {
  * sim to model -- not a gap, since there is nothing for it to be wrong
  * about).
  */
-function deductPp(state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]): void {
+export function deductPp(state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]): void {
   const attacker = state.battlers[attackerId]
   if (!attacker) return
   const slot = attacker.mon.moves.findIndex((id) => id === moveId)
@@ -499,7 +508,7 @@ function deductPp(state: BattleState, attackerId: number, moveId: string, moveEf
  * unconditional call: a damage application that does NOT faint anyone cannot
  * change the outcome, but computing it fresh every time is cheaper than a
  * second conditional and cannot disagree with one. */
-function applyDamage(state: BattleState, battlerId: number, damage: number | null, fainted: number[]): void {
+export function applyDamage(state: BattleState, battlerId: number, damage: number | null, fainted: number[]): void {
   if (damage === null) return
   const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) return
@@ -631,6 +640,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       attackerDamage: null,
       cancelledBy: null,
       confusionSelfHitDamage: null,
+      statChanges: null,
       unmodelled: [],
       fainted: [],
     }
@@ -699,9 +709,31 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         attackerDamage: null,
         cancelledBy: cancelResult.cancelledBy,
         confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
+        statChanges: null,
         unmodelled,
         fainted: [],
       })
+      continue
+    }
+
+    // Move effect dispatch runs between attackcanceler and the accuracy/damage path.
+    // Handled status moves (Swords Dance, Belly Drum, etc.) do not draw accuracy in
+    // C battle scripts; their script runs ppreduce and applies their effects directly.
+    const moveEffect = action.chosenMove.effect ?? deps.dataContext.move(action.chosenMove.id)?.effect ?? null
+    const handler = getMoveEffectHandler(moveEffect)
+    if (handler) {
+      const effectOutcome = handler({
+        state,
+        battlerId,
+        targetId,
+        action,
+        turnOrderIndex: index,
+        deps,
+        unmodelled,
+        deductPp,
+        applyDamage,
+      })
+      outcomes.push(effectOutcome)
       continue
     }
 
@@ -753,6 +785,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         attackerDamage: null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
+        statChanges: null,
         unmodelled,
         fainted: [],
       })
@@ -776,6 +809,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       attackerDamage,
       cancelledBy: null,
       confusionSelfHitDamage: null,
+      statChanges: null,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })
