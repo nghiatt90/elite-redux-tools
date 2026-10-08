@@ -83,8 +83,7 @@
 //                           resolvedHoldEffect is one of HOLD_EFFECT_TOXIC_ORB
 //                           / HOLD_EFFECT_FLAME_ORB / HOLD_EFFECT_FROST_ORB /
 //                           HOLD_EFFECT_STICKY_BARB (battle_util.c:6252-6288).
-//   ENDTURN_LEECH_SEED      Unreachable -- STATUS3_LEECHSEED has no reader
-//                           outside constants.ts.
+//   ENDTURN_LEECH_SEED      PORTED.
 //   ENDTURN_TOXIC_WASTE_DAMAGE Unreachable -- gated on getMonotypeChampType(),
 //                           which exists only as an external fact threaded
 //                           into TurnOrderContext/GroundingContext (grounding.
@@ -246,6 +245,8 @@ import {
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LEECHSEED,
+  STATUS3_LEECHSEED_BATTLER,
   STATUS3_MAGNET_RISE,
   STATUS3_ROOTED,
   STATUS3_TELEKINESIS,
@@ -421,7 +422,7 @@ function isBloodStainAffected(battler: BattlerState): boolean {
  * already documents this gap at its own call site in turn.ts (the Pressure
  * check); same treatment, only surfaced here when Permanence or Hemolysis is
  * actually found on the opposing side. */
-function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
+export function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
   if (isBloodStainAffected(battler)) return false
@@ -451,7 +452,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -559,6 +560,79 @@ function runBurn(state: BattleState, battlerId: number, battler: BattlerState): 
   return { battlerId, effect: 'BURN', hpChange, fainted }
 }
 
+/**
+ * ENDTURN_LEECH_SEED, src/battle_util.c:2472-2486 and BattleScript_LeechSeedTurnDrain
+ * (data/battle_scripts_1.s:7482-7509).
+ */
+export function runLeechSeed(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  dataContext: SimDataContext,
+  unmodelled: string[],
+): EndTurnEffectResult[] {
+  if (!hasFlag(battler.statuses3, STATUS3_LEECHSEED)) return []
+  if (battler.mon.hp === 0) return []
+  const seederId = battler.statuses3 & STATUS3_LEECHSEED_BATTLER
+  const seeder = state.battlers[seederId]
+  if (!seeder || seeder.mon.hp === 0) return []
+  if (isMagicGuardProtected(state, battler)) return [] // REQUIRE_NOT(IsMagicGuardProtected), :2477
+
+  const rawDmg = Math.trunc(battler.mon.maxHp / 8) // :2480
+  const dmg = rawDmg === 0 ? 1 : rawDmg // :2481
+  const hpDealt = Math.min(battler.mon.hp, dmg) // datahpupdate BS_ATTACKER, :7486-7487
+
+  const seededFainted = applyEndTurnHp(state, battlerId, battler, -hpDealt)
+  const results: EndTurnEffectResult[] = [
+    {
+      battlerId,
+      effect: 'LEECH_SEED',
+      hpChange: -hpDealt,
+      fainted: seededFainted,
+    },
+  ]
+
+  // BattleScript_LeechSeedTurnDrain:7488: jumpifability BS_ATTACKER, ABILITY_LIQUID_OOZE
+  const hasLiquidOoze = battlerHasAbility(battler.mon.abilities, 'ABILITY_LIQUID_OOZE', NO_SUPPRESSION)
+  if (hasLiquidOoze) {
+    const oozeFainted = applyEndTurnHp(state, seederId, seeder, -hpDealt)
+    results.push({
+      battlerId: seederId,
+      effect: 'LEECH_SEED',
+      hpChange: -hpDealt,
+      fainted: oozeFainted,
+    })
+  } else {
+    // BattleScript_LeechSeedTurnDrain:7490-7491:
+    // jumpifhealingblocked BS_TARGET, BattleScript_LeechSeedHealBlock
+    // jumpifstatus BS_TARGET, STATUS1_BLEED, BattleScript_LeechSeedHealBlock
+    if (canBattlerHeal(state, seederId, seeder, unmodelled)) {
+      let healAmount = hpDealt
+      // manipulatedamage DMG_BIG_ROOT (battle_script_commands.c:9384-9386, battle_util.c:2369-2376)
+      const seederItem = seeder.mon.itemId ? dataContext.item(seeder.mon.itemId) : null
+      if (seederItem?.resolvedHoldEffect === 'HOLD_EFFECT_BIG_ROOT') {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      if (battlerHasAbility(seeder.mon.abilities, 'ABILITY_ABSORBANT', NO_SUPPRESSION)) {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      const prevHp = seeder.mon.hp
+      applyEndTurnHp(state, seederId, seeder, healAmount)
+      const actualHeal = seeder.mon.hp - prevHp
+      if (actualHeal > 0) {
+        results.push({
+          battlerId: seederId,
+          effect: 'LEECH_SEED',
+          hpChange: actualHeal,
+          fainted: false,
+        })
+      }
+    }
+  }
+
+  return results
+}
+
 /** Pushes an unmodelled line for a "gapped at runtime" case, but only when its
  * real C condition is actually true for this battler -- see this module's
  * header table. Kept as one small helper so every gap call site reads the
@@ -617,6 +691,10 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       unmodelled,
       `battler ${battlerId}: ENDTURN_ORBS (battle_util.c:6252-6288) is not applied -- ${battler.mon.itemId}'s orb effect (${heldEffect}) was not run`,
     )
+
+    // ENDTURN_LEECH_SEED, :2472-2486.
+    const leechResults = runLeechSeed(state, battlerId, battler, dataContext, unmodelled)
+    results.push(...leechResults)
 
     const poison = runPoison(state, battlerId, battler, unmodelled)
     if (poison) results.push(poison)

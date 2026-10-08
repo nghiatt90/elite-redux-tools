@@ -25,13 +25,23 @@ import {
   STAT_SPDEF,
   STAT_SPEED,
   STATUS1_ANY,
+  STATUS1_BLEED,
+  STATUS1_BURN,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_LEECHSEED,
+  STATUS3_SEMI_INVULNERABLE,
   STATUS3_YAWN,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
+  WEATHER_FOG_ANY,
+  WEATHER_HAIL_ANY,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
   WEATHER_SUN_ANY,
+  clearFlag,
   hasFlag,
   setCounter,
   setFlag,
@@ -72,11 +82,15 @@ import {
   MOVE_EFFECT_EVS_MINUS_2,
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
+  benefitsFromStatBuffs,
   changeStatBuffs,
   changeStatBuffsImplicit,
   getHighestAttackingStatId,
   isBattlerWeatherAffected,
 } from './statBuffs'
+import { canBattlerHeal } from './endTurn'
+import { syncPartyHp } from './outcome'
+import { attackPreModify, calculateBattleStat } from '../battleStat'
 import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import {
@@ -1169,6 +1183,306 @@ export function handleProtect(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { missed: false })
 }
 
+/**
+ * Abilities with bitfields.unaware = "TRUE" in data/v2.65beta/abilityHooks.json
+ * (IsUnaware, battle_util.c:9006-9009).
+ */
+const UNAWARE_ABILITIES: readonly string[] = [
+  'ABILITY_CONTEMPT',
+  'ABILITY_LEPIDOPTERAN',
+  'ABILITY_SWORD_OF_DAMNATION',
+  'ABILITY_UNAWARE',
+]
+
+/** The `jumpifhealingblocked` macro (asm/macros/battle_script.inc:2493-2510):
+ * CanBattlerHeal (battle_util.c:8979-8986) minus its STATUS1_BLEED clause. */
+function isHealingBlocked(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
+  const status1 = battler.mon.status1
+  battler.mon.status1 = clearFlag(status1, STATUS1_BLEED)
+  const blocked = !canBattlerHeal(state, battlerId, battler, unmodelled)
+  battler.mon.status1 = status1
+  return blocked
+}
+
+/** healthbarupdate + datahpupdate for a heal (battle_script_commands.c:1908-1911). */
+function healBattler(state: BattleState, battlerId: number, battler: BattlerState, heal: number): void {
+  battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+  syncPartyHp(state, battlerId)
+}
+
+/**
+ * BattleScript_EffectRestoreHp (data/battle_scripts_1.s:3940-3955),
+ * BattleScript_EffectSoftboiled (:5909-5924) and BattleScript_EffectRoost
+ * (:2736-2742), all through Cmd_tryhealhalfhealth (battle_script_commands.c:
+ * 9255-9274). Roost has no jumpifhealingblocked, so a heal-blocked Roost does
+ * not fail: tryhealhalfhealth just zeroes the heal. A bleeding user always
+ * reaches BattleScript_MoveUsedBleedHeal (:156), whose curestatus
+ * (VARIOUS_CURE_STATUS, :7685-7689) clears all of status1 instead of healing.
+ */
+function handleHealHalf(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, action.chosenMove!.id, moveEffect, unmodelled)
+
+  if (moveEffect !== 'EFFECT_ROOST' && isHealingBlocked(state, battlerId, battler, unmodelled)) {
+    return outcome(ctx, { targetId: battlerId })
+  }
+
+  let heal = 0
+  if (canBattlerHeal(state, battlerId, battler, unmodelled)) {
+    if (battler.mon.hp === battler.mon.maxHp) return outcome(ctx, { targetId: battlerId })
+    heal = Math.trunc(battler.mon.maxHp / 2)
+    if (heal === 0) heal = 1
+  }
+
+  if (moveEffect === 'EFFECT_ROOST') {
+    unmodelled.push(
+      "Cmd_setroost (battle_script_commands.c:4022-4047): Roost's temporary Flying-type removal and RESOURCE_FLAG_ROOST are not modelled",
+    )
+  }
+
+  if (hasFlag(battler.mon.status1, STATUS1_BLEED)) {
+    battler.mon.status1 = 0
+    return outcome(ctx, { targetId: battlerId })
+  }
+
+  healBattler(state, battlerId, battler, heal)
+  return outcome(ctx, { targetId: battlerId })
+}
+
+/**
+ * BattleScript_EffectMorningSun / Synthesis / Moonlight / ShoreUp (data/
+ * battle_scripts_1.s:5495-5503) -> Cmd_recoverbasedonsunlight (battle_script_
+ * commands.c:11433-11460) -> BattleScript_PresentHealTarget (:5915-5924).
+ * Neither command checks CanBattlerHeal, so Heal Block does not stop these.
+ */
+function handleWeatherRecovery(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // :11435-11437 -- bleed first, then PresentHealTarget's jumpifstatus cures it.
+  if (hasFlag(battler.mon.status1, STATUS1_BLEED)) {
+    battler.mon.status1 = 0
+    return outcome(ctx, { targetId: battlerId })
+  }
+  if (battler.mon.hp === battler.mon.maxHp) return outcome(ctx, { targetId: battlerId })
+
+  const maxHp = battler.mon.maxHp
+  let heal: number
+  if (moveId === 'MOVE_SHORE_UP') {
+    heal = isBattlerWeatherAffected(state, battlerId, WEATHER_SANDSTORM_ANY, deps) ? Math.trunc((2 * maxHp) / 3) : Math.trunc(maxHp / 2)
+  } else if (
+    moveId === 'MOVE_MOONLIGHT' &&
+    battlerHasSimAbility(state, battler, 'ABILITY_MOON_SPIRIT', false, battlerId, false, deps.dataContext)
+  ) {
+    heal = Math.trunc((maxHp * 3) / 4)
+  } else if (isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, deps) || hasChloroplast(state, battler, deps)) {
+    heal = Math.trunc((maxHp * 2) / 3)
+  } else if (
+    isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY | WEATHER_SANDSTORM_ANY | WEATHER_FOG_ANY | WEATHER_HAIL_ANY, deps)
+  ) {
+    heal = Math.trunc(maxHp / 4)
+  } else {
+    heal = Math.trunc(maxHp / 2)
+  }
+  if (heal === 0) heal = 1
+
+  healBattler(state, battlerId, battler, heal)
+  return outcome(ctx, { targetId: battlerId })
+}
+
+/**
+ * BattleScript_EffectJungleHealing (data/battle_scripts_1.s:773-804),
+ * singles only: VARIOUS_JUMP_IF_TEAM_HEALTHY (battle_script_commands.c:
+ * 7883-7895) and VARIOUS_TRY_HEAL_PERCENT_HP (:7896-7907). Life Dew skips the
+ * status cure (:791).
+ */
+function handleJungleHealing(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  if (battler.mon.hp === battler.mon.maxHp && !(battler.mon.status1 & STATUS1_ANY)) {
+    return outcome(ctx, { targetId: battlerId })
+  }
+
+  if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+    let heal = Math.trunc((battler.mon.maxHp * 25) / 100)
+    if (heal === 0) heal = 1
+    healBattler(state, battlerId, battler, heal)
+  }
+
+  if (moveId !== 'MOVE_LIFE_DEW' && (battler.mon.status1 & STATUS1_ANY) !== 0) {
+    battler.mon.status1 = 0
+  }
+
+  return outcome(ctx, { targetId: battlerId })
+}
+
+/**
+ * BattleScript_EffectPainSplit (data/battle_scripts_1.s:4691-4707).
+ *
+ * `accuracycheck ..., NO_ACC_CALC_CHECK_LOCK_ON` (battle_script_commands.c:
+ * 1403-1411) draws no RNG: Lock-On passes, a semi-invulnerable target fails,
+ * and otherwise JumpIfMoveAffectedByProtect(0) runs IsBattlerProtected with
+ * move 0 (MOVE_NONE) -- not Pain Split. The Commander branch (:1404) needs a
+ * doubles ally and is unreachable in singles.
+ */
+function handlePainSplit(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, turnOrderIndex, order } = ctx
+  const battler = state.battlers[battlerId]!
+  if (targetId === null) return outcome(ctx, { targetId: null })
+  const target = state.battlers[targetId]
+  if (!target) return outcome(ctx, { targetId })
+  const moveId = action.chosenMove!.id
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (!lockedOn) {
+    if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) return outcome(ctx, { targetId })
+    const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+    const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+    const protectType = isBattlerProtected(state, battlerId, targetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+    if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Cmd_painsplitdmgcalc, :10765-10786
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId })
+  }
+  const hpDiff = Math.trunc((battler.mon.hp + target.mon.hp) / 2)
+  battler.mon.hp = Math.min(battler.mon.maxHp, hpDiff)
+  target.mon.hp = Math.min(target.mon.maxHp, hpDiff)
+  syncPartyHp(state, battlerId)
+  syncPartyHp(state, targetId)
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * BattleScript_EffectStrengthSap (data/battle_scripts_1.s:896-942).
+ *
+ * The heal amount is VARIOUS_GET_STAT_VALUE (battle_script_commands.c:
+ * 6809-6811): CalculateStat(target, STAT_ATK, 0, MOVE_NONE, ...) with the
+ * USER's Unaware. Two script quirks are kept: when the user is at full HP,
+ * heal-blocked or bleeding, the drop goes through BattleScript_StrengthSapMustLower,
+ * whose success path still reaches BattleScript_StrengthSapHp and heals
+ * (datahpupdate, :1908-1911, has no heal-block check); and on the ordinary path
+ * a blocked drop jumps straight to StrengthSapHp and heals anyway.
+ * ChangeStatBuffs never sets B_MSG_STAT_FELL_EMPTY, so the script's checks for
+ * it never fire.
+ */
+function handleStrengthSap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  if (targetId === null) return outcome(ctx, { targetId: null })
+  const target = state.battlers[targetId]
+  if (!target) return outcome(ctx, { targetId })
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId })
+  }
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  const statChanges: StatChangeOutcome[] = []
+  const lowerAttack = (): number => {
+    const res = changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_ATK, STAT_BUFF_ALLOW_PTR, true, deps, unmodelled, moveId)
+    if (res.delta !== 0) statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: res.delta })
+    return res.delta
+  }
+
+  // :903-908
+  if ((target.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE) === MIN_STAT_STAGE) {
+    lowerAttack()
+    return outcome(ctx, { targetId, statChanges })
+  }
+
+  // :910
+  if (hasFlag(target.mon.status1, STATUS1_BURN)) {
+    unmodelled.push("Strength Sap's CalculateStat burn halving does not check IgnoresBurnAtkDrop (battle_util.c:7138)")
+  }
+  unmodelled.push(
+    "Strength Sap's CalculateStat (battle_util.c:7105-7217) applies no onStat ability hooks and ignores Wonder Room",
+  )
+  const userIsUnaware = UNAWARE_ABILITIES.some((ab) =>
+    battlerHasSimAbility(state, battler, ab, false, battlerId, false, deps.dataContext),
+  )
+  let statValue = calculateBattleStat({
+    rawStat: target.mon.rawStats.atk,
+    extraStatLevel: target.volatiles.extraAttackLevel ?? 0,
+    statStage: target.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE,
+    isUnaware: userIsUnaware,
+    isWonderRoomActive: false,
+    isOffensiveStatForWonderRoom: true,
+    isCrit: false,
+    isAttackRole: true,
+    benefitsFromStatBuffs: benefitsFromStatBuffs(state, targetId),
+    preModify: attackPreModify({
+      violentRush: !!target.volatiles.violentRush,
+      showdownMode: !!target.volatiles.showdownMode,
+      readiedAction: !!target.volatiles.readiedAction,
+      isBurned: hasFlag(target.mon.status1, STATUS1_BURN),
+    }),
+    applyOnStatHooks: (s) => s,
+    secondaryStatPercent: 0,
+    statStageRatios: deps.statStageRatios,
+  })
+
+  const mustLower =
+    battler.mon.hp === battler.mon.maxHp ||
+    isHealingBlocked(state, battlerId, battler, unmodelled) ||
+    hasFlag(battler.mon.status1, STATUS1_BLEED)
+  const lowered = lowerAttack() !== 0
+  if (mustLower && !lowered) return outcome(ctx, { targetId, statChanges })
+
+  // BattleScript_StrengthSapHp, :928-934 -- manipulatedamage DMG_BIG_ROOT (GetDrainedBigRootHp, battle_util.c:2369-2376)
+  if (battler.mon.hp === battler.mon.maxHp) return outcome(ctx, { targetId, statChanges })
+  if (statValue === 0) statValue = 1
+  const holdEffect = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect : null
+  if (holdEffect === 'HOLD_EFFECT_BIG_ROOT') statValue = Math.trunc((statValue * 3) / 2)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_ABSORBANT', false, battlerId, false, deps.dataContext)) {
+    statValue = Math.trunc((statValue * 3) / 2)
+  }
+  healBattler(state, battlerId, battler, statValue)
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * BattleScript_EffectLeechSeed (data/battle_scripts_1.s:4579-4592) and
+ * Cmd_setseeded (battle_script_commands.c:9341-9355). A missed accuracy check
+ * still runs setseeded, which then fails on MOVE_RESULT_NO_EFFECT.
+ */
+function handleLeechSeed(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null) return outcome(ctx, { targetId: null })
+  const target = state.battlers[targetId]
+  if (!target) return outcome(ctx, { targetId })
+  const moveId = action.chosenMove!.id
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId })
+  }
+  if (checkAccuracy(ctx, targetId, moveId)) return outcome(ctx, { targetId, missed: true })
+
+  if (hasFlag(target.statuses3, STATUS3_LEECHSEED) || target.mon.types.includes('GRASS')) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  target.statuses3 |= battlerId | STATUS3_LEECHSEED
+
+  return outcome(ctx, { targetId })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
@@ -1207,6 +1521,18 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_WILL_O_WISP: handleWillOWisp,
   EFFECT_YAWN: handleYawn,
   EFFECT_SWAGGER: handleSwagger,
+
+  EFFECT_RESTORE_HP: handleHealHalf,
+  EFFECT_SOFTBOILED: handleHealHalf,
+  EFFECT_MORNING_SUN: handleWeatherRecovery,
+  EFFECT_SYNTHESIS: handleWeatherRecovery,
+  EFFECT_MOONLIGHT: handleWeatherRecovery,
+  EFFECT_SHORE_UP: handleWeatherRecovery,
+  EFFECT_ROOST: handleHealHalf,
+  EFFECT_JUNGLE_HEALING: handleJungleHealing,
+  EFFECT_PAIN_SPLIT: handlePainSplit,
+  EFFECT_STRENGTH_SAP: handleStrengthSap,
+  EFFECT_LEECH_SEED: handleLeechSeed,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {
