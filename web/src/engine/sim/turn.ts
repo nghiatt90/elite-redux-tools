@@ -129,6 +129,7 @@ import type { SimDataContext } from './dataContext'
 import { gapsToUnmodelled } from './bridge'
 import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
+export { buildAccuracyInputs, getTotalAccuracy }
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
@@ -176,6 +177,11 @@ export interface StatChangeOutcome {
   battlerId: number
   stat: number
   change: number
+}
+
+export interface StatusAppliedOutcome {
+  battlerId: number
+  status: string
 }
 
 /** What one battler's action did. Returned rather than logged so tests and the
@@ -229,6 +235,8 @@ export interface ActionOutcome {
   confusionSelfHitDamage: number | null
   /** Stat changes applied during this action. null when not attempted/applicable (e.g. damaging moves or unhandled actions). */
   statChanges: StatChangeOutcome[] | null
+  /** Status applied during this action. null when not attempted/applicable or no status was applied. */
+  statusApplied: StatusAppliedOutcome | null
   /** The damage engine's own "I could not model this" channel, passed through
    * rather than dropped at the boundary. Anything in here means the numbers
    * above are incomplete. */
@@ -641,6 +649,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       cancelledBy: null,
       confusionSelfHitDamage: null,
       statChanges: null,
+      statusApplied: null,
       unmodelled: [],
       fainted: [],
     }
@@ -710,6 +719,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         cancelledBy: cancelResult.cancelledBy,
         confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
         statChanges: null,
+        statusApplied: null,
         unmodelled,
         fainted: [],
       })
@@ -728,6 +738,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         targetId,
         action,
         turnOrderIndex: index,
+        order,
         deps,
         unmodelled,
         deductPp,
@@ -786,6 +797,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         cancelledBy: null,
         confusionSelfHitDamage: null,
         statChanges: null,
+        statusApplied: null,
         unmodelled,
         fainted: [],
       })
@@ -810,6 +822,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       cancelledBy: null,
       confusionSelfHitDamage: null,
       statChanges: null,
+      statusApplied: null,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })

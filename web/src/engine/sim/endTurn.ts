@@ -162,8 +162,8 @@
 //   ENDTURN_TAUNT           Unreachable -- volatiles.tauntTimer is named only
 //                           in attackCanceller.ts's "Unreachable" comment for
 //                           CANCELLER_TAUNTED, never read by executable code.
-//   ENDTURN_YAWN            Unreachable -- STATUS3_YAWN has no reader outside
-//                           constants.ts.
+//   ENDTURN_YAWN            Gapped -- STATUS3_YAWN is set by Yawn; end-of-turn
+//                           drowsiness countdown and sleep are not ported.
 //   ENDTURN_LASER_FOCUS     Unreachable -- STATUS3_LASER_FOCUS/laserFocusTimer
 //                           have no reader outside constants.ts/create.ts.
 //   ENDTURN_EMBARGO         Unreachable -- STATUS3_EMBARGO/embargoTimer have no
@@ -253,6 +253,7 @@ import {
   STATUS3_MAGNET_RISE,
   STATUS3_ROOTED,
   STATUS3_TELEKINESIS,
+  STATUS3_YAWN,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_GHASTLY_ECHO,
@@ -671,6 +672,13 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       hasFlag(battler.statuses4, STATUS4_COILED) || hasFlag(battler.statuses4, STATUS4_CUTTHROAT),
       unmodelled,
       `battler ${battlerId}: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared`,
+    )
+
+    // ENDTURN_YAWN, :2839-2854.
+    gapIf(
+      hasFlag(battler.statuses3, STATUS3_YAWN),
+      unmodelled,
+      `battler ${battlerId}: ENDTURN_YAWN (battle_util.c:2839-2854) is not applied -- yawn drowsiness countdown and sleep were not applied`,
     )
 
     // ENDTURN_MAGNET_RISE, :2875-2884.

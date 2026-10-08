@@ -5,12 +5,15 @@
 // deduct PP after attackcanceler, and apply stat changes/HP modifications directly.
 
 import type { BattleState, BattlerState } from './state'
-import type { ChosenAction } from './turnOrder'
-import type { ActionOutcome, StatChangeOutcome, TurnLoopDeps } from './turn'
+import type { ChosenAction, TurnOrder } from './turnOrder'
+import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
+import { buildAccuracyInputs, getTotalAccuracy } from './turn'
+import { gapsToUnmodelled } from './bridge'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  SIDE_STATUS_SAFEGUARD,
   STAT_ACC,
   STAT_ATK,
   STAT_DEF,
@@ -18,9 +21,16 @@ import {
   STAT_SPATK,
   STAT_SPDEF,
   STAT_SPEED,
+  STATUS1_ANY,
+  STATUS2_ENRAGED,
+  STATUS3_YAWN,
   STATUS4_CUTTHROAT,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
   WEATHER_SUN_ANY,
   hasFlag,
+  setCounter,
+  setFlag,
 } from './constants'
 import {
   MOVE_EFFECT_AFFECTS_USER,
@@ -33,6 +43,18 @@ import {
   isBattlerWeatherAffected,
 } from './statBuffs'
 import type { SimDataContext } from './dataContext'
+import {
+  MOVE_EFFECT_BURN,
+  MOVE_EFFECT_SLEEP,
+  MOVE_EFFECT_TOXIC,
+  applyPrimaryStatusEffect,
+  canBeBurned,
+  canBePoisoned,
+  canSleep,
+  doesSubstituteBlockMove,
+  findAbilitySlot,
+  isBattlerTerrainAffected,
+} from './statusEffects'
 
 export interface MoveEffectContext {
   state: BattleState
@@ -40,6 +62,7 @@ export interface MoveEffectContext {
   targetId: number | null
   action: ChosenAction
   turnOrderIndex: number
+  order?: TurnOrder
   deps: TurnLoopDeps
   unmodelled: string[]
   deductPp: (state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]) => void
@@ -49,7 +72,7 @@ export interface MoveEffectContext {
 export type MoveEffectHandler = (ctx: MoveEffectContext) => ActionOutcome
 
 /**
- * Outcome builder for self moves (Finding 6).
+ * Outcome builder for move effect handlers.
  * Defaults targetId to ctx.battlerId per Finding 5 (MOVE_TARGET_USER, src/battle_util.c:239-242, 6403-6405).
  */
 function outcome(
@@ -69,10 +92,43 @@ function outcome(
     cancelledBy: null,
     confusionSelfHitDamage: null,
     statChanges: [],
+    statusApplied: null,
     unmodelled: ctx.unmodelled,
     fainted: [],
     ...fields,
   }
+}
+
+/**
+ * Accuracy check helper at its script position (Cmd_accuracycheck, battle_script_commands.c:1398-1447).
+ * Evaluates GetTotalAccuracy and draws Random() % 100 from state.rng.
+ * Returns true if the move missed.
+ */
+function checkAccuracy(
+  ctx: MoveEffectContext,
+  targetId: number,
+  moveId: string,
+): boolean {
+  const { state, battlerId, deps, unmodelled, turnOrderIndex, order } = ctx
+  const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+  const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+  const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
+    state,
+    battlerId,
+    targetId,
+    moveId,
+    targetHasActedThisTurn,
+    deps,
+  )
+  unmodelled.push(...gapsToUnmodelled(gaps))
+  if (defenderHasAnticipation) {
+    unmodelled.push(
+      "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+    )
+  }
+  const accResult = getTotalAccuracy(inputs)
+  unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+  return state.rng.random16() % 100 >= accResult.accuracy
 }
 
 /** Helper for plain EFFECT_*_UP and EFFECT_*_UP_2/3 using BattleScript_EffectStatUp. */
@@ -706,6 +762,260 @@ function handleBellyDrum(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { statChanges, attackerDamage, fainted })
 }
 
+/**
+ * EFFECT_SLEEP handler (Hypnosis, Sleep Powder, Dark Void).
+ * BattleScript_EffectSleep, data/battle_scripts_1.s:3103-3113.
+ */
+function handleSleep(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:3106)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // Powder immunity is CANCELLER_POWDER_MOVE (battle_util.c:3455), before the script -- see attackCanceller.ts.
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_SLEEP (:3107, VARIOUS_REQUIRE_CAN_DO_EFFECT :8509-8520).
+  // Every reason CanSleep can fail is caught by a fail branch; Substitute is only checked there
+  // (JumpIfStandardStatusBlocking :6600) once CanSleep has failed, so a Substitute alone does not stop
+  // the accuracy draw -- SetMoveEffect's own DoesSubstituteBlockMove blocks the status afterwards.
+  if (!canSleep(state, targetId, battlerId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 4. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:3108)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. setmoveeffect MOVE_EFFECT_SLEEP, seteffectprimary (:3111-3112)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_SLEEP,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'SLEEP' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_TOXIC handler (Toxic).
+ * BattleScript_EffectToxic, data/battle_scripts_1.s:3957-3970.
+ */
+function handleToxic(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:3960)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_TOXIC (:3961, VARIOUS_REQUIRE_CAN_DO_EFFECT :8540-8548).
+  // Substitute only matters here once CanBePoisoned has failed (see handleSleep).
+  if (!canBePoisoned(state, battlerId, targetId, moveId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:3962)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setmoveeffect MOVE_EFFECT_TOXIC, seteffectprimary (:3965-3966)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_TOXIC,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'TOXIC' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_WILL_O_WISP handler (Will-O-Wisp).
+ * BattleScript_EffectWillOWisp, data/battle_scripts_1.s:6090-6103.
+ */
+function handleWillOWisp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:6093)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. jumpifsubstituteblocks BattleScript_ButItFailed (:6094)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. requirecandoeffect BS_TARGET, MOVE_EFFECT_BURN (:6095)
+  if (!canBeBurned(state, targetId, battlerId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 4. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:6096)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. jumpifsafeguard BattleScript_SafeguardProtected (:6097)
+  const targetSide = targetId & 1
+  if (hasFlag(state.sides[targetSide].statuses, SIDE_STATUS_SAFEGUARD)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 6. setmoveeffect MOVE_EFFECT_BURN, seteffectprimary (:6100-6101)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_BURN,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'BURN' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_YAWN handler (Yawn).
+ * BattleScript_EffectYawn, data/battle_scripts_1.s:6411-6422.
+ */
+function handleYawn(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:6414)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_SLEEP (:6415). Substitute only matters once CanSleep has
+  // failed (see handleSleep), and Cmd_setyawn (:11840-11855) never checks it, so Yawn goes through one.
+  if (!canSleep(state, targetId, battlerId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:6416)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setyawn BattleScript_ButItFailed (:6417, Cmd_setyawn at battle_script_commands.c:11840-11855)
+  if (
+    hasFlag(target.statuses3, STATUS3_YAWN) ||
+    hasFlag(target.mon.status1, STATUS1_ANY) ||
+    isBattlerTerrainAffected(state, targetId, STATUS_FIELD_ELECTRIC_TERRAIN, deps) ||
+    isBattlerTerrainAffected(state, targetId, STATUS_FIELD_MISTY_TERRAIN, deps)
+  ) {
+    return outcome(ctx, { targetId })
+  }
+
+  target.statuses3 = setCounter(target.statuses3, STATUS3_YAWN, 2)
+  return outcome(ctx, { targetId, statusApplied: { battlerId: targetId, status: 'YAWN' } })
+}
+
+/**
+ * EFFECT_SWAGGER handler (Swagger).
+ * BattleScript_EffectSwagger, data/battle_scripts_1.s:5134-5154.
+ */
+function handleSwagger(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. jumpifsubstituteblocks BattleScript_MakeMoveMissed (:5136)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:5137)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 3. ppreduce (:5139)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifenragedandstatmaxed STAT_ATK, BattleScript_ButItFailed (:5140)
+  const isEnraged = hasFlag(target.mon.status2, STATUS2_ENRAGED)
+  const isAtkMaxed = (target.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE) >= MAX_STAT_STAGE
+  if (isEnraged && isAtkMaxed) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 5. Stat change: target's Attack raised +2 (:5143-5149)
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    2,
+    STAT_ATK,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: res.delta })
+  }
+
+  // 6. BattleScript_SwaggerTryConfuse: setmoveeffect MOVE_EFFECT_ENRAGE (:5151)
+  let statusApplied: StatusAppliedOutcome | null = null
+  if (!hasFlag(target.mon.status2, STATUS2_ENRAGED)) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_ENRAGED)
+    const slot = findAbilitySlot(target.mon.abilities, 'ABILITY_MENTAL_POLLUTION')
+    if (slot >= 0) {
+      target.volatiles.abilityState[slot] = 1
+    }
+    statusApplied = { battlerId: targetId, status: 'ENRAGED' }
+  }
+
+  return outcome(ctx, { targetId, statChanges, statusApplied })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_ATTACK_UP: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 1),
   EFFECT_ATTACK_UP_2: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 2),
@@ -735,6 +1045,12 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SHELTER: handleShelter,
   EFFECT_SHELL_SMASH: handleShellSmash,
   EFFECT_BELLY_DRUM: handleBellyDrum,
+
+  EFFECT_SLEEP: handleSleep,
+  EFFECT_TOXIC: handleToxic,
+  EFFECT_WILL_O_WISP: handleWillOWisp,
+  EFFECT_YAWN: handleYawn,
+  EFFECT_SWAGGER: handleSwagger,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

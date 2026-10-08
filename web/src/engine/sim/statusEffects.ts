@@ -29,6 +29,7 @@ import {
   STATUS1_TOXIC_POISON,
   STATUS2_BIDE,
   STATUS2_CONFUSION,
+  STATUS2_ENRAGED,
   STATUS2_INFATUATION,
   STATUS2_LOCK_CONFUSE,
   STATUS2_MULTIPLETURNS,
@@ -89,6 +90,44 @@ export const MOVE_EFFECT_FROSTBITE = 7
 export const MOVE_EFFECT_BLEED = 8
 export const MOVE_EFFECT_CONFUSION = 9
 export const MOVE_EFFECT_FLINCH = 10
+export const MOVE_EFFECT_ATK_PLUS_1 = 17
+export const MOVE_EFFECT_DEF_PLUS_1 = 18
+export const MOVE_EFFECT_SPD_PLUS_1 = 19
+export const MOVE_EFFECT_SP_ATK_PLUS_1 = 20
+export const MOVE_EFFECT_SP_DEF_PLUS_1 = 21
+export const MOVE_EFFECT_ACC_PLUS_1 = 22
+export const MOVE_EFFECT_EVS_PLUS_1 = 23
+export const MOVE_EFFECT_ATK_MINUS_1 = 24
+export const MOVE_EFFECT_DEF_MINUS_1 = 25
+export const MOVE_EFFECT_SPD_MINUS_1 = 26
+export const MOVE_EFFECT_SP_ATK_MINUS_1 = 27
+export const MOVE_EFFECT_SP_DEF_MINUS_1 = 28
+export const MOVE_EFFECT_ACC_MINUS_1 = 29
+export const MOVE_EFFECT_EVS_MINUS_1 = 30
+export const MOVE_EFFECT_PREVENT_ESCAPE = 34
+export const MOVE_EFFECT_NIGHTMARE = 35
+export const MOVE_EFFECT_ATK_PLUS_2 = 41
+export const MOVE_EFFECT_DEF_PLUS_2 = 42
+export const MOVE_EFFECT_SPD_PLUS_2 = 43
+export const MOVE_EFFECT_SP_ATK_PLUS_2 = 44
+export const MOVE_EFFECT_SP_DEF_PLUS_2 = 45
+export const MOVE_EFFECT_ACC_PLUS_2 = 46
+export const MOVE_EFFECT_EVS_PLUS_2 = 47
+export const MOVE_EFFECT_ATK_MINUS_2 = 48
+export const MOVE_EFFECT_DEF_MINUS_2 = 49
+export const MOVE_EFFECT_SPD_MINUS_2 = 50
+export const MOVE_EFFECT_SP_ATK_MINUS_2 = 51
+export const MOVE_EFFECT_SP_DEF_MINUS_2 = 52
+export const MOVE_EFFECT_ACC_MINUS_2 = 53
+export const MOVE_EFFECT_EVS_MINUS_2 = 54
+export const MOVE_EFFECT_ATTRACT = 73
+export const MOVE_EFFECT_CURSE = 74
+export const MOVE_EFFECT_DISABLE = 75
+export const MOVE_EFFECT_SALT_CURE = 77
+export const MOVE_EFFECT_SYRUP = 85
+export const MOVE_EFFECT_YAWN = 89
+export const MOVE_EFFECT_ENRAGE = 98
+export const MOVE_EFFECT_DRENCH = 99
 
 // include/constants/battle.h:456
 export const PRIMARY_STATUS_MOVE_EFFECT = MOVE_EFFECT_BLEED
@@ -318,6 +357,28 @@ export const INFILTRATES_SUBSTITUTE_ABILITIES = [
   'ABILITY_PINNACLE_BLADE',
 ] as const
 
+/**
+ * All 4 abilities with `bitfields.powderImmune` in data/v2.65beta/abilityHooks.json.
+ * Derived using:
+ * grep -oP '"powderImmune":"TRUE".*?"id":"ABILITY_[^"]*"' /home/nghiatruong/git-repos/personal/elitereduxtools/data/v2.65beta/abilityHooks.json
+ */
+export const POWDER_IMMUNE_ABILITIES = [
+  'ABILITY_EFFECT_SPORE',
+  'ABILITY_GUARDIAN_COAT',
+  'ABILITY_OVERCOAT',
+  'ABILITY_SHIELD_DUST',
+] as const
+
+/**
+ * All 2 abilities with `bitfields.pollinateImmunities` in data/v2.65beta/abilityHooks.json.
+ * Derived using:
+ * grep -oP '"pollinateImmunities":"TRUE".*?"id":"ABILITY_[^"]*"' /home/nghiatruong/git-repos/personal/elitereduxtools/data/v2.65beta/abilityHooks.json
+ */
+export const POLLINATE_IMMUNITIES_ABILITIES = [
+  'ABILITY_POLLINATE',
+  'ABILITY_STEEL_BEETLE',
+] as const
+
 // ---------------------------------------------------------------------------
 // Dependencies and Results Interfaces
 // ---------------------------------------------------------------------------
@@ -336,7 +397,7 @@ export interface ApplyStatusResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function findAbilitySlot(
+export function findAbilitySlot(
   slots: { ability: string | null; innates: (string | null)[] },
   abilityId: string,
 ): number {
@@ -345,6 +406,46 @@ function findAbilitySlot(
     if (slots.innates[i] === abilityId) return i + 1
   }
   return -1
+}
+
+/**
+ * IsPowderImmune, src/battle_util.c:3190-3197.
+ * Checks powder immunity via Mycelium Might bypass, Grass type, Safety Goggles,
+ * powderImmune abilities, and Bug pollinateImmunities.
+ */
+export function isPowderImmune(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  deps: StatusDeps,
+): boolean {
+  if (isMyceliumMightActive(state, attackerId, deps)) return false
+
+  const target = state.battlers[targetId]
+  if (!target) return false
+
+  if (target.mon.types.includes('GRASS')) return true
+
+  if (deps.grounding.holdEffectOf(targetId) === 'HOLD_EFFECT_SAFETY_GOGGLES') return true
+
+  const attacker = state.battlers[attackerId]
+  const attackerHasMoldBreaker = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+
+  for (const ability of POWDER_IMMUNE_ABILITIES) {
+    if (battlerHasSimAbility(state, target, ability, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
+      return true
+    }
+  }
+
+  if (target.mon.types.includes('BUG')) {
+    for (const ability of POLLINATE_IMMUNITIES_ABILITIES) {
+      if (battlerHasSimAbility(state, target, ability, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 /**
@@ -690,6 +791,43 @@ export function isPreventableSecondaryEffect(moveEffect: number): boolean {
     case MOVE_EFFECT_FROSTBITE:
     case MOVE_EFFECT_BLEED:
     case MOVE_EFFECT_CONFUSION:
+    case MOVE_EFFECT_FLINCH:
+    case MOVE_EFFECT_ATK_PLUS_1:
+    case MOVE_EFFECT_DEF_PLUS_1:
+    case MOVE_EFFECT_SPD_PLUS_1:
+    case MOVE_EFFECT_SP_ATK_PLUS_1:
+    case MOVE_EFFECT_SP_DEF_PLUS_1:
+    case MOVE_EFFECT_ACC_PLUS_1:
+    case MOVE_EFFECT_EVS_PLUS_1:
+    case MOVE_EFFECT_ATK_MINUS_1:
+    case MOVE_EFFECT_DEF_MINUS_1:
+    case MOVE_EFFECT_SPD_MINUS_1:
+    case MOVE_EFFECT_SP_ATK_MINUS_1:
+    case MOVE_EFFECT_SP_DEF_MINUS_1:
+    case MOVE_EFFECT_ACC_MINUS_1:
+    case MOVE_EFFECT_EVS_MINUS_1:
+    case MOVE_EFFECT_ATK_PLUS_2:
+    case MOVE_EFFECT_DEF_PLUS_2:
+    case MOVE_EFFECT_SPD_PLUS_2:
+    case MOVE_EFFECT_SP_ATK_PLUS_2:
+    case MOVE_EFFECT_SP_DEF_PLUS_2:
+    case MOVE_EFFECT_ACC_PLUS_2:
+    case MOVE_EFFECT_EVS_PLUS_2:
+    case MOVE_EFFECT_ATK_MINUS_2:
+    case MOVE_EFFECT_DEF_MINUS_2:
+    case MOVE_EFFECT_SPD_MINUS_2:
+    case MOVE_EFFECT_SP_ATK_MINUS_2:
+    case MOVE_EFFECT_SP_DEF_MINUS_2:
+    case MOVE_EFFECT_ACC_MINUS_2:
+    case MOVE_EFFECT_EVS_MINUS_2:
+    case MOVE_EFFECT_ATTRACT:
+    case MOVE_EFFECT_CURSE:
+    case MOVE_EFFECT_DISABLE:
+    case MOVE_EFFECT_SALT_CURE:
+    case MOVE_EFFECT_PREVENT_ESCAPE:
+    case MOVE_EFFECT_NIGHTMARE:
+    case MOVE_EFFECT_SYRUP:
+    case MOVE_EFFECT_DRENCH:
       return true
     default:
       return false
@@ -1366,6 +1504,19 @@ export function applyPrimaryStatusEffect(
       // Confusion duration draw: (Random() % 2) + 3 turns (src/battle_script_commands.c:2660)
       const confusionTurns = (state.rng.random16() % 2) + 3
       effectBattler.mon.status2 = setCounter(effectBattler.mon.status2, STATUS2_CONFUSION, confusionTurns)
+      return { applied: true, doesntAffectFoe: false }
+    }
+
+    case MOVE_EFFECT_ENRAGE: {
+      // Enrage volatile (src/battle_script_commands.c:3025-3030)
+      if (hasFlag(effectBattler.mon.status2, STATUS2_ENRAGED)) {
+        return { applied: false, doesntAffectFoe: false }
+      }
+      effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_ENRAGED)
+      const slot = findAbilitySlot(effectBattler.mon.abilities, 'ABILITY_MENTAL_POLLUTION')
+      if (slot >= 0) {
+        effectBattler.volatiles.abilityState[slot] = 1
+      }
       return { applied: true, doesntAffectFoe: false }
     }
 
