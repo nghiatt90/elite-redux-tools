@@ -260,6 +260,27 @@ def _argument_to_dict(move) -> dict | None:
     raise ValueError(f"unhandled Move.Argument oneof case: {kind!r}")
 
 
+def _has_sheer_force_boost(move) -> bool:
+    # Mirrored from tools/codegen/src/er/move/BattleMovesGenerator.kt:70-77:
+    # STATUS split -> false; effectChance == 0 -> false;
+    # move.effect.getOption(noSheerForce) -> false;
+    # move.argument.effect.effect.getOption(noSheerForce) -> false;
+    # else true
+    if move.split == MoveList_pb2.MoveSplit.STATUS:
+        return False
+    if move.effect_chance == 0:
+        return False
+    if move.WhichOneof("move_effect") == "effect":
+        desc = MoveBehavior_pb2.MoveBehavior.DESCRIPTOR.values_by_number.get(move.effect)
+        if desc and desc.GetOptions().Extensions[MoveBehavior_pb2.no_sheer_force]:
+            return False
+    if move.HasField("argument") and move.argument.WhichOneof("argument") == "effect":
+        desc = MoveEffect_pb2.MoveEffect.DESCRIPTOR.values_by_number.get(move.argument.effect.effect)
+        if desc and desc.GetOptions().Extensions[MoveBehavior_pb2.no_sheer_force]:
+            return False
+    return True
+
+
 def move_to_dict(move) -> dict:
     move_effect = move.WhichOneof("move_effect")
     entry = {
@@ -290,6 +311,8 @@ def move_to_dict(move) -> dict:
         ),
         "flags": {key: True for key, field in _MOVE_FLAGS.items() if getattr(move, field)},
     }
+    if _has_sheer_force_boost(move):
+        entry["sheerForceBoost"] = True
     if move.tutor:
         entry["tutorCategory"] = MoveList_pb2.TutorType.Name(move.tutor)
     if move.split_modifier:

@@ -136,6 +136,24 @@ def test_move_dict_has_no_type2_split_flag_crit_hits_air_hit_count_when_default(
     assert "argument" not in d
 
 
+def test_move_dict_sheer_force_boost():
+    _, moves, _, _, _ = _fixtures()
+    # A known status move has no flag
+    swords_dance = next(m for m in moves if m.name == "Swords Dance")
+    d_sd = move_to_dict(swords_dance)
+    assert "sheerForceBoost" not in d_sd
+
+    # Flamethrower (effectChance 10, burn) has the flag
+    flamethrower = next(m for m in moves if m.name == "Flamethrower")
+    d_ft = move_to_dict(flamethrower)
+    assert d_ft.get("sheerForceBoost") is True
+
+    # A move whose argument effect is MOVE_EFFECT_PREVENT_ESCAPE (no_sheer_force) does not
+    pitfall = next(m for m in moves if m.name == "Pitfall")
+    d_pf = move_to_dict(pitfall)
+    assert "sheerForceBoost" not in d_pf
+
+
 def test_species_dict_has_weight_and_height():
     species, _, _, species_map, tutors = _fixtures()
     pikachu = next(s for s in playable_species(species) if s.dex.name == "Pikachu")

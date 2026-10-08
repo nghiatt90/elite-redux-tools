@@ -28,6 +28,7 @@
 // ==========================================================================
 
 import type { BaseStats } from '../types'
+import type { MoveBehaviorEntry } from '../basePower'
 
 /** The species fields the bridge needs. A subset of species.json's entry, named
  * here so the engine does not depend on `lib/types.ts`'s full `Species` shape
@@ -94,6 +95,20 @@ export interface SimMoveData {
    * moves.json's argument is absent or a non-int kind (type/effect/status/
    * misc/other) -- those aren't read by anything attackCanceller.ts needs. */
   argumentInt?: number | null
+  /** moves.json's `sheerForceBoost` (FLAG_SHEER_FORCE_BOOST, BattleMovesGenerator.kt:70-77). */
+  sheerForceBoost?: true
+  /** moves.json's `effectChance` (MoveList.proto `effect_chance`). */
+  effectChance?: number
+  /** moves.json's `argument` when kind is 'effect' or other structured argument. */
+  argument?: {
+    kind: string
+    effect?: string
+    affectsUser?: boolean
+    certain?: boolean
+    [key: string]: unknown
+  } | null
+  /** moves.json's inline `customBehavior`. */
+  customBehavior?: MoveBehaviorEntry | null
 }
 
 /**

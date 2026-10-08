@@ -16,6 +16,7 @@ import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
+import type { MoveBehaviors } from '../basePower'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   MAX_STAT_STAGE,
@@ -55,6 +56,7 @@ import {
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_TOXIC,
+  ON_MODIFY_EFFECT_CHANCE_ABILITIES,
   POLLINATE_IMMUNITIES_ABILITIES,
   POWDER_IMMUNE_ABILITIES,
   SET_STATE_ON_EFFECT_ABILITIES,
@@ -63,6 +65,7 @@ import {
   canBeBurned,
   canPoisonType,
   canSleep,
+  getMoveEffectChance,
   isAbilityStatusProtected,
   isBattlerTerrainAffected,
   isStatusImmune,
@@ -76,6 +79,7 @@ const abilityIds = new Set(snapshot<Array<{ id: string }>>('abilities.json').map
 const rawItems = snapshot<Array<SimItemData>>('items.json')
 const itemsById = new Map(rawItems.map((item) => [item.id, item]))
 const rawAbilityHooks = snapshot<Record<string, { hooks?: Record<string, unknown>; bitfields?: Record<string, string> }>>('abilityHooks.json')
+const rawBehaviors = snapshot<{ behaviors: MoveBehaviors }>('moveBehaviors.json').behaviors
 
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
@@ -89,6 +93,10 @@ function requireMove(id: string): SimMoveData {
     flags: (m.flags as Record<string, true>) ?? {},
     accuracy: m.accuracy as number,
     hitsAir: m.hitsAir as SimMoveData['hitsAir'],
+    sheerForceBoost: m.sheerForceBoost as SimMoveData['sheerForceBoost'],
+    effectChance: m.effectChance as number | undefined,
+    argument: m.argument as SimMoveData['argument'],
+    customBehavior: m.customBehavior as SimMoveData['customBehavior'],
   }
 }
 
@@ -103,7 +111,13 @@ const MOVE_SLEEP_POWDER = requireMove('MOVE_SLEEP_POWDER')
 const MOVE_TOXIC = requireMove('MOVE_TOXIC')
 const MOVE_WILL_O_WISP = requireMove('MOVE_WILL_O_WISP')
 const MOVE_YAWN = requireMove('MOVE_YAWN')
+const MOVE_SWORDS_DANCE = requireMove('MOVE_SWORDS_DANCE')
 const MOVE_SWAGGER = requireMove('MOVE_SWAGGER')
+const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
+const MOVE_RELIC_SONG = requireMove('MOVE_RELIC_SONG')
+const MOVE_TRI_ATTACK = requireMove('MOVE_TRI_ATTACK')
+const MOVE_THROAT_CHOP = requireMove('MOVE_THROAT_CHOP')
+const MOVE_WATER_PULSE = requireMove('MOVE_WATER_PULSE')
 
 const ABILITY_CORROSION = requireAbility('ABILITY_CORROSION')
 const ABILITY_MISTY_SURGE = requireAbility('ABILITY_MISTY_SURGE')
@@ -117,6 +131,8 @@ const ABILITY_NOISE_CANCEL = requireAbility('ABILITY_NOISE_CANCEL')
 const ABILITY_SHIELD_DUST = requireAbility('ABILITY_SHIELD_DUST')
 const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
 const ABILITY_OVERCOAT = requireAbility('ABILITY_OVERCOAT')
+const ABILITY_SERENE_GRACE = requireAbility('ABILITY_SERENE_GRACE')
+const ABILITY_SHEER_FORCE = requireAbility('ABILITY_SHEER_FORCE')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -253,9 +269,20 @@ function dummyDamage(): DamageResolver & { calls: number } {
   return r
 }
 
-function testDeps(damage: DamageResolver = dummyDamage()): TurnLoopDeps {
+function fixedDamage(amount: number, resolverDraws: number = 0): DamageResolver {
+  return {
+    resolve: (state) => {
+      for (let i = 0; i < resolverDraws; i++) {
+        state.rng.random16()
+      }
+      return { targetDamage: amount, attackerDamage: null, unmodelled: [] }
+    },
+  }
+}
+
+function testDeps(damage: DamageResolver = dummyDamage(), moveBehaviors?: MoveBehaviors): TurnLoopDeps {
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
-  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
+  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT, moveBehaviors }
 }
 
 describe('Status predicates (step 3, batch 2)', () => {
@@ -965,5 +992,281 @@ describe('Oracle tests: ability lists pinned against abilityHooks.json (step 6, 
 
     expect([...POLLINATE_IMMUNITIES_ABILITIES].sort()).toEqual(expected)
     expect(POLLINATE_IMMUNITIES_ABILITIES).toHaveLength(2)
+  })
+})
+
+describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', () => {
+  it('exact draw order: damage draws, then chance draw, then sleep duration draw', () => {
+    // Derivation:
+    // 1. accuracycheck (turn.ts:779) draws Random() % 100 < 100 -> roll 0 (hits)
+    // 2. damage.resolve draws 2 values (e.g. crit roll 50, damage roll 90)
+    // 3. seteffectwithchance (Cmd_seteffectwithchance, battle_script_commands.c:3113):
+    //    effectChance = 10 (MOVE_RELIC_SONG). Draw 4 % 100 = 4 < 10 -> passes!
+    // 4. applyPrimaryStatusEffect (case MOVE_EFFECT_SLEEP, battle_script_commands.c:2555):
+    //    sleepTurns = (Random() % 3) + 2. Draw 1 % 3 + 2 = 3 turns.
+    // 5. Battler 1 acts: has STATUS1_SLEEP, CANCELLER_ASLEEP decrements counter from 3 to 2, cancels move (0 draws).
+    const rng = scriptedRng([0, 50, 90, 4, 1])
+    const state = battle([{}, {}], rng)
+    const deps = testDeps(fixedDamage(20, 2), rawBehaviors)
+    const out = executeTurn(state, [useMove(1, MOVE_RELIC_SONG), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(out.actions[0].targetDamage).toBe(20)
+    expect(out.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'SLEEP' })
+    expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(true)
+    expect(getCounter(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(2) // 3 turns - 1 decremented on battler 1's turn
+    expect(out.actions[1].cancelledBy).toBe('SLEEP')
+    expect(rng.calls).toBe(5)
+  })
+
+  it('effectChance 10 with scripted RNG 9 (applies) vs 10 (does not apply)', () => {
+    // Derivation:
+    // Move: Flamethrower (effectChance 10, EFFECT_BURN_HIT).
+    // Roll 9: 9 % 100 = 9 < 10 -> burn applies.
+    // Roll 10: 10 % 100 = 10 < 10 -> false, burn does not apply.
+
+    // 1. Roll 9: applies
+    const rngApplies = scriptedRng([0, 9])
+    const stateApplies = battle([{}, {}], rngApplies)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    const outApplies = executeTurn(stateApplies, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(outApplies.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'BURN' })
+    expect(hasFlag(stateApplies.battlers[1]!.mon.status1, STATUS1_BURN)).toBe(true)
+    expect(rngApplies.calls).toBe(2)
+
+    // 2. Roll 10: does not apply
+    const rngFails = scriptedRng([0, 10])
+    const stateFails = battle([{}, {}], rngFails)
+    const outFails = executeTurn(stateFails, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(outFails.actions[0].statusApplied).toBeNull()
+    expect(stateFails.battlers[1]!.mon.status1).toBe(0)
+    expect(rngFails.calls).toBe(2)
+  })
+
+  it('Serene Grace doubles secondary effect chance (10% -> 20%)', () => {
+    // Derivation:
+    // Attacker has ABILITY_SERENE_GRACE.
+    // Flamethrower base chance = 10. GetMoveEffectChance: 10 * 2 = 20.
+    // Roll 15: without Serene Grace (15 < 10) fails; with Serene Grace (15 < 20) passes.
+    // Roll 20: 20 < 20 fails.
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+
+    // 1. Roll 15: passes under Serene Grace
+    const rng15 = scriptedRng([0, 15])
+    const state15 = battle([{ abilities: { ability: ABILITY_SERENE_GRACE, innates: [null, null, null] } }, {}], rng15)
+    const out15 = executeTurn(state15, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(out15.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'BURN' })
+    expect(hasFlag(state15.battlers[1]!.mon.status1, STATUS1_BURN)).toBe(true)
+
+    // 2. Roll 20: fails under Serene Grace
+    const rng20 = scriptedRng([0, 20])
+    const state20 = battle([{ abilities: { ability: ABILITY_SERENE_GRACE, innates: [null, null, null] } }, {}], rng20)
+    const out20 = executeTurn(state20, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(out20.actions[0].statusApplied).toBeNull()
+    expect(state20.battlers[1]!.mon.status1).toBe(0)
+  })
+
+  it('Shield Dust blocks secondary effect but not primary effect', () => {
+    // Derivation:
+    // IsPreventableSecondaryEffect (src/battle_script_commands.c:2240-2290, 2348-2350).
+    // Target has ABILITY_SHIELD_DUST.
+    // Secondary burn (Flamethrower, primary=false): blocked by Shield Dust.
+    // Primary burn (Will-O-Wisp, primary=true): bypasses Shield Dust.
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+
+    // 1. Secondary burn from Flamethrower: blocked
+    const rngSecondary = scriptedRng([0, 0])
+    const stateSecondary = battle([{}, { abilities: { ability: ABILITY_SHIELD_DUST, innates: [null, null, null] } }], rngSecondary)
+    const outSecondary = executeTurn(stateSecondary, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(outSecondary.actions[0].statusApplied).toBeNull()
+    expect(stateSecondary.battlers[1]!.mon.status1).toBe(0)
+
+    // 2. Primary burn from Will-O-Wisp: applies
+    const rngPrimary = scriptedRng([0])
+    const statePrimary = battle([{}, { abilities: { ability: ABILITY_SHIELD_DUST, innates: [null, null, null] } }], rngPrimary)
+    const outPrimary = executeTurn(statePrimary, [useMove(1, MOVE_WILL_O_WISP), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(outPrimary.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'BURN' })
+    expect(hasFlag(statePrimary.battlers[1]!.mon.status1, STATUS1_BURN)).toBe(true)
+  })
+
+  it('Safeguard blocks secondary status effect', () => {
+    // Derivation:
+    // SetMoveEffect Safeguard check (src/battle_script_commands.c:2352-2354):
+    // if (!primary && baseEffect <= MOVE_EFFECT_CONFUSION) { if (SIDE_STATUS_SAFEGUARD) return; }
+    const rng = scriptedRng([0, 0])
+    const state = battle([{}, {}], rng)
+    state.sides[1].statuses |= SIDE_STATUS_SAFEGUARD
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(out.actions[0].statusApplied).toBeNull()
+    expect(state.battlers[1]!.mon.status1).toBe(0)
+  })
+
+  it('Sheer Force: secondary chance roll happens in C, but effect is suppressed', () => {
+    // Derivation:
+    // In C, Cmd_seteffectwithchance (:3105, 3113) calculates chance and executes Random() % 100 < percentChance.
+    // Inside SetMoveEffect (:2361), TestSheerForceFlag returns TRUE, aborting effect application.
+    // Attacker has ABILITY_SHEER_FORCE and Flamethrower has sheerForceBoost: true.
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ abilities: { ability: ABILITY_SHEER_FORCE, innates: [null, null, null] } }, {}], rng)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    // The chance draw happened (accuracy roll 0 + chance roll 0 = 2 calls)
+    expect(rng.calls).toBe(2)
+    expect(out.actions[0].statusApplied).toBeNull()
+    expect(state.battlers[1]!.mon.status1).toBe(0)
+  })
+
+  it('target fainting from hit: chance roll happens, effect suppressed, duration not drawn', () => {
+    // Derivation:
+    // Target has 10 HP. Attacker deals 20 damage, fainting target.
+    // In C, Cmd_seteffectwithchance (:3113) executes Random() % 100 < percentChance.
+    // Then SetMoveEffect (:2364) checks if (gBattleMons[gEffectBattler].hp == 0) return.
+    // The status is not applied, and duration is never drawn.
+    const rng = scriptedRng([0, 5])
+    const state = battle([{}, { hp: 10 }], rng)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    const out = executeTurn(state, [useMove(1, MOVE_RELIC_SONG), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(out.actions[0].fainted).toEqual([1])
+    expect(out.actions[0].statusApplied).toBeNull()
+    // Accuracy (1) + Chance roll (1) = 2 draws. Sleep duration (3rd draw) was NOT drawn.
+    expect(rng.calls).toBe(2)
+  })
+
+  it('Tri Attack pick: Random() % 3 selects Burn (0), Frostbite (1), or Paralysis (2)', () => {
+    // Derivation:
+    // SetMoveEffect case MOVE_EFFECT_TRI_ATTACK (src/battle_script_commands.c:2698-2706):
+    // static const u8 sTriAttackEffects[] = {MOVE_EFFECT_BURN, MOVE_EFFECT_FROSTBITE, MOVE_EFFECT_PARALYSIS};
+    // SET_MOVE_EFFECT_AS(sTriAttackEffects[Random() % 3])
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+
+    // 1. Pick 0: Burn
+    const rngBurn = scriptedRng([0, 5, 0])
+    const stateBurn = battle([{}, {}], rngBurn)
+    const outBurn = executeTurn(stateBurn, [useMove(1, MOVE_TRI_ATTACK), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    expect(outBurn.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'BURN' })
+    expect(hasFlag(stateBurn.battlers[1]!.mon.status1, STATUS1_BURN)).toBe(true)
+
+    // 2. Pick 1: Frostbite
+    const rngFrostbite = scriptedRng([0, 5, 1])
+    const stateFrostbite = battle([{}, {}], rngFrostbite)
+    const outFrostbite = executeTurn(stateFrostbite, [useMove(1, MOVE_TRI_ATTACK), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    expect(outFrostbite.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'FROSTBITE' })
+    expect(hasFlag(stateFrostbite.battlers[1]!.mon.status1, STATUS1_FROSTBITE)).toBe(true)
+
+    // 3. Pick 2: Paralysis
+    const rngParalysis = scriptedRng([0, 5, 2])
+    const stateParalysis = battle([{}, {}], rngParalysis)
+    const outParalysis = executeTurn(stateParalysis, [useMove(1, MOVE_TRI_ATTACK), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    expect(outParalysis.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'PARALYSIS' })
+    expect(hasFlag(stateParalysis.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+  })
+
+  it('unported legacy secondary effect produces named gap', () => {
+    // Derivation:
+    // Throat Chop has legacyConfig: BattleScript_EffectThroatChop, not ported in batch 3a.
+    // Damaging move execution reaches applySecondaryMoveEffects, pushing named gap.
+    const rng = scriptedRng([0])
+    const state = battle([{}, {}], rng)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    const out = executeTurn(state, [useMove(1, MOVE_THROAT_CHOP), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+    expect(out.actions[0].statusApplied).toBeNull()
+    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_THROAT_CHOP not modelled')
+  })
+
+  it('confusion secondary effect applies and draws duration', () => {
+    // Derivation:
+    // Water Pulse (effectChance 20, EFFECT_CONFUSE_HIT).
+    // Confusion duration: (Random() % 2) + 3 turns (src/battle_script_commands.c:2660).
+    // Scripted roll: 1 % 2 + 3 = 4 turns.
+    const rng = scriptedRng([0, 5, 1])
+    const state = battle([{}, {}], rng)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    // The foe takes no action, so its own confusion countdown does not run this turn.
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_PULSE), null], deps)
+
+    expect(out.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'CONFUSION' })
+    expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+    expect(getCounter(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(4)
+  })
+
+  it('Tri Attack on target with existing status1 does not draw RNG and does not apply', () => {
+    // Derivation:
+    // Cmd_seteffectwithchance rolls chance (30%).
+    // SetMoveEffect case MOVE_EFFECT_TRI_ATTACK checks:
+    // if (!gBattleMons[gEffectBattler].status1) { ... Random() % 3 ... }
+    // If status1 != 0, Random() % 3 is skipped and effect is not applied.
+    const rng = scriptedRng([0, 5])
+    const state = battle([{}, { status1: STATUS1_PARALYSIS }], rng)
+    const deps = testDeps(fixedDamage(20), rawBehaviors)
+    // The foe takes no action: a paralyzed foe acting would add its own full-paralysis canceller roll.
+    const out = executeTurn(state, [useMove(1, MOVE_TRI_ATTACK), null], deps)
+
+    expect(out.actions[0].statusApplied).toBeNull()
+    expect(state.battlers[1]!.mon.status1).toBe(STATUS1_PARALYSIS)
+    // 1 draw for accuracy + 1 draw for chance roll = 2 draws (no Tri Attack pick roll)
+    expect(rng.calls).toBe(2)
+  })
+
+  it('ON_MODIFY_EFFECT_CHANCE_ABILITIES matches abilityHooks.json onModifyEffectChance hooks', () => {
+    const expected = Object.entries(rawAbilityHooks)
+      .filter(([, entry]) => Boolean(entry.hooks?.onModifyEffectChance))
+      .map(([id]) => id)
+      .sort()
+
+    expect([...ON_MODIFY_EFFECT_CHANCE_ABILITIES].sort()).toEqual(expected)
+    expect(ON_MODIFY_EFFECT_CHANCE_ABILITIES).toHaveLength(13)
+  })
+
+  it('getMoveEffectChance applies ability modifications, rainbow doubling, and 100 cap', () => {
+    const deps = testDeps()
+    const state = battle([
+      { abilities: { ability: 'ABILITY_CORRUPTED_MIND', innates: [null, null, null] } },
+      { abilities: { ability: 'ABILITY_BAD_LUCK', innates: [null, null, null] } },
+    ], countingRng())
+
+    // 1. Bad Luck on foe sets chance < 100 to 0
+    expect(getMoveEffectChance(state, 0, 'MOVE_PSYCHIC', 0, 50, deps)).toBe(0)
+
+    // 2. Bad Luck on foe preserves 100% chance
+    expect(getMoveEffectChance(state, 0, 'MOVE_PSYCHIC', 0, 100, deps)).toBe(100)
+
+    // 3. Corrupted Mind on psychic move without Bad Luck: 20 * 1.4 = 28
+    const stateNoBadLuck = battle([
+      { abilities: { ability: 'ABILITY_CORRUPTED_MIND', innates: [null, null, null] } },
+      {},
+    ], countingRng())
+    expect(getMoveEffectChance(stateNoBadLuck, 0, 'MOVE_PSYCHIC', 0, 20, deps)).toBe(28)
+
+    // 4. Pyromancy: 5x for Burn
+    const statePyro = battle([
+      { abilities: { ability: 'ABILITY_PYROMANCY', innates: [null, null, null] } },
+      {},
+    ], countingRng())
+    expect(getMoveEffectChance(statePyro, 0, 'MOVE_FLAMETHROWER', MOVE_EFFECT_BURN, 10, deps)).toBe(50)
+
+    // 5. Cryomancy: 5x for Frostbite
+    const stateCryo = battle([
+      { abilities: { ability: 'ABILITY_CRYOMANCY', innates: [null, null, null] } },
+      {},
+    ], countingRng())
+    expect(getMoveEffectChance(stateCryo, 0, 'MOVE_ICE_BEAM', MOVE_EFFECT_FROSTBITE, 10, deps)).toBe(50)
+
+    // 6. Rainbow timer doubling + cap at 100
+    statePyro.sides[0].timers.rainbowTimer = 3
+    // 10 * 5 (Pyromancy) = 50 * 2 (Rainbow) = 100
+    expect(getMoveEffectChance(statePyro, 0, 'MOVE_FLAMETHROWER', MOVE_EFFECT_BURN, 10, deps)).toBe(100)
+    // 20 * 5 = 100 * 2 = 200 -> capped at 100
+    expect(getMoveEffectChance(statePyro, 0, 'MOVE_FLAMETHROWER', MOVE_EFFECT_BURN, 20, deps)).toBe(100)
   })
 })

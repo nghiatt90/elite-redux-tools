@@ -141,7 +141,8 @@ import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
 import { PARTY_SIZE } from './constants'
-import { getMoveEffectHandler } from './moveEffects'
+import type { MoveBehaviors } from '../basePower'
+import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -378,6 +379,9 @@ export interface TurnLoopDeps {
    * but making this optional rather than mandatory keeps those callers'
    * `TurnLoopDeps` literals compiling unchanged. */
   replacement?: ReplacementDeps
+  /** moveBehaviors.json's `behaviors` map. Optional: when absent, structured
+   * behaviors read from moveData.customBehavior instead. */
+  moveBehaviors?: MoveBehaviors
 }
 
 /** Assembles the TurnOrderContext the loop actually runs with: the caller's
@@ -809,6 +813,21 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     applyDamage(state, targetId, targetDamage, fainted)
     applyDamage(state, battlerId, attackerDamage, fainted)
 
+    // Secondary status effects (BattleScript_EffectHit, seteffectwithchance).
+    const secondaryStatusApplied = applySecondaryMoveEffects({
+      state,
+      attackerId: battlerId,
+      targetId,
+      moveId: action.chosenMove.id,
+      targetDamage,
+      deps: {
+        dataContext: deps.dataContext,
+        grounding: deps.grounding,
+        moveBehaviors: deps.moveBehaviors,
+      },
+      unmodelled,
+    })
+
     outcomes.push({
       turnOrderIndex: index,
       battlerId,
@@ -822,7 +841,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       cancelledBy: null,
       confusionSelfHitDamage: null,
       statChanges: null,
-      statusApplied: null,
+      statusApplied: secondaryStatusApplied,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })

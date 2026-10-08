@@ -48,7 +48,12 @@ import {
   setCounter,
   setFlag,
 } from './constants'
-import { attackerHasMoldBreakerActive, battlerHasSimAbility, isBattlerWeatherAffected } from './statBuffs'
+import {
+  attackerHasMoldBreakerActive,
+  battlerHasSimAbility,
+  isBattlerWeatherAffected,
+  isSimAbilitySuppressed,
+} from './statBuffs'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext } from './dataContext'
@@ -90,6 +95,7 @@ export const MOVE_EFFECT_FROSTBITE = 7
 export const MOVE_EFFECT_BLEED = 8
 export const MOVE_EFFECT_CONFUSION = 9
 export const MOVE_EFFECT_FLINCH = 10
+export const MOVE_EFFECT_TRI_ATTACK = 11
 export const MOVE_EFFECT_ATK_PLUS_1 = 17
 export const MOVE_EFFECT_DEF_PLUS_1 = 18
 export const MOVE_EFFECT_SPD_PLUS_1 = 19
@@ -391,6 +397,7 @@ export interface StatusDeps {
 export interface ApplyStatusResult {
   applied: boolean
   doesntAffectFoe: boolean
+  status?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -843,31 +850,22 @@ export function isPreventableSecondaryEffect(moveEffect: number): boolean {
  *
  * The codegen does NOT read the move's own `no_sheer_force` flag (moves.json `flags.noSheerForce`), only
  * the MoveBehavior / argument MoveEffect `noSheerForce` options, which the snapshot does not carry per move.
- * So only the STATUS-split case is decidable here; every other Sheer Force use is gapped by name.
+ * Reads moveData.sheerForceBoost emitted by pipeline per BattleMovesGenerator.kt:70-77.
  */
 export function testSheerForceFlag(
   state: BattleState,
   attackerId: number,
   moveId: string | null | undefined,
   deps: StatusDeps,
-  unmodelled?: string[],
 ): boolean {
   const attacker = state.battlers[attackerId]
   if (!attacker) return false
   if (!battlerHasSimAbility(state, attacker, 'ABILITY_SHEER_FORCE', false, attackerId, false, deps.dataContext)) {
     return false
   }
-
-  if (!moveId) {
-    unmodelled?.push('TestSheerForceFlag')
-    return false
-  }
-
+  if (!moveId) return false
   const moveData = deps.dataContext.move(moveId)
-  if (moveData?.split === 'STATUS') return false
-
-  unmodelled?.push('TestSheerForceFlag: FLAG_SHEER_FORCE_BOOST (BattleMovesGenerator.kt:70-77) is not in the snapshot; treated as not set')
-  return false
+  return moveData?.sheerForceBoost === true
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,7 +1326,7 @@ export function applyPrimaryStatusEffect(
 
   // 3. TestSheerForceFlag (:2361)
   // Evaluated for gBattlerAttacker (attackerId) regardless of primary.
-  if (testSheerForceFlag(state, attackerId, moveId, deps, unmodelled)) {
+  if (testSheerForceFlag(state, attackerId, moveId, deps)) {
     return { applied: false, doesntAffectFoe: false }
   }
 
@@ -1504,7 +1502,7 @@ export function applyPrimaryStatusEffect(
       // Confusion duration draw: (Random() % 2) + 3 turns (src/battle_script_commands.c:2660)
       const confusionTurns = (state.rng.random16() % 2) + 3
       effectBattler.mon.status2 = setCounter(effectBattler.mon.status2, STATUS2_CONFUSION, confusionTurns)
-      return { applied: true, doesntAffectFoe: false }
+      return { applied: true, doesntAffectFoe: false, status: 'CONFUSION' }
     }
 
     case MOVE_EFFECT_ENRAGE: {
@@ -1517,7 +1515,28 @@ export function applyPrimaryStatusEffect(
       if (slot >= 0) {
         effectBattler.volatiles.abilityState[slot] = 1
       }
-      return { applied: true, doesntAffectFoe: false }
+      return { applied: true, doesntAffectFoe: false, status: 'ENRAGED' }
+    }
+
+    case MOVE_EFFECT_TRI_ATTACK: {
+      // Tri Attack effect pick (src/battle_script_commands.c:2698-2706)
+      if (effectBattler.mon.status1 === 0) {
+        const triEffects = [MOVE_EFFECT_BURN, MOVE_EFFECT_FROSTBITE, MOVE_EFFECT_PARALYSIS]
+        const roll = state.rng.random16() % 3
+        const pickedEffect = triEffects[roll]
+        return applyPrimaryStatusEffect(
+          state,
+          attackerId,
+          targetId,
+          pickedEffect,
+          moveId,
+          deps,
+          unmodelled,
+          primary,
+          certain,
+        )
+      }
+      return { applied: false, doesntAffectFoe: false }
     }
 
     default:
@@ -1551,8 +1570,122 @@ export function applyPrimaryStatusEffect(
       }
     }
 
-    return { applied: true, doesntAffectFoe: false }
+    return { applied: true, doesntAffectFoe: false, status: PRIMARY_STATUS_NAMES[baseEffect] }
   }
 
   return { applied: false, doesntAffectFoe: false }
+}
+
+export const PRIMARY_STATUS_NAMES: Record<number, string> = {
+  [MOVE_EFFECT_SLEEP]: 'SLEEP',
+  [MOVE_EFFECT_POISON]: 'POISON',
+  [MOVE_EFFECT_TOXIC]: 'TOXIC',
+  [MOVE_EFFECT_BURN]: 'BURN',
+  [MOVE_EFFECT_PARALYSIS]: 'PARALYSIS',
+  [MOVE_EFFECT_FREEZE]: 'FREEZE',
+  [MOVE_EFFECT_FROSTBITE]: 'FROSTBITE',
+  [MOVE_EFFECT_BLEED]: 'BLEED',
+}
+
+/**
+ * All 13 abilities with `hooks.onModifyEffectChance` in data/v2.65beta/abilityHooks.json.
+ * Derived using:
+ * grep -oP '"onModifyEffectChance":\{[^\}]*\}.*?"id":"(ABILITY_[^"]*)"' data/v2.65beta/abilityHooks.json
+ */
+export const ON_MODIFY_EFFECT_CHANCE_ABILITIES = [
+  'ABILITY_ANGELS_WRATH',
+  'ABILITY_BAD_LUCK',
+  'ABILITY_CHANDELIER',
+  'ABILITY_CORRUPTED_MIND',
+  'ABILITY_CRYOMANCY',
+  'ABILITY_CRYOSTASIS',
+  'ABILITY_LUCKY_WINGS',
+  'ABILITY_PRECISE_FIST',
+  'ABILITY_PYROMANCY',
+  'ABILITY_SERENE_GRACE',
+  'ABILITY_SNOWY_WRATH',
+  'ABILITY_THERMOMANCY',
+  'ABILITY_WAY_OF_PRECISION',
+] as const
+
+/**
+ * GetMoveEffectChance, src/battle_script_commands.c:3071-3090.
+ * Calculates effective move secondary effect chance considering onModifyEffectChance abilities,
+ * rainbow timer, and capping at 100.
+ */
+export function getMoveEffectChance(
+  state: BattleState,
+  attackerId: number,
+  moveId: string | null | undefined,
+  moveEffect: number,
+  baseChance: number,
+  deps: StatusDeps,
+  unmodelled?: string[],
+): number {
+  let chance = baseChance
+
+  const moveData = moveId ? deps.dataContext.move(moveId) : null
+  const moveType = moveData?.type ?? null
+  const isPsychic = moveType === 'PSYCHIC' || moveType === 'TYPE_PSYCHIC'
+  const isPunch = moveData?.flags?.punchBased === true
+  const attacker = state.battlers[attackerId]
+  // ON_ABILITY(abilityBattler, TRUE, ...) (:3082): the attacker's Mold Breaker can break another battler's
+  // breakable hook (Bad Luck is breakable).
+  const attackerHasMoldBreaker = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    const abilityBattlerId = (attackerId + i) % state.battlersCount
+    const abilityBattler = state.battlers[abilityBattlerId]
+    if (!abilityBattler) continue
+    if (i !== 0 && abilityBattler.mon.hp === 0) continue
+
+    const isAttacker = abilityBattlerId === attackerId
+    const isFoe = (abilityBattlerId & 1) !== (attackerId & 1)
+
+    const abilities = [abilityBattler.mon.abilities.ability, ...abilityBattler.mon.abilities.innates]
+    for (const abilityId of abilities) {
+      if (!abilityId) continue
+      if (isSimAbilitySuppressed(state, abilityBattler, abilityId, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
+        continue
+      }
+      if (isAttacker && (abilityId === 'ABILITY_CORRUPTED_MIND' || abilityId === 'ABILITY_PRECISE_FIST' || abilityId === 'ABILITY_WAY_OF_PRECISION')) {
+        unmodelled?.push(`GetMoveEffectChance: ${abilityId} reads GET_MOVE_TYPE / DoesMoveMatchFlag(MOVE_FLAG_PUNCH); this uses the base type and flags.punchBased`)
+      }
+
+      if (isAttacker) {
+        if (abilityId === 'ABILITY_ANGELS_WRATH') {
+          if (moveId === 'MOVE_POISON_STING') chance = 100
+        } else if (abilityId === 'ABILITY_CHANDELIER' || abilityId === 'ABILITY_PYROMANCY') {
+          if (moveEffect === MOVE_EFFECT_BURN) chance *= 5
+        } else if (abilityId === 'ABILITY_CORRUPTED_MIND') {
+          if (isPsychic) chance = Math.floor(chance * 1.4)
+        } else if (
+          abilityId === 'ABILITY_CRYOMANCY' ||
+          abilityId === 'ABILITY_CRYOSTASIS' ||
+          abilityId === 'ABILITY_SNOWY_WRATH'
+        ) {
+          if (moveEffect === MOVE_EFFECT_FROSTBITE) chance *= 5
+        } else if (abilityId === 'ABILITY_PRECISE_FIST' || abilityId === 'ABILITY_WAY_OF_PRECISION') {
+          if (isPunch) chance *= 5
+        } else if (abilityId === 'ABILITY_SERENE_GRACE' || abilityId === 'ABILITY_LUCKY_WINGS') {
+          chance *= 2
+        } else if (abilityId === 'ABILITY_THERMOMANCY') {
+          if (moveEffect === MOVE_EFFECT_FROSTBITE || moveEffect === MOVE_EFFECT_BURN) chance *= 5
+        }
+      }
+
+      if (isFoe) {
+        if (abilityId === 'ABILITY_BAD_LUCK') {
+          if (chance < 100) chance = 0
+        }
+      }
+    }
+  }
+
+  const attackerSide = attackerId & 1
+  if (state.sides[attackerSide]?.timers?.rainbowTimer > 0) {
+    chance *= 2
+  }
+
+  return Math.min(chance, 100)
 }

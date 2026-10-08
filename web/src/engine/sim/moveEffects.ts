@@ -43,17 +43,27 @@ import {
   isBattlerWeatherAffected,
 } from './statBuffs'
 import type { SimDataContext } from './dataContext'
+import type { MoveBehaviors } from '../basePower'
 import {
+  MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
+  MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_FREEZE,
+  MOVE_EFFECT_FROSTBITE,
+  MOVE_EFFECT_PARALYSIS,
+  MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_TOXIC,
+  MOVE_EFFECT_TRI_ATTACK,
   applyPrimaryStatusEffect,
   canBeBurned,
   canBePoisoned,
   canSleep,
   doesSubstituteBlockMove,
   findAbilitySlot,
+  getMoveEffectChance,
   isBattlerTerrainAffected,
+  type StatusDeps,
 } from './statusEffects'
 
 export interface MoveEffectContext {
@@ -1060,4 +1070,228 @@ export function getMoveEffectHandler(effect: string | null): MoveEffectHandler |
 
 export function isHandledMoveEffect(effect: string | null): boolean {
   return getMoveEffectHandler(effect) !== null
+}
+
+// ---------------------------------------------------------------------------
+// Secondary Move Effects (Post-Damage)
+// ---------------------------------------------------------------------------
+
+export const SECONDARY_STATUS_EFFECT_MAP: Record<string, number> = {
+  MOVE_EFFECT_SLEEP: MOVE_EFFECT_SLEEP,
+  MOVE_EFFECT_POISON: MOVE_EFFECT_POISON,
+  MOVE_EFFECT_BURN: MOVE_EFFECT_BURN,
+  MOVE_EFFECT_FREEZE: MOVE_EFFECT_FREEZE,
+  MOVE_EFFECT_PARALYSIS: MOVE_EFFECT_PARALYSIS,
+  MOVE_EFFECT_TOXIC: MOVE_EFFECT_TOXIC,
+  MOVE_EFFECT_FROSTBITE: MOVE_EFFECT_FROSTBITE,
+  MOVE_EFFECT_BLEED: MOVE_EFFECT_BLEED,
+  MOVE_EFFECT_CONFUSION: MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_TRI_ATTACK: MOVE_EFFECT_TRI_ATTACK,
+}
+
+export interface SecondaryMoveEffectContext {
+  state: BattleState
+  attackerId: number
+  targetId: number
+  moveId: string
+  targetDamage: number | null
+  deps: StatusDeps & { moveBehaviors?: MoveBehaviors }
+  unmodelled: string[]
+}
+
+/**
+ * Port of post-damage secondary move effect resolution.
+ * Sources:
+ * - BattleScript_EffectHit: data/battle_scripts_1.s:2857-2885
+ * - Cmd_seteffectwithchance: src/battle_script_commands.c:3092-3125
+ * - AttackScriptGenerator: tools/codegen/src/er/move/MoveScriptGenerator.kt:51-109
+ *
+ * Resolves secondary status effects (sleep, poison, toxic, burn, freeze, paralysis,
+ * frostbite, bleed, confusion, and Tri Attack pick).
+ * C execution order:
+ * 1. Chance is calculated via GetMoveEffectChance (capped at 100).
+ * 2. If MOVE_EFFECT_CERTAIN, RNG draw is skipped.
+ * 3. Otherwise, Random() % 100 < percentChance is drawn from state.rng.
+ * 4. If chance passes and not immune (targetDamage !== 0), SetMoveEffect is called.
+ * 5. SetMoveEffect checks Shield Dust / Covert Cloak, Safeguard, Sheer Force,
+ *    dead battler, and Substitute before applying status.
+ */
+export function applySecondaryMoveEffects(
+  ctx: SecondaryMoveEffectContext,
+): StatusAppliedOutcome | null {
+  const { state, attackerId, targetId, moveId, targetDamage, deps, unmodelled } = ctx
+  const moveData = deps.dataContext.move(moveId)
+  const moveEffect = moveData?.effect ?? null
+
+  interface EffectSpec {
+    effectName: string
+    chance: number
+    affectsUser: boolean
+    certain: boolean
+  }
+  const effectSpecs: EffectSpec[] = []
+
+  const behavior = moveData?.customBehavior ?? (moveEffect && deps.moveBehaviors ? deps.moveBehaviors[moveEffect] : null)
+
+  if (behavior?.attack) {
+    const secondaryList = behavior.attack.secondaryEffects as Array<{
+      effect?: string
+      kind?: string
+      argumentEffect?: boolean
+      chance?: number
+      affectsUser?: boolean
+      certain?: boolean
+    }> | undefined
+
+    if (secondaryList) {
+      // MoveScriptGenerator.kt:76-82 / :58: a single effect becomes `setmoveeffect X; goto BattleScript_EffectHit`
+      // (or BattleScript_EffectArgumentHit) with no setmoveeffectchance, so the move's own effectChance is used and
+      // the entry's chance is ignored. Only the generated multi-effect script emits setmoveeffectchance (:88-96).
+      const singleEffect = secondaryList.length === 1
+      const chanceFor = (itemChance: number | undefined) =>
+        !singleEffect && itemChance !== undefined && itemChance !== 0 ? itemChance : (moveData?.effectChance ?? 0)
+      for (const item of secondaryList) {
+        if (item.kind === 'argumentEffect' || item.argumentEffect) {
+          const arg = moveData?.argument
+          if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+            const chance = chanceFor(item.chance)
+            effectSpecs.push({
+              effectName: arg.effect,
+              chance,
+              affectsUser: Boolean(arg.affectsUser),
+              certain: Boolean(arg.certain),
+            })
+          }
+        } else if (item.effect) {
+          const chance = chanceFor(item.chance)
+          effectSpecs.push({
+            effectName: item.effect,
+            chance,
+            affectsUser: Boolean(item.affectsUser),
+            certain: Boolean(item.certain),
+          })
+        }
+      }
+    }
+  } else if (moveEffect === 'EFFECT_PARALYZE_HIT') {
+    // Legacy script: BattleScript_EffectParalyzeHit (src/battle_scripts_1.s:3365-3368)
+    const attacker = state.battlers[attackerId]
+    const hasColdPlasma = attacker
+      ? battlerHasSimAbility(state, attacker, 'ABILITY_COLD_PLASMA', false, attackerId, false, deps.dataContext)
+      : false
+    effectSpecs.push({
+      effectName: hasColdPlasma ? 'MOVE_EFFECT_BURN' : 'MOVE_EFFECT_PARALYSIS',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_THUNDER') {
+    // Legacy script: BattleScript_EffectThunder (src/battle_scripts_1.s:5734-5736)
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_PARALYSIS',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_HURRICANE') {
+    // Legacy script: BattleScript_EffectHurricane (src/battle_scripts_1.s:5738-5740)
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_CONFUSION',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
+    // Pure damaging move with no secondary effect
+  } else {
+    // Any other legacy script reached by a damaging move:
+    unmodelled.push(`secondary effect of ${moveEffect} not modelled`)
+    return null
+  }
+
+  if (effectSpecs.length === 0) {
+    return null
+  }
+
+  let statusAppliedOutcome: StatusAppliedOutcome | null = null
+
+  for (const spec of effectSpecs) {
+    const baseEffectNum = SECONDARY_STATUS_EFFECT_MAP[spec.effectName]
+    if (baseEffectNum === undefined) {
+      unmodelled.push(`secondary effect of ${spec.effectName} not modelled`)
+      continue
+    }
+
+    const effectNumWithFlags =
+      baseEffectNum |
+      (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) |
+      (spec.certain ? MOVE_EFFECT_CERTAIN : 0)
+
+    const percentChance = getMoveEffectChance(
+      state,
+      attackerId,
+      moveId,
+      baseEffectNum,
+      spec.chance,
+      deps,
+      unmodelled,
+    )
+
+    // C: !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT). damageResolver.ts returns 0 exactly when the hit is
+    // immune; null means the damage could not be computed, so whether the move had an effect is unknown.
+    if (targetDamage === null) {
+      unmodelled.push(`seteffectwithchance: ${moveId} dealt unresolved damage, so MOVE_RESULT_NO_EFFECT is unknown; treated as no effect`)
+    }
+    const isImmune = targetDamage === 0 || targetDamage === null
+
+    if (spec.certain) {
+      // MOVE_EFFECT_CERTAIN skips the RNG draw
+      if (!isImmune) {
+        const res = applyPrimaryStatusEffect(
+          state,
+          attackerId,
+          targetId,
+          effectNumWithFlags,
+          moveId,
+          deps,
+          unmodelled,
+          false,
+          true,
+        )
+        if (res.applied && res.status) {
+          statusAppliedOutcome = {
+            battlerId: spec.affectsUser ? attackerId : targetId,
+            status: res.status,
+          }
+        }
+      }
+    } else {
+      // Real RNG draw: Random() % 100 < percentChance
+      const roll = state.rng.random16() % 100
+      const chancePasses = roll < percentChance
+
+      if (chancePasses && !isImmune) {
+        const certainForStatus = percentChance >= 100
+        const res = applyPrimaryStatusEffect(
+          state,
+          attackerId,
+          targetId,
+          effectNumWithFlags,
+          moveId,
+          deps,
+          unmodelled,
+          false,
+          certainForStatus,
+        )
+        if (res.applied && res.status) {
+          statusAppliedOutcome = {
+            battlerId: spec.affectsUser ? attackerId : targetId,
+            status: res.status,
+          }
+        }
+      }
+    }
+  }
+
+  return statusAppliedOutcome
 }
