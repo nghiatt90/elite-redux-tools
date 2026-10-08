@@ -140,6 +140,7 @@ import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
+import { runMoveEnd } from './moveEnd'
 import {
   PARTY_SIZE,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -1201,7 +1202,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
 
     const fainted: number[] = []
+    const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, targetId, targetDamage, fainted)
+    const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
     applyDamage(state, battlerId, attackerDamage, fainted)
 
     // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
@@ -1219,16 +1222,27 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       unmodelled,
     })
 
-    // Move-end protect retaliation (e.g. PROTECT_TOUCH_BUT_DAMAGED from Ice Burn / Freeze Shock)
-    const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+    // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968).
+    const moveEndOutcome = runMoveEnd({
+      state,
+      attackerId: battlerId,
+      targetId,
+      moveId: action.chosenMove.id,
+      targetDamage: targetDamage ?? 0,
+      hpDealt,
+      deps,
+      unmodelled,
+      fainted,
+    })
+
     const finalStatChanges: StatChangeOutcome[] = []
     if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
-    if (protectMoveEnd.statChanges) finalStatChanges.push(...protectMoveEnd.statChanges)
-    const finalStatusApplied = secondaryResult?.statusApplied ?? protectMoveEnd.statusApplied
+    if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
+    const finalStatusApplied = secondaryResult?.statusApplied ?? moveEndOutcome.statusApplied
 
-    if (state.battlers[battlerId]) {
-      state.battlers[battlerId]!.lastMove = action.chosenMove.id
-    }
+    const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
+      ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)
+      : null
 
     outcomes.push({
       turnOrderIndex: index,
@@ -1239,10 +1253,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       missed: false,
       targetId,
       targetDamage,
-      attackerDamage,
+      attackerDamage: combinedAttackerDamage,
       cancelledBy: null,
       confusionSelfHitDamage: null,
-      statChanges: secondaryResult?.statChanges || protectMoveEnd.statChanges ? finalStatChanges : null,
+      statChanges: secondaryResult?.statChanges || moveEndOutcome.statChanges ? finalStatChanges : null,
       statusApplied: finalStatusApplied,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,

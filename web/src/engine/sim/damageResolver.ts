@@ -49,8 +49,6 @@ export interface BridgeDamageResolverDeps extends BridgeDeps {
   random: RandomSource
 }
 
-const recoilEffects = new Set(['EFFECT_RECOIL_25', 'EFFECT_RECOIL_33', 'EFFECT_RECOIL_50', 'EFFECT_RECOIL_HP_25', 'EFFECT_FLINCH_RECOIL_33'])
-
 function magnitudeTier(random: RandomSource): 4 | 5 | 6 | 7 | 8 | 9 | 10 {
   const roll = random.random16() % 100
   if (roll < 5) return 4
@@ -146,8 +144,8 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         : (crit ? result.totalCritRolls : result.totalRolls)
       if (!values) return { targetDamage: null, attackerDamage: null, unmodelled }
       if (result.hitCount !== null) unmodelled.push('multi-hit per-hit rolls and crits are not independently drawn')
-      if (recoilEffects.has(move.effect ?? '') || move.effect === 'EFFECT_ABSORB' || attacker.battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_LIFE_ORB') {
-        unmodelled.push('recoil, drain, and Life Orb attacker damage are not modelled yet')
+      if (move.effect === 'EFFECT_ABSORB') {
+        unmodelled.push('drain is not modelled yet')
       }
       return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled }
     },

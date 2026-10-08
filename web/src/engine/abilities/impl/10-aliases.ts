@@ -113,6 +113,7 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_BRUTEFORCE',
     src: 'src/abilities.cc:9283',
+    flags: { noRecoil: true },
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_RECKLESS'),
   },
   {
