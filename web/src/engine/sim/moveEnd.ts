@@ -13,8 +13,8 @@
 //  2   | MOVEEND_RAGE                    | 4434-4443  | Gapped (cond.) | Target Rage attack raise; STATUS2_RAGE is not in state.ts.
 //  3   | MOVEEND_SYNCHRONIZE_TARGET      | 4523-4526  | Gapped (cond.) | Target Synchronize on status application; gapped if target has ABILITY_SYNCHRONIZE & status.
 //  4   | MOVEEND_DANCER                  | 4854-4879  | Gapped (cond.) | Dancer copying dance moves; gapped if danceBased move and other battler has ABILITY_DANCER.
-//  5   | MOVEEND_ABILITIES               | 4527-4531  | Gapped (cond.) | Target contact/move-end abilities (Rough Skin, Iron Barbs, Static...); out of scope per brief.
-//  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Gapped (cond.) | Attacker move-end abilities (Poison Touch...); out of scope per brief.
+//  5   | MOVEEND_ABILITIES               | 4527-4531  | Ported / Gap   | Target contact abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey). Other defender abilities gapped.
+//  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Ported / Gap   | Attacker contact abilities (Static, Flame Body, Poison Point/Touch). Other attacker abilities gapped.
 //  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Unreachable    | Re-checks immunities to cure status; no-op in single-action sim.
 //  8   | MOVEEND_SYNCHRONIZE_ATTACKER    | 4543-4546  | Gapped (cond.) | Attacker Synchronize.
 //  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Unreachable    | Choice item move lock; choicedMove array is not in BattlerState.
@@ -44,21 +44,47 @@
 import type { MoveBehaviors } from '../basePower'
 import type { BattleState, BattlerState } from './state'
 import {
+  DEFAULT_STAT_STAGE,
+  MAX_STAT_STAGE,
+  MIN_STAT_STAGE,
   STATUS2_CONFUSION,
   STATUS2_ENRAGED,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
+  STAT_SPEED,
   clearFlag,
   hasFlag,
 } from './constants'
 import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
+import type { AbilitySlots } from '../abilities/dispatch'
 import { isMagicGuardProtected } from './endTurn'
-import { testSheerForceFlag } from './statusEffects'
+import {
+  MOVE_EFFECT_BURN,
+  MOVE_EFFECT_PARALYSIS,
+  MOVE_EFFECT_POISON,
+  MOVE_EFFECT_SLEEP,
+  applyPrimaryStatusEffect,
+  canBeBurned,
+  canBeParalyzed,
+  canBePoisoned,
+  canSleep,
+  doesSubstituteBlockMove,
+  isPowderImmune,
+  testSheerForceFlag,
+} from './statusEffects'
+import type { StatusDeps } from './statusEffects'
+import {
+  battlerHasSimAbility,
+  changeStatBuffsImplicit,
+  isSimAbilitySuppressed,
+  MOVE_EFFECT_AFFECTS_USER,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
+} from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide } from './turn'
-import type { SimMoveData } from './dataContext'
+import type { SimDataContext, SimMoveData } from './dataContext'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -529,6 +555,448 @@ function battlerHasHalfRecoil(battler: BattlerState): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// MOVEEND_ABILITIES & MOVEEND_ABILITIES_ATTACKER Hook Implementations
+// ---------------------------------------------------------------------------
+
+// Quoted grep: grep -rn 'Impl<ABILITY_ROUGH_SKIN>' pipeline/.upstream/eliteredux-source/src/abilities.cc
+// Matches: ABILITY_ROUGH_SKIN (:783), ABILITY_IRON_BARBS (:2263), ABILITY_DRAGONFRUIT (:11224), ABILITY_POISON_QUILLS (:10149)
+// Plus ABILITY_DOUBLE_IRON_BARBS (:7324)
+// Plus Static family: ABILITY_STATIC (:620), ABILITY_WHITE_NOISE (:8180)
+// Plus Flame Body family: ABILITY_FLAME_BODY (:1136), ABILITY_SMOLDERING_WOOD (:4362), ABILITY_SUPER_HOT_GOO (:6103)
+// Plus Poison Point family: ABILITY_POISON_POINT (:997), ABILITY_POISON_TOUCH (:2099), ABILITY_TOXIC_SHELL (:11534), ABILITY_VENOM_CROWN (:9518), ABILITY_BLIGHT_SCALE (:9525)
+// Plus Effect Spore: ABILITY_EFFECT_SPORE (:818)
+// Plus Gooey family: ABILITY_GOOEY (:2482), ABILITY_SLIME_MOLD (:2495), ABILITY_TANGLING_HAIR (:3053), ABILITY_MASSIVE_PELT (:11357), ABILITY_MUCUS_MEMBRANE (:11628)
+export const PORTED_DEFENDER_ABILITIES = new Set([
+  'ABILITY_ROUGH_SKIN',
+  'ABILITY_IRON_BARBS',
+  'ABILITY_DRAGONFRUIT',
+  'ABILITY_DOUBLE_IRON_BARBS',
+  'ABILITY_POISON_QUILLS',
+  'ABILITY_STATIC',
+  'ABILITY_WHITE_NOISE',
+  'ABILITY_FLAME_BODY',
+  'ABILITY_SMOLDERING_WOOD',
+  'ABILITY_SUPER_HOT_GOO',
+  'ABILITY_POISON_POINT',
+  'ABILITY_POISON_TOUCH',
+  'ABILITY_TOXIC_SHELL',
+  'ABILITY_VENOM_CROWN',
+  'ABILITY_BLIGHT_SCALE',
+  'ABILITY_EFFECT_SPORE',
+  'ABILITY_GOOEY',
+  'ABILITY_SLIME_MOLD',
+  'ABILITY_TANGLING_HAIR',
+  'ABILITY_MASSIVE_PELT',
+  'ABILITY_MUCUS_MEMBRANE',
+])
+
+// Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
+// Matches:
+// - Static family: ABILITY_STATIC (:621), ABILITY_WHITE_NOISE (:8182)
+// - Flame Body family: ABILITY_FLAME_BODY (:1137), ABILITY_SMOLDERING_WOOD (:4363), ABILITY_SUPER_HOT_GOO (:6104)
+// - Poison Point family: ABILITY_POISON_POINT (:998), ABILITY_POISON_TOUCH (:2100), ABILITY_TOXIC_SHELL (:11535), ABILITY_VENOM_CROWN (:9519), ABILITY_BLIGHT_SCALE (:9526), ABILITY_POISON_QUILLS (:10147)
+export const PORTED_ATTACKER_ABILITIES = new Set([
+  'ABILITY_STATIC',
+  'ABILITY_WHITE_NOISE',
+  'ABILITY_FLAME_BODY',
+  'ABILITY_SMOLDERING_WOOD',
+  'ABILITY_SUPER_HOT_GOO',
+  'ABILITY_POISON_POINT',
+  'ABILITY_POISON_TOUCH',
+  'ABILITY_TOXIC_SHELL',
+  'ABILITY_VENOM_CROWN',
+  'ABILITY_BLIGHT_SCALE',
+  'ABILITY_POISON_QUILLS',
+])
+
+/**
+ * Extracts a battler's ability slots in reverse order (slot 3 -> 2 -> 1 -> 0),
+ * matching HandleDefenderAbility / HandleAttackerAbility in src/battle_util.c:9018, 9059:
+ * `abilityNumber = numPossibleAbilities - abilityNumber`.
+ */
+export function getBattlerAbilitySlotsReverse(slots: AbilitySlots): { abilityId: string; slotIndex: number }[] {
+  const result: { abilityId: string; slotIndex: number }[] = []
+  if (slots.innates[2]) result.push({ abilityId: slots.innates[2], slotIndex: 3 })
+  if (slots.innates[1]) result.push({ abilityId: slots.innates[1], slotIndex: 2 })
+  if (slots.innates[0]) result.push({ abilityId: slots.innates[0], slotIndex: 1 })
+  if (slots.ability) result.push({ abilityId: slots.ability, slotIndex: 0 })
+  return result
+}
+
+/**
+ * StatLowerableOrMirrorArmor, src/battle_util.c:8538-8542.
+ */
+function canLowerStatOrMirrorArmor(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const contrary = battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battlerId, false, dataContext)
+  const canLower = contrary ? stage < MAX_STAT_STAGE : stage > MIN_STAT_STAGE
+  if (canLower) return true
+  return (
+    battlerHasSimAbility(state, battler, 'ABILITY_MIRROR_ARMOR', true, battlerId, false, dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_CRYSTALLINE_ARMOR', true, battlerId, false, dataContext)
+  )
+}
+
+export interface MoveEndAbilitiesContext {
+  state: BattleState
+  attackerId: number
+  targetId: number
+  moveId: string
+  moveData: SimMoveData | undefined
+  targetDamage: number
+  deps: TurnLoopDeps
+  unmodelled: string[]
+  fainted: number[]
+}
+
+export interface MoveEndAbilitiesResult {
+  attackerDamage: number
+  statChanges: StatChangeOutcome[]
+  statusApplied: StatusAppliedOutcome | null
+}
+
+function handleDefenderMoveEndAbility(
+  state: BattleState,
+  abilityId: string,
+  targetId: number,
+  attackerId: number,
+  moveData: SimMoveData | undefined,
+  moveId: string,
+  attackerHoldEffect: string | null,
+  deps: TurnLoopDeps,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+  fainted: number[],
+): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChange: StatChangeOutcome | null } {
+  const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChange: StatChangeOutcome | null } = {
+    attackerDamage: 0,
+    statusApplied: null,
+    statChange: null,
+  }
+
+  const attacker = state.battlers[attackerId]
+  // ShouldApplyOnHitEffect(attacker), src/battle_util.c:4062: DidMoveHit() && IsBattlerAlive(attacker)
+  if (!attacker || attacker.mon.hp <= 0) return result
+
+  // 1. Rough Skin family (src/abilities.cc:784-793, 2262, 7325, 10149, 11224)
+  if (
+    abilityId === 'ABILITY_ROUGH_SKIN' ||
+    abilityId === 'ABILITY_IRON_BARBS' ||
+    abilityId === 'ABILITY_DRAGONFRUIT' ||
+    abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ||
+    abilityId === 'ABILITY_POISON_QUILLS'
+  ) {
+    if (isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
+      const denom = abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ? 6 : 8
+      const dmg = Math.max(1, Math.floor(attacker.mon.maxHp / denom))
+      applyDamage(state, attackerId, dmg, fainted)
+      result.attackerDamage += dmg
+    }
+  }
+
+  // If attacker fainted from Rough Skin recoil, subsequent checks won't pass ShouldApplyOnHitEffect
+  if (attacker.mon.hp <= 0) return result
+
+  // 2. Poison Point on defender (src/abilities.cc:987-995, 2101, 9519, 9526, 10149, 11536)
+  if (
+    abilityId === 'ABILITY_POISON_POINT' ||
+    abilityId === 'ABILITY_POISON_TOUCH' ||
+    abilityId === 'ABILITY_TOXIC_SHELL' ||
+    abilityId === 'ABILITY_VENOM_CROWN' ||
+    abilityId === 'ABILITY_BLIGHT_SCALE' ||
+    abilityId === 'ABILITY_POISON_QUILLS'
+  ) {
+    if (canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
+      if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+        if (state.rng.random16() % 100 < 30) {
+          const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
+          if (res.applied && res.status) {
+            result.statusApplied = { battlerId: attackerId, status: res.status }
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Static on defender (src/abilities.cc:610-618, 8183)
+  if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
+    if (canBeParalyzed(state, targetId, attackerId, statusDeps)) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
+      if (state.rng.random16() % 100 < chance) {
+        const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: attackerId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 4. Flame Body on defender (src/abilities.cc:1126-1134, 4364, 6106)
+  if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
+    if (canBeBurned(state, attackerId, targetId, statusDeps)) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
+      if (state.rng.random16() % 100 < chance) {
+        const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: attackerId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 5. Effect Spore on defender (src/abilities.cc:818-845)
+  if (abilityId === 'ABILITY_EFFECT_SPORE') {
+    if (
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !isPowderImmune(state, targetId, attackerId, statusDeps)
+    ) {
+      if (state.rng.random16() % 100 < 30) {
+        const roll = state.rng.random16() % 3
+        if (roll === 0) {
+          if (canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_POISON | MOVE_EFFECT_AFFECTS_USER, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: attackerId, status: res.status }
+            }
+          }
+        } else if (roll === 1) {
+          if (canBeParalyzed(state, targetId, attackerId, statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_PARALYSIS | MOVE_EFFECT_AFFECTS_USER, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: attackerId, status: res.status }
+            }
+          }
+        } else if (roll === 2) {
+          if (canSleep(state, attackerId, targetId, statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_SLEEP | MOVE_EFFECT_AFFECTS_USER, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: attackerId, status: res.status }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 6. Gooey family on defender (src/abilities.cc:2482-2492, 2496, 3054, 6106, 11358, 11629)
+  if (
+    abilityId === 'ABILITY_GOOEY' ||
+    abilityId === 'ABILITY_SLIME_MOLD' ||
+    abilityId === 'ABILITY_TANGLING_HAIR' ||
+    abilityId === 'ABILITY_MASSIVE_PELT' ||
+    abilityId === 'ABILITY_MUCUS_MEMBRANE' ||
+    abilityId === 'ABILITY_SUPER_HOT_GOO'
+  ) {
+    // BattleScript_GooeyActivates (battle_scripts_1.s:10581-10586) swaps attacker and target around
+    // seteffectsecondary: SetMoveEffect(FALSE, FALSE) with the Gooey holder as gBattlerAttacker and
+    // HITMARKER_IGNORE_SAFEGUARD set (Shield Dust skipped). Its Sheer Force / Substitute checks (:2361, :2388)
+    // therefore read the holder against gCurrentMove; MOVE_EFFECT_SPD_MINUS_1 then calls
+    // ChangeStatBuffsImplicit with STAT_BUFF_UPDATE_MOVE_EFFECT (:2765-2775).
+    if (
+      canLowerStatOrMirrorArmor(state, attackerId, STAT_SPEED, deps.dataContext) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !testSheerForceFlag(state, targetId, moveId, statusDeps) &&
+      !doesSubstituteBlockMove(state, targetId, attackerId, moveId, statusDeps, unmodelled)
+    ) {
+      const dropRes = changeStatBuffsImplicit(
+        state,
+        targetId,
+        attackerId,
+        -1,
+        STAT_SPEED,
+        STAT_BUFF_UPDATE_MOVE_EFFECT,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (dropRes.delta !== 0) {
+        result.statChange = { battlerId: attackerId, stat: STAT_SPEED, change: dropRes.delta }
+      }
+    }
+  }
+
+  return result
+}
+
+function handleAttackerMoveEndAbility(
+  state: BattleState,
+  abilityId: string,
+  attackerId: number,
+  targetId: number,
+  moveData: SimMoveData | undefined,
+  moveId: string,
+  attackerHoldEffect: string | null,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+): StatusAppliedOutcome | null {
+  const target = state.battlers[targetId]
+  const attacker = state.battlers[attackerId]
+  // ShouldApplyOnHitEffect(target), src/battle_util.c:4062: DidMoveHit() && IsBattlerAlive(target)
+  if (!target || target.mon.hp <= 0 || !attacker || attacker.mon.hp <= 0) return null
+
+  // 1. Poison Point on attacker (src/abilities.cc:987-995, 2100, 9519, 9526, 10147, 11535)
+  if (
+    abilityId === 'ABILITY_POISON_POINT' ||
+    abilityId === 'ABILITY_POISON_TOUCH' ||
+    abilityId === 'ABILITY_TOXIC_SHELL' ||
+    abilityId === 'ABILITY_VENOM_CROWN' ||
+    abilityId === 'ABILITY_BLIGHT_SCALE' ||
+    abilityId === 'ABILITY_POISON_QUILLS'
+  ) {
+    if (canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+      if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+        if (state.rng.random16() % 100 < 30) {
+          const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
+          if (res.applied && res.status) {
+            return { battlerId: targetId, status: res.status }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Static on attacker (src/abilities.cc:610-618, 8182)
+  if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
+    if (canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
+      if (state.rng.random16() % 100 < chance) {
+        const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          return { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 3. Flame Body on attacker (src/abilities.cc:1126-1134, 4363, 6104)
+  if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
+    if (canBeBurned(state, targetId, attackerId, statusDeps)) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
+      if (state.rng.random16() % 100 < chance) {
+        const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          return { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Port of AbilityBattleEffects(ABILITYEFFECT_MOVE_END, gBattlerTarget), src/battle_util.c:4485-4489.
+ * Iterates target's ability slots in reverse order (slot 3 -> 2 -> 1 -> 0).
+ */
+export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): MoveEndAbilitiesResult {
+  const { state, attackerId, targetId, moveId, moveData, deps, unmodelled, fainted } = ctx
+  const target = state.battlers[targetId]
+  const result: MoveEndAbilitiesResult = {
+    attackerDamage: 0,
+    statChanges: [],
+    statusApplied: null,
+  }
+  if (!target) return result
+
+  const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+  const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
+  const slots = getBattlerAbilitySlotsReverse(target.mon.abilities)
+
+  for (const { abilityId } of slots) {
+    if (isSimAbilitySuppressed(state, target, abilityId, false, attackerId, false, deps.dataContext)) {
+      continue
+    }
+    if (PORTED_DEFENDER_ABILITIES.has(abilityId)) {
+      const abRes = handleDefenderMoveEndAbility(
+        state,
+        abilityId,
+        targetId,
+        attackerId,
+        moveData,
+        moveId,
+        attackerHoldEffect,
+        deps,
+        statusDeps,
+        unmodelled,
+        fainted,
+      )
+      if (abRes.attackerDamage > 0) {
+        result.attackerDamage += abRes.attackerDamage
+      }
+      if (abRes.statChange) {
+        result.statChanges.push(abRes.statChange)
+      }
+      if (abRes.statusApplied && !result.statusApplied) {
+        result.statusApplied = abRes.statusApplied
+      }
+    } else if (ON_DEFENDER_ABILITIES.has(abilityId)) {
+      const msg = `move-end defender ability ${abilityId} is not modelled yet`
+      if (!unmodelled.includes(msg)) {
+        unmodelled.push(msg)
+      }
+    }
+  }
+
+  return result
+}
+
+/**
+ * Port of AbilityBattleEffects(ABILITYEFFECT_MOVE_END_ATTACKER, gBattlerAttacker), src/battle_util.c:4491-4495.
+ * Iterates attacker's ability slots in reverse order (slot 3 -> 2 -> 1 -> 0).
+ */
+export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): MoveEndAbilitiesResult {
+  const { state, attackerId, targetId, moveId, moveData, deps, unmodelled } = ctx
+  const attacker = state.battlers[attackerId]
+  const result: MoveEndAbilitiesResult = {
+    attackerDamage: 0,
+    statChanges: [],
+    statusApplied: null,
+  }
+  if (!attacker || attacker.mon.hp <= 0) return result
+
+  const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+  const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
+  const slots = getBattlerAbilitySlotsReverse(attacker.mon.abilities)
+
+  for (const { abilityId } of slots) {
+    if (isSimAbilitySuppressed(state, attacker, abilityId, false, attackerId, false, deps.dataContext)) {
+      continue
+    }
+    if (PORTED_ATTACKER_ABILITIES.has(abilityId)) {
+      const applied = handleAttackerMoveEndAbility(
+        state,
+        abilityId,
+        attackerId,
+        targetId,
+        moveData,
+        moveId,
+        attackerHoldEffect,
+        statusDeps,
+        unmodelled,
+      )
+      if (applied && !result.statusApplied) {
+        result.statusApplied = applied
+      }
+    } else if (ON_ATTACKER_ABILITIES.has(abilityId)) {
+      const msg = `move-end attacker ability ${abilityId} is not modelled yet`
+      if (!unmodelled.includes(msg)) {
+        unmodelled.push(msg)
+      }
+    }
+  }
+
+  return result
+}
+
+// ---------------------------------------------------------------------------
 // MoveEnd Ladder
 // ---------------------------------------------------------------------------
 
@@ -599,24 +1067,47 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 5: MOVEEND_ABILITIES (:4527-4531)
-  // Target contact/move-end abilities
+  // Target contact/move-end abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey)
   if (target && targetDamage > 0) {
-    for (const ab of ON_DEFENDER_ABILITIES) {
-      if (battlerHasAbility(target.mon.abilities, ab, () => false)) {
-        unmodelled.push(`move-end defender ability ${ab} is not modelled yet`)
-        break
-      }
+    const defAbResult = dispatchMoveEndDefenderAbilities({
+      state,
+      attackerId,
+      targetId,
+      moveId,
+      moveData,
+      targetDamage,
+      deps,
+      unmodelled,
+      fainted,
+    })
+    if (defAbResult.attackerDamage > 0) {
+      totalAttackerDamage += defAbResult.attackerDamage
+      hadAttackerDamage = true
+    }
+    if (defAbResult.statChanges.length > 0) {
+      statChanges.push(...defAbResult.statChanges)
+    }
+    if (defAbResult.statusApplied && !statusApplied) {
+      statusApplied = defAbResult.statusApplied
     }
   }
 
   // Case 6: MOVEEND_ABILITIES_ATTACKER (:4532-4536)
-  // Attacker contact/move-end abilities (e.g. Poison Touch)
-  if (attacker && targetDamage > 0) {
-    for (const ab of ON_ATTACKER_ABILITIES) {
-      if (battlerHasAbility(attacker.mon.abilities, ab, () => false)) {
-        unmodelled.push(`move-end attacker ability ${ab} is not modelled yet`)
-        break
-      }
+  // Attacker contact/move-end abilities (Static, Flame Body, Poison Point/Touch)
+  if (attacker && attacker.mon.hp > 0 && targetDamage > 0) {
+    const atkAbResult = dispatchMoveEndAttackerAbilities({
+      state,
+      attackerId,
+      targetId,
+      moveId,
+      moveData,
+      targetDamage,
+      deps,
+      unmodelled,
+      fainted,
+    })
+    if (atkAbResult.statusApplied && !statusApplied) {
+      statusApplied = atkAbResult.statusApplied
     }
   }
 

@@ -1284,6 +1284,9 @@ export function applyPrimaryStatusEffect(
   unmodelled?: string[],
   primary: boolean = true,
   certain: boolean = false,
+  /** HITMARKER_IGNORE_SAFEGUARD -- set by abilities.cc's AbilityStatusEffect /
+   * AbilityStatusEffectSafe (:263-284) before their seteffectsecondary. */
+  ignoreSafeguard: boolean = false,
 ): ApplyStatusResult {
   const affectsUser = hasFlag(moveEffect, MOVE_EFFECT_AFFECTS_USER)
   const effectBattlerId = affectsUser ? attackerId : targetId
@@ -1299,8 +1302,7 @@ export function applyPrimaryStatusEffect(
 
   // Top of SetMoveEffect (src/battle_script_commands.c:2348-2388)
   // 1. Shield Dust / Covert Cloak (:2348-2350)
-  // Note: HITMARKER_IGNORE_SAFEGUARD is never set for moves.
-  if (!primary && !affectsUser && isPreventableSecondaryEffect(baseEffect)) {
+  if (!ignoreSafeguard && !primary && !affectsUser && isPreventableSecondaryEffect(baseEffect)) {
     const attackerHasMoldBreaker = attackerBattler ? attackerHasMoldBreakerActive(attackerBattler, deps) : false
     const hasShieldDust = battlerHasSimAbility(
       state,
@@ -1318,8 +1320,7 @@ export function applyPrimaryStatusEffect(
   }
 
   // 2. Safeguard (:2352-2354)
-  // Note: HITMARKER_IGNORE_SAFEGUARD is never set for moves.
-  if (!primary && baseEffect <= MOVE_EFFECT_CONFUSION) {
+  if (!ignoreSafeguard && !primary && baseEffect <= MOVE_EFFECT_CONFUSION) {
     const effectSide = effectBattlerId & 1
     if (hasFlag(state.sides[effectSide].statuses, SIDE_STATUS_SAFEGUARD)) {
       return { applied: false, doesntAffectFoe: false }

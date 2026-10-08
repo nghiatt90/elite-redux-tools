@@ -25,14 +25,24 @@ import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
+  DEFAULT_STAT_STAGE,
+  SIDE_STATUS_SAFEGUARD,
+  STATUS1_BURN,
   STATUS1_NONE,
+  STATUS1_PARALYSIS,
+  STATUS1_POISON,
+  STATUS1_SLEEP,
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
+  STATUS3_GASTRO_ACID,
+  STAT_SPEED,
   hasFlag,
 } from './constants'
 import {
-  NO_RECOIL_ABILITIES,
   HALF_RECOIL_ABILITIES,
+  NO_RECOIL_ABILITIES,
+  PORTED_ATTACKER_ABILITIES,
+  PORTED_DEFENDER_ABILITIES,
   RECOIL_FRACTIONS,
 } from './moveEnd'
 
@@ -215,8 +225,23 @@ const ABILITY_MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 const ABILITY_LONG_REACH = requireAbility('ABILITY_LONG_REACH')
 const ABILITY_SHEER_FORCE = requireAbility('ABILITY_SHEER_FORCE')
 const ABILITY_ROUGH_SKIN = requireAbility('ABILITY_ROUGH_SKIN')
+const ABILITY_IRON_BARBS = requireAbility('ABILITY_IRON_BARBS')
+const ABILITY_DOUBLE_IRON_BARBS = requireAbility('ABILITY_DOUBLE_IRON_BARBS')
+const ABILITY_DRAGONFRUIT = requireAbility('ABILITY_DRAGONFRUIT')
+const ABILITY_POISON_QUILLS = requireAbility('ABILITY_POISON_QUILLS')
+const ABILITY_STATIC = requireAbility('ABILITY_STATIC')
+const ABILITY_SHIELD_DUST = requireAbility('ABILITY_SHIELD_DUST')
+const ABILITY_WHITE_NOISE = requireAbility('ABILITY_WHITE_NOISE')
+const ABILITY_FLAME_BODY = requireAbility('ABILITY_FLAME_BODY')
+const ABILITY_SMOLDERING_WOOD = requireAbility('ABILITY_SMOLDERING_WOOD')
+const ABILITY_POISON_POINT = requireAbility('ABILITY_POISON_POINT')
 const ABILITY_POISON_TOUCH = requireAbility('ABILITY_POISON_TOUCH')
+const ABILITY_EFFECT_SPORE = requireAbility('ABILITY_EFFECT_SPORE')
+const ABILITY_GOOEY = requireAbility('ABILITY_GOOEY')
 const ABILITY_MOXIE = requireAbility('ABILITY_MOXIE')
+const ABILITY_AFTERMATH = requireAbility('ABILITY_AFTERMATH')
+const ABILITY_ABSORBANT = requireAbility('ABILITY_ABSORBANT')
+const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
 
 // ---------------------------------------------------------------------------
 // Unit Tests
@@ -659,26 +684,26 @@ describe('State Bookkeeping & Clear Bits', () => {
 })
 
 describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
-  it('conditionally gaps defender contact ability (ABILITY_ROUGH_SKIN) on damaged target', () => {
+  it('conditionally gaps defender contact ability (ABILITY_AFTERMATH) on damaged target', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } }],
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_AFTERMATH, innates: [null, null, null] } }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end defender ability ABILITY_ROUGH_SKIN is not modelled yet')
+    expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps attacker contact ability (ABILITY_POISON_TOUCH) on damaging hit', () => {
+  it('conditionally gaps attacker contact ability (ABILITY_ABSORBANT) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_TOUCH, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_ABSORBANT, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_POISON_TOUCH is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ABSORBANT is not modelled yet')
   })
 
   it('conditionally gaps on-faint ability (ABILITY_MOXIE) when a battler faints', () => {
@@ -727,6 +752,48 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       EFFECT_FLINCH_RECOIL_50: 2,
     })
   })
+
+  it('PORTED_DEFENDER_ABILITIES pins all 21 contact abilities and aliases', () => {
+    expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
+      'ABILITY_BLIGHT_SCALE',
+      'ABILITY_DOUBLE_IRON_BARBS',
+      'ABILITY_DRAGONFRUIT',
+      'ABILITY_EFFECT_SPORE',
+      'ABILITY_FLAME_BODY',
+      'ABILITY_GOOEY',
+      'ABILITY_IRON_BARBS',
+      'ABILITY_MASSIVE_PELT',
+      'ABILITY_MUCUS_MEMBRANE',
+      'ABILITY_POISON_POINT',
+      'ABILITY_POISON_QUILLS',
+      'ABILITY_POISON_TOUCH',
+      'ABILITY_ROUGH_SKIN',
+      'ABILITY_SLIME_MOLD',
+      'ABILITY_SMOLDERING_WOOD',
+      'ABILITY_STATIC',
+      'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TANGLING_HAIR',
+      'ABILITY_TOXIC_SHELL',
+      'ABILITY_VENOM_CROWN',
+      'ABILITY_WHITE_NOISE',
+    ])
+  })
+
+  it('PORTED_ATTACKER_ABILITIES pins all 11 contact abilities and aliases', () => {
+    expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
+      'ABILITY_BLIGHT_SCALE',
+      'ABILITY_FLAME_BODY',
+      'ABILITY_POISON_POINT',
+      'ABILITY_POISON_QUILLS',
+      'ABILITY_POISON_TOUCH',
+      'ABILITY_SMOLDERING_WOOD',
+      'ABILITY_STATIC',
+      'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TOXIC_SHELL',
+      'ABILITY_VENOM_CROWN',
+      'ABILITY_WHITE_NOISE',
+    ])
+  })
 })
 
 describe('MOVEEND_RECOIL uses savedDmg', () => {
@@ -736,5 +803,483 @@ describe('MOVEEND_RECOIL uses savedDmg', () => {
     executeTurn(state, [useMove(1, MOVE_DOUBLE_EDGE), null], testDepsWithDamage(fixedDamage(300)))
     expect(state.battlers[1]!.mon.hp).toBe(0)
     expect(state.battlers[0]!.mon.hp).toBe(70)
+  })
+})
+
+describe('MOVEEND_ABILITIES (Case 5): Defender Contact Abilities', () => {
+  it('Rough Skin deals floor(maxHp / 8) damage on contact hit (Tackle)', () => {
+    // Attacker: 100 max HP -> floor(100 / 8) = 12 damage.
+    // Defender: holds Rough Skin.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(70) // 100 - 30
+    expect(state.battlers[0]!.mon.hp).toBe(88) // 100 - 12
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+  })
+
+  it('Iron Barbs deals floor(maxHp / 8) damage on contact hit (Tackle)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_IRON_BARBS, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(88) // 100 - 12
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+  })
+
+  it('Double Iron Barbs deals floor(maxHp / 6) damage on contact hit (Tackle)', () => {
+    // Attacker: 100 max HP -> floor(100 / 6) = 16 damage.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_DOUBLE_IRON_BARBS, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(84) // 100 - 16
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(16)
+  })
+
+  it('Dragonfruit deals floor(maxHp / 8) damage on contact hit (Tackle)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_DRAGONFRUIT, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(88)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+  })
+
+  it('Rough Skin does NOT deal damage on non-contact hit (Water Gun)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBeNull()
+  })
+
+  it('Rough Skin recoil is blocked by attacker Magic Guard', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_MAGIC_GUARD, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBeNull()
+  })
+
+  it('Static paralyzes attacker on contact hit when roll < 30', () => {
+    // Contact hit (Tackle): 30% chance. Roll 15 < 30 -> paralyzed.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }],
+      scriptedRng([0, 15]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'PARALYSIS' })
+  })
+
+  it('Static does NOT paralyze attacker on failing roll (roll >= 30)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }],
+      scriptedRng([0, 30]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+
+  it('Static paralyzes attacker on non-contact hit (Water Gun) with 10% chance (roll < 10)', () => {
+    // Non-contact hit: 10% chance. Roll 5 < 10 -> paralyzed.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }],
+      scriptedRng([0, 5]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'PARALYSIS' })
+  })
+
+  it('Static does NOT paralyze attacker on non-contact hit if roll >= 10', () => {
+    // Non-contact hit: 10% chance. Roll 15 >= 10 -> no paralysis.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }],
+      scriptedRng([0, 15]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+
+  it('White Noise (Static alias) paralyzes attacker on contact hit', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_WHITE_NOISE, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'PARALYSIS' })
+  })
+
+  it('Flame Body burns attacker on contact hit (30% chance, roll < 30)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_FLAME_BODY, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_BURN)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'BURN' })
+  })
+
+  it('Flame Body burns attacker on non-contact hit with 20% chance (roll < 20)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_FLAME_BODY, innates: [null, null, null] } }],
+      scriptedRng([0, 15]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_BURN)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'BURN' })
+  })
+
+  it('Smoldering Wood (Flame Body alias) burns attacker on contact hit', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SMOLDERING_WOOD, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_BURN)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'BURN' })
+  })
+
+  it('Poison Point poisons attacker on contact hit (30% chance, roll < 30)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_POINT, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_POISON)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'POISON' })
+  })
+
+  it('Poison Point does NOT poison on non-contact hit (Water Gun) even with roll < 30', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_POINT, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+
+  it('Poison Quills deals Rough Skin recoil (12) and can poison attacker on contact', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_QUILLS, innates: [null, null, null] } }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(76) // 100 - 12 recoil - 12 end-turn poison (maxHp / 8)
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_POISON)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'POISON' })
+  })
+})
+
+describe('MOVEEND_ABILITIES (Case 5): Effect Spore Draw Branches', () => {
+  it('Branch 0 (Poison): roll < 30, roll % 3 == 0 inflicts poison', () => {
+    // Draw 1: 10 (< 30) -> triggers
+    // Draw 2: 0 (% 3 == 0) -> Poison
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_EFFECT_SPORE, innates: [null, null, null] } }],
+      scriptedRng([0, 10, 0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_POISON)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'POISON' })
+  })
+
+  it('Branch 1 (Paralysis): roll < 30, roll % 3 == 1 inflicts paralysis', () => {
+    // Draw 1: 10 (< 30) -> triggers
+    // Draw 2: 1 (% 3 == 1) -> Paralysis
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_EFFECT_SPORE, innates: [null, null, null] } }],
+      scriptedRng([0, 10, 1]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'PARALYSIS' })
+  })
+
+  it('Branch 2 (Sleep): roll < 30, roll % 3 == 2 inflicts sleep (with sleep turns draw)', () => {
+    // Draw 1: 10 (< 30) -> triggers
+    // Draw 2: 2 (% 3 == 2) -> Sleep
+    // Draw 3: 1 -> sleepTurns = (1 % 3) + 2 = 3 turns in applyPrimaryStatusEffect
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_EFFECT_SPORE, innates: [null, null, null] } }],
+      scriptedRng([0, 10, 2, 1]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_SLEEP)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 0, status: 'SLEEP' })
+  })
+
+  it('Effect Spore does NOT trigger when roll >= 30', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_EFFECT_SPORE, innates: [null, null, null] } }],
+      scriptedRng([0, 50]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+
+  it('Effect Spore does NOT trigger on non-contact hit (Water Gun)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_EFFECT_SPORE, innates: [null, null, null] } }],
+      scriptedRng([0, 10, 0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+})
+
+describe('MOVEEND_ABILITIES (Case 5): Gooey Speed Drop', () => {
+  it('lowers attacker Speed by 1 stage on contact hit (Tackle)', () => {
+    // Default speed stage is 6 (DEFAULT_STAT_STAGE). Drops to 5.
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GOOEY, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: -1 }])
+  })
+
+  it('does NOT lower attacker Speed on non-contact hit (Water Gun)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GOOEY, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toBeNull()
+  })
+})
+
+describe('MOVEEND_ABILITIES_ATTACKER (Case 6): Attacker Contact Abilities', () => {
+  it('attacker with Static paralyzes target on contact hit when roll < 30', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 1, status: 'PARALYSIS' })
+  })
+
+  it('attacker with Static does NOT paralyze target on roll >= 30', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0, 40]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+
+  it('attacker with Poison Touch poisons target on contact hit when roll < 30', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_TOUCH, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0, 15]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toEqual({ battlerId: 1, status: 'POISON' })
+  })
+
+  it('attacker with Poison Touch does NOT poison target on non-contact hit (Water Gun)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_POISON_TOUCH, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0, 10]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.status1).toBe(STATUS1_NONE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statusApplied).toBeNull()
+  })
+})
+
+describe('Ability Slots, Innates, Suppression & Ordering Rules', () => {
+  it('triggers contact ability located in innate slot (innates[0])', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100 },
+        { hp: 100, maxHp: 100, abilities: { ability: null, innates: [ABILITY_ROUGH_SKIN, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(88)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+  })
+
+  it('applies reverse slot order (slot 3 before slot 0) and both effects trigger when attacker survives', () => {
+    // Target has Rough Skin in innate slot 3 (innates[2]) and Gooey in main slot 0 (ability).
+    // Attacker has 100 HP, takes 12 recoil (survives), then Gooey drops speed.
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100 },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GOOEY, innates: [null, null, ABILITY_ROUGH_SKIN] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(88) // 100 - 12
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: -1 }])
+  })
+
+  it('fainting attacker from earlier slot (Rough Skin in slot 3) stops later slot (Gooey in slot 0)', () => {
+    // Target has Rough Skin in slot 3 (innates[2]) and Gooey in slot 0 (ability).
+    // Attacker has only 10 HP. Rough Skin deals 12 damage >= 10 HP -> attacker faints!
+    // Gooey's ShouldApplyOnHitEffect(attacker) checks IsBattlerAlive -> false, so Gooey does not trigger.
+    const state = battle(
+      [
+        { hp: 10, maxHp: 100 },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GOOEY, innates: [null, null, ABILITY_ROUGH_SKIN] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(0)
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+    expect(act.statChanges).toBeNull()
+    expect(act.fainted).toContain(0)
+  })
+
+  it('Rough Skin STILL triggers against attacker with Mold Breaker (IsSuppressed checkMoldBreaker is FALSE)', () => {
+    // Mold Breaker does NOT bypass contact abilities in upstream C!
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOLD_BREAKER, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(88) // 100 - 12
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBe(12)
+  })
+
+  it('Rough Skin does NOT trigger when defender is suppressed under Gastro Acid', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100 },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ROUGH_SKIN, innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    state.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID
+
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.attackerDamage).toBeNull()
+  })
+})
+
+describe('ability statuses set HITMARKER_IGNORE_SAFEGUARD', () => {
+  it("Static paralyses a Shield Dust attacker: SetMoveEffect's Shield Dust check (:2348) is skipped under the flag", () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SHIELD_DUST, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } },
+      ],
+      scriptedRng([0, 0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+    expect(hasFlag(state.battlers[0]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+  })
+
+  it("Safeguard still blocks Static, via CanBeParalyzed's IsStatusImmune (battle_util.c:5028)", () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STATIC, innates: [null, null, null] } }],
+      scriptedRng([0, 0]),
+    )
+    state.sides[0]!.statuses |= SIDE_STATUS_SAFEGUARD
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
   })
 })
