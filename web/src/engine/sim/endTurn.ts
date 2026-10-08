@@ -132,12 +132,8 @@
 //   ENDTURN_THRASH          Unreachable -- STATUS2_LOCK_CONFUSE has no reader
 //                           outside constants.ts; the case also needs
 //                           SetMoveEffect/CancelMultiTurnMoves, neither ported.
-//   ENDTURN_FLINCH          Gapped -- STATUS2_FLINCHED is read for real by
-//                           attackCanceller.ts. The C unconditionally clears it
-//                           every end of turn (:2771); not applied here (no
-//                           mutation), gapped only when the bit is actually
-//                           set, so a caller knows this port leaves a flinch
-//                           flag standing past the turn that consumed it.
+//   ENDTURN_FLINCH          Ported -- battle_util.c:2770-2772: unconditionally
+//                           clears STATUS2_FLINCHED every end of turn.
 //   ENDTURN_DISABLE         Unreachable -- volatiles.disabledMove/disableTimer
 //                           are named only in attackCanceller.ts's own
 //                           "Unreachable" comment for CANCELLER_DISABLED, never
@@ -258,6 +254,7 @@ import {
   STATUS4_CUTTHROAT,
   STATUS4_GHASTLY_ECHO,
   STATUS_FIELD_MAGIC_ROOM,
+  clearFlag,
   getCounter,
   hasFlag,
   setCounter,
@@ -653,12 +650,8 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
     if (burn) results.push(burn)
 
     // ENDTURN_FLINCH, :2770-2772 -- the C clears STATUS2_FLINCHED
-    // unconditionally every end of turn; not applied here.
-    gapIf(
-      hasFlag(battler.mon.status2, STATUS2_FLINCHED),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_FLINCH (battle_util.c:2770-2772) is not applied -- the flinch flag was not cleared`,
-    )
+    // unconditionally every end of turn.
+    battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_FLINCHED)
 
     // ENDTURN_GHASTLY_ECHO, :2813-2816.
     gapIf(

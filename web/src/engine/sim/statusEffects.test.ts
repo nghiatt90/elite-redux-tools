@@ -19,9 +19,14 @@ import type { GroundingContext } from './grounding'
 import type { MoveBehaviors } from '../basePower'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
+  DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   SIDE_STATUS_SAFEGUARD,
   STAT_ATK,
+  STAT_DEF,
+  STAT_SPEED,
+  STAT_SPATK,
+  STAT_SPDEF,
   STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_FROSTBITE,
@@ -32,6 +37,7 @@ import {
   STATUS1_TOXIC_POISON,
   STATUS2_CONFUSION,
   STATUS2_ENRAGED,
+  STATUS2_FLINCHED,
   STATUS2_SUBSTITUTE,
   STATUS2_UPROAR,
   STATUS3_YAWN,
@@ -118,6 +124,12 @@ const MOVE_RELIC_SONG = requireMove('MOVE_RELIC_SONG')
 const MOVE_TRI_ATTACK = requireMove('MOVE_TRI_ATTACK')
 const MOVE_THROAT_CHOP = requireMove('MOVE_THROAT_CHOP')
 const MOVE_WATER_PULSE = requireMove('MOVE_WATER_PULSE')
+const MOVE_ZEN_HEADBUTT = requireMove('MOVE_ZEN_HEADBUTT')
+const MOVE_ROCK_SMASH = requireMove('MOVE_ROCK_SMASH')
+const MOVE_FLAME_CHARGE = requireMove('MOVE_FLAME_CHARGE')
+const MOVE_GIANT_GALE = requireMove('MOVE_GIANT_GALE')
+const MOVE_FIRE_FANG = requireMove('MOVE_FIRE_FANG')
+const MOVE_ANCIENT_POWER = requireMove('MOVE_ANCIENT_POWER')
 
 const ABILITY_CORROSION = requireAbility('ABILITY_CORROSION')
 const ABILITY_MISTY_SURGE = requireAbility('ABILITY_MISTY_SURGE')
@@ -133,6 +145,9 @@ const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
 const ABILITY_OVERCOAT = requireAbility('ABILITY_OVERCOAT')
 const ABILITY_SERENE_GRACE = requireAbility('ABILITY_SERENE_GRACE')
 const ABILITY_SHEER_FORCE = requireAbility('ABILITY_SHEER_FORCE')
+const ABILITY_INNER_FOCUS = requireAbility('ABILITY_INNER_FOCUS')
+const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
+const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -1268,5 +1283,229 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
     expect(getMoveEffectChance(statePyro, 0, 'MOVE_FLAMETHROWER', MOVE_EFFECT_BURN, 10, deps)).toBe(100)
     // 20 * 5 = 100 * 2 = 200 -> capped at 100
     expect(getMoveEffectChance(statePyro, 0, 'MOVE_FLAMETHROWER', MOVE_EFFECT_BURN, 20, deps)).toBe(100)
+  })
+
+  describe('Cycle 26: Flinch and stat-change secondary effects', () => {
+    it('flinch move flinches slower foe, cancelling its next action with FLINCH', () => {
+      // Derivation:
+      // MOVE_ZEN_HEADBUTT: accuracy 100, effectChance 30, EFFECT_FLINCH_HIT (moveBehaviors.json).
+      // Battler 0 (Spe 100) acts before Battler 1 (Spe 50).
+      // RNG draws:
+      // 1. Accuracy roll: Random() % 100 -> 0 (< 100 passes).
+      // 2. Chance roll (Cmd_seteffectwithchance, battle_script_commands.c:3092, 3113):
+      //    Random() % 100 < 30 -> 0 passes.
+      // SetMoveEffect case MOVE_EFFECT_FLINCH (:2665):
+      //    gBattleMons[1].status2 |= STATUS2_FLINCHED.
+      // Battler 1 acts:
+      //    AtkCanceller_UnableToUseMove (attackCanceller.ts:321, battle_script_commands.c:3305)
+      //    checks hasFlag(status2, STATUS2_FLINCHED), returns cancelledBy: 'FLINCH'.
+      // End of turn (endTurn.ts, battle_util.c:2770-2772):
+      //    ENDTURN_FLINCH clears STATUS2_FLINCHED.
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, {}], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ZEN_HEADBUTT), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+      expect(out.actions[0].action).toBe('USE_MOVE')
+      expect(out.actions[0].cancelledBy).toBeNull()
+      expect(out.actions[1].action).toBe('USE_MOVE')
+      expect(out.actions[1].cancelledBy).toBe('FLINCH')
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_FLINCHED)).toBe(false)
+      expect(rng.calls).toBe(2)
+    })
+
+    it('Inner Focus blocks flinch', () => {
+      // Derivation:
+      // Battler 0 uses MOVE_ZEN_HEADBUTT on Battler 1 with ABILITY_INNER_FOCUS.
+      // RNG draws:
+      // 1. Accuracy roll: 0 (< 100 passes).
+      // 2. Chance roll: 0 (< 30 passes).
+      // SetMoveEffect case MOVE_EFFECT_FLINCH (battle_script_commands.c:2666):
+      // IsAbilityStatusProtected(1, CHECK_FLINCH) returns ABILITY_INNER_FOCUS,
+      // so STATUS2_FLINCHED is NOT set on Battler 1.
+      // Battler 1 acts: not cancelled.
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, { abilities: { ability: ABILITY_INNER_FOCUS, innates: [null, null, null] } }], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ZEN_HEADBUTT), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+      expect(out.actions[0].cancelledBy).toBeNull()
+      expect(out.actions[1].cancelledBy).toBeNull()
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_FLINCHED)).toBe(false)
+    })
+
+    it('defence-down hit lowers target Defense by 1 stage', () => {
+      // Derivation:
+      // MOVE_ROCK_SMASH: accuracy 100, effectChance 100, EFFECT_DEFENSE_DOWN_HIT.
+      // secondaryEffects: [{ effect: 'MOVE_EFFECT_DEF_MINUS_1' }].
+      // RNG draws:
+      // 1. Accuracy: 0 (< 100 passes).
+      // 2. Chance roll: 0 (< 100 passes).
+      // SetMoveEffect (battle_script_commands.c:2765-2781):
+      // ChangeStatBuffsImplicit(-1, STAT_DEF, STAT_BUFF_UPDATE_MOVE_EFFECT, gBattlescriptCurrInstr).
+      // Target's Def stage drops from DEFAULT_STAT_STAGE (6) to 5.
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, {}], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ROCK_SMASH), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([{ battlerId: 1, stat: STAT_DEF, change: -1 }])
+      expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(5)
+      expect(rng.calls).toBe(2)
+    })
+
+    it('speed-up self hit raises user Speed by 1 stage (affectsUser)', () => {
+      // Derivation:
+      // MOVE_FLAME_CHARGE: accuracy 100, effectChance 100, EFFECT_SPEED_UP_HIT.
+      // Legacy script BattleScript_EffectSpeedUpHit (battle_scripts_1.s:2127):
+      // setmoveeffect MOVE_EFFECT_SPD_PLUS_1 | MOVE_EFFECT_AFFECTS_USER.
+      // RNG draws:
+      // 1. Accuracy: 0 (< 100 passes).
+      // 2. Chance roll: 0 (< 100 passes).
+      // SetMoveEffect (battle_script_commands.c:2751-2764):
+      // ChangeStatBuffsImplicit(1, STAT_SPEED, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT, 0).
+      // User's Speed stage raises from DEFAULT_STAT_STAGE (6) to 7.
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, {}], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_FLAME_CHARGE), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: 1 }])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+      expect(rng.calls).toBe(2)
+    })
+
+    it('Contrary on target reverses secondary stat drop to a boost', () => {
+      // Derivation:
+      // Battler 0 uses MOVE_ROCK_SMASH on Battler 1 with ABILITY_CONTRARY.
+      // Inside ChangeStatBuffsImplicit -> ChangeStatBuffs (battle_script_commands.c:9749):
+      // BATTLER_HAS_ABILITY(battler, ABILITY_CONTRARY) multiplies statValue by -1 (-1 * -1 = 1).
+      // ReverseStatChangeMoveEffect (battle_script_commands.c:9752).
+      // Target's Def stage raises from DEFAULT_STAT_STAGE (6) to 7.
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, { abilities: { ability: ABILITY_CONTRARY, innates: [null, null, null] } }], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ROCK_SMASH), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([{ battlerId: 1, stat: STAT_DEF, change: 1 }])
+      expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(7)
+    })
+
+    it('Clear Body target blocks secondary stat drop', () => {
+      // Derivation:
+      // Battler 0 uses MOVE_ROCK_SMASH on Battler 1 with ABILITY_CLEAR_BODY.
+      // Inside changeStatBuffs: getStatDropBlock returns true for ABILITY_CLEAR_BODY.
+      // Stat drop is blocked, delta is 0, returning empty statChanges.
+      // Target's Def stage remains DEFAULT_STAT_STAGE (6).
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, { abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] } }], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ROCK_SMASH), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([])
+      expect(state.battlers[1]!.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
+    })
+
+    it('Mist blocks secondary stat drop', () => {
+      // Derivation:
+      // Side 1 has active Mist (timers.mistTimer = 5).
+      // Battler 0 uses MOVE_ROCK_SMASH on Battler 1.
+      // Inside changeStatBuffs (battle_script_commands.c:9769):
+      // isMistActive returns true for side 1, statValue <= -1, and not certain.
+      // Drop is blocked with B_MSG_STAT_WONT_DECREASE, delta is 0.
+      // Target's Def stage remains DEFAULT_STAT_STAGE (6).
+      const rng = scriptedRng([0, 0])
+      const state = battle([{}, {}], rng)
+      state.sides[1].timers.mistTimer = 5
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ROCK_SMASH), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([])
+      expect(state.battlers[1]!.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
+    })
+
+    it('EFFECT_ARGUMENT_HIT on real move (Giant Gale lowers user Speed)', () => {
+      // Derivation:
+      // MOVE_GIANT_GALE: accuracy 100, effectChance 100, EFFECT_ARGUMENT_HIT.
+      // argument: { affectsUser: true, certain: true, effect: 'MOVE_EFFECT_SPD_MINUS_1', kind: 'effect' }.
+      // Legacy script BattleScript_EffectArgumentHit (battle_scripts_1.s:11831):
+      // argumenttomoveeffect; goto BattleScript_EffectHit.
+      // certain: true skips RNG chance draw (battle_script_commands.c:3107).
+      // ChangeStatBuffsImplicit(-1, STAT_SPEED, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT, gBattlescriptCurrInstr).
+      // User's Speed stage drops from DEFAULT_STAT_STAGE (6) to 5.
+      // Accuracy draw = 1. Chance draw skipped. Total rng.calls = 1.
+      const rng = scriptedRng([0])
+      const state = battle([{}, {}], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_GIANT_GALE), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: -1 }])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(5)
+      expect(rng.calls).toBe(1)
+    })
+
+    it('Fire Fang draw order: rolls flinch first, then status (burn)', () => {
+      // Derivation:
+      // MOVE_FIRE_FANG: accuracy 95, effectChance 10, EFFECT_FLINCH_STATUS.
+      // argument: { affectsUser: false, certain: false, effect: 'MOVE_EFFECT_BURN', kind: 'effect' }.
+      // Legacy script BattleScript_EffectFlinchWithStatus (battle_scripts_1.s:3870-3893):
+      // Draw order:
+      // 1. Accuracy roll (Random() % 100 < 95)
+      // 2. Flinch chance roll: seteffectwithchance (Random() % 100 < 10)
+      // 3. Burn chance roll: seteffectwithchance (Random() % 100 < 10)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+
+      // Sub-case A: Flinch passes (roll 5 < 10), Burn fails (roll 50 >= 10)
+      // Accuracy = 0 (< 95), Flinch = 5 (< 10), Burn = 50 (>= 10)
+      const rngA = scriptedRng([0, 5, 50])
+      const stateA = battle([{}, {}], rngA)
+      const outA = executeTurn(stateA, [useMove(1, MOVE_FIRE_FANG), useMove(0, MOVE_SWORDS_DANCE)], deps)
+
+      expect(outA.actions[0].statusApplied).toBeNull()
+      expect(stateA.battlers[1]!.mon.status1).toBe(0)
+      expect(outA.actions[1].cancelledBy).toBe('FLINCH')
+      expect(rngA.calls).toBe(3)
+
+      // Sub-case B: Flinch fails (roll 50 >= 10), Burn passes (roll 5 < 10)
+      // Accuracy = 0 (< 95), Flinch = 50 (>= 10), Burn = 5 (< 10)
+      const rngB = scriptedRng([0, 50, 5])
+      const stateB = battle([{}, {}], rngB)
+      const outB = executeTurn(stateB, [useMove(1, MOVE_FIRE_FANG), null], deps)
+
+      expect(outB.actions[0].statusApplied).toEqual({ battlerId: 1, status: 'BURN' })
+      expect(hasFlag(stateB.battlers[1]!.mon.status1, STATUS1_BURN)).toBe(true)
+      expect(hasFlag(stateB.battlers[1]!.mon.status2, STATUS2_FLINCHED)).toBe(false)
+      expect(rngB.calls).toBe(3)
+    })
+
+    it('ALL_STATS_UP on real move (Ancient Power raises all 5 stats by 1 on user)', () => {
+      // Derivation:
+      // MOVE_ANCIENT_POWER: accuracy 100, effectChance 10, EFFECT_ALL_STATS_UP_HIT.
+      // secondaryEffects: [{ affectsUser: true, certain: false, chance: 0, effect: 'MOVE_EFFECT_ALL_STATS_UP' }].
+      // RNG draws:
+      // 1. Accuracy roll: 0 (< 100 passes).
+      // 2. Chance roll: 5 (< 10 passes).
+      // BattleScript_AllStatsUp (battle_scripts_1.s:7891-7925):
+      // Raises ATK, DEF, SPEED, SPATK, SPDEF by 1 on user (battler 0).
+      // All 5 stages increase from DEFAULT_STAT_STAGE (6) to 7.
+      const rng = scriptedRng([0, 5])
+      const state = battle([{}, {}], rng)
+      const deps = testDeps(fixedDamage(20), rawBehaviors)
+      const out = executeTurn(state, [useMove(1, MOVE_ANCIENT_POWER), null], deps)
+
+      expect(out.actions[0].statChanges).toEqual([
+        { battlerId: 0, stat: STAT_ATK, change: 1 },
+        { battlerId: 0, stat: STAT_DEF, change: 1 },
+        { battlerId: 0, stat: STAT_SPEED, change: 1 },
+        { battlerId: 0, stat: STAT_SPATK, change: 1 },
+        { battlerId: 0, stat: STAT_SPDEF, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+      expect(rng.calls).toBe(2)
+    })
   })
 })

@@ -813,8 +813,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     applyDamage(state, targetId, targetDamage, fainted)
     applyDamage(state, battlerId, attackerDamage, fainted)
 
-    // Secondary status effects (BattleScript_EffectHit, seteffectwithchance).
-    const secondaryStatusApplied = applySecondaryMoveEffects({
+    // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
+    const secondaryResult = applySecondaryMoveEffects({
       state,
       attackerId: battlerId,
       targetId,
@@ -840,8 +840,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       attackerDamage,
       cancelledBy: null,
       confusionSelfHitDamage: null,
-      statChanges: null,
-      statusApplied: secondaryStatusApplied,
+      statChanges: secondaryResult ? secondaryResult.statChanges : null,
+      statusApplied: secondaryResult ? secondaryResult.statusApplied : null,
       unmodelled: [...unmodelled, ...damageUnmodelled],
       fainted,
     })

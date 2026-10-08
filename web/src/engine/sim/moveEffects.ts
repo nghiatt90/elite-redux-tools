@@ -23,6 +23,7 @@ import {
   STAT_SPEED,
   STATUS1_ANY,
   STATUS2_ENRAGED,
+  STATUS2_FLINCHED,
   STATUS3_YAWN,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -36,6 +37,37 @@ import {
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
   STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
+  MOVE_EFFECT_ATK_PLUS_1,
+  MOVE_EFFECT_DEF_PLUS_1,
+  MOVE_EFFECT_SPD_PLUS_1,
+  MOVE_EFFECT_SP_ATK_PLUS_1,
+  MOVE_EFFECT_SP_DEF_PLUS_1,
+  MOVE_EFFECT_ACC_PLUS_1,
+  MOVE_EFFECT_EVS_PLUS_1,
+  MOVE_EFFECT_ATK_MINUS_1,
+  MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_EFFECT_SP_ATK_MINUS_1,
+  MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_EFFECT_ACC_MINUS_1,
+  MOVE_EFFECT_EVS_MINUS_1,
+  MOVE_EFFECT_ALL_STATS_UP,
+  MOVE_EFFECT_ATK_PLUS_2,
+  MOVE_EFFECT_DEF_PLUS_2,
+  MOVE_EFFECT_SPD_PLUS_2,
+  MOVE_EFFECT_SP_ATK_PLUS_2,
+  MOVE_EFFECT_SP_DEF_PLUS_2,
+  MOVE_EFFECT_ACC_PLUS_2,
+  MOVE_EFFECT_EVS_PLUS_2,
+  MOVE_EFFECT_ATK_MINUS_2,
+  MOVE_EFFECT_DEF_MINUS_2,
+  MOVE_EFFECT_SPD_MINUS_2,
+  MOVE_EFFECT_SP_ATK_MINUS_2,
+  MOVE_EFFECT_SP_DEF_MINUS_2,
+  MOVE_EFFECT_ACC_MINUS_2,
+  MOVE_EFFECT_EVS_MINUS_2,
+  attackerHasMoldBreakerActive,
   battlerHasSimAbility,
   changeStatBuffs,
   changeStatBuffsImplicit,
@@ -45,9 +77,11 @@ import {
 import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import {
+  CHECK_FLINCH,
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FREEZE,
   MOVE_EFFECT_FROSTBITE,
   MOVE_EFFECT_PARALYSIS,
@@ -62,7 +96,10 @@ import {
   doesSubstituteBlockMove,
   findAbilitySlot,
   getMoveEffectChance,
+  isAbilityStatusProtected,
   isBattlerTerrainAffected,
+  isPreventableSecondaryEffect,
+  testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
 
@@ -1076,7 +1113,8 @@ export function isHandledMoveEffect(effect: string | null): boolean {
 // Secondary Move Effects (Post-Damage)
 // ---------------------------------------------------------------------------
 
-export const SECONDARY_STATUS_EFFECT_MAP: Record<string, number> = {
+// pipeline/.upstream/er-config/MoveEffect.proto:12-22, 28-41, 47, 52-65
+export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_SLEEP: MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_POISON: MOVE_EFFECT_POISON,
   MOVE_EFFECT_BURN: MOVE_EFFECT_BURN,
@@ -1086,7 +1124,43 @@ export const SECONDARY_STATUS_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_FROSTBITE: MOVE_EFFECT_FROSTBITE,
   MOVE_EFFECT_BLEED: MOVE_EFFECT_BLEED,
   MOVE_EFFECT_CONFUSION: MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_FLINCH: MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_TRI_ATTACK: MOVE_EFFECT_TRI_ATTACK,
+  MOVE_EFFECT_ATK_PLUS_1: MOVE_EFFECT_ATK_PLUS_1,
+  MOVE_EFFECT_DEF_PLUS_1: MOVE_EFFECT_DEF_PLUS_1,
+  MOVE_EFFECT_SPD_PLUS_1: MOVE_EFFECT_SPD_PLUS_1,
+  MOVE_EFFECT_SP_ATK_PLUS_1: MOVE_EFFECT_SP_ATK_PLUS_1,
+  MOVE_EFFECT_SP_DEF_PLUS_1: MOVE_EFFECT_SP_DEF_PLUS_1,
+  MOVE_EFFECT_ACC_PLUS_1: MOVE_EFFECT_ACC_PLUS_1,
+  MOVE_EFFECT_EVS_PLUS_1: MOVE_EFFECT_EVS_PLUS_1,
+  MOVE_EFFECT_ATK_MINUS_1: MOVE_EFFECT_ATK_MINUS_1,
+  MOVE_EFFECT_DEF_MINUS_1: MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_EFFECT_SPD_MINUS_1: MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_EFFECT_SP_ATK_MINUS_1: MOVE_EFFECT_SP_ATK_MINUS_1,
+  MOVE_EFFECT_SP_DEF_MINUS_1: MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_EFFECT_ACC_MINUS_1: MOVE_EFFECT_ACC_MINUS_1,
+  MOVE_EFFECT_EVS_MINUS_1: MOVE_EFFECT_EVS_MINUS_1,
+  MOVE_EFFECT_ALL_STATS_UP: MOVE_EFFECT_ALL_STATS_UP,
+  MOVE_EFFECT_ATK_PLUS_2: MOVE_EFFECT_ATK_PLUS_2,
+  MOVE_EFFECT_DEF_PLUS_2: MOVE_EFFECT_DEF_PLUS_2,
+  MOVE_EFFECT_SPD_PLUS_2: MOVE_EFFECT_SPD_PLUS_2,
+  MOVE_EFFECT_SP_ATK_PLUS_2: MOVE_EFFECT_SP_ATK_PLUS_2,
+  MOVE_EFFECT_SP_DEF_PLUS_2: MOVE_EFFECT_SP_DEF_PLUS_2,
+  MOVE_EFFECT_ACC_PLUS_2: MOVE_EFFECT_ACC_PLUS_2,
+  MOVE_EFFECT_EVS_PLUS_2: MOVE_EFFECT_EVS_PLUS_2,
+  MOVE_EFFECT_ATK_MINUS_2: MOVE_EFFECT_ATK_MINUS_2,
+  MOVE_EFFECT_DEF_MINUS_2: MOVE_EFFECT_DEF_MINUS_2,
+  MOVE_EFFECT_SPD_MINUS_2: MOVE_EFFECT_SPD_MINUS_2,
+  MOVE_EFFECT_SP_ATK_MINUS_2: MOVE_EFFECT_SP_ATK_MINUS_2,
+  MOVE_EFFECT_SP_DEF_MINUS_2: MOVE_EFFECT_SP_DEF_MINUS_2,
+  MOVE_EFFECT_ACC_MINUS_2: MOVE_EFFECT_ACC_MINUS_2,
+  MOVE_EFFECT_EVS_MINUS_2: MOVE_EFFECT_EVS_MINUS_2,
+}
+export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
+
+export interface SecondaryEffectsResult {
+  statusApplied: StatusAppliedOutcome | null
+  statChanges: StatChangeOutcome[]
 }
 
 export interface SecondaryMoveEffectContext {
@@ -1118,7 +1192,7 @@ export interface SecondaryMoveEffectContext {
  */
 export function applySecondaryMoveEffects(
   ctx: SecondaryMoveEffectContext,
-): StatusAppliedOutcome | null {
+): SecondaryEffectsResult | null {
   const { state, attackerId, targetId, moveId, targetDamage, deps, unmodelled } = ctx
   const moveData = deps.dataContext.move(moveId)
   const moveEffect = moveData?.effect ?? null
@@ -1173,6 +1247,49 @@ export function applySecondaryMoveEffects(
         }
       }
     }
+  } else if (moveEffect === 'EFFECT_ARGUMENT_HIT') {
+    // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
+    // argumenttomoveeffect; goto BattleScript_EffectHit
+    const arg = moveData?.argument
+    if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+      effectSpecs.push({
+        effectName: arg.effect,
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: Boolean(arg.affectsUser),
+        certain: Boolean(arg.certain),
+      })
+    }
+  } else if (moveEffect === 'EFFECT_FLINCH_STATUS') {
+    // Legacy script: BattleScript_EffectFlinchWithStatus (data/battle_scripts_1.s:3870-3893)
+    // 1. setmoveeffect MOVE_EFFECT_FLINCH
+    // 2. seteffectwithchance (draw 1)
+    // 3. argumenttomoveeffect
+    // 4. seteffectwithchance (draw 2)
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_FLINCH',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+    const arg = moveData?.argument
+    if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+      effectSpecs.push({
+        effectName: arg.effect,
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: Boolean(arg.affectsUser),
+        certain: Boolean(arg.certain),
+      })
+    }
+  } else if (moveEffect === 'EFFECT_SPEED_UP_HIT') {
+    // Legacy script: BattleScript_EffectSpeedUpHit (data/battle_scripts_1.s:2127-2129)
+    // setmoveeffect MOVE_EFFECT_SPD_PLUS_1 | MOVE_EFFECT_AFFECTS_USER
+    // goto BattleScript_EffectHit
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_SPD_PLUS_1',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: true,
+      certain: false,
+    })
   } else if (moveEffect === 'EFFECT_PARALYZE_HIT') {
     // Legacy script: BattleScript_EffectParalyzeHit (src/battle_scripts_1.s:3365-3368)
     const attacker = state.battlers[attackerId]
@@ -1214,9 +1331,10 @@ export function applySecondaryMoveEffects(
   }
 
   let statusAppliedOutcome: StatusAppliedOutcome | null = null
+  const statChanges: StatChangeOutcome[] = []
 
   for (const spec of effectSpecs) {
-    const baseEffectNum = SECONDARY_STATUS_EFFECT_MAP[spec.effectName]
+    const baseEffectNum = SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
     if (baseEffectNum === undefined) {
       unmodelled.push(`secondary effect of ${spec.effectName} not modelled`)
       continue
@@ -1244,54 +1362,231 @@ export function applySecondaryMoveEffects(
     }
     const isImmune = targetDamage === 0 || targetDamage === null
 
+    let chancePasses = false
     if (spec.certain) {
       // MOVE_EFFECT_CERTAIN skips the RNG draw
-      if (!isImmune) {
-        const res = applyPrimaryStatusEffect(
-          state,
-          attackerId,
-          targetId,
-          effectNumWithFlags,
-          moveId,
-          deps,
-          unmodelled,
-          false,
-          true,
-        )
-        if (res.applied && res.status) {
-          statusAppliedOutcome = {
-            battlerId: spec.affectsUser ? attackerId : targetId,
-            status: res.status,
-          }
-        }
-      }
+      chancePasses = !isImmune
     } else {
       // Real RNG draw: Random() % 100 < percentChance
       const roll = state.rng.random16() % 100
-      const chancePasses = roll < percentChance
+      chancePasses = roll < percentChance && !isImmune
+    }
 
-      if (chancePasses && !isImmune) {
-        const certainForStatus = percentChance >= 100
-        const res = applyPrimaryStatusEffect(
-          state,
-          attackerId,
-          targetId,
-          effectNumWithFlags,
-          moveId,
-          deps,
-          unmodelled,
-          false,
-          certainForStatus,
-        )
-        if (res.applied && res.status) {
-          statusAppliedOutcome = {
-            battlerId: spec.affectsUser ? attackerId : targetId,
-            status: res.status,
+    if (!chancePasses) {
+      continue
+    }
+
+    const effectBattlerId = spec.affectsUser ? attackerId : targetId
+    const effectBattler = state.battlers[effectBattlerId]
+    if (!effectBattler || effectBattler.mon.hp === 0) {
+      continue
+    }
+
+    // Top-of-SetMoveEffect gate conditions (src/battle_script_commands.c:2348-2388)
+    // 1. Shield Dust / Covert Cloak (:2348-2350)
+    if (!spec.affectsUser && isPreventableSecondaryEffect(baseEffectNum)) {
+      const attackerBattler = state.battlers[attackerId]
+      const attackerHasMoldBreaker = attackerBattler ? attackerHasMoldBreakerActive(attackerBattler, deps) : false
+      const hasShieldDust = battlerHasSimAbility(
+        state,
+        effectBattler,
+        'ABILITY_SHIELD_DUST',
+        true,
+        attackerId,
+        attackerHasMoldBreaker,
+        deps.dataContext,
+      )
+      const hasCovertCloak = deps.grounding ? deps.grounding.holdEffectOf(effectBattlerId) === 'HOLD_EFFECT_COVERT_CLOAK' : false
+      if (hasShieldDust || hasCovertCloak) {
+        continue
+      }
+    }
+
+    // 2. Safeguard (:2352-2354)
+    if (!spec.affectsUser && baseEffectNum <= MOVE_EFFECT_CONFUSION) {
+      const effectSide = effectBattlerId & 1
+      if (hasFlag(state.sides[effectSide].statuses, SIDE_STATUS_SAFEGUARD)) {
+        continue
+      }
+    }
+
+    // 3. TestSheerForceFlag (:2361)
+    if (testSheerForceFlag(state, attackerId, moveId, deps)) {
+      continue
+    }
+
+    // 4. DoesSubstituteBlockMove (:2388)
+    if (!spec.affectsUser && doesSubstituteBlockMove(state, attackerId, effectBattlerId, moveId, deps)) {
+      continue
+    }
+
+    // Flinch: MOVE_EFFECT_FLINCH (battle_script_commands.c:2665-2669)
+    if (baseEffectNum === MOVE_EFFECT_FLINCH) {
+      if (!isAbilityStatusProtected(state, effectBattlerId, CHECK_FLINCH, attackerId, deps)) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_FLINCHED)
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_ALL_STATS_UP (battle_script_commands.c:2832-2836, battle_scripts_1.s:7891-7925)
+    if (baseEffectNum === MOVE_EFFECT_ALL_STATS_UP) {
+      const statsToBoost = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]
+      const canBoost = statsToBoost.some(
+        (s) => (effectBattler.mon.statStages[s] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE,
+      )
+      if (canBoost) {
+        for (const statId of statsToBoost) {
+          const res = changeStatBuffsImplicit(
+            state,
+            attackerId,
+            targetId,
+            1,
+            statId,
+            MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+            true,
+            deps,
+            unmodelled,
+            moveId,
+          )
+          if (res.delta !== 0) {
+            statChanges.push({
+              battlerId: attackerId,
+              stat: statId,
+              change: res.delta,
+            })
           }
         }
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_*_PLUS_1 (battle_script_commands.c:2751-2764)
+    if (baseEffectNum >= MOVE_EFFECT_ATK_PLUS_1 && baseEffectNum <= MOVE_EFFECT_EVS_PLUS_1) {
+      const statId = baseEffectNum - MOVE_EFFECT_ATK_PLUS_1 + 1
+      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        targetId,
+        1,
+        statId,
+        flags,
+        false,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({
+          battlerId: effectBattlerId,
+          stat: statId,
+          change: res.delta,
+        })
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_*_MINUS_1 (battle_script_commands.c:2765-2781)
+    if (baseEffectNum >= MOVE_EFFECT_ATK_MINUS_1 && baseEffectNum <= MOVE_EFFECT_EVS_MINUS_1) {
+      const statId = baseEffectNum - MOVE_EFFECT_ATK_MINUS_1 + 1
+      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        targetId,
+        -1,
+        statId,
+        flags,
+        true,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({
+          battlerId: effectBattlerId,
+          stat: statId,
+          change: res.delta,
+        })
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_*_PLUS_2 (battle_script_commands.c:2782-2795)
+    if (baseEffectNum >= MOVE_EFFECT_ATK_PLUS_2 && baseEffectNum <= MOVE_EFFECT_EVS_PLUS_2) {
+      const statId = baseEffectNum - MOVE_EFFECT_ATK_PLUS_2 + 1
+      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        targetId,
+        2,
+        statId,
+        flags,
+        false,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({
+          battlerId: effectBattlerId,
+          stat: statId,
+          change: res.delta,
+        })
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_*_MINUS_2 (battle_script_commands.c:2796-2812)
+    if (baseEffectNum >= MOVE_EFFECT_ATK_MINUS_2 && baseEffectNum <= MOVE_EFFECT_EVS_MINUS_2) {
+      const statId = baseEffectNum - MOVE_EFFECT_ATK_MINUS_2 + 1
+      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        targetId,
+        -2,
+        statId,
+        flags,
+        true,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({
+          battlerId: effectBattlerId,
+          stat: statId,
+          change: res.delta,
+        })
+      }
+      continue
+    }
+
+    // Primary status effects and confusion (battle_script_commands.c:2390-2580, 2655-2664)
+    const certainForStatus = spec.certain || percentChance >= 100
+    const res = applyPrimaryStatusEffect(
+      state,
+      attackerId,
+      targetId,
+      effectNumWithFlags,
+      moveId,
+      deps,
+      unmodelled,
+      false,
+      certainForStatus,
+    )
+    if (res.applied && res.status) {
+      statusAppliedOutcome = {
+        battlerId: effectBattlerId,
+        status: res.status,
       }
     }
   }
 
-  return statusAppliedOutcome
+  return {
+    statusApplied: statusAppliedOutcome,
+    statChanges,
+  }
 }

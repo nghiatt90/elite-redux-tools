@@ -112,6 +112,8 @@ export const MOVE_EFFECT_ACC_MINUS_1 = 29
 export const MOVE_EFFECT_EVS_MINUS_1 = 30
 export const MOVE_EFFECT_PREVENT_ESCAPE = 34
 export const MOVE_EFFECT_NIGHTMARE = 35
+// pipeline/.upstream/er-config/MoveEffect.proto:47: MOVE_EFFECT_ALL_STATS_UP = 36;
+export const MOVE_EFFECT_ALL_STATS_UP = 36
 export const MOVE_EFFECT_ATK_PLUS_2 = 41
 export const MOVE_EFFECT_DEF_PLUS_2 = 42
 export const MOVE_EFFECT_SPD_PLUS_2 = 43
@@ -1622,13 +1624,23 @@ export function getMoveEffectChance(
   deps: StatusDeps,
   unmodelled?: string[],
 ): number {
+  // battle_script_commands.c:3073:
+  // if (moveEffect == MOVE_EFFECT_FLINCH && gTurnStructs[gBattlerAttacker].parentalBondOn < gTurnStructs[gBattlerAttacker].parentalBondInitialCount) return 0;
+  const attacker = state.battlers[attackerId]
+  if (
+    moveEffect === MOVE_EFFECT_FLINCH &&
+    attacker &&
+    attacker.turn.parentalBondOn < attacker.turn.parentalBondInitialCount
+  ) {
+    return 0
+  }
+
   let chance = baseChance
 
   const moveData = moveId ? deps.dataContext.move(moveId) : null
   const moveType = moveData?.type ?? null
   const isPsychic = moveType === 'PSYCHIC' || moveType === 'TYPE_PSYCHIC'
   const isPunch = moveData?.flags?.punchBased === true
-  const attacker = state.battlers[attackerId]
   // ON_ABILITY(abilityBattler, TRUE, ...) (:3082): the attacker's Mold Breaker can break another battler's
   // breakable hook (Bad Luck is breakable).
   const attackerHasMoldBreaker = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false

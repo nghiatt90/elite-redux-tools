@@ -491,3 +491,80 @@ export function changeStatBuffsImplicit(
     currentMoveId,
   )
 }
+
+// pipeline/.upstream/er-config/MoveEffect.proto:28-41, 47, 52-65
+export const MOVE_EFFECT_ATK_PLUS_1 = 17
+export const MOVE_EFFECT_DEF_PLUS_1 = 18
+export const MOVE_EFFECT_SPD_PLUS_1 = 19
+export const MOVE_EFFECT_SP_ATK_PLUS_1 = 20
+export const MOVE_EFFECT_SP_DEF_PLUS_1 = 21
+export const MOVE_EFFECT_ACC_PLUS_1 = 22
+export const MOVE_EFFECT_EVS_PLUS_1 = 23
+export const MOVE_EFFECT_ATK_MINUS_1 = 24
+export const MOVE_EFFECT_DEF_MINUS_1 = 25
+export const MOVE_EFFECT_SPD_MINUS_1 = 26
+export const MOVE_EFFECT_SP_ATK_MINUS_1 = 27
+export const MOVE_EFFECT_SP_DEF_MINUS_1 = 28
+export const MOVE_EFFECT_ACC_MINUS_1 = 29
+export const MOVE_EFFECT_EVS_MINUS_1 = 30
+export const MOVE_EFFECT_ALL_STATS_UP = 36
+export const MOVE_EFFECT_ATK_PLUS_2 = 41
+export const MOVE_EFFECT_DEF_PLUS_2 = 42
+export const MOVE_EFFECT_SPD_PLUS_2 = 43
+export const MOVE_EFFECT_SP_ATK_PLUS_2 = 44
+export const MOVE_EFFECT_SP_DEF_PLUS_2 = 45
+export const MOVE_EFFECT_ACC_PLUS_2 = 46
+export const MOVE_EFFECT_EVS_PLUS_2 = 47
+export const MOVE_EFFECT_ATK_MINUS_2 = 48
+export const MOVE_EFFECT_DEF_MINUS_2 = 49
+export const MOVE_EFFECT_SPD_MINUS_2 = 50
+export const MOVE_EFFECT_SP_ATK_MINUS_2 = 51
+export const MOVE_EFFECT_SP_DEF_MINUS_2 = 52
+export const MOVE_EFFECT_ACC_MINUS_2 = 53
+export const MOVE_EFFECT_EVS_MINUS_2 = 54
+
+/**
+ * Port of ReverseStatChangeMoveEffect, src/battle_script_commands.c:9641-9705.
+ * Reverses a stat change move effect (+1 <-> -1, +2 <-> -2) under Contrary.
+ */
+export function reverseStatChangeMoveEffect(moveEffect: number): number {
+  switch (moveEffect) {
+    // +1 -> -1
+    case MOVE_EFFECT_ATK_PLUS_1: return MOVE_EFFECT_ATK_MINUS_1
+    case MOVE_EFFECT_DEF_PLUS_1: return MOVE_EFFECT_DEF_MINUS_1
+    case MOVE_EFFECT_SPD_PLUS_1: return MOVE_EFFECT_SPD_MINUS_1
+    case MOVE_EFFECT_SP_ATK_PLUS_1: return MOVE_EFFECT_SP_ATK_MINUS_1
+    case MOVE_EFFECT_SP_DEF_PLUS_1: return MOVE_EFFECT_SP_DEF_MINUS_1
+    case MOVE_EFFECT_ACC_PLUS_1: return MOVE_EFFECT_ACC_MINUS_1
+    case MOVE_EFFECT_EVS_PLUS_1: return MOVE_EFFECT_EVS_MINUS_1
+
+    // -1 -> +1
+    case MOVE_EFFECT_ATK_MINUS_1: return MOVE_EFFECT_ATK_PLUS_1
+    case MOVE_EFFECT_DEF_MINUS_1: return MOVE_EFFECT_DEF_PLUS_1
+    case MOVE_EFFECT_SPD_MINUS_1: return MOVE_EFFECT_SPD_PLUS_1
+    case MOVE_EFFECT_SP_ATK_MINUS_1: return MOVE_EFFECT_SP_ATK_PLUS_1
+    case MOVE_EFFECT_SP_DEF_MINUS_1: return MOVE_EFFECT_SP_DEF_PLUS_1
+    case MOVE_EFFECT_ACC_MINUS_1: return MOVE_EFFECT_ACC_PLUS_1
+    case MOVE_EFFECT_EVS_MINUS_1: return MOVE_EFFECT_EVS_PLUS_1
+
+    // +2 -> -2
+    case MOVE_EFFECT_ATK_PLUS_2: return MOVE_EFFECT_ATK_MINUS_2
+    case MOVE_EFFECT_DEF_PLUS_2: return MOVE_EFFECT_DEF_MINUS_2
+    case MOVE_EFFECT_SPD_PLUS_2: return MOVE_EFFECT_SPD_MINUS_2
+    case MOVE_EFFECT_SP_ATK_PLUS_2: return MOVE_EFFECT_SP_ATK_MINUS_2
+    case MOVE_EFFECT_SP_DEF_PLUS_2: return MOVE_EFFECT_SP_DEF_MINUS_2
+    case MOVE_EFFECT_ACC_PLUS_2: return MOVE_EFFECT_ACC_MINUS_2
+    case MOVE_EFFECT_EVS_PLUS_2: return MOVE_EFFECT_EVS_MINUS_2
+
+    // -2 -> +2
+    case MOVE_EFFECT_ATK_MINUS_2: return MOVE_EFFECT_ATK_PLUS_2
+    case MOVE_EFFECT_DEF_MINUS_2: return MOVE_EFFECT_DEF_PLUS_2
+    case MOVE_EFFECT_SPD_MINUS_2: return MOVE_EFFECT_SPD_PLUS_2
+    case MOVE_EFFECT_SP_ATK_MINUS_2: return MOVE_EFFECT_SP_ATK_PLUS_2
+    case MOVE_EFFECT_SP_DEF_MINUS_2: return MOVE_EFFECT_SP_DEF_PLUS_2
+    case MOVE_EFFECT_ACC_MINUS_2: return MOVE_EFFECT_ACC_PLUS_2
+    case MOVE_EFFECT_EVS_MINUS_2: return MOVE_EFFECT_EVS_PLUS_2
+
+    default: return moveEffect
+  }
+}
