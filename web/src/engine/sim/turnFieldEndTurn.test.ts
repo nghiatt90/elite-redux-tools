@@ -152,13 +152,15 @@ describe('executeTurn: field end-turn ladder -- weather timers (ENDTURN_SANDSTOR
     expect(out.fieldEndTurn.some((r) => r.effect === 'SANDSTORM')).toBe(true)
   })
 
-  it('weather set this turn does not decrement (the started gating) but still deals damage that same turn', () => {
+  it('a started.weather flag carried in from before the turn is cleared at turn start, so the timer still decrements', () => {
+    // CheckFocusPunch_ClearVarsBeforeTurnStarts (battle_main.c:4589-4595) zeroes gFieldTimers.started before
+    // actions run; only weather set during this turn's actions skips this end-turn's countdown.
     const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100 }], scripted())
     state.field.weather = WEATHER_SANDSTORM_TEMPORARY
     state.field.weatherDuration = 5
     state.field.timers.started.weather = true
     const out = executeTurn(state, [null, null], deps())
-    expect(state.field.weatherDuration).toBe(5) // untouched
+    expect(state.field.weatherDuration).toBe(4)
     expect(hasFlag(state.field.weather, WEATHER_SANDSTORM_TEMPORARY)).toBe(true)
     expect(out.fieldEndTurn.filter((r) => r.effect === 'SANDSTORM')).toHaveLength(2)
   })

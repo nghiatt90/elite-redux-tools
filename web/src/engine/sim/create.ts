@@ -39,7 +39,7 @@ function nullSlot4(): Slot4<string | null> {
   return [null, null, null, null]
 }
 
-function createVolatileBeganThisTurn(): VolatileBeganThisTurn {
+export function createVolatileBeganThisTurn(): VolatileBeganThisTurn {
   return {
     violentRush: false,
     rapidResponse: false,
@@ -223,7 +223,7 @@ export function createTurnState(): TurnState {
   }
 }
 
-function createSideBeganThisTurn(): SideBeganThisTurn {
+export function createSideBeganThisTurn(): SideBeganThisTurn {
   return {
     reflect: false,
     lightscreen: false,
@@ -289,7 +289,7 @@ export function createSideState(party: SimPartyMon[] = []): SideState {
   }
 }
 
-function createFieldBeganThisTurn(): FieldBeganThisTurn {
+export function createFieldBeganThisTurn(): FieldBeganThisTurn {
   return {
     mudSport: false,
     waterSport: false,

@@ -133,7 +133,7 @@ export { buildAccuracyInputs, getTotalAccuracy }
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
-import { createRoundState, createTurnState } from './create'
+import { createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
 import type { EndTurnEffectResult } from './endTurn'
 import { runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
@@ -481,6 +481,19 @@ export function roundStructsClear(state: BattleState): void {
   for (const battler of state.battlers) {
     if (battler) battler.round = createRoundState()
   }
+}
+
+/** CheckFocusPunch_ClearVarsBeforeTurnStarts, battle_main.c:4589-4595 -- every `started`
+ * flag is cleared before the turn's actions, not at the end of the previous turn, so a
+ * timer set by a between-turns switch-in is still counted down this turn. */
+export function clearStartedFlags(state: BattleState): void {
+  for (const battler of state.battlers) {
+    if (battler) battler.volatiles.started = createVolatileBeganThisTurn()
+  }
+  for (const side of state.sides) {
+    side.timers.started = createSideBeganThisTurn()
+  }
+  state.field.timers.started = createFieldBeganThisTurn()
 }
 
 /**
@@ -936,6 +949,7 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
 
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
   assertNoPerBattlerQuash(state)
+  clearStartedFlags(state)
 
   const ctx = buildTurnOrderContext(state, deps)
   const order = setActionsAndBattlersTurnOrder(state, actions)

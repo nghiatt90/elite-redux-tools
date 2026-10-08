@@ -13,9 +13,18 @@ import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_MAT_BLOCK,
+  SIDE_STATUS_MIST,
+  SIDE_STATUS_REFLECT,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_TAILWIND,
+  SIDE_STATUS_TOXIC_SPIKES,
   SIDE_STATUS_WIDE_GUARD,
   STAT_ACC,
   STAT_ATK,
@@ -1483,6 +1492,308 @@ function handleLeechSeed(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId })
 }
 
+const TYPE_NAME_TO_ID: Record<string, number> = {
+  TYPE_NORMAL: 0,
+  TYPE_FIGHTING: 1,
+  TYPE_FLYING: 2,
+  TYPE_POISON: 3,
+  TYPE_GROUND: 4,
+  TYPE_ROCK: 5,
+  TYPE_BUG: 6,
+  TYPE_GHOST: 7,
+  TYPE_STEEL: 8,
+  TYPE_MYSTERY: 9,
+  TYPE_FIRE: 10,
+  TYPE_WATER: 11,
+  TYPE_GRASS: 12,
+  TYPE_ELECTRIC: 13,
+  TYPE_PSYCHIC: 14,
+  TYPE_ICE: 15,
+  TYPE_DRAGON: 16,
+  TYPE_DARK: 17,
+  TYPE_FAIRY: 18,
+  TYPE_STELLAR: 19,
+}
+
+function getMoveTypeNumber(moveType: string | null | undefined): number {
+  if (!moveType) return 5
+  const key = moveType.startsWith('TYPE_') ? moveType : `TYPE_${moveType}`
+  return TYPE_NAME_TO_ID[key] ?? 5
+}
+
+/** GetBattlerHoldEffect(battler, TRUE) -- grounding.holdEffectOf already applies Klutz/Embargo. */
+function getHoldEffect(ctx: MoveEffectContext, battlerId: number): string | null {
+  return ctx.deps.grounding.holdEffectOf(battlerId)
+}
+
+/**
+ * BattleScript_EffectReflect (data/battle_scripts_1.s:4320-4330) and
+ * Cmd_setreflect (src/battle_script_commands.c:9319-9339).
+ */
+function handleReflect(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+  const hasReflect = hasFlag(sideState.statuses, SIDE_STATUS_REFLECT)
+  const hasScreenCleaner = battlerHasSimAbility(state, battler, 'ABILITY_SCREEN_CLEANER', false, battlerId, false, deps.dataContext)
+
+  if (hasReflect && !hasScreenCleaner) {
+    return outcome(ctx, { missed: true })
+  }
+
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_REFLECT)
+  sideState.timers.started.reflect = true
+  sideState.timers.reflectBattlerId = battlerId
+
+  const isExtended = getHoldEffect(ctx, battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+  sideState.timers.reflectTimer = isExtended ? 8 : 5
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectLightScreen (data/battle_scripts_1.s:4016-4021) and
+ * Cmd_setlightscreen (src/battle_script_commands.c:10252-10273).
+ */
+function handleLightScreen(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+  const hasLightScreen = hasFlag(sideState.statuses, SIDE_STATUS_LIGHTSCREEN)
+  const hasScreenCleaner = battlerHasSimAbility(state, battler, 'ABILITY_SCREEN_CLEANER', false, battlerId, false, deps.dataContext)
+
+  if (hasLightScreen && !hasScreenCleaner) {
+    return outcome(ctx, { missed: true })
+  }
+
+  sideState.timers.started.lightscreen = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_LIGHTSCREEN)
+  sideState.timers.lightscreenBattlerId = battlerId
+
+  const isExtended = getHoldEffect(ctx, battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+  sideState.timers.lightscreenTimer = isExtended ? 8 : 5
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectAuroraVeil (data/battle_scripts_1.s:3985-3990) and
+ * VARIOUS_SET_AURORA_VEIL (src/battle_script_commands.c:7749-7767).
+ */
+function handleAuroraVeil(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+  const hasAuroraVeil = hasFlag(sideState.statuses, SIDE_STATUS_AURORA_VEIL)
+  const hasScreenCleaner = battlerHasSimAbility(state, battler, 'ABILITY_SCREEN_CLEANER', false, battlerId, false, deps.dataContext)
+  const isHail = isBattlerWeatherAffected(state, battlerId, WEATHER_HAIL_ANY, deps)
+  const hasAuroraBorealis = battlerHasSimAbility(state, battler, 'ABILITY_AURORA_BOREALIS', false, battlerId, false, deps.dataContext)
+
+  if ((hasAuroraVeil && !hasScreenCleaner) || (!isHail && !hasAuroraBorealis)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  sideState.timers.started.auroraVeil = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_AURORA_VEIL)
+  sideState.timers.auroraVeilBattlerId = battlerId
+
+  const isExtended = getHoldEffect(ctx, battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+  sideState.timers.auroraVeilTimer = isExtended ? 8 : 5
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectMist (data/battle_scripts_1.s:4179-4188) and
+ * Cmd_setmist (src/battle_script_commands.c:10456-10469).
+ */
+function handleMist(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+
+  if (sideState.timers.mistTimer !== 0) {
+    return outcome(ctx, {})
+  }
+
+  sideState.timers.started.mist = true
+  sideState.timers.mistTimer = 5
+  sideState.timers.mistBattlerId = battlerId
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_MIST)
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectSafeguard (data/battle_scripts_1.s:5246-5252) and
+ * Cmd_setsafeguard (src/battle_script_commands.c:11234-11248).
+ */
+function handleSafeguard(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+
+  if (hasFlag(sideState.statuses, SIDE_STATUS_SAFEGUARD)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  sideState.timers.started.safeguard = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SAFEGUARD)
+  sideState.timers.safeguardTimer = 5
+  sideState.timers.safeguardBattlerId = battlerId
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectTailwind (data/battle_scripts_1.s:2693-2704) and
+ * Cmd_settailwind (src/battle_script_commands.c:10961-10973).
+ */
+function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+
+  if (hasFlag(sideState.statuses, SIDE_STATUS_TAILWIND)) {
+    return outcome(ctx, {})
+  }
+
+  sideState.timers.started.tailwind = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TAILWIND)
+  sideState.timers.tailwindBattlerId = battlerId
+  sideState.timers.tailwindTimer = 3
+
+  unmodelled.push(
+    'BattleScript_OnTailwindStart (data/battle_scripts_1.s:9267-9296): Wind Rider and Wind Power reactions are not modelled',
+  )
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectSpikes (data/battle_scripts_1.s:5058-5067) and
+ * Cmd_trysetspikes (src/battle_script_commands.c:11115-11125).
+ */
+function handleSpikes(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const targetSide = (battlerId & 1) ^ 1
+  const sideState = state.sides[targetSide]!
+
+  if (sideState.timers.spikesAmount >= 3) {
+    return outcome(ctx, {})
+  }
+
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SPIKES)
+  sideState.timers.spikesAmount++
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectStealthRock (data/battle_scripts_1.s:2559-2569) and
+ * Cmd_setstealthrock (src/battle_script_commands.c:11979-11989).
+ */
+function handleStealthRock(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const targetSide = (battlerId & 1) ^ 1
+  const sideState = state.sides[targetSide]!
+
+  if (hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+    return outcome(ctx, {})
+  }
+
+  const moveData = deps.dataContext.move(moveId)
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
+  sideState.timers.stealthRockType = getMoveTypeNumber(moveData?.type)
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectToxicSpikes (data/battle_scripts_1.s:2616-2626) and
+ * Cmd_settoxicspikes (src/battle_script_commands.c:11820-11829).
+ */
+function handleToxicSpikes(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const targetSide = (battlerId & 1) ^ 1
+  const sideState = state.sides[targetSide]!
+
+  if (sideState.timers.toxicSpikesAmount >= 2) {
+    return outcome(ctx, {})
+  }
+
+  sideState.timers.toxicSpikesAmount++
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TOXIC_SPIKES)
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectStickyWeb (data/battle_scripts_1.s:2570-2580) and
+ * Cmd_setstickyweb (src/battle_script_commands.c:11462-11472).
+ */
+function handleStickyWeb(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const targetSide = (battlerId & 1) ^ 1
+  const sideState = state.sides[targetSide]!
+
+  if (hasFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)) {
+    return outcome(ctx, {})
+  }
+
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)
+  sideState.timers.stickyWebTimer = 0
+
+  unmodelled.push(
+    'Cmd_setstickyweb (battle_script_commands.c:11469): gBattleStruct->stickyWebUser is not modelled in BattleState',
+  )
+
+  return outcome(ctx, {})
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
@@ -1533,6 +1844,17 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PAIN_SPLIT: handlePainSplit,
   EFFECT_STRENGTH_SAP: handleStrengthSap,
   EFFECT_LEECH_SEED: handleLeechSeed,
+
+  EFFECT_REFLECT: handleReflect,
+  EFFECT_LIGHT_SCREEN: handleLightScreen,
+  EFFECT_AURORA_VEIL: handleAuroraVeil,
+  EFFECT_MIST: handleMist,
+  EFFECT_SAFEGUARD: handleSafeguard,
+  EFFECT_TAILWIND: handleTailwind,
+  EFFECT_SPIKES: handleSpikes,
+  EFFECT_STEALTH_ROCK: handleStealthRock,
+  EFFECT_TOXIC_SPIKES: handleToxicSpikes,
+  EFFECT_STICKY_WEB: handleStickyWeb,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {
