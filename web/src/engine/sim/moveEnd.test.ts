@@ -36,6 +36,10 @@ import {
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
   STATUS3_GASTRO_ACID,
+  STATUS3_HEAL_BLOCK,
+  STATUS3_MAGNET_RISE,
+  STATUS3_SMACKED_DOWN,
+  STATUS3_TELEKINESIS,
   STAT_ACC,
   STAT_ATK,
   STAT_SPATK,
@@ -1617,5 +1621,420 @@ describe('Knock Off (MOVEEND_MOVE_EFFECTS2_ON_EACH)', () => {
     const plain = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
     const clean = executeTurn(plain, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
     expect(clean.actions.find((a) => a.battlerId === 0)!.unmodelled.filter((m) => m.includes('UpdateBattlerItem'))).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Thief / Bug Bite / Smack Down (MOVEEND_MOVE_EFFECTS2_ON_EACH), King's Rock (15), Shell Bell (26)
+// ---------------------------------------------------------------------------
+
+// requireMove() omits effectChance / argument (adding them would start firing secondary effects in every older test).
+function withEffectData(id: string): SimMoveData {
+  const raw = movesById.get(id)!
+  return { ...requireMove(id), effectChance: raw.effectChance as number, argument: raw.argument as SimMoveData['argument'] }
+}
+
+const MOVE_THIEF = withEffectData('MOVE_THIEF')
+const MOVE_BUG_BITE = withEffectData('MOVE_BUG_BITE')
+const MOVE_SMACK_DOWN = withEffectData('MOVE_SMACK_DOWN')
+const MOVE_SMITE = withEffectData('MOVE_SMITE')
+const MOVE_BITE = withEffectData('MOVE_BITE')
+const ABILITY_KLUTZ = requireAbility('ABILITY_KLUTZ')
+const ABILITY_SERENE_GRACE = requireAbility('ABILITY_SERENE_GRACE')
+const FLYING_TYPES: SimBattleMon['types'] = ['FLYING', 'MYSTERY', 'MYSTERY']
+
+// The build's linter reads a call to anything named useX inside a non-callback function as a React hook.
+const chooseMove = useMove
+const itemMoveBehaviors = snapshot<{ behaviors: MoveBehaviors }>('moveBehaviors.json').behaviors
+function itemMoveDeps(damage: DamageResolver, holdEffects: Record<number, string>, moves: SimMoveData[]): TurnLoopDeps {
+  const byId = new Map(moves.map((m) => [m.id, m]))
+  return {
+    ...testDepsWithDamage(damage, holdEffects),
+    dataContext: { ...DATA_CONTEXT, move: (id) => byId.get(id) ?? DATA_CONTEXT.move(id) },
+    moveBehaviors: itemMoveBehaviors,
+  }
+}
+
+function actionOf(out: ReturnType<typeof executeTurn>, battlerId: number) {
+  return out.actions.find((a) => a.battlerId === battlerId)!
+}
+
+describe('Thief (MOVE_EFFECT_STEAL_ITEM, battle_script_commands.c:4579-4593)', () => {
+  const deps = () => itemMoveDeps(fixedDamage(30), {}, [MOVE_THIEF])
+
+  it('steals the item when the attacker holds none: accuracy draw, then seteffectwithchance draws at 100%', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{}, { itemId: 'ITEM_LEFTOVERS' }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[1]!.mon.hp).toBe(70) // 100 - 30
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+    expect(rng.calls).toBe(2)
+    expect(actionOf(out, 0).unmodelled).not.toContain('secondary effect of MOVE_EFFECT_STEAL_ITEM not modelled')
+  })
+
+  it('does not steal when the target holds nothing', () => {
+    const state = battle([{}, {}], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+
+  it('steals through Sticky Hold: CanStealItem (battle_util.c:8500-8510) has no IsStickyHold clause', () => {
+    const state = battle(
+      [{}, { itemId: 'ITEM_LEFTOVERS', abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] } }],
+      scriptedRng([0, 0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+
+  it('cannot steal what CanBattlerGetOrLoseItem forbids (Mega Stone)', () => {
+    const state = battle([{}, { itemId: 'ITEM_VENUSAURITE' }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_VENUSAURITE')
+  })
+
+  it('takes the item of a target it knocked out (no ShouldApplyOnHitEffect on this branch)', () => {
+    const state = battle([{}, { hp: 30, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    const out = executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(actionOf(out, 0).fainted).toContain(1)
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('an attacker that already holds an item falls through to Knock Off: target loses its item, attacker keeps its own', () => {
+    const state = battle([{ itemId: 'ITEM_ORAN_BERRY' }, { itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_ORAN_BERRY')
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+
+  it('the Knock Off fallthrough still respects Sticky Hold', () => {
+    const state = battle(
+      [{ itemId: 'ITEM_ORAN_BERRY' }, { itemId: 'ITEM_LEFTOVERS', abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] } }],
+      scriptedRng([0, 0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], deps())
+
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('steals nothing when the move had no effect (damage 0: seteffectwithchance stores nothing)', () => {
+    const state = battle([{}, { itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_THIEF), null], itemMoveDeps(fixedDamage(0), {}, [MOVE_THIEF]))
+
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('gaps the receiver\'s Unburden reset only when the thief actually has Unburden', () => {
+    const withUnburden = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_UNBURDEN'), innates: [null, null, null] } }, { itemId: 'ITEM_LEFTOVERS' }],
+      scriptedRng([0, 0]),
+    )
+    const gapped = executeTurn(withUnburden, [useMove(1, MOVE_THIEF), null], deps())
+    expect(actionOf(gapped, 0).unmodelled.some((m) => m.includes('Unburden'))).toBe(true)
+
+    const plain = battle([{}, { itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    const clean = executeTurn(plain, [useMove(1, MOVE_THIEF), null], deps())
+    expect(actionOf(clean, 0).unmodelled.filter((m) => m.includes('UpdateBattlerItem'))).toEqual([])
+  })
+})
+
+describe('Bug Bite (MOVE_EFFECT_BUG_BITE, battle_script_commands.c:4595-4597, EatTargetBerry :13221)', () => {
+  const deps = () => itemMoveDeps(fixedDamage(30), {}, [MOVE_BUG_BITE])
+
+  it('eats the target berry; the move is CERTAIN so there is no seteffectwithchance draw (accuracy draw only)', () => {
+    const rng = scriptedRng([0])
+    const state = battle([{}, { itemId: 'ITEM_ORAN_BERRY' }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
+
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(state.battlers[0]!.mon.itemId).toBeNull() // the attacker's own (empty) slot is restored from changedItems
+    expect(rng.calls).toBe(1)
+    expect(actionOf(out, 0).unmodelled.some((m) => m.startsWith("Bug Bite's consumeberry of ITEM_ORAN_BERRY"))).toBe(true)
+  })
+
+  it('leaves the attacker\'s own item alone', () => {
+    const state = battle([{ itemId: 'ITEM_LEFTOVERS' }, { itemId: 'ITEM_ORAN_BERRY' }], scriptedRng([0]))
+    executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
+
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+
+  it('Sticky Hold keeps the berry (EatTargetBerry IsStickyHold, :13223)', () => {
+    const rng = scriptedRng([0])
+    const state = battle(
+      [{}, { itemId: 'ITEM_ORAN_BERRY', abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] } }],
+      rng,
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
+
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_ORAN_BERRY')
+    expect(actionOf(out, 0).unmodelled.some((m) => m.includes('consumeberry'))).toBe(false)
+  })
+
+  it('a non-berry target takes the BattleScript_EffectKnockOff route: 100% roll drawn, item knocked off, nothing eaten', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{}, { itemId: 'ITEM_LEFTOVERS' }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
+
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(rng.calls).toBe(2)
+    expect(actionOf(out, 0).unmodelled.some((m) => m.includes('consumeberry'))).toBe(false)
+  })
+
+  it('a Klutz target\'s berry is IsItemNegated, so jumpifnotberry also takes the Knock Off route', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle(
+      [{}, { itemId: 'ITEM_ORAN_BERRY', abilities: { ability: ABILITY_KLUTZ, innates: [null, null, null] } }],
+      rng,
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
+
+    expect(rng.calls).toBe(2)
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(actionOf(out, 0).unmodelled.some((m) => m.includes('consumeberry'))).toBe(false)
+  })
+
+  it('Pluck shares the effect', () => {
+    const MOVE_PLUCK = withEffectData('MOVE_PLUCK')
+    const state = battle([{}, { itemId: 'ITEM_ORAN_BERRY' }], scriptedRng([0]))
+    executeTurn(state, [useMove(1, MOVE_PLUCK), null], itemMoveDeps(fixedDamage(30), {}, [MOVE_PLUCK]))
+
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+})
+
+describe('Smack Down (MOVE_EFFECT_SMACK_DOWN, battle_script_commands.c:4598-4606)', () => {
+  const deps = () => itemMoveDeps(fixedDamage(30), {}, [MOVE_SMACK_DOWN, MOVE_SMITE])
+
+  it('grounds a Flying-type and clears Magnet Rise / Telekinesis; no argument effect, but the seteffectwithchance roll is still drawn', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{}, { types: FLYING_TYPES }], rng)
+    state.battlers[1]!.statuses3 |= STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS
+    executeTurn(state, [useMove(1, MOVE_SMACK_DOWN), null], deps())
+
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(true)
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_MAGNET_RISE)).toBe(false)
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)).toBe(false)
+    expect(rng.calls).toBe(2)
+  })
+
+  it('does nothing to an already-grounded target', () => {
+    const state = battle([{}, { types: ['WATER', 'MYSTERY', 'MYSTERY'] }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_SMACK_DOWN), null], deps())
+
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(false)
+  })
+
+  it('does nothing to a target the move fainted (IsBattlerAlive)', () => {
+    const state = battle([{}, { hp: 30, types: FLYING_TYPES }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_SMACK_DOWN), null], deps())
+
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(false)
+  })
+
+  it('Smite: grounds on the stored effect and rolls its 20% paralysis separately (accuracy 0, roll 19 -> paralysed)', () => {
+    const state = battle([{}, { types: FLYING_TYPES }], scriptedRng([0, 19]))
+    executeTurn(state, [useMove(1, MOVE_SMITE), null], deps())
+
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(true)
+    expect(state.battlers[1]!.mon.status1).toBe(STATUS1_PARALYSIS)
+  })
+
+  it('Smite: roll 20 fails the 20% chance but still grounds', () => {
+    const state = battle([{}, { types: FLYING_TYPES }], scriptedRng([0, 20]))
+    executeTurn(state, [useMove(1, MOVE_SMITE), null], deps())
+
+    expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(true)
+    expect(state.battlers[1]!.mon.status1).toBe(STATUS1_NONE)
+  })
+})
+
+describe("King's Rock (MOVEEND_KINGSROCK, battle_util.c:6034-6052)", () => {
+  const FLINCH_HOLD = { 0: 'HOLD_EFFECT_FLINCH' }
+  const deps = (moves: SimMoveData[] = [], damage: DamageResolver = fixedDamage(20), holdEffects: Record<number, string> = FLINCH_HOLD) =>
+    itemMoveDeps(damage, holdEffects, moves)
+  const bothTackle = (state: BattleState, d: TurnLoopDeps) => executeTurn(state, [chooseMove(1, MOVE_TACKLE), chooseMove(0, MOVE_TACKLE)], d)
+
+  it('flinches on a roll below the item param (10): draws are accuracy, then the item roll', () => {
+    const rng = scriptedRng([0, 9])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    const out = bothTackle(state, deps())
+
+    expect(actionOf(out, 1).cancelledBy).toBe('FLINCH')
+    expect(state.battlers[1]!.mon.hp).toBe(80) // 100 - 20
+    expect(state.battlers[0]!.mon.hp).toBe(100) // the flinched target never hit back
+    expect(rng.calls).toBe(2)
+  })
+
+  it('does not flinch on a roll of 10 (10 < 10 is false); the target then retaliates (its own accuracy draw is the third)', () => {
+    const rng = scriptedRng([0, 10])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    const out = bothTackle(state, deps())
+
+    expect(actionOf(out, 1).cancelledBy).toBeNull()
+    expect(state.battlers[0]!.mon.hp).toBe(80)
+    expect(rng.calls).toBe(3)
+  })
+
+  it('Razor Fang shares HOLD_EFFECT_FLINCH and its param', () => {
+    const state = battle([{ itemId: 'ITEM_RAZOR_FANG' }, {}], scriptedRng([0, 9]))
+    expect(actionOf(bothTackle(state, deps()), 1).cancelledBy).toBe('FLINCH')
+  })
+
+  it('Serene Grace doubles the param to 20 (B_SERENE_GRACE_BOOST >= GEN_5): roll 19 flinches, roll 20 does not', () => {
+    const serene = { ability: ABILITY_SERENE_GRACE, innates: [null, null, null] as [null, null, null] }
+    const hit = battle([{ itemId: 'ITEM_KINGS_ROCK', abilities: serene }, {}], scriptedRng([0, 19]))
+    expect(actionOf(bothTackle(hit, deps()), 1).cancelledBy).toBe('FLINCH')
+
+    const miss = battle([{ itemId: 'ITEM_KINGS_ROCK', abilities: serene }, {}], scriptedRng([0, 20]))
+    expect(actionOf(bothTackle(miss, deps()), 1).cancelledBy).toBeNull()
+  })
+
+  it('an active rainbow on the attacker\'s side doubles the param too', () => {
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], scriptedRng([0, 19]))
+    state.sides[0].timers.rainbowTimer = 3
+    expect(actionOf(bothTackle(state, deps()), 1).cancelledBy).toBe('FLINCH')
+  })
+
+  it('draws nothing when the hit did no damage', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps([], fixedDamage(0)))
+
+    expect(rng.calls).toBe(1)
+  })
+
+  it('draws nothing when a Substitute absorbed the hit (TARGET_TURN_DAMAGED false)', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    state.battlers[1]!.mon.status2 |= STATUS2_SUBSTITUTE
+    state.battlers[1]!.volatiles.substituteHp = 50
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps())
+
+    expect(rng.calls).toBe(1)
+  })
+
+  it('still draws when the hit faints the target, but nothing flinches (hp term follows the roll)', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, { hp: 20 }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps())
+
+    expect(actionOf(out, 0).fainted).toContain(1)
+    expect(rng.calls).toBe(2)
+  })
+
+  it('a move that already flinches (Bite, effectChance 30) is not FLAG_KINGS_ROCK_AFFECTED: the roll is drawn, no extra flinch', () => {
+    // accuracy 0, Bite's own flinch roll 99 (fails 30%), item roll 0 (passes 10%), then the target's accuracy draw.
+    const rng = scriptedRng([0, 99, 0])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_BITE), useMove(0, MOVE_TACKLE)], deps([MOVE_BITE]))
+
+    expect(actionOf(out, 1).cancelledBy).toBeNull()
+    expect(rng.calls).toBe(4)
+  })
+
+  it('Shield Dust on the target blocks the flinch', () => {
+    const state = battle(
+      [{ itemId: 'ITEM_KINGS_ROCK' }, { abilities: { ability: ABILITY_SHIELD_DUST, innates: [null, null, null] } }],
+      scriptedRng([0, 0]),
+    )
+    expect(actionOf(bothTackle(state, deps()), 1).cancelledBy).toBeNull()
+  })
+
+  it('Sheer Force on the attacker blocks the flinch for a Sheer Force boosted move (SetMoveEffect :2361)', () => {
+    // Flamethrower: accuracy 0, its burn roll 99 (fails), item roll 0 (passes).
+    const state = battle(
+      [{ itemId: 'ITEM_KINGS_ROCK', abilities: { ability: ABILITY_SHEER_FORCE, innates: [null, null, null] } }, {}],
+      scriptedRng([0, 99, 0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), useMove(0, MOVE_TACKLE)], deps([MOVE_FLAMETHROWER]))
+
+    expect(actionOf(out, 1).cancelledBy).toBeNull()
+  })
+
+  it('does nothing without a HOLD_EFFECT_FLINCH holder', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ itemId: 'ITEM_KINGS_ROCK' }, {}], rng)
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps([], fixedDamage(20), {}))
+
+    expect(rng.calls).toBe(1)
+  })
+})
+
+describe('Shell Bell (MOVEEND_LIFEORB_SHELLBELL, battle_util.c:6066-6083)', () => {
+  const SHELL_BELL = { 0: 'HOLD_EFFECT_SHELL_BELL' }
+  const deps = (damage: number, moves: SimMoveData[] = []) => itemMoveDeps(fixedDamage(damage), SHELL_BELL, moves)
+
+  it('heals floor(savedDmg / 4): floor(30 / 4) = 7', () => {
+    const state = battle([{ hp: 50, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps(30))
+
+    expect(state.battlers[0]!.mon.hp).toBe(57)
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+  })
+
+  it('heals at least 1: floor(3 / 4) = 0 becomes 1', () => {
+    const state = battle([{ hp: 50, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps(3))
+
+    expect(state.battlers[0]!.mon.hp).toBe(51)
+  })
+
+  it('caps the heal at max HP: 99 + floor(40 / 4) -> 100', () => {
+    const state = battle([{ hp: 99, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps(40))
+
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('uses the HP actually dealt, not the overkill: a 20-HP target hit for 100 heals floor(20 / 4) = 5', () => {
+    const state = battle([{ hp: 50, itemId: 'ITEM_SHELL_BELL' }, { hp: 20 }], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps(100))
+
+    expect(state.battlers[0]!.mon.hp).toBe(55)
+  })
+
+  it('does not heal at full HP or under Heal Block (CanBattlerHeal)', () => {
+    const full = battle([{ hp: 100, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    executeTurn(full, [useMove(1, MOVE_TACKLE), null], deps(30))
+    expect(full.battlers[0]!.mon.hp).toBe(100)
+
+    const blocked = battle([{ hp: 50, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    blocked.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    executeTurn(blocked, [useMove(1, MOVE_TACKLE), null], deps(30))
+    expect(blocked.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('does not heal when Sheer Force boosts the move (TestSheerForceFlag)', () => {
+    // Flamethrower: accuracy 0, burn roll 99 (fails).
+    const state = battle(
+      [{ hp: 50, itemId: 'ITEM_SHELL_BELL', abilities: { ability: ABILITY_SHEER_FORCE, innates: [null, null, null] } }, {}],
+      scriptedRng([0, 99]),
+    )
+    executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), null], deps(30, [MOVE_FLAMETHROWER]))
+
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('does not heal when the target took no damage, and no longer gaps', () => {
+    const state = battle([{ hp: 50, itemId: 'ITEM_SHELL_BELL' }, {}], scriptedRng())
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], deps(0))
+
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+    expect(actionOf(out, 0).unmodelled).not.toContain('move-end Shell Bell heal is not modelled yet')
   })
 })

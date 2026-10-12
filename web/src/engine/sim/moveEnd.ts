@@ -23,19 +23,19 @@
 // 12   | MOVEEND_TARGET_VISIBLE          | 4702-4713  | Unreachable    | Target sprite visibility; visual only.
 // 13   | MOVEEND_ITEM_EFFECTS_TARGET     | 4569-4572  | Ported / Gap   | Ported: Rocky Helmet (floor(maxHp/6) to contact attacker). Other target items gapped.
 // 14   | MOVEEND_ITEM_EFFECTS_ALL        | 4666-4671  | Gapped (cond.) | Item effects for all battlers (pinch berries etc.).
-// 15   | MOVEEND_KINGSROCK               | 4672-4676  | Gapped (cond.) | King's Rock flinch roll.
+// 15   | MOVEEND_KINGSROCK               | 4672-4676  | Ported / Gap   | Ported: King's Rock / Razor Fang flinch (battle_util.c:6034-6052). Blunder Policy (:6053-6061) gapped; multi-hit moves gapped.
 // 16   | MOVEEND_SUBSTITUTE              | 4714-4722  | Ported         | Clears STATUS2_SUBSTITUTE and sets substituteDestroyedThisTurn if substituteHp is 0.
 // 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | attacker.lastMove = moveId (the only field existing in state.ts).
 // 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Unreachable    | Mirror move tracking; not modeled in BattlerState.
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
-// 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (TryKnockOffBattleScript, :4268-4288). Thief, Bug Bite, Smack Down gapped.
+// 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (:4268-4288), Thief (:4579-4593), Bug Bite (:4595-4597, EatTargetBerry :13221) minus the berry's own effect (gapped), Smack Down (:4598-4606).
 // 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Unreachable    | Double battle second target iteration; sim is single battle.
 // 22   | MOVEEND_MOVE_EFFECTS2           | 4633-4655  | Gapped (cond.) | Post-target-item move effects (Make It Rain, Burn Up, Scale Shot, Wyrm Wind).
 // 23   | MOVEEND_RECOIL                  | 4457-4517  | Ported         | Recoil self-damage; Magic Guard, noRecoil (Rock Head/Steel Barrel/Bruteforce), halfRecoil.
 // 24   | MOVEEND_CHARGE                  | 4922-4933  | Ported         | Clears STATUS3_CHARGED_UP on Electric damaging move.
 // 25   | MOVEEND_ABILITIES_AFTER_RECOIL  | 4518-4522  | Gapped (cond.) | ABILITYEFFECT_AFTER_RECOIL hook.
-// 26   | MOVEEND_LIFEORB_SHELLBELL       | 4823-4827  | Ported / Gap   | Ported: Life Orb (floor(maxHp/10) self-damage, Sheer Force/Magic Guard checks). Shell Bell gapped.
-// 27   | MOVEEND_CHANGED_ITEMS           | 4656-4665  | Unreachable    | Changed held items assignment.
+// 26   | MOVEEND_LIFEORB_SHELLBELL       | 4823-4827  | Ported         | Life Orb (floor(maxHp/10) self-damage, Sheer Force/Magic Guard checks) and Shell Bell (savedDmg/4, min 1).
+// 27   | MOVEEND_CHANGED_ITEMS           | 4656-4665  | Ported         | Assigns the stolen item Thief parked in changedItems at Case 20.
 // 28   | MOVEEND_DEFROST                 | 4444-4456  | Unreachable    | Frostbite cured by fire move on target.
 // 29   | MOVEEND_PICKPOCKET              | 4828-4853  | Gapped (cond.) | Pickpocket item theft; gapped if target has ABILITY_PICKPOCKET.
 // 30   | MOVEEND_CLEAR_BITS              | 4934-4957  | Ported         | Clears rolloutCounter (if not Rollout), targetAffected, gemBoost, berryReduced.
@@ -49,9 +49,14 @@ import {
   MIN_STAT_STAGE,
   STATUS2_CONFUSION,
   STATUS2_ENRAGED,
+  STATUS2_FLINCHED,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
+  STATUS3_MAGNET_RISE,
+  STATUS3_ON_AIR,
+  STATUS3_SMACKED_DOWN,
+  STATUS3_TELEKINESIS,
   STAT_ATK,
   STAT_DEF,
   STAT_SPATK,
@@ -59,13 +64,19 @@ import {
   STAT_SPEED,
   clearFlag,
   hasFlag,
+  setFlag,
 } from './constants'
 import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { AbilitySlots } from '../abilities/dispatch'
-import { isMagicGuardProtected } from './endTurn'
+import { canBattlerHeal, isMagicGuardProtected } from './endTurn'
+import { isBattlerGrounded } from './grounding'
+import { syncPartyHp } from './outcome'
+import { resolveMultihitType } from './attackCanceller'
 import {
+  CHECK_FLINCH,
   MOVE_EFFECT_BURN,
+  MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_PARALYSIS,
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
@@ -75,7 +86,9 @@ import {
   canBePoisoned,
   canSleep,
   doesSubstituteBlockMove,
+  isAbilityStatusProtected,
   isPowderImmune,
+  isPreventableSecondaryEffect,
   testSheerForceFlag,
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
@@ -483,14 +496,6 @@ const TARGET_ITEM_EFFECTS = new Set([
   'HOLD_EFFECT_MARANGA_BERRY',
   'HOLD_EFFECT_JABOCA_BERRY',
   'HOLD_EFFECT_ROWAP_BERRY',
-])
-
-// Move effects handled in MOVEEND_MOVE_EFFECTS2_ON_EACH (battle_script_commands.c:4573-4632) that stay gapped.
-// Knock Off is ported (applyKnockOff) and reaches Case 20 through moveEffect2, not through this set.
-const MOVE_EFFECTS2_ON_EACH = new Set([
-  'EFFECT_THIEF',
-  'EFFECT_BUG_BITE',
-  'EFFECT_SMACK_DOWN',
 ])
 
 // Move effects handled in MOVEEND_MOVE_EFFECTS2 (battle_script_commands.c:4633-4655)
@@ -1269,19 +1274,176 @@ function applyKnockOff(
     return
   }
 
-  // UpdateBattlerItem(battlerDef, ITEM_NONE), battle_script_commands.c:2194-2221. The ability-state side effects
-  // (:2198-2212) have no state to write to here; gap them when a holder of the ability is actually present.
-  const hasAbility = (battler: BattlerState, id: string) => battlerHasAbility(battler.mon.abilities, id, () => false)
-  if (hasAbility(target, 'ABILITY_UNBURDEN') || hasAbility(target, 'ABILITY_SUGAR_RUSH')) {
+  clearBattlerItem(state, target, unmodelled)
+}
+
+/**
+ * UpdateBattlerItem(battler, ITEM_NONE), battle_script_commands.c:2194-2221. The ability-state side effects
+ * (:2198-2212) have no state to write to here; gap them when a holder of the ability is actually present.
+ */
+function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
+  const itemId = battler.mon.itemId
+  const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
+  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
     unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
   }
-  if (hasAbility(target, 'ABILITY_GREEDY')) {
+  if (hasAbility(battler, 'ABILITY_GREEDY')) {
     unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
   }
   if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
     unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
   }
-  target.mon.itemId = null
+  battler.mon.itemId = null
+}
+
+/**
+ * MOVE_EFFECT_STEAL_ITEM, battle_script_commands.c:4579-4593 (Thief, Covet). Only reads the attacker's and target's
+ * items: no ShouldApplyOnHitEffect / alive check and no IsStickyHold check, so Thief takes the item of a mon it just
+ * knocked out and ignores Sticky Hold. An attacker that already holds an item FALLTHROUGHs into TryKnockOffBattleScript
+ * (which does check both). `changedItems` is gBattleStruct->changedItems: MOVEEND_CHANGED_ITEMS hands the item over.
+ */
+function applyStealItem(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  targetDamaged: boolean,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+  changedItems: Map<number, string>,
+): void {
+  const attacker = state.battlers[attackerId]
+  const target = state.battlers[targetId]
+  if (!attacker || !target) return
+  if (attacker.mon.itemId) {
+    applyKnockOff(state, attackerId, targetId, targetDamaged, deps, unmodelled)
+    return
+  }
+  // CanStealItem, battle_util.c:8500-8510 (the stealer-holds-nothing clause is the branch above).
+  const itemId = target.mon.itemId
+  if (!itemId || !canBattlerGetOrLoseItem(target, itemId, deps) || !canBattlerGetOrLoseItem(attacker, itemId, deps)) return
+
+  // StealTargetItem, battle_script_commands.c:2224-2229: UpdateBattlerItem(target, NONE), then UpdateBattlerItem(attacker, item).
+  clearBattlerItem(state, target, unmodelled)
+  const hasAbility = (id: string) => battlerHasAbility(attacker.mon.abilities, id, () => false)
+  if (hasAbility('ABILITY_UNBURDEN') || hasAbility('ABILITY_SUGAR_RUSH')) {
+    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2194-2197) is not modelled")
+  }
+  // gBattleMons[attacker].item = 0 until MOVEEND_CHANGED_ITEMS (:4585-4586).
+  changedItems.set(attackerId, itemId)
+}
+
+/**
+ * MOVE_EFFECT_BUG_BITE via EatTargetBerry, battle_script_commands.c:13221-13234 (Bug Bite, Pluck). No alive /
+ * DidMoveHit / CanBattlerGetOrLoseItem check; only IsStickyHold. The target loses the berry; BattleScript_MoveEffectBugBite
+ * (data/battle_scripts_1.s:1006-1014) then runs `consumeberry BS_ATTACKER, TRUE` (VARIOUS_CONSUME_BERRY,
+ * battle_script_commands.c:8024-8041), which fires the berry's ITEMEFFECT_BATTLER_MOVE_END effect on the attacker and
+ * restores the attacker's own item from changedItems. The restore leaves the attacker's item unchanged, which is all
+ * that is modelled; the berry's effect is gapped by name.
+ */
+function applyBugBite(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  const attacker = state.battlers[attackerId]
+  const target = state.battlers[targetId]
+  if (!attacker || !target || !target.mon.itemId) return
+  const itemId = target.mon.itemId
+  if (deps.dataContext.item(itemId)?.grouping !== 'POCKET_BERRIES') return
+  const attackerHasMoldBreaker = attackerHasMoldBreakerActive(attacker, deps)
+  if (
+    battlerHasSimAbility(state, target, 'ABILITY_STICKY_HOLD', true, attackerId, attackerHasMoldBreaker, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_SUPERSWEET_SYRUP', true, attackerId, attackerHasMoldBreaker, deps.dataContext)
+  ) {
+    return
+  }
+  clearBattlerItem(state, target, unmodelled)
+  unmodelled.push(
+    `Bug Bite's consumeberry of ${itemId} on the attacker (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041, ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END)) is not modelled; only the target's berry loss is`,
+  )
+}
+
+/** MOVE_EFFECT_SMACK_DOWN, battle_script_commands.c:4598-4606. */
+function applySmackDown(state: BattleState, attackerId: number, targetId: number, deps: TurnLoopDeps): void {
+  const attacker = state.battlers[attackerId]
+  const target = state.battlers[targetId]
+  if (!attacker || !target || !isBattlerAlive(state, targetId)) return
+  // IsBattlerGrounded reads Levitate with checkMoldBreaker TRUE (battle_util.c:6669) against gBattlerAttacker.
+  const grounding = { ...deps.grounding, attackerHasMoldBreaker: attackerHasMoldBreakerActive(attacker, deps) }
+  if (isBattlerGrounded(state, targetId, grounding)) return
+  target.statuses3 = clearFlag(setFlag(target.statuses3, STATUS3_SMACKED_DOWN), STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS | STATUS3_ON_AIR)
+}
+
+/**
+ * MOVEEND_KINGSROCK's HOLD_EFFECT_FLINCH branch, ItemBattleEffects(ITEMEFFECT_KINGSROCK), battle_util.c:6034-6052.
+ * `&&` order matters for the RNG: Random() is only drawn once the damage, NO_EFFECT and TARGET_TURN_DAMAGED terms pass,
+ * and it is drawn before the FLAG_KINGS_ROCK_AFFECTED and target-alive terms. gBattleMoveDamage != 0 is read as the hit's
+ * targetDamage. There is no attacker-alive check.
+ */
+function applyKingsRock(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  targetDamage: number,
+  targetDamaged: boolean,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  const attacker = state.battlers[attackerId]
+  const target = state.battlers[targetId]
+  if (!attacker || !target) return
+  const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+
+  // GetBattlerHoldEffectParam, then B_SERENE_GRACE_BOOST >= GEN_5 (battle_config.h:115, GEN_7) doubling.
+  let param = (attacker.mon.itemId ? deps.dataContext.item(attacker.mon.itemId)?.holdEffectStrength : null) ?? 0
+  if (battlerHasSimAbility(state, attacker, 'ABILITY_SERENE_GRACE', false, attackerId, false, deps.dataContext)) {
+    param = Math.min(100, param * 2)
+  }
+  if (state.sides[attackerId & 1]?.timers?.rainbowTimer) {
+    param = Math.min(100, param * 2)
+  }
+
+  if (targetDamage === 0 || !targetDamaged) return
+  if (state.rng.random16() % 100 >= param) return
+
+  // The C fires this once per hit of a multi-strike move; the sim resolves the move once.
+  if (resolveMultihitType(attacker, moveId, moveData, deps.grounding.holdEffectOf(attackerId), []) !== null) {
+    unmodelled.push("ITEMEFFECT_KINGSROCK fires once per hit of a multi-strike move (battle_util.c:6033); the sim rolls it once for the whole move")
+  }
+  if (!isKingsRockAffected(moveData, deps) || target.mon.hp === 0) return
+
+  // SetMoveEffect(FALSE, 0) with MOVE_EFFECT_FLINCH, battle_script_commands.c:2336-2392 and :2665-2669. The Safeguard
+  // gate (:2352) is `moveEffect <= MOVE_EFFECT_CONFUSION`, which flinch is not.
+  const attackerHasMoldBreaker = attackerHasMoldBreakerActive(attacker, deps)
+  const hasShieldDust = battlerHasSimAbility(state, target, 'ABILITY_SHIELD_DUST', true, attackerId, attackerHasMoldBreaker, deps.dataContext)
+  if ((hasShieldDust || deps.grounding.holdEffectOf(targetId) === 'HOLD_EFFECT_COVERT_CLOAK') && isPreventableSecondaryEffect(MOVE_EFFECT_FLINCH)) return
+  if (testSheerForceFlag(state, attackerId, moveId, statusDeps)) return
+  if (doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) return
+  if (!isAbilityStatusProtected(state, targetId, CHECK_FLINCH, attackerId, statusDeps)) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_FLINCHED)
+  }
+}
+
+/**
+ * FLAG_KINGS_ROCK_AFFECTED, tools/codegen/src/er/move/BattleMovesGenerator.kt:80-88: not a status move, not a flinching
+ * move (the effect's `flinch_effect`, or MOVE_EFFECT_FLINCH as the argument effect, with a nonzero effectChance), and the
+ * effect has no `no_kings_rock` option. The move's own `no_kings_rock` flag has no flag_code_value and is not read.
+ * `customBehavior.causesFlinch` stands in for `move.customBehavior.causesFlinch`.
+ */
+function isKingsRockAffected(moveData: SimMoveData | undefined, deps: TurnLoopDeps): boolean {
+  if (!moveData || moveData.split === 'STATUS') return false
+  const options = moveData.effect ? deps.moveBehaviors?.[moveData.effect]?.options : undefined
+  if ((moveData.effectChance ?? 0) > 0) {
+    if (options?.flinchEffect) return false
+    if (moveData.argument?.kind === 'effect' && moveData.argument.effect === 'MOVE_EFFECT_FLINCH') return false
+  }
+  if (options?.noKingsRock) return false
+  if (moveData.customBehavior?.causesFlinch) return false
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1332,6 +1494,8 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     hasFlag(target.mon.status2, STATUS2_SUBSTITUTE) &&
     doesSubstituteBlockMove(state, attackerId, targetId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, [])
   const targetTurnDamaged = hpDealt > 0 && !subAbsorbedHit
+  // gBattleStruct->changedItems: items parked at MOVEEND_MOVE_EFFECTS2_ON_EACH and handed over at MOVEEND_CHANGED_ITEMS.
+  const changedItems = new Map<number, string>()
 
   // BattleScript_MoveEndTryFaintTarget -> BattleScript_FaintTarget -> onfaintedbyattacker
   // (battle_scripts_1.s:2881-2882, 6911-6912), which runs before moveendall.
@@ -1467,7 +1631,9 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Item effects for all battlers.
 
   // Case 15: MOVEEND_KINGSROCK (:4672-4676)
-  // King's Rock flinch.
+  if (attacker && target && deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_FLINCH') {
+    applyKingsRock(state, attackerId, targetId, moveId, moveData, targetDamage, targetTurnDamaged, deps, unmodelled)
+  }
 
   // Case 16: MOVEEND_SUBSTITUTE (:4714-4722)
   for (const b of state.battlers) {
@@ -1489,10 +1655,19 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Multi-hit loop. Total-damage resolved in sim.
 
   // Case 20: MOVEEND_MOVE_EFFECTS2_ON_EACH (:4573-4632)
-  if (ctx.moveEffect2 === 'MOVE_EFFECT_KNOCK_OFF') {
-    applyKnockOff(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled)
-  } else if (moveData?.effect && MOVE_EFFECTS2_ON_EACH.has(moveData.effect)) {
-    unmodelled.push(`move-end effect ${moveData.effect} is not modelled yet`)
+  switch (ctx.moveEffect2) {
+    case 'MOVE_EFFECT_STEAL_ITEM':
+      applyStealItem(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled, changedItems)
+      break
+    case 'MOVE_EFFECT_KNOCK_OFF':
+      applyKnockOff(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled)
+      break
+    case 'MOVE_EFFECT_BUG_BITE':
+      applyBugBite(state, attackerId, targetId, deps, unmodelled)
+      break
+    case 'MOVE_EFFECT_SMACK_DOWN':
+      applySmackDown(state, attackerId, targetId, deps)
+      break
   }
 
   // Case 21: MOVEEND_NEXT_TARGET (:4782-4822)
@@ -1562,12 +1737,25 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         hadAttackerDamage = true
       }
     } else if (atkHoldEffect === 'HOLD_EFFECT_SHELL_BELL') {
-      unmodelled.push('move-end Shell Bell heal is not modelled yet')
+      // REQUIRE chain, battle_util.c:6068-6073; the heal is savedDmg / 4 (min 1), :6077-6078, capped at maxHp by datahpupdate.
+      if (
+        hpDealt > 0 &&
+        attacker.mon.hp < attacker.mon.maxHp &&
+        canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+        !testSheerForceFlag(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding })
+      ) {
+        const heal = Math.max(1, Math.floor(hpDealt / 4))
+        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+        syncPartyHp(state, attackerId)
+      }
     }
   }
 
   // Case 27: MOVEEND_CHANGED_ITEMS (:4656-4665)
-  // Changed held items
+  for (const [battlerId, itemId] of changedItems) {
+    const holder = state.battlers[battlerId]
+    if (holder) holder.mon.itemId = itemId
+  }
 
   // Case 28: MOVEEND_DEFROST (:4444-4456)
   // Frostbite thaw

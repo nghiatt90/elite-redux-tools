@@ -39,6 +39,7 @@ import {
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
   STATUS3_ALWAYS_HITS,
+  STATUS3_EMBARGO,
   STATUS3_LEECHSEED,
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_YAWN,
@@ -2076,9 +2077,19 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
-// MOVE_EFFECT_KNOCK_OFF's numeric value is generated and not in the tree. Downstream, getMoveEffectChance only
-// compares against FLINCH / BURN / FROSTBITE, so any value outside the real enum range behaves identically.
-const MOVE_EFFECT_KNOCK_OFF = -1
+// The numeric values of MOVE_EFFECT_KNOCK_OFF / STEAL_ITEM / BUG_BITE / SMACK_DOWN are generated and not in the tree.
+// Downstream, getMoveEffectChance only compares against FLINCH / BURN / FROSTBITE, so any value outside the real enum
+// range behaves identically.
+const MOVE_EFFECT_STORED_FOR_MOVEEND = -1
+
+// SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores these in gBattleStruct->moveEffect2 and
+// returns; MOVEEND_MOVE_EFFECTS2_ON_EACH (moveEnd.ts) applies them.
+const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
+  'MOVE_EFFECT_KNOCK_OFF',
+  'MOVE_EFFECT_STEAL_ITEM',
+  'MOVE_EFFECT_BUG_BITE',
+  'MOVE_EFFECT_SMACK_DOWN',
+])
 
 export interface SecondaryEffectsResult {
   statusApplied: StatusAppliedOutcome | null
@@ -2154,6 +2165,8 @@ export function applySecondaryMoveEffects(
     chance: number
     affectsUser: boolean
     certain: boolean
+    /** Reached through Cmd_seteffectsecondary (SetMoveEffect(FALSE, 0) with no chance roll and no NO_EFFECT gate). */
+    secondary?: boolean
   }
   const effectSpecs: EffectSpec[] = []
 
@@ -2272,6 +2285,42 @@ export function applySecondaryMoveEffects(
     })
   } else if (moveEffect === 'EFFECT_RAPID_SPIN') {
     return applyRapidSpinEffects(ctx)
+  } else if (moveEffect === 'EFFECT_BUG_BITE') {
+    // BattleScript_EffectBugBite (data/battle_scripts_1.s:992-995): `jumpifnotberry BS_TARGET,
+    // BattleScript_EffectKnockOff` (VARIOUS_JUMP_IF_NOT_BERRY, battle_script_commands.c:6869-6875), otherwise
+    // `setmoveeffect MOVE_EFFECT_BUG_BITE | MOVE_EFFECT_CERTAIN` (no chance roll). BattleScript_EffectKnockOff
+    // (:6431-6433) is a plain `setmoveeffect MOVE_EFFECT_KNOCK_OFF` with the move's own effectChance.
+    const targetBattler = state.battlers[targetId]
+    const targetItem = targetBattler?.mon.itemId ?? null
+    const itemNegated =
+      !!targetBattler &&
+      (hasFlag(targetBattler.statuses3, STATUS3_EMBARGO) ||
+        battlerHasSimAbility(state, targetBattler, 'ABILITY_KLUTZ', false, targetId, false, deps.dataContext))
+    const isBerry = !!targetItem && !itemNegated && deps.dataContext.item(targetItem)?.grouping === 'POCKET_BERRIES'
+    effectSpecs.push({
+      effectName: isBerry ? 'MOVE_EFFECT_BUG_BITE' : 'MOVE_EFFECT_KNOCK_OFF',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: isBerry,
+    })
+  } else if (moveEffect === 'EFFECT_SMACK_DOWN') {
+    // BattleScript_EffectSmackDown (data/battle_scripts_1.s:1520-1542): `setmoveeffect MOVE_EFFECT_SMACK_DOWN;
+    // seteffectsecondary` stores it in moveEffect2 (SetMoveEffect(FALSE, 0), :3132-3135) with no chance roll, then
+    // `argumenttomoveeffect; seteffectwithchance` rolls the move's effectChance for its argument effect.
+    effectSpecs.push({ effectName: 'MOVE_EFFECT_SMACK_DOWN', chance: 0, affectsUser: false, certain: false, secondary: true })
+    const arg = moveData?.argument
+    if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+      effectSpecs.push({
+        effectName: arg.effect,
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: Boolean(arg.affectsUser),
+        certain: Boolean(arg.certain),
+      })
+    } else {
+      // argumenttomoveeffect leaves moveEffect 0, but Cmd_seteffectwithchance still evaluates `Random() % 100`
+      // before its `&& gBattleScripting.moveEffect` (battle_script_commands.c:3113).
+      state.rng.random16()
+    }
   } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
     // Pure damaging move with no secondary effect
   } else {
@@ -2289,8 +2338,8 @@ export function applySecondaryMoveEffects(
   let moveEffect2: string | null = null
 
   for (const spec of effectSpecs) {
-    const isKnockOff = spec.effectName === 'MOVE_EFFECT_KNOCK_OFF'
-    const baseEffectNum = isKnockOff ? MOVE_EFFECT_KNOCK_OFF : SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
+    const storedForMoveEnd = MOVE_EFFECTS_STORED_FOR_MOVEEND.has(spec.effectName)
+    const baseEffectNum = storedForMoveEnd ? MOVE_EFFECT_STORED_FOR_MOVEEND : SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
     if (baseEffectNum === undefined) {
       unmodelled.push(`secondary effect of ${spec.effectName} not modelled`)
       continue
@@ -2300,6 +2349,11 @@ export function applySecondaryMoveEffects(
       baseEffectNum |
       (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) |
       (spec.certain ? MOVE_EFFECT_CERTAIN : 0)
+
+    if (spec.secondary) {
+      moveEffect2 = spec.effectName
+      continue
+    }
 
     const percentChance = getMoveEffectChance(
       state,
@@ -2332,10 +2386,10 @@ export function applySecondaryMoveEffects(
       continue
     }
 
-    // SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores KNOCK_OFF in moveEffect2 and
+    // SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores the effect in moveEffect2 and
     // returns before the Shield Dust / Safeguard / Sheer Force / Substitute gates below; MOVEEND_MOVE_EFFECTS2_ON_EACH
     // (moveEnd.ts) applies it.
-    if (isKnockOff) {
+    if (storedForMoveEnd) {
       moveEffect2 = spec.effectName
       continue
     }
