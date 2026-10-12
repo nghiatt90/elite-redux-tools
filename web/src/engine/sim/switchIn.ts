@@ -35,13 +35,19 @@
 //
 //   Switch-in abilities (HandleSwitchInAbility's own scan over every ability
 //   slot, battle_util.c, reached from Cmd_switchineffects at
-//   battle_script_commands.c:5475-5541) -- GAPPED, by name, only when the
-//   incoming mon's ability actually has an onEntry hook per abilityHooks.json
-//   (SWITCH_IN_ABILITY_IDS below) -- same "gapped only when the real C
-//   condition is true" discipline as endTurn.ts's ENDTURN_ABILITIES. Checked
-//   against ALL FOUR slots (ability + 3 innates), matching
-//   HandleSwitchInAbility's own GetNumPossibleAbilitiesForBattler loop --
-//   UNLIKE endTurn.ts's ENDTURN_ABILITIES, which reads slot 0 only.
+//   battle_script_commands.c:5475-5541 and TryDoEventsBeforeFirstTurn at
+//   battle_main.c:3354-3382):
+//   - PORTED: weather setters (Drizzle, Drought, Sand Stream, Snow Warning
+//     and aliases Seaborne, Storm Cloud, Orichalcum Pulse, Desert Spirit,
+//     Sand Bender, Snowy Wrath, Sundae) through tryChangeBattleWeather
+//     (matching TryChangeBattleWeather, battle_util.c:3721-3743).
+//   - Dispatched across all four ability slots in C order (slot 3 down to 0,
+//     matching HandleSwitchInAbility's numPossibleAbilities - i loop).
+//   - Lead pass: applyBattleStartPass walks leads in speed order
+//     (gBattlerByTurnOrder via RecalculateMoveOrder, battle_main.c:3356).
+//   - Gapped: all other onEntry abilities remain conditional gaps in
+//     unmodelled[], checked against SWITCH_IN_ABILITY_IDS and suppressed
+//     per IsSuppressed (battle_util.c:9187).
 //
 //   Switch-in items (ITEMEFFECT_ON_SWITCH_IN, battle_util.c:5418-5604) --
 //   GAPPED, by name, only when the incoming mon's item's resolvedHoldEffect is
@@ -49,72 +55,29 @@
 //   `case HOLD_EFFECT_*` list, same "transcribed by name" precedent as
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
-import type { AbilitySlots } from '../abilities/dispatch'
 import { createBattlerState } from './create'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
+import {
+  applyBattleStartPass,
+  applySwitchInAbilities,
+  tryChangeBattleWeather,
+  type BattleStartDeps,
+  SWITCH_IN_ABILITY_IDS,
+  WEATHER_SETTER_MAP,
+} from './switchInAbility'
 
-/** HandleSwitchInAbility's own scan over every ability slot -- duplicated
- * rather than imported from fieldEndTurn.ts's private `hasAnyAbility` to avoid
- * a cross-module reach into an unexported helper (same "kept in lockstep by
- * inspection" precedent as endTurn.ts/fieldEndTurn.ts's own duplicated
- * `isAlive`/`isBattlerAlive`). */
-function hasAnyAbility(slots: AbilitySlots, ids: ReadonlySet<string>): boolean {
-  if (slots.ability && ids.has(slots.ability)) return true
-  return slots.innates.some((id) => id !== null && ids.has(id))
+export {
+  applyBattleStartPass,
+  applySwitchInAbilities,
+  tryChangeBattleWeather,
+  type BattleStartDeps,
+  SWITCH_IN_ABILITY_IDS,
+  WEATHER_SETTER_MAP,
 }
 
-/** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
- * `hooks.onEntry` is present. Used only to decide when the switch-in ability
- * gap line fires; the hook itself is not run. */
-const SWITCH_IN_ABILITY_IDS: ReadonlySet<string> = new Set([
-  'ABILITY_AIR_BLOWER', 'ABILITY_AIR_LOCK', 'ABILITY_ANTICIPATION', 'ABILITY_APE_SHIFT', 'ABILITY_AQUATIC',
-  'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER', 'ABILITY_ATLAS', 'ABILITY_AURA_BREAK', 'ABILITY_AURORAS_GALE',
-  'ABILITY_BARK_SKIN', 'ABILITY_BERSERK_DNA', 'ABILITY_BLIND_RAGE', 'ABILITY_BLISTERING_SUN', 'ABILITY_BLOOD_STAIN',
-  'ABILITY_BRUISER', 'ABILITY_BUTTER_UP', 'ABILITY_CHAMPIONS_ENTRANCE', 'ABILITY_CHANGE_OF_HEART', 'ABILITY_CHEAP_TACTICS',
-  'ABILITY_CHEATING_DEATH', 'ABILITY_CHILLING_PRESENCE', 'ABILITY_CHRISTMAS_NIGHTMARE', 'ABILITY_CLOUD_NINE', 'ABILITY_CLUELESS',
-  'ABILITY_COIL_UP', 'ABILITY_COMATOSE', 'ABILITY_COSTAR', 'ABILITY_COWARD', 'ABILITY_CROWNED_KING',
-  'ABILITY_CROWNED_SHIELD', 'ABILITY_CROWNED_SWORD', 'ABILITY_CURIOUS_MEDICINE', 'ABILITY_CURLIPEDE', 'ABILITY_CURSE_OF_FAMINE',
-  'ABILITY_CUTTHROAT', 'ABILITY_DARK_AURA', 'ABILITY_DAUNTLESS_SHIELD', 'ABILITY_DEEP_FRIED', 'ABILITY_DELTA_STREAM',
-  'ABILITY_DEMOLITIONIST', 'ABILITY_DESERT_SPIRIT', 'ABILITY_DESOLATE_LAND', 'ABILITY_DISGUISE', 'ABILITY_DOOMBRINGER',
-  'ABILITY_DOWNLOAD', 'ABILITY_DRACONIC_MIGHT', 'ABILITY_DRACO_MORALE', 'ABILITY_DRAGONFLY', 'ABILITY_DRAGONFRUIT',
-  'ABILITY_DRAKELP_HEAD', 'ABILITY_DREAMSCAPE', 'ABILITY_DREAM_WHIMSY', 'ABILITY_DRIZZLE', 'ABILITY_DROUGHT',
-  'ABILITY_DUST_CLOUD', 'ABILITY_EDGELORD', 'ABILITY_ELECTRIC_SURGE', 'ABILITY_ELECTRO_BOOSTER', 'ABILITY_EMBODY_ASPECT',
-  'ABILITY_EMBODY_ASPECT_CORNERSTONE', 'ABILITY_EMBODY_ASPECT_HEARTHFLAME', 'ABILITY_EMBODY_ASPECT_WELLSPRING', 'ABILITY_ENERGIZED', 'ABILITY_FAIRY_AURA',
-  'ABILITY_FAIRY_TALE', 'ABILITY_FEARMONGER', 'ABILITY_FEY_FLIGHT', 'ABILITY_FIRES_WRATH', 'ABILITY_FLAME_COAT',
-  'ABILITY_FLARE_BOOST', 'ABILITY_FLOWER_GIFT', 'ABILITY_FOAMY_WEB', 'ABILITY_FOOD_LOVERS', 'ABILITY_FORECAST',
-  'ABILITY_FOREWARN', 'ABILITY_FRISK', 'ABILITY_FROSTY_PRESCENCE', 'ABILITY_FUNERAL_PYRE', 'ABILITY_FURNACE',
-  'ABILITY_GALLANTRY', 'ABILITY_GENERATOR', 'ABILITY_GLEAM_EYES', 'ABILITY_GRASSY_SURGE', 'ABILITY_GRAVITY_WELL',
-  'ABILITY_GREATER_SPIRIT', 'ABILITY_GROUNDED', 'ABILITY_HADRON_ENGINE', 'ABILITY_HALF_DRAKE', 'ABILITY_HEADSTRONG',
-  'ABILITY_HOSPITALITY', 'ABILITY_HOT_COALS', 'ABILITY_HOVER', 'ABILITY_ICE_AGE', 'ABILITY_ICE_FACE',
-  'ABILITY_IMPOSTER', 'ABILITY_INTIMIDATE', 'ABILITY_INTREPID_SWORD', 'ABILITY_INVERSE_ROOM', 'ABILITY_I_AM_STEVE',
-  'ABILITY_JUMP_SCARE', 'ABILITY_KING_OF_THE_JUNGLE', 'ABILITY_KOMODO', 'ABILITY_LAWNMOWER', 'ABILITY_LETHARGY',
-  'ABILITY_LETS_DANCE', 'ABILITY_LETS_ROLL', 'ABILITY_LIGHTNING_BORN', 'ABILITY_LIGHT_SABER', 'ABILITY_LOCUST_SWARM',
-  'ABILITY_LOW_BLOW', 'ABILITY_LOW_VISIBILITY', 'ABILITY_MADNESS_ENHANCEMENT', 'ABILITY_MAJESTIC_MOTH', 'ABILITY_MALICIOUS',
-  'ABILITY_MASHED_POTATO', 'ABILITY_METALLIC', 'ABILITY_METALLIC_JAWS', 'ABILITY_MIMICRY', 'ABILITY_MISTY_SURGE',
-  'ABILITY_MOB_BOSS', 'ABILITY_MOLD_BREAKER', 'ABILITY_MOLTEN_CORE', 'ABILITY_MONKEY_BUSINESS', 'ABILITY_MONSTER_MASH',
-  'ABILITY_NEUTRALIZING_FOG', 'ABILITY_NIHIL_BLASTER', 'ABILITY_NORTH_WIND', 'ABILITY_OMINOUS_SHROUD', 'ABILITY_ON_THE_PROWL',
-  'ABILITY_ORICHALCUM_PULSE', 'ABILITY_OVERCAST', 'ABILITY_OVERWATCH', 'ABILITY_PARASITIC_SPORES', 'ABILITY_PASTEL_VEIL',
-  'ABILITY_PATCHWORK', 'ABILITY_PERMANENCE', 'ABILITY_PETAL_SHIELD', 'ABILITY_PETRIFY', 'ABILITY_PHANTOM',
-  'ABILITY_PHANTOM_THIEF', 'ABILITY_PICKUP', 'ABILITY_PIXIE_POWER', 'ABILITY_POSEIDONS_DOMINION', 'ABILITY_POWDER_BURST',
-  'ABILITY_POWER_OF_ALCHEMY', 'ABILITY_POWER_OUTAGE', 'ABILITY_PRESSURE', 'ABILITY_PRIMORDIAL_SEA', 'ABILITY_PROTOSYNTHESIS',
-  'ABILITY_PSYCHIC_SURGE', 'ABILITY_PURIFYING_WATERS', 'ABILITY_QUARK_DRIVE', 'ABILITY_RAINBOW_SCALES', 'ABILITY_RAPID_RESPONSE',
-  'ABILITY_READIED_ACTION', 'ABILITY_REJECTION', 'ABILITY_REVELATION', 'ABILITY_ROCKY_EXTERIOR', 'ABILITY_ROCK_ARMOR',
-  'ABILITY_ROSE_GARDEN', 'ABILITY_ROYAL_DECREE', 'ABILITY_SALT_CIRCLE', 'ABILITY_SAND_BENDER', 'ABILITY_SAND_PIT',
-  'ABILITY_SAND_STREAM', 'ABILITY_SCARE', 'ABILITY_SCARECROW', 'ABILITY_SCHOOLING', 'ABILITY_SCREEN_CLEANER',
-  'ABILITY_SEABORNE', 'ABILITY_SEA_GUARDIAN', 'ABILITY_SHIELDS_DOWN', 'ABILITY_SHOWDOWN_MODE', 'ABILITY_SIDEWINDER',
-  'ABILITY_SLOW_START', 'ABILITY_SNOWY_WRATH', 'ABILITY_SNOW_WARNING', 'ABILITY_SOOTHING_AROMA', 'ABILITY_SOOTHSAYER',
-  'ABILITY_SPIDER_LAIR', 'ABILITY_SPIDER_LAIR_UPGRADE', 'ABILITY_SPYWARE', 'ABILITY_STORM_CLOUD', 'ABILITY_SUNDAE',
-  'ABILITY_SUN_WORSHIP', 'ABILITY_SUPERCELL', 'ABILITY_SUPPRESS', 'ABILITY_SUPREME_OVERLORD', 'ABILITY_SWAMP_THING',
-  'ABILITY_TALON_TRAP', 'ABILITY_TAR_TOSS', 'ABILITY_TASTE_THE_RAINBOW', 'ABILITY_TELEKINETIC', 'ABILITY_TERAFORM_ZERO',
-  'ABILITY_TERAVOLT', 'ABILITY_TERRIFY', 'ABILITY_TOXIC_BOOST', 'ABILITY_TOXIC_SPILL', 'ABILITY_TOXIC_SURGE',
-  'ABILITY_TRACE', 'ABILITY_TRASH_HEAP', 'ABILITY_TRICKSTER', 'ABILITY_TURBOBLAZE', 'ABILITY_TURF_WAR',
-  'ABILITY_TWISTED_DIMENSION', 'ABILITY_UNNERVE', 'ABILITY_VIOLENT_RUSH', 'ABILITY_VOLTRON', 'ABILITY_WATCH_YOUR_STEP',
-  'ABILITY_WATERBORNE', 'ABILITY_WATER_VEIL', 'ABILITY_WEB_SPINNER', 'ABILITY_WHITE_SMOKE', 'ABILITY_WILDFIRE',
-  'ABILITY_WIND_RAGE', 'ABILITY_WIND_RIDER', 'ABILITY_WINTER_THRONE', 'ABILITY_WISHMAKER', 'ABILITY_WITCH_BROOM',
-  'ABILITY_WOODLAND_CURSE', 'ABILITY_YUKI_ONNA', 'ABILITY_ZEN_GARDEN', 'ABILITY_ZEN_MODE', 'ABILITY_ZERO_TO_HERO',
-])
+
 
 /** ITEMEFFECT_ON_SWITCH_IN's own `case HOLD_EFFECT_*` list, battle_util.c:
  * 5421-5603 (the whole switch inside `if (!gTurnStructs[battlerId].
@@ -223,11 +186,7 @@ export function switchIn(state: BattleState, battlerId: number, partyIndex: numb
   applySwitchInHazards(state, battlerId, deps, unmodelled)
   if (state.battlers[battlerId]!.mon.hp === 0) return
 
-  if (hasAnyAbility(incoming.abilities, SWITCH_IN_ABILITY_IDS)) {
-    const ownAbility = incoming.abilities.ability
-    const hookOwner = ownAbility && SWITCH_IN_ABILITY_IDS.has(ownAbility) ? ownAbility : incoming.abilities.innates.find((id) => id !== null && SWITCH_IN_ABILITY_IDS.has(id))
-    unmodelled.push(`battler ${battlerId}: HandleSwitchInAbility (battle_util.c:5475-5541) is not applied -- ${hookOwner}'s onEntry hook was not run`)
-  }
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
 
   if (!incoming.itemId) return
   const heldEffect = deps.dataContext.item(incoming.itemId)?.resolvedHoldEffect ?? null

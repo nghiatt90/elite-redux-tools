@@ -11,6 +11,11 @@ import { buildAccuracyInputs, getTotalAccuracy, isBattlerProtected, ProtectType 
 import { gapsToUnmodelled } from './bridge'
 import {
   DEFAULT_STAT_STAGE,
+  ENUM_WEATHER_FOG,
+  ENUM_WEATHER_HAIL,
+  ENUM_WEATHER_RAIN,
+  ENUM_WEATHER_SANDSTORM,
+  ENUM_WEATHER_SUN,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   SIDE_STATUS_AURORA_VEIL,
@@ -47,18 +52,10 @@ import {
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   WEATHER_FOG_ANY,
-  WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_ANY,
-  WEATHER_HAIL_TEMPORARY,
-  WEATHER_PRIMAL_ANY,
   WEATHER_RAIN_ANY,
-  WEATHER_RAIN_PERMANENT,
-  WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_ANY,
-  WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SUN_ANY,
-  WEATHER_SUN_PERMANENT,
-  WEATHER_SUN_TEMPORARY,
   clearFlag,
   hasFlag,
   setCounter,
@@ -107,7 +104,7 @@ import {
   isBattlerWeatherAffected,
 } from './statBuffs'
 import { canBattlerHeal } from './endTurn'
-import { weatherHasEffect } from './fieldEndTurn'
+import { tryChangeBattleWeather } from './switchInAbility'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat } from '../battleStat'
@@ -1810,29 +1807,19 @@ function handleStickyWeb(ctx: MoveEffectContext): ActionOutcome {
  * Note: while the brief mentioned "(5, and the extending hold effect...)", upstream C
  * explicitly defines WEATHER_DURATION as 8 and WEATHER_DURATION_EXTENDED as 12.
  */
-export const WEATHER_DURATION = 8
-export const WEATHER_DURATION_EXTENDED = 12
+export { WEATHER_DURATION, WEATHER_DURATION_EXTENDED } from './constants'
 
 /**
  * Common implementation for weather moves:
  * - Macro checkprimalweather (battle_script.inc:2511-2526): fails if gBattleWeather has WEATHER_PRIMAL_ANY.
  * - Cmd_various VARIOUS_SET_WEATHER (src/battle_script_commands.c:8634-8644).
- * - TryChangeBattleWeather (src/battle_util.c:3721-3743):
- *   - Fails if WEATHER_PRIMAL_ANY is active (:3725-3727).
- *   - Fails if !WEATHER_HAS_EFFECT (:3728-3730, include/battle_util.h:45-46, fieldEndTurn.ts:390-396).
- *   - Fails if already active (gBattleWeather & (sWeatherFlagsInfo[weather][0] | sWeatherFlagsInfo[weather][1])) (:3731).
- *   - Sets gBattleWeather = sWeatherFlagsInfo[weather][0] (:3732).
- *   - Sets gFieldTimers.started.weather = TRUE (:3733).
- *   - Sets gWishFutureKnock.weatherDuration to WEATHER_DURATION_EXTENDED (12) if GetBattlerHoldEffect matches,
- *     else WEATHER_DURATION (8) (:3734-3737, include/battle_util.h:50-51).
+ * - TryChangeBattleWeather (src/battle_util.c:3721-3743) via tryChangeBattleWeather.
  * - VARIOUS_ON_WEATHER_CHANGE (src/battle_script_commands.c:8183-8190) / BattleScript_OnWeatherChange
- *   (data/battle_scripts_1.s:9833-9841): gaps onWeather ability hook.
+ *   (data/battle_scripts_1.s:9833-9841): gaps onWeather ability hook when weather changes.
  */
 function applyWeatherMove(
   ctx: MoveEffectContext,
-  weatherFlag: number,
-  existingWeatherMask: number,
-  extendingHoldEffect: string,
+  weatherEnum: number,
   scriptCitation: string,
 ): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
@@ -1840,32 +1827,12 @@ function applyWeatherMove(
   const moveEffect = action.chosenMove!.effect
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
-  // checkprimalweather (battle_script.inc:2511-2526) & TryChangeBattleWeather (src/battle_util.c:3725-3727)
-  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
-    return outcome(ctx, {})
+  const changed = tryChangeBattleWeather(state, battlerId, weatherEnum, false, deps)
+  if (changed) {
+    unmodelled.push(
+      `BattleScript_OnWeatherChange (data/battle_scripts_1.s:9833-9841) / VARIOUS_ON_WEATHER_CHANGE (src/battle_script_commands.c:8183-8190): onWeather ability reactions are not modelled (${scriptCitation})`,
+    )
   }
-
-  // TryChangeBattleWeather: !WEATHER_HAS_EFFECT check (src/battle_util.c:3728-3730)
-  if (!weatherHasEffect(state, deps.grounding)) {
-    return outcome(ctx, {})
-  }
-
-  // TryChangeBattleWeather: already-active check (src/battle_util.c:3731)
-  if (hasFlag(state.field.weather, existingWeatherMask)) {
-    return outcome(ctx, {})
-  }
-
-  // Set weather & started flag (src/battle_util.c:3732-3733)
-  state.field.weather = weatherFlag
-  state.field.timers.started.weather = true
-
-  // Set weather duration with extending hold effect (src/battle_util.c:3734-3737)
-  const isExtended = getHoldEffect(ctx, battlerId) === extendingHoldEffect
-  state.field.weatherDuration = isExtended ? WEATHER_DURATION_EXTENDED : WEATHER_DURATION
-
-  unmodelled.push(
-    `BattleScript_OnWeatherChange (data/battle_scripts_1.s:9833-9841) / VARIOUS_ON_WEATHER_CHANGE (src/battle_script_commands.c:8183-8190): onWeather ability reactions are not modelled (${scriptCitation})`,
-  )
 
   return outcome(ctx, {})
 }
@@ -1877,13 +1844,7 @@ function applyWeatherMove(
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleRainDance(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(
-    ctx,
-    WEATHER_RAIN_TEMPORARY,
-    WEATHER_RAIN_TEMPORARY | WEATHER_RAIN_PERMANENT,
-    'HOLD_EFFECT_DAMP_ROCK',
-    'BattleScript_EffectRainDance',
-  )
+  return applyWeatherMove(ctx, ENUM_WEATHER_RAIN, 'BattleScript_EffectRainDance')
 }
 
 /**
@@ -1893,13 +1854,7 @@ function handleRainDance(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleSunnyDay(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(
-    ctx,
-    WEATHER_SUN_TEMPORARY,
-    WEATHER_SUN_TEMPORARY | WEATHER_SUN_PERMANENT,
-    'HOLD_EFFECT_HEAT_ROCK',
-    'BattleScript_EffectSunnyDay',
-  )
+  return applyWeatherMove(ctx, ENUM_WEATHER_SUN, 'BattleScript_EffectSunnyDay')
 }
 
 /**
@@ -1909,13 +1864,7 @@ function handleSunnyDay(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleSandstorm(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(
-    ctx,
-    WEATHER_SANDSTORM_TEMPORARY,
-    WEATHER_SANDSTORM_ANY,
-    'HOLD_EFFECT_SMOOTH_ROCK',
-    'BattleScript_EffectSandstorm',
-  )
+  return applyWeatherMove(ctx, ENUM_WEATHER_SANDSTORM, 'BattleScript_EffectSandstorm')
 }
 
 /**
@@ -1925,13 +1874,7 @@ function handleSandstorm(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleHail(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(
-    ctx,
-    WEATHER_HAIL_TEMPORARY,
-    WEATHER_HAIL_ANY,
-    'HOLD_EFFECT_ICY_ROCK',
-    'BattleScript_EffectHail',
-  )
+  return applyWeatherMove(ctx, ENUM_WEATHER_HAIL, 'BattleScript_EffectHail')
 }
 
 /**
@@ -1941,13 +1884,7 @@ function handleHail(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(
-    ctx,
-    WEATHER_FOG_TEMPORARY,
-    WEATHER_FOG_ANY,
-    'HOLD_EFFECT_SMOKE_BALL',
-    'BattleScript_EffectEerieFog',
-  )
+  return applyWeatherMove(ctx, ENUM_WEATHER_FOG, 'BattleScript_EffectEerieFog')
 }
 
 const HANDLERS: Record<string, MoveEffectHandler> = {

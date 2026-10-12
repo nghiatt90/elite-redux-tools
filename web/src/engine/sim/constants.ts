@@ -333,3 +333,23 @@ export const WEATHER_PRIMAL_ANY = WEATHER_RAIN_PRIMAL | WEATHER_SUN_PRIMAL | WEA
 /** :414-415 -- "permanent" here means "does not tick down", and PRIMAL counts. */
 export const WEATHER_PERMANENT =
   WEATHER_PRIMAL_ANY | WEATHER_RAIN_PERMANENT | WEATHER_SANDSTORM_PERMANENT | WEATHER_SUN_PERMANENT | WEATHER_HAIL_PERMANENT | WEATHER_FOG_PERMANENT
+
+// ENUM_WEATHER_* -- include/constants/battle.h:446-454.
+export const ENUM_WEATHER_NONE = 0
+export const ENUM_WEATHER_RAIN = 1
+export const ENUM_WEATHER_SUN = 2
+export const ENUM_WEATHER_SANDSTORM = 3
+export const ENUM_WEATHER_HAIL = 4
+export const ENUM_WEATHER_SUN_PRIMAL = 5
+export const ENUM_WEATHER_RAIN_PRIMAL = 6
+export const ENUM_WEATHER_STRONG_WINDS = 7
+export const ENUM_WEATHER_FOG = 8
+
+/** WEATHER_DURATION (8) and WEATHER_DURATION_EXTENDED (12) -- include/battle_util.h:50-51. */
+export const WEATHER_DURATION = 8
+export const WEATHER_DURATION_EXTENDED = 12
+
+/** Neutral stat stage multipliers [numerator, denominator] from stage -6 to +6. */
+export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
+  [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
+]

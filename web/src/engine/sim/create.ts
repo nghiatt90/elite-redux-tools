@@ -327,7 +327,7 @@ export function createFieldTimerState(): FieldTimerState {
 }
 
 /** Clear skies, no terrain, no Room. A battle that starts under weather (a
- * Drizzle lead, an encounters.json field effect) sets `weather` afterwards --
+ * Drizzle lead via applyBattleStartPass, an encounters.json field effect) sets `weather` afterwards --
  * the constructor does not decide that, because deciding it needs data. */
 export function createFieldState(): FieldState {
   return {
