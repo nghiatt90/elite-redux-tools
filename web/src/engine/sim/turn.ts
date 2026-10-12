@@ -1230,6 +1230,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       moveId: action.chosenMove.id,
       targetDamage: targetDamage ?? 0,
       hpDealt,
+      moveEffect2: secondaryResult?.moveEffect2 ?? null,
       deps,
       unmodelled,
       fainted,

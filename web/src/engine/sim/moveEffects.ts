@@ -2075,9 +2075,15 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
+// MOVE_EFFECT_KNOCK_OFF's numeric value is generated and not in the tree. Downstream, getMoveEffectChance only
+// compares against FLINCH / BURN / FROSTBITE, so any value outside the real enum range behaves identically.
+const MOVE_EFFECT_KNOCK_OFF = -1
+
 export interface SecondaryEffectsResult {
   statusApplied: StatusAppliedOutcome | null
   statChanges: StatChangeOutcome[]
+  /** gBattleStruct->moveEffect2 (battle_script_commands.c:2332), consumed by MOVEEND_MOVE_EFFECTS2_ON_EACH. */
+  moveEffect2: string | null
 }
 
 export interface SecondaryMoveEffectContext {
@@ -2249,9 +2255,11 @@ export function applySecondaryMoveEffects(
 
   let statusAppliedOutcome: StatusAppliedOutcome | null = null
   const statChanges: StatChangeOutcome[] = []
+  let moveEffect2: string | null = null
 
   for (const spec of effectSpecs) {
-    const baseEffectNum = SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
+    const isKnockOff = spec.effectName === 'MOVE_EFFECT_KNOCK_OFF'
+    const baseEffectNum = isKnockOff ? MOVE_EFFECT_KNOCK_OFF : SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
     if (baseEffectNum === undefined) {
       unmodelled.push(`secondary effect of ${spec.effectName} not modelled`)
       continue
@@ -2290,6 +2298,14 @@ export function applySecondaryMoveEffects(
     }
 
     if (!chancePasses) {
+      continue
+    }
+
+    // SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores KNOCK_OFF in moveEffect2 and
+    // returns before the Shield Dust / Safeguard / Sheer Force / Substitute gates below; MOVEEND_MOVE_EFFECTS2_ON_EACH
+    // (moveEnd.ts) applies it.
+    if (isKnockOff) {
+      moveEffect2 = spec.effectName
       continue
     }
 
@@ -2505,5 +2521,6 @@ export function applySecondaryMoveEffects(
   return {
     statusApplied: statusAppliedOutcome,
     statChanges,
+    moveEffect2,
   }
 }

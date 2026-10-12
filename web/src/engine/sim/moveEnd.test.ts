@@ -17,7 +17,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
-import type { BattleState, RandomSource, SimBattleMon } from './state'
+import type { MoveBehaviors } from '../basePower'
+import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -35,12 +36,18 @@ import {
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
   STATUS3_GASTRO_ACID,
+  STAT_ACC,
+  STAT_ATK,
+  STAT_SPATK,
   STAT_SPEED,
   hasFlag,
 } from './constants'
 import {
   HALF_RECOIL_ABILITIES,
+  KO_STAT_RAISES,
   NO_RECOIL_ABILITIES,
+  ON_BATTLER_FAINTS_ABILITIES,
+  ON_BATTLER_FAINTS_FOR,
   PORTED_ATTACKER_ABILITIES,
   PORTED_DEFENDER_ABILITIES,
   RECOIL_FRACTIONS,
@@ -215,6 +222,9 @@ const MOVE_FIRE_PUNCH = requireMove('MOVE_FIRE_PUNCH')
 const MOVE_THUNDERBOLT = requireMove('MOVE_THUNDERBOLT')
 const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
 const MOVE_RAPID_SPIN = requireMove('MOVE_RAPID_SPIN')
+// requireMove() omits effectChance (adding it would start firing secondary effects in every older test); Knock Off's
+// seteffectwithchance needs moves.json's effectChance (100) as its percentChance.
+const MOVE_KNOCK_OFF: SimMoveData = { ...requireMove('MOVE_KNOCK_OFF'), effectChance: movesById.get('MOVE_KNOCK_OFF')!.effectChance as number }
 
 const ABILITY_ROCK_HEAD = requireAbility('ABILITY_ROCK_HEAD')
 const ABILITY_STEEL_BARREL = requireAbility('ABILITY_STEEL_BARREL')
@@ -239,6 +249,10 @@ const ABILITY_POISON_TOUCH = requireAbility('ABILITY_POISON_TOUCH')
 const ABILITY_EFFECT_SPORE = requireAbility('ABILITY_EFFECT_SPORE')
 const ABILITY_GOOEY = requireAbility('ABILITY_GOOEY')
 const ABILITY_MOXIE = requireAbility('ABILITY_MOXIE')
+const ABILITY_BEAST_BOOST = requireAbility('ABILITY_BEAST_BOOST')
+const ABILITY_SOUL_HEART = requireAbility('ABILITY_SOUL_HEART')
+const ABILITY_SOUL_EATER = requireAbility('ABILITY_SOUL_EATER')
+const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
 const ABILITY_AFTERMATH = requireAbility('ABILITY_AFTERMATH')
 const ABILITY_ABSORBANT = requireAbility('ABILITY_ABSORBANT')
 const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
@@ -706,16 +720,44 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ABSORBANT is not modelled yet')
   })
 
-  it('conditionally gaps on-faint ability (ABILITY_MOXIE) when a battler faints', () => {
+  it('conditionally gaps an unported on-faint ability (ABILITY_SOUL_EATER, APPLY_ON_ATTACKER) when its holder KOs', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
     expect(act.fainted).toContain(1)
-    expect(act.unmodelled).toContain('on-faint ability ABILITY_MOXIE is not modelled yet')
+    expect(act.unmodelled).toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+  })
+
+  it('does not gap an unported on-faint ability when nobody faints', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+  })
+
+  it('does not gap an APPLY_ON_ATTACKER ability held by the fainted battler or when it is not the attacker', () => {
+    // The defender holds Soul Eater and survives; the attacker faints to Rocky Helmet. Attacker = MAX_BATTLERS_COUNT in
+    // VARIOUS_ON_FAINTED_BY_OTHER (battle_script_commands.c:7167), so APPLY_ON_ATTACKER matches nobody.
+    const state = battle(
+      [
+        { hp: 15, maxHp: 120 },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(10), { 1: 'HOLD_EFFECT_ROCKY_HELMET' }))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([0])
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
   })
 
   it('conditionally gaps Rapid Spin hazard/binding removal', () => {
@@ -1281,5 +1323,299 @@ describe('ability statuses set HITMARKER_IGNORE_SAFEGUARD', () => {
     state.sides[0]!.statuses |= SIDE_STATUS_SAFEGUARD
     executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
     expect(state.battlers[0]!.mon.status1).toBe(STATUS1_NONE)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Knock-out abilities (VARIOUS_ON_FAINTED_BY_ATTACKER / _BY_OTHER)
+// ---------------------------------------------------------------------------
+
+function partyMon(hp: number): SimPartyMon {
+  return {
+    speciesId: 'SPECIES_MUDKIP',
+    hp,
+    maxHp: 100,
+    level: 50,
+    moves: ['MOVE_TACKLE', null, null, null],
+    pp: [35, 0, 0, 0],
+    itemId: null,
+    abilities: { ability: null, innates: [null, null, null] },
+    rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 50 },
+    nature: 'NATURE_HARDY',
+    hiddenPowerType: null,
+    speedDown: false,
+    gender: 'MALE',
+    status1: STATUS1_NONE,
+    types: ['WATER', 'MYSTERY', 'MYSTERY'],
+  }
+}
+
+describe('onBattlerFaints dispatch: Moxie and the other +1 stat-raise hooks', () => {
+  it('Moxie raises the holder Attack by 1 after a KO (MoxieClone, abilities.cc:315-320)', () => {
+    // Tackle: accuracy 100, roll 0 hits. Target hp 30 takes 30 -> faints. The attacker (slot 0) holds Moxie and
+    // onBattlerFaintsFor = APPLY_ON_ATTACKER, so ChangeStatBuffs(attacker, +1, STAT_ATK) -> stage 6 -> 7.
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 1 }])
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_MOXIE is not modelled yet')
+  })
+
+  it('Moxie does not raise Attack when the target survives', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([])
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(act.statChanges).toBeNull()
+  })
+
+  it('Moxie does not raise Attack when the attacker is already at +6 (ChangeStatBuffs returns 0, abilities.cc:317)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    state.battlers[0]!.mon.statStages[STAT_ATK] = 12
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(12)
+    expect(act.statChanges).toBeNull()
+  })
+
+  it('Moxie does not fire when the KO ends the battle (REQUIRE_NOT(NoAliveMonsForEitherParty), battle_script_commands.c:7133)', () => {
+    const base = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const state = createBattleState({
+      battlers: [base.battlers[0]!, base.battlers[1]!],
+      playerParty: [partyMon(100)],
+      opponentParty: [partyMon(30)],
+      rng: base.rng,
+    })
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battleOutcome).toBe('WON')
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(act.statChanges).toBeNull()
+  })
+
+  it('Moxie fires when the fainted side still has a reserve mon', () => {
+    const base = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const state = createBattleState({
+      battlers: [base.battlers[0]!, base.battlers[1]!],
+      playerParty: [partyMon(100)],
+      opponentParty: [partyMon(30), partyMon(100)],
+      rng: base.rng,
+    })
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(state.battleOutcome).toBeNull()
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 1 }])
+  })
+
+  it('Moxie in an innate slot fires too (ON_ABILITY walks every slot)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: null, innates: [null, ABILITY_MOXIE, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(out.actions.find((a) => a.battlerId === 0)!.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 1 }])
+  })
+
+  it('Beast Boost raises the holder highest raw stat (GetHighestStatId(battler, FALSE), battle_util.c:8724-8746)', () => {
+    // Attacker raw stats: atk 70, def 90, spatk 80, spdef 85, spe 100 (battle() helper: spe 100 for slot 0).
+    // Struct order ATK, DEF, SPEED, SPATK, SPDEF with strict >: 70 -> 90 -> 100 (Speed) stays highest.
+    const state = battle(
+      [{ hp: 100, maxHp: 100, atk: 70, abilities: { ability: ABILITY_BEAST_BOOST, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(out.actions.find((a) => a.battlerId === 0)!.statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: 1 }])
+  })
+
+  it('Soul Heart (APPLY_ON_ANY, no HasAttackerFaintedTarget check) raises Sp. Atk on the foe when the attacker faints', () => {
+    // Attacker hp 15 / maxHp 120 hits a Rocky Helmet holder: floor(120 / 6) = 20 >= 15 -> the attacker faints in
+    // MOVEEND_ITEM_EFFECTS_TARGET. VARIOUS_ON_FAINTED_BY_OTHER then offers the faint to every alive battler: the
+    // target holds Soul Heart (APPLY_ON_ANY) -> Sp. Atk +1 on the target (slot 1).
+    const state = battle(
+      [{ hp: 15, maxHp: 120 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_HEART, innates: [null, null, null] } }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(10), { 1: 'HOLD_EFFECT_ROCKY_HELMET' }))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([0])
+    expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(act.statChanges).toEqual([{ battlerId: 1, stat: STAT_SPATK, change: 1 }])
+  })
+
+  it('Moxie held by the foe does NOT fire when the attacker faints (APPLY_ON_ATTACKER vs attacker = MAX_BATTLERS_COUNT, :7167)', () => {
+    const state = battle(
+      [{ hp: 15, maxHp: 120 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOXIE, innates: [null, null, null] } }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(10), { 1: 'HOLD_EFFECT_ROCKY_HELMET' }))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([0])
+    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(act.statChanges).toBeNull()
+  })
+})
+
+describe('Pinned onBattlerFaints tables', () => {
+  it('ON_BATTLER_FAINTS_FOR covers exactly the onBattlerFaints abilities', () => {
+    expect(new Set(Object.keys(ON_BATTLER_FAINTS_FOR))).toEqual(ON_BATTLER_FAINTS_ABILITIES)
+  })
+
+  it('KO_STAT_RAISES only names abilities that have an onBattlerFaints hook', () => {
+    for (const id of Object.keys(KO_STAT_RAISES)) expect(ON_BATTLER_FAINTS_ABILITIES.has(id), id).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Knock Off (MOVE_EFFECT_KNOCK_OFF -> MOVEEND_MOVE_EFFECTS2_ON_EACH -> TryKnockOffBattleScript)
+// ---------------------------------------------------------------------------
+
+describe('Knock Off (MOVEEND_MOVE_EFFECTS2_ON_EACH)', () => {
+  const BEHAVIORS = snapshot<{ behaviors: MoveBehaviors }>('moveBehaviors.json').behaviors
+  const knockOffDeps = (damage: DamageResolver, holdEffects: Record<number, string> = {}): TurnLoopDeps => ({
+    ...testDepsWithDamage(damage, holdEffects),
+    dataContext: { ...DATA_CONTEXT, move: (id) => (id === 'MOVE_KNOCK_OFF' ? MOVE_KNOCK_OFF : DATA_CONTEXT.move(id)) },
+    moveBehaviors: BEHAVIORS,
+  })
+
+  it('removes the target item after a hit: accuracy draw, then seteffectwithchance draws even at 100% (:3113)', () => {
+    // Knock Off effectChance 100 -> `Random() % 100 < 100` always passes but the draw still happens: 2 calls total.
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(rng.calls).toBe(2)
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).not.toContain('secondary effect of EFFECT_KNOCK_OFF not modelled')
+  })
+
+  it('Sticky Hold keeps the item (IsStickyHold, :4274-4278)', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100 },
+        { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS', abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] } },
+      ],
+      scriptedRng([0, 0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('a Mold Breaker attacker bypasses Sticky Hold (BattlerHasAbility checkMoldBreaker TRUE, :9330)', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_MOLD_BREAKER, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS', abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] } },
+      ],
+      scriptedRng([0, 0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+  })
+
+  it('does nothing when the target holds no item', () => {
+    const rng = scriptedRng([0, 0])
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], rng)
+    const out = executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(70)
+    expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled.filter((m) => /UpdateBattlerItem|Knock/.test(m))).toEqual([])
+  })
+
+  it('does nothing when the move missed (Cmd_moveend never runs; no seteffectwithchance draw)', () => {
+    // Accuracy stage -6 on the attacker: 100 * 3 / 9 = 33. A roll of 99 gives 99 >= 33 -> miss.
+    const rng = scriptedRng([99, 0])
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], rng)
+    state.battlers[0]!.mon.statStages[STAT_ACC] = 0
+    const out = executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+    expect(state.battlers[1]!.mon.hp).toBe(100)
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+    expect(rng.calls).toBe(1)
+  })
+
+  it('does nothing when the hit had no effect (MOVE_RESULT_NO_EFFECT: seteffectwithchance does not set moveEffect2)', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(0)))
+
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('does not knock off the item of a target the move fainted (ShouldApplyOnHitEffect needs IsBattlerAlive, :4271)', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 30, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    const out = executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+    expect(out.actions.find((a) => a.battlerId === 0)!.fainted).toContain(1)
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('cannot remove items CanBattlerGetOrLoseItem forbids (Enigma Berry, Mega Stones; battle_util.c:8255-8259)', () => {
+    for (const itemId of ['ITEM_ENIGMA_BERRY', 'ITEM_VENUSAURITE']) {
+      const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId }], scriptedRng([0, 0]))
+      executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+
+      expect(state.battlers[1]!.mon.itemId, itemId).toBe(itemId)
+    }
+  })
+
+  it('a Substitute that absorbs the hit leaves TARGET_TURN_DAMAGED false, so the item stays (Cmd_datahpupdate :1877-1892)', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    state.battlers[1]!.mon.status2 |= STATUS2_SUBSTITUTE
+    state.battlers[1]!.volatiles.substituteHp = 20
+    executeTurn(state, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(10)))
+
+    expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+  })
+
+  it('gaps UpdateBattlerItem ability state only when the target actually has Unburden', () => {
+    const withUnburden = battle(
+      [
+        { hp: 100, maxHp: 100 },
+        { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS', abilities: { ability: requireAbility('ABILITY_UNBURDEN'), innates: [null, null, null] } },
+      ],
+      scriptedRng([0, 0]),
+    )
+    const gapped = executeTurn(withUnburden, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+    expect(gapped.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Unburden'))).toBe(true)
+
+    const plain = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
+    const clean = executeTurn(plain, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
+    expect(clean.actions.find((a) => a.battlerId === 0)!.unmodelled.filter((m) => m.includes('UpdateBattlerItem'))).toEqual([])
   })
 })

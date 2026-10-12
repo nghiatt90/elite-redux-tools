@@ -28,7 +28,7 @@
 // 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | attacker.lastMove = moveId (the only field existing in state.ts).
 // 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Unreachable    | Mirror move tracking; not modeled in BattlerState.
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
-// 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Gapped (cond.) | Post-target-item effects: Knock Off, Thief, Bug Bite, Smack Down. Out of scope per brief.
+// 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (TryKnockOffBattleScript, :4268-4288). Thief, Bug Bite, Smack Down gapped.
 // 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Unreachable    | Double battle second target iteration; sim is single battle.
 // 22   | MOVEEND_MOVE_EFFECTS2           | 4633-4655  | Gapped (cond.) | Post-target-item move effects (Make It Rain, Burn Up, Scale Shot, Wyrm Wind).
 // 23   | MOVEEND_RECOIL                  | 4457-4517  | Ported         | Recoil self-damage; Magic Guard, noRecoil (Rock Head/Steel Barrel/Bruteforce), halfRecoil.
@@ -52,6 +52,10 @@ import {
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPATK,
+  STAT_SPDEF,
   STAT_SPEED,
   clearFlag,
   hasFlag,
@@ -76,14 +80,17 @@ import {
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
 import {
+  attackerHasMoldBreakerActive,
   battlerHasSimAbility,
+  changeStatBuffs,
   changeStatBuffsImplicit,
   isSimAbilitySuppressed,
   MOVE_EFFECT_AFFECTS_USER,
+  STAT_BUFF_DONT_SET_BUFFERS,
   STAT_BUFF_UPDATE_MOVE_EFFECT,
 } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide } from './turn'
+import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 
 // ---------------------------------------------------------------------------
@@ -380,6 +387,7 @@ export const ON_ATTACKER_ABILITIES = new Set([
 ])
 
 // Quoted grep: grep -oP '"onBattlerFaints".+?"id":"\KABILITY_[A-Z0-9_]+' data/v2.65beta/abilityHooks.json
+// Dispatched by dispatchOnBattlerFaints; the stat-raise subset is ported (KO_STAT_RAISES), the rest gap when applicable.
 export const ON_BATTLER_FAINTS_ABILITIES = new Set([
   'ABILITY_ADRENALINE_RUSH',
   'ABILITY_APEX_PREDATOR',
@@ -477,9 +485,9 @@ const TARGET_ITEM_EFFECTS = new Set([
   'HOLD_EFFECT_ROWAP_BERRY',
 ])
 
-// Move effects handled in MOVEEND_MOVE_EFFECTS2_ON_EACH (battle_script_commands.c:4573-4632)
+// Move effects handled in MOVEEND_MOVE_EFFECTS2_ON_EACH (battle_script_commands.c:4573-4632) that stay gapped.
+// Knock Off is ported (applyKnockOff) and reaches Case 20 through moveEffect2, not through this set.
 const MOVE_EFFECTS2_ON_EACH = new Set([
-  'EFFECT_KNOCK_OFF',
   'EFFECT_THIEF',
   'EFFECT_BUG_BITE',
   'EFFECT_SMACK_DOWN',
@@ -997,6 +1005,286 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
 }
 
 // ---------------------------------------------------------------------------
+// onBattlerFaints dispatch (VARIOUS_ON_FAINTED_BY_ATTACKER / VARIOUS_ON_FAINTED_BY_OTHER)
+// ---------------------------------------------------------------------------
+
+type FaintApplyOn = 'ATTACKER' | 'ANY' | 'OTHER' | 'ALLY' | 'FOE'
+
+// Each ability's onBattlerFaintsFor. Quoted grep:
+//   grep -oP '"ABILITY_[A-Z0-9_]+":\{"applyOn":\{[^}]*"onBattlerFaintsFor":"[^"]*"' data/v2.65beta/abilityHooks.json
+// Alias values resolved against their targets in src/abilities.cc: BANDIT -> Impl<SCAVENGER> (:4454, ATTACKER),
+// GHOST_FRENZY and SOUL_DEVOURER -> Impl<SOUL_EATER> (:4270, ATTACKER), QIGONG -> Impl<RAMPAGE> (:3716, ATTACKER),
+// CRYOSTASIS and HEMOTOXIN -> Impl<POISON_PUPPETEER> (:7728, OTHER).
+export const ON_BATTLER_FAINTS_FOR: Record<string, FaintApplyOn> = {
+  ABILITY_ADRENALINE_RUSH: 'ATTACKER',
+  ABILITY_APEX_PREDATOR: 'ATTACKER',
+  ABILITY_AS_ONE_ICE_RIDER: 'ATTACKER',
+  ABILITY_AS_ONE_SHADOW_RIDER: 'ATTACKER',
+  ABILITY_BANDIT: 'ATTACKER',
+  ABILITY_BATTLE_BOND: 'ATTACKER',
+  ABILITY_BEAST_BOOST: 'ATTACKER',
+  ABILITY_BERSERKER_RAGE: 'ATTACKER',
+  ABILITY_BLOODLUST: 'ANY',
+  ABILITY_BLOOD_BATH: 'OTHER',
+  ABILITY_BREEZY_NEIGH: 'ATTACKER',
+  ABILITY_CHILLING_NEIGH: 'ATTACKER',
+  ABILITY_CHOKEHOLD: 'OTHER',
+  ABILITY_COMMANDER: 'ALLY',
+  ABILITY_CROWNED_KING: 'ATTACKER',
+  ABILITY_CRYOSTASIS: 'OTHER',
+  ABILITY_DRAGONS_RITUAL: 'ATTACKER',
+  ABILITY_DRAKE_OF_RAGE: 'ATTACKER',
+  ABILITY_EDGELORD: 'ATTACKER',
+  ABILITY_ENERGIZED: 'ATTACKER',
+  ABILITY_ENTRANCE: 'OTHER',
+  ABILITY_FORSAKEN_HEART: 'ANY',
+  ABILITY_FROSTBIND: 'OTHER',
+  ABILITY_GHOST_FRENZY: 'ATTACKER',
+  ABILITY_GOING_BERSERK: 'ATTACKER',
+  ABILITY_GRIM_NEIGH: 'ATTACKER',
+  ABILITY_HAUNTING_FRENZY: 'ATTACKER',
+  ABILITY_HEMOTOXIN: 'OTHER',
+  ABILITY_HUBRIS: 'ATTACKER',
+  ABILITY_HUNGRY_MAWS: 'ATTACKER',
+  ABILITY_HUNTERS_HORN: 'ATTACKER',
+  ABILITY_HYDRA: 'ATTACKER',
+  ABILITY_JAWS_OF_CARNAGE: 'ATTACKER',
+  ABILITY_LOOTER: 'ATTACKER',
+  ABILITY_MAGMA_EATER: 'ATTACKER',
+  ABILITY_MASTER_HAND: 'ATTACKER',
+  ABILITY_MOXIE: 'ATTACKER',
+  ABILITY_NEUROTOXIN: 'OTHER',
+  ABILITY_POISON_PUPPETEER: 'OTHER',
+  ABILITY_POWER_OF_ALCHEMY: 'OTHER',
+  ABILITY_PREDATOR: 'ATTACKER',
+  ABILITY_PRETENTIOUS: 'ATTACKER',
+  ABILITY_QIGONG: 'ATTACKER',
+  ABILITY_RAGING_GODDESS: 'ATTACKER',
+  ABILITY_RAMPAGE: 'ATTACKER',
+  ABILITY_RECEIVER: 'ALLY',
+  ABILITY_SCAVENGER: 'ATTACKER',
+  ABILITY_SET_ABLAZE: 'OTHER',
+  ABILITY_SIDEWINDER: 'ATTACKER',
+  ABILITY_SOUL_DEVOURER: 'ATTACKER',
+  ABILITY_SOUL_EATER: 'ATTACKER',
+  ABILITY_SOUL_HEART: 'ANY',
+  ABILITY_STRIKEOUT: 'FOE',
+  ABILITY_SUPER_STRAIN: 'ATTACKER',
+  ABILITY_WAY_OF_SWIFTNESS: 'ATTACKER',
+}
+
+/**
+ * Port of IsTargettedApplyOnFlagAppropriate (src/abilities.cc:175-188) / IsApplyOnFlagAppropriate (:190-198) for the
+ * onBattlerFaintsFor flags, with contextBattler = the fainted battler and target = the fainted battler.
+ * `attackerId` is gBattlerAttacker for VARIOUS_ON_FAINTED_BY_ATTACKER and null (MAX_BATTLERS_COUNT) for _BY_OTHER,
+ * so APPLY_ON_ATTACKER can never match there (battle_script_commands.c:7140, :7167).
+ */
+function faintHookApplies(flag: FaintApplyOn, holderId: number, faintedId: number, attackerId: number | null): boolean {
+  switch (flag) {
+    case 'ATTACKER':
+      return holderId === attackerId
+    case 'ANY':
+      return true // APPLY_ON_ALLY | APPLY_ON_FOE_OR_SELF: every side matches (the holder is alive, the fainted battler is not)
+    case 'OTHER':
+      return holderId !== faintedId // APPLY_ON_ANY | APPLY_IGNORE_SELF
+    case 'ALLY':
+      return (holderId & 1) === (faintedId & 1) // APPLY_ON_ALLY
+    case 'FOE':
+      return (holderId & 1) !== (faintedId & 1) // APPLY_ON_FOE
+  }
+}
+
+/** GetHighestStatId(battler, FALSE), src/battle_util.c:8724-8746: raw in-battle stats in struct order (pokemon.h:167-171). */
+function getHighestStatId(mon: BattlerState['mon']): number {
+  const order: [number, keyof BattlerState['mon']['rawStats']][] = [
+    [STAT_ATK, 'atk'],
+    [STAT_DEF, 'def'],
+    [STAT_SPEED, 'spe'],
+    [STAT_SPATK, 'spatk'],
+    [STAT_SPDEF, 'spdef'],
+  ]
+  let highestId = STAT_ATK
+  let highestStat = 0
+  for (const [id, key] of order) {
+    const value = mon.rawStats[key]
+    if (value > highestStat) {
+      highestStat = value
+      highestId = id
+    }
+  }
+  return highestId
+}
+
+const HIGHEST = 'HIGHEST'
+
+// onBattlerFaints hooks whose whole body is a +1 ChangeStatBuffs(battler, 1, stat,
+// MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS, NULL) followed by BattleScript_RaiseStatOnFaintingTarget
+// (data/battle_scripts_1.s:10331-10337, text only). `moxieClone` hooks route through MoxieClone (src/abilities.cc:315-320),
+// which first requires HasAttackerFaintedTarget(); Soul Heart / Forsaken Heart call ChangeStatBuffs directly.
+// Sources (src/abilities.cc): MOXIE :2199 ATK; CHILLING_NEIGH :3609 = Moxie; GRIM_NEIGH :3615 SPATK; HUBRIS :6751 = Grim Neigh;
+// HYDRA :11290 = Hubris; ADRENALINE_RUSH :5846 SPEED; HAUNTING_FRENZY :7531 and BREEZY_NEIGH :10390 = Adrenaline Rush;
+// BEAST_BOOST :3130 GetHighestStatId(battler, FALSE); AS_ONE_ICE_RIDER :3622 = Chilling Neigh; AS_ONE_SHADOW_RIDER :3637 = Grim Neigh;
+// CROWNED_KING :6723-6725 = Shadow Rider | Ice Rider (SPATK then ATK); SOUL_HEART :3043 SPATK; FORSAKEN_HEART :9418 ATK.
+export const KO_STAT_RAISES: Record<string, { stats: readonly (number | typeof HIGHEST)[]; moxieClone: boolean }> = {
+  ABILITY_MOXIE: { stats: [STAT_ATK], moxieClone: true },
+  ABILITY_CHILLING_NEIGH: { stats: [STAT_ATK], moxieClone: true },
+  ABILITY_GRIM_NEIGH: { stats: [STAT_SPATK], moxieClone: true },
+  ABILITY_HUBRIS: { stats: [STAT_SPATK], moxieClone: true },
+  ABILITY_HYDRA: { stats: [STAT_SPATK], moxieClone: true },
+  ABILITY_ADRENALINE_RUSH: { stats: [STAT_SPEED], moxieClone: true },
+  ABILITY_HAUNTING_FRENZY: { stats: [STAT_SPEED], moxieClone: true },
+  ABILITY_BREEZY_NEIGH: { stats: [STAT_SPEED], moxieClone: true },
+  ABILITY_BEAST_BOOST: { stats: [HIGHEST], moxieClone: true },
+  ABILITY_AS_ONE_ICE_RIDER: { stats: [STAT_ATK], moxieClone: true },
+  ABILITY_AS_ONE_SHADOW_RIDER: { stats: [STAT_SPATK], moxieClone: true },
+  ABILITY_CROWNED_KING: { stats: [STAT_SPATK, STAT_ATK], moxieClone: true },
+  ABILITY_SOUL_HEART: { stats: [STAT_SPATK], moxieClone: false },
+  ABILITY_FORSAKEN_HEART: { stats: [STAT_ATK], moxieClone: false },
+}
+
+export interface FaintDispatchContext {
+  state: BattleState
+  faintedId: number
+  attackerId: number
+  targetId: number
+  /** VARIOUS_ON_FAINTED_BY_ATTACKER (the target fainted to the attacker's move) vs VARIOUS_ON_FAINTED_BY_OTHER. */
+  byAttacker: boolean
+  moveId: string
+  moveData: SimMoveData | undefined
+  targetDamage: number
+  deps: TurnLoopDeps
+  unmodelled: string[]
+}
+
+/**
+ * HasAttackerFaintedTarget, src/battle_script_commands.c:6394-6402. gLastHitBy / GetTurnBattler / the chosen-move
+ * comparison are always satisfied for the move the sim is resolving (the attacker is acting and chose this move), so
+ * they reduce to: a damaging move that did something, attacker != target.
+ */
+function hasAttackerFaintedTarget(ctx: FaintDispatchContext): boolean {
+  return (ctx.moveData?.power ?? 0) !== 0 && ctx.targetDamage > 0 && ctx.attackerId !== ctx.targetId
+}
+
+/**
+ * Port of VARIOUS_ON_FAINTED_BY_ATTACKER / VARIOUS_ON_FAINTED_BY_OTHER, src/battle_script_commands.c:7132-7148 and
+ * :7159-7175, run from BattleScript_FaintTarget (data/battle_scripts_1.s:6897-6915, onfaintedbyattacker) and
+ * BattleScript_FaintAttacker (:6892, onfaintedbyother), i.e. after seteffectwithchance / tryfaintmon and before moveend
+ * for the target.
+ *
+ * REQUIRE_NOT(NoAliveMonsForEitherParty()), then every ALIVE battler i in index order, its ability slots in reverse
+ * (ON_ABILITY, include/battle_util.h:269, checkMoldBreaker FALSE), for abilities with an onBattlerFaints hook whose
+ * onBattlerFaintsFor matches (faintHookApplies). Returns the stat changes made.
+ */
+export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOutcome[] {
+  const { state, faintedId, attackerId, targetId, byAttacker, moveId, deps, unmodelled } = ctx
+  const statChanges: StatChangeOutcome[] = []
+  if (state.battleOutcome) return statChanges
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    const holder = state.battlers[i]
+    if (!holder || !isBattlerAlive(state, i)) continue
+
+    for (const { abilityId } of getBattlerAbilitySlotsReverse(holder.mon.abilities)) {
+      const flag = ON_BATTLER_FAINTS_FOR[abilityId]
+      if (!flag || !faintHookApplies(flag, i, faintedId, byAttacker ? attackerId : null)) continue
+      if (isSimAbilitySuppressed(state, holder, abilityId, false, attackerId, false, deps.dataContext)) continue
+
+      const raise = KO_STAT_RAISES[abilityId]
+      if (!raise) {
+        const msg = `on-faint ability ${abilityId} is not modelled yet`
+        if (!unmodelled.includes(msg)) unmodelled.push(msg)
+        continue
+      }
+      if (raise.moxieClone && !hasAttackerFaintedTarget(ctx)) continue
+
+      for (const stat of raise.stats) {
+        const statId = stat === HIGHEST ? getHighestStatId(holder.mon) : stat
+        const res = changeStatBuffs(
+          state,
+          i,
+          attackerId,
+          targetId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS,
+          false,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) statChanges.push({ battlerId: i, stat: statId, change: res.delta })
+      }
+    }
+  }
+  return statChanges
+}
+
+// ---------------------------------------------------------------------------
+// MOVE_EFFECT_KNOCK_OFF (MOVEEND_MOVE_EFFECTS2_ON_EACH)
+// ---------------------------------------------------------------------------
+
+/** CanBattlerGetOrLoseItem, src/battle_util.c:8250-8273. GET_BASE_SPECIES_ID is approximated by the species id prefix
+ * (the same approximation ai/aiCheckBadMove.ts uses); HOLD_EFFECT_Z_CRYSTAL is behind an #ifdef that is not defined. */
+function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string, deps: TurnLoopDeps): boolean {
+  if (itemId === 'ITEM_ENIGMA_BERRY') return false
+  const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
+  if (holdEffect === 'HOLD_EFFECT_PRIMAL_ORB' || holdEffect === 'HOLD_EFFECT_MEGA_STONE') return false
+  const species = battler.mon.speciesId
+  if (species.startsWith('SPECIES_GENESECT') && holdEffect === 'HOLD_EFFECT_DRIVE') return false
+  if (species.startsWith('SPECIES_SILVALLY') && holdEffect === 'HOLD_EFFECT_MEMORY') return false
+  if (species.startsWith('SPECIES_ARCEUS') && holdEffect === 'HOLD_EFFECT_PLATE') return false
+  return true
+}
+
+/**
+ * Port of TryKnockOffBattleScript, src/battle_script_commands.c:4268-4288, reached from MOVEEND_MOVE_EFFECTS2_ON_EACH
+ * (:4573-4594) when seteffectwithchance stored MOVE_EFFECT_KNOCK_OFF in moveEffect2.
+ * `targetDamaged` is TARGET_TURN_DAMAGED (battle.h:750): HP actually removed from the target, which a Substitute that
+ * absorbed the hit leaves at zero (Cmd_datahpupdate :1877-1892 never reaches the physicalDmg/specialDmg writes).
+ */
+function applyKnockOff(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  targetDamaged: boolean,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  const target = state.battlers[targetId]
+  const attacker = state.battlers[attackerId]
+  if (!target || !attacker || !target.mon.itemId) return
+  const itemId = target.mon.itemId
+  if (!canBattlerGetOrLoseItem(target, itemId, deps)) return
+  // ShouldApplyOnHitEffect(battlerDef): DidMoveHit() && IsBattlerAlive(battlerDef)
+  if (!targetDamaged || !isBattlerAlive(state, targetId)) return
+  // NoAliveMonsForEitherParty()
+  if (state.battleOutcome) return
+
+  // IsStickyHold, battle_util.c:9329-9333: BattlerHasAbility(battler, X, TRUE) -- Mold Breaker can bypass it.
+  const attackerHasMoldBreaker = attackerHasMoldBreakerActive(attacker, deps)
+  if (
+    battlerHasSimAbility(state, target, 'ABILITY_STICKY_HOLD', true, attackerId, attackerHasMoldBreaker, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_SUPERSWEET_SYRUP', true, attackerId, attackerHasMoldBreaker, deps.dataContext)
+  ) {
+    return
+  }
+
+  // UpdateBattlerItem(battlerDef, ITEM_NONE), battle_script_commands.c:2194-2221. The ability-state side effects
+  // (:2198-2212) have no state to write to here; gap them when a holder of the ability is actually present.
+  const hasAbility = (battler: BattlerState, id: string) => battlerHasAbility(battler.mon.abilities, id, () => false)
+  if (hasAbility(target, 'ABILITY_UNBURDEN') || hasAbility(target, 'ABILITY_SUGAR_RUSH')) {
+    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
+  }
+  if (hasAbility(target, 'ABILITY_GREEDY')) {
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+  }
+  if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+  }
+  target.mon.itemId = null
+}
+
+// ---------------------------------------------------------------------------
 // MoveEnd Ladder
 // ---------------------------------------------------------------------------
 
@@ -1008,6 +1296,8 @@ export interface MoveEndContext {
   targetDamage: number
   /** gTurnStructs[attacker].savedDmg -- the HP actually removed from the target (gHpDealt, :4335). */
   hpDealt: number
+  /** gBattleStruct->moveEffect2, set by seteffectwithchance (moveEffects.ts applySecondaryMoveEffects). */
+  moveEffect2?: string | null
   deps: TurnLoopDeps
   unmodelled: string[]
   fainted: number[]
@@ -1033,6 +1323,34 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   let hadAttackerDamage = false
   const statChanges: StatChangeOutcome[] = []
   let statusApplied: StatusAppliedOutcome | null = null
+
+  // TARGET_TURN_DAMAGED (battle.h:750), read at MOVEEND_MOVE_EFFECTS2_ON_EACH by Knock Off. Captured before Case 16
+  // clears STATUS2_SUBSTITUTE: a Substitute that absorbed the hit leaves physicalDmg / specialDmg at zero
+  // (Cmd_datahpupdate :1877-1892).
+  const subAbsorbedHit =
+    !!target &&
+    hasFlag(target.mon.status2, STATUS2_SUBSTITUTE) &&
+    doesSubstituteBlockMove(state, attackerId, targetId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, [])
+  const targetTurnDamaged = hpDealt > 0 && !subAbsorbedHit
+
+  // BattleScript_MoveEndTryFaintTarget -> BattleScript_FaintTarget -> onfaintedbyattacker
+  // (battle_scripts_1.s:2881-2882, 6911-6912), which runs before moveendall.
+  if (target && target.mon.hp === 0 && fainted.includes(targetId)) {
+    statChanges.push(
+      ...dispatchOnBattlerFaints({
+        state,
+        faintedId: targetId,
+        attackerId,
+        targetId,
+        byAttacker: true,
+        moveId,
+        moveData,
+        targetDamage,
+        deps,
+        unmodelled,
+      }),
+    )
+  }
 
   // Case 0: MOVEEND_SUM_DAMAGE (:4334-4342)
   // Target damage already accumulated in targetDamage.
@@ -1171,7 +1489,9 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Multi-hit loop. Total-damage resolved in sim.
 
   // Case 20: MOVEEND_MOVE_EFFECTS2_ON_EACH (:4573-4632)
-  if (moveData?.effect && MOVE_EFFECTS2_ON_EACH.has(moveData.effect)) {
+  if (ctx.moveEffect2 === 'MOVE_EFFECT_KNOCK_OFF') {
+    applyKnockOff(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled)
+  } else if (moveData?.effect && MOVE_EFFECTS2_ON_EACH.has(moveData.effect)) {
     unmodelled.push(`move-end effect ${moveData.effect} is not modelled yet`)
   }
 
@@ -1274,18 +1594,24 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     unmodelled.push('Rapid Spin hazard/binding removal is not modelled yet')
   }
 
-  // Knock-out abilities gap (per brief item 3)
-  if (fainted.length > 0) {
-    for (const b of state.battlers) {
-      if (b && b.mon.hp > 0) {
-        for (const ab of ON_BATTLER_FAINTS_ABILITIES) {
-          if (battlerHasAbility(b.mon.abilities, ab, () => false)) {
-            unmodelled.push(`on-faint ability ${ab} is not modelled yet`)
-            break
-          }
-        }
-      }
-    }
+  // Every other faint this action caused (the attacker, from recoil / Rocky Helmet / Rough Skin / Life Orb) goes through
+  // BattleScript_FaintAttacker -> onfaintedbyother (battle_scripts_1.s:6892), after moveend.
+  for (const faintedId of fainted) {
+    if (faintedId === targetId) continue
+    statChanges.push(
+      ...dispatchOnBattlerFaints({
+        state,
+        faintedId,
+        attackerId,
+        targetId,
+        byAttacker: false,
+        moveId,
+        moveData,
+        targetDamage,
+        deps,
+        unmodelled,
+      }),
+    )
   }
 
   return {
