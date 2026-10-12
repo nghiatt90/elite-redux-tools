@@ -265,6 +265,15 @@ describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header t
     expect(out2.endTurnUnmodelled.some((m) => m.includes('ENDTURN_ABILITIES'))).toBe(false)
   })
 
+  it('gaps ENDTURN_ABILITIES for an innate slot too (ABILITYEFFECT_ENDTURN loops every slot, battle_util.c:4397-4399)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, SPEED_BOOST, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${SPEED_BOOST}'s onEndTurn hook was not run`)
+  })
+
   it('gaps ENDTURN_ITEMS1/ENDTURN_ITEMS2 exactly when the battler holds a recognised hold effect, and not otherwise', () => {
     const withItem = battle([{ spe: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }, { spe: 50, maxHp: 100 }], scripted())
     const out1 = executeTurn(withItem, [null, null], deps())

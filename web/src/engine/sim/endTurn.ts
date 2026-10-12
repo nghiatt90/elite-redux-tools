@@ -64,10 +64,10 @@
 //                           outside constants.ts.
 //   ENDTURN_SYRUP           Unreachable -- volatiles.syrupTimer has no reader
 //                           outside create.ts's zero default.
-//   ENDTURN_ABILITIES       Gapped -- gapped when the battler's own ability
-//                           (not innates -- AbilityBattleEffects(ENDTURN,...)
-//                           only ever reads slot 0) has an onEndTurn hook per
-//                           abilityHooks.json (ENDTURN_ABILITY_IDS below).
+//   ENDTURN_ABILITIES       Gapped -- gapped when any of the battler's ability
+//                           slots (AbilityBattleEffects(ENDTURN,...) loops them
+//                           all, battle_util.c:4397-4399) has an onEndTurn hook
+//                           per abilityHooks.json (ENDTURN_ABILITY_IDS below).
 //   ENDTURN_ITEMS1          Gapped -- gapped when the battler's item's
 //   ENDTURN_ITEMS2          resolvedHoldEffect is one of ITEMS_1_2_HOLD_EFFECTS
 //                           (battle_util.c:5622-5855's own case-1 switch,
@@ -667,15 +667,16 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
       `battler ${battlerId}: ENDTURN_INGRAIN (battle_util.c:2426-2434) is not applied -- Ingrain's maxHP/8 heal was skipped`,
     )
 
-    // ENDTURN_ABILITIES, :2452-2459 -- the battler's OWN ability slot only
-    // (AbilityBattleEffects(ABILITYEFFECT_ENDTURN, battler, ...) reads
-    // gBattleMons[battler].ability, never the innate slots).
-    const ownAbility = battler.mon.abilities.ability
-    gapIf(
-      ownAbility !== null && ENDTURN_ABILITY_IDS.has(ownAbility),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${ownAbility}'s onEndTurn hook was not run`,
-    )
+    // ENDTURN_ABILITIES, :2452-2459 -- AbilityBattleEffects(ABILITYEFFECT_ENDTURN)
+    // runs HandleEndTurnAbility over EVERY ability slot (:4397-4399, :9213).
+    const { ability, innates } = battler.mon.abilities
+    for (const slotAbility of [ability, ...innates]) {
+      gapIf(
+        slotAbility !== null && ENDTURN_ABILITY_IDS.has(slotAbility),
+        unmodelled,
+        `battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${slotAbility}'s onEndTurn hook was not run`,
+      )
+    }
 
     // ENDTURN_ITEMS1 / ENDTURN_ITEMS2, :2460-2467.
     const heldEffect = battler.mon.itemId ? (dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
