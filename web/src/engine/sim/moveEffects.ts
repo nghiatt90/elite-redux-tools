@@ -108,6 +108,7 @@ import {
 import { canBattlerHeal } from './endTurn'
 import { weatherHasEffect } from './fieldEndTurn'
 import { syncPartyHp } from './outcome'
+import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat } from '../battleStat'
 import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
@@ -2097,6 +2098,34 @@ export interface SecondaryMoveEffectContext {
 }
 
 /**
+ * BattleScript_EffectRapidSpin, B_SPEED_BUFFING_RAPID_SPIN == GEN_8 branch
+ * (data/battle_scripts_1.s:5402-5431), from the `jumpifhalfword ...
+ * DOESNT_AFFECT_FOE` onwards: `setmoveeffect MOVE_EFFECT_RAPIDSPIN |
+ * AFFECTS_USER | CERTAIN` + `seteffectwithchance` (a certain effect draws no RNG
+ * and needs !MOVE_RESULT_NO_EFFECT, :3107) -> SetMoveEffect -> rapidspinfree
+ * (:2837), then `setstatchanger STAT_SPEED, 1` + `statbuffchange
+ * MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR`. A type-immune target skips all
+ * of it. SetMoveEffect's gates ahead of the RAPIDSPIN case that can apply to the
+ * attacker are TestSheerForceFlag (:2361) and the dead-effect-battler check (:2364).
+ */
+function applyRapidSpinEffects(ctx: SecondaryMoveEffectContext): SecondaryEffectsResult {
+  const { state, attackerId, targetId, moveId, targetDamage, deps, unmodelled } = ctx
+  const result: SecondaryEffectsResult = { statusApplied: null, statChanges: [], moveEffect2: null }
+  if (targetDamage === null) {
+    unmodelled.push(`seteffectwithchance: ${moveId} dealt unresolved damage, so MOVE_RESULT_NO_EFFECT is unknown; treated as no effect`)
+    return result
+  }
+  if (targetDamage === 0) return result
+
+  const attacker = state.battlers[attackerId]
+  if (attacker && attacker.mon.hp > 0 && !testSheerForceFlag(state, attackerId, moveId, deps)) rapidSpinFree(state, attackerId)
+
+  const res = changeStatBuffsImplicit(state, attackerId, targetId, 1, STAT_SPEED, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR, true, deps, unmodelled, moveId)
+  if (res.delta !== 0) result.statChanges.push({ battlerId: attackerId, stat: STAT_SPEED, change: res.delta })
+  return result
+}
+
+/**
  * Port of post-damage secondary move effect resolution.
  * Sources:
  * - BattleScript_EffectHit: data/battle_scripts_1.s:2857-2885
@@ -2241,6 +2270,8 @@ export function applySecondaryMoveEffects(
       affectsUser: false,
       certain: false,
     })
+  } else if (moveEffect === 'EFFECT_RAPID_SPIN') {
+    return applyRapidSpinEffects(ctx)
   } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
     // Pure damaging move with no secondary effect
   } else {

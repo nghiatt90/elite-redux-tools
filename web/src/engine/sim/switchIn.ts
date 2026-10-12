@@ -23,15 +23,15 @@
 // SWITCH-IN EFFECTS (hazards, onEntry abilities, switch-in items), classified
 // per this batch's brief rather than ported:
 //
-//   Entry hazards (Spikes/Toxic Spikes/Stealth Rock/Sticky Web) -- UNRESACHABLE.
-//   Nothing in web/src/engine/sim writes SideTimerState's
-//   spikesAmount/toxicSpikesAmount/stealthRockType, or sets SIDE_STATUS_STICKY_
-//   WEB (grep-verified: fieldEndTurn.ts only ever READS stickyWebTimer to tick
-//   it down). Move effects are not modelled at all yet (turn.ts's own header:
-//   "DELIBERATELY ABSENT ... hazards"), so a hazard can never be present on a
-//   side for a switch-in to resolve against. No gap line is emitted for these
-//   -- there is no real condition to gate one on, the same precedent
-//   fieldEndTurn.ts's own header uses for ENDTURN_WISH.
+//   Entry hazards (Spikes/Stealth Rock/Toxic Spikes/Sticky Web) -- PORTED, in
+//   hazards.ts's applySwitchInHazards (Cmd_switchineffects's first pass,
+//   battle_script_commands.c:5512-5515, VARIOUS_DO_HAZARD_DAMAGE :8711-8830).
+//   They run right after the battler is rebuilt and BEFORE the ability and item
+//   gaps below, as in the C: that second pass (:5517+) only happens for a mon
+//   that is still alive after the hazards, so a hazard faint emits neither gap
+//   and leaves the battler at 0 HP for applyEndOfTurnReplacements to replace
+//   again. Hot Coals / Caltrops, Mirror Armor on Sticky Web and the Toxic
+//   Spikes reaction flags are gapped inside hazards.ts, only when they apply.
 //
 //   Switch-in abilities (HandleSwitchInAbility's own scan over every ability
 //   slot, battle_util.c, reached from Cmd_switchineffects at
@@ -50,8 +50,8 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import type { AbilitySlots } from '../abilities/dispatch'
-import type { SimDataContext } from './dataContext'
 import { createBattlerState } from './create'
+import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
 
@@ -201,11 +201,12 @@ function buildSwitchedInMon(incoming: SimPartyMon): SimBattleMon {
   }
 }
 
-/** Performs one battler's switch-in and reports which switch-in effects apply
- * by name (see this module's header for the hazard/ability/item
- * classification). Throws on an invalid `partyIndex` -- see this batch's brief
- * on why a silent fallback would be the wrong failure mode here. */
-export function switchIn(state: BattleState, battlerId: number, partyIndex: number, unmodelled: string[]): void {
+/** Performs one battler's switch-in: rebuilds the battler, resolves entry
+ * hazards (hazards.ts), then -- only if the mon survived them -- reports which
+ * switch-in effects apply by name (see this module's header). Throws on an
+ * invalid `partyIndex` -- see this batch's brief on why a silent fallback would
+ * be the wrong failure mode here. */
+export function switchIn(state: BattleState, battlerId: number, partyIndex: number, deps: HazardDeps, unmodelled: string[]): void {
   const battler = state.battlers[battlerId]
   if (!battler) throw new Error(`switchIn: no battler at id ${battlerId}`)
   const side = battlerId & 1
@@ -219,18 +220,17 @@ export function switchIn(state: BattleState, battlerId: number, partyIndex: numb
   state.battlers[battlerId] = createBattlerState(battlerId, mon, partyIndex)
   syncPartyHp(state, battlerId)
 
+  applySwitchInHazards(state, battlerId, deps, unmodelled)
+  if (state.battlers[battlerId]!.mon.hp === 0) return
+
   if (hasAnyAbility(incoming.abilities, SWITCH_IN_ABILITY_IDS)) {
     const ownAbility = incoming.abilities.ability
     const hookOwner = ownAbility && SWITCH_IN_ABILITY_IDS.has(ownAbility) ? ownAbility : incoming.abilities.innates.find((id) => id !== null && SWITCH_IN_ABILITY_IDS.has(id))
     unmodelled.push(`battler ${battlerId}: HandleSwitchInAbility (battle_util.c:5475-5541) is not applied -- ${hookOwner}'s onEntry hook was not run`)
   }
-}
 
-/** The item half of switchIn's gap reporting -- split out because it needs
- * `SimDataContext.item`, which `switchIn` itself has no reason to take. */
-export function switchInItemGap(dataContext: SimDataContext, battlerId: number, incoming: SimPartyMon, unmodelled: string[]): void {
   if (!incoming.itemId) return
-  const heldEffect = dataContext.item(incoming.itemId)?.resolvedHoldEffect ?? null
+  const heldEffect = deps.dataContext.item(incoming.itemId)?.resolvedHoldEffect ?? null
   if (heldEffect !== null && SWITCH_IN_HOLD_EFFECTS.has(heldEffect)) {
     unmodelled.push(`battler ${battlerId}: ITEMEFFECT_ON_SWITCH_IN (battle_util.c:5418-5604) is not applied -- ${incoming.itemId}'s switch-in hold effect (${heldEffect}) was not run`)
   }
@@ -238,20 +238,18 @@ export function switchInItemGap(dataContext: SimDataContext, battlerId: number, 
 
 /** Replaces every fainted battler whose side still has a live reserve, once
  * per side per call -- the end-of-turn shape HandleFaintedMonActions's own
- * state-3 gate is waiting for (see this module's header). No-op entirely once
- * the battle is decided, matching BattleScript_HandleFaintedMon's own
- * checkteamslost-then-jump-to-FaintedMonEnd shortcut. */
-export function applyEndOfTurnReplacements(state: BattleState, deps: ReplacementDeps, dataContext: SimDataContext, unmodelled: string[]): void {
+ * state-3 gate is waiting for (see this module's header). A replacement that
+ * faints to its own entry hazards is replaced again (HandleFaintedMonActions
+ * runs again for it in the C), until a mon survives, the side runs out of
+ * reserves, or the battle is decided. No-op entirely once the battle is
+ * decided, matching BattleScript_HandleFaintedMon's own checkteamslost-then-
+ * jump-to-FaintedMonEnd shortcut. */
+export function applyEndOfTurnReplacements(state: BattleState, deps: ReplacementDeps, switchDeps: HazardDeps, unmodelled: string[]): void {
   if (state.battleOutcome) return
   for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
-    const battler = state.battlers[battlerId]
-    if (!battler || battler.mon.hp !== 0) continue
-    if (!hasLiveReserve(state, battlerId)) continue
-
-    const partyIndex = deps.chooseReplacement(state, battlerId, unmodelled)
-    const party = state.sides[battlerId & 1].party
-    const incoming = party[partyIndex]
-    switchIn(state, battlerId, partyIndex, unmodelled)
-    if (incoming) switchInItemGap(dataContext, battlerId, incoming, unmodelled)
+    while (!state.battleOutcome && state.battlers[battlerId]?.mon.hp === 0 && hasLiveReserve(state, battlerId)) {
+      const partyIndex = deps.chooseReplacement(state, battlerId, unmodelled)
+      switchIn(state, battlerId, partyIndex, switchDeps, unmodelled)
+    }
   }
 }

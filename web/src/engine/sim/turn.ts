@@ -139,7 +139,8 @@ import { runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
-import { applyEndOfTurnReplacements, switchIn, switchInItemGap } from './switchIn'
+import { applyEndOfTurnReplacements, switchIn } from './switchIn'
+import type { HazardTypeDeps } from './hazards'
 import { runMoveEnd } from './moveEnd'
 import {
   PARTY_SIZE,
@@ -411,6 +412,10 @@ export interface TurnLoopDeps {
   /** moveBehaviors.json's `behaviors` map. Optional: when absent, structured
    * behaviors read from moveData.customBehavior instead. */
   moveBehaviors?: MoveBehaviors
+  /** Type tables for Stealth Rock's GetStealthHazardDamage (hazards.ts).
+   * Optional for the same reason as `replacement`; a Stealth Rock switch-in
+   * without it is gapped rather than guessed. */
+  hazardTypes?: HazardTypeDeps
 }
 
 /** Assembles the TurnOrderContext the loop actually runs with: the caller's
@@ -942,9 +947,7 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
     unmodelled.push(`battler ${battlerId}: switchoutabilities (battle_scripts_1.s:7211) is not applied -- a switch-out ability hook was present on the outgoing mon`)
   }
 
-  const incoming = party[partyIndex]
-  switchIn(state, battlerId, partyIndex, unmodelled)
-  if (incoming) switchInItemGap(deps.dataContext, battlerId, incoming, unmodelled)
+  switchIn(state, battlerId, partyIndex, deps, unmodelled)
   return unmodelled
 }
 
@@ -1313,7 +1316,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // caller) and when state.battleOutcome is already set (no switch-in UI
   // exists once the battle is decided).
   const replacementUnmodelled: string[] = []
-  if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps.dataContext, replacementUnmodelled)
+  if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
   roundStructsClear(state)

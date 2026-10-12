@@ -1589,11 +1589,6 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     target.turn.berryReduced = false
   }
 
-  // Rapid Spin hazard clearing gap (per brief item 3)
-  if (moveData?.effect === 'EFFECT_RAPID_SPIN') {
-    unmodelled.push('Rapid Spin hazard/binding removal is not modelled yet')
-  }
-
   // Every other faint this action caused (the attacker, from recoil / Rocky Helmet / Rough Skin / Life Orb) goes through
   // BattleScript_FaintAttacker -> onfaintedbyother (battle_scripts_1.s:6892), after moveend.
   for (const faintedId of fainted) {

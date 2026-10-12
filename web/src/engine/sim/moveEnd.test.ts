@@ -760,12 +760,12 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
   })
 
-  it('conditionally gaps Rapid Spin hazard/binding removal', () => {
+  it('no longer gaps Rapid Spin hazard/binding removal (hazards.ts rapidSpinFree)', () => {
     const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
     const out = executeTurn(state, [useMove(1, MOVE_RAPID_SPIN), null], testDepsWithDamage(fixedDamage(20)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('Rapid Spin hazard/binding removal is not modelled yet')
+    expect(act.unmodelled).not.toContain('Rapid Spin hazard/binding removal is not modelled yet')
   })
 })
 

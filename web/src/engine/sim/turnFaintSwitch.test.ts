@@ -403,7 +403,7 @@ describe('applyEndOfTurnReplacements', () => {
     expect(out.replacementUnmodelled.some((g) => g.includes('ITEMEFFECT_ON_SWITCH_IN'))).toBe(false)
   })
 
-  it('never emits a hazard gap line -- hazards are unreachable (nothing in sim/ sets them)', () => {
+  it('emits no hazard line when no hazard is present on the side', () => {
     const reserve = partyMon({ hp: 60 })
     const state = battle([{ spe: 50, hp: 5 }, { spe: 200, hp: 100 }], scripted(), [partyMon({ hp: 5 }), reserve], [partyMon({ hp: 100 })])
     const rep = replacementDeps(1)
