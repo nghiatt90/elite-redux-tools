@@ -131,6 +131,7 @@ import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './tu
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import { tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
+import { dispatchOnWeatherChange } from './onWeather'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -1580,6 +1581,7 @@ function handleDefenderMoveEndAbility(
           attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_SMACKED_DOWN)
           attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS | STATUS3_ON_AIR)
         }
+        dispatchOnWeatherChange(state, deps, unmodelled) // BattleScript_SandSpitActivates, battle_scripts_1.s:9622-9627
       }
     }
   }

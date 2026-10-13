@@ -877,6 +877,8 @@ export function runFieldEndTurnEffects(
   // source that it does not.
   if (state.field.timers.clearSkiesTimer && !state.field.timers.started.clearSkiesTimer) {
     state.field.timers.clearSkiesTimer--
+    // BattleScript_ClearSkiesEnds -> BattleScript_MoveWeatherChangeRet (battle_scripts_1.s:12465-12467, 5515-5518).
+    if (!state.field.timers.clearSkiesTimer) dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
   }
 
   // ENDTURN_MISC_SIDE_TIMERS, :2278-2287.
