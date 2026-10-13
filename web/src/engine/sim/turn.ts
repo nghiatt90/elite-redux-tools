@@ -1303,7 +1303,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     fieldEndTurn = fieldResult.results
     fieldEndTurnUnmodelled = fieldResult.unmodelled
     if (!state.battleOutcome) {
-      const battlerResult = runEndTurnEffects(state, endTurnOrder, deps.dataContext)
+      const battlerResult = runEndTurnEffects(state, endTurnOrder, deps.dataContext, {
+        grounding: deps.grounding,
+        statStageRatios: deps.statStageRatios,
+      })
       endTurn = battlerResult.results
       endTurnUnmodelled = battlerResult.unmodelled
     }

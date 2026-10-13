@@ -64,10 +64,18 @@
 //                           outside constants.ts.
 //   ENDTURN_SYRUP           Unreachable -- volatiles.syrupTimer has no reader
 //                           outside create.ts's zero default.
-//   ENDTURN_ABILITIES       Gapped -- gapped when any of the battler's ability
-//                           slots (AbilityBattleEffects(ENDTURN,...) loops them
-//                           all, battle_util.c:4397-4399) has an onEndTurn hook
-//                           per abilityHooks.json (ENDTURN_ABILITY_IDS below).
+//   ENDTURN_ABILITIES       PORTED (subset) / Gapped -- AbilityBattleEffects(
+//                           ENDTURN,...) (:4397-4399) runs HandleEndTurnAbility
+//                           (:9213-9239) walking slots from GetNumPossibleAbilitiesForBattler()
+//                           down to 0 (innates[2], innates[1], innates[0], ability).
+//                           Skips fainted (hp===0, :9217) and suppressed abilities
+//                           (isSimAbilitySuppressed, :9233). Ported hooks:
+//                           Speed Boost (and Maximum Acceleration), Rain Dish,
+//                           Ice Body (and Sundae), Dry Skin, Hydration (and
+//                           Purifying Waters), Shed Skin (and Pattern Change,
+//                           Wonder Scale), Self-Sufficient (and Self-Repair,
+//                           Apple Pie, Dune Veil), Poison Absorb. Unported
+//                           hooks remain conditionally gapped (ENDTURN_ABILITY_IDS).
 //   ENDTURN_ITEMS1          Gapped -- gapped when the battler's item's
 //   ENDTURN_ITEMS2          resolvedHoldEffect is one of ITEMS_1_2_HOLD_EFFECTS
 //                           (battle_util.c:5622-5855's own case-1 switch,
@@ -229,11 +237,16 @@
 
 import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
+import type { GroundingContext } from './grounding'
+import { isBattlerGrounded } from './grounding'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
+import { changeStatBuffs, isBattlerWeatherAffected, isSimAbilitySuppressed, MOVE_EFFECT_AFFECTS_USER } from './statBuffs'
 import {
+  STAT_SPEED,
+  STATUS1_ANY,
   STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_FROSTBITE,
@@ -249,12 +262,17 @@ import {
   STATUS3_LEECHSEED_BATTLER,
   STATUS3_MAGNET_RISE,
   STATUS3_ROOTED,
+  STATUS3_SEMI_INVULNERABLE,
   STATUS3_TELEKINESIS,
   STATUS3_YAWN,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_GHASTLY_ECHO,
   STATUS_FIELD_MAGIC_ROOM,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  WEATHER_HAIL_ANY,
+  WEATHER_RAIN_ANY,
+  WEATHER_SUN_ANY,
   clearFlag,
   getCounter,
   hasFlag,
@@ -300,14 +318,13 @@ const ITEMS_1_2_HOLD_EFFECTS = new Set([
 /** ITEMEFFECT_ORBS's own switch, battle_util.c:6252-6288. */
 const ORBS_HOLD_EFFECTS = new Set(['HOLD_EFFECT_TOXIC_ORB', 'HOLD_EFFECT_FLAME_ORB', 'HOLD_EFFECT_FROST_ORB', 'HOLD_EFFECT_STICKY_BARB'])
 
-/** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
+/** abilityHooks.json (data/v2.65beta, pinned SHA) -- unported ability ids whose
  * `hooks.onEndTurn` is present, read once during porting rather than looked up
  * at runtime (same precedent as HIT_COUNT_OVERRIDE_MOVES above). Used only to
- * decide when ENDTURN_ABILITIES's gap line fires. */
+ * decide when ENDTURN_ABILITIES's gap line fires for unported hooks. */
 const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_ACID_REFLUX',
   'ABILITY_APE_SHIFT',
-  'ABILITY_APPLE_PIE',
   'ABILITY_BAD_DREAMS',
   'ABILITY_BIG_LEAVES',
   'ABILITY_BLOOD_PRICE',
@@ -320,9 +337,7 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_CRAVING',
   'ABILITY_CRYO_ARCHITECT',
   'ABILITY_CUD_CHEW',
-  'ABILITY_DRY_SKIN',
   'ABILITY_DUAL_SHADOW',
-  'ABILITY_DUNE_VEIL',
   'ABILITY_ETERNAL_BLESSING',
   'ABILITY_FLAME_COAT',
   'ABILITY_FLOWER_GIFT',
@@ -333,34 +348,22 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_HOME_RUN',
   'ABILITY_HONEY_GATHER',
   'ABILITY_HUNGER_SWITCH',
-  'ABILITY_HYDRATION',
-  'ABILITY_ICE_BODY',
   'ABILITY_LEAF_GUARD',
   'ABILITY_LIFE_STEAL',
   'ABILITY_LOCUST_SWARM',
-  'ABILITY_MAXIMUM_ACCELERATION',
   'ABILITY_MOODY',
-  'ABILITY_PATTERN_CHANGE',
   'ABILITY_PEACEFUL_REST',
   'ABILITY_PEACEFUL_SLUMBER',
-  'ABILITY_POISON_ABSORB',
   'ABILITY_POWER_CONSTRUCT',
-  'ABILITY_PURIFYING_WATERS',
-  'ABILITY_RAIN_DISH',
   'ABILITY_REVELATION',
   'ABILITY_SAP_TRAP',
   'ABILITY_SCHOOLING',
-  'ABILITY_SELF_REPAIR',
-  'ABILITY_SELF_SUFFICIENT',
   'ABILITY_SERPENT_BIND',
-  'ABILITY_SHED_SKIN',
   'ABILITY_SHIELDS_DOWN',
   'ABILITY_SOOTHSAYER',
   'ABILITY_SOUL_TAP',
-  'ABILITY_SPEED_BOOST',
   'ABILITY_STRIKEOUT',
   'ABILITY_SUMO_WRESTLER',
-  'ABILITY_SUNDAE',
   'ABILITY_SUNS_BOUNTY',
   'ABILITY_SWEET_DREAMS',
   'ABILITY_TALON_TRAP',
@@ -370,7 +373,6 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_TRUANT',
   'ABILITY_WHITE_NOISE',
   'ABILITY_WINTER_THRONE',
-  'ABILITY_WONDER_SCALE',
   'ABILITY_ZEN_MODE',
 ])
 
@@ -451,8 +453,8 @@ export interface EndTurnEffectResult {
   /** 'SANDSTORM'/'HAIL'/'GRASSY_TERRAIN'/'TOXIC_TERRAIN' are the field
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
-   * battler". */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED'
+   * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -642,13 +644,250 @@ function gapIf(condition: boolean, unmodelled: string[], message: string): void 
 }
 
 /**
+ * IsBattlerTerrainAffected(battlerId, STATUS_FIELD_TOXIC_TERRAIN), battle_util.c:4901-4925.
+ * Checks whether Toxic Terrain is active, the battler is not semi-invulnerable,
+ * and either grounded or carries allowTerrainIfAirborne (Toxic Surge).
+ */
+function isBattlerTerrainAffectedByToxicTerrain(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  grounding?: GroundingContext,
+): boolean {
+  if (!hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)) return false
+  if (grounding?.isCluelessOnField) return false
+  if (hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE)) return false
+  const gCtx: GroundingContext = grounding ?? {
+    holdEffectOf: () => null,
+    monotypeChampType: null,
+    isCluelessOnField: false,
+    attackerHasMoldBreaker: false,
+  }
+  if (isBattlerGrounded(state, battlerId, { ...gCtx, attackerHasMoldBreaker: false })) return true
+  return battlerHasAbility(battler.mon.abilities, 'ABILITY_TOXIC_SURGE', NO_SUPPRESSION)
+}
+
+/**
+ * ENDTURN_ABILITIES, battle_util.c:2452-2459 -> AbilityBattleEffects(ABILITYEFFECT_ENDTURN, ...)
+ * (:4397-4399) -> HandleEndTurnAbility (:9213-9239).
+ * Slot order: walks numPossibleAbilities down to 0, visiting slot 3 (innates[2]),
+ * slot 2 (innates[1]), slot 1 (innates[0]), then slot 0 (chosen ability).
+ * Skips fainted battlers (IsBattlerAlive, :9217) and suppressed abilities (IsSuppressed, :9233).
+ */
+function runEndTurnAbilities(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  dataContext: SimDataContext,
+  deps: { grounding?: GroundingContext; statStageRatios?: [number, number][] } | undefined,
+  unmodelled: string[],
+): EndTurnEffectResult[] {
+  const results: EndTurnEffectResult[] = []
+
+  const { ability, innates } = battler.mon.abilities
+  const slots: readonly (string | null)[] = [
+    innates[2] ?? null,
+    innates[1] ?? null,
+    innates[0] ?? null,
+    ability,
+  ]
+
+  for (const slotAbility of slots) {
+    if (slotAbility === null) continue
+    if (battler.mon.hp === 0) break // IsBattlerAlive check, :9217
+    if (isSimAbilitySuppressed(state, battler, slotAbility, false, battlerId, false, dataContext)) continue // IsSuppressed check, :9233
+
+    switch (slotAbility) {
+      case 'ABILITY_SPEED_BOOST':
+      case 'ABILITY_MAXIMUM_ACCELERATION': {
+        // src/abilities.cc:515-524, 8419
+        if (battler.volatiles.isFirstTurn !== 2) {
+          changeStatBuffs(
+            state,
+            battlerId,
+            battlerId,
+            battlerId,
+            1,
+            STAT_SPEED,
+            MOVE_EFFECT_AFFECTS_USER,
+            false,
+            { dataContext, grounding: deps?.grounding },
+            unmodelled,
+          )
+        }
+        break
+      }
+
+      case 'ABILITY_RAIN_DISH': {
+        // src/abilities.cc:1063-1074
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, { dataContext, grounding: deps?.grounding })
+        ) {
+          const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          const prevHp = battler.mon.hp
+          applyEndTurnHp(state, battlerId, battler, heal)
+          const actualHeal = battler.mon.hp - prevHp
+          if (actualHeal > 0) {
+            results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_ICE_BODY':
+      case 'ABILITY_SUNDAE': {
+        // src/abilities.cc:1778-1789, 11284
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerWeatherAffected(state, battlerId, WEATHER_HAIL_ANY, { dataContext, grounding: deps?.grounding })
+        ) {
+          const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          const prevHp = battler.mon.hp
+          applyEndTurnHp(state, battlerId, battler, heal)
+          const actualHeal = battler.mon.hp - prevHp
+          if (actualHeal > 0) {
+            results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_DRY_SKIN': {
+        // src/abilities.cc:1498-1510
+        if (
+          isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, { dataContext, grounding: deps?.grounding }) &&
+          !isMagicGuardProtected(state, battler)
+        ) {
+          const dmg = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          const prevHp = battler.mon.hp
+          const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+          results.push({ battlerId, effect: 'ABILITY', hpChange: battler.mon.hp - prevHp, fainted })
+        } else if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, { dataContext, grounding: deps?.grounding })
+        ) {
+          const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          const prevHp = battler.mon.hp
+          applyEndTurnHp(state, battlerId, battler, heal)
+          const actualHeal = battler.mon.hp - prevHp
+          if (actualHeal > 0) {
+            results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_HYDRATION':
+      case 'ABILITY_PURIFYING_WATERS': {
+        // src/abilities.cc:1549-1558, 6459
+        if (
+          isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, { dataContext, grounding: deps?.grounding }) &&
+          hasFlag(battler.mon.status1, STATUS1_ANY)
+        ) {
+          battler.mon.status1 = 0
+          battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+          const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+          if (partySlot) partySlot.status1 = 0
+        }
+        break
+      }
+
+      case 'ABILITY_SHED_SKIN':
+      case 'ABILITY_PATTERN_CHANGE':
+      case 'ABILITY_WONDER_SCALE': {
+        // src/abilities.cc:1278-1287, 8301, 10024
+        // RNG: Random() % 100 < 30 drawn first in exact C order
+        const roll = state.rng.random16()
+        if (roll % 100 < 30) {
+          if (hasFlag(battler.mon.status1, STATUS1_ANY)) {
+            battler.mon.status1 = 0
+            battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+            const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+            if (partySlot) partySlot.status1 = 0
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_SELF_SUFFICIENT':
+      case 'ABILITY_SELF_REPAIR':
+      case 'ABILITY_APPLE_PIE':
+      case 'ABILITY_DUNE_VEIL': {
+        // src/abilities.cc:4041-4054, 5294, 8878, 10960
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2
+        ) {
+          const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 16))
+          const prevHp = battler.mon.hp
+          applyEndTurnHp(state, battlerId, battler, heal)
+          const actualHeal = battler.mon.hp - prevHp
+          if (actualHeal > 0) {
+            results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_POISON_ABSORB': {
+        // src/abilities.cc:4438-4449
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerTerrainAffectedByToxicTerrain(state, battlerId, battler, deps?.grounding)
+        ) {
+          const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          const prevHp = battler.mon.hp
+          applyEndTurnHp(state, battlerId, battler, heal)
+          const actualHeal = battler.mon.hp - prevHp
+          if (actualHeal > 0) {
+            results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+          }
+        }
+        break
+      }
+
+      default: {
+        if (ENDTURN_ABILITY_IDS.has(slotAbility)) {
+          // Conditional gap for unmodelled abilities:
+          // Schooling requires level >= 20 in C (src/abilities.cc:2838)
+          const cond = slotAbility === 'ABILITY_SCHOOLING' ? battler.mon.level >= 20 : true
+          gapIf(
+            cond,
+            unmodelled,
+            `battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${slotAbility}'s onEndTurn hook was not run`,
+          )
+        }
+        break
+      }
+    }
+  }
+
+  return results
+}
+
+/**
  * Runs every ENDTURN_* case this batch supports, for every battler, in
  * `battlerOrder` (this turn's own gBattlerByTurnOrder -- see this module's
  * header). One battler completes its ENTIRE ladder pass before the next
  * battler is even looked at, matching the C's own turnEffectsBattlerId/
  * turnEffectsTracker nesting.
  */
-export function runEndTurnEffects(state: BattleState, battlerOrder: readonly number[], dataContext: SimDataContext): { results: EndTurnEffectResult[]; unmodelled: string[] } {
+export function runEndTurnEffects(
+  state: BattleState,
+  battlerOrder: readonly number[],
+  dataContext: SimDataContext,
+  deps?: { grounding?: GroundingContext; statStageRatios?: [number, number][] },
+): { results: EndTurnEffectResult[]; unmodelled: string[] } {
   const results: EndTurnEffectResult[] = []
   const unmodelled: string[] = []
 
@@ -668,15 +907,9 @@ export function runEndTurnEffects(state: BattleState, battlerOrder: readonly num
     )
 
     // ENDTURN_ABILITIES, :2452-2459 -- AbilityBattleEffects(ABILITYEFFECT_ENDTURN)
-    // runs HandleEndTurnAbility over EVERY ability slot (:4397-4399, :9213).
-    const { ability, innates } = battler.mon.abilities
-    for (const slotAbility of [ability, ...innates]) {
-      gapIf(
-        slotAbility !== null && ENDTURN_ABILITY_IDS.has(slotAbility),
-        unmodelled,
-        `battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${slotAbility}'s onEndTurn hook was not run`,
-      )
-    }
+    // runs HandleEndTurnAbility over EVERY ability slot in descending order (:4397-4399, :9213).
+    const abilityResults = runEndTurnAbilities(state, battlerId, battler, dataContext, deps, unmodelled)
+    results.push(...abilityResults)
 
     // ENDTURN_ITEMS1 / ENDTURN_ITEMS2, :2460-2467.
     const heldEffect = battler.mon.itemId ? (dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null

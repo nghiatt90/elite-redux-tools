@@ -8,7 +8,21 @@ import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
 import type { BattleState, RandomSource, SimBattleMon } from './state'
-import { STATUS1_BURN, STATUS1_POISON, STATUS1_TOXIC_POISON, STATUS1_TOXIC_COUNTER, getCounter } from './constants'
+import {
+  DEFAULT_STAT_STAGE,
+  STAT_SPEED,
+  STATUS1_BURN,
+  STATUS1_POISON,
+  STATUS1_TOXIC_COUNTER,
+  STATUS1_TOXIC_POISON,
+  STATUS3_GASTRO_ACID,
+  STATUS3_HEAL_BLOCK,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  WEATHER_HAIL_TEMPORARY,
+  WEATHER_RAIN_TEMPORARY,
+  WEATHER_SUN_TEMPORARY,
+  getCounter,
+} from './constants'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn, THROWING_DAMAGE_RESOLVER } from './turn'
@@ -49,6 +63,21 @@ const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 const TOXIC_BOOST = requireAbility('ABILITY_TOXIC_BOOST')
 const POISON_HEAL = requireAbility('ABILITY_POISON_HEAL')
 const SPEED_BOOST = requireAbility('ABILITY_SPEED_BOOST') // has an onEndTurn hook per abilityHooks.json
+const MAXIMUM_ACCELERATION = requireAbility('ABILITY_MAXIMUM_ACCELERATION')
+const RAIN_DISH = requireAbility('ABILITY_RAIN_DISH')
+const ICE_BODY = requireAbility('ABILITY_ICE_BODY')
+const SUNDAE = requireAbility('ABILITY_SUNDAE')
+const DRY_SKIN = requireAbility('ABILITY_DRY_SKIN')
+const HYDRATION = requireAbility('ABILITY_HYDRATION')
+const PURIFYING_WATERS = requireAbility('ABILITY_PURIFYING_WATERS')
+const SHED_SKIN = requireAbility('ABILITY_SHED_SKIN')
+const PATTERN_CHANGE = requireAbility('ABILITY_PATTERN_CHANGE')
+const WONDER_SCALE = requireAbility('ABILITY_WONDER_SCALE')
+const SELF_SUFFICIENT = requireAbility('ABILITY_SELF_SUFFICIENT')
+const SELF_REPAIR = requireAbility('ABILITY_SELF_REPAIR')
+const DUNE_VEIL = requireAbility('ABILITY_DUNE_VEIL')
+const POISON_ABSORB = requireAbility('ABILITY_POISON_ABSORB')
+const BAD_DREAMS = requireAbility('ABILITY_BAD_DREAMS')
 const LEFTOVERS = requireItem('ITEM_LEFTOVERS')
 if (LEFTOVERS.resolvedHoldEffect !== 'HOLD_EFFECT_LEFTOVERS') throw new Error('ITEM_LEFTOVERS no longer resolves to HOLD_EFFECT_LEFTOVERS')
 const TOXIC_ORB = requireItem('ITEM_TOXIC_ORB')
@@ -87,7 +116,18 @@ function mon(overrides: Partial<SimBattleMon> = {}): SimBattleMon {
   }
 }
 
-function battle(specs: { spe: number; hp?: number; maxHp?: number; status1?: number; abilities?: SimBattleMon['abilities']; itemId?: string | null }[], rng: RandomSource): BattleState {
+function battle(
+  specs: {
+    spe: number
+    hp?: number
+    maxHp?: number
+    status1?: number
+    abilities?: SimBattleMon['abilities']
+    itemId?: string | null
+    types?: SimBattleMon['types']
+  }[],
+  rng: RandomSource,
+): BattleState {
   return createBattleState({
     battlers: specs.map((s, i) =>
       createBattlerState(
@@ -99,6 +139,7 @@ function battle(specs: { spe: number; hp?: number; maxHp?: number; status1?: num
           status1: s.status1 ?? 0,
           abilities: s.abilities ?? { ability: null, innates: [null, null, null] },
           itemId: s.itemId ?? null,
+          ...(s.types ? { types: s.types } : {}),
         }),
         0,
       ),
@@ -252,10 +293,10 @@ describe('executeTurn: end-turn ladder -- fainting and battler order', () => {
 })
 
 describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header table)', () => {
-  it('gaps ENDTURN_ABILITIES exactly when the battler\'s own ability has an onEndTurn hook, and not otherwise', () => {
-    const withHook = battle([{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }], scripted())
+  it('gaps ENDTURN_ABILITIES exactly when the battler\'s own ability has an unmodelled onEndTurn hook, and not otherwise', () => {
+    const withHook = battle([{ spe: 100, maxHp: 100, abilities: { ability: BAD_DREAMS, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }], scripted())
     const out1 = executeTurn(withHook, [null, null], deps())
-    expect(out1.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${SPEED_BOOST}'s onEndTurn hook was not run`)
+    expect(out1.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${BAD_DREAMS}'s onEndTurn hook was not run`)
 
     const withoutHook = battle(
       [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
@@ -267,11 +308,11 @@ describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header t
 
   it('gaps ENDTURN_ABILITIES for an innate slot too (ABILITYEFFECT_ENDTURN loops every slot, battle_util.c:4397-4399)', () => {
     const state = battle(
-      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, SPEED_BOOST, null] } }, { spe: 50, maxHp: 100 }],
+      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, BAD_DREAMS, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
     const out = executeTurn(state, [null, null], deps())
-    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${SPEED_BOOST}'s onEndTurn hook was not run`)
+    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${BAD_DREAMS}'s onEndTurn hook was not run`)
   })
 
   it('gaps ENDTURN_ITEMS1/ENDTURN_ITEMS2 exactly when the battler holds a recognised hold effect, and not otherwise', () => {
@@ -301,6 +342,478 @@ describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header t
   it('a battler with no held item, no ability and no status carries NO end-turn gap lines at all -- nothing gaps unconditionally', () => {
     const state = battle([{ spe: 100, maxHp: 100 }, { spe: 50, maxHp: 100 }], scripted())
     const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(out.endTurnUnmodelled).toEqual([])
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Speed Boost (battle_util.c:2452, abilities.cc:515-524)', () => {
+  it('raises Speed by 1 at end of turn when not the switch-in turn (isFirstTurn != 2)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(out.endTurn).toEqual([])
+  })
+
+  it('does NOT raise Speed on the turn the battler enters battle (isFirstTurn == 2 guard)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(2)
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('does NOT raise Speed if Speed is already at maximum (+6 stages / stage 12)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.battlers[0]!.mon.statStages[STAT_SPEED] = 12
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(12)
+  })
+
+  it('Maximum Acceleration shares Speed Boost implementation (abilities.cc:8419)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: MAXIMUM_ACCELERATION, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Rain Dish (abilities.cc:1063-1074)', () => {
+  it('heals floor(maxHp/8) in rain when damaged and not on switch-in turn', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+
+  it('floors to 0 and respects the minimum-1 rule (maxHp=7 -> 1 HP heal)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 7, hp: 5, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 1, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(6)
+  })
+
+  it('does not heal if weather is not rain', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('does not heal on switch-in turn (isFirstTurn == 2)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('does not heal if battler is already at full HP (BATTLER_MAX_HP)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 80, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(80)
+  })
+
+  it('does not heal under Heal Block (CanBattlerHeal)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Ice Body (abilities.cc:1778-1789) & Sundae (abilities.cc:11284)', () => {
+  it('heals floor(maxHp/8) in hail when damaged and not on switch-in turn', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: ICE_BODY, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_HAIL_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+
+  it('does not heal if weather is not hail', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: ICE_BODY, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('Sundae shares Ice Body implementation and heals in hail (abilities.cc:11284)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: SUNDAE, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_HAIL_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Dry Skin (abilities.cc:1498-1510)', () => {
+  it('heals in rain by delegating to Rain Dish implementation', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+
+  it('takes floor(maxHp/8) damage in sun, even on switch-in turn (no isFirstTurn guard)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(2)
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(40)
+  })
+
+  it('sun damage floors to 0 and respects the minimum-1 rule (maxHp=7 -> 1 HP damage)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 7, hp: 5, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: -1, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(4)
+  })
+
+  it('Magic Guard prevents sun damage (!IsMagicGuardProtected)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: DRY_SKIN, innates: [MAGIC_GUARD, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('Heal Block does NOT prevent sun damage (only blocks healing, not damage)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(40)
+  })
+
+  it('sun damage can cause battler to faint', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 5, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: -5, fainted: true }])
+    expect(state.battlers[0]!.mon.hp).toBe(0)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Hydration (abilities.cc:1549-1558) & Purifying Waters (abilities.cc:6459)', () => {
+  it('cures status1 in rain before ENDTURN_POISON runs, preventing poison damage this turn', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 80, status1: STATUS1_POISON, abilities: { ability: HYDRATION, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(80)
+  })
+
+  it('does not cure status1 if weather is not rain, so poison damage still occurs', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 80, status1: STATUS1_POISON, abilities: { ability: HYDRATION, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_POISON)
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'POISON', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(70)
+  })
+
+  it('Purifying Waters shares Hydration implementation and cures status in rain (abilities.cc:6459)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 80, status1: STATUS1_BURN, abilities: { ability: PURIFYING_WATERS, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(80)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Shed Skin (abilities.cc:1278-1287), Pattern Change (abilities.cc:8301) & Wonder Scale (abilities.cc:10024)', () => {
+  it('cures status1 on successful roll (Random() % 100 < 30), preventing burn damage this turn', () => {
+    // scripted roll of 29: 29 % 100 = 29 < 30 -> cures status1
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 160, status1: STATUS1_BURN, abilities: { ability: SHED_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(29),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+
+  it('fails to cure status1 on roll >= 30, so burn damage occurs (floor(160/16) = 10)', () => {
+    // scripted roll of 30: 30 % 100 = 30, not < 30 -> fails to cure
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 160, status1: STATUS1_BURN, abilities: { ability: SHED_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(30),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_BURN)
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'BURN', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(150)
+  })
+
+  it('Pattern Change shares Shed Skin implementation and cures status on successful roll (abilities.cc:8301)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 160, status1: STATUS1_BURN, abilities: { ability: PATTERN_CHANGE, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(0),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+
+  it('Wonder Scale shares Shed Skin implementation and cures status on successful roll (abilities.cc:10024)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 160, status1: STATUS1_BURN, abilities: { ability: WONDER_SCALE, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(15),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Self-Sufficient (abilities.cc:4041-4054), Self-Repair (abilities.cc:5294) & Dune Veil (abilities.cc:10960)', () => {
+  it('heals floor(maxHp/16) when damaged and not on switch-in turn', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(110)
+  })
+
+  it('floors to 0 and respects the minimum-1 rule (maxHp=15 -> 1 HP heal)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 15, hp: 10, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 1, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(11)
+  })
+
+  it('does not heal on switch-in turn (isFirstTurn == 2)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('does not heal if at full HP (BATTLER_MAX_HP)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 160, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+
+  it('does not heal under Heal Block (CanBattlerHeal)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('Self-Repair shares Self-Sufficient implementation (abilities.cc:5294)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_REPAIR, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(110)
+  })
+
+  it('Dune Veil shares Self-Sufficient implementation (abilities.cc:10960)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: DUNE_VEIL, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(110)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Poison Absorb (abilities.cc:4438-4449)', () => {
+  it('heals floor(maxHp/8) in Toxic Terrain when grounded, damaged and not on switch-in turn', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: POISON_ABSORB, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.statuses |= STATUS_FIELD_TOXIC_TERRAIN
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false }])
+    // The field ladder's Toxic Terrain chip (80 / 16 = 5) runs first: 50 - 5 + 10.
+    expect(state.battlers[0]!.mon.hp).toBe(55)
+  })
+
+  it('does not heal outside Toxic Terrain', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: POISON_ABSORB, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('does not heal if ungrounded in Toxic Terrain (Flying type)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: POISON_ABSORB, innates: [null, null, null] }, types: ['FLYING', 'FLYING', 'FLYING'] }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.statuses |= STATUS_FIELD_TOXIC_TERRAIN
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: slot dispatch, innates & suppression (battle_util.c:4397-4399, :9213-9239)', () => {
+  it('triggers end-turn abilities placed in innate slots', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, SPEED_BOOST, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+
+  it('runs innate slots before chosen ability slot in exact C order (innate[2], innate[1], innate[0], ability)', () => {
+    // Battler with innate Rain Dish (innate[0]) and chosen Self-Sufficient (ability).
+    // In rain, maxHp 160, hp 100: Rain Dish heals 20 (to 120), Self-Sufficient heals 10 (to 130).
+    const state = battle(
+      [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_SUFFICIENT, innates: [RAIN_DISH, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.field.weather = WEATHER_RAIN_TEMPORARY
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([
+      { battlerId: 0, effect: 'ABILITY', hpChange: 20, fainted: false },
+      { battlerId: 0, effect: 'ABILITY', hpChange: 10, fainted: false },
+    ])
+    expect(state.battlers[0]!.mon.hp).toBe(130)
+  })
+
+  it('suppresses end-turn ability when Gastro Acid is active (STATUS3_GASTRO_ACID, battle_util.c:9233)', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.battlers[0]!.statuses3 |= STATUS3_GASTRO_ACID
+    const out = executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
     expect(out.endTurn).toEqual([])
     expect(out.endTurnUnmodelled).toEqual([])
   })
