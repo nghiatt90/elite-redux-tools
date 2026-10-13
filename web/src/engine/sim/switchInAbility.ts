@@ -139,6 +139,7 @@ import {
   RESET_STAT_DROPS,
   STAT_BUFF_NOT_PROTECT_AFFECTED,
   STAT_BUFF_UPDATE_MOVE_EFFECT,
+  runReactiveAbilityEffects,
   tryResetBattlerStatChanges,
 } from './statBuffs'
 import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
@@ -1411,6 +1412,9 @@ export function applySwitchInAbilities(
       `battler ${battlerId}: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ${abilityId}'s onEntry hook was not run`,
     )
   }
+
+  // battle_script_commands.c:5517 -- ABILITYEFFECT_REACTIVE in Cmd_switchineffects
+  runReactiveAbilityEffects(state, deps, unmodelled)
 }
 
 export interface BattleStartDeps {
@@ -1450,4 +1454,7 @@ export function applyBattleStartPass(
 
     applySwitchInAbilities(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
   }
+
+  // battle_main.c:3356 -- ABILITYEFFECT_REACTIVE in TryDoEventsBeforeFirstTurn
+  runReactiveAbilityEffects(state, deps, unmodelled)
 }

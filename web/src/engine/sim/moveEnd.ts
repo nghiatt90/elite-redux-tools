@@ -125,6 +125,7 @@ import {
   dispatchOnStatLowered,
   getHighestAttackingStatId,
   isSimAbilitySuppressed,
+  runReactiveAbilityEffects,
 } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
@@ -2853,6 +2854,9 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     )
   }
 
+  // battle_script_commands.c:4330 -- ABILITYEFFECT_REACTIVE at start of Cmd_moveend
+  runReactiveAbilityEffects(state, deps, unmodelled, statChanges)
+
   // Case 0: MOVEEND_SUM_DAMAGE (:4334-4342)
   // Target damage already accumulated in targetDamage.
 
@@ -3144,6 +3148,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       }),
     )
   }
+
+  // Cmd_moveend re-enters after every case that calls a script, and runs ABILITYEFFECT_REACTIVE
+  // (battle_script_commands.c:4330) at each entry; this single-pass port runs it once more at the end
+  // so stat changes made during move end (Stamina, Weak Armor, KO raises...) are still copied.
+  runReactiveAbilityEffects(state, deps, unmodelled, statChanges)
 
   return {
     attackerDamage: hadAttackerDamage ? totalAttackerDamage : null,

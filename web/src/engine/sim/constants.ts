@@ -57,6 +57,11 @@ export const MIN_STAT_STAGE = 0
 export const DEFAULT_STAT_STAGE = 6
 export const MAX_STAT_STAGE = 12
 
+/** include/battle.h:579-583 -- StatStageCheckState */
+export const STAT_STAGE_CHECK_NOT_NEEDED = 0
+export const STAT_STAGE_CHECK_NEEDED = 1
+export const STAT_STAGE_CHECK_IN_PROGRESS = 2
+
 /** include/constants/battle.h:30-33, 39-40, 45. */
 export const B_POSITION_PLAYER_LEFT = 0
 export const B_POSITION_OPPONENT_LEFT = 1

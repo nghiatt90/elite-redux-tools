@@ -621,6 +621,13 @@ export interface BattleState {
   /** The random source. NOT `gRngValue`: the plan's decision 3 gives up
    * bit-exactness, so this is *a* stream, not the game's. See rng.ts. */
   rng: RandomSource
+  /** `StatStageCheckState statStageCheckState:2` (include/battle.h:720, :579-583).
+   * Tracks whether stat changes need to be checked for reactive effects
+   * (STAT_STAGE_CHECK_NOT_NEEDED = 0, STAT_STAGE_CHECK_NEEDED = 1, STAT_STAGE_CHECK_IN_PROGRESS = 2). */
+  statStageCheckState: number
+  /** `s8 statChangesToCheck[MAX_BATTLERS_COUNT][NUM_BATTLE_STATS - 1]` (include/battle.h:727).
+   * Tracks net stat changes per battler for STAT_ATK..STAT_EVASION (indexed by statId - 1). */
+  statChangesToCheck: number[][]
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

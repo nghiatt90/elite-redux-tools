@@ -16,6 +16,9 @@ import {
   STAT_SPEED,
   STAT_SPATK,
   STAT_SPDEF,
+  STAT_STAGE_CHECK_IN_PROGRESS,
+  STAT_STAGE_CHECK_NEEDED,
+  STAT_STAGE_CHECK_NOT_NEEDED,
   STATUS1_BLEED,
   STATUS1_POISON_ANY,
   STATUS3_EMBARGO,
@@ -540,24 +543,23 @@ export function changeStatBuffs(
   if (newStage > MAX_STAT_STAGE) newStage = MAX_STAT_STAGE
   battler.mon.statStages[statId] = newStage
 
-  // :9937-9940 -- reactive triggers
-  // Defiant/Competitive onStatLowered reactions fire in the string-printing code
-  // (battle_util.c:1222-1255) when STRINGID_DEFENDERSSTATFELL is printed with
-  // a cross-side changer, ported via dispatchOnStatLowered called at stat-drop sites.
-  if (statValue > 0 && battler.round.statRaised) {
-    const opposingSide = (battlerId & 1) ^ 1
-    for (let id = 0; id < state.battlersCount; id++) {
-      if ((id & 1) !== opposingSide || !isAlive(state, id)) continue
-      const foe = state.battlers[id]
-      if (!foe) continue
-      const foeItem = foe.mon.itemId ? deps.dataContext.item(foe.mon.itemId) : undefined
-      if (foeItem?.resolvedHoldEffect === 'HOLD_EFFECT_MIRROR_HERB') {
-        unmodelled.push("Mirror Herb copy stat trigger (battle_util.c:4738-4762) is not modelled")
-      }
-      if (battlerHasSimAbility(state, foe, 'ABILITY_OPPORTUNIST', false, attackerId, false, deps.dataContext)) {
-        unmodelled.push("Opportunist copy stat trigger is not modelled")
-      }
+  // src/battle_script_commands.c:9937-9940 -- record stat changes for reactive triggers
+  if (
+    statValue !== 0 &&
+    (state.statStageCheckState ?? STAT_STAGE_CHECK_NOT_NEEDED) !== STAT_STAGE_CHECK_IN_PROGRESS &&
+    statId < NUM_BATTLE_STATS
+  ) {
+    state.statStageCheckState = STAT_STAGE_CHECK_NEEDED
+    if (!state.statChangesToCheck) {
+      state.statChangesToCheck = Array.from({ length: state.battlersCount }, () =>
+        new Array<number>(NUM_BATTLE_STATS - 1).fill(0),
+      )
     }
+    if (!state.statChangesToCheck[battlerId]) {
+      state.statChangesToCheck[battlerId] = new Array<number>(NUM_BATTLE_STATS - 1).fill(0)
+    }
+    state.statChangesToCheck[battlerId][statId - 1] =
+      (state.statChangesToCheck[battlerId][statId - 1] ?? 0) + statValue
   }
 
   // :9942 -- if (WONT_INCREASE && flags & STAT_BUFF_ALLOW_PTR) gMoveResultFlags |= MOVE_RESULT_MISSED;
@@ -939,4 +941,289 @@ export function dispatchOnStatLowered(
   }
 
   return anyTriggered
+}
+
+/**
+ * BattleScript_AttackerAteItem / Cmd_removeitem (data/battle_scripts_1.s:10795-10802,
+ * src/battle_script_commands.c:6040-6053).
+ */
+export function consumeHeldItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
+  const itemId = battler.mon.itemId
+  if (itemId) {
+    battler.usedHeldItem = itemId
+  }
+  const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
+  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
+    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
+  }
+  if (hasAbility(battler, 'ABILITY_GREEDY')) {
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+  }
+  if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+  }
+  battler.mon.itemId = null
+}
+
+/**
+ * Port of AbilityBattleEffects(ABILITYEFFECT_REACTIVE, ...) (src/battle_util.c:4733-4774)
+ * and BattleScript_PerformCopyStatEffects / VARIOUS_DO_COPY_STAT_CHANGE
+ * (src/battle_script_commands.c:8202-8309).
+ *
+ * Runs reactive triggers when stats change:
+ * 1. Mirror Herb scan (battle_util.c:4737-4751)
+ * 2. onReactive for every alive battler (battle_util.c:4765-4768):
+ *    - ABILITY_RETRIBUTION_BLOW (abilities.cc:5145-5160): out-of-turn attack (gapped)
+ *    - ABILITY_EGOIST (abilities.cc:7074-7092): copies opponent stat raises
+ *    - ABILITY_SHARING_IS_CARING (abilities.cc:7368-7386): copies all stat changes
+ * 3. Copy execution passes:
+ *    - Egoist pass (battle_script_commands.c:8206-8241)
+ *    - Sharing is Caring pass (battle_script_commands.c:8243-8279)
+ *    - Mirror Herb pass (battle_script_commands.c:8280-8305): copies opponent stat raises,
+ *      eats item on first stat raised.
+ * 4. Cleans up statChangesToCheck and resets statStageCheckState to STAT_STAGE_CHECK_NOT_NEEDED.
+ */
+export function runReactiveAbilityEffects(
+  state: BattleState,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+  statChanges?: { battlerId: number; stat: number; change: number }[],
+  battlerOrder?: readonly number[],
+): boolean {
+  if ((state.statStageCheckState ?? STAT_STAGE_CHECK_NOT_NEEDED) !== STAT_STAGE_CHECK_NEEDED) {
+    return false
+  }
+
+  // 1. Mirror Herb scan (battle_util.c:4737-4751)
+  let mirrorHerbFound = false
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (!isAlive(state, i)) continue
+    const battler = state.battlers[i]
+    if (!battler) continue
+    const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
+    if (
+      item?.resolvedHoldEffect === 'HOLD_EFFECT_MIRROR_HERB' &&
+      !hasFlag(battler.statuses3, STATUS3_EMBARGO) &&
+      !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext)
+    ) {
+      for (let statId = STAT_ATK; statId < NUM_BATTLE_STATS; statId++) {
+        for (let j = 0; j < state.battlersCount; j++) {
+          if ((i & 1) === (j & 1)) continue // opponents only
+          if ((state.statChangesToCheck?.[j]?.[statId - 1] ?? 0) > 0) {
+            mirrorHerbFound = true
+            break
+          }
+        }
+        if (mirrorHerbFound) break
+      }
+    }
+    if (mirrorHerbFound) break
+  }
+
+  if (mirrorHerbFound) {
+    state.statStageCheckState = STAT_STAGE_CHECK_IN_PROGRESS
+  }
+
+  // 2. onReactive for every alive battler (battle_util.c:4765-4768)
+  const egoistActive: boolean[] = new Array(state.battlersCount).fill(false)
+  let sharingIsCaringActive = false
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (!isAlive(state, i)) continue
+    const battler = state.battlers[i]
+    if (!battler) continue
+
+    const slots = getAbilitySlotsReverse(battler.mon.abilities)
+    for (const { abilityId } of slots) {
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, i, false, deps.dataContext)) {
+        continue
+      }
+
+      if (abilityId === 'ABILITY_EGOIST') {
+        // abilities.cc:7075-7091
+        if (state.statStageCheckState !== STAT_STAGE_CHECK_NOT_NEEDED) {
+          let opponentHasPositive = false
+          for (let opp = (i & 1) ^ 1; opp < state.battlersCount; opp += 2) {
+            for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+              if ((state.statChangesToCheck?.[opp]?.[stat - 1] ?? 0) > 0) {
+                opponentHasPositive = true
+                break
+              }
+            }
+            if (opponentHasPositive) break
+          }
+          if (opponentHasPositive) {
+            state.statStageCheckState = STAT_STAGE_CHECK_IN_PROGRESS
+            egoistActive[i] = true
+          }
+        }
+      } else if (abilityId === 'ABILITY_SHARING_IS_CARING') {
+        // abilities.cc:7368-7385
+        if (state.statStageCheckState === STAT_STAGE_CHECK_NEEDED || state.statStageCheckState === STAT_STAGE_CHECK_IN_PROGRESS) {
+          state.statStageCheckState = STAT_STAGE_CHECK_IN_PROGRESS
+          sharingIsCaringActive = true
+        }
+      } else if (abilityId === 'ABILITY_RETRIBUTION_BLOW') {
+        // abilities.cc:5145-5160: Retribution Blow
+        if (state.statStageCheckState !== STAT_STAGE_CHECK_NOT_NEEDED) {
+          for (let opp = 0; opp < state.battlersCount; opp++) {
+            if ((opp & 1) === (i & 1)) continue
+            for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+              if ((state.statChangesToCheck?.[opp]?.[stat - 1] ?? 0) > 0) {
+                unmodelled.push("Retribution Blow out-of-turn attack (abilities.cc:5145-5160) is not modelled")
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // If no reactive effect triggered, reset to NOT_NEEDED and zero (battle_util.c:4770-4773)
+  if (state.statStageCheckState === STAT_STAGE_CHECK_NEEDED) {
+    state.statStageCheckState = STAT_STAGE_CHECK_NOT_NEEDED
+    if (state.statChangesToCheck) {
+      for (let b = 0; b < state.battlersCount; b++) {
+        state.statChangesToCheck[b]?.fill(0)
+      }
+    }
+    return false
+  }
+
+  // 3. Perform copy effects (battle_script_commands.c:8202-8309)
+  let anyCopied = false
+
+  // Pass 1: Egoist (battle_script_commands.c:8206-8241)
+  const order = battlerOrder ?? Array.from({ length: state.battlersCount }, (_, idx) => idx)
+  for (const battlerId of order) {
+    if (!isAlive(state, battlerId) || !egoistActive[battlerId]) continue
+    const battler = state.battlers[battlerId]
+    if (!battler) continue
+
+    // `s8 change = 0` is declared outside the stat loop (:8209) and only reset by the `return`
+    // after a successful copy, so a copy that ChangeStatBuffs refuses carries into the next stat.
+    let change = 0
+    for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+      for (let other = 0; other < state.battlersCount; other++) {
+        if ((other & 1) === (battlerId & 1)) continue // opponents only
+        const val = state.statChangesToCheck?.[other]?.[stat - 1] ?? 0
+        if (val > 0) change += val
+      }
+      if (change !== 0) {
+        const res = changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          change,
+          stat,
+          MOVE_EFFECT_AFFECTS_USER,
+          true,
+          deps,
+          unmodelled,
+        )
+        if (res.delta !== 0) {
+          anyCopied = true
+          if (statChanges) {
+            statChanges.push({ battlerId, stat, change: res.delta })
+          }
+          change = 0
+        }
+      }
+    }
+  }
+
+  // Pass 2: Sharing is Caring (battle_script_commands.c:8243-8279)
+  if (sharingIsCaringActive) {
+    for (let b = 0; b < state.battlersCount; b++) {
+      if (!isAlive(state, b)) continue
+      for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+        let change = 0
+        for (let other = 0; other < state.battlersCount; other++) {
+          if (other === b) continue
+          change += state.statChangesToCheck?.[other]?.[stat - 1] ?? 0
+        }
+        if (change !== 0) {
+          const res = changeStatBuffs(
+            state,
+            b,
+            b,
+            b,
+            change,
+            stat,
+            MOVE_EFFECT_AFFECTS_USER,
+            true,
+            deps,
+            unmodelled,
+          )
+          if (res.delta !== 0) {
+            anyCopied = true
+            if (statChanges) {
+              statChanges.push({ battlerId: b, stat, change: res.delta })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Pass 3: Mirror Herb (battle_script_commands.c:8280-8305)
+  for (let effectBattler = 0; effectBattler < state.battlersCount; effectBattler++) {
+    if (!isAlive(state, effectBattler)) continue
+    const battler = state.battlers[effectBattler]
+    if (!battler) continue
+    const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
+    if (
+      item?.resolvedHoldEffect !== 'HOLD_EFFECT_MIRROR_HERB' ||
+      hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+      isUnnerveAbilityOnOpposingSide(state, effectBattler, deps.dataContext)
+    ) {
+      continue
+    }
+
+    let ateItem = false
+    for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+      let change = 0
+      for (let i = 0; i < state.battlersCount; i++) {
+        if ((i & 1) === (effectBattler & 1)) continue // opponents only
+        const val = state.statChangesToCheck?.[i]?.[stat - 1] ?? 0
+        if (val > 0) change += val
+      }
+      if (change > 0) {
+        const res = changeStatBuffs(
+          state,
+          effectBattler,
+          effectBattler,
+          effectBattler,
+          change,
+          stat,
+          MOVE_EFFECT_AFFECTS_USER,
+          true,
+          deps,
+          unmodelled,
+        )
+        if (res.delta !== 0) {
+          anyCopied = true
+          if (!ateItem) {
+            consumeHeldItem(state, battler, unmodelled)
+            ateItem = true
+          }
+          if (statChanges) {
+            statChanges.push({ battlerId: effectBattler, stat, change: res.delta })
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Reset state and zero statChangesToCheck (battle_script_commands.c:8306-8307)
+  if (state.statChangesToCheck) {
+    for (let b = 0; b < state.battlersCount; b++) {
+      state.statChangesToCheck[b]?.fill(0)
+    }
+  }
+  state.statStageCheckState = STAT_STAGE_CHECK_NOT_NEEDED
+
+  return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive
 }

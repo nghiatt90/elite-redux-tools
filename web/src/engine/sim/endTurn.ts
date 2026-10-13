@@ -243,7 +243,7 @@ import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
-import { changeStatBuffs, isBattlerWeatherAffected, isSimAbilitySuppressed, MOVE_EFFECT_AFFECTS_USER } from './statBuffs'
+import { changeStatBuffs, isBattlerWeatherAffected, isSimAbilitySuppressed, MOVE_EFFECT_AFFECTS_USER, runReactiveAbilityEffects } from './statBuffs'
 import {
   STAT_SPEED,
   STATUS1_ANY,
@@ -890,6 +890,9 @@ export function runEndTurnEffects(
 ): { results: EndTurnEffectResult[]; unmodelled: string[] } {
   const results: EndTurnEffectResult[] = []
   const unmodelled: string[] = []
+
+  // battle_util.c:2401 -- AbilityBattleEffects(ABILITYEFFECT_REACTIVE, 0, 0, ABILITY_BS_EXECUTE, 0)
+  runReactiveAbilityEffects(state, { dataContext, grounding: deps?.grounding }, unmodelled, undefined, battlerOrder)
 
   for (const battlerId of battlerOrder) {
     if (hasFlag(state.absentBattlerFlags, 1 << battlerId)) continue // :2409-2412

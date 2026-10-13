@@ -19,6 +19,7 @@ import {
   NUM_BATTLE_STATS,
   PARTY_SIZE,
   STAT_EVASION,
+  STAT_STAGE_CHECK_NOT_NEEDED,
   STATUS1_ANY,
   STATUS1_SLEEP,
   STATUS1_TOXIC_COUNTER,
@@ -261,6 +262,9 @@ describe('createBattleState', () => {
     expect(state.sides[1].statuses).toBe(0)
     expect(state.sides[0].timers.spikesAmount).toBe(0)
     expect(state.sides[0].faintedCount).toBe(0)
+    expect(state.statStageCheckState).toBe(STAT_STAGE_CHECK_NOT_NEEDED)
+    expect(state.statChangesToCheck).toHaveLength(MAX_BATTLERS_COUNT)
+    expect(state.statChangesToCheck[0]).toHaveLength(NUM_BATTLE_STATS - 1)
   })
 
   it('gives the two sides separate side state', () => {

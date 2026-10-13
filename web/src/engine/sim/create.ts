@@ -33,7 +33,7 @@ import type {
   VolatileState,
 } from './state'
 import { ABILITY_SLOT_COUNT, MOVE_HISTORY_COUNT, SWITCH_IN_ABILITY_DONE_COUNT, defaultStatStages } from './state'
-import { MAX_BATTLERS_COUNT, PARTY_SIZE, WEATHER_NONE } from './constants'
+import { MAX_BATTLERS_COUNT, NUM_BATTLE_STATS, PARTY_SIZE, STAT_STAGE_CHECK_NOT_NEEDED, WEATHER_NONE } from './constants'
 
 function nullSlot4(): Slot4<string | null> {
   return [null, null, null, null]
@@ -436,5 +436,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     aiFlags: options.aiFlags ?? 0,
     turnCount: 0,
     rng: options.rng,
+    statStageCheckState: STAT_STAGE_CHECK_NOT_NEEDED,
+    statChangesToCheck: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<number>(NUM_BATTLE_STATS - 1).fill(0)),
   }
 }

@@ -166,6 +166,7 @@ import {
   MOVE_EFFECT_SP_DEF_MINUS_1,
   MOVE_EFFECT_SPD_MINUS_1,
   STAT_BUFF_UPDATE_MOVE_EFFECT,
+  runReactiveAbilityEffects,
 } from './statBuffs'
 import {
   applyPrimaryStatusEffect,
@@ -1278,6 +1279,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         if (protectMoveEnd.statusApplied) {
           effectOutcome.statusApplied = protectMoveEnd.statusApplied
         }
+      }
+      // Nearest sim point for handled status moves (Swords Dance, etc.) to trigger
+      // ABILITYEFFECT_REACTIVE (Cmd_moveend, src/battle_script_commands.c:4330).
+      const reactiveStatChanges: StatChangeOutcome[] = []
+      runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
+      if (reactiveStatChanges.length > 0) {
+        effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
       }
       if (state.battlers[battlerId]) {
         state.battlers[battlerId]!.lastMove = action.chosenMove.id
