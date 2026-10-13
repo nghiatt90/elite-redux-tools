@@ -28,6 +28,8 @@ import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   DEFAULT_STAT_STAGE,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_TOXIC_SPIKES,
   STATUS1_BURN,
   STATUS1_NONE,
   STATUS1_PARALYSIS,
@@ -42,9 +44,13 @@ import {
   STATUS3_TELEKINESIS,
   STAT_ACC,
   STAT_ATK,
+  STAT_DEF,
   STAT_SPATK,
+  STAT_SPDEF,
   STAT_SPEED,
+  WEATHER_SANDSTORM_TEMPORARY,
   hasFlag,
+  statusInfatuatedWith,
 } from './constants'
 import {
   HALF_RECOIL_ABILITIES,
@@ -56,6 +62,7 @@ import {
   ON_BATTLER_FAINTS_ABILITIES,
   ON_BATTLER_FAINTS_FOR,
   PORTED_ATTACKER_ABILITIES,
+  ON_DEFENDER_ABILITIES,
   PORTED_DEFENDER_ABILITIES,
   RECOIL_FRACTIONS,
 } from './moveEnd'
@@ -204,9 +211,9 @@ function useMove(target: number, move: SimMoveData): ChosenAction {
   return { action: 'USE_MOVE', moveToBeUsed: view, chosenMove: view, target }
 }
 
-function fixedDamage(targetDamage: number): DamageResolver {
+function fixedDamage(targetDamage: number, isCriticalHit?: boolean): DamageResolver {
   return {
-    resolve: () => ({ targetDamage, attackerDamage: null, unmodelled: [] }),
+    resolve: () => ({ targetDamage, attackerDamage: null, unmodelled: [], isCriticalHit: isCriticalHit ?? false }),
   }
 }
 
@@ -267,6 +274,17 @@ const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
 const ABILITY_AFTERMATH = requireAbility('ABILITY_AFTERMATH')
 const ABILITY_ABSORBANT = requireAbility('ABILITY_ABSORBANT')
 const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
+const ABILITY_STAMINA = requireAbility('ABILITY_STAMINA')
+const ABILITY_WEAK_ARMOR = requireAbility('ABILITY_WEAK_ARMOR')
+const ABILITY_ANGER_POINT = requireAbility('ABILITY_ANGER_POINT')
+const ABILITY_BERSERK = requireAbility('ABILITY_BERSERK')
+const ABILITY_CUTE_CHARM = requireAbility('ABILITY_CUTE_CHARM')
+const ABILITY_TOXIC_DEBRIS = requireAbility('ABILITY_TOXIC_DEBRIS')
+const ABILITY_LOOSE_QUILLS = requireAbility('ABILITY_LOOSE_QUILLS')
+const ABILITY_SAND_SPIT = requireAbility('ABILITY_SAND_SPIT')
+const ABILITY_INFLATABLE = requireAbility('ABILITY_INFLATABLE')
+const ABILITY_GUILT_TRIP = requireAbility('ABILITY_GUILT_TRIP')
+const ABILITY_STEAM_ENGINE = requireAbility('ABILITY_STEAM_ENGINE')
 
 // ---------------------------------------------------------------------------
 // Unit Tests
@@ -806,30 +824,77 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 21 contact abilities and aliases', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 67 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
+      'ABILITY_ANGER_POINT',
+      'ABILITY_ANGER_SHELL',
+      'ABILITY_ATOMIC_BURST',
+      'ABILITY_BALLOON_BLITZ',
+      'ABILITY_BALLOON_BOMBER',
+      'ABILITY_BERSERK',
+      'ABILITY_BERSERKER_RAGE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_COTTON_DOWN',
+      'ABILITY_CROWNED_SHIELD',
+      'ABILITY_CROWNED_SWORD',
+      'ABILITY_CURSED_BODY',
+      'ABILITY_CUTE_CHARM',
+      'ABILITY_DAMP',
       'ABILITY_DOUBLE_IRON_BARBS',
       'ABILITY_DRAGONFRUIT',
       'ABILITY_EFFECT_SPORE',
+      'ABILITY_ELECTROMORPHOSIS',
       'ABILITY_FLAME_BODY',
+      'ABILITY_FORTITUDE',
+      'ABILITY_FURNACE',
+      'ABILITY_GOING_BERSERK',
       'ABILITY_GOOEY',
+      'ABILITY_GUILT_TRIP',
+      'ABILITY_HAUNTED_SPIRIT',
+      'ABILITY_ILL_WILL',
+      'ABILITY_INFLATABLE',
       'ABILITY_IRON_BARBS',
+      'ABILITY_ITCHY_DEFENSE',
+      'ABILITY_LOOSE_QUILLS',
+      'ABILITY_LOOSE_ROCKS',
       'ABILITY_MASSIVE_PELT',
+      'ABILITY_MOUSTACHE',
       'ABILITY_MUCUS_MEMBRANE',
       'ABILITY_POISON_POINT',
       'ABILITY_POISON_QUILLS',
       'ABILITY_POISON_TOUCH',
+      'ABILITY_PRIM_AND_PROPER',
+      'ABILITY_PURE_LOVE',
+      'ABILITY_RAGE_POINT',
+      'ABILITY_RATTLED',
       'ABILITY_ROUGH_SKIN',
+      'ABILITY_SAND_SPIT',
+      'ABILITY_SCARECROW',
+      'ABILITY_SCRAPYARD',
+      'ABILITY_SEED_SOWER',
+      'ABILITY_SHATTERED_ARMOR',
       'ABILITY_SLIME_MOLD',
       'ABILITY_SMOLDERING_WOOD',
+      'ABILITY_STAMINA',
       'ABILITY_STATIC',
+      'ABILITY_STEAM_ENGINE',
       'ABILITY_SUPER_HOT_GOO',
       'ABILITY_TANGLING_HAIR',
+      'ABILITY_TENDER_AFFECTION',
+      'ABILITY_THERMAL_ENTROPY',
+      'ABILITY_THERMAL_EXCHANGE',
+      'ABILITY_TIPPING_POINT',
+      'ABILITY_TOXIC_DEBRIS',
       'ABILITY_TOXIC_SHELL',
+      'ABILITY_UNLOCKED_POTENTIAL',
+      'ABILITY_VENGEFUL_SPIRIT',
       'ABILITY_VENOM_CROWN',
+      'ABILITY_WATER_COMPACTION',
+      'ABILITY_WEAK_ARMOR',
       'ABILITY_WHITE_NOISE',
+      'ABILITY_WIND_POWER',
     ])
+    for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
   it('PORTED_ATTACKER_ABILITIES pins all 11 contact abilities and aliases', () => {
@@ -2244,4 +2309,262 @@ describe('onBattlerFaints dispatch: beyond stat raises (Soul Eater, Predator, Ja
     expect(state.battlers[0]!.mon.hp).toBe(60)
   })
 })
+
+describe('MOVEEND_ABILITIES (Cycle 42 onDefender batch)', () => {
+  it('Stamina raises Defense by 1 on standard damaging hit, and by 12 (max) on critical hit', () => {
+    // Standard damaging hit
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STAMINA, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.hp).toBe(80)
+    expect(state1.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statChanges).toEqual([{ battlerId: 1, stat: STAT_DEF, change: 1 }])
+
+    // Critical hit (isCriticalHit = true) raises Defense by 12 stages (clamped to +6 from stage 6)
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STAMINA, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20, true)))
+
+    expect(state2.battlers[1]!.mon.statStages[STAT_DEF]).toBe(12)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statChanges).toEqual([{ battlerId: 1, stat: STAT_DEF, change: 6 }])
+  })
+
+  it('Weak Armor lowers Defense by 1 and raises Speed by 2 on physical hit, and does not activate on special hit', () => {
+    // Physical hit (Tackle)
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_WEAK_ARMOR, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(state1.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 2)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statChanges).toEqual([
+      { battlerId: 1, stat: STAT_DEF, change: -1 },
+      { battlerId: 1, stat: STAT_SPEED, change: 2 },
+    ])
+
+    // Special hit (Water Gun) does not activate Weak Armor
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_WEAK_ARMOR, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state2.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+    expect(state2.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statChanges).toBeNull()
+  })
+
+  it('Anger Point raises Attack by 1 on normal hit, and by 12 (max) on critical hit', () => {
+    // Normal hit
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ANGER_POINT, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statChanges).toEqual([{ battlerId: 1, stat: STAT_ATK, change: 1 }])
+
+    // Critical hit (isCriticalHit = true)
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ANGER_POINT, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20, true)))
+
+    expect(state2.battlers[1]!.mon.statStages[STAT_ATK]).toBe(12)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statChanges).toEqual([{ battlerId: 1, stat: STAT_ATK, change: 6 }])
+  })
+
+  it('Berserk raises highest attacking stat by 1 when crossing half HP, and does not fire when starting <= half HP', () => {
+    // Crossing half HP: starts at 60/100 HP, takes 20 dmg -> 40/100 HP (<= 50, but started > 50).
+    // Defender rawStats: atk 100, spatk 80 (atk > spatk, so STAT_ATK is raised).
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 60, maxHp: 100, abilities: { ability: ABILITY_BERSERK, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.hp).toBe(40)
+    expect(state1.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statChanges).toEqual([{ battlerId: 1, stat: STAT_ATK, change: 1 }])
+    expect(state1.battlers[1]!.volatiles.abilityState[0]).toBe(1)
+
+    // Starting at or below half HP: starts at 50/100 HP, takes 10 dmg -> 40/100 HP (did not cross).
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 50, maxHp: 100, abilities: { ability: ABILITY_BERSERK, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(10)))
+
+    expect(state2.battlers[1]!.mon.hp).toBe(40)
+    expect(state2.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statChanges).toBeNull()
+  })
+
+  it('Cute Charm infatuates attacker on contact hit when roll < 50, and does not infatuate when roll >= 50', () => {
+    // Roll < 50: rng draws 0 for accuracy check, 20 for Cute Charm (< 50) -> infatuation applied
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_CUTE_CHARM, innates: [null, null, null] } }],
+      scriptedRng([0, 20]),
+    )
+    executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state1.battlers[0]!.mon.status2, statusInfatuatedWith(1))).toBe(true)
+
+    // Roll >= 50: rng draws 0 for accuracy check, 60 for Cute Charm (>= 50) -> no infatuation
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_CUTE_CHARM, innates: [null, null, null] } }],
+      scriptedRng([0, 60]),
+    )
+    executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state2.battlers[0]!.mon.status2, statusInfatuatedWith(1))).toBe(false)
+  })
+
+  it('Toxic Debris sets Toxic Spikes on attacker side on contact hit, and does not trigger on non-contact hit', () => {
+    // Contact hit (Tackle) sets Toxic Spikes (layer 1)
+    const state1 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_TOXIC_DEBRIS, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state1.sides[0]!.statuses, SIDE_STATUS_TOXIC_SPIKES)).toBe(true)
+    expect(state1.sides[0]!.timers.toxicSpikesAmount).toBe(1)
+
+    // Non-contact hit (Water Gun) does not set Toxic Spikes
+    const state2 = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_TOXIC_DEBRIS, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    executeTurn(state2, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state2.sides[0]!.statuses, SIDE_STATUS_TOXIC_SPIKES)).toBe(false)
+    expect(state2.sides[0]!.timers.toxicSpikesAmount).toBe(0)
+  })
+
+  it('Loose Quills sets Spikes on attacker side on contact hit', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_LOOSE_QUILLS, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_SPIKES)).toBe(true)
+    expect(state.sides[0]!.timers.spikesAmount).toBe(1)
+  })
+
+  it('Sand Spit summons Sandstorm on hit and grounds airborne attacker with Smack Down', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SAND_SPIT, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    // Make attacker airborne via Magnet Rise
+    state.battlers[0]!.statuses3 |= STATUS3_MAGNET_RISE
+
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state.field.weather, WEATHER_SANDSTORM_TEMPORARY)).toBe(true)
+    expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_SMACKED_DOWN)).toBe(true)
+    expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(false)
+  })
+
+  it('Stamina in an innate slot fires (+1 Def on damaging hit)', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: null, innates: [ABILITY_STAMINA, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 1, stat: STAT_DEF, change: 1 }])
+  })
+
+  it('Inflatable raises Def and SpDef by 1 when hit by Fire or Flying move', () => {
+    // Flamethrower (Fire type)
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_INFLATABLE, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(state.battlers[1]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([
+      { battlerId: 1, stat: STAT_DEF, change: 1 },
+      { battlerId: 1, stat: STAT_SPDEF, change: 1 },
+    ])
+  })
+
+  it('Steam Engine raises Speed by 12 (max) when hit by Fire or Water move', () => {
+    // Water Gun (Water type)
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STEAM_ENGINE, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(12)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 1, stat: STAT_SPEED, change: 6 }])
+  })
+
+  it('Guilt Trip lowers attacker Attack and Sp. Atk by 2 when defender faints', () => {
+    // Defender has 15 HP and takes 20 damage -> faints
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 15, maxHp: 100, abilities: { ability: ABILITY_GUILT_TRIP, innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 2)
+    expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 2)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([
+      { battlerId: 0, stat: STAT_ATK, change: -2 },
+      { battlerId: 0, stat: STAT_SPATK, change: -2 },
+    ])
+  })
+
+  it('Cotton Down lowers the opposing Speed by 1 on a hit', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_COTTON_DOWN'), innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+    expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: -1 }])
+  })
+
+  it("Ill Will zeroes the attacker's PP for the move when the holder faints to a contact hit", () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100 }, { hp: 15, maxHp: 100, abilities: { ability: requireAbility('ABILITY_ILL_WILL'), innates: [null, null, null] } }],
+      scriptedRng(),
+    )
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(state.battlers[0]!.mon.pp[0]).toBe(0)
+  })
+})
+
 

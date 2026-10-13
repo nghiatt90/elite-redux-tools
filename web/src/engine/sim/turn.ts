@@ -360,6 +360,7 @@ export interface DamageResolution {
   attackerDamage: number | null
   unmodelled: string[]
   absorbingAbility?: string | null
+  isCriticalHit?: boolean
 }
 
 export interface DamageResolveContext {
@@ -1198,7 +1199,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       continue
     }
 
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
 
     if (absorbingAbility) {
       const absorbOutcome = applyAbsorbEffect({
@@ -1290,6 +1291,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       moveId: action.chosenMove.id,
       targetDamage: targetDamage ?? 0,
       hpDealt,
+      isCriticalHit,
       moveEffect2: secondaryResult?.moveEffect2 ?? null,
       deps,
       unmodelled,

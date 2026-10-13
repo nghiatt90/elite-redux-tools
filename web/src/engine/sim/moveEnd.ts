@@ -45,26 +45,38 @@ import type { MoveBehaviors } from '../basePower'
 import type { BattleState, BattlerState } from './state'
 import {
   DEFAULT_STAT_STAGE,
+  ENUM_WEATHER_SANDSTORM,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_TOXIC_SPIKES,
   STATUS2_CONFUSION,
+  STATUS2_CURSED,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
+  STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
   STATUS3_MAGNET_RISE,
   STATUS3_ON_AIR,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_TERRAIN_ANY,
+  STATUS_FIELD_TERRAIN_PERMANENT,
   STAT_ATK,
   STAT_DEF,
   STAT_SPATK,
   STAT_SPDEF,
   STAT_SPEED,
+  WEATHER_PRIMAL_ANY,
+  WEATHER_SANDSTORM_ANY,
   clearFlag,
   hasFlag,
   setFlag,
+  statusInfatuatedWith,
 } from './constants'
 import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -75,6 +87,7 @@ import { syncPartyHp } from './outcome'
 import { resolveMultihitType } from './attackCanceller'
 import {
   CHECK_FLINCH,
+  CHECK_RESTRICTING,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_PARALYSIS,
@@ -84,6 +97,7 @@ import {
   canBeBurned,
   canBeParalyzed,
   canBePoisoned,
+  canInfatuate,
   canSleep,
   doesSubstituteBlockMove,
   isAbilityStatusProtected,
@@ -93,18 +107,23 @@ import {
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
 import {
+  MOVE_EFFECT_AFFECTS_USER,
+  MOVE_EFFECT_CERTAIN,
+  STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_DONT_SET_BUFFERS,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
   changeStatBuffs,
   changeStatBuffsImplicit,
+  getHighestAttackingStatId,
   isSimAbilitySuppressed,
-  MOVE_EFFECT_AFFECTS_USER,
-  STAT_BUFF_DONT_SET_BUFFERS,
-  STAT_BUFF_UPDATE_MOVE_EFFECT,
 } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
+import { tryChangeBattleWeather } from './switchInAbility'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -580,6 +599,29 @@ function battlerHasHalfRecoil(battler: BattlerState): boolean {
 // Plus Poison Point family: ABILITY_POISON_POINT (:997), ABILITY_POISON_TOUCH (:2099), ABILITY_TOXIC_SHELL (:11534), ABILITY_VENOM_CROWN (:9518), ABILITY_BLIGHT_SCALE (:9525)
 // Plus Effect Spore: ABILITY_EFFECT_SPORE (:818)
 // Plus Gooey family: ABILITY_GOOEY (:2482), ABILITY_SLIME_MOLD (:2495), ABILITY_TANGLING_HAIR (:3053), ABILITY_MASSIVE_PELT (:11357), ABILITY_MUCUS_MEMBRANE (:11628)
+// Plus Cycle 42 onDefender batch:
+// - Stamina family: ABILITY_STAMINA (:2598), ABILITY_CROWNED_SHIELD (:6701), ABILITY_MOUSTACHE (:10949)
+// - Weak Armor: ABILITY_WEAK_ARMOR (:1950)
+// - Anger Point family: ABILITY_ANGER_POINT (:1461), ABILITY_CROWNED_SWORD (:6695), ABILITY_TIPPING_POINT (:6219), ABILITY_BERSERKER_RAGE (:6237), ABILITY_FORTITUDE (:6623), ABILITY_RAGE_POINT (:8784)
+// - Berserk family: ABILITY_BERSERK (:2758), ABILITY_UNLOCKED_POTENTIAL (:8239), ABILITY_GOING_BERSERK (:12144)
+// - Anger Shell: ABILITY_ANGER_SHELL (:7061)
+// - Inflatable family: ABILITY_INFLATABLE (:3860), ABILITY_BALLOON_BLITZ (:9282), ABILITY_BALLOON_BOMBER (:7761)
+// - Toxic Debris: ABILITY_TOXIC_DEBRIS (:5060)
+// - Scrapyard family: ABILITY_SCRAPYARD (:5043), ABILITY_LOOSE_QUILLS (:5056), ABILITY_SHATTERED_ARMOR (:12285), ABILITY_LOOSE_ROCKS (:5104)
+// - Cute Charm family: ABILITY_CUTE_CHARM (:1217), ABILITY_TENDER_AFFECTION (:10008), ABILITY_PRIM_AND_PROPER (:6311), ABILITY_PURE_LOVE (:6537)
+// - Damp: ABILITY_DAMP (:578)
+// - Furnace: ABILITY_FURNACE (:5797)
+// - Guilt Trip: ABILITY_GUILT_TRIP (:7108)
+// - Haunted Spirit family: ABILITY_HAUNTED_SPIRIT (:4321), ABILITY_VENGEFUL_SPIRIT (:7189)
+// - Ill Will: ABILITY_ILL_WILL (:7278)
+// - Itchy Defense: ABILITY_ITCHY_DEFENSE (:6154)
+// - Sand Spit: ABILITY_SAND_SPIT (:3317)
+// - Seed Sower: ABILITY_SEED_SOWER (:6859)
+// - Wind Power: ABILITY_WIND_POWER (:7032)
+// - Cotton Down family: ABILITY_COTTON_DOWN (:3242), ABILITY_SCARECROW (:9982)
+// - Cursed Body: ABILITY_CURSED_BODY (:1910)
+// - Justified-style defender stat raises: ABILITY_RATTLED (:2213), ABILITY_WATER_COMPACTION (:2650), ABILITY_STEAM_ENGINE (:3291), ABILITY_THERMAL_EXCHANGE (:7339), ABILITY_THERMAL_ENTROPY (:12404)
+// - Electromorphosis family: ABILITY_ELECTROMORPHOSIS (:5299), ABILITY_ATOMIC_BURST (:5313)
 export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_ROUGH_SKIN',
   'ABILITY_IRON_BARBS',
@@ -602,6 +644,52 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_TANGLING_HAIR',
   'ABILITY_MASSIVE_PELT',
   'ABILITY_MUCUS_MEMBRANE',
+  'ABILITY_STAMINA',
+  'ABILITY_CROWNED_SHIELD',
+  'ABILITY_MOUSTACHE',
+  'ABILITY_WEAK_ARMOR',
+  'ABILITY_ANGER_POINT',
+  'ABILITY_CROWNED_SWORD',
+  'ABILITY_TIPPING_POINT',
+  'ABILITY_BERSERKER_RAGE',
+  'ABILITY_FORTITUDE',
+  'ABILITY_RAGE_POINT',
+  'ABILITY_BERSERK',
+  'ABILITY_UNLOCKED_POTENTIAL',
+  'ABILITY_GOING_BERSERK',
+  'ABILITY_ANGER_SHELL',
+  'ABILITY_INFLATABLE',
+  'ABILITY_BALLOON_BLITZ',
+  'ABILITY_BALLOON_BOMBER',
+  'ABILITY_TOXIC_DEBRIS',
+  'ABILITY_SCRAPYARD',
+  'ABILITY_LOOSE_QUILLS',
+  'ABILITY_SHATTERED_ARMOR',
+  'ABILITY_LOOSE_ROCKS',
+  'ABILITY_CUTE_CHARM',
+  'ABILITY_TENDER_AFFECTION',
+  'ABILITY_PRIM_AND_PROPER',
+  'ABILITY_PURE_LOVE',
+  'ABILITY_DAMP',
+  'ABILITY_FURNACE',
+  'ABILITY_GUILT_TRIP',
+  'ABILITY_HAUNTED_SPIRIT',
+  'ABILITY_VENGEFUL_SPIRIT',
+  'ABILITY_ILL_WILL',
+  'ABILITY_ITCHY_DEFENSE',
+  'ABILITY_SAND_SPIT',
+  'ABILITY_SEED_SOWER',
+  'ABILITY_WIND_POWER',
+  'ABILITY_COTTON_DOWN',
+  'ABILITY_SCARECROW',
+  'ABILITY_CURSED_BODY',
+  'ABILITY_RATTLED',
+  'ABILITY_WATER_COMPACTION',
+  'ABILITY_STEAM_ENGINE',
+  'ABILITY_THERMAL_EXCHANGE',
+  'ABILITY_THERMAL_ENTROPY',
+  'ABILITY_ELECTROMORPHOSIS',
+  'ABILITY_ATOMIC_BURST',
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -658,6 +746,59 @@ function canLowerStatOrMirrorArmor(
   )
 }
 
+/**
+ * CanRaiseStat, src/battle_util.c:9364 -> CompareStat (:8545-8561), which flips under Contrary.
+ */
+function canRaiseStat(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const contrary = battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battlerId, false, dataContext)
+  return contrary ? stage > MIN_STAT_STAGE : stage < MAX_STAT_STAGE
+}
+
+/**
+ * CanLowerStat, src/battle_util.c:9363 -> CompareStat (:8545-8561), which flips under Contrary.
+ */
+function canLowerStat(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const contrary = battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battlerId, false, dataContext)
+  return contrary ? stage < MAX_STAT_STAGE : stage > MIN_STAT_STAGE
+}
+
+/**
+ * CheckHalfHpAbility, src/battle_util.c:9043-9048.
+ * Returns true if defender was above half HP before the hit, is at or below half HP after, and is still alive.
+ */
+function checkHalfHpAbility(target: BattlerState, hpDealt: number): boolean {
+  if (target.mon.hp <= 0) return false
+  const hpBefore = target.mon.hp + hpDealt
+  const halfHp = Math.floor(target.mon.maxHp / 2)
+  return hpBefore > halfHp && target.mon.hp <= halfHp
+}
+
+/**
+ * HandleDefenderAbility's GET_MOVE_TYPE (battle_util.c:9061) -- read as the declared type, like MOVEEND_CHARGE;
+ * dynamic type changes (-ate abilities, Weather Ball) are not applied.
+ */
+function moveTypeMatches(moveData: SimMoveData | undefined, ...types: string[]): boolean {
+  if (!moveData || !moveData.type) return false
+  const clean = moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type
+  return types.includes(clean)
+}
+
 export interface MoveEndAbilitiesContext {
   state: BattleState
   attackerId: number
@@ -665,6 +806,8 @@ export interface MoveEndAbilitiesContext {
   moveId: string
   moveData: SimMoveData | undefined
   targetDamage: number
+  hpDealt?: number
+  isCriticalHit?: boolean
   deps: TurnLoopDeps
   unmodelled: string[]
   fainted: number[]
@@ -679,25 +822,29 @@ export interface MoveEndAbilitiesResult {
 function handleDefenderMoveEndAbility(
   state: BattleState,
   abilityId: string,
+  slotIndex: number,
   targetId: number,
   attackerId: number,
   moveData: SimMoveData | undefined,
   moveId: string,
+  targetDamage: number,
+  hpDealt: number,
+  isCriticalHit: boolean,
   attackerHoldEffect: string | null,
   deps: TurnLoopDeps,
   statusDeps: StatusDeps,
   unmodelled: string[],
   fainted: number[],
-): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChange: StatChangeOutcome | null } {
-  const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChange: StatChangeOutcome | null } = {
+): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
+  const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
     statusApplied: null,
-    statChange: null,
+    statChanges: [],
   }
 
   const attacker = state.battlers[attackerId]
-  // ShouldApplyOnHitEffect(attacker), src/battle_util.c:4062: DidMoveHit() && IsBattlerAlive(attacker)
-  if (!attacker || attacker.mon.hp <= 0) return result
+  const target = state.battlers[targetId]
+  if (!attacker || !target) return result
 
   // 1. Rough Skin family (src/abilities.cc:784-793, 2262, 7325, 10149, 11224)
   if (
@@ -707,16 +854,13 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ||
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
-    if (isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
+    if (attacker.mon.hp > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
       const denom = abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ? 6 : 8
       const dmg = Math.max(1, Math.floor(attacker.mon.maxHp / denom))
       applyDamage(state, attackerId, dmg, fainted)
       result.attackerDamage += dmg
     }
   }
-
-  // If attacker fainted from Rough Skin recoil, subsequent checks won't pass ShouldApplyOnHitEffect
-  if (attacker.mon.hp <= 0) return result
 
   // 2. Poison Point on defender (src/abilities.cc:987-995, 2101, 9519, 9526, 10149, 11536)
   if (
@@ -727,7 +871,7 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_BLIGHT_SCALE' ||
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
-    if (canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
+    if (attacker.mon.hp > 0 && canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
       if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
         if (state.rng.random16() % 100 < 30) {
           const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
@@ -741,7 +885,7 @@ function handleDefenderMoveEndAbility(
 
   // 3. Static on defender (src/abilities.cc:610-618, 8183)
   if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
-    if (canBeParalyzed(state, targetId, attackerId, statusDeps)) {
+    if (attacker.mon.hp > 0 && canBeParalyzed(state, targetId, attackerId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
@@ -754,7 +898,7 @@ function handleDefenderMoveEndAbility(
 
   // 4. Flame Body on defender (src/abilities.cc:1126-1134, 4364, 6106)
   if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
-    if (canBeBurned(state, attackerId, targetId, statusDeps)) {
+    if (attacker.mon.hp > 0 && canBeBurned(state, attackerId, targetId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
@@ -768,6 +912,7 @@ function handleDefenderMoveEndAbility(
   // 5. Effect Spore on defender (src/abilities.cc:818-845)
   if (abilityId === 'ABILITY_EFFECT_SPORE') {
     if (
+      attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !isPowderImmune(state, targetId, attackerId, statusDeps)
     ) {
@@ -799,21 +944,18 @@ function handleDefenderMoveEndAbility(
     }
   }
 
-  // 6. Gooey family on defender (src/abilities.cc:2482-2492, 2496, 3054, 6106, 11358, 11629)
+  // 6. Gooey family on defender (src/abilities.cc:2482-2492, 2496, 3054, 6106, 10949, 11358, 11629)
   if (
     abilityId === 'ABILITY_GOOEY' ||
     abilityId === 'ABILITY_SLIME_MOLD' ||
     abilityId === 'ABILITY_TANGLING_HAIR' ||
     abilityId === 'ABILITY_MASSIVE_PELT' ||
     abilityId === 'ABILITY_MUCUS_MEMBRANE' ||
-    abilityId === 'ABILITY_SUPER_HOT_GOO'
+    abilityId === 'ABILITY_SUPER_HOT_GOO' ||
+    abilityId === 'ABILITY_MOUSTACHE'
   ) {
-    // BattleScript_GooeyActivates (battle_scripts_1.s:10581-10586) swaps attacker and target around
-    // seteffectsecondary: SetMoveEffect(FALSE, FALSE) with the Gooey holder as gBattlerAttacker and
-    // HITMARKER_IGNORE_SAFEGUARD set (Shield Dust skipped). Its Sheer Force / Substitute checks (:2361, :2388)
-    // therefore read the holder against gCurrentMove; MOVE_EFFECT_SPD_MINUS_1 then calls
-    // ChangeStatBuffsImplicit with STAT_BUFF_UPDATE_MOVE_EFFECT (:2765-2775).
     if (
+      attacker.mon.hp > 0 &&
       canLowerStatOrMirrorArmor(state, attackerId, STAT_SPEED, deps.dataContext) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !testSheerForceFlag(state, targetId, moveId, statusDeps) &&
@@ -832,8 +974,738 @@ function handleDefenderMoveEndAbility(
         moveId,
       )
       if (dropRes.delta !== 0) {
-        result.statChange = { battlerId: attackerId, stat: STAT_SPEED, change: dropRes.delta }
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_SPEED, change: dropRes.delta })
       }
+    }
+  }
+
+  // 7. Stamina family (src/abilities.cc:2598-2604, 6701, 10949)
+  if (
+    abilityId === 'ABILITY_STAMINA' ||
+    abilityId === 'ABILITY_CROWNED_SHIELD' ||
+    abilityId === 'ABILITY_MOUSTACHE'
+  ) {
+    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
+      const stages = isCriticalHit ? 12 : 1
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        stages,
+        STAT_DEF,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: res.delta })
+      }
+    }
+  }
+
+  // 8. Weak Armor (src/abilities.cc:1950-1961, data/battle_scripts_1.s:10300-10324)
+  if (abilityId === 'ABILITY_WEAK_ARMOR') {
+    if (
+      target.mon.hp > 0 &&
+      moveData?.split === 'PHYSICAL' &&
+      (canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext) || canLowerStat(state, targetId, STAT_DEF, deps.dataContext))
+    ) {
+      if (moveData?.effect === 'EFFECT_HIT_ESCAPE') {
+        target.round.disableEjectPack = true
+      }
+      const defRes = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        -1,
+        STAT_DEF,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (defRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
+      }
+      const speRes = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        2,
+        STAT_SPEED,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (speRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: speRes.delta })
+      }
+    }
+  }
+
+  // 9. Anger Point family (src/abilities.cc:1461-1473, 6220-6232, 6237, 6624-6636, 6695, 8785-8792)
+  if (abilityId === 'ABILITY_ANGER_POINT' || abilityId === 'ABILITY_CROWNED_SWORD') {
+    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
+      const stages = isCriticalHit ? 12 : 1
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        stages,
+        STAT_ATK,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_TIPPING_POINT' || abilityId === 'ABILITY_BERSERKER_RAGE') {
+    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)) {
+      const stages = isCriticalHit ? 12 : 1
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        stages,
+        STAT_SPATK,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_FORTITUDE') {
+    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext)) {
+      const stages = isCriticalHit ? 12 : 1
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        stages,
+        STAT_SPDEF,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPDEF, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_RAGE_POINT') {
+    if (
+      target.mon.hp > 0 &&
+      isCriticalHit &&
+      (canRaiseStat(state, targetId, STAT_ATK, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext))
+    ) {
+      const atkRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        1,
+        STAT_ATK,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (atkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: atkRes.delta })
+      }
+      const spAtkRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        1,
+        STAT_SPATK,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (spAtkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: spAtkRes.delta })
+      }
+    }
+  }
+
+  // 10. Berserk family (src/abilities.cc:2759-2769, 8239, 12144)
+  if (
+    abilityId === 'ABILITY_BERSERK' ||
+    abilityId === 'ABILITY_UNLOCKED_POTENTIAL' ||
+    abilityId === 'ABILITY_GOING_BERSERK'
+  ) {
+    if (checkHalfHpAbility(target, hpDealt) && !target.volatiles.abilityState[slotIndex]) {
+      const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
+      if (canRaiseStat(state, targetId, highestStat, deps.dataContext)) {
+        target.volatiles.abilityState[slotIndex] = 1
+        const res = changeStatBuffs(
+          state,
+          targetId,
+          attackerId,
+          targetId,
+          1,
+          highestStat,
+          STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          result.statChanges.push({ battlerId: targetId, stat: highestStat, change: res.delta })
+        }
+      }
+    }
+  }
+
+  // 11. Anger Shell (src/abilities.cc:7062-7070, data/battle_scripts_1.s:1848-1893)
+  if (abilityId === 'ABILITY_ANGER_SHELL') {
+    if (
+      checkHalfHpAbility(target, hpDealt) &&
+      !target.volatiles.abilityState[slotIndex] &&
+      (canRaiseStat(state, targetId, STAT_ATK, deps.dataContext) ||
+        canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext) ||
+        canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext))
+    ) {
+      target.volatiles.abilityState[slotIndex] = 1
+      const defRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        -1,
+        STAT_DEF,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR | MOVE_EFFECT_CERTAIN,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (defRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
+      }
+      const spDefRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        -1,
+        STAT_SPDEF,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR | MOVE_EFFECT_CERTAIN,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (spDefRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPDEF, change: spDefRes.delta })
+      }
+      const atkRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        2,
+        STAT_ATK,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (atkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: atkRes.delta })
+      }
+      const spAtkRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        2,
+        STAT_SPATK,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (spAtkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: spAtkRes.delta })
+      }
+      const speRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        2,
+        STAT_SPEED,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (speRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: speRes.delta })
+      }
+    }
+  }
+
+  if (abilityId === 'ABILITY_BALLOON_BOMBER' && target.mon.hp <= 0) {
+    unmodelled.push("Balloon Bomber's Aftermath half (UseOutOfTurnAttack Explosion/Outburst on faint, abilities.cc:7761) is not modelled")
+  }
+
+  // 12. Inflatable family (src/abilities.cc:3861-3868, 7761, 9282, data/battle_scripts_1.s:9075-9096)
+  if (
+    abilityId === 'ABILITY_INFLATABLE' ||
+    abilityId === 'ABILITY_BALLOON_BLITZ' ||
+    abilityId === 'ABILITY_BALLOON_BOMBER'
+  ) {
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'FIRE', 'FLYING') &&
+      (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext))
+    ) {
+      const defRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        1,
+        STAT_DEF,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (defRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
+      }
+      const spDefRes = changeStatBuffs(
+        state,
+        targetId,
+        targetId,
+        attackerId,
+        1,
+        STAT_SPDEF,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (spDefRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPDEF, change: spDefRes.delta })
+      }
+    }
+  }
+
+  // 13. Toxic Debris (src/abilities.cc:5061-5068)
+  if (abilityId === 'ABILITY_TOXIC_DEBRIS') {
+    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+      const oppSide = (targetId & 1) ^ 1
+      const sideState = state.sides[oppSide]!
+      if (sideState.timers.toxicSpikesAmount < 2) {
+        sideState.timers.toxicSpikesAmount++
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TOXIC_SPIKES)
+      }
+    }
+  }
+
+  // 14. Scrapyard / Loose Quills / Loose Rocks (src/abilities.cc:5044-5051, 5056, 5105-5112, 12285)
+  if (
+    abilityId === 'ABILITY_SCRAPYARD' ||
+    abilityId === 'ABILITY_LOOSE_QUILLS' ||
+    abilityId === 'ABILITY_SHATTERED_ARMOR'
+  ) {
+    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+      const oppSide = (targetId & 1) ^ 1
+      const sideState = state.sides[oppSide]!
+      if (sideState.timers.spikesAmount < 3) {
+        sideState.timers.spikesAmount++
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SPIKES)
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_LOOSE_ROCKS') {
+    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+      const oppSide = (targetId & 1) ^ 1
+      const sideState = state.sides[oppSide]!
+      if (!hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
+        sideState.timers.stealthRockType = 5 // TYPE_ROCK
+      }
+    }
+  }
+
+  // 15. Cute Charm family (src/abilities.cc:1207-1215, 6311, 6537, 10009)
+  if (
+    abilityId === 'ABILITY_CUTE_CHARM' ||
+    abilityId === 'ABILITY_TENDER_AFFECTION' ||
+    abilityId === 'ABILITY_PRIM_AND_PROPER' ||
+    abilityId === 'ABILITY_PURE_LOVE'
+  ) {
+    if (
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      canInfatuate(state, targetId, attackerId, statusDeps)
+    ) {
+      if (state.rng.random16() % 100 < 50) {
+        attacker.mon.status2 = setFlag(attacker.mon.status2, statusInfatuatedWith(targetId))
+      }
+    }
+  }
+
+  // 16. Damp (src/abilities.cc:564-576)
+  if (abilityId === 'ABILITY_DAMP') {
+    if (
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !attacker.mon.types.includes('WATER')
+    ) {
+      attacker.mon.types = ['WATER', 'WATER', 'MYSTERY']
+    }
+  }
+
+  // 17. Furnace (src/abilities.cc:5798-5805)
+  if (abilityId === 'ABILITY_FURNACE') {
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'ROCK') &&
+      canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
+    ) {
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        2,
+        STAT_SPEED,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+      }
+    }
+  }
+
+  // 18. Guilt Trip (src/abilities.cc:7109-7116, data/battle_scripts_1.s:6158-6175)
+  if (abilityId === 'ABILITY_GUILT_TRIP') {
+    if (
+      attacker.mon.hp > 0 &&
+      target.mon.hp <= 0 &&
+      (canLowerStat(state, attackerId, STAT_ATK, deps.dataContext) || canLowerStat(state, attackerId, STAT_SPATK, deps.dataContext))
+    ) {
+      const atkRes = changeStatBuffs(
+        state,
+        attackerId,
+        attackerId,
+        targetId,
+        -2,
+        STAT_ATK,
+        STAT_BUFF_ALLOW_PTR | MOVE_EFFECT_AFFECTS_USER,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (atkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_ATK, change: atkRes.delta })
+      }
+      const spAtkRes = changeStatBuffs(
+        state,
+        attackerId,
+        attackerId,
+        targetId,
+        -2,
+        STAT_SPATK,
+        STAT_BUFF_ALLOW_PTR | MOVE_EFFECT_AFFECTS_USER,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (spAtkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_SPATK, change: spAtkRes.delta })
+      }
+    }
+  }
+
+  // 19. Haunted Spirit family (src/abilities.cc:4321-4332, 7189)
+  if (abilityId === 'ABILITY_HAUNTED_SPIRIT' || abilityId === 'ABILITY_VENGEFUL_SPIRIT') {
+    if (
+      attacker.mon.hp > 0 &&
+      target.mon.hp <= 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !attacker.mon.types.includes('GHOST') &&
+      !hasFlag(attacker.mon.status2, STATUS2_CURSED)
+    ) {
+      attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_CURSED)
+    }
+  }
+
+  // 20. Ill Will (src/abilities.cc:7278-7292)
+  if (abilityId === 'ABILITY_ILL_WILL') {
+    if (
+      attacker.mon.hp > 0 &&
+      target.mon.hp <= 0 &&
+      moveId !== 'MOVE_STRUGGLE' &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      // gChosenMovePos: the slot of the move being used; a called move (Metronome etc.) has no slot of its own.
+      const slot = attacker.mon.moves.indexOf(moveId)
+      if (slot === -1) {
+        unmodelled.push(`Ill Will: ${moveId} is not in the attacker's move slots, so gChosenMovePos is unknown`)
+      } else if (attacker.mon.pp[slot]! > 0) {
+        attacker.mon.pp[slot] = 0
+      }
+    }
+  }
+
+  // 21. Itchy Defense (src/abilities.cc:6154-6170, battle_script_commands.c:2300-2309)
+  if (abilityId === 'ABILITY_ITCHY_DEFENSE') {
+    if (
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !hasFlag(attacker.mon.status2, STATUS2_WRAPPED)
+    ) {
+      attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_WRAPPED)
+      // HasGrappler: bitfields.grappler (grep '"grappler"' abilityHooks.json -> Grappler, Tangled Tails, Tentalock)
+      const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
+        battlerHasSimAbility(state, target, ab, false, targetId, false, deps.dataContext),
+      )
+      const hasGripClaw = deps.grounding.holdEffectOf(targetId) === 'HOLD_EFFECT_GRIP_CLAW'
+      attacker.volatiles.wrapTurns =
+        hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
+      attacker.volatiles.wrapAbility = abilityId
+      unmodelled.push('Itchy Defense set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+    }
+  }
+
+  // 22. Sand Spit (src/abilities.cc:3317-3337)
+  if (abilityId === 'ABILITY_SAND_SPIT') {
+    if (
+      target.mon.hp > 0 &&
+      !hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY) &&
+      !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)
+    ) {
+      const changed = tryChangeBattleWeather(state, targetId, ENUM_WEATHER_SANDSTORM, true, deps)
+      if (changed) {
+        if (!isBattlerGrounded(state, attackerId, deps.grounding) && attacker.mon.hp > 0) {
+          attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_SMACKED_DOWN)
+          attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS | STATUS3_ON_AIR)
+        }
+      }
+    }
+  }
+
+  // 23. Seed Sower (src/abilities.cc:6859-6866, battle_util.c:3778-3795)
+  if (abilityId === 'ABILITY_SEED_SOWER') {
+    if (
+      target.mon.hp > 0 &&
+      !hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN) &&
+      !hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT)
+    ) {
+      state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+      state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
+      state.field.timers.started.terrain = true
+      state.field.timers.terrainBattlerId = targetId
+      const heldEffect = deps.grounding.holdEffectOf(targetId)
+      state.field.timers.terrainTimer = heldEffect === 'HOLD_EFFECT_TERRAIN_EXTENDER' ? 12 : 8
+    }
+  }
+
+  // 24. Wind Power (src/abilities.cc:7032-7041)
+  if (abilityId === 'ABILITY_WIND_POWER') {
+    if (target.mon.hp > 0 && !!moveData?.flags?.airBased && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+      target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
+    }
+  }
+
+  // 25. Cotton Down family (src/abilities.cc:3242-3252, 9982, data/battle_scripts_1.s:8553-8575)
+  // DidMoveHit, then BATTLE_OPPOSITE(battler) or its partner alive; the script walks gBattlerTarget from
+  // GetOppositeSide(battler) in steps of 2, skipping absent battlers, with the holder as gBattlerAttacker.
+  if (abilityId === 'ABILITY_COTTON_DOWN' || abilityId === 'ABILITY_SCARECROW') {
+    const opposite = targetId ^ 1
+    const anyAlive = (state.battlers[opposite]?.mon.hp ?? 0) > 0 || (state.battlers[opposite ^ 2]?.mon.hp ?? 0) > 0
+    if (targetDamage > 0 && anyAlive) {
+      for (let foeId = (targetId & 1) ^ 1; foeId < state.battlersCount; foeId += 2) {
+        if ((state.battlers[foeId]?.mon.hp ?? 0) <= 0) continue
+        const res = changeStatBuffs(
+          state,
+          foeId,
+          targetId,
+          foeId,
+          -1,
+          STAT_SPEED,
+          STAT_BUFF_NOT_PROTECT_AFFECTED,
+          true,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          result.statChanges.push({ battlerId: foeId, stat: STAT_SPEED, change: res.delta })
+        }
+      }
+    }
+  }
+
+  // 26. Cursed Body (src/abilities.cc:1910-1924)
+  if (abilityId === 'ABILITY_CURSED_BODY') {
+    if (
+      attacker.mon.hp > 0 &&
+      !attacker.volatiles.disabledMove &&
+      !isAbilityStatusProtected(state, attackerId, CHECK_RESTRICTING, targetId, statusDeps) &&
+      (attacker.mon.pp[attacker.mon.moves.indexOf(moveId)] ?? 0) > 0
+    ) {
+      if (state.rng.random16() % 100 < 30) {
+        attacker.volatiles.disabledMove = moveId
+        attacker.volatiles.disableTimer = 4
+        unmodelled.push('Disable move lock is not modelled yet: CANCELLER_DISABLED is not implemented in turn loop')
+      }
+    }
+  }
+
+  // 27. Justified-style defender stat raises
+  if (abilityId === 'ABILITY_RATTLED') {
+    // src/abilities.cc:2213-2224
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'DARK', 'BUG', 'GHOST') &&
+      canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
+    ) {
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        1,
+        STAT_SPEED,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_WATER_COMPACTION') {
+    // src/abilities.cc:2650-2659
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'WATER') &&
+      canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)
+    ) {
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        2,
+        STAT_DEF,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_STEAM_ENGINE') {
+    // src/abilities.cc:3291-3300
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'FIRE', 'WATER') &&
+      canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
+    ) {
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        12,
+        STAT_SPEED,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+      }
+    }
+  }
+  if (abilityId === 'ABILITY_THERMAL_EXCHANGE' || abilityId === 'ABILITY_THERMAL_ENTROPY') {
+    // src/abilities.cc:7339-7348, 12405
+    if (
+      target.mon.hp > 0 &&
+      moveTypeMatches(moveData, 'FIRE') &&
+      canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)
+    ) {
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        attackerId,
+        targetId,
+        1,
+        STAT_ATK,
+        STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: res.delta })
+      }
+    }
+  }
+
+  // 28. Electromorphosis family (src/abilities.cc:5299-5308, 5313)
+  if (abilityId === 'ABILITY_ELECTROMORPHOSIS' || abilityId === 'ABILITY_ATOMIC_BURST') {
+    if (target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+      target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
     }
   }
 
@@ -911,7 +1783,9 @@ function handleAttackerMoveEndAbility(
  * Iterates target's ability slots in reverse order (slot 3 -> 2 -> 1 -> 0).
  */
 export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): MoveEndAbilitiesResult {
-  const { state, attackerId, targetId, moveId, moveData, deps, unmodelled, fainted } = ctx
+  const { state, attackerId, targetId, moveId, moveData, targetDamage, deps, unmodelled, fainted } = ctx
+  const hpDealt = ctx.hpDealt ?? targetDamage
+  const isCriticalHit = ctx.isCriticalHit ?? false
   const target = state.battlers[targetId]
   const result: MoveEndAbilitiesResult = {
     attackerDamage: 0,
@@ -924,7 +1798,7 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
   const slots = getBattlerAbilitySlotsReverse(target.mon.abilities)
 
-  for (const { abilityId } of slots) {
+  for (const { abilityId, slotIndex } of slots) {
     if (isSimAbilitySuppressed(state, target, abilityId, false, attackerId, false, deps.dataContext)) {
       continue
     }
@@ -932,10 +1806,14 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
       const abRes = handleDefenderMoveEndAbility(
         state,
         abilityId,
+        slotIndex,
         targetId,
         attackerId,
         moveData,
         moveId,
+        targetDamage,
+        hpDealt,
+        isCriticalHit,
         attackerHoldEffect,
         deps,
         statusDeps,
@@ -945,8 +1823,8 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
       }
-      if (abRes.statChange) {
-        result.statChanges.push(abRes.statChange)
+      if (abRes.statChanges.length > 0) {
+        result.statChanges.push(...abRes.statChanges)
       }
       if (abRes.statusApplied && !result.statusApplied) {
         result.statusApplied = abRes.statusApplied
@@ -1518,6 +2396,7 @@ export interface MoveEndContext {
   targetDamage: number
   /** gTurnStructs[attacker].savedDmg -- the HP actually removed from the target (gHpDealt, :4335). */
   hpDealt: number
+  isCriticalHit?: boolean
   /** gBattleStruct->moveEffect2, set by seteffectwithchance (moveEffects.ts applySecondaryMoveEffects). */
   moveEffect2?: string | null
   deps: TurnLoopDeps
@@ -1618,6 +2497,8 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       moveId,
       moveData,
       targetDamage,
+      hpDealt,
+      isCriticalHit: ctx.isCriticalHit ?? false,
       deps,
       unmodelled,
       fainted,

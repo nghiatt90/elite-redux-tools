@@ -147,7 +147,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       if (move.effect === 'EFFECT_ABSORB') {
         unmodelled.push('drain is not modelled yet')
       }
-      return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled, absorbingAbility: null }
+      return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled, absorbingAbility: null, isCriticalHit: crit }
     },
   }
 }
