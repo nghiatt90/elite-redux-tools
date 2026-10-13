@@ -18,6 +18,7 @@ import {
   ENUM_WEATHER_SUN,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  NUM_BATTLE_STATS,
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -72,6 +73,7 @@ import {
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_TELEKINESIS,
   STATUS3_YAWN,
+  STATUS4_COMMANDED,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_FEAR,
@@ -4915,6 +4917,947 @@ function handleStockpile(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId: battlerId, statChanges })
 }
 
+/**
+ * Accuracy check helper for NO_ACC_CALC_CHECK_LOCK_ON (Cmd_accuracycheck, battle_script_commands.c:1403-1411).
+ * Used by Pain Split, Power/Guard/Speed/Heart Swap, Power/Guard Split, Topsy-Turvy.
+ */
+function checkNoAccCalcLockOn(ctx: MoveEffectContext, targetId: number): { failed: boolean; missed: boolean } {
+  const { state, battlerId, deps, unmodelled, turnOrderIndex, order } = ctx
+  const target = state.battlers[targetId]!
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (lockedOn) return { failed: false, missed: false }
+  if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) return { failed: true, missed: true }
+  const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+  const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+  const protectType = isBattlerProtected(state, battlerId, targetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+  if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) return { failed: true, missed: true }
+  return { failed: false, missed: false }
+}
+
+/**
+ * EFFECT_PSYCH_UP handler (Psych Up).
+ * BattleScript_EffectPsychUp (data/battle_scripts_1.s:5644-5653),
+ * Cmd_copyfoestats (src/battle_script_commands.c:11356-11365).
+ */
+function handlePsychUp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // Cmd_copyfoestats:11360-11362 copies statStages[0..NUM_BATTLE_STATS-1].
+  const statChanges: StatChangeOutcome[] = []
+  for (let i = 0; i < NUM_BATTLE_STATS; i++) {
+    const targetStage = target.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+    const currentStage = battler.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+    battler.mon.statStages[i] = targetStage
+    const delta = targetStage - currentStage
+    if (i >= STAT_ATK && i <= STAT_EVASION && delta !== 0) {
+      statChanges.push({ battlerId, stat: i, change: delta })
+    }
+  }
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_POWER_SWAP handler (Power Swap).
+ * BattleScript_EffectPowerSwap (data/battle_scripts_1.s:2504-2518),
+ * Cmd_swapstatstages (src/battle_script_commands.c:13039-13048),
+ * VARIOUS_SWAP_STAT (:8879-8885).
+ */
+function handlePowerSwap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // swapstatstages STAT_ATK, STAT_SPATK
+  const statChanges: StatChangeOutcome[] = []
+  for (const stat of [STAT_ATK, STAT_SPATK]) {
+    const atkStage = battler.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    const defStage = target.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    battler.mon.statStages[stat] = defStage
+    target.mon.statStages[stat] = atkStage
+    if (defStage - atkStage !== 0) {
+      statChanges.push({ battlerId, stat, change: defStage - atkStage })
+    }
+    if (atkStage - defStage !== 0) {
+      statChanges.push({ battlerId: targetId, stat, change: atkStage - defStage })
+    }
+  }
+
+  // swapstat BS_TARGET, STAT_ATK, STAT_SPATK: swaps rawStats.atk and rawStats.spatk
+  const tempAtk = battler.mon.rawStats.atk
+  battler.mon.rawStats.atk = target.mon.rawStats.atk
+  target.mon.rawStats.atk = tempAtk
+
+  const tempSpAtk = battler.mon.rawStats.spatk
+  battler.mon.rawStats.spatk = target.mon.rawStats.spatk
+  target.mon.rawStats.spatk = tempSpAtk
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_GUARD_SWAP handler (Guard Swap).
+ * BattleScript_EffectGuardSwap (data/battle_scripts_1.s:2519-2533),
+ * Cmd_swapstatstages (src/battle_script_commands.c:13039-13048),
+ * VARIOUS_SWAP_STAT (:8879-8885).
+ */
+function handleGuardSwap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // swapstatstages STAT_DEF, STAT_SPDEF
+  const statChanges: StatChangeOutcome[] = []
+  for (const stat of [STAT_DEF, STAT_SPDEF]) {
+    const atkStage = battler.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    const defStage = target.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    battler.mon.statStages[stat] = defStage
+    target.mon.statStages[stat] = atkStage
+    if (defStage - atkStage !== 0) {
+      statChanges.push({ battlerId, stat, change: defStage - atkStage })
+    }
+    if (atkStage - defStage !== 0) {
+      statChanges.push({ battlerId: targetId, stat, change: atkStage - defStage })
+    }
+  }
+
+  // swapstat BS_TARGET, STAT_DEF, STAT_SPDEF: swaps rawStats.def and rawStats.spdef
+  const tempDef = battler.mon.rawStats.def
+  battler.mon.rawStats.def = target.mon.rawStats.def
+  target.mon.rawStats.def = tempDef
+
+  const tempSpDef = battler.mon.rawStats.spdef
+  battler.mon.rawStats.spdef = target.mon.rawStats.spdef
+  target.mon.rawStats.spdef = tempSpDef
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_SPEED_SWAP handler (Speed Swap).
+ * BattleScript_EffectSpeedSwap (data/battle_scripts_1.s:2534-2545),
+ * Cmd_swapstatstages (src/battle_script_commands.c:13039-13048),
+ * VARIOUS_SWAP_STAT (:8879-8885).
+ */
+function handleSpeedSwap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // swapstatstages STAT_SPEED
+  const statChanges: StatChangeOutcome[] = []
+  const atkStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  const defStage = target.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  battler.mon.statStages[STAT_SPEED] = defStage
+  target.mon.statStages[STAT_SPEED] = atkStage
+  if (defStage - atkStage !== 0) {
+    statChanges.push({ battlerId, stat: STAT_SPEED, change: defStage - atkStage })
+  }
+  if (atkStage - defStage !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: atkStage - defStage })
+  }
+
+  // swapstat BS_TARGET, STAT_SPEED: swaps rawStats.spe
+  const tempSpe = battler.mon.rawStats.spe
+  battler.mon.rawStats.spe = target.mon.rawStats.spe
+  target.mon.rawStats.spe = tempSpe
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_HEART_SWAP handler (Heart Swap).
+ * BattleScript_EffectHeartSwap (data/battle_scripts_1.s:2486-2503),
+ * Cmd_swapstatstages (src/battle_script_commands.c:13039-13048).
+ */
+function handleHeartSwap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // swapstatstages: STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF, STAT_EVASION, STAT_ACC
+  const statsToSwap = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF, STAT_EVASION, STAT_ACC]
+  const statChanges: StatChangeOutcome[] = []
+  for (const stat of statsToSwap) {
+    const atkStage = battler.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    const defStage = target.mon.statStages[stat] ?? DEFAULT_STAT_STAGE
+    battler.mon.statStages[stat] = defStage
+    target.mon.statStages[stat] = atkStage
+    if (defStage - atkStage !== 0) {
+      statChanges.push({ battlerId, stat, change: defStage - atkStage })
+    }
+    if (atkStage - defStage !== 0) {
+      statChanges.push({ battlerId: targetId, stat, change: atkStage - defStage })
+    }
+  }
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_POWER_SPLIT handler (Power Split).
+ * BattleScript_EffectPowerSplit (data/battle_scripts_1.s:2460-2472),
+ * Cmd_averagestats (src/battle_script_commands.c:13050-13060).
+ */
+function handlePowerSplit(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // averagestats STAT_ATK, STAT_SPATK (rawStats)
+  const avgAtk = Math.trunc((battler.mon.rawStats.atk + target.mon.rawStats.atk) / 2)
+  battler.mon.rawStats.atk = avgAtk
+  target.mon.rawStats.atk = avgAtk
+
+  const avgSpAtk = Math.trunc((battler.mon.rawStats.spatk + target.mon.rawStats.spatk) / 2)
+  battler.mon.rawStats.spatk = avgSpAtk
+  target.mon.rawStats.spatk = avgSpAtk
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_GUARD_SPLIT handler (Guard Split).
+ * BattleScript_EffectGuardSplit (data/battle_scripts_1.s:2473-2485),
+ * Cmd_averagestats (src/battle_script_commands.c:13050-13060).
+ */
+function handleGuardSplit(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // averagestats STAT_DEF, STAT_SPDEF (rawStats)
+  const avgDef = Math.trunc((battler.mon.rawStats.def + target.mon.rawStats.def) / 2)
+  battler.mon.rawStats.def = avgDef
+  target.mon.rawStats.def = avgDef
+
+  const avgSpDef = Math.trunc((battler.mon.rawStats.spdef + target.mon.rawStats.spdef) / 2)
+  battler.mon.rawStats.spdef = avgSpDef
+  target.mon.rawStats.spdef = avgSpDef
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_TOPSY_TURVY handler (Topsy-Turvy).
+ * BattleScript_EffectTopsyTurvy (data/battle_scripts_1.s:2208-2227),
+ * VARIOUS_INVERT_STAT_STAGES (src/battle_script_commands.c:7290-7297).
+ */
+function handleTopsyTurvy(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: acc.missed })
+
+  // jumpifstat checks: fails if ALL 7 stat stages == 6 (DEFAULT_STAT_STAGE)
+  const statsToCheck = [STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED, STAT_ACC, STAT_EVASION]
+  const anyNonNeutral = statsToCheck.some((s) => (target.mon.statStages[s] ?? DEFAULT_STAT_STAGE) !== DEFAULT_STAT_STAGE)
+  if (!anyNonNeutral) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // invertstatstages BS_TARGET: 0..NUM_BATTLE_STATS-1
+  const statChanges: StatChangeOutcome[] = []
+  for (let i = 0; i < NUM_BATTLE_STATS; i++) {
+    const cur = target.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+    let next = cur
+    if (cur < DEFAULT_STAT_STAGE) {
+      next = DEFAULT_STAT_STAGE + (DEFAULT_STAT_STAGE - cur)
+    } else if (cur > DEFAULT_STAT_STAGE) {
+      next = DEFAULT_STAT_STAGE - (cur - DEFAULT_STAT_STAGE)
+    }
+    target.mon.statStages[i] = next
+    if (i >= STAT_ATK && i <= STAT_EVASION && next - cur !== 0) {
+      statChanges.push({ battlerId: targetId, stat: i, change: next - cur })
+    }
+  }
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_ACUPRESSURE handler (Acupressure).
+ * BattleScript_EffectAcupressure (data/battle_scripts_1.s:1243-1259),
+ * VARIOUS_ACUPRESSURE (src/battle_script_commands.c:6913-6928).
+ */
+function handleAcupressure(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const actualTargetId = targetId !== null ? targetId : battlerId
+  const target = state.battlers[actualTargetId]
+  if (!target || target.mon.hp === 0) {
+    return outcome(ctx, { targetId: actualTargetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // jumpifstatus2 BS_TARGET, STATUS2_SUBSTITUTE, BattleScript_PrintMoveMissed (only if target != attacker)
+  if (actualTargetId !== battlerId && hasFlag(target.mon.status2, STATUS2_SUBSTITUTE)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId: actualTargetId, missed: true })
+  }
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // VARIOUS_ACUPRESSURE: bits = 0; for (i = STAT_ATK; i < NUM_BATTLE_STATS; i++) if (stage < MAX_STAT_STAGE) bits |= (1 << i);
+  let bits = 0
+  for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+    const stage = target.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+    if (stage < MAX_STAT_STAGE) {
+      bits |= (1 << i)
+    }
+  }
+
+  if (bits === 0) {
+    return outcome(ctx, { targetId: actualTargetId, missed: true })
+  }
+
+  // do { statId = (Random() % (NUM_BATTLE_STATS - 1)) + 1; } while (!(bits & (1 << statId)));
+  let statId: number
+  do {
+    statId = (state.rng.random16() % (NUM_BATTLE_STATS - 1)) + 1
+  } while ((bits & (1 << statId)) === 0)
+
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    actualTargetId,
+    2,
+    statId,
+    MOVE_EFFECT_CERTAIN,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: actualTargetId, stat: statId, change: res.delta })
+  }
+
+  return outcome(ctx, { targetId: actualTargetId, statChanges })
+}
+
+/**
+ * EFFECT_CLANGOROUS_SOUL handler (Clangorous Soul).
+ * BattleScript_EffectClangorousSoul (data/battle_scripts_1.s:245-257),
+ * VARIOUS_CUT_1_3_HP_RAISE_STATS (src/battle_script_commands.c:8089-8106),
+ * BattleScript_AllStatsUp (data/battle_scripts_1.s:7891-7925).
+ */
+function handleClangorousSoul(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp, applyDamage } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const hpFraction = Math.max(1, Math.trunc(battler.mon.maxHp / 3))
+  const statsToBoost = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]
+  const atLeastOneStatBoosted = statsToBoost.some(
+    (s) => (battler.mon.statStages[s] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE,
+  )
+
+  if (!atLeastOneStatBoosted || battler.mon.hp <= hpFraction) {
+    return outcome(ctx, { missed: true })
+  }
+
+  const fainted: number[] = []
+  applyDamage(state, battlerId, hpFraction, fainted)
+
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of statsToBoost) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId, stat: statId, change: res.delta })
+    }
+  }
+
+  return outcome(ctx, { attackerDamage: hpFraction, statChanges, fainted })
+}
+
+/**
+ * EFFECT_FILLET_AWAY handler (Fillet Away).
+ * BattleScript_EffectFilletAway (data/battle_scripts_1.s:5606-5642),
+ * VARIOUS_TRY_LOSE_PERCENT_HP (src/battle_script_commands.c:8310-8324).
+ */
+function handleFilletAway(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp, applyDamage } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const statsToBoost = [STAT_ATK, STAT_SPATK, STAT_SPEED]
+  const atLeastOneStatBoosted = statsToBoost.some(
+    (s) => (battler.mon.statStages[s] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE,
+  )
+  if (!atLeastOneStatBoosted) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // VARIOUS_TRY_LOSE_PERCENT_HP 50: checks current hp <= 1
+  if (battler.mon.hp <= 1) {
+    return outcome(ctx, { missed: true })
+  }
+
+  let hpLost = Math.trunc((battler.mon.hp * 50) / 100)
+  if (hpLost === 0) hpLost = 1
+
+  const fainted: number[] = []
+  applyDamage(state, battlerId, hpLost, fainted)
+
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of statsToBoost) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      2,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId, stat: statId, change: res.delta })
+    }
+  }
+
+  return outcome(ctx, { attackerDamage: hpLost, statChanges, fainted })
+}
+
+/**
+ * EFFECT_NO_RETREAT handler (No Retreat).
+ * BattleScript_EffectNoRetreat (data/battle_scripts_1.s:338-354),
+ * VARIOUS_TRY_NO_RETREAT (src/battle_script_commands.c:8126-8133),
+ * BattleScript_AllStatsUp (:7891-7925).
+ */
+function handleNoRetreat(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:340); PrintMoveMissed runs ppreduce too.
+  const missed = checkAccuracy(ctx, ctx.targetId ?? battlerId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { missed: true })
+
+  // VARIOUS_TRY_NO_RETREAT: fails if already noRetreat or STATUS2_ESCAPE_PREVENTION
+  if (battler.volatiles.noRetreat || hasFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+    return outcome(ctx, { missed: true })
+  }
+  battler.volatiles.noRetreat = true
+
+  // BattleScript_AllStatsUp
+  const statsToBoost = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of statsToBoost) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId, stat: statId, change: res.delta })
+    }
+  }
+
+  // jumpifstatus4 BS_TARGET, STATUS4_COMMANDED, BattleScript_MoveEnd
+  // jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION, BattleScript_MoveEnd
+  // setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE -> STATUS2_ESCAPE_PREVENTION
+  if (!hasFlag(battler.statuses4, STATUS4_COMMANDED) && !hasFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+    battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)
+    battler.volatiles.battlerPreventingEscape = battlerId
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * EFFECT_TIDY_UP handler (Tidy Up).
+ * BattleScript_EffectTidyUp (data/battle_scripts_1.s:5440-5465).
+ */
+function handleTidyUp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // setmoveeffect MOVE_EFFECT_RAPIDSPIN | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+  // seteffectprimary -> BattleScriptCall(BattleScript_RapidSpinAway) -> rapidspinfree
+  // C quirk: Upstream ER implements Tidy Up via MOVE_EFFECT_RAPIDSPIN, which only clears hazards/trapping
+  // on the user's side; it does NOT clear substitutes (unlike vanilla Gen 9 Tidy Up).
+  rapidSpinFree(state, battlerId)
+
+  const statsToBoost = [STAT_ATK, STAT_SPEED]
+  const canBoost = statsToBoost.some(
+    (s) => (battler.mon.statStages[s] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE,
+  )
+
+  if (!canBoost) {
+    return outcome(ctx, { missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of statsToBoost) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId, stat: statId, change: res.delta })
+    }
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * EFFECT_VENOM_DRENCH handler (Venom Drench).
+ * BattleScript_EffectVenomDrench (data/battle_scripts_1.s:1732-1765).
+ */
+function handleVenomDrench(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // jumpifstatus BS_TARGET, STATUS1_POISON_ANY
+  // jumpifterrainaffected BS_TARGET, STATUS_FIELD_TOXIC_TERRAIN
+  const isPoisoned = hasFlag(target.mon.status1, STATUS1_POISON | STATUS1_TOXIC_POISON)
+  const isToxicTerrain = isBattlerTerrainAffected(state, targetId, STATUS_FIELD_TOXIC_TERRAIN, deps)
+  if (!isPoisoned && !isToxicTerrain) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // jumpifstat checks: fails if Atk, SpAtk, Speed are ALL at MIN_STAT_STAGE
+  const statsToDrop = [STAT_ATK, STAT_SPATK, STAT_SPEED]
+  const canDrop = statsToDrop.some(
+    (s) => (target.mon.statStages[s] ?? DEFAULT_STAT_STAGE) > MIN_STAT_STAGE,
+  )
+  if (!canDrop) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of statsToDrop) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      targetId,
+      -1,
+      statId,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
+    }
+    if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+      dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+    }
+  }
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_TOXIC_THREAD handler (Toxic Thread).
+ * BattleScript_EffectToxicThread (data/battle_scripts_1.s:1704-1730).
+ */
+function handleToxicThread(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // jumpifsubstituteblocks BattleScript_ButItFailedAtkStringPpReduce
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // jumpifstat BS_TARGET, CMP_NOT_EQUAL, STAT_SPEED, MIN_STAT_STAGE, BattleScript_ToxicThreadWorks
+  // jumpifstatus BS_TARGET, STATUS1_POISON_ANY, BattleScript_ButItFailedAtkStringPpReduce
+  const speedAtMin = (target.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE) === MIN_STAT_STAGE
+  const isPoisoned = hasFlag(target.mon.status1, STATUS1_POISON | STATUS1_TOXIC_POISON)
+  if (speedAtMin && isPoisoned) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // setstatchanger STAT_SPEED, 3, TRUE (ER drops Speed by 3)
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -3,
+    STAT_SPEED,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+  }
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // setmoveeffect MOVE_EFFECT_POISON
+  // seteffectprimary
+  let statusApplied: StatusAppliedOutcome | null = null
+  const psnRes = applyPrimaryStatusEffect(state, battlerId, targetId, MOVE_EFFECT_POISON, moveId, deps, unmodelled, true, false)
+  if (psnRes.applied && psnRes.status) {
+    statusApplied = { battlerId: targetId, status: psnRes.status }
+  }
+
+  return outcome(ctx, { targetId, statChanges, statusApplied })
+}
+
+/**
+ * EFFECT_TAR_SHOT handler (Tar Shot).
+ * BattleScript_EffectTarShot (data/battle_scripts_1.s:317-337),
+ * VARIOUS_CAN_TAR_SHOT_WORK (src/battle_script_commands.c:8141-8146),
+ * VARIOUS_TRY_TAR_SHOT (:8134-8140).
+ */
+function handleTarShot(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // jumpifsubstituteblocks BattleScript_ButItFailedAtkStringPpReduce
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // cantarshotwork -> VARIOUS_CAN_TAR_SHOT_WORK (battle_script_commands.c:8141-8146):
+  // C bug: Upstream checks `tarShot || !CompareStat(STAT_SPEED, MAX_STAT_STAGE, CMP_LESS_THAN)`,
+  // using MAX_STAT_STAGE instead of MIN_STAT_STAGE despite the comment stating it fails if speed
+  // cannot be lowered further. Preserving C behavior as written.
+  const speedStage = target.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  if (target.volatiles.tarShot || speedStage >= MAX_STAT_STAGE) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // setstatchanger STAT_SPEED, 1, TRUE
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -1,
+    STAT_SPEED,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+  }
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // trytarshot BS_TARGET -> VARIOUS_TRY_TAR_SHOT (:8134-8140)
+  target.volatiles.tarShot = true
+
+  return outcome(ctx, { targetId, statChanges })
+}
+
+/**
+ * EFFECT_SPICY_EXTRACT handler (Spicy Extract).
+ * BattleScript_EffectSpicyExtract (data/battle_scripts_1.s:5155-5186).
+ */
+function handleSpicyExtract(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // jumpifsubstituteblocks BattleScript_MakeMoveMissed
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // jumpifstat BS_TARGET, CMP_LESS_THAN, STAT_ATK, MAX_STAT_STAGE
+  // jumpifstat BS_TARGET, CMP_GREATER_THAN, STAT_DEF, MIN_STAT_STAGE
+  // requirecandoeffect BS_TARGET, MOVE_EFFECT_CONFUSION
+  const atkStage = target.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const defStage = target.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  if (atkStage >= MAX_STAT_STAGE && defStage <= MIN_STAT_STAGE && confusionBlocked(ctx, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  // setstatchanger STAT_ATK, 2, FALSE
+  const atkRes = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    2,
+    STAT_ATK,
+    STAT_BUFF_ALLOW_PTR,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (atkRes.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: atkRes.delta })
+  }
+
+  // setstatchanger STAT_DEF, 2, TRUE
+  const defRes = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -2,
+    STAT_DEF,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (defRes.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
+  }
+  // The script prints this drop from gStatUpStringIds (:5180) -- STRINGID_DEFENDERSSTATROSE, never the
+  // STRINGID_DEFENDERSSTATFELL that runs onStatLowered (battle_util.c:1222), so no Defiant here.
+
+  // setmoveeffect MOVE_EFFECT_CONFUSION
+  // seteffectprimary
+  let statusApplied: StatusAppliedOutcome | null = null
+  const confRes = applyPrimaryStatusEffect(state, battlerId, targetId, MOVE_EFFECT_CONFUSION, moveId, deps, unmodelled, true, false)
+  if (confRes.applied && confRes.status) {
+    statusApplied = { battlerId: targetId, status: confRes.status }
+  }
+
+  return outcome(ctx, { targetId, statChanges, statusApplied })
+}
+
+/**
+ * EFFECT_MEMENTO handler (Memento).
+ * BattleScript_EffectMemento (data/battle_scripts_1.s:6111-6150),
+ * Cmd_jumpifattackandspecialattackcannotfall (src/battle_script_commands.c:11590-11610),
+ * Cmd_setatkhptozero (:9229-9238).
+ */
+function handleMemento(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, applyDamage } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // Cmd_jumpifattackandspecialattackcannotfall (B_MEMENTO_FAIL == GEN_7):
+  // Fails if target is protected, semi-invulnerable, or behind substitute. User does NOT faint.
+  const targetIndex = ctx.order ? ctx.order.battlerByTurnOrder.indexOf(targetId) : -1
+  const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < ctx.turnOrderIndex
+  const protectType = isBattlerProtected(state, battlerId, targetId, moveId, targetHasActedThisTurn, deps, unmodelled)
+  if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+    // BattleScript_MementoFailProtect (:6145-6156): setatkhptozero and tryfaintmon still run.
+    const userHp = battler.mon.hp
+    const faintedOnProtect: number[] = []
+    applyDamage(state, battlerId, userHp, faintedOnProtect)
+    return outcome(ctx, { targetId, missed: true, attackerDamage: userHp, fainted: faintedOnProtect })
+  }
+  if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // User faints first via setatkhptozero (:9229-9238) / tryfaintmon (:6139)
+  const userHp = battler.mon.hp
+  const fainted: number[] = []
+  applyDamage(state, battlerId, userHp, fainted)
+
+  // Target Atk -2, SpAtk -2
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of [STAT_ATK, STAT_SPATK]) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      targetId,
+      -2,
+      statId,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
+    }
+    if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+      dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+    }
+  }
+
+  return outcome(ctx, { targetId, attackerDamage: userHp, statChanges, fainted })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
@@ -5072,6 +6015,27 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PSYCHO_SHIFT: handlePsychoShift,
   EFFECT_STOCKPILE: handleStockpile,
   EFFECT_SWALLOW: handleHealHalf,
+
+  EFFECT_PSYCH_UP: handlePsychUp,
+  EFFECT_POWER_SWAP: handlePowerSwap,
+  EFFECT_GUARD_SWAP: handleGuardSwap,
+  EFFECT_SPEED_SWAP: handleSpeedSwap,
+  EFFECT_HEART_SWAP: handleHeartSwap,
+  EFFECT_POWER_SPLIT: handlePowerSplit,
+  EFFECT_GUARD_SPLIT: handleGuardSplit,
+  EFFECT_TOPSY_TURVY: handleTopsyTurvy,
+
+  EFFECT_ACUPRESSURE: handleAcupressure,
+  EFFECT_CLANGOROUS_SOUL: handleClangorousSoul,
+  EFFECT_FILLET_AWAY: handleFilletAway,
+  EFFECT_NO_RETREAT: handleNoRetreat,
+  EFFECT_TIDY_UP: handleTidyUp,
+
+  EFFECT_VENOM_DRENCH: handleVenomDrench,
+  EFFECT_TOXIC_THREAD: handleToxicThread,
+  EFFECT_TAR_SHOT: handleTarShot,
+  EFFECT_SPICY_EXTRACT: handleSpicyExtract,
+  EFFECT_MEMENTO: handleMemento,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

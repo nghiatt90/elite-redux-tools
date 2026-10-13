@@ -46,6 +46,7 @@ import {
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
   STATUS1_POISON,
+  STATUS1_TOXIC_POISON,
   SIDE_STATUS_SMOKESCREEN,
   STATUS2_CONFUSION,
   STATUS2_CURSED,
@@ -74,6 +75,7 @@ import {
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_FOG_TEMPORARY,
   WEATHER_RAIN_TEMPORARY,
@@ -216,6 +218,24 @@ const MOVE_FLORAL_HEALING = requireMove('MOVE_FLORAL_HEALING')
 const MOVE_PSYCHO_SHIFT = requireMove('MOVE_PSYCHO_SHIFT')
 const MOVE_STOCKPILE = requireMove('MOVE_STOCKPILE')
 const MOVE_SWALLOW = requireMove('MOVE_SWALLOW')
+const MOVE_PSYCH_UP = requireMove('MOVE_PSYCH_UP')
+const MOVE_POWER_SWAP = requireMove('MOVE_POWER_SWAP')
+const MOVE_GUARD_SWAP = requireMove('MOVE_GUARD_SWAP')
+const MOVE_SPEED_SWAP = requireMove('MOVE_SPEED_SWAP')
+const MOVE_HEART_SWAP = requireMove('MOVE_HEART_SWAP')
+const MOVE_POWER_SPLIT = requireMove('MOVE_POWER_SPLIT')
+const MOVE_GUARD_SPLIT = requireMove('MOVE_GUARD_SPLIT')
+const MOVE_TOPSY_TURVY = requireMove('MOVE_TOPSY_TURVY')
+const MOVE_ACUPRESSURE = requireMove('MOVE_ACUPRESSURE')
+const MOVE_CLANGOROUS_SOUL = requireMove('MOVE_CLANGOROUS_SOUL')
+const MOVE_FILLET_AWAY = requireMove('MOVE_FILLET_AWAY')
+const MOVE_NO_RETREAT = requireMove('MOVE_NO_RETREAT')
+const MOVE_TIDY_UP = requireMove('MOVE_TIDY_UP')
+const MOVE_VENOM_DRENCH = requireMove('MOVE_VENOM_DRENCH')
+const MOVE_TOXIC_THREAD = requireMove('MOVE_TOXIC_THREAD')
+const MOVE_TAR_SHOT = requireMove('MOVE_TAR_SHOT')
+const MOVE_SPICY_EXTRACT = requireMove('MOVE_SPICY_EXTRACT')
+const MOVE_MEMENTO = requireMove('MOVE_MEMENTO')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -4554,6 +4574,737 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           expect(state.battlers[0]!.mon.pp[0]).toBe(1)
           // 40 + 50 = 90 HP
           expect(state.battlers[0]!.mon.hp).toBe(90)
+        })
+      })
+    })
+
+    describe('Cycle 57: Stat copy/swap/split, self multi-stat, and target drop moves', () => {
+      // Part 1: Stat copy / swap / split moves
+      describe('EFFECT_PSYCH_UP', () => {
+        it('copies all target stat stages and costs PP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PSYCH_UP', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[1]!.mon.statStages[STAT_ATK] = 8
+          state.battlers[1]!.mon.statStages[STAT_SPATK] = 5
+          state.battlers[1]!.mon.statStages[STAT_SPEED] = 9
+
+          const out = executeTurn(state, [useMove(1, MOVE_PSYCH_UP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(8)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(5)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(9)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(8)
+        })
+
+        it('bypasses substitute and copies stages', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PSYCH_UP', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.substituteHp = 25
+          state.battlers[1]!.mon.statStages[STAT_DEF] = 10
+
+          const out = executeTurn(state, [useMove(1, MOVE_PSYCH_UP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(10)
+        })
+      })
+
+      describe('EFFECT_POWER_SWAP', () => {
+        it('swaps Atk/SpAtk stages and rawStats between user and target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_POWER_SWAP', null, null, null], pp: [10, 0, 0, 0], atk: 120, spatk: 80 },
+              { spe: 50, atk: 60, spatk: 140 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_ATK] = 7
+          state.battlers[0]!.mon.statStages[STAT_SPATK] = 6
+          state.battlers[1]!.mon.statStages[STAT_ATK] = 4
+          state.battlers[1]!.mon.statStages[STAT_SPATK] = 9
+
+          const out = executeTurn(state, [useMove(1, MOVE_POWER_SWAP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(4)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(9)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(7)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(6)
+
+          expect(state.battlers[0]!.mon.rawStats.atk).toBe(60)
+          expect(state.battlers[0]!.mon.rawStats.spatk).toBe(140)
+          expect(state.battlers[1]!.mon.rawStats.atk).toBe(120)
+          expect(state.battlers[1]!.mon.rawStats.spatk).toBe(80)
+        })
+      })
+
+      describe('EFFECT_GUARD_SWAP', () => {
+        it('swaps Def/SpDef stages and rawStats between user and target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_GUARD_SWAP', null, null, null], pp: [10, 0, 0, 0], def: 110, spdef: 70 },
+              { spe: 50, def: 50, spdef: 130 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_DEF] = 8
+          state.battlers[0]!.mon.statStages[STAT_SPDEF] = 6
+          state.battlers[1]!.mon.statStages[STAT_DEF] = 5
+          state.battlers[1]!.mon.statStages[STAT_SPDEF] = 10
+
+          const out = executeTurn(state, [useMove(1, MOVE_GUARD_SWAP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(5)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(10)
+          expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(8)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPDEF]).toBe(6)
+
+          expect(state.battlers[0]!.mon.rawStats.def).toBe(50)
+          expect(state.battlers[0]!.mon.rawStats.spdef).toBe(130)
+          expect(state.battlers[1]!.mon.rawStats.def).toBe(110)
+          expect(state.battlers[1]!.mon.rawStats.spdef).toBe(70)
+        })
+      })
+
+      describe('EFFECT_SPEED_SWAP', () => {
+        it('swaps Speed stage and rawStats between user and target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SPEED_SWAP', null, null, null], pp: [10, 0, 0, 0], spe: 120 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_SPEED] = 9
+          state.battlers[1]!.mon.statStages[STAT_SPEED] = 4
+
+          const out = executeTurn(state, [useMove(1, MOVE_SPEED_SWAP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(4)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(9)
+          expect(state.battlers[0]!.mon.rawStats.spe).toBe(50)
+          expect(state.battlers[1]!.mon.rawStats.spe).toBe(120)
+        })
+      })
+
+      describe('EFFECT_HEART_SWAP', () => {
+        it('swaps all 7 stat stages and leaves rawStats untouched', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_HEART_SWAP', null, null, null], pp: [10, 0, 0, 0], atk: 100, def: 90 },
+              { spe: 50, atk: 70, def: 60 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_ATK] = 8
+          state.battlers[0]!.mon.statStages[STAT_DEF] = 4
+          state.battlers[0]!.mon.statStages[STAT_ACC] = 7
+          state.battlers[1]!.mon.statStages[STAT_ATK] = 5
+          state.battlers[1]!.mon.statStages[STAT_DEF] = 9
+          state.battlers[1]!.mon.statStages[STAT_ACC] = 3
+
+          const out = executeTurn(state, [useMove(1, MOVE_HEART_SWAP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(5)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(9)
+          expect(state.battlers[0]!.mon.statStages[STAT_ACC]).toBe(3)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(8)
+          expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(4)
+          expect(state.battlers[1]!.mon.statStages[STAT_ACC]).toBe(7)
+
+          expect(state.battlers[0]!.mon.rawStats.atk).toBe(100)
+          expect(state.battlers[1]!.mon.rawStats.atk).toBe(70)
+        })
+      })
+
+      describe('EFFECT_POWER_SPLIT', () => {
+        it('averages Atk and SpAtk raw stats using integer division and leaves stages intact', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_POWER_SPLIT', null, null, null], pp: [10, 0, 0, 0], atk: 105, spatk: 80 },
+              { spe: 50, atk: 70, spatk: 111 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_ATK] = 8
+          state.battlers[1]!.mon.statStages[STAT_ATK] = 4
+
+          const out = executeTurn(state, [useMove(1, MOVE_POWER_SPLIT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+
+          expect(state.battlers[0]!.mon.rawStats.atk).toBe(87)
+          expect(state.battlers[1]!.mon.rawStats.atk).toBe(87)
+          expect(state.battlers[0]!.mon.rawStats.spatk).toBe(95)
+          expect(state.battlers[1]!.mon.rawStats.spatk).toBe(95)
+
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(8)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(4)
+        })
+      })
+
+      describe('EFFECT_GUARD_SPLIT', () => {
+        it('averages Def and SpDef raw stats using integer division and leaves stages intact', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_GUARD_SPLIT', null, null, null], pp: [10, 0, 0, 0], def: 120, spdef: 75 },
+              { spe: 50, def: 50, spdef: 80 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_GUARD_SPLIT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+
+          expect(state.battlers[0]!.mon.rawStats.def).toBe(85)
+          expect(state.battlers[1]!.mon.rawStats.def).toBe(85)
+          expect(state.battlers[0]!.mon.rawStats.spdef).toBe(77)
+          expect(state.battlers[1]!.mon.rawStats.spdef).toBe(77)
+        })
+      })
+
+      describe('EFFECT_TOPSY_TURVY', () => {
+        it('inverts positive and negative stat stages on the target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TOPSY_TURVY', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[1]!.mon.statStages[STAT_ATK] = 8
+          state.battlers[1]!.mon.statStages[STAT_DEF] = 4
+          state.battlers[1]!.mon.statStages[STAT_SPATK] = 10
+          state.battlers[1]!.mon.statStages[STAT_SPEED] = 3
+
+          const out = executeTurn(state, [useMove(1, MOVE_TOPSY_TURVY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(4)
+          expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(8)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(2)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(9)
+        })
+
+        it('fails with missed: true if all 7 target stat stages are neutral (6)', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TOPSY_TURVY', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_TOPSY_TURVY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+      })
+
+      // Part 2: Self multi-stat moves
+      describe('EFFECT_ACUPRESSURE', () => {
+        it('raises a random non-maxed stat by 2 using scripted RNG', () => {
+          const deps = testDeps()
+          // (random16() % 7) + 1: value 2 yields (2 % 7) + 1 = 3 (STAT_SPEED)
+          const rng = scriptedRng([2])
+          const state = battle(
+            [
+              { moves: ['MOVE_ACUPRESSURE', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_ACUPRESSURE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(8)
+        })
+
+        it('fails with missed: true if all stats are maxed at MAX_STAT_STAGE (12)', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_ACUPRESSURE', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          for (let i = STAT_ATK; i <= STAT_EVASION; i++) {
+            state.battlers[0]!.mon.statStages[i] = MAX_STAT_STAGE
+          }
+
+          const out = executeTurn(state, [useMove(0, MOVE_ACUPRESSURE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+        })
+      })
+
+      describe('EFFECT_CLANGOROUS_SOUL', () => {
+        it('deducts 1/3 max HP and raises all 5 battle stats by 1 stage', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_CLANGOROUS_SOUL', null, null, null], pp: [5, 0, 0, 0], hp: 90, maxHp: 90 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_CLANGOROUS_SOUL), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(state.battlers[0]!.mon.hp).toBe(60)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+        })
+
+        it('fails with missed: true if HP <= 1/3 max HP without deducting HP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_CLANGOROUS_SOUL', null, null, null], pp: [5, 0, 0, 0], hp: 30, maxHp: 90 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_CLANGOROUS_SOUL), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(30)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+        })
+      })
+
+      describe('EFFECT_FILLET_AWAY', () => {
+        it('deducts 50% current HP and raises Atk, SpAtk, Speed by 2 stages', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FILLET_AWAY', null, null, null], pp: [10, 0, 0, 0], hp: 80, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_FILLET_AWAY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.mon.hp).toBe(40)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(8)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(8)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(8)
+        })
+
+        it('fails with missed: true if current HP <= 1', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FILLET_AWAY', null, null, null], pp: [10, 0, 0, 0], hp: 1, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_FILLET_AWAY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(1)
+        })
+      })
+
+      describe('EFFECT_NO_RETREAT', () => {
+        it('raises all 5 battle stats by 1 stage and prevents the user from switching', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_NO_RETREAT', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_NO_RETREAT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+          expect(state.battlers[0]!.volatiles.noRetreat).toBe(true)
+          expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(true)
+          expect(canBattlerEscape(state, 0, { dataContext: DATA_CONTEXT, grounding: GROUNDING })).toBe(false)
+        })
+
+        it('fails with missed: true if used when already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_NO_RETREAT', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.volatiles.noRetreat = true
+
+          const out = executeTurn(state, [useMove(0, MOVE_NO_RETREAT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_TIDY_UP', () => {
+        it('clears hazards from user side and raises Atk and Speed by 1 stage', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TIDY_UP', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.sides[0]!.statuses = setFlag(
+            state.sides[0]!.statuses,
+            SIDE_STATUS_SPIKES | SIDE_STATUS_STEALTH_ROCK | SIDE_STATUS_STICKY_WEB | SIDE_STATUS_TOXIC_SPIKES,
+          )
+
+          const out = executeTurn(state, [useMove(0, MOVE_TIDY_UP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_SPIKES)).toBe(false)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_STEALTH_ROCK)).toBe(false)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_STICKY_WEB)).toBe(false)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_TOXIC_SPIKES)).toBe(false)
+        })
+
+        it('clears hazards even when stats are maxed, but marks move missed: true', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TIDY_UP', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
+          state.battlers[0]!.mon.statStages[STAT_SPEED] = MAX_STAT_STAGE
+          state.sides[0]!.statuses = setFlag(state.sides[0]!.statuses, SIDE_STATUS_STEALTH_ROCK)
+
+          const out = executeTurn(state, [useMove(0, MOVE_TIDY_UP), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_STEALTH_ROCK)).toBe(false)
+        })
+      })
+
+      // Part 3: Target drops
+      describe('EFFECT_VENOM_DRENCH', () => {
+        it('fails with missed: true on an unpoisoned target without toxic terrain', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_VENOM_DRENCH', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_VENOM_DRENCH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('lowers Atk, SpAtk, and Speed by 1 stage on a poisoned target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_VENOM_DRENCH', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, status1: STATUS1_POISON },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_VENOM_DRENCH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(5)
+        })
+
+        it('lowers Atk, SpAtk, and Speed by 1 stage on a badly poisoned target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_VENOM_DRENCH', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, status1: STATUS1_TOXIC_POISON },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_VENOM_DRENCH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(5)
+        })
+
+        it('succeeds on an unpoisoned target when Toxic Terrain is active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_VENOM_DRENCH', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)
+
+          const out = executeTurn(state, [useMove(1, MOVE_VENOM_DRENCH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(5)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(5)
+        })
+      })
+
+      describe('EFFECT_TOXIC_THREAD', () => {
+        it('lowers target Speed by 3 stages and poisons the target (ER C drops Speed by 3)', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TOXIC_THREAD', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_TOXIC_THREAD), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(3)
+          expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+        })
+
+        it('fails with missed: true if target has Substitute', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TOXIC_THREAD', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.substituteHp = 25
+
+          const out = executeTurn(state, [useMove(1, MOVE_TOXIC_THREAD), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(6)
+        })
+      })
+
+      describe('EFFECT_TAR_SHOT', () => {
+        it('lowers Speed by 1 stage and sets tarShot volatile', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TAR_SHOT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_TAR_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(5)
+          expect(state.battlers[1]!.volatiles.tarShot).toBe(true)
+        })
+
+        it('fails with missed: true if tarShot is already active on the target', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TAR_SHOT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.tarShot = true
+
+          const out = executeTurn(state, [useMove(1, MOVE_TAR_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_SPICY_EXTRACT', () => {
+        it('does not trigger Defiant: its Def drop prints the stat-ROSE string (battle_scripts_1.s:5180)', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_SPICY_EXTRACT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50, abilities: { ability: ABILITY_DEFIANT, innates: [null, null, null] } },
+            ],
+            countingRng(),
+          )
+          executeTurn(state, [useMove(1, MOVE_SPICY_EXTRACT), null], testDeps())
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+          expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 2)
+        })
+
+        it('raises target Atk by 2, lowers Def by 2, and inflicts Confusion', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SPICY_EXTRACT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SPICY_EXTRACT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(8)
+          expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(4)
+          expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+        })
+
+        it('fails with missed: true if target has Substitute', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SPICY_EXTRACT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50, status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.substituteHp = 25
+
+          const out = executeTurn(state, [useMove(1, MOVE_SPICY_EXTRACT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(6)
+        })
+      })
+
+      describe('EFFECT_MEMENTO', () => {
+        it('user faints and lowers target Atk and SpAtk by 2 stages', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MEMENTO', null, null, null], pp: [10, 0, 0, 0], hp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_MEMENTO), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.hp).toBe(0)
+          expect(act.attackerDamage).toBe(100)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(4)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(4)
+        })
+
+        it('fails without fainting user if target has Substitute', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MEMENTO', null, null, null], pp: [10, 0, 0, 0], hp: 100 },
+              { spe: 50, status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.substituteHp = 25
+
+          const out = executeTurn(state, [useMove(1, MOVE_MEMENTO), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(6)
         })
       })
     })
