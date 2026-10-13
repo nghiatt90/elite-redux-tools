@@ -141,12 +141,12 @@
 //                           SetMoveEffect/CancelMultiTurnMoves, neither ported.
 //   ENDTURN_FLINCH          Ported -- battle_util.c:2770-2772: unconditionally
 //                           clears STATUS2_FLINCHED every end of turn.
-//   ENDTURN_DISABLE         Unreachable -- volatiles.disabledMove/disableTimer
-//                           are named only in attackCanceller.ts's own
-//                           "Unreachable" comment for CANCELLER_DISABLED, never
-//                           read by executable code; same field, same verdict.
-//   ENDTURN_ENCORE          Unreachable -- volatiles.encoreTimer/encoredMove
-//                           have no reader outside create.ts's defaults.
+//   ENDTURN_DISABLE         Ported (:2774-2791) -- decrements disableTimer;
+//                           clears disabledMove when timer reaches 0 or move is
+//                           forgotten.
+//   ENDTURN_ENCORE          Ported (:2792-2808) -- decrements encoreTimer;
+//                           clears encoredMove when timer reaches 0, PP is 0,
+//                           or move is forgotten.
 //   ENDTURN_LOCK_ON         Unreachable -- STATUS3_ALWAYS_HITS IS read for
 //                           real by accuracy.ts/accuracyBridge.ts, but
 //                           accuracyBridge.ts's own gap note for it says "no
@@ -162,15 +162,14 @@
 //   ENDTURN_COILED_UP       Gapped -- STATUS4_COILED and STATUS4_CUTTHROAT are
 //                           both read for real by turnOrder.ts (priority).
 //                           Gapped whenever either bit is set.
-//   ENDTURN_TAUNT           Unreachable -- volatiles.tauntTimer is named only
-//                           in attackCanceller.ts's "Unreachable" comment for
-//                           CANCELLER_TAUNTED, never read by executable code.
+//   ENDTURN_TAUNT           Ported (:2831-2838) -- decrements tauntTimer until 0.
 //   ENDTURN_YAWN            Ported (:2839-2854) -- drowsiness countdown and
 //                           sleep on 0 turns remaining if CanSleep is true.
 //   ENDTURN_LASER_FOCUS     Unreachable -- STATUS3_LASER_FOCUS/laserFocusTimer
 //                           have no reader outside constants.ts/create.ts.
-//   ENDTURN_EMBARGO         Unreachable -- STATUS3_EMBARGO/embargoTimer have no
-//                           reader outside constants.ts/create.ts.
+//   ENDTURN_EMBARGO         Ported (:2862-2874) -- decrements embargoTimer,
+//                           clears STATUS3_EMBARGO at 0, clears
+//                           substituteDestroyedThisTurn.
 //   ENDTURN_MAGNET_RISE     Gapped -- STATUS3_MAGNET_RISE is read for real by
 //                           grounding.ts. Its paired magnetRiseTimer has no
 //                           reader anywhere, so the exact expiry turn cannot be
@@ -178,17 +177,8 @@
 //   ENDTURN_TELEKINESIS     Gapped -- STATUS3_TELEKINESIS is read for real by
 //                           grounding.ts, same telekinesisTimer caveat as
 //                           MAGNET_RISE above.
-//   ENDTURN_HEALBLOCK       Unreachable -- volatiles.healBlockTimer is named
-//                           only in attackCanceller.ts's "Unreachable" comment
-//                           for CANCELLER_HEAL_BLOCKED, never read by
-//                           executable code. STATUS3_HEAL_BLOCK the packed bit
-//                           has no reader either, EXCEPT inside this module's
-//                           own canBattlerHeal (CanBattlerHeal, ported below
-//                           for Poison Heal) -- that makes the bit reachable
-//                           for canBattlerHeal's own purpose, but the ENDTURN_
-//                           HEALBLOCK case itself (which would tick the paired
-//                           timer down to clear it) stays Unreachable since the
-//                           timer has no reader anywhere.
+//   ENDTURN_HEALBLOCK       Ported (:2896-2906) -- decrements healBlockTimer,
+//                           clears STATUS3_HEAL_BLOCK when timer reaches 0.
 //   ENDTURN_ROOST           PORTED -- clears RESOURCE_FLAG_ROOST and restores
 //                           original types from battler.roostTypes (:2907-2914).
 //   ENDTURN_ELECTRIFY       Unreachable -- STATUS4_ELECTRIFIED has no reader
@@ -258,6 +248,7 @@ import {
   STATUS2_FLINCHED,
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
+  STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
@@ -980,6 +971,34 @@ export function runEndTurnEffects(
     // unconditionally every end of turn.
     battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_FLINCHED)
 
+    // ENDTURN_DISABLE, :2774-2791.
+    if (battler.volatiles.disableTimer !== 0) {
+      const moveIdx = battler.volatiles.disabledMove
+        ? battler.mon.moves.indexOf(battler.volatiles.disabledMove)
+        : -1
+      if (moveIdx === -1) {
+        battler.volatiles.disabledMove = null
+        battler.volatiles.disableTimer = 0
+      } else if (--battler.volatiles.disableTimer === 0) {
+        battler.volatiles.disabledMove = null
+      }
+    }
+
+    // ENDTURN_ENCORE, :2792-2808.
+    if (battler.volatiles.encoreTimer !== 0) {
+      const pos = battler.volatiles.encoredMovePos
+      if (battler.mon.moves[pos] !== battler.volatiles.encoredMove) {
+        battler.volatiles.encoredMove = null
+        battler.volatiles.encoreTimer = 0
+      } else if (
+        --battler.volatiles.encoreTimer === 0 ||
+        (battler.mon.pp[pos] ?? 0) === 0
+      ) {
+        battler.volatiles.encoredMove = null
+        battler.volatiles.encoreTimer = 0
+      }
+    }
+
     // ENDTURN_GHASTLY_ECHO, :2813-2816.
     gapIf(
       hasFlag(battler.statuses4, STATUS4_GHASTLY_ECHO),
@@ -994,6 +1013,11 @@ export function runEndTurnEffects(
       `battler ${battlerId}: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared`,
     )
 
+    // ENDTURN_TAUNT, :2831-2838.
+    if (battler.volatiles.tauntTimer > 0) {
+      battler.volatiles.tauntTimer--
+    }
+
     // ENDTURN_YAWN, :2839-2854.
     if (hasFlag(battler.statuses3, STATUS3_YAWN)) {
       const counter = getCounter(battler.statuses3, STATUS3_YAWN)
@@ -1005,6 +1029,14 @@ export function runEndTurnEffects(
         battler.mon.status1 = setCounter(battler.mon.status1, STATUS1_SLEEP, sleepTurns)
       }
     }
+
+    // ENDTURN_EMBARGO, :2862-2874.
+    if (hasFlag(battler.statuses3, STATUS3_EMBARGO)) {
+      if (battler.volatiles.embargoTimer === 0 || --battler.volatiles.embargoTimer === 0) {
+        battler.statuses3 = clearFlag(battler.statuses3, STATUS3_EMBARGO)
+      }
+    }
+    battler.volatiles.substituteDestroyedThisTurn = false
 
     // ENDTURN_MAGNET_RISE, :2875-2884.
     gapIf(
@@ -1019,6 +1051,13 @@ export function runEndTurnEffects(
       unmodelled,
       `battler ${battlerId}: ENDTURN_TELEKINESIS (battle_util.c:2886-2894) is not applied -- telekinesisTimer has no reader anywhere, so its expiry cannot be computed`,
     )
+
+    // ENDTURN_HEALBLOCK, :2896-2906.
+    if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) {
+      if (battler.volatiles.healBlockTimer === 0 || --battler.volatiles.healBlockTimer === 0) {
+        battler.statuses3 = clearFlag(battler.statuses3, STATUS3_HEAL_BLOCK)
+      }
+    }
 
     // ENDTURN_ROOST, :2907-2914.
     if (hasFlag(battler.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)) {

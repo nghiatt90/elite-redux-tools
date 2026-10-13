@@ -723,7 +723,9 @@ describe('State Bookkeeping & Clear Bits', () => {
     executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
 
     expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(false)
-    expect(state.battlers[1]!.volatiles.substituteDestroyedThisTurn).toBe(true)
+    // MOVEEND_SUBSTITUTE set it, and ENDTURN_EMBARGO clears it for every battler at the end of
+    // the turn (battle_util.c:2871), so it is false again once executeTurn returns.
+    expect(state.battlers[1]!.volatiles.substituteDestroyedThisTurn).toBe(false)
   })
 
   it('MOVEEND_CLEAR_BITS (30): resets rolloutCounter, targetAffected, gemBoost, berryReduced', () => {

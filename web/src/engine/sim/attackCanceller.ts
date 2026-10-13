@@ -35,9 +35,8 @@
 //                          this sim does not run; grepped, no writer exists
 //                          anywhere in web/src/engine/sim either.
 //   CANCELLER_FLINCH      Ported.
-//   CANCELLER_DISABLED    Unreachable -- volatiles.disabledMove has no writer
-//                          in web/src/engine/sim (Disable's own move effect is
-//                          not ported).
+//   CANCELLER_DISABLED    Ported (:3315-3325) -- cancels move if it matches
+//                          volatiles.disabledMove.
 //   CANCELLER_GRAVITY     Unreachable -- field.statuses' GRAVITY bit has no
 //                          production writer in web/src/engine/sim; grounding.ts
 //                          and turn.test.ts only READ it (the latter to test
@@ -45,8 +44,10 @@
 //                          effect itself is not ported. Same "nothing in this
 //                          loop ever sets it" treatment turn.ts's header already
 //                          gives RoundState.protectMove.
-//   CANCELLER_HEAL_BLOCKED Unreachable -- volatiles.healBlockTimer has no writer.
-//   CANCELLER_TAUNTED     Unreachable -- volatiles.tauntTimer has no writer.
+//   CANCELLER_HEAL_BLOCKED Ported (:3326-3336) -- cancels status healing moves
+//                          under STATUS3_HEAL_BLOCK or opposing Permanence.
+//   CANCELLER_TAUNTED     Ported (:3348-3357) -- cancels power == 0 moves under
+//                          volatiles.tauntTimer.
 //   CANCELLER_IMPRISONED  Unreachable -- statuses3's IMPRISONED_OTHERS bit has
 //                          no writer.
 //   CANCELLER_PARALYSED   Ported. Hell mode's disableParalysisCancel clause
@@ -145,13 +146,26 @@ import {
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
   STATUS3_GRUDGE,
+  STATUS3_HEAL_BLOCK,
   clearFlag,
   getCounter,
   hasFlag,
   setCounter,
 } from './constants'
+import { cancelMultiTurnMoves } from './statusEffects'
+import { isAbilityAliveOnOpposingSide } from './turn'
 
-export const CANCEL_REASONS = ['SLEEP', 'FREEZE', 'PARALYSIS', 'FLINCH', 'TRUANT', 'CONFUSION'] as const
+export const CANCEL_REASONS = [
+  'SLEEP',
+  'FREEZE',
+  'PARALYSIS',
+  'FLINCH',
+  'TRUANT',
+  'CONFUSION',
+  'DISABLE',
+  'HEAL_BLOCK',
+  'TAUNT',
+] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
 export interface AttackCancellerResult {
@@ -237,6 +251,33 @@ function findAbilitySlot(slots: AbilitySlots, abilityId: string): number {
   return [slots.ability, ...slots.innates].indexOf(abilityId)
 }
 
+/** IsHealingMoveEffect, src/battle_util.c:8880-8904. */
+function isHealingMoveEffect(effect: string | null): boolean {
+  switch (effect) {
+    case 'EFFECT_ABSORB':
+    case 'EFFECT_MORNING_SUN':
+    case 'EFFECT_MOONLIGHT':
+    case 'EFFECT_RESTORE_HP':
+    case 'EFFECT_REST':
+    case 'EFFECT_ROOST':
+    case 'EFFECT_WISH':
+    case 'EFFECT_HEALING_WISH':
+    case 'EFFECT_REVIVAL_BLESSING':
+    case 'EFFECT_SOFTBOILED':
+    case 'EFFECT_SYNTHESIS':
+    case 'EFFECT_SHORE_UP':
+    case 'EFFECT_JUNGLE_HEALING':
+    case 'EFFECT_HEAL_PULSE':
+    case 'EFFECT_MATCHA_GOTCHA':
+    case 'EFFECT_STRENGTH_SAP':
+    case 'EFFECT_DRAIN_BRAIN':
+    case 'EFFECT_PARTY_FAVORS':
+      return true
+    default:
+      return false
+  }
+}
+
 const NO_CANCEL: AttackCancellerResult = { cancelledBy: null, confusionSelfHitDamage: null }
 
 /**
@@ -312,10 +353,7 @@ export function runAttackCanceller(
     return { cancelledBy: 'TRUANT', confusionSelfHitDamage: null }
   }
 
-  // CANCELLER_RECHARGE (:3294-3304), CANCELLER_DISABLED (:3315-3325),
-  // CANCELLER_GRAVITY (:3337-3347), CANCELLER_HEAL_BLOCKED (:3326-3336),
-  // CANCELLER_TAUNTED (:3348-3357), CANCELLER_IMPRISONED (:3358-3367) --
-  // unreachable, see this module's header.
+  // CANCELLER_RECHARGE (:3294-3304) -- unreachable, see header.
 
   // CANCELLER_FLINCH, :3305-3314.
   if (hasFlag(attacker.mon.status2, STATUS2_FLINCHED)) {
@@ -323,6 +361,38 @@ export function runAttackCanceller(
     attacker.round.attackCancelled = true
     return { cancelledBy: 'FLINCH', confusionSelfHitDamage: null }
   }
+
+  // CANCELLER_DISABLED, :3315-3325.
+  if (attacker.volatiles.disabledMove && attacker.volatiles.disabledMove === moveId) {
+    attacker.round.usedDisabledMove = true
+    attacker.round.attackCancelled = true
+    cancelMultiTurnMoves(attacker)
+    return { cancelledBy: 'DISABLE', confusionSelfHitDamage: null }
+  }
+
+  // CANCELLER_GRAVITY (:3337-3347) -- unreachable, see header.
+
+  // CANCELLER_HEAL_BLOCKED, :3326-3336.
+  if (
+    (hasFlag(attacker.statuses3, STATUS3_HEAL_BLOCK) || isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PERMANENCE')) &&
+    move?.split === 'STATUS' &&
+    isHealingMoveEffect(move?.effect ?? null)
+  ) {
+    attacker.round.usedHealBlockedMove = true
+    attacker.round.attackCancelled = true
+    cancelMultiTurnMoves(attacker)
+    return { cancelledBy: 'HEAL_BLOCK', confusionSelfHitDamage: null }
+  }
+
+  // CANCELLER_TAUNTED, :3348-3357.
+  if (attacker.volatiles.tauntTimer > 0 && (move ? move.power === 0 : false)) {
+    attacker.round.usedTauntedMove = true
+    attacker.round.attackCancelled = true
+    cancelMultiTurnMoves(attacker)
+    return { cancelledBy: 'TAUNT', confusionSelfHitDamage: null }
+  }
+
+  // CANCELLER_IMPRISONED (:3358-3367) -- unreachable, see header.
 
   // CANCELLER_PARALYSED, :3400-3413.
   if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS)) {

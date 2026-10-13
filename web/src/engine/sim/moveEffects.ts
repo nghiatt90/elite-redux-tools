@@ -45,9 +45,11 @@ import {
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
+  STATUS2_TORMENT,
   STATUS3_ALWAYS_HITS,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
+  STATUS3_HEAL_BLOCK,
   STATUS3_LEECHSEED,
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_YAWN,
@@ -145,6 +147,8 @@ import {
   canGetFrostbite,
   canInfatuate,
   canSleep,
+  CHECK_HEAL_BLOCK,
+  CHECK_RESTRICTING,
   doesSubstituteBlockMove,
   findAbilitySlot,
   getMoveEffectChance,
@@ -3334,6 +3338,276 @@ function handleHelpingHand(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { missed: true })
 }
 
+/**
+ * EFFECT_TAUNT handler (Taunt).
+ * BattleScript_EffectTaunt, data/battle_scripts_1.s:6255-6266.
+ * Cmd_settaunt, src/battle_script_commands.c:11678-11698.
+ */
+function handleTaunt(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:6258)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. jumpifabilitystatusimmunity BS_TARGET, MOVE_TAUNT (:6259) -> CHECK_RESTRICTING
+  if (isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:6260)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. settaunt BattleScript_ButItFailed (:6261, Cmd_settaunt:11678-11698)
+  const attackerHasMB = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
+  if (battlerHasSimAbility(state, target, 'ABILITY_OBLIVIOUS', true, battlerId, attackerHasMB, deps.dataContext)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  if (target.volatiles.tauntTimer !== 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // B_TAUNT_TURNS >= GEN_5: 4 turns, or 3 if target hasn't moved yet this turn (:11684-11686)
+  const targetOrder = ctx.order ? ctx.order.battlerByTurnOrder.indexOf(targetId) : -1
+  const attackerOrder = ctx.order ? ctx.order.battlerByTurnOrder.indexOf(battlerId) : -1
+  const turns = targetOrder > attackerOrder && targetOrder !== -1 && attackerOrder !== -1 ? 3 : 4
+  target.volatiles.tauntTimer = turns
+  target.volatiles.tauntTimer2 = turns
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_DISABLE handler (Disable).
+ * BattleScript_EffectDisable, data/battle_scripts_1.s:4622-4632.
+ * Cmd_disablelastusedattack, src/battle_script_commands.c:10706-10737.
+ */
+function handleDisable(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:4625)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. jumpifabilitystatusimmunity BS_TARGET, MOVE_DISABLE (:4626) -> CHECK_RESTRICTING
+  if (isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4627)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. disablelastusedattack BattleScript_ButItFailed (:4628, DisableLastUsedMove:10714-10737)
+  const lastMove = target.lastMove
+  const moveIdx = lastMove ? target.mon.moves.indexOf(lastMove) : -1
+  if (
+    !lastMove ||
+    lastMove === 'MOVE_NONE' ||
+    target.volatiles.disabledMove !== null ||
+    moveIdx === -1 ||
+    (target.mon.pp[moveIdx] ?? 0) === 0
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.volatiles.disabledMove = lastMove
+  target.volatiles.disableTimer = 4 // B_DISABLE_TURNS == GEN_7
+  target.volatiles.disableTimerStartValue = 4
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_ENCORE handler (Encore).
+ * BattleScript_EffectEncore, data/battle_scripts_1.s:4678-4689.
+ * Cmd_trysetencore / SetEncore, src/battle_script_commands.c:10739-10763.
+ */
+function handleEncore(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed (:4680); ppreduce (:4682) -- PrintMoveMissed
+  // runs its own ppreduce (battle_scripts_1.s:3092-3094), so a miss costs PP too.
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. jumpifabilitystatusimmunity BS_TARGET, MOVE_ENCORE (:4683) -> CHECK_RESTRICTING
+  if (isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. trysetencore BattleScript_ButItFailed (:4684, SetEncore:10739-10758)
+  const lastMove = target.lastMove
+  if (
+    !lastMove ||
+    lastMove === 'MOVE_NONE' ||
+    lastMove === 'MOVE_STRUGGLE' ||
+    lastMove === 'MOVE_ENCORE' ||
+    lastMove === 'MOVE_MIRROR_MOVE'
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const moveIdx = target.mon.moves.indexOf(lastMove)
+  if (
+    target.volatiles.encoredMove !== null ||
+    target.volatiles.encoreTimer !== 0 ||
+    moveIdx === -1 ||
+    (target.mon.pp[moveIdx] ?? 0) === 0
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.volatiles.encoredMove = lastMove
+  target.volatiles.encoredMovePos = moveIdx
+  target.volatiles.encoreTimer = 3
+  target.volatiles.encoreTimerStartValue = 3
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_TORMENT handler (Torment).
+ * BattleScript_EffectTorment, data/battle_scripts_1.s:6056-6067.
+ * Cmd_settorment, src/battle_script_commands.c:11662-11669.
+ */
+function handleTorment(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:6059)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:6060)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. jumpifabilitystatusimmunity BS_TARGET, MOVE_TORMENT (:6061) -> CHECK_RESTRICTING
+  if (isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. settorment BattleScript_ButItFailed (:6062, Cmd_settorment:11662-11669)
+  if (hasFlag(target.mon.status2, STATUS2_TORMENT)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.mon.status2 = setFlag(target.mon.status2, STATUS2_TORMENT)
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_HEAL_BLOCK handler (Heal Block).
+ * BattleScript_EffectHealBlock, data/battle_scripts_1.s:2744-2755.
+ * Cmd_sethealblock, src/battle_script_commands.c:4970-4978.
+ */
+function handleHealBlock(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed (:2746); ppreduce (:2748) -- a miss costs PP too.
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. jumpifabilitystatusimmunity BS_TARGET, MOVE_HEAL_BLOCK (:2749) -> CHECK_HEAL_BLOCK
+  if (isAbilityStatusProtected(state, targetId, CHECK_HEAL_BLOCK, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. sethealblock BattleScript_ButItFailed (:2750, Cmd_sethealblock:4970-4978)
+  if (hasFlag(target.statuses3, STATUS3_HEAL_BLOCK)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.statuses3 = setFlag(target.statuses3, STATUS3_HEAL_BLOCK)
+  target.volatiles.healBlockTimer = 5
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_EMBARGO handler (Embargo).
+ * BattleScript_EffectEmbargo, data/battle_scripts_1.s:2681-2691.
+ * Cmd_setembargo, src/battle_script_commands.c:11190-11198.
+ */
+function handleEmbargo(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed (:2683); ppreduce (:2685) -- a miss costs PP too.
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. setembargo BattleScript_ButItFailed (:2686, Cmd_setembargo:11190-11198)
+  if (hasFlag(target.statuses3, STATUS3_EMBARGO)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.statuses3 = setFlag(target.statuses3, STATUS3_EMBARGO)
+  target.volatiles.embargoTimer = 5
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_FOCUS_ENERGY handler (Focus Energy).
+ * BattleScript_EffectFocusEnergy, data/battle_scripts_1.s:4190-4200.
+ * VARIOUS_INCREASE_CRIT, src/battle_script_commands.c:8591-8601.
+ */
+function handleFocusEnergy(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:4193)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. increasecrit BS_ATTACKER, 2, BattleScript_ButItFailed (:4194)
+  // VARIOUS_INCREASE_CRIT: increase = min(3 - critBoost, 2); if (!increase && ptr) fails.
+  const increase = Math.min(Math.max(0, 3 - battler.volatiles.critBoost), 2)
+  if (increase <= 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.volatiles.critBoost += increase
+
+  return outcome(ctx, {})
+}
+
 /** BATTLE_TYPE_DOUBLE, include/constants/battle.h. */
 const BATTLE_TYPE_DOUBLE = 1 << 0
 
@@ -3418,6 +3692,13 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_KARMA: handleKarma,
   EFFECT_RECYCLE: handleRecycle,
   EFFECT_HELPING_HAND: handleHelpingHand,
+  EFFECT_TAUNT: handleTaunt,
+  EFFECT_DISABLE: handleDisable,
+  EFFECT_ENCORE: handleEncore,
+  EFFECT_TORMENT: handleTorment,
+  EFFECT_HEAL_BLOCK: handleHealBlock,
+  EFFECT_EMBARGO: handleEmbargo,
+  EFFECT_FOCUS_ENERGY: handleFocusEnergy,
 
   EFFECT_RESTORE_HP: handleHealHalf,
   EFFECT_SOFTBOILED: handleHealHalf,

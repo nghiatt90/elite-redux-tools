@@ -43,7 +43,10 @@ import {
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_INFATUATION,
+  STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
+  STATUS3_EMBARGO,
+  STATUS3_HEAL_BLOCK,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   WEATHER_SANDSTORM_TEMPORARY,
@@ -111,6 +114,7 @@ const MOVE_SHARPEN = requireMove('MOVE_SHARPEN')
 const MOVE_SHELTER = requireMove('MOVE_SHELTER')
 const MOVE_CONFUSE_RAY = requireMove('MOVE_CONFUSE_RAY')
 const MOVE_TAUNT = requireMove('MOVE_TAUNT')
+const MOVE_HAZE = requireMove('MOVE_HAZE')
 const MOVE_BARRIER = requireMove('MOVE_BARRIER')
 const MOVE_DRAGON_CHEER = requireMove('MOVE_DRAGON_CHEER')
 const MOVE_GEAR_UP = requireMove('MOVE_GEAR_UP')
@@ -141,7 +145,16 @@ const MOVE_SWEET_KISS = requireMove('MOVE_SWEET_KISS')
 const MOVE_FLATTER = requireMove('MOVE_FLATTER')
 const MOVE_TEETER_DANCE = requireMove('MOVE_TEETER_DANCE')
 const MOVE_ATTRACT = requireMove('MOVE_ATTRACT')
+const MOVE_DISABLE = requireMove('MOVE_DISABLE')
+const MOVE_ENCORE = requireMove('MOVE_ENCORE')
+const MOVE_TORMENT = requireMove('MOVE_TORMENT')
+const MOVE_HEAL_BLOCK = requireMove('MOVE_HEAL_BLOCK')
+const MOVE_EMBARGO = requireMove('MOVE_EMBARGO')
+const MOVE_FOCUS_ENERGY = requireMove('MOVE_FOCUS_ENERGY')
+const MOVE_RECOVER = requireMove('MOVE_RECOVER')
 
+const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
+const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
 const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
 const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
 const ABILITY_DEFIANT = requireAbility('ABILITY_DEFIANT')
@@ -834,10 +847,10 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_TAUNT', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const state = battle([{ moves: ['MOVE_HAZE', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
 
-    const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, MOVE_HAZE), null], testDeps(dmg))
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -2254,6 +2267,565 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
 
         expect(state.battlers[0]!.mon.pp[0]).toBe(14)
         expect(act.statusApplied).toBeNull()
+      })
+    })
+
+    describe('Cycle 53: EFFECT_TAUNT (BattleScript_EffectTaunt, Cmd_settaunt, CANCELLER_TAUNTED, ENDTURN_TAUNT)', () => {
+      it('Taunt blocks a status move the next turn and wears off after 3 turns when user acts first', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TAUNT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [30, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 0 uses Taunt. Battler 1 moves after Battler 0, so turns = 3.
+        const out1 = executeTurn(state, [useMove(1, MOVE_TAUNT), null], deps)
+        const act1 = out1.actions.find((a) => a.battlerId === 0)!
+        expect(act1.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        // Set to 3 during turn, decremented by ENDTURN_TAUNT to 2 at end of turn
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBe(2)
+
+        // Turn 2: Battler 1 tries to use Swords Dance, blocked by CANCELLER_TAUNTED
+        const out2 = executeTurn(state, [null, useMove(1, MOVE_SWORDS_DANCE)], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 1)!
+        expect(act2.cancelledBy).toBe('TAUNT')
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        // Decremented by ENDTURN_TAUNT to 1
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBe(1)
+
+        // Turn 3: Battler 1 tries Swords Dance again, still taunted
+        const out3 = executeTurn(state, [null, useMove(1, MOVE_SWORDS_DANCE)], deps)
+        const act3 = out3.actions.find((a) => a.battlerId === 1)!
+        expect(act3.cancelledBy).toBe('TAUNT')
+        // Decremented by ENDTURN_TAUNT to 0 (wears off)
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBe(0)
+
+        // Turn 4: Taunt has worn off, Swords Dance succeeds
+        const out4 = executeTurn(state, [null, useMove(1, MOVE_SWORDS_DANCE)], deps)
+        const act4 = out4.actions.find((a) => a.battlerId === 1)!
+        expect(act4.cancelledBy).toBeNull()
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+      })
+
+      it('Taunt fails on an already-taunted target (Cmd_settaunt:11682)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TAUNT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[1]!.volatiles.tauntTimer = 2
+        const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+
+      it('Taunt fails against an Oblivious target (Cmd_settaunt:11679, jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TAUNT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_OBLIVIOUS, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBe(0)
+      })
+
+      it('Taunt fails against an Aroma Veil target (jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TAUNT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_AROMA_VEIL, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBe(0)
+      })
+    })
+
+    describe('Cycle 53: EFFECT_DISABLE (BattleScript_EffectDisable, DisableLastUsedMove, CANCELLER_DISABLED, ENDTURN_DISABLE)', () => {
+      it("Disable blocks the target's last move until the timer ends (4 turns)", () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DISABLE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 1 uses Tackle, setting lastMove = 'MOVE_TACKLE'
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.lastMove).toBe('MOVE_TACKLE')
+
+        // Turn 2: Battler 0 uses Disable on Battler 1
+        const out2 = executeTurn(state, [useMove(1, MOVE_DISABLE), null], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 0)!
+        expect(act2.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(state.battlers[1]!.volatiles.disabledMove).toBe('MOVE_TACKLE')
+        // Starts at 4, decremented by ENDTURN_DISABLE at end of turn to 3
+        expect(state.battlers[1]!.volatiles.disableTimer).toBe(3)
+
+        // Turn 3: Battler 1 tries to use Tackle, cancelled by CANCELLER_DISABLED
+        const out3 = executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        const act3 = out3.actions.find((a) => a.battlerId === 1)!
+        expect(act3.cancelledBy).toBe('DISABLE')
+        // Decremented by ENDTURN_DISABLE to 2
+        expect(state.battlers[1]!.volatiles.disableTimer).toBe(2)
+
+        // Turn 4: Battler 1 tries Tackle again, still disabled
+        const out4 = executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        const act4 = out4.actions.find((a) => a.battlerId === 1)!
+        expect(act4.cancelledBy).toBe('DISABLE')
+        // Decremented to 1
+        expect(state.battlers[1]!.volatiles.disableTimer).toBe(1)
+
+        // Turn 5: Battler 1 tries Tackle again, still disabled
+        const out5 = executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        const act5 = out5.actions.find((a) => a.battlerId === 1)!
+        expect(act5.cancelledBy).toBe('DISABLE')
+        // Decremented to 0, disabledMove cleared
+        expect(state.battlers[1]!.volatiles.disableTimer).toBe(0)
+        expect(state.battlers[1]!.volatiles.disabledMove).toBeNull()
+
+        // Turn 6: Disable has worn off, Tackle succeeds
+        const out6 = executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        const act6 = out6.actions.find((a) => a.battlerId === 1)!
+        expect(act6.cancelledBy).toBeNull()
+      })
+
+      it('Disable fails if target has no last move (DisableLastUsedMove:10720)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DISABLE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+        // No move used yet by battler 1
+        const out = executeTurn(state, [useMove(1, MOVE_DISABLE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.disabledMove).toBeNull()
+      })
+
+      it('Disable fails if target already has a disabled move', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DISABLE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+        state.battlers[1]!.volatiles.disabledMove = 'MOVE_TACKLE'
+        state.battlers[1]!.volatiles.disableTimer = 3
+        const out = executeTurn(state, [useMove(1, MOVE_DISABLE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+
+      it('Disable fails against an Oblivious target (jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DISABLE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], abilities: { ability: ABILITY_OBLIVIOUS, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+        const out = executeTurn(state, [useMove(1, MOVE_DISABLE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.disabledMove).toBeNull()
+      })
+    })
+
+    describe('Cycle 53: EFFECT_ENCORE (BattleScript_EffectEncore, SetEncore, turn.ts encore forcing, ENDTURN_ENCORE)', () => {
+      it('Encore locks the target into its last move for 3 turns', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', 'MOVE_SWORDS_DANCE', null, null], pp: [35, 30, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 1 uses Tackle
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.lastMove).toBe('MOVE_TACKLE')
+
+        // Turn 2: Battler 0 uses Encore on Battler 1
+        const out2 = executeTurn(state, [useMove(1, MOVE_ENCORE), null], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 0)!
+        expect(act2.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(state.battlers[1]!.volatiles.encoredMove).toBe('MOVE_TACKLE')
+        expect(state.battlers[1]!.volatiles.encoredMovePos).toBe(0)
+        // Starts at 3, decremented by ENDTURN_ENCORE at end of turn to 2
+        expect(state.battlers[1]!.volatiles.encoreTimer).toBe(2)
+
+        // Turn 3: Battler 1 chooses Swords Dance (slot 2), but Encore forces Tackle (slot 1)
+        const out3 = executeTurn(state, [null, useMove(2, MOVE_SWORDS_DANCE)], deps)
+        const act3 = out3.actions.find((a) => a.battlerId === 1)!
+        // Stat stages unchanged because Tackle ran instead of Swords Dance
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        expect(act3.cancelledBy).toBeNull()
+        // Decremented by ENDTURN_ENCORE to 1
+        expect(state.battlers[1]!.volatiles.encoreTimer).toBe(1)
+
+        // Turn 4: Battler 1 chooses Swords Dance again, Encore still forces Tackle
+        executeTurn(state, [null, useMove(2, MOVE_SWORDS_DANCE)], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        // Decremented to 0, encoredMove cleared
+        expect(state.battlers[1]!.volatiles.encoreTimer).toBe(0)
+        expect(state.battlers[1]!.volatiles.encoredMove).toBeNull()
+
+        // Turn 5: Encore ended, Swords Dance succeeds
+        executeTurn(state, [null, useMove(2, MOVE_SWORDS_DANCE)], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+      })
+
+      it('Encore fails if target has no last move (SetEncore:10749)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_ENCORE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.encoredMove).toBeNull()
+      })
+
+      it('Encore fails if target last move was MOVE_ENCORE (SetEncore:10745)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastMove = 'MOVE_ENCORE'
+        const out = executeTurn(state, [useMove(1, MOVE_ENCORE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+
+      it('Encore fails if target is already encored (SetEncore:10749)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+        state.battlers[1]!.volatiles.encoredMove = 'MOVE_TACKLE'
+        state.battlers[1]!.volatiles.encoreTimer = 2
+        const out = executeTurn(state, [useMove(1, MOVE_ENCORE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+
+      it('Encore fails against an Oblivious target (jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_ENCORE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], abilities: { ability: ABILITY_OBLIVIOUS, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+        const out = executeTurn(state, [useMove(1, MOVE_ENCORE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[1]!.volatiles.encoredMove).toBeNull()
+      })
+    })
+
+    describe('Cycle 53: EFFECT_TORMENT (BattleScript_EffectTorment, Cmd_settorment, turn.ts Torment gap)', () => {
+      it('Torment applies STATUS2_TORMENT and gaps consecutive lastMove at execution', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TORMENT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 0 uses Torment
+        const out1 = executeTurn(state, [useMove(1, MOVE_TORMENT), null], deps)
+        const act1 = out1.actions.find((a) => a.battlerId === 0)!
+        expect(act1.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_TORMENT)).toBe(true)
+
+        // Turn 2: Battler 1 uses Tackle
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.lastMove).toBe('MOVE_TACKLE')
+
+        // Turn 3: Battler 1 uses Tackle again while tormented -> unmodelled gap recorded
+        const out3 = executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        const act3 = out3.actions.find((a) => a.battlerId === 1)!
+        expect(act3.unmodelled.some((m) => m.includes('Torment move restriction'))).toBe(true)
+      })
+
+      it('Torment fails if target is already tormented (Cmd_settorment:11663)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TORMENT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, status2: STATUS2_TORMENT },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_TORMENT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+
+      it('Torment fails against an Oblivious target (jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TORMENT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_OBLIVIOUS, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_TORMENT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_TORMENT)).toBe(false)
+      })
+    })
+
+    describe('Cycle 53: EFFECT_HEAL_BLOCK (BattleScript_EffectHealBlock, Cmd_sethealblock, CANCELLER_HEAL_BLOCKED, ENDTURN_HEALBLOCK)', () => {
+      it('Heal Block prevents Recover and wears off after 5 turns', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_HEAL_BLOCK', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, hp: 50, maxHp: 100, moves: ['MOVE_RECOVER', null, null, null], pp: [10, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 0 uses Heal Block
+        const out1 = executeTurn(state, [useMove(1, MOVE_HEAL_BLOCK), null], deps)
+        const act1 = out1.actions.find((a) => a.battlerId === 0)!
+        expect(act1.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_HEAL_BLOCK)).toBe(true)
+        // Starts at 5, decremented by ENDTURN_HEALBLOCK to 4
+        expect(state.battlers[1]!.volatiles.healBlockTimer).toBe(4)
+
+        // Turn 2: Battler 1 tries Recover, blocked by CANCELLER_HEAL_BLOCKED
+        const out2 = executeTurn(state, [null, useMove(1, MOVE_RECOVER)], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 1)!
+        expect(act2.cancelledBy).toBe('HEAL_BLOCK')
+        expect(state.battlers[1]!.mon.hp).toBe(50)
+        // Timer decrements to 3
+        expect(state.battlers[1]!.volatiles.healBlockTimer).toBe(3)
+
+        // Turn 3: Recover blocked, timer decrements to 2
+        const out3 = executeTurn(state, [null, useMove(1, MOVE_RECOVER)], deps)
+        expect(out3.actions.find((a) => a.battlerId === 1)!.cancelledBy).toBe('HEAL_BLOCK')
+        expect(state.battlers[1]!.volatiles.healBlockTimer).toBe(2)
+
+        // Turn 4: Recover blocked, timer decrements to 1
+        const out4 = executeTurn(state, [null, useMove(1, MOVE_RECOVER)], deps)
+        expect(out4.actions.find((a) => a.battlerId === 1)!.cancelledBy).toBe('HEAL_BLOCK')
+        expect(state.battlers[1]!.volatiles.healBlockTimer).toBe(1)
+
+        // Turn 5: Recover blocked, timer decrements to 0 and clears STATUS3_HEAL_BLOCK
+        const out5 = executeTurn(state, [null, useMove(1, MOVE_RECOVER)], deps)
+        expect(out5.actions.find((a) => a.battlerId === 1)!.cancelledBy).toBe('HEAL_BLOCK')
+        expect(state.battlers[1]!.volatiles.healBlockTimer).toBe(0)
+        expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_HEAL_BLOCK)).toBe(false)
+
+        // Turn 6: Heal Block ended, Recover succeeds (restores 50% max HP = 50 -> 100)
+        const out6 = executeTurn(state, [null, useMove(1, MOVE_RECOVER)], deps)
+        const act6 = out6.actions.find((a) => a.battlerId === 1)!
+        expect(act6.cancelledBy).toBeNull()
+        expect(state.battlers[1]!.mon.hp).toBe(100)
+      })
+
+      it('Heal Block fails if target already has Heal Block (Cmd_sethealblock:4971)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_HEAL_BLOCK', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[1]!.statuses3 |= STATUS3_HEAL_BLOCK
+        const out = executeTurn(state, [useMove(1, MOVE_HEAL_BLOCK), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+
+      it('Heal Block fails against an Aroma Veil target (jumpifabilitystatusimmunity)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_HEAL_BLOCK', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_AROMA_VEIL, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_HEAL_BLOCK), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_HEAL_BLOCK)).toBe(false)
+      })
+    })
+
+    describe('Cycle 53: EFFECT_EMBARGO (BattleScript_EffectEmbargo, Cmd_setembargo, ENDTURN_EMBARGO)', () => {
+      it('Embargo sets STATUS3_EMBARGO and wears off after 5 turns', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_EMBARGO', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        // Turn 1: Battler 0 uses Embargo
+        const out1 = executeTurn(state, [useMove(1, MOVE_EMBARGO), null], deps)
+        const act1 = out1.actions.find((a) => a.battlerId === 0)!
+        expect(act1.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_EMBARGO)).toBe(true)
+        // Starts at 5, decremented by ENDTURN_EMBARGO to 4
+        expect(state.battlers[1]!.volatiles.embargoTimer).toBe(4)
+
+        // Turns 2-4: timer decrements each turn
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.volatiles.embargoTimer).toBe(3)
+
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.volatiles.embargoTimer).toBe(2)
+
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.volatiles.embargoTimer).toBe(1)
+
+        // Turn 5: decrements to 0, clears STATUS3_EMBARGO
+        executeTurn(state, [null, useMove(1, MOVE_TACKLE)], deps)
+        expect(state.battlers[1]!.volatiles.embargoTimer).toBe(0)
+        expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_EMBARGO)).toBe(false)
+      })
+
+      it('Embargo fails if target already has Embargo (Cmd_setembargo:11191)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_EMBARGO', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[1]!.statuses3 |= STATUS3_EMBARGO
+        const out = executeTurn(state, [useMove(1, MOVE_EMBARGO), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+      })
+    })
+
+    describe('Cycle 53: EFFECT_FOCUS_ENERGY (BattleScript_EffectFocusEnergy, VARIOUS_INCREASE_CRIT)', () => {
+      it('Focus Energy raises crit stage by 2 (capped at 3)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_FOCUS_ENERGY', null, null, null], pp: [30, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+
+        // Turn 1: Focus Energy raises critBoost by 2 (0 -> 2)
+        const out1 = executeTurn(state, [useMove(1, MOVE_FOCUS_ENERGY), null], deps)
+        const act1 = out1.actions.find((a) => a.battlerId === 0)!
+        expect(act1.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+        expect(state.battlers[0]!.volatiles.critBoost).toBe(2)
+
+        // Turn 2: Second Focus Energy raises critBoost from 2 to 3 (capped at 3)
+        const out2 = executeTurn(state, [useMove(1, MOVE_FOCUS_ENERGY), null], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 0)!
+        expect(act2.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(28)
+        expect(state.battlers[0]!.volatiles.critBoost).toBe(3)
+      })
+
+      it('Focus Energy fails when already at maximum critBoost (3)', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_FOCUS_ENERGY', null, null, null], pp: [30, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[0]!.volatiles.critBoost = 3
+        const out = executeTurn(state, [useMove(1, MOVE_FOCUS_ENERGY), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+        expect(act.missed).toBe(true)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+        expect(state.battlers[0]!.volatiles.critBoost).toBe(3)
       })
     })
   })

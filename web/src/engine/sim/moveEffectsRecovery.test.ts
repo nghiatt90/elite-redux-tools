@@ -531,7 +531,10 @@ describe('Leech Seed: Application and end-of-turn drain/heal', () => {
   it('ENDTURN_LEECH_SEED does not heal seeder if seeder is under Heal Block', () => {
     const state = battle([{ hp: 50, maxHp: 100 }, { hp: 80, maxHp: 80, spe: 50 }], scriptedRng())
     state.battlers[1]!.statuses3 |= STATUS3_LEECHSEED | 0
+    // A live timer: battler 0's own ENDTURN_HEALBLOCK runs before battler 1's Leech Seed, and a
+    // zero timer clears the bit there (battle_util.c:2896-2906).
     state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    state.battlers[0]!.volatiles.healBlockTimer = 5
 
     runEndTurnEffects(state, [0, 1], DATA_CONTEXT)
 
@@ -562,19 +565,26 @@ describe('C quirks in the heal paths', () => {
     expect(state.battlers[0]!.mon.hp).toBe(100)
   })
 
-  it('Morning Sun still heals under Heal Block (recoverbasedonsunlight never checks CanBattlerHeal)', () => {
+  // recoverbasedonsunlight and the Strength Sap script never check CanBattlerHeal, but both are
+  // status healing effects, so CANCELLER_HEAL_BLOCKED (IsHealBlockPreventingMove, battle_util.c:
+  // 1400-1404, 3326-3336) stops them before their scripts run.
+  it('Morning Sun is cancelled under Heal Block', () => {
     const state = battle([{ hp: 10, maxHp: 120 }, { spe: 50 }], scriptedRng())
     state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
-    executeTurn(state, [useMove(0, MOVE_MORNING_SUN), null], testDeps())
-    expect(state.battlers[0]!.mon.hp).toBe(70)
+    state.battlers[0]!.volatiles.healBlockTimer = 5
+    const out = executeTurn(state, [useMove(0, MOVE_MORNING_SUN), null], testDeps())
+    expect(out.actions.find((a) => a.battlerId === 0)!.cancelledBy).toBe('HEAL_BLOCK')
+    expect(state.battlers[0]!.mon.hp).toBe(10)
   })
 
-  it('Strength Sap heals a heal-blocked user when the Attack drop lands (StrengthSapMustLower -> StrengthSapHp)', () => {
+  it('Strength Sap is cancelled under Heal Block', () => {
     const state = battle([{ hp: 20, maxHp: 150 }, { atk: 100, spe: 50 }], scriptedRng())
     state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
-    executeTurn(state, [useMove(1, MOVE_STRENGTH_SAP), null], testDeps())
-    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
-    expect(state.battlers[0]!.mon.hp).toBe(120)
+    state.battlers[0]!.volatiles.healBlockTimer = 5
+    const out = executeTurn(state, [useMove(1, MOVE_STRENGTH_SAP), null], testDeps())
+    expect(out.actions.find((a) => a.battlerId === 0)!.cancelledBy).toBe('HEAL_BLOCK')
+    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(state.battlers[0]!.mon.hp).toBe(20)
   })
 
   it('Pain Split draws no accuracy roll (NO_ACC_CALC_CHECK_LOCK_ON)', () => {

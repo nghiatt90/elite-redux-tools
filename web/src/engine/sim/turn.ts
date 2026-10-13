@@ -121,7 +121,7 @@
 //     the real port.
 
 import type { BattleOutcome, BattleState, SimPartyMon } from './state'
-import type { ChosenAction, TurnOrderContext, TurnOrder } from './turnOrder'
+import type { ChosenAction, TurnOrderContext, TurnOrder, TurnOrderMoveView } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
@@ -151,6 +151,7 @@ import {
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_WIDE_GUARD,
   STATUS1_ANY,
+  STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
@@ -1156,9 +1157,48 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
   return unmodelled
 }
 
+/** The TurnOrderMoveView of `moveId`, built from its move data over `base` (whose
+ * battler-dependent fields are kept, as chooseAiAction's buildMoveView leaves them). */
+function moveViewFor(base: TurnOrderMoveView, moveId: string, dataContext: SimDataContext): TurnOrderMoveView {
+  const move = dataContext.move(moveId)
+  return {
+    ...base,
+    id: moveId,
+    priority: move?.priority ?? 0,
+    effect: move?.effect ?? null,
+    isStatus: move?.split === 'STATUS',
+    resolvedType: move?.type ?? 'MYSTERY',
+    power: move?.power ?? 0,
+    flags: move?.flags ?? {},
+    split: move?.split ?? 'STATUS',
+  }
+}
+
+/**
+ * Encore. Selection (battle_main.c:3689-3691) replaces an encored battler's chosen move with
+ * encoredMove before turn order is computed; HandleAction_UseMove (battle_util.c:221-236) keeps
+ * it, or -- when the slot no longer holds the encored move -- uses that slot's move and ends the
+ * encore. The sim keeps the caller's target rather than re-running GetMoveTarget.
+ */
+function applyEncore(state: BattleState, battlerId: number, action: ChosenAction | null, deps: TurnLoopDeps): ChosenAction | null {
+  const battler = state.battlers[battlerId]
+  if (!action || action.action !== 'USE_MOVE' || !action.chosenMove || !battler?.volatiles.encoredMove) return action
+  const v = battler.volatiles
+  const slotMove = battler.mon.moves[v.encoredMovePos]
+  if (slotMove !== v.encoredMove) {
+    v.encoredMove = null
+    v.encoredMovePos = 0
+    v.encoreTimer = 0
+  }
+  if (!slotMove || slotMove === action.chosenMove.id) return action
+  const view = moveViewFor(action.chosenMove, slotMove, deps.dataContext)
+  return { ...action, chosenMove: view, moveToBeUsed: view }
+}
+
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
   assertNoPerBattlerQuash(state)
   clearStartedFlags(state)
+  actions = actions.map((a, id) => applyEncore(state, id, a, deps))
 
   const ctx = buildTurnOrderContext(state, deps)
   const order = setActionsAndBattlersTurnOrder(state, actions)
@@ -1234,8 +1274,22 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       continue
     }
 
+    const attackerBattler = state.battlers[battlerId]!
     const targetId = action.target
     const unmodelled: string[] = []
+
+    // Torment move restriction (battle_util.c:1443-1452, 1641-1642).
+    // In C, Torment prevents selecting lastMove during move selection; when
+    // evaluated directly at action execution, gap the unmodelled restriction.
+    if (
+      hasFlag(attackerBattler.mon.status2, STATUS2_TORMENT) &&
+      action.chosenMove.id === attackerBattler.lastMove &&
+      attackerBattler.lastMove !== 'MOVE_STRUGGLE'
+    ) {
+      unmodelled.push(
+        `battler ${battlerId}: Torment move restriction (battle_util.c:1443-1452) is not enforced at selection time`,
+      )
+    }
 
     // Cmd_attackcanceler, battle_script_commands.c:1046-1081 -- runs BEFORE any
     // target-liveness consideration, matching the C: AtkCanceller_UnableToUseMove

@@ -1643,7 +1643,7 @@ function handleDefenderMoveEndAbility(
       if (state.rng.random16() % 100 < 30) {
         attacker.volatiles.disabledMove = moveId
         attacker.volatiles.disableTimer = 4
-        unmodelled.push('Disable move lock is not modelled yet: CANCELLER_DISABLED is not implemented in turn loop')
+        attacker.volatiles.disableTimerStartValue = 4
       }
     }
   }
