@@ -7,7 +7,7 @@
 import type { BattleState, BattlerState } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { buildAccuracyInputs, getTotalAccuracy, isBattlerProtected, ProtectType } from './turn'
+import { buildAccuracyInputs, getTotalAccuracy, isBattlerAlive, isBattlerProtected, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
 import {
   DEFAULT_STAT_STAGE,
@@ -39,6 +39,8 @@ import {
   STATUS1_ANY,
   STATUS1_BLEED,
   STATUS1_BURN,
+  STATUS2_CURSED,
+  STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
   STATUS3_ALWAYS_HITS,
@@ -49,6 +51,7 @@ import {
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_RAIN_ANY,
@@ -722,6 +725,58 @@ function handleShelter(ctx: MoveEffectContext): ActionOutcome {
     )
     if (r.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: r.delta })
   }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectGearUp (data/battle_scripts_1.s:1212-1241).
+ * If Speed < MAX_STAT_STAGE or SpAtk < MAX_STAT_STAGE:
+ * - Speed +2 (or +1 if Speed stage > 10)
+ * - SpAtk +1
+ * If both are already at MAX_STAT_STAGE, jumps to BattleScript_CantRaiseMultipleStats (fails).
+ */
+function handleGearUp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  const spaStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+
+  if (speStage >= MAX_STAT_STAGE && spaStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { missed: true, statChanges: [] })
+  }
+
+  const speBoost = speStage > 10 ? 1 : 2
+  const rSpe = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    speBoost,
+    STAT_SPEED,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpe.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: rSpe.delta })
+
+  const rSpa = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPATK,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpa.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: rSpa.delta })
 
   return outcome(ctx, { statChanges })
 }
@@ -1625,6 +1680,51 @@ function handleAuroraVeil(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * BattleScript_EffectBarrier (data/battle_scripts_1.s:3992-4014),
+ * Cmd_setlightscreen (src/battle_script_commands.c:10252-10273) and
+ * Cmd_setreflect (src/battle_script_commands.c:9319-9339).
+ * The script has no ppreduce, so Barrier never spends PP. A failed setlightscreen's
+ * MOVE_RESULT_MISSED is cleared by bichalfword; a failed setreflect sets it either way,
+ * so the move counts as missed exactly when Reflect fails.
+ */
+function handleBarrier(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, deps } = ctx
+  const battler = state.battlers[battlerId]!
+
+  if (!hasFlag(state.field.statuses, STATUS_FIELD_PSYCHIC_TERRAIN)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  const side = battlerId & 1
+  const sideState = state.sides[side]!
+  const hasScreenCleaner = battlerHasSimAbility(state, battler, 'ABILITY_SCREEN_CLEANER', false, battlerId, false, deps.dataContext)
+  const isExtended = getHoldEffect(ctx, battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+  const timer = isExtended ? 8 : 5
+
+  const hasLightScreen = hasFlag(sideState.statuses, SIDE_STATUS_LIGHTSCREEN)
+  const hasReflect = hasFlag(sideState.statuses, SIDE_STATUS_REFLECT)
+
+  const lightScreenFailed = hasLightScreen && !hasScreenCleaner
+  const reflectFailed = hasReflect && !hasScreenCleaner
+
+  if (!lightScreenFailed) {
+    sideState.timers.started.lightscreen = true
+    sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_LIGHTSCREEN)
+    sideState.timers.lightscreenBattlerId = battlerId
+    sideState.timers.lightscreenTimer = timer
+  }
+
+  if (!reflectFailed) {
+    sideState.timers.started.reflect = true
+    sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_REFLECT)
+    sideState.timers.reflectBattlerId = battlerId
+    sideState.timers.reflectTimer = timer
+  }
+
+  return outcome(ctx, reflectFailed ? { missed: true } : {})
+}
+
+/**
  * BattleScript_EffectMist (data/battle_scripts_1.s:4179-4188) and
  * Cmd_setmist (src/battle_script_commands.c:10456-10469).
  */
@@ -1873,6 +1973,317 @@ function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
   return applyWeatherMove(ctx, ENUM_WEATHER_FOG, 'BattleScript_EffectEerieFog')
 }
 
+/**
+ * BattleScript_EffectDragonCheer (data/battle_scripts_1.s:11903-11938),
+ * VARIOUS_INCREASE_CRIT (src/battle_script_commands.c:8591-8601), and
+ * VARIOUS_JUMP_IF_ABSENT (src/battle_script_commands.c:6769-6772).
+ * Raises critical hit stage by 2 if Dragon type, or 1 otherwise (capped at 3).
+ * If attacker is already at max critBoost (3), tries to boost partner; in singles
+ * partner is absent, so it jumps to BattleScript_ButItFailed.
+ */
+function handleDragonCheer(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const isAttackerDragon = battler.mon.types.includes('DRAGON')
+  const attackerAmount = isAttackerDragon ? 2 : 1
+  const attackerIncrease = Math.min(Math.max(0, 3 - battler.volatiles.critBoost), attackerAmount)
+
+  if (attackerIncrease > 0) {
+    battler.volatiles.critBoost += attackerIncrease
+
+    // Check partner in doubles
+    const partnerId = battlerId ^ 2
+    const partner = state.battlers[partnerId]
+    if (partner && isBattlerAlive(state, partnerId)) {
+      const isPartnerDragon = partner.mon.types.includes('DRAGON')
+      const partnerAmount = isPartnerDragon ? 2 : 1
+      const partnerIncrease = Math.min(Math.max(0, 3 - partner.volatiles.critBoost), partnerAmount)
+      if (partnerIncrease > 0) {
+        partner.volatiles.critBoost += partnerIncrease
+      }
+    }
+
+    return outcome(ctx, {})
+  }
+
+  // Attacker already at max critBoost (3): branch to PartnerOnly
+  const partnerId = battlerId ^ 2
+  const partner = state.battlers[partnerId]
+  if (!partner || !isBattlerAlive(state, partnerId)) {
+    // Partner absent (singles or partner fainted): fails
+    return outcome(ctx, { missed: true })
+  }
+
+  const isPartnerDragon = partner.mon.types.includes('DRAGON')
+  const partnerAmount = isPartnerDragon ? 2 : 1
+  const partnerIncrease = Math.min(Math.max(0, 3 - partner.volatiles.critBoost), partnerAmount)
+  partner.volatiles.critBoost += partnerIncrease
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectCurse (data/battle_scripts_1.s:4928-4987).
+ * If user is Ghost-type or affected by Fog weather, executes BattleScript_GhostCurse:
+ * - Target takes STATUS2_CURSED (fails if already cursed or semi-invulnerable).
+ * - Attacker takes maxHp / 2 damage (floored, min 1) and may faint.
+ * Otherwise, non-Ghost branch:
+ * - Speed -1, Attack +1, Defense +1 (fails if Speed at min and Attack/Defense at max).
+ */
+function handleCurse(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, applyDamage, turnOrderIndex, order } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  const isGhost = battler.mon.types.includes('GHOST')
+  const isFog = isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)
+
+  if (isGhost || isFog) {
+    // Ghost Curse
+    // jumpifbytenotequal gBattlerAttacker, gBattlerTarget / getmovetarget BS_ATTACKER
+    const actualTargetId = targetId === null || targetId === battlerId ? battlerId ^ 1 : targetId
+    const target = state.battlers[actualTargetId]
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+    if (!target || !isBattlerAlive(state, actualTargetId)) {
+      return outcome(ctx, { targetId: actualTargetId, missed: true })
+    }
+
+    // Cmd_accuracycheck NO_ACC_CALC_CHECK_LOCK_ON (battle_script_commands.c:1403-1411); Commander is doubles-only
+    const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+    if (!lockedOn) {
+      if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+        return outcome(ctx, { targetId: actualTargetId, missed: true })
+      }
+      const targetIndex = order ? order.battlerByTurnOrder.indexOf(actualTargetId) : -1
+      const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+      const protectType = isBattlerProtected(state, battlerId, actualTargetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+      if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+        return outcome(ctx, { targetId: actualTargetId, missed: true })
+      }
+    }
+
+    // Cmd_cursetarget (battle_script_commands.c:11103-11113)
+    if (hasFlag(target.mon.status2, STATUS2_CURSED)) {
+      return outcome(ctx, { targetId: actualTargetId, missed: true })
+    }
+
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_CURSED)
+    const hpCost = Math.max(1, Math.floor(battler.mon.maxHp / 2))
+    const fainted: number[] = []
+    applyDamage(state, battlerId, hpCost, fainted)
+
+    return outcome(ctx, {
+      targetId: actualTargetId,
+      attackerDamage: hpCost,
+      fainted,
+    })
+  }
+
+  // Non-Ghost Curse
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const defStage = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+
+  if (speStage <= MIN_STAT_STAGE && atkStage >= MAX_STAT_STAGE && defStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { missed: true, statChanges: [] })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  const rSpe = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    -1,
+    STAT_SPEED,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpe.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: rSpe.delta })
+
+  const rAtk = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_ATK,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rAtk.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: rAtk.delta })
+
+  const rDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_DEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: rDef.delta })
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectDestinyBond (data/battle_scripts_1.s:4785-4793) and
+ * Cmd_setdestinybond (src/battle_script_commands.c:10943-10946).
+ */
+function handleDestinyBond(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_DESTINY_BOND)
+
+  unmodelled.push(
+    'Destiny Bond faint trigger on KO (battle_script_commands.c:3244-3251) is not modelled in faint path yet',
+  )
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectKarma (data/battle_scripts_1.s:4989-5030).
+ * Lowers user's Speed by 1 and raises Special Attack and Special Defense by 1.
+ * Fails if Speed is already at minimum and both SpAtk and SpDef are at maximum.
+ */
+function handleKarma(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+  const spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+
+  if (speStage <= MIN_STAT_STAGE && spAtkStage >= MAX_STAT_STAGE && spDefStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { missed: true, statChanges: [] })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  const rSpe = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    -1,
+    STAT_SPEED,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpe.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: rSpe.delta })
+
+  const rSpAtk = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPATK,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpAtk.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: rSpAtk.delta })
+
+  const rSpDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (rSpDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: rSpDef.delta })
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectRecycle (data/battle_scripts_1.s:6363-6371) and
+ * Cmd_tryrecycleitem (src/battle_script_commands.c:12296-12311).
+ * Restores the mon's last consumed held item if it is currently holding no item.
+ * Fails if no item was consumed or if the mon already holds an item.
+ */
+function handleRecycle(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const usedItem = battler.usedHeldItem
+  const currentItem = battler.mon.itemId
+
+  if (usedItem && usedItem !== 'ITEM_NONE' && (!currentItem || currentItem === 'ITEM_NONE')) {
+    battler.mon.itemId = usedItem
+    battler.usedHeldItem = null
+    return outcome(ctx, {})
+  }
+
+  return outcome(ctx, { missed: true })
+}
+
+/**
+ * BattleScript_EffectHelpingHand (data/battle_scripts_1.s:6268-6276) and
+ * Cmd_trysethelpinghand (src/battle_script_commands.c:11700-11710).
+ * Doubles-only move that buffs partner's damage for the turn (round.helpingHand).
+ * Fails in singles, or if partner is fainted/absent, or if user or partner already has helpingHand set.
+ */
+function handleHelpingHand(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const partnerId = battlerId ^ 2
+  const partner = state.battlers[partnerId]
+
+  if (
+    (state.battleTypeFlags & BATTLE_TYPE_DOUBLE) !== 0 &&
+    partner &&
+    !(state.absentBattlerFlags & (1 << partnerId)) &&
+    !battler.round.helpingHand &&
+    !partner.round.helpingHand
+  ) {
+    partner.round.helpingHand = true
+    return outcome(ctx, {})
+  }
+
+  return outcome(ctx, { missed: true })
+}
+
+/** BATTLE_TYPE_DOUBLE, include/constants/battle.h. */
+const BATTLE_TYPE_DOUBLE = 1 << 0
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
@@ -1897,12 +2308,14 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_BULK_UP: handleBulkUp,
   EFFECT_CALM_MIND: handleCalmMind,
   EFFECT_DRAGON_DANCE: handleDragonDance,
+  EFFECT_DRAGON_CHEER: handleDragonCheer,
   EFFECT_QUIVER_DANCE: handleQuiverDance,
   EFFECT_VICTORY_DANCE: handleVictoryDance,
   EFFECT_MYSTIC_DANCE: handleMysticDance,
   EFFECT_GROWTH: handleGrowth,
   EFFECT_SHARPEN: handleSharpen,
   EFFECT_SHELTER: handleShelter,
+  EFFECT_GEAR_UP: handleGearUp,
   EFFECT_SHELL_SMASH: handleShellSmash,
   EFFECT_BELLY_DRUM: handleBellyDrum,
 
@@ -1911,6 +2324,11 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_WILL_O_WISP: handleWillOWisp,
   EFFECT_YAWN: handleYawn,
   EFFECT_SWAGGER: handleSwagger,
+  EFFECT_CURSE: handleCurse,
+  EFFECT_DESTINY_BOND: handleDestinyBond,
+  EFFECT_KARMA: handleKarma,
+  EFFECT_RECYCLE: handleRecycle,
+  EFFECT_HELPING_HAND: handleHelpingHand,
 
   EFFECT_RESTORE_HP: handleHealHalf,
   EFFECT_SOFTBOILED: handleHealHalf,
@@ -1927,6 +2345,7 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_REFLECT: handleReflect,
   EFFECT_LIGHT_SCREEN: handleLightScreen,
   EFFECT_AURORA_VEIL: handleAuroraVeil,
+  EFFECT_BARRIER: handleBarrier,
   EFFECT_MIST: handleMist,
   EFFECT_SAFEGUARD: handleSafeguard,
   EFFECT_TAILWIND: handleTailwind,

@@ -18,18 +18,24 @@ import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn } from './turn'
+import { getMoveEffectHandler } from './moveEffects'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_REFLECT,
   STAT_ATK,
   STAT_DEF,
   STAT_SPEED,
   STAT_SPATK,
   STAT_SPDEF,
+  STATUS2_CURSED,
+  STATUS2_DESTINY_BOND,
   STATUS4_CUTTHROAT,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SUN_TEMPORARY,
   hasFlag,
@@ -91,6 +97,14 @@ const MOVE_GROWTH = requireMove('MOVE_GROWTH')
 const MOVE_SHARPEN = requireMove('MOVE_SHARPEN')
 const MOVE_SHELTER = requireMove('MOVE_SHELTER')
 const MOVE_CONFUSE_RAY = requireMove('MOVE_CONFUSE_RAY')
+const MOVE_BARRIER = requireMove('MOVE_BARRIER')
+const MOVE_DRAGON_CHEER = requireMove('MOVE_DRAGON_CHEER')
+const MOVE_GEAR_UP = requireMove('MOVE_GEAR_UP')
+const MOVE_CURSE = requireMove('MOVE_CURSE')
+const MOVE_DESTINY_BOND = requireMove('MOVE_DESTINY_BOND')
+const MOVE_KARMA = requireMove('MOVE_KARMA')
+const MOVE_RECYCLE = requireMove('MOVE_RECYCLE')
+const MOVE_HELPING_HAND = requireMove('MOVE_HELPING_HAND')
 
 const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
 const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
@@ -1041,5 +1055,353 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       expect(res.multistringChooser).toBe(B_MSG_STAT_WONT_INCREASE)
       expect(res.missed).toBe(false)
     }
+  })
+
+  it('BattleScript_EffectBarrier: fails without Psychic Terrain; with Psychic Terrain sets Reflect and Light Screen without modifying stat stages', () => {
+    // Without Psychic Terrain: fails (missed: true)
+    {
+      const state = battle([{ moves: ['MOVE_BARRIER', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_BARRIER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_LIGHTSCREEN)).toBe(false)
+      expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_REFLECT)).toBe(false)
+    }
+
+    // With Psychic Terrain: sets both screens for 5 turns; stat stages untouched
+    {
+      const state = battle([{ moves: ['MOVE_BARRIER', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      state.field.statuses |= STATUS_FIELD_PSYCHIC_TERRAIN
+      const out = executeTurn(state, [useMove(1, MOVE_BARRIER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_LIGHTSCREEN)).toBe(true)
+      expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_REFLECT)).toBe(true)
+      expect(state.sides[0]!.timers.lightscreenTimer).toBe(5)
+      expect(state.sides[0]!.timers.reflectTimer).toBe(5)
+      expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+      // the script has no ppreduce
+      expect(state.battlers[0]!.mon.pp[0]).toBe(20)
+    }
+
+    // Reflect already up: Light Screen still set, but the failed setreflect marks the move missed
+    {
+      const state = battle([{ moves: ['MOVE_BARRIER', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      state.field.statuses |= STATUS_FIELD_PSYCHIC_TERRAIN
+      state.sides[0]!.statuses |= SIDE_STATUS_REFLECT
+      const out = executeTurn(state, [useMove(1, MOVE_BARRIER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_LIGHTSCREEN)).toBe(true)
+      expect(state.sides[0]!.timers.lightscreenTimer).toBe(5)
+    }
+  })
+
+  it('BattleScript_EffectDragonCheer: raises crit stage by 1 for non-Dragon, 2 for Dragon; fails in singles if crit maxed at 3; stat stages unaffected', () => {
+    // Non-Dragon user: +1 critBoost, stat stages untouched
+    {
+      const state = battle([{ moves: ['MOVE_DRAGON_CHEER', null, null, null], pp: [15, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_DRAGON_CHEER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(state.battlers[0]!.volatiles.critBoost).toBe(1)
+      expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    }
+
+    // Dragon user: +2 critBoost, stat stages untouched
+    {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ types: ['DRAGON', 'MYSTERY', 'MYSTERY'], moves: ['MOVE_DRAGON_CHEER', null, null, null], pp: [15, 0, 0, 0] }), 0),
+          createBattlerState(1, mon(), 0),
+        ],
+        rng: countingRng(),
+      })
+      const out = executeTurn(state, [useMove(1, MOVE_DRAGON_CHEER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(state.battlers[0]!.volatiles.critBoost).toBe(2)
+      expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    }
+
+    // Max crit (3) in singles: partner absent -> fails with missed: true
+    {
+      const state = battle([{ moves: ['MOVE_DRAGON_CHEER', null, null, null], pp: [15, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.volatiles.critBoost = 3
+      const out = executeTurn(state, [useMove(1, MOVE_DRAGON_CHEER), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(state.battlers[0]!.volatiles.critBoost).toBe(3)
+    }
+  })
+
+  it('BattleScript_EffectGearUp: raises Speed by 2 (or 1 if Speed > 10) and SpAtk by 1; fails if both maxed', () => {
+    // Neutral stages (6): Speed +2 -> 8, SpAtk +1 -> 7
+    {
+      const state = battle([{ moves: ['MOVE_GEAR_UP', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_GEAR_UP), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([
+        { battlerId: 0, stat: STAT_SPEED, change: 2 },
+        { battlerId: 0, stat: STAT_SPATK, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(8)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+    }
+
+    // Speed > 10 (stage 11): Speed +1 -> 12, SpAtk +1 -> 7
+    {
+      const state = battle([{ moves: ['MOVE_GEAR_UP', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.mon.statStages[STAT_SPEED] = 11
+      const out = executeTurn(state, [useMove(1, MOVE_GEAR_UP), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([
+        { battlerId: 0, stat: STAT_SPEED, change: 1 },
+        { battlerId: 0, stat: STAT_SPATK, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(MAX_STAT_STAGE)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+    }
+
+    // Both Speed and SpAtk at MAX_STAT_STAGE (12): fails (missed: true, statChanges: [])
+    {
+      const state = battle([{ moves: ['MOVE_GEAR_UP', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.mon.statStages[STAT_SPEED] = MAX_STAT_STAGE
+      state.battlers[0]!.mon.statStages[STAT_SPATK] = MAX_STAT_STAGE
+      const out = executeTurn(state, [useMove(1, MOVE_GEAR_UP), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(actionOutcome.statChanges).toEqual([])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(MAX_STAT_STAGE)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(MAX_STAT_STAGE)
+    }
+  })
+
+  it('BattleScript_EffectCurse: non-Ghost lowers Speed and raises Atk/Def; Ghost cuts 50% max HP and curses target', () => {
+    // Non-Ghost user: Speed -1, Atk +1, Def +1
+    {
+      const state = battle([{ moves: ['MOVE_CURSE', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_CURSE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([
+        { battlerId: 0, stat: STAT_SPEED, change: -1 },
+        { battlerId: 0, stat: STAT_ATK, change: 1 },
+        { battlerId: 0, stat: STAT_DEF, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(5)
+      expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(7)
+      expect(state.battlers[0]!.mon.hp).toBe(100)
+    }
+
+    // Non-Ghost user at min Speed (0) and max Atk/Def (12): fails
+    {
+      const state = battle([{ moves: ['MOVE_CURSE', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.mon.statStages[STAT_SPEED] = MIN_STAT_STAGE
+      state.battlers[0]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
+      state.battlers[0]!.mon.statStages[STAT_DEF] = MAX_STAT_STAGE
+      const out = executeTurn(state, [useMove(1, MOVE_CURSE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(actionOutcome.statChanges).toEqual([])
+    }
+
+    // Ghost user: loses 50% max HP (50 HP) and lays curse on target
+    {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ types: ['GHOST', 'MYSTERY', 'MYSTERY'], moves: ['MOVE_CURSE', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 }), 0),
+          createBattlerState(1, mon(), 0),
+        ],
+        rng: countingRng(),
+      })
+      const out = executeTurn(state, [useMove(1, MOVE_CURSE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.targetId).toBe(1)
+      expect(actionOutcome.attackerDamage).toBe(50)
+      expect(state.battlers[0]!.mon.hp).toBe(50)
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CURSED)).toBe(true)
+    }
+
+    // Ghost user targeting an already-cursed target: fails, no self-damage
+    {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ types: ['GHOST', 'MYSTERY', 'MYSTERY'], moves: ['MOVE_CURSE', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 }), 0),
+          createBattlerState(1, mon({ status2: STATUS2_CURSED }), 0),
+        ],
+        rng: countingRng(),
+      })
+      const out = executeTurn(state, [useMove(1, MOVE_CURSE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(state.battlers[0]!.mon.hp).toBe(100)
+    }
+  })
+
+  it('EFFECT_DESTINY_BOND: sets STATUS2_DESTINY_BOND on user and logs unmodelled KO trigger gap', () => {
+    const state = battle([{ moves: ['MOVE_DESTINY_BOND', null, null, null], pp: [5, 0, 0, 0] }, {}], countingRng())
+    const out = executeTurn(state, [useMove(1, MOVE_DESTINY_BOND), null], testDeps())
+    const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+    expect(actionOutcome.missed).toBe(false)
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_DESTINY_BOND)).toBe(true)
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Destiny Bond faint trigger on KO'))).toBe(true)
+  })
+
+  describe('EFFECT_KARMA', () => {
+    it('lowers user Speed by 1 and raises SpAtk and SpDef by 1', () => {
+      const state = battle([{ moves: ['MOVE_KARMA', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_KARMA), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([
+        { battlerId: 0, stat: STAT_SPEED, change: -1 },
+        { battlerId: 0, stat: STAT_SPATK, change: 1 },
+        { battlerId: 0, stat: STAT_SPDEF, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(5)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+    })
+
+    it('fails when user is at min Speed (0) and max SpAtk/SpDef (12)', () => {
+      const state = battle([{ moves: ['MOVE_KARMA', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.mon.statStages[STAT_SPEED] = MIN_STAT_STAGE
+      state.battlers[0]!.mon.statStages[STAT_SPATK] = MAX_STAT_STAGE
+      state.battlers[0]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+      const out = executeTurn(state, [useMove(1, MOVE_KARMA), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(actionOutcome.statChanges).toEqual([])
+    })
+
+    it('raises SpAtk and SpDef even when Speed is already min stage 0', () => {
+      const state = battle([{ moves: ['MOVE_KARMA', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.mon.statStages[STAT_SPEED] = MIN_STAT_STAGE
+      const out = executeTurn(state, [useMove(1, MOVE_KARMA), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(actionOutcome.statChanges).toEqual([
+        { battlerId: 0, stat: STAT_SPATK, change: 1 },
+        { battlerId: 0, stat: STAT_SPDEF, change: 1 },
+      ])
+      expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(0)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+      expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+    })
+  })
+
+  describe('EFFECT_RECYCLE', () => {
+    it('restores consumed held item when user has no held item', () => {
+      const state = battle([{ moves: ['MOVE_RECYCLE', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.usedHeldItem = 'ITEM_SITRUS_BERRY'
+      state.battlers[0]!.mon.itemId = null
+      const out = executeTurn(state, [useMove(1, MOVE_RECYCLE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(false)
+      expect(state.battlers[0]!.mon.itemId).toBe('ITEM_SITRUS_BERRY')
+      expect(state.battlers[0]!.usedHeldItem).toBe(null)
+    })
+
+    it('fails when user has no previously consumed item', () => {
+      const state = battle([{ moves: ['MOVE_RECYCLE', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.usedHeldItem = null
+      state.battlers[0]!.mon.itemId = null
+      const out = executeTurn(state, [useMove(1, MOVE_RECYCLE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(state.battlers[0]!.mon.itemId).toBe(null)
+    })
+
+    it('fails when user already holds an item', () => {
+      const state = battle([{ moves: ['MOVE_RECYCLE', null, null, null], pp: [10, 0, 0, 0] }, {}], countingRng())
+      state.battlers[0]!.usedHeldItem = 'ITEM_SITRUS_BERRY'
+      state.battlers[0]!.mon.itemId = 'ITEM_LEFTOVERS'
+      const out = executeTurn(state, [useMove(1, MOVE_RECYCLE), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+      expect(state.battlers[0]!.mon.itemId).toBe('ITEM_LEFTOVERS')
+      expect(state.battlers[0]!.usedHeldItem).toBe('ITEM_SITRUS_BERRY')
+    })
+  })
+
+  describe('EFFECT_HELPING_HAND', () => {
+    // executeTurn is singles-only; call the handler directly for the doubles cases
+    function runHelpingHand(state: ReturnType<typeof createBattleState>, action: ChosenAction) {
+      return getMoveEffectHandler('EFFECT_HELPING_HAND')!({
+        state,
+        battlerId: 0,
+        targetId: null,
+        action,
+        turnOrderIndex: 0,
+        deps: testDeps(),
+        unmodelled: [],
+        deductPp: () => {},
+        applyDamage: () => {},
+      })
+    }
+
+    it('fails in singles because there is no partner', () => {
+      const state = battle([{ moves: ['MOVE_HELPING_HAND', null, null, null], pp: [20, 0, 0, 0] }, {}], countingRng())
+      const out = executeTurn(state, [useMove(1, MOVE_HELPING_HAND), null], testDeps())
+      const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
+      expect(actionOutcome.missed).toBe(true)
+    })
+
+    it('sets partner round.helpingHand in doubles', () => {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ moves: ['MOVE_HELPING_HAND', null, null, null], pp: [20, 0, 0, 0] }), 0),
+          createBattlerState(1, mon(), 0),
+          createBattlerState(2, mon(), 0),
+          createBattlerState(3, mon(), 0),
+        ],
+        battleTypeFlags: 1,
+        rng: countingRng(),
+      })
+      expect(runHelpingHand(state, useMove(1, MOVE_HELPING_HAND)).missed).toBe(false)
+      expect(state.battlers[2]!.round.helpingHand).toBe(true)
+    })
+
+    it('fails in doubles if partner is fainted', () => {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ moves: ['MOVE_HELPING_HAND', null, null, null], pp: [20, 0, 0, 0] }), 0),
+          createBattlerState(1, mon(), 0),
+          createBattlerState(2, mon({ hp: 0 }), 0),
+          createBattlerState(3, mon(), 0),
+        ],
+        battleTypeFlags: 1,
+        rng: countingRng(),
+      })
+      // Cmd_trysethelpinghand reads gAbsentBattlerFlags, not HP
+      state.absentBattlerFlags |= 1 << 2
+      expect(runHelpingHand(state, useMove(1, MOVE_HELPING_HAND)).missed).toBe(true)
+      expect(state.battlers[2]!.round.helpingHand).toBe(false)
+    })
+
+    it('fails if partner already has helpingHand set', () => {
+      const state = createBattleState({
+        battlers: [
+          createBattlerState(0, mon({ moves: ['MOVE_HELPING_HAND', null, null, null], pp: [20, 0, 0, 0] }), 0),
+          createBattlerState(1, mon(), 0),
+          createBattlerState(2, mon(), 0),
+          createBattlerState(3, mon(), 0),
+        ],
+        battleTypeFlags: 1,
+        rng: countingRng(),
+      })
+      state.battlers[2]!.round.helpingHand = true
+      expect(runHelpingHand(state, useMove(1, MOVE_HELPING_HAND)).missed).toBe(true)
+    })
   })
 })
