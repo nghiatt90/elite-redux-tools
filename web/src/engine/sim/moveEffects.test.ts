@@ -28,6 +28,8 @@ import {
   MIN_STAT_STAGE,
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_LUCKY_CHANT,
+  SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_REFLECT,
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
@@ -77,6 +79,10 @@ import {
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
+  STATUS_FIELD_FAIRY_LOCK,
+  STATUS_FIELD_MUDSPORT,
+  STATUS_FIELD_WATERSPORT,
+  SPORT_DURATION,
   WEATHER_FOG_TEMPORARY,
   WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_TEMPORARY,
@@ -120,6 +126,9 @@ function requireMove(id: string): SimMoveData {
     flags: (m.flags as Record<string, true>) ?? {},
     accuracy: m.accuracy as number,
     hitsAir: m.hitsAir as SimMoveData['hitsAir'],
+    type2: m.type2 as string | null,
+    target: m.target as string,
+    argument: (m.argument ?? null) as SimMoveData['argument'],
   }
 }
 
@@ -236,6 +245,20 @@ const MOVE_TOXIC_THREAD = requireMove('MOVE_TOXIC_THREAD')
 const MOVE_TAR_SHOT = requireMove('MOVE_TAR_SHOT')
 const MOVE_SPICY_EXTRACT = requireMove('MOVE_SPICY_EXTRACT')
 const MOVE_MEMENTO = requireMove('MOVE_MEMENTO')
+const MOVE_SOAK = requireMove('MOVE_SOAK')
+const MOVE_MAGIC_POWDER = requireMove('MOVE_MAGIC_POWDER')
+const MOVE_FORESTS_CURSE = requireMove('MOVE_FORESTS_CURSE')
+const MOVE_TRICK_OR_TREAT = requireMove('MOVE_TRICK_OR_TREAT')
+const MOVE_INCITE = requireMove('MOVE_INCITE')
+const MOVE_CONVERSION = requireMove('MOVE_CONVERSION')
+const MOVE_REFLECT_TYPE = requireMove('MOVE_REFLECT_TYPE')
+const MOVE_LUCKY_CHANT = requireMove('MOVE_LUCKY_CHANT')
+const MOVE_QUICK_GUARD = requireMove('MOVE_QUICK_GUARD')
+const MOVE_MAT_BLOCK = requireMove('MOVE_MAT_BLOCK')
+const MOVE_SMOKESCREEN = requireMove('MOVE_SMOKESCREEN')
+const MOVE_MUD_SPORT = requireMove('MOVE_MUD_SPORT')
+const MOVE_WATER_SPORT = requireMove('MOVE_WATER_SPORT')
+const MOVE_FAIRY_LOCK = requireMove('MOVE_FAIRY_LOCK')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -5305,6 +5328,589 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           expect(act.missed).toBe(true)
           expect(state.battlers[0]!.mon.hp).toBe(100)
           expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(6)
+        })
+      })
+
+      describe('EFFECT_SOAK', () => {
+        it('makes target pure Water and deducts PP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SOAK', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['FIRE', 'FLYING', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SOAK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.types).toEqual(['WATER', 'WATER', 'MYSTERY'])
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('fails on target that is already pure Water', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SOAK', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SOAK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[1]!.mon.types).toEqual(['WATER', 'MYSTERY', 'MYSTERY'])
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('fails if target has Substitute', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SOAK', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['FIRE', 'MYSTERY', 'MYSTERY'], status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          state.battlers[1]!.volatiles.substituteHp = 25
+
+          const out = executeTurn(state, [useMove(1, MOVE_SOAK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[1]!.mon.types).toEqual(['FIRE', 'MYSTERY', 'MYSTERY'])
+        })
+
+        it('Magic Powder turns target into pure Psychic', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MAGIC_POWDER', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['GRASS', 'POISON', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_MAGIC_POWDER), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.types).toEqual(['PSYCHIC', 'PSYCHIC', 'MYSTERY'])
+        })
+
+        it('compares type1/type2 only: a Water/Water target with a Grass type3 still fails (VARIOUS_TRY_SOAK :7369)', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_SOAK', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['WATER', 'WATER', 'GRASS'] },
+            ],
+            countingRng(),
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_SOAK), null], testDeps())
+          expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(state.battlers[1]!.mon.types).toEqual(['WATER', 'WATER', 'GRASS'])
+        })
+      })
+
+      describe('EFFECT_THIRD_TYPE', () => {
+        it("Forest's Curse adds Grass as the third type", () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FORESTS_CURSE', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_FORESTS_CURSE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.types).toEqual(['NORMAL', 'MYSTERY', 'GRASS'])
+        })
+
+        it("Forest's Curse fails if target is already Grass type", () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FORESTS_CURSE', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['GRASS', 'POISON', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_FORESTS_CURSE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+
+        it('Trick-or-Treat sets trickOrTreat flag and succeeds even if target is already Ghost', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TRICK_OR_TREAT', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, types: ['GHOST', 'POISON', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_TRICK_OR_TREAT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.volatiles.trickOrTreat).toBe(true)
+          expect(state.battlers[1]!.mon.types[2]).toBe('GHOST')
+        })
+
+        it('Incite adds Dark as third type and inflicts ENRAGED status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_INCITE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, types: ['FIRE', 'FLYING', 'MYSTERY'] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_INCITE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.types).toEqual(['FIRE', 'FLYING', 'DARK'])
+          expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_ENRAGED)).toBe(true)
+          expect(act.statusApplied).toEqual({ battlerId: 1, status: 'ENRAGED' })
+        })
+      })
+
+      describe('EFFECT_CONVERSION', () => {
+        it("changes the user to its first non-mystery move's type and boosts SpAtk/Speed", () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              {
+                moves: ['MOVE_THUNDER_WAVE', 'MOVE_CONVERSION', null, null],
+                pp: [20, 30, 0, 0],
+                types: ['NORMAL', 'MYSTERY', 'MYSTERY'],
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(2, MOVE_CONVERSION), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.types).toEqual(['ELECTRIC', 'ELECTRIC', 'MYSTERY'])
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+        })
+
+        it('fails type change if already of that type but still raises stats per C quirk', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              {
+                moves: ['MOVE_CONVERSION', 'MOVE_EMBER', null, null],
+                pp: [30, 25, 0, 0],
+                types: ['NORMAL', 'MYSTERY', 'MYSTERY'],
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Conversion is move 0 (type NORMAL); user is already pure NORMAL.
+          // Type change fails in C, but it still proceeds to stat buffs!
+          const out = executeTurn(state, [useMove(1, MOVE_CONVERSION), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.types).toEqual(['NORMAL', 'MYSTERY', 'MYSTERY'])
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
+        })
+      })
+
+      describe('EFFECT_REFLECT_TYPE', () => {
+        it("copies user's type1 and type2 onto the target (ER design)", () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              {
+                moves: ['MOVE_REFLECT_TYPE', null, null, null],
+                pp: [15, 0, 0, 0],
+                types: ['ELECTRIC', 'STEEL', 'MYSTERY'],
+              },
+              {
+                spe: 50,
+                types: ['FIRE', 'FLYING', 'GRASS'],
+              },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_REFLECT_TYPE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.types).toEqual(['ELECTRIC', 'STEEL', 'GRASS'])
+        })
+
+        it('fails if target is Arceus or Silvally', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              {
+                moves: ['MOVE_REFLECT_TYPE', null, null, null],
+                pp: [15, 0, 0, 0],
+                types: ['FIRE', 'MYSTERY', 'MYSTERY'],
+              },
+              {
+                spe: 50,
+                types: ['NORMAL', 'MYSTERY', 'MYSTERY'],
+              },
+            ],
+            rng,
+          )
+          state.battlers[1]!.mon.speciesId = 'SPECIES_ARCEUS'
+
+          const out = executeTurn(state, [useMove(1, MOVE_REFLECT_TYPE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[1]!.mon.types).toEqual(['NORMAL', 'MYSTERY', 'MYSTERY'])
+        })
+
+        it("a mono-typed user writes its type into both of the target's slots (:7355-7357)", () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_REFLECT_TYPE', null, null, null], pp: [15, 0, 0, 0], types: ['FIRE', 'MYSTERY', 'MYSTERY'] },
+              { spe: 50, types: ['WATER', 'GROUND', 'GRASS'] },
+            ],
+            countingRng(),
+          )
+          executeTurn(state, [useMove(1, MOVE_REFLECT_TYPE), null], testDeps())
+          expect(state.battlers[1]!.mon.types).toEqual(['FIRE', 'FIRE', 'GRASS'])
+        })
+
+        it('a user with type1 MYSTERY (e.g. after Burn Up) copies its type2 twice (:7352-7354)', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_REFLECT_TYPE', null, null, null], pp: [15, 0, 0, 0], types: ['MYSTERY', 'FLYING', 'MYSTERY'] },
+              { spe: 50, types: ['WATER', 'GROUND', 'MYSTERY'] },
+            ],
+            countingRng(),
+          )
+          executeTurn(state, [useMove(1, MOVE_REFLECT_TYPE), null], testDeps())
+          expect(state.battlers[1]!.mon.types).toEqual(['FLYING', 'FLYING', 'MYSTERY'])
+        })
+
+        it('fails when the user has no type1/type2 (:7358-7359)', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_REFLECT_TYPE', null, null, null], pp: [15, 0, 0, 0], types: ['MYSTERY', 'MYSTERY', 'GHOST'] },
+              { spe: 50, types: ['WATER', 'GROUND', 'MYSTERY'] },
+            ],
+            countingRng(),
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REFLECT_TYPE), null], testDeps())
+          expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(state.battlers[1]!.mon.types).toEqual(['WATER', 'GROUND', 'MYSTERY'])
+        })
+      })
+
+      describe('EFFECT_LUCKY_CHANT', () => {
+        it('sets luckyChantTimer to 5 and sets SIDE_STATUS_LUCKY_CHANT', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_LUCKY_CHANT', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_LUCKY_CHANT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.sides[0]!.timers.luckyChantTimer).toBe(5)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_LUCKY_CHANT)).toBe(true)
+        })
+
+        it('fails if Lucky Chant is already active on user side', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_LUCKY_CHANT', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.sides[0]!.statuses |= SIDE_STATUS_LUCKY_CHANT
+          state.sides[0]!.timers.luckyChantTimer = 3
+
+          const out = executeTurn(state, [useMove(1, MOVE_LUCKY_CHANT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_QUICK_GUARD', () => {
+        it('sets quickGuardTimer to 3 and blocks opposing priority attack', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_QUICK_GUARD', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+              { moves: ['MOVE_BABY_DOLL_EYES', null, null, null], pp: [30, 0, 0, 0], spe: 50 },
+            ],
+            rng,
+          )
+
+          const guard = useMove(1, MOVE_QUICK_GUARD)
+          guard.chosenMove = { ...guard.chosenMove!, priority: 1 }
+          const eyes = useMove(0, MOVE_BABY_DOLL_EYES)
+          eyes.chosenMove = { ...eyes.chosenMove!, priority: 1 }
+          const out = executeTurn(state, [guard, eyes], deps)
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          expect(act0.missed).toBe(false)
+          // started.quickGuard keeps ENDTURN_MISC_SIDE_TIMERS from ticking it on the setting turn.
+          expect(state.sides[0]!.timers.quickGuardTimer).toBe(3)
+
+          const act1 = out.actions.find((a) => a.battlerId === 1)!
+          expect(act1.cancelledBy).toBe('QUICK_GUARD')
+          expect(state.battlers[1]!.mon.pp[0]).toBe(30) // BattleScript_ButItFailed has no ppreduce
+        })
+
+        it('does not block a priority-0 move', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_QUICK_GUARD', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+              { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+            ],
+            countingRng(),
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_QUICK_GUARD), useMove(0, MOVE_TACKLE)], testDeps())
+          expect(out.actions.find((a) => a.battlerId === 1)!.cancelledBy).toBeNull()
+        })
+
+        it('fails if Quick Guard is already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_QUICK_GUARD', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.sides[0]!.timers.quickGuardTimer = 2
+
+          const out = executeTurn(state, [useMove(1, MOVE_QUICK_GUARD), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_MAT_BLOCK', () => {
+        it('succeeds on first turn, protects against attack, and wears off at end of turn', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MAT_BLOCK', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.volatiles.isFirstTurn = 1
+
+          const out = executeTurn(state, [useMove(1, MOVE_MAT_BLOCK), useMove(0, MOVE_TACKLE)], deps)
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          expect(act0.missed).toBe(false)
+
+          const act1 = out.actions.find((a) => a.battlerId === 1)!
+          expect(act1.missed).toBe(true)
+          expect(act1.targetDamage).toBeNull()
+
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_MAT_BLOCK)).toBe(false)
+        })
+
+        it('fails if not the user first turn', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MAT_BLOCK', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.volatiles.isFirstTurn = 0
+
+          const out = executeTurn(state, [useMove(1, MOVE_MAT_BLOCK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9) // ButItFailedAtkStringPpReduce
+        })
+      })
+
+      describe('EFFECT_SMOKESCREEN', () => {
+        it('sets smokescreenTimer to 5 and sets SIDE_STATUS_SMOKESCREEN', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SMOKESCREEN', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SMOKESCREEN), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.sides[0]!.timers.smokescreenTimer).toBe(5)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_SMOKESCREEN)).toBe(true)
+        })
+
+        it('fails if Smokescreen is already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SMOKESCREEN', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.sides[0]!.statuses |= SIDE_STATUS_SMOKESCREEN
+          state.sides[0]!.timers.smokescreenTimer = 4
+
+          const out = executeTurn(state, [useMove(1, MOVE_SMOKESCREEN), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+
+        it("succeeds without resetting a timer-only smokescreen (jumpifsideaffecting reads the bit, :12389)", () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_SMOKESCREEN', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            countingRng(),
+          )
+          state.sides[0]!.timers.smokescreenTimer = 3
+          const out = executeTurn(state, [useMove(1, MOVE_SMOKESCREEN), null], testDeps())
+          expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_SMOKESCREEN)).toBe(false)
+        })
+      })
+
+      describe('EFFECT_MUD_SPORT and EFFECT_WATER_SPORT', () => {
+        it('Mud Sport sets field mudSportTimer to 5 and STATUS_FIELD_MUDSPORT', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MUD_SPORT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_MUD_SPORT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.field.timers.mudSportTimer).toBe(SPORT_DURATION)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_MUDSPORT)).toBe(true)
+        })
+
+        it('Mud Sport fails if already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MUD_SPORT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.field.statuses |= STATUS_FIELD_MUDSPORT
+          state.field.timers.mudSportTimer = 3
+
+          const out = executeTurn(state, [useMove(1, MOVE_MUD_SPORT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+        })
+
+        it('Water Sport sets field waterSportTimer to 5 and STATUS_FIELD_WATERSPORT', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_WATER_SPORT', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_WATER_SPORT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          // Kept quirk: ENDTURN_WATER_SPORT (battle_util.c:2148) has no started.waterSport check, unlike
+          // Mud Sport's (:2156), so the setting turn already counts down.
+          expect(state.field.timers.waterSportTimer).toBe(SPORT_DURATION - 1)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_WATERSPORT)).toBe(true)
+        })
+      })
+
+      describe('EFFECT_FAIRY_LOCK', () => {
+        it('sets fairyLockTimer to 1, sets STATUS_FIELD_FAIRY_LOCK, and prevents escape', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FAIRY_LOCK', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_FAIRY_LOCK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.field.timers.fairyLockTimer).toBe(1)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_FAIRY_LOCK)).toBe(true)
+          expect(canBattlerEscape(state, 1, deps)).toBe(false)
+        })
+
+        it('fails if Fairy Lock is already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FAIRY_LOCK', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.field.statuses |= STATUS_FIELD_FAIRY_LOCK
+          state.field.timers.fairyLockTimer = 1
+
+          const out = executeTurn(state, [useMove(1, MOVE_FAIRY_LOCK), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
         })
       })
     })

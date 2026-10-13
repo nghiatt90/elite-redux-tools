@@ -502,10 +502,15 @@ function resetPendingSwitch(state: BattleState, battlerId: number): void {
   if (battler) battler.monToSwitchIntoId = PARTY_SIZE
 }
 
-/** TurnValuesCleanUp(FALSE), battle_main.c:4490 -- ZERO(gRoundStructs[i]) for every battler. */
+/** TurnValuesCleanUp(FALSE), battle_main.c:4490, 4505-4506 -- ZERO(gRoundStructs[i]) for every battler,
+ * then clear the one-turn side shields (Wide Guard, Crafty Shield, Mat Block). The isFirstTurn and
+ * rechargeTimer decrements (:4491-4496) are not ported. */
 export function roundStructsClear(state: BattleState): void {
   for (const battler of state.battlers) {
     if (battler) battler.round = createRoundState()
+  }
+  for (const side of state.sides) {
+    side.statuses = clearFlag(side.statuses, SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK)
   }
 }
 
@@ -1309,7 +1314,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // attackerHoldEffect.
     const attackerMon = state.battlers[battlerId]?.mon
     const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
-    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding)
+    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding, action.chosenMove)
     if (cancelResult.cancelledBy) {
       outcomes.push({
         turnOrderIndex: index,

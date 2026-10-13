@@ -23,10 +23,12 @@ import {
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_LUCKY_CHANT,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_MIST,
   SIDE_STATUS_REFLECT,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_TOXIC_SPIKES,
@@ -88,10 +90,16 @@ import {
   STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
   STATUS_FIELD_WONDER_ROOM,
+  STATUS_FIELD_FAIRY_LOCK,
+  STATUS_FIELD_MUDSPORT,
+  STATUS_FIELD_WATERSPORT,
   SIDE_STATUS_STICKY_WEB,
   STATUS_FIELD_TERRAIN_ANY,
   TERRAIN_DURATION,
   TERRAIN_DURATION_EXTENDED,
+  SCREEN_DURATION,
+  SCREEN_DURATION_EXTENDED,
+  SPORT_DURATION,
   GRAVITY_DURATION,
   INVERSE_ROOM_DURATION,
   MAGIC_ROOM_DURATION,
@@ -170,6 +178,7 @@ import {
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_ENRAGE,
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FREEZE,
   MOVE_EFFECT_FROSTBITE,
@@ -2252,7 +2261,16 @@ export function handleProtect(ctx: MoveEffectContext): ActionOutcome {
   const battler = state.battlers[battlerId]!
 
   // Cmd_ppreduce runs before setprotectlike in BattleScript_ProtectLikeAtkString (data/battle_scripts_1.s:5038-5040)
+  // or BattleScript_ButItFailedAtkStringPpReduce (data/battle_scripts_1.s:5938-5939)
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // BattleScript_EffectMatBlock (data/battle_scripts_1.s:5029-5032): jumpifnotfirstturn BattleScript_ButItFailedAtkStringPpReduce
+  // (Cmd_jumpifnotfirstturn, src/battle_script_commands.c:9439-9446)
+  // gProcessingExtraAttacks is never set in the sim. isFirstTurn is never decremented either
+  // (TurnValuesCleanUp's :4491 is unported), so this cannot fail yet.
+  if (moveEffect === 'EFFECT_MAT_BLOCK' && !battler.volatiles.isFirstTurn) {
+    return outcome(ctx, { missed: true })
+  }
 
   // ProtectSucceeds, battle_script_commands.c:6649-6655
   // If last resulting move is not a protection move (moves.json flag `isProtection`), reset protectUses to 0
@@ -5858,9 +5876,400 @@ function handleMemento(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, attackerDamage: userHp, statChanges, fainted })
 }
 
+/**
+ * EFFECT_SOAK (Soak, Magic Powder)
+ * BattleScript_EffectSoak (data/battle_scripts_1.s:1949-1962),
+ * VARIOUS_TRY_SOAK (src/battle_script_commands.c:7365-7373),
+ * SET_BATTLER_TYPE (include/battle.h:755-760).
+ */
+export function handleSoak(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null) return outcome(ctx, { missed: true })
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1951)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:1953) -- PrintMoveMissed also calls ppreduce (:3094)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. jumpifability BS_TARGET, ABILITY_MULTITYPE / ABILITY_RKS_SYSTEM, BattleScript_ButItFailed (:1954-1955)
+  const moldBreaker = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
+  if (
+    battlerHasSimAbility(state, target, 'ABILITY_MULTITYPE', true, battlerId, moldBreaker, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_RKS_SYSTEM', true, battlerId, moldBreaker, deps.dataContext)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifsubstituteblocks BattleScript_ButItFailed (:1956)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. trysoak BattleScript_ButItFailed (VARIOUS_TRY_SOAK, src/battle_script_commands.c:7365-7373)
+  // gBattleMoves[gCurrentMove].type: Soak -> Water, Magic Powder -> Psychic. Only type1/type2 are
+  // compared; the sim's mono [X, 'MYSTERY'] is the C's type2 == type1.
+  const moveType = (deps.dataContext.move(moveId)?.type ?? 'TYPE_MYSTERY').replace(/^TYPE_/, '')
+  const [t1, t2] = target.mon.types
+  if (t1 === moveType && (t2 === moveType || t2 === 'MYSTERY')) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // SET_BATTLER_TYPE (battle.h:755-760)
+  target.mon.types = [moveType, moveType, 'MYSTERY']
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_THIRD_TYPE (Forest's Curse, Trick-or-Treat, Incite)
+ * BattleScript_EffectThirdType (data/battle_scripts_1.s:1269-1281),
+ * VARIOUS_TRY_THIRD_TYPE (src/battle_script_commands.c:7768-7781),
+ * VARIOUS_ARGUMENT_TO_MOVE_EFFECT (:7713-7715),
+ * SetMoveEffect (:3025-3030).
+ */
+export function handleThirdType(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null) return outcome(ctx, { missed: true })
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1271)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:1273)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. trysetthirdtype BS_TARGET, BattleScript_ButItFailed (:1274, VARIOUS_TRY_THIRD_TYPE:7768-7781)
+  const moveData = deps.dataContext.move(moveId)
+  const moveType = (moveData?.type ?? 'TYPE_MYSTERY').replace(/^TYPE_/, '')
+
+  // IS_BATTLER_OF_TYPE: an already-typed target fails, except Trick-or-Treat's Ghost, which
+  // still sets trickOrTreat and type3.
+  if (target.mon.types.includes(moveType)) {
+    if (moveType !== 'GHOST') return outcome(ctx, { targetId, missed: true })
+    target.volatiles.trickOrTreat = true
+  }
+  target.mon.types[2] = moveType
+
+  // 4. argumenttomoveeffect + seteffectprimary (:1279-1280). Incite is the only EFFECT_THIRD_TYPE
+  // move with an argument (MOVE_EFFECT_ENRAGE); the others leave moveEffect 0.
+  let statusApplied: StatusAppliedOutcome | null = null
+  const arg = moveData?.argument
+  if (arg?.kind === 'effect' && arg.effect === 'MOVE_EFFECT_ENRAGE') {
+    const res = applyPrimaryStatusEffect(state, battlerId, targetId, MOVE_EFFECT_ENRAGE, moveId, deps, unmodelled, true, false)
+    if (res.applied && res.status) {
+      statusApplied = { battlerId: targetId, status: res.status }
+    }
+  }
+
+  return outcome(ctx, { targetId, statusApplied, missed: false })
+}
+
+/**
+ * EFFECT_CONVERSION (Conversion)
+ * BattleScript_EffectConversion (data/battle_scripts_1.s:3831-3868),
+ * Cmd_tryconversiontypechange (src/battle_script_commands.c:10205-10236).
+ */
+export function handleConversion(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:3834)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. tryconversiontypechange BattleScript_EffectConversionFailed (:10205-10236)
+  // Inspects battler's moves 0..3 in order. On the FIRST non-empty move whose type is not MYSTERY:
+  // if battler's types already match that move's types, it breaks out and fails type change!
+  let typeChanged = false
+  const moves = battler.mon.moves ?? []
+  for (let i = 0; i < moves.length; i++) {
+    const mId = moves[i]
+    if (!mId) continue
+    const mData = deps.dataContext.move(mId)
+    const mType = (mData?.type ?? 'TYPE_MYSTERY').replace(/^TYPE_/, '')
+    if (mType === 'MYSTERY') continue
+    const mType2Raw = mData?.type2 ? mData.type2.replace(/^TYPE_/, '') : 'MYSTERY'
+    const mType2 = mType2Raw === 'MYSTERY' ? mType : mType2Raw
+
+    const [t1, t2, t3] = battler.mon.types
+    const currentT2 = (t2 === 'MYSTERY' || !t2) ? t1 : t2
+    if (t1 === mType && currentT2 === mType2 && t3 === 'MYSTERY') {
+      // Mon is already of this move's exact types; C breaks out and fails type change (:10224)
+      break
+    }
+
+    battler.mon.types = [mType, mType2, 'MYSTERY']
+    typeChanged = true
+    break
+  }
+
+  // 3. Both paths reach the same jumpifstat pair (:3845-3846, :3851-3852). Kept quirk: it tests
+  // STAT_ATK, not STAT_SPATK, before raising SpAtk and Speed. CompareStat's Contrary inversion
+  // is not applied, as in the other stat handlers.
+  const statChanges: StatChangeOutcome[] = []
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+
+  let statBoostFailed = false
+  if (atkStage < MAX_STAT_STAGE || speStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPEED,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: r2.delta })
+  } else {
+    // Both STAT_ATK and STAT_SPEED are at max stage -> jumps to BattleScript_CantRaiseMultipleStats (:3852)
+    statBoostFailed = true
+  }
+
+  if (!typeChanged && statBoostFailed) {
+    return outcome(ctx, { missed: true })
+  }
+
+  return outcome(ctx, { statChanges, missed: false })
+}
+
+/**
+ * EFFECT_REFLECT_TYPE (Reflect Type)
+ * BattleScript_EffectReflectType (data/battle_scripts_1.s:1964-1975),
+ * VARIOUS_TRY_REFLECT_TYPE (src/battle_script_commands.c:7348-7364).
+ * ER reverses vanilla: the attacker's types are written onto the target.
+ */
+export function handleReflectType(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null) return outcome(ctx, { missed: true })
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const user = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1966)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:1968)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. tryreflecttype BattleScript_ButItFailed (VARIOUS_TRY_REFLECT_TYPE, src/battle_script_commands.c:7348-7364)
+  // Exact species match only, so other Arceus/Silvally forms are not exempt.
+  if (target.mon.speciesId === 'SPECIES_ARCEUS' || target.mon.speciesId === 'SPECIES_SILVALLY') {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  // The four branches in C order; type3 is never touched.
+  const [u1, u2] = user.mon.types
+  const t3 = target.mon.types[2]
+  if (u1 === 'MYSTERY' && u2 !== 'MYSTERY') {
+    target.mon.types = [u2, u2, t3]
+  } else if (u1 !== 'MYSTERY' && u2 === 'MYSTERY') {
+    target.mon.types = [u1, u1, t3]
+  } else if (u1 === 'MYSTERY' && u2 === 'MYSTERY') {
+    return outcome(ctx, { targetId, missed: true })
+  } else {
+    target.mon.types = [u1, u2, t3]
+  }
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_LUCKY_CHANT (Lucky Chant)
+ * BattleScript_EffectLuckyChant (data/battle_scripts_1.s:2342-2351),
+ * VARIOUS_SET_LUCKY_CHANT (src/battle_script_commands.c:7201-7212).
+ */
+export function handleLuckyChant(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const side = battlerId & 1
+
+  // 1. ppreduce (:2345)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setluckychant BS_ATTACKER, BattleScript_ButItFailed (:2346, VARIOUS_SET_LUCKY_CHANT:7201-7212)
+  if (state.sides[side].statuses & SIDE_STATUS_LUCKY_CHANT) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.sides[side].timers.started.luckyChant = true
+  state.sides[side].statuses |= SIDE_STATUS_LUCKY_CHANT
+  state.sides[side].timers.luckyChantBattlerId = battlerId
+  state.sides[side].timers.luckyChantTimer = SCREEN_DURATION
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_QUICK_GUARD (Quick Guard)
+ * BattleScript_EffectQuickGuard (data/battle_scripts_1.s:12549-12558),
+ * VARIOUS_SET_QUICK_GUARD (src/battle_script_commands.c:8886-8894).
+ */
+export function handleQuickGuard(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const side = battlerId & 1
+
+  // 1. ppreduce (:12552)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setquickguard BattleScript_ButItFailed (:12553, VARIOUS_SET_QUICK_GUARD:8886-8894)
+  if (state.sides[side].timers.quickGuardTimer) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.sides[side].timers.quickGuardTimer = 3
+  state.sides[side].timers.started.quickGuard = true
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_SMOKESCREEN (Smokescreen)
+ * BattleScript_EffectSmokescreen (data/battle_scripts_1.s:12385-12399),
+ * SetMoveEffect:MOVE_EFFECT_SMOKESCREEN (src/battle_script_commands.c:2983-2995).
+ */
+export function handleSmokescreen(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+  const side = battlerId & 1
+
+  // 1. ppreduce (:12388)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // The attacker checks its own ability, so Mold Breaker never applies.
+  const hasScreenCleaner = battlerHasSimAbility(state, battler, 'ABILITY_SCREEN_CLEANER', false, battlerId, false, deps.dataContext)
+
+  // 2. jumpifsideaffecting BS_ATTACKER, SIDE_STATUS_SMOKESCREEN (:12389) reads the bit only, so
+  // White Smoke's timer-only smokescreen does not fail the move.
+  if (hasFlag(state.sides[side].statuses, SIDE_STATUS_SMOKESCREEN) && !hasScreenCleaner) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. SetMoveEffect(MOVE_EFFECT_SMOKESCREEN) (:2983-2995). Kept quirk: a Screen Cleaner user
+  // passes the check above, then sets nothing, but the move still counts as a success.
+  if (!state.sides[side].timers.smokescreenTimer && !hasScreenCleaner) {
+    const isExtended = getHoldEffect(ctx, battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+    const duration = isExtended ? SCREEN_DURATION_EXTENDED : SCREEN_DURATION
+
+    state.sides[side].timers.smokescreenTimer = duration
+    state.sides[side].timers.started.smokescreen = true
+    state.sides[side].timers.smokescreenBattler = battlerId
+    state.sides[side].statuses |= SIDE_STATUS_SMOKESCREEN
+  }
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_MUD_SPORT and EFFECT_WATER_SPORT (Mud Sport, Water Sport)
+ * BattleScript_EffectMudSport / BattleScript_EffectWaterSport (data/battle_scripts_1.s:6598-6609),
+ * Cmd_settypebasedhalvers (src/battle_script_commands.c:12217-12245). ER's damage path never
+ * reads STATUS_FIELD_MUDSPORT or STATUS_FIELD_WATERSPORT; only the end-of-turn countdown and the AI do.
+ */
+export function handleTypeBasedHalvers(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6602)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. settypebasedhalvers BattleScript_ButItFailed (Cmd_settypebasedhalvers:12217-12245)
+  if (moveEffect === 'EFFECT_MUD_SPORT') {
+    if (state.field.statuses & STATUS_FIELD_MUDSPORT) {
+      return outcome(ctx, { missed: true })
+    }
+    state.field.statuses |= STATUS_FIELD_MUDSPORT
+    state.field.timers.started.mudSport = true
+    state.field.timers.mudSportTimer = SPORT_DURATION
+  } else {
+    if (state.field.statuses & STATUS_FIELD_WATERSPORT) {
+      return outcome(ctx, { missed: true })
+    }
+    state.field.statuses |= STATUS_FIELD_WATERSPORT
+    state.field.timers.started.waterSport = true
+    state.field.timers.waterSportTimer = SPORT_DURATION
+  }
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_FAIRY_LOCK (Fairy Lock)
+ * BattleScript_EffectFairyLock (data/battle_scripts_1.s:835-845),
+ * VARIOUS_TRY_FAIRY_LOCK (src/battle_script_commands.c:6799-6808).
+ */
+export function handleFairyLock(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:837)
+  const missed = checkAccuracy(ctx, targetId ?? battlerId, moveId)
+  // 2. ppreduce (:839)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { missed: true })
+
+  // 3. trysetfairylock BattleScript_ButItFailed (VARIOUS_TRY_FAIRY_LOCK:6799-6808)
+  if (state.field.statuses & STATUS_FIELD_FAIRY_LOCK) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.field.statuses |= STATUS_FIELD_FAIRY_LOCK
+  state.field.timers.started.fairyLock = true
+  state.field.timers.fairyLockTimer = 1
+
+  return outcome(ctx, { missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
+  EFFECT_MAT_BLOCK: handleProtect,
+
+  EFFECT_SOAK: handleSoak,
+  EFFECT_THIRD_TYPE: handleThirdType,
+  EFFECT_CONVERSION: handleConversion,
+  EFFECT_REFLECT_TYPE: handleReflectType,
+
+  EFFECT_LUCKY_CHANT: handleLuckyChant,
+  EFFECT_QUICK_GUARD: handleQuickGuard,
+  EFFECT_SMOKESCREEN: handleSmokescreen,
+
+  EFFECT_MUD_SPORT: handleTypeBasedHalvers,
+  EFFECT_WATER_SPORT: handleTypeBasedHalvers,
+  EFFECT_FAIRY_LOCK: handleFairyLock,
 
   EFFECT_ATTACK_UP: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 1),
   EFFECT_ATTACK_UP_2: (ctx) => handleSingleStatUp(ctx, STAT_ATK, 2),

@@ -72,6 +72,9 @@ export interface SimMoveData {
   id: string
   power: number
   type: string | null
+  /** moves.json's `type2` -- `gBattleMoves[move].type2`, read by Cmd_tryconversiontypechange
+   * (battle_script_commands.c:10216). */
+  type2?: string | null
   split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
   effect: string | null
   target?: string

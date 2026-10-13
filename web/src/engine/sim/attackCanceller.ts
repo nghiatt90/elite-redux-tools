@@ -72,7 +72,9 @@
 //                          not modelled either.
 //   CANCELLER_THROAT_CHOP Unreachable -- volatiles.throatChopTimer has no writer.
 //   CANCELLER_SKY_DROP    Unreachable -- volatiles.skyDropped has no writer.
-//   CANCELLER_QUICK_GUARD Unreachable -- side.timers.quickGuardTimer has no writer.
+//   CANCELLER_QUICK_GUARD Ported (:3272-3280) -- gProcessingExtraAttacks is never
+//                          set in the sim. Priority comes from the action's own
+//                          TurnOrderMoveView; with none supplied the check is skipped.
 //   CANCELLER_PSYCHIC_TERRAIN Unreachable -- field.statuses' PSYCHIC_TERRAIN bit
 //                          has no writer.
 //   CANCELLER_CONFUSED    Ported, except the self-hit's own damage (see below).
@@ -131,6 +133,7 @@ import type { BattleState, BattlerState } from './state'
 import type { SimMoveData } from './dataContext'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
+import { getMovePriority, type TurnOrderMoveView } from './turnOrder'
 import {
   STATUS1_FREEZE,
   STATUS1_FROSTBITE,
@@ -164,6 +167,7 @@ export const CANCEL_REASONS = [
   'GRAVITY',
   'HEAL_BLOCK',
   'TAUNT',
+  'QUICK_GUARD',
 ] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
@@ -325,6 +329,7 @@ export function runAttackCanceller(
   unmodelled: string[],
   attackerHoldEffect: string | null = null,
   grounding?: GroundingContext,
+  moveView: TurnOrderMoveView | null = null,
 ): AttackCancellerResult {
   const attacker = state.battlers[attackerId]
   if (!attacker) return NO_CANCEL
@@ -474,9 +479,22 @@ export function runAttackCanceller(
     )
   }
 
-  // CANCELLER_THROAT_CHOP (:3481-3490), CANCELLER_SKY_DROP (:3264-3271),
-  // CANCELLER_QUICK_GUARD (:3272-3280), CANCELLER_PSYCHIC_TERRAIN
-  // (:3542-3551) -- unreachable, see header.
+  // CANCELLER_THROAT_CHOP (:3481-3490), CANCELLER_SKY_DROP (:3264-3271) -- unreachable, see header.
+
+  // CANCELLER_QUICK_GUARD, battle_util.c:3272-3280:
+  // BattleScript_ButItFailed with HITMARKER_NO_ATTACKSTRING -- no ppreduce.
+  if (
+    targetId !== null &&
+    moveView &&
+    (attackerId & 1) !== (targetId & 1) &&
+    state.sides[targetId & 1].timers.quickGuardTimer &&
+    getMovePriority(state, attackerId, moveView, targetId) > 0
+  ) {
+    attacker.round.attackCancelled = true
+    return { cancelledBy: 'QUICK_GUARD', confusionSelfHitDamage: null }
+  }
+
+  // CANCELLER_PSYCHIC_TERRAIN (:3542-3551) -- unreachable, see header.
 
   // CANCELLER_CONFUSED, :3368-3399 (source order; enum value 20 -- see header).
   const confusionCounter = getCounter(attacker.mon.status2, STATUS2_CONFUSION)
