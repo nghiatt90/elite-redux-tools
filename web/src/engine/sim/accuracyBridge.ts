@@ -40,12 +40,14 @@ import {
   DEFAULT_STAT_STAGE,
   STAT_ACC,
   STAT_EVASION,
+  STATUS2_WRAPPED,
   STATUS3_ALWAYS_HITS,
   STATUS3_TELEKINESIS,
   STATUS4_FORESIGHT,
   hasFlag,
 } from './constants'
 import { isPhantomForce, semiInvulnerableState } from './unpack'
+import { isSimAbilitySuppressed } from './statBuffs'
 
 const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/, '')
 
@@ -146,6 +148,14 @@ export function buildAccuracyInputs(
     moveFlagDmgTwoXInAir: move?.hitsAir === 'DOUBLE_DAMAGE',
     moveFlagDmgUnderground: Boolean(move?.flags.hitsUnderground),
     moveFlagDmgUnderwater: Boolean(move?.flags.hitsUnderwater),
+    moveSplit: move?.split ?? null,
+    // moves.json renames FLAG_MEGA_LAUNCHER/STRIKER/KEEN_EDGE (pipeline/src/erdata/emit.py:89-92). DoesMoveMatchFlag's
+    // ability-granted flags are not applied here.
+    moveFlagMegaLauncher: Boolean(move?.flags.bulletBased),
+    moveFlagArrowBased: Boolean(move?.flags.arrowBased),
+    moveFlagStriker: Boolean(move?.flags.kickBased),
+    moveFlagKeenEdge: Boolean(move?.flags.sliceBased),
+    moveTarget: move?.target ?? null,
 
     attackerTypes: attacker.mon.types,
     // Gapped (structuralGaps); the C tests a live 2-bit counter this sim never
@@ -177,6 +187,10 @@ export function buildAccuracyInputs(
     defenderIsUnderwater: semiInvulnerableState(defender.statuses3) === 'UNDERWATER',
     defenderSmokescreenActive: false,
     defenderAbilitySlots: defender.mon.abilities,
+    defenderIsWrapped: hasFlag(defender.mon.status2, STATUS2_WRAPPED),
+    isAbilitySuppressed: (side, abilityId) =>
+      isSimAbilitySuppressed(state, side === 'attacker' ? attacker : defender, abilityId, false, attackerId, false, deps.dataContext),
+    attackerIndexFirst: attackerId < targetId,
 
     weather,
     gravityActive,

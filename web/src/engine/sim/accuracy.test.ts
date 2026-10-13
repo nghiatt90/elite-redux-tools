@@ -25,7 +25,19 @@ function requireAbility(id: string): string {
 
 describe('real ids used below exist in the snapshot', () => {
   it('moves', () => {
-    for (const id of ['MOVE_TACKLE', 'MOVE_SHEER_COLD', 'MOVE_BLIZZARD', 'MOVE_EERIE_SPELL', 'MOVE_VEXING_VOID', 'MOVE_THUNDER', 'MOVE_HURRICANE']) requireMove(id)
+    for (const id of [
+      'MOVE_TACKLE',
+      'MOVE_SHEER_COLD',
+      'MOVE_BLIZZARD',
+      'MOVE_EERIE_SPELL',
+      'MOVE_VEXING_VOID',
+      'MOVE_THUNDER',
+      'MOVE_HURRICANE',
+      'MOVE_SING',
+      'MOVE_HYPNOSIS',
+      'MOVE_FOCUS_BLAST',
+    ])
+      requireMove(id)
   })
   it('abilities, including every UNPORTED_ACCURACY_ABILITIES entry', () => {
     for (const id of UNPORTED_ACCURACY_ABILITIES) requireAbility(id)
@@ -436,16 +448,24 @@ describe('gap cases -- IsStatDropBlocked, structural and unconditional', () => {
 })
 
 describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
-  it('an attacker ability with an onAccuracy hook (Sand Veil) is named in a gap', () => {
-    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
-    const result = getTotalAccuracy(baseInputs({ attackerAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({ field: 'attackerAbilitySlots', reason: 'NO_SOURCE', detail: "ABILITY_SAND_VEIL's onAccuracy hook has no port" })
+  it('an unported ability on defender (Commander) is named in a gap', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMMANDER'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ defenderAbilitySlots: slots }))
+    expect(otherGaps(result.gaps)).toContainEqual({
+      field: 'defenderAbilitySlots',
+      reason: 'NO_SOURCE',
+      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
+    })
   })
 
-  it('a defender ability with an onAccuracy hook (No Guard) is named in a gap', () => {
-    const slots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
-    const result = getTotalAccuracy(baseInputs({ defenderAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({ field: 'defenderAbilitySlots', reason: 'NO_SOURCE', detail: "ABILITY_NO_GUARD's onAccuracy hook has no port" })
+  it('an unported ability on attacker (Commander) is named in a gap', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMMANDER'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ attackerAbilitySlots: slots }))
+    expect(otherGaps(result.gaps)).toContainEqual({
+      field: 'attackerAbilitySlots',
+      reason: 'NO_SOURCE',
+      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
+    })
   })
 
   it('an ability with NO onAccuracy hook (Torrent) produces no ability gap', () => {
@@ -455,10 +475,14 @@ describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
     expect(otherGaps(result.gaps)).toEqual([])
   })
 
-  it('an innate slot (not just the chosen ability) is scanned too', () => {
-    const slots: AbilitySlots = { ability: null, innates: [requireAbility('ABILITY_COMPOUND_EYES'), null, null] }
-    const result = getTotalAccuracy(baseInputs({ attackerAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({ field: 'attackerAbilitySlots', reason: 'NO_SOURCE', detail: "ABILITY_COMPOUND_EYES's onAccuracy hook has no port" })
+  it('an innate slot (not just the chosen ability) is scanned for unported abilities', () => {
+    const slots: AbilitySlots = { ability: null, innates: [requireAbility('ABILITY_COMMANDER'), null, null] }
+    const result = getTotalAccuracy(baseInputs({ defenderAbilitySlots: slots }))
+    expect(otherGaps(result.gaps)).toContainEqual({
+      field: 'defenderAbilitySlots',
+      reason: 'NO_SOURCE',
+      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
+    })
   })
 
   it('UNPORTED_ACCURACY_ABILITIES has no duplicate ids', () => {
@@ -466,22 +490,63 @@ describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
   })
 })
 
-// Oracle test, same discipline as abilities/coverage.test.ts's registry
-// coverage gate: re-derive the truth from the committed snapshot every run,
-// rather than trusting the hand-maintained array above it. This list SHRINKS
-// only when an ability is really ported (removed from UNPORTED_ACCURACY_
-// ABILITIES AND given a real onAccuracy check in getTotalAccuracy, the way
-// HasAuroraBorealis was above), and GROWS if the snapshot is repinned to an
-// eliteredux-source commit that adds new onAccuracy hooks. Either direction
-// must fail this test until the array is updated to match.
 describe('UNPORTED_ACCURACY_ABILITIES oracle -- data/v2.65beta/abilityHooks.json', () => {
   const abilityHooks = snapshot<Record<string, { hooks?: Record<string, unknown> }>>('abilityHooks.json')
 
-  // Abilities this module genuinely ports a real onAccuracy-equivalent check
-  // for, even though they carry a live `.onAccuracy` hook in the C -- see
-  // getTotalAccuracy's HasAuroraBorealis branch, which is NOT the unported
-  // ability loop and is NOT in UNPORTED_ACCURACY_ABILITIES.
-  const GENUINELY_PORTED = new Set(['ABILITY_AURORA_BOREALIS'])
+  // Abilities this module genuinely ports a real onAccuracy check for
+  // (plus Aurora Borealis's check in the Hail exceptions path).
+  const GENUINELY_PORTED = new Set([
+    'ABILITY_ANGELS_WRATH',
+    'ABILITY_ARTILLERY',
+    'ABILITY_AURORA_BOREALIS',
+    'ABILITY_BAD_LUCK',
+    'ABILITY_BRAWLING_WYVERN',
+    'ABILITY_CHANDELIER',
+    'ABILITY_COMPOUND_EYES',
+    'ABILITY_DEADEYE',
+    'ABILITY_DEADLY_PRECISION',
+    'ABILITY_DEPTH_EXPLORER',
+    'ABILITY_ECHOLOCATION',
+    'ABILITY_ENLIGHTENED',
+    'ABILITY_FATAL_PRECISION',
+    'ABILITY_FINAL_BLOW',
+    'ABILITY_FLAWLESS_PRECISION',
+    'ABILITY_GIFTED_MIND',
+    'ABILITY_GLACIAL_GHOST',
+    'ABILITY_GRIP_PINCER',
+    'ABILITY_HUNTERS_MARK',
+    'ABILITY_HUSTLE',
+    'ABILITY_HYPNOTIC_TRANCE',
+    'ABILITY_HYPNOTIST',
+    'ABILITY_ILLUMINATE',
+    'ABILITY_INNER_FOCUS',
+    'ABILITY_IRON_BARRAGE',
+    'ABILITY_KEEN_EYE',
+    'ABILITY_LULLABY',
+    'ABILITY_LUNAR_ECLIPSE',
+    'ABILITY_MACH_3',
+    'ABILITY_NO_GUARD',
+    'ABILITY_OLE',
+    'ABILITY_PIXIE_POWER',
+    'ABILITY_PLASMA_LAMP',
+    'ABILITY_QIGONG',
+    'ABILITY_RADIANCE',
+    'ABILITY_RAIN_SHROUD',
+    'ABILITY_REFRIGERATOR',
+    'ABILITY_ROUNDHOUSE',
+    'ABILITY_SAND_VEIL',
+    'ABILITY_SHINY_LIGHTNING',
+    'ABILITY_SIGHTING_SYSTEM',
+    'ABILITY_SMOKEY_MANEUVERS',
+    'ABILITY_SNOW_CLOAK',
+    'ABILITY_SUPER_SCOPE',
+    'ABILITY_SWEEPING_EDGE',
+    'ABILITY_SWEEPING_EDGE_PLUS',
+    'ABILITY_UNLOCKED_POTENTIAL',
+    'ABILITY_VICTORY_STAR',
+    'ABILITY_WAY_OF_PRECISION',
+    'ABILITY_WORLD_SERPENT',
+  ])
 
   it('every ability declaring an onAccuracy hook is genuinely ported or in UNPORTED_ACCURACY_ABILITIES, and nothing extra is listed', () => {
     const withOnAccuracy = Object.entries(abilityHooks)
@@ -495,3 +560,349 @@ describe('UNPORTED_ACCURACY_ABILITIES oracle -- data/v2.65beta/abilityHooks.json
     expect(actual).toEqual(expected)
   })
 })
+
+describe('Compound Eyes (1.3x multiplier), :663-666', () => {
+  it('multiplies base move accuracy by 1.3: 70 * 1.3 = 91', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMPOUND_EYES'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(91)
+  })
+
+  it('multiplies base move accuracy by 1.3: 80 * 1.3 = 104, capped at 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMPOUND_EYES'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 80, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+})
+
+describe('onAccuracy loop order and suppression (battle_script_commands.c:1354-1362)', () => {
+  const eyes: AbilitySlots = { ability: requireAbility('ABILITY_COMPOUND_EYES'), innates: [null, null, null] }
+  const badLuck: AbilitySlots = { ability: requireAbility('ABILITY_BAD_LUCK'), innates: [null, null, null] }
+
+  it('runs the lower battler index first: attacker first gives trunc(70*1.3)-5 = 86, defender first trunc(65*1.3) = 84', () => {
+    const attackerFirst = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: eyes, defenderAbilitySlots: badLuck, attackerIndexFirst: true }))
+    const defenderFirst = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: eyes, defenderAbilitySlots: badLuck, attackerIndexFirst: false }))
+    expect(attackerFirst.accuracy).toBe(86)
+    expect(defenderFirst.accuracy).toBe(84)
+  })
+
+  it('skips an ability IsSuppressed reports (Gastro Acid / Neutralizing Gas)', () => {
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: eyes, isAbilitySuppressed: () => true }))
+    expect(result.accuracy).toBe(70)
+  })
+})
+
+describe('No Guard (ALWAYS_HITS as attacker and defender, bypasses semi-invulnerability), :1611-1614', () => {
+  it('attacker with No Guard returns 101 for a 70 accuracy move', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('attacker with No Guard hits semi-invulnerable target (defender on-air): prio 5 beats prio 4 -> returns 101', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderIsOnAir: true, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('defender with No Guard returns 101 when attacked with a 70 accuracy move', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('defender with No Guard on air still gets hit (returns 101)', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderIsOnAir: true, defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+})
+
+describe('Hustle (0.9x multiplier on physical and special damaging moves, exempts status), :1201-1204', () => {
+  it('penalizes physical damaging moves: 100 * 0.9 = 90', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_HUSTLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveSplit: 'PHYSICAL', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(90)
+  })
+
+  it('ER deviation: penalizes special damaging moves too (CHECK_NOT(IS_MOVE_STATUS(move))): 100 * 0.9 = 90', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_HUSTLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveSplit: 'SPECIAL', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(90)
+  })
+
+  it('status moves are exempt from Hustle penalty: accuracy remains 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_HUSTLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveSplit: 'STATUS', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+})
+
+describe('Sand Veil (1.25x division in sandstorm, applies only on defender), :600-605', () => {
+  it('defender with Sand Veil in sandstorm reduces 100 accuracy move to Math.trunc(100 / 1.25) = 80', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'SANDSTORM', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('defender with Sand Veil outside sandstorm does not reduce accuracy: 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'NONE', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+
+  it('attacker with Sand Veil does NOT reduce its own move accuracy (APPLY_ON_TARGET flag): 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'SANDSTORM', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+})
+
+describe('Keen Eye (1.2x multiplier, does not ignore evasion stat boosts in onAccuracy), :1142-1145', () => {
+  it('attacker with Keen Eye gets 1.2x accuracy boost: 70 * 1.2 = 84', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_KEEN_EYE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(84)
+  })
+
+  it('Keen Eye onAccuracy hook does NOT ignore defender evasion stage (+2 evasion -> ratio 2/3): Math.trunc(84 * 2 / 3) = 56', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_KEEN_EYE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderEvasionStage: 8, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(56)
+  })
+})
+
+describe('Mold Breaker vs breakable defender abilities and Ability Shield, battle_util.c:9254-9261', () => {
+  it('attacker with Mold Breaker bypasses breakable Sand Veil in sandstorm: 100 instead of 80', () => {
+    const defSlots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 100,
+        weather: 'SANDSTORM',
+        attackerHasMoldBreaker: true,
+        defenderAbilitySlots: defSlots,
+      }),
+    )
+    expect(result.accuracy).toBe(100)
+  })
+
+  it('defender with Ability Shield blocks Mold Breaker suppression: Sand Veil still applies (80)', () => {
+    const defSlots: AbilitySlots = { ability: requireAbility('ABILITY_SAND_VEIL'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 100,
+        weather: 'SANDSTORM',
+        attackerHasMoldBreaker: true,
+        defenderHoldEffect: 'HOLD_EFFECT_ABILITY_SHIELD',
+        defenderAbilitySlots: defSlots,
+      }),
+    )
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('attacker with Mold Breaker does NOT bypass No Guard (No Guard is not breakable): returns 101', () => {
+    const defSlots: AbilitySlots = { ability: requireAbility('ABILITY_NO_GUARD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 70,
+        attackerHasMoldBreaker: true,
+        defenderAbilitySlots: defSlots,
+      }),
+    )
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('attacker with Mold Breaker does NOT bypass Olé (Olé is not breakable): 100 * 0.8 = 80', () => {
+    const defSlots: AbilitySlots = { ability: requireAbility('ABILITY_OLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 100,
+        moveTarget: 'SELECTED',
+        attackerHasMoldBreaker: true,
+        defenderAbilitySlots: defSlots,
+      }),
+    )
+    expect(result.accuracy).toBe(80)
+  })
+})
+
+describe('Olé (0.8x multiplier against single-target moves, not breakable), :7557-7569', () => {
+  it('defender with Olé penalizes single-target move accuracy: 100 * 0.8 = 80', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_OLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveTarget: 'SELECTED', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('defender with Olé does NOT penalize spread moves (moveTarget: BOTH): 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_OLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveTarget: 'BOTH', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+
+  it('attacker with Olé does NOT penalize its own accuracy (APPLY_ON_TARGET flag): 100', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_OLE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, moveTarget: 'SELECTED', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+})
+
+describe('Grip Pincer (ALWAYS_HITS when defender is wrapped), :4707-4710', () => {
+  it('returns 101 when defender is wrapped', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_GRIP_PINCER'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderIsWrapped: true, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('does not trigger when defender is not wrapped: returns 70', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_GRIP_PINCER'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, defenderIsWrapped: false, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(70)
+  })
+})
+
+describe('Inner Focus (ALWAYS_HITS for Focus Blast), :1003-1006', () => {
+  it('returns 101 when using Focus Blast', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_INNER_FOCUS'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_FOCUS_BLAST'), moveAccuracy: 70, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('does not trigger for other moves: returns normal accuracy (100)', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_INNER_FOCUS'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveId: requireMove('MOVE_TACKLE'), moveAccuracy: 100, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(100)
+  })
+})
+
+describe('Artillery and Deadeye (HITS_IF_POSSIBLE for Mega Launcher / arrow moves), :4770-4791', () => {
+  it('Artillery returns 101 for a move with moveFlagMegaLauncher', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_ARTILLERY'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, moveFlagMegaLauncher: true, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('Artillery does not trigger without moveFlagMegaLauncher: returns 70', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_ARTILLERY'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, moveFlagMegaLauncher: false, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(70)
+  })
+
+  it('Deadeye returns 101 for an arrow move with moveFlagArrowBased', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_DEADEYE'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, moveFlagArrowBased: true, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+})
+
+describe('Fatal Precision (HITS_IF_POSSIBLE for damaging super-effective moves), :4398-4402', () => {
+  it('returns 101 for a super-effective damaging move', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_FATAL_PRECISION'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 70,
+        moveSplit: 'PHYSICAL',
+        isSuperEffective: true,
+        attackerAbilitySlots: slots,
+      }),
+    )
+    expect(result.accuracy).toBe(101)
+  })
+
+  it('does not trigger when the move is not super effective: returns 70', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_FATAL_PRECISION'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 70,
+        moveSplit: 'PHYSICAL',
+        isSuperEffective: false,
+        attackerAbilitySlots: slots,
+      }),
+    )
+    expect(result.accuracy).toBe(70)
+  })
+
+  it('does not trigger for status moves even if isSuperEffective flag is true: returns 70', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_FATAL_PRECISION'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveAccuracy: 70,
+        moveSplit: 'STATUS',
+        isSuperEffective: true,
+        attackerAbilitySlots: slots,
+      }),
+    )
+    expect(result.accuracy).toBe(70)
+  })
+})
+
+describe('Lullaby and Hypnotist (1.5x multiplier for Sing / Hypnosis), :4221-4225, 9583-9587', () => {
+  it('Lullaby boosts Sing from 55 to Math.trunc(55 * 1.5) = 82', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_LULLABY'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveId: requireMove('MOVE_SING'),
+        moveAccuracy: 55,
+        attackerAbilitySlots: slots,
+      }),
+    )
+    expect(result.accuracy).toBe(82)
+  })
+
+  it('Hypnotist boosts Hypnosis from 60 to Math.trunc(60 * 1.5) = 90', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_HYPNOTIST'), innates: [null, null, null] }
+    const result = getTotalAccuracy(
+      baseInputs({
+        moveId: requireMove('MOVE_HYPNOSIS'),
+        moveAccuracy: 60,
+        attackerAbilitySlots: slots,
+      }),
+    )
+    expect(result.accuracy).toBe(90)
+  })
+})
+
+describe('Weather evasion and accuracy abilities: Snow Cloak, Rain Shroud, Smokey Maneuvers, Echolocation', () => {
+  it('Snow Cloak in Hail reduces 100 accuracy move to Math.trunc(100 / 1.25) = 80', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SNOW_CLOAK'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'HAIL', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('Rain Shroud in rain reduces 100 accuracy move to Math.trunc(100 / 1.25) = 80', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_RAIN_SHROUD'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'RAIN_TEMPORARY', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('Smokey Maneuvers in fog reduces 100 accuracy move to Math.trunc(100 / 1.25) = 80', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_SMOKEY_MANEUVERS'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, weather: 'FOG', defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(80)
+  })
+
+  it('Echolocation in fog makes attacker always hit (returns 101)', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_ECHOLOCATION'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 70, weather: 'FOG', attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(101)
+  })
+})
+
+describe('Bad Luck (additive -5 accuracy), :4304-4307', () => {
+  it('defender with Bad Luck reduces 100 accuracy move to 95', () => {
+    const slots: AbilitySlots = { ability: requireAbility('ABILITY_BAD_LUCK'), innates: [null, null, null] }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 100, defenderAbilitySlots: slots }))
+    expect(result.accuracy).toBe(95)
+  })
+})
+
+describe('Reverse slot iteration order, battle_util.h:269-275', () => {
+  it('runs innate 0 before ability: 50 * 1.3 = 65, then 65 * 1.2 = 78', () => {
+    const slots: AbilitySlots = {
+      ability: requireAbility('ABILITY_ILLUMINATE'),
+      innates: [requireAbility('ABILITY_COMPOUND_EYES'), null, null],
+    }
+    const result = getTotalAccuracy(baseInputs({ moveAccuracy: 50, attackerAbilitySlots: slots }))
+    expect(result.accuracy).toBe(78)
+  })
+})
+

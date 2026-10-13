@@ -54,7 +54,7 @@
 import type { BridgeGap } from './bridge'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
-import { hasFlag as abilityHasFlag } from '../abilities/dispatchCalc'
+import { computeAttackerHasMoldBreaker, hasFlag as abilityHasFlag } from '../abilities/dispatchCalc'
 import type { WeatherKind } from '../types'
 import { DEFAULT_STAT_STAGE } from './constants'
 
@@ -98,64 +98,12 @@ export const ACCURACY_STAGE_RATIOS: [number, number][] = [
   [3, 1], // +6
 ]
 
-/** The 50 abilities in the pinned checkout whose `.onAccuracy` hook
- * GetTotalAccuracy's ability loop (:1354-1362) would run, none of which has a
- * port. Mechanically derived -- see accuracy.test.ts's oracle test, which
- * re-derives this set from data/v2.65beta/abilityHooks.json and fails if it
- * ever drifts. Aliases (e.g. Radiance/Illuminate, Hunters Mark/Deadeye) count
- * as live hooks, same as a hand-written one. Kept as data (not a hardcoded
- * switch) so the gap-scan and its test can iterate it. */
+/** The abilities in the pinned checkout whose `.onAccuracy` hook
+ * GetTotalAccuracy's ability loop (:1354-1362) would run, which have no port.
+ * Only ABILITY_COMMANDER remains unported because its `GetAbilityState(target, ability)`
+ * condition has no state in the sim. */
 export const UNPORTED_ACCURACY_ABILITIES = [
-  'ABILITY_ANGELS_WRATH',
-  'ABILITY_ARTILLERY',
-  'ABILITY_BAD_LUCK',
-  'ABILITY_BRAWLING_WYVERN',
-  'ABILITY_CHANDELIER',
   'ABILITY_COMMANDER',
-  'ABILITY_COMPOUND_EYES',
-  'ABILITY_DEADEYE',
-  'ABILITY_DEADLY_PRECISION',
-  'ABILITY_DEPTH_EXPLORER',
-  'ABILITY_ECHOLOCATION',
-  'ABILITY_ENLIGHTENED',
-  'ABILITY_FATAL_PRECISION',
-  'ABILITY_FINAL_BLOW',
-  'ABILITY_FLAWLESS_PRECISION',
-  'ABILITY_GIFTED_MIND',
-  'ABILITY_GLACIAL_GHOST',
-  'ABILITY_GRIP_PINCER',
-  'ABILITY_HUNTERS_MARK',
-  'ABILITY_HUSTLE',
-  'ABILITY_HYPNOTIC_TRANCE',
-  'ABILITY_HYPNOTIST',
-  'ABILITY_ILLUMINATE',
-  'ABILITY_INNER_FOCUS',
-  'ABILITY_IRON_BARRAGE',
-  'ABILITY_KEEN_EYE',
-  'ABILITY_LULLABY',
-  'ABILITY_LUNAR_ECLIPSE',
-  'ABILITY_MACH_3',
-  'ABILITY_NO_GUARD',
-  'ABILITY_OLE',
-  'ABILITY_PIXIE_POWER',
-  'ABILITY_PLASMA_LAMP',
-  'ABILITY_QIGONG',
-  'ABILITY_RADIANCE',
-  'ABILITY_RAIN_SHROUD',
-  'ABILITY_REFRIGERATOR',
-  'ABILITY_ROUNDHOUSE',
-  'ABILITY_SAND_VEIL',
-  'ABILITY_SHINY_LIGHTNING',
-  'ABILITY_SIGHTING_SYSTEM',
-  'ABILITY_SMOKEY_MANEUVERS',
-  'ABILITY_SNOW_CLOAK',
-  'ABILITY_SUPER_SCOPE',
-  'ABILITY_SWEEPING_EDGE',
-  'ABILITY_SWEEPING_EDGE_PLUS',
-  'ABILITY_UNLOCKED_POTENTIAL',
-  'ABILITY_VICTORY_STAR',
-  'ABILITY_WAY_OF_PRECISION',
-  'ABILITY_WORLD_SERPENT',
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -209,6 +157,20 @@ export interface AccuracyInputs {
   moveFlagDmgUnderground: boolean
   /** FLAG_DMG_UNDERWATER, moves.json's `hitsUnderwater` (:1270). */
   moveFlagDmgUnderwater: boolean
+  /** gBattleMoves[move].split (IS_MOVE_STATUS: battle.h:747). Needed for
+   * Hustle (abilities.cc:1202), Gifted Mind (:5356), Fatal Precision / Deadly Precision (:4399, 11192). */
+  moveSplit?: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  /** FLAG_MEGA_LAUNCHER_BOOST, pokemon.h:342 (IsMegaLauncherBoosted,
+   * battle_util.c:9373). Artillery (:4789), Deadeye (:4771), Super Scope (:9512). */
+  moveFlagMegaLauncher?: boolean
+  /** gBattleMoves[move].arrowBased (Deadeye: abilities.cc:4771, Hunters Mark :9756). */
+  moveFlagArrowBased?: boolean
+  /** FLAG_STRIKER_BOOST (IsStrikerBoosted: battle_util.c:9377). Roundhouse (:5074). */
+  moveFlagStriker?: boolean
+  /** FLAG_KEEN_EDGE_BOOST (MOVE_FLAG_KEEN_EDGE, abilities.cc:376). Sweeping Edge (:5343). */
+  moveFlagKeenEdge?: boolean
+  /** GetBattlerBattleMoveTargetFlags(move, battler) (abilities.cc:7558). Olé (:7559-7561). */
+  moveTarget?: string | null
 
   // -- attacker --------------------------------------------------------------
   /** IS_BATTLER_OF_TYPE(battlerAtk, ...) checks (:1264, 1297, 1301, 1305,
@@ -231,7 +193,7 @@ export interface AccuracyInputs {
   attackerAccStage: number
   /** The attacker's 4 ability slots, for the two REAL checks this module
    * makes: IsUnaware (:1338, via abilities/dispatchCalc.hasFlag) and the
-   * unported onAccuracy loop's gap scan (:1354-1362). */
+   * onAccuracy loop (:1354-1362). */
   attackerAbilitySlots: AbilitySlots
   /** GetBattlerTurnOrderNum(battlerAtk) > GetBattlerTurnOrderNum(battlerDef)
    * (:1380) -- does the attacker act AFTER the defender this turn? Zoom
@@ -254,6 +216,19 @@ export interface AccuracyInputs {
    * supplied directly, the same class of un-derivable per-turn fact as
    * OffensiveMultiplierContext's `attackerAbilityOn`. */
   myceliumMightActive: boolean
+  /** Whether the attacker has Mold Breaker active for this hit (battle_util.c:9255,
+   * gHitMarker & HITMARKER_MOLD_BREAKER). When not specified, derived via
+   * computeAttackerHasMoldBreaker from attackerAbilitySlots. */
+  attackerHasMoldBreaker?: boolean
+  /** Whether this hit is super-effective (CalcTypeEffectivenessMultiplier >= GetSuperEffectiveMult()).
+   * Needed for Fatal Precision (:4400), Deadly Precision (:11193), etc. Undefined = unknown (gapped). */
+  isSuperEffective?: boolean
+  /** IsSuppressed(battler, ability, FALSE) (battle_util.c:9254-9261) -- Gastro Acid / Neutralizing Gas,
+   * with the Ability Shield exception. Mold Breaker is handled separately below. */
+  isAbilitySuppressed?: (side: 'attacker' | 'defender', abilityId: string) => boolean
+  /** True when the attacker's battler index is lower than the defender's: GetTotalAccuracy's ability
+   * loop walks sourceBattler 0..gBattlersCount-1 (:1354), so the lower index's hooks run first. */
+  attackerIndexFirst?: boolean
 
   // -- defender ---------------------------------------------------------------
   /** GetBattlerHoldEffect(battlerDef, TRUE) (:1256). Only
@@ -299,10 +274,11 @@ export interface AccuracyInputs {
    * the C tests it as a plain truthy nonzero; this module only needs that
    * boolean, not the exact remaining-turns count SideTimerState carries. */
   defenderSmokescreenActive: boolean
-  /** The defender's 4 ability slots -- only read by the unported onAccuracy
-   * loop's gap scan (:1354-1362); nothing this module actually PORTS reads a
-   * defender-side ability flag. */
+  /** The defender's 4 ability slots, for the onAccuracy loop (:1354-1362). */
   defenderAbilitySlots: AbilitySlots
+  /** STATUS2_WRAPPED (constants.ts, gBattleMons[target].status2 & STATUS2_WRAPPED).
+   * Grip Pincer (:4708), World Serpent (:10252). */
+  defenderIsWrapped?: boolean
 
   // -- field -------------------------------------------------------------
   /** ConditionFieldContext's own WeatherKind (engine/types.ts), used for the
@@ -324,6 +300,272 @@ export interface AccuracyResult {
 }
 
 const bareHoldEffect = (id: string | null, want: string): boolean => id === want
+
+export const BREAKABLE_DEFENDER_ACCURACY_ABILITIES = new Set([
+  'ABILITY_SAND_VEIL',
+  'ABILITY_SNOW_CLOAK',
+  'ABILITY_BAD_LUCK',
+  'ABILITY_SMOKEY_MANEUVERS',
+  'ABILITY_GLACIAL_GHOST',
+  'ABILITY_RAIN_SHROUD',
+])
+
+/** onAccuracy hooks gated on CalcTypeEffectivenessMultiplier >= GetSuperEffectiveMult(). */
+const SUPER_EFFECTIVE_ACCURACY_ABILITIES = new Set([
+  'ABILITY_FATAL_PRECISION',
+  'ABILITY_DEADLY_PRECISION',
+  'ABILITY_FINAL_BLOW',
+  'ABILITY_FLAWLESS_PRECISION',
+  'ABILITY_MACH_3',
+])
+
+export function getSlotsInReverse(slots: AbilitySlots): string[] {
+  const result: string[] = []
+  if (slots.innates[2]) result.push(slots.innates[2])
+  if (slots.innates[1]) result.push(slots.innates[1])
+  if (slots.innates[0]) result.push(slots.innates[0])
+  if (slots.ability) result.push(slots.ability)
+  return result
+}
+
+export function runAttackerAbilityHook(
+  abilityId: string,
+  inputs: AccuracyInputs,
+  currentAcc: number,
+): { acc: number; prio: number } {
+  let acc = currentAcc
+  let prio: number = ACCURACY_PRIORITY.NO_RESULT
+
+  switch (abilityId) {
+    case 'ABILITY_COMPOUND_EYES':
+      acc = Math.trunc(acc * 1.3)
+      prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      break
+
+    case 'ABILITY_ILLUMINATE':
+    case 'ABILITY_RADIANCE':
+    case 'ABILITY_REFRIGERATOR':
+    case 'ABILITY_DEPTH_EXPLORER':
+    case 'ABILITY_CHANDELIER':
+    case 'ABILITY_VICTORY_STAR':
+    case 'ABILITY_KEEN_EYE':
+    case 'ABILITY_PIXIE_POWER':
+      acc = Math.trunc(acc * 1.2)
+      prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      break
+
+    case 'ABILITY_PLASMA_LAMP':
+      if (inputs.moveType === 'FIRE' || inputs.moveType === 'ELECTRIC') {
+        acc = Math.trunc(acc * 1.2)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_SHINY_LIGHTNING':
+      if (inputs.moveId === 'MOVE_THUNDER') {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      } else {
+        acc = Math.trunc(acc * 1.2)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_HUSTLE':
+      if (inputs.moveSplit !== 'STATUS') {
+        acc = Math.trunc(acc * 0.9)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_HYPNOTIST':
+    case 'ABILITY_LUNAR_ECLIPSE':
+      if (inputs.moveId === 'MOVE_HYPNOSIS') {
+        acc = Math.trunc(acc * 1.5)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_LULLABY':
+      if (inputs.moveId === 'MOVE_SING') {
+        acc = Math.trunc(acc * 1.5)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_INNER_FOCUS':
+    case 'ABILITY_ENLIGHTENED':
+    case 'ABILITY_UNLOCKED_POTENTIAL':
+    case 'ABILITY_WAY_OF_PRECISION':
+      if (inputs.moveId === 'MOVE_FOCUS_BLAST') {
+        prio = ACCURACY_PRIORITY.ALWAYS_HITS
+      }
+      break
+
+    case 'ABILITY_SIGHTING_SYSTEM':
+    case 'ABILITY_IRON_BARRAGE':
+      prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      break
+
+    case 'ABILITY_QIGONG':
+    case 'ABILITY_NO_GUARD':
+    case 'ABILITY_BRAWLING_WYVERN':
+      prio = ACCURACY_PRIORITY.ALWAYS_HITS
+      break
+
+    case 'ABILITY_GRIP_PINCER':
+    case 'ABILITY_WORLD_SERPENT':
+      if (inputs.defenderIsWrapped) {
+        prio = ACCURACY_PRIORITY.ALWAYS_HITS
+      }
+      break
+
+    case 'ABILITY_ARTILLERY':
+    case 'ABILITY_SUPER_SCOPE':
+      if (inputs.moveFlagMegaLauncher) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_DEADEYE':
+    case 'ABILITY_HUNTERS_MARK':
+      if (inputs.moveFlagMegaLauncher || inputs.moveFlagArrowBased) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_ROUNDHOUSE':
+      if (inputs.moveFlagStriker) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_SWEEPING_EDGE':
+    case 'ABILITY_SWEEPING_EDGE_PLUS':
+      if (inputs.moveFlagKeenEdge) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_GIFTED_MIND':
+      if (inputs.moveSplit === 'STATUS') {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_ANGELS_WRATH':
+      if (
+        inputs.moveId === 'MOVE_TACKLE' ||
+        inputs.moveId === 'MOVE_POISON_STING' ||
+        inputs.moveId === 'MOVE_ELECTROWEB' ||
+        inputs.moveId === 'MOVE_BUG_BITE'
+      ) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_FATAL_PRECISION':
+    case 'ABILITY_DEADLY_PRECISION':
+    case 'ABILITY_FINAL_BLOW':
+    case 'ABILITY_FLAWLESS_PRECISION':
+    case 'ABILITY_MACH_3':
+      if (inputs.moveSplit !== 'STATUS' && inputs.isSuperEffective) {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    case 'ABILITY_ECHOLOCATION':
+      if (inputs.weather === 'FOG') {
+        prio = ACCURACY_PRIORITY.ALWAYS_HITS
+      }
+      break
+
+    case 'ABILITY_HYPNOTIC_TRANCE':
+      if (inputs.moveId === 'MOVE_HYPNOSIS') {
+        prio = ACCURACY_PRIORITY.HITS_IF_POSSIBLE
+      }
+      break
+
+    default:
+      break
+  }
+
+  return { acc, prio }
+}
+
+export function runDefenderAbilityHook(
+  abilityId: string,
+  inputs: AccuracyInputs,
+  currentAcc: number,
+): { acc: number; prio: number } {
+  let acc = currentAcc
+  let prio: number = ACCURACY_PRIORITY.NO_RESULT
+
+  switch (abilityId) {
+    case 'ABILITY_NO_GUARD':
+    case 'ABILITY_BRAWLING_WYVERN':
+      prio = ACCURACY_PRIORITY.ALWAYS_HITS
+      break
+
+    case 'ABILITY_SAND_VEIL':
+      if (inputs.weather === 'SANDSTORM') {
+        acc = Math.trunc(acc / 1.25)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_SNOW_CLOAK':
+    case 'ABILITY_GLACIAL_GHOST':
+      if (inputs.weather === 'HAIL') {
+        acc = Math.trunc(acc / 1.25)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_RAIN_SHROUD':
+      if (
+        inputs.weather === 'RAIN_PERMANENT' ||
+        inputs.weather === 'RAIN_TEMPORARY' ||
+        inputs.weather === 'RAIN_PRIMAL'
+      ) {
+        acc = Math.trunc(acc / 1.25)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_SMOKEY_MANEUVERS':
+      if (inputs.weather === 'FOG') {
+        acc = Math.trunc(acc / 1.25)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+
+    case 'ABILITY_BAD_LUCK':
+      acc -= 5
+      prio = ACCURACY_PRIORITY.ADDITIVE
+      break
+
+    case 'ABILITY_OLE': {
+      const isSingleTarget =
+        !inputs.moveTarget ||
+        inputs.moveTarget === 'SELECTED' ||
+        inputs.moveTarget === 'USER_OR_SELECTED' ||
+        inputs.moveTarget === 'RANDOM' ||
+        inputs.moveTarget === 'MOVE_TARGET_SELECTED' ||
+        inputs.moveTarget === 'MOVE_TARGET_USER_OR_SELECTED' ||
+        inputs.moveTarget === 'MOVE_TARGET_RANDOM'
+      if (isSingleTarget) {
+        acc = Math.trunc(acc * 0.8)
+        prio = ACCURACY_PRIORITY.MULTIPLICATIVE
+      }
+      break
+    }
+
+    default:
+      break
+  }
+
+  return { acc, prio }
+}
 
 /**
  * GetTotalAccuracy, src/battle_script_commands.c:1251-1396. The real-battle
@@ -459,14 +701,57 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
   if (isSunny && isSunAffectedMove) moveAcc = 50
 
   // -- the onAccuracy ability loop, :1354-1362 --------------------------------
-  // No hook is ported (see header); gap by name whenever a battler actually
-  // holds one of the 50 abilities that declare onAccuracy, in EITHER slot set
-  // (singles: the C's own FILTER only ever admits battlerAtk and battlerDef).
-  for (const abilityId of UNPORTED_ACCURACY_ABILITIES) {
-    const onAttacker = battlerHasAbility(inputs.attackerAbilitySlots, abilityId, () => false)
-    const onDefender = battlerHasAbility(inputs.defenderAbilitySlots, abilityId, () => false)
-    if (onAttacker) gaps.push({ field: 'attackerAbilitySlots', reason: 'NO_SOURCE', detail: `${abilityId}'s onAccuracy hook has no port` })
-    if (onDefender) gaps.push({ field: 'defenderAbilitySlots', reason: 'NO_SOURCE', detail: `${abilityId}'s onAccuracy hook has no port` })
+  // Iterates each battler's slots in reverse (innate 2 -> innate 1 -> innate 0 -> ability),
+  // matching ON_ABILITY's `for (int idx = GetNumPossibleAbilitiesForBattler() - 1; idx >= 0; idx--)` (battle_util.h:269-275).
+  // Applies onAccuracyFor flags (abilities.cc:175-198) and Mold Breaker suppression (battle_util.c:9254-9261).
+  const attackerHasMoldBreaker =
+    inputs.attackerHasMoldBreaker ??
+    computeAttackerHasMoldBreaker(
+      inputs.attackerAbilitySlots,
+      inputs.moveId,
+      inputs.moveSplit ?? 'PHYSICAL',
+      inputs.moveType,
+    )
+  const defenderHasAbilityShield = inputs.defenderHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD'
+
+  const runAttackerSide = () => {
+    for (const abilityId of getSlotsInReverse(inputs.attackerAbilitySlots)) {
+      if (inputs.isAbilitySuppressed?.('attacker', abilityId)) continue
+      if ((UNPORTED_ACCURACY_ABILITIES as readonly string[]).includes(abilityId)) {
+        gaps.push({ field: 'attackerAbilitySlots', reason: 'NO_SOURCE', detail: `${abilityId}'s onAccuracy hook has no port` })
+        continue
+      }
+      if (SUPER_EFFECTIVE_ACCURACY_ABILITIES.has(abilityId) && inputs.isSuperEffective === undefined && inputs.moveSplit !== 'STATUS') {
+        gaps.push({ field: 'attackerAbilitySlots', reason: 'NO_SOURCE', detail: `${abilityId}'s onAccuracy needs the hit's type effectiveness, which is not supplied` })
+      }
+      const res = runAttackerAbilityHook(abilityId, inputs, moveAcc)
+      moveAcc = res.acc
+      prio = Math.max(prio, res.prio)
+    }
+  }
+  const runDefenderSide = () => {
+    for (const abilityId of getSlotsInReverse(inputs.defenderAbilitySlots)) {
+      if (inputs.isAbilitySuppressed?.('defender', abilityId)) continue
+      if ((UNPORTED_ACCURACY_ABILITIES as readonly string[]).includes(abilityId)) {
+        gaps.push({ field: 'defenderAbilitySlots', reason: 'NO_SOURCE', detail: `${abilityId}'s onAccuracy hook has no port` })
+        continue
+      }
+      // Mold Breaker suppression: checkMoldBreaker=TRUE in GetTotalAccuracy (:1357),
+      // suppresses breakable abilities on battlerDef unless defender holds Ability Shield (:9254-9261).
+      if (attackerHasMoldBreaker && BREAKABLE_DEFENDER_ACCURACY_ABILITIES.has(abilityId) && !defenderHasAbilityShield) {
+        continue
+      }
+      const res = runDefenderAbilityHook(abilityId, inputs, moveAcc)
+      moveAcc = res.acc
+      prio = Math.max(prio, res.prio)
+    }
+  }
+  if (inputs.attackerIndexFirst ?? true) {
+    runAttackerSide()
+    runDefenderSide()
+  } else {
+    runDefenderSide()
+    runAttackerSide()
   }
 
   // -- the final switch, :1364-1371 -------------------------------------------
