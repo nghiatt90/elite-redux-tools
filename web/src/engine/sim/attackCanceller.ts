@@ -37,13 +37,9 @@
 //   CANCELLER_FLINCH      Ported.
 //   CANCELLER_DISABLED    Ported (:3315-3325) -- cancels move if it matches
 //                          volatiles.disabledMove.
-//   CANCELLER_GRAVITY     Unreachable -- field.statuses' GRAVITY bit has no
-//                          production writer in web/src/engine/sim; grounding.ts
-//                          and turn.test.ts only READ it (the latter to test
-//                          grounding, not this canceller), and the Gravity move
-//                          effect itself is not ported. Same "nothing in this
-//                          loop ever sets it" treatment turn.ts's header already
-//                          gives RoundState.protectMove.
+//   CANCELLER_GRAVITY     Ported (:3337-3347) -- cancels moves named by
+//                          IsGravityPreventingMove (battle_util.c:1379-1398)
+//                          when STATUS_FIELD_GRAVITY is active and Clueless is not.
 //   CANCELLER_HEAL_BLOCKED Ported (:3326-3336) -- cancels status healing moves
 //                          under STATUS3_HEAL_BLOCK or opposing Permanence.
 //   CANCELLER_TAUNTED     Ported (:3348-3357) -- cancels power == 0 moves under
@@ -147,6 +143,7 @@ import {
   STATUS2_POWDER,
   STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
+  STATUS_FIELD_GRAVITY,
   clearFlag,
   getCounter,
   hasFlag,
@@ -154,6 +151,7 @@ import {
 } from './constants'
 import { cancelMultiTurnMoves } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
+import { isGravityActive, type GroundingContext } from './grounding'
 
 export const CANCEL_REASONS = [
   'SLEEP',
@@ -163,6 +161,7 @@ export const CANCEL_REASONS = [
   'TRUANT',
   'CONFUSION',
   'DISABLE',
+  'GRAVITY',
   'HEAL_BLOCK',
   'TAUNT',
 ] as const
@@ -181,6 +180,33 @@ export interface AttackCancellerResult {
 }
 
 const bareType = (type: string | null | undefined): string => (type ?? '').replace(/^TYPE_/, '')
+
+/**
+ * Moves prevented under Gravity.
+ * src/battle_util.c:1379-1398 (IsGravityPreventingMove).
+ */
+export const GRAVITY_PREVENTED_MOVES = new Set<string>([
+  'MOVE_BOUNCE',
+  'MOVE_FLY',
+  'MOVE_FLYING_PRESS',
+  'MOVE_HIGH_JUMP_KICK',
+  'MOVE_JUMP_KICK',
+  'MOVE_MAGNET_RISE',
+  'MOVE_SKY_DROP',
+  'MOVE_SPLASH',
+  'MOVE_TELEKINESIS',
+  'MOVE_FLOATY_FALL',
+  'MOVE_SEISMIC_TOSS',
+])
+
+/**
+ * IsGravityPreventingMove, src/battle_util.c:1379-1398, through IsGravityActive (:8689-8696),
+ * which Clueless suppresses (grounding.isCluelessOnField).
+ */
+export function isGravityPreventingMove(state: BattleState, moveId: string, grounding: GroundingContext | undefined): boolean {
+  if (grounding ? !isGravityActive(state, grounding) : !hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)) return false
+  return GRAVITY_PREVENTED_MOVES.has(moveId)
+}
 
 /** The six moves whose C hitCountOverride (pokemon.h:290) is nonzero, read
  * directly off er-config's MoveList.textproto at the pinned SHA (sources.lock.json)
@@ -298,6 +324,7 @@ export function runAttackCanceller(
   move: SimMoveData | undefined,
   unmodelled: string[],
   attackerHoldEffect: string | null = null,
+  grounding?: GroundingContext,
 ): AttackCancellerResult {
   const attacker = state.battlers[attackerId]
   if (!attacker) return NO_CANCEL
@@ -370,7 +397,13 @@ export function runAttackCanceller(
     return { cancelledBy: 'DISABLE', confusionSelfHitDamage: null }
   }
 
-  // CANCELLER_GRAVITY (:3337-3347) -- unreachable, see header.
+  // CANCELLER_GRAVITY, :3337-3347.
+  if (isGravityPreventingMove(state, moveId, grounding)) {
+    attacker.round.usedGravityPreventedMove = true
+    attacker.round.attackCancelled = true
+    cancelMultiTurnMoves(attacker)
+    return { cancelledBy: 'GRAVITY', confusionSelfHitDamage: null }
+  }
 
   // CANCELLER_HEAL_BLOCKED, :3326-3336.
   if (

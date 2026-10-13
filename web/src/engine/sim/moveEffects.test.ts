@@ -20,6 +20,7 @@ import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn } from './turn'
 import { getMoveEffectHandler } from './moveEffects'
 import type { GroundingContext } from './grounding'
+import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   DEFAULT_STAT_STAGE,
@@ -28,9 +29,14 @@ import {
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_TOXIC_SPIKES,
   STAT_ACC,
   STAT_ATK,
   STAT_DEF,
+  STAT_EVASION,
   STAT_SPEED,
   STAT_SPATK,
   STAT_SPDEF,
@@ -38,21 +44,30 @@ import {
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
   STATUS1_POISON,
+  SIDE_STATUS_SMOKESCREEN,
   STATUS2_CONFUSION,
   STATUS2_CURSED,
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_INFATUATION,
+
   STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
   STATUS4_CUTTHROAT,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  WEATHER_FOG_TEMPORARY,
+  WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SUN_ANY,
   WEATHER_SUN_TEMPORARY,
   getCounter,
+  setFlag,
   hasFlag,
   statusInfatuatedWith,
 } from './constants'
@@ -64,6 +79,7 @@ import {
   STAT_BUFF_ALLOW_PTR,
   STAT_DROP_BLOCK_ABILITIES,
   changeStatBuffs,
+  isBattlerWeatherAffected,
 } from './statBuffs'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
@@ -114,6 +130,7 @@ const MOVE_SHARPEN = requireMove('MOVE_SHARPEN')
 const MOVE_SHELTER = requireMove('MOVE_SHELTER')
 const MOVE_CONFUSE_RAY = requireMove('MOVE_CONFUSE_RAY')
 const MOVE_TAUNT = requireMove('MOVE_TAUNT')
+const MOVE_FOLLOW_ME = requireMove('MOVE_FOLLOW_ME')
 const MOVE_HAZE = requireMove('MOVE_HAZE')
 const MOVE_BARRIER = requireMove('MOVE_BARRIER')
 const MOVE_DRAGON_CHEER = requireMove('MOVE_DRAGON_CHEER')
@@ -152,6 +169,13 @@ const MOVE_HEAL_BLOCK = requireMove('MOVE_HEAL_BLOCK')
 const MOVE_EMBARGO = requireMove('MOVE_EMBARGO')
 const MOVE_FOCUS_ENERGY = requireMove('MOVE_FOCUS_ENERGY')
 const MOVE_RECOVER = requireMove('MOVE_RECOVER')
+const MOVE_ELECTRIC_TERRAIN = requireMove('MOVE_ELECTRIC_TERRAIN')
+const MOVE_GRASSY_TERRAIN = requireMove('MOVE_GRASSY_TERRAIN')
+const MOVE_TRICK_ROOM = requireMove('MOVE_TRICK_ROOM')
+const MOVE_GRAVITY = requireMove('MOVE_GRAVITY')
+const MOVE_FLY = requireMove('MOVE_FLY')
+const MOVE_CLEAR_SKIES = requireMove('MOVE_CLEAR_SKIES')
+const MOVE_DEFOG = requireMove('MOVE_DEFOG')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -847,10 +871,10 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_HAZE', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const state = battle([{ moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
 
-    const out = executeTurn(state, [useMove(1, MOVE_HAZE), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, MOVE_FOLLOW_ME), null], testDeps(dmg))
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -2826,6 +2850,345 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(act.missed).toBe(true)
         expect(state.battlers[0]!.mon.pp[0]).toBe(29)
         expect(state.battlers[0]!.volatiles.critBoost).toBe(3)
+      })
+    })
+
+    describe('Field-effect moves (cycle 54)', () => {
+      describe('Terrain moves', () => {
+        it('Electric Terrain sets the terrain, started flag, and timer (8 turns default, 12 with Terrain Extender)', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_ELECTRIC_TERRAIN', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_ELECTRIC_TERRAIN), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN)).toBe(true)
+          expect(state.field.timers.terrainTimer).toBe(8)
+          expect(state.field.timers.started.terrain).toBe(true)
+
+          // With Terrain Extender
+          const extDeps = {
+            ...testDeps(),
+            grounding: {
+              ...GROUNDING,
+              holdEffectOf: (id: number) => (id === 0 ? 'HOLD_EFFECT_TERRAIN_EXTENDER' : null),
+            },
+          }
+          const extState = battle(
+            [
+              { moves: ['MOVE_ELECTRIC_TERRAIN', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          executeTurn(extState, [useMove(1, MOVE_ELECTRIC_TERRAIN), null], extDeps)
+          expect(hasFlag(extState.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN)).toBe(true)
+          expect(extState.field.timers.terrainTimer).toBe(12)
+        })
+
+        it('A second terrain move replaces the first, and casting the same terrain fails', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_ELECTRIC_TERRAIN', 'MOVE_GRASSY_TERRAIN', null, null], pp: [10, 10, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Electric Terrain sets electric
+          executeTurn(state, [useMove(1, MOVE_ELECTRIC_TERRAIN), null], deps)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN)).toBe(true)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(false)
+
+          // Turn 2: Grassy Terrain replaces electric
+          executeTurn(state, [useMove(2, MOVE_GRASSY_TERRAIN), null], deps)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN)).toBe(false)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(true)
+          expect(state.field.timers.terrainTimer).toBe(8)
+
+          // Turn 3: Casting Grassy Terrain while already active fails (missed: true, costs PP)
+          const out3 = executeTurn(state, [useMove(2, MOVE_GRASSY_TERRAIN), null], deps)
+          const act3 = out3.actions.find((a) => a.battlerId === 0)!
+          expect(act3.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[1]).toBe(8)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(true)
+        })
+      })
+
+      describe('Rooms', () => {
+        it('Trick Room is set for 5 turns, then toggled off by a second use', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TRICK_ROOM', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Sets Trick Room
+          const out1 = executeTurn(state, [useMove(1, MOVE_TRICK_ROOM), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)).toBe(true)
+          expect(state.field.timers.trickRoomTimer).toBe(5)
+          expect(state.field.timers.started.trickRoom).toBe(true)
+
+          // Turn 2: Second use toggles Trick Room off
+          const out2 = executeTurn(state, [useMove(1, MOVE_TRICK_ROOM), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(3)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)).toBe(false)
+          expect(state.field.timers.trickRoomTimer).toBe(0)
+        })
+
+        it('Trick Room flips turn order: slower battler moves before faster battler', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Battler 0 is slower (spe: 40), Battler 1 is faster (spe: 100)
+          const state = battle(
+            [
+              { spe: 40, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+              { spe: 100, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          // Without Trick Room: faster battler 1 moves first
+          const outNormal = executeTurn(state, [useMove(1, MOVE_TACKLE), useMove(1, MOVE_TACKLE)], deps)
+          expect(outNormal.actions[0]!.battlerId).toBe(1)
+          expect(outNormal.actions[1]!.battlerId).toBe(0)
+
+          // Under Trick Room: slower battler 0 moves first
+          state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+          state.field.timers.trickRoomTimer = 5
+
+          const outTR = executeTurn(state, [useMove(1, MOVE_TACKLE), useMove(1, MOVE_TACKLE)], deps)
+          expect(outTR.actions[0]!.battlerId).toBe(0)
+          expect(outTR.actions[1]!.battlerId).toBe(1)
+        })
+      })
+
+      describe('Gravity', () => {
+        it('Gravity grounds a Flying type and cancels moves named by IsGravityPreventingMove', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Battler 0 uses Gravity (spe: 50)
+          // Battler 1 is Flying-type with MOVE_FLY (spe: 100)
+          const state = battle(
+            [
+              { spe: 50, moves: ['MOVE_GRAVITY', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 100, types: ['FLYING', 'MYSTERY', 'MYSTERY'], moves: ['MOVE_FLY', null, null, null], pp: [15, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          // Before Gravity: Flying type is not grounded
+          expect(isBattlerGrounded(state, 1, deps.grounding)).toBe(false)
+
+          // Turn 1: Battler 0 activates Gravity
+          const out1 = executeTurn(state, [useMove(1, MOVE_GRAVITY), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)).toBe(true)
+          expect(state.field.timers.gravityTimer).toBe(5)
+
+          // Flying type is now grounded under Gravity
+          expect(isBattlerGrounded(state, 1, deps.grounding)).toBe(true)
+
+          // Turn 2: Battler 1 tries to use MOVE_FLY -> cancelled by CANCELLER_GRAVITY
+          const out2 = executeTurn(state, [null, useMove(1, MOVE_FLY)], deps)
+          const actFly = out2.actions.find((a) => a.battlerId === 1)!
+          expect(actFly.cancelledBy).toBe('GRAVITY')
+          expect(actFly.targetDamage).toBeNull()
+
+          // Second Gravity use fails (missed: true, costs PP)
+          const out3 = executeTurn(state, [useMove(1, MOVE_GRAVITY), null], deps)
+          const act3 = out3.actions.find((a) => a.battlerId === 0)!
+          expect(act3.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(3)
+        })
+      })
+
+      describe('Haze', () => {
+        it('Haze resets all stat stages across all battlers to default stage 6', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_HAZE', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Battler 0 has +2 Atk and -1 Def; Battler 1 has +3 SpAtk and -2 Spe
+          state.battlers[0]!.mon.statStages[STAT_ATK] = 8
+          state.battlers[0]!.mon.statStages[STAT_DEF] = 5
+          state.battlers[1]!.mon.statStages[STAT_SPATK] = 9
+          state.battlers[1]!.mon.statStages[STAT_SPEED] = 4
+
+          const out = executeTurn(state, [useMove(1, MOVE_HAZE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+
+          // All stats normalised back to DEFAULT_STAT_STAGE (6)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+          expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+        })
+      })
+
+      describe('Defog', () => {
+        it('Defog lowers target evasion, clears target screens, and clears hazards on both sides', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_DEFOG', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Set screens on target side (side 1)
+          state.sides[1]!.statuses = setFlag(state.sides[1]!.statuses, SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN)
+          state.sides[1]!.timers.reflectTimer = 5
+          state.sides[1]!.timers.lightscreenTimer = 5
+
+          // Set hazards on side 0 and side 1
+          state.sides[0]!.statuses = setFlag(state.sides[0]!.statuses, SIDE_STATUS_SPIKES | SIDE_STATUS_TOXIC_SPIKES)
+          state.sides[0]!.timers.spikesAmount = 1
+          state.sides[0]!.timers.toxicSpikesAmount = 1
+          state.sides[1]!.statuses = setFlag(state.sides[1]!.statuses, SIDE_STATUS_STEALTH_ROCK | SIDE_STATUS_STICKY_WEB)
+          state.sides[1]!.timers.stealthRockType = 1
+          state.sides[1]!.timers.stickyWebTimer = 1
+
+          const out = executeTurn(state, [useMove(1, MOVE_DEFOG), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+
+          // Evasion lowered by 1 stage (from 6 to 5)
+          expect(state.battlers[1]!.mon.statStages[STAT_EVASION]).toBe(5)
+          expect(act.statChanges).toEqual([{ battlerId: 1, stat: STAT_EVASION, change: -1 }])
+
+          // Target screens cleared
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_REFLECT)).toBe(false)
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_LIGHTSCREEN)).toBe(false)
+          expect(state.sides[1]!.timers.reflectTimer).toBe(0)
+          expect(state.sides[1]!.timers.lightscreenTimer).toBe(0)
+
+          // Hazards cleared on both sides
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_SPIKES)).toBe(false)
+          expect(hasFlag(state.sides[0]!.statuses, SIDE_STATUS_TOXIC_SPIKES)).toBe(false)
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_STEALTH_ROCK)).toBe(false)
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_STICKY_WEB)).toBe(false)
+        })
+
+        it('Defog blows the fog away, and ENDTURN_FOG brings it back that same end of turn', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_DEFOG', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          state.field.weather = WEATHER_FOG_TEMPORARY
+          state.field.weatherDuration = 5
+
+          const out = executeTurn(state, [useMove(1, MOVE_DEFOG), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          // ClearDefogHazards sets fogReturnTimer = weatherDuration - 1 = 4 (battle_script_commands.c:6554);
+          // ENDTURN_FOG's `!gBattleWeather && fogReturnTimer` branch (battle_util.c:2037-2046) then
+          // restores temporary fog for those 4 turns and zeroes the return timer.
+          expect(state.field.weather).toBe(WEATHER_FOG_TEMPORARY)
+          expect(state.field.weatherDuration).toBe(4)
+          expect(state.field.timers.fogReturnTimer).toBe(0)
+        })
+
+        it('Defog leaves Smokescreen up (DEFOG_CLEAR tests SIDE_STATUS_LIGHTSCREEN for it, battle_script_commands.c:6519)', () => {
+          const state = battle([{ moves: ['MOVE_DEFOG', null, null, null], pp: [15, 0, 0, 0] }, { spe: 50 }], countingRng())
+          state.sides[1]!.statuses = setFlag(setFlag(state.sides[1]!.statuses, SIDE_STATUS_REFLECT), SIDE_STATUS_SMOKESCREEN)
+          state.sides[1]!.timers.reflectTimer = 5
+          state.sides[1]!.timers.smokescreenTimer = 5
+          executeTurn(state, [useMove(1, MOVE_DEFOG), null], testDeps())
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_REFLECT)).toBe(false)
+          expect(hasFlag(state.sides[1]!.statuses, SIDE_STATUS_SMOKESCREEN)).toBe(true)
+        })
+
+        it('Defog fails when target evasion is at min and no hazards/screens/fog exist', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_DEFOG', null, null, null], pp: [15, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          state.battlers[1]!.mon.statStages[STAT_EVASION] = MIN_STAT_STAGE
+
+          const out = executeTurn(state, [useMove(1, MOVE_DEFOG), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(14) // PP still deducted
+        })
+      })
+
+      describe('Clear Skies', () => {
+        it('Clear Skies sets clearSkiesTimer to 5, suppresses weather, and second use fails', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_CLEAR_SKIES', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          state.field.weather = WEATHER_RAIN_TEMPORARY
+          state.field.weatherDuration = 5
+
+          // Turn 1: Sets Clear Skies
+          const out1 = executeTurn(state, [useMove(1, MOVE_CLEAR_SKIES), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(state.field.timers.clearSkiesTimer).toBe(5)
+          expect(state.field.timers.started.clearSkiesTimer).toBe(true)
+
+          // Weather is suppressed while clearSkiesTimer is active
+          expect(isBattlerWeatherAffected(state, 0, state.field.weather, deps)).toBe(false)
+
+          // Turn 2: Second use fails while timer is active
+          const out2 = executeTurn(state, [useMove(1, MOVE_CLEAR_SKIES), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(3)
+        })
       })
     })
   })

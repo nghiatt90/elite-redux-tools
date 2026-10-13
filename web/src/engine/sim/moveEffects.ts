@@ -51,15 +51,35 @@ import {
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
   STATUS3_LEECHSEED,
+  STATUS3_MAGNET_RISE,
+  STATUS3_ON_AIR,
   STATUS3_SEMI_INVULNERABLE,
+  STATUS3_TELEKINESIS,
   STATUS3_YAWN,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_INVERSE_ROOM,
+  STATUS_FIELD_MAGIC_ROOM,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  STATUS_FIELD_WONDER_ROOM,
+  SIDE_STATUS_STICKY_WEB,
+  STATUS_FIELD_TERRAIN_ANY,
+  TERRAIN_DURATION,
+  TERRAIN_DURATION_EXTENDED,
+  GRAVITY_DURATION,
+  INVERSE_ROOM_DURATION,
+  MAGIC_ROOM_DURATION,
+  TRICK_ROOM_DURATION,
+  WONDER_ROOM_DURATION,
   WEATHER_FOG_ANY,
+  WEATHER_FOG_PERMANENT,
   WEATHER_HAIL_ANY,
   WEATHER_RAIN_ANY,
   WEATHER_SANDSTORM_ANY,
@@ -113,6 +133,8 @@ import {
   dispatchOnStatLowered,
   getHighestAttackingStatId,
   isBattlerWeatherAffected,
+  RESET_ALL_STATS,
+  tryResetBattlerStatChanges,
 } from './statBuffs'
 import { canBattlerHeal } from './endTurn'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
@@ -147,6 +169,7 @@ import {
   canGetFrostbite,
   canInfatuate,
   canSleep,
+  cancelMultiTurnMoves,
   CHECK_HEAL_BLOCK,
   CHECK_RESTRICTING,
   doesSubstituteBlockMove,
@@ -3030,6 +3053,361 @@ function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
   return applyWeatherMove(ctx, ENUM_WEATHER_FOG)
 }
 
+/** Abilities with an onTerrain hook (abilityHooks.json), run by BattleScript_OnTerrainChanged
+ * (data/battle_scripts_1.s:9947-9955, VARIOUS_ON_TERRAIN_CHANGE) -- not ported. */
+const ON_TERRAIN_ABILITIES = [
+  'ABILITY_DRAKELP_HEAD', 'ABILITY_ENERGIZED', 'ABILITY_GENERATOR', 'ABILITY_HARUKAZE',
+  'ABILITY_MIMICRY', 'ABILITY_QUARK_DRIVE', 'ABILITY_TOXIC_BOOST',
+]
+
+/**
+ * Terrain moves: BattleScript_EffectElectricTerrain and its aliases (data/battle_scripts_1.s:2192-2206)
+ * -> setterrain -> HandleTerrainMove (src/battle_script_commands.c:6404-6463). Unlike
+ * TryChangeBattleTerrain it fails only when the same terrain is already up -- a permanent
+ * terrain is replaced. EFFECT_TOXIC_TERRAIN shares the Misty script; HandleTerrainMove picks
+ * the terrain from the move effect.
+ */
+function applyTerrainMove(ctx: MoveEffectContext, terrainFlag: number): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  if (hasFlag(state.field.statuses, terrainFlag)) return outcome(ctx, { missed: true })
+
+  state.field.statuses = setFlag(clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY), terrainFlag)
+  state.field.timers.started.terrain = true
+  state.field.timers.terrainBattlerId = battlerId
+  state.field.timers.terrainTimer =
+    deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_TERRAIN_EXTENDER' ? TERRAIN_DURATION_EXTENDED : TERRAIN_DURATION
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    const held = b && ON_TERRAIN_ABILITIES.find((id) => battlerHasSimAbility(state, b, id, false, i, false, deps.dataContext))
+    if (held) unmodelled.push(`battler ${i}: ${held}'s onTerrain reaction (BattleScript_OnTerrainChanged, battle_scripts_1.s:9947-9955) is not applied`)
+  }
+  return outcome(ctx, {})
+}
+
+function handleElectricTerrain(ctx: MoveEffectContext): ActionOutcome {
+  return applyTerrainMove(ctx, STATUS_FIELD_ELECTRIC_TERRAIN)
+}
+
+function handleGrassyTerrain(ctx: MoveEffectContext): ActionOutcome {
+  return applyTerrainMove(ctx, STATUS_FIELD_GRASSY_TERRAIN)
+}
+
+function handleMistyTerrain(ctx: MoveEffectContext): ActionOutcome {
+  return applyTerrainMove(ctx, STATUS_FIELD_MISTY_TERRAIN)
+}
+
+function handlePsychicTerrain(ctx: MoveEffectContext): ActionOutcome {
+  return applyTerrainMove(ctx, STATUS_FIELD_PSYCHIC_TERRAIN)
+}
+
+function handleToxicTerrain(ctx: MoveEffectContext): ActionOutcome {
+  return applyTerrainMove(ctx, STATUS_FIELD_TOXIC_TERRAIN)
+}
+
+/**
+ * Common handler for room-setting moves.
+ * BattleScript_EffectTrickRoom (data/battle_scripts_1.s:2638-2655),
+ * BattleScript_EffectInverseRoom / BattleScript_EffectWonderRoom / BattleScript_EffectMagicRoom (:2657-2667),
+ * Cmd_setroom / HandleRoomMove (src/battle_script_commands.c:11866-11921).
+ */
+function handleRoomMove(
+  ctx: MoveEffectContext,
+  statusFlag: number,
+  duration: number,
+  startedKey: 'trickRoom' | 'wonderRoom' | 'magicRoom' | 'inverseRoom',
+  timerKey: 'trickRoomTimer' | 'wonderRoomTimer' | 'magicRoomTimer' | 'inverseRoomTimer',
+): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // Permanent room check: if active and timer > 10, fails (BattleScript_ButItFailed).
+  if (hasFlag(state.field.statuses, statusFlag) && state.field.timers[timerKey] > 10) {
+    return outcome(ctx, { missed: true })
+  }
+
+  if (hasFlag(state.field.statuses, statusFlag)) {
+    // Toggles off: gFieldStatuses &= ~statusFlag; *timer = 0
+    state.field.statuses = clearFlag(state.field.statuses, statusFlag)
+    state.field.timers[timerKey] = 0
+    state.field.timers.started[startedKey] = true
+  } else {
+    // Toggles on: gFieldStatuses |= statusFlag; *timer = duration
+    state.field.statuses = setFlag(state.field.statuses, statusFlag)
+    state.field.timers[timerKey] = duration
+    state.field.timers.started[startedKey] = true
+  }
+
+  return outcome(ctx, {})
+}
+
+function handleTrickRoom(ctx: MoveEffectContext): ActionOutcome {
+  const { state, deps, unmodelled } = ctx
+  const res = handleRoomMove(ctx, STATUS_FIELD_TRICK_ROOM, TRICK_ROOM_DURATION, 'trickRoom', 'trickRoomTimer')
+  if (hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)) {
+    for (let i = 0; i < state.battlersCount; i++) {
+      if (deps.grounding.holdEffectOf(i) === 'HOLD_EFFECT_ROOM_SERVICE') {
+        unmodelled.push(`battler ${i}: Room Service (tryroomservice, battle_scripts_1.s:2647-2652) is not applied`)
+      }
+    }
+  }
+  return res
+}
+
+function handleWonderRoom(ctx: MoveEffectContext): ActionOutcome {
+  return handleRoomMove(ctx, STATUS_FIELD_WONDER_ROOM, WONDER_ROOM_DURATION, 'wonderRoom', 'wonderRoomTimer')
+}
+
+function handleMagicRoom(ctx: MoveEffectContext): ActionOutcome {
+  return handleRoomMove(ctx, STATUS_FIELD_MAGIC_ROOM, MAGIC_ROOM_DURATION, 'magicRoom', 'magicRoomTimer')
+}
+
+function handleInverseRoom(ctx: MoveEffectContext): ActionOutcome {
+  return handleRoomMove(ctx, STATUS_FIELD_INVERSE_ROOM, INVERSE_ROOM_DURATION, 'inverseRoom', 'inverseRoomTimer')
+}
+
+/**
+ * BattleScript_EffectGravity (data/battle_scripts_1.s:2713-2734),
+ * Cmd_setgravity (src/battle_script_commands.c:6004-6013),
+ * VARIOUS_GRAVITY_ON_AIRBORNE_MONS (src/battle_script_commands.c:6887-6891).
+ */
+function handleGravity(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
+  state.field.timers.started.gravity = true
+  state.field.timers.gravityTimer = GRAVITY_DURATION
+
+  // BattleScript_GravityLoop / VARIOUS_GRAVITY_ON_AIRBORNE_MONS
+  for (let i = 0; i < state.battlersCount; i++) {
+    const battler = state.battlers[i]
+    if (!battler || battler.mon.hp === 0) continue
+    if (hasFlag(battler.statuses3, STATUS3_ON_AIR | STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS)) {
+      if (hasFlag(battler.statuses3, STATUS3_ON_AIR)) {
+        cancelMultiTurnMoves(battler)
+      }
+      battler.statuses3 = clearFlag(
+        battler.statuses3,
+        STATUS3_ON_AIR | STATUS3_MAGNET_RISE | STATUS3_TELEKINESIS,
+      )
+    }
+  }
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectHaze (data/battle_scripts_1.s:3723-3733),
+ * Cmd_normalisebuffs (src/battle_script_commands.c:9988-9995),
+ * TryResetBattlerStatChanges (src/battle_script_commands.c:9957-9986).
+ */
+function handleHaze(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    tryResetBattlerStatChanges(state, i, RESET_ALL_STATS)
+  }
+
+  return outcome(ctx, {})
+}
+
+/**
+ * BattleScript_EffectClearSkies (data/battle_scripts_1.s:12453-12463),
+ * trysetclearskies -> VARIOUS_SET_CLEAR_SKIES (src/battle_script_commands.c:8683-8691),
+ * BattleScript_OnWeatherChange (data/battle_scripts_1.s:9833-9841).
+ */
+function handleClearSkies(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (state.field.timers.clearSkiesTimer > 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.field.timers.clearSkiesTimer = 5
+  state.field.timers.started.clearSkiesTimer = true
+  dispatchOnWeatherChange(state, deps, unmodelled)
+
+  return outcome(ctx, {})
+}
+
+/**
+ * ClearDefogHazards(battler, FALSE), src/battle_script_commands.c:6506-6560.
+ * Checks whether Defog can clear any hazards, screens, or fog.
+ */
+function canDefogClear(state: BattleState, attackerId: number): boolean {
+  const attackerSide = attackerId & 1
+  for (let i = 0; i < 2; i++) {
+    const side = state.sides[i]
+    if (!side) continue
+    if (i !== attackerSide) {
+      if (
+        hasFlag(side.statuses, SIDE_STATUS_REFLECT) ||
+        hasFlag(side.statuses, SIDE_STATUS_LIGHTSCREEN) ||
+        hasFlag(side.statuses, SIDE_STATUS_MIST) ||
+        hasFlag(side.statuses, SIDE_STATUS_AURORA_VEIL) ||
+        hasFlag(side.statuses, SIDE_STATUS_SAFEGUARD)
+      ) {
+        return true
+      }
+    }
+    if (
+      hasFlag(side.statuses, SIDE_STATUS_SPIKES) ||
+      hasFlag(side.statuses, SIDE_STATUS_STEALTH_ROCK) ||
+      hasFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES) ||
+      (!side.timers.foamyWeb && hasFlag(side.statuses, SIDE_STATUS_STICKY_WEB)) ||
+      side.timers.caltrops ||
+      side.timers.hotCoals
+    ) {
+      return true
+    }
+  }
+  if (hasFlag(state.field.weather, WEATHER_FOG_ANY)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * ClearDefogHazards(battler, TRUE), src/battle_script_commands.c:6506-6560. Each call clears one
+ * thing and VARIOUS_DEFOG (:7599-7610) re-runs it until it returns FALSE, so everything goes. The
+ * Smokescreen line tests SIDE_STATUS_LIGHTSCREEN (:6519), already cleared by then, so Smokescreen
+ * stays. DEFOG_CLEAR (:6493-6504) zeroes the timer field only, never `started`.
+ */
+function clearDefog(
+  state: BattleState,
+  attackerId: number,
+  deps: MoveEffectContext['deps'],
+  unmodelled: string[],
+): void {
+  const attackerSide = attackerId & 1
+  for (let i = 0; i < 2; i++) {
+    const side = state.sides[i]
+    if (!side) continue
+    if (i !== attackerSide) {
+      if (hasFlag(side.statuses, SIDE_STATUS_REFLECT)) {
+        side.statuses = clearFlag(side.statuses, SIDE_STATUS_REFLECT)
+        side.timers.reflectTimer = 0
+      }
+      if (hasFlag(side.statuses, SIDE_STATUS_LIGHTSCREEN)) {
+        side.statuses = clearFlag(side.statuses, SIDE_STATUS_LIGHTSCREEN)
+        side.timers.lightscreenTimer = 0
+      }
+      if (hasFlag(side.statuses, SIDE_STATUS_MIST)) {
+        side.statuses = clearFlag(side.statuses, SIDE_STATUS_MIST)
+        side.timers.mistTimer = 0
+      }
+      if (hasFlag(side.statuses, SIDE_STATUS_AURORA_VEIL)) {
+        side.statuses = clearFlag(side.statuses, SIDE_STATUS_AURORA_VEIL)
+        side.timers.auroraVeilTimer = 0
+      }
+      if (hasFlag(side.statuses, SIDE_STATUS_SAFEGUARD)) {
+        side.statuses = clearFlag(side.statuses, SIDE_STATUS_SAFEGUARD)
+        side.timers.safeguardTimer = 0
+      }
+    }
+    if (hasFlag(side.statuses, SIDE_STATUS_SPIKES)) {
+      side.statuses = clearFlag(side.statuses, SIDE_STATUS_SPIKES)
+      side.timers.spikesAmount = 0
+    }
+    if (hasFlag(side.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+      side.statuses = clearFlag(side.statuses, SIDE_STATUS_STEALTH_ROCK)
+      side.timers.stealthRockType = 0
+    }
+    if (hasFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES)) {
+      side.statuses = clearFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES)
+      side.timers.toxicSpikesAmount = 0
+    }
+    if (!side.timers.foamyWeb && hasFlag(side.statuses, SIDE_STATUS_STICKY_WEB)) {
+      side.statuses = clearFlag(side.statuses, SIDE_STATUS_STICKY_WEB)
+      side.timers.stickyWebTimer = 0
+    }
+    if (side.timers.caltrops) {
+      side.timers.caltrops = false
+    }
+    if (side.timers.hotCoals) {
+      side.timers.hotCoals = false
+    }
+  }
+
+  if (hasFlag(state.field.weather, WEATHER_FOG_ANY)) {
+    if (hasFlag(state.field.weather, WEATHER_FOG_PERMANENT)) {
+      state.field.timers.fogReturnTimer = 99
+    } else {
+      state.field.timers.fogReturnTimer = (state.field.weatherDuration - 1) & 0xff // u8
+    }
+    state.field.weather = clearFlag(state.field.weather, WEATHER_FOG_ANY)
+    dispatchOnWeatherChange(state, deps, unmodelled)
+  }
+}
+
+/**
+ * BattleScript_EffectDefog (data/battle_scripts_1.s:1560-1593),
+ * VARIOUS_DEFOG / ClearDefogHazards (src/battle_script_commands.c:6506-6560, 7599-7610),
+ * BattleScript_FogBlownAway (data/battle_scripts_1.s:7385-7389).
+ */
+function handleDefog(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. Check if substitute blocks or evasion is at MIN_STAT_STAGE (0)
+  const subBlocks = doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)
+  const evsAtMin = (target.mon.statStages[STAT_EVASION] ?? DEFAULT_STAT_STAGE) <= MIN_STAT_STAGE
+
+  if ((subBlocks || evsAtMin) && !canDefogClear(state, battlerId)) {
+    // BattleScript_DefogIfCanClearHazards -> defogclear FALSE BattleScript_ButItFailedAtkStringPpReduce
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. Accuracy check (BattleScript_DefogWorks -> accuracycheck BattleScript_PrintMoveMissed)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. Move hits and deducts PP
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 4. statbuffchange STAT_BUFF_ALLOW_PTR (:1571) -- no substitute gate here: a substitute only
+  // routed the script through defogclear FALSE above, and ChangeStatBuffs never checks one.
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_EVASION, STAT_BUFF_ALLOW_PTR, true, deps, unmodelled, moveId)
+  if (res.delta !== 0) statChanges.push({ battlerId: targetId, stat: STAT_EVASION, change: res.delta })
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // 5. Clear hazards, screens, and fog
+  clearDefog(state, battlerId, deps, unmodelled)
+
+  return outcome(ctx, {
+    targetId,
+    statChanges: statChanges.length > 0 ? statChanges : null,
+  })
+}
+
 /**
  * BattleScript_EffectDragonCheer (data/battle_scripts_1.s:11903-11938),
  * VARIOUS_INCREASE_CRIT (src/battle_script_commands.c:8591-8601), and
@@ -3729,6 +4107,22 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SANDSTORM: handleSandstorm,
   EFFECT_HAIL: handleHail,
   EFFECT_EERIE_FOG: handleEerieFog,
+
+  EFFECT_ELECTRIC_TERRAIN: handleElectricTerrain,
+  EFFECT_GRASSY_TERRAIN: handleGrassyTerrain,
+  EFFECT_MISTY_TERRAIN: handleMistyTerrain,
+  EFFECT_PSYCHIC_TERRAIN: handlePsychicTerrain,
+  EFFECT_TOXIC_TERRAIN: handleToxicTerrain,
+
+  EFFECT_TRICK_ROOM: handleTrickRoom,
+  EFFECT_WONDER_ROOM: handleWonderRoom,
+  EFFECT_MAGIC_ROOM: handleMagicRoom,
+  EFFECT_INVERSE_ROOM: handleInverseRoom,
+
+  EFFECT_GRAVITY: handleGravity,
+  EFFECT_HAZE: handleHaze,
+  EFFECT_CLEAR_SKIES: handleClearSkies,
+  EFFECT_DEFOG: handleDefog,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

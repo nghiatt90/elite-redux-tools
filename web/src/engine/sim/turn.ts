@@ -153,6 +153,7 @@ import {
   STATUS1_ANY,
   STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
+  STATUS_FIELD_TRICK_ROOM,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
@@ -437,6 +438,10 @@ export interface TurnLoopDeps {
 export function buildTurnOrderContext(state: BattleState, deps: TurnLoopDeps): TurnOrderContext {
   return {
     ...deps.turnOrder,
+    get isTrickRoomActive() {
+      if (deps.grounding.isCluelessOnField || deps.grounding.monotypeChampType === 'FLYING') return false
+      return deps.turnOrder.isTrickRoomActive || hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+    },
     isBattlerGrounded: (battlerId: number) => isBattlerGrounded(state, battlerId, deps.grounding),
   }
 }
@@ -1302,7 +1307,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // attackerHoldEffect.
     const attackerMon = state.battlers[battlerId]?.mon
     const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
-    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect)
+    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding)
     if (cancelResult.cancelledBy) {
       outcomes.push({
         turnOrderIndex: index,
