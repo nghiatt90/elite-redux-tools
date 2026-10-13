@@ -165,8 +165,8 @@
 //   ENDTURN_TAUNT           Unreachable -- volatiles.tauntTimer is named only
 //                           in attackCanceller.ts's "Unreachable" comment for
 //                           CANCELLER_TAUNTED, never read by executable code.
-//   ENDTURN_YAWN            Gapped -- STATUS3_YAWN is set by Yawn; end-of-turn
-//                           drowsiness countdown and sleep are not ported.
+//   ENDTURN_YAWN            Ported (:2839-2854) -- drowsiness countdown and
+//                           sleep on 0 turns remaining if CanSleep is true.
 //   ENDTURN_LASER_FOCUS     Unreachable -- STATUS3_LASER_FOCUS/laserFocusTimer
 //                           have no reader outside constants.ts/create.ts.
 //   ENDTURN_EMBARGO         Unreachable -- STATUS3_EMBARGO/embargoTimer have no
@@ -189,9 +189,8 @@
 //                           HEALBLOCK case itself (which would tick the paired
 //                           timer down to clear it) stays Unreachable since the
 //                           timer has no reader anywhere.
-//   ENDTURN_ROOST           Unreachable -- gBattleResources->flags[]'s
-//                           RESOURCE_FLAG_ROOST bit has no equivalent field in
-//                           this state model at all.
+//   ENDTURN_ROOST           PORTED -- clears RESOURCE_FLAG_ROOST and restores
+//                           original types from battler.roostTypes (:2907-2914).
 //   ENDTURN_ELECTRIFY       Unreachable -- STATUS4_ELECTRIFIED has no reader
 //                           outside constants.ts.
 //   ENDTURN_POWDER          Gapped -- STATUS2_POWDER is read for real by
@@ -239,6 +238,8 @@ import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
+import type { StatusDeps } from './statusEffects'
+import { canSleep, cancelMultiTurnMoves } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -260,6 +261,7 @@ import {
   STATUS3_HEAL_BLOCK,
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
+  RESOURCE_FLAG_ROOST,
   STATUS3_MAGNET_RISE,
   STATUS3_ROOTED,
   STATUS3_SEMI_INVULNERABLE,
@@ -894,6 +896,16 @@ export function runEndTurnEffects(
   // battle_util.c:2401 -- AbilityBattleEffects(ABILITYEFFECT_REACTIVE, 0, 0, ABILITY_BS_EXECUTE, 0)
   runReactiveAbilityEffects(state, { dataContext, grounding: deps?.grounding }, unmodelled, undefined, battlerOrder)
 
+  const statusDeps: StatusDeps = {
+    dataContext,
+    grounding: deps?.grounding ?? {
+      holdEffectOf: () => null,
+      monotypeChampType: null,
+      isCluelessOnField: false,
+      attackerHasMoldBreaker: false,
+    },
+  }
+
   for (const battlerId of battlerOrder) {
     if (hasFlag(state.absentBattlerFlags, 1 << battlerId)) continue // :2409-2412
     const battler = state.battlers[battlerId]
@@ -983,11 +995,16 @@ export function runEndTurnEffects(
     )
 
     // ENDTURN_YAWN, :2839-2854.
-    gapIf(
-      hasFlag(battler.statuses3, STATUS3_YAWN),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_YAWN (battle_util.c:2839-2854) is not applied -- yawn drowsiness countdown and sleep were not applied`,
-    )
+    if (hasFlag(battler.statuses3, STATUS3_YAWN)) {
+      const counter = getCounter(battler.statuses3, STATUS3_YAWN)
+      const newCounter = counter > 0 ? counter - 1 : 0
+      battler.statuses3 = setCounter(battler.statuses3, STATUS3_YAWN, newCounter)
+      if (!hasFlag(battler.statuses3, STATUS3_YAWN) && canSleep(state, battlerId, undefined, statusDeps)) {
+        cancelMultiTurnMoves(battler)
+        const sleepTurns = (state.rng.random16() & 3) + 2
+        battler.mon.status1 = setCounter(battler.mon.status1, STATUS1_SLEEP, sleepTurns)
+      }
+    }
 
     // ENDTURN_MAGNET_RISE, :2875-2884.
     gapIf(
@@ -1002,6 +1019,13 @@ export function runEndTurnEffects(
       unmodelled,
       `battler ${battlerId}: ENDTURN_TELEKINESIS (battle_util.c:2886-2894) is not applied -- telekinesisTimer has no reader anywhere, so its expiry cannot be computed`,
     )
+
+    // ENDTURN_ROOST, :2907-2914.
+    if (hasFlag(battler.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)) {
+      battler.resourceFlags = clearFlag(battler.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)
+      const [r1, r2] = battler.roostTypes ?? ['NORMAL', 'NORMAL']
+      battler.mon.types = [r1, r2, battler.mon.types[2]]
+    }
 
     // ENDTURN_POWDER, :2919-2921 -- the C clears STATUS2_POWDER unconditionally
     // every end of turn; not applied here.

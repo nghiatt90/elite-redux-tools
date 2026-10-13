@@ -511,6 +511,15 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.isInfatuatedWithOpponent).toBe(true)
   })
 
+  it('reads boostedStat from the paradox ability slot (ParadoxBoost source:2, statId:3)', () => {
+    const state = battle({ abilities: { ability: null, innates: ['ABILITY_PROTOSYNTHESIS', null, null] } })
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.boostedStat).toBeNull()
+    state.battlers[0]!.volatiles.abilityState[1] = 2 | (STAT_SPEED << 2)
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.boostedStat).toBe('spe')
+    state.battlers[0]!.volatiles.abilityState[1] = STAT_SPEED << 2
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.boostedStat).toBeNull()
+  })
+
   it('formats gaps for the damage engine own unmodelled channel', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const lines = gapsToUnmodelled(gaps)

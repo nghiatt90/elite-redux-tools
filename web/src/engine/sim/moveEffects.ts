@@ -18,6 +18,7 @@ import {
   ENUM_WEATHER_SUN,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  RESOURCE_FLAG_ROOST,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_LIGHTSCREEN,
@@ -44,6 +45,7 @@ import {
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
   STATUS3_ALWAYS_HITS,
+  STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_LEECHSEED,
   STATUS3_SEMI_INVULNERABLE,
@@ -108,6 +110,7 @@ import {
 } from './statBuffs'
 import { canBattlerHeal } from './endTurn'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
+import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat } from '../battleStat'
@@ -1309,9 +1312,22 @@ function handleHealHalf(ctx: MoveEffectContext): ActionOutcome {
   }
 
   if (moveEffect === 'EFFECT_ROOST') {
-    unmodelled.push(
-      "Cmd_setroost (battle_script_commands.c:4022-4047): Roost's temporary Flying-type removal and RESOURCE_FLAG_ROOST are not modelled",
-    )
+    // Cmd_setroost (battle_script_commands.c:4022-4047)
+    // The sim spells a mono type as [X, 'MYSTERY', ...] where the C has type1 == type2,
+    // so the pure-Flying test accepts either. Only type1/type2 are saved or rewritten;
+    // a Flying type3 alone matches no branch and ENDTURN_ROOST restores whatever
+    // roostTypes already held, as in the C.
+    battler.resourceFlags = setFlag(battler.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)
+    const [t1, t2, t3] = battler.mon.types
+    if (t1 === 'FLYING' && (t2 === 'FLYING' || t2 === 'MYSTERY')) {
+      battler.roostTypes = ['FLYING', 'FLYING']
+      battler.mon.types = ['NORMAL', 'NORMAL', 'MYSTERY'] // SET_BATTLER_TYPE(.., TYPE_NORMAL)
+    } else if (t1 === 'FLYING' || t2 === 'FLYING') {
+      battler.roostTypes = [t1, t2]
+      battler.mon.types = [t1 === 'FLYING' ? 'MYSTERY' : t1, t2 === 'FLYING' ? 'MYSTERY' : t2, t3]
+    } else if (t3 !== 'FLYING') {
+      battler.roostTypes = [t1, t2]
+    }
   }
 
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) {
@@ -1784,7 +1800,7 @@ function handleSafeguard(ctx: MoveEffectContext): ActionOutcome {
  * Cmd_settailwind (src/battle_script_commands.c:10961-10973).
  */
 function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
@@ -1794,9 +1810,25 @@ function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, {})
   }
 
-  unmodelled.push(
-    'BattleScript_OnTailwindStart (data/battle_scripts_1.s:9267-9296): Wind Rider and Wind Power reactions are not modelled',
-  )
+  // BattleScript_OnTailwindStart (data/battle_scripts_1.s:9266-9296): callifability is
+  // jumpifability -> BATTLER_HAS_ABILITY (mold breaker checked, no alive check).
+  // raisehighestattackingstat (VARIOUS_RAISE_HIGHEST_ATTACKING_STAT, battle_script_
+  // commands.c:8159-8170) passes BS_ptr 0; setcharge (:11620-11623) sets STATUS3_CHARGED_UP.
+  const attackerHasMB = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
+  for (const bId of [battlerId, battlerId ^ 2]) {
+    const b = state.battlers[bId]
+    if (!b) continue
+    if (battlerHasSimAbility(state, b, 'ABILITY_WIND_RIDER', true, battlerId, attackerHasMB, deps.dataContext)) {
+      const statId = getHighestAttackingStatId(state, bId, deps.statStageRatios)
+      changeStatBuffs(state, bId, battlerId, battlerId, 1, statId, MOVE_EFFECT_AFFECTS_USER, false, deps, unmodelled, moveId)
+    }
+    if (
+      battlerHasSimAbility(state, b, 'ABILITY_WIND_POWER', true, battlerId, attackerHasMB, deps.dataContext) &&
+      !hasFlag(b.statuses3, STATUS3_CHARGED_UP)
+    ) {
+      b.statuses3 = setFlag(b.statuses3, STATUS3_CHARGED_UP)
+    }
+  }
 
   return outcome(ctx, {})
 }
@@ -1911,7 +1943,6 @@ export { WEATHER_DURATION, WEATHER_DURATION_EXTENDED } from './constants'
 function applyWeatherMove(
   ctx: MoveEffectContext,
   weatherEnum: number,
-  scriptCitation: string,
 ): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
   const moveId = action.chosenMove!.id
@@ -1920,9 +1951,7 @@ function applyWeatherMove(
 
   const changed = tryChangeBattleWeather(state, battlerId, weatherEnum, false, deps)
   if (changed) {
-    unmodelled.push(
-      `BattleScript_OnWeatherChange (data/battle_scripts_1.s:9833-9841) / VARIOUS_ON_WEATHER_CHANGE (src/battle_script_commands.c:8183-8190): onWeather ability reactions are not modelled (${scriptCitation})`,
-    )
+    dispatchOnWeatherChange(state, deps, unmodelled)
   }
 
   return outcome(ctx, {})
@@ -1935,7 +1964,7 @@ function applyWeatherMove(
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleRainDance(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(ctx, ENUM_WEATHER_RAIN, 'BattleScript_EffectRainDance')
+  return applyWeatherMove(ctx, ENUM_WEATHER_RAIN)
 }
 
 /**
@@ -1945,7 +1974,7 @@ function handleRainDance(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleSunnyDay(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(ctx, ENUM_WEATHER_SUN, 'BattleScript_EffectSunnyDay')
+  return applyWeatherMove(ctx, ENUM_WEATHER_SUN)
 }
 
 /**
@@ -1955,7 +1984,7 @@ function handleSunnyDay(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleSandstorm(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(ctx, ENUM_WEATHER_SANDSTORM, 'BattleScript_EffectSandstorm')
+  return applyWeatherMove(ctx, ENUM_WEATHER_SANDSTORM)
 }
 
 /**
@@ -1965,7 +1994,7 @@ function handleSandstorm(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleHail(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(ctx, ENUM_WEATHER_HAIL, 'BattleScript_EffectHail')
+  return applyWeatherMove(ctx, ENUM_WEATHER_HAIL)
 }
 
 /**
@@ -1975,7 +2004,7 @@ function handleHail(ctx: MoveEffectContext): ActionOutcome {
  * and TryChangeBattleWeather (src/battle_util.c:3721-3743).
  */
 function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
-  return applyWeatherMove(ctx, ENUM_WEATHER_FOG, 'BattleScript_EffectEerieFog')
+  return applyWeatherMove(ctx, ENUM_WEATHER_FOG)
 }
 
 /**

@@ -391,3 +391,6 @@ export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
 export const BATTLE_TYPE_PALACE = 1 << 17
 export const BATTLE_TYPE_ARENA = 1 << 18
 
+/** include/battle.h:69 -- BattleResources.flags */
+export const RESOURCE_FLAG_ROOST = 0x2
+

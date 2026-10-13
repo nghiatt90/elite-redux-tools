@@ -906,8 +906,31 @@ describe('Status move handlers (step 2 & 5, batch 2)', () => {
       const out = executeTurn(state, [useMove(1, MOVE_YAWN), null], deps)
       const act = out.actions.find((a) => a.battlerId === 0)!
 
-      expect(getCounter(state.battlers[1]!.statuses3, STATUS3_YAWN)).toBe(2)
+      // Yawn sets counter to 2; ENDTURN_YAWN (battle_util.c:2841) decrements it to 1 at end of turn
+      expect(getCounter(state.battlers[1]!.statuses3, STATUS3_YAWN)).toBe(1)
       expect(act.statusApplied).toEqual({ battlerId: 1, status: 'YAWN' })
+      expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(false)
+
+      // Turn 2: Yawn decrements to 0 and applies sleep
+      executeTurn(state, [null, null], deps)
+      expect(getCounter(state.battlers[1]!.statuses3, STATUS3_YAWN)).toBe(0)
+      expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(true)
+      // countingRng draws 0 -> (0 & 3) + 2 = 2 turns of sleep
+      expect(getCounter(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(2)
+    }
+
+    // 1b. Yawn turn 2 blocked by Electric Terrain on grounded target
+    {
+      const rng = countingRng()
+      const state = battle([{ moves: ['MOVE_YAWN', null, null, null], pp: [30, 0, 0, 0] }, {}], rng)
+      executeTurn(state, [useMove(1, MOVE_YAWN), null], deps)
+      expect(getCounter(state.battlers[1]!.statuses3, STATUS3_YAWN)).toBe(1)
+
+      // Electric terrain set before turn 2 ends
+      state.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+      executeTurn(state, [null, null], deps)
+      expect(getCounter(state.battlers[1]!.statuses3, STATUS3_YAWN)).toBe(0)
+      expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_SLEEP)).toBe(false)
     }
 
     // 2. Already yawning: fails

@@ -122,6 +122,7 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
+import { dispatchOnWeatherChange } from './onWeather'
 import {
   B_MSG_DEFENDER_STAT_FELL,
   B_MSG_STAT_WONT_DECREASE,
@@ -968,7 +969,9 @@ export function applySwitchInAbilities(
     // 1. Weather setters (Cycle 36)
     const weatherEnum = WEATHER_SETTER_MAP[abilityId]
     if (weatherEnum !== undefined) {
-      tryChangeBattleWeather(state, battlerId, weatherEnum, true, deps)
+      if (tryChangeBattleWeather(state, battlerId, weatherEnum, true, deps)) {
+        dispatchOnWeatherChange(state, deps, unmodelled)
+      }
       continue
     }
 
@@ -994,7 +997,9 @@ export function applySwitchInAbilities(
           disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
         }
       }
-      tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_RAIN, true, deps)
+      if (tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_RAIN, true, deps)) {
+        dispatchOnWeatherChange(state, deps, unmodelled)
+      }
       continue
     }
 
@@ -1026,7 +1031,9 @@ export function applySwitchInAbilities(
         disableSwitchInAbility(state, battlerId ^ 2, 'ABILITY_WIND_RIDER', deps.dataContext)
       }
       if (abilityId === 'ABILITY_BLISTERING_SUN') {
-        tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_SUN_PRIMAL, true, deps)
+        if (tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_SUN_PRIMAL, true, deps)) {
+          dispatchOnWeatherChange(state, deps, unmodelled)
+        }
       }
       continue
     }

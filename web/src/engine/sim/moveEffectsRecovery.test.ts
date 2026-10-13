@@ -257,14 +257,11 @@ describe('Recovery moves: Recover, Soft-Boiled, Roost', () => {
     expect(state.battlers[0]!.mon.hp).toBe(90)
   })
 
-  it('Roost heals 50% max HP and records unmodelled setroost gap', () => {
+  it('Roost heals 50% max HP', () => {
     const state = battle([{ hp: 30, maxHp: 100 }, { spe: 50 }], scriptedRng())
-    const outcome = executeTurn(state, [useMove(0, MOVE_ROOST), null], testDeps())
+    executeTurn(state, [useMove(0, MOVE_ROOST), null], testDeps())
 
     expect(state.battlers[0]!.mon.hp).toBe(80)
-    expect(outcome.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain(
-      "Cmd_setroost (battle_script_commands.c:4022-4047): Roost's temporary Flying-type removal and RESOURCE_FLAG_ROOST are not modelled",
-    )
   })
 
   it('Heal Block blocks Recover from healing', () => {

@@ -380,6 +380,7 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     monToSwitchIntoId: PARTY_SIZE,
     aiMonToSwitchIntoId: PARTY_SIZE,
     sameMoveTurns: 0,
+    resourceFlags: 0,
   }
 }
 

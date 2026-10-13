@@ -25,6 +25,7 @@ import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  RESOURCE_FLAG_ROOST,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
   STAT_ATK,
@@ -34,9 +35,11 @@ import {
   STAT_SPDEF,
   STATUS2_CURSED,
   STATUS2_DESTINY_BOND,
+  STATUS3_CHARGED_UP,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   WEATHER_SANDSTORM_TEMPORARY,
+  WEATHER_SUN_ANY,
   WEATHER_SUN_TEMPORARY,
   hasFlag,
 } from './constants'
@@ -105,6 +108,10 @@ const MOVE_DESTINY_BOND = requireMove('MOVE_DESTINY_BOND')
 const MOVE_KARMA = requireMove('MOVE_KARMA')
 const MOVE_RECYCLE = requireMove('MOVE_RECYCLE')
 const MOVE_HELPING_HAND = requireMove('MOVE_HELPING_HAND')
+const MOVE_ROOST = requireMove('MOVE_ROOST')
+const MOVE_TACKLE = requireMove('MOVE_TACKLE')
+const MOVE_TAILWIND = requireMove('MOVE_TAILWIND')
+const MOVE_SUNNY_DAY = requireMove('MOVE_SUNNY_DAY')
 
 const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
 const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
@@ -119,8 +126,12 @@ const ABILITY_DESERT_CLOAK = requireAbility('ABILITY_DESERT_CLOAK')
 const ABILITY_DUNE_VEIL = requireAbility('ABILITY_DUNE_VEIL')
 const ABILITY_FLOWER_VEIL = requireAbility('ABILITY_FLOWER_VEIL')
 const ABILITY_JUNGLES_GUARD = requireAbility('ABILITY_JUNGLES_GUARD')
+const ABILITY_WIND_RIDER = requireAbility('ABILITY_WIND_RIDER')
+const ABILITY_WIND_POWER = requireAbility('ABILITY_WIND_POWER')
+const ABILITY_PROTOSYNTHESIS = requireAbility('ABILITY_PROTOSYNTHESIS')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
+const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -166,12 +177,16 @@ function battle(
   specs: {
     spe?: number
     atk?: number
+    def?: number
     spatk?: number
+    spdef?: number
     hp?: number
     maxHp?: number
     abilities?: SimBattleMon['abilities']
     moves?: SimBattleMon['moves']
     pp?: SimBattleMon['pp']
+    types?: [string, string, string]
+    itemId?: string | null
   }[],
   rng: RandomSource,
 ): BattleState {
@@ -181,12 +196,14 @@ function battle(
         i,
         mon({
           // The foe defaults slower so turn order needs no speed-tie draw (GetWhoStrikesFirst, battle_main.c:4397).
-          rawStats: { atk: s.atk ?? 100, def: 90, spatk: s.spatk ?? 80, spdef: 85, spe: s.spe ?? (i === 0 ? 100 : 50) },
+          rawStats: { atk: s.atk ?? 100, def: s.def ?? 90, spatk: s.spatk ?? 80, spdef: s.spdef ?? 85, spe: s.spe ?? (i === 0 ? 100 : 50) },
           hp: s.hp ?? 100,
           maxHp: s.maxHp ?? 100,
           abilities: s.abilities ?? { ability: null, innates: [null, null, null] },
           moves: s.moves ?? ['MOVE_SWORDS_DANCE', null, null, null],
           pp: s.pp ?? [30, 0, 0, 0],
+          types: s.types ?? ['WATER', 'MYSTERY', 'MYSTERY'],
+          itemId: s.itemId ?? null,
         }),
         0,
       ),
@@ -1402,6 +1419,217 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       })
       state.battlers[2]!.round.helpingHand = true
       expect(runHelpingHand(state, useMove(1, MOVE_HELPING_HAND)).missed).toBe(true)
+    })
+  })
+
+  describe('Cycle 50 status-move partials (Roost, Tailwind, onWeather)', () => {
+    describe('Roost (Cmd_setroost: battle_script_commands.c:4022-4047, ENDTURN_ROOST: battle_util.c:2907-2914)', () => {
+      it('Roost on a Flying/Fire dual type removes Flying during the turn and restores Flying at end of turn', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { hp: 50, maxHp: 100, spe: 100, types: ['FLYING', 'FIRE', 'MYSTERY'], moves: ['MOVE_ROOST', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        let defenderTypesDuringAttack: [string, string, string] | null = null
+        let wasGroundedDuringAttack = false
+        const damage: DamageResolver = {
+          resolve: (st, _atk, tgt) => {
+            defenderTypesDuringAttack = [...st.battlers[tgt]!.mon.types]
+            wasGroundedDuringAttack = !st.battlers[tgt]!.mon.types.includes('FLYING')
+            return { targetDamage: 20, attackerDamage: null, unmodelled: [] }
+          },
+        }
+
+        executeTurn(state, [useMove(1, MOVE_ROOST), useMove(0, MOVE_TACKLE)], testDeps(damage))
+
+        expect(defenderTypesDuringAttack).toEqual(['MYSTERY', 'FIRE', 'MYSTERY'])
+        expect(wasGroundedDuringAttack).toBe(true)
+
+        expect(state.battlers[0]!.mon.types).toEqual(['FLYING', 'FIRE', 'MYSTERY'])
+        expect(state.battlers[0]!.roostTypes).toEqual(['FLYING', 'FIRE'])
+        expect(hasFlag(state.battlers[0]!.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)).toBe(false)
+        expect(state.battlers[0]!.mon.hp).toBe(80)
+      })
+
+      it('Roost on a pure Flying type sets types to NORMAL/NORMAL/MYSTERY during turn and restores pure Flying at end of turn', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { hp: 50, maxHp: 100, spe: 100, types: ['FLYING', 'FLYING', 'MYSTERY'], moves: ['MOVE_ROOST', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        let defenderTypesDuringAttack: [string, string, string] | null = null
+        const damage: DamageResolver = {
+          resolve: (st, _atk, tgt) => {
+            defenderTypesDuringAttack = [...st.battlers[tgt]!.mon.types]
+            return { targetDamage: null, attackerDamage: null, unmodelled: [] }
+          },
+        }
+
+        executeTurn(state, [useMove(1, MOVE_ROOST), useMove(0, MOVE_TACKLE)], testDeps(damage))
+
+        expect(defenderTypesDuringAttack).toEqual(['NORMAL', 'NORMAL', 'MYSTERY'])
+        expect(state.battlers[0]!.mon.types).toEqual(['FLYING', 'FLYING', 'MYSTERY'])
+        expect(state.battlers[0]!.roostTypes).toEqual(['FLYING', 'FLYING'])
+        expect(hasFlag(state.battlers[0]!.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)).toBe(false)
+      })
+
+      it('Roost at full HP does not strip Flying type (tryhealhalfhealth branches to AlreadyAtFullHp)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { hp: 100, maxHp: 100, spe: 100, types: ['FLYING', 'FIRE', 'MYSTERY'], moves: ['MOVE_ROOST', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] },
+          ],
+          rng,
+        )
+
+        let defenderTypesDuringAttack: [string, string, string] | null = null
+        const damage: DamageResolver = {
+          resolve: (st, _atk, tgt) => {
+            defenderTypesDuringAttack = [...st.battlers[tgt]!.mon.types]
+            return { targetDamage: null, attackerDamage: null, unmodelled: [] }
+          },
+        }
+
+        executeTurn(state, [useMove(1, MOVE_ROOST), useMove(0, MOVE_TACKLE)], testDeps(damage))
+
+        expect(defenderTypesDuringAttack).toEqual(['FLYING', 'FIRE', 'MYSTERY'])
+        expect(hasFlag(state.battlers[0]!.resourceFlags ?? 0, RESOURCE_FLAG_ROOST)).toBe(false)
+      })
+    })
+
+    describe('Tailwind reactions (BattleScript_OnTailwindStart: data/battle_scripts_1.s:9267-9296)', () => {
+      it('Tailwind raises Atk +1 for a user with Wind Rider in singles', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {
+              atk: 100,
+              spatk: 80,
+              abilities: { ability: ABILITY_WIND_RIDER, innates: [null, null, null] },
+              moves: ['MOVE_TAILWIND', null, null, null],
+              pp: [15, 0, 0, 0],
+            },
+            {},
+          ],
+          rng,
+        )
+
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        executeTurn(state, [useMove(0, MOVE_TAILWIND), null], testDeps())
+
+        expect(state.sides[0]!.timers.tailwindTimer).toBe(3)
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+      })
+
+      it('Tailwind sets STATUS3_CHARGED_UP on a user with Wind Power', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {
+              abilities: { ability: ABILITY_WIND_POWER, innates: [null, null, null] },
+              moves: ['MOVE_TAILWIND', null, null, null],
+              pp: [15, 0, 0, 0],
+            },
+            {},
+          ],
+          rng,
+        )
+
+        expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_CHARGED_UP)).toBe(false)
+        executeTurn(state, [useMove(0, MOVE_TAILWIND), null], testDeps())
+
+        expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_CHARGED_UP)).toBe(true)
+      })
+    })
+
+    describe('onWeather reactions (BattleScript_OnWeatherChange, Protosynthesis)', () => {
+      it('Sunny Day activates Protosynthesis on its highest stat', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {
+              atk: 110,
+              def: 80,
+              spatk: 70,
+              spdef: 75,
+              spe: 90,
+              abilities: { ability: ABILITY_PROTOSYNTHESIS, innates: [null, null, null] },
+              moves: ['MOVE_SUNNY_DAY', null, null, null],
+              pp: [5, 0, 0, 0],
+            },
+            {},
+          ],
+          rng,
+        )
+
+        expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+
+        executeTurn(state, [useMove(0, MOVE_SUNNY_DAY), null], testDeps())
+
+        expect(hasFlag(state.field.weather, WEATHER_SUN_ANY)).toBe(true)
+        expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(2 | (STAT_ATK << 2))
+      })
+
+      it('Weather ending deactivates Protosynthesis when no Booster Energy is held', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {
+              atk: 110,
+              abilities: { ability: ABILITY_PROTOSYNTHESIS, innates: [null, null, null] },
+            },
+            {},
+          ],
+          rng,
+        )
+
+        state.field.weather = WEATHER_SUN_TEMPORARY
+        state.field.weatherDuration = 1
+        state.battlers[0]!.volatiles.abilityState[0] = 2 | (STAT_ATK << 2)
+
+        executeTurn(state, [null, null], testDeps())
+
+        expect(hasFlag(state.field.weather, WEATHER_SUN_ANY)).toBe(false)
+        expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+      })
+
+      it('Weather ending consumes Booster Energy and preserves Protosynthesis boost', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {
+              atk: 110,
+              itemId: ITEM_BOOSTER_ENERGY.id,
+              abilities: { ability: ABILITY_PROTOSYNTHESIS, innates: [null, null, null] },
+            },
+            {},
+          ],
+          rng,
+        )
+
+        state.field.weather = WEATHER_SUN_TEMPORARY
+        state.field.weatherDuration = 1
+        state.battlers[0]!.volatiles.abilityState[0] = 2 | (STAT_ATK << 2)
+
+        // GetBattlerHoldEffect(battler, TRUE) goes through grounding.holdEffectOf.
+        const deps = { ...testDeps(), grounding: { ...GROUNDING, holdEffectOf: (id: number) => (id === 0 ? 'HOLD_EFFECT_BOOSTER_ENERGY' : null) } }
+        executeTurn(state, [null, null], deps)
+
+        expect(hasFlag(state.field.weather, WEATHER_SUN_ANY)).toBe(false)
+        expect(state.battlers[0]!.mon.itemId).toBeNull()
+        // RemoveItem (battle_script_commands.c:2231) never writes usedHeldItems.
+        expect(state.battlers[0]!.usedHeldItem ?? null).toBeNull()
+        expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(1 | (STAT_ATK << 2))
+      })
     })
   })
 })

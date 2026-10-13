@@ -230,6 +230,7 @@ import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { isMagicGuardProtected, type EndTurnEffectResult } from './endTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
+import { dispatchOnWeatherChange } from './onWeather'
 import {
   hasFlag,
   clearFlag,
@@ -561,6 +562,7 @@ export function runFieldEndTurnEffects(
       state.field.weatherDuration--
       if (state.field.weatherDuration === 0) {
         state.field.weather = clearFlag(clearFlag(state.field.weather, WEATHER_RAIN_TEMPORARY), WEATHER_RAIN_DOWNPOUR)
+        dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
       }
     }
   }
@@ -573,6 +575,7 @@ export function runFieldEndTurnEffects(
       if (state.field.weatherDuration === 0) {
         state.field.weather = clearFlag(state.field.weather, WEATHER_SANDSTORM_TEMPORARY)
         ended = true
+        dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
       }
     }
     if (!ended) {
@@ -595,7 +598,10 @@ export function runFieldEndTurnEffects(
     const permanentOrPrimal = hasFlag(state.field.weather, WEATHER_SUN_PERMANENT) || hasFlag(state.field.weather, WEATHER_SUN_PRIMAL)
     if (!permanentOrPrimal && !state.field.timers.started.weather) {
       state.field.weatherDuration--
-      if (state.field.weatherDuration === 0) state.field.weather = clearFlag(state.field.weather, WEATHER_SUN_TEMPORARY)
+      if (state.field.weatherDuration === 0) {
+        state.field.weather = clearFlag(state.field.weather, WEATHER_SUN_TEMPORARY)
+        dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
+      }
     }
   }
 
@@ -607,6 +613,7 @@ export function runFieldEndTurnEffects(
       if (state.field.weatherDuration === 0) {
         state.field.weather = clearFlag(state.field.weather, WEATHER_HAIL_TEMPORARY)
         ended = true
+        dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
       }
     }
     if (!ended) {
@@ -633,6 +640,7 @@ export function runFieldEndTurnEffects(
       if (state.field.weatherDuration === 0) {
         state.field.weather = clearFlag(state.field.weather, WEATHER_FOG_ANY)
         ended = true // BattleScript_FogEnds -- no stat drops this turn.
+        dispatchOnWeatherChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
       }
     }
     if (!ended && hasFlag(state.field.weather, WEATHER_FOG_ANY)) {
@@ -657,7 +665,7 @@ export function runFieldEndTurnEffects(
         state.field.weather = WEATHER_FOG_TEMPORARY
         state.field.weatherDuration = state.field.timers.fogReturnTimer
       }
-      state.field.timers.fogReturnTimer = 0
+      state.field.timers.fogReturnTimer = 0 // BattleScript_FogReturns has no OnWeatherChange call.
     }
   }
 

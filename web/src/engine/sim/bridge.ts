@@ -57,12 +57,13 @@
 
 import type { BattlerBattleState, BattleStatKey, ConditionBattlerContext, FieldBattleState, WeatherKind } from '../types'
 import { BATTLE_STAT_KEYS } from '../types'
-import type { BattleState } from './state'
+import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 // Only isGravityActive: the full grounding port belongs to the simulator's own
 // consumers, not to BattlerBattleState.isGrounded -- see that field's comment.
 import { isGravityActive } from './grounding'
+import { findAbilitySlot } from './statusEffects'
 import type { TurnOrderContext } from './turnOrder'
 import { TOTAL_SPEED_FULL, getBattlerTotalSpeedStat } from './turnOrder'
 import {
@@ -176,6 +177,19 @@ const STAT_INDEX_BY_KEY: Record<BattleStatKey, number> = {
   spatk: STAT_SPATK,
   spdef: STAT_SPDEF,
   spe: STAT_SPEED,
+}
+
+/** ParadoxBoost (include/battle_util.h:115-118) as abilityState packs it -- `source:2`
+ * then `statId:3` -- for whichever of Protosynthesis/Quark Drive the battler holds;
+ * the onStat hook (abilities.cc:6972-6979) boosts only while `source` is nonzero. */
+function paradoxBoostedStat(battler: BattlerState): BattleStatKey | null {
+  for (const id of ['ABILITY_PROTOSYNTHESIS', 'ABILITY_QUARK_DRIVE']) {
+    const slot = findAbilitySlot(battler.mon.abilities, id)
+    if (slot === -1) continue
+    const packed = battler.volatiles.abilityState[slot] ?? 0
+    if (packed & 3) return BATTLE_STAT_KEYS.find((k) => STAT_INDEX_BY_KEY[k] === (packed >> 2)) ?? null
+  }
+  return null
 }
 
 /** The 8-entry internal array, as the 5-key external record the calculator
@@ -365,7 +379,7 @@ const BATCH1_GAPS: BridgeGap[] = [
 
   // --- no honest source anywhere ------------------------------------------
   { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'one boolean standing for per-ability activation state; volatiles.abilityState has no ability-to-slot mapping' },
-  { field: 'boostedStat', reason: 'NO_SOURCE', detail: "Protosynthesis/Quark Drive's chosen stat; nothing in the sim tracks paradox activation" },
+  { field: 'boostedStat', reason: 'NO_SOURCE', detail: "Protosynthesis/Quark Drive's chosen stat; only Protosynthesis's onWeather activation is ported (onEntry and Quark Drive's onTerrain are not)" },
   { field: 'condition.lastMoveFailed', reason: 'NO_SOURCE', detail: 'gBattleStruct->lastMoveFailed is absent from the state model entirely' },
 
 ]
@@ -537,7 +551,7 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     // would flip those too -- acceptable until those abilities get their own state.
     abilityOn: Boolean(battler.volatiles.flashFire),
     gender: mon.gender,
-    boostedStat: null,
+    boostedStat: paradoxBoostedStat(battler),
     // Derived: the turn loop maintains this one.
     alliesFainted: state.sides[battlerId & 1].faintedCount,
     slowStartTimer: slowStartTimer(battler.volatiles),

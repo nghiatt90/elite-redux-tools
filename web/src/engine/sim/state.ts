@@ -352,6 +352,14 @@ export interface BattlerState {
    * absent/null means ITEM_NONE, exactly what a fresh battle reads. Optional so
    * every existing BattlerState construction stays valid. */
   usedHeldItem?: string | null
+  /** `RESOURCE_FLAG_ROOST` (include/battle.h:69) -- `gBattleResources->flags->flags[battler]`.
+   * Bitmask of resource flags (e.g. RESOURCE_FLAG_ROOST = 0x2). */
+  resourceFlags?: number
+  /** `u8 roostTypes[MAX_BATTLERS_COUNT][3]` (include/battle.h:687) -- `gBattleStruct->roostTypes`,
+   * of which ENDTURN_ROOST (battle_util.c:2907-2914) restores only [0] and [1]. Absent reads as
+   * TYPE_NORMAL (0, AllocZeroed). The C never resets it on switch; the sim's per-switch battler
+   * rebuild does, which differs only when a type3-only Flying mon Roosts. */
+  roostTypes?: [string, string]
 }
 
 // ---------------------------------------------------------------------------
