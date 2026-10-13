@@ -349,6 +349,34 @@ export const ENUM_WEATHER_FOG = 8
 export const WEATHER_DURATION = 8
 export const WEATHER_DURATION_EXTENDED = 12
 
+/** TERRAIN_DURATION (8) and TERRAIN_DURATION_EXTENDED (12) -- include/battle_util.h:52-53. */
+export const TERRAIN_DURATION = 8
+export const TERRAIN_DURATION_EXTENDED = 12
+
+/** GRAVITY_DURATION (5) and GRAVITY_DURATION_EXTENDED (8) -- include/battle_util.h:54-55. */
+export const GRAVITY_DURATION = 5
+export const GRAVITY_DURATION_EXTENDED = 8
+
+/** TRICK_ROOM_DURATION (5) and TRICK_ROOM_DURATION_SHORT (3) -- include/battle_util.h:56-57. */
+export const TRICK_ROOM_DURATION = 5
+export const TRICK_ROOM_DURATION_SHORT = 3
+
+/** INVERSE_ROOM_DURATION (5) and INVERSE_ROOM_DURATION_SHORT (3) -- include/battle_util.h:60-61. */
+export const INVERSE_ROOM_DURATION = 5
+export const INVERSE_ROOM_DURATION_SHORT = 3
+
+/** SCREEN_DURATION (5), SCREEN_DURATION_EXTENDED (8), SCREEN_DURATION_SHORT (3) -- include/battle_util.h:63-65. */
+export const SCREEN_DURATION = 5
+export const SCREEN_DURATION_EXTENDED = 8
+export const SCREEN_DURATION_SHORT = 3
+
+/** TAILWIND_DURATION (3) and TAILWIND_DURATION_SHORT (3) -- include/battle_util.h:66-67. */
+export const TAILWIND_DURATION = 3
+export const TAILWIND_DURATION_SHORT = 3
+
+/** PLEDGE_DURATION (3) -- include/battle_util.h:68. */
+export const PLEDGE_DURATION = 3
+
 /** Neutral stat stage multipliers [numerator, denominator] from stage -6 to +6. */
 export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],

@@ -66,8 +66,6 @@ import {
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
   STATUS_FIELD_GRASSY_TERRAIN,
-  STATUS_FIELD_TERRAIN_ANY,
-  STATUS_FIELD_TERRAIN_PERMANENT,
   STAT_ATK,
   STAT_DEF,
   STAT_SPATK,
@@ -129,7 +127,7 @@ import {
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
-import { tryChangeBattleWeather } from './switchInAbility'
+import { tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -1582,17 +1580,8 @@ function handleDefenderMoveEndAbility(
 
   // 23. Seed Sower (src/abilities.cc:6859-6866, battle_util.c:3778-3795)
   if (abilityId === 'ABILITY_SEED_SOWER') {
-    if (
-      target.mon.hp > 0 &&
-      !hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN) &&
-      !hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT)
-    ) {
-      state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
-      state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
-      state.field.timers.started.terrain = true
-      state.field.timers.terrainBattlerId = targetId
-      const heldEffect = deps.grounding.holdEffectOf(targetId)
-      state.field.timers.terrainTimer = heldEffect === 'HOLD_EFFECT_TERRAIN_EXTENDER' ? 12 : 8
+    if (target.mon.hp > 0) {
+      tryChangeBattleTerrain(state, targetId, STATUS_FIELD_GRASSY_TERRAIN, deps)
     }
   }
 

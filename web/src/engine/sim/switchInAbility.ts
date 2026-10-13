@@ -53,9 +53,23 @@ import {
   ENUM_WEATHER_STRONG_WINDS,
   ENUM_WEATHER_SUN,
   ENUM_WEATHER_SUN_PRIMAL,
+  GRAVITY_DURATION,
+  GRAVITY_DURATION_EXTENDED,
+  INVERSE_ROOM_DURATION_SHORT,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  PLEDGE_DURATION,
+  SCREEN_DURATION,
+  SCREEN_DURATION_SHORT,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SMOKESCREEN,
+  SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_TAILWIND,
+  SIDE_STATUS_TOXIC_SPIKES,
   STAT_ATK,
   STAT_DEF,
   STAT_SPEED,
@@ -66,6 +80,20 @@ import {
   STATUS2_SUBSTITUTE,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_INVERSE_ROOM,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TERRAIN_ANY,
+  STATUS_FIELD_TERRAIN_PERMANENT,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  TAILWIND_DURATION_SHORT,
+  TERRAIN_DURATION,
+  TERRAIN_DURATION_EXTENDED,
+  TRICK_ROOM_DURATION_SHORT,
   WEATHER_DURATION,
   WEATHER_DURATION_EXTENDED,
   WEATHER_FOG_ANY,
@@ -85,7 +113,9 @@ import {
   WEATHER_SUN_PERMANENT,
   WEATHER_SUN_PRIMAL,
   WEATHER_SUN_TEMPORARY,
+  clearFlag,
   hasFlag,
+  setFlag,
 } from './constants'
 import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
@@ -190,6 +220,64 @@ export const WEATHER_SETTER_MAP: Readonly<Record<string, number>> = {
   ABILITY_SNOW_WARNING: ENUM_WEATHER_HAIL,
   ABILITY_SNOWY_WRATH: ENUM_WEATHER_HAIL,
   ABILITY_SUNDAE: ENUM_WEATHER_HAIL,
+}
+
+/**
+ * Ported terrain setters and their onEntry aliases:
+ * - ABILITY_ELECTRIC_SURGE (abilities.cc:3144-3155)
+ * - ABILITY_HADRON_ENGINE (abilities.cc:7467-7468, alias Impl<ABILITY_ELECTRIC_SURGE>.onEntry)
+ * - ABILITY_PSYCHIC_SURGE (abilities.cc:3160-3167)
+ * - ABILITY_MISTY_SURGE (abilities.cc:3172-3179)
+ * - ABILITY_GRASSY_SURGE (abilities.cc:3184-3191)
+ * - ABILITY_KING_OF_THE_JUNGLE (abilities.cc:12580-12581, alias Impl<ABILITY_GRASSY_SURGE>.onEntry)
+ * - ABILITY_TOXIC_SURGE (abilities.cc:10134-10141)
+ */
+export const TERRAIN_SETTER_MAP: Readonly<Record<string, number>> = {
+  ABILITY_ELECTRIC_SURGE: STATUS_FIELD_ELECTRIC_TERRAIN,
+  ABILITY_HADRON_ENGINE: STATUS_FIELD_ELECTRIC_TERRAIN,
+  ABILITY_PSYCHIC_SURGE: STATUS_FIELD_PSYCHIC_TERRAIN,
+  ABILITY_MISTY_SURGE: STATUS_FIELD_MISTY_TERRAIN,
+  ABILITY_GRASSY_SURGE: STATUS_FIELD_GRASSY_TERRAIN,
+  ABILITY_KING_OF_THE_JUNGLE: STATUS_FIELD_GRASSY_TERRAIN,
+  ABILITY_TOXIC_SURGE: STATUS_FIELD_TOXIC_TERRAIN,
+}
+
+/**
+ * Abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
+ * Queues an out-of-turn full move attack via gQueuedExtraAttackData.
+ */
+export const USE_ENTRY_MOVE_MAP: Readonly<Record<string, string>> = {
+  ABILITY_LOW_BLOW: 'MOVE_FEINT_ATTACK',
+  ABILITY_CHEAP_TACTICS: 'MOVE_SCRATCH',
+  ABILITY_MONKEY_BUSINESS: 'MOVE_TICKLE',
+  ABILITY_DUST_CLOUD: 'MOVE_SAND_ATTACK',
+  ABILITY_TRICKSTER: 'MOVE_DISABLE',
+  ABILITY_DOOMBRINGER: 'MOVE_DOOM_DESIRE',
+  ABILITY_WISHMAKER: 'MOVE_WISH',
+  ABILITY_SUPPRESS: 'MOVE_TORMENT',
+  ABILITY_CHANGE_OF_HEART: 'MOVE_HEART_SWAP',
+  ABILITY_TELEKINETIC: 'MOVE_TELEKINESIS',
+  ABILITY_POWDER_BURST: 'MOVE_POWDER',
+  ABILITY_MONSTER_MASH: 'MOVE_TRICK_OR_TREAT',
+  ABILITY_PHANTOM_THIEF: 'MOVE_SPECTRAL_THIEF',
+  ABILITY_WEB_SPINNER: 'MOVE_STRING_SHOT',
+  ABILITY_DRACO_MORALE: 'MOVE_DRAGON_CHEER',
+  ABILITY_DREAM_WHIMSY: 'MOVE_YAWN',
+  ABILITY_WILDFIRE: 'MOVE_FIRE_SPIN',
+  ABILITY_JUMP_SCARE: 'MOVE_ASTONISH',
+  ABILITY_TAR_TOSS: 'MOVE_TAR_SHOT',
+  ABILITY_WIND_RAGE: 'MOVE_DEFOG',
+  ABILITY_SAND_PIT: 'MOVE_SAND_TOMB',
+  ABILITY_POSEIDONS_DOMINION: 'MOVE_WHIRLPOOL',
+  ABILITY_WOODLAND_CURSE: 'MOVE_FORESTS_CURSE',
+  ABILITY_CHILLING_PRESENCE: 'MOVE_ICY_WIND',
+  ABILITY_NEUTRALIZING_FOG: 'MOVE_DEFOG',
+  ABILITY_ROYAL_DECREE: 'MOVE_GLARE',
+  ABILITY_FROSTY_PRESCENCE: 'MOVE_MIST',
+  ABILITY_LETS_DANCE: 'MOVE_TEETER_DANCE',
+  ABILITY_I_AM_STEVE: 'MOVE_NO_RETREAT',
+  ABILITY_MASHED_POTATO: 'MOVE_SYRUP_BOMB',
+  ABILITY_ELECTRO_BOOSTER: 'MOVE_MAGNET_RISE',
 }
 
 interface WeatherFlagInfo {
@@ -299,6 +387,253 @@ export function tryChangeBattleWeather(
 }
 
 /**
+ * TryChangeBattleTerrain, battle_util.c:3778-3795.
+ *
+ * - Fails if matching terrain is already active (gFieldStatuses & statusFlag).
+ * - Fails if STATUS_FIELD_TERRAIN_PERMANENT is active.
+ * - Clears STATUS_FIELD_TERRAIN_ANY from gFieldStatuses.
+ * - Sets statusFlag on gFieldStatuses.
+ * - Sets gFieldTimers.started.terrain = TRUE.
+ * - Sets gFieldTimers.terrainBattlerId = battler.
+ * - Sets gFieldTimers.terrainTimer to TERRAIN_DURATION_EXTENDED (12) if battler holds
+ *   Terrain Extender (HOLD_EFFECT_TERRAIN_EXTENDER), else TERRAIN_DURATION (8).
+ */
+export function tryChangeBattleTerrain(
+  state: BattleState,
+  battlerId: number,
+  terrainFlag: number,
+  deps: { grounding: GroundingContext },
+): boolean {
+  if (
+    hasFlag(state.field.statuses, terrainFlag) ||
+    hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT)
+  ) {
+    return false
+  }
+
+  state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+  state.field.statuses = setFlag(state.field.statuses, terrainFlag)
+  state.field.timers.started.terrain = true
+  state.field.timers.terrainBattlerId = battlerId
+
+  const heldEffect = deps.grounding.holdEffectOf(battlerId)
+  state.field.timers.terrainTimer =
+    heldEffect === 'HOLD_EFFECT_TERRAIN_EXTENDER' ? TERRAIN_DURATION_EXTENDED : TERRAIN_DURATION
+
+  return true
+}
+
+/**
+ * Sets Tailwind on the specified side.
+ * - Cmd_settailwind (battle_script_commands.c:10961-10973)
+ * - Impl<ABILITY_AIR_BLOWER>.onEntry (abilities.cc:1388-1402)
+ */
+export function trySetTailwind(
+  state: BattleState,
+  side: number,
+  battlerId: number,
+  duration: number = TAILWIND_DURATION_SHORT,
+): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (hasFlag(sideState.statuses, SIDE_STATUS_TAILWIND)) {
+    return false
+  }
+
+  sideState.timers.started.tailwind = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TAILWIND)
+  sideState.timers.tailwindBattlerId = battlerId
+  sideState.timers.tailwindTimer = duration
+  return true
+}
+
+/**
+ * Sets Sticky Web on the specified side.
+ * - Cmd_setstickyweb (battle_script_commands.c:11462-11472)
+ * - Impl<ABILITY_SPIDER_LAIR>.onEntry (abilities.cc:4383-4393)
+ * - Impl<ABILITY_SPIDER_LAIR_UPGRADE>.onEntry (abilities.cc:9253-9263)
+ */
+export function trySetStickyWeb(
+  state: BattleState,
+  side: number,
+  timer: number = 0,
+  startedSpiderWeb: boolean = false,
+): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (hasFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)) {
+    return false
+  }
+
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)
+  sideState.timers.stickyWebTimer = timer
+  if (startedSpiderWeb) {
+    sideState.timers.started.spiderWeb = true
+  }
+  return true
+}
+
+/**
+ * Sets Aurora Veil on the specified side.
+ * - Impl<ABILITY_NORTH_WIND>.onEntry (abilities.cc:4482-4495)
+ */
+export function trySetAuroraVeil(
+  state: BattleState,
+  side: number,
+  battlerId: number,
+  deps: { grounding: GroundingContext; dataContext: SimDataContext },
+): boolean {
+  const sideState = state.sides[side]
+  const battler = state.battlers[battlerId]
+  if (!sideState || !battler) return false
+
+  const hasScreenCleaner = battlerHasSimAbility(
+    state,
+    battler,
+    'ABILITY_SCREEN_CLEANER',
+    false,
+    battlerId,
+    false,
+    deps.dataContext,
+  )
+  if (hasFlag(sideState.statuses, SIDE_STATUS_AURORA_VEIL) && !hasScreenCleaner) {
+    return false
+  }
+
+  sideState.timers.started.auroraVeil = true
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_AURORA_VEIL)
+  const isLightClay = deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_LIGHT_CLAY'
+  sideState.timers.auroraVeilTimer = isLightClay ? SCREEN_DURATION : SCREEN_DURATION_SHORT
+  return true
+}
+
+/**
+ * Impl<ABILITY_WHITE_SMOKE>.onEntry (abilities.cc:1367-1376). It sets only the timer, not SIDE_STATUS_SMOKESCREEN,
+ * and its Light Clay test compares GetBattlerHoldEffect() to ITEM_LIGHT_CLAY (an item id, 294), not to
+ * HOLD_EFFECT_LIGHT_CLAY -- read here as never matching, so the duration is always SCREEN_DURATION_SHORT.
+ */
+export function trySetSmokescreen(state: BattleState, side: number, battlerId: number): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (sideState.timers.smokescreenTimer > 0) {
+    return false
+  }
+
+  sideState.timers.smokescreenTimer = SCREEN_DURATION_SHORT
+  sideState.timers.started.smokescreen = true
+  sideState.timers.smokescreenBattler = battlerId
+  return true
+}
+
+/**
+ * TryRemoveScreens, battle_util.c:8359-8385.
+ * Removes screens (Reflect, Light Screen, Aurora Veil, Smokescreen) from both sides.
+ */
+export function tryRemoveScreens(state: BattleState): boolean {
+  let removed = false
+  const screenMask =
+    SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_AURORA_VEIL | SIDE_STATUS_SMOKESCREEN
+  for (let side = 0; side < state.sides.length; side++) {
+    const sideState = state.sides[side]
+    if (!sideState) continue
+    if (hasFlag(sideState.statuses, screenMask)) {
+      sideState.statuses = clearFlag(sideState.statuses, screenMask)
+      sideState.timers.reflectTimer = 0
+      sideState.timers.lightscreenTimer = 0
+      sideState.timers.auroraVeilTimer = 0
+      sideState.timers.smokescreenTimer = 0
+      removed = true
+    }
+  }
+  return removed
+}
+
+/**
+ * Sets Gravity on the field.
+ * - Impl<ABILITY_ATLAS>.onEntry (abilities.cc:5530-5541) -> GRAVITY_DURATION_EXTENDED (8)
+ * - Impl<ABILITY_GRAVITY_WELL>.onEntry (abilities.cc:5741-5746) -> GRAVITY_DURATION (5)
+ */
+export function trySetGravity(state: BattleState, duration: number): boolean {
+  if (hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY)) {
+    return false
+  }
+  state.field.timers.started.gravity = true
+  state.field.timers.gravityTimer = duration
+  state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_GRAVITY)
+  return true
+}
+
+/**
+ * Sets Trick Room on the field.
+ * - Impl<ABILITY_TWISTED_DIMENSION>.onEntry (abilities.cc:4458-4468) -> TRICK_ROOM_DURATION_SHORT (3)
+ */
+export function trySetTrickRoom(state: BattleState, duration: number = TRICK_ROOM_DURATION_SHORT): boolean {
+  if (hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)) {
+    return false
+  }
+  state.field.timers.started.trickRoom = true
+  state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+  state.field.timers.trickRoomTimer = duration
+  return true
+}
+
+/**
+ * Sets Inverse Room on the field.
+ * - Impl<ABILITY_INVERSE_ROOM>.onEntry (abilities.cc:6131-6141) -> INVERSE_ROOM_DURATION_SHORT (3)
+ */
+export function trySetInverseRoom(state: BattleState, duration: number = INVERSE_ROOM_DURATION_SHORT): boolean {
+  if (hasFlag(state.field.statuses, STATUS_FIELD_INVERSE_ROOM)) {
+    return false
+  }
+  state.field.timers.started.inverseRoom = true
+  state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_INVERSE_ROOM)
+  state.field.timers.inverseRoomTimer = duration
+  return true
+}
+
+/**
+ * Sets Toxic Spikes on the specified side.
+ * - Impl<ABILITY_ROSE_GARDEN>.onEntry (abilities.cc:9338-9349) -> 2 layers
+ */
+export function trySetToxicSpikes(state: BattleState, side: number, amount: number = 2): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (sideState.timers.toxicSpikesAmount >= 2) return false
+
+  sideState.timers.toxicSpikesAmount = Math.min(amount, 2)
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TOXIC_SPIKES)
+  return true
+}
+
+/**
+ * Sets Spikes on the specified side.
+ * - Impl<ABILITY_WATCH_YOUR_STEP>.onEntry (abilities.cc:7302-7313) -> +2 layers up to 3
+ */
+export function trySetSpikes(state: BattleState, side: number, addLayers: number = 2): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (sideState.timers.spikesAmount >= 3) return false
+
+  sideState.timers.spikesAmount = Math.min(sideState.timers.spikesAmount + addLayers, 3)
+  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SPIKES)
+  return true
+}
+
+/**
+ * Sets Swamp on the specified side.
+ * - Impl<ABILITY_SWAMP_THING>.onEntry (abilities.cc:10684-10692) -> PLEDGE_DURATION (3)
+ */
+export function trySetSwamp(state: BattleState, side: number, duration: number = PLEDGE_DURATION): boolean {
+  const sideState = state.sides[side]
+  if (!sideState) return false
+  if (sideState.timers.swampTimer > 0) return false
+
+  sideState.timers.started.swamp = true
+  sideState.timers.swampTimer = duration
+  return true
+}
+
+/**
  * GetAbilityIndex, battle_util.c:9299-9313.
  * Returns the first slot index (0..3) with the given ability that is not suppressed.
  */
@@ -343,6 +678,24 @@ function checkAndSetSwitchInAbility(
     return true
   }
   return false
+}
+
+/**
+ * DisableSwitchInAbility, battle_util.c:3922-3927.
+ * Marks the given ability slot on the battler as switchInAbilityDone.
+ */
+export function disableSwitchInAbility(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  dataContext: SimDataContext,
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index < 4) {
+    battler.volatiles.switchInAbilityDone[index] = true
+  }
 }
 
 /**
@@ -610,6 +963,155 @@ export function applySwitchInAbilities(
     const weatherEnum = WEATHER_SETTER_MAP[abilityId]
     if (weatherEnum !== undefined) {
       tryChangeBattleWeather(state, battlerId, weatherEnum, true, deps)
+      continue
+    }
+
+    // 2. Terrain setters (Cycle 45)
+    const terrainFlag = TERRAIN_SETTER_MAP[abilityId]
+    if (terrainFlag !== undefined) {
+      const success = tryChangeBattleTerrain(state, battlerId, terrainFlag, deps)
+      if (terrainFlag === STATUS_FIELD_ELECTRIC_TERRAIN && success) {
+        for (let i = 0; i < state.battlersCount; i++) {
+          disableSwitchInAbility(state, i, 'ABILITY_GENERATOR', deps.dataContext)
+          disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SUPERCELL') {
+      // Impl<ABILITY_ELECTRIC_SURGE>.onEntry | Impl<ABILITY_DRIZZLE>.onEntry (abilities.cc:10485)
+      const success = tryChangeBattleTerrain(state, battlerId, STATUS_FIELD_ELECTRIC_TERRAIN, deps)
+      if (success) {
+        for (let i = 0; i < state.battlersCount; i++) {
+          disableSwitchInAbility(state, i, 'ABILITY_GENERATOR', deps.dataContext)
+          disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
+        }
+      }
+      tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_RAIN, true, deps)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ZEN_GARDEN') {
+      // abilities.cc:11318-11340: Seeds hold effect or 50/50 RNG
+      // GetBattlerHoldEffect(battler, TRUE) == HOLD_EFFECT_SEEDS, then the seed's terrain param
+      const hasSeeds = deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_SEEDS'
+      let flag: number
+      if (hasSeeds && battler.mon.itemId === 'ITEM_GRASSY_SEED') {
+        flag = STATUS_FIELD_GRASSY_TERRAIN
+      } else if (hasSeeds && battler.mon.itemId === 'ITEM_PSYCHIC_SEED') {
+        flag = STATUS_FIELD_PSYCHIC_TERRAIN
+      } else {
+        flag = state.rng.random16() % 2 === 0 ? STATUS_FIELD_GRASSY_TERRAIN : STATUS_FIELD_PSYCHIC_TERRAIN
+      }
+      tryChangeBattleTerrain(state, battlerId, flag, deps)
+      continue
+    }
+
+    // 3. Side and field setters (Cycle 45)
+    if (
+      abilityId === 'ABILITY_AIR_BLOWER' ||
+      abilityId === 'ABILITY_AIR_LOCK' ||
+      abilityId === 'ABILITY_BLISTERING_SUN'
+    ) {
+      const side = battlerId & 1
+      if (trySetTailwind(state, side, battlerId, TAILWIND_DURATION_SHORT)) {
+        disableSwitchInAbility(state, battlerId, 'ABILITY_WIND_RIDER', deps.dataContext)
+        disableSwitchInAbility(state, battlerId ^ 2, 'ABILITY_WIND_RIDER', deps.dataContext)
+      }
+      if (abilityId === 'ABILITY_BLISTERING_SUN') {
+        tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_SUN_PRIMAL, true, deps)
+      }
+      continue
+    }
+
+    if (
+      abilityId === 'ABILITY_SPIDER_LAIR' ||
+      abilityId === 'ABILITY_SPIDER_LAIR_UPGRADE' ||
+      abilityId === 'ABILITY_FOAMY_WEB'
+    ) {
+      const targetSide = (battlerId & 1) ^ 1
+      const timer = abilityId === 'ABILITY_SPIDER_LAIR_UPGRADE' ? 7 : 5
+      const success = trySetStickyWeb(state, targetSide, timer, true)
+      if (abilityId === 'ABILITY_FOAMY_WEB' && success) {
+        const ownSide = battlerId & 1
+        if (state.sides[ownSide]) {
+          state.sides[ownSide].timers.foamyWeb = true
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_NORTH_WIND' || abilityId === 'ABILITY_AURORAS_GALE') {
+      const side = battlerId & 1
+      trySetAuroraVeil(state, side, battlerId, deps)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_WHITE_SMOKE') {
+      const side = battlerId & 1
+      trySetSmokescreen(state, side, battlerId)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SCREEN_CLEANER') {
+      tryRemoveScreens(state)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ATLAS') {
+      trySetGravity(state, GRAVITY_DURATION_EXTENDED)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_GRAVITY_WELL') {
+      trySetGravity(state, GRAVITY_DURATION)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TWISTED_DIMENSION') {
+      trySetTrickRoom(state, TRICK_ROOM_DURATION_SHORT)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_INVERSE_ROOM') {
+      trySetInverseRoom(state, INVERSE_ROOM_DURATION_SHORT)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ROSE_GARDEN') {
+      const targetSide = (battlerId & 1) ^ 1
+      trySetToxicSpikes(state, targetSide, 2)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_WATCH_YOUR_STEP') {
+      const targetSide = (battlerId & 1) ^ 1
+      trySetSpikes(state, targetSide, 2)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SWAMP_THING') {
+      const targetSide = (battlerId & 1) ^ 1
+      trySetSwamp(state, targetSide, PLEDGE_DURATION)
+      continue
+    }
+
+    // 4. Entry moves via UseEntryMove (Cycle 45)
+    const entryMoveId = USE_ENTRY_MOVE_MAP[abilityId]
+    if (entryMoveId !== undefined) {
+      const oppSide = (battlerId & 1) ^ 1
+      const oppTarget1 = oppSide
+      const oppTarget2 = oppSide ^ 2
+      const hasAliveOpponent =
+        (state.battlers[oppTarget1]?.mon.hp ?? 0) > 0 ||
+        (state.battlers[oppTarget2]?.mon.hp ?? 0) > 0
+
+      if (hasAliveOpponent) {
+        unmodelled.push(
+          `battler ${battlerId}: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ${abilityId} queued ${entryMoveId}`,
+        )
+      }
       continue
     }
 

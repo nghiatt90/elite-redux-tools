@@ -22,7 +22,21 @@ import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_RAIN,
+  GRAVITY_DURATION,
+  GRAVITY_DURATION_EXTENDED,
+  INVERSE_ROOM_DURATION_SHORT,
+  PLEDGE_DURATION,
+  SCREEN_DURATION,
+  SCREEN_DURATION_SHORT,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SMOKESCREEN,
+  SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_TAILWIND,
+  SIDE_STATUS_TOXIC_SPIKES,
   STAT_ATK,
   STAT_DEF,
   STAT_SPEED,
@@ -35,6 +49,19 @@ import {
   STATUS3_GASTRO_ACID,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_GRAVITY,
+  STATUS_FIELD_INVERSE_ROOM,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TERRAIN_PERMANENT,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  TAILWIND_DURATION_SHORT,
+  TERRAIN_DURATION,
+  TERRAIN_DURATION_EXTENDED,
+  TRICK_ROOM_DURATION_SHORT,
   WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_NONE,
@@ -47,7 +74,20 @@ import {
 import {
   applyBattleStartPass,
   applySwitchInAbilities,
+  disableSwitchInAbility,
+  tryChangeBattleTerrain,
   tryChangeBattleWeather,
+  tryRemoveScreens,
+  trySetAuroraVeil,
+  trySetGravity,
+  trySetInverseRoom,
+  trySetSmokescreen,
+  trySetSpikes,
+  trySetStickyWeb,
+  trySetSwamp,
+  trySetTailwind,
+  trySetToxicSpikes,
+  trySetTrickRoom,
   type BattleStartDeps,
 } from './switchInAbility'
 import { switchIn } from './switchIn'
@@ -1201,3 +1241,590 @@ describe('cycle 41: switch-in stat changes and flag setters', () => {
     expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(11)
   })
 })
+
+describe('cycle 45: switch-in terrain, side/field setters and entry moves', () => {
+  // -------------------------------------------------------------------------
+  // 1. Terrain setters
+  // -------------------------------------------------------------------------
+
+  it('Electric Surge sets Electric Terrain for TERRAIN_DURATION (8 turns) without Terrain Extender', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+    expect(state.field.timers.terrainTimer).toBe(TERRAIN_DURATION)
+    expect(state.field.timers.started.terrain).toBe(true)
+    expect(state.field.timers.terrainBattlerId).toBe(0)
+  })
+
+  it('Electric Surge with Terrain Extender sets Electric Terrain for TERRAIN_DURATION_EXTENDED (12 turns)', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps({ 0: 'HOLD_EFFECT_TERRAIN_EXTENDER' }), [])
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+    expect(state.field.timers.terrainTimer).toBe(TERRAIN_DURATION_EXTENDED)
+    expect(state.field.timers.started.terrain).toBe(true)
+  })
+
+  it('Electric Surge disables ABILITY_GENERATOR and ABILITY_ENERGIZED on all battlers', () => {
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] } },
+        { abilities: { ability: requireAbility('ABILITY_GENERATOR'), innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    // Generator on battler 1 should be disabled in its switchInAbilityDone slot
+    expect(state.battlers[1]!.volatiles.switchInAbilityDone[0]).toBe(true)
+  })
+
+  it('Electric Surge fails when STATUS_FIELD_TERRAIN_PERMANENT is active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    state.field.statuses |= STATUS_FIELD_TERRAIN_PERMANENT
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeFalsy()
+    expect(state.field.timers.terrainTimer).toBe(0)
+  })
+
+  it('Electric Surge does not reset terrain timer when Electric Terrain is already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    state.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+    state.field.timers.terrainTimer = 3
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.timers.terrainTimer).toBe(3)
+  })
+
+  it('Grassy Surge overwrites existing Electric Terrain and resets timer to 8', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_GRASSY_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    state.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+    state.field.timers.terrainTimer = 2
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeFalsy()
+    expect(state.field.statuses & STATUS_FIELD_GRASSY_TERRAIN).toBeTruthy()
+    expect(state.field.timers.terrainTimer).toBe(TERRAIN_DURATION)
+  })
+
+  it('Terrain aliases: Hadron Engine, King of the Jungle, Misty Surge, Toxic Surge', () => {
+    const stateHadron = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_HADRON_ENGINE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateHadron, 0, makeTestDeps(), [])
+    expect(stateHadron.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+
+    const stateKing = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_KING_OF_THE_JUNGLE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateKing, 0, makeTestDeps(), [])
+    expect(stateKing.field.statuses & STATUS_FIELD_GRASSY_TERRAIN).toBeTruthy()
+
+    const stateMisty = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_MISTY_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateMisty, 0, makeTestDeps(), [])
+    expect(stateMisty.field.statuses & STATUS_FIELD_MISTY_TERRAIN).toBeTruthy()
+
+    const stateToxic = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_TOXIC_SURGE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateToxic, 0, makeTestDeps(), [])
+    expect(stateToxic.field.statuses & STATUS_FIELD_TOXIC_TERRAIN).toBeTruthy()
+  })
+
+  it('Supercell sets both Electric Terrain and Rain', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SUPERCELL'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+    expect(state.field.weather & WEATHER_RAIN_TEMPORARY).toBeTruthy()
+  })
+
+  it('Zen Garden sets Grassy Terrain with Grassy Seed, Psychic with Psychic Seed, and 50/50 RNG otherwise', () => {
+    const stateGrassySeed = battle(
+      [{ itemId: 'ITEM_GRASSY_SEED', abilities: { ability: requireAbility('ABILITY_ZEN_GARDEN'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateGrassySeed, 0, makeTestDeps({ 0: 'HOLD_EFFECT_SEEDS' }), [])
+    expect(stateGrassySeed.field.statuses & STATUS_FIELD_GRASSY_TERRAIN).toBeTruthy()
+
+    const statePsychicSeed = battle(
+      [{ itemId: 'ITEM_PSYCHIC_SEED', abilities: { ability: requireAbility('ABILITY_ZEN_GARDEN'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(statePsychicSeed, 0, makeTestDeps({ 0: 'HOLD_EFFECT_SEEDS' }), [])
+    expect(statePsychicSeed.field.statuses & STATUS_FIELD_PSYCHIC_TERRAIN).toBeTruthy()
+
+    const stateRngEven = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ZEN_GARDEN'), innates: [null, null, null] } }, {}],
+      scriptedRng([0]),
+    )
+    applySwitchInAbilities(stateRngEven, 0, makeTestDeps(), [])
+    expect(stateRngEven.field.statuses & STATUS_FIELD_GRASSY_TERRAIN).toBeTruthy()
+
+    const stateRngOdd = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ZEN_GARDEN'), innates: [null, null, null] } }, {}],
+      scriptedRng([1]),
+    )
+    applySwitchInAbilities(stateRngOdd, 0, makeTestDeps(), [])
+    expect(stateRngOdd.field.statuses & STATUS_FIELD_PSYCHIC_TERRAIN).toBeTruthy()
+  })
+
+  // -------------------------------------------------------------------------
+  // 2. Side and screen setters
+  // -------------------------------------------------------------------------
+
+  it('Air Blower sets Tailwind (3 turns) and disables Wind Rider on user and partner', () => {
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_AIR_BLOWER'), innates: [null, null, null] } },
+        {},
+        { abilities: { ability: requireAbility('ABILITY_WIND_RIDER'), innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[0]!.statuses & SIDE_STATUS_TAILWIND).toBeTruthy()
+    expect(state.sides[0]!.timers.tailwindTimer).toBe(TAILWIND_DURATION_SHORT)
+    expect(state.sides[0]!.timers.started.tailwind).toBe(true)
+    expect(state.sides[0]!.timers.tailwindBattlerId).toBe(0)
+    // Wind Rider on partner (battler 2) disabled
+    expect(state.battlers[2]!.volatiles.switchInAbilityDone[0]).toBe(true)
+  })
+
+  it('Air Blower does not re-set Tailwind when already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_AIR_BLOWER'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    state.sides[0]!.statuses |= SIDE_STATUS_TAILWIND
+    state.sides[0]!.timers.tailwindTimer = 2
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[0]!.timers.tailwindTimer).toBe(2)
+  })
+
+  it('Air Lock sets Tailwind, and Blistering Sun sets Tailwind plus Primal Sun', () => {
+    const stateAirLock = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_AIR_LOCK'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateAirLock, 0, makeTestDeps(), [])
+    expect(stateAirLock.sides[0]!.statuses & SIDE_STATUS_TAILWIND).toBeTruthy()
+
+    const stateSun = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_BLISTERING_SUN'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSun, 0, makeTestDeps(), [])
+    expect(stateSun.sides[0]!.statuses & SIDE_STATUS_TAILWIND).toBeTruthy()
+    expect(stateSun.field.weather & WEATHER_SUN_PRIMAL).toBeTruthy()
+  })
+
+  it('Spider Lair and Spider Lair Upgrade set Sticky Web on foe side (5 and 7 turns)', () => {
+    const stateLair = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SPIDER_LAIR'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateLair, 0, makeTestDeps(), [])
+    expect(stateLair.sides[1]!.statuses & SIDE_STATUS_STICKY_WEB).toBeTruthy()
+    expect(stateLair.sides[1]!.timers.stickyWebTimer).toBe(5)
+    expect(stateLair.sides[1]!.timers.started.spiderWeb).toBe(true)
+
+    const stateUpgrade = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SPIDER_LAIR_UPGRADE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateUpgrade, 0, makeTestDeps(), [])
+    expect(stateUpgrade.sides[1]!.statuses & SIDE_STATUS_STICKY_WEB).toBeTruthy()
+    expect(stateUpgrade.sides[1]!.timers.stickyWebTimer).toBe(7)
+  })
+
+  it('Foamy Web sets Sticky Web (5 turns) on foe and foamyWeb flag on user side; does not set flag if already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FOAMY_WEB'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[1]!.statuses & SIDE_STATUS_STICKY_WEB).toBeTruthy()
+    expect(state.sides[1]!.timers.stickyWebTimer).toBe(5)
+    expect(state.sides[0]!.timers.foamyWeb).toBe(true)
+
+    const stateBlocked = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FOAMY_WEB'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    stateBlocked.sides[1]!.statuses |= SIDE_STATUS_STICKY_WEB
+    applySwitchInAbilities(stateBlocked, 0, makeTestDeps(), [])
+    expect(stateBlocked.sides[0]!.timers.foamyWeb).toBe(false)
+  })
+
+  it('North Wind / Aurora Gale sets Aurora Veil (3 turns, 5 turns with Light Clay); fails if already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_NORTH_WIND'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[0]!.statuses & SIDE_STATUS_AURORA_VEIL).toBeTruthy()
+    expect(state.sides[0]!.timers.auroraVeilTimer).toBe(SCREEN_DURATION_SHORT)
+    expect(state.sides[0]!.timers.started.auroraVeil).toBe(true)
+
+    const stateClay = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_AURORAS_GALE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateClay, 0, makeTestDeps({ 0: 'HOLD_EFFECT_LIGHT_CLAY' }), [])
+    expect(stateClay.sides[0]!.timers.auroraVeilTimer).toBe(SCREEN_DURATION)
+
+    // Fails to overwrite if already active
+    const stateActive = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_NORTH_WIND'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    stateActive.sides[0]!.statuses |= SIDE_STATUS_AURORA_VEIL
+    stateActive.sides[0]!.timers.auroraVeilTimer = 1
+    applySwitchInAbilities(stateActive, 0, makeTestDeps(), [])
+    expect(stateActive.sides[0]!.timers.auroraVeilTimer).toBe(1)
+  })
+
+  it('White Smoke sets the Smokescreen timer only (3 turns, Light Clay or not); fails if timer > 0', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_WHITE_SMOKE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    // abilities.cc:1367-1376 never sets SIDE_STATUS_SMOKESCREEN
+    expect(state.sides[0]!.statuses & SIDE_STATUS_SMOKESCREEN).toBeFalsy()
+    expect(state.sides[0]!.timers.smokescreenTimer).toBe(SCREEN_DURATION_SHORT)
+    expect(state.sides[0]!.timers.started.smokescreen).toBe(true)
+    expect(state.sides[0]!.timers.smokescreenBattler).toBe(0)
+
+    const stateClay = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_WHITE_SMOKE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    // GetBattlerHoldEffect() == ITEM_LIGHT_CLAY compares a hold effect to an item id
+    applySwitchInAbilities(stateClay, 0, makeTestDeps({ 0: 'HOLD_EFFECT_LIGHT_CLAY' }), [])
+    expect(stateClay.sides[0]!.timers.smokescreenTimer).toBe(SCREEN_DURATION_SHORT)
+
+    const stateActive = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_WHITE_SMOKE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    stateActive.sides[0]!.timers.smokescreenTimer = 2
+    applySwitchInAbilities(stateActive, 0, makeTestDeps(), [])
+    expect(stateActive.sides[0]!.timers.smokescreenTimer).toBe(2)
+  })
+
+  it('Screen Cleaner clears Reflect, Light Screen, Aurora Veil, Smokescreen from both sides', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SCREEN_CLEANER'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    for (const side of [0, 1]) {
+      state.sides[side]!.statuses |=
+        SIDE_STATUS_REFLECT | SIDE_STATUS_LIGHTSCREEN | SIDE_STATUS_AURORA_VEIL | SIDE_STATUS_SMOKESCREEN
+      state.sides[side]!.timers.reflectTimer = 5
+      state.sides[side]!.timers.lightscreenTimer = 5
+      state.sides[side]!.timers.auroraVeilTimer = 5
+      state.sides[side]!.timers.smokescreenTimer = 3
+    }
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    for (const side of [0, 1]) {
+      expect(state.sides[side]!.statuses & SIDE_STATUS_REFLECT).toBeFalsy()
+      expect(state.sides[side]!.statuses & SIDE_STATUS_LIGHTSCREEN).toBeFalsy()
+      expect(state.sides[side]!.statuses & SIDE_STATUS_AURORA_VEIL).toBeFalsy()
+      expect(state.sides[side]!.statuses & SIDE_STATUS_SMOKESCREEN).toBeFalsy()
+      expect(state.sides[side]!.timers.reflectTimer).toBe(0)
+      expect(state.sides[side]!.timers.lightscreenTimer).toBe(0)
+      expect(state.sides[side]!.timers.auroraVeilTimer).toBe(0)
+      expect(state.sides[side]!.timers.smokescreenTimer).toBe(0)
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 3. Field setters
+  // -------------------------------------------------------------------------
+
+  it('Atlas sets Gravity for 8 turns, and Gravity Well sets Gravity for 5 turns', () => {
+    const stateAtlas = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ATLAS'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateAtlas, 0, makeTestDeps(), [])
+    expect(stateAtlas.field.statuses & STATUS_FIELD_GRAVITY).toBeTruthy()
+    expect(stateAtlas.field.timers.gravityTimer).toBe(GRAVITY_DURATION_EXTENDED)
+    expect(stateAtlas.field.timers.started.gravity).toBe(true)
+
+    const stateWell = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_GRAVITY_WELL'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateWell, 0, makeTestDeps(), [])
+    expect(stateWell.field.statuses & STATUS_FIELD_GRAVITY).toBeTruthy()
+    expect(stateWell.field.timers.gravityTimer).toBe(GRAVITY_DURATION)
+  })
+
+  it('Twisted Dimension sets Trick Room (3 turns), failing if already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_TWISTED_DIMENSION'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_TRICK_ROOM).toBeTruthy()
+    expect(state.field.timers.trickRoomTimer).toBe(TRICK_ROOM_DURATION_SHORT)
+    expect(state.field.timers.started.trickRoom).toBe(true)
+
+    state.field.timers.trickRoomTimer = 1
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.timers.trickRoomTimer).toBe(1)
+  })
+
+  it('Inverse Room sets Inverse Room (3 turns), failing if already active', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_INVERSE_ROOM'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_INVERSE_ROOM).toBeTruthy()
+    expect(state.field.timers.inverseRoomTimer).toBe(INVERSE_ROOM_DURATION_SHORT)
+    expect(state.field.timers.started.inverseRoom).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // 4. Hazard setters
+  // -------------------------------------------------------------------------
+
+  it('Rose Garden sets 2 layers of Toxic Spikes on opposing side', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ROSE_GARDEN'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[1]!.statuses & SIDE_STATUS_TOXIC_SPIKES).toBeTruthy()
+    expect(state.sides[1]!.timers.toxicSpikesAmount).toBe(2)
+  })
+
+  it('Watch Your Step adds 2 layers of Spikes (capped at 3) on opposing side', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_WATCH_YOUR_STEP'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[1]!.statuses & SIDE_STATUS_SPIKES).toBeTruthy()
+    expect(state.sides[1]!.timers.spikesAmount).toBe(2)
+
+    // Second activation adds 2 but caps at 3
+    state.battlers[0]!.volatiles.switchInAbilityDone = [false, false, false, false]
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[1]!.timers.spikesAmount).toBe(3)
+  })
+
+  it('Swamp Thing sets Swamp for PLEDGE_DURATION (3 turns) on opposing side', () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SWAMP_THING'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[1]!.timers.swampTimer).toBe(PLEDGE_DURATION)
+    expect(state.sides[1]!.timers.started.swamp).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // 5. Entry move abilities (UseEntryMove)
+  // -------------------------------------------------------------------------
+
+  it('Entry move abilities queue unmodelled gap messages when opponent is alive', () => {
+    const unmodelled: string[] = []
+    const stateTactics = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CHEAP_TACTICS'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateTactics, 0, makeTestDeps(), unmodelled)
+    expect(unmodelled).toContain(
+      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHEAP_TACTICS queued MOVE_SCRATCH',
+    )
+
+    unmodelled.length = 0
+    const stateThief = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_PHANTOM_THIEF'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateThief, 0, makeTestDeps(), unmodelled)
+    expect(unmodelled).toContain(
+      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_PHANTOM_THIEF queued MOVE_SPECTRAL_THIEF',
+    )
+
+    unmodelled.length = 0
+    const stateHeart = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CHANGE_OF_HEART'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateHeart, 0, makeTestDeps(), unmodelled)
+    expect(unmodelled).toContain(
+      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHANGE_OF_HEART queued MOVE_HEART_SWAP',
+    )
+  })
+
+  it('Entry move abilities do NOT queue unmodelled gap when opposing battler is fainted', () => {
+    const unmodelled: string[] = []
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_CHEAP_TACTICS'), innates: [null, null, null] } },
+        { hp: 0 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
+    expect(unmodelled).toHaveLength(0)
+  })
+
+  // -------------------------------------------------------------------------
+  // 6. Innate-slot setters
+  // -------------------------------------------------------------------------
+
+  it('Innate ABILITY_GRASSY_SURGE in innates[0] sets Grassy Terrain', () => {
+    const state = battle(
+      [
+        {
+          abilities: {
+            ability: null,
+            innates: [requireAbility('ABILITY_GRASSY_SURGE'), null, null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.field.statuses & STATUS_FIELD_GRASSY_TERRAIN).toBeTruthy()
+    expect(state.field.timers.terrainTimer).toBe(TERRAIN_DURATION)
+  })
+
+  it('Innate ABILITY_AIR_BLOWER in innates[1] sets Tailwind', () => {
+    const state = battle(
+      [
+        {
+          abilities: {
+            ability: null,
+            innates: [null, requireAbility('ABILITY_AIR_BLOWER'), null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.sides[0]!.statuses & SIDE_STATUS_TAILWIND).toBeTruthy()
+    expect(state.sides[0]!.timers.tailwindTimer).toBe(TAILWIND_DURATION_SHORT)
+  })
+
+  // -------------------------------------------------------------------------
+  // 7. Direct helper function tests
+  // -------------------------------------------------------------------------
+
+  it('tryChangeBattleTerrain helper correctly enforces terrain flags', () => {
+    const state = battle([{}, {}], scriptedRng())
+    const deps = makeTestDeps()
+
+    expect(tryChangeBattleTerrain(state, 0, STATUS_FIELD_ELECTRIC_TERRAIN, deps)).toBe(true)
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+
+    // Same terrain fails
+    expect(tryChangeBattleTerrain(state, 0, STATUS_FIELD_ELECTRIC_TERRAIN, deps)).toBe(false)
+
+    // Permanent terrain blocks changes
+    state.field.statuses |= STATUS_FIELD_TERRAIN_PERMANENT
+    expect(tryChangeBattleTerrain(state, 0, STATUS_FIELD_GRASSY_TERRAIN, deps)).toBe(false)
+  })
+
+  it('trySetTailwind, trySetStickyWeb, trySetAuroraVeil, trySetSmokescreen helpers', () => {
+    const state = battle([{}, {}], scriptedRng())
+    const deps = makeTestDeps()
+
+    expect(trySetTailwind(state, 0, 0, 3)).toBe(true)
+    expect(trySetTailwind(state, 0, 0, 3)).toBe(false)
+
+    expect(trySetStickyWeb(state, 1, 5, true)).toBe(true)
+    expect(trySetStickyWeb(state, 1, 5, true)).toBe(false)
+
+    expect(trySetAuroraVeil(state, 0, 0, deps)).toBe(true)
+    expect(trySetAuroraVeil(state, 0, 0, deps)).toBe(false)
+
+    expect(trySetSmokescreen(state, 0, 0)).toBe(true)
+    expect(trySetSmokescreen(state, 0, 0)).toBe(false)
+  })
+
+  it('trySetGravity, trySetTrickRoom, trySetInverseRoom, trySetToxicSpikes, trySetSpikes, trySetSwamp helpers', () => {
+    const state = battle([{}, {}], scriptedRng())
+
+    expect(trySetGravity(state, 5)).toBe(true)
+    expect(trySetGravity(state, 5)).toBe(false)
+
+    expect(trySetTrickRoom(state, 3)).toBe(true)
+    expect(trySetTrickRoom(state, 3)).toBe(false)
+
+    expect(trySetInverseRoom(state, 3)).toBe(true)
+    expect(trySetInverseRoom(state, 3)).toBe(false)
+
+    expect(trySetToxicSpikes(state, 1, 2)).toBe(true)
+    expect(trySetToxicSpikes(state, 1, 2)).toBe(false)
+
+    expect(trySetSpikes(state, 1, 2)).toBe(true)
+    expect(state.sides[1]!.timers.spikesAmount).toBe(2)
+    expect(trySetSpikes(state, 1, 2)).toBe(true)
+    expect(state.sides[1]!.timers.spikesAmount).toBe(3)
+    expect(trySetSpikes(state, 1, 1)).toBe(false)
+
+    expect(trySetSwamp(state, 1, 3)).toBe(true)
+    expect(trySetSwamp(state, 1, 3)).toBe(false)
+  })
+
+  it('tryRemoveScreens helper returns true if screens removed, false otherwise', () => {
+    const state = battle([{}, {}], scriptedRng())
+    expect(tryRemoveScreens(state)).toBe(false)
+
+    state.sides[0]!.statuses |= SIDE_STATUS_REFLECT
+    state.sides[0]!.timers.reflectTimer = 5
+    expect(tryRemoveScreens(state)).toBe(true)
+    expect(state.sides[0]!.statuses & SIDE_STATUS_REFLECT).toBeFalsy()
+    expect(state.sides[0]!.timers.reflectTimer).toBe(0)
+    expect(tryRemoveScreens(state)).toBe(false)
+  })
+
+  it('disableSwitchInAbility marks switchInAbilityDone for the matching slot', () => {
+    const state = battle(
+      [
+        {
+          abilities: {
+            ability: requireAbility('ABILITY_INTREPID_SWORD'),
+            innates: [requireAbility('ABILITY_WIND_RIDER'), null, null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    disableSwitchInAbility(state, 0, 'ABILITY_WIND_RIDER', DATA_CONTEXT)
+    expect(state.battlers[0]!.volatiles.switchInAbilityDone[1]).toBe(true)
+    expect(state.battlers[0]!.volatiles.switchInAbilityDone[0]).toBe(false)
+  })
+})
+

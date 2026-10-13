@@ -27,8 +27,6 @@ import {
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
-  SIDE_STATUS_STICKY_WEB,
-  SIDE_STATUS_TAILWIND,
   SIDE_STATUS_TOXIC_SPIKES,
   SIDE_STATUS_WIDE_GUARD,
   STAT_ACC,
@@ -104,7 +102,7 @@ import {
   isBattlerWeatherAffected,
 } from './statBuffs'
 import { canBattlerHeal } from './endTurn'
-import { tryChangeBattleWeather } from './switchInAbility'
+import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat } from '../battleStat'
@@ -1687,16 +1685,9 @@ function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
   const side = battlerId & 1
-  const sideState = state.sides[side]!
-
-  if (hasFlag(sideState.statuses, SIDE_STATUS_TAILWIND)) {
+  if (!trySetTailwind(state, side, battlerId, 3)) {
     return outcome(ctx, {})
   }
-
-  sideState.timers.started.tailwind = true
-  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_TAILWIND)
-  sideState.timers.tailwindBattlerId = battlerId
-  sideState.timers.tailwindTimer = 3
 
   unmodelled.push(
     'BattleScript_OnTailwindStart (data/battle_scripts_1.s:9267-9296): Wind Rider and Wind Power reactions are not modelled',
@@ -1786,14 +1777,9 @@ function handleStickyWeb(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
   const targetSide = (battlerId & 1) ^ 1
-  const sideState = state.sides[targetSide]!
-
-  if (hasFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)) {
+  if (!trySetStickyWeb(state, targetSide, 0, false)) {
     return outcome(ctx, {})
   }
-
-  sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)
-  sideState.timers.stickyWebTimer = 0
 
   unmodelled.push(
     'Cmd_setstickyweb (battle_script_commands.c:11469): gBattleStruct->stickyWebUser is not modelled in BattleState',
