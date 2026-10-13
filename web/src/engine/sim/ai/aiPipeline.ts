@@ -23,7 +23,7 @@ import { aiCheckBadMove } from './aiCheckBadMove'
 import { aiCheckViability } from './aiCheckViability'
 import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitching'
 import type { AiDamageDeps } from './aiCalcDamage'
-import { selfAbility } from './aiAbilityHelpers'
+import { isAbilityPreventingEscape } from '../escape'
 
 /** include/constants/battle.h:18, 66. Same values aiSwitching.ts's own module
  * header cites (BATTLE_TYPE_ARENA) and state.ts's aiFlags doc cites
@@ -167,34 +167,7 @@ export function countUsablePartyMons(state: BattleState, battlerId: number): num
   return count
 }
 
-/** The 5 abilities with an `onTrap` hook in abilityHooks.json at the pinned
- * snapshot (data/v2.65beta/abilityHooks.json, grep-verified against the
- * `hooks.onTrap` key): Arena Trap, Frenzied Phantom, Magnet Pull, Sap Trap,
- * Shadow Tag. */
-const TRAPPING_ABILITIES = new Set(['ABILITY_ARENA_TRAP', 'ABILITY_FRENZIED_PHANTOM', 'ABILITY_MAGNET_PULL', 'ABILITY_SAP_TRAP', 'ABILITY_SHADOW_TAG'])
-
-/**
- * IsAbilityPreventingEscape, battle_util.c:4826-4834 -- ALWAYS returns "not
- * prevented" (0/false) here. The real function calls each living opponent's
- * `onTrap` ability hook (ON_ABILITY, ability registry), which needs the
- * ability-dispatch bridge this batch does not wire up (no OnTrapContext exists
- * yet), and also needs Shed Shell / Ghost-type immunity checked first. Reported
- * as a gap only when the opposing battler actually holds one of the 5
- * `onTrap`-hooked abilities in ANY slot (`TRAPPING_ABILITIES` above) -- i.e.
- * only when the missing check could actually have changed the answer.
- */
-export function isAbilityPreventingEscape(state: BattleState, battlerId: number, deps: AiDamageDeps): { prevents: boolean; unmodelled: string[] } {
-  const opposingId = battlerId ^ 1
-  const opposing = state.battlers[opposingId]
-  const unmodelled: string[] = []
-  if (opposing) {
-    // ON_ABILITY(opponent, FALSE, onTrap, ...) (battle_util.c:4832) goes through IsSuppressed, so selfAbility.
-    if ([...TRAPPING_ABILITIES].some((id) => selfAbility(state, deps, opposing, id))) {
-      unmodelled.push(`IsAbilityPreventingEscape (battle_util.c:4826-4834) not ported -- opponent battler ${opposingId} has a trapping-capable ability; escape-prevention not checked, treated as not preventing`)
-    }
-  }
-  return { prevents: false, unmodelled }
-}
+export { isAbilityPreventingEscape }
 
 /** GetTotalBaseStat -- reused from species data via `deps.dataContext.species`
  * (SimSpeciesData.baseStats, engine/sim/dataContext.ts). */
@@ -214,7 +187,7 @@ export type AiChoice = { kind: 'switch' } | { kind: 'move'; moveIndex: number }
  *
  * The second switch check's own guard skips `STATUS3_ROOTED`/`STATUS4_COMMANDED`/
  * `skyDropped`/`fear`/wrap-or-escape-prevention/BATTLE_TYPE_ARENA|PALACE exactly
- * as the C does; `IsAbilityPreventingEscape` is approximated (see its own doc).
+ * as the C does.
  */
 export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number, scores: [number, number, number, number], deps: AiSwitchingDeps): { choice: AiChoice; unmodelled: string[] } {
   const unmodelled: string[] = []

@@ -386,3 +386,8 @@ export const PLEDGE_DURATION = 3
 export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
 ]
+
+/** include/constants/battle.h:66, 67 -- BattleTypeFlags */
+export const BATTLE_TYPE_PALACE = 1 << 17
+export const BATTLE_TYPE_ARENA = 1 << 18
+

@@ -144,6 +144,7 @@ import type { HazardTypeDeps } from './hazards'
 import { getBattlerAbilitySlotsReverse, runMoveEnd } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import {
+  BATTLE_TYPE_ARENA,
   hasFlag,
   PARTY_SIZE,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -152,6 +153,7 @@ import {
   STATUS1_ANY,
   STATUS3_CHARGED_UP,
 } from './constants'
+import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
 import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
 import {
@@ -1102,6 +1104,21 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
   const unmodelled: string[] = []
   const battler = state.battlers[battlerId]
   if (!battler) return unmodelled
+
+  const escapeDeps: EscapeDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+
+  // battle_main.c:3747-3755: the party menu refuses the switch (PARTY_ACTION_CANT_SWITCH /
+  // PARTY_ACTION_ABILITY_PREVENTS), so the game never queues it; the sim drops the action.
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) || !canBattlerEscape(state, battlerId, escapeDeps)) {
+    unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (cannot escape)`)
+    return unmodelled
+  }
+  const abilityTrap = isAbilityPreventingEscape(state, battlerId, escapeDeps)
+  unmodelled.push(...abilityTrap.unmodelled)
+  if (abilityTrap.prevents) {
+    unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (prevented by ability of battler ${abilityTrap.trappingBattlerId})`)
+    return unmodelled
+  }
 
   let partyIndex = battler.monToSwitchIntoId
   if (partyIndex === PARTY_SIZE) {

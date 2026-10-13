@@ -347,22 +347,22 @@ describe('isAbilityOnField -- battle_util.c:4803-4811 (BattlerHasAbility TRUE)',
 describe('isAbilityPreventingEscape reads the opposing trap ability through IsSuppressed', () => {
   const SHADOW_TAG = 'ABILITY_SHADOW_TAG'
   if (!hooks[SHADOW_TAG] || isUnsuppressable(SHADOW_TAG)) throw new Error('Shadow Tag is missing or unsuppressable')
-  const gaps = (s: BattleState) => isAbilityPreventingEscape(s, ATK, deps).unmodelled.length
+  const prevents = (s: BattleState) => isAbilityPreventingEscape(s, ATK, deps).prevents
 
-  it('flags the gap for a live Shadow Tag foe, and not once Gastro Acid or Neutralizing Gas suppresses it', () => {
-    expect(gaps(state({}, { abilities: ability(SHADOW_TAG) }))).toBe(1)
+  it('traps for a live Shadow Tag foe, and not once Gastro Acid or Neutralizing Gas suppresses it', () => {
+    expect(prevents(state({}, { abilities: ability(SHADOW_TAG) }))).toBe(true)
     const ga = state({}, { abilities: ability(SHADOW_TAG) })
     gastroAcid(ga, DEF)
-    expect(gaps(ga)).toBe(0)
+    expect(prevents(ga)).toBe(false)
     const ng = state({}, { abilities: ability(SHADOW_TAG) })
     neutralizingGas(ng)
-    expect(gaps(ng)).toBe(0)
+    expect(prevents(ng)).toBe(false)
   })
 
-  it('an Ability Shield keeps the gap flagged under Gastro Acid', () => {
+  it('an Ability Shield keeps Shadow Tag active under Gastro Acid', () => {
     const s = state({}, { abilities: ability(SHADOW_TAG), itemId: 'ITEM_ABILITY_SHIELD' })
     gastroAcid(s, DEF)
-    expect(gaps(s)).toBe(1)
+    expect(prevents(s)).toBe(true)
   })
 })
 
