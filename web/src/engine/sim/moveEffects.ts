@@ -66,6 +66,7 @@ import {
   hasFlag,
   setCounter,
   setFlag,
+  statusInfatuatedWith,
 } from './constants'
 import {
   MOVE_EFFECT_AFFECTS_USER,
@@ -119,7 +120,9 @@ import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat } from '../battleStat'
 import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
+import type { StatusCheck } from './statusEffects'
 import {
+  CHECK_CONFUSION,
   CHECK_FLINCH,
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
@@ -127,6 +130,7 @@ import {
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FREEZE,
   MOVE_EFFECT_FROSTBITE,
+  MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES,
   MOVE_EFFECT_PARALYSIS,
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
@@ -134,7 +138,12 @@ import {
   MOVE_EFFECT_TRI_ATTACK,
   applyPrimaryStatusEffect,
   canBeBurned,
+  canBeConfused,
+  canBeParalyzedIgnoreType,
   canBePoisoned,
+  canBleed,
+  canGetFrostbite,
+  canInfatuate,
   canSleep,
   doesSubstituteBlockMove,
   findAbilitySlot,
@@ -1591,6 +1600,141 @@ function handleToxic(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * EFFECT_POISON handler (Poison Powder).
+ * BattleScript_EffectPoison, data/battle_scripts_1.s:4332-4344.
+ */
+function handlePoison(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:4335)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_POISON (:4336, battle_script_commands.c:8544-8552)
+  if (!canBePoisoned(state, battlerId, targetId, moveId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4337)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setmoveeffect MOVE_EFFECT_POISON, seteffectprimary (:4340-4341)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_POISON,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'POISON' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_FROSTBITE handler (Flash Freeze).
+ * BattleScript_EffectFrostbite, data/battle_scripts_1.s:3127-3138.
+ */
+function handleFrostbite(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:3130)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_FROSTBITE (:3131, battle_script_commands.c:8534-8542)
+  if (!canGetFrostbite(state, targetId, battlerId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:3132)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifsafeguard BattleScript_SafeguardProtected (:3133)
+  const targetSide = targetId & 1
+  if (hasFlag(state.sides[targetSide].statuses, SIDE_STATUS_SAFEGUARD)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 5. setmoveeffect MOVE_EFFECT_FROSTBITE, seteffectprimary (:3136-3137)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_FROSTBITE,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'FROSTBITE' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_BLEED handler (Blood Shot).
+ * BattleScript_EffectBleed, data/battle_scripts_1.s:3115-3125.
+ */
+function handleBleed(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:3118)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_BLEED (:3119, battle_script_commands.c:8522-8533)
+  if (!canBleed(state, targetId, battlerId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:3120)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setmoveeffect MOVE_EFFECT_BLEED, seteffectprimary (:3123-3124)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_BLEED,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'BLEED' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
  * EFFECT_WILL_O_WISP handler (Will-O-Wisp).
  * BattleScript_EffectWillOWisp, data/battle_scripts_1.s:6090-6103.
  */
@@ -1641,6 +1785,104 @@ function handleWillOWisp(ctx: MoveEffectContext): ActionOutcome {
   )
 
   const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'BURN' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_PARALYZE handler (Thunder Wave).
+ * BattleScript_EffectParalyze, data/battle_scripts_1.s:4362-4376.
+ */
+function handleParalyze(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:4365)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. typecalc (:4366, src/battle_script_commands.c:1617-1624, src/battle_util.c:7985-7996, 7899-7913)
+  // Thunder Wave is Electric-type. Electric against Ground type has 0x effectiveness,
+  // setting MOVE_RESULT_DOESNT_AFFECT_FOE which causes accuracycheck (:4369)
+  // via JumpIfMoveFailed (:1213) to jump to BattleScript_ButItFailed without rolling accuracy.
+  const moveType = (deps.dataContext.move(moveId)?.type ?? 'TYPE_ELECTRIC').replace(/^TYPE_/, '')
+  if (moveType === 'ELECTRIC' && target.mon.types.includes('GROUND')) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. requirecandoeffect BS_TARGET, MOVE_EFFECT_PARALYSIS | MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES (:4367, battle_script_commands.c:8553-8558)
+  // Checks status1, Safeguard, Misty Terrain, and ability status immunities (Limber, etc.).
+  if (!canBeParalyzedIgnoreType(state, battlerId, targetId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 4. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4369)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. setmoveeffect MOVE_EFFECT_PARALYSIS, seteffectprimary (:4372-4373, battle_script_commands.c:2474-2499)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_PARALYSIS,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'PARALYSIS' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_PARALYZE_IGNORE_TYPE handler (Glare, Stun Spore).
+ * BattleScript_EffectParalyzeIgnoreType, data/battle_scripts_1.s:4346-4360.
+ */
+function handleParalyzeIgnoreType(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+
+  // 1. ppreduce (:4349)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  // 2. requirecandoeffect BS_TARGET, MOVE_EFFECT_PARALYSIS | MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES (:4350)
+  // Glare / Stun Spore omits typecalc, so Ground typing does not block the move.
+  if (!canBeParalyzedIgnoreType(state, battlerId, targetId, deps)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4352)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setmoveeffect MOVE_EFFECT_PARALYSIS | MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES, seteffectprimary (:4356-4357)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_PARALYSIS | MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'PARALYSIS' } : null
   return outcome(ctx, { targetId, statusApplied })
 }
 
@@ -1750,6 +1992,201 @@ function handleSwagger(ctx: MoveEffectContext): ActionOutcome {
   }
 
   return outcome(ctx, { targetId, statChanges, statusApplied })
+}
+
+/**
+ * JumpIfStandardStatusBlocking, src/battle_script_commands.c:6593-6616 -- the fail branches
+ * VARIOUS_REQUIRE_CAN_DO_EFFECT (:8583-8588 for confusion) takes only after CanBeConfused has
+ * failed. When none applies the script carries on to its accuracycheck, so an already-confused
+ * target with no status1 still draws accuracy and SetMoveEffect then does nothing.
+ */
+function isStandardStatusBlocking(ctx: MoveEffectContext, targetId: number, check: StatusCheck): boolean {
+  const { state, battlerId, action, deps, unmodelled } = ctx
+  const target = state.battlers[targetId]!
+  if (target.mon.status1) return true
+  if (doesSubstituteBlockMove(state, battlerId, targetId, action.chosenMove!.id, deps, unmodelled)) return true
+  if (isBattlerTerrainAffected(state, targetId, STATUS_FIELD_MISTY_TERRAIN, deps)) return true
+  if (hasFlag(state.sides[targetId & 1].statuses, SIDE_STATUS_SAFEGUARD)) return true
+  return isAbilityStatusProtected(state, targetId, check, battlerId, deps) !== null
+}
+
+/** requirecandoeffect BS_TARGET, MOVE_EFFECT_CONFUSION: true when the script jumps away. */
+function confusionBlocked(ctx: MoveEffectContext, targetId: number): boolean {
+  return !canBeConfused(ctx.state, targetId, ctx.battlerId, ctx.deps) && isStandardStatusBlocking(ctx, targetId, CHECK_CONFUSION)
+}
+
+/**
+ * EFFECT_CONFUSE handler (Confuse Ray, Supersonic).
+ * BattleScript_EffectConfuse, data/battle_scripts_1.s:4219-4231.
+ */
+function handleConfuse(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+
+  // ppreduce (:4222), requirecandoeffect (:4223), accuracycheck BattleScript_ButItFailed (:4224)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (confusionBlocked(ctx, targetId)) return outcome(ctx, { targetId })
+  if (checkAccuracy(ctx, targetId, moveId)) return outcome(ctx, { targetId, missed: true })
+
+  // setmoveeffect MOVE_EFFECT_CONFUSION, seteffectprimary (:4227-4228)
+  const res = applyPrimaryStatusEffect(state, battlerId, targetId, MOVE_EFFECT_CONFUSION, moveId, deps, unmodelled, true, false)
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'CONFUSION' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/** SetMoveEffect MOVE_EFFECT_ATTRACT (battle_script_commands.c:2727-2731) after its preamble's
+ * fainted-battler and substitute exits (:2364-2387). */
+function setAttractMoveEffect(ctx: MoveEffectContext, targetId: number): boolean {
+  const { state, battlerId, action, deps, unmodelled } = ctx
+  const target = state.battlers[targetId]!
+  if (target.mon.hp === 0) return false
+  if (doesSubstituteBlockMove(state, battlerId, targetId, action.chosenMove!.id, deps, unmodelled)) return false
+  if (!canInfatuate(state, battlerId, targetId, deps)) return false
+  target.mon.status2 = setFlag(target.mon.status2, statusInfatuatedWith(battlerId))
+  return true
+}
+
+/**
+ * EFFECT_SWEET_KISS handler (Sweet Kiss).
+ * BattleScript_EffectSweetKiss, data/battle_scripts_1.s:4202-4216. The script tests confusion and
+ * accuracy BEFORE its ppreduce, so a miss (BattleScript_ButItFailed) costs no PP. A blocked
+ * confusion takes requirecandoeffect's afterPtr, BattleScript_EffectAttract, which is all of Attract.
+ */
+function handleSweetKiss(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+
+  if (confusionBlocked(ctx, targetId)) return handleAttract(ctx)
+  if (checkAccuracy(ctx, targetId, moveId)) return outcome(ctx, { targetId, missed: true })
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  let statusApplied: StatusAppliedOutcome | null = null
+  const conf = applyPrimaryStatusEffect(state, battlerId, targetId, MOVE_EFFECT_CONFUSION, moveId, deps, unmodelled, true, false)
+  if (conf.applied) statusApplied = { battlerId: targetId, status: 'CONFUSION' }
+  if (setAttractMoveEffect(ctx, targetId) && !statusApplied) statusApplied = { battlerId: targetId, status: 'INFATUATION' }
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_FLATTER handler (Flatter).
+ * BattleScript_EffectFlatter, data/battle_scripts_1.s:6069-6088.
+ */
+function handleFlatter(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+
+  // 1. jumpifsubstituteblocks BattleScript_MakeMoveMissed (:6071)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:6072)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 3. ppreduce (:6074)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifenragedandstatmaxed STAT_SPATK, BattleScript_ButItFailed (:6075)
+  const isEnraged = hasFlag(target.mon.status2, STATUS2_ENRAGED)
+  const isSpAtkMaxed = (target.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE) >= MAX_STAT_STAGE
+  if (isEnraged && isSpAtkMaxed) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 5. Stat change: target's SpAtk raised +1 (:6078-6084)
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    1,
+    STAT_SPATK,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: res.delta })
+  }
+
+  // 6. BattleScript_FlatterTryConfuse: setmoveeffect MOVE_EFFECT_ENRAGE (:6086)
+  let statusApplied: StatusAppliedOutcome | null = null
+  if (!hasFlag(target.mon.status2, STATUS2_ENRAGED)) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_ENRAGED)
+    const slot = findAbilitySlot(target.mon.abilities, 'ABILITY_MENTAL_POLLUTION')
+    if (slot >= 0) {
+      target.volatiles.abilityState[slot] = 1
+    }
+    statusApplied = { battlerId: targetId, status: 'ENRAGED' }
+  }
+
+  return outcome(ctx, { targetId, statChanges, statusApplied })
+}
+
+/**
+ * EFFECT_TEETER_DANCE handler (Teeter Dance).
+ * BattleScript_EffectTeeterDance, data/battle_scripts_1.s:6544-6566: every battler but the user,
+ * in id order; a blocked confusion skips to the next battler, a fainted one is skipped, and a
+ * miss goes to BattleScript_TeeterDanceMissed.
+ */
+function handleTeeterDance(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+
+  let statusApplied: StatusAppliedOutcome | null = null
+  for (let tId = 0; tId < state.battlersCount; tId++) {
+    if (tId === battlerId || !state.battlers[tId]) continue
+    if (confusionBlocked(ctx, tId)) continue
+    if (state.battlers[tId]!.mon.hp === 0) continue
+    if (checkAccuracy(ctx, tId, moveId)) continue
+    const res = applyPrimaryStatusEffect(state, battlerId, tId, MOVE_EFFECT_CONFUSION, moveId, deps, unmodelled, true, false)
+    if (res.applied && !statusApplied) statusApplied = { battlerId: tId, status: 'CONFUSION' }
+  }
+  return outcome(ctx, { targetId: targetId ?? battlerId, statusApplied })
+}
+
+/**
+ * EFFECT_ATTRACT handler (Attract).
+ * BattleScript_EffectAttract, data/battle_scripts_1.s:5224-5236. ER has no gender requirement:
+ * tryinfatuating (battle_script_commands.c:10419-10429) only asks CanInfatuate (battle_util.c:5135-5143).
+ */
+function handleAttract(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const moveId = action.chosenMove!.id
+  const target = state.battlers[targetId]!
+  const attacker = state.battlers[battlerId]!
+
+  // ppreduce (:5227), accuracycheck (:5228), jumpifabilitystatusimmunity + tryinfatuating (:5229-5230)
+  deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
+  if (checkAccuracy(ctx, targetId, moveId)) return outcome(ctx, { targetId, missed: true })
+  if (!canInfatuate(state, battlerId, targetId, deps)) return outcome(ctx, { targetId })
+  target.mon.status2 = setFlag(target.mon.status2, statusInfatuatedWith(battlerId))
+
+  // BattleScript_TryDestinyKnotAttacker (:5212-5222): infatuatewithbattler with no CanInfatuate check.
+  if (deps.grounding.holdEffectOf(targetId) === 'HOLD_EFFECT_DESTINY_KNOT') {
+    attacker.mon.status2 = setFlag(attacker.mon.status2, statusInfatuatedWith(targetId))
+  }
+  return outcome(ctx, { targetId, statusApplied: { battlerId: targetId, status: 'INFATUATION' } })
 }
 
 /** sProtectSuccessRates, src/battle_script_commands.c:727 */
@@ -2962,9 +3399,19 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SHIFT_GEAR: handleShiftGear,
 
   EFFECT_SLEEP: handleSleep,
+  EFFECT_POISON: handlePoison,
   EFFECT_TOXIC: handleToxic,
   EFFECT_WILL_O_WISP: handleWillOWisp,
+  EFFECT_FROSTBITE: handleFrostbite,
+  EFFECT_BLEED: handleBleed,
+  EFFECT_PARALYZE: handleParalyze,
+  EFFECT_PARALYZE_IGNORE_TYPE: handleParalyzeIgnoreType,
   EFFECT_YAWN: handleYawn,
+  EFFECT_CONFUSE: handleConfuse,
+  EFFECT_SWEET_KISS: handleSweetKiss,
+  EFFECT_FLATTER: handleFlatter,
+  EFFECT_TEETER_DANCE: handleTeeterDance,
+  EFFECT_ATTRACT: handleAttract,
   EFFECT_SWAGGER: handleSwagger,
   EFFECT_CURSE: handleCurse,
   EFFECT_DESTINY_BOND: handleDestinyBond,

@@ -34,15 +34,24 @@ import {
   STAT_SPEED,
   STAT_SPATK,
   STAT_SPDEF,
+  STATUS1_BLEED,
+  STATUS1_FROSTBITE,
+  STATUS1_PARALYSIS,
+  STATUS1_POISON,
+  STATUS2_CONFUSION,
   STATUS2_CURSED,
   STATUS2_DESTINY_BOND,
+  STATUS2_ENRAGED,
+  STATUS2_INFATUATION,
   STATUS3_CHARGED_UP,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SUN_ANY,
   WEATHER_SUN_TEMPORARY,
+  getCounter,
   hasFlag,
+  statusInfatuatedWith,
 } from './constants'
 import {
   B_MSG_DEFENDER_STAT_FELL,
@@ -101,6 +110,7 @@ const MOVE_GROWTH = requireMove('MOVE_GROWTH')
 const MOVE_SHARPEN = requireMove('MOVE_SHARPEN')
 const MOVE_SHELTER = requireMove('MOVE_SHELTER')
 const MOVE_CONFUSE_RAY = requireMove('MOVE_CONFUSE_RAY')
+const MOVE_TAUNT = requireMove('MOVE_TAUNT')
 const MOVE_BARRIER = requireMove('MOVE_BARRIER')
 const MOVE_DRAGON_CHEER = requireMove('MOVE_DRAGON_CHEER')
 const MOVE_GEAR_UP = requireMove('MOVE_GEAR_UP')
@@ -122,6 +132,15 @@ const MOVE_COSMIC_POWER = requireMove('MOVE_COSMIC_POWER')
 const MOVE_COIL = requireMove('MOVE_COIL')
 const MOVE_TICKLE = requireMove('MOVE_TICKLE')
 const MOVE_NOBLE_ROAR = requireMove('MOVE_NOBLE_ROAR')
+const MOVE_THUNDER_WAVE = requireMove('MOVE_THUNDER_WAVE')
+const MOVE_GLARE = requireMove('MOVE_GLARE')
+const MOVE_POISON_POWDER = requireMove('MOVE_POISON_POWDER')
+const MOVE_FLASH_FREEZE = requireMove('MOVE_FLASH_FREEZE')
+const MOVE_BLOOD_SHOT = requireMove('MOVE_BLOOD_SHOT')
+const MOVE_SWEET_KISS = requireMove('MOVE_SWEET_KISS')
+const MOVE_FLATTER = requireMove('MOVE_FLATTER')
+const MOVE_TEETER_DANCE = requireMove('MOVE_TEETER_DANCE')
+const MOVE_ATTRACT = requireMove('MOVE_ATTRACT')
 
 const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
 const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
@@ -198,6 +217,9 @@ function battle(
     pp?: SimBattleMon['pp']
     types?: [string, string, string]
     itemId?: string | null
+    gender?: SimBattleMon['gender']
+    status1?: number
+    status2?: number
   }[],
   rng: RandomSource,
 ): BattleState {
@@ -215,6 +237,9 @@ function battle(
           pp: s.pp ?? [30, 0, 0, 0],
           types: s.types ?? ['WATER', 'MYSTERY', 'MYSTERY'],
           itemId: s.itemId ?? null,
+          gender: s.gender ?? 'MALE',
+          status1: s.status1 ?? 0,
+          status2: s.status2 ?? 0,
         }),
         0,
       ),
@@ -229,6 +254,20 @@ function countingRng(): RandomSource & { calls: number } {
     random16: () => {
       r.calls++
       return 0
+    },
+  }
+  return r
+}
+
+function scriptedRng(values: number[]): RandomSource & { calls: number } {
+  let idx = 0
+  const r = {
+    calls: 0,
+    random16: () => {
+      r.calls++
+      const val = values[idx] ?? 0
+      idx++
+      return val
     },
   }
   return r
@@ -795,10 +834,10 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_CONFUSE_RAY', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const state = battle([{ moves: ['MOVE_TAUNT', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
 
-    const out = executeTurn(state, [useMove(1, MOVE_CONFUSE_RAY), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], testDeps(dmg))
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -1754,6 +1793,467 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         executeTurn(state, [useMove(1, MOVE_NOBLE_ROAR), null], deps)
         expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
         expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 1)
+      })
+    })
+  })
+
+  describe('Cycle 52 status-condition moves', () => {
+    describe('EFFECT_PARALYZE & EFFECT_PARALYZE_IGNORE_TYPE', () => {
+      it('Thunder Wave paralyzes a neutral target', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [{ moves: ['MOVE_THUNDER_WAVE', null, null, null], pp: [10, 0, 0, 0] }, {}],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_THUNDER_WAVE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'PARALYSIS' })
+        expect(act.missed).toBe(false)
+        expect(rng.calls).toBe(1)
+      })
+
+      it('Thunder Wave fails on a Ground type without drawing accuracy', () => {
+        // BattleScript_EffectParalyze: typecalc (:4366) sets MOVE_RESULT_DOESNT_AFFECT_FOE,
+        // causing accuracycheck (:4369) to jump to BattleScript_ButItFailed without rolling accuracy.
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { moves: ['MOVE_THUNDER_WAVE', null, null, null], pp: [10, 0, 0, 0] },
+            { types: ['GROUND', 'MYSTERY', 'MYSTERY'] },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_THUNDER_WAVE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(rng.calls).toBe(0)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        expect(state.battlers[1]!.mon.status1).toBe(0)
+        expect(act.statusApplied).toBeNull()
+        expect(act.missed).toBe(false)
+      })
+
+      it('Glare paralyzes a Ground type', () => {
+        // BattleScript_EffectParalyzeIgnoreType: no typecalc, so Ground typing does not block it.
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { moves: ['MOVE_GLARE', null, null, null], pp: [20, 0, 0, 0] },
+            { types: ['GROUND', 'MYSTERY', 'MYSTERY'] },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_GLARE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'PARALYSIS' })
+        expect(act.missed).toBe(false)
+      })
+
+      it('Thunder Wave fails on an already-statused target', () => {
+        // requirecandoeffect BS_TARGET (:4367) calls CanBeParalyzedIgnoreType,
+        // which returns false because status1 !== 0; JumpIfStandardStatusBlocking jumps to fail.
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { moves: ['MOVE_THUNDER_WAVE', null, null, null], pp: [10, 0, 0, 0] },
+            { status1: STATUS1_PARALYSIS },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_THUNDER_WAVE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(rng.calls).toBe(0)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        expect(act.statusApplied).toBeNull()
+      })
+    })
+
+    describe('EFFECT_POISON, EFFECT_FROSTBITE & EFFECT_BLEED', () => {
+      it('Poison Powder poisons a neutral target', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [{ moves: ['MOVE_POISON_POWDER', null, null, null], pp: [20, 0, 0, 0] }, {}],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_POISON_POWDER), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'POISON' })
+        expect(act.missed).toBe(false)
+        expect(rng.calls).toBe(1)
+      })
+
+      it('Poison Powder: CANCELLER_POWDER_MOVE is gapped on pure Grass, but Poison-type fails in script', () => {
+        // C check: BattleScript_EffectPoison has no Grass check; powder immunity is in
+        // CANCELLER_POWDER_MOVE (battle_util.c:3455) which attackCanceller.ts gaps by name.
+        // CanBePoisoned checks Poison/Steel types via CanPoisonType (src/battle_script_commands.c:6465).
+        const deps = testDeps()
+
+        // 1. Pure Grass: CANCELLER_POWDER_MOVE gap recorded, script runs
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_POISON_POWDER', null, null, null], pp: [20, 0, 0, 0] },
+              { types: ['GRASS', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_POISON_POWDER), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(act.unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(true)
+          expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+        }
+
+        // 2. Poison type: CanBePoisoned fails before accuracy
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_POISON_POWDER', null, null, null], pp: [20, 0, 0, 0] },
+              { types: ['POISON', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_POISON_POWDER), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(act.statusApplied).toBeNull()
+        }
+      })
+
+      it('Flash Freeze inflicts Frostbite, fails on Ice types and already-statused', () => {
+        const deps = testDeps()
+
+        // 1. Neutral target gets Frostbite
+        {
+          const rng = countingRng()
+          const state = battle(
+            [{ moves: ['MOVE_FLASH_FREEZE', null, null, null], pp: [10, 0, 0, 0] }, {}],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_FLASH_FREEZE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_FROSTBITE)).toBe(true)
+          expect(act.statusApplied).toEqual({ battlerId: 1, status: 'FROSTBITE' })
+        }
+
+        // 2. Ice type fails without drawing accuracy
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FLASH_FREEZE', null, null, null], pp: [10, 0, 0, 0] },
+              { types: ['ICE', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_FLASH_FREEZE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(act.statusApplied).toBeNull()
+        }
+
+        // 3. Already-statused target fails
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FLASH_FREEZE', null, null, null], pp: [10, 0, 0, 0] },
+              { status1: STATUS1_FROSTBITE },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_FLASH_FREEZE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(act.statusApplied).toBeNull()
+        }
+      })
+
+      it('Blood Shot inflicts Bleed, fails on Rock and Ghost types and already-statused', () => {
+        const deps = testDeps()
+
+        // 1. Neutral target gets Bleed
+        {
+          const rng = countingRng()
+          const state = battle(
+            [{ moves: ['MOVE_BLOOD_SHOT', null, null, null], pp: [10, 0, 0, 0] }, {}],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_BLOOD_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_BLEED)).toBe(true)
+          expect(act.statusApplied).toEqual({ battlerId: 1, status: 'BLEED' })
+        }
+
+        // 2. Rock type fails
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_BLOOD_SHOT', null, null, null], pp: [10, 0, 0, 0] },
+              { types: ['ROCK', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_BLOOD_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(act.statusApplied).toBeNull()
+        }
+
+        // 3. Ghost type fails
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_BLOOD_SHOT', null, null, null], pp: [10, 0, 0, 0] },
+              { types: ['GHOST', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_BLOOD_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(act.statusApplied).toBeNull()
+        }
+
+        // 4. Already-statused fails
+        {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_BLOOD_SHOT', null, null, null], pp: [10, 0, 0, 0] },
+              { status1: STATUS1_BLEED },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_BLOOD_SHOT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(act.statusApplied).toBeNull()
+        }
+      })
+    })
+
+    describe('EFFECT_CONFUSE, EFFECT_SWEET_KISS, EFFECT_FLATTER & EFFECT_TEETER_DANCE', () => {
+      it('Confuse Ray confuses with the turn count from the scripted RNG and fails if already confused', () => {
+        const deps = testDeps()
+        // Confuse Ray:
+        // 1. checkAccuracy: roll 0 (% 100 < 100, hits)
+        // 2. applyPrimaryStatusEffect: confusion turn count (Random() % 2) + 3
+        // With scripted roll 1: (1 % 2) + 3 = 4 turns.
+        const rng = scriptedRng([0, 1])
+        const state = battle(
+          [{ moves: ['MOVE_CONFUSE_RAY', null, null, null], pp: [10, 0, 0, 0] }, {}],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_CONFUSE_RAY), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+        expect(getCounter(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(4)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'CONFUSION' })
+        expect(act.missed).toBe(false)
+        expect(rng.calls).toBe(2)
+
+        // Already confused, no status1: requirecandoeffect only jumps on a JumpIfStandardStatusBlocking
+        // branch (battle_script_commands.c:6593-6616, 8583-8588), so the accuracy draw still happens
+        // and SetMoveEffect then changes nothing.
+        const rng2 = countingRng()
+        state.rng = rng2
+        const out2 = executeTurn(state, [useMove(1, MOVE_CONFUSE_RAY), null], deps)
+        const act2 = out2.actions.find((a) => a.battlerId === 0)!
+        expect(rng2.calls).toBe(1)
+        expect(act2.statusApplied).toBeNull()
+
+        // With a status1 the standard branch fails it before accuracy.
+        const rng3 = countingRng()
+        state.rng = rng3
+        state.battlers[1]!.mon.status1 = STATUS1_PARALYSIS
+        executeTurn(state, [useMove(1, MOVE_CONFUSE_RAY), null], deps)
+        expect(rng3.calls).toBe(0)
+      })
+
+      it('Flatter raises SpAtk by 1 and enrages the target', () => {
+        // BattleScript_EffectFlatter (data/battle_scripts_1.s:6069-6088):
+        // In Elite Redux, Flatter sets MOVE_EFFECT_ENRAGE (STATUS2_ENRAGED) and raises STAT_SPATK by 1.
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [{ moves: ['MOVE_FLATTER', null, null, null], pp: [15, 0, 0, 0] }, {}],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_FLATTER), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_ENRAGED)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'ENRAGED' })
+      })
+
+      it('Sweet Kiss confuses and infatuates opposite-gender target', () => {
+        // BattleScript_EffectSweetKiss (data/battle_scripts_1.s:4202-4216):
+        // Sets both MOVE_EFFECT_CONFUSION and MOVE_EFFECT_ATTRACT.
+        const deps = testDeps()
+        const rng = scriptedRng([0, 0])
+        const state = battle(
+          [
+            { gender: 'MALE', moves: ['MOVE_SWEET_KISS', null, null, null], pp: [10, 0, 0, 0] },
+            { gender: 'FEMALE' },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_SWEET_KISS), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_INFATUATION)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'CONFUSION' })
+      })
+
+      it('Teeter Dance confuses other battlers and skips the attacker', () => {
+        // BattleScript_EffectTeeterDance (data/battle_scripts_1.s:6544-6566):
+        // Loops all battlers, skipping the user and faint battlers.
+        const deps = testDeps()
+        const rng = scriptedRng([0, 0])
+        const state = battle(
+          [
+            { moves: ['MOVE_TEETER_DANCE', null, null, null], pp: [20, 0, 0, 0] },
+            {},
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_TEETER_DANCE), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_CONFUSION)).toBe(false)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'CONFUSION' })
+      })
+    })
+
+    describe('EFFECT_ATTRACT', () => {
+      it('Attract infatuates opposite-gender target and triggers Destiny Knot', () => {
+        // BattleScript_EffectAttract (data/battle_scripts_1.s:5224-5236):
+        // Infatuates opposite gender target, and Destiny Knot reflects infatuation back to user.
+        const deps = {
+          ...testDeps(),
+          grounding: { ...GROUNDING, holdEffectOf: (id: number) => (id === 1 ? 'HOLD_EFFECT_DESTINY_KNOT' : null) },
+        }
+        const rng = countingRng()
+        const state = battle(
+          [
+            { gender: 'MALE', moves: ['MOVE_ATTRACT', null, null, null], pp: [15, 0, 0, 0] },
+            { gender: 'FEMALE' },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_ATTRACT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_INFATUATION)).toBe(true)
+        expect(hasFlag(state.battlers[1]!.mon.status2, statusInfatuatedWith(0))).toBe(true)
+        // Destiny Knot reflects infatuation back to user (battler 0 infatuated with battler 1)
+        expect(hasFlag(state.battlers[0]!.mon.status2, statusInfatuatedWith(1))).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'INFATUATION' })
+        expect(act.missed).toBe(false)
+      })
+
+      it('Attract infatuates a same-gender target (ER has no gender check)', () => {
+        // tryinfatuating (battle_script_commands.c:10419-10429) only asks CanInfatuate (battle_util.c:5135-5143).
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { gender: 'MALE', moves: ['MOVE_ATTRACT', null, null, null], pp: [15, 0, 0, 0] },
+            { gender: 'MALE' },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_ATTRACT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_INFATUATION)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'INFATUATION' })
+      })
+
+      it('Attract infatuates a genderless target', () => {
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { gender: 'MALE', moves: ['MOVE_ATTRACT', null, null, null], pp: [15, 0, 0, 0] },
+            { gender: 'GENDERLESS' },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_ATTRACT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_INFATUATION)).toBe(true)
+        expect(act.statusApplied).toEqual({ battlerId: 1, status: 'INFATUATION' })
+      })
+
+      it('Attract fails on an already-infatuated target', () => {
+        // CanInfatuate (src/battle_util.c:5136): if (status2 & STATUS2_INFATUATION) return FALSE.
+        const deps = testDeps()
+        const rng = countingRng()
+        const state = battle(
+          [
+            { gender: 'MALE', moves: ['MOVE_ATTRACT', null, null, null], pp: [15, 0, 0, 0] },
+            { gender: 'FEMALE', status2: statusInfatuatedWith(0) },
+          ],
+          rng,
+        )
+        const out = executeTurn(state, [useMove(1, MOVE_ATTRACT), null], deps)
+        const act = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        expect(act.statusApplied).toBeNull()
       })
     })
   })
