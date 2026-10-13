@@ -40,12 +40,18 @@ import {
   STATUS1_ANY,
   STATUS1_BLEED,
   STATUS1_BURN,
+  STATUS1_FROSTBITE,
+  STATUS1_PARALYSIS,
+  STATUS1_POISON,
+  STATUS1_SLEEP,
+  STATUS1_TOXIC_POISON,
   STATUS2_CURSED,
   STATUS2_DEFENSE_CURL,
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_FLINCHED,
+  STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
   STATUS2_WRAPPED,
@@ -147,7 +153,7 @@ import {
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
-import { canBattlerHeal } from './endTurn'
+import { canBattlerHeal, isHealingBlocked } from './endTurn'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
@@ -174,6 +180,7 @@ import {
   applyPrimaryStatusEffect,
   canBeBurned,
   canBeConfused,
+  canBeParalyzed,
   canBeParalyzedIgnoreType,
   canBePoisoned,
   canBleed,
@@ -183,6 +190,7 @@ import {
   cancelMultiTurnMoves,
   CHECK_HEAL_BLOCK,
   CHECK_RESTRICTING,
+  CHECK_SLEEP,
   doesSubstituteBlockMove,
   findAbilitySlot,
   getMoveEffectChance,
@@ -2326,16 +2334,6 @@ const UNAWARE_ABILITIES: readonly string[] = [
   'ABILITY_UNAWARE',
 ]
 
-/** The `jumpifhealingblocked` macro (asm/macros/battle_script.inc:2493-2510):
- * CanBattlerHeal (battle_util.c:8979-8986) minus its STATUS1_BLEED clause. */
-function isHealingBlocked(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
-  const status1 = battler.mon.status1
-  battler.mon.status1 = clearFlag(status1, STATUS1_BLEED)
-  const blocked = !canBattlerHeal(state, battlerId, battler, unmodelled)
-  battler.mon.status1 = status1
-  return blocked
-}
-
 /** healthbarupdate + datahpupdate for a heal (battle_script_commands.c:1908-1911). */
 function healBattler(state: BattleState, battlerId: number, battler: BattlerState, heal: number): void {
   battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
@@ -4378,6 +4376,30 @@ function handlePerishSong(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * EFFECT_WISH handler (Wish).
+ * BattleScript_EffectWish, data/battle_scripts_1.s:6306-6313.
+ * Cmd_trywish case 0, src/battle_script_commands.c:11784-11793.
+ */
+function handleWish(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:6309)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. trywish 0, BattleScript_ButItFailed (:6310, Cmd_trywish case 0:11784-11793)
+  if (state.field.wishCounter[battlerId] !== 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  state.field.wishCounter[battlerId] = 2
+  state.field.wishPartyId[battlerId] = battler.partyIndex
+  return outcome(ctx, {})
+}
+
+/**
  * EFFECT_MINIMIZE handler (Minimize).
  * BattleScript_EffectMinimize, data/battle_scripts_1.s:4922-4927.
  * Cmd_setminimize, src/battle_script_commands.c:11573-11577.
@@ -4415,6 +4437,483 @@ function handleMinimize(ctx: MoveEffectContext): ActionOutcome {
 
 /** BATTLE_TYPE_DOUBLE, include/constants/battle.h. */
 const BATTLE_TYPE_DOUBLE = 1 << 0
+
+/** Abilities with bitfields.isSoundproof (abilityHooks.json). */
+const SOUNDPROOF_IDS = ['ABILITY_SOUNDPROOF', 'ABILITY_NOISE_CANCEL']
+
+/**
+ * EFFECT_HEAL_BELL handler (Heal Bell, Aromatherapy).
+ * BattleScript_EffectHealBell, data/battle_scripts_1.s:4842-4869.
+ * Cmd_healpartystatus, src/battle_script_commands.c:11022-11101.
+ * tryhealpercenthealth BS_ATTACKER, 30, src/battle_script_commands.c:7896-7907.
+ */
+function handleHealBell(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+  const side = battlerId & 1
+
+  // 1. ppreduce (:4845)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. healpartystatus (:4846, Cmd_healpartystatus :11022-11101). IsSoundproof (battle_util.c:
+  // 8864-8871) is the battler's own Soundproof/Noise Cancel (both APPLY_ON_SELF), mold breaker
+  // checked. Heal Bell's party loop calls IsSoundproof(i) with the PARTY index i as a battler id for
+  // the active slots -- ported as written; reserves check their own ability and innates.
+  // Aromatherapy heals everyone. The sim has no doubles partner here.
+  const isHealBell = moveId === 'MOVE_HEAL_BELL'
+  const attackerHasMB = attackerHasMoldBreakerActive(battler, deps)
+  const isSoundproof = (id: number): boolean => {
+    const b = state.battlers[id]
+    return !!b && SOUNDPROOF_IDS.some((ab) => battlerHasSimAbility(state, b, ab, true, battlerId, attackerHasMB, deps.dataContext))
+  }
+  if (!isHealBell || !isSoundproof(battlerId)) {
+    battler.mon.status1 = 0
+    battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+  }
+  const party = state.sides[side].party
+  for (let i = 0; i < party.length; i++) {
+    const pMon = party[i]
+    if (!pMon || pMon.speciesId === null) continue
+    let healMon = true
+    if (isHealBell) {
+      healMon =
+        i === battler.partyIndex
+          ? !isSoundproof(i)
+          : !SOUNDPROOF_IDS.some((ab) => pMon.abilities.ability === ab || pMon.abilities.innates.includes(ab))
+    }
+    if (healMon) pMon.status1 = 0
+  }
+
+  // 3. tryhealpercenthealth BS_ATTACKER, 30, BattleScript_MoveEnd (:4862)
+  if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+    const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 30) / 100))
+    healBattler(state, battlerId, battler, healAmount)
+  }
+
+  return outcome(ctx, { targetId: battlerId })
+}
+
+/**
+ * EFFECT_REFRESH handler (Refresh).
+ * BattleScript_EffectRefresh, data/battle_scripts_1.s:6484-6508.
+ * Cmd_cureifburnedparalysedorpoisoned, src/battle_script_commands.c:11648-11660.
+ * tryhealpercenthealth BS_ATTACKER, 25, src/battle_script_commands.c:7896-7907.
+ */
+function handleRefresh(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:6487)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. cureifburnedparalysedorpoisoned (:6488, Cmd_cureifburnedparalysedorpoisoned:11648-11660)
+  // STATUS1_POISON | STATUS1_BURN | STATUS1_PARALYSIS | STATUS1_TOXIC_POISON | STATUS1_FROSTBITE | STATUS1_BLEED
+  const CURE_MASK =
+    STATUS1_POISON | STATUS1_BURN | STATUS1_PARALYSIS | STATUS1_TOXIC_POISON | STATUS1_FROSTBITE | STATUS1_BLEED
+  const hasCurableStatus = (battler.mon.status1 & CURE_MASK) !== 0
+
+  if (hasCurableStatus) {
+    battler.mon.status1 = 0
+    if (state.sides[battlerId & 1].party[battler.partyIndex]) {
+      state.sides[battlerId & 1].party[battler.partyIndex].status1 = 0
+    }
+
+    // tryhealpercenthealth BS_ATTACKER, 25, BattleScript_MoveEnd (:6494)
+    if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+      const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 25) / 100))
+      healBattler(state, battlerId, battler, healAmount)
+    }
+    return outcome(ctx, { targetId: battlerId })
+  } else {
+    // BattleScript_EffectRefresh_NoStatusHeal (:6500)
+    // tryhealpercenthealth BS_ATTACKER, 25, BattleScript_ButItFailed (:6501)
+    if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled)) {
+      return outcome(ctx, { targetId: battlerId, missed: true })
+    }
+    const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 25) / 100))
+    healBattler(state, battlerId, battler, healAmount)
+    return outcome(ctx, { targetId: battlerId })
+  }
+}
+
+/**
+ * EFFECT_PURIFY handler (Purify).
+ * BattleScript_EffectPurify, data/battle_scripts_1.s:879-895.
+ * Cmd_accuracycheck NO_ACC_CALC_CHECK_LOCK_ON, src/battle_script_commands.c:1403-1411.
+ * Cmd_curestatus BS_TARGET, src/battle_script_commands.c:7685-7689.
+ * Cmd_tryhealhalfhealth BS_ATTACKER, src/battle_script_commands.c:9255-9274.
+ */
+function handlePurify(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:882)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null) {
+    return outcome(ctx, { missed: true })
+  }
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:883)
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (!lockedOn && hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. jumpifstatus BS_TARGET, STATUS1_ANY, BattleScript_PurifyWorks (:884) -> goto BattleScript_ButItFailed (:885)
+  if ((target.mon.status1 & STATUS1_ANY) === 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. curestatus BS_TARGET (:889; VARIOUS_CURE_STATUS :7685-7689 zeroes status1 only)
+  target.mon.status1 = 0
+  if (state.sides[targetId & 1].party[target.partyIndex]) {
+    state.sides[targetId & 1].party[target.partyIndex].status1 = 0
+  }
+
+  // 5. tryhealhalfhealth BattleScript_AlreadyAtFullHp, BS_ATTACKER (:893, Cmd_tryhealhalfhealth
+  // :9255-9274) -> BattleScript_RestoreHp (:3949-3955, no bleed branch): a user CanBattlerHeal
+  // rejects (bleed included) gets a zero heal, a full-HP user goes to AlreadyAtFullHp.
+  if (canBattlerHeal(state, battlerId, battler, unmodelled) && battler.mon.hp < battler.mon.maxHp) {
+    healBattler(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 2)))
+  }
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_TAKE_HEART handler (Take Heart).
+ * BattleScript_EffectTakeHeart, data/battle_scripts_1.s:6695-6712.
+ * BattleScript_CalmMindDoBoosts, data/battle_scripts_1.s:6748-6763.
+ */
+function handleTakeHeart(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:6698)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const hasStatus = (battler.mon.status1 & STATUS1_ANY) !== 0
+  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+  const spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+
+  // :6699-6702: If no status and both SpAtk & SpDef are at MAX_STAT_STAGE, fails!
+  if (!hasStatus && spAtkStage >= MAX_STAT_STAGE && spDefStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // 2. curestatus BS_ATTACKER (:6706; status1 only)
+  if (hasStatus) {
+    battler.mon.status1 = 0
+    if (state.sides[battlerId & 1].party[battler.partyIndex]) {
+      state.sides[battlerId & 1].party[battler.partyIndex].status1 = 0
+    }
+  }
+
+  // 3. Stat boosts: SpAtk +1 and SpDef +1 (:6751-6762)
+  const statChanges: StatChangeOutcome[] = []
+  const rSpAtk = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPATK,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rSpAtk.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: rSpAtk.delta })
+
+  const rSpDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rSpDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: rSpDef.delta })
+
+  return outcome(ctx, { targetId: battlerId, statChanges })
+}
+
+/**
+ * EFFECT_REST handler (Rest).
+ * BattleScript_EffectRest, data/battle_scripts_1.s:4023-4036.
+ * Cmd_trysetrest, src/battle_script_commands.c:9415-9437.
+ */
+function handleRest(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:4026)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifstatus BS_ATTACKER, STATUS1_SLEEP, BattleScript_RestIsAlreadyAsleep (:4027)
+  if ((battler.mon.status1 & STATUS1_SLEEP) !== 0) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // 3. jumpifabilityflag BS_ATTACKER, ABILITY_COMATOSE, BattleScript_RestIsAlreadyAsleep (:4028)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_COMATOSE', false, battlerId, false, deps.dataContext)) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // 4. requirecandoeffect BS_ATTACKER, MOVE_EFFECT_SLEEP | MOVE_EFFECT_AFFECTS_USER (:4029)
+  // IsAbilityStatusProtected(battlerId, CHECK_SLEEP)
+  if (isAbilityStatusProtected(state, battlerId, CHECK_SLEEP, battlerId, deps) !== null) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // 5. trysetrest BattleScript_AlreadyAtFullHp (:4030, Cmd_trysetrest:9415-9437)
+  // - Full HP fails
+  if (battler.mon.hp === battler.mon.maxHp) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // - Electric Terrain prevents
+  if (isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_ELECTRIC_TERRAIN, deps)) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // - Misty Terrain prevents
+  if (isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_MISTY_TERRAIN, deps)) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  // Sets sleep to 3 turns: STATUS1_SLEEP_TURN(3) = 3 (battle_script_commands.c:9432)
+  battler.mon.status1 = 3
+  syncPartyHp(state, battlerId)
+  if (state.sides[battlerId & 1].party[battler.partyIndex]) {
+    state.sides[battlerId & 1].party[battler.partyIndex].status1 = battler.mon.status1
+  }
+
+  // PresentHealTarget (:5915-5924)
+  // Restores user to full HP
+  healBattler(state, battlerId, battler, battler.mon.maxHp - battler.mon.hp)
+
+  return outcome(ctx, { targetId: battlerId })
+}
+
+/** Abilities with bitfields.megaLauncherBoost (abilityHooks.json). */
+const MEGA_LAUNCHER_BOOST_ABILITIES = [
+  'ABILITY_GUNMAN', 'ABILITY_IRON_BARRAGE', 'ABILITY_MASTER_HAND', 'ABILITY_MEGA_LAUNCHER', 'ABILITY_NIHIL_BLASTER', 'ABILITY_SUPER_SCOPE',
+]
+
+/**
+ * EFFECT_HEAL_PULSE handler (Heal Pulse, Floral Healing).
+ * BattleScript_EffectHealPulse, data/battle_scripts_1.s:2252-2267.
+ * Cmd_tryhealpulse BS_TARGET, src/battle_script_commands.c:7261-7280.
+ */
+function handleHealPulse(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:2255)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null) {
+    return outcome(ctx, { missed: true })
+  }
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:2256)
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (!lockedOn && hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. jumpifsubstituteblocks BattleScript_ButItFailed (:2257) - attacker first!
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifhealingblocked BS_TARGET, BattleScript_ButItFailed (:2258)
+  if (isHealingBlocked(state, targetId, target, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. tryhealpulse BS_TARGET, BattleScript_AlreadyAtFullHp (:2259, :7261-7280)
+  if (hasFlag(target.mon.status1, STATUS1_BLEED)) {
+    // jumpifstatus BS_TARGET, STATUS1_BLEED, BattleScript_MoveUsedBleedHeal (:2262)
+    target.mon.status1 = 0
+    if (state.sides[targetId & 1].party[target.partyIndex]) {
+      state.sides[targetId & 1].party[target.partyIndex].status1 = 0
+    }
+    return outcome(ctx, { targetId })
+  }
+
+  if (target.mon.hp === target.mon.maxHp) {
+    // BattleScript_AlreadyAtFullHp (:5926-5930) - prints full HP message, succeeds with no heal
+    return outcome(ctx, { targetId })
+  }
+
+  // Mega Launcher check (:7268-7271):
+  // Checks if move has bulletBased flag and attacker or target has ABILITY_MEGA_LAUNCHER
+  // IsMegaLauncherBoosted(attacker, move) (battle_util.c:9373: MOVE_FLAG_MEGA_LAUNCHER, moves.json's
+  // bulletBased; ability-granted flags not applied) and then ON_ABILITY over the TARGET's abilities
+  // with the megaLauncherBoost bitfield (abilityHooks.json), checkMoldBreaker FALSE.
+  const isBulletBased = Boolean(deps.dataContext.move(moveId)?.flags.bulletBased)
+  const megaLauncherBoosted =
+    isBulletBased &&
+    MEGA_LAUNCHER_BOOST_ABILITIES.some((id) => battlerHasSimAbility(state, target, id, false, targetId, false, deps.dataContext))
+
+  const heal = megaLauncherBoosted
+    ? Math.max(1, Math.trunc((target.mon.maxHp * 3) / 4))
+    : Math.max(1, Math.trunc(target.mon.maxHp / 2))
+
+  healBattler(state, targetId, target, heal)
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_PSYCHO_SHIFT handler (Psycho Shift).
+ * BattleScript_EffectPsychoShift, data/battle_scripts_1.s:1456-1478.
+ * Cmd_trypsychoshift, src/battle_script_commands.c:7641-7684.
+ */
+function handlePsychoShift(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  if (targetId === null) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { missed: true })
+  }
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1458)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+
+  // 2. ppreduce (:1460)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { targetId, missed: true })
+
+  // 3. jumpifstatus BS_ATTACKER, STATUS1_ANY (:1461)
+  const userStatus = battler.mon.status1 & STATUS1_ANY
+  if (userStatus === 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifstatus BS_TARGET, STATUS1_ANY (:1464)
+  if ((target.mon.status1 & STATUS1_ANY) !== 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. jumpifsafeguard (:1465)
+  if (hasFlag(state.sides[targetId & 1].statuses, SIDE_STATUS_SAFEGUARD)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 6. trypsychoshift (:1466, VARIOUS_PSYCHO_SHIFT :7641-7684). Only the paralysis, poison and
+  // burn branches can fail, and the poison branch asks CanBeParalyzed (the C's own call). Sleep,
+  // frostbite and bleed transfer even when the target cannot take them. The target has no status1
+  // here (jumpifstatus above), so each branch's "target lacks it" test is always true.
+  let fails = false
+  if (hasFlag(userStatus, STATUS1_PARALYSIS)) fails = !canBeParalyzed(state, battlerId, targetId, deps)
+  else if (hasFlag(userStatus, STATUS1_POISON) || hasFlag(userStatus, STATUS1_TOXIC_POISON)) fails = !canBeParalyzed(state, battlerId, targetId, deps)
+  else if (hasFlag(userStatus, STATUS1_BURN)) fails = !canBeBurned(state, targetId, battlerId, deps)
+  if (fails) return outcome(ctx, { targetId, missed: true })
+
+  target.mon.status1 = userStatus
+
+  // curestatus BS_ATTACKER (:1474)
+  battler.mon.status1 = 0
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_STOCKPILE handler (Stockpile).
+ * BattleScript_EffectStockpile, data/battle_scripts_1.s:5979-6007.
+ * Cmd_stockpile, src/battle_script_commands.c:9494-9519.
+ */
+function handleStockpile(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:5982)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. stockpile 0 (:5983, Cmd_stockpile case 0:9496-9507)
+  if (battler.volatiles.stockpileCounter >= 3) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  battler.volatiles.stockpileCounter++
+  battler.volatiles.stockpileBeforeDef = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  battler.volatiles.stockpileBeforeSpDef = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+
+  // 3. Stat buffs: Def +1 and SpDef +1 (:5994-6004)
+  const statChanges: StatChangeOutcome[] = []
+  const rDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_DEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: rDef.delta })
+
+  const rSpDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    false,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rSpDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: rSpDef.delta })
+
+  // 4. stockpile 1 (:6006, Cmd_stockpile case 1:9508-9515)
+  // Records the net stages gained from this stockpile use
+  const currentDef = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  const currentSpDef = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+  battler.volatiles.stockpileDef += currentDef - battler.volatiles.stockpileBeforeDef
+  battler.volatiles.stockpileSpDef += currentSpDef - battler.volatiles.stockpileBeforeSpDef
+
+  return outcome(ctx, { targetId: battlerId, statChanges })
+}
 
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PROTECT: handleProtect,
@@ -4563,6 +5062,16 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_MIRACLE_EYE: handleMiracleEye,
   EFFECT_PERISH_SONG: handlePerishSong,
   EFFECT_MINIMIZE: handleMinimize,
+  EFFECT_WISH: handleWish,
+  EFFECT_HEAL_BELL: handleHealBell,
+  EFFECT_REFRESH: handleRefresh,
+  EFFECT_PURIFY: handlePurify,
+  EFFECT_TAKE_HEART: handleTakeHeart,
+  EFFECT_REST: handleRest,
+  EFFECT_HEAL_PULSE: handleHealPulse,
+  EFFECT_PSYCHO_SHIFT: handlePsychoShift,
+  EFFECT_STOCKPILE: handleStockpile,
+  EFFECT_SWALLOW: handleHealHalf,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

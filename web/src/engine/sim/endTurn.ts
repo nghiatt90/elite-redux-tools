@@ -411,6 +411,16 @@ function isBloodStainAffected(battler: BattlerState): boolean {
  * already documents this gap at its own call site in turn.ts (the Pressure
  * check); same treatment, only surfaced here when Permanence or Hemolysis is
  * actually found on the opposing side. */
+/** The `jumpifhealingblocked` macro (asm/macros/battle_script.inc:2493-2510):
+ * CanBattlerHeal (battle_util.c:8979-8986) minus its STATUS1_BLEED clause. */
+export function isHealingBlocked(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
+  const status1 = battler.mon.status1
+  battler.mon.status1 = clearFlag(status1, STATUS1_BLEED)
+  const blocked = !canBattlerHeal(state, battlerId, battler, unmodelled)
+  battler.mon.status1 = status1
+  return blocked
+}
+
 export function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
@@ -441,7 +451,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number

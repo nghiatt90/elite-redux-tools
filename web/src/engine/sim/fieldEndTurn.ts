@@ -58,12 +58,9 @@
 //   ENDTURN_LUCKY_CHANT      PORTED.
 //   ENDTURN_SAFEGUARD        PORTED.
 //   ENDTURN_TAILWIND         PORTED.
-//   ENDTURN_WISH             Unreachable -- no field anywhere in this state
-//                            model corresponds to gWishFutureKnock.wishCounter
-//                            or its heal amount (BattlerState/SideState have
-//                            no such field); there is no real condition to
-//                            gate a runtime gap on, so none is emitted (same
-//                            treatment as endTurn.ts's ENDTURN_LEECH_SEED).
+//   ENDTURN_WISH             PORTED (wishCounter countdown, BattleScript_WishComesTrue
+//                            at 0 heals half wish-user max HP or cures bleed,
+//                            battle_util.c:1943-1958).
 //   ENDTURN_RAIN             PORTED (timer only; rain never damages).
 //   ENDTURN_SANDSTORM        PORTED (timer + Cmd_weatherdamage's damage, see
 //                            below).
@@ -228,7 +225,7 @@ import { isBattlerGrounded } from './grounding'
 import type { SimDataContext } from './dataContext'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
-import { isMagicGuardProtected, type EndTurnEffectResult } from './endTurn'
+import { isHealingBlocked, isMagicGuardProtected, type EndTurnEffectResult } from './endTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { dispatchOnWeatherChange } from './onWeather'
 import {
@@ -283,6 +280,7 @@ import {
   STATUS3_UNDERGROUND,
   STATUS3_UNDERWATER,
   STATUS3_SEMI_INVULNERABLE,
+  STATUS1_BLEED,
 } from './constants'
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- duplicated (rather than
@@ -553,7 +551,45 @@ export function runFieldEndTurnEffects(
     }
   }
 
-  // ENDTURN_WISH, :1929-1943 -- Unreachable, see this module's header.
+  // ENDTURN_WISH, battle_util.c:1943-1958: over gBattlerByTurnOrder (order).
+  if (state.field.wishCounter) {
+    for (const bId of order) {
+      if (state.field.wishCounter[bId] !== 0) {
+        state.field.wishCounter[bId]--
+        if (state.field.wishCounter[bId] === 0) {
+          const b = state.battlers[bId]
+          if (b && isAlive(state, bId)) {
+            // BattleScript_WishComesTrue (data/battle_scripts_1.s:8187-8207)
+            // Cmd_trywish case 1 (battle_script_commands.c:11794-11816)
+            // B_WISH_HP_SOURCE >= GEN_5: user's max HP (from wishPartyId), else target's max HP
+            const side = bId & 1
+            const partyId = state.field.wishPartyId?.[bId] ?? b.partyIndex
+            const partyMon = state.sides[side]?.party[partyId]
+            const sourceMaxHp = partyMon?.maxHp ?? b.mon.maxHp
+            const healAmount = Math.max(1, Math.trunc(sourceMaxHp / 2))
+
+            // trywish 1: a bleeding target skips the full-HP check (:11795-11799, 11811); then
+            // jumpifhealingblocked -> ButItFailed, jumpifstatus STATUS1_BLEED -> MoveUsedBleedHeal.
+            const bleeding = hasFlag(b.mon.status1, STATUS1_BLEED)
+            if (bleeding || b.mon.hp < b.mon.maxHp) {
+              if (!isHealingBlocked(state, bId, b, unmodelled)) {
+                if (bleeding) {
+                  b.mon.status1 = 0
+                  syncPartyHp(state, bId)
+                } else {
+                  const prevHp = b.mon.hp
+                  b.mon.hp = Math.min(b.mon.maxHp, b.mon.hp + healAmount)
+                  const applied = b.mon.hp - prevHp
+                  syncPartyHp(state, bId)
+                  results.push({ battlerId: bId, effect: 'WISH', hpChange: applied, fainted: false })
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
   // ENDTURN_RAIN, :1945-1966 -- REQUIRE(!clearSkiesTimer).
   if (!state.field.timers.clearSkiesTimer && hasFlag(state.field.weather, WEATHER_RAIN_ANY)) {

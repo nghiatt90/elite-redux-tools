@@ -29,6 +29,7 @@ import {
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_STICKY_WEB,
@@ -41,6 +42,7 @@ import {
   STAT_SPATK,
   STAT_SPDEF,
   STATUS1_BLEED,
+  STATUS1_BURN,
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
   STATUS1_POISON,
@@ -51,6 +53,7 @@ import {
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_INFATUATION,
+  STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
   STATUS3_ALWAYS_HITS,
@@ -69,6 +72,7 @@ import {
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
   STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_FOG_TEMPORARY,
@@ -200,6 +204,18 @@ const MOVE_FORESIGHT = requireMove('MOVE_FORESIGHT')
 const MOVE_MIRACLE_EYE = requireMove('MOVE_MIRACLE_EYE')
 const MOVE_PERISH_SONG = requireMove('MOVE_PERISH_SONG')
 const MOVE_MINIMIZE = requireMove('MOVE_MINIMIZE')
+const MOVE_WISH = requireMove('MOVE_WISH')
+const MOVE_HEAL_BELL = requireMove('MOVE_HEAL_BELL')
+const MOVE_AROMATHERAPY = requireMove('MOVE_AROMATHERAPY')
+const MOVE_REFRESH = requireMove('MOVE_REFRESH')
+const MOVE_PURIFY = requireMove('MOVE_PURIFY')
+const MOVE_TAKE_HEART = requireMove('MOVE_TAKE_HEART')
+const MOVE_REST = requireMove('MOVE_REST')
+const MOVE_HEAL_PULSE = requireMove('MOVE_HEAL_PULSE')
+const MOVE_FLORAL_HEALING = requireMove('MOVE_FLORAL_HEALING')
+const MOVE_PSYCHO_SHIFT = requireMove('MOVE_PSYCHO_SHIFT')
+const MOVE_STOCKPILE = requireMove('MOVE_STOCKPILE')
+const MOVE_SWALLOW = requireMove('MOVE_SWALLOW')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -221,6 +237,10 @@ const ABILITY_WIND_RIDER = requireAbility('ABILITY_WIND_RIDER')
 const ABILITY_WIND_POWER = requireAbility('ABILITY_WIND_POWER')
 const ABILITY_PROTOSYNTHESIS = requireAbility('ABILITY_PROTOSYNTHESIS')
 const ABILITY_SOUNDPROOF = requireAbility('ABILITY_SOUNDPROOF')
+const ABILITY_COMATOSE = requireAbility('ABILITY_COMATOSE')
+const ABILITY_INSOMNIA = requireAbility('ABILITY_INSOMNIA')
+const ABILITY_VITAL_SPIRIT = requireAbility('ABILITY_VITAL_SPIRIT')
+const ABILITY_MEGA_LAUNCHER = requireAbility('ABILITY_MEGA_LAUNCHER')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -3708,6 +3728,832 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           // Neutral evasion stage is 6 (DEFAULT_STAT_STAGE). +2 stages raises to 8.
           expect(state.battlers[0]!.mon.statStages[STAT_EVASION]).toBe(8)
           expect(act1.statChanges).toEqual([{ battlerId: 0, stat: STAT_EVASION, change: 2 }])
+        })
+      })
+
+      describe('EFFECT_WISH', () => {
+        it('Wish sets wishCounter=2, decrements at end of turn, heals half max HP at end of next turn', () => {
+          // BattleScript_EffectWish (data/battle_scripts_1.s:6306-6313)
+          // Cmd_trywish (battle_script_commands.c:11783-11818)
+          // TurnBasedEffects case ENDTURN_WISH (battle_util.c:1943-1958)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Wish at 50/100 HP.
+          const out1 = executeTurn(state, [useMove(1, MOVE_WISH), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          // wishCounter was 2 during turn, decremented to 1 at end-of-turn.
+          expect(state.field.wishCounter[0]).toBe(1)
+          // No heal yet on turn 1.
+          expect(state.battlers[0]!.mon.hp).toBe(50)
+          expect(out1.fieldEndTurn.some((e) => e.effect === 'WISH')).toBe(false)
+
+          // Turn 2: Wish comes true at end of turn!
+          const out2 = executeTurn(state, [null, null], deps)
+          expect(state.field.wishCounter[0]).toBe(0)
+          // Heals half of user's max HP (50 HP): 50 -> 100.
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          expect(out2.fieldEndTurn).toContainEqual({ battlerId: 0, effect: 'WISH', hpChange: 50, fainted: false })
+        })
+
+        it('Wish fails if wishCounter is already active', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.field.wishCounter = [1, 0, 0, 0]
+
+          const out = executeTurn(state, [useMove(1, MOVE_WISH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9) // Costs PP even when it fails
+        })
+
+        it('Wish clears STATUS1_BLEED instead of healing HP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          executeTurn(state, [useMove(1, MOVE_WISH), null], deps)
+          expect(state.field.wishCounter[0]).toBe(1)
+
+          // Afflict bleed before end of turn 2
+          state.battlers[0]!.mon.status1 = STATUS1_BLEED
+          executeTurn(state, [null, null], deps)
+
+          expect(state.field.wishCounter[0]).toBe(0)
+          expect(state.battlers[0]!.mon.status1).toBe(0) // Cured bleed
+          expect(state.battlers[0]!.mon.hp).toBe(50) // HP not healed
+        })
+
+        it('Wish does not heal when at full HP or under Heal Block', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Full HP test
+          const stateFull = battle(
+            [
+              { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          executeTurn(stateFull, [useMove(1, MOVE_WISH), null], deps)
+          const outFull = executeTurn(stateFull, [null, null], deps)
+          expect(stateFull.battlers[0]!.mon.hp).toBe(100)
+          expect(outFull.fieldEndTurn.some((e) => e.effect === 'WISH')).toBe(false)
+
+          // Heal Block test
+          const stateBlocked = battle(
+            [
+              { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          executeTurn(stateBlocked, [useMove(1, MOVE_WISH), null], deps)
+          stateBlocked.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+          const outBlocked = executeTurn(stateBlocked, [null, null], deps)
+          expect(stateBlocked.battlers[0]!.mon.hp).toBe(50)
+          expect(outBlocked.fieldEndTurn.some((e) => e.effect === 'WISH')).toBe(false)
+        })
+      })
+
+      describe('EFFECT_HEAL_BELL', () => {
+        it('Heal Bell cures active status, clears Nightmare, heals user 30% max HP, and cures reserve party mons', () => {
+          // BattleScript_EffectHealBell (data/battle_scripts_1.s:4842-4869)
+          // Cmd_healpartystatus (src/battle_script_commands.c:11022-11101)
+          // tryhealpercenthealth BS_ATTACKER, 30 (src/battle_script_commands.c:7896-7907)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_HEAL_BELL', null, null, null], pp: [5, 0, 0, 0], hp: 50, maxHp: 100, status1: STATUS1_BURN, status2: STATUS2_NIGHTMARE },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          // Add reserve party mon with status
+          state.sides[0].party = [
+            {
+              speciesId: 'SPECIES_MUDKIP',
+              types: ['WATER', 'MYSTERY', 'MYSTERY'],
+              hp: 50,
+              maxHp: 100,
+              level: 50,
+              moves: [null, null, null, null],
+              pp: [0, 0, 0, 0],
+              itemId: null,
+              abilities: { ability: null, innates: [null, null, null] },
+              rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 100 },
+              nature: 'NATURE_HARDY',
+              hiddenPowerType: null,
+              speedDown: false,
+              gender: 'MALE',
+              status1: STATUS1_BURN,
+            },
+            {
+              speciesId: 'SPECIES_TORCHIC',
+              types: ['WATER', 'MYSTERY', 'MYSTERY'],
+              hp: 100,
+              maxHp: 100,
+              level: 50,
+              moves: [null, null, null, null],
+              pp: [0, 0, 0, 0],
+              itemId: null,
+              abilities: { ability: null, innates: [null, null, null] },
+              rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 100 },
+              nature: 'NATURE_HARDY',
+              hiddenPowerType: null,
+              speedDown: false,
+              gender: 'MALE',
+              status1: STATUS1_PARALYSIS,
+            },
+            {
+              speciesId: 'SPECIES_EXPLOUD',
+              types: ['WATER', 'MYSTERY', 'MYSTERY'],
+              hp: 100,
+              maxHp: 100,
+              level: 50,
+              moves: [null, null, null, null],
+              pp: [0, 0, 0, 0],
+              itemId: null,
+              abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] },
+              rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 100 },
+              nature: 'NATURE_HARDY',
+              hiddenPowerType: null,
+              speedDown: false,
+              gender: 'MALE',
+              status1: STATUS1_POISON,
+            },
+          ]
+
+          const out = executeTurn(state, [useMove(1, MOVE_HEAL_BELL), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          // Active battler cured of status1 and Nightmare
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+          expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_NIGHTMARE)).toBe(false)
+          // User healed 30% max HP: 50 -> 80
+          expect(state.battlers[0]!.mon.hp).toBe(80)
+
+          // Reserve party mon without Soundproof is cured
+          expect(state.sides[0].party[1]!.status1).toBe(0)
+          // Reserve party mon with Soundproof is NOT cured
+          expect(state.sides[0].party[2]!.status1).toBe(STATUS1_POISON)
+        })
+
+        it('Heal Bell respects Soundproof on active battler, Aromatherapy ignores Soundproof', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Soundproof user with Heal Bell
+          const stateBell = battle(
+            [
+              {
+                moves: ['MOVE_HEAL_BELL', null, null, null],
+                pp: [5, 0, 0, 0],
+                status1: STATUS1_BURN,
+                abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] },
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outBell = executeTurn(stateBell, [useMove(1, MOVE_HEAL_BELL), null], deps)
+          expect(outBell.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          // Status NOT cured due to Soundproof
+          expect(stateBell.battlers[0]!.mon.status1).toBe(STATUS1_BURN)
+
+          // Soundproof user with Aromatherapy
+          const stateAroma = battle(
+            [
+              {
+                moves: ['MOVE_AROMATHERAPY', null, null, null],
+                pp: [5, 0, 0, 0],
+                status1: STATUS1_BURN,
+                abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] },
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outAroma = executeTurn(stateAroma, [useMove(1, MOVE_AROMATHERAPY), null], deps)
+          expect(outAroma.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          // Status IS cured because Aromatherapy ignores Soundproof
+          expect(stateAroma.battlers[0]!.mon.status1).toBe(0)
+        })
+      })
+
+      describe('EFFECT_REFRESH', () => {
+        it('Refresh cures burn/poison/paralysis and heals 25% max HP', () => {
+          // BattleScript_EffectRefresh (data/battle_scripts_1.s:6484-6508)
+          // Cmd_cureifburnedparalysedorpoisoned (src/battle_script_commands.c:11648-11660)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_REFRESH', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100, status1: STATUS1_BURN },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REFRESH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+          // 50 + 25 = 75 HP
+          expect(state.battlers[0]!.mon.hp).toBe(75)
+        })
+
+        it('Refresh cures status even at full HP without failing', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              // Burn, not paralysis: countingRng's 0 would fully paralyse the user in CANCELLER_PARALYSED.
+              { moves: ['MOVE_REFRESH', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100, status1: STATUS1_BURN },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REFRESH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+        })
+
+        it('Refresh fails at full HP if user has no status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_REFRESH', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REFRESH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9) // Costs PP
+        })
+
+        it('Refresh heals 25% max HP when damaged even if user has no status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_REFRESH', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REFRESH), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.hp).toBe(75)
+        })
+      })
+
+      describe('EFFECT_PURIFY', () => {
+        it('Purify cures target status and restores 50% max HP to user', () => {
+          // BattleScript_EffectPurify (data/battle_scripts_1.s:879-895)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PURIFY', null, null, null], pp: [20, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50, status1: STATUS1_POISON },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_PURIFY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+        })
+
+        it('Purify fails if target has no status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PURIFY', null, null, null], pp: [20, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50, status1: 0 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_PURIFY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(state.battlers[0]!.mon.hp).toBe(50)
+        })
+
+        it('Purify leaves a bleeding user alone: tryhealhalfhealth zeroes the heal and RestoreHp has no bleed cure', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PURIFY', null, null, null], pp: [20, 0, 0, 0], hp: 50, maxHp: 100, status1: STATUS1_BLEED },
+              { spe: 50, status1: STATUS1_BURN },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_PURIFY), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[1]!.mon.status1).toBe(0) // Target cured
+          // Cmd_tryhealhalfhealth (battle_script_commands.c:9255-9274): CanBattlerHeal fails on bleed, so the
+          // heal is 0; BattleScript_RestoreHp (battle_scripts_1.s:3949-3955) has no bleed branch.
+          expect(state.battlers[0]!.mon.status1).toBe(STATUS1_BLEED)
+          expect(state.battlers[0]!.mon.hp).toBe(50)
+        })
+      })
+
+      describe('EFFECT_TAKE_HEART', () => {
+        it('Take Heart cures user status and boosts SpAtk +1 and SpDef +1', () => {
+          // BattleScript_EffectTakeHeart (data/battle_scripts_1.s:6695-6712)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              // Burn, not paralysis: countingRng's 0 would fully paralyse the user in CANCELLER_PARALYSED.
+              { moves: ['MOVE_TAKE_HEART', null, null, null], pp: [5, 0, 0, 0], status1: STATUS1_BURN },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_TAKE_HEART), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+          // Default stat stage is 6; +1 raises to 7
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+          expect(act.statChanges).toEqual([
+            { battlerId: 0, stat: STAT_SPATK, change: 1 },
+            { battlerId: 0, stat: STAT_SPDEF, change: 1 },
+          ])
+        })
+
+        it('Take Heart works and boosts stats even without status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TAKE_HEART', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_TAKE_HEART), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+        })
+
+        it('Take Heart fails if user has no status and both stats are maxed', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TAKE_HEART', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_SPATK] = MAX_STAT_STAGE
+          state.battlers[0]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+
+          const out = executeTurn(state, [useMove(1, MOVE_TAKE_HEART), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+        })
+      })
+
+      describe('EFFECT_REST', () => {
+        it('Rest fully heals HP, cures prior status, and sets sleep counter to 3 turns', () => {
+          // BattleScript_EffectRest (data/battle_scripts_1.s:4023-4036)
+          // Cmd_trysetrest (src/battle_script_commands.c:9415-9437)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_REST', null, null, null], pp: [10, 0, 0, 0], hp: 30, maxHp: 100, status1: STATUS1_BURN, status2: STATUS2_NIGHTMARE },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REST), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          // Fully healed: 30 -> 100
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          // Burn replaced by sleep for 3 turns (STATUS1_SLEEP_TURN(3)); Cmd_trysetrest writes status1 only,
+          // so Nightmare stays.
+          expect(state.battlers[0]!.mon.status1).toBe(3)
+          expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_NIGHTMARE)).toBe(true)
+        })
+
+        it('Rest fails at full HP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_REST', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_REST), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+        })
+
+        it('Rest fails if already asleep or Comatose', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Already asleep
+          const stateAsleep = battle(
+            [
+              { moves: ['MOVE_REST', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100, status1: 2 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          // An asleep user never reaches the script: CANCELLER_ASLEEP stops it first.
+          const outAsleep = executeTurn(stateAsleep, [useMove(1, MOVE_REST), null], deps)
+          expect(outAsleep.actions.find((a) => a.battlerId === 0)!.cancelledBy).toBe('SLEEP')
+
+          // Comatose
+          const stateComatose = battle(
+            [
+              {
+                moves: ['MOVE_REST', null, null, null],
+                pp: [10, 0, 0, 0],
+                hp: 50,
+                maxHp: 100,
+                abilities: { ability: ABILITY_COMATOSE, innates: [null, null, null] },
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outComatose = executeTurn(stateComatose, [useMove(1, MOVE_REST), null], deps)
+          expect(outComatose.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+        })
+
+        it('Rest fails if protected by sleep immunity ability (Insomnia / Vital Spirit)', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Insomnia
+          const stateInsomnia = battle(
+            [
+              {
+                moves: ['MOVE_REST', null, null, null],
+                pp: [10, 0, 0, 0],
+                hp: 50,
+                maxHp: 100,
+                abilities: { ability: ABILITY_INSOMNIA, innates: [null, null, null] },
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outInsomnia = executeTurn(stateInsomnia, [useMove(1, MOVE_REST), null], deps)
+          expect(outInsomnia.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+
+          // Vital Spirit
+          const stateVital = battle(
+            [
+              {
+                moves: ['MOVE_REST', null, null, null],
+                pp: [10, 0, 0, 0],
+                hp: 50,
+                maxHp: 100,
+                abilities: { ability: ABILITY_VITAL_SPIRIT, innates: [null, null, null] },
+              },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outVital = executeTurn(stateVital, [useMove(1, MOVE_REST), null], deps)
+          expect(outVital.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+        })
+
+        it('Rest fails on Electric Terrain or Misty Terrain when grounded', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Electric Terrain
+          const stateElectric = battle(
+            [
+              { moves: ['MOVE_REST', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          stateElectric.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+          const outElectric = executeTurn(stateElectric, [useMove(1, MOVE_REST), null], deps)
+          expect(outElectric.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+
+          // Misty Terrain
+          const stateMisty = battle(
+            [
+              { moves: ['MOVE_REST', null, null, null], pp: [10, 0, 0, 0], hp: 50, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          stateMisty.field.statuses |= STATUS_FIELD_MISTY_TERRAIN
+          const outMisty = executeTurn(stateMisty, [useMove(1, MOVE_REST), null], deps)
+          expect(outMisty.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_HEAL_PULSE', () => {
+        it('Heal Pulse heals target 50% max HP, and 75% max HP with Mega Launcher', () => {
+          // BattleScript_EffectHealPulse (data/battle_scripts_1.s:2252-2267)
+          // Cmd_tryhealpulse (src/battle_script_commands.c:7261-7280)
+          const deps = testDeps()
+          const rng = countingRng()
+          // Standard 50% heal
+          const state = battle(
+            [
+              { moves: ['MOVE_HEAL_PULSE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, hp: 40, maxHp: 100 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_HEAL_PULSE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          // 40 + 50 = 90 HP
+          expect(state.battlers[1]!.mon.hp).toBe(90)
+
+          // Mega Launcher boosted (75% heal)
+          const stateMega = battle(
+            [
+              {
+                moves: ['MOVE_HEAL_PULSE', null, null, null],
+                pp: [10, 0, 0, 0],
+              },
+              // VARIOUS_TRY_HEAL_PULSE reads megaLauncherBoost on the TARGET (gActiveBattler, :7268-7271).
+              { spe: 50, hp: 20, maxHp: 100, abilities: { ability: ABILITY_MEGA_LAUNCHER, innates: [null, null, null] } },
+            ],
+            rng,
+          )
+          const outMega = executeTurn(stateMega, [useMove(1, MOVE_HEAL_PULSE), null], deps)
+          expect(outMega.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          // 20 + 75 = 95 HP
+          expect(stateMega.battlers[1]!.mon.hp).toBe(95)
+        })
+
+        it('Floral Healing heals target 50% max HP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FLORAL_HEALING', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, hp: 40, maxHp: 100 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_FLORAL_HEALING), null], deps)
+          expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(state.battlers[1]!.mon.hp).toBe(90)
+        })
+
+        it('Heal Pulse fails against Substitute and Heal Block', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Substitute
+          const stateSub = battle(
+            [
+              { moves: ['MOVE_HEAL_PULSE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, hp: 40, maxHp: 100, status2: STATUS2_SUBSTITUTE },
+            ],
+            rng,
+          )
+          const outSub = executeTurn(stateSub, [useMove(1, MOVE_HEAL_PULSE), null], deps)
+          expect(outSub.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(stateSub.battlers[1]!.mon.hp).toBe(40)
+
+          // Heal Block
+          const stateBlock = battle(
+            [
+              { moves: ['MOVE_HEAL_PULSE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, hp: 40, maxHp: 100 },
+            ],
+            rng,
+          )
+          stateBlock.battlers[1]!.statuses3 |= STATUS3_HEAL_BLOCK
+          const outBlock = executeTurn(stateBlock, [useMove(1, MOVE_HEAL_PULSE), null], deps)
+          expect(outBlock.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(stateBlock.battlers[1]!.mon.hp).toBe(40)
+        })
+
+        it('Heal Pulse clears bleed on target without restoring HP', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_HEAL_PULSE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50, hp: 40, maxHp: 100, status1: STATUS1_BLEED },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_HEAL_PULSE), null], deps)
+          expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(state.battlers[1]!.mon.hp).toBe(40)
+        })
+      })
+
+      describe('EFFECT_PSYCHO_SHIFT', () => {
+        it('Psycho Shift moves frostbite even onto an Ice type (VARIOUS_PSYCHO_SHIFT has no fail branch for it)', () => {
+          const state = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_FROSTBITE },
+              { spe: 50, types: ['ICE', 'MYSTERY', 'MYSTERY'] },
+            ],
+            countingRng(),
+          )
+          executeTurn(state, [useMove(1, MOVE_PSYCHO_SHIFT), null], testDeps())
+          expect(state.battlers[1]!.mon.status1).toBe(STATUS1_FROSTBITE)
+          expect(state.battlers[0]!.mon.status1).toBe(0)
+        })
+
+        it('Psycho Shift transfers user burn to target and cures user', () => {
+          // BattleScript_EffectPsychoShift (data/battle_scripts_1.s:1456-1478)
+          // Cmd_trypsychoshift (src/battle_script_commands.c:7641-7684)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_BURN },
+              { spe: 50, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_PSYCHO_SHIFT), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.mon.status1).toBe(0) // User cured
+          expect(state.battlers[1]!.mon.status1).toBe(STATUS1_BURN) // Target burned
+        })
+
+        it('Psycho Shift fails if user has no status or target already has status', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // User has no status
+          const stateNoStatus = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const outNoStatus = executeTurn(stateNoStatus, [useMove(1, MOVE_PSYCHO_SHIFT), null], deps)
+          expect(outNoStatus.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+
+          // Target already has status
+          const stateTargetStat = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_BURN },
+              { spe: 50, status1: STATUS1_PARALYSIS },
+            ],
+            rng,
+          )
+          const outTargetStat = executeTurn(stateTargetStat, [useMove(1, MOVE_PSYCHO_SHIFT), null], deps)
+          expect(outTargetStat.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(stateTargetStat.battlers[0]!.mon.status1).toBe(STATUS1_BURN)
+        })
+
+        it('Psycho Shift fails against Safeguard or type immunity', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          // Safeguard
+          const stateSafe = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_BURN },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          stateSafe.sides[1].statuses |= SIDE_STATUS_SAFEGUARD
+          const outSafe = executeTurn(stateSafe, [useMove(1, MOVE_PSYCHO_SHIFT), null], deps)
+          expect(outSafe.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+
+          // Fire-type immune to burn
+          const stateFire = battle(
+            [
+              { moves: ['MOVE_PSYCHO_SHIFT', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_BURN },
+              { spe: 50, types: ['FIRE', 'MYSTERY', 'MYSTERY'] },
+            ],
+            rng,
+          )
+          const outFire = executeTurn(stateFire, [useMove(1, MOVE_PSYCHO_SHIFT), null], deps)
+          expect(outFire.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+        })
+      })
+
+      describe('EFFECT_STOCKPILE', () => {
+        it('Stockpile raises Def and SpDef +1 and caps at 3 stockpiles', () => {
+          // BattleScript_EffectStockpile (data/battle_scripts_1.s:5979-6007)
+          // Cmd_stockpile (src/battle_script_commands.c:9494-9519)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_STOCKPILE', null, null, null], pp: [5, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Use 1
+          const out1 = executeTurn(state, [useMove(1, MOVE_STOCKPILE), null], deps)
+          expect(out1.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(1)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(7)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(7)
+          expect(state.battlers[0]!.volatiles.stockpileDef).toBe(1)
+          expect(state.battlers[0]!.volatiles.stockpileSpDef).toBe(1)
+
+          // Use 2
+          const out2 = executeTurn(state, [useMove(1, MOVE_STOCKPILE), null], deps)
+          expect(out2.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(2)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(8)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(8)
+          expect(state.battlers[0]!.volatiles.stockpileDef).toBe(2)
+          expect(state.battlers[0]!.volatiles.stockpileSpDef).toBe(2)
+
+          // Use 3
+          const out3 = executeTurn(state, [useMove(1, MOVE_STOCKPILE), null], deps)
+          expect(out3.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+          expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(3)
+          expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(9)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(9)
+
+          // Use 4: fails because stockpileCounter is already 3
+          const out4 = executeTurn(state, [useMove(1, MOVE_STOCKPILE), null], deps)
+          expect(out4.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+          expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(3)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(1) // Costs PP
+        })
+      })
+
+      describe('EFFECT_SWALLOW', () => {
+        it('Swallow restores 50% max HP like Recover (mapped to handleHealHalf)', () => {
+          // MoveBehaviorConfigList.textproto:778-779
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SWALLOW', null, null, null], pp: [2, 0, 0, 0], hp: 40, maxHp: 100 },
+              { spe: 50 },
+            ],
+            rng,
+          )
+          const out = executeTurn(state, [useMove(1, MOVE_SWALLOW), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(1)
+          // 40 + 50 = 90 HP
+          expect(state.battlers[0]!.mon.hp).toBe(90)
         })
       })
     })

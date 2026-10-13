@@ -336,6 +336,8 @@ export function createFieldState(): FieldState {
     weather: WEATHER_NONE,
     timers: createFieldTimerState(),
     weatherDuration: 0,
+    wishCounter: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
+    wishPartyId: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
   }
 }
 

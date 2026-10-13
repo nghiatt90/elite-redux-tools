@@ -540,9 +540,12 @@ export interface FieldState {
   weather: number
   timers: FieldTimerState
   /** `gWishFutureKnock.weatherDuration` (battle.h:340) -- weather's own countdown,
-   * which lives outside gFieldTimers. The rest of WishFutureKnock (Wish, Future
-   * Sight) is not modelled yet; those are move behaviours, step 5. */
+   * which lives outside gFieldTimers. Future Sight is not modelled yet. */
   weatherDuration: number
+  /** `u8 wishCounter[MAX_BATTLERS_COUNT]` (struct WishFutureKnock, include/battle.h:338). */
+  wishCounter: number[]
+  /** `u8 wishPartyId[MAX_BATTLERS_COUNT]` (struct WishFutureKnock, include/battle.h:339). */
+  wishPartyId: number[]
 }
 
 // ---------------------------------------------------------------------------

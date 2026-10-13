@@ -1650,7 +1650,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   const replacementUnmodelled: string[] = []
   if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
 
-  // HandleWishPerishSongOnTurnEnd (battle_util.c:3032-3053) runs after HandleFaintedMonActions
+  // HandleWishPerishSongOnTurnEnd (battle_util.c:2997-3078) in C has state 0: futureSightCounter (:2998-3031),
+  // state 1: perishSongTimer (:3032-3053), state 2: arenaTurnCounter (:3060-3072). Wish itself is not
+  // in HandleWishPerishSongOnTurnEnd; it is in DoFieldEndTurnEffects / ENDTURN_WISH (battle_util.c:1943-1958)
+  // in fieldEndTurn.ts, which runs during runFieldEndTurnEffects above.
+  // HandleWishPerishSongOnTurnEnd's perishSongTimer runs after HandleFaintedMonActions
   // (battle_main.c:3485-3489), over gBattlerByTurnOrder (endTurnOrder) skipping absent battlers.
   // BattleScript_PerishSongTakesLife's faint is then replaced on the next HandleFaintedMonActions pass.
   if (!state.battleOutcome) {
