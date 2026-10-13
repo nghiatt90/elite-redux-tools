@@ -97,10 +97,12 @@ import {
   MOVE_EFFECT_ACC_MINUS_2,
   MOVE_EFFECT_EVS_MINUS_2,
   attackerHasMoldBreakerActive,
+  B_MSG_DEFENDER_STAT_FELL,
   battlerHasSimAbility,
   benefitsFromStatBuffs,
   changeStatBuffs,
   changeStatBuffsImplicit,
+  dispatchOnStatLowered,
   getHighestAttackingStatId,
   isBattlerWeatherAffected,
 } from './statBuffs'
@@ -1467,6 +1469,9 @@ function handleStrengthSap(ctx: MoveEffectContext): ActionOutcome {
   const lowerAttack = (): number => {
     const res = changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_ATK, STAT_BUFF_ALLOW_PTR, true, deps, unmodelled, moveId)
     if (res.delta !== 0) statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: res.delta })
+    if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+      dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+    }
     return res.delta
   }
 
@@ -2869,6 +2874,9 @@ export function applySecondaryMoveEffects(
           change: res.delta,
         })
       }
+      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (attackerId & 1) !== (targetId & 1)) {
+        dispatchOnStatLowered(state, targetId, attackerId, deps, unmodelled, statChanges)
+      }
       continue
     }
 
@@ -2920,6 +2928,9 @@ export function applySecondaryMoveEffects(
           stat: statId,
           change: res.delta,
         })
+      }
+      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (attackerId & 1) !== (targetId & 1)) {
+        dispatchOnStatLowered(state, targetId, attackerId, deps, unmodelled, statChanges)
       }
       continue
     }

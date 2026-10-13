@@ -123,9 +123,11 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
 import {
+  B_MSG_DEFENDER_STAT_FELL,
   B_MSG_STAT_WONT_DECREASE,
   battlerHasSimAbility,
   changeStatBuffs,
+  dispatchOnStatLowered,
   getHighestAttackingStatId,
   getHighestDefendingStatId,
   getHighestStatId,
@@ -865,6 +867,9 @@ function applyIntimidateClone(
       )
       if (!hasGuardDog && res.multistringChooser === B_MSG_STAT_WONT_DECREASE && stageBefore !== MIN_STAT_STAGE) {
         blocked = true
+      }
+      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+        dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled)
       }
     }
 

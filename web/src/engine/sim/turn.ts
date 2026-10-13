@@ -157,7 +157,9 @@ import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
+  B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffsImplicit,
+  dispatchOnStatLowered,
   isSimAbilitySuppressed,
   MOVE_EFFECT_ATK_MINUS_1,
   MOVE_EFFECT_DEF_MINUS_1,
@@ -788,7 +790,14 @@ export function handleProtectLikeMoveEnd(
     unmodelled,
     currentMoveId,
   )
-  return res.delta !== 0 ? { statChanges: [{ battlerId: attackerId, stat: statId, change: res.delta }], statusApplied: null } : none
+  const changes: StatChangeOutcome[] = []
+  if (res.delta !== 0) {
+    changes.push({ battlerId: attackerId, stat: statId, change: res.delta })
+  }
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (protectorId & 1) !== (attackerId & 1)) {
+    dispatchOnStatLowered(state, attackerId, protectorId, statusDeps, unmodelled, changes)
+  }
+  return changes.length > 0 ? { statChanges: changes, statusApplied: null } : none
 }
 
 /**

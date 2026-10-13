@@ -508,7 +508,9 @@ export function changeStatBuffs(
           if (!battler.round.disableEjectPack) {
             const hasEjectPackAbility = battlerHasSimAbility(state, battler, 'ABILITY_EJECT_PACK_ABILITY', false, attackerId, false, deps.dataContext)
             const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
-            const hasEjectPackItem = item?.resolvedHoldEffect === 'HOLD_EFFECT_EJECT_PACK'
+            const hasEjectPackItem =
+              item?.resolvedHoldEffect === 'HOLD_EFFECT_EJECT_PACK' &&
+              !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
             if (hasEjectPackAbility || hasEjectPackItem) {
               unmodelled.push("Eject Pack switch trigger (battle_script_commands.c:9877-9893) is not modelled")
             }
@@ -539,14 +541,9 @@ export function changeStatBuffs(
   battler.mon.statStages[statId] = newStage
 
   // :9937-9940 -- reactive triggers
-  if (statValue < 0 && !affectsUser) {
-    if (
-      battlerHasSimAbility(state, battler, 'ABILITY_DEFIANT', false, attackerId, false, deps.dataContext) ||
-      battlerHasSimAbility(state, battler, 'ABILITY_COMPETITIVE', false, attackerId, false, deps.dataContext)
-    ) {
-      unmodelled.push("Defiant / Competitive onStatLowered trigger (battle_script_commands.c:9938, abilities.cc:11764) is not modelled")
-    }
-  }
+  // Defiant/Competitive onStatLowered reactions fire in the string-printing code
+  // (battle_util.c:1222-1255) when STRINGID_DEFENDERSSTATFELL is printed with
+  // a cross-side changer, ported via dispatchOnStatLowered called at stat-drop sites.
   if (statValue > 0 && battler.round.statRaised) {
     const opposingSide = (battlerId & 1) ^ 1
     for (let id = 0; id < state.battlersCount; id++) {
@@ -683,4 +680,263 @@ export function reverseStatChangeMoveEffect(moveEffect: number): number {
 
     default: return moveEffect
   }
+}
+
+/**
+ * CanRaiseStat, src/battle_util.c:9364 -> CompareStat (:8545-8561), which flips under Contrary.
+ */
+export function canRaiseStat(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const contrary = battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battlerId, false, dataContext)
+  return contrary ? stage > MIN_STAT_STAGE : stage < MAX_STAT_STAGE
+}
+
+const UNNERVE_ABILITIES = [
+  'ABILITY_UNNERVE',
+  'ABILITY_AS_ONE_ICE_RIDER',
+  'ABILITY_AS_ONE_SHADOW_RIDER',
+  'ABILITY_CROWNED_KING',
+] as const
+
+/**
+ * IsUnnerveAbilityOnOpposingSide, src/battle_util.c:8387-8397. Both branches scan
+ * BATTLE_OPPOSITE(battlerId) for the `unnerve` flag (the four abilities above); the
+ * second only changes which battler must be alive. The opposite's partner is never scanned.
+ */
+export function isUnnerveAbilityOnOpposingSide(
+  state: BattleState,
+  battlerId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const opposite = battlerId ^ 1
+  const partner = opposite ^ 2
+  const gate = isAlive(state, opposite) || (partner < state.battlersCount && isAlive(state, partner))
+  const opp = state.battlers[opposite]
+  if (!gate || !opp) return false
+  return UNNERVE_ABILITIES.some((ability) => battlerHasSimAbility(state, opp, ability, false, battlerId, false, dataContext))
+}
+
+function getAbilitySlotsReverse(slots: BattlerState['mon']['abilities']): { abilityId: string; slotIndex: number }[] {
+  const result: { abilityId: string; slotIndex: number }[] = []
+  if (slots.innates[2]) result.push({ abilityId: slots.innates[2], slotIndex: 3 })
+  if (slots.innates[1]) result.push({ abilityId: slots.innates[1], slotIndex: 2 })
+  if (slots.innates[0]) result.push({ abilityId: slots.innates[0], slotIndex: 1 })
+  if (slots.ability) result.push({ abilityId: slots.ability, slotIndex: 0 })
+  return result
+}
+
+type AbilityOnStatLoweredHandler = (
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+  statChanges?: { battlerId: number; stat: number; change: number }[],
+) => boolean
+
+interface OnStatLoweredEntry {
+  applyOn: 'APPLY_ON_SELF' | 'APPLY_ON_ALLY'
+  handler: AbilityOnStatLoweredHandler
+}
+
+function raiseStatByHook(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  stages: number,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+  statChanges?: { battlerId: number; stat: number; change: number }[],
+): boolean {
+  if (!canRaiseStat(state, battlerId, statId, deps.dataContext)) {
+    return false
+  }
+  const res = changeStatBuffs(
+    state,
+    battlerId,
+    battlerId,
+    battlerId,
+    stages,
+    statId,
+    // BattleScript_StackBattlerStatUp (data/battle_scripts_1.s:9028-9037)
+    MOVE_EFFECT_AFFECTS_USER,
+    true,
+    deps,
+    unmodelled,
+  )
+  if (res.delta !== 0 && statChanges) {
+    statChanges.push({ battlerId, stat: statId, change: res.delta })
+  }
+  return true
+}
+
+const ON_STAT_LOWERED_HOOKS: Record<string, OnStatLoweredEntry> = {
+  // src/abilities.cc:11764-11769
+  ABILITY_DEFIANT: {
+    applyOn: 'APPLY_ON_SELF',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_ATK, 2, deps, unmodelled, statChanges)
+    },
+  },
+  // src/abilities.cc:11774-11779
+  ABILITY_COMPETITIVE: {
+    applyOn: 'APPLY_ON_SELF',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_SPATK, 2, deps, unmodelled, statChanges)
+    },
+  },
+  // src/abilities.cc:11784 (alias ABILITY_DEFIANT)
+  ABILITY_CONTEMPT: {
+    applyOn: 'APPLY_ON_SELF',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_ATK, 2, deps, unmodelled, statChanges)
+    },
+  },
+  // src/abilities.cc:11790-11795
+  ABILITY_RUN_AWAY: {
+    applyOn: 'APPLY_ON_SELF',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_SPEED, 2, deps, unmodelled, statChanges)
+    },
+  },
+  // src/abilities.cc:11800-11815
+  ABILITY_KINGS_WRATH: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      let any = false
+      if (raiseStatByHook(state, battlerId, STAT_DEF, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_ATK, 1, deps, unmodelled, statChanges)) any = true
+      return any
+    },
+  },
+  // src/abilities.cc:11819-11834
+  ABILITY_QUEENS_MOURNING: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      let any = false
+      if (raiseStatByHook(state, battlerId, STAT_SPDEF, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_SPATK, 1, deps, unmodelled, statChanges)) any = true
+      return any
+    },
+  },
+  // src/abilities.cc:11838-11863
+  ABILITY_EMPERORS_WRATH: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      let any = false
+      if (raiseStatByHook(state, battlerId, STAT_SPDEF, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_DEF, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_SPATK, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_ATK, 1, deps, unmodelled, statChanges)) any = true
+      return any
+    },
+  },
+  // src/abilities.cc:11868-11870 (alias ABILITY_DEFIANT, with onStatLoweredFor = APPLY_ON_ALLY)
+  ABILITY_LUCHA_LIBRE: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_ATK, 2, deps, unmodelled, statChanges)
+    },
+  },
+  // src/abilities.cc:11877-11878 (alias ABILITY_KINGS_WRATH, onStatLoweredFor = APPLY_ON_ALLY)
+  ABILITY_FIRE_RULER: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      let any = false
+      if (raiseStatByHook(state, battlerId, STAT_DEF, 1, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_ATK, 1, deps, unmodelled, statChanges)) any = true
+      return any
+    },
+  },
+  // src/abilities.cc:11884-11899
+  ABILITY_NARCISSIST: {
+    applyOn: 'APPLY_ON_ALLY',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      let any = false
+      if (raiseStatByHook(state, battlerId, STAT_SPATK, 2, deps, unmodelled, statChanges)) any = true
+      if (raiseStatByHook(state, battlerId, STAT_ATK, 2, deps, unmodelled, statChanges)) any = true
+      return any
+    },
+  },
+  // src/abilities.cc:12554 (alias ABILITY_COMPETITIVE)
+  ABILITY_DUALITY: {
+    applyOn: 'APPLY_ON_SELF',
+    handler: (state, battlerId, deps, unmodelled, statChanges) => {
+      return raiseStatByHook(state, battlerId, STAT_SPATK, 2, deps, unmodelled, statChanges)
+    },
+  },
+}
+
+/**
+ * Dispatcher for onStatLowered reactions (Defiant / Competitive family).
+ * Port of battle_util.c:1222-1255 (PrepareStringBattle on STRINGID_DEFENDERSSTATFELL):
+ * When a defender's stat is lowered by a cross-side battler, executes onStatLowered
+ * for gBattlerTarget (if alive) and then for its partner (if alive), each gated by
+ * IsApplyOnFlagAppropriate(gBattlerTarget, <battler>, onStatLoweredFor).
+ */
+export function dispatchOnStatLowered(
+  state: BattleState,
+  targetId: number,
+  attackerId: number,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+  statChanges?: { battlerId: number; stat: number; change: number }[],
+): boolean {
+  if (targetId >= state.battlersCount || attackerId >= state.battlersCount) {
+    return false
+  }
+
+  // Cross-side check: GetBattlerSide(changedStatsBattlerId) != GetBattlerSide(gBattlerTarget)
+  if ((targetId & 1) === (attackerId & 1)) {
+    return false
+  }
+
+  let anyTriggered = false
+
+  // In C order: gBattlerTarget, then BATTLE_PARTNER(gBattlerTarget)
+  const targets: { battlerId: number; isTarget: boolean }[] = []
+  if (isAlive(state, targetId)) {
+    targets.push({ battlerId: targetId, isTarget: true })
+  }
+  const partnerId = targetId ^ 2
+  if (partnerId < state.battlersCount && isAlive(state, partnerId)) {
+    targets.push({ battlerId: partnerId, isTarget: false })
+  }
+
+  for (const { battlerId, isTarget } of targets) {
+    const battler = state.battlers[battlerId]
+    if (!battler) continue
+
+    const slots = getAbilitySlotsReverse(battler.mon.abilities)
+    for (const { abilityId } of slots) {
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, attackerId, false, deps.dataContext)) {
+        continue
+      }
+
+      const hook = ON_STAT_LOWERED_HOOKS[abilityId]
+      if (!hook) continue
+
+      // IsApplyOnFlagAppropriate(gBattlerTarget, battler, hook.applyOn):
+      // When battler is targetId (contextBattler == sourceBattler):
+      //   APPLY_ON_SELF or APPLY_ON_ALLY both pass (neither has APPLY_IGNORE_SELF).
+      // When battler is partnerId (contextBattler != sourceBattler, same side):
+      //   Only APPLY_ON_ALLY passes.
+      if (!isTarget && hook.applyOn !== 'APPLY_ON_ALLY') {
+        continue
+      }
+
+      const triggered = hook.handler(state, battlerId, deps, unmodelled, statChanges)
+      if (triggered) {
+        anyTriggered = true
+      }
+    }
+  }
+
+  return anyTriggered
 }

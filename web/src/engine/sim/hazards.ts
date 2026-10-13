@@ -49,7 +49,14 @@ import {
 } from './constants'
 import { applyDamage } from './turn'
 import { isMagicGuardProtected } from './endTurn'
-import { attackerHasMoldBreakerActive, battlerHasSimAbility, changeStatBuffsImplicit, STAT_BUFF_ALLOW_PTR } from './statBuffs'
+import {
+  attackerHasMoldBreakerActive,
+  B_MSG_DEFENDER_STAT_FELL,
+  battlerHasSimAbility,
+  changeStatBuffsImplicit,
+  dispatchOnStatLowered,
+  STAT_BUFF_ALLOW_PTR,
+} from './statBuffs'
 import { canBePoisoned, MOVE_EFFECT_POISON, SET_STATE_ON_EFFECT_MAP } from './statusEffects'
 
 /** The type tables GetStealthHazardDamage's GetTypeModifier calls need. Optional
@@ -202,7 +209,10 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
       if (foe && (battlerHasSimAbility(state, foe, 'ABILITY_SUBDUE', false, opposite, false, deps.dataContext) || battlerHasSimAbility(state, foe, 'ABILITY_INFILTRATOR', false, opposite, false, deps.dataContext) || attackerHasMoldBreakerActive(foe, { grounding }))) {
         unmodelled.push(`battler ${battlerId}: Sticky Web's attacker (gBattleStruct->stickyWebUser) is not tracked; the opposing active battler was used, and it has an ability that changes ChangeStatBuffs`)
       }
-      changeStatBuffsImplicit(state, opposite, battlerId, -1, STAT_SPEED, STAT_BUFF_ALLOW_PTR, true, { dataContext: deps.dataContext, grounding }, unmodelled)
+      const res = changeStatBuffsImplicit(state, opposite, battlerId, -1, STAT_SPEED, STAT_BUFF_ALLOW_PTR, true, { dataContext: deps.dataContext, grounding }, unmodelled)
+      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (opposite & 1) !== (battlerId & 1)) {
+        dispatchOnStatLowered(state, battlerId, opposite, { dataContext: deps.dataContext, grounding }, unmodelled)
+      }
     }
   }
 

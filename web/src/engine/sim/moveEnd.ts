@@ -111,6 +111,7 @@ import {
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
 import {
+  B_MSG_DEFENDER_STAT_FELL,
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
   STAT_BUFF_ALLOW_PTR,
@@ -121,6 +122,7 @@ import {
   battlerHasSimAbility,
   changeStatBuffs,
   changeStatBuffsImplicit,
+  dispatchOnStatLowered,
   getHighestAttackingStatId,
   isSimAbilitySuppressed,
 } from './statBuffs'
@@ -1022,6 +1024,9 @@ function handleDefenderMoveEndAbility(
       if (dropRes.delta !== 0) {
         result.statChanges.push({ battlerId: attackerId, stat: STAT_SPEED, change: dropRes.delta })
       }
+      if (dropRes.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (targetId & 1) !== (attackerId & 1)) {
+        dispatchOnStatLowered(state, attackerId, targetId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled, result.statChanges)
+      }
     }
   }
 
@@ -1616,6 +1621,9 @@ function handleDefenderMoveEndAbility(
         )
         if (res.delta !== 0) {
           result.statChanges.push({ battlerId: foeId, stat: STAT_SPEED, change: res.delta })
+        }
+        if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (targetId & 1) !== (foeId & 1)) {
+          dispatchOnStatLowered(state, foeId, targetId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled, result.statChanges)
         }
       }
     }
