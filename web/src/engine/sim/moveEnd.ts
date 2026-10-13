@@ -55,10 +55,12 @@ import {
   STATUS2_CURSED,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
+  STATUS2_INFATUATION,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
   STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
+  STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
   STATUS3_ON_AIR,
   STATUS3_SMACKED_DOWN,
@@ -89,14 +91,18 @@ import {
   CHECK_FLINCH,
   CHECK_RESTRICTING,
   MOVE_EFFECT_BURN,
+  MOVE_EFFECT_CONFUSION,
   MOVE_EFFECT_FLINCH,
+  MOVE_EFFECT_FROSTBITE,
   MOVE_EFFECT_PARALYSIS,
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
   applyPrimaryStatusEffect,
   canBeBurned,
+  canBeConfused,
   canBeParalyzed,
   canBePoisoned,
+  canGetFrostbite,
   canInfatuate,
   canSleep,
   doesSubstituteBlockMove,
@@ -693,22 +699,64 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
+// and onAttacker hooks in pipeline/.upstream/eliteredux-source/src/abilities.cc & battle_script_commands.c:4828-4853
 // Matches:
 // - Static family: ABILITY_STATIC (:621), ABILITY_WHITE_NOISE (:8182)
 // - Flame Body family: ABILITY_FLAME_BODY (:1137), ABILITY_SMOLDERING_WOOD (:4363), ABILITY_SUPER_HOT_GOO (:6104)
 // - Poison Point family: ABILITY_POISON_POINT (:998), ABILITY_POISON_TOUCH (:2100), ABILITY_TOXIC_SHELL (:11535), ABILITY_VENOM_CROWN (:9519), ABILITY_BLIGHT_SCALE (:9526), ABILITY_POISON_QUILLS (:10147)
+// - Cycle 43 onAttacker batch:
+//   - Absorbant: ABILITY_ABSORBANT (:5397)
+//   - Aftershock: ABILITY_AFTERSHOCK (:6350)
+//   - Blade Dance: ABILITY_BLADE_DANCE (:9038)
+//   - Cute Charm family: ABILITY_CUTE_CHARM (:1207), ABILITY_TENDER_AFFECTION (:10009), ABILITY_PURE_LOVE (:6536)
+//   - Damp: ABILITY_DAMP (:564)
+//   - Elemental Charge: ABILITY_ELEMENTAL_CHARGE (:5494)
+//   - Envenom: ABILITY_ENVENOM (:10269)
+//   - Flaming Jaws family: ABILITY_FLAMING_JAWS (:6668), ABILITY_FLAMING_MAW (:7766)
+//   - Grip Pincer family: ABILITY_GRIP_PINCER (:4689), ABILITY_WORLD_SERPENT (:10250), ABILITY_SERPENT_BIND (:12007), ABILITY_TENTALOCK (:12080)
+//   - Growing Tooth: ABILITY_GROWING_TOOTH (:3847)
+//   - High Tide: ABILITY_HIGH_TIDE (:6472)
+//   - Illuminate: ABILITY_ILLUMINATE (:912)
+//   - Loud Bang: ABILITY_LOUD_BANG (:3898)
+//   - Purple Haze: ABILITY_PURPLE_HAZE (:10280)
+//   - Stench: ABILITY_STENCH (:484)
+//   - Volcano Rage: ABILITY_VOLCANO_RAGE (:4840)
+//   - Pickpocket: ABILITY_PICKPOCKET (battle_script_commands.c:4294, :4828-4853)
 export const PORTED_ATTACKER_ABILITIES = new Set([
-  'ABILITY_STATIC',
-  'ABILITY_WHITE_NOISE',
+  'ABILITY_ABSORBANT',
+  'ABILITY_AFTERSHOCK',
+  'ABILITY_BLADE_DANCE',
+  'ABILITY_BLIGHT_SCALE',
+  'ABILITY_CUTE_CHARM',
+  'ABILITY_DAMP',
+  'ABILITY_ELEMENTAL_CHARGE',
+  'ABILITY_ENVENOM',
   'ABILITY_FLAME_BODY',
-  'ABILITY_SMOLDERING_WOOD',
-  'ABILITY_SUPER_HOT_GOO',
+  'ABILITY_FLAMING_JAWS',
+  'ABILITY_FLAMING_MAW',
+  'ABILITY_GRIP_PINCER',
+  'ABILITY_GROWING_TOOTH',
+  'ABILITY_HIGH_TIDE',
+  'ABILITY_ILLUMINATE',
+  'ABILITY_LOUD_BANG',
+  'ABILITY_PICKPOCKET',
   'ABILITY_POISON_POINT',
+  'ABILITY_POISON_QUILLS',
   'ABILITY_POISON_TOUCH',
+  'ABILITY_PURE_LOVE',
+  'ABILITY_PURPLE_HAZE',
+  'ABILITY_SERPENT_BIND',
+  'ABILITY_SMOLDERING_WOOD',
+  'ABILITY_STATIC',
+  'ABILITY_STENCH',
+  'ABILITY_SUPER_HOT_GOO',
+  'ABILITY_TENDER_AFFECTION',
+  'ABILITY_TENTALOCK',
   'ABILITY_TOXIC_SHELL',
   'ABILITY_VENOM_CROWN',
-  'ABILITY_BLIGHT_SCALE',
-  'ABILITY_POISON_QUILLS',
+  'ABILITY_VOLCANO_RAGE',
+  'ABILITY_WHITE_NOISE',
+  'ABILITY_WORLD_SERPENT',
 ])
 
 /**
@@ -1719,14 +1767,22 @@ function handleAttackerMoveEndAbility(
   targetId: number,
   moveData: SimMoveData | undefined,
   moveId: string,
+  targetDamage: number,
+  hpDealt: number,
   attackerHoldEffect: string | null,
+  deps: TurnLoopDeps,
   statusDeps: StatusDeps,
   unmodelled: string[],
-): StatusAppliedOutcome | null {
-  const target = state.battlers[targetId]
+): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
+  const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
+    attackerDamage: 0,
+    statusApplied: null,
+    statChanges: [],
+  }
+
   const attacker = state.battlers[attackerId]
-  // ShouldApplyOnHitEffect(target), src/battle_util.c:4062: DidMoveHit() && IsBattlerAlive(target)
-  if (!target || target.mon.hp <= 0 || !attacker || attacker.mon.hp <= 0) return null
+  const target = state.battlers[targetId]
+  if (!attacker || attacker.mon.hp <= 0 || !target) return result
 
   // 1. Poison Point on attacker (src/abilities.cc:987-995, 2100, 9519, 9526, 10147, 11535)
   if (
@@ -1737,12 +1793,12 @@ function handleAttackerMoveEndAbility(
     abilityId === 'ABILITY_BLIGHT_SCALE' ||
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
-    if (canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+    if (target.mon.hp > 0 && targetDamage > 0 && canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
       if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
         if (state.rng.random16() % 100 < 30) {
           const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
           if (res.applied && res.status) {
-            return { battlerId: targetId, status: res.status }
+            result.statusApplied = { battlerId: targetId, status: res.status }
           }
         }
       }
@@ -1751,12 +1807,12 @@ function handleAttackerMoveEndAbility(
 
   // 2. Static on attacker (src/abilities.cc:610-618, 8182)
   if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
-    if (canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+    if (target.mon.hp > 0 && targetDamage > 0 && canBeParalyzed(state, attackerId, targetId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
         if (res.applied && res.status) {
-          return { battlerId: targetId, status: res.status }
+          result.statusApplied = { battlerId: targetId, status: res.status }
         }
       }
     }
@@ -1764,18 +1820,353 @@ function handleAttackerMoveEndAbility(
 
   // 3. Flame Body on attacker (src/abilities.cc:1126-1134, 4363, 6104)
   if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
-    if (canBeBurned(state, targetId, attackerId, statusDeps)) {
+    if (target.mon.hp > 0 && targetDamage > 0 && canBeBurned(state, targetId, attackerId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
         if (res.applied && res.status) {
-          return { battlerId: targetId, status: res.status }
+          result.statusApplied = { battlerId: targetId, status: res.status }
         }
       }
     }
   }
 
-  return null
+  // 4. Absorbant (src/abilities.cc:5397-5408)
+  if (abilityId === 'ABILITY_ABSORBANT') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      !target.mon.types.includes('GRASS') &&
+      !hasFlag(target.statuses3, STATUS3_LEECHSEED) &&
+      (moveData?.effect === 'EFFECT_ABSORB' || moveData?.effect === 'EFFECT_DREAM_EATER')
+    ) {
+      target.statuses3 |= attackerId | STATUS3_LEECHSEED
+    }
+  }
+
+  // 5. Aftershock (src/abilities.cc:6350-6357)
+  if (abilityId === 'ABILITY_AFTERSHOCK') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      attackerId !== targetId &&
+      Boolean(moveData && moveData.power > 0)
+    ) {
+      unmodelled.push("Aftershock's followup move (UseAttackerFollowUpMove MOVE_MAGNITUDE, abilities.cc:6355) is not modelled")
+    }
+  }
+
+  // 6. Blade Dance (src/abilities.cc:9038-9045)
+  if (abilityId === 'ABILITY_BLADE_DANCE') {
+    if (
+      isBattlerAlive(state, targetId) &&
+      Boolean(moveData?.flags?.dance)
+    ) {
+      unmodelled.push("Blade Dance's followup move (UseAttackerFollowUpMove MOVE_LEAF_BLADE, abilities.cc:9043) is not modelled")
+    }
+  }
+
+  // 7. Cute Charm family on attacker (src/abilities.cc:1207-1215, 6522-6536, 10009)
+  if (
+    abilityId === 'ABILITY_CUTE_CHARM' ||
+    abilityId === 'ABILITY_TENDER_AFFECTION' ||
+    abilityId === 'ABILITY_PURE_LOVE'
+  ) {
+    if (abilityId === 'ABILITY_PURE_LOVE') {
+      if (
+        targetDamage > 0 &&
+        attacker.mon.hp < attacker.mon.maxHp &&
+        canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+        hasFlag(target.mon.status2, STATUS2_INFATUATION)
+      ) {
+        const heal = Math.max(1, Math.floor(hpDealt / 4))
+        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+        syncPartyHp(state, attackerId)
+      }
+    }
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      canInfatuate(state, attackerId, targetId, statusDeps)
+    ) {
+      if (state.rng.random16() % 100 < 50) {
+        target.mon.status2 = setFlag(target.mon.status2, statusInfatuatedWith(attackerId))
+      }
+    }
+  }
+
+  // 8. Damp on attacker (src/abilities.cc:564-576)
+  if (abilityId === 'ABILITY_DAMP') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !target.mon.types.includes('WATER')
+    ) {
+      target.mon.types = ['WATER', 'WATER', 'MYSTERY']
+    }
+  }
+
+  // 9. Elemental Charge (src/abilities.cc:5495-5519)
+  if (abilityId === 'ABILITY_ELEMENTAL_CHARGE') {
+    if (target.mon.hp > 0 && targetDamage > 0) {
+      if (state.rng.random16() % 100 < 20) {
+        if (moveTypeMatches(moveData, 'ELECTRIC')) {
+          if (canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: targetId, status: res.status }
+            }
+          }
+        } else if (moveTypeMatches(moveData, 'FIRE')) {
+          if (canBeBurned(state, targetId, attackerId, statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: targetId, status: res.status }
+            }
+          }
+        } else if (moveTypeMatches(moveData, 'ICE')) {
+          if (canGetFrostbite(state, targetId, attackerId, statusDeps)) {
+            const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_FROSTBITE, moveId, statusDeps, unmodelled, false, false, true)
+            if (res.applied && res.status) {
+              result.statusApplied = { battlerId: targetId, status: res.status }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 10. Envenom (src/abilities.cc:10270-10276)
+  if (abilityId === 'ABILITY_ENVENOM') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)
+    ) {
+      if (state.rng.random16() % 100 < 30) {
+        const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 11. Flaming Jaws family (src/abilities.cc:6669-6676, 7766)
+  if (abilityId === 'ABILITY_FLAMING_JAWS' || abilityId === 'ABILITY_FLAMING_MAW') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.biteBased)
+    ) {
+      if (state.rng.random16() % 2 !== 0) {
+        const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 12. Grip Pincer family (src/abilities.cc:4690-4705, 10250, 12025-12041, 12082)
+  if (
+    abilityId === 'ABILITY_GRIP_PINCER' ||
+    abilityId === 'ABILITY_WORLD_SERPENT' ||
+    abilityId === 'ABILITY_SERPENT_BIND' ||
+    abilityId === 'ABILITY_TENTALOCK'
+  ) {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !hasFlag(target.mon.status2, STATUS2_WRAPPED)
+    ) {
+      if (state.rng.random16() % 2 !== 0) {
+        target.mon.status2 = setFlag(target.mon.status2, STATUS2_WRAPPED)
+        const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
+          battlerHasSimAbility(state, attacker, ab, false, attackerId, false, deps.dataContext),
+        )
+        const hasGripClaw = deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_GRIP_CLAW'
+        target.volatiles.wrapTurns =
+          hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
+        target.volatiles.wrapAbility = abilityId
+        const name =
+          abilityId === 'ABILITY_WORLD_SERPENT'
+            ? 'World Serpent'
+            : abilityId === 'ABILITY_TENTALOCK'
+              ? 'Tentalock'
+              : abilityId === 'ABILITY_SERPENT_BIND'
+                ? 'Serpent Bind'
+                : 'Grip Pincer'
+        unmodelled.push(`${name} set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled`)
+      }
+    }
+  }
+
+  // 13. Growing Tooth (src/abilities.cc:3848-3856)
+  if (abilityId === 'ABILITY_GROWING_TOOTH') {
+    if (
+      targetDamage > 0 &&
+      Boolean(moveData?.flags?.biteBased) &&
+      canRaiseStat(state, attackerId, STAT_ATK, deps.dataContext)
+    ) {
+      const atkRes = changeStatBuffs(
+        state,
+        attackerId,
+        attackerId,
+        attackerId,
+        1,
+        STAT_ATK,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (atkRes.delta !== 0) {
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_ATK, change: atkRes.delta })
+      }
+    }
+  }
+
+  // 14. High Tide (src/abilities.cc:6473-6478)
+  if (abilityId === 'ABILITY_HIGH_TIDE') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      attackerId !== targetId &&
+      moveTypeMatches(moveData, 'WATER')
+    ) {
+      unmodelled.push("High Tide's followup move (UseAttackerFollowUpMove MOVE_SURF, abilities.cc:6477) is not modelled")
+    }
+  }
+
+  // 15. Illuminate (src/abilities.cc:913-942)
+  if (abilityId === 'ABILITY_ILLUMINATE') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      target.mon.types.includes('GHOST')
+    ) {
+      let type1 = target.mon.types[0] ?? 'MYSTERY'
+      let type2 = target.mon.types[1] ?? type1
+      let type3 = target.mon.types[2] ?? 'MYSTERY'
+
+      if (type1 === 'GHOST') {
+        if (type1 === type2) {
+          if (type3 === 'GHOST') {
+            type1 = 'MYSTERY'
+            type2 = 'MYSTERY'
+            type3 = 'MYSTERY'
+          } else {
+            type1 = type3
+            type2 = type3
+            type3 = 'MYSTERY'
+          }
+        } else {
+          type1 = type2
+        }
+      } else if (type2 === 'GHOST') {
+        type2 = type1
+      }
+
+      if (type3 === 'GHOST') {
+        type3 = 'MYSTERY'
+      }
+
+      target.mon.types = [type1, type2, type3]
+    }
+  }
+
+  // 16. Loud Bang (src/abilities.cc:3899-3906)
+  if (abilityId === 'ABILITY_LOUD_BANG') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      canBeConfused(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.sound)
+    ) {
+      if (state.rng.random16() % 2 !== 0) {
+        const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_CONFUSION, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 17. Purple Haze (src/abilities.cc:10281-10285)
+  if (abilityId === 'ABILITY_PURPLE_HAZE') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      attackerId !== targetId
+    ) {
+      unmodelled.push("Purple Haze's followup move (UseAttackerFollowUpMove MOVE_POISON_GAS, abilities.cc:10284) is not modelled")
+    }
+  }
+
+  // 18. Stench (src/abilities.cc:485-491)
+  if (abilityId === 'ABILITY_STENCH') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      isKingsRockAffected(moveData, deps)
+    ) {
+      if (state.rng.random16() % 100 < 10) {
+        // AbilityStatusEffectDirect (abilities.cc:270-275) sets HITMARKER_IGNORE_SAFEGUARD, so SetMoveEffect's
+        // Shield Dust / Covert Cloak check (battle_script_commands.c:2350) is skipped.
+        if (!testSheerForceFlag(state, attackerId, moveId, statusDeps)) {
+          if (!doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) {
+            if (!isAbilityStatusProtected(state, targetId, CHECK_FLINCH, attackerId, statusDeps)) {
+              target.mon.status2 = setFlag(target.mon.status2, STATUS2_FLINCHED)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 19. Volcano Rage (src/abilities.cc:4841-4846)
+  if (abilityId === 'ABILITY_VOLCANO_RAGE') {
+    if (
+      target.mon.hp > 0 &&
+      targetDamage > 0 &&
+      attackerId !== targetId &&
+      moveTypeMatches(moveData, 'FIRE')
+    ) {
+      unmodelled.push("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845) is not modelled")
+    }
+  }
+
+  // 20. Pickpocket (src/battle_script_commands.c:4290-4305, 4828-4853)
+  if (abilityId === 'ABILITY_PICKPOCKET') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.itemId === null &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      target.mon.itemId !== null &&
+      canBattlerGetOrLoseItem(target, target.mon.itemId, deps) &&
+      canBattlerGetOrLoseItem(attacker, target.mon.itemId, deps)
+    ) {
+      const attackerHasMoldBreaker = attackerHasMoldBreakerActive(attacker, deps)
+      const hasStickyHold =
+        battlerHasSimAbility(state, target, 'ABILITY_STICKY_HOLD', true, attackerId, attackerHasMoldBreaker, deps.dataContext) ||
+        battlerHasSimAbility(state, target, 'ABILITY_SUPERSWEET_SYRUP', true, attackerId, attackerHasMoldBreaker, deps.dataContext)
+      if (
+        !hasStickyHold &&
+        !testSheerForceFlag(state, attackerId, moveId, statusDeps) &&
+        !doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)
+      ) {
+        unmodelled.push("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848) is not modelled")
+      }
+    }
+  }
+
+  return result
 }
 
 /**
@@ -1845,7 +2236,8 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
  * Iterates attacker's ability slots in reverse order (slot 3 -> 2 -> 1 -> 0).
  */
 export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): MoveEndAbilitiesResult {
-  const { state, attackerId, targetId, moveId, moveData, deps, unmodelled } = ctx
+  const { state, attackerId, targetId, moveId, moveData, targetDamage, deps, unmodelled } = ctx
+  const hpDealt = ctx.hpDealt ?? targetDamage
   const attacker = state.battlers[attackerId]
   const result: MoveEndAbilitiesResult = {
     attackerDamage: 0,
@@ -1863,19 +2255,28 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
       continue
     }
     if (PORTED_ATTACKER_ABILITIES.has(abilityId)) {
-      const applied = handleAttackerMoveEndAbility(
+      const abRes = handleAttackerMoveEndAbility(
         state,
         abilityId,
         attackerId,
         targetId,
         moveData,
         moveId,
+        targetDamage,
+        hpDealt,
         attackerHoldEffect,
+        deps,
         statusDeps,
         unmodelled,
       )
-      if (applied && !result.statusApplied) {
-        result.statusApplied = applied
+      if (abRes.attackerDamage > 0) {
+        result.attackerDamage += abRes.attackerDamage
+      }
+      if (abRes.statChanges.length > 0) {
+        result.statChanges.push(...abRes.statChanges)
+      }
+      if (abRes.statusApplied && !result.statusApplied) {
+        result.statusApplied = abRes.statusApplied
       }
     } else if (ON_ATTACKER_ABILITIES.has(abilityId)) {
       const msg = `move-end attacker ability ${abilityId} is not modelled yet`
@@ -2478,7 +2879,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 4: MOVEEND_DANCER (:4854-4879)
-  if (moveData?.flags?.danceBased) {
+  if (moveData?.flags?.dance) {
     for (const b of state.battlers) {
       if (b && b.id !== attackerId && b.mon.hp > 0 && battlerHasAbility(b.mon.abilities, 'ABILITY_DANCER', () => false)) {
         unmodelled.push('move-end Dancer is not modelled yet')
@@ -2516,8 +2917,8 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 6: MOVEEND_ABILITIES_ATTACKER (:4532-4536)
-  // Attacker contact/move-end abilities (Static, Flame Body, Poison Point/Touch)
-  if (attacker && attacker.mon.hp > 0 && targetDamage > 0) {
+  // Attacker contact/move-end abilities
+  if (attacker && attacker.mon.hp > 0) {
     const atkAbResult = dispatchMoveEndAttackerAbilities({
       state,
       attackerId,
@@ -2525,10 +2926,19 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       moveId,
       moveData,
       targetDamage,
+      hpDealt,
+      isCriticalHit: ctx.isCriticalHit ?? false,
       deps,
       unmodelled,
       fainted,
     })
+    if (atkAbResult.attackerDamage > 0) {
+      totalAttackerDamage += atkAbResult.attackerDamage
+      hadAttackerDamage = true
+    }
+    if (atkAbResult.statChanges.length > 0) {
+      statChanges.push(...atkAbResult.statChanges)
+    }
     if (atkAbResult.statusApplied && !statusApplied) {
       statusApplied = atkAbResult.statusApplied
     }

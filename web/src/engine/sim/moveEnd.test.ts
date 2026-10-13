@@ -35,10 +35,13 @@ import {
   STATUS1_PARALYSIS,
   STATUS1_POISON,
   STATUS1_SLEEP,
+  STATUS2_CONFUSION,
   STATUS2_SUBSTITUTE,
+  STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
   STATUS3_GASTRO_ACID,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
@@ -285,6 +288,18 @@ const ABILITY_SAND_SPIT = requireAbility('ABILITY_SAND_SPIT')
 const ABILITY_INFLATABLE = requireAbility('ABILITY_INFLATABLE')
 const ABILITY_GUILT_TRIP = requireAbility('ABILITY_GUILT_TRIP')
 const ABILITY_STEAM_ENGINE = requireAbility('ABILITY_STEAM_ENGINE')
+const MOVE_MEGA_DRAIN = requireMove('MOVE_MEGA_DRAIN')
+const MOVE_HYPER_VOICE = requireMove('MOVE_HYPER_VOICE')
+const ABILITY_GROWING_TOOTH = requireAbility('ABILITY_GROWING_TOOTH')
+const ABILITY_ENVENOM = requireAbility('ABILITY_ENVENOM')
+const ABILITY_STENCH = requireAbility('ABILITY_STENCH')
+const ABILITY_DAMP = requireAbility('ABILITY_DAMP')
+const ABILITY_PURE_LOVE = requireAbility('ABILITY_PURE_LOVE')
+const ABILITY_ILLUMINATE = requireAbility('ABILITY_ILLUMINATE')
+const ABILITY_LOUD_BANG = requireAbility('ABILITY_LOUD_BANG')
+const ABILITY_GRIP_PINCER = requireAbility('ABILITY_GRIP_PINCER')
+const ABILITY_VOLCANO_RAGE = requireAbility('ABILITY_VOLCANO_RAGE')
+const ABILITY_PICKPOCKET = requireAbility('ABILITY_PICKPOCKET')
 
 // ---------------------------------------------------------------------------
 // Unit Tests
@@ -738,15 +753,15 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps attacker contact ability (ABILITY_ABSORBANT) on damaging hit', () => {
+  it('conditionally gaps an unported attacker ability (ABILITY_CHAINSAW) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_ABSORBANT, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_CHAINSAW'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ABSORBANT is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_CHAINSAW is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -897,19 +912,42 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 11 contact abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 34 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
+      'ABILITY_ABSORBANT',
+      'ABILITY_AFTERSHOCK',
+      'ABILITY_BLADE_DANCE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_CUTE_CHARM',
+      'ABILITY_DAMP',
+      'ABILITY_ELEMENTAL_CHARGE',
+      'ABILITY_ENVENOM',
       'ABILITY_FLAME_BODY',
+      'ABILITY_FLAMING_JAWS',
+      'ABILITY_FLAMING_MAW',
+      'ABILITY_GRIP_PINCER',
+      'ABILITY_GROWING_TOOTH',
+      'ABILITY_HIGH_TIDE',
+      'ABILITY_ILLUMINATE',
+      'ABILITY_LOUD_BANG',
+      'ABILITY_PICKPOCKET',
       'ABILITY_POISON_POINT',
       'ABILITY_POISON_QUILLS',
       'ABILITY_POISON_TOUCH',
+      'ABILITY_PURE_LOVE',
+      'ABILITY_PURPLE_HAZE',
+      'ABILITY_SERPENT_BIND',
       'ABILITY_SMOLDERING_WOOD',
       'ABILITY_STATIC',
+      'ABILITY_STENCH',
       'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TENDER_AFFECTION',
+      'ABILITY_TENTALOCK',
       'ABILITY_TOXIC_SHELL',
       'ABILITY_VENOM_CROWN',
+      'ABILITY_VOLCANO_RAGE',
       'ABILITY_WHITE_NOISE',
+      'ABILITY_WORLD_SERPENT',
     ])
   })
 })
@@ -2566,5 +2604,303 @@ describe('MOVEEND_ABILITIES (Cycle 42 onDefender batch)', () => {
     expect(state.battlers[0]!.mon.pp[0]).toBe(0)
   })
 })
+
+describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
+  it('Growing Tooth raises Attack by 1 when using a bite move', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GROWING_TOOTH, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_BITE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 1 }])
+  })
+
+  it('Growing Tooth does NOT raise Attack when using a non-bite move (Tackle)', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GROWING_TOOTH, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toBeNull()
+  })
+
+  it('Growing Tooth raises Attack by 1 when equipped in an innate slot', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: null, innates: [ABILITY_GROWING_TOOTH, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_BITE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 1 }])
+  })
+
+  it('Envenom poisons defender on hit when roll < 30, and misses when roll >= 30', () => {
+    // Roll < 30: roll 0 for accuracy, roll 20 for Envenom (< 30) -> poisoned
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ENVENOM, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 20]),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.status1).toBe(STATUS1_POISON)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statusApplied).toEqual({ battlerId: 1, status: 'POISON' })
+
+    // Roll >= 30: roll 0 for accuracy, roll 50 for Envenom (>= 30) -> no status
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ENVENOM, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 50]),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state2.battlers[1]!.mon.status1).toBe(STATUS1_NONE)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statusApplied).toBeNull()
+  })
+
+  it('Stench flinches the slower target on a roll below 10, and not on a roll of 10', () => {
+    // STATUS2_FLINCHED is cleared at end of turn, so read it through the target's cancelled action.
+    const stench = { hp: 100, maxHp: 100, abilities: { ability: ABILITY_STENCH, innates: [null, null, null] as [null, null, null] } }
+    const rng1 = scriptedRng([0, 9]) // attacker accuracy, Stench roll
+    const state1 = battle([stench, { hp: 100, maxHp: 100 }], rng1)
+    const out1 = executeTurn(state1, [useMove(1, MOVE_TACKLE), useMove(0, MOVE_TACKLE)], testDepsWithDamage(fixedDamage(20)))
+    expect(actionOf(out1, 1).cancelledBy).toBe('FLINCH')
+    expect(state1.battlers[0]!.mon.hp).toBe(100)
+
+    const rng2 = scriptedRng([0, 10])
+    const state2 = battle([stench, { hp: 100, maxHp: 100 }], rng2)
+    const out2 = executeTurn(state2, [useMove(1, MOVE_TACKLE), useMove(0, MOVE_TACKLE)], testDepsWithDamage(fixedDamage(20)))
+    expect(actionOf(out2, 1).cancelledBy).toBeNull()
+    expect(state2.battlers[0]!.mon.hp).toBe(80)
+  })
+
+  it('Absorbant inflicts Leech Seed on defender on drain move (Mega Drain), and does not affect Grass types', () => {
+    // Mega Drain into non-Grass target
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ABSORBANT, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state1, [useMove(1, MOVE_MEGA_DRAIN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state1.battlers[1]!.statuses3, STATUS3_LEECHSEED)).toBe(true)
+    expect(state1.battlers[1]!.statuses3 & 0x3).toBe(0) // seeded by battler 0
+
+    // Mega Drain into Grass target -> Leech Seed immune
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ABSORBANT, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['GRASS', 'MYSTERY', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state2, [useMove(1, MOVE_MEGA_DRAIN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state2.battlers[1]!.statuses3, STATUS3_LEECHSEED)).toBe(false)
+  })
+
+  it('Damp changes defender type to Water on contact hit, but does not trigger on non-contact move', () => {
+    // Contact hit (Tackle)
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_DAMP, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.types).toEqual(['WATER', 'WATER', 'MYSTERY'])
+
+    // Non-contact hit (Water Gun)
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_DAMP, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state2, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state2.battlers[1]!.mon.types).toEqual(['NORMAL', 'MYSTERY', 'MYSTERY'])
+  })
+
+  it('Cute Charm on attacker infatuates defender on contact hit when roll < 50, and misses on roll >= 50 or non-contact move', () => {
+    // Roll < 50: roll 0 for accuracy, roll 20 for Cute Charm (< 50) -> infatuation
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_CUTE_CHARM, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 20]),
+    )
+    executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state1.battlers[1]!.mon.status2, statusInfatuatedWith(0))).toBe(true)
+
+    // Roll >= 50: roll 0 for accuracy, roll 60 for Cute Charm (>= 50) -> no infatuation
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_CUTE_CHARM, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 60]),
+    )
+    executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state2.battlers[1]!.mon.status2, statusInfatuatedWith(0))).toBe(false)
+
+    // Non-contact hit (Water Gun): no infatuation regardless of roll
+    const state3 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_CUTE_CHARM, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 20]),
+    )
+    executeTurn(state3, [useMove(1, MOVE_WATER_GUN), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state3.battlers[1]!.mon.status2, statusInfatuatedWith(0))).toBe(false)
+  })
+
+  it('Pure Love heals attacker floor(hpDealt / 4) when target is already infatuated', () => {
+    const state = battle(
+      [
+        { hp: 60, maxHp: 100, abilities: { ability: ABILITY_PURE_LOVE, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng(),
+    )
+    state.battlers[1]!.mon.status2 = statusInfatuatedWith(0)
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(40)))
+
+    // 60 + floor(40 / 4) = 70 HP
+    expect(state.battlers[0]!.mon.hp).toBe(70)
+  })
+
+  it('Illuminate removes Ghost type from defender on a damaging hit', () => {
+    // Defender has Ghost/Poison types
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ILLUMINATE, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['GHOST', 'POISON', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state1, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state1.battlers[1]!.mon.types).toEqual(['POISON', 'POISON', 'MYSTERY'])
+
+    // Defender has no Ghost type -> types unchanged
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_ILLUMINATE, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+      ],
+      scriptedRng(),
+    )
+    executeTurn(state2, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state2.battlers[1]!.mon.types).toEqual(['WATER', 'MYSTERY', 'MYSTERY'])
+  })
+
+  it('Loud Bang confounds target with 50% chance on a sound-based move (Hyper Voice)', () => {
+    // 50% roll succeeds: roll 0 for accuracy, roll 1 for Loud Bang (1 % 2 !== 0) -> confused
+    const state1 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_LOUD_BANG, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 1]),
+    )
+    const out1 = executeTurn(state1, [useMove(1, MOVE_HYPER_VOICE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state1.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(true)
+    const act1 = out1.actions.find((a) => a.battlerId === 0)!
+    expect(act1.statusApplied).toEqual({ battlerId: 1, status: 'CONFUSION' })
+
+    // 50% roll fails: roll 0 for accuracy, roll 2 for Loud Bang (2 % 2 !== 0 is false) -> no confusion
+    const state2 = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_LOUD_BANG, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 2]),
+    )
+    const out2 = executeTurn(state2, [useMove(1, MOVE_HYPER_VOICE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state2.battlers[1]!.mon.status2, STATUS2_CONFUSION)).toBe(false)
+    const act2 = out2.actions.find((a) => a.battlerId === 0)!
+    expect(act2.statusApplied).toBeNull()
+  })
+
+  it('Grip Pincer wraps target on contact hit and logs unmodelled wrap message', () => {
+    // roll 0 for accuracy, roll 1 for Grip Pincer (< 50% chance), roll 0 for wrap turns
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_GRIP_PINCER, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng([0, 1, 0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
+    expect(state.battlers[1]!.volatiles.wrapTurns).toBe(4)
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain('Grip Pincer set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+  })
+
+  it('Pickpocket logs unmodelled item theft when attacker has no item and defender has item', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, itemId: null, abilities: { ability: ABILITY_PICKPOCKET, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848) is not modelled")
+  })
+
+  it('Volcano Rage logs unmodelled followup move on Fire move', () => {
+    const state = battle(
+      [
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_VOLCANO_RAGE, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100 },
+      ],
+      scriptedRng(),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845) is not modelled")
+  })
+})
+
 
 
