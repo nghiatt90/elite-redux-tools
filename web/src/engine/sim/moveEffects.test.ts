@@ -49,13 +49,23 @@ import {
   STATUS2_CURSED,
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
+  STATUS2_ESCAPE_PREVENTION,
   STATUS2_INFATUATION,
-
+  STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LASER_FOCUS,
+  STATUS3_MAGNET_RISE,
+  STATUS3_MINIMIZED,
+  STATUS3_MIRACLE_EYED,
+  STATUS3_PERISH_SONG,
+  STATUS3_ROOTED,
   STATUS4_CUTTHROAT,
+  STATUS4_FORESIGHT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
   STATUS_FIELD_GRASSY_TERRAIN,
@@ -71,6 +81,7 @@ import {
   hasFlag,
   statusInfatuatedWith,
 } from './constants'
+import { canBattlerEscape } from './escape'
 import {
   B_MSG_DEFENDER_STAT_FELL,
   B_MSG_STAT_WONT_DECREASE,
@@ -176,6 +187,19 @@ const MOVE_GRAVITY = requireMove('MOVE_GRAVITY')
 const MOVE_FLY = requireMove('MOVE_FLY')
 const MOVE_CLEAR_SKIES = requireMove('MOVE_CLEAR_SKIES')
 const MOVE_DEFOG = requireMove('MOVE_DEFOG')
+const MOVE_SUBSTITUTE = requireMove('MOVE_SUBSTITUTE')
+const MOVE_AQUA_RING = requireMove('MOVE_AQUA_RING')
+const MOVE_INGRAIN = requireMove('MOVE_INGRAIN')
+const MOVE_MAGNET_RISE = requireMove('MOVE_MAGNET_RISE')
+const MOVE_CHARGE = requireMove('MOVE_CHARGE')
+const MOVE_LOCK_ON = requireMove('MOVE_LOCK_ON')
+const MOVE_LASER_FOCUS = requireMove('MOVE_LASER_FOCUS')
+const MOVE_ZAP_CANNON = requireMove('MOVE_ZAP_CANNON')
+const MOVE_MEAN_LOOK = requireMove('MOVE_MEAN_LOOK')
+const MOVE_FORESIGHT = requireMove('MOVE_FORESIGHT')
+const MOVE_MIRACLE_EYE = requireMove('MOVE_MIRACLE_EYE')
+const MOVE_PERISH_SONG = requireMove('MOVE_PERISH_SONG')
+const MOVE_MINIMIZE = requireMove('MOVE_MINIMIZE')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -196,6 +220,7 @@ const ABILITY_JUNGLES_GUARD = requireAbility('ABILITY_JUNGLES_GUARD')
 const ABILITY_WIND_RIDER = requireAbility('ABILITY_WIND_RIDER')
 const ABILITY_WIND_POWER = requireAbility('ABILITY_WIND_POWER')
 const ABILITY_PROTOSYNTHESIS = requireAbility('ABILITY_PROTOSYNTHESIS')
+const ABILITY_SOUNDPROOF = requireAbility('ABILITY_SOUNDPROOF')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -3188,6 +3213,501 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           const act2 = out2.actions.find((a) => a.battlerId === 0)!
           expect(act2.missed).toBe(true)
           expect(state.battlers[0]!.mon.pp[0]).toBe(3)
+        })
+      })
+
+      describe('EFFECT_SUBSTITUTE', () => {
+        it('Substitute costs 1/4 max HP and fails at or below that HP; a second Substitute fails', () => {
+          // BattleScript_EffectSubstitute (data/battle_scripts_1.s:4506-4530)
+          // Cmd_setsubstitute (src/battle_script_commands.c:10535-10550)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { hp: 100, maxHp: 100, moves: ['MOVE_SUBSTITUTE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // 1. Success: costs 1/4 max HP (25), sets STATUS2_SUBSTITUTE and substituteHp = 25
+          const out1 = executeTurn(state, [useMove(1, MOVE_SUBSTITUTE), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(act1.attackerDamage).toBe(25)
+          expect(state.battlers[0]!.mon.hp).toBe(75)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(true)
+          expect(state.battlers[0]!.volatiles.substituteHp).toBe(25)
+
+          // 2. Already has substitute: second use fails, PP is deducted, HP is not deducted
+          const out2 = executeTurn(state, [useMove(1, MOVE_SUBSTITUTE), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(75)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(8)
+          expect(state.battlers[0]!.volatiles.substituteHp).toBe(25)
+
+          // 3. Fails at or below 1/4 max HP (<= 25 HP)
+          const stateLow = battle(
+            [
+              { hp: 25, maxHp: 100, moves: ['MOVE_SUBSTITUTE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            countingRng(),
+          )
+          const outLow = executeTurn(stateLow, [useMove(1, MOVE_SUBSTITUTE), null], deps)
+          const actLow = outLow.actions.find((a) => a.battlerId === 0)!
+          expect(actLow.missed).toBe(true)
+          expect(stateLow.battlers[0]!.mon.hp).toBe(25)
+          expect(stateLow.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(stateLow.battlers[0]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(false)
+          expect(stateLow.battlers[0]!.volatiles.substituteHp).toBe(0)
+
+          // 4. Succeeds at 26 HP (> 25 HP)
+          const stateCanAfford = battle(
+            [
+              { hp: 26, maxHp: 100, moves: ['MOVE_SUBSTITUTE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            countingRng(),
+          )
+          const outCanAfford = executeTurn(stateCanAfford, [useMove(1, MOVE_SUBSTITUTE), null], deps)
+          const actCanAfford = outCanAfford.actions.find((a) => a.battlerId === 0)!
+          expect(actCanAfford.missed).toBe(false)
+          expect(stateCanAfford.battlers[0]!.mon.hp).toBe(1)
+          expect(hasFlag(stateCanAfford.battlers[0]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(true)
+          expect(stateCanAfford.battlers[0]!.volatiles.substituteHp).toBe(25)
+        })
+      })
+
+      describe('EFFECT_AQUA_RING', () => {
+        it('Aqua Ring sets STATUS3_AQUA_RING, heals 1/16 max HP at end of turn, and second use fails', () => {
+          // BattleScript_EffectAquaRing (data/battle_scripts_1.s:2670-2679)
+          // ENDTURN_AQUA_RING (battle_util.c:2435-2443)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { hp: 50, maxHp: 100, moves: ['MOVE_AQUA_RING', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Aqua Ring. End-turn heals 1/16 max HP (100 / 16 = 6 HP) -> 56 HP
+          const out1 = executeTurn(state, [useMove(1, MOVE_AQUA_RING), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_AQUA_RING)).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(56)
+
+          // Turn 2: Second use fails, still heals at end of turn (56 + 6 = 62 HP)
+          const out2 = executeTurn(state, [useMove(1, MOVE_AQUA_RING), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(18)
+          expect(state.battlers[0]!.mon.hp).toBe(62)
+        })
+      })
+
+      describe('EFFECT_INGRAIN', () => {
+        it('Ingrain sets STATUS3_ROOTED, heals 1/8 max HP at end of turn, and second use fails', () => {
+          // BattleScript_EffectIngrain (data/battle_scripts_1.s:6326-6336)
+          // ENDTURN_INGRAIN (battle_util.c:2426-2434)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { hp: 50, maxHp: 100, moves: ['MOVE_INGRAIN', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Ingrain. End-turn heals 1/8 max HP (100 / 8 = 12 HP) -> 62 HP
+          const out1 = executeTurn(state, [useMove(1, MOVE_INGRAIN), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_ROOTED)).toBe(true)
+          expect(state.battlers[0]!.mon.hp).toBe(62)
+
+          // Turn 2: Second use fails, still heals at end of turn (62 + 12 = 74 HP)
+          const out2 = executeTurn(state, [useMove(1, MOVE_INGRAIN), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(18)
+          expect(state.battlers[0]!.mon.hp).toBe(74)
+        })
+      })
+
+      describe('EFFECT_MAGNET_RISE', () => {
+        it('Magnet Rise sets STATUS3_MAGNET_RISE, sets timer to 5, and wears off after duration', () => {
+          // BattleScript_EffectMagnetRise (data/battle_scripts_1.s:2627-2636)
+          // ENDTURN_MAGNET_RISE (battle_util.c:2875-2884)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MAGNET_RISE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Magnet Rise (timer 5 -> decrements to 4 at end of turn)
+          const out1 = executeTurn(state, [useMove(1, MOVE_MAGNET_RISE), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(true)
+          expect(state.battlers[0]!.volatiles.magnetRiseTimer).toBe(4)
+
+          // Turn 2: timer 4 -> 3
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.magnetRiseTimer).toBe(3)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(true)
+
+          // Turn 3: timer 3 -> 2
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.magnetRiseTimer).toBe(2)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(true)
+
+          // Turn 4: timer 2 -> 1
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.magnetRiseTimer).toBe(1)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(true)
+
+          // Turn 5: timer 1 -> 0, STATUS3_MAGNET_RISE clears!
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.magnetRiseTimer).toBe(0)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MAGNET_RISE)).toBe(false)
+        })
+      })
+
+      describe('EFFECT_CHARGE', () => {
+        it('Charge sets STATUS3_CHARGED_UP and raises SpDef by 1 stage', () => {
+          // BattleScript_EffectCharge (data/battle_scripts_1.s:6222-6240)
+          // Cmd_setcharge (src/battle_script_commands.c:11620-11623)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_CHARGE', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_CHARGE), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_CHARGED_UP)).toBe(true)
+          expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
+        })
+      })
+
+      describe('EFFECT_LOCK_ON', () => {
+        it('Lock-On makes the next move skip the accuracy draw and lands 50% accurate Zap Cannon', () => {
+          // BattleScript_EffectLockOn (data/battle_scripts_1.s:4739-4751)
+          // Cmd_setalwayshitflag (src/battle_script_commands.c:10827-10832)
+          // ENDTURN_LOCK_ON (battle_util.c:2809-2812)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_LOCK_ON', 'MOVE_ZAP_CANNON', null, null], pp: [5, 5, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Lock-On on target.
+          const out1 = executeTurn(state, [useMove(1, MOVE_LOCK_ON), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          // End of turn 1: counter decremented by 1 turn, still non-zero
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_ALWAYS_HITS)).toBe(true)
+          expect(state.battlers[1]!.volatiles.battlerWithSureHit).toBe(0)
+
+          // Turn 2: Zap Cannon (50% accuracy) under an rng that always rolls 99 -- a miss if the
+          // accuracy roll were drawn. Lock-On makes it a sure hit (STATUS3_ALWAYS_HITS).
+          state.rng = { random16: () => 99 }
+          const out2 = executeTurn(state, [useMove(1, MOVE_ZAP_CANNON), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[1]).toBe(4)
+          // At end of turn 2, Lock-On expires
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_ALWAYS_HITS)).toBe(false)
+        })
+
+        it('Lock-On fails when target is behind Substitute', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_LOCK_ON', null, null, null], pp: [5, 0, 0, 0] },
+              { status2: STATUS2_SUBSTITUTE, spe: 50 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_LOCK_ON), null], deps)
+          const act = out.actions.find((a) => a.battlerId === 0)!
+          expect(act.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_ALWAYS_HITS)).toBe(false)
+        })
+      })
+
+      describe('EFFECT_LASER_FOCUS', () => {
+        it('Laser Focus sets STATUS3_LASER_FOCUS and wears off after 2 turns', () => {
+          // BattleScript_EffectLaserFocus (data/battle_scripts_1.s:1037-1047)
+          // ENDTURN_LASER_FOCUS (battle_util.c:2855-2861)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_LASER_FOCUS', null, null, null], pp: [30, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Uses Laser Focus (timer 2 -> decrements to 1 at end of turn)
+          const out1 = executeTurn(state, [useMove(1, MOVE_LASER_FOCUS), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_LASER_FOCUS)).toBe(true)
+          expect(state.battlers[0]!.volatiles.laserFocusTimer).toBe(1)
+
+          // Turn 2: Still active during turn. At end of turn decrements to 0, wears off!
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.laserFocusTimer).toBe(0)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_LASER_FOCUS)).toBe(false)
+        })
+      })
+
+      describe('EFFECT_MEAN_LOOK', () => {
+        it('Mean Look sets STATUS2_ESCAPE_PREVENTION, prevents target escape, fails on second use, fails on Ghost, and fails on substitute', () => {
+          // BattleScript_EffectMeanLook (data/battle_scripts_1.s:4890-4907)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MEAN_LOOK', 'MOVE_SUBSTITUTE', null, null], pp: [5, 10, 0, 0] },
+              { moves: ['MOVE_MEAN_LOOK', null, null, null], pp: [5, 0, 0, 0], spe: 50 },
+            ],
+            rng,
+          )
+
+          expect(canBattlerEscape(state, 1, deps)).toBe(true)
+
+          // Battler 0 uses Mean Look on Battler 1
+          const out1 = executeTurn(state, [useMove(1, MOVE_MEAN_LOOK), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(true)
+          expect(state.battlers[1]!.volatiles.battlerPreventingEscape).toBe(0)
+          expect(canBattlerEscape(state, 1, deps)).toBe(false)
+
+          // Second use fails (jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION)
+          const out2 = executeTurn(state, [useMove(1, MOVE_MEAN_LOOK), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(3)
+
+          // Mean Look fails on Ghost type (jumpiftype BS_TARGET, TYPE_GHOST)
+          const ghostState = battle(
+            [
+              { moves: ['MOVE_MEAN_LOOK', null, null, null], pp: [5, 0, 0, 0] },
+              { types: ['GHOST', 'MYSTERY', 'MYSTERY'], spe: 50 },
+            ],
+            rng,
+          )
+          const outGhost = executeTurn(ghostState, [useMove(1, MOVE_MEAN_LOOK), null], deps)
+          const actGhost = outGhost.actions.find((a) => a.battlerId === 0)!
+          expect(actGhost.missed).toBe(true)
+          expect(hasFlag(ghostState.battlers[1]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(false)
+          expect(canBattlerEscape(ghostState, 1, deps)).toBe(true)
+
+          // Mean Look fails if target has a Substitute (jumpifsubstituteblocks)
+          const subState = battle(
+            [
+              { moves: ['MOVE_MEAN_LOOK', null, null, null], pp: [5, 0, 0, 0], spe: 50 },
+              { moves: ['MOVE_SUBSTITUTE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+            ],
+            rng,
+          )
+          // Battler 1 sets up Substitute first
+          executeTurn(subState, [null, useMove(1, MOVE_SUBSTITUTE)], deps)
+          expect(hasFlag(subState.battlers[1]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(true)
+          // Battler 0 uses Mean Look into Substitute -> blocked
+          const outSub = executeTurn(subState, [useMove(1, MOVE_MEAN_LOOK), null], deps)
+          const actSub = outSub.actions.find((a) => a.battlerId === 0)!
+          expect(actSub.missed).toBe(true)
+          expect(hasFlag(subState.battlers[1]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(false)
+        })
+      })
+
+      describe('EFFECT_FORESIGHT', () => {
+        it('Foresight sets STATUS4_FORESIGHT and fails on second use', () => {
+          // BattleScript_EffectForesight (data/battle_scripts_1.s:5069-5082)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_FORESIGHT', null, null, null], pp: [40, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out1 = executeTurn(state, [useMove(1, MOVE_FORESIGHT), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(39)
+          expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FORESIGHT)).toBe(true)
+
+          // Second use fails (jumpifstatus4 BS_TARGET, STATUS4_FORESIGHT)
+          const out2 = executeTurn(state, [useMove(1, MOVE_FORESIGHT), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(38)
+        })
+      })
+
+      describe('EFFECT_MIRACLE_EYE', () => {
+        it('Miracle Eye sets STATUS3_MIRACLE_EYED and fails on second use', () => {
+          // BattleScript_EffectMiracleEye (data/battle_scripts_1.s:2705-2712)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MIRACLE_EYE', null, null, null], pp: [40, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out1 = executeTurn(state, [useMove(1, MOVE_MIRACLE_EYE), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(39)
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_MIRACLE_EYED)).toBe(true)
+
+          // Second use fails (setmiracleeye BattleScript_ButItFailed)
+          const out2 = executeTurn(state, [useMove(1, MOVE_MIRACLE_EYE), null], deps)
+          const act2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(38)
+        })
+      })
+
+      describe('EFFECT_PERISH_SONG', () => {
+        it('Perish Song faints both sides after the count ends, respecting Soundproof', () => {
+          // BattleScript_EffectPerishSong (data/battle_scripts_1.s:5083-5100)
+          // HandleWishPerishSongOnTurnEnd (battle_util.c:3032-3053, battle_main.c:3489)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_PERISH_SONG', null, null, null], pp: [5, 0, 0, 0], hp: 100, maxHp: 100 },
+              { hp: 100, maxHp: 100, spe: 50 },
+            ],
+            rng,
+          )
+
+          // Turn 1: Battler 0 uses Perish Song. Sets timer 3, decrements to 2 at end of turn.
+          const out1 = executeTurn(state, [useMove(1, MOVE_PERISH_SONG), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_PERISH_SONG)).toBe(true)
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_PERISH_SONG)).toBe(true)
+          expect(state.battlers[0]!.volatiles.perishSongTimer).toBe(2)
+          expect(state.battlers[1]!.volatiles.perishSongTimer).toBe(2)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          expect(state.battlers[1]!.mon.hp).toBe(100)
+
+          // Turn 2: Decrements 2 -> 1
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.perishSongTimer).toBe(1)
+          expect(state.battlers[1]!.volatiles.perishSongTimer).toBe(1)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          expect(state.battlers[1]!.mon.hp).toBe(100)
+
+          // Turn 3: Decrements 1 -> 0
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.volatiles.perishSongTimer).toBe(0)
+          expect(state.battlers[1]!.volatiles.perishSongTimer).toBe(0)
+          expect(state.battlers[0]!.mon.hp).toBe(100)
+          expect(state.battlers[1]!.mon.hp).toBe(100)
+
+          // Turn 4: Timer was 0 -> both faint!
+          executeTurn(state, [null, null], deps)
+          expect(state.battlers[0]!.mon.hp).toBe(0)
+          expect(state.battlers[1]!.mon.hp).toBe(0)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_PERISH_SONG)).toBe(false)
+          expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_PERISH_SONG)).toBe(false)
+
+          // Soundproof immunity: Battler 1 has ABILITY_SOUNDPROOF
+          const spState = battle(
+            [
+              { moves: ['MOVE_PERISH_SONG', null, null, null], pp: [5, 0, 0, 0] },
+              { abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] }, spe: 50 },
+            ],
+            rng,
+          )
+          const spOut = executeTurn(spState, [useMove(1, MOVE_PERISH_SONG), null], deps)
+          const spAct = spOut.actions.find((a) => a.battlerId === 0)!
+          expect(spAct.missed).toBe(false)
+          expect(hasFlag(spState.battlers[0]!.statuses3, STATUS3_PERISH_SONG)).toBe(true)
+          expect(hasFlag(spState.battlers[1]!.statuses3, STATUS3_PERISH_SONG)).toBe(false)
+
+          // If all active battlers are Soundproof / unaffected, Perish Song fails
+          const allSpState = battle(
+            [
+              { moves: ['MOVE_PERISH_SONG', null, null, null], pp: [5, 0, 0, 0], abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] } },
+              { abilities: { ability: ABILITY_SOUNDPROOF, innates: [null, null, null] }, spe: 50 },
+            ],
+            rng,
+          )
+          const allSpOut = executeTurn(allSpState, [useMove(1, MOVE_PERISH_SONG), null], deps)
+          const allSpAct = allSpOut.actions.find((a) => a.battlerId === 0)!
+          expect(allSpAct.missed).toBe(true)
+          expect(allSpState.battlers[0]!.mon.pp[0]).toBe(4) // costs PP
+        })
+      })
+
+      describe('EFFECT_MINIMIZE', () => {
+        it('Minimize sets STATUS3_MINIMIZED and raises evasion by 2 stages', () => {
+          // BattleScript_EffectMinimize (data/battle_scripts_1.s:4922-4927)
+          // Cmd_setminimize (battle_script_commands.c:11573-11577)
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MINIMIZE', null, null, null], pp: [10, 0, 0, 0] },
+              { spe: 50 },
+            ],
+            rng,
+          )
+
+          const out1 = executeTurn(state, [useMove(1, MOVE_MINIMIZE), null], deps)
+          const act1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_MINIMIZED)).toBe(true)
+          // Neutral evasion stage is 6 (DEFAULT_STAT_STAGE). +2 stages raises to 8.
+          expect(state.battlers[0]!.mon.statStages[STAT_EVASION]).toBe(8)
+          expect(act1.statChanges).toEqual([{ battlerId: 0, stat: STAT_EVASION, change: 2 }])
         })
       })
     })

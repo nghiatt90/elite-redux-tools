@@ -145,6 +145,7 @@ import { getBattlerAbilitySlotsReverse, runMoveEnd } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import {
   BATTLE_TYPE_ARENA,
+  clearFlag,
   hasFlag,
   PARTY_SIZE,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -153,6 +154,7 @@ import {
   STATUS1_ANY,
   STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
+  STATUS3_PERISH_SONG,
   STATUS_FIELD_TRICK_ROOM,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
@@ -1601,7 +1603,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // DoFieldEndTurnEffects (fieldEndTurn.ts) and DoBattlerEndTurnEffects
   // (endTurn.ts), in that order, THEN HandleFaintedMonActions (switchIn.ts's
   // applyEndOfTurnReplacements, below) and HandleWishPerishSongOnTurnEnd
-  // (absent), and only after all of that does
+  // (below), and only after all of that does
   // gBattleResults.battleTurnCounter++ run (:3508-3511). Both residual
   // ladders therefore belong HERE, before the counter increment below -- not
   // after it. fieldEndTurn's own ENDTURN_ORDER recomputes gBattlerByTurnOrder;
@@ -1647,6 +1649,26 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // exists once the battle is decided).
   const replacementUnmodelled: string[] = []
   if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+
+  // HandleWishPerishSongOnTurnEnd (battle_util.c:3032-3053) runs after HandleFaintedMonActions
+  // (battle_main.c:3485-3489), over gBattlerByTurnOrder (endTurnOrder) skipping absent battlers.
+  // BattleScript_PerishSongTakesLife's faint is then replaced on the next HandleFaintedMonActions pass.
+  if (!state.battleOutcome) {
+    let perishFainted = false
+    for (const bId of endTurnOrder) {
+      const b = state.battlers[bId]
+      if (!b || hasFlag(state.absentBattlerFlags, 1 << bId) || !hasFlag(b.statuses3, STATUS3_PERISH_SONG)) continue
+      if (b.volatiles.perishSongTimer === 0) {
+        b.statuses3 = clearFlag(b.statuses3, STATUS3_PERISH_SONG)
+        const faintedList: number[] = []
+        applyDamage(state, bId, b.mon.hp, faintedList)
+        if (faintedList.length) perishFainted = true
+      } else {
+        b.volatiles.perishSongTimer--
+      }
+    }
+    if (perishFainted && deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+  }
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
   roundStructsClear(state)

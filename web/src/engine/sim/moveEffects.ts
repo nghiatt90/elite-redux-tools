@@ -44,21 +44,32 @@ import {
   STATUS2_DEFENSE_CURL,
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
+  STATUS2_ESCAPE_PREVENTION,
   STATUS2_FLINCHED,
+  STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS2_WRAPPED,
   STATUS3_ALWAYS_HITS,
+  STATUS3_ALWAYS_HITS_TURN,
+  STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LASER_FOCUS,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
+  STATUS3_MIRACLE_EYED,
+  STATUS3_MINIMIZED,
   STATUS3_ON_AIR,
+  STATUS3_PERISH_SONG,
+  STATUS3_ROOTED,
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_TELEKINESIS,
   STATUS3_YAWN,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_FEAR,
+  STATUS4_FORESIGHT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
   STATUS_FIELD_GRASSY_TERRAIN,
@@ -3986,6 +3997,422 @@ function handleFocusEnergy(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, {})
 }
 
+/**
+ * EFFECT_SUBSTITUTE handler.
+ * BattleScript_EffectSubstitute, data/battle_scripts_1.s:4506-4530.
+ * Cmd_setsubstitute, src/battle_script_commands.c:10535-10550.
+ */
+function handleSubstitute(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, applyDamage } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:4508)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifstatus2 BS_ATTACKER, STATUS2_SUBSTITUTE, BattleScript_AlreadyHasSubstitute (:4511)
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.mon.status2, STATUS2_SUBSTITUTE)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. setsubstitute (:4512, Cmd_setsubstitute:10535-10550)
+  const hp = Math.max(1, Math.floor(battler.mon.maxHp / 4))
+  const damage = Math.max(1, Math.floor(battler.mon.maxHp / (moveEffect === 'EFFECT_SHED_TAIL' ? 2 : 4)))
+
+  if (battler.mon.hp <= damage) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_SUBSTITUTE)
+  battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_WRAPPED)
+  battler.volatiles.substituteHp = hp
+
+  const fainted: number[] = []
+  applyDamage(state, battlerId, damage, fainted)
+
+  return outcome(ctx, { attackerDamage: damage, fainted })
+}
+
+/**
+ * EFFECT_AQUA_RING handler.
+ * BattleScript_EffectAquaRing, data/battle_scripts_1.s:2670-2679.
+ * Cmd_setuserstatus3, src/battle_script_commands.c:11991-12002.
+ */
+function handleAquaRing(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:2673)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setuserstatus3 STATUS3_AQUA_RING, BattleScript_ButItFailed (:2674)
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.statuses3, STATUS3_AQUA_RING)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_AQUA_RING)
+  return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_INGRAIN handler.
+ * BattleScript_EffectIngrain, data/battle_scripts_1.s:6326-6336.
+ * Cmd_setuserstatus3, src/battle_script_commands.c:11991-12002.
+ */
+function handleIngrain(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6329)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setuserstatus3 STATUS3_ROOTED, BattleScript_ButItFailed (:6330)
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.statuses3, STATUS3_ROOTED)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_ROOTED)
+  return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_MAGNET_RISE handler.
+ * BattleScript_EffectMagnetRise, data/battle_scripts_1.s:2627-2636.
+ * Cmd_setuserstatus3, src/battle_script_commands.c:11991-12002.
+ */
+function handleMagnetRise(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:2630)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setuserstatus3 STATUS3_MAGNET_RISE, BattleScript_ButItFailed (:2631)
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.statuses3, STATUS3_MAGNET_RISE)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_MAGNET_RISE)
+  battler.volatiles.magnetRiseTimer = 5
+  return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_CHARGE handler.
+ * BattleScript_EffectCharge, data/battle_scripts_1.s:6222-6240.
+ * Cmd_setcharge, src/battle_script_commands.c:11620-11623.
+ */
+function handleCharge(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6225)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setcharge (:6226)
+  const battler = state.battlers[battlerId]!
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_CHARGED_UP)
+
+  // 3. SpDef +1 stat buff (:6229-6231)
+  const statChanges: StatChangeOutcome[] = []
+  const rSpDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rSpDef.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: rSpDef.delta })
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * EFFECT_LOCK_ON handler (Lock-On, Mind Reader).
+ * BattleScript_EffectLockOn, data/battle_scripts_1.s:4739-4751.
+ * Cmd_setalwayshitflag, src/battle_script_commands.c:10827-10832.
+ */
+function handleLockOn(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:4742)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null) return outcome(ctx, { targetId: null, missed: true })
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. jumpifsubstituteblocks BattleScript_ButItFailed (:4743)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4744)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setalwayshitflag (:4745, Cmd_setalwayshitflag:10827-10832)
+  target.statuses3 = (target.statuses3 & ~STATUS3_ALWAYS_HITS) | STATUS3_ALWAYS_HITS_TURN(2)
+  target.volatiles.battlerWithSureHit = battlerId
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_LASER_FOCUS handler.
+ * BattleScript_EffectLaserFocus, data/battle_scripts_1.s:1037-1047.
+ * Cmd_setuserstatus3, src/battle_script_commands.c:11991-12002.
+ */
+function handleLaserFocus(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:1040)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setuserstatus3 STATUS3_LASER_FOCUS, BattleScript_ButItFailed (:1041)
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.statuses3, STATUS3_LASER_FOCUS)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_LASER_FOCUS)
+  battler.volatiles.laserFocusTimer = 2
+  return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_MEAN_LOOK handler (Mean Look, Block, Spider Web).
+ * BattleScript_EffectMeanLook, data/battle_scripts_1.s:4890-4907.
+ * Cmd_accuracycheck NO_ACC_CALC_CHECK_LOCK_ON, battle_script_commands.c:1403-1411.
+ * Cmd_seteffectprimary / MOVE_EFFECT_PREVENT_ESCAPE, battle_script_commands.c:2823-2826.
+ */
+function handleMeanLook(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps, turnOrderIndex, order } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:4893)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null) return outcome(ctx, { targetId: null, missed: true })
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:4894)
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (!lockedOn) {
+    if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+    const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+    const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+    const protectType = isBattlerProtected(state, battlerId, targetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+    if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+  }
+
+  // 3. jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION (:4896)
+  if (hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifsubstituteblocks (:4897)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 5. jumpiftype BS_TARGET, TYPE_GHOST (:4899)
+  if (target.mon.types.includes('GHOST')) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 6. setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE / seteffectprimary (:4903-4904)
+  target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+  target.volatiles.battlerPreventingEscape = battlerId
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_FORESIGHT handler (Foresight, Odor Sleuth).
+ * BattleScript_EffectForesight, data/battle_scripts_1.s:5069-5082.
+ * Cmd_setforesight, src/battle_script_commands.c:11127-11130.
+ */
+function handleForesight(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps, turnOrderIndex, order } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5072)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null) return outcome(ctx, { targetId: null, missed: true })
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:5073)
+  const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
+  if (!lockedOn) {
+    if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+    const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+    const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
+    const protectType = isBattlerProtected(state, battlerId, targetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+    if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+  }
+
+  // 3. jumpifstatus4 BS_TARGET, STATUS4_FORESIGHT (:5074)
+  if (hasFlag(target.statuses4, STATUS4_FORESIGHT)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. setforesight (:5075)
+  target.statuses4 = setFlag(target.statuses4, STATUS4_FORESIGHT)
+
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_MIRACLE_EYE handler (Miracle Eye).
+ * BattleScript_EffectMiracleEye, data/battle_scripts_1.s:2705-2712.
+ * Cmd_setmiracleeye, src/battle_script_commands.c:9448-9455.
+ */
+function handleMiracleEye(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  if (targetId === null) return outcome(ctx, { targetId: null, missed: true })
+  const target = state.battlers[targetId]
+  if (!target || !isBattlerAlive(state, targetId)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2707); ppreduce (:2709)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. setmiracleeye BattleScript_ButItFailed (:2710)
+  if (hasFlag(target.statuses3, STATUS3_MIRACLE_EYED)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.statuses3 = setFlag(target.statuses3, STATUS3_MIRACLE_EYED)
+  return outcome(ctx, { targetId })
+}
+
+/**
+ * EFFECT_PERISH_SONG handler (Perish Song).
+ * BattleScript_EffectPerishSong, data/battle_scripts_1.s:5083-5100.
+ * Cmd_trysetperishsong, src/battle_script_commands.c:11132-11145.
+ */
+function handlePerishSong(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5086)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. trysetperishsong BattleScript_ButItFailed (:5087, Cmd_trysetperishsong :11132-11145): every
+  // battler, alive or not. IsSoundproof (battle_util.c:8864-8871) is the isSoundproof bitfield
+  // (Soundproof, Noise Cancel) on the battler itself -- both leave onImmuneFor at APPLY_ON_SELF,
+  // so the ally branch never fires -- with mold breaker checked.
+  const attackerHasMB = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
+  if (battlerHasSimAbility(state, state.battlers[battlerId]!, 'ABILITY_PRANKSTER', false, battlerId, false, deps.dataContext)) {
+    unmodelled.push("Cmd_trysetperishsong's BlocksPrankster check (battle_script_commands.c:11138) is not applied")
+  }
+  let affectedCount = 0
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    if (!b) continue
+    if (hasFlag(b.statuses3, STATUS3_PERISH_SONG)) continue
+    const isSoundproof = ['ABILITY_SOUNDPROOF', 'ABILITY_NOISE_CANCEL'].some((ab) =>
+      battlerHasSimAbility(state, b, ab, true, battlerId, attackerHasMB, deps.dataContext),
+    )
+    if (isSoundproof) continue
+
+    affectedCount++
+    b.statuses3 = setFlag(b.statuses3, STATUS3_PERISH_SONG)
+    b.volatiles.perishSongTimer = 3
+    b.volatiles.perishSongTimerStartValue = 3
+  }
+
+  if (affectedCount === 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_MINIMIZE handler (Minimize).
+ * BattleScript_EffectMinimize, data/battle_scripts_1.s:4922-4927.
+ * Cmd_setminimize, src/battle_script_commands.c:11573-11577.
+ */
+function handleMinimize(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. setminimize (:4924)
+  const battler = state.battlers[battlerId]!
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_MINIMIZED)
+
+  // 2. ppreduce (:3616)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 3. Evasion +2 stat buff (:4925, :3617)
+  const statChanges: StatChangeOutcome[] = []
+  const rEvs = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    2,
+    STAT_EVASION,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rEvs.delta !== 0) statChanges.push({ battlerId, stat: STAT_EVASION, change: rEvs.delta })
+
+  return outcome(ctx, { statChanges })
+}
+
 /** BATTLE_TYPE_DOUBLE, include/constants/battle.h. */
 const BATTLE_TYPE_DOUBLE = 1 << 0
 
@@ -4123,6 +4550,19 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_HAZE: handleHaze,
   EFFECT_CLEAR_SKIES: handleClearSkies,
   EFFECT_DEFOG: handleDefog,
+
+  EFFECT_SUBSTITUTE: handleSubstitute,
+  EFFECT_AQUA_RING: handleAquaRing,
+  EFFECT_INGRAIN: handleIngrain,
+  EFFECT_MAGNET_RISE: handleMagnetRise,
+  EFFECT_CHARGE: handleCharge,
+  EFFECT_LOCK_ON: handleLockOn,
+  EFFECT_LASER_FOCUS: handleLaserFocus,
+  EFFECT_MEAN_LOOK: handleMeanLook,
+  EFFECT_FORESIGHT: handleForesight,
+  EFFECT_MIRACLE_EYE: handleMiracleEye,
+  EFFECT_PERISH_SONG: handlePerishSong,
+  EFFECT_MINIMIZE: handleMinimize,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

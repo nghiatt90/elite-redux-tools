@@ -56,12 +56,10 @@
 //
 //   ENDTURN_SKY_DROP        Unreachable -- volatiles.shouldClearSkyDrop has no
 //                           reader anywhere in web/src/engine/sim.
-//   ENDTURN_INGRAIN         Gapped -- STATUS3_ROOTED is read for real by
-//                           grounding.ts. Gapped when set, hp!=0, not already
-//                           at max HP and CanBattlerHeal(battler) (ported
-//                           below, canBattlerHeal).
-//   ENDTURN_AQUA_RING       Unreachable -- STATUS3_AQUA_RING has no reader
-//                           outside constants.ts.
+//   ENDTURN_INGRAIN         Ported (:2426-2434) -- heals maxHP/8 at end of turn
+//                           with Big Root / Absorbant bonus.
+//   ENDTURN_AQUA_RING       Ported (:2435-2443) -- heals maxHP/16 at end of turn
+//                           with Big Root / Absorbant bonus.
 //   ENDTURN_SYRUP           Unreachable -- volatiles.syrupTimer has no reader
 //                           outside create.ts's zero default.
 //   ENDTURN_ABILITIES       PORTED (subset) / Gapped -- AbilityBattleEffects(
@@ -147,14 +145,8 @@
 //   ENDTURN_ENCORE          Ported (:2792-2808) -- decrements encoreTimer;
 //                           clears encoredMove when timer reaches 0, PP is 0,
 //                           or move is forgotten.
-//   ENDTURN_LOCK_ON         Unreachable -- STATUS3_ALWAYS_HITS IS read for
-//                           real by accuracy.ts/accuracyBridge.ts, but
-//                           accuracyBridge.ts's own gap note for it says "no
-//                           sim code writes statuses3"; writing it here first,
-//                           in a module that does not own that bridge's gap
-//                           list, would silently stale that note rather than
-//                           fix it. Left unreachable pending a batch that
-//                           reconciles both.
+//   ENDTURN_LOCK_ON         Ported (:2809-2812) -- decrements STATUS3_ALWAYS_HITS
+//                           counter by STATUS3_ALWAYS_HITS_TURN(1).
 //   ENDTURN_GHASTLY_ECHO    Gapped -- STATUS4_GHASTLY_ECHO is read for real by
 //                           unpack.ts. Its paired ghastlyEchoTimer has no
 //                           reader anywhere, so the exact expiry turn cannot be
@@ -165,15 +157,13 @@
 //   ENDTURN_TAUNT           Ported (:2831-2838) -- decrements tauntTimer until 0.
 //   ENDTURN_YAWN            Ported (:2839-2854) -- drowsiness countdown and
 //                           sleep on 0 turns remaining if CanSleep is true.
-//   ENDTURN_LASER_FOCUS     Unreachable -- STATUS3_LASER_FOCUS/laserFocusTimer
-//                           have no reader outside constants.ts/create.ts.
+//   ENDTURN_LASER_FOCUS     Ported (:2855-2861) -- decrements laserFocusTimer;
+//                           clears STATUS3_LASER_FOCUS at 0.
 //   ENDTURN_EMBARGO         Ported (:2862-2874) -- decrements embargoTimer,
 //                           clears STATUS3_EMBARGO at 0, clears
 //                           substituteDestroyedThisTurn.
-//   ENDTURN_MAGNET_RISE     Gapped -- STATUS3_MAGNET_RISE is read for real by
-//                           grounding.ts. Its paired magnetRiseTimer has no
-//                           reader anywhere, so the exact expiry turn cannot be
-//                           computed; gapped whenever the bit is set.
+//   ENDTURN_MAGNET_RISE     Ported (:2875-2884) -- decrements magnetRiseTimer;
+//                           clears STATUS3_MAGNET_RISE at 0.
 //   ENDTURN_TELEKINESIS     Gapped -- STATUS3_TELEKINESIS is read for real by
 //                           grounding.ts, same telekinesisTimer caveat as
 //                           MAGNET_RISE above.
@@ -248,8 +238,12 @@ import {
   STATUS2_FLINCHED,
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_ALWAYS_HITS_TURN,
+  STATUS3_AQUA_RING,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LASER_FOCUS,
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
   RESOURCE_FLAG_ROOST,
@@ -447,7 +441,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -902,15 +896,61 @@ export function runEndTurnEffects(
     const battler = state.battlers[battlerId]
     if (!battler) continue
 
-    // ENDTURN_INGRAIN, :2426-2434.
-    gapIf(
+    // ENDTURN_INGRAIN, battle_util.c:2426-2434.
+    if (
       hasFlag(battler.statuses3, STATUS3_ROOTED) &&
-        battler.mon.hp !== 0 &&
-        battler.mon.hp !== battler.mon.maxHp &&
-        canBattlerHeal(state, battlerId, battler, unmodelled),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_INGRAIN (battle_util.c:2426-2434) is not applied -- Ingrain's maxHP/8 heal was skipped`,
-    )
+      battler.mon.hp !== 0 &&
+      battler.mon.hp !== battler.mon.maxHp &&
+      canBattlerHeal(state, battlerId, battler, unmodelled)
+    ) {
+      let healAmount = Math.max(1, Math.floor(battler.mon.maxHp / 8))
+      const item = battler.mon.itemId ? dataContext.item(battler.mon.itemId) : null
+      if (item?.resolvedHoldEffect === 'HOLD_EFFECT_BIG_ROOT') {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      if (battlerHasAbility(battler.mon.abilities, 'ABILITY_ABSORBANT', NO_SUPPRESSION)) {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      const prevHp = battler.mon.hp
+      applyEndTurnHp(state, battlerId, battler, healAmount)
+      const actualHeal = battler.mon.hp - prevHp
+      if (actualHeal > 0) {
+        results.push({
+          battlerId,
+          effect: 'INGRAIN',
+          hpChange: actualHeal,
+          fainted: false,
+        })
+      }
+    }
+
+    // ENDTURN_AQUA_RING, battle_util.c:2435-2443.
+    if (
+      hasFlag(battler.statuses3, STATUS3_AQUA_RING) &&
+      battler.mon.hp !== 0 &&
+      battler.mon.hp !== battler.mon.maxHp &&
+      canBattlerHeal(state, battlerId, battler, unmodelled)
+    ) {
+      let healAmount = Math.max(1, Math.floor(battler.mon.maxHp / 16))
+      const item = battler.mon.itemId ? dataContext.item(battler.mon.itemId) : null
+      if (item?.resolvedHoldEffect === 'HOLD_EFFECT_BIG_ROOT') {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      if (battlerHasAbility(battler.mon.abilities, 'ABILITY_ABSORBANT', NO_SUPPRESSION)) {
+        healAmount = Math.trunc((healAmount * 3) / 2)
+      }
+      const prevHp = battler.mon.hp
+      applyEndTurnHp(state, battlerId, battler, healAmount)
+      const actualHeal = battler.mon.hp - prevHp
+      if (actualHeal > 0) {
+        results.push({
+          battlerId,
+          effect: 'AQUA_RING',
+          hpChange: actualHeal,
+          fainted: false,
+        })
+      }
+    }
 
     // ENDTURN_ABILITIES, :2452-2459 -- AbilityBattleEffects(ABILITYEFFECT_ENDTURN)
     // runs HandleEndTurnAbility over EVERY ability slot in descending order (:4397-4399, :9213).
@@ -999,6 +1039,11 @@ export function runEndTurnEffects(
       }
     }
 
+    // ENDTURN_LOCK_ON, battle_util.c:2809-2812.
+    if (hasFlag(battler.statuses3, STATUS3_ALWAYS_HITS)) {
+      battler.statuses3 -= STATUS3_ALWAYS_HITS_TURN(1)
+    }
+
     // ENDTURN_GHASTLY_ECHO, :2813-2816.
     gapIf(
       hasFlag(battler.statuses4, STATUS4_GHASTLY_ECHO),
@@ -1030,6 +1075,13 @@ export function runEndTurnEffects(
       }
     }
 
+    // ENDTURN_LASER_FOCUS, battle_util.c:2855-2861.
+    if (hasFlag(battler.statuses3, STATUS3_LASER_FOCUS)) {
+      if (battler.volatiles.laserFocusTimer === 0 || --battler.volatiles.laserFocusTimer === 0) {
+        battler.statuses3 = clearFlag(battler.statuses3, STATUS3_LASER_FOCUS)
+      }
+    }
+
     // ENDTURN_EMBARGO, :2862-2874.
     if (hasFlag(battler.statuses3, STATUS3_EMBARGO)) {
       if (battler.volatiles.embargoTimer === 0 || --battler.volatiles.embargoTimer === 0) {
@@ -1038,12 +1090,12 @@ export function runEndTurnEffects(
     }
     battler.volatiles.substituteDestroyedThisTurn = false
 
-    // ENDTURN_MAGNET_RISE, :2875-2884.
-    gapIf(
-      hasFlag(battler.statuses3, STATUS3_MAGNET_RISE),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_MAGNET_RISE (battle_util.c:2875-2884) is not applied -- magnetRiseTimer has no reader anywhere, so its expiry cannot be computed`,
-    )
+    // ENDTURN_MAGNET_RISE, battle_util.c:2875-2884.
+    if (hasFlag(battler.statuses3, STATUS3_MAGNET_RISE)) {
+      if (battler.volatiles.magnetRiseTimer === 0 || --battler.volatiles.magnetRiseTimer === 0) {
+        battler.statuses3 = clearFlag(battler.statuses3, STATUS3_MAGNET_RISE)
+      }
+    }
 
     // ENDTURN_TELEKINESIS, :2886-2894.
     gapIf(

@@ -201,6 +201,8 @@ export const STATUS3_LEECHSEED_BATTLER = 0x3
 export const STATUS3_LEECHSEED = 1 << 2
 /** 2-bit timer at bit 3 (Lock-On), not a flag. */
 export const STATUS3_ALWAYS_HITS = 0x18
+/** include/constants/battle.h:212 */
+export const STATUS3_ALWAYS_HITS_TURN = (num: number): number => ((num << 3) & STATUS3_ALWAYS_HITS)
 export const STATUS3_PERISH_SONG = 1 << 5
 export const STATUS3_ON_AIR = 1 << 6
 export const STATUS3_UNDERGROUND = 1 << 7
