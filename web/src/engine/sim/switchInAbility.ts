@@ -43,6 +43,7 @@
 //      earlier ones.
 
 import {
+  DEFAULT_STAT_STAGE,
   DEFAULT_STAT_STAGE_RATIOS,
   ENUM_WEATHER_FOG,
   ENUM_WEATHER_HAIL,
@@ -52,19 +53,35 @@ import {
   ENUM_WEATHER_STRONG_WINDS,
   ENUM_WEATHER_SUN,
   ENUM_WEATHER_SUN_PRIMAL,
+  MAX_STAT_STAGE,
+  MIN_STAT_STAGE,
+  SIDE_STATUS_STEALTH_ROCK,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPEED,
+  STAT_SPATK,
+  STAT_SPDEF,
+  STATUS2_DEFENSE_CURL,
+  STATUS2_ENRAGED,
+  STATUS2_SUBSTITUTE,
+  STATUS4_COILED,
+  STATUS4_CUTTHROAT,
   WEATHER_DURATION,
   WEATHER_DURATION_EXTENDED,
+  WEATHER_FOG_ANY,
   WEATHER_FOG_PERMANENT,
   WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_PERMANENT,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_PRIMAL_ANY,
+  WEATHER_RAIN_ANY,
   WEATHER_RAIN_PERMANENT,
   WEATHER_RAIN_PRIMAL,
   WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_PERMANENT,
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_STRONG_WINDS,
+  WEATHER_SUN_ANY,
   WEATHER_SUN_PERMANENT,
   WEATHER_SUN_PRIMAL,
   WEATHER_SUN_TEMPORARY,
@@ -75,10 +92,27 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
-import { battlerHasSimAbility, isSimAbilitySuppressed } from './statBuffs'
+import {
+  B_MSG_STAT_WONT_DECREASE,
+  battlerHasSimAbility,
+  changeStatBuffs,
+  getHighestAttackingStatId,
+  getHighestDefendingStatId,
+  getHighestStatId,
+  isBattlerWeatherAffected,
+  isSimAbilitySuppressed,
+  MOVE_EFFECT_AFFECTS_USER,
+  MOVE_EFFECT_CERTAIN,
+  RESET_STAT_BUFFS,
+  RESET_STAT_DROPS,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
+  tryResetBattlerStatChanges,
+} from './statBuffs'
 import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
+import { TYPE_ROCK_ID } from './hazards'
 
 /** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
  * `hooks.onEntry` is present. */
@@ -312,6 +346,226 @@ function checkAndSetSwitchInAbility(
 }
 
 /**
+ * The 12 abilities with tauntImmune = TRUE (abilities.cc).
+ * IsBattlerImmuneToLowerStatsFromIntimidateClone (battle_script_commands.c:10275-10281).
+ */
+export const TAUNT_IMMUNE_ABILITIES: ReadonlySet<string> = new Set([
+  'ABILITY_OBLIVIOUS',
+  'ABILITY_OWN_TEMPO',
+  'ABILITY_INNER_FOCUS',
+  'ABILITY_VITAL_SPIRIT',
+  'ABILITY_SCRAPPY',
+  'ABILITY_OVERWHELM',
+  'ABILITY_DISCIPLINE',
+  'ABILITY_ENLIGHTENED',
+  'ABILITY_UNLOCKED_POTENTIAL',
+  'ABILITY_WAY_OF_PRECISION',
+  'ABILITY_BLIND_RAGE',
+  'ABILITY_BIRD_OF_PREY',
+])
+
+/**
+ * IsBattlerImmuneToLowerStatsFromIntimidateClone, battle_script_commands.c:10275-10281.
+ * Guard Dog is NOT immune (it converts the drop into a raise in VARIOUS_DO_INTIMIDATE).
+ * Checks tauntImmune with checkMoldBreaker = FALSE.
+ */
+export function isBattlerImmuneToLowerStatsFromIntimidateClone(
+  state: BattleState,
+  target: BattlerState,
+  dataContext: SimDataContext,
+): boolean {
+  if (battlerHasSimAbility(state, target, 'ABILITY_GUARD_DOG', false, target.id, false, dataContext)) {
+    return false
+  }
+  for (const abilityId of TAUNT_IMMUNE_ABILITIES) {
+    if (battlerHasSimAbility(state, target, abilityId, false, target.id, false, dataContext)) {
+      return true
+    }
+  }
+  return false
+}
+
+export interface IntimidateCloneInfo {
+  stats: readonly ('DEFENDING' | 'ATTACKING' | number)[]
+  amount: number
+  resetsOppBuffs?: boolean
+  setsViolentRush?: boolean
+}
+
+/**
+ * Intimidate family data from GetIntimidateData / Intimidate<ABILITY_*> (abilities.cc).
+ * Loop order in C runs `numStatsLowered - 1` down to 0, reflected in the `stats` array order.
+ */
+export const INTIMIDATE_CLONE_MAP: Readonly<Record<string, IntimidateCloneInfo>> = {
+  ABILITY_INTIMIDATE: { stats: [STAT_ATK], amount: 1 },
+  ABILITY_SCARE: { stats: [STAT_SPATK], amount: 1 },
+  // C loops numStatsLowered - 1 down to 0: statsLowered = {STAT_ATK, STAT_SPATK, 0} -> SPATK then ATK
+  ABILITY_FEARMONGER: { stats: [STAT_SPATK, STAT_ATK], amount: 1 },
+  ABILITY_FIRES_WRATH: { stats: [STAT_SPATK, STAT_ATK], amount: 1 },
+  ABILITY_YUKI_ONNA: { stats: [STAT_SPATK, STAT_ATK], amount: 1 },
+  // Malicious: statsLowered = {STAT_HIGHEST_ATTACKING, STAT_HIGHEST_DEFENDING, 0} -> DEFENDING then ATTACKING
+  ABILITY_MALICIOUS: { stats: ['DEFENDING', 'ATTACKING'], amount: 1 },
+  ABILITY_TERRIFY: { stats: [STAT_SPATK], amount: 2 },
+  ABILITY_PETRIFY: { stats: [STAT_SPEED], amount: 1, resetsOppBuffs: true },
+  ABILITY_GLEAM_EYES: { stats: [STAT_SPATK], amount: 1 },
+  ABILITY_CHAMPIONS_ENTRANCE: { stats: [STAT_ATK], amount: 1, setsViolentRush: true },
+  ABILITY_SCARECROW: { stats: [STAT_SPATK], amount: 1 },
+  ABILITY_MOB_BOSS: { stats: [STAT_SPATK], amount: 2 },
+}
+
+export interface SwitchInAbilityDeps extends HazardDeps {
+  statStageRatios?: [number, number][]
+}
+
+/**
+ * UseIntimidateClone (battle_util.c:4064-4072) and VARIOUS_DO_INTIMIDATE (battle_script_commands.c:8969-9016).
+ */
+function applyIntimidateClone(
+  state: BattleState,
+  battlerId: number,
+  info: IntimidateCloneInfo,
+  deps: SwitchInAbilityDeps,
+  unmodelled: string[],
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  const statStageRatios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
+
+  if (info.setsViolentRush) {
+    battler.volatiles.violentRush = true
+    battler.volatiles.started.violentRush = true
+  }
+
+  // Impl<ABILITY_PETRIFY>.onEntry (abilities.cc:8446-8452): the reset loop runs inside onEntry, before the
+  // pushed BattleScript_IntimidateActivatedNew executes.
+  if (info.resetsOppBuffs) {
+    for (let i = (battlerId & 1) ^ 1; i < state.battlersCount; i += 2) {
+      if ((state.battlers[i]?.mon.hp ?? 0) === 0) continue
+      tryResetBattlerStatChanges(state, i, RESET_STAT_BUFFS)
+    }
+  }
+
+  // BattleScript_IntimidateActivatedNew: dointimidate BS_TARGET, then BS_TARGET_PARTNER, with
+  // gBattlerTarget = BATTLE_OPPOSITE(battler) (battle_util.c:4067).
+  const firstTarget = battlerId ^ 1
+  for (const targetId of [firstTarget, firstTarget ^ 2]) {
+    const target = state.battlers[targetId]
+    if (!target || target.mon.hp === 0) continue
+
+    // VARIOUS_DO_INTIMIDATE reads the ability from gBattleScripting.abilityPopupOverwrite (:8970). An
+    // immunity popup (:8979) or Guard Dog popup (:9011) on the first target overwrites it, so the
+    // partner's GetIntimidateData returns NULL and REQUIRE skips it.
+    if (isBattlerImmuneToLowerStatsFromIntimidateClone(state, target, deps.dataContext)) {
+      break
+    }
+
+    // SetMoveEffect's DoesSubstituteBlockMove (:2388) uses the stale gBattlerAttacker / gCurrentMove;
+    // the intimidator stands in for gBattlerAttacker here.
+    const hasSub = hasFlag(target.mon.status2, STATUS2_SUBSTITUTE)
+    const infiltrates = battlerHasSimAbility(
+      state,
+      battler,
+      'ABILITY_INFILTRATOR',
+      false,
+      battlerId,
+      false,
+      deps.dataContext,
+    )
+    if (hasSub && !infiltrates) {
+      continue
+    }
+
+    const hasGuardDog = battlerHasSimAbility(
+      state,
+      target,
+      'ABILITY_GUARD_DOG',
+      true,
+      battlerId,
+      false,
+      deps.dataContext,
+    )
+
+    let blocked = false
+    for (const statKey of info.stats) {
+      let statId: number
+      if (statKey === 'DEFENDING') {
+        statId = getHighestDefendingStatId(state, targetId, statStageRatios)
+      } else if (statKey === 'ATTACKING') {
+        statId = getHighestAttackingStatId(state, targetId, statStageRatios)
+      } else {
+        statId = statKey
+      }
+
+      const stageBefore = target.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+      const delta = hasGuardDog ? info.amount : -info.amount
+      const res = changeStatBuffs(
+        state,
+        targetId,
+        battlerId,
+        targetId,
+        delta,
+        statId,
+        STAT_BUFF_UPDATE_MOVE_EFFECT,
+        true,
+        deps,
+        unmodelled,
+      )
+      if (!hasGuardDog && res.multistringChooser === B_MSG_STAT_WONT_DECREASE && stageBefore !== MIN_STAT_STAGE) {
+        blocked = true
+      }
+    }
+
+    if (hasGuardDog) break
+    if (blocked && targetId === firstTarget && state.battlers[firstTarget ^ 2]) {
+      unmodelled.push(
+        `battler ${battlerId}: a stat-drop block on battler ${targetId} may overwrite abilityPopupOverwrite (battle_script_commands.c:9797-9820) and skip the partner's dointimidate; the partner is still processed`,
+      )
+    }
+  }
+}
+
+/** CanRaiseStat, battle_util.c:9364 -> CompareStat (:8545-8561), which flips the test under Contrary. */
+function canRaiseStat(state: BattleState, battler: BattlerState, statId: number, dataContext: SimDataContext): boolean {
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  if (battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battler.id, false, dataContext)) {
+    return stage > MIN_STAT_STAGE
+  }
+  return stage < MAX_STAT_STAGE
+}
+
+/**
+ * Impl<ABILITY_DOWNLOAD>.onEntry (abilities.cc:1517-1528).
+ */
+function applyDownload(
+  state: BattleState,
+  battlerId: number,
+  deps: SwitchInAbilityDeps,
+  unmodelled: string[],
+): void {
+  // gBattlerTarget = BATTLE_OPPOSITE(battler); the partner fallback tests IsBattlerAlive(battler), not the
+  // target, so a fainted opposite battler is still the one read.
+  const oppId = battlerId ^ 1
+  if (!state.battlers[oppId]) return
+
+  const statStageRatios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
+  const highestDefending = getHighestDefendingStatId(state, oppId, statStageRatios)
+  const statToRaise = highestDefending === STAT_DEF ? STAT_SPATK : STAT_ATK
+
+  changeStatBuffs(
+    state,
+    battlerId,
+    battlerId,
+    battlerId,
+    1,
+    statToRaise,
+    MOVE_EFFECT_AFFECTS_USER,
+    false,
+    deps,
+    unmodelled,
+  )
+}
+
+/**
  * Dispatches switch-in abilities for a single battler.
  * Ported from HandleSwitchInAbility (battle_util.c:9103-9204) and
  * Cmd_switchineffects (battle_script_commands.c:5520-5525).
@@ -327,11 +581,13 @@ function checkAndSetSwitchInAbility(
 export function applySwitchInAbilities(
   state: BattleState,
   battlerId: number,
-  deps: HazardDeps,
+  deps: SwitchInAbilityDeps,
   unmodelled: string[],
 ): void {
   const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) return
+
+  const statStageRatios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
 
   const slotEntries: Array<{ slotIndex: number; abilityId: string | null }> = [
     { slotIndex: 3, abilityId: battler.mon.abilities.innates[2] },
@@ -350,9 +606,297 @@ export function applySwitchInAbilities(
       continue
     }
 
+    // 1. Weather setters (Cycle 36)
     const weatherEnum = WEATHER_SETTER_MAP[abilityId]
     if (weatherEnum !== undefined) {
       tryChangeBattleWeather(state, battlerId, weatherEnum, true, deps)
+      continue
+    }
+
+    // 2. Intimidate family via UseIntimidateClone
+    const intimidateInfo = INTIMIDATE_CLONE_MAP[abilityId]
+    if (intimidateInfo !== undefined) {
+      applyIntimidateClone(state, battlerId, intimidateInfo, deps, unmodelled)
+      if (abilityId === 'ABILITY_GLEAM_EYES') {
+        unmodelled.push(`battler ${battlerId}: Gleam Eyes' onEntry also runs Impl<ABILITY_FRISK>.onEntry (abilities.cc:8832), which is not ported`)
+      }
+      continue
+    }
+
+    // 3. Download
+    if (abilityId === 'ABILITY_DOWNLOAD') {
+      applyDownload(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    // 4. Plain stat raises
+    if (
+      abilityId === 'ABILITY_INTREPID_SWORD' ||
+      abilityId === 'ABILITY_CROWNED_SWORD' ||
+      abilityId === 'ABILITY_EMBODY_ASPECT_HEARTHFLAME'
+    ) {
+      if (canRaiseStat(state, battler, STAT_ATK, deps.dataContext)) {
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          STAT_ATK,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (
+      abilityId === 'ABILITY_DAUNTLESS_SHIELD' ||
+      abilityId === 'ABILITY_CROWNED_SHIELD' ||
+      abilityId === 'ABILITY_EMBODY_ASPECT_CORNERSTONE'
+    ) {
+      if (canRaiseStat(state, battler, STAT_DEF, deps.dataContext)) {
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          STAT_DEF,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_EMBODY_ASPECT') {
+      if (canRaiseStat(state, battler, STAT_SPEED, deps.dataContext)) {
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          STAT_SPEED,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_EMBODY_ASPECT_WELLSPRING') {
+      if (canRaiseStat(state, battler, STAT_SPDEF, deps.dataContext)) {
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          STAT_SPDEF,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_LETS_ROLL' || abilityId === 'ABILITY_CURLIPEDE') {
+      if (canRaiseStat(state, battler, STAT_DEF, deps.dataContext)) {
+        // The C assigns rather than ORs, clearing every other status2 bit.
+        battler.mon.status2 = STATUS2_DEFENSE_CURL
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          STAT_DEF,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      if (abilityId === 'ABILITY_CURLIPEDE') {
+        if (!hasFlag(battler.statuses4, STATUS4_COILED)) {
+          battler.statuses4 |= STATUS4_COILED
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_MAJESTIC_MOTH') {
+      const statId = getHighestStatId(state, battlerId, statStageRatios)
+      changeStatBuffs(
+        state,
+        battlerId,
+        battlerId,
+        battlerId,
+        1,
+        statId,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        deps,
+        unmodelled,
+      )
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SEA_GUARDIAN') {
+      if (isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, deps)) {
+        const statId = getHighestStatId(state, battlerId, statStageRatios)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SUN_WORSHIP') {
+      if (isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, deps)) {
+        const statId = getHighestStatId(state, battlerId, statStageRatios)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_GREATER_SPIRIT') {
+      if (isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) {
+        const statId = getHighestStatId(state, battlerId, statStageRatios)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_FURNACE') {
+      const side = battlerId & 1
+      if (
+        hasFlag(state.sides[side]?.statuses ?? 0, SIDE_STATUS_STEALTH_ROCK) &&
+        state.sides[side]?.timers.stealthRockType === TYPE_ROCK_ID
+      ) {
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          2,
+          STAT_SPEED,
+          MOVE_EFFECT_AFFECTS_USER,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_BERSERK_DNA') {
+      const atkStat = getHighestAttackingStatId(state, battlerId, statStageRatios)
+      if (canRaiseStat(state, battler, atkStat, deps.dataContext)) {
+        battler.mon.status2 |= STATUS2_ENRAGED
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          2,
+          atkStat,
+          MOVE_EFFECT_AFFECTS_USER,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    // 5. Flag setters
+    if (abilityId === 'ABILITY_VIOLENT_RUSH') {
+      battler.volatiles.violentRush = true
+      battler.volatiles.started.violentRush = true
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SHOWDOWN_MODE') {
+      battler.volatiles.showdownMode = true
+      battler.volatiles.started.showdownMode = true
+      continue
+    }
+
+    if (abilityId === 'ABILITY_RAPID_RESPONSE') {
+      battler.volatiles.rapidResponse = true
+      battler.volatiles.started.rapidResponse = true
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ON_THE_PROWL' || abilityId === 'ABILITY_OVERWATCH') {
+      battler.volatiles.onTheProwl = true
+      battler.volatiles.started.onTheProwl = true
+      continue
+    }
+
+    if (abilityId === 'ABILITY_COIL_UP' || abilityId === 'ABILITY_SIDEWINDER') {
+      if (!hasFlag(battler.statuses4, STATUS4_COILED)) {
+        battler.statuses4 |= STATUS4_COILED
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_CUTTHROAT' || abilityId === 'ABILITY_EDGELORD') {
+      if (!hasFlag(battler.statuses4, STATUS4_CUTTHROAT)) {
+        battler.statuses4 |= STATUS4_CUTTHROAT
+      }
+      continue
+    }
+
+    // 6. Pressure onEntry stat reset
+    if (abilityId === 'ABILITY_PRESSURE') {
+      for (let i = 0; i < state.battlersCount; i++) {
+        const b = state.battlers[i]
+        if (!b || b.mon.hp === 0) continue
+        tryResetBattlerStatChanges(state, i, i === battlerId ? RESET_STAT_DROPS : RESET_STAT_BUFFS)
+      }
       continue
     }
 
@@ -397,6 +941,6 @@ export function applyBattleStartPass(
     const battler = state.battlers[battlerId]
     if (!battler || battler.mon.hp === 0) continue
 
-    applySwitchInAbilities(state, battlerId, deps as HazardDeps, unmodelled)
+    applySwitchInAbilities(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
   }
 }

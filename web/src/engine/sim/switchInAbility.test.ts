@@ -20,9 +20,22 @@ import type { BattleState, RandomSource, SimBattleMon } from './state'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
+  DEFAULT_STAT_STAGE,
   ENUM_WEATHER_RAIN,
+  SIDE_STATUS_STEALTH_ROCK,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPEED,
+  STAT_SPATK,
+  STAT_SPDEF,
   STATUS1_NONE,
+  STATUS2_DEFENSE_CURL,
+  STATUS2_ENRAGED,
+  STATUS2_SUBSTITUTE,
   STATUS3_GASTRO_ACID,
+  STATUS4_COILED,
+  STATUS4_CUTTHROAT,
+  WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_NONE,
   WEATHER_RAIN_PERMANENT,
@@ -119,6 +132,9 @@ function battle(
   specs: {
     spe?: number
     atk?: number
+    def?: number
+    spatk?: number
+    spdef?: number
     hp?: number
     maxHp?: number
     itemId?: string | null
@@ -134,7 +150,13 @@ function battle(
       createBattlerState(
         i,
         mon({
-          rawStats: { atk: s.atk ?? 100, def: 90, spatk: 80, spdef: 85, spe: s.spe ?? (i === 0 ? 100 : 50) },
+          rawStats: {
+            atk: s.atk ?? 100,
+            def: s.def ?? 90,
+            spatk: s.spatk ?? 80,
+            spdef: s.spdef ?? 85,
+            spe: s.spe ?? (i === 0 ? 100 : 50),
+          },
           hp: s.hp ?? 100,
           maxHp: s.maxHp ?? 100,
           itemId: s.itemId ?? null,
@@ -398,10 +420,10 @@ describe('switch-in ability dispatch and weather setters', () => {
   })
 
   it('a non-ported onEntry ability still produces its gap line, for leads too', () => {
-    // Lead with unported onEntry ability (Intimidate)
+    // Lead with unported onEntry ability (Anticipation)
     const stateLead = battle(
       [
-        { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] }, spe: 100 },
+        { abilities: { ability: requireAbility('ABILITY_ANTICIPATION'), innates: [null, null, null] }, spe: 100 },
         { spe: 50 },
       ],
       scriptedRng(),
@@ -410,10 +432,10 @@ describe('switch-in ability dispatch and weather setters', () => {
     applyBattleStartPass(stateLead, makeTestDeps(), unmodelledLead)
 
     expect(unmodelledLead).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_INTIMIDATE\'s onEntry hook was not run',
+      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_ANTICIPATION\'s onEntry hook was not run',
     )
 
-    // Replacement switch-in with unported onEntry ability (Download)
+    // Replacement switch-in with unported onEntry ability (Frisk)
     const stateReplacement = battle(
       [
         { hp: 0, spe: 100 },
@@ -423,7 +445,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     )
     stateReplacement.sides[0].party[1] = {
       ...mon({
-        abilities: { ability: requireAbility('ABILITY_DOWNLOAD'), innates: [null, null, null] },
+        abilities: { ability: requireAbility('ABILITY_FRISK'), innates: [null, null, null] },
         hp: 100,
       }),
     }
@@ -431,7 +453,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     switchIn(stateReplacement, 0, 1, makeTestDeps(), unmodelledRepl)
 
     expect(unmodelledRepl).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_DOWNLOAD\'s onEntry hook was not run',
+      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_FRISK\'s onEntry hook was not run',
     )
   })
 
@@ -559,5 +581,623 @@ describe('switch-in ability dispatch and weather setters', () => {
     applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
     expect(state.field.weather).toBe(WEATHER_RAIN_TEMPORARY)
     expect(unmodelled).toEqual([])
+  })
+})
+
+describe('cycle 41: switch-in stat changes and flag setters', () => {
+  it('Intimidate at battle start lowers opposing Attack by 1 in lead pass', () => {
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] }, spe: 100 },
+        { spe: 50 },
+      ],
+      scriptedRng(),
+    )
+    const unmodelled: string[] = []
+    applyBattleStartPass(state, makeTestDeps(), unmodelled)
+
+    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(unmodelled).toEqual([])
+  })
+
+  it('blocked Intimidate: foe with tauntImmune ability (Inner Focus, Oblivious, Scrappy) has Attack untouched', () => {
+    for (const immuneAbility of ['ABILITY_INNER_FOCUS', 'ABILITY_OBLIVIOUS', 'ABILITY_SCRAPPY']) {
+      const state = battle(
+        [
+          { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] }, spe: 100 },
+          { abilities: { ability: requireAbility(immuneAbility), innates: [null, null, null] }, spe: 50 },
+        ],
+        scriptedRng(),
+      )
+      const unmodelled: string[] = []
+      applyBattleStartPass(state, makeTestDeps(), unmodelled)
+
+      expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+      expect(unmodelled).toEqual([])
+    }
+  })
+
+  it('Substitute blocks Intimidate unless the attacker has Infiltrator', () => {
+    // Normal Intimidate blocked by Substitute
+    const stateNormal = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] } },
+        {},
+      ],
+      scriptedRng(),
+    )
+    stateNormal.battlers[1]!.mon.status2 |= STATUS2_SUBSTITUTE
+    const unmodelledNormal: string[] = []
+    applySwitchInAbilities(stateNormal, 0, makeTestDeps(), unmodelledNormal)
+    expect(stateNormal.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(unmodelledNormal).toEqual([])
+
+    // Intimidate + Infiltrator bypasses Substitute
+    const stateInfiltrator = battle(
+      [
+        {
+          abilities: {
+            ability: requireAbility('ABILITY_INTIMIDATE'),
+            innates: [requireAbility('ABILITY_INFILTRATOR'), null, null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    stateInfiltrator.battlers[1]!.mon.status2 |= STATUS2_SUBSTITUTE
+    const unmodelledInfil: string[] = []
+    applySwitchInAbilities(stateInfiltrator, 0, makeTestDeps(), unmodelledInfil)
+    expect(stateInfiltrator.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(unmodelledInfil).toEqual([])
+  })
+
+  it('Guard Dog inverts Intimidate from -1 Attack to +1 Attack', () => {
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] } },
+        { abilities: { ability: requireAbility('ABILITY_GUARD_DOG'), innates: [null, null, null] } },
+      ],
+      scriptedRng(),
+    )
+    const unmodelled: string[] = []
+    applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
+
+    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(unmodelled).toEqual([])
+  })
+
+  it('Clear Body and Hyper Cutter block Intimidate Attack drop via changeStatBuffs', () => {
+    for (const blockerAbility of ['ABILITY_CLEAR_BODY', 'ABILITY_HYPER_CUTTER']) {
+      const state = battle(
+        [
+          { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] } },
+          { abilities: { ability: requireAbility(blockerAbility), innates: [null, null, null] } },
+        ],
+        scriptedRng(),
+      )
+      const unmodelled: string[] = []
+      applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
+
+      expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+      expect(unmodelled).toEqual([])
+    }
+  })
+
+  it('innate-slot Intimidate activates properly', () => {
+    const state = battle(
+      [
+        { abilities: { ability: null, innates: [requireAbility('ABILITY_INTIMIDATE'), null, null] } },
+        {},
+      ],
+      scriptedRng(),
+    )
+    const unmodelled: string[] = []
+    applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
+
+    expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(unmodelled).toEqual([])
+  })
+
+  it('Intimidate variants apply their specific stat drops and side effects', () => {
+    // Scare: -1 SpAtk
+    const stateScare = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SCARE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateScare, 0, makeTestDeps(), [])
+    expect(stateScare.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stateScare.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Fearmonger: -1 SpAtk, -1 Atk
+    const stateFearmonger = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FEARMONGER'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateFearmonger, 0, makeTestDeps(), [])
+    expect(stateFearmonger.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stateFearmonger.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+
+    // Terrify: -2 SpAtk
+    const stateTerrify = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_TERRIFY'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateTerrify, 0, makeTestDeps(), [])
+    expect(stateTerrify.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 2)
+
+    // Malicious: -1 highest defending, then -1 highest attacking
+    // Foe has Def 100 > SpDef 85 (defending: Def), Atk 110 > SpAtk 80 (attacking: Atk)
+    const stateMalicious = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_MALICIOUS'), innates: [null, null, null] } },
+        { atk: 110, def: 100, spatk: 80, spdef: 85 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateMalicious, 0, makeTestDeps(), [])
+    expect(stateMalicious.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stateMalicious.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stateMalicious.battlers[1]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE)
+    expect(stateMalicious.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Petrify: -1 Speed and resets opposing buffed stages (> 6 to 6), drops preserved
+    const statePetrify = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_PETRIFY'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    statePetrify.battlers[1]!.mon.statStages[STAT_ATK] = 8
+    statePetrify.battlers[1]!.mon.statStages[STAT_SPATK] = 10
+    statePetrify.battlers[1]!.mon.statStages[STAT_DEF] = 4
+    applySwitchInAbilities(statePetrify, 0, makeTestDeps(), [])
+    expect(statePetrify.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(statePetrify.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePetrify.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePetrify.battlers[1]!.mon.statStages[STAT_DEF]).toBe(4)
+
+    // Champions Entrance: -1 Atk + violentRush flag
+    const stateChampions = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CHAMPIONS_ENTRANCE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateChampions, 0, makeTestDeps(), [])
+    expect(stateChampions.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stateChampions.battlers[0]!.volatiles.violentRush).toBe(true)
+    expect(stateChampions.battlers[0]!.volatiles.started.violentRush).toBe(true)
+  })
+
+  it('Download raises SpAtk when foe Def >= SpDef, and raises Atk when foe SpDef > Def', () => {
+    // Foe Def (100) > SpDef (80) -> raises SpAtk
+    const stateHigherDef = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_DOWNLOAD'), innates: [null, null, null] } },
+        { def: 100, spdef: 80 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateHigherDef, 0, makeTestDeps(), [])
+    expect(stateHigherDef.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(stateHigherDef.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Foe SpDef (100) > Def (80) -> raises Atk
+    const stateHigherSpDef = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_DOWNLOAD'), innates: [null, null, null] } },
+        { def: 80, spdef: 100 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateHigherSpDef, 0, makeTestDeps(), [])
+    expect(stateHigherSpDef.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(stateHigherSpDef.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Tie: foe Def (90) == SpDef (90) -> C loops Def then SpDef with strictly greater (>), so Def wins -> raises SpAtk
+    const stateEqual = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_DOWNLOAD'), innates: [null, null, null] } },
+        { def: 90, spdef: 90 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateEqual, 0, makeTestDeps(), [])
+    expect(stateEqual.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(stateEqual.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('plain stat raisers boost their respective stats by 1 stage', () => {
+    // Intrepid Sword (+1 Atk) and alias Crowned Sword
+    const stateSword = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_INTREPID_SWORD'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSword, 0, makeTestDeps(), [])
+    expect(stateSword.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    const stateCrownedSword = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CROWNED_SWORD'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateCrownedSword, 0, makeTestDeps(), [])
+    expect(stateCrownedSword.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    // Dauntless Shield (+1 Def) and alias Crowned Shield
+    const stateShield = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_DAUNTLESS_SHIELD'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateShield, 0, makeTestDeps(), [])
+    expect(stateShield.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    const stateCrownedShield = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CROWNED_SHIELD'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateCrownedShield, 0, makeTestDeps(), [])
+    expect(stateCrownedShield.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    // Embody Aspect (+1 Speed)
+    const stateAspectSpe = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_EMBODY_ASPECT'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateAspectSpe, 0, makeTestDeps(), [])
+    expect(stateAspectSpe.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    // Embody Aspect Wellspring (+1 SpDef)
+    const stateAspectSpDef = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_EMBODY_ASPECT_WELLSPRING'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateAspectSpDef, 0, makeTestDeps(), [])
+    expect(stateAspectSpDef.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+
+  it("Let's Roll boosts Def and sets Defense Curl, Curlipede also sets Coiled", () => {
+    // Let's Roll
+    const stateLetsRoll = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_LETS_ROLL'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateLetsRoll, 0, makeTestDeps(), [])
+    expect(stateLetsRoll.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect((stateLetsRoll.battlers[0]!.mon.status2 & STATUS2_DEFENSE_CURL) !== 0).toBe(true)
+
+    // Curlipede (Let's Roll + Coil Up)
+    const stateCurlipede = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CURLIPEDE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateCurlipede, 0, makeTestDeps(), [])
+    expect(stateCurlipede.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect((stateCurlipede.battlers[0]!.mon.status2 & STATUS2_DEFENSE_CURL) !== 0).toBe(true)
+    expect((stateCurlipede.battlers[0]!.statuses4 & STATUS4_COILED) !== 0).toBe(true)
+  })
+
+  it('Majestic Moth raises the highest stat by 1 stage', () => {
+    // SpAtk 120 is highest
+    const stateMoth = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_MAJESTIC_MOTH'), innates: [null, null, null] },
+          atk: 80,
+          def: 80,
+          spatk: 120,
+          spdef: 80,
+          spe: 80,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateMoth, 0, makeTestDeps(), [])
+    expect(stateMoth.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(stateMoth.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('weather-gated stat raisers activate only under their corresponding weather', () => {
+    // Sea Guardian: highest stat in Rain
+    const stateSeaRain = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_SEA_GUARDIAN'), innates: [null, null, null] },
+          atk: 130,
+          def: 90,
+          spatk: 80,
+          spdef: 80,
+          spe: 80,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    stateSeaRain.field.weather = WEATHER_RAIN_TEMPORARY
+    applySwitchInAbilities(stateSeaRain, 0, makeTestDeps(), [])
+    expect(stateSeaRain.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    // Sea Guardian: no Rain -> no boost
+    const stateSeaNoRain = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_SEA_GUARDIAN'), innates: [null, null, null] },
+          atk: 130,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSeaNoRain, 0, makeTestDeps(), [])
+    expect(stateSeaNoRain.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Sun Worship: in Sun
+    const stateSun = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_SUN_WORSHIP'), innates: [null, null, null] },
+          spatk: 130,
+          atk: 80,
+          def: 80,
+          spdef: 80,
+          spe: 80,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    stateSun.field.weather = WEATHER_SUN_TEMPORARY
+    applySwitchInAbilities(stateSun, 0, makeTestDeps(), [])
+    expect(stateSun.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    const stateSunNoSun = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_SUN_WORSHIP'), innates: [null, null, null] },
+          spatk: 130,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSunNoSun, 0, makeTestDeps(), [])
+    expect(stateSunNoSun.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+
+    // Greater Spirit: in Fog
+    const stateFog = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_GREATER_SPIRIT'), innates: [null, null, null] },
+          spe: 130,
+          atk: 80,
+          def: 80,
+          spatk: 80,
+          spdef: 80,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    stateFog.field.weather = WEATHER_FOG_TEMPORARY
+    applySwitchInAbilities(stateFog, 0, makeTestDeps(), [])
+    expect(stateFog.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+
+    const stateFogNoFog = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_GREATER_SPIRIT'), innates: [null, null, null] },
+          spe: 130,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateFogNoFog, 0, makeTestDeps(), [])
+    expect(stateFogNoFog.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('Furnace boosts Speed by 2 only if the side has Stealth Rock of type 5 (ROCK)', () => {
+    // Valid Stealth Rock (type 5)
+    const stateFurnaceValid = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FURNACE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    stateFurnaceValid.sides[0]!.statuses |= SIDE_STATUS_STEALTH_ROCK
+    stateFurnaceValid.sides[0]!.timers.stealthRockType = 5
+    applySwitchInAbilities(stateFurnaceValid, 0, makeTestDeps(), [])
+    expect(stateFurnaceValid.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 2)
+
+    // No Stealth Rock
+    const stateFurnaceNoRocks = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FURNACE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateFurnaceNoRocks, 0, makeTestDeps(), [])
+    expect(stateFurnaceNoRocks.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+
+    // Stealth Rock of wrong type (e.g. Steel type 8)
+    const stateFurnaceWrongType = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_FURNACE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    stateFurnaceWrongType.sides[0]!.statuses |= SIDE_STATUS_STEALTH_ROCK
+    stateFurnaceWrongType.sides[0]!.timers.stealthRockType = 8
+    applySwitchInAbilities(stateFurnaceWrongType, 0, makeTestDeps(), [])
+    expect(stateFurnaceWrongType.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('Berserk DNA raises highest attacking stat by 2 and sets STATUS2_ENRAGED', () => {
+    const stateBerserk = battle(
+      [
+        {
+          abilities: { ability: requireAbility('ABILITY_BERSERK_DNA'), innates: [null, null, null] },
+          atk: 130,
+          spatk: 80,
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateBerserk, 0, makeTestDeps(), [])
+    expect(stateBerserk.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+    expect((stateBerserk.battlers[0]!.mon.status2 & STATUS2_ENRAGED) !== 0).toBe(true)
+  })
+
+  it('flag setter abilities set volatile and status4 flags with their started twins', () => {
+    // Violent Rush
+    const stateViolent = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_VIOLENT_RUSH'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateViolent, 0, makeTestDeps(), [])
+    expect(stateViolent.battlers[0]!.volatiles.violentRush).toBe(true)
+    expect(stateViolent.battlers[0]!.volatiles.started.violentRush).toBe(true)
+
+    // Showdown Mode
+    const stateShowdown = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SHOWDOWN_MODE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateShowdown, 0, makeTestDeps(), [])
+    expect(stateShowdown.battlers[0]!.volatiles.showdownMode).toBe(true)
+    expect(stateShowdown.battlers[0]!.volatiles.started.showdownMode).toBe(true)
+
+    // Rapid Response
+    const stateRapid = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_RAPID_RESPONSE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateRapid, 0, makeTestDeps(), [])
+    expect(stateRapid.battlers[0]!.volatiles.rapidResponse).toBe(true)
+    expect(stateRapid.battlers[0]!.volatiles.started.rapidResponse).toBe(true)
+
+    // On the Prowl (and Overwatch alias)
+    const stateProwl = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ON_THE_PROWL'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateProwl, 0, makeTestDeps(), [])
+    expect(stateProwl.battlers[0]!.volatiles.onTheProwl).toBe(true)
+    expect(stateProwl.battlers[0]!.volatiles.started.onTheProwl).toBe(true)
+
+    const stateOverwatch = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_OVERWATCH'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateOverwatch, 0, makeTestDeps(), [])
+    expect(stateOverwatch.battlers[0]!.volatiles.onTheProwl).toBe(true)
+    expect(stateOverwatch.battlers[0]!.volatiles.started.onTheProwl).toBe(true)
+
+    // Coil Up (and Sidewinder alias)
+    const stateCoil = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_COIL_UP'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateCoil, 0, makeTestDeps(), [])
+    expect((stateCoil.battlers[0]!.statuses4 & STATUS4_COILED) !== 0).toBe(true)
+
+    const stateSidewinder = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_SIDEWINDER'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSidewinder, 0, makeTestDeps(), [])
+    expect((stateSidewinder.battlers[0]!.statuses4 & STATUS4_COILED) !== 0).toBe(true)
+
+    // Cutthroat (and Edgelord alias)
+    const stateCutthroat = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_CUTTHROAT'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateCutthroat, 0, makeTestDeps(), [])
+    expect((stateCutthroat.battlers[0]!.statuses4 & STATUS4_CUTTHROAT) !== 0).toBe(true)
+
+    const stateEdgelord = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_EDGELORD'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateEdgelord, 0, makeTestDeps(), [])
+    expect((stateEdgelord.battlers[0]!.statuses4 & STATUS4_CUTTHROAT) !== 0).toBe(true)
+  })
+
+  it('Pressure resets self stat drops (<= 5 to 6) and resets opponent stat buffs (>= 7 to 6)', () => {
+    const statePressure = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_PRESSURE'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    // Caster has drops (< 6) and a buff (> 6)
+    statePressure.battlers[0]!.mon.statStages[STAT_ATK] = 4
+    statePressure.battlers[0]!.mon.statStages[STAT_DEF] = 5
+    statePressure.battlers[0]!.mon.statStages[STAT_SPATK] = 8
+
+    // Opponent has buffs (> 6) and a drop (< 6)
+    statePressure.battlers[1]!.mon.statStages[STAT_ATK] = 9
+    statePressure.battlers[1]!.mon.statStages[STAT_SPEED] = 8
+    statePressure.battlers[1]!.mon.statStages[STAT_DEF] = 3
+
+    applySwitchInAbilities(statePressure, 0, makeTestDeps(), [])
+
+    // Caster drops reset to 6, caster buff preserved
+    expect(statePressure.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePressure.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePressure.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(8)
+
+    // Opponent buffs reset to 6, opponent drop preserved
+    expect(statePressure.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePressure.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+    expect(statePressure.battlers[1]!.mon.statStages[STAT_DEF]).toBe(3)
+  })
+
+  it('Intimidate in doubles: an immune first target stops the partner from being hit (abilityPopupOverwrite)', () => {
+    const intimidator = { abilities: { ability: requireAbility('ABILITY_INTIMIDATE'), innates: [null, null, null] } as SimBattleMon['abilities'] }
+    const immune = { abilities: { ability: requireAbility('ABILITY_INNER_FOCUS'), innates: [null, null, null] } as SimBattleMon['abilities'] }
+    const blocked = battle([intimidator, immune, {}, {}], scriptedRng())
+    applySwitchInAbilities(blocked, 0, makeTestDeps(), [])
+    expect(blocked.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(blocked.battlers[3]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+
+    const both = battle([intimidator, {}, {}, {}], scriptedRng())
+    applySwitchInAbilities(both, 0, makeTestDeps(), [])
+    expect(both.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(both.battlers[3]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(both.battlers[2]!.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('Download still reads a fainted opposite battler', () => {
+    const state = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_DOWNLOAD'), innates: [null, null, null] } },
+        { hp: 0, def: 80, spdef: 100 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    // SpDef 100 > Def 80 -> GetHighestDefendingStatId = STAT_SPDEF -> +1 Atk
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+
+  it("Let's Roll assigns status2, clearing confusion", () => {
+    const state = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_LETS_ROLL'), innates: [null, null, null] } }, {}],
+      scriptedRng(),
+    )
+    state.battlers[0]!.mon.status2 = 2
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.battlers[0]!.mon.status2).toBe(STATUS2_DEFENSE_CURL)
+    expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+
+  it('Intrepid Sword at +6 still fires under Contrary (CompareStat flips), lowering Attack', () => {
+    const state = battle(
+      [
+        {
+          abilities: {
+            ability: requireAbility('ABILITY_INTREPID_SWORD'),
+            innates: [requireAbility('ABILITY_CONTRARY'), null, null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.battlers[0]!.mon.statStages[STAT_ATK] = 12
+    applySwitchInAbilities(state, 0, makeTestDeps(), [])
+    expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(11)
   })
 })

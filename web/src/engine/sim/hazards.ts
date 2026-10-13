@@ -73,7 +73,7 @@ const TYPE_NAME_BY_ID = [
   'NORMAL', 'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'MYSTERY',
   'FIRE', 'WATER', 'GRASS', 'ELECTRIC', 'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY', 'STELLAR',
 ] as const
-const TYPE_ROCK_ID = 5
+export const TYPE_ROCK_ID = 5
 
 /**
  * All 2 abilities with `bitfields.stealthRockImmune` in data/v2.65beta/abilityHooks.json

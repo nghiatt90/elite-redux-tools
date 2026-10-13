@@ -9,9 +9,13 @@ import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  NUM_BATTLE_STATS,
   STAT_ACC,
   STAT_ATK,
+  STAT_DEF,
+  STAT_SPEED,
   STAT_SPATK,
+  STAT_SPDEF,
   STATUS1_BLEED,
   STATUS1_POISON_ANY,
   STATUS3_EMBARGO,
@@ -282,6 +286,118 @@ export function getHighestAttackingStatId(
   // Ties prefer STAT_ATK because check is strictly greater (`>`).
   if (spAtkStat > atkStat) return STAT_SPATK
   return STAT_ATK
+}
+
+/**
+ * GetHighestDefendingStatId, src/battle_util.c:8769-8788.
+ * Evaluates Defense vs Special Defense with stat stages (if includeStatStages is true).
+ * In C: for (i = STAT_DEF; i <= STAT_SPDEF; i += STAT_SPDEF - STAT_DEF)
+ * Ties prefer STAT_DEF because check is strictly greater (`>`).
+ */
+export function getHighestDefendingStatId(
+  state: BattleState,
+  battlerId: number,
+  statStageRatios: [number, number][],
+): number {
+  const battler = state.battlers[battlerId]
+  if (!battler) return STAT_DEF
+
+  const benefits = benefitsFromStatBuffs(state, battlerId)
+
+  let defStage = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  if (!benefits) defStage = Math.min(defStage, DEFAULT_STAT_STAGE)
+  const defRatio = statStageRatios[defStage] ?? [1, 1]
+  const defStat = Math.floor((battler.mon.rawStats.def * defRatio[0]) / defRatio[1])
+
+  let spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+  if (!benefits) spDefStage = Math.min(spDefStage, DEFAULT_STAT_STAGE)
+  const spDefRatio = statStageRatios[spDefStage] ?? [1, 1]
+  const spDefStat = Math.floor((battler.mon.rawStats.spdef * spDefRatio[0]) / spDefRatio[1])
+
+  if (spDefStat > defStat) return STAT_SPDEF
+  return STAT_DEF
+}
+
+/**
+ * GetHighestStatId, src/battle_util.c:8746, 8724-8744.
+ * Walks in C struct order: STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF.
+ * Ties prefer earlier stat because check is strictly greater (`>`).
+ */
+export function getHighestStatId(
+  state: BattleState,
+  battlerId: number,
+  statStageRatios: [number, number][],
+): number {
+  const battler = state.battlers[battlerId]
+  if (!battler) return STAT_ATK
+
+  const benefits = benefitsFromStatBuffs(state, battlerId)
+
+  const stats: Array<[number, keyof BattlerState['mon']['rawStats']]> = [
+    [STAT_ATK, 'atk'],
+    [STAT_DEF, 'def'],
+    [STAT_SPEED, 'spe'],
+    [STAT_SPATK, 'spatk'],
+    [STAT_SPDEF, 'spdef'],
+  ]
+
+  let highestId = STAT_ATK
+  let highestStat = 0
+
+  for (const [id, key] of stats) {
+    let stage = battler.mon.statStages[id] ?? DEFAULT_STAT_STAGE
+    if (!benefits) stage = Math.min(stage, DEFAULT_STAT_STAGE)
+    const ratio = statStageRatios[stage] ?? [1, 1]
+    const val = Math.floor((battler.mon.rawStats[key] * ratio[0]) / ratio[1])
+
+    if (val > highestStat) {
+      highestStat = val
+      highestId = id
+    }
+  }
+
+  return highestId
+}
+
+// src/battle_script_commands.h:50-52
+export const RESET_ALL_STATS = 0
+export const RESET_STAT_BUFFS = 1
+export const RESET_STAT_DROPS = -1
+
+/**
+ * TryResetBattlerStatChanges, src/battle_script_commands.c:9957-9986.
+ */
+export function tryResetBattlerStatChanges(
+  state: BattleState,
+  battlerId: number,
+  comparison: number,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+
+  battler.volatiles.stockpileDef = 0
+  battler.volatiles.stockpileSpDef = 0
+
+  let ret = false
+  for (let j = 0; j < NUM_BATTLE_STATS; j++) {
+    const current = battler.mon.statStages[j] ?? DEFAULT_STAT_STAGE
+    if (comparison === RESET_ALL_STATS && current === DEFAULT_STAT_STAGE) continue
+    if (comparison === RESET_STAT_BUFFS && current <= DEFAULT_STAT_STAGE) continue
+    if (comparison === RESET_STAT_DROPS && current >= DEFAULT_STAT_STAGE) continue
+
+    ret = true
+    battler.mon.statStages[j] = DEFAULT_STAT_STAGE
+  }
+
+  if (
+    (comparison === RESET_ALL_STATS || comparison === RESET_STAT_BUFFS) &&
+    battler.volatiles.critBoost
+  ) {
+    ret = true
+    battler.volatiles.critBoost = 0
+  }
+
+  return ret
 }
 
 /**
