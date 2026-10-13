@@ -142,6 +142,7 @@ import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
 import { runMoveEnd } from './moveEnd'
+import { applyAbsorbEffect } from './absorb'
 import {
   PARTY_SIZE,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -358,6 +359,7 @@ export interface DamageResolution {
   targetDamage: number | null
   attackerDamage: number | null
   unmodelled: string[]
+  absorbingAbility?: string | null
 }
 
 export interface DamageResolveContext {
@@ -1196,7 +1198,62 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       continue
     }
 
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+
+    if (absorbingAbility) {
+      const absorbOutcome = applyAbsorbEffect({
+        state,
+        attackerId: battlerId,
+        targetId,
+        absorbingAbility,
+        moveId: action.chosenMove.id,
+        deps,
+        unmodelled,
+      })
+
+      // In C: JumpIfMoveFailed jumps to BattleScript_AfterAbsorbEffect (battle_script_commands.c:1221),
+      // which sets MOVE_RESULT_DOESNT_AFFECT_FOE and jumps to BattleScript_MoveEnd (battle_scripts_1.s:10038-10042).
+      // Damage calculation and secondary effects (seteffectwithchance) are skipped entirely.
+      const moveEndOutcome = runMoveEnd({
+        state,
+        attackerId: battlerId,
+        targetId,
+        moveId: action.chosenMove.id,
+        targetDamage: 0,
+        hpDealt: 0,
+        moveEffect2: null,
+        deps,
+        unmodelled,
+        fainted: [],
+      })
+
+      const finalStatChanges: StatChangeOutcome[] = []
+      if (absorbOutcome.statChanges.length > 0) finalStatChanges.push(...absorbOutcome.statChanges)
+      if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
+
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+      }
+
+      outcomes.push({
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        battleOver: false,
+        missed: false,
+        targetId,
+        targetDamage: 0,
+        attackerDamage: moveEndOutcome.attackerDamage,
+        cancelledBy: null,
+        confusionSelfHitDamage: null,
+        statChanges: finalStatChanges.length > 0 ? finalStatChanges : null,
+        statusApplied: moveEndOutcome.statusApplied,
+        unmodelled: [...unmodelled, ...damageUnmodelled],
+        fainted: [],
+      })
+      continue
+    }
 
     // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure stops HP at 1
     const targetBattler = state.battlers[targetId]

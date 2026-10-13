@@ -532,7 +532,10 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
      * in this field. */
     isGrounded: !mon.types.includes('FLYING'),
     semiInvulnerable: semiInvulnerableState(battler.statuses3),
-    abilityOn: false,
+    // RESOURCE_FLAG_FLASH_FIRE is the only activation state the sim tracks so far. abilityOn is one
+    // per-battler toggle, so a Flash Fire holder that also has Unburden / Slow Start / Stakeout etc.
+    // would flip those too -- acceptable until those abilities get their own state.
+    abilityOn: Boolean(battler.volatiles.flashFire),
     gender: mon.gender,
     boostedStat: null,
     // Derived: the turn loop maintains this one.

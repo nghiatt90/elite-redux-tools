@@ -201,6 +201,8 @@ export interface VolatileState {
   iceStatue: boolean
   usedMonotypeEntry: boolean
   drenched: number // :2
+  /** RESOURCE_FLAG_FLASH_FIRE (src/battle_util.c:4462, include/battle.h:68). */
+  flashFire: boolean
 }
 
 /** `struct RoundStruct`, include/battle.h:164-206 (gRoundStructs, battle.h:1011)

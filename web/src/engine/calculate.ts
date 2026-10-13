@@ -55,7 +55,7 @@ import {
   computeAbilityMultiplier,
   computeAfterTypeEffectiveness,
   computeAttackerHasMoldBreaker,
-  computeIsAbsorbed,
+  computeAbsorbingAbility,
   computeIsImmune,
   computeTypeEffectivenessWithAbilities,
   computeInfiltratesScreens,
@@ -206,6 +206,7 @@ export interface DamageCalcResult {
    * defender holding Bad Luck/Bad Omen at once is an extreme enough edge case
    * that this simplification was chosen over duplicating that machinery here. */
   isForcedMinRoll: boolean
+  absorbingAbility?: string | null
 }
 
 function toDamageContext(scenario: DamageCalcScenario): DamageContext {
@@ -829,7 +830,7 @@ function calcInternal(
    * unlike hitModifier which is a FINAL-stage multiplier. 0 for every non-multi-hit
    * move and for every hit of a move whose OWN scaling isn't hit-index-based. */
   hitIndex: number = 0,
-): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[] } {
+): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[]; absorbingAbility?: string | null } {
   const unmodelled: string[] = []
   const { attacker, defender, move, field, moveBehaviors, battleConstants } = scenario
   const statStageRatios = battleConstants.statStageRatios
@@ -896,8 +897,9 @@ function calcInternal(
   // to 0 here, same as the Levitate/isGrounded case above, is what makes the
   // outer calculateMoveDamage's `isImmune` flag (typeEffectiveness === 0) read
   // correctly for this case too, not just true type immunity.
-  if (computeIsAbsorbed(defender.abilitySlots, { moveType, moveFlags: move.flags }, attackerHasMoldBreaker)) {
-    return { dmg: -1, typeEffectiveness: 0, resolvedMoveType: moveType, unmodelled }
+  const absorbingAbility = computeAbsorbingAbility(defender.abilitySlots, { moveType, moveFlags: move.flags }, attackerHasMoldBreaker)
+  if (absorbingAbility) {
+    return { dmg: -1, typeEffectiveness: 0, resolvedMoveType: moveType, unmodelled, absorbingAbility }
   }
 
   // TestImmunityAbilities (:8978-8997) -- a hard block distinct from both type
@@ -1325,7 +1327,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     forceCrit: boolean,
     hitModifier: number,
     hitIndex: number = 0,
-  ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[] } {
+  ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[]; absorbingAbility?: string | null } {
     const primary = evaluate(moveType, forceCrit, hitModifier, hitIndex)
     let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
@@ -1334,7 +1336,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
       if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
     }
 
-    if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
+    if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility }
 
     // random factor, src/battle_util.c:7815-7821 -- Bad Luck/Bad Omen force
     // roll=15 on the defender's side; surfaced via the result's own
@@ -1343,13 +1345,14 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     // CALLER's job to know only rolls[0] is reachable when that flag is set.
     let dmg = idiv(best.dmg * (100 - damageRoll), 100)
     if (dmg === 0) dmg = 1
-    return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled }
+    return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility }
   }
 
   const unmodelled = new Set<string>()
   const rolls: number[] = []
   let typeEffectiveness = uq(1.0)
   let effectiveMoveType = moveType
+  let absorbingAbility: string | null = null
   // `roll` is the C's own roll variable (multiplier = (100-roll)%, so roll=0 is the
   // maximum 100% hit and roll=15 the minimum 85% hit, src/battle_util.c:7816-7817).
   // Iterated 15 -> 0 here so the OUTPUT array itself reads ascending (index 0 =
@@ -1360,6 +1363,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     rolls.push(result.dmg)
     typeEffectiveness = result.typeEffectiveness
     effectiveMoveType = result.effectiveMoveType
+    if (result.absorbingAbility) absorbingAbility = result.absorbingAbility
     result.unmodelled.forEach((u) => unmodelled.add(u))
   }
 
@@ -1425,5 +1429,6 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     totalRolls,
     totalCritRolls,
     isForcedMinRoll,
+    absorbingAbility: absorbingAbility ?? null,
   }
 }

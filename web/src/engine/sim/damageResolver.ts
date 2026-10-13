@@ -131,7 +131,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       }
       const result = calculateMoveDamage(scenario)
       unmodelled.push(...result.unmodelled)
-      if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled }
+      if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled, absorbingAbility: result.absorbingAbility ?? null }
 
       // Cmd_critcalc runs before Cmd_damagecalc (battle_script_commands.c:1568-1585).
       const denominator = result.critChanceDenominator
@@ -142,12 +142,12 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       const values = result.hitCount === null
         ? (crit ? result.critRolls : result.rolls)
         : (crit ? result.totalCritRolls : result.totalRolls)
-      if (!values) return { targetDamage: null, attackerDamage: null, unmodelled }
+      if (!values) return { targetDamage: null, attackerDamage: null, unmodelled, absorbingAbility: null }
       if (result.hitCount !== null) unmodelled.push('multi-hit per-hit rolls and crits are not independently drawn')
       if (move.effect === 'EFFECT_ABSORB') {
         unmodelled.push('drain is not modelled yet')
       }
-      return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled }
+      return { targetDamage: values[15 - roll], attackerDamage: null, unmodelled, absorbingAbility: null }
     },
   }
 }

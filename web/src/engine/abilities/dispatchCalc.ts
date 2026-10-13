@@ -165,20 +165,24 @@ export function getParentalBondMultiplier(trigger: ParentalBondTrigger | null, t
 }
 
 /**
- * TestAbsorbingAbilities, src/battle_util.c:8961-8969 -- true if any of the
- * defender's (unsuppressed) abilities redirects this move away from dealing damage.
+ * TestAbsorbingAbilities, src/battle_util.c:8961-8969 -- returns the ability id if any of the
+ * defender's (unsuppressed) abilities redirects this move away from dealing damage, or null.
  * checkMoldBreaker=TRUE in the C, so this uses the same suppressedByMoldBreaker
  * predicate as the defensive-multiplier loop and onCrit's defender run.
  */
-export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbContext, attackerHasMoldBreaker: boolean): boolean {
-  let absorbed = false
-  forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
+export function computeAbsorbingAbility(defenderSlots: AbilitySlots, ctx: OnAbsorbContext, attackerHasMoldBreaker: boolean): string | null {
+  let absorbingAbility: string | null = null
+  forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl, id) => {
     if (impl.onAbsorb?.(ctx)) {
-      absorbed = true
+      absorbingAbility = id
       return 'break'
     }
   })
-  return absorbed
+  return absorbingAbility
+}
+
+export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbContext, attackerHasMoldBreaker: boolean): boolean {
+  return computeAbsorbingAbility(defenderSlots, ctx, attackerHasMoldBreaker) !== null
 }
 
 /**

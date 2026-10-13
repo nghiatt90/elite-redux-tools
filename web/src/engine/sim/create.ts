@@ -131,6 +131,7 @@ export function createVolatileState(): VolatileState {
     iceStatue: false,
     usedMonotypeEntry: false,
     drenched: 0,
+    flashFire: false,
   }
 }
 
