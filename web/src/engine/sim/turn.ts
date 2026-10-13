@@ -120,7 +120,7 @@
 //     buildTurnOrderContext below assembles a context whose isBattlerGrounded is
 //     the real port.
 
-import type { BattleOutcome, BattleState } from './state'
+import type { BattleOutcome, BattleState, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderContext, TurnOrder } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
@@ -135,19 +135,22 @@ import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
 import { createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
 import type { EndTurnEffectResult } from './endTurn'
-import { runEndTurnEffects } from './endTurn'
+import { canBattlerHeal, runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
-import { runMoveEnd } from './moveEnd'
+import { getBattlerAbilitySlotsReverse, runMoveEnd } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import {
+  hasFlag,
   PARTY_SIZE,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_WIDE_GUARD,
+  STATUS1_ANY,
+  STATUS3_CHARGED_UP,
 } from './constants'
 import type { MoveBehaviors } from '../basePower'
 import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
@@ -155,6 +158,7 @@ import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
   changeStatBuffsImplicit,
+  isSimAbilitySuppressed,
   MOVE_EFFECT_ATK_MINUS_1,
   MOVE_EFFECT_DEF_MINUS_1,
   MOVE_EFFECT_SP_DEF_MINUS_1,
@@ -904,17 +908,185 @@ export function applyDamage(state: BattleState, battlerId: number, damage: numbe
  * `OpponentHandleChoosePokemon` being the one real function both call sites
  * reach in the C.
  *
- * NOT ported, gapped by name only when reached: `switchoutabilities`
- * (Regenerator/Natural Cure-style switch-OUT ability hooks, a real
- * mechanism distinct from switchIn.ts's own switch-IN hook scan) and the
- * Pursuit-style `jumpifnopursuitswitchdmg` branch (an opposing Pursuit user
- * damaging the switching mon before it leaves) -- neither has a hook wired
- * anywhere in this sim (no OnSwitchOut ability context exists, and Pursuit's
- * own switch-detection needs `defenderIsSwitching`, which aiCalcDamage.ts's
- * own header already notes is hardcoded false). Hazards on entry stay
- * unreachable, same precedent as switchIn.ts's own header.
+ * Ported: `switchoutabilities` (BattleScript_DoSwitchOut, battle_scripts_1.s:7211;
+ * Cmd_switchoutabilities, src/battle_script_commands.c:12102-12120), dispatching
+ * Regenerator, Eternal Blessing, Natural Cure, Self-Repair, Natural Recovery,
+ * and reporting gaps for abilities requiring unmodelled state (Toxic Spill, Trash Heap,
+ * Generator, Energized, Zero to Hero, Retriever, Strikeout).
+ *
+ * NOT ported, gapped by name only when reached: Pursuit-style `jumpifnopursuitswitchdmg`
+ * branch (an opposing Pursuit user damaging the switching mon before it leaves) --
+ * Pursuit's own switch-detection needs `defenderIsSwitching`, which aiCalcDamage.ts's
+ * own header already notes is hardcoded false. Hazards on entry stay unreachable, same
+ * precedent as switchIn.ts's own header.
  */
-const SWITCH_OUT_HOOK_ABILITIES: ReadonlySet<string> = new Set(['ABILITY_REGENERATOR', 'ABILITY_NATURAL_CURE', 'ABILITY_SELF_REPAIR', 'ABILITY_NATURAL_RECOVERY'])
+export const SWITCH_OUT_HOOK_ABILITIES: ReadonlySet<string> = new Set([
+  'ABILITY_REGENERATOR',
+  'ABILITY_ETERNAL_BLESSING',
+  'ABILITY_NATURAL_CURE',
+  'ABILITY_SELF_REPAIR',
+  'ABILITY_NATURAL_RECOVERY',
+  'ABILITY_TOXIC_SPILL',
+  'ABILITY_TRASH_HEAP',
+  'ABILITY_GENERATOR',
+  'ABILITY_ENERGIZED',
+  'ABILITY_ZERO_TO_HERO',
+  'ABILITY_RETRIEVER',
+  'ABILITY_STRIKEOUT',
+])
+
+/**
+ * Port of Cmd_switchoutabilities (src/battle_script_commands.c:12102-12120).
+ *
+ * Runs on-field exit hooks when a living battler switches out (battle_scripts_1.s:7211).
+ *
+ * Evaluates battlers in order starting from the switching battler:
+ *   for (int i = 0; i < gBattlersCount; i++) {
+ *     int battler = (gActiveBattler + i) % gBattlersCount;
+ *     FILTER(i == 0 || IsBattlerAlive(battler))
+ *     ON_ABILITY(battler, FALSE,
+ *       gAbilities[ability].onExit && IsApplyOnFlagAppropriate(gActiveBattler, battler, gAbilities[ability].onExitFor),
+ *       ...)
+ *   }
+ *
+ * Within each battler, scans ability slots in reverse order (slot 3 -> 2 -> 1 -> 0, matching ON_ABILITY).
+ * Checks suppression (IsSuppressed, checkMoldBreaker=FALSE -> Neutralizing Gas / Gastro Acid).
+ */
+export function dispatchSwitchOutAbilities(
+  state: BattleState,
+  switchingBattlerId: number,
+  outgoingSlot: SimPartyMon | undefined,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  for (let i = 0; i < state.battlersCount; i++) {
+    const battlerId = (switchingBattlerId + i) % state.battlersCount
+    if (i !== 0 && !isBattlerAlive(state, battlerId)) continue
+    const battler = state.battlers[battlerId]
+    if (!battler) continue
+
+    const slots = getBattlerAbilitySlotsReverse(battler.mon.abilities)
+    for (const { abilityId } of slots) {
+      if (!SWITCH_OUT_HOOK_ABILITIES.has(abilityId)) continue
+
+      // IsApplyOnFlagAppropriate(contextBattler=switchingBattler, sourceBattler=battler, onExitFor), abilities.cc:190-198.
+      // Strikeout has onExitFor = APPLY_ON_FOE, which without APPLY_IGNORE_SELF also passes for the switching
+      // battler itself (:192). All other onExit abilities default to APPLY_ON_SELF.
+      const isFoe = (battlerId & 1) !== (switchingBattlerId & 1)
+      const isSelf = battlerId === switchingBattlerId
+
+      if (abilityId === 'ABILITY_STRIKEOUT') {
+        if (!isFoe && !isSelf) continue
+      } else {
+        if (!isSelf) continue
+      }
+
+      // IsSuppressed(battler, ability, checkMoldBreaker=FALSE)
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, 0, false, deps.dataContext)) {
+        continue
+      }
+
+      switch (abilityId) {
+        case 'ABILITY_REGENERATOR':
+        case 'ABILITY_ETERNAL_BLESSING': {
+          // Impl<ABILITY_REGENERATOR>.onExit (abilities.cc:2106-2111) / Impl<ABILITY_ETERNAL_BLESSING>.onExit (abilities.cc:8156):
+          //   CHECK(IsBattlerAlive(battler))
+          //   CHECK_NOT(BATTLER_MAX_HP(battler))
+          //   BattleScriptCall(BattleScript_RegeneratorExits) -> tryhealpercenthealth BS_STACK_1, 33 + datahpupdate BS_STACK_1
+          // Cmd_tryhealpercenthealth (battle_script_commands.c:7896-7907):
+          //   maxHP * 33 / 100, clamped min 1. Fails if max HP or !CanBattlerHeal.
+          if (battler.mon.hp <= 0) break
+          if (battler.mon.hp >= battler.mon.maxHp) break
+          if (!canBattlerHeal(state, battlerId, battler, unmodelled)) break
+
+          const heal = Math.max(1, Math.trunc((battler.mon.maxHp * 33) / 100))
+          battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+          if (outgoingSlot) outgoingSlot.hp = battler.mon.hp
+          break
+        }
+
+        case 'ABILITY_NATURAL_CURE':
+        case 'ABILITY_SELF_REPAIR': {
+          // Impl<ABILITY_NATURAL_CURE>.onExit (abilities.cc:866-876) / Impl<ABILITY_SELF_REPAIR>.onExit (abilities.cc:5295):
+          //   CHECK(IsBattlerAlive(battler))
+          //   CHECK(gBattleMons[battler].status1 & STATUS1_ANY)
+          //   gBattleMons[battler].status1 &= ~STATUS1_ANY;
+          //   BattleScriptCall(BattleScript_NaturalCureExits) -> curestatus BS_STACK_1 (status1 = 0)
+          if (battler.mon.hp <= 0) break
+          if (!hasFlag(battler.mon.status1, STATUS1_ANY)) break
+
+          battler.mon.status1 = 0
+          if (outgoingSlot) outgoingSlot.status1 = 0
+          break
+        }
+
+        case 'ABILITY_NATURAL_RECOVERY': {
+          // Impl<ABILITY_NATURAL_RECOVERY>.onExit (abilities.cc:6263):
+          //   return Impl<ABILITY_NATURAL_CURE>.onExit(DELEGATE_EXIT) | Impl<ABILITY_REGENERATOR>.onExit(DELEGATE_EXIT)
+          if (battler.mon.hp > 0 && hasFlag(battler.mon.status1, STATUS1_ANY)) {
+            battler.mon.status1 = 0
+            if (outgoingSlot) outgoingSlot.status1 = 0
+          }
+          if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+            const heal = Math.max(1, Math.trunc((battler.mon.maxHp * 33) / 100))
+            battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+            if (outgoingSlot) outgoingSlot.hp = battler.mon.hp
+          }
+          break
+        }
+
+        case 'ABILITY_TOXIC_SPILL':
+        case 'ABILITY_TRASH_HEAP':
+          // Impl<ABILITY_TOXIC_SPILL>.onExit (abilities.cc:5245-5249), Trash Heap aliases it (:8978):
+          // BattleScript_TheToxicWasHasDissapeared (battle_scripts_1.s:9370-9373) only prints a message.
+          break
+
+        case 'ABILITY_GENERATOR': {
+          // Impl<ABILITY_GENERATOR>.onExit (abilities.cc:6200-6204):
+          //   CHECK(gStatuses3[battler] & STATUS3_CHARGED_UP)
+          //   SetSingleUseAbilityCounter(battler, ability, FALSE)
+          if (hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) {
+            unmodelled.push(`battler ${battlerId}: switch-out Generator SetSingleUseAbilityCounter is not modelled`)
+          }
+          break
+        }
+
+        case 'ABILITY_ENERGIZED': {
+          // Impl<ABILITY_ENERGIZED>.onExit (abilities.cc:8730): Impl<ABILITY_GENERATOR>.onExit
+          if (hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) {
+            unmodelled.push(`battler ${battlerId}: switch-out Energized SetSingleUseAbilityCounter is not modelled`)
+          }
+          break
+        }
+
+        case 'ABILITY_ZERO_TO_HERO': {
+          // Impl<ABILITY_ZERO_TO_HERO>.onExit (abilities.cc:7136-7139):
+          //   SetSingleUseAbilityCounter(battler, ability, TRUE)
+          unmodelled.push(`battler ${battlerId}: switch-out Zero to Hero SetSingleUseAbilityCounter is not modelled`)
+          break
+        }
+
+        case 'ABILITY_RETRIEVER': {
+          // Impl<ABILITY_RETRIEVER>.onExit (abilities.cc:6575-6591):
+          //   CHECK(IsBattlerAlive(battler))
+          //   CHECK_NOT(gBattleMons[battler].item)
+          //   restores originalItem from itemStolen / opposingOriginalItems
+          if (battler.mon.hp > 0 && battler.mon.itemId === null) {
+            unmodelled.push(`battler ${battlerId}: switch-out Retriever item restoration is not modelled`)
+          }
+          break
+        }
+
+        case 'ABILITY_STRIKEOUT': {
+          // Impl<ABILITY_STRIKEOUT>.onExit (abilities.cc:11158-11160, onExitFor = APPLY_ON_FOE):
+          //   StrikeoutClearFlags(battler, ability, switchingBattler)
+          unmodelled.push(`battler ${battlerId}: switch-out StrikeoutClearFlags for switching battler ${switchingBattlerId} is not modelled`)
+          break
+        }
+      }
+    }
+  }
+}
 
 function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLoopDeps): string[] {
   const unmodelled: string[] = []
@@ -945,9 +1117,12 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
     outgoingSlot.status1 = battler.mon.status1
   }
 
-  const outgoingAbilities = [battler.mon.abilities.ability, ...battler.mon.abilities.innates]
-  if (outgoingAbilities.some((id) => id !== null && SWITCH_OUT_HOOK_ABILITIES.has(id))) {
-    unmodelled.push(`battler ${battlerId}: switchoutabilities (battle_scripts_1.s:7211) is not applied -- a switch-out ability hook was present on the outgoing mon`)
+  // Cmd_switchoutabilities (battle_scripts_1.s:7211, battle_script_commands.c:12102)
+  dispatchSwitchOutAbilities(state, battlerId, outgoingSlot, deps, unmodelled)
+
+  if (outgoingSlot) {
+    outgoingSlot.hp = battler.mon.hp
+    outgoingSlot.status1 = battler.mon.status1
   }
 
   switchIn(state, battlerId, partyIndex, deps, unmodelled)

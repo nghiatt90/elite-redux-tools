@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
-import { STATUS1_BURN, STATUS1_POISON, STATUS2_CONFUSION, STAT_ATK, DEFAULT_STAT_STAGE, WEATHER_SANDSTORM_PERMANENT } from './constants'
+import { STATUS1_BURN, STATUS1_POISON, STATUS2_CONFUSION, STAT_ATK, DEFAULT_STAT_STAGE, WEATHER_SANDSTORM_PERMANENT, STATUS3_GASTRO_ACID, STATUS3_CHARGED_UP } from './constants'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -55,6 +55,11 @@ const UNPORTED_ENTRY = requireAbility('ABILITY_ANTICIPATION')
 if (!abilityHooks[UNPORTED_ENTRY]?.hooks?.onEntry) throw new Error(`${UNPORTED_ENTRY} no longer has an onEntry hook in abilityHooks.json`)
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 if (abilityHooks[MAGIC_GUARD]?.hooks?.onEntry) throw new Error(`${MAGIC_GUARD} unexpectedly gained an onEntry hook -- pick a different "no gap" ability`)
+const REGENERATOR = requireAbility('ABILITY_REGENERATOR')
+const NATURAL_CURE = requireAbility('ABILITY_NATURAL_CURE')
+const NATURAL_RECOVERY = requireAbility('ABILITY_NATURAL_RECOVERY')
+const GENERATOR = requireAbility('ABILITY_GENERATOR')
+const ZERO_TO_HERO = requireAbility('ABILITY_ZERO_TO_HERO')
 const AIR_BALLOON = requireItem('ITEM_AIR_BALLOON')
 if (AIR_BALLOON.resolvedHoldEffect !== 'HOLD_EFFECT_AIR_BALLOON') throw new Error('ITEM_AIR_BALLOON no longer resolves to HOLD_EFFECT_AIR_BALLOON')
 const LEFTOVERS = requireItem('ITEM_LEFTOVERS')
@@ -518,5 +523,145 @@ describe('executeTurn: a mid-turn CHOSEN switch (performSwitchAction)', () => {
 
     expect(out.actions[0].unmodelled.some((g) => g.includes('nothing to switch into'))).toBe(true)
     expect(state.battlers[0]!.partyIndex).toBe(0) // unchanged
+  })
+
+  it('Regenerator heals a damaged mon on a voluntary switch and the healed HP survives when it switches back in', () => {
+    const leadPartyMon = partyMon({ hp: 50, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 50, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    // Outgoing mon in slot 0 was healed by Math.max(1, Math.trunc(100 * 33 / 100)) = 33 HP -> 50 + 33 = 83 HP.
+    expect(state.sides[0].party[0]!.hp).toBe(83)
+    // Active battler 0 is now reserve (party slot 1)
+    expect(state.battlers[0]!.partyIndex).toBe(1)
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+
+    // Switch battler 0 back to party slot 0 on the next turn.
+    state.battlers[0]!.monToSwitchIntoId = 0
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    // Battler 0 takes the field with the 83 HP that survived in party slot 0.
+    expect(state.battlers[0]!.partyIndex).toBe(0)
+    expect(state.battlers[0]!.mon.hp).toBe(83)
+  })
+
+  it('Regenerator does not heal a mon at full HP on switch-out', () => {
+    const leadPartyMon = partyMon({ hp: 100, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 100, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(state.sides[0].party[0]!.hp).toBe(100)
+  })
+
+  it('Natural Cure clears poison on switch-out', () => {
+    const leadPartyMon = partyMon({ hp: 100, maxHp: 100, status1: STATUS1_POISON, abilities: { ability: NATURAL_CURE, innates: [null, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 100, maxHp: 100, status1: STATUS1_POISON, abilities: { ability: NATURAL_CURE, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(state.sides[0].party[0]!.status1).toBe(0)
+  })
+
+  it('Natural Recovery both heals HP and clears status', () => {
+    const leadPartyMon = partyMon({ hp: 50, maxHp: 100, status1: STATUS1_POISON, abilities: { ability: NATURAL_RECOVERY, innates: [null, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 50, maxHp: 100, status1: STATUS1_POISON, abilities: { ability: NATURAL_RECOVERY, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(state.sides[0].party[0]!.hp).toBe(83)
+    expect(state.sides[0].party[0]!.status1).toBe(0)
+  })
+
+  it('dispatches switch-out abilities held in an innate slot', () => {
+    const leadPartyMon = partyMon({ hp: 50, maxHp: 100, abilities: { ability: null, innates: [REGENERATOR, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 50, maxHp: 100, abilities: { ability: null, innates: [REGENERATOR, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(state.sides[0].party[0]!.hp).toBe(83)
+  })
+
+  it('suppresses switch-out ability when Gastro Acid is active', () => {
+    const leadPartyMon = partyMon({ hp: 50, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } })
+    const reservePartyMon = partyMon({ hp: 100, maxHp: 100 })
+    const state = battle(
+      [{ spe: 200, hp: 50, maxHp: 100, abilities: { ability: REGENERATOR, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [leadPartyMon, reservePartyMon],
+      [partyMon({ hp: 100 })],
+    )
+    state.battlers[0]!.statuses3 |= STATUS3_GASTRO_ACID
+    state.battlers[0]!.monToSwitchIntoId = 1
+
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    executeTurn(state, [switchAction, null], deps(lethalToTarget(0)))
+
+    expect(state.sides[0].party[0]!.hp).toBe(50)
+  })
+
+  it('gaps Generator when Charged Up is set, and Zero to Hero on exit', () => {
+    const stateGen = battle(
+      [{ spe: 200, hp: 100, maxHp: 100, abilities: { ability: GENERATOR, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [partyMon({ abilities: { ability: GENERATOR, innates: [null, null, null] } }), partyMon({ hp: 100 })],
+      [partyMon({ hp: 100 })],
+    )
+    stateGen.battlers[0]!.statuses3 |= STATUS3_CHARGED_UP
+    stateGen.battlers[0]!.monToSwitchIntoId = 1
+    const switchAction: ChosenAction = { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }
+    const outGen = executeTurn(stateGen, [switchAction, null], deps(lethalToTarget(0)))
+    expect(outGen.actions[0].unmodelled.some((m) => m.includes('switch-out Generator SetSingleUseAbilityCounter'))).toBe(true)
+
+    const stateZth = battle(
+      [{ spe: 200, hp: 100, maxHp: 100, abilities: { ability: ZERO_TO_HERO, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
+      scripted(),
+      [partyMon({ abilities: { ability: ZERO_TO_HERO, innates: [null, null, null] } }), partyMon({ hp: 100 })],
+      [partyMon({ hp: 100 })],
+    )
+    stateZth.battlers[0]!.monToSwitchIntoId = 1
+    const outZth = executeTurn(stateZth, [switchAction, null], deps(lethalToTarget(0)))
+    expect(outZth.actions[0].unmodelled.some((m) => m.includes('switch-out Zero to Hero SetSingleUseAbilityCounter'))).toBe(true)
   })
 })
