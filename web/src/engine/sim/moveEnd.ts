@@ -400,7 +400,8 @@ export const ON_ATTACKER_ABILITIES = new Set([
 ])
 
 // Quoted grep: grep -oP '"onBattlerFaints".+?"id":"\KABILITY_[A-Z0-9_]+' data/v2.65beta/abilityHooks.json
-// Dispatched by dispatchOnBattlerFaints; the stat-raise subset is ported (KO_STAT_RAISES), the rest gap when applicable.
+// Dispatched by dispatchOnBattlerFaints; the stat-raise subset (KO_STAT_RAISES), Soul Eater / Predator (KO_SOUL_EATER_ABILITIES),
+// Jaws of Carnage (KO_JAWS_OF_CARNAGE_ABILITIES), and Pretentious (KO_CRIT_BOOST_ABILITIES) are ported; the rest gap when applicable.
 export const ON_BATTLER_FAINTS_ABILITIES = new Set([
   'ABILITY_ADRENALINE_RUSH',
   'ABILITY_APEX_PREDATOR',
@@ -1147,6 +1148,37 @@ export const KO_STAT_RAISES: Record<string, { stats: readonly (number | typeof H
   ABILITY_FORSAKEN_HEART: { stats: [STAT_ATK], moxieClone: false },
 }
 
+// Soul Eater and its aliases (src/abilities.cc: SOUL_EATER :4263, PREDATOR :4619, LOOTER :4625, SCAVENGER :4452,
+// BANDIT :12300 via Scavenger, GHOST_FRENZY :12293, SOUL_DEVOURER :9382, HUNTERS_HORN :6065, MAGMA_EATER :6096,
+// APEX_PREDATOR :8670). BattleScript_HandleSoulEaterEffect heals 25% max HP (battle_scripts_1.s:11454,
+// tryhealpercenthealth BS_STACK_1 25, battle_script_commands.c:7899-7901 floor 1).
+export const KO_SOUL_EATER_ABILITIES = new Set([
+  'ABILITY_SOUL_EATER',
+  'ABILITY_PREDATOR',
+  'ABILITY_LOOTER',
+  'ABILITY_SCAVENGER',
+  'ABILITY_BANDIT',
+  'ABILITY_GHOST_FRENZY',
+  'ABILITY_SOUL_DEVOURER',
+  'ABILITY_HUNTERS_HORN',
+  'ABILITY_MAGMA_EATER',
+  'ABILITY_APEX_PREDATOR',
+])
+
+// Jaws of Carnage and its alias Hungry Maws (src/abilities.cc: JAWS_OF_CARNAGE :5556, HUNGRY_MAWS :10418).
+// Heals 50% max HP if move has FLAG_STRONG_JAW_BOOST (biteBased), else 25% (BattleScript_HandleJawsOfCarnageEffect :11464).
+export const KO_JAWS_OF_CARNAGE_ABILITIES = new Set([
+  'ABILITY_JAWS_OF_CARNAGE',
+  'ABILITY_HUNGRY_MAWS',
+])
+
+// Pretentious and its alias Way of Swiftness (src/abilities.cc: PRETENTIOUS :8116, WAY_OF_SWIFTNESS :8482).
+// Increments volatiles.critBoost if < 3 (BattleScript_AbilityBoostsCrit :8121).
+export const KO_CRIT_BOOST_ABILITIES = new Set([
+  'ABILITY_PRETENTIOUS',
+  'ABILITY_WAY_OF_SWIFTNESS',
+])
+
 export interface FaintDispatchContext {
   state: BattleState
   faintedId: number
@@ -1195,30 +1227,58 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
       if (isSimAbilitySuppressed(state, holder, abilityId, false, attackerId, false, deps.dataContext)) continue
 
       const raise = KO_STAT_RAISES[abilityId]
-      if (!raise) {
-        const msg = `on-faint ability ${abilityId} is not modelled yet`
-        if (!unmodelled.includes(msg)) unmodelled.push(msg)
+      if (raise) {
+        if (raise.moxieClone && !hasAttackerFaintedTarget(ctx)) continue
+
+        for (const stat of raise.stats) {
+          const statId = stat === HIGHEST ? getHighestStatId(holder.mon) : stat
+          const res = changeStatBuffs(
+            state,
+            i,
+            attackerId,
+            targetId,
+            1,
+            statId,
+            MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS,
+            false,
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          if (res.delta !== 0) statChanges.push({ battlerId: i, stat: statId, change: res.delta })
+        }
         continue
       }
-      if (raise.moxieClone && !hasAttackerFaintedTarget(ctx)) continue
 
-      for (const stat of raise.stats) {
-        const statId = stat === HIGHEST ? getHighestStatId(holder.mon) : stat
-        const res = changeStatBuffs(
-          state,
-          i,
-          attackerId,
-          targetId,
-          1,
-          statId,
-          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS,
-          false,
-          { dataContext: deps.dataContext, grounding: deps.grounding },
-          unmodelled,
-          moveId,
-        )
-        if (res.delta !== 0) statChanges.push({ battlerId: i, stat: statId, change: res.delta })
+      if (KO_SOUL_EATER_ABILITIES.has(abilityId)) {
+        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled)) {
+          const heal = Math.max(1, Math.trunc((holder.mon.maxHp * 25) / 100))
+          holder.mon.hp = Math.min(holder.mon.maxHp, holder.mon.hp + heal)
+          syncPartyHp(state, i)
+        }
+        continue
       }
+
+      if (KO_JAWS_OF_CARNAGE_ABILITIES.has(abilityId)) {
+        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled)) {
+          const isBite = Boolean(ctx.moveData?.flags.biteBased)
+          const percent = isBite ? 50 : 25
+          const heal = Math.max(1, Math.trunc((holder.mon.maxHp * percent) / 100))
+          holder.mon.hp = Math.min(holder.mon.maxHp, holder.mon.hp + heal)
+          syncPartyHp(state, i)
+        }
+        continue
+      }
+
+      if (KO_CRIT_BOOST_ABILITIES.has(abilityId)) {
+        if (holder.volatiles.critBoost < 3) {
+          holder.volatiles.critBoost++
+        }
+        continue
+      }
+
+      const msg = `on-faint ability ${abilityId} is not modelled yet`
+      if (!unmodelled.includes(msg)) unmodelled.push(msg)
     }
   }
   return statChanges

@@ -48,6 +48,9 @@ import {
 } from './constants'
 import {
   HALF_RECOIL_ABILITIES,
+  KO_CRIT_BOOST_ABILITIES,
+  KO_JAWS_OF_CARNAGE_ABILITIES,
+  KO_SOUL_EATER_ABILITIES,
   KO_STAT_RAISES,
   NO_RECOIL_ABILITIES,
   ON_BATTLER_FAINTS_ABILITIES,
@@ -256,6 +259,10 @@ const ABILITY_MOXIE = requireAbility('ABILITY_MOXIE')
 const ABILITY_BEAST_BOOST = requireAbility('ABILITY_BEAST_BOOST')
 const ABILITY_SOUL_HEART = requireAbility('ABILITY_SOUL_HEART')
 const ABILITY_SOUL_EATER = requireAbility('ABILITY_SOUL_EATER')
+const ABILITY_PREDATOR = requireAbility('ABILITY_PREDATOR')
+const ABILITY_JAWS_OF_CARNAGE = requireAbility('ABILITY_JAWS_OF_CARNAGE')
+const ABILITY_PRETENTIOUS = requireAbility('ABILITY_PRETENTIOUS')
+const ABILITY_RAMPAGE = requireAbility('ABILITY_RAMPAGE')
 const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
 const ABILITY_AFTERMATH = requireAbility('ABILITY_AFTERMATH')
 const ABILITY_ABSORBANT = requireAbility('ABILITY_ABSORBANT')
@@ -724,36 +731,36 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ABSORBANT is not modelled yet')
   })
 
-  it('conditionally gaps an unported on-faint ability (ABILITY_SOUL_EATER, APPLY_ON_ATTACKER) when its holder KOs', () => {
+  it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_RAMPAGE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
     expect(act.fainted).toContain(1)
-    expect(act.unmodelled).toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+    expect(act.unmodelled).toContain('on-faint ability ABILITY_RAMPAGE is not modelled yet')
   })
 
   it('does not gap an unported on-faint ability when nobody faints', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_RAMPAGE, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_RAMPAGE is not modelled yet')
   })
 
   it('does not gap an APPLY_ON_ATTACKER ability held by the fainted battler or when it is not the attacker', () => {
-    // The defender holds Soul Eater and survives; the attacker faints to Rocky Helmet. Attacker = MAX_BATTLERS_COUNT in
+    // The defender holds Rampage and survives; the attacker faints to Rocky Helmet. Attacker = MAX_BATTLERS_COUNT in
     // VARIOUS_ON_FAINTED_BY_OTHER (battle_script_commands.c:7167), so APPLY_ON_ATTACKER matches nobody.
     const state = battle(
       [
         { hp: 15, maxHp: 120 },
-        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } },
+        { hp: 100, maxHp: 100, abilities: { ability: ABILITY_RAMPAGE, innates: [null, null, null] } },
       ],
       scriptedRng(),
     )
@@ -761,7 +768,7 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
 
     const act = out.actions.find((a) => a.battlerId === 0)!
     expect(act.fainted).toEqual([0])
-    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_RAMPAGE is not modelled yet')
   })
 
   it('no longer gaps Rapid Spin hazard/binding removal (hazards.ts rapidSpinFree)', () => {
@@ -1498,6 +1505,18 @@ describe('Pinned onBattlerFaints tables', () => {
   it('KO_STAT_RAISES only names abilities that have an onBattlerFaints hook', () => {
     for (const id of Object.keys(KO_STAT_RAISES)) expect(ON_BATTLER_FAINTS_ABILITIES.has(id), id).toBe(true)
   })
+
+  it('KO_SOUL_EATER_ABILITIES only names abilities that have an onBattlerFaints hook', () => {
+    for (const id of KO_SOUL_EATER_ABILITIES) expect(ON_BATTLER_FAINTS_ABILITIES.has(id), id).toBe(true)
+  })
+
+  it('KO_JAWS_OF_CARNAGE_ABILITIES only names abilities that have an onBattlerFaints hook', () => {
+    for (const id of KO_JAWS_OF_CARNAGE_ABILITIES) expect(ON_BATTLER_FAINTS_ABILITIES.has(id), id).toBe(true)
+  })
+
+  it('KO_CRIT_BOOST_ABILITIES only names abilities that have an onBattlerFaints hook', () => {
+    for (const id of KO_CRIT_BOOST_ABILITIES) expect(ON_BATTLER_FAINTS_ABILITIES.has(id), id).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2038,3 +2057,191 @@ describe('Shell Bell (MOVEEND_LIFEORB_SHELLBELL, battle_util.c:6066-6083)', () =
     expect(actionOf(out, 0).unmodelled).not.toContain('move-end Shell Bell heal is not modelled yet')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Knock-out abilities beyond stat raises (Soul Eater, Predator, Jaws of Carnage, Pretentious)
+// ---------------------------------------------------------------------------
+
+describe('onBattlerFaints dispatch: beyond stat raises (Soul Eater, Predator, Jaws of Carnage, Pretentious)', () => {
+  it('Predator heals 25% max HP after KOing the target (BattleScript_HandleSoulEaterEffect, battle_scripts_1.s:11454)', () => {
+    // Attacker: maxHp 120, current hp 60. Target: hp 30, maxHp 100.
+    // Tackle deals 30 -> target faints.
+    // Predator onBattlerFaints (Impl<ABILITY_SOUL_EATER>.onBattlerFaints, src/abilities.cc:4620):
+    // maxHP * 25 / 100 = 120 * 25 / 100 = 30 heal.
+    // New HP: min(120, 60 + 30) = 90.
+    const state = battle(
+      [{ hp: 60, maxHp: 120, abilities: { ability: ABILITY_PREDATOR, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.hp).toBe(90)
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_PREDATOR is not modelled yet')
+  })
+
+  it('Predator does not heal when the target survives', () => {
+    // Target takes 30 damage and survives at 70 HP -> dispatchOnBattlerFaints is not invoked.
+    const state = battle(
+      [{ hp: 60, maxHp: 120, abilities: { ability: ABILITY_PREDATOR, innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+
+  it('Soul Eater heals 25% max HP after KOing the target (src/abilities.cc:4263)', () => {
+    // Attacker: maxHp 100, current hp 50. Target: hp 30, maxHp 100.
+    // Tackle deals 30 -> target faints.
+    // Soul Eater heals floor(100 * 25 / 100) = 25.
+    // New HP: min(100, 50 + 25) = 75.
+    const state = battle(
+      [{ hp: 50, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.hp).toBe(75)
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_SOUL_EATER is not modelled yet')
+  })
+
+  it('Soul Eater does not heal when attacker is already at full HP (CHECK_NOT(BATTLER_MAX_HP(battler)))', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('Soul Eater does not heal when CanBattlerHeal returns false (STATUS3_HEAL_BLOCK)', () => {
+    const state = battle(
+      [{ hp: 50, maxHp: 100, abilities: { ability: ABILITY_SOUL_EATER, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    state.battlers[0]!.statuses3 |= STATUS3_HEAL_BLOCK
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.mon.hp).toBe(50)
+  })
+
+  it('Jaws of Carnage heals 50% max HP after a KO with a bite move (BattleScript_HandleJawsOfCarnageEffect, :11464)', () => {
+    // MOVE_BITE carries flags.biteBased (FLAG_STRONG_JAW_BOOST).
+    // Attacker: maxHp 100, current hp 40. Target: hp 30, maxHp 100.
+    // 50% of 100 = 50 heal.
+    // New HP: min(100, 40 + 50) = 90.
+    const state = battle(
+      [{ hp: 40, maxHp: 100, abilities: { ability: ABILITY_JAWS_OF_CARNAGE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_BITE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.hp).toBe(90)
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_JAWS_OF_CARNAGE is not modelled yet')
+  })
+
+  it('Jaws of Carnage heals 25% max HP after a KO with a non-bite move (BattleScript_HandleSoulEaterEffect fallback)', () => {
+    // MOVE_TACKLE has no biteBased flag.
+    // Attacker: maxHp 100, current hp 40. Target: hp 30, maxHp 100.
+    // 25% of 100 = 25 heal.
+    // New HP: min(100, 40 + 25) = 65.
+    const state = battle(
+      [{ hp: 40, maxHp: 100, abilities: { ability: ABILITY_JAWS_OF_CARNAGE, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.hp).toBe(65)
+  })
+
+  it('Pretentious increments volatiles.critBoost by 1 on KO (src/abilities.cc:8116-8125)', () => {
+    // Attacker: critBoost 0. Target: hp 30, maxHp 100.
+    // Pretentious onBattlerFaints: critBoost < 3 -> critBoost++.
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_PRETENTIOUS, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    expect(state.battlers[0]!.volatiles.critBoost).toBe(0)
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.volatiles.critBoost).toBe(1)
+    expect(act.unmodelled).not.toContain('on-faint ability ABILITY_PRETENTIOUS is not modelled yet')
+  })
+
+  it('Pretentious caps at critBoost 3 (CHECK(critBoost < 3))', () => {
+    const state = battle(
+      [{ hp: 100, maxHp: 100, abilities: { ability: ABILITY_PRETENTIOUS, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    state.battlers[0]!.volatiles.critBoost = 3
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    expect(state.battlers[0]!.volatiles.critBoost).toBe(3)
+  })
+
+  it('Predator held by the defender does NOT fire when the attacker faints (APPLY_ON_ATTACKER)', () => {
+    // Defender (slot 1) holds Predator with hp 50 / maxHp 100.
+    // Attacker (slot 0) has hp 15 / maxHp 120 and hits defender holding Rocky Helmet.
+    // Defender takes 10 -> hp 40.
+    // Attacker takes floor(120 / 6) = 20 -> faints in MOVEEND_ITEM_EFFECTS_TARGET.
+    // Faint triggers VARIOUS_ON_FAINTED_BY_OTHER (attacker = MAX_BATTLERS_COUNT):
+    // faintHookApplies('ATTACKER', ...) returns false, so defender does not heal.
+    const state = battle(
+      [
+        { hp: 15, maxHp: 120 },
+        { hp: 50, maxHp: 100, abilities: { ability: ABILITY_PREDATOR, innates: [null, null, null] } },
+      ],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(10), { 1: 'HOLD_EFFECT_ROCKY_HELMET' }))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toEqual([0])
+    expect(state.battlers[1]!.mon.hp).toBe(40)
+  })
+
+  it('Predator in an innate slot fires (ON_ABILITY walks every slot in reverse)', () => {
+    const state = battle(
+      [{ hp: 60, maxHp: 120, abilities: { ability: null, innates: [null, ABILITY_PREDATOR, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battlers[0]!.mon.hp).toBe(90)
+  })
+
+  it('Predator does not heal when KO ends the battle (REQUIRE_NOT(NoAliveMonsForEitherParty), :7133)', () => {
+    const base = battle(
+      [{ hp: 60, maxHp: 120, abilities: { ability: ABILITY_PREDATOR, innates: [null, null, null] } }, { hp: 30, maxHp: 100 }],
+      scriptedRng([0]),
+    )
+    const state = createBattleState({
+      battlers: [base.battlers[0]!, base.battlers[1]!],
+      playerParty: [partyMon(60)],
+      opponentParty: [partyMon(30)],
+      rng: base.rng,
+    })
+    const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
+
+    const act = out.actions.find((a) => a.battlerId === 0)!
+    expect(act.fainted).toContain(1)
+    expect(state.battleOutcome).toBe('WON')
+    expect(state.battlers[0]!.mon.hp).toBe(60)
+  })
+})
+
