@@ -300,6 +300,7 @@ const ABILITY_LOUD_BANG = requireAbility('ABILITY_LOUD_BANG')
 const ABILITY_GRIP_PINCER = requireAbility('ABILITY_GRIP_PINCER')
 const ABILITY_VOLCANO_RAGE = requireAbility('ABILITY_VOLCANO_RAGE')
 const ABILITY_PICKPOCKET = requireAbility('ABILITY_PICKPOCKET')
+const ABILITY_NOSFERATU = requireAbility('ABILITY_NOSFERATU')
 
 // ---------------------------------------------------------------------------
 // Unit Tests
@@ -2899,6 +2900,35 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), null], testDepsWithDamage(fixedDamage(20)))
 
     expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845) is not modelled")
+  })
+
+  describe('Case 25: MOVEEND_ABILITIES_AFTER_RECOIL (Nosferatu)', () => {
+    it('Nosferatu heals half the damage dealt on a contact move', () => {
+      const state = battle(
+        [
+          { hp: 50, maxHp: 100, abilities: { ability: ABILITY_NOSFERATU, innates: [null, null, null] } },
+          { hp: 100, maxHp: 100 },
+        ],
+        scriptedRng(),
+      )
+      executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+      // Dealt 20 damage on contact move; heals half = 10 HP. HP was 50, now 60.
+      expect(state.battlers[0]!.mon.hp).toBe(60)
+    })
+
+    it('Nosferatu does nothing at full HP', () => {
+      const state = battle(
+        [
+          { hp: 100, maxHp: 100, abilities: { ability: ABILITY_NOSFERATU, innates: [null, null, null] } },
+          { hp: 100, maxHp: 100 },
+        ],
+        scriptedRng(),
+      )
+      executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+      expect(state.battlers[0]!.mon.hp).toBe(100)
+    })
   })
 })
 

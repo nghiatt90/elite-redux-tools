@@ -28,6 +28,7 @@ import {
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
+  STAT_ACC,
   STAT_ATK,
   STAT_DEF,
   STAT_SPEED,
@@ -112,9 +113,19 @@ const MOVE_ROOST = requireMove('MOVE_ROOST')
 const MOVE_TACKLE = requireMove('MOVE_TACKLE')
 const MOVE_TAILWIND = requireMove('MOVE_TAILWIND')
 const MOVE_SUNNY_DAY = requireMove('MOVE_SUNNY_DAY')
+// ER's Growl is EFFECT_ATTACK_DOWN_HIT; Baby-Doll Eyes is the EFFECT_ATTACK_DOWN move.
+const MOVE_BABY_DOLL_EYES = requireMove('MOVE_BABY_DOLL_EYES')
+const MOVE_SCREECH = requireMove('MOVE_SCREECH')
+const MOVE_SCARY_FACE = requireMove('MOVE_SCARY_FACE')
+const MOVE_LEER = requireMove('MOVE_LEER')
+const MOVE_COSMIC_POWER = requireMove('MOVE_COSMIC_POWER')
+const MOVE_COIL = requireMove('MOVE_COIL')
+const MOVE_TICKLE = requireMove('MOVE_TICKLE')
+const MOVE_NOBLE_ROAR = requireMove('MOVE_NOBLE_ROAR')
 
 const ABILITY_CONTRARY = requireAbility('ABILITY_CONTRARY')
 const ABILITY_CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
+const ABILITY_DEFIANT = requireAbility('ABILITY_DEFIANT')
 const ABILITY_WHITE_SMOKE = requireAbility('ABILITY_WHITE_SMOKE')
 const ABILITY_CHLOROPLAST = requireAbility('ABILITY_CHLOROPLAST')
 const ABILITY_CUTTHROAT = requireAbility('ABILITY_CUTTHROAT')
@@ -1629,6 +1640,120 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         // RemoveItem (battle_script_commands.c:2231) never writes usedHeldItems.
         expect(state.battlers[0]!.usedHeldItem ?? null).toBeNull()
         expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(1 | (STAT_ATK << 2))
+      })
+    })
+
+    describe('Single-stat target drops (BattleScript_EffectStatDown)', () => {
+      it("Baby-Doll Eyes lowers the foe's Atk by 1", () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_BABY_DOLL_EYES), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+      })
+
+      it("Screech lowers the foe's Def by 2", () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_SCREECH), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 2)
+      })
+
+      it('a stat-drop blocked by Clear Body leaves the stage unchanged', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {},
+            { abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_BABY_DOLL_EYES), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+      })
+
+      it('a stat-drop that misses (scripted RNG on the accuracy draw) changes nothing', () => {
+        const roll = 90
+        const rng = {
+          calls: 0,
+          random16: () => {
+            rng.calls++
+            return roll
+          },
+        }
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_SCREECH), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+      })
+
+      it('Defiant on the target raises Atk by 2 after Leer', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            {},
+            { abilities: { ability: ABILITY_DEFIANT, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_LEER), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+      })
+    })
+
+    describe('Scary Face (BattleScript_EffectScaryFace, battle_scripts_1.s:12050-12065)', () => {
+      it('lowers Speed by 2 with no accuracy draw and sets fear', () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        executeTurn(state, [useMove(1, MOVE_SCARY_FACE), null], testDeps())
+        expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 2)
+        expect(state.battlers[1]!.volatiles.fear).toBe(true)
+        expect(rng.calls).toBe(0)
+      })
+    })
+
+    describe('Remaining self stat-ups', () => {
+      it('Cosmic Power raises Def and SpDef by 1', () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(0, MOVE_COSMIC_POWER), null], deps)
+        expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
+      })
+
+      it('Coil raises Atk, Def and Accuracy', () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(0, MOVE_COIL), null], deps)
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.statStages[STAT_ACC]).toBe(DEFAULT_STAT_STAGE + 1)
+      })
+    })
+
+    describe('Two-stat target drops', () => {
+      it('Tickle lowers Atk and Def', () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_TICKLE), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+        expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
+      })
+
+      it('Noble Roar lowers Atk and SpAtk', () => {
+        const rng = countingRng()
+        const state = battle([{}, {}], rng)
+        const deps = testDeps()
+        executeTurn(state, [useMove(1, MOVE_NOBLE_ROAR), null], deps)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+        expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 1)
       })
     })
   })

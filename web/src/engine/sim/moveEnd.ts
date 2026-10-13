@@ -3074,7 +3074,20 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 25: MOVEEND_ABILITIES_AFTER_RECOIL (:4518-4522)
-  // ABILITYEFFECT_AFTER_RECOIL
+  // ABILITYEFFECT_AFTER_RECOIL (battle_util.c:4722-4732)
+  if (
+    attacker &&
+    attacker.mon.hp > 0 &&
+    targetTurnDamaged &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_NOSFERATU', false, attackerId, false, deps.dataContext) &&
+    isMoveMakingContact(moveData, attacker, deps.grounding.holdEffectOf(attackerId)) &&
+    attacker.mon.hp < attacker.mon.maxHp &&
+    canBattlerHeal(state, attackerId, attacker, unmodelled)
+  ) {
+    const heal = Math.max(1, Math.floor(hpDealt / 2))
+    attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+    syncPartyHp(state, attackerId)
+  }
 
   // Case 26: MOVEEND_LIFEORB_SHELLBELL (:4823-4827, :6066-6110)
   if (attacker && attacker.mon.hp > 0 && targetDamage > 0 && attackerId !== targetId) {

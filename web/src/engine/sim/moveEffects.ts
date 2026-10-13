@@ -41,6 +41,7 @@ import {
   STATUS1_BLEED,
   STATUS1_BURN,
   STATUS2_CURSED,
+  STATUS2_DEFENSE_CURL,
   STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
@@ -50,7 +51,9 @@ import {
   STATUS3_LEECHSEED,
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_YAWN,
+  STATUS4_COILED,
   STATUS4_CUTTHROAT,
+  STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
@@ -262,6 +265,202 @@ function handleSingleStatUp(
   return outcome(ctx, { statChanges, missed: res.missed ?? false })
 }
 
+/**
+ * BattleScript_EffectStatDown, data/battle_scripts_1.s:3666-3687.
+ * Single-stat target drops:
+ * - attackcanceler (handled by caller / target check)
+ * - jumpifsubstituteblocks BattleScript_ButItFailedAtkStringPpReduce (:3668)
+ * - accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:3669)
+ * - attackstring (:3671)
+ * - ppreduce (:3672)
+ * - statbuffchange STAT_BUFF_ALLOW_PTR, BattleScript_StatDownEnd (:3673)
+ * - onStatLowered reaction via dispatchOnStatLowered
+ */
+function handleSingleStatDown(
+  ctx: MoveEffectContext,
+  statId: number,
+  stages: number,
+): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. jumpifsubstituteblocks BattleScript_ButItFailedAtkStringPpReduce (:3668)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId })
+  }
+
+  // 2. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:3669)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. statbuffchange STAT_BUFF_ALLOW_PTR, BattleScript_StatDownEnd (:3673)
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -stages,
+    statId,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
+  }
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  return outcome(ctx, { targetId, statChanges, missed: res.missed ?? false })
+}
+
+/**
+ * BattleScript_EffectScaryFace, data/battle_scripts_1.s:12050-12065.
+ * Scary Face has its own script:
+ * - attackcanceler
+ * - attackstring & ppreduce (:12052-12053)
+ * - statbuffchange STAT_BUFF_ALLOW_PTR, BattleScript_EffectScaryFace_Fear (:12057)
+ * - setmoveeffect MOVE_EFFECT_FEAR, seteffectprimary (:12063-12064)
+ */
+function handleScaryFace(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -2,
+    STAT_SPEED,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+  }
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // seteffectprimary MOVE_EFFECT_FEAR: SetMoveEffect returns early on a fainted effect battler
+  // (battle_script_commands.c:2364-2382) or a substitute (:2387), needs !fear (:2996-2999), and
+  // BattleScript_SetFear skips when STATUS4_FEAR is set (battle_scripts_1.s:2451-2453); VARIOUS_SET_FEAR :8178-8181.
+  if (
+    target.mon.hp > 0 &&
+    !doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled) &&
+    !target.volatiles.fear &&
+    !hasFlag(target.statuses4, STATUS4_FEAR)
+  ) {
+    target.statuses4 = setFlag(target.statuses4, STATUS4_FEAR)
+    target.volatiles.fear = true
+    target.volatiles.started.fear = true
+  }
+
+  return outcome(ctx, { targetId, statChanges, missed: res.missed ?? false })
+}
+
+/**
+ * Helper for two-stat target drops:
+ * - EFFECT_TICKLE (BattleScript_EffectTickle, data/battle_scripts_1.s:6610-6636): Atk -1, Def -1
+ * - EFFECT_NOBLE_ROAR (BattleScript_EffectNobleRoar, data/battle_scripts_1.s:1772-1798): Atk -1, SpAtk -1
+ */
+function handleTwoStatDown(
+  ctx: MoveEffectContext,
+  stat1: number,
+  stat2: number,
+): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const s1Stage = target.mon.statStages[stat1] ?? DEFAULT_STAT_STAGE
+  const s2Stage = target.mon.statStages[stat2] ?? DEFAULT_STAT_STAGE
+
+  // BattleScript_CantLowerMultipleStats check
+  if (s1Stage === MIN_STAT_STAGE && s2Stage === MIN_STAT_STAGE) {
+    return outcome(ctx, { targetId })
+  }
+
+  // accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+
+  // Stat drop 1
+  const r1 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -1,
+    stat1,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (r1.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: stat1, change: r1.delta })
+  }
+  if (r1.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // Stat drop 2
+  const r2 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -1,
+    stat2,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (r2.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: stat2, change: r2.delta })
+  }
+  if (r2.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  return outcome(ctx, { targetId, statChanges, missed: (r1.missed || r2.missed) ?? false })
+}
+
 /** BattleScript_EffectBulkUp, data/battle_scripts_1.s:6670-6693. */
 function handleBulkUp(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
@@ -343,6 +542,389 @@ function handleCalmMind(ctx: MoveEffectContext): ActionOutcome {
       action.chosenMove!.id,
     )
     if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/** BattleScript_EffectCosmicPower, data/battle_scripts_1.s:6645-6668. */
+function handleCosmicPower(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const defStage = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  const spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+
+  if (defStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_DEF,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPDEF,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/** BattleScript_EffectCoil, data/battle_scripts_1.s:2019-2061. */
+function handleCoil(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const defStage = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  const accStage = battler.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE
+  // jumpifabilityflag ABILITY_COIL_UP -> CheckAbilityFlag (battle_script_commands.c:6707-6708), the coilUp
+  // bitfield: Coil Up, Curlipede, Sidewinder (abilityHooks.json).
+  const hasCoilUp = ['ABILITY_COIL_UP', 'ABILITY_CURLIPEDE', 'ABILITY_SIDEWINDER'].some((id) =>
+    battlerHasSimAbility(state, battler, id, false, battlerId, false, deps.dataContext),
+  )
+  const isCoiled = hasFlag(battler.statuses4, STATUS4_COILED)
+
+  if (atkStage < MAX_STAT_STAGE || defStage < MAX_STAT_STAGE || accStage < MAX_STAT_STAGE || (hasCoilUp && !isCoiled)) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_DEF,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: r2.delta })
+
+    const r3 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ACC,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r3.delta !== 0) statChanges.push({ battlerId, stat: STAT_ACC, change: r3.delta })
+
+    if (hasCoilUp && !hasFlag(battler.statuses4, STATUS4_COILED)) {
+      battler.statuses4 = setFlag(battler.statuses4, STATUS4_COILED)
+    }
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectAttackUpUserAlly, data/battle_scripts_1.s:34-69.
+ * Howl raises user's Attack by 1, and partner's Attack by 1 in doubles.
+ */
+function handleHowl(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const partnerId = battlerId ^ 2
+  const hasPartner = (state.battleTypeFlags & BATTLE_TYPE_DOUBLE) !== 0 && isBattlerAlive(state, partnerId)
+
+  if (!hasPartner) {
+    return handleSingleStatUp(ctx, STAT_ATK, 1)
+  }
+
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const partner = state.battlers[partnerId]!
+  const userAtk = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const partnerAtk = partner.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+
+  if (userAtk < MAX_STAT_STAGE || partnerAtk < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      partnerId,
+      1,
+      STAT_ATK,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId: partnerId, stat: STAT_ATK, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectMeditate, data/battle_scripts_1.s:6714-6737.
+ * Meditate raises user's Attack and Special Defense by 1 stage.
+ * C lines 6718-6719 gate by spAtkStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE.
+ */
+function handleMeditate(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+  const spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
+
+  if (spAtkStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPDEF,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectDefenseCurl, data/battle_scripts_1.s:5896-5908.
+ * Defense Curl sets STATUS2_DEFENSE_CURL (Cmd_setdefensecurlbit, battle_script_commands.c:11428-11431)
+ * and raises Defense by 1.
+ */
+function handleDefenseCurl(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_DEFENSE_CURL)
+
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_DEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId, stat: STAT_DEF, change: res.delta })
+  }
+
+  return outcome(ctx, { statChanges, missed: res.missed ?? false })
+}
+
+/**
+ * BattleScript_EffectAttackAccUp, data/battle_scripts_1.s:2167-2190.
+ * Raises user's Attack and Accuracy by 1 stage.
+ */
+function handleAttackAccuracyUp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const accStage = battler.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE
+
+  if (atkStage < MAX_STAT_STAGE || accStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ACC,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_ACC, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectAttackSpAttackUp, data/battle_scripts_1.s:2142-2165.
+ * Raises user's Attack and Special Attack by 1 stage.
+ */
+function handleAttackSpAtkUp(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+
+  if (atkStage < MAX_STAT_STAGE || spAtkStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: r2.delta })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * BattleScript_EffectShiftGear, data/battle_scripts_1.s:1988-2017.
+ * Raises user's Speed by 2 stages and Attack by 1 stage.
+ */
+function handleShiftGear(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
+  const statChanges: StatChangeOutcome[] = []
+
+  const battler = state.battlers[battlerId]!
+  const speedStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+
+  if (speedStage < MAX_STAT_STAGE || atkStage < MAX_STAT_STAGE) {
+    // jumpifstat STAT_SPEED > 10 -> BattleScript_ShiftGearSpeedBy1 (:1997, 2001-2003).
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      speedStage > 10 ? 1 : 2,
+      STAT_SPEED,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_ATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      action.chosenMove!.id,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r2.delta })
   }
 
   return outcome(ctx, { statChanges })
@@ -2339,6 +2921,24 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_EVASION_UP: (ctx) => handleSingleStatUp(ctx, STAT_EVASION, 1),
   EFFECT_EVASION_UP_2: (ctx) => handleSingleStatUp(ctx, STAT_EVASION, 2),
 
+  EFFECT_ATTACK_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_ATK, 1),
+  EFFECT_ATTACK_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_ATK, 2),
+  EFFECT_DEFENSE_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_DEF, 1),
+  EFFECT_DEFENSE_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_DEF, 2),
+  EFFECT_SPEED_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_SPEED, 1),
+  EFFECT_SPEED_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_SPEED, 2),
+  EFFECT_SPECIAL_ATTACK_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_SPATK, 1),
+  EFFECT_SPECIAL_ATTACK_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_SPATK, 2),
+  EFFECT_SPECIAL_DEFENSE_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_SPDEF, 1),
+  EFFECT_SPECIAL_DEFENSE_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_SPDEF, 2),
+  EFFECT_ACCURACY_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_ACC, 1),
+  EFFECT_ACCURACY_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_ACC, 2),
+  EFFECT_EVASION_DOWN: (ctx) => handleSingleStatDown(ctx, STAT_EVASION, 1),
+  EFFECT_EVASION_DOWN_2: (ctx) => handleSingleStatDown(ctx, STAT_EVASION, 2),
+  EFFECT_SCARY_FACE: handleScaryFace,
+  EFFECT_TICKLE: (ctx) => handleTwoStatDown(ctx, STAT_ATK, STAT_DEF),
+  EFFECT_NOBLE_ROAR: (ctx) => handleTwoStatDown(ctx, STAT_ATK, STAT_SPATK),
+
   EFFECT_BULK_UP: handleBulkUp,
   EFFECT_CALM_MIND: handleCalmMind,
   EFFECT_DRAGON_DANCE: handleDragonDance,
@@ -2352,6 +2952,14 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_GEAR_UP: handleGearUp,
   EFFECT_SHELL_SMASH: handleShellSmash,
   EFFECT_BELLY_DRUM: handleBellyDrum,
+  EFFECT_COSMIC_POWER: handleCosmicPower,
+  EFFECT_COIL: handleCoil,
+  EFFECT_HOWL: handleHowl,
+  EFFECT_MEDITATE: handleMeditate,
+  EFFECT_DEFENSE_CURL: handleDefenseCurl,
+  EFFECT_ATTACK_ACCURACY_UP: handleAttackAccuracyUp,
+  EFFECT_ATTACK_SPATK_UP: handleAttackSpAtkUp,
+  EFFECT_SHIFT_GEAR: handleShiftGear,
 
   EFFECT_SLEEP: handleSleep,
   EFFECT_TOXIC: handleToxic,
