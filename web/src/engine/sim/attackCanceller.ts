@@ -44,8 +44,8 @@
 //                          under STATUS3_HEAL_BLOCK or opposing Permanence.
 //   CANCELLER_TAUNTED     Ported (:3348-3357) -- cancels power == 0 moves under
 //                          volatiles.tauntTimer.
-//   CANCELLER_IMPRISONED  Unreachable -- statuses3's IMPRISONED_OTHERS bit has
-//                          no writer.
+//   CANCELLER_IMPRISONED  Ported (:3358-3367) -- cancels moves known by an opposing
+//                          battler with STATUS3_IMPRISONED_OTHERS.
 //   CANCELLER_PARALYSED   Ported. Hell mode's disableParalysisCancel clause
 //                          (isHellMode() && side !== B_SIDE_PLAYER, :3402) is
 //                          not modelled -- Hell mode is out of scope (CLAUDE.md,
@@ -146,6 +146,7 @@ import {
   STATUS2_POWDER,
   STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
+  STATUS3_IMPRISONED_OTHERS,
   STATUS_FIELD_GRAVITY,
   clearFlag,
   getCounter,
@@ -167,6 +168,7 @@ export const CANCEL_REASONS = [
   'GRAVITY',
   'HEAL_BLOCK',
   'TAUNT',
+  'IMPRISON',
   'QUICK_GUARD',
 ] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
@@ -308,6 +310,24 @@ function isHealingMoveEffect(effect: string | null): boolean {
   }
 }
 
+/**
+ * GetImprisonedMovesCount, src/battle_util.c:1683-1699.
+ * Checks whether an opposing battler has STATUS3_IMPRISONED_OTHERS and knows the move.
+ */
+function getImprisonedMovesCount(state: BattleState, battlerId: number, moveId: string): number {
+  let imprisonedMoves = 0
+  const battlerSide = battlerId & 1
+  for (let i = 0; i < state.battlers.length; i++) {
+    const foe = state.battlers[i]
+    if (foe && (i & 1) !== battlerSide && hasFlag(foe.statuses3, STATUS3_IMPRISONED_OTHERS)) {
+      if (foe.mon.moves.includes(moveId)) {
+        imprisonedMoves++
+      }
+    }
+  }
+  return imprisonedMoves
+}
+
 const NO_CANCEL: AttackCancellerResult = { cancelledBy: null, confusionSelfHitDamage: null }
 
 /**
@@ -430,7 +450,13 @@ export function runAttackCanceller(
     return { cancelledBy: 'TAUNT', confusionSelfHitDamage: null }
   }
 
-  // CANCELLER_IMPRISONED (:3358-3367) -- unreachable, see header.
+  // CANCELLER_IMPRISONED, :3358-3367.
+  if (getImprisonedMovesCount(state, attackerId, moveId) > 0) {
+    attacker.round.usedImprisonedMove = true
+    attacker.round.attackCancelled = true
+    cancelMultiTurnMoves(attacker)
+    return { cancelledBy: 'IMPRISON', confusionSelfHitDamage: null }
+  }
 
   // CANCELLER_PARALYSED, :3400-3413.
   if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS)) {

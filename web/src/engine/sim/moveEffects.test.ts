@@ -56,7 +56,9 @@ import {
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_INFATUATION,
+  STATUS2_MULTIPLETURNS,
   STATUS2_NIGHTMARE,
+  STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
   STATUS3_ALWAYS_HITS,
@@ -64,14 +66,19 @@ import {
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_GASTRO_ACID,
+  STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
+  STATUS3_IMPRISONED_OTHERS,
   STATUS3_LASER_FOCUS,
   STATUS3_MAGNET_RISE,
   STATUS3_MINIMIZED,
   STATUS3_MIRACLE_EYED,
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
+  STATUS3_POWER_TRICK,
+  STATUS3_TELEKINESIS,
   STATUS4_CUTTHROAT,
+  STATUS4_ELECTRIFIED,
   STATUS4_FEAR,
   STATUS4_FORESIGHT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -267,6 +274,15 @@ const MOVE_WORRY_SEED = requireMove('MOVE_WORRY_SEED')
 const MOVE_ENTRAINMENT = requireMove('MOVE_ENTRAINMENT')
 const MOVE_ROLE_PLAY = requireMove('MOVE_ROLE_PLAY')
 const MOVE_SKILL_SWAP = requireMove('MOVE_SKILL_SWAP')
+const MOVE_SPITE = requireMove('MOVE_SPITE')
+const MOVE_GRUDGE = requireMove('MOVE_GRUDGE')
+const MOVE_IMPRISON = requireMove('MOVE_IMPRISON')
+const MOVE_TELEKINESIS = requireMove('MOVE_TELEKINESIS')
+const MOVE_ELECTRIFY = requireMove('MOVE_ELECTRIFY')
+const MOVE_POWER_TRICK = requireMove('MOVE_POWER_TRICK')
+const MOVE_ION_DELUGE = requireMove('MOVE_ION_DELUGE')
+const MOVE_POWDER = requireMove('MOVE_POWDER')
+const MOVE_EMBER = requireMove('MOVE_EMBER')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -6416,6 +6432,390 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             const out = executeTurn(state, [useMove(1, MOVE_SKILL_SWAP), null], deps)
             const act = out.actions.find((a) => a.battlerId === 0)!
             expect(act.missed).toBe(true)
+          })
+        })
+      })
+
+      describe('Cycle 60: Spite, Grudge, Imprison, Telekinesis, Electrify, Power Trick, Ion Deluge, Powder', () => {
+        describe('EFFECT_SPITE', () => {
+          it("cuts the target's last-used move's PP by 4 (B_PP_REDUCED_BY_SPITE >= GEN_4)", () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SPITE', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPITE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(6)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails when the target has no last move, and still costs the user PP (ppreduce precedes tryspiteppreduce)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SPITE', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.lastMove = null
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPITE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(10)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails when the last move has 0 PP left (B_CAN_SPITE_FAIL >= GEN_4)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SPITE', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [0, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPITE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('clamps the cut to the remaining PP and cancels a multi-turn move when PP reaches 0', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SPITE', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [2, 0, 0, 0], status2: STATUS2_MULTIPLETURNS },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPITE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(0)
+            expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+          })
+        })
+
+        describe('EFFECT_GRUDGE', () => {
+          it('sets STATUS3_GRUDGE on the user (the next attackcanceler clears it, so check after a turn with no further move)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_GRUDGE', null, null, null], pp: [5, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_GRUDGE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_GRUDGE)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          })
+
+          it('re-using Grudge with it already set succeeds: CANCELLER_FLAGS clears it first, so setuserstatus3 never sees it set', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_GRUDGE', null, null, null], pp: [5, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.statuses3 = setFlag(state.battlers[0]!.statuses3, STATUS3_GRUDGE)
+
+            const out = executeTurn(state, [useMove(0, MOVE_GRUDGE), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_GRUDGE)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          })
+
+          it("zeroes the PP of the move that faints the Grudge user (Cmd_tryfaintmon, :3252-3263)", () => {
+            const lethal: DamageResolver & { calls: number } = {
+              calls: 0,
+              resolve: () => ({ targetDamage: 10, attackerDamage: null, unmodelled: [] }),
+            }
+            const state = battle(
+              [
+                { hp: 10, moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 10 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.statuses3 = setFlag(state.battlers[0]!.statuses3, STATUS3_GRUDGE)
+
+            executeTurn(state, [null, useMove(0, MOVE_TACKLE)], testDeps(lethal))
+            expect(state.battlers[0]!.mon.hp).toBe(0)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(0)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_GRUDGE)).toBe(false)
+          })
+        })
+
+        describe('EFFECT_IMPRISON', () => {
+          it('sets STATUS3_IMPRISONED_OTHERS when the user shares a move with a foe', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_IMPRISON', 'MOVE_TACKLE', null, null], pp: [10, 10, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_IMPRISON), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_IMPRISONED_OTHERS)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails when no move is shared with a foe, and still costs PP (ppreduce precedes tryimprison)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_IMPRISON', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_IMPRISON), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_IMPRISONED_OTHERS)).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails when the user already has STATUS3_IMPRISONED_OTHERS', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_IMPRISON', 'MOVE_TACKLE', null, null], pp: [10, 10, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.statuses3 = setFlag(state.battlers[0]!.statuses3, STATUS3_IMPRISONED_OTHERS)
+
+            const out = executeTurn(state, [useMove(0, MOVE_IMPRISON), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('CANCELLER_IMPRISONED stops a foe from using a move the imprisoner knows', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 10 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.statuses3 = setFlag(state.battlers[0]!.statuses3, STATUS3_IMPRISONED_OTHERS)
+
+            const out = executeTurn(state, [null, useMove(0, MOVE_TACKLE)], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 1)!.cancelledBy).toBe('IMPRISON')
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+          })
+        })
+
+        describe('EFFECT_TELEKINESIS', () => {
+          it('sets STATUS3_TELEKINESIS with a 3 turn timer that ENDTURN_TELEKINESIS counts down and clears', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TELEKINESIS', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_TELEKINESIS), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)).toBe(true)
+            expect(state.battlers[1]!.volatiles.telekinesisTimer).toBe(2)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+
+            executeTurn(state, [null, null], testDeps())
+            expect(state.battlers[1]!.volatiles.telekinesisTimer).toBe(1)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)).toBe(true)
+
+            executeTurn(state, [null, null], testDeps())
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)).toBe(false)
+          })
+
+          it('fails on a banned species (sTelekinesisBanList) and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TELEKINESIS', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.mon.speciesId = 'SPECIES_DIGLETT'
+
+            const out = executeTurn(state, [useMove(1, MOVE_TELEKINESIS), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+          })
+
+          it('fails when the target is STATUS3_ROOTED', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TELEKINESIS', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.statuses3 = setFlag(state.battlers[1]!.statuses3, STATUS3_ROOTED)
+
+            const out = executeTurn(state, [useMove(1, MOVE_TELEKINESIS), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+          })
+
+          it('fails when the target already has STATUS3_TELEKINESIS (Gravity is unreachable here: it cancels Telekinesis first)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TELEKINESIS', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[1]!.statuses3 = setFlag(state.battlers[1]!.statuses3, STATUS3_TELEKINESIS)
+            state.battlers[1]!.volatiles.telekinesisTimer = 3
+
+            const out = executeTurn(state, [useMove(1, MOVE_TELEKINESIS), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[1]!.volatiles.telekinesisTimer).toBe(2)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+          })
+        })
+
+        describe('EFFECT_ELECTRIFY', () => {
+          it('succeeds when the user acts before the target: bumps protectUses and notes the unported type reader', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_ELECTRIFY', null, null, null], pp: [3, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ELECTRIFY), useMove(0, MOVE_TACKLE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.volatiles.protectUses).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(2)
+            expect(act.unmodelled.some((m) => m.includes('STATUS4_ELECTRIFIED'))).toBe(true)
+          })
+
+          it('fails when the target has already acted (gCurrentTurnActionNumber >= target turn order), resets protectUses and costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_ELECTRIFY', null, null, null], pp: [3, 0, 0, 0], spe: 10 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.volatiles.protectUses = 2
+
+            const out = executeTurn(state, [useMove(1, MOVE_ELECTRIFY), useMove(0, MOVE_TACKLE)], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[0]!.volatiles.protectUses).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(2)
+          })
+
+          it('ENDTURN_ELECTRIFY clears STATUS4_ELECTRIFIED', () => {
+            const state = battle([{}, {}], countingRng())
+            state.battlers[1]!.statuses4 = setFlag(state.battlers[1]!.statuses4, STATUS4_ELECTRIFIED)
+
+            executeTurn(state, [null, null], testDeps())
+            expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_ELECTRIFIED)).toBe(false)
+          })
+        })
+
+        describe('EFFECT_POWER_TRICK', () => {
+          it('swaps Attack and Defense (stats and stages) and sets STATUS3_POWER_TRICK; a second use swaps back', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_POWER_TRICK', null, null, null], pp: [10, 0, 0, 0], atk: 120, def: 70 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.mon.statStages[STAT_ATK] = 8
+            state.battlers[0]!.mon.statStages[STAT_DEF] = 5
+
+            const out = executeTurn(state, [useMove(0, MOVE_POWER_TRICK), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_POWER_TRICK)).toBe(true)
+            expect(state.battlers[0]!.mon.rawStats.atk).toBe(70)
+            expect(state.battlers[0]!.mon.rawStats.def).toBe(120)
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(5)
+            expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(8)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+
+            executeTurn(state, [useMove(0, MOVE_POWER_TRICK), null], testDeps())
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_POWER_TRICK)).toBe(false)
+            expect(state.battlers[0]!.mon.rawStats.atk).toBe(120)
+            expect(state.battlers[0]!.mon.rawStats.def).toBe(70)
+          })
+        })
+
+        describe('EFFECT_ION_DELUGE', () => {
+          it('costs PP and succeeds, noting the unported type reader (the flag itself is cleared by ENDTURN_ION_DELUGE in the same executeTurn)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_ION_DELUGE', null, null, null], pp: [20, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_ION_DELUGE), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(act.unmodelled.some((m) => m.includes('STATUS_FIELD_ION_DELUGE'))).toBe(true)
+          })
+        })
+
+        describe('EFFECT_POWDER', () => {
+          it('sets STATUS2_POWDER on the target: its Fire move that turn reaches CANCELLER_POWDER_STATUS', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_POWDER', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_EMBER', null, null, null], pp: [25, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_POWDER), useMove(0, MOVE_EMBER)], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(
+              out.actions.find((a) => a.battlerId === 1)!.unmodelled.some((m) => m.includes('CANCELLER_POWDER_STATUS')),
+            ).toBe(true)
+          })
+
+          it('fails when the target already has STATUS2_POWDER, and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_POWDER', null, null, null], pp: [20, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0], status2: STATUS2_POWDER },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_POWDER), null], testDeps())
+            expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('ENDTURN_POWDER clears STATUS2_POWDER', () => {
+            const state = battle([{}, { status2: STATUS2_POWDER }], countingRng())
+
+            executeTurn(state, [null, null], testDeps())
+            expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_POWDER)).toBe(false)
           })
         })
       })

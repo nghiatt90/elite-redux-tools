@@ -164,20 +164,15 @@
 //                           substituteDestroyedThisTurn.
 //   ENDTURN_MAGNET_RISE     Ported (:2875-2884) -- decrements magnetRiseTimer;
 //                           clears STATUS3_MAGNET_RISE at 0.
-//   ENDTURN_TELEKINESIS     Gapped -- STATUS3_TELEKINESIS is read for real by
-//                           grounding.ts, same telekinesisTimer caveat as
-//                           MAGNET_RISE above.
+//   ENDTURN_TELEKINESIS     Ported (:2886-2894) -- decrements telekinesisTimer;
+//                           clears STATUS3_TELEKINESIS at 0.
 //   ENDTURN_HEALBLOCK       Ported (:2896-2906) -- decrements healBlockTimer,
 //                           clears STATUS3_HEAL_BLOCK when timer reaches 0.
 //   ENDTURN_ROOST           PORTED -- clears RESOURCE_FLAG_ROOST and restores
 //                           original types from battler.roostTypes (:2907-2914).
-//   ENDTURN_ELECTRIFY       Unreachable -- STATUS4_ELECTRIFIED has no reader
-//                           outside constants.ts.
-//   ENDTURN_POWDER          Gapped -- STATUS2_POWDER is read for real by
-//                           attackCanceller.ts (CANCELLER_POWDER_STATUS). The C
-//                           unconditionally clears it every end of turn
-//                           (:2920); not applied here, gapped only when the bit
-//                           is actually set.
+//   ENDTURN_ELECTRIFY       Ported (:2915-2918) -- clears STATUS4_ELECTRIFIED at end of turn.
+//   ENDTURN_POWDER          Ported (:2919-2921) -- unconditionally clears
+//                           STATUS2_POWDER every end of turn.
 //   ENDTURN_THROAT_CHOP     Unreachable -- volatiles.throatChopTimer is named
 //                           only in attackCanceller.ts's "Unreachable" comment
 //                           for CANCELLER_THROAT_CHOP, never read by
@@ -254,6 +249,7 @@ import {
   STATUS3_YAWN,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
+  STATUS4_ELECTRIFIED,
   STATUS4_GHASTLY_ECHO,
   STATUS_FIELD_MAGIC_ROOM,
   STATUS_FIELD_TOXIC_TERRAIN,
@@ -1108,11 +1104,11 @@ export function runEndTurnEffects(
     }
 
     // ENDTURN_TELEKINESIS, :2886-2894.
-    gapIf(
-      hasFlag(battler.statuses3, STATUS3_TELEKINESIS),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_TELEKINESIS (battle_util.c:2886-2894) is not applied -- telekinesisTimer has no reader anywhere, so its expiry cannot be computed`,
-    )
+    if (hasFlag(battler.statuses3, STATUS3_TELEKINESIS)) {
+      if (battler.volatiles.telekinesisTimer === 0 || --battler.volatiles.telekinesisTimer === 0) {
+        battler.statuses3 = clearFlag(battler.statuses3, STATUS3_TELEKINESIS)
+      }
+    }
 
     // ENDTURN_HEALBLOCK, :2896-2906.
     if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) {
@@ -1128,13 +1124,11 @@ export function runEndTurnEffects(
       battler.mon.types = [r1, r2, battler.mon.types[2]]
     }
 
-    // ENDTURN_POWDER, :2919-2921 -- the C clears STATUS2_POWDER unconditionally
-    // every end of turn; not applied here.
-    gapIf(
-      hasFlag(battler.mon.status2, STATUS2_POWDER),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_POWDER (battle_util.c:2919-2921) is not applied -- the powder flag was not cleared`,
-    )
+    // ENDTURN_ELECTRIFY, :2915-2918 -- clears STATUS4_ELECTRIFIED at end of turn.
+    battler.statuses4 = clearFlag(battler.statuses4, STATUS4_ELECTRIFIED)
+
+    // ENDTURN_POWDER, :2919-2921 -- unconditional.
+    battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_POWDER)
 
     // ENDTURN_SLOW_START, :2930-2941 -- timer sub-branch only.
     gapIf(

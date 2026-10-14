@@ -55,6 +55,7 @@ import {
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_FLINCHED,
   STATUS2_NIGHTMARE,
+  STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
   STATUS2_WRAPPED,
@@ -63,8 +64,10 @@ import {
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
   STATUS3_GASTRO_ACID,
+  STATUS3_GRUDGE,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
+  STATUS3_IMPRISONED_OTHERS,
   STATUS3_LASER_FOCUS,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
@@ -72,13 +75,16 @@ import {
   STATUS3_MINIMIZED,
   STATUS3_ON_AIR,
   STATUS3_PERISH_SONG,
+  STATUS3_POWER_TRICK,
   STATUS3_ROOTED,
   STATUS3_SEMI_INVULNERABLE,
+  STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
   STATUS3_YAWN,
   STATUS4_COMMANDED,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
+  STATUS4_ELECTRIFIED,
   STATUS4_FEAR,
   STATUS4_FORESIGHT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -92,6 +98,7 @@ import {
   STATUS_FIELD_TRICK_ROOM,
   STATUS_FIELD_WONDER_ROOM,
   STATUS_FIELD_FAIRY_LOCK,
+  STATUS_FIELD_ION_DELUGE,
   STATUS_FIELD_MUDSPORT,
   STATUS_FIELD_WATERSPORT,
   SIDE_STATUS_STICKY_WEB,
@@ -6658,7 +6665,368 @@ export function handleSkillSwap(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, missed: false })
 }
 
+/**
+ * EFFECT_SPITE (Spite)
+ * BattleScript_EffectSpite (data/battle_scripts_1.s:4821-4831),
+ * Cmd_tryspiteppreduce (src/battle_script_commands.c:10975-11020).
+ * ppreduce runs before accuracycheck (:4824-4825).
+ * Spite reduces the PP of the target's last move by 4 (B_PP_REDUCED_BY_SPITE >= GEN_4).
+ * Fails if target has no last move, last move is MOVE_NONE, last move is not known by target,
+ * or target's PP for that move is 0 (B_CAN_SPITE_FAIL >= GEN_4).
+ * When PP reaches 0, multi-turn moves are cancelled (CancelMultiTurnMoves: battle_util.c:1164-1179).
+ */
+export function handleSpite(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const target = state.battlers[targetId]!
+
+  // 1. ppreduce (:4824)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4825)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. tryspiteppreduce BattleScript_ButItFailed (Cmd_tryspiteppreduce:10975-11020)
+  const lastMove = target.lastMove
+  if (!lastMove || lastMove === 'MOVE_NONE') {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const moveIdx = target.mon.moves.indexOf(lastMove)
+  if (moveIdx === -1 || (target.mon.pp[moveIdx] ?? 0) === 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const currentPp = target.mon.pp[moveIdx] ?? 0
+  const ppToDeduct = Math.min(4, currentPp)
+  target.mon.pp[moveIdx] = currentPp - ppToDeduct
+
+  if (target.mon.pp[moveIdx] === 0) {
+    cancelMultiTurnMoves(target)
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_GRUDGE (Grudge)
+ * BattleScript_EffectGrudge (data/battle_scripts_1.s:6511-6520),
+ * Cmd_setuserstatus3 (src/battle_script_commands.c:11991-12002).
+ * ppreduce runs before setuserstatus3 (:6514-6515).
+ * Sets STATUS3_GRUDGE on user. Fails if user already has STATUS3_GRUDGE.
+ * CANCELLER_FLAGS (battle_util.c:3204-3208; attackCanceller.ts:340) clears STATUS3_GRUDGE on user's next action.
+ * When the user faints from an opponent's damaging move (Cmd_tryfaintmon: battle_script_commands.c:3252-3263),
+ * the opponent's move loses all its PP.
+ */
+export function handleGrudge(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0) {
+    return outcome(ctx, {})
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6514)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setuserstatus3 STATUS3_GRUDGE, BattleScript_ButItFailed (Cmd_setuserstatus3:11991-12002)
+  if (hasFlag(battler.statuses3, STATUS3_GRUDGE)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_GRUDGE)
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_IMPRISON (Imprison)
+ * BattleScript_EffectImprison (data/battle_scripts_1.s:6473-6482),
+ * Cmd_tryimprison (src/battle_script_commands.c:11948-11977).
+ * ppreduce runs before tryimprison (:6476-6477).
+ * Fails if user already has STATUS3_IMPRISONED_OTHERS (:11949-11950).
+ * Checks opposing battlers: if at least one foe shares a non-MOVE_NONE move with user,
+ * sets STATUS3_IMPRISONED_OTHERS on user (:11954-11971).
+ * Otherwise fails if no foe shares any move with user (:11974-11975).
+ * CANCELLER_IMPRISONED (battle_util.c:3358-3367; attackCanceller.ts) cancels moves known by opposing
+ * battler with STATUS3_IMPRISONED_OTHERS.
+ */
+export function handleImprison(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0) {
+    return outcome(ctx, {})
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6476)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. tryimprison BattleScript_ButItFailed (Cmd_tryimprison:11948-11977)
+  if (hasFlag(battler.statuses3, STATUS3_IMPRISONED_OTHERS)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  const battlerSide = battlerId & 1
+  let sharesMoveWithAnyFoe = false
+
+  for (let i = 0; i < state.battlers.length; i++) {
+    const foe = state.battlers[i]
+    if (!foe || (i & 1) === battlerSide) continue
+
+    for (const userMove of battler.mon.moves) {
+      if (userMove && userMove !== 'MOVE_NONE' && foe.mon.moves.includes(userMove)) {
+        sharesMoveWithAnyFoe = true
+        break
+      }
+    }
+    if (sharesMoveWithAnyFoe) break
+  }
+
+  if (!sharesMoveWithAnyFoe) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_IMPRISONED_OTHERS)
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * sTelekinesisBanList (src/battle_script_commands.c:13007-13017).
+ */
+const TELEKINESIS_BANNED_SPECIES: ReadonlySet<string> = new Set([
+  'SPECIES_DIGLETT',
+  'SPECIES_DUGTRIO',
+  'SPECIES_DIGLETT_ALOLAN',
+  'SPECIES_DUGTRIO_ALOLAN',
+  'SPECIES_SANDYGAST',
+  'SPECIES_PALOSSAND',
+  'SPECIES_GENGAR_MEGA',
+])
+
+/**
+ * EFFECT_TELEKINESIS (Telekinesis)
+ * BattleScript_EffectTelekinesis (data/battle_scripts_1.s:2547-2557),
+ * Cmd_settelekinesis (src/battle_script_commands.c:13028-13037).
+ * accuracycheck NO_ACC_CALC_CHECK_LOCK_ON runs before ppreduce (:2549-2551).
+ * In C, missing branches to BattleScript_PrintMoveMissed which also runs ppreduce.
+ * Fails if:
+ * 1. Target already has STATUS3_TELEKINESIS, STATUS3_ROOTED, or STATUS3_SMACKED_DOWN (:13029).
+ * 2. Field has STATUS_FIELD_GRAVITY (:13029).
+ * 3. Target species is in sTelekinesisBanList (:13007-13026): Diglett, Dugtrio,
+ *    Alolan Diglett, Alolan Dugtrio, Sandygast, Palossand, Mega Gengar.
+ * On success, sets STATUS3_TELEKINESIS and telekinesisTimer = 3 (:13033-13034).
+ * ENDTURN_TELEKINESIS (battle_util.c:2886-2894; endTurn.ts) decrements timer and clears status at 0.
+ */
+export function handleTelekinesis(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const target = state.battlers[targetId]!
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, NO_ACC_CALC_CHECK_LOCK_ON (:2549)
+  // Both hit and miss paths deduct PP (ppreduce at :2551 and inside BattleScript_PrintMoveMissed).
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. settelekinesis BattleScript_ButItFailed (Cmd_settelekinesis:13028-13037)
+  if (
+    hasFlag(target.statuses3, STATUS3_TELEKINESIS | STATUS3_ROOTED | STATUS3_SMACKED_DOWN) ||
+    hasFlag(state.field.statuses, STATUS_FIELD_GRAVITY) ||
+    TELEKINESIS_BANNED_SPECIES.has(target.mon.speciesId)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.statuses3 = setFlag(target.statuses3, STATUS3_TELEKINESIS)
+  target.volatiles.telekinesisTimer = 3
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_ELECTRIFY (Electrify)
+ * BattleScript_EffectElectrify (data/battle_scripts_1.s:1976-1987),
+ * VARIOUS_TRY_ELECTRIFY (src/battle_script_commands.c:7338-7347).
+ * accuracycheck ACC_CURR_MOVE runs before ppreduce (:1978-1980);
+ * missing branches to BattleScript_PrintMoveMissed which also reduces PP.
+ * tryelectrify:
+ * 1. Checks ProtectSucceeds(attacker): shares protectUses with protect-like moves.
+ *    If last move was not protection move, resets protectUses to 0.
+ *    Rolls Random() <= PROTECT_SUCCESS_RATES[protectUses] (:6649-6655).
+ * 2. Checks gCurrentTurnActionNumber >= GetBattlerTurnOrderNum(target):
+ *    fails if user acts at or after target's turn (target already acted).
+ * If either fails, resets protectUses to 0 and fails (costs PP since ppreduce already ran).
+ * If both succeed, increments protectUses and sets STATUS4_ELECTRIFIED on target.
+ * Cleared at end of turn by ENDTURN_ELECTRIFY (battle_util.c:2915-2918; endTurn.ts).
+ */
+export function handleElectrify(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, turnOrderIndex, order } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1978)
+  // Both hit and miss paths deduct PP (ppreduce at :1980 and inside BattleScript_PrintMoveMissed).
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. tryelectrify BattleScript_ButItFailed (VARIOUS_TRY_ELECTRIFY: battle_script_commands.c:7338-7347)
+  // ProtectSucceeds, battle_script_commands.c:6649-6655
+  const lastMoveId = battler.lastMove
+  const lastMoveData = lastMoveId ? deps.dataContext.move(lastMoveId) : undefined
+  if (!lastMoveData?.flags?.isProtection) {
+    battler.volatiles.protectUses = 0
+  }
+
+  let protectSucceeds = false
+  if (battler.volatiles.protectUses <= 3) {
+    const threshold = PROTECT_SUCCESS_RATES[battler.volatiles.protectUses]!
+    const roll = state.rng.random16()
+    if (threshold >= roll) {
+      protectSucceeds = true
+    }
+  }
+
+  // gCurrentTurnActionNumber >= GetBattlerTurnOrderNum(gBattlerTarget)
+  const targetTurnOrderNum = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+  const targetAlreadyActed = targetTurnOrderNum !== -1 && turnOrderIndex >= targetTurnOrderNum
+
+  if (!protectSucceeds || targetAlreadyActed) {
+    battler.volatiles.protectUses = 0
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  battler.volatiles.protectUses++
+  target.statuses4 = setFlag(target.statuses4, STATUS4_ELECTRIFIED)
+  unmodelled.push(
+    "STATUS4_ELECTRIFIED's reader, GetMoveTypeInternal (battle_main.c:5196), lives in the damage engine's move-type resolution, which does not read it -- the target's moves this turn are still typed as normal",
+  )
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_POWER_TRICK (Power Trick)
+ * BattleScript_EffectPowerTrick (data/battle_scripts_1.s:1444-1454),
+ * VARIOUS_POWER_TRICK (src/battle_script_commands.c:7690-7694).
+ * Toggles STATUS3_POWER_TRICK (XOR, so a second use clears it and swaps back) and swaps the
+ * user's Attack and Defense stats and their stat stages. Never fails.
+ * Readers not ported: the Baton Pass re-swap (battle_main.c:2833) and the exp-gain stat
+ * reload (battle_script_commands.c:3655).
+ */
+export function handlePowerTrick(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1446) -- PrintMoveMissed runs ppreduce too.
+  const missed = checkAccuracy(ctx, targetId ?? battlerId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { missed: true })
+
+  battler.statuses3 ^= STATUS3_POWER_TRICK
+  const mon = battler.mon
+  const atk = mon.rawStats.atk
+  mon.rawStats.atk = mon.rawStats.def
+  mon.rawStats.def = atk
+  const atkStage = mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  mon.statStages[STAT_ATK] = mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+  mon.statStages[STAT_DEF] = atkStage
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_ION_DELUGE (Ion Deluge)
+ * BattleScript_EffectIonDeluge (data/battle_scripts_1.s:2228-2238).
+ * Sets STATUS_FIELD_ION_DELUGE with no fail check. ENDTURN_ION_DELUGE (battle_util.c:2171-2174;
+ * fieldEndTurn.ts) clears it every end of turn.
+ */
+export function handleIonDeluge(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2230) -- PrintMoveMissed runs ppreduce too.
+  const missed = checkAccuracy(ctx, targetId ?? battlerId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) return outcome(ctx, { missed: true })
+
+  state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE)
+  unmodelled.push(
+    "STATUS_FIELD_ION_DELUGE's reader, GetMoveTypeInternal (battle_main.c:5196), lives in the damage engine's move-type resolution, which does not read it -- Normal moves this turn are still typed Normal",
+  )
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_POWDER (Powder)
+ * BattleScript_EffectPowder (data/battle_scripts_1.s:1121-1132),
+ * VARIOUS_SET_POWDER (src/battle_script_commands.c:6910-6912).
+ * Fails if the target already has STATUS2_POWDER. ENDTURN_POWDER (battle_util.c:2919-2921;
+ * endTurn.ts) clears it every end of turn; CANCELLER_POWDER_STATUS is in attackCanceller.ts.
+ */
+export function handlePowder(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // accuracycheck BattleScript_PrintMoveMissed, NO_ACC_CALC_CHECK_LOCK_ON (:1123) -- PrintMoveMissed runs ppreduce too.
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) return outcome(ctx, { targetId, missed: true })
+
+  // jumpifstatus2 BS_TARGET, STATUS2_POWDER, BattleScript_ButItFailed (:1126)
+  if (hasFlag(target.mon.status2, STATUS2_POWDER)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.mon.status2 = setFlag(target.mon.status2, STATUS2_POWDER)
+  return outcome(ctx, { targetId, missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
+  EFFECT_SPITE: handleSpite,
+  EFFECT_GRUDGE: handleGrudge,
+  EFFECT_IMPRISON: handleImprison,
+  EFFECT_TELEKINESIS: handleTelekinesis,
+  EFFECT_ELECTRIFY: handleElectrify,
+  EFFECT_POWER_TRICK: handlePowerTrick,
+  EFFECT_ION_DELUGE: handleIonDeluge,
+  EFFECT_POWDER: handlePowder,
   EFFECT_GASTRO_ACID: handleGastroAcid,
   EFFECT_SIMPLE_BEAM: handleSimpleBeam,
   EFFECT_WORRY_SEED: handleWorrySeed,

@@ -154,6 +154,7 @@ import {
   STATUS1_ANY,
   STATUS2_TORMENT,
   STATUS3_CHARGED_UP,
+  STATUS3_GRUDGE,
   STATUS3_PERISH_SONG,
   STATUS_FIELD_TRICK_ROOM,
 } from './constants'
@@ -1541,6 +1542,30 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, targetId, targetDamage, fainted)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
+
+    // Grudge faint trigger (Cmd_tryfaintmon: battle_script_commands.c:3252-3263)
+    if (
+      fainted.includes(targetId) &&
+      targetBattler &&
+      hasFlag(targetBattler.statuses3, STATUS3_GRUDGE) &&
+      (battlerId & 1) !== (targetId & 1) &&
+      attackerBattler.mon.hp > 0 &&
+      action.chosenMove.id !== 'MOVE_STRUGGLE'
+    ) {
+      // The C zeroes gBattleStruct->chosenMovePositions[attacker]; the sim has no chosen slot, so
+      // it finds the slot by move id, which a called move (Metronome etc.) does not have.
+      const moveIdx = attackerBattler.mon.moves.indexOf(action.chosenMove.id)
+      if (moveIdx !== -1) {
+        attackerBattler.mon.pp[moveIdx] = 0
+      } else {
+        unmodelled.push(
+          `battler ${battlerId}: Grudge's PP wipe (battle_script_commands.c:3252-3263) is not applied -- ${action.chosenMove.id} is not in the chosen-move slot lookup`,
+        )
+      }
+      // Not part of tryfaintmon: ClearFuryCutterDestinyBondGrudge (battle_util.c:6307-6311) on faint.
+      targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_GRUDGE)
+    }
+
     applyDamage(state, battlerId, attackerDamage, fainted)
 
     // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
