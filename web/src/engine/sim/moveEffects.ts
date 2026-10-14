@@ -62,6 +62,7 @@ import {
   STATUS3_ALWAYS_HITS_TURN,
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
+  STATUS3_GASTRO_ACID,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
   STATUS3_LASER_FOCUS,
@@ -108,6 +109,7 @@ import {
   WEATHER_FOG_ANY,
   WEATHER_FOG_PERMANENT,
   WEATHER_HAIL_ANY,
+  WEATHER_PRIMAL_ANY,
   WEATHER_RAIN_ANY,
   WEATHER_SANDSTORM_ANY,
   WEATHER_SUN_ANY,
@@ -211,6 +213,14 @@ import {
   testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
+import { applySwitchInAbilities } from './switchInAbility'
+import {
+  isEntrainmentBannedAbilityAttacker,
+  isEntrainmentTargetOrSimpleBeamBannedAbility,
+  isRolePlayBannedAbility,
+  isRolePlayBannedAbilityAtk,
+  isWorrySeedBannedAbility,
+} from './ai/aiAbilityHelpers'
 
 export interface MoveEffectContext {
   state: BattleState
@@ -6253,7 +6263,408 @@ export function handleFairyLock(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { missed: false })
 }
 
+// ---------------------------------------------------------------------------
+// Ability-change moves (Cycle 59) helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * DoesBattlerHaveAbilityShield, battle_util.c:6539-6545. No ability sets blocksAbilitySuppression in
+ * abilityHooks.json, so only the held Ability Shield (unless Embargoed) can return true.
+ */
+function doesBattlerHaveAbilityShield(battler: BattlerState, deps: TurnLoopDeps): boolean {
+  if (battler.mon.itemId) {
+    const item = deps.dataContext.item(battler.mon.itemId)
+    if (item?.resolvedHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD' && !hasFlag(battler.statuses3, STATUS3_EMBARGO)) {
+      return true
+    }
+  }
+  return false
+}
+
+/** The four ability slots in C order, with an empty slot spelled ABILITY_NONE as in gBattleMons. */
+function abilitySlotIds(battler: BattlerState): string[] {
+  return [battler.mon.abilities.ability, ...battler.mon.abilities.innates].map((a) => a ?? 'ABILITY_NONE')
+}
+
+/**
+ * HasAbilityIgnoringSuppression, battle_util.c:9315-9323 -- every slot, suppressed or not. An empty
+ * slot is ABILITY_NONE, so asking about ABILITY_NONE matches a battler with an empty innate slot.
+ */
+function hasAbilityIgnoringSuppression(battler: BattlerState, abilityId: string): boolean {
+  return abilitySlotIds(battler).includes(abilityId)
+}
+
+/**
+ * UpdateAbilityStateIndicesForNewAbility / UpdateAbilityStateIndices (battle_util.c:8819-8862): each
+ * new slot takes switchInAbilityDone, turnAbilityTriggers and abilityState from the first old slot
+ * holding the same ability, else zero. Called before ReplaceAbility, so the old slot 0 is still in place.
+ */
+function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: string): void {
+  const oldAbilities = abilitySlotIds(battler)
+  const newAbilities = [newAbility, ...oldAbilities.slice(1)]
+  const switchInAbilityDone = newAbilities.map(() => false)
+  const turnAbilityTriggers = newAbilities.map(() => false)
+  const abilityState = newAbilities.map(() => 0)
+  for (let i = 0; i < newAbilities.length; i++) {
+    const j = oldAbilities.indexOf(newAbilities[i]!)
+    if (j < 0) continue
+    switchInAbilityDone[i] = battler.volatiles.switchInAbilityDone[j] ?? false
+    turnAbilityTriggers[i] = battler.turn.turnAbilityTriggers[j] ?? false
+    abilityState[i] = battler.volatiles.abilityState[j] ?? 0
+  }
+  battler.volatiles.switchInAbilityDone = switchInAbilityDone
+  battler.turn.turnAbilityTriggers = turnAbilityTriggers
+  battler.volatiles.abilityState = abilityState
+}
+
+/**
+ * EFFECT_GASTRO_ACID (Gastro Acid)
+ * BattleScript_EffectGastroAcid (data/battle_scripts_1.s:2581-2596),
+ * Cmd_setgastroacid (src/battle_script_commands.c:11831-11838),
+ * BattleScript_EffectPoison (data/battle_scripts_1.s:4332-4344).
+ */
+export function handleGastroAcid(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2583)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:2585; also inside BattleScript_PrintMoveMissed on miss)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. setgastroacid BattleScript_EffectPoison (Cmd_setgastroacid, src/battle_script_commands.c:11831-11838)
+  const failsGastroAcid =
+    hasFlag(target.statuses3, STATUS3_GASTRO_ACID) || doesBattlerHaveAbilityShield(target, deps)
+
+  if (failsGastroAcid) {
+    // Branch to BattleScript_EffectPoison (data/battle_scripts_1.s:4332-4344), which starts over:
+    // - attackcanceler (:4333): its canceller ladder already ran to CANCELLER_END this action, so
+    //   nothing in it is re-run here
+    // - attackstring (:4334)
+    // - ppreduce (:4335): Cmd_ppreduce has no once-per-move guard (:1460-1495), so a second PP goes
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+    // - requirecandoeffect BS_TARGET, MOVE_EFFECT_POISON (:4336, battle_script_commands.c:8544-8552)
+    if (!canBePoisoned(state, battlerId, targetId, moveId, deps)) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+
+    // - accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:4337) -> second accuracy check
+    const poisonMissed = checkAccuracy(ctx, targetId, moveId)
+    if (poisonMissed) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+
+    // - setmoveeffect MOVE_EFFECT_POISON, seteffectprimary (:4340-4341)
+    const res = applyPrimaryStatusEffect(
+      state,
+      battlerId,
+      targetId,
+      MOVE_EFFECT_POISON,
+      moveId,
+      deps,
+      unmodelled,
+      true,
+      false,
+    )
+    const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'POISON' } : null
+    return outcome(ctx, { targetId, statusApplied })
+  }
+
+  // Success branch of setgastroacid:
+  target.statuses3 = setFlag(target.statuses3, STATUS3_GASTRO_ACID)
+
+  // trytoclearprimalweather (VARIOUS_TRY_TO_CLEAR_PRIMAL_WEATHER, battle_script_commands.c:7964-7981)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    unmodelled.push('trytoclearprimalweather not modelled')
+  }
+
+  // setmoveeffect MOVE_EFFECT_POISON, seteffectprimary (:2594-2595)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_POISON,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'POISON' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
+ * EFFECT_SIMPLE_BEAM (Simple Beam)
+ * BattleScript_EffectSimpleBeam (data/battle_scripts_1.s:2321-2334),
+ * VARIOUS_SET_SIMPLE_BEAM (src/battle_script_commands.c:7220-7229).
+ */
+export function handleSimpleBeam(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2323)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:2325)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. setabilitysimple BS_TARGET, BattleScript_ButItFailed (VARIOUS_SET_SIMPLE_BEAM:7220-7229)
+  const targetAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+  if (
+    isEntrainmentTargetOrSimpleBeamBannedAbility(targetAbility) ||
+    hasAbilityIgnoringSuppression(target, 'ABILITY_SIMPLE') ||
+    doesBattlerHaveAbilityShield(target, deps)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  updateAbilityStateForNewAbility(target, 'ABILITY_SIMPLE')
+  target.mon.abilities.ability = 'ABILITY_SIMPLE'
+
+  // trytoclearprimalweather (VARIOUS_TRY_TO_CLEAR_PRIMAL_WEATHER:7964-7981)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    unmodelled.push('trytoclearprimalweather not modelled')
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_WORRY_SEED (Worry Seed)
+ * BattleScript_EffectWorrySeed (data/battle_scripts_1.s:2416-2432),
+ * Cmd_tryworryseed (src/battle_script_commands.c:13091-13100).
+ * MOVE_EFFECT_FEAR applied on both success and fail paths of tryworryseed (:2429-2432;
+ * battle_script_commands.c:2364-2387, 2996-2999; battle_scripts_1.s:2444-2455; VARIOUS_SET_FEAR :8178-8181).
+ */
+export function handleWorrySeed(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2418)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:2420)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. tryworryseed BattleScript_EffectWorrySeed_Fear (Cmd_tryworryseed:13091-13100)
+  const targetAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+  const failsWorrySeed =
+    isWorrySeedBannedAbility(targetAbility) ||
+    hasAbilityIgnoringSuppression(target, 'ABILITY_INSOMNIA') ||
+    doesBattlerHaveAbilityShield(target, deps)
+
+  if (!failsWorrySeed) {
+    updateAbilityStateForNewAbility(target, 'ABILITY_INSOMNIA')
+    target.mon.abilities.ability = 'ABILITY_INSOMNIA'
+
+    // trytoclearprimalweather (VARIOUS_TRY_TO_CLEAR_PRIMAL_WEATHER:7964-7981)
+    if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+      unmodelled.push('trytoclearprimalweather not modelled')
+    }
+  }
+
+  // 4. BattleScript_EffectWorrySeed_Fear (:2429-2432):
+  // setmoveeffect MOVE_EFFECT_FEAR, seteffectprimary
+  if (
+    target.mon.hp > 0 &&
+    !doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled) &&
+    !target.volatiles.fear &&
+    !hasFlag(target.statuses4, STATUS4_FEAR)
+  ) {
+    target.statuses4 = setFlag(target.statuses4, STATUS4_FEAR)
+    target.volatiles.fear = true
+    target.volatiles.started.fear = true
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_ENTRAINMENT (Entrainment)
+ * BattleScript_EffectEntrainment (data/battle_scripts_1.s:2269-2282),
+ * VARIOUS_TRY_ENTRAINMENT (src/battle_script_commands.c:7230-7244),
+ * VARIOUS_SET_LAST_USED_ABILITY (:7258-7260),
+ * switchinabilities BS_TARGET (VARIOUS_SWITCHIN_ABILITIES:7087-7098).
+ */
+export function handleEntrainment(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2271)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:2273)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. tryentrainment BattleScript_ButItFailed (VARIOUS_TRY_ENTRAINMENT:7230-7244)
+  const userAbility = battler.mon.abilities.ability ?? 'ABILITY_NONE'
+  const targetAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+
+  if (
+    isEntrainmentBannedAbilityAttacker(userAbility) ||
+    isEntrainmentTargetOrSimpleBeamBannedAbility(targetAbility) ||
+    doesBattlerHaveAbilityShield(target, deps) ||
+    hasAbilityIgnoringSuppression(target, userAbility)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  updateAbilityStateForNewAbility(target, userAbility)
+  target.mon.abilities.ability = userAbility
+
+  // 4. switchinabilities BS_TARGET (:2281, VARIOUS_SWITCHIN_ABILITIES:7087-7098)
+  applySwitchInAbilities(state, targetId, deps, unmodelled)
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_ROLE_PLAY (Role Play)
+ * BattleScript_EffectRolePlay (data/battle_scripts_1.s:6294-6304),
+ * Cmd_trycopyability (src/battle_script_commands.c:11767-11781).
+ * Accuracy check uses NO_ACC_CALC_CHECK_LOCK_ON (:6298; Cmd_accuracycheck :1403-1411)
+ * and comes after ppreduce (:6297).
+ */
+export function handleRolePlay(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6297)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:6298)
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. trycopyability BattleScript_ButItFailed (Cmd_trycopyability:11767-11781)
+  const defAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+  const atkAbility = battler.mon.abilities.ability ?? 'ABILITY_NONE'
+
+  if (
+    hasAbilityIgnoringSuppression(battler, defAbility) ||
+    defAbility === 'ABILITY_NONE' ||
+    isRolePlayBannedAbilityAtk(atkAbility) ||
+    isRolePlayBannedAbility(defAbility) ||
+    doesBattlerHaveAbilityShield(battler, deps)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  updateAbilityStateForNewAbility(battler, defAbility)
+  battler.mon.abilities.ability = defAbility
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_SKILL_SWAP (Skill Swap)
+ * BattleScript_EffectSkillSwap (data/battle_scripts_1.s:6449-6472),
+ * Cmd_tryswapabilities (src/battle_script_commands.c:11923-11946).
+ * Accuracy check uses NO_ACC_CALC_CHECK_LOCK_ON (:6453; Cmd_accuracycheck :1403-1411)
+ * and comes after ppreduce (:6452).
+ * Switch-in abilities triggered for attacker then target (B_SKILL_SWAP >= GEN_4, :6466-6470;
+ * VARIOUS_SWITCHIN_ABILITIES :7087-7098).
+ */
+export function handleSkillSwap(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:6452)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:6453)
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. tryswapabilities BattleScript_ButItFailed (Cmd_tryswapabilities:11923-11946)
+  const atkAbility = battler.mon.abilities.ability ?? 'ABILITY_NONE'
+  const defAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+
+  if (
+    isRolePlayBannedAbility(atkAbility) ||
+    isRolePlayBannedAbility(defAbility) ||
+    hasAbilityIgnoringSuppression(battler, defAbility) ||
+    hasAbilityIgnoringSuppression(target, atkAbility) ||
+    doesBattlerHaveAbilityShield(battler, deps) ||
+    doesBattlerHaveAbilityShield(target, deps)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  updateAbilityStateForNewAbility(battler, defAbility)
+  updateAbilityStateForNewAbility(target, atkAbility)
+
+  battler.mon.abilities.ability = defAbility
+  target.mon.abilities.ability = atkAbility
+
+  // 4. switchinabilities BS_ATTACKER, switchinabilities BS_TARGET (B_SKILL_SWAP >= GEN_4, :6466-6470)
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
+  applySwitchInAbilities(state, targetId, deps, unmodelled)
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
+  EFFECT_GASTRO_ACID: handleGastroAcid,
+  EFFECT_SIMPLE_BEAM: handleSimpleBeam,
+  EFFECT_WORRY_SEED: handleWorrySeed,
+  EFFECT_ENTRAINMENT: handleEntrainment,
+  EFFECT_ROLE_PLAY: handleRolePlay,
+  EFFECT_SKILL_SWAP: handleSkillSwap,
   EFFECT_PROTECT: handleProtect,
   EFFECT_ENDURE: handleProtect,
   EFFECT_MAT_BLOCK: handleProtect,

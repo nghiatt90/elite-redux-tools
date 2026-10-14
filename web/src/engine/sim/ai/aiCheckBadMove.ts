@@ -194,7 +194,20 @@ import {
   WEATHER_HAIL_ANY,
   WEATHER_FOG_ANY,
 } from '../constants'
-import { defAbility, selfAbility, isAbilityOnField, doesBattlerHaveAbilityShield, getBattlerHoldEffect, SOUNDPROOF_ABILITIES } from './aiAbilityHelpers'
+import {
+  defAbility,
+  selfAbility,
+  isAbilityOnField,
+  doesBattlerHaveAbilityShield,
+  getBattlerHoldEffect,
+  SOUNDPROOF_ABILITIES,
+  isRolePlayBannedAbility,
+  isRolePlayBannedAbilityAtk,
+  isWorrySeedBannedAbility,
+  isEntrainmentBannedAbilityAttacker,
+  isEntrainmentTargetOrSimpleBeamBannedAbility,
+} from './aiAbilityHelpers'
+export { PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES, isRolePlayBannedAbility, isRolePlayBannedAbilityAtk } from './aiAbilityHelpers'
 import { computeIsAbsorbed, computeIsImmune } from '../../abilities/dispatchCalc'
 import { isMagicGuardProtected } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
@@ -647,61 +660,6 @@ function canInfatuate(attacker: BattlerState, defender: BattlerState, unmodelled
   if (attacker.id === defender.id) return false
   unmodelled.push('AI_CanBeInfatuated/CanInfatuate: IsAbilityStatusProtected(battlerDef, CHECK_INFATUATE) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
   return true
-}
-
-/** Every ability whose abilityHooks.json marks `persistent` or `unsuppressable`
- * -- IsPersistentOrUnsuppressableAbility, battle_util.c:4790
- * (`gAbilities[ability].unsuppressable || gAbilities[ability].persistent`).
- * Feeds IsRolePlayBannedAbility(Atk)/IsWorrySeedBannedAbility/
- * IsEntrainmentBannedAbilityAttacker/IsEntrainmentTargetOrSimpleBeamBannedAbility
- * below -- every one of those is this same predicate plus (for four of them) a
- * short literal extra-abilities array taken straight from the C's own static
- * tables. Pinned by an oracle test in aiCheckBadMove.test.ts.
- *
- * Extraction: `python3 -c "import json; d=json.load(open('data/v2.65beta/
- * abilityHooks.json')); b=lambda v:v.get('bitfields',{}); print(sorted(k for
- * k,v in d.items() if b(v).get('persistent') or b(v).get('unsuppressable')))"`
- * -- 47 entries. */
-export const PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES: readonly string[] = [
-  'ABILITY_ANTICIPATION', 'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER', 'ABILITY_BACKUP_POWER', 'ABILITY_BATTLE_BOND',
-  'ABILITY_BLOOD_STAIN', 'ABILITY_BLOOD_STIGMA', 'ABILITY_CHEATING_DEATH', 'ABILITY_CLUELESS', 'ABILITY_COMATOSE',
-  'ABILITY_COMMANDER', 'ABILITY_COWARD', 'ABILITY_CROWNED_KING', 'ABILITY_DISGUISE', 'ABILITY_DNA_SCRAMBLE',
-  'ABILITY_DRAKELP_HEAD', 'ABILITY_DREAMSCAPE', 'ABILITY_DUAL_SHADOW', 'ABILITY_EJECT_PACK_ABILITY', 'ABILITY_ENERGIZED',
-  'ABILITY_ETERNAL_BLESSING', 'ABILITY_FLAMMABLE_COAT', 'ABILITY_FLOWER_GIFT', 'ABILITY_FORECAST', 'ABILITY_GALLANTRY',
-  'ABILITY_GENERATOR', 'ABILITY_GULP_MISSILE', 'ABILITY_HUNGER_SWITCH', 'ABILITY_ICE_FACE', 'ABILITY_JUMP_SCARE',
-  'ABILITY_LOCUST_SWARM', 'ABILITY_MULTITYPE', 'ABILITY_NEUTRALIZING_GAS', 'ABILITY_PATCHWORK', 'ABILITY_POWER_CONSTRUCT',
-  'ABILITY_POWER_OUTAGE', 'ABILITY_RECURRING_NIGHTMARE', 'ABILITY_REVELATION', 'ABILITY_RKS_SYSTEM', 'ABILITY_SCHOOLING',
-  'ABILITY_SHIELDS_DOWN', 'ABILITY_SOOTHSAYER', 'ABILITY_STALWART', 'ABILITY_STANCE_CHANGE', 'ABILITY_WISHMAKER',
-  'ABILITY_ZEN_MODE', 'ABILITY_ZERO_TO_HERO',
-]
-const PERSISTENT_OR_UNSUPPRESSABLE_SET = new Set(PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES)
-
-/** IsRolePlayBannedAbilityAtk, battle_util.c:8422-8425. */
-export function isRolePlayBannedAbilityAtk(ability: string | null): boolean {
-  return !!ability && PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability)
-}
-/** IsRolePlayBannedAbility, battle_util.c:8428-8436 -- `sRolePlayBannedAbilities`
- * (:90-95) transcribed literally (4 entries, unchanged from vanilla; Prismatic
- * Fur is this game's own addition). `!ability` (ABILITY_NONE) is also banned. */
-const ROLE_PLAY_BANNED_EXTRA = new Set(['ABILITY_TRACE', 'ABILITY_WONDER_GUARD', 'ABILITY_RECEIVER', 'ABILITY_PRISMATIC_FUR'])
-export function isRolePlayBannedAbility(ability: string | null): boolean {
-  if (!ability || ability === 'ABILITY_NONE') return true
-  return PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ROLE_PLAY_BANNED_EXTRA.has(ability)
-}
-/** IsWorrySeedBannedAbility, battle_util.c:8438-8441. */
-function isWorrySeedBannedAbility(ability: string | null): boolean {
-  return !!ability && PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability)
-}
-/** IsEntrainmentBannedAbilityAttacker, battle_util.c:8448-8455 --
- * `sSkillSwapBannedAbilities` (:85-88) transcribed literally. */
-const SKILL_SWAP_BANNED = new Set(['ABILITY_WONDER_GUARD', 'ABILITY_PRISMATIC_FUR'])
-function isEntrainmentBannedAbilityAttacker(ability: string | null): boolean {
-  return !!ability && (PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || SKILL_SWAP_BANNED.has(ability))
-}
-/** IsEntrainmentTargetOrSimpleBeamBannedAbility, battle_util.c:8457-8464 --
- * `sEntrainmentTargetSimpleBeamBannedAbilities` (:97-99) is just Truant. */
-function isEntrainmentTargetOrSimpleBeamBannedAbility(ability: string | null): boolean {
-  return !!ability && (PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ability === 'ABILITY_TRUANT')
 }
 
 /** GetBattlerAbility, battle_util.c:9327 -- the primary ability SLOT only

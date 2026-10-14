@@ -63,6 +63,7 @@ import {
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
+  STATUS3_GASTRO_ACID,
   STATUS3_HEAL_BLOCK,
   STATUS3_LASER_FOCUS,
   STATUS3_MAGNET_RISE,
@@ -71,6 +72,7 @@ import {
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
   STATUS4_CUTTHROAT,
+  STATUS4_FEAR,
   STATUS4_FORESIGHT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
@@ -259,6 +261,12 @@ const MOVE_SMOKESCREEN = requireMove('MOVE_SMOKESCREEN')
 const MOVE_MUD_SPORT = requireMove('MOVE_MUD_SPORT')
 const MOVE_WATER_SPORT = requireMove('MOVE_WATER_SPORT')
 const MOVE_FAIRY_LOCK = requireMove('MOVE_FAIRY_LOCK')
+const MOVE_GASTRO_ACID = requireMove('MOVE_GASTRO_ACID')
+const MOVE_SIMPLE_BEAM = requireMove('MOVE_SIMPLE_BEAM')
+const MOVE_WORRY_SEED = requireMove('MOVE_WORRY_SEED')
+const MOVE_ENTRAINMENT = requireMove('MOVE_ENTRAINMENT')
+const MOVE_ROLE_PLAY = requireMove('MOVE_ROLE_PLAY')
+const MOVE_SKILL_SWAP = requireMove('MOVE_SKILL_SWAP')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -284,6 +292,8 @@ const ABILITY_COMATOSE = requireAbility('ABILITY_COMATOSE')
 const ABILITY_INSOMNIA = requireAbility('ABILITY_INSOMNIA')
 const ABILITY_VITAL_SPIRIT = requireAbility('ABILITY_VITAL_SPIRIT')
 const ABILITY_MEGA_LAUNCHER = requireAbility('ABILITY_MEGA_LAUNCHER')
+const ABILITY_DROUGHT = requireAbility('ABILITY_DROUGHT')
+const ABILITY_WONDER_GUARD = requireAbility('ABILITY_WONDER_GUARD')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -5911,6 +5921,502 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           const out = executeTurn(state, [useMove(1, MOVE_FAIRY_LOCK), null], deps)
           const act = out.actions.find((a) => a.battlerId === 0)!
           expect(act.missed).toBe(true)
+        })
+      })
+
+      describe('Cycle 59: Ability-change moves', () => {
+        describe('EFFECT_GASTRO_ACID', () => {
+          it('Gastro Acid sets STATUS3_GASTRO_ACID and applies poison on success', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_GASTRO_ACID', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  types: ['NORMAL', 'MYSTERY', 'MYSTERY'],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_GASTRO_ACID), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(true)
+            expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+            expect(act.statusApplied?.status).toBe('POISON')
+            // Deducted 1 PP on success path (:2585)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails via BattleScript_EffectPoison on Steel type when target already has Gastro Acid and costs a second PP', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_GASTRO_ACID', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  types: ['STEEL', 'MYSTERY', 'MYSTERY'],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+            state.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID
+
+            const out = executeTurn(state, [useMove(1, MOVE_GASTRO_ACID), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            // BattleScript_EffectPoison -> requirecandoeffect fails on Steel type
+            expect(act.missed).toBe(true)
+            // ppreduce called twice: once at Gastro Acid :2585 and once at EffectPoison :4335
+            expect(state.battlers[0]!.mon.pp[0]).toBe(8)
+          })
+
+          it('fails if target holds Ability Shield and cannot be poisoned', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_GASTRO_ACID', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  types: ['STEEL', 'MYSTERY', 'MYSTERY'],
+                  itemId: 'ITEM_ABILITY_SHIELD',
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_GASTRO_ACID), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(8)
+          })
+        })
+
+        describe('EFFECT_SIMPLE_BEAM', () => {
+          it('makes target primary ability ABILITY_SIMPLE and clears abilityState[0]', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_SIMPLE_BEAM', null, null, null], pp: [15, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+            state.battlers[1]!.volatiles.abilityState[0] = 5
+
+            const out = executeTurn(state, [useMove(1, MOVE_SIMPLE_BEAM), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_SIMPLE')
+            expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+          })
+
+          it('fails if target already has ABILITY_SIMPLE in primary slot', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_SIMPLE_BEAM', null, null, null], pp: [15, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_SIMPLE, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SIMPLE_BEAM), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+          })
+
+          it('fails if target already has ABILITY_SIMPLE in an innate slot (HasAbilityIgnoringSuppression)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_SIMPLE_BEAM', null, null, null], pp: [15, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [ABILITY_SIMPLE, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SIMPLE_BEAM), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+          })
+
+          it('fails if target holds Ability Shield', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_SIMPLE_BEAM', null, null, null], pp: [15, 0, 0, 0] },
+                {
+                  itemId: 'ITEM_ABILITY_SHIELD',
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SIMPLE_BEAM), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+          })
+        })
+
+        describe('EFFECT_WORRY_SEED', () => {
+          it('Worry Seed sets ABILITY_INSOMNIA and applies Fear', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_WORRY_SEED', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+            state.battlers[1]!.volatiles.abilityState[0] = 3
+
+            const out = executeTurn(state, [useMove(1, MOVE_WORRY_SEED), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_INSOMNIA')
+            expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(0)
+            expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FEAR)).toBe(true)
+            expect(state.battlers[1]!.volatiles.fear).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('on tryworryseed fail (target already has Insomnia), branches to EffectWorrySeed_Fear and still applies Fear', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_WORRY_SEED', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_INSOMNIA, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_WORRY_SEED), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            // Does not fail/miss: branches to BattleScript_EffectWorrySeed_Fear
+            expect(act.missed).toBe(false)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_INSOMNIA')
+            expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FEAR)).toBe(true)
+            expect(state.battlers[1]!.volatiles.fear).toBe(true)
+          })
+
+          it('fails to replace an unsuppressable ability (Comatose) but still applies Fear', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_WORRY_SEED', null, null, null], pp: [10, 0, 0, 0] },
+                {
+                  abilities: { ability: ABILITY_COMATOSE, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_WORRY_SEED), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_COMATOSE')
+            expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FEAR)).toBe(true)
+            expect(state.battlers[1]!.volatiles.fear).toBe(true)
+          })
+        })
+
+        describe('EFFECT_ENTRAINMENT', () => {
+          it('copies user primary ability to target and triggers target switch-in ability (Drought sets Sun)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ENTRAINMENT', null, null, null],
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  pp: [15, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ENTRAINMENT), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_DROUGHT')
+            // switchinabilities BS_TARGET: target triggers Drought, activating Sun
+            expect(hasFlag(state.field.weather, WEATHER_SUN_ANY)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+          })
+
+          it('fails if user has a banned ability (Wonder Guard)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ENTRAINMENT', null, null, null],
+                  abilities: { ability: ABILITY_WONDER_GUARD, innates: [null, null, null] },
+                  pp: [15, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ENTRAINMENT), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+          })
+
+          it('fails if target already has user ability in an innate slot (HasAbilityIgnoringSuppression)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ENTRAINMENT', null, null, null],
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  pp: [15, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [ABILITY_DROUGHT, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ENTRAINMENT), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+          })
+        })
+
+        describe('EFFECT_ROLE_PLAY', () => {
+          it('copies target primary ability to user and resets user abilityState[0]', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROLE_PLAY', null, null, null],
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+            state.battlers[0]!.volatiles.abilityState[0] = 7
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROLE_PLAY), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+            expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails on banned target ability (Wonder Guard) and still costs PP (ppreduce before fail)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROLE_PLAY', null, null, null],
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_WONDER_GUARD, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROLE_PLAY), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_DROUGHT')
+            // ppreduce ran before trycopyability / BattleScript_ButItFailed (:6297)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails if user already has target ability in an innate slot (HasAbilityIgnoringSuppression)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROLE_PLAY', null, null, null],
+                  abilities: { ability: ABILITY_DROUGHT, innates: [ABILITY_CLEAR_BODY, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROLE_PLAY), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+          })
+        })
+
+        describe('EFFECT_SKILL_SWAP', () => {
+          it('swaps primaries between user and target, updates ability states, and triggers switch-in abilities', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_SKILL_SWAP', null, null, null],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+            state.battlers[0]!.volatiles.abilityState[0] = 2
+            state.battlers[1]!.volatiles.abilityState[0] = 4
+
+            const out = executeTurn(state, [useMove(1, MOVE_SKILL_SWAP), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_DROUGHT')
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+            expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+            expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(0)
+            // switchinabilities triggers: user got Drought -> sets Sun!
+            expect(hasFlag(state.field.weather, WEATHER_SUN_ANY)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails on banned ability (Wonder Guard on target) and costs PP (ppreduce before fail)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_SKILL_SWAP', null, null, null],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_WONDER_GUARD, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SKILL_SWAP), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_WONDER_GUARD')
+            // ppreduce ran before tryswapabilities (:6452)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails if target holds Ability Shield', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_SKILL_SWAP', null, null, null],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  itemId: 'ITEM_ABILITY_SHIELD',
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SKILL_SWAP), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_CLEAR_BODY')
+            expect(state.battlers[1]!.mon.abilities.ability).toBe('ABILITY_DROUGHT')
+          })
+
+          it('fails if user already has target ability in an innate slot (HasAbilityIgnoringSuppression)', () => {
+            const deps = testDeps()
+            const rng = countingRng()
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_SKILL_SWAP', null, null, null],
+                  abilities: { ability: ABILITY_CLEAR_BODY, innates: [ABILITY_DROUGHT, null, null] },
+                  pp: [10, 0, 0, 0],
+                },
+                {
+                  abilities: { ability: ABILITY_DROUGHT, innates: [null, null, null] },
+                  spe: 50,
+                },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SKILL_SWAP), null], deps)
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+          })
         })
       })
     })
