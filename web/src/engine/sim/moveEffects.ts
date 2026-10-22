@@ -50,8 +50,11 @@ import {
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
   STATUS1_POISON,
+  STATUS1_POISON_ANY,
   STATUS1_SLEEP,
+  STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
+  STATUS2_CONFUSION,
   STATUS2_CURSED,
   STATUS2_DEFENSE_CURL,
   STATUS2_DESTINY_BOND,
@@ -112,6 +115,7 @@ import {
   SCREEN_DURATION,
   SCREEN_DURATION_EXTENDED,
   SPORT_DURATION,
+  QUASH_DURATION,
   GRAVITY_DURATION,
   INVERSE_ROOM_DURATION,
   MAGIC_ROOM_DURATION,
@@ -134,6 +138,7 @@ import {
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
   STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
   STAT_BUFF_UPDATE_MOVE_EFFECT,
   MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_DEF_PLUS_1,
@@ -168,11 +173,14 @@ import {
   B_MSG_DEFENDER_STAT_FELL,
   battlerHasSimAbility,
   benefitsFromStatBuffs,
+  canRaiseStat,
   changeStatBuffs,
   changeStatBuffsImplicit,
+  consumeHeldItem,
   dispatchOnStatLowered,
   getHighestAttackingStatId,
   isBattlerWeatherAffected,
+  isUnnerveAbilityOnOpposingSide,
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
@@ -7552,6 +7560,612 @@ export function handleCourtChange(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { missed: false })
 }
 
+/**
+ * EFFECT_AFTER_YOU (After You).
+ * BattleScript_EffectAfterYou (data/battle_scripts_1.s:1418-1428),
+ * tryafteryou (.omc/team-pilot/battle_script.inc:1547-1550),
+ * VARIOUS_AFTER_YOU (src/battle_script_commands.c:7695-7702),
+ * GetBattlerTurnOrderNum (src/battle_script_commands.c:2169-2175).
+ * Sets target.round.afterYou = true (read by getMoveSpeed, turnOrder.ts:458-459 /
+ * src/battle_main.c:4302-4303, to reorder the target ahead of remaining battlers via
+ * recalculateMoveOrder) unless gCurrentTurnActionNumber >= GetBattlerTurnOrderNum(target),
+ * in which case it jumps to BattleScript_ButItFailed.
+ */
+export function handleAfterYou(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp, turnOrderIndex, order } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1420), then ppreduce (:1422).
+  // BattleScript_PrintMoveMissed also runs ppreduce, so PP is deducted on both paths.
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. tryafteryou BS_TARGET, BattleScript_ButItFailed (VARIOUS_AFTER_YOU, :7695-7702)
+  const idx = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
+  const targetTurnOrderNum = idx === -1 ? state.battlersCount : idx
+  if (turnOrderIndex >= targetTurnOrderNum) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  target.round.afterYou = true
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_QUASH (Quash).
+ * BattleScript_EffectQuash (data/battle_scripts_1.s:2240-2250),
+ * tryquash (.omc/team-pilot/battle_script.inc:1542-1545),
+ * VARIOUS_TRY_QUASH (src/battle_script_commands.c:7281-7289).
+ * In Elite Redux, Quash is a field-wide 5-turn effect (QUASH_DURATION = 5,
+ * include/battle_util.h:70) that sets gFieldTimers.quashTimer and
+ * gFieldTimers.started.quash (read by getMovePriority / getMoveSpeed /
+ * getBattlerTotalSpeedStat in turnOrder.ts and decremented by ENDTURN_QUASH
+ * in fieldEndTurn.ts). Fails if quashTimer != 0.
+ */
+export function handleQuash(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2242), then ppreduce (:2244).
+  const missed = checkAccuracy(ctx, targetId ?? battlerId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed || state.field.timers.quashTimer !== 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 2. tryquash BattleScript_ButItFailed (VARIOUS_TRY_QUASH, :7281-7289)
+  state.field.timers.quashTimer = QUASH_DURATION
+  state.field.timers.started.quash = true
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_COACHING (Coaching).
+ * BattleScript_EffectCoaching (data/battle_scripts_1.s:746-771),
+ * jumpifnoally (.omc/team-pilot/battle_script.inc:1817-1820, VARIOUS_JUMP_IF_NO_ALLY,
+ * src/battle_script_commands.c:6786-6789),
+ * Cmd_jumpifstat / CompareStat (src/battle_script_commands.c:3370-3383, src/battle_util.c:8545-8585),
+ * SetAttackingStructValues MOVE_TARGET_ALLY (src/battle_util.c:283-287).
+ * Raises ally's Attack and Defense by 1 stage each (STAT_BUFF_ALLOW_PTR | STAT_BUFF_NOT_PROTECT_AFFECTED).
+ * Fails if user has no alive partner or if target is already at max Attack and Defense.
+ */
+export function handleCoaching(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:749)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifnoally BS_ATTACKER, BattleScript_ButItFailed (VARIOUS_JUMP_IF_NO_ALLY, :6786-6789)
+  const partnerId = battlerId ^ 2
+  if (!isBattlerAlive(state, partnerId)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // SetAttackingStructValues (:283-287): MOVE_TARGET_ALLY resolves gBattlerTarget to
+  // BATTLE_PARTNER(gBattlerAttacker) unless gBattlerTarget has Commander active, in which
+  // case it falls back to gBattlerAttacker.
+  const partner = state.battlers[partnerId]!
+  const initialTarget = targetId !== null ? state.battlers[targetId] : partner
+  const cmdSlot = initialTarget ? findAbilitySlot(initialTarget.mon.abilities, 'ABILITY_COMMANDER') : -1
+  const commanderActive = cmdSlot !== -1 && (initialTarget!.volatiles.abilityState[cmdSlot] ?? 0) >= 1
+  const resolvedTargetId = !commanderActive ? partnerId : battlerId
+  const target = state.battlers[resolvedTargetId]!
+
+  // 3. EffectCoaching_CheckAllyStats (:751-754):
+  // jumpifstat BS_TARGET, CMP_NOT_EQUAL, STAT_ATK/STAT_DEF, MAX_STAT_STAGE, BattleScript_CoachingWorks
+  const canBoostAtk = !compareStatToMax(state, target, STAT_ATK, 'EQUAL', battlerId, deps)
+  const canBoostDef = !compareStatToMax(state, target, STAT_DEF, 'EQUAL', battlerId, deps)
+  if (!canBoostAtk && !canBoostDef) {
+    return outcome(ctx, { targetId: resolvedTargetId, missed: true })
+  }
+
+  // 4. BattleScript_CoachingWorks (:755-771)
+  const statChanges: StatChangeOutcome[] = []
+  const rAtk = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    resolvedTargetId,
+    1,
+    STAT_ATK,
+    STAT_BUFF_ALLOW_PTR | STAT_BUFF_NOT_PROTECT_AFFECTED,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rAtk.delta !== 0) {
+    statChanges.push({ battlerId: resolvedTargetId, stat: STAT_ATK, change: rAtk.delta })
+  }
+
+  const rDef = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    resolvedTargetId,
+    1,
+    STAT_DEF,
+    STAT_BUFF_ALLOW_PTR | STAT_BUFF_NOT_PROTECT_AFFECTED,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rDef.delta !== 0) {
+    statChanges.push({ battlerId: resolvedTargetId, stat: STAT_DEF, change: rDef.delta })
+  }
+
+  return outcome(ctx, { targetId: resolvedTargetId, statChanges, missed: false })
+}
+
+/**
+ * EFFECT_AROMATIC_MIST (Aromatic Mist).
+ * BattleScript_EffectAromaticMist (data/battle_scripts_1.s:1134-1171),
+ * Cmd_jumpifstat / CompareStat (src/battle_script_commands.c:3370-3383, src/battle_util.c:8545-8585),
+ * VARIOUS_JUMP_IF_ABSENT (src/battle_script_commands.c:6769-6772).
+ * Elite Redux reworks Aromatic Mist to target USER and raise Sp. Def by 2 stages for both
+ * BS_ATTACKER and (if alive) BS_ATTACKER_PARTNER. Fails via BattleScript_ButItFailed only if
+ * BS_ATTACKER is at max Sp. Def and BS_ATTACKER_PARTNER is absent or also at max Sp. Def.
+ * Note: data/battle_scripts_1.s:1161,1163 mistakenly jump to BattleScript_AromaticMistPrintString
+ * (:1153) instead of BattleScript_AromaticMistPrintStringParnter (:1168), which in C loops
+ * BattleScript_AromaticMistPartner indefinitely when an alive partner is present; we execute the
+ * partner statbuffchange once and proceed to BattleScript_MoveEnd.
+ */
+export function handleAromaticMist(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:1137)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. Pre-check (:1138-1140):
+  // jumpifstat BS_ATTACKER, CMP_NOT_EQUAL, STAT_SPDEF, MAX_STAT_STAGE, BattleScript_EffectAromaticMist_Works
+  // jumpifabsent BS_ATTACKER_PARTNER, BattleScript_ButItFailed
+  // jumpifstat BS_ATTACKER_PARTNER, CMP_EQUAL, STAT_SPDEF, MAX_STAT_STAGE, BattleScript_ButItFailed
+  const partnerId = battlerId ^ 2
+  const partnerAlive = isBattlerAlive(state, partnerId)
+  const partner = partnerAlive ? state.battlers[partnerId]! : null
+  const attackerAtMax = compareStatToMax(state, battler, STAT_SPDEF, 'EQUAL', battlerId, deps)
+  if (attackerAtMax) {
+    if (!partner || compareStatToMax(state, partner, STAT_SPDEF, 'EQUAL', battlerId, deps)) {
+      return outcome(ctx, { missed: true })
+    }
+  }
+
+  // 3. BattleScript_EffectAromaticMist_Works (:1141-1152):
+  // setstatchanger STAT_SPDEF, 2, FALSE
+  // statbuffchange MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR, BattleScript_AromaticMistPrintString
+  const statChanges: StatChangeOutcome[] = []
+  const rUser = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId ?? battlerId,
+    2,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (rUser.delta !== 0) {
+    statChanges.push({ battlerId, stat: STAT_SPDEF, change: rUser.delta })
+  }
+
+  // 4. BattleScript_AromaticMistPartner (:1155-1171):
+  // jumpifabsent BS_ATTACKER_PARTNER, BattleScript_MoveEnd
+  // copybyte gBattlerTarget, sBATTLER
+  // statbuffchange STAT_BUFF_ALLOW_PTR, BattleScript_AromaticMistPrintStringParnter
+  if (partnerAlive) {
+    const rPartner = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      partnerId,
+      2,
+      STAT_SPDEF,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (rPartner.delta !== 0) {
+      statChanges.push({ battlerId: partnerId, stat: STAT_SPDEF, change: rPartner.delta })
+    }
+  }
+
+  return outcome(ctx, { statChanges, missed: false })
+}
+
+/**
+ * Abilities with .ripen = TRUE in src/abilities.cc:8163, 8879, 12280
+ * (HasRipenEffect, src/battle_util.c:5162-5165).
+ */
+const RIPEN_ABILITIES = ['ABILITY_RIPEN', 'ABILITY_SUGAR_RUSH', 'ABILITY_APPLE_PIE'] as const
+
+function hasRipenEffect(
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext },
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  for (const ab of RIPEN_ABILITIES) {
+    if (battlerHasSimAbility(state, battler, ab, false, battlerId, false, deps.dataContext)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * VARIOUS_JUMP_IF_NOT_BERRY (src/battle_script_commands.c:6869-6875) and
+ * IsItemNegated (src/battle_util.c:6520-6524).
+ * Checks that the battler's item is not negated by STATUS3_EMBARGO or ABILITY_KLUTZ
+ * and belongs to POCKET_BERRIES.
+ */
+function hasNonNegatedBerry(
+  state: BattleState,
+  battlerId: number,
+  deps: TurnLoopDeps,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const itemId = battler.mon.itemId
+  if (!itemId) return false
+  if (
+    hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+  ) {
+    return false
+  }
+  return deps.dataContext.item(itemId)?.grouping === 'POCKET_BERRIES'
+}
+
+/**
+ * Cmd_removeitem (src/battle_script_commands.c:6040-6053), SetCudChew (:6028-6038,
+ * called at src/battle_util.c:6301), and TryCheekPouch (:6015-6026).
+ */
+function finishBerryRemoval(
+  state: BattleState,
+  attackerId: number,
+  battlerId: number,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  const battler = state.battlers[battlerId]!
+  const attacker = state.battlers[attackerId]
+  const attackerHasMB = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+
+  // SetCudChew (:6028-6038)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_CUD_CHEW', true, attackerId, attackerHasMB, deps.dataContext)) {
+    unmodelled.push("SetCudChew's Cud Chew ability state (battle_script_commands.c:6028-6038) is not modelled")
+  }
+
+  // Cmd_removeitem (:6040-6051): records usedHeldItem and clears itemId via UpdateBattlerItem
+  consumeHeldItem(state, battler, unmodelled)
+
+  // TryCheekPouch (:6015-6026): in ER, Cheek Pouch is merged into ABILITY_GLUTTONY
+  if (
+    battlerHasSimAbility(state, battler, 'ABILITY_GLUTTONY', false, battlerId, false, deps.dataContext) &&
+    canBattlerHeal(state, battlerId, battler, unmodelled) &&
+    battler.mon.hp < battler.mon.maxHp
+  ) {
+    let heal = Math.trunc(battler.mon.maxHp / 3)
+    if (heal === 0) heal = 1
+    healBattler(state, battlerId, battler, heal)
+  }
+}
+
+/**
+ * VARIOUS_CONSUME_BERRY (src/battle_script_commands.c:8024-8041) with restoreItem = FALSE
+ * and sBERRY_OVERRIDE = TRUE (gBattleScripting.overrideBerryRequirements = TRUE),
+ * dispatching ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END, battlerId, FALSE)
+ * (src/battle_util.c:5872-6033).
+ */
+function consumeBerryWithOverride(
+  state: BattleState,
+  attackerId: number,
+  battlerId: number,
+  moveId: string,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+  statChanges: StatChangeOutcome[],
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0) return
+  const itemId = battler.mon.itemId
+  if (!itemId) return
+
+  if (itemId === 'ITEM_ENIGMA_BERRY') {
+    unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
+    return
+  }
+
+  const itemData = deps.dataContext.item(itemId)
+  const holdEffect = itemData?.resolvedHoldEffect ?? null
+  if (!holdEffect || holdEffect === 'HOLD_EFFECT_NONE') return
+  const param = itemData?.holdEffectStrength ?? 0
+
+  switch (holdEffect) {
+    case 'HOLD_EFFECT_MICLE_BERRY': {
+      // TrySetMicleBerry (battle_util.c:5257-5269), BattleScript_MicleBerryActivateRet (data/battle_scripts_1.s:11255-11265)
+      battler.round.usedMicleBerry = true
+      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      break
+    }
+    case 'HOLD_EFFECT_RESTORE_HP':
+    case 'HOLD_EFFECT_RESTORE_PCT_HP': {
+      // ItemHealHp (battle_util.c:5311-5333), BattleScript_ItemHealHP_RemoveItemRet (data/battle_scripts_1.s:10859-10873)
+      if (!canBattlerHeal(state, battlerId, battler, unmodelled)) break
+      // :5315 -- !(gBattleScripting.overrideBerryRequirements && gBattleMons[battlerId].hp == gBattleMons[battlerId].maxHP)
+      if (battler.mon.hp === battler.mon.maxHp) break
+      // :10860 -- jumpifconsumableblocked BS_SCRIPTING, BattleScript_Return (VARIOUS_JUMP_IF_CONSUMABLE_BLOCKED, :9024-9032)
+      if (isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) break
+
+      let heal =
+        holdEffect === 'HOLD_EFFECT_RESTORE_PCT_HP'
+          ? Math.trunc((battler.mon.maxHp * param) / 100)
+          : param
+      if (hasRipenEffect(state, battlerId, deps)) heal *= 2
+      healBattler(state, battlerId, battler, heal)
+      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      break
+    }
+    case 'HOLD_EFFECT_CONFUSE_SPICY':
+    case 'HOLD_EFFECT_CONFUSE_DRY':
+    case 'HOLD_EFFECT_CONFUSE_SWEET':
+    case 'HOLD_EFFECT_CONFUSE_BITTER':
+    case 'HOLD_EFFECT_CONFUSE_SOUR': {
+      // HealConfuseBerry (battle_util.c:5167-5193): HasEnoughHpToEatBerry returns TRUE under sBERRY_OVERRIDE even at full HP
+      unmodelled.push(
+        'HealConfuseBerry nature-flavor confusion check (battle_util.c:5181-5188) is not modelled (gPokeblockFlavorCompatibilityTable not in SimDataContext); treated as neutral flavor',
+      )
+      if (isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) break
+      let heal = param > 0 ? Math.trunc(battler.mon.maxHp / param) : 1
+      if (heal === 0) heal = 1
+      if (hasRipenEffect(state, battlerId, deps)) heal *= 2
+      healBattler(state, battlerId, battler, heal)
+      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      break
+    }
+    case 'HOLD_EFFECT_ATTACK_UP':
+    case 'HOLD_EFFECT_DEFENSE_UP':
+    case 'HOLD_EFFECT_SPEED_UP':
+    case 'HOLD_EFFECT_SP_ATTACK_UP':
+    case 'HOLD_EFFECT_SP_DEFENSE_UP': {
+      // StatRaiseBerry (battle_util.c:5195-5215), BattleScript_BerryStatRaiseRet (data/battle_scripts_1.s:11009-11029)
+      const statId =
+        holdEffect === 'HOLD_EFFECT_ATTACK_UP'
+          ? STAT_ATK
+          : holdEffect === 'HOLD_EFFECT_DEFENSE_UP'
+            ? STAT_DEF
+            : holdEffect === 'HOLD_EFFECT_SPEED_UP'
+              ? STAT_SPEED
+              : holdEffect === 'HOLD_EFFECT_SP_ATTACK_UP'
+                ? STAT_SPATK
+                : STAT_SPDEF
+      if (!canRaiseStat(state, battlerId, statId, deps.dataContext)) break
+      const amount = hasRipenEffect(state, battlerId, deps) ? 2 : 1
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        battlerId,
+        amount,
+        statId,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({ battlerId, stat: statId, change: res.delta })
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_RANDOM_STAT_UP': {
+      // RandomStatRaiseBerry (battle_util.c:5217-5255)
+      let anyCanRaise = false
+      for (let i = 0; i < 5; i++) {
+        if (canRaiseStat(state, battlerId, STAT_ATK + i, deps.dataContext)) {
+          anyCanRaise = true
+          break
+        }
+      }
+      if (!anyCanRaise) break
+      let i = 0
+      do {
+        i = state.rng.random16() % 5
+      } while (!canRaiseStat(state, battlerId, STAT_ATK + i, deps.dataContext))
+      const statId = STAT_ATK + i
+      const amount = hasRipenEffect(state, battlerId, deps) ? 4 : 2
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        battlerId,
+        amount,
+        statId,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        deps,
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        statChanges.push({ battlerId, stat: statId, change: res.delta })
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_PAR': {
+      // battle_util.c:5925-5931
+      if (hasFlag(battler.mon.status1, STATUS1_PARALYSIS) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_PARALYSIS)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_PSN': {
+      // battle_util.c:5932-5938
+      if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_POISON_ANY | STATUS1_TOXIC_COUNTER)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_BRN': {
+      // battle_util.c:5939-5945
+      if (hasFlag(battler.mon.status1, STATUS1_BURN) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_BURN)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_FRZ': {
+      // battle_util.c:5946-5952 (C checks STATUS1_FROSTBITE, not STATUS1_FREEZE)
+      if (hasFlag(battler.mon.status1, STATUS1_FROSTBITE) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_FROSTBITE)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_SLP': {
+      // battle_util.c:5953-5960
+      if (hasFlag(battler.mon.status1, STATUS1_SLEEP) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_SLEEP)
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_CONFUSION': {
+      // battle_util.c:5961-5967
+      if (hasFlag(battler.mon.status2, STATUS2_CONFUSION) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+    case 'HOLD_EFFECT_CURE_STATUS': {
+      // battle_util.c:5975-6006 (overrideBerryRequirements bypasses IsUnnerveAbilityOnOpposingSide at :5977)
+      if (hasFlag(battler.mon.status1, STATUS1_ANY) || hasFlag(battler.mon.status2, STATUS2_CONFUSION)) {
+        if (hasFlag(battler.mon.status1, STATUS1_SLEEP)) {
+          battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+        }
+        battler.mon.status1 = 0
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
+        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      }
+      break
+    }
+  }
+}
+
+/**
+ * EFFECT_TEATIME (Teatime).
+ * BattleScript_EffectTeatime (data/battle_scripts_1.s:12622-12650),
+ * VARIOUS_JUMP_IF_ABSENT (src/battle_script_commands.c:6769-6772),
+ * VARIOUS_JUMP_IF_NOT_BERRY (src/battle_script_commands.c:6869-6875),
+ * VARIOUS_CONSUME_BERRY (src/battle_script_commands.c:8024-8041),
+ * ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END) (src/battle_util.c:5872-6033).
+ * Checks all battlers 0..gBattlersCount-1; fails via BattleScript_ButItFailed if no alive
+ * battler holds a non-negated berry (neither STATUS3_EMBARGO nor ABILITY_KLUTZ). Otherwise
+ * sets sBERRY_OVERRIDE = TRUE and runs consumeberry for each alive battler holding a
+ * non-negated berry in 0..gBattlersCount-1 order.
+ */
+export function handleTeatime(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:12625)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. BattleScript_Teatime_AnyBerriesLoop (:12626-12634)
+  let anyBerry = false
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (!isBattlerAlive(state, i)) continue
+    if (!hasNonNegatedBerry(state, i, deps)) continue
+    anyBerry = true
+    break
+  }
+
+  if (!anyBerry) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. BattleScript_Teatime_EatBerriesLoop (:12635-12650) with sBERRY_OVERRIDE = TRUE
+  const statChanges: StatChangeOutcome[] = []
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (!isBattlerAlive(state, i)) continue
+    if (!hasNonNegatedBerry(state, i, deps)) continue
+    consumeBerryWithOverride(state, battlerId, i, moveId, deps, unmodelled, statChanges)
+  }
+
+  return outcome(ctx, { statChanges, missed: false })
+}
+
+/**
+ * EFFECT_STUFF_CHEEKS (Stuff Cheeks).
+ * BattleScript_EffectStuffCheeks (data/battle_scripts_1.s:559-580),
+ * VARIOUS_JUMP_IF_NOT_BERRY (src/battle_script_commands.c:6869-6875),
+ * VARIOUS_CONSUME_BERRY (src/battle_script_commands.c:8024-8041).
+ * Fails via BattleScript_ButItFailed if user does not hold a non-negated berry.
+ * Otherwise sets sBERRY_OVERRIDE = TRUE, runs consumeberry BS_ATTACKER, then raises
+ * user's Defense by 2 stages (MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR).
+ */
+export function handleStuffCheeks(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:562)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifnotberry BS_ATTACKER, BattleScript_ButItFailed (:563)
+  if (!hasNonNegatedBerry(state, battlerId, deps)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. consumeberry BS_ATTACKER with sBERRY_OVERRIDE = TRUE (:566-570)
+  const statChanges: StatChangeOutcome[] = []
+  consumeBerryWithOverride(state, battlerId, battlerId, moveId, deps, unmodelled, statChanges)
+
+  // 4. setstatchanger STAT_DEF, 2, FALSE; statbuffchange MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR (:573-574)
+  // Note: VARIOUS_CONSUME_BERRY (:8032) sets gBattlerTarget = gActiveBattler (battlerId).
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    2,
+    STAT_DEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId, stat: STAT_DEF, change: res.delta })
+  }
+
+  return outcome(ctx, { statChanges, missed: res.missed ?? false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SPITE: handleSpite,
   EFFECT_GRUDGE: handleGrudge,
@@ -7765,6 +8379,13 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_ROTOTILLER: handleRototiller,
   EFFECT_MAGNETIC_FLUX: handleMagneticFlux,
   EFFECT_COURT_CHANGE: handleCourtChange,
+
+  EFFECT_AFTER_YOU: handleAfterYou,
+  EFFECT_QUASH: handleQuash,
+  EFFECT_COACHING: handleCoaching,
+  EFFECT_AROMATIC_MIST: handleAromaticMist,
+  EFFECT_TEATIME: handleTeatime,
+  EFFECT_STUFF_CHEEKS: handleStuffCheeks,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

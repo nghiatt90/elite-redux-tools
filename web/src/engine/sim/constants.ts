@@ -388,8 +388,9 @@ export const TAILWIND_DURATION_SHORT = 3
 /** PLEDGE_DURATION (3) -- include/battle_util.h:68. */
 export const PLEDGE_DURATION = 3
 
-/** SPORT_DURATION (5) -- include/battle_util.h:69. */
+/** SPORT_DURATION (5) and QUASH_DURATION (5) -- include/battle_util.h:69-70. */
 export const SPORT_DURATION = 5
+export const QUASH_DURATION = 5
 
 /** Neutral stat stage multipliers [numerator, denominator] from stage -6 to +6. */
 export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [

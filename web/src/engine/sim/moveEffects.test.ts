@@ -92,6 +92,7 @@ import {
   STATUS_FIELD_MUDSPORT,
   STATUS_FIELD_WATERSPORT,
   SPORT_DURATION,
+  QUASH_DURATION,
   WEATHER_FOG_TEMPORARY,
   WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_TEMPORARY,
@@ -290,6 +291,12 @@ const MOVE_FLOWER_SHIELD = requireMove('MOVE_FLOWER_SHIELD')
 const MOVE_ROTOTILLER = requireMove('MOVE_ROTOTILLER')
 const MOVE_MAGNETIC_FLUX = requireMove('MOVE_MAGNETIC_FLUX')
 const MOVE_COURT_CHANGE = requireMove('MOVE_COURT_CHANGE')
+const MOVE_AFTER_YOU = requireMove('MOVE_AFTER_YOU')
+const MOVE_QUASH = requireMove('MOVE_QUASH')
+const MOVE_COACHING = requireMove('MOVE_COACHING')
+const MOVE_AROMATIC_MIST = requireMove('MOVE_AROMATIC_MIST')
+const MOVE_TEATIME = requireMove('MOVE_TEATIME')
+const MOVE_STUFF_CHEEKS = requireMove('MOVE_STUFF_CHEEKS')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -322,6 +329,8 @@ const ABILITY_MINUS = requireAbility('ABILITY_MINUS')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
+const ITEM_LIECHI_BERRY = requireItem('ITEM_LIECHI_BERRY')
+const ITEM_SITRUS_BERRY = requireItem('ITEM_SITRUS_BERRY')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -7125,6 +7134,319 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(hasFlag(state.sides[0].statuses, SIDE_STATUS_SPIKES)).toBe(false)
             expect(state.sides[1].timers.spikesAmount).toBe(2)
             expect(state.sides[0].timers.spikesAmount).toBe(0)
+          })
+        })
+
+        describe('EFFECT_AFTER_YOU', () => {
+          it('sets target.round.afterYou and reorders a slower target to act immediately after the user', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_AFTER_YOU', null, null, null], pp: [15, 0, 0, 0], spe: 200 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 150 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+
+            // Battler 0 (spe 200) targets slowest battler 2 (spe 50); recalculateMoveOrder pulls battler 2 into slot 1
+            const out = executeTurn(
+              state,
+              [useMove(2, MOVE_AFTER_YOU), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.targetId).toBe(2)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(out.order.battlerByTurnOrder).toEqual([0, 2, 1, 3])
+          })
+
+          it('fails when the target has already acted this turn, and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_AFTER_YOU', null, null, null], pp: [15, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            // Battler 0 acts first at slot 0; battler 1 uses After You on battler 0 at slot 1
+            const out = executeTurn(state, [useMove(0, MOVE_CELEBRATE), useMove(0, MOVE_AFTER_YOU)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 1)!
+            expect(act.missed).toBe(true)
+            expect(act.targetId).toBe(0)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(14)
+          })
+        })
+
+        describe('EFFECT_QUASH', () => {
+          it('sets field quashTimer to QUASH_DURATION (5) and started.quash = true when inactive', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_QUASH', null, null, null], pp: [5, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_QUASH), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+            expect(state.field.timers.quashTimer).toBe(QUASH_DURATION)
+            expect(state.field.timers.started.quash).toBe(true)
+          })
+
+          it('fails when quashTimer is already active, and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_QUASH', null, null, null], pp: [5, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.field.timers.quashTimer = 3
+
+            const out = executeTurn(state, [useMove(1, MOVE_QUASH), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+            // Pre-existing quashTimer (3) was not reset to 5; ENDTURN_QUASH decremented it to 2
+            expect(state.field.timers.quashTimer).toBe(2)
+          })
+        })
+
+        describe('EFFECT_COACHING', () => {
+          it('raises alive ally Attack and Defense by +1 stage in doubles', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_COACHING', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 90 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 80 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 70 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(
+              state,
+              [useMove(2, MOVE_COACHING), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.targetId).toBe(2)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[2]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[2]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(act.statChanges).toEqual([
+              { battlerId: 2, stat: STAT_ATK, change: 1 },
+              { battlerId: 2, stat: STAT_DEF, change: 1 },
+            ])
+          })
+
+          it('fails in singles (no ally) or when ally is already at max Attack and Defense', () => {
+            // Singles: no alive partner (battler 2 is absent)
+            const singlesState = battle(
+              [
+                { moves: ['MOVE_COACHING', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            const singlesOut = executeTurn(
+              singlesState,
+              [useMove(0, MOVE_COACHING), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const singlesAct = singlesOut.actions.find((a) => a.battlerId === 0)!
+            expect(singlesAct.missed).toBe(true)
+            expect(singlesState.battlers[0]!.mon.pp[0]).toBe(9)
+
+            // Doubles: ally already at MAX_STAT_STAGE for both Attack and Defense
+            const doublesState = battle(
+              [
+                { moves: ['MOVE_COACHING', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 90 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 80 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 70 },
+              ],
+              countingRng(),
+            )
+            doublesState.battlers[2]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
+            doublesState.battlers[2]!.mon.statStages[STAT_DEF] = MAX_STAT_STAGE
+
+            const doublesOut = executeTurn(
+              doublesState,
+              [useMove(2, MOVE_COACHING), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const doublesAct = doublesOut.actions.find((a) => a.battlerId === 0)!
+            expect(doublesAct.missed).toBe(true)
+            expect(doublesAct.targetId).toBe(2)
+            expect(doublesState.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(doublesAct.statChanges).toEqual([])
+          })
+        })
+
+        describe('EFFECT_AROMATIC_MIST', () => {
+          it('raises user and alive partner Sp. Def by +2 stages in doubles (and user alone in singles)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_AROMATIC_MIST', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 90 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 80 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 70 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(
+              state,
+              [useMove(0, MOVE_AROMATIC_MIST), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(state.battlers[2]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(act.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_SPDEF, change: 2 },
+              { battlerId: 2, stat: STAT_SPDEF, change: 2 },
+            ])
+          })
+
+          it('fails when user is at max Sp. Def and partner is absent or also at max Sp. Def', () => {
+            // Singles: user at MAX_STAT_STAGE, partner absent -> fails
+            const singlesState = battle(
+              [
+                { moves: ['MOVE_AROMATIC_MIST', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            singlesState.battlers[0]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+
+            const singlesOut = executeTurn(
+              singlesState,
+              [useMove(0, MOVE_AROMATIC_MIST), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const singlesAct = singlesOut.actions.find((a) => a.battlerId === 0)!
+            expect(singlesAct.missed).toBe(true)
+            expect(singlesState.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(singlesAct.statChanges).toEqual([])
+
+            // Doubles: user at MAX_STAT_STAGE, partner also at MAX_STAT_STAGE -> fails
+            const doublesState = battle(
+              [
+                { moves: ['MOVE_AROMATIC_MIST', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 90 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 80 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 70 },
+              ],
+              countingRng(),
+            )
+            doublesState.battlers[0]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+            doublesState.battlers[2]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+
+            const doublesOut = executeTurn(
+              doublesState,
+              [useMove(0, MOVE_AROMATIC_MIST), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const doublesAct = doublesOut.actions.find((a) => a.battlerId === 0)!
+            expect(doublesAct.missed).toBe(true)
+            expect(doublesState.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(doublesAct.statChanges).toEqual([])
+          })
+        })
+
+        describe('EFFECT_TEATIME', () => {
+          it('forces all alive battlers holding non-negated berries to consume them in battler id order with sBERRY_OVERRIDE', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TEATIME', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_LIECHI_BERRY.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, hp: 50, maxHp: 100, itemId: ITEM_SITRUS_BERRY.id },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_TEATIME), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            // Battler 0 ate Liechi Berry (+1 Atk even at full HP due to sBERRY_OVERRIDE)
+            expect(state.battlers[0]!.mon.itemId).toBeNull()
+            expect(state.battlers[0]!.usedHeldItem).toBe(ITEM_LIECHI_BERRY.id)
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            // Battler 1 ate Sitrus Berry (+25 HP)
+            expect(state.battlers[1]!.mon.itemId).toBeNull()
+            expect(state.battlers[1]!.usedHeldItem).toBe(ITEM_SITRUS_BERRY.id)
+            expect(state.battlers[1]!.mon.hp).toBe(75)
+          })
+
+          it('fails when no alive battler holds a non-negated berry', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TEATIME', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_BOOSTER_ENERGY.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: ITEM_LIECHI_BERRY.id },
+              ],
+              countingRng(),
+            )
+            // Battler 1's berry is negated by Embargo
+            state.battlers[1]!.statuses3 = setFlag(state.battlers[1]!.statuses3, STATUS3_EMBARGO)
+
+            const out = executeTurn(state, [useMove(1, MOVE_TEATIME), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[1]!.mon.itemId).toBe(ITEM_LIECHI_BERRY.id)
+          })
+        })
+
+        describe('EFFECT_STUFF_CHEEKS', () => {
+          it('consumes user berry with sBERRY_OVERRIDE and raises Defense by +2 stages', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_STUFF_CHEEKS', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_LIECHI_BERRY.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_STUFF_CHEEKS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[0]!.mon.itemId).toBeNull()
+            expect(state.battlers[0]!.usedHeldItem).toBe(ITEM_LIECHI_BERRY.id)
+            // Liechi Berry raised Attack by +1, then Stuff Cheeks raised Defense by +2
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(act.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_ATK, change: 1 },
+              { battlerId: 0, stat: STAT_DEF, change: 2 },
+            ])
+          })
+
+          it('fails when user does not hold a non-negated berry', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_STUFF_CHEEKS', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: null },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_STUFF_CHEEKS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+            expect(act.statChanges).toEqual([])
           })
         })
       })
