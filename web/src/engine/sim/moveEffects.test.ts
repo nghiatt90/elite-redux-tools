@@ -283,6 +283,13 @@ const MOVE_POWER_TRICK = requireMove('MOVE_POWER_TRICK')
 const MOVE_ION_DELUGE = requireMove('MOVE_ION_DELUGE')
 const MOVE_POWDER = requireMove('MOVE_POWDER')
 const MOVE_EMBER = requireMove('MOVE_EMBER')
+const MOVE_CELEBRATE = requireMove('MOVE_CELEBRATE')
+const MOVE_HOLD_HANDS = requireMove('MOVE_HOLD_HANDS')
+const MOVE_AUTOTOMIZE = requireMove('MOVE_AUTOTOMIZE')
+const MOVE_FLOWER_SHIELD = requireMove('MOVE_FLOWER_SHIELD')
+const MOVE_ROTOTILLER = requireMove('MOVE_ROTOTILLER')
+const MOVE_MAGNETIC_FLUX = requireMove('MOVE_MAGNETIC_FLUX')
+const MOVE_COURT_CHANGE = requireMove('MOVE_COURT_CHANGE')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -310,6 +317,8 @@ const ABILITY_VITAL_SPIRIT = requireAbility('ABILITY_VITAL_SPIRIT')
 const ABILITY_MEGA_LAUNCHER = requireAbility('ABILITY_MEGA_LAUNCHER')
 const ABILITY_DROUGHT = requireAbility('ABILITY_DROUGHT')
 const ABILITY_WONDER_GUARD = requireAbility('ABILITY_WONDER_GUARD')
+const ABILITY_PLUS = requireAbility('ABILITY_PLUS')
+const ABILITY_MINUS = requireAbility('ABILITY_MINUS')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -6816,6 +6825,306 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
 
             executeTurn(state, [null, null], testDeps())
             expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_POWDER)).toBe(false)
+          })
+        })
+
+        describe('EFFECT_DO_NOTHING', () => {
+          it('costs PP and changes nothing (Celebrate / vanilla Splash)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [20, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_CELEBRATE), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([])
+            expect(act.statusApplied).toBeNull()
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+            expect(state.battlers[1]!.mon.hp).toBe(100)
+          })
+
+          it('Hold Hands fails in singles when gBattlerTarget == gBattlerAttacker and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_HOLD_HANDS', null, null, null], pp: [20, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_HOLD_HANDS), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_AUTOTOMIZE', () => {
+          it('raises user Speed by +2, increments autotomizeCount, and notes the weight reader gap', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_AUTOTOMIZE', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_AUTOTOMIZE), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_SPEED, change: 2 }])
+            expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(state.battlers[0]!.volatiles.autotomizeCount).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(act.unmodelled.some((m) => m.includes('autotomizeCount'))).toBe(true)
+          })
+
+          it('fails when Speed is already at MAX_STAT_STAGE: does not increment autotomizeCount or gap weight', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_AUTOTOMIZE', null, null, null], pp: [15, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.mon.statStages[STAT_SPEED] = MAX_STAT_STAGE
+
+            const out = executeTurn(state, [useMove(0, MOVE_AUTOTOMIZE), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(state.battlers[0]!.volatiles.autotomizeCount).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(act.unmodelled.some((m) => m.includes('autotomizeCount'))).toBe(false)
+          })
+        })
+
+        describe('EFFECT_FLOWER_SHIELD', () => {
+          it('raises Defense by +1 of Grass-type battlers only (including airborne Grass-types)', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_FLOWER_SHIELD', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GRASS', 'FLYING', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['WATER', 'MYSTERY', 'MYSTERY'],
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_FLOWER_SHIELD), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([{ battlerId: 0, stat: STAT_DEF, change: 1 }])
+            expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails when no battler on the field is Grass-type, and still costs PP', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_FLOWER_SHIELD', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['FAIRY', 'MYSTERY', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['WATER', 'MYSTERY', 'MYSTERY'],
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_FLOWER_SHIELD), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_ROTOTILLER', () => {
+          it('raises Atk and SpAtk by +1 of grounded Grass-types only (or +2 in Grassy Terrain)', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROTOTILLER', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GRASS', 'MYSTERY', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GRASS', 'FLYING', 'MYSTERY'],
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_ROTOTILLER), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_ATK, change: 1 },
+              { battlerId: 0, stat: STAT_SPATK, change: 1 },
+            ])
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('raises Atk and SpAtk by +2 when STATUS_FIELD_GRASSY_TERRAIN is active', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROTOTILLER', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GRASS', 'MYSTERY', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['WATER', 'MYSTERY', 'MYSTERY'],
+                },
+              ],
+              countingRng(),
+            )
+            state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
+            state.field.timers.terrainTimer = 5
+
+            const out = executeTurn(state, [useMove(0, MOVE_ROTOTILLER), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_ATK, change: 2 },
+              { battlerId: 0, stat: STAT_SPATK, change: 2 },
+            ])
+          })
+
+          it('fails when no grounded Grass-type battler qualifies, and still costs PP', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_ROTOTILLER', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GROUND', 'MYSTERY', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  types: ['GRASS', 'FLYING', 'MYSTERY'],
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_ROTOTILLER), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_MAGNETIC_FLUX', () => {
+          it('raises Def and SpDef by +1 when the user has Plus or Minus', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_MAGNETIC_FLUX', null, null, null],
+                  pp: [20, 0, 0, 0],
+                  abilities: { ability: ABILITY_PLUS, innates: [null, null, null] },
+                },
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  abilities: { ability: ABILITY_MINUS, innates: [null, null, null] },
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_MAGNETIC_FLUX), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_DEF, change: 1 },
+              { battlerId: 0, stat: STAT_SPDEF, change: 1 },
+            ])
+            expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[1]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('fails when neither user nor ally has Plus or Minus, and still costs PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_MAGNETIC_FLUX', null, null, null], pp: [20, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_MAGNETIC_FLUX), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_COURT_CHANGE', () => {
+          it('swaps swappable side statuses, timers, and battlerIds (BATTLE_OPPOSITE) between the two sides', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_COURT_CHANGE', null, null, null], pp: [10, 0, 0, 0] },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [10, 0, 0, 0] },
+              ],
+              countingRng(),
+            )
+            // Side 1 has Reflect (timer 4 -> swapped to side 0, then ENDTURN_REFLECT ticks it to 3)
+            // Side 0 has Spikes (2 layers)
+            state.sides[1].statuses = setFlag(state.sides[1].statuses, SIDE_STATUS_REFLECT)
+            state.sides[1].timers.reflectTimer = 4
+            state.sides[1].timers.reflectBattlerId = 1
+
+            state.sides[0].statuses = setFlag(state.sides[0].statuses, SIDE_STATUS_SPIKES)
+            state.sides[0].timers.spikesAmount = 2
+
+            const out = executeTurn(state, [useMove(0, MOVE_COURT_CHANGE), null], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+
+            // Reflect moved to side 0 (timer 4 decremented to 3 at end of turn) and reflectBattlerId = 1 ^ 1 = 0
+            expect(hasFlag(state.sides[0].statuses, SIDE_STATUS_REFLECT)).toBe(true)
+            expect(hasFlag(state.sides[1].statuses, SIDE_STATUS_REFLECT)).toBe(false)
+            expect(state.sides[0].timers.reflectTimer).toBe(3)
+            expect(state.sides[1].timers.reflectTimer).toBe(0)
+            expect(state.sides[0].timers.reflectBattlerId).toBe(0)
+
+            // Spikes moved to side 1 with 2 layers
+            expect(hasFlag(state.sides[1].statuses, SIDE_STATUS_SPIKES)).toBe(true)
+            expect(hasFlag(state.sides[0].statuses, SIDE_STATUS_SPIKES)).toBe(false)
+            expect(state.sides[1].timers.spikesAmount).toBe(2)
+            expect(state.sides[0].timers.spikesAmount).toBe(0)
           })
         })
       })

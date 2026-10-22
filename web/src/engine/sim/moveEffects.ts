@@ -10,6 +10,7 @@ import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDe
 import { buildAccuracyInputs, getTotalAccuracy, isBattlerAlive, isBattlerProtected, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
 import {
+  B_SIDE_PLAYER,
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_FOG,
   ENUM_WEATHER_HAIL,
@@ -22,15 +23,18 @@ import {
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_LUCKY_CHANT,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_MIST,
   SIDE_STATUS_REFLECT,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_SCREEN_ANY,
   SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_TAILWIND,
   SIDE_STATUS_TOXIC_SPIKES,
   SIDE_STATUS_WIDE_GUARD,
   STAT_ACC,
@@ -173,6 +177,7 @@ import {
   tryResetBattlerStatChanges,
 } from './statBuffs'
 import { canBattlerHeal, isHealingBlocked } from './endTurn'
+import { isBattlerGrounded } from './grounding'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
@@ -7018,6 +7023,535 @@ export function handlePowder(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, missed: false })
 }
 
+/**
+ * EFFECT_DO_NOTHING (Celebrate, Happy Hour, Hold Hands; vanilla Splash).
+ * BattleScript_EffectDoNothing (data/battle_scripts_1.s:4594-4620).
+ * Note: In Elite Redux v2.65beta moves.json, MOVE_SPLASH was reworked to EFFECT_HEAT_CRASH;
+ * MOVE_CELEBRATE, MOVE_HAPPY_HOUR, and MOVE_HOLD_HANDS use EFFECT_DO_NOTHING.
+ * - Deducts PP unconditionally after attackcanceler (:4597).
+ * - MOVE_HOLD_HANDS (:4598, :4607-4612): fails if target's side has SIDE_STATUS_CRAFTY_SHIELD
+ *   or if gBattlerTarget == gBattlerAttacker (no alive ally, SetAttackingStructValues,
+ *   src/battle_util.c:283-287).
+ * - MOVE_CELEBRATE (:4601, :4613-4616): prints STRINGID_CELEBRATEMESSAGE and ends.
+ * - MOVE_HAPPY_HOUR (:4602, :4617-4620): MOVE_EFFECT_HAPPY_HOUR (src/battle_script_commands.c:2692-2697)
+ *   doubles gBattleStruct->moneyMultiplier when used by B_SIDE_PLAYER (gapped when player-side).
+ * - Default (:4603-4606): increments GAME_STAT_USED_SPLASH, prints STRINGID_BUTNOTHINGHAPPENED, ends.
+ */
+export function handleDoNothing(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (moveId === 'MOVE_HOLD_HANDS') {
+    const partnerId = battlerId ^ 2
+    const partner = state.battlers[partnerId]
+    const partnerSlot = partner ? findAbilitySlot(partner.mon.abilities, 'ABILITY_COMMANDER') : -1
+    const partnerCommanderActive = partnerSlot !== -1 && (partner!.volatiles.abilityState[partnerSlot] ?? 0) >= 1
+    const resolvedTarget =
+      isBattlerAlive(state, partnerId) && !partnerCommanderActive && targetId !== battlerId
+        ? partnerId
+        : battlerId
+    if (
+      hasFlag(state.sides[resolvedTarget & 1].statuses, SIDE_STATUS_CRAFTY_SHIELD) ||
+      resolvedTarget === battlerId
+    ) {
+      return outcome(ctx, { targetId: resolvedTarget, missed: true })
+    }
+    return outcome(ctx, { targetId: resolvedTarget, missed: false })
+  }
+
+  if (moveId === 'MOVE_HAPPY_HOUR' && (battlerId & 1) === B_SIDE_PLAYER) {
+    unmodelled.push(
+      'MOVE_EFFECT_HAPPY_HOUR (battle_script_commands.c:2692-2697): gBattleStruct->moneyMultiplier / moneyMultiplierMove not modelled',
+    )
+  }
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * GetBattlerWeight, src/battle_util.c:6705-6734.
+ * Returns null if species data is unavailable in dataContext.
+ */
+function getBattlerWeight(
+  state: BattleState,
+  battlerId: number,
+  attackerId: number,
+  deps: TurnLoopDeps,
+): number | null {
+  const battler = state.battlers[battlerId]
+  if (!battler) return null
+  const species = deps.dataContext.species(battler.mon.speciesId)
+  if (!species) return null
+
+  let weight = species.weight
+  const holdEffect = deps.grounding.holdEffectOf(battlerId)
+  const attacker = state.battlers[attackerId]
+  const attackerHasMB = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+
+  if (battlerHasSimAbility(state, battler, 'ABILITY_HEAVY_METAL', true, attackerId, attackerHasMB, deps.dataContext)) {
+    weight *= 2
+  }
+  if (battlerHasSimAbility(state, battler, 'ABILITY_LIGHT_METAL', true, attackerId, attackerHasMB, deps.dataContext)) {
+    weight = Math.trunc(weight / 2)
+  }
+  if (battlerHasSimAbility(state, battler, 'ABILITY_LEAD_COAT', true, attackerId, attackerHasMB, deps.dataContext)) {
+    weight *= 3
+  }
+  if (battlerHasSimAbility(state, battler, 'ABILITY_TERASTAL_TREASURE', true, attackerId, attackerHasMB, deps.dataContext)) {
+    weight *= 3
+  }
+  if (battlerHasSimAbility(state, battler, 'ABILITY_CHROME_COAT', true, attackerId, attackerHasMB, deps.dataContext)) {
+    weight *= 3
+  }
+  if (holdEffect === 'HOLD_EFFECT_FLOAT_STONE') {
+    weight = Math.trunc(weight / 2)
+  }
+
+  for (let i = 0; i < battler.volatiles.autotomizeCount; i++) {
+    if (weight > 1000) {
+      weight -= 1000
+    } else {
+      weight = 1
+      break
+    }
+  }
+
+  if (weight === 0) weight = 1
+  return weight
+}
+
+/**
+ * EFFECT_AUTOTOMIZE (Autotomize).
+ * BattleScript_EffectAutotomize (data/battle_scripts_1.s:1617-1640),
+ * VARIOUS_TRY_AUTOTOMIZE (src/battle_script_commands.c:7533-7540).
+ * Raises user's Speed by 2 stages, then if the stat raise succeeded (!MOVE_RESULT_NO_EFFECT),
+ * increments volatiles.autotomizeCount when GetBattlerWeight > 1.
+ */
+export function handleAutotomize(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const statChanges: StatChangeOutcome[] = []
+  const res = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    2,
+    STAT_SPEED,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    statChanges.push({ battlerId, stat: STAT_SPEED, change: res.delta })
+  }
+
+  // BattleScript_AutotomizeWeightLoss (:1635-1640): jumpifmovehadnoeffect BattleScript_MoveEnd
+  if (!res.missed) {
+    const currentWeight = getBattlerWeight(state, battlerId, battlerId, deps)
+    if (currentWeight === null || currentWeight > 1) {
+      battler.volatiles.autotomizeCount++
+    }
+    unmodelled.push(
+      "VARIOUS_TRY_AUTOTOMIZE (battle_script_commands.c:7533-7540, battle_util.c:6705-6734): volatiles.autotomizeCount is not read by bridge.ts's condition.weight (Heavy Slam / Low Kick)",
+    )
+  }
+
+  return outcome(ctx, { statChanges, missed: res.missed ?? false })
+}
+
+/**
+ * EFFECT_FLOWER_SHIELD (Flower Shield).
+ * BattleScript_EffectFlowerShield (data/battle_scripts_1.s:1287-1320),
+ * Cmd_selectfirstvalidtarget (src/battle_script_commands.c:11474-11481),
+ * Cmd_jumpifnexttargetvalid (src/battle_script_commands.c:9240-9253),
+ * Cmd_jumpbasedontype (src/battle_script_commands.c:3403-3427).
+ * Raises Defense by 1 stage for all valid Grass-type battlers on the field (grounded or not).
+ * Fails via BattleScript_ButItFailed if no valid target is Grass-type.
+ */
+export function handleFlowerShield(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const moveTarget = deps.dataContext.move(moveId)?.target ?? 'ALL_BATTLERS'
+  const includesUser =
+    moveTarget === 'ALL_BATTLERS' || moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY'
+
+  const validTargets: number[] = []
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (i === battlerId && !includesUser) continue
+    const b = state.battlers[i]
+    if (!b) continue
+    const cmdSlot = findAbilitySlot(b.mon.abilities, 'ABILITY_COMMANDER')
+    if (cmdSlot !== -1 && (b.volatiles.abilityState[cmdSlot] ?? 0) >= 1) continue
+    if (!isBattlerAlive(state, i)) continue
+    validTargets.push(i)
+  }
+
+  // BattleScript_FlowerShieldIsAnyGrass (:1291-1295)
+  const hasAnyGrass = validTargets.some((i) => state.battlers[i]!.mon.types.includes('GRASS'))
+  if (!hasAnyGrass) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // BattleScript_FlowerShieldLoop (:1297-1320)
+  const statChanges: StatChangeOutcome[] = []
+  for (const i of validTargets) {
+    const b = state.battlers[i]!
+    if (!b.mon.types.includes('GRASS')) continue
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      i,
+      1,
+      STAT_DEF,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId: i, stat: STAT_DEF, change: res.delta })
+    }
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * CompareStat(battlerId, statId, MAX_STAT_STAGE, cmpKind), src/battle_util.c:8545-8585.
+ * Flips CMP_LESS_THAN <-> CMP_GREATER_THAN and MAX_STAT_STAGE <-> MIN_STAT_STAGE when
+ * BattlerHasAbility(battlerId, ABILITY_CONTRARY, TRUE).
+ */
+function compareStatToMax(
+  state: BattleState,
+  battler: BattlerState,
+  statId: number,
+  cmpKind: 'LESS_THAN' | 'EQUAL',
+  attackerId: number,
+  deps: TurnLoopDeps,
+): boolean {
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const attacker = state.battlers[attackerId]
+  const attackerHasMB = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+  const hasContrary = battlerHasSimAbility(
+    state,
+    battler,
+    'ABILITY_CONTRARY',
+    true,
+    attackerId,
+    attackerHasMB,
+    deps.dataContext,
+  )
+  if (cmpKind === 'LESS_THAN') {
+    return hasContrary ? stage > MIN_STAT_STAGE : stage < MAX_STAT_STAGE
+  }
+  return hasContrary ? stage === MIN_STAT_STAGE : stage === MAX_STAT_STAGE
+}
+
+/**
+ * IsRototillerAffected, src/battle_script_commands.c:6640-6647,
+ * BlocksPrankster, src/battle_util.c:8622-8635.
+ */
+function isRototillerAffected(
+  state: BattleState,
+  attackerId: number,
+  battlerId: number,
+  deps: TurnLoopDeps,
+): boolean {
+  if (!isBattlerAlive(state, battlerId)) return false
+  if (!isBattlerGrounded(state, battlerId, deps.grounding)) return false
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (!battler.mon.types.includes('GRASS')) return false
+  if (hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE)) return false
+
+  // BlocksPrankster(MOVE_ROTOTILLER, gBattlerAttacker, battlerId, FALSE) (:6645, battle_util.c:8622-8635)
+  const attacker = state.battlers[attackerId]
+  if (
+    attacker &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_PRANKSTER', false, attackerId, false, deps.dataContext) &&
+    (attackerId & 1) !== (battlerId & 1) &&
+    battler.mon.types.includes('DARK')
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * EFFECT_ROTOTILLER (Rototiller).
+ * BattleScript_EffectRototiller (data/battle_scripts_1.s:1322-1380),
+ * VARIOUS_GET_ROTOTILLER_TARGETS (src/battle_script_commands.c:7998-8013),
+ * VARIOUS_JUMP_IF_NOT_ROTOTILLER_AFFECTED (src/battle_script_commands.c:8014-8021),
+ * IsRototillerAffected (src/battle_script_commands.c:6640-6647).
+ * Raises Attack and Sp. Atk by 1 stage (or 2 stages in Grassy Terrain, ER change at :1341-1346,
+ * :1352-1357) for all grounded, non-semi-invulnerable Grass-type battlers not blocked by Prankster.
+ * Fails via BattleScript_ButItFailed if no battler qualifies.
+ */
+export function handleRototiller(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // VARIOUS_GET_ROTOTILLER_TARGETS (:7998-8013)
+  let count = 0
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    if (!b) continue
+    b.turn.rototillerAffected = false
+    if (isRototillerAffected(state, battlerId, i, deps)) {
+      b.turn.rototillerAffected = true
+      count++
+    }
+  }
+
+  if (count === 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // BattleScript_RototillerLoop (:1332-1379)
+  const statChanges: StatChangeOutcome[] = []
+  let currentAttackerId = battlerId
+
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    if (!b) continue
+
+    // C quirk (:1334-1335, :1369-1373): jumpifstat checks STAT_ATK and STAT_SPATK BEFORE
+    // jumpifnotrototilleraffected, and BattleScript_RototillerCantRaiseMultipleStats executes
+    // `copybyte gBattlerAttacker, gBattlerTarget` without restoring gBattlerAttacker.
+    if (
+      !compareStatToMax(state, b, STAT_ATK, 'LESS_THAN', currentAttackerId, deps) &&
+      compareStatToMax(state, b, STAT_SPATK, 'EQUAL', currentAttackerId, deps)
+    ) {
+      currentAttackerId = i
+      continue
+    }
+
+    // VARIOUS_JUMP_IF_NOT_ROTOTILLER_AFFECTED (:8014-8021)
+    if (b.turn.rototillerAffected) {
+      b.turn.rototillerAffected = false
+    } else {
+      continue
+    }
+
+    const stages = hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN) ? 2 : 1
+    const rAtk = changeStatBuffsImplicit(
+      state,
+      currentAttackerId,
+      i,
+      stages,
+      STAT_ATK,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (rAtk.delta !== 0) {
+      statChanges.push({ battlerId: i, stat: STAT_ATK, change: rAtk.delta })
+    }
+
+    const rSpAtk = changeStatBuffsImplicit(
+      state,
+      currentAttackerId,
+      i,
+      stages,
+      STAT_SPATK,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (rSpAtk.delta !== 0) {
+      statChanges.push({ battlerId: i, stat: STAT_SPATK, change: rSpAtk.delta })
+    }
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * EFFECT_MAGNETIC_FLUX (Magnetic Flux).
+ * BattleScript_EffectMagneticFlux (data/battle_scripts_1.s:1173-1211),
+ * Cmd_jumpifability (src/battle_script_commands.c:3316-3349),
+ * setallytonexttarget (.omc/team-pilot/battle_script.inc:2129-2136).
+ * Checks user (battlerId) then partner (battlerId ^ 2); raises Defense and Sp. Def by 1 stage
+ * for each that has ABILITY_MINUS or ABILITY_PLUS (checked with checkMoldBreaker = true).
+ * Fails via BattleScript_ButItFailed if gBattleCommunication == 0 (no stat stage changed).
+ */
+export function handleMagneticFlux(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const attacker = state.battlers[battlerId]!
+  const attackerHasMB = attackerHasMoldBreakerActive(attacker, deps)
+  const statChanges: StatChangeOutcome[] = []
+  let battleCommunication = 0
+
+  for (const tId of [battlerId, battlerId ^ 2]) {
+    const target = state.battlers[tId]
+    if (!target || target.mon.hp === 0) continue
+
+    const hasMinusOrPlus =
+      battlerHasSimAbility(state, target, 'ABILITY_MINUS', true, battlerId, attackerHasMB, deps.dataContext) ||
+      battlerHasSimAbility(state, target, 'ABILITY_PLUS', true, battlerId, attackerHasMB, deps.dataContext)
+    if (!hasMinusOrPlus) continue
+
+    if (
+      !compareStatToMax(state, target, STAT_DEF, 'LESS_THAN', battlerId, deps) &&
+      compareStatToMax(state, target, STAT_SPDEF, 'EQUAL', battlerId, deps)
+    ) {
+      continue
+    }
+
+    const rDef = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      tId,
+      1,
+      STAT_DEF,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (rDef.delta !== 0) {
+      statChanges.push({ battlerId: tId, stat: STAT_DEF, change: rDef.delta })
+      battleCommunication++
+    }
+
+    const rSpDef = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      tId,
+      1,
+      STAT_SPDEF,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (rSpDef.delta !== 0) {
+      statChanges.push({ battlerId: tId, stat: STAT_SPDEF, change: rSpDef.delta })
+      battleCommunication++
+    }
+  }
+
+  if (battleCommunication === 0) {
+    return outcome(ctx, { missed: true })
+  }
+
+  return outcome(ctx, { statChanges })
+}
+
+/**
+ * SIDE_STATUS_SWAPPABLE, include/constants/battle.h:356-357.
+ * C quirk: excludes SIDE_STATUS_LUCKY_CHANT even though VARIOUS_SWAP_SIDE_EFFECTS swaps
+ * luckyChantTimer, started.luckyChant, and luckyChantBattlerId; includes SIDE_STATUS_STICKY_WEB
+ * even when foamyWeb prevents swapping stickyWebTimer.
+ */
+const SIDE_STATUS_SWAPPABLE =
+  SIDE_STATUS_HAZARDS_ANY |
+  SIDE_STATUS_SCREEN_ANY |
+  SIDE_STATUS_SAFEGUARD |
+  SIDE_STATUS_MIST |
+  SIDE_STATUS_TAILWIND |
+  SIDE_STATUS_SMOKESCREEN
+
+/**
+ * EFFECT_COURT_CHANGE (Court Change).
+ * BattleScript_EffectCourtChange (data/battle_scripts_1.s:24-32),
+ * VARIOUS_SWAP_SIDE_EFFECTS (src/battle_script_commands.c:8325-8378).
+ * Swaps SIDE_STATUS_SWAPPABLE bits and side timers between sides[0] and sides[1],
+ * and flips *BattlerId fields with BATTLE_OPPOSITE (id ^ 1). Never fails.
+ */
+export function handleCourtChange(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const side0 = state.sides[0]
+  const side1 = state.sides[1]
+  const t0 = side0.timers
+  const t1 = side1.timers
+
+  // :8328-8332 -- swap SIDE_STATUS_SWAPPABLE bits
+  const tempFlags = (side0.statuses & SIDE_STATUS_SWAPPABLE) >>> 0
+  side0.statuses = ((side0.statuses & ~SIDE_STATUS_SWAPPABLE) | (side1.statuses & SIDE_STATUS_SWAPPABLE)) >>> 0
+  side1.statuses = ((side1.statuses & ~SIDE_STATUS_SWAPPABLE) | tempFlags) >>> 0
+
+  // :8334-8350 -- swap side timers and hazard amounts/types
+  ;[t0.reflectTimer, t1.reflectTimer] = [t1.reflectTimer, t0.reflectTimer]
+  ;[t0.lightscreenTimer, t1.lightscreenTimer] = [t1.lightscreenTimer, t0.lightscreenTimer]
+  ;[t0.mistTimer, t1.mistTimer] = [t1.mistTimer, t0.mistTimer]
+  ;[t0.safeguardTimer, t1.safeguardTimer] = [t1.safeguardTimer, t0.safeguardTimer]
+  ;[t0.spikesAmount, t1.spikesAmount] = [t1.spikesAmount, t0.spikesAmount]
+  ;[t0.toxicSpikesAmount, t1.toxicSpikesAmount] = [t1.toxicSpikesAmount, t0.toxicSpikesAmount]
+  ;[t0.stealthRockType, t1.stealthRockType] = [t1.stealthRockType, t0.stealthRockType]
+  ;[t0.auroraVeilTimer, t1.auroraVeilTimer] = [t1.auroraVeilTimer, t0.auroraVeilTimer]
+  ;[t0.tailwindTimer, t1.tailwindTimer] = [t1.tailwindTimer, t0.tailwindTimer]
+  ;[t0.luckyChantTimer, t1.luckyChantTimer] = [t1.luckyChantTimer, t0.luckyChantTimer]
+
+  if (deps.grounding.monotypeChampType !== 'WATER') {
+    ;[t0.swampTimer, t1.swampTimer] = [t1.swampTimer, t0.swampTimer]
+  }
+
+  ;[t0.fireSeaTimer, t1.fireSeaTimer] = [t1.fireSeaTimer, t0.fireSeaTimer]
+  ;[t0.rainbowTimer, t1.rainbowTimer] = [t1.rainbowTimer, t0.rainbowTimer]
+  ;[t0.smokescreenTimer, t1.smokescreenTimer] = [t1.smokescreenTimer, t0.smokescreenTimer]
+  ;[t0.hotCoals, t1.hotCoals] = [t1.hotCoals, t0.hotCoals]
+  ;[t0.caltrops, t1.caltrops] = [t1.caltrops, t0.caltrops]
+
+  const tempStarted = { ...t0.started }
+  t0.started = { ...t1.started }
+  t1.started = tempStarted
+
+  // :8352-8357 -- stickyWebTimer swapped only when neither side has foamyWeb;
+  // otherwise started.spiderWeb is swapped back to its initial state.
+  if (!t0.foamyWeb && !t1.foamyWeb) {
+    ;[t0.stickyWebTimer, t1.stickyWebTimer] = [t1.stickyWebTimer, t0.stickyWebTimer]
+  } else {
+    ;[t0.started.spiderWeb, t1.started.spiderWeb] = [t1.started.spiderWeb, t0.started.spiderWeb]
+  }
+
+  // :8359-8374 -- UPDATE_COURTCHANGED_BATTLER: BATTLE_OPPOSITE(id) = id ^ 1
+  ;[t0.reflectBattlerId, t1.reflectBattlerId] = [t1.reflectBattlerId ^ 1, t0.reflectBattlerId ^ 1]
+  ;[t0.lightscreenBattlerId, t1.lightscreenBattlerId] = [t1.lightscreenBattlerId ^ 1, t0.lightscreenBattlerId ^ 1]
+  ;[t0.mistBattlerId, t1.mistBattlerId] = [t1.mistBattlerId ^ 1, t0.mistBattlerId ^ 1]
+  ;[t0.safeguardBattlerId, t1.safeguardBattlerId] = [t1.safeguardBattlerId ^ 1, t0.safeguardBattlerId ^ 1]
+  ;[t0.auroraVeilBattlerId, t1.auroraVeilBattlerId] = [t1.auroraVeilBattlerId ^ 1, t0.auroraVeilBattlerId ^ 1]
+  ;[t0.tailwindBattlerId, t1.tailwindBattlerId] = [t1.tailwindBattlerId ^ 1, t0.tailwindBattlerId ^ 1]
+  ;[t0.luckyChantBattlerId, t1.luckyChantBattlerId] = [t1.luckyChantBattlerId ^ 1, t0.luckyChantBattlerId ^ 1]
+  ;[t0.smokescreenBattler, t1.smokescreenBattler] = [t1.smokescreenBattler ^ 1, t0.smokescreenBattler ^ 1]
+
+  return outcome(ctx, { missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SPITE: handleSpite,
   EFFECT_GRUDGE: handleGrudge,
@@ -7224,6 +7758,13 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_TAR_SHOT: handleTarShot,
   EFFECT_SPICY_EXTRACT: handleSpicyExtract,
   EFFECT_MEMENTO: handleMemento,
+
+  EFFECT_DO_NOTHING: handleDoNothing,
+  EFFECT_AUTOTOMIZE: handleAutotomize,
+  EFFECT_FLOWER_SHIELD: handleFlowerShield,
+  EFFECT_ROTOTILLER: handleRototiller,
+  EFFECT_MAGNETIC_FLUX: handleMagneticFlux,
+  EFFECT_COURT_CHANGE: handleCourtChange,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {
