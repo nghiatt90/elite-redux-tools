@@ -8715,6 +8715,256 @@ export function handleWaterlog(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, missed: false })
 }
 
+/**
+ * EFFECT_TRICK (Trick, Switcheroo).
+ * BattleScript_EffectTrick (data/battle_scripts_1.s:6279-6292),
+ * tryswapitems (.omc/team-pilot/battle_script.inc:1126-1129, Cmd_tryswapitems, src/battle_script_commands.c:11712-11765),
+ * IsStickyHold (src/battle_util.c:9329-9333),
+ * UpdateBattlerItem (src/battle_script_commands.c:2194-2221).
+ *
+ * C details and quirks preserved:
+ * 1. Script order: attackcanceler -> attackstring -> ppreduce (:6282) -> jumpifsubstituteblocks (:6283) ->
+ *    accuracycheck ACC_CURR_MOVE (:6284) -> tryswapitems (:6285).
+ * 2. Cmd_tryswapitems (:11729-11734) fails when `attacker.item == target.item` (which rejects both when neither
+ *    battler holds an item and when both hold the exact same item ID) or when any of the 4 CanBattlerGetOrLoseItem
+ *    checks `(attacker, attacker.item)`, `(attacker, target.item)`, `(target, target.item)`, `(target, attacker.item)`
+ *    is false.
+ * 3. `IsStickyHold(gBattlerTarget)` (:11737) checks only `gBattlerTarget` (with checkMoldBreaker = TRUE, so an
+ *    attacker with Sticky Hold can swap away its own item) and does not check `gBattleMons[gBattlerTarget].item != ITEM_NONE`
+ *    (so a target with Sticky Hold / Supersweet Syrup holding no item still blocks Trick/Switcheroo).
+ */
+export function handleTrick(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. attackstring + ppreduce (:6281-6282)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifsubstituteblocks BattleScript_ButItFailed (:6283)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, ACC_CURR_MOVE (:6284)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. tryswapitems BattleScript_ButItFailed (Cmd_tryswapitems, :11712-11765).
+  // All 40 solver fights are trainer battles (BATTLE_TYPE_TRAINER set) and B_TRAINERS_KNOCK_OFF_ITEMS is TRUE
+  // (include/constants/battle_config.h:103).
+  const attackerItem = battler.mon.itemId
+  const targetItem = target.mon.itemId
+  if (
+    attackerItem === targetItem ||
+    !canBattlerGetOrLoseItem(battler, attackerItem, deps) ||
+    !canBattlerGetOrLoseItem(battler, targetItem, deps) ||
+    !canBattlerGetOrLoseItem(target, targetItem, deps) ||
+    !canBattlerGetOrLoseItem(target, attackerItem, deps)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // IsStickyHold(gBattlerTarget) (:11737, src/battle_util.c:9329-9333)
+  const attackerHasMB = attackerHasMoldBreakerActive(battler, deps)
+  const isStickyHold =
+    battlerHasSimAbility(state, target, 'ABILITY_STICKY_HOLD', true, battlerId, attackerHasMB, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_SUPERSWEET_SYRUP', true, battlerId, attackerHasMB, deps.dataContext)
+  if (isStickyHold) {
+    // :11738-11739 -- jumps to BattleScript_MoveEnd (not ButItFailed), so the move is not marked failed
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // :11743-11744:
+  // gLastUsedItem = UpdateBattlerItem(gBattlerAttacker, gBattleMons[gBattlerTarget].item);
+  // gBattleStruct->changedItems[gBattlerAttacker] = UpdateBattlerItem(gBattlerTarget, gLastUsedItem);
+  const applyUpdateBattlerItem = (holder: BattlerState, oldItem: string | null, newItem: string | null): void => {
+    if (oldItem === newItem) return
+    if (oldItem === null) {
+      if (
+        findAbilitySlot(holder.mon.abilities, 'ABILITY_UNBURDEN') !== -1 ||
+        findAbilitySlot(holder.mon.abilities, 'ABILITY_SUGAR_RUSH') !== -1
+      ) {
+        unmodelled.push(
+          "UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2197-2200) is not modelled",
+        )
+      }
+      holder.mon.itemId = newItem
+    } else if (newItem === null) {
+      clearBattlerItem(state, holder, unmodelled)
+    } else {
+      holder.mon.itemId = newItem
+    }
+  }
+
+  applyUpdateBattlerItem(battler, attackerItem, targetItem)
+  applyUpdateBattlerItem(target, targetItem, attackerItem)
+  // MOVEEND_CHANGED_ITEMS (:4658-4661): when changedItems[attacker] != 0 (i.e. targetItem !== null),
+  // sets gTurnStructs[attacker].shouldTriggerSwitchItem = FALSE.
+  if (targetItem !== null) {
+    battler.turn.shouldTriggerSwitchItem = false
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_SNATCH (Snatch).
+ * BattleScript_EffectSnatch (data/battle_scripts_1.s:6522-6533),
+ * trysetsnatch (.omc/team-pilot/battle_script.inc:1185-1188, Cmd_trysetsnatch, src/battle_script_commands.c:12063-12072).
+ *
+ * C details:
+ * 1. Both success (:6525-6526) and failure (`BattleScript_ButItFailedAtkStringPpReduce`, :6524) run `attackstring` + `ppreduce`.
+ * 2. Fails when `gCurrentTurnActionNumber == gBattlersCount - 1` (user acts last in the turn order).
+ * 3. Otherwise sets `gRoundStructs[gBattlerAttacker].stealMove = TRUE`.
+ * 4. Consumer in Cmd_attackcanceler (src/battle_script_commands.c:1175-1182, BattleScript_SnatchedMove at
+ *    data/battle_scripts_1.s:8346-8355) is not ported in attackCanceller.ts / turn.ts.
+ */
+export function handleSnatch(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, turnOrderIndex, order } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const battlerCount = order ? order.battlerByTurnOrder.length : state.battlers.length
+  if (turnOrderIndex === battlerCount - 1) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.round.stealMove = true
+  unmodelled.push(
+    "Snatch's stealMove consumer in Cmd_attackcanceler (battle_script_commands.c:1175-1182, BattleScript_SnatchedMove at data/battle_scripts_1.s:8346-8355) is not modelled; subsequent FLAG_SNATCH_AFFECTED moves this turn are not stolen",
+  )
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_MAGIC_COAT (Magic Coat).
+ * BattleScript_EffectMagicCoat (data/battle_scripts_1.s:6345-6355),
+ * trysetmagiccoat (.omc/team-pilot/battle_script.inc:1180-1183, Cmd_trysetmagiccoat, src/battle_script_commands.c:12052-12061).
+ *
+ * C details:
+ * 1. Cmd_trysetmagiccoat (:12053) sets `gBattlerTarget = gBattlerAttacker`.
+ * 2. Both success (:6348-6349) and failure (`BattleScript_ButItFailedAtkStringPpReduce`, :6347) run `attackstring` + `ppreduce`.
+ * 3. Fails when `gCurrentTurnActionNumber == gBattlersCount - 1` (user acts last in the turn order).
+ * 4. Otherwise sets `gRoundStructs[gBattlerAttacker].bounceMove = TRUE`.
+ * 5. Consumer in Cmd_attackcanceler (src/battle_script_commands.c:1153-1166, BattleScript_MagicCoatBounce /
+ *    BattleScript_MagicCoatBouncePrankster at data/battle_scripts_1.s:8325-8344) is not ported in attackCanceller.ts / turn.ts.
+ */
+export function handleMagicCoat(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp, turnOrderIndex, order } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const battlerCount = order ? order.battlerByTurnOrder.length : state.battlers.length
+  if (turnOrderIndex === battlerCount - 1) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.round.bounceMove = true
+  unmodelled.push(
+    "Magic Coat's bounceMove consumer in Cmd_attackcanceler (battle_script_commands.c:1153-1166, BattleScript_MagicCoatBounce at data/battle_scripts_1.s:8325-8344) is not modelled; incoming FLAG_MAGIC_COAT_AFFECTED moves this turn are not reflected",
+  )
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_ALLY_SWITCH (Ally Switch).
+ * BattleScript_EffectAllySwitch (data/battle_scripts_1.s:12538-12548),
+ * swapwith BS_ATTACKER_PARTNER (.omc/team-pilot/battle_script.inc:1794-1797, VARIOUS_SWAP_WITH,
+ * src/battle_script_commands.c:6754, 8855-8878),
+ * SetAttackingStructValues MOVE_TARGET_ALLY (src/battle_util.c:283-287).
+ *
+ * C details and quirks preserved:
+ * 1. BattleScript_EffectAllySwitch (:12538-12548) has no failure check (no jumpifnotdoublebattle, no jumpifabsent,
+ *    no ProtectSucceeds; NoTargetPresent at src/battle_script_commands.c:948-961 has no MOVE_TARGET_ALLY case),
+ *    so Ally Switch never fails in C, even in singles or when the partner is absent.
+ * 2. VARIOUS_SWAP_WITH (:8855-8878) does not swap the battlers' positions/structs; it only swaps other battlers'
+ *    `gBattleStruct->moveTarget[i]` between `gBattlerAttacker` and `BATTLE_PARTNER(gBattlerAttacker)` and swaps
+ *    `gWishFutureKnock.futureSightMove/Power/Attacker/Counter` between the two slots. Neither `gBattleStruct->moveTarget`
+ *    (other battlers' pending `ChosenAction.target` in turn.ts) nor `gWishFutureKnock.futureSight*` is modelled here.
+ */
+export function handleAllySwitch(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. attackstring + ppreduce (:12540-12541)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // SetAttackingStructValues (:283-287): MOVE_TARGET_ALLY resolves gBattlerTarget to BATTLE_PARTNER(gBattlerAttacker)
+  // if alive and initial gBattlerTarget does not have Commander active, else gBattlerAttacker.
+  const partnerId = battlerId ^ 2
+  const partnerAlive = isBattlerAlive(state, partnerId)
+  const initialTarget = targetId !== null ? state.battlers[targetId] : state.battlers[partnerId]
+  const cmdSlot = initialTarget ? findAbilitySlot(initialTarget.mon.abilities, 'ABILITY_COMMANDER') : -1
+  const commanderActive = cmdSlot !== -1 && (initialTarget!.volatiles.abilityState[cmdSlot] ?? 0) >= 1
+  const resolvedTargetId = partnerAlive && !commanderActive ? partnerId : battlerId
+
+  // 2. swapwith BS_ATTACKER_PARTNER (VARIOUS_SWAP_WITH, :8855-8878)
+  unmodelled.push(
+    "VARIOUS_SWAP_WITH (battle_script_commands.c:8855-8878): swapping other battlers' gBattleStruct->moveTarget[i] between the user and BATTLE_PARTNER(user) and swapping gWishFutureKnock.futureSight* slots are not modelled",
+  )
+
+  return outcome(ctx, { targetId: resolvedTargetId, missed: false })
+}
+
+/**
+ * EFFECT_FOLLOW_ME (Follow Me, Rage Powder, Spotlight).
+ * BattleScript_EffectFollowMe (data/battle_scripts_1.s:6202-6212),
+ * setforcedtarget (.omc/team-pilot/battle_script.inc:1110-1112, Cmd_setforcedtarget, src/battle_script_commands.c:11612-11618),
+ * IsAffectedByFollowMe (src/battle_util.c:118-126).
+ *
+ * C details and quirks preserved:
+ * 1. BattleScript_EffectFollowMe (:6202-6212) has no singles failure check, no accuracy check, and no substitute check.
+ * 2. Cmd_setforcedtarget (:11614-11616) always sets `followmeTimer = 1`, `followmeTarget = gBattlerAttacker`, and
+ *    `followmePowder = TestMoveFlags(gCurrentMove, FLAG_POWDER)` on `gSideTimers[GetBattlerSide(gBattlerAttacker)]`,
+ *    even for MOVE_SPOTLIGHT (which has target MOVE_TARGET_SELECTED in moves.json but shares EFFECT_FOLLOW_ME).
+ * 3. Neither the target-redirection consumer IsAffectedByFollowMe (src/battle_util.c:118-126, 263-265, 6365-6366,
+ *    6395-6396) nor the end-of-turn clear of followmeTimer in TurnValuesCleanUp (src/battle_main.c:4507-4508) is
+ *    ported in turn.ts.
+ */
+export function handleFollowMe(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const moveData = deps.dataContext.move(moveId)
+  const isSelectedTarget = moveData?.target === 'SELECTED'
+
+  if (isSelectedTarget && (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0)) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 1. attackstring + ppreduce (:6204-6205)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. setforcedtarget (Cmd_setforcedtarget, :11612-11618)
+  const sideTimers = state.sides[battlerId & 1].timers
+  sideTimers.followmeTimer = 1
+  sideTimers.followmeTarget = battlerId
+  sideTimers.followmePowder = Boolean(moveData?.flags?.powderAffected)
+
+  unmodelled.push(
+    "Follow Me's IsAffectedByFollowMe target-redirection consumer (battle_util.c:118-126, 263-265, 6365-6366, 6395-6396) and TurnValuesCleanUp's end-of-turn clear of followmeTimer (battle_main.c:4507-4508) are not modelled in turn.ts",
+  )
+
+  return outcome(ctx, { targetId: isSelectedTarget ? targetId : battlerId, missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SPITE: handleSpite,
   EFFECT_GRUDGE: handleGrudge,
@@ -8942,6 +9192,12 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_KINESIS: handleKinesis,
   EFFECT_DRAIN_BRAIN: handleDrainBrain,
   EFFECT_WATERLOG: handleWaterlog,
+
+  EFFECT_TRICK: handleTrick,
+  EFFECT_SNATCH: handleSnatch,
+  EFFECT_MAGIC_COAT: handleMagicCoat,
+  EFFECT_ALLY_SWITCH: handleAllySwitch,
+  EFFECT_FOLLOW_ME: handleFollowMe,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

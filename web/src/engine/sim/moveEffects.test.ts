@@ -303,6 +303,14 @@ const MOVE_GEOMANCY = requireMove('MOVE_GEOMANCY')
 const MOVE_KINESIS = requireMove('MOVE_KINESIS')
 const MOVE_DRAIN_BRAIN = requireMove('MOVE_DRAIN_BRAIN')
 const MOVE_WATERLOG = requireMove('MOVE_WATERLOG')
+const MOVE_BATON_PASS = requireMove('MOVE_BATON_PASS')
+const MOVE_TRICK = requireMove('MOVE_TRICK')
+const MOVE_SWITCHEROO = requireMove('MOVE_SWITCHEROO')
+const MOVE_SNATCH = requireMove('MOVE_SNATCH')
+const MOVE_MAGIC_COAT = requireMove('MOVE_MAGIC_COAT')
+const MOVE_ALLY_SWITCH = requireMove('MOVE_ALLY_SWITCH')
+const MOVE_RAGE_POWDER = requireMove('MOVE_RAGE_POWDER')
+const MOVE_SPOTLIGHT = requireMove('MOVE_SPOTLIGHT')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -332,6 +340,8 @@ const ABILITY_DROUGHT = requireAbility('ABILITY_DROUGHT')
 const ABILITY_WONDER_GUARD = requireAbility('ABILITY_WONDER_GUARD')
 const ABILITY_PLUS = requireAbility('ABILITY_PLUS')
 const ABILITY_MINUS = requireAbility('ABILITY_MINUS')
+const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
+const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -1010,10 +1020,10 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const state = battle([{ moves: ['MOVE_BATON_PASS', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
 
-    const out = executeTurn(state, [useMove(1, MOVE_FOLLOW_ME), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dmg))
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -7762,6 +7772,309 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(missState.battlers[0]!.mon.pp[0]).toBe(14)
             expect(missOut.endTurnOrder).toEqual([1, 0])
             expect(missState.battlers[1]!.volatiles.drenched).toBe(0)
+          })
+        })
+
+        describe('EFFECT_TRICK', () => {
+          it('swaps held items between user and target (including one-sided swaps and Mold Breaker bypassing target Sticky Hold)', () => {
+            // Two-item swap via MOVE_TRICK
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_TRICK', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_SITRUS_BERRY.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: ITEM_LIECHI_BERRY.id },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_TRICK), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(rng.calls).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[0]!.mon.itemId).toBe(ITEM_LIECHI_BERRY.id)
+            expect(state.battlers[1]!.mon.itemId).toBe(ITEM_SITRUS_BERRY.id)
+
+            // One-sided swap via MOVE_SWITCHEROO with Mold Breaker bypassing target's Sticky Hold
+            const mbRng = countingRng()
+            const mbState = battle(
+              [
+                {
+                  moves: ['MOVE_SWITCHEROO', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  spe: 100,
+                  itemId: null,
+                  abilities: { ability: ABILITY_MOLD_BREAKER, innates: [null, null, null] },
+                },
+                {
+                  moves: ['MOVE_CELEBRATE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  spe: 50,
+                  itemId: ITEM_POWER_HERB.id,
+                  abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] },
+                },
+              ],
+              mbRng,
+            )
+
+            const mbOut = executeTurn(mbState, [useMove(1, MOVE_SWITCHEROO), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(mbOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(mbState.battlers[0]!.mon.itemId).toBe(ITEM_POWER_HERB.id)
+            expect(mbState.battlers[1]!.mon.itemId).toBeNull()
+          })
+
+          it('fails when both hold identical or empty items, when Substitute blocks before accuracy, or when target has Sticky Hold', () => {
+            // Identical non-null items fail (attacker.item == target.item)
+            const sameItemState = battle(
+              [
+                { moves: ['MOVE_TRICK', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_SITRUS_BERRY.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: ITEM_SITRUS_BERRY.id },
+              ],
+              countingRng(),
+            )
+            const sameItemOut = executeTurn(sameItemState, [useMove(1, MOVE_TRICK), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(sameItemOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(sameItemState.battlers[0]!.mon.pp[0]).toBe(9)
+
+            // Target Substitute blocks before accuracy check (0 RNG draws)
+            const subRng = countingRng()
+            const subState = battle(
+              [
+                { moves: ['MOVE_TRICK', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_SITRUS_BERRY.id },
+                {
+                  moves: ['MOVE_CELEBRATE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  spe: 50,
+                  itemId: ITEM_LIECHI_BERRY.id,
+                  status2: STATUS2_SUBSTITUTE,
+                },
+              ],
+              subRng,
+            )
+            subState.battlers[1]!.volatiles.substituteHp = 25
+            const subOut = executeTurn(subState, [useMove(1, MOVE_TRICK), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(subOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(subRng.calls).toBe(0)
+            expect(subState.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(subState.battlers[0]!.mon.itemId).toBe(ITEM_SITRUS_BERRY.id)
+            expect(subState.battlers[1]!.mon.itemId).toBe(ITEM_LIECHI_BERRY.id)
+
+            // C quirk (:11737): target's Sticky Hold blocks Trick even when target holds no item
+            const shState = battle(
+              [
+                { moves: ['MOVE_TRICK', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_SITRUS_BERRY.id },
+                {
+                  moves: ['MOVE_CELEBRATE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  spe: 50,
+                  itemId: null,
+                  abilities: { ability: ABILITY_STICKY_HOLD, innates: [null, null, null] },
+                },
+              ],
+              countingRng(),
+            )
+            const shOut = executeTurn(shState, [useMove(1, MOVE_TRICK), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(shOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(shState.battlers[0]!.mon.itemId).toBe(ITEM_SITRUS_BERRY.id)
+            expect(shState.battlers[1]!.mon.itemId).toBeNull()
+          })
+        })
+
+        describe('EFFECT_SNATCH', () => {
+          it('sets user round.stealMove when user does not act last in the turn', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SNATCH', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            let stealMoveDuringTurn = false
+            const spyDmg: DamageResolver = {
+              resolve: (s) => {
+                stealMoveDuringTurn = s.battlers[0]!.round.stealMove
+                return { targetDamage: 10, attackerDamage: null, unmodelled: [] }
+              },
+            }
+
+            const out = executeTurn(state, [useMove(0, MOVE_SNATCH), useMove(0, MOVE_TACKLE)], testDeps(spyDmg))
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(stealMoveDuringTurn).toBe(true)
+            expect(act.unmodelled.some((u) => u.includes('stealMove'))).toBe(true)
+            // Cleared at end of turn by roundStructsClear
+            expect(state.battlers[0]!.round.stealMove).toBe(false)
+          })
+
+          it('fails when user acts last in the turn (gCurrentTurnActionNumber == gBattlersCount - 1), while still deducting PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SNATCH', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_SNATCH), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.turnOrderIndex).toBe(1)
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(act.unmodelled).toEqual([])
+          })
+        })
+
+        describe('EFFECT_MAGIC_COAT', () => {
+          it('sets user round.bounceMove and targets the user when user does not act last in the turn', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_MAGIC_COAT', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            let bounceMoveDuringTurn = false
+            const spyDmg: DamageResolver = {
+              resolve: (s) => {
+                bounceMoveDuringTurn = s.battlers[0]!.round.bounceMove
+                return { targetDamage: 10, attackerDamage: null, unmodelled: [] }
+              },
+            }
+
+            const out = executeTurn(state, [useMove(1, MOVE_MAGIC_COAT), useMove(0, MOVE_TACKLE)], testDeps(spyDmg))
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(act.targetId).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(bounceMoveDuringTurn).toBe(true)
+            expect(act.unmodelled.some((u) => u.includes('bounceMove'))).toBe(true)
+            expect(state.battlers[0]!.round.bounceMove).toBe(false)
+          })
+
+          it('fails when user acts last in the turn (gCurrentTurnActionNumber == gBattlersCount - 1), while still deducting PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_MAGIC_COAT', null, null, null], pp: [15, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_MAGIC_COAT), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.turnOrderIndex).toBe(1)
+            expect(act.missed).toBe(true)
+            expect(act.targetId).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(act.unmodelled).toEqual([])
+          })
+        })
+
+        describe('EFFECT_ALLY_SWITCH', () => {
+          it('resolves target to BATTLE_PARTNER(user) in doubles (or user in singles), deducts PP without failing, and gaps VARIOUS_SWAP_WITH', () => {
+            // Doubles with alive partner (battler 2)
+            const doublesState = battle(
+              [
+                { moves: ['MOVE_ALLY_SWITCH', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 90 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 80 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 70 },
+              ],
+              countingRng(),
+            )
+
+            const doublesOut = executeTurn(
+              doublesState,
+              [useMove(2, MOVE_ALLY_SWITCH), useMove(1, MOVE_CELEBRATE), useMove(2, MOVE_CELEBRATE), useMove(3, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const doublesAct = doublesOut.actions.find((a) => a.battlerId === 0)!
+            expect(doublesAct.missed).toBe(false)
+            expect(doublesAct.targetId).toBe(2)
+            expect(doublesState.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(doublesAct.unmodelled.some((u) => u.includes('VARIOUS_SWAP_WITH'))).toBe(true)
+
+            // Singles: BattleScript_EffectAllySwitch (:12538-12548) has no failure branch in C; resolves targetId to user
+            const singlesState = battle(
+              [
+                { moves: ['MOVE_ALLY_SWITCH', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const singlesOut = executeTurn(
+              singlesState,
+              [useMove(0, MOVE_ALLY_SWITCH), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const singlesAct = singlesOut.actions.find((a) => a.battlerId === 0)!
+            expect(singlesAct.missed).toBe(false)
+            expect(singlesAct.targetId).toBe(0)
+            expect(singlesState.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(singlesAct.unmodelled.some((u) => u.includes('VARIOUS_SWAP_WITH'))).toBe(true)
+          })
+        })
+
+        describe('EFFECT_FOLLOW_ME', () => {
+          it('sets followmeTimer, followmeTarget, and followmePowder on the user side for Follow Me, Rage Powder, and Spotlight', () => {
+            // Follow Me: followmePowder = false, no accuracy roll drawn
+            const fmRng = countingRng()
+            const fmState = battle(
+              [
+                { moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              fmRng,
+            )
+            const fmOut = executeTurn(fmState, [useMove(0, MOVE_FOLLOW_ME), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const fmAct = fmOut.actions.find((a) => a.battlerId === 0)!
+            expect(fmAct.missed).toBe(false)
+            expect(fmAct.targetId).toBe(0)
+            expect(fmRng.calls).toBe(0)
+            expect(fmState.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(fmState.sides[0].timers.followmeTimer).toBe(1)
+            expect(fmState.sides[0].timers.followmeTarget).toBe(0)
+            expect(fmState.sides[0].timers.followmePowder).toBe(false)
+            expect(fmAct.unmodelled.some((u) => u.includes('IsAffectedByFollowMe'))).toBe(true)
+
+            // Rage Powder (on battler 1, side 1): followmePowder = true
+            const rpState = battle(
+              [
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_RAGE_POWDER', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+            const rpOut = executeTurn(rpState, [useMove(0, MOVE_CELEBRATE), useMove(1, MOVE_RAGE_POWDER)], testDeps())
+            const rpAct = rpOut.actions.find((a) => a.battlerId === 1)!
+            expect(rpAct.missed).toBe(false)
+            expect(rpAct.targetId).toBe(1)
+            expect(rpState.battlers[1]!.mon.pp[0]).toBe(19)
+            expect(rpState.sides[1].timers.followmeTimer).toBe(1)
+            expect(rpState.sides[1].timers.followmeTarget).toBe(1)
+            expect(rpState.sides[1].timers.followmePowder).toBe(true)
+
+            // Spotlight: C quirk (:11614-11616) writes followmeTarget = gBattlerAttacker on user's side even though target is SELECTED
+            const spState = battle(
+              [
+                { moves: ['MOVE_SPOTLIGHT', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            const spOut = executeTurn(spState, [useMove(1, MOVE_SPOTLIGHT), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const spAct = spOut.actions.find((a) => a.battlerId === 0)!
+            expect(spAct.missed).toBe(false)
+            expect(spAct.targetId).toBe(1)
+            expect(spState.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(spState.sides[0].timers.followmeTimer).toBe(1)
+            expect(spState.sides[0].timers.followmeTarget).toBe(0)
+            expect(spState.sides[0].timers.followmePowder).toBe(false)
+            expect(spState.sides[1].timers.followmeTimer).toBe(0)
           })
         })
       })
