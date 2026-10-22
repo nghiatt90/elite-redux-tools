@@ -61,6 +61,7 @@ import {
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_FLINCHED,
+  STATUS2_MULTIPLETURNS,
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
@@ -190,7 +191,7 @@ import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switc
 import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
-import { attackPreModify, calculateBattleStat } from '../battleStat'
+import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
 import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import type { StatusCheck } from './statusEffects'
@@ -200,6 +201,7 @@ import {
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_DRENCH,
   MOVE_EFFECT_ENRAGE,
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FREEZE,
@@ -213,6 +215,7 @@ import {
   applyPrimaryStatusEffect,
   canBeBurned,
   canBeConfused,
+  canBeDrenched,
   canBeParalyzed,
   canBeParalyzedIgnoreType,
   canBePoisoned,
@@ -8166,6 +8169,552 @@ export function handleStuffCheeks(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { statChanges, missed: res.missed ?? false })
 }
 
+/**
+ * CanBattlerGetOrLoseItem (src/battle_util.c:8250-8273).
+ * Returns true when itemId is null (ITEM_NONE in C has HOLD_EFFECT_NONE and is not ITEM_ENIGMA_BERRY).
+ */
+function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | null, deps: TurnLoopDeps): boolean {
+  if (!itemId) return true
+  if (itemId === 'ITEM_ENIGMA_BERRY') return false
+  const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
+  if (holdEffect === 'HOLD_EFFECT_PRIMAL_ORB' || holdEffect === 'HOLD_EFFECT_MEGA_STONE') return false
+  const species = battler.mon.speciesId
+  if (species.startsWith('SPECIES_GENESECT') && holdEffect === 'HOLD_EFFECT_DRIVE') return false
+  if (species.startsWith('SPECIES_SILVALLY') && holdEffect === 'HOLD_EFFECT_MEMORY') return false
+  if (species.startsWith('SPECIES_ARCEUS') && holdEffect === 'HOLD_EFFECT_PLATE') return false
+  return true
+}
+
+/**
+ * UpdateBattlerItem(battler, ITEM_NONE) / RemoveItem(battler) (src/battle_script_commands.c:2194-2221, 2231).
+ */
+function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
+  const itemId = battler.mon.itemId
+  if (!itemId) return
+  const hasAbility = (b: BattlerState, id: string) => findAbilitySlot(b.mon.abilities, id) !== -1
+  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
+    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
+  }
+  if (hasAbility(battler, 'ABILITY_GREEDY')) {
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+  }
+  if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+  }
+  battler.mon.itemId = null
+}
+
+/**
+ * EFFECT_BESTOW (Bestow).
+ * BattleScript_EffectBestow (data/battle_scripts_1.s:1381-1416),
+ * trybestow (.omc/team-pilot/battle_script.inc:1552-1555, VARIOUS_BESTOW, src/battle_script_commands.c:7703-7712),
+ * trypsychoshift (.omc/team-pilot/battle_script.inc:1678-1681, VARIOUS_PSYCHO_SHIFT, src/battle_script_commands.c:7641-7684).
+ *
+ * C quirks preserved:
+ * 1. VARIOUS_BESTOW (:7705-7706) does not check `gBattleMons[gBattlerTarget].item != ITEM_NONE` (so Bestow can
+ *    overwrite an existing item on the target) and passes `gBattleMons[gBattlerTarget].item` (not the attacker's
+ *    item) to `CanBattlerGetOrLoseItem(gBattlerTarget, ...)`.
+ * 2. BattleScript_EffectBestow (:1392, :1404) checks `jumpifstatus BS_TARGET, STATUS1_ANY` instead of `BS_ATTACKER`,
+ *    so the status-transfer branch only runs when the target already has a status1, never runs `curestatus BS_ATTACKER`,
+ *    and in VARIOUS_PSYCHO_SHIFT (:7641-7684) sets `target.status1 = attacker.status1 & STATUS1_ANY` whenever `i`
+ *    remains TRUE (including when the attacker has no status, Sleep, Frostbite, or Bleed).
+ */
+export function handleBestow(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, NO_ACC_CALC_CHECK_LOCK_ON (:1383), then ppreduce (:1385).
+  // BattleScript_PrintMoveMissed also runs ppreduce, so PP is deducted on both paths.
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  const acc = checkNoAccCalcLockOn(ctx, targetId)
+  if (acc.failed) {
+    return outcome(ctx, { targetId, missed: acc.missed })
+  }
+
+  // 2. jumpifsubstituteblocks BattleScript_ButItFailed (:1386)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. trybestow BattleScript_EffectBestow_NoGiveItem (VARIOUS_BESTOW, :7703-7712)
+  const attackerItem = battler.mon.itemId
+  const targetItem = target.mon.itemId
+  const gaveItem =
+    attackerItem !== null &&
+    canBattlerGetOrLoseItem(battler, attackerItem, deps) &&
+    canBattlerGetOrLoseItem(target, targetItem, deps)
+
+  if (gaveItem) {
+    // UpdateBattlerItem(gBattlerAttacker, ITEM_NONE), then UpdateBattlerItem(gBattlerTarget, gLastUsedItem) (:7709-7710)
+    clearBattlerItem(state, battler, unmodelled)
+    if (targetItem !== attackerItem) {
+      if (
+        targetItem === null &&
+        (findAbilitySlot(target.mon.abilities, 'ABILITY_UNBURDEN') !== -1 ||
+          findAbilitySlot(target.mon.abilities, 'ABILITY_SUGAR_RUSH') !== -1)
+      ) {
+        unmodelled.push(
+          "UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2194-2197) is not modelled",
+        )
+      }
+      target.mon.itemId = attackerItem
+    }
+  }
+
+  // Helper for VARIOUS_PSYCHO_SHIFT (:7641-7684)
+  const runTryPsychoShift = (): boolean => {
+    const userStatus = battler.mon.status1
+    const curTargetStatus = target.mon.status1
+    let i = true
+    if (hasFlag(userStatus, STATUS1_PARALYSIS) && !hasFlag(curTargetStatus, STATUS1_PARALYSIS)) {
+      if (!canBeParalyzed(state, battlerId, targetId, deps)) i = false
+    } else if (hasFlag(userStatus, STATUS1_POISON_ANY) && !hasFlag(curTargetStatus, STATUS1_POISON_ANY)) {
+      // C quirk (:7653): calls CanBeParalyzed instead of CanBePoisoned
+      if (!canBeParalyzed(state, battlerId, targetId, deps)) i = false
+    } else if (hasFlag(userStatus, STATUS1_BURN) && !hasFlag(curTargetStatus, STATUS1_BURN)) {
+      if (!canBeBurned(state, targetId, battlerId, deps)) i = false
+    }
+    if (i) {
+      target.mon.status1 = userStatus & STATUS1_ANY
+    }
+    return i
+  }
+
+  if (gaveItem) {
+    // 4a. jumpifstatus BS_TARGET, STATUS1_ANY, BattleScript_EffectBestow_HasStatus (:1392)
+    // C bug kept: tests BS_TARGET instead of BS_ATTACKER
+    if (hasFlag(target.mon.status1, STATUS1_ANY)) {
+      // :1395 -- jumpifsafeguard BattleScript_SafeguardProtected
+      if (!hasFlag(state.sides[targetId & 1].statuses, SIDE_STATUS_SAFEGUARD)) {
+        // :1396 -- trypsychoshift BattleScript_MoveEnd
+        runTryPsychoShift()
+      }
+    }
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // 4b. BattleScript_EffectBestow_NoGiveItem (:1403-1416)
+  // C bug kept: tests BS_TARGET instead of BS_ATTACKER (:1404)
+  if (!hasFlag(target.mon.status1, STATUS1_ANY)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  // :1407 -- jumpifsafeguard BattleScript_SafeguardProtected
+  if (hasFlag(state.sides[targetId & 1].statuses, SIDE_STATUS_SAFEGUARD)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  // :1408 -- trypsychoshift BattleScript_ButItFailed
+  if (!runTryPsychoShift()) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_CALTROPS (Caltrops).
+ * BattleScript_EffectCaltrops (data/battle_scripts_1.s:5047-5056),
+ * trysetcaltrops (.omc/team-pilot/battle_script.inc:2355-2358),
+ * VARIOUS_SET_CALTROPS (src/battle_script_commands.c:8848-8854).
+ * Sets `gSideTimers[GetBattlerSide(gActiveBattler)].caltrops = TRUE` on the target side
+ * (note: unlike Spikes/Stealth Rock/Toxic Spikes, VARIOUS_SET_CALTROPS does not set any
+ * bit in `gSideStatuses`). Fails via BattleScript_ButItFailedAtkStringPpReduce if
+ * `caltrops` is already set on that side. Switch-in consumption is handled in hazards.ts:220-224.
+ */
+export function handleCaltrops(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // Both success (:5051) and BattleScript_ButItFailedAtkStringPpReduce (:5939) run ppreduce.
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const targetSide = (battlerId & 1) ^ 1
+  const sideState = state.sides[targetSide]!
+
+  // trysetcaltrops BS_TARGET, BattleScript_ButItFailedAtkStringPpReduce (:5049, :8848-8854)
+  if (sideState.timers.caltrops) {
+    return outcome(ctx, { missed: true })
+  }
+
+  sideState.timers.caltrops = true
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_GEOMANCY (Geomancy).
+ * BattleScript_EffectGeomancy (data/battle_scripts_1.s:4455-4494),
+ * BattleScriptFirstChargingTurn (:4079-4093),
+ * twoturnmoveacceleratecheck (.omc/team-pilot/battle_script.inc:2468-2475),
+ * BattleScript_PowerHerbActivation (:4391-4397),
+ * SetMoveEffect(MOVE_EFFECT_CHARGING) (src/battle_script_commands.c:2714-2720),
+ * Cmd_clearstatusfromeffect (:3140-3157).
+ *
+ * Turn 1 (when STATUS2_MULTIPLETURNS is not set): deducts PP, sets STATUS2_MULTIPLETURNS and
+ * round.chargingTurn = true. Unless the user has ABILITY_ACCELERATE or an unblocked
+ * HOLD_EFFECT_POWER_HERB (which is consumed via removeitem), the script ends after turn 1.
+ * Turn 2 (or accelerated turn 1): clears STATUS2_MULTIPLETURNS (and clears round.chargingTurn if
+ * ABILITY_ACCELERATE), does not deduct PP (HITMARKER_NO_PPDEDUCT), fails via
+ * BattleScript_CantRaiseMultipleStats if SpAtk, SpDef, and Speed are all already at max stage,
+ * and otherwise raises SpAtk, SpDef, and Speed by +2 stages each.
+ */
+export function handleGeomancy(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. jumpifstatus2 BS_ATTACKER, STATUS2_MULTIPLETURNS, BattleScript_GeomancySecondTurn (:4456)
+  if (!hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS)) {
+    // BattleScriptFirstChargingTurn (:4079-4093)
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_MULTIPLETURNS)
+    battler.round.chargingTurn = true
+
+    // twoturnmoveacceleratecheck (:4460, .omc/team-pilot/battle_script.inc:2468-2475)
+    const hasAccelerate = battlerHasSimAbility(
+      state,
+      battler,
+      'ABILITY_ACCELERATE',
+      false,
+      battlerId,
+      false,
+      deps.dataContext,
+    )
+    if (!hasAccelerate) {
+      const itemId = battler.mon.itemId
+      const itemNegated =
+        hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+        battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+      if (!itemNegated && itemId === 'ITEM_ENIGMA_BERRY') {
+        unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
+      }
+      const holdEffect = !itemNegated && itemId ? (deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null) : null
+      if (holdEffect !== 'HOLD_EFFECT_POWER_HERB') {
+        return outcome(ctx, { missed: false })
+      }
+      // jumpifconsumableblocked BS_ATTACKER, BattleScript_MoveEnd (:2471, VARIOUS_JUMP_IF_CONSUMABLE_BLOCKED :9024-9032)
+      if (isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+        return outcome(ctx, { missed: false })
+      }
+      // BattleScript_PowerHerbActivation (:4391-4397): removeitem BS_ATTACKER
+      consumeHeldItem(state, battler, unmodelled)
+    }
+  }
+
+  // 2. BattleScript_GeomancySecondTurn (:4461-4494)
+  // clearstatusfromeffect BS_ATTACKER (:4465, Cmd_clearstatusfromeffect :3140-3157)
+  battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_MULTIPLETURNS)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_ACCELERATE', false, battlerId, false, deps.dataContext)) {
+    battler.round.chargingTurn = false
+  }
+
+  // Pre-check (:4468-4470):
+  // jumpifstat BS_ATTACKER, CMP_LESS_THAN, STAT_SPATK, MAX_STAT_STAGE, BattleScript_GeomancyDoMoveAnim
+  // jumpifstat BS_ATTACKER, CMP_LESS_THAN, STAT_SPDEF, MAX_STAT_STAGE, BattleScript_GeomancyDoMoveAnim
+  // jumpifstat BS_ATTACKER, CMP_EQUAL, STAT_SPEED, MAX_STAT_STAGE, BattleScript_CantRaiseMultipleStats
+  if (
+    !compareStatToMax(state, battler, STAT_SPATK, 'LESS_THAN', battlerId, deps) &&
+    !compareStatToMax(state, battler, STAT_SPDEF, 'LESS_THAN', battlerId, deps) &&
+    compareStatToMax(state, battler, STAT_SPEED, 'EQUAL', battlerId, deps)
+  ) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // BattleScript_GeomancyDoMoveAnim (:4471-4494): SpAtk +2, SpDef +2, Speed +2
+  const statChanges: StatChangeOutcome[] = []
+  for (const statId of [STAT_SPATK, STAT_SPDEF, STAT_SPEED]) {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      2,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) {
+      statChanges.push({ battlerId, stat: statId, change: res.delta })
+    }
+  }
+
+  return outcome(ctx, { statChanges, missed: false })
+}
+
+/**
+ * EFFECT_KINESIS (Kinesis).
+ * BattleScript_EffectKinesis (data/battle_scripts_1.s:12525-12536),
+ * trydestroyitem (.omc/team-pilot/battle_script.inc:2350-2353),
+ * VARIOUS_TRY_DESTROY_ITEM (src/battle_script_commands.c:8839-8847),
+ * IsStickyHold (src/battle_util.c:9329-9333),
+ * SetMoveEffect(MOVE_EFFECT_FLINCH) (src/battle_script_commands.c:2348-2388, 2665-2669).
+ *
+ * In Elite Redux, Kinesis has +1 priority, rolls accuracy, deducts PP, destroys the target's
+ * held item via RemoveItem (failing via BattleScript_ButItFailed if the target holds no item,
+ * holds an unremovable item, has Sticky Hold / Supersweet Syrup, or is behind a Substitute),
+ * and then inflicts flinch via seteffectprimary MOVE_EFFECT_FLINCH (blocked by Inner Focus
+ * family via IsAbilityStatusProtected(..., CHECK_FLINCH)).
+ */
+export function handleKinesis(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:12527), then ppreduce (:12529).
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. trydestroyitem BS_TARGET, BattleScript_ButItFailed (VARIOUS_TRY_DESTROY_ITEM, :8839-8847)
+  const itemId = target.mon.itemId
+  const attackerHasMB = attackerHasMoldBreakerActive(battler, deps)
+  const isStickyHold =
+    battlerHasSimAbility(state, target, 'ABILITY_STICKY_HOLD', true, battlerId, attackerHasMB, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_SUPERSWEET_SYRUP', true, battlerId, attackerHasMB, deps.dataContext)
+
+  if (
+    !itemId ||
+    !canBattlerGetOrLoseItem(target, itemId, deps) ||
+    isStickyHold ||
+    doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // RemoveItem(gActiveBattler) (:8845, :2231)
+  clearBattlerItem(state, target, unmodelled)
+
+  // 3. setmoveeffect MOVE_EFFECT_FLINCH; seteffectprimary (:12534-12535, :2665-2669)
+  if (
+    target.mon.hp > 0 &&
+    !testSheerForceFlag(state, battlerId, moveId, deps) &&
+    !isAbilityStatusProtected(state, targetId, CHECK_FLINCH, battlerId, deps)
+  ) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_FLINCHED)
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_DRAIN_BRAIN (Drain Brain).
+ * BattleScript_EffectDrainBrain (data/battle_scripts_1.s:944-990),
+ * VARIOUS_GET_STAT_VALUE (src/battle_script_commands.c:6809-6812),
+ * CalculateStat (src/battle_util.c:7105-7217),
+ * GetDrainedBigRootHp (src/battle_util.c:2369-2376).
+ *
+ * The Special Attack counterpart to Strength Sap: lowers the target's Sp. Atk by 1 stage
+ * and heals the user by the target's effective Sp. Atk stat calculated before the drop.
+ * Preserves the C script quirks:
+ * - When the user is at full HP (:959), heal-blocked (:960), or bleeding (:961), the script
+ *   jumps to BattleScript_DrainBrainMustLower (:985) / BattleScript_StrengthSapMustLower (:937);
+ *   if the drop succeeds, it still reaches BattleScript_DrainBrainHp / BattleScript_StrengthSapHp
+ *   and heals (datahpupdate, :1908-1911, has no heal-block or bleed check).
+ * - On the ordinary path (!mustLower), if the stat drop is blocked (e.g. Clear Body while
+ *   Sp. Atk stage > MIN_STAT_STAGE), statbuffchange jumps to BattleScript_DrainBrainHp (:964)
+ *   and heals the user anyway.
+ */
+export function handleDrainBrain(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. jumpifsubstituteblocks BattleScript_ButItFailedAtkStringPpReduce (:947)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:948), then ppreduce (:950)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  const lowerSpAttack = (): { delta: number; missed: boolean } => {
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      targetId,
+      -1,
+      STAT_SPATK,
+      STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: res.delta })
+    if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+      dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+    }
+    return { delta: res.delta, missed: res.missed ?? false }
+  }
+
+  // 3. jumpifstat BS_TARGET, CMP_NOT_EQUAL, STAT_SPATK, MIN_STAT_STAGE, BattleScript_DrainBrainTryLower (:951-956)
+  if ((target.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE) === MIN_STAT_STAGE) {
+    const { missed: lowerMissed } = lowerSpAttack()
+    return outcome(ctx, { targetId, statChanges, missed: lowerMissed })
+  }
+
+  // 4. getstatvalue BS_TARGET, STAT_SPATK (:958, VARIOUS_GET_STAT_VALUE, battle_script_commands.c:6809-6812)
+  unmodelled.push("Drain Brain's CalculateStat (battle_util.c:7171-7178) applies no onStat ability hooks")
+  const userIsUnaware = UNAWARE_ABILITIES.some((ab) =>
+    battlerHasSimAbility(state, battler, ab, false, battlerId, false, deps.dataContext),
+  )
+  const wonderRoomActive =
+    hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) &&
+    !state.battlers.some(
+      (b, idx) => !!b && b.mon.hp > 0 && battlerHasSimAbility(state, b, 'ABILITY_CLUELESS', false, idx, false, deps.dataContext),
+    )
+  const isFrostbitten =
+    hasFlag(target.mon.status1, STATUS1_FROSTBITE) &&
+    !battlerHasSimAbility(state, target, 'ABILITY_OVERCLOCK', false, targetId, false, deps.dataContext)
+  let statValue = calculateBattleStat({
+    rawStat: target.mon.rawStats.spatk,
+    extraStatLevel: target.volatiles.extraSpAttackLevel ?? 0,
+    statStage: target.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE,
+    isUnaware: userIsUnaware,
+    isWonderRoomActive: wonderRoomActive,
+    isOffensiveStatForWonderRoom: true,
+    isCrit: false,
+    isAttackRole: true,
+    benefitsFromStatBuffs: benefitsFromStatBuffs(state, targetId),
+    preModify: spAttackPreModify({
+      rapidResponse: !!target.volatiles.rapidResponse,
+      isFrostbitten,
+    }),
+    applyOnStatHooks: (s) => s,
+    secondaryStatPercent: 0,
+    statStageRatios: deps.statStageRatios,
+  })
+
+  // 5. jumpiffullhp / jumpifhealingblocked / jumpifstatus STATUS1_BLEED (:959-961)
+  const mustLower =
+    battler.mon.hp === battler.mon.maxHp ||
+    isHealingBlocked(state, battlerId, battler, unmodelled) ||
+    hasFlag(battler.mon.status1, STATUS1_BLEED)
+  const { delta, missed: lowerMissed } = lowerSpAttack()
+  const lowered = delta !== 0
+  if (mustLower && !lowered) {
+    return outcome(ctx, { targetId, statChanges, missed: lowerMissed })
+  }
+
+  // 6. BattleScript_DrainBrainHp (:977-984) -- manipulatedamage DMG_BIG_ROOT (GetDrainedBigRootHp, battle_util.c:2369-2376)
+  if (battler.mon.hp === battler.mon.maxHp) {
+    return outcome(ctx, { targetId, statChanges, missed: false })
+  }
+  if (statValue === 0) statValue = 1
+  const itemNegated =
+    hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+  const holdEffect = !itemNegated && battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect : null
+  if (holdEffect === 'HOLD_EFFECT_BIG_ROOT') statValue = Math.trunc((statValue * 3) / 2)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_ABSORBANT', false, battlerId, false, deps.dataContext)) {
+    statValue = Math.trunc((statValue * 3) / 2)
+  }
+  healBattler(state, battlerId, battler, statValue)
+
+  return outcome(ctx, { targetId, statChanges, missed: false })
+}
+
+/**
+ * EFFECT_WATERLOG (Waterlog).
+ * BattleScript_EffectWaterlog (data/battle_scripts_1.s:2993-3008),
+ * setwaterlogged (.omc/team-pilot/battle_script.inc:2456-2459),
+ * VARIOUS_WATERLOG (src/battle_script_commands.c:8916-8918),
+ * VARIOUS_JUMP_IF_WEATHER_AFFECTED (src/battle_script_commands.c:8056-8061),
+ * Cmd_seteffectwithchance (src/battle_script_commands.c:3092-3125),
+ * SetMoveEffect(MOVE_EFFECT_DRENCH) (src/battle_script_commands.c:2348-2388, 3031-3036),
+ * CanBeDrenched (src/battle_util.c:5125-5133).
+ *
+ * Sets gRoundStructs[target].waterlog = TRUE (halving the target's speed twice -> floor(speed / 4)
+ * for the rest of the round via GetBattlerTotalSpeedStat, battle_main.c:4465), then attempts to
+ * inflict Drench (MOVE_EFFECT_DRENCH) via seteffectwithchance with a 20% base chance, boosted to
+ * 50% when the target is affected by rain (WEATHER_RAIN_ANY). Because Waterlog is a STATUS move,
+ * Cmd_seteffectwithchance passes isStatus = TRUE (primary = TRUE) to SetMoveEffect, so Shield Dust
+ * and Covert Cloak do not block the Drench effect.
+ */
+export function handleWaterlog(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2995), then ppreduce (:2997)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 2. setwaterlogged BS_TARGET (:2998, VARIOUS_WATERLOG, battle_script_commands.c:8916-8918)
+  target.round.waterlog = true
+
+  // 3. setmoveeffect MOVE_EFFECT_DRENCH; jumpifweatheraffected BS_TARGET, WEATHER_RAIN_ANY -> setmoveeffectchance 50 (:3001-3005)
+  const baseChance = isBattlerWeatherAffected(state, targetId, WEATHER_RAIN_ANY, deps)
+    ? 50
+    : (deps.dataContext.move(moveId)?.effectChance ?? 20)
+
+  // 4. seteffectwithchance (:3007, Cmd_seteffectwithchance, battle_script_commands.c:3092-3125)
+  const percentChance = getMoveEffectChance(
+    state,
+    battlerId,
+    moveId,
+    MOVE_EFFECT_DRENCH,
+    baseChance,
+    deps,
+    unmodelled,
+  )
+  const minionControlFirstHit =
+    battler.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL' &&
+    battler.turn.parentalBondOn < battler.turn.parentalBondInitialCount
+
+  if (!minionControlFirstHit && state.rng.random16() % 100 < percentChance) {
+    // SetMoveEffect(isStatus = TRUE, 0) (:2361, 2364, 2388, 3031-3036)
+    if (
+      !testSheerForceFlag(state, battlerId, moveId, deps) &&
+      target.mon.hp > 0 &&
+      !doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled) &&
+      canBeDrenched(state, targetId, battlerId, deps)
+    ) {
+      target.volatiles.drenched = 2 + (state.rng.random16() % 2)
+      target.volatiles.started.drenched = true
+    }
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SPITE: handleSpite,
   EFFECT_GRUDGE: handleGrudge,
@@ -8386,6 +8935,13 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_AROMATIC_MIST: handleAromaticMist,
   EFFECT_TEATIME: handleTeatime,
   EFFECT_STUFF_CHEEKS: handleStuffCheeks,
+
+  EFFECT_BESTOW: handleBestow,
+  EFFECT_CALTROPS: handleCaltrops,
+  EFFECT_GEOMANCY: handleGeomancy,
+  EFFECT_KINESIS: handleKinesis,
+  EFFECT_DRAIN_BRAIN: handleDrainBrain,
+  EFFECT_WATERLOG: handleWaterlog,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {

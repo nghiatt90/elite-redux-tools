@@ -297,6 +297,12 @@ const MOVE_COACHING = requireMove('MOVE_COACHING')
 const MOVE_AROMATIC_MIST = requireMove('MOVE_AROMATIC_MIST')
 const MOVE_TEATIME = requireMove('MOVE_TEATIME')
 const MOVE_STUFF_CHEEKS = requireMove('MOVE_STUFF_CHEEKS')
+const MOVE_BESTOW = requireMove('MOVE_BESTOW')
+const MOVE_CALTROPS = requireMove('MOVE_CALTROPS')
+const MOVE_GEOMANCY = requireMove('MOVE_GEOMANCY')
+const MOVE_KINESIS = requireMove('MOVE_KINESIS')
+const MOVE_DRAIN_BRAIN = requireMove('MOVE_DRAIN_BRAIN')
+const MOVE_WATERLOG = requireMove('MOVE_WATERLOG')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -331,6 +337,7 @@ const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
 const ITEM_LIECHI_BERRY = requireItem('ITEM_LIECHI_BERRY')
 const ITEM_SITRUS_BERRY = requireItem('ITEM_SITRUS_BERRY')
+const ITEM_POWER_HERB = requireItem('ITEM_POWER_HERB')
 
 const RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
@@ -7447,6 +7454,314 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(state.battlers[0]!.mon.pp[0]).toBe(9)
             expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
             expect(act.statChanges).toEqual([])
+          })
+        })
+
+        describe('EFFECT_BESTOW', () => {
+          it('transfers user held item to target and (when target already has status1) runs trypsychoshift without curing user', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_BESTOW', null, null, null],
+                  pp: [15, 0, 0, 0],
+                  spe: 100,
+                  itemId: ITEM_SITRUS_BERRY.id,
+                  status1: STATUS1_BLEED,
+                },
+                {
+                  moves: ['MOVE_CELEBRATE', null, null, null],
+                  pp: [10, 0, 0, 0],
+                  spe: 50,
+                  itemId: null,
+                  status1: STATUS1_PARALYSIS,
+                },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_BESTOW), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(state.battlers[0]!.mon.itemId).toBeNull()
+            expect(state.battlers[1]!.mon.itemId).toBe(ITEM_SITRUS_BERRY.id)
+            // C quirk (:1392-1402): jumpifstatus tests BS_TARGET, trypsychoshift overwrites target status1 with user's, and curestatus BS_ATTACKER is never called
+            expect(state.battlers[1]!.mon.status1).toBe(STATUS1_BLEED)
+            expect(state.battlers[0]!.mon.status1).toBe(STATUS1_BLEED)
+          })
+
+          it('fails when user holds no item and target has no status1, while still deducting PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_BESTOW', null, null, null], pp: [15, 0, 0, 0], spe: 100, itemId: null },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: null },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_BESTOW), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(state.battlers[1]!.mon.itemId).toBeNull()
+          })
+        })
+
+        describe('EFFECT_CALTROPS', () => {
+          it('sets caltrops on the opposing side timer without setting any gSideStatuses bit', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_CALTROPS', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_CALTROPS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(state.sides[1].timers.caltrops).toBe(true)
+            expect(state.sides[0].timers.caltrops).toBe(false)
+            expect(state.sides[1].statuses).toBe(0)
+          })
+
+          it('fails when caltrops is already set on the opposing side, while still deducting PP', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_CALTROPS', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.sides[1].timers.caltrops = true
+
+            const out = executeTurn(state, [useMove(1, MOVE_CALTROPS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(state.sides[1].timers.caltrops).toBe(true)
+          })
+        })
+
+        describe('EFFECT_GEOMANCY', () => {
+          it('charges on turn 1 (deducting PP and setting STATUS2_MULTIPLETURNS) and raises SpAtk/SpDef/Speed by +2 on turn 2 (or immediately with Power Herb)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_GEOMANCY', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            // Turn 1: charging turn
+            const out1 = executeTurn(state, [useMove(0, MOVE_GEOMANCY), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act1 = out1.actions.find((a) => a.battlerId === 0)!
+            expect(act1.missed).toBe(false)
+            expect(act1.statChanges).toEqual([])
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(true)
+
+            // Turn 2: execution turn (HITMARKER_NO_PPDEDUCT -> PP stays 9)
+            const out2 = executeTurn(state, [useMove(0, MOVE_GEOMANCY), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act2 = out2.actions.find((a) => a.battlerId === 0)!
+            expect(act2.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(act2.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_SPATK, change: 2 },
+              { battlerId: 0, stat: STAT_SPDEF, change: 2 },
+              { battlerId: 0, stat: STAT_SPEED, change: 2 },
+            ])
+
+            // Power Herb: completes in 1 turn and consumes Power Herb
+            const herbState = battle(
+              [
+                { moves: ['MOVE_GEOMANCY', null, null, null], pp: [10, 0, 0, 0], spe: 100, itemId: ITEM_POWER_HERB.id },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            const herbOut = executeTurn(herbState, [useMove(0, MOVE_GEOMANCY), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const herbAct = herbOut.actions.find((a) => a.battlerId === 0)!
+            expect(herbAct.missed).toBe(false)
+            expect(herbState.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(herbState.battlers[0]!.mon.itemId).toBeNull()
+            expect(herbState.battlers[0]!.usedHeldItem).toBe(ITEM_POWER_HERB.id)
+            expect(hasFlag(herbState.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+            expect(herbAct.statChanges).toEqual([
+              { battlerId: 0, stat: STAT_SPATK, change: 2 },
+              { battlerId: 0, stat: STAT_SPDEF, change: 2 },
+              { battlerId: 0, stat: STAT_SPEED, change: 2 },
+            ])
+          })
+
+          it('fails on the second turn when SpAtk, SpDef, and Speed are all already at max stage', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_GEOMANCY', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.battlers[0]!.mon.status2 = setFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)
+            state.battlers[0]!.mon.statStages[STAT_SPATK] = MAX_STAT_STAGE
+            state.battlers[0]!.mon.statStages[STAT_SPDEF] = MAX_STAT_STAGE
+            state.battlers[0]!.mon.statStages[STAT_SPEED] = MAX_STAT_STAGE
+
+            const out = executeTurn(state, [useMove(0, MOVE_GEOMANCY), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(10)
+          })
+        })
+
+        describe('EFFECT_KINESIS', () => {
+          it('destroys target held item and flinches the target', () => {
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_KINESIS', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: ITEM_SITRUS_BERRY.id },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_KINESIS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            const act1 = out.actions.find((a) => a.battlerId === 1)!
+            expect(act0.missed).toBe(false)
+            expect(rng.calls).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[1]!.mon.itemId).toBeNull()
+            expect(act1.cancelledBy).toBe('FLINCH')
+          })
+
+          it('fails when target holds no item (or has Sticky Hold) and does not flinch the target', () => {
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_KINESIS', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, itemId: null },
+              ],
+              rng,
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_KINESIS), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            const act1 = out.actions.find((a) => a.battlerId === 1)!
+            expect(act0.missed).toBe(true)
+            expect(rng.calls).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(act1.cancelledBy).toBeNull()
+          })
+        })
+
+        describe('EFFECT_DRAIN_BRAIN', () => {
+          it('lowers target SpAtk by 1 stage and heals the user by target pre-drop effective SpAtk', () => {
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_DRAIN_BRAIN', null, null, null], pp: [10, 0, 0, 0], spe: 100, hp: 50, maxHp: 200 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, spatk: 60 },
+              ],
+              rng,
+            )
+            state.battlers[1]!.mon.statStages[STAT_SPATK] = DEFAULT_STAT_STAGE + 2 // +2 stage -> 60 * 4 / 2 = 120
+
+            const out = executeTurn(state, [useMove(1, MOVE_DRAIN_BRAIN), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(rng.calls).toBe(1)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+            expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+            expect(act.statChanges).toEqual([{ battlerId: 1, stat: STAT_SPATK, change: -1 }])
+            expect(state.battlers[0]!.mon.hp).toBe(170)
+          })
+
+          it('fails to heal when target SpAtk is already at MIN_STAT_STAGE', () => {
+            const rng = countingRng()
+            const state = battle(
+              [
+                { moves: ['MOVE_DRAIN_BRAIN', null, null, null], pp: [10, 0, 0, 0], spe: 100, hp: 50, maxHp: 200 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50, spatk: 100 },
+              ],
+              rng,
+            )
+            state.battlers[1]!.mon.statStages[STAT_SPATK] = MIN_STAT_STAGE
+
+            const out = executeTurn(state, [useMove(1, MOVE_DRAIN_BRAIN), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(true)
+            expect(act.statChanges).toEqual([])
+            expect(state.battlers[0]!.mon.hp).toBe(50)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_WATERLOG', () => {
+          it('waterlogs the target (quartering its speed for the round) and inflicts Drench with 20% base / 50% rain chance', () => {
+            // Roll 1: accuracy (0 < 100 -> hit)
+            // Roll 2: drench chance in rain (35 < 50 -> triggers, whereas 35 >= 20 would not without rain)
+            // Roll 3: drench duration (1 -> 2 + (1 % 2) = 3 turns)
+            const rng = scriptedRng([0, 35, 1])
+            const state = battle(
+              [
+                { moves: ['MOVE_WATERLOG', null, null, null], pp: [15, 0, 0, 0], spe: 60 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+              ],
+              rng,
+            )
+            state.field.weather = WEATHER_RAIN_TEMPORARY
+
+            const out = executeTurn(state, [useMove(1, MOVE_WATERLOG), useMove(0, MOVE_CELEBRATE)], testDeps())
+            const act = out.actions.find((a) => a.battlerId === 0)!
+            expect(act.missed).toBe(false)
+            expect(rng.calls).toBe(3)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+            // Target's speed (100) was quartered to 25 by round.waterlog, so battler 0 (spe 60) went first in endTurnOrder.
+            expect(out.endTurnOrder).toEqual([0, 1])
+            expect(state.battlers[1]!.volatiles.drenched).toBe(3)
+            expect(state.battlers[1]!.volatiles.started.drenched).toBe(true)
+          })
+
+          it('does not drench a Water-type target even when the effect chance roll passes, and fails completely on accuracy miss', () => {
+            // Water-type target: accuracy roll 0, drench chance roll 0 (< 20), but CanBeDrenched returns false (no duration roll).
+            const waterRng = scriptedRng([0, 0])
+            const waterState = battle(
+              [
+                { moves: ['MOVE_WATERLOG', null, null, null], pp: [15, 0, 0, 0], spe: 60 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+              ],
+              waterRng,
+            )
+            const waterOut = executeTurn(waterState, [useMove(1, MOVE_WATERLOG), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(waterOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
+            expect(waterRng.calls).toBe(2)
+            expect(waterOut.endTurnOrder).toEqual([0, 1])
+            expect(waterState.battlers[1]!.volatiles.drenched).toBe(0)
+
+            // Accuracy miss: target at +1 Evasion (accuracy = floor(100 * 2 / 3) = 66), roll 90 >= 66 -> misses.
+            const missRng = scriptedRng([90])
+            const missState = battle(
+              [
+                { moves: ['MOVE_WATERLOG', null, null, null], pp: [15, 0, 0, 0], spe: 60 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 100, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+              ],
+              missRng,
+            )
+            missState.battlers[1]!.mon.statStages[STAT_EVASION] = DEFAULT_STAT_STAGE + 1
+            const missOut = executeTurn(missState, [useMove(1, MOVE_WATERLOG), useMove(0, MOVE_CELEBRATE)], testDeps())
+            expect(missOut.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+            expect(missRng.calls).toBe(1)
+            expect(missState.battlers[0]!.mon.pp[0]).toBe(14)
+            expect(missOut.endTurnOrder).toEqual([1, 0])
+            expect(missState.battlers[1]!.volatiles.drenched).toBe(0)
           })
         })
       })
