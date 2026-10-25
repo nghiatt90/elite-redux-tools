@@ -56,9 +56,11 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
+import { B_SIDE_PLAYER } from './constants'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
+import { tryPrimalReversion, undoMegaEvolution } from './formChange'
 import {
   applyBattleStartPass,
   applySwitchInAbilities,
@@ -161,6 +163,7 @@ function buildSwitchedInMon(incoming: SimPartyMon): SimBattleMon {
     gender: incoming.gender,
     status1: incoming.status1,
     status2: 0,
+    evs: incoming.evs,
   }
 }
 
@@ -186,6 +189,12 @@ export function switchIn(
     throw new Error(`switchIn: invalid replacement party slot ${partyIndex} for battler ${battlerId}`)
   }
 
+  const outgoingPartyIndex = battler.partyIndex
+  if (side === B_SIDE_PLAYER) {
+    // UndoMegaEvolution on switch-out for player side (battle_main.c:3007)
+    undoMegaEvolution(state, side, outgoingPartyIndex, deps.dataContext)
+  }
+
   const mon = buildSwitchedInMon(incoming)
   const newBattler = createBattlerState(battlerId, mon, partyIndex)
   state.battlers[battlerId] = newBattler
@@ -197,6 +206,9 @@ export function switchIn(
 
   applySwitchInHazards(state, battlerId, deps, unmodelled)
   if (state.battlers[battlerId]!.mon.hp === 0) return
+
+  // TryPrimalReversion (src/battle_script_commands.c:5519)
+  tryPrimalReversion(state, battlerId, deps, unmodelled)
 
   applySwitchInAbilities(state, battlerId, deps, unmodelled)
 

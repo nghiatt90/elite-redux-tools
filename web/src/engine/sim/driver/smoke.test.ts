@@ -105,6 +105,7 @@ describe.skipIf(process.env.SIM_SMOKE !== '1')('Simulation smoke run over boss f
 
     const seeds = [1, 2, 3]
     let fightsRun = 0
+    let megaEvolutionsTotal = 0
     const threwList: Array<{ trainerId: string; seed: number; error: string }> = []
     const outcomeCounts: Record<string, number> = {
       WON: 0,
@@ -128,6 +129,7 @@ describe.skipIf(process.env.SIM_SMOKE !== '1')('Simulation smoke run over boss f
           rng,
           maxTurns: 60,
         })
+        megaEvolutionsTotal += result.megaEvolutions
 
         if (result.error) {
           threwList.push({ trainerId, seed, error: result.error })
@@ -149,6 +151,7 @@ describe.skipIf(process.env.SIM_SMOKE !== '1')('Simulation smoke run over boss f
     console.log(`Trainer IDs found: ${trainerIds.length}`)
     console.log(`Fights run: ${fightsRun}`)
     console.log(`Fights threw: ${threwList.length}`)
+    console.log(`Mega evolutions / primal reversions-by-turn-action: ${megaEvolutionsTotal}`)
     console.log('\nOutcome counts:')
     for (const [outcome, count] of Object.entries(outcomeCounts)) {
       console.log(`  ${outcome.padEnd(12)}: ${count}`)

@@ -9,7 +9,7 @@ import type { MoveData } from '../../calculate'
 import type { MoveBehaviors } from '../../basePower'
 import type { BattleConstants } from '../../types'
 import type { TypeChart } from '../../typeEffectiveness'
-import type { SimDataContext, SimItemData, SimMoveData, SimSpeciesData } from '../dataContext'
+import type { SimDataContext, SimItemData, SimMegaEvolution, SimMoveData, SimPrimalReversion, SimSpeciesData } from '../dataContext'
 import type { GroundingContext } from '../grounding'
 import type { TurnOrderContext } from '../turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
@@ -100,6 +100,25 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
   const itemsById = new Map<string, any>(rawItems.map((i) => [i.id as string, i]))
   const trainersById = new Map<string, TrainerData>(trainers.map((t) => [t.id, t]))
 
+  const megaEvolutionMap = new Map<string, string>()
+  const primalReversionMap = new Map<string, string>()
+  for (const s of rawSpecies) {
+    if (Array.isArray(s.megas)) {
+      for (const m of s.megas) {
+        if (m && m.from && m.item) {
+          megaEvolutionMap.set(`${m.from}|${m.item}`, s.id as string)
+        }
+      }
+    }
+    if (Array.isArray(s.primals)) {
+      for (const p of s.primals) {
+        if (p && p.from && p.item) {
+          primalReversionMap.set(`${p.from}|${p.item}`, s.id as string)
+        }
+      }
+    }
+  }
+
   const dataContext: SimDataContext = {
     species(id: string): SimSpeciesData | undefined {
       const s = speciesById.get(id)
@@ -112,11 +131,19 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
         innates: (s.innates ?? []) as (string | null)[],
         weight: (s.weight ?? 0) as number,
         heads: s.heads as number | undefined,
-        megas: s.megas as unknown[] | undefined,
-        primals: s.primals as unknown[] | undefined,
+        megas: s.megas as SimMegaEvolution[] | undefined,
+        primals: s.primals as SimPrimalReversion[] | undefined,
         formOf: (s.formOf ?? null) as string | null,
         evolutions: s.evolutions as unknown[] | undefined,
       }
+    },
+
+    megaEvolutionSpecies(speciesId: string, itemId: string): string | undefined {
+      return megaEvolutionMap.get(`${speciesId}|${itemId}`)
+    },
+
+    primalReversionSpecies(speciesId: string, itemId: string): string | undefined {
+      return primalReversionMap.get(`${speciesId}|${itemId}`)
     },
 
     item(id: string): SimItemData | undefined {

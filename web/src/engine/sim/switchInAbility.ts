@@ -147,6 +147,7 @@ import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
 import { TYPE_ROCK_ID } from './hazards'
+import { tryPrimalReversion } from './formChange'
 
 /** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
  * `hooks.onEntry` is present. */
@@ -224,6 +225,9 @@ export const WEATHER_SETTER_MAP: Readonly<Record<string, number>> = {
   ABILITY_SNOW_WARNING: ENUM_WEATHER_HAIL,
   ABILITY_SNOWY_WRATH: ENUM_WEATHER_HAIL,
   ABILITY_SUNDAE: ENUM_WEATHER_HAIL,
+  ABILITY_DESOLATE_LAND: ENUM_WEATHER_SUN_PRIMAL,
+  ABILITY_PRIMORDIAL_SEA: ENUM_WEATHER_RAIN_PRIMAL,
+  ABILITY_DELTA_STREAM: ENUM_WEATHER_STRONG_WINDS,
 }
 
 /**
@@ -383,10 +387,33 @@ export function tryChangeBattleWeather(
   state.field.weather = info.tempFlag
   state.field.timers.started.weather = true
 
-  const heldEffect = deps.grounding.holdEffectOf(battlerId)
-  const isExtended = info.extendingHoldEffect !== null && heldEffect === info.extendingHoldEffect
-  state.field.weatherDuration = isExtended ? WEATHER_DURATION_EXTENDED : WEATHER_DURATION
+  const isPrimal =
+    weatherEnum === ENUM_WEATHER_SUN_PRIMAL ||
+    weatherEnum === ENUM_WEATHER_RAIN_PRIMAL ||
+    weatherEnum === ENUM_WEATHER_STRONG_WINDS
 
+  if (isPrimal) {
+    // SetPermanentWeather, battle_util.c:3750: gWishFutureKnock.weatherDuration = 255;
+    state.field.weatherDuration = 255
+  } else {
+    const heldEffect = deps.grounding.holdEffectOf(battlerId)
+    const isExtended = info.extendingHoldEffect !== null && heldEffect === info.extendingHoldEffect
+    state.field.weatherDuration = isExtended ? WEATHER_DURATION_EXTENDED : WEATHER_DURATION
+  }
+
+  return true
+}
+
+/**
+ * SetPermanentWeather, battle_util.c:3745-3757.
+ * Sets permanent weather (e.g. ENUM_WEATHER_SUN_PRIMAL) and duration to 255.
+ */
+export function setPermanentWeather(state: BattleState, weatherEnum: number): boolean {
+  const info = WEATHER_FLAGS_INFO[weatherEnum]
+  if (!info) return false
+  state.field.weather = info.tempFlag
+  state.field.timers.started.weather = true
+  state.field.weatherDuration = 255
   return true
 }
 
@@ -1458,6 +1485,9 @@ export function applyBattleStartPass(
     if (battlerId === undefined) continue
     const battler = state.battlers[battlerId]
     if (!battler || battler.mon.hp === 0) continue
+
+    // battle_main.c:3370-3372: TryPrimalReversion(gBattlerAttacker, FALSE)
+    tryPrimalReversion(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
 
     applySwitchInAbilities(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
   }

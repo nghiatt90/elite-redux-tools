@@ -10,6 +10,7 @@ import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { battleAiSetupFlags } from '../ai/aiFlags'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
+import { canMegaEvolve } from '../formChange'
 import { PARTY_SIZE } from '../constants'
 import type { BattleOutcome, BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
@@ -50,6 +51,7 @@ export interface BattleRunResult {
   log: TurnLogEntry[]
   unmodelled: Map<string, number>
   error?: string
+  megaEvolutions: number
 }
 
 function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
@@ -58,6 +60,7 @@ function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
     moves: [...p.moves] as Slot4<string | null>,
     pp: [...p.pp] as Slot4<number>,
     rawStats: { ...p.rawStats },
+    evs: p.evs ? { ...p.evs } : undefined,
     abilities: {
       ability: p.abilities.ability,
       innates: [...p.abilities.innates] as [string | null, string | null, string | null],
@@ -85,6 +88,7 @@ function toBattleMon(incoming: SimPartyMon): SimBattleMon {
     gender: incoming.gender,
     status1: incoming.status1,
     status2: 0,
+    evs: incoming.evs,
   }
 }
 
@@ -155,11 +159,13 @@ function defaultPlayerPolicy(
   }
 
   const target = mData?.target === 'USER' ? 0 : 1
+  const mega = canMegaEvolve(state, 0, data.dataContext)
   return {
     action: 'USE_MOVE',
     moveToBeUsed: moveView,
     chosenMove: moveView,
     target,
+    ...(mega ? { mega: true } : {}),
   }
 }
 
@@ -179,6 +185,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
   }
 
   let turnCount = 0
+  let megaEvolutions = 0
   const log: TurnLogEntry[] = []
 
   try {
@@ -309,6 +316,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
 
       const actions: (ChosenAction | null)[] = [playerAction, opponentAction, null, null]
       const turnOutcome = executeTurn(state, actions, turnDeps)
+      megaEvolutions += turnOutcome.megaEvolutions ?? 0
 
       for (const actionOutcome of turnOutcome.actions) {
         turnUnmodelled.push(...actionOutcome.unmodelled)
@@ -342,6 +350,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       turns: turnCount,
       log,
       unmodelled: unmodelledMap,
+      megaEvolutions,
     }
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? (err.stack ?? err.message) : String(err)
@@ -351,6 +360,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       log,
       unmodelled: unmodelledMap,
       error: errorMsg,
+      megaEvolutions,
     }
   }
 }

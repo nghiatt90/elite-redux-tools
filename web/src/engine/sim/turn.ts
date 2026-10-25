@@ -143,8 +143,10 @@ import { applyEndOfTurnReplacements, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
 import { getBattlerAbilitySlotsReverse, runMoveEnd, runMoveEndBookkeeping } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
+import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
 import {
   BATTLE_TYPE_ARENA,
+  B_SIDE_PLAYER,
   clearFlag,
   hasFlag,
   PARTY_SIZE,
@@ -374,6 +376,10 @@ export interface TurnOutcome {
    * live reserve, the battle was already decided, or the caller supplied no
    * `deps.replacement` at all). */
   replacementUnmodelled: string[]
+  /** Number of Mega Evolutions that took place this turn. */
+  megaEvolutions?: number
+  /** Which battlers evolved this turn, in battler order (CheckMegaEvolutionBeforeTurn, battle_main.c:4513-4541). */
+  megaEvolved?: { battlerId: number; speciesId: string; unmodelled: string[] }[]
 }
 
 /**
@@ -2389,6 +2395,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   }
   const outcomes: ActionOutcome[] = []
 
+  // CheckMegaEvolutionBeforeTurn (battle_main.c:4513-4541) and TryChangeTurnOrder (:4545-4549)
+  const megaEvolved = checkMegaEvolutionBeforeTurn(state, actions, order, deps)
+  const megaEvolutions = megaEvolved.length
+
   // RunTurnActionsFunctions, battle_main.c:3320 -- drain any attacks queued before first action
   if (state.queuedExtraAttacks.length > 0) {
     drainQueuedExtraAttacks(state, 0, order, deps, outcomes)
@@ -2508,11 +2518,30 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   state.processingExtraAttacks = false
   state.currentExtraAttack = null
 
+  // BattleCleanUp / battle_main.c:4830: UndoMegaEvolution for all player party slots at battle end
+  if (state.battleOutcome !== null) {
+    for (let i = 0; i < PARTY_SIZE; i++) {
+      undoMegaEvolution(state, B_SIDE_PLAYER, i, deps.dataContext)
+    }
+  }
+
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop and the end-turn ladders above; state.turnCount is therefore the
   // zero-based counter while resolving this turn (turn 1 is 0), matching
   // bridge.ts's parity checks. battle_main.c:3512-3513 saturates the u8
   // counter at 0xFF.
   state.turnCount = Math.min(0xFF, state.turnCount + 1)
-  return { actions: outcomes, order, endTurn, endTurnUnmodelled, fieldEndTurn, fieldEndTurnUnmodelled, endTurnOrder, outcome: state.battleOutcome, replacementUnmodelled }
+  return {
+    actions: outcomes,
+    order,
+    endTurn,
+    endTurnUnmodelled,
+    fieldEndTurn,
+    fieldEndTurnUnmodelled,
+    endTurnOrder,
+    outcome: state.battleOutcome,
+    replacementUnmodelled,
+    megaEvolutions,
+    megaEvolved,
+  }
 }

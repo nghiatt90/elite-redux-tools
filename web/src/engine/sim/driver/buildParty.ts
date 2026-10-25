@@ -37,7 +37,7 @@ function resolveGender(speciesData: any, override?: 'MALE' | 'FEMALE' | 'GENDERL
   return 'MALE'
 }
 
-function resolveTypes(speciesData: any): [string, string, string] {
+export function resolveTypes(speciesData: any): [string, string, string] {
   const rawTypes = (speciesData.types ?? []) as string[]
   const bareTypes = rawTypes.map((t) => t.replace('TYPE_', ''))
   return [
@@ -148,6 +148,7 @@ export function buildOpponentParty(
       gender,
       status1: 0,
       types,
+      evs,
     }
   })
 }
@@ -221,6 +222,7 @@ export function buildPlayerParty(
       gender,
       status1: 0,
       types,
+      evs,
     }
   })
 }

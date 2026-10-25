@@ -30,6 +30,19 @@
 import type { BaseStats } from '../types'
 import type { MoveBehaviorEntry } from '../basePower'
 
+export interface SimMegaEvolution {
+  from: string
+  item?: string
+  move?: string
+  megaType?: string
+}
+
+export interface SimPrimalReversion {
+  from: string
+  item: string
+  primalType?: string
+}
+
 /** The species fields the bridge needs. A subset of species.json's entry, named
  * here so the engine does not depend on `lib/types.ts`'s full `Species` shape
  * (which carries learnsets, descriptions and sprite metadata the engine has no
@@ -47,8 +60,8 @@ export interface SimSpeciesData {
   heads?: number
   /** Non-empty when this species IS a Mega/Primal form -- the reverse lookup
    * ConditionBattlerContext.isMegaEvolved reads. */
-  megas?: unknown[]
-  primals?: unknown[]
+  megas?: SimMegaEvolution[]
+  primals?: SimPrimalReversion[]
   /** GET_BASE_SPECIES_ID's source. */
   formOf?: string | null
   /** Eviolite eligibility (canEvolveStrict). */
@@ -127,4 +140,6 @@ export interface SimDataContext {
   species(id: string): SimSpeciesData | undefined
   item(id: string): SimItemData | undefined
   move(id: string): SimMoveData | undefined
+  megaEvolutionSpecies?(speciesId: string, itemId: string): string | undefined
+  primalReversionSpecies?(speciesId: string, itemId: string): string | undefined
 }

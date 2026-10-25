@@ -31,6 +31,7 @@ import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
 import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingles } from './aiPipeline'
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
 import { PARTY_SIZE } from '../constants'
+import { canMegaEvolve } from '../formChange'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
  * sim does not have yet (dynamic move type resolution, terrain grounding, the
@@ -183,8 +184,18 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
     return { action: { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }, unmodelled }
   }
 
+  // OpponentHandleChooseMove, battle_controller_opponent.c:1608:
+  // "if (CanMegaEvolve(gActiveBattler) && ItemId_GetHoldEffect(mon.item) != HOLD_EFFECT_PRIMAL_ORB) -> RET_MEGA_EVOLUTION"
+  const mega = canMegaEvolve(state, battlerId, deps.dataContext)
+
   return {
-    action: { action: 'USE_MOVE', moveToBeUsed: moveView!, chosenMove: moveView!, target: battlerTarget },
+    action: {
+      action: 'USE_MOVE',
+      moveToBeUsed: moveView!,
+      chosenMove: moveView!,
+      target: battlerTarget,
+      ...(mega ? { mega: true } : {}),
+    },
     unmodelled,
   }
 }

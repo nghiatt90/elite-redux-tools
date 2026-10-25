@@ -20,6 +20,7 @@ import type {
   FieldBeganThisTurn,
   FieldState,
   FieldTimerState,
+  MegaEvolutionState,
   RandomSource,
   RoundState,
   SideBeganThisTurn,
@@ -461,6 +462,29 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     queuedExtraAttacks: [],
     processingExtraAttacks: false,
     currentExtraAttack: null,
+    mega: createMegaEvolutionState(),
+  }
+}
+
+/**
+ * `struct MegaEvolutionData`, include/battle.h:549-564 (AllocZeroed, battle_main.c:2741).
+ */
+export function createMegaEvolutionState(): MegaEvolutionState {
+  return {
+    toEvolve: 0,
+    evolvedPartyIds: [0, 0],
+    alreadyEvolved: [false, false, false, false],
+    evolvedSpecies: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
+    playerEvolvedSpecies: null,
+    primalRevertedPartyIds: [0, 0],
+    primalRevertedSpecies: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
+    playerPrimalRevertedSpecies: null,
+    battlerId: 0,
+    playerSelect: false,
+    triggerSpriteId: 0,
+    isWishMegaEvo: false,
+    isPrimalReversion: false,
+    playerBaseSpecies: new Array<string | null>(PARTY_SIZE).fill(null),
   }
 }
 

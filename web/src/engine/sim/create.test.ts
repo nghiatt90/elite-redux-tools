@@ -283,6 +283,8 @@ describe('createBattleState', () => {
     expect(state.queuedExtraAttacks).toEqual([])
     expect(state.processingExtraAttacks).toBe(false)
     expect(state.currentExtraAttack).toBeNull()
+    expect(state.mega.toEvolve).toBe(0)
+    expect(state.mega.alreadyEvolved).toEqual([false, false, false, false])
   })
 
   it('gives the two sides separate side state', () => {

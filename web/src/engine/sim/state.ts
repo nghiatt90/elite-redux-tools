@@ -14,7 +14,7 @@
 // (rng.ts) stands in for it. Graphics, link-battle, Battle Frontier, Safari,
 // Battle Palace/Arena and Battle TV state are omitted outright.
 
-import type { BattleStatKey } from '../types'
+import type { BattleStatKey, StatKey } from '../types'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { NUM_BATTLE_STATS, DEFAULT_STAT_STAGE, MAX_MON_MOVES, AI_MOVE_HISTORY_COUNT, NUM_INNATE_PER_SPECIES, TOTAL_ABILITY_COUNT, HELL_MODE_EXTRA_ABILITIES } from './constants'
 
@@ -91,6 +91,9 @@ export interface SimBattleMon {
   /** `Status2 status2` (:162) -- packed. Cleared on switch out, so it has no
    * party-mon counterpart. */
   status2: number
+  /** The mon's EVs (MON_DATA_*_EV), kept because CalculateMonStatsMaster re-reads them whenever the stats are recomputed
+   * (form change: RecalcBattlerStats, src/battle_script_commands.c:6618). Absent == all zero (fixtures). */
+  evs?: Record<StatKey, number>
 }
 
 /** `struct VolatileBeganThisTurn`, include/battle.h:77-87 -- "this volatile was
@@ -420,6 +423,8 @@ export interface SimPartyMon {
    * Multitype mechanic reaches a benched mon), so this is a battle-start-
    * derivable fact like `rawStats`, not state that goes stale mid-battle. */
   types: [string, string, string]
+  /** See SimBattleMon.evs. */
+  evs?: Record<StatKey, number>
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +670,43 @@ export interface BattleState {
   processingExtraAttacks: boolean
   /** Currently executing extra attack, mirroring `gQueuedExtraAttackData[0]` (include/battle.h:1023, battle_main.c:4242). */
   currentExtraAttack: ExtraAttackAction | null
+  /** `struct MegaEvolutionData mega` (include/battle.h:694, :549-564). */
+  mega: MegaEvolutionState
+}
+
+/**
+ * `struct MegaEvolutionData`, include/battle.h:549-564.
+ * Backing struct for `gBattleStruct->mega` (include/battle.h:694).
+ */
+export interface MegaEvolutionState {
+  /** `u8 toEvolve` (:550) -- battler bitmask for pending mega evolutions this turn. */
+  toEvolve: number
+  /** `u8 evolvedPartyIds[2]` (:551) -- bitmask of party slots that mega evolved, per side. */
+  evolvedPartyIds: [number, number]
+  /** `bool8 alreadyEvolved[4]` (:552) -- keyed by battler position. Checked by CanMegaEvolve for player side. */
+  alreadyEvolved: [boolean, boolean, boolean, boolean]
+  /** `u16 evolvedSpecies[MAX_BATTLERS_COUNT]` (:553) -- base species prior to mega evo. */
+  evolvedSpecies: (string | null)[]
+  /** `u16 playerEvolvedSpecies` (:554) -- player base species prior to mega evo. */
+  playerEvolvedSpecies: string | null
+  /** `u8 primalRevertedPartyIds[2]` (:555) -- bitmask of party slots that primal reverted, per side. */
+  primalRevertedPartyIds: [number, number]
+  /** `u16 primalRevertedSpecies[MAX_BATTLERS_COUNT]` (:556) -- base species prior to primal reversion. */
+  primalRevertedSpecies: (string | null)[]
+  /** `u16 playerPrimalRevertedSpecies` (:557) -- player base species prior to primal reversion. */
+  playerPrimalRevertedSpecies: string | null
+  /** `u8 battlerId` (:558) -- loop counter in CheckMegaEvolutionBeforeTurn (battle_main.c:4515). */
+  battlerId: number
+  /** `bool8 playerSelect` (:559). */
+  playerSelect: boolean
+  /** `u8 triggerSpriteId` (:560). */
+  triggerSpriteId: number
+  /** `bool8 isWishMegaEvo` (:561). */
+  isWishMegaEvo: boolean
+  /** `bool8 isPrimalReversion` (:562). */
+  isPrimalReversion: boolean
+  /** `u16 playerBaseSpecies[PARTY_SIZE]` (:563) -- party slot base species restored on UndoMegaEvolution. */
+  playerBaseSpecies: (string | null)[]
 }
 
 /**
