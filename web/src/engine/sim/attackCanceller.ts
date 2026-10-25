@@ -362,9 +362,9 @@ export function runAttackCanceller(
   // CANCELLER_ASLEEP, :3209-3247. UproarWakeUpCheck (:3211) is not modelled:
   // STATUS2_UPROAR has no writer anywhere in this sim (Uproar's own move effect
   // is not ported), so it is unreachable rather than gapped -- the branch it
-  // guards can never fire. gProcessingExtraAttacks/sleepTalk (:3210) is also
-  // always false, same precedent as turn.ts's other "not modelled" notes.
-  if (hasFlag(attacker.mon.status1, STATUS1_SLEEP)) {
+  // guards can never fire.
+  // :3210 -- sleep check does not run if gProcessingExtraAttacks && gTurnStructs[gBattlerAttacker].sleepTalk
+  if (hasFlag(attacker.mon.status1, STATUS1_SLEEP) && !(state.processingExtraAttacks && attacker.turn.sleepTalk)) {
     const earlyBird = battlerHasAbility(attacker.mon.abilities, 'ABILITY_EARLY_BIRD', () => false)
     const toSub = earlyBird ? 2 : 1
     const sleepCounter = getCounter(attacker.mon.status1, STATUS1_SLEEP)
@@ -408,7 +408,7 @@ export function runAttackCanceller(
   // CANCELLER_RECHARGE (:3294-3304) -- unreachable, see header.
 
   // CANCELLER_FLINCH, :3305-3314.
-  if (hasFlag(attacker.mon.status2, STATUS2_FLINCHED)) {
+  if (hasFlag(attacker.mon.status2, STATUS2_FLINCHED) && !state.processingExtraAttacks) {
     attacker.round.flinchImmobility = true
     attacker.round.attackCancelled = true
     return { cancelledBy: 'FLINCH', confusionSelfHitDamage: null }
@@ -459,7 +459,7 @@ export function runAttackCanceller(
   }
 
   // CANCELLER_PARALYSED, :3400-3413.
-  if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS)) {
+  if (hasFlag(attacker.mon.status1, STATUS1_PARALYSIS) && !state.processingExtraAttacks) {
     if (state.rng.random16() % 4 === 0) {
       attacker.round.prlzImmobility = true
       attacker.round.attackCancelled = true
@@ -510,6 +510,7 @@ export function runAttackCanceller(
   // CANCELLER_QUICK_GUARD, battle_util.c:3272-3280:
   // BattleScript_ButItFailed with HITMARKER_NO_ATTACKSTRING -- no ppreduce.
   if (
+    !state.processingExtraAttacks &&
     targetId !== null &&
     moveView &&
     (attackerId & 1) !== (targetId & 1) &&
@@ -523,29 +524,32 @@ export function runAttackCanceller(
   // CANCELLER_PSYCHIC_TERRAIN (:3542-3551) -- unreachable, see header.
 
   // CANCELLER_CONFUSED, :3368-3399 (source order; enum value 20 -- see header).
-  const confusionCounter = getCounter(attacker.mon.status2, STATUS2_CONFUSION)
-  if (confusionCounter !== 0) {
-    const newConfusion = confusionCounter - 1
-    attacker.mon.status2 = setCounter(attacker.mon.status2, STATUS2_CONFUSION, newConfusion)
-    if (newConfusion === 0) {
-      // :3372-3374 -- wore off. Not a cancellation; the ladder stops here.
+  // :3372 -- REQUIRE(!gProcessingExtraAttacks)
+  if (!state.processingExtraAttacks) {
+    const confusionCounter = getCounter(attacker.mon.status2, STATUS2_CONFUSION)
+    if (confusionCounter !== 0) {
+      const newConfusion = confusionCounter - 1
+      attacker.mon.status2 = setCounter(attacker.mon.status2, STATUS2_CONFUSION, newConfusion)
+      if (newConfusion === 0) {
+        // :3372-3374 -- wore off. Not a cancellation; the ladder stops here.
+        return NO_CANCEL
+      }
+      if (state.rng.random16() % 3 === 0) {
+        // :3375-3388 -- self-hit. CalculateMoveDamage's own call (:3376-3378) is
+        // gapped by name: computing it needs the full damage engine bridge
+        // turn.ts's DamageResolver seam defers (see this module's header and
+        // AttackCancellerResult.confusionSelfHitDamage's own doc).
+        attacker.round.confusionSelfDmg = true
+        attacker.round.attackCancelled = true
+        unmodelled.push(
+          "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
+        )
+        return { cancelledBy: 'CONFUSION', confusionSelfHitDamage: null }
+      }
+      // :3395-3398 -- confused but acted through it. Not a cancellation; the
+      // ladder stops here.
       return NO_CANCEL
     }
-    if (state.rng.random16() % 3 === 0) {
-      // :3375-3388 -- self-hit. CalculateMoveDamage's own call (:3376-3378) is
-      // gapped by name: computing it needs the full damage engine bridge
-      // turn.ts's DamageResolver seam defers (see this module's header and
-      // AttackCancellerResult.confusionSelfHitDamage's own doc).
-      attacker.round.confusionSelfDmg = true
-      attacker.round.attackCancelled = true
-      unmodelled.push(
-        "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
-      )
-      return { cancelledBy: 'CONFUSION', confusionSelfHitDamage: null }
-    }
-    // :3395-3398 -- confused but acted through it. Not a cancellation; the
-    // ladder stops here.
-    return NO_CANCEL
   }
 
   // CANCELLER_MULTIHIT_MOVES, :3491-3541 -- never stops the ladder in the C

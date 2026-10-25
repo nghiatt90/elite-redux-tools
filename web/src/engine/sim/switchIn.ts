@@ -190,6 +190,8 @@ export function switchIn(
   const newBattler = createBattlerState(battlerId, mon, partyIndex)
   state.battlers[battlerId] = newBattler
   clearBattlerLastTakenMove(state, battlerId)
+  // SwitchInClearSetData, battle_main.c:2849-2859: Remove any queued out-of-turn attacks for switching battler
+  state.queuedExtraAttacks = state.queuedExtraAttacks.filter((a) => a.attacker !== battlerId)
   if (beforeEffects) beforeEffects(newBattler)
   syncPartyHp(state, battlerId)
 

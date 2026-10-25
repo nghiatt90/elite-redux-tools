@@ -457,6 +457,9 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     lastTakenMove: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
     lastTakenMoveFrom: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<string | null>(MAX_BATTLERS_COUNT).fill(null)),
     chosenMovePositions: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
+    queuedExtraAttacks: [],
+    processingExtraAttacks: false,
+    currentExtraAttack: null,
   }
 }
 

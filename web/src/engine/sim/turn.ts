@@ -178,6 +178,7 @@ import {
   STATUS3_TELEKINESIS,
   STATUS4_SALT_CURE,
   STATUS_FIELD_TRICK_ROOM,
+  WEATHER_FOG_ANY,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
@@ -188,6 +189,7 @@ import {
   B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffsImplicit,
   dispatchOnStatLowered,
+  isBattlerWeatherAffected,
   isSimAbilitySuppressed,
   MOVE_EFFECT_ATK_MINUS_1,
   MOVE_EFFECT_DEF_MINUS_1,
@@ -614,6 +616,114 @@ export function isAffectedByFollowMe(
 }
 
 /**
+ * GetMoveTarget, src/battle_util.c:6343-6416.
+ * Resolves the target battler for a move (defaulting setTarget = 0).
+ */
+export function getMoveTarget(
+  state: BattleState,
+  attacker: number,
+  moveId: string,
+  deps: TurnLoopDeps,
+  setTarget: number = 0,
+): number {
+  let moveTarget: string
+  const moveData = deps.dataContext.move(moveId)
+
+  if (setTarget) {
+    moveTarget = moveData?.target ?? 'SELECTED'
+  } else {
+    moveTarget = moveData?.target ?? 'SELECTED'
+  }
+
+  // Special cases (src/battle_util.c:6353-6360)
+  if (moveId === 'MOVE_CURSE') {
+    const attackerBattler = state.battlers[attacker]
+    const isGhost = attackerBattler?.mon.types.includes('TYPE_GHOST') ?? false
+    if (isGhost || isBattlerWeatherAffected(state, attacker, WEATHER_FOG_ANY, deps)) {
+      moveTarget = 'SELECTED'
+    } else {
+      moveTarget = 'USER'
+    }
+  }
+
+  const getPartner = (id: number): number => id ^ 2
+  const isAlive = (id: number): boolean => isBattlerAlive(state, id)
+
+  // SetRandomTarget (src/battle_util.c:6326-6341)
+  const setRandomTarget = (battlerId: number): number => {
+    const side = battlerId & 1
+    const targets = [
+      [1, 3], // B_SIDE_PLAYER -> OPPONENT_LEFT (1), OPPONENT_RIGHT (3)
+      [0, 2], // B_SIDE_OPPONENT -> PLAYER_LEFT (0), PLAYER_RIGHT (2)
+    ]
+    if (state.battlersCount > 2) {
+      const target = targets[side][0]
+      if (isAlive(target)) return target
+      const flank = target ^ 2
+      if (isAlive(flank)) return flank
+      return target
+    } else {
+      return targets[side][0]
+    }
+  }
+
+  let targetBattler = 0
+  const side = (attacker & 1) ^ 1
+
+  switch (moveTarget) {
+    case 'SELECTED': {
+      if (isAffectedByFollowMe(state, attacker, side, moveId, deps)) {
+        targetBattler = state.sides[side]?.timers.followmeTarget ?? (attacker ^ 1)
+      } else {
+        targetBattler = setRandomTarget(attacker)
+      }
+      break
+    }
+    case 'DEPENDS':
+    case 'BOTH':
+    case 'FOES_AND_ALLY':
+    case 'OPPONENTS_FIELD': {
+      targetBattler = attacker ^ 1
+      if (!isAlive(targetBattler)) {
+        const partner = getPartner(targetBattler)
+        if (isAlive(partner)) {
+          targetBattler = partner
+        } else if (moveTarget === 'FOES_AND_ALLY' && isAlive(getPartner(attacker))) {
+          targetBattler = getPartner(attacker)
+        }
+      }
+      break
+    }
+    case 'RANDOM': {
+      if (isAffectedByFollowMe(state, attacker, side, moveId, deps)) {
+        targetBattler = state.sides[side]?.timers.followmeTarget ?? (attacker ^ 1)
+      } else if (state.battlersCount > 2) {
+        targetBattler = setRandomTarget(attacker)
+      } else {
+        targetBattler = attacker ^ 1
+      }
+      break
+    }
+    case 'USER_OR_SELECTED':
+    case 'USER':
+    default:
+      targetBattler = attacker
+      break
+    case 'ALLY': {
+      const partner = getPartner(attacker)
+      if (isAlive(partner)) {
+        targetBattler = partner
+      } else {
+        targetBattler = attacker
+      }
+      break
+    }
+  }
+
+  return targetBattler
+}
+
+/**
  * BlocksPrankster, src/battle_util.c:8622-8635.
  * Returns true if battlerPrankster's status move is blocked by battlerDef's Dark typing.
  */
@@ -625,14 +735,20 @@ export function blocksPrankster(
   checkTarget: boolean,
   deps: TurnLoopDeps,
 ): boolean {
-  const moveData = deps.dataContext.move(moveId)
-  if (moveData?.split !== 'STATUS') return false
-  const pranksterBattler = state.battlers[battlerPranksterId]
-  if (!pranksterBattler) return false
-  if (!battlerHasSimAbility(state, pranksterBattler, 'ABILITY_PRANKSTER', false, battlerPranksterId, false, deps.dataContext)) {
-    return false
+  // battle_util.c:8623-8628
+  if (state.processingExtraAttacks) {
+    if (!state.currentExtraAttack?.prankster) return false
+  } else {
+    const moveData = deps.dataContext.move(moveId)
+    if (moveData?.split !== 'STATUS') return false
+    const pranksterBattler = state.battlers[battlerPranksterId]
+    if (!pranksterBattler) return false
+    if (!battlerHasSimAbility(state, pranksterBattler, 'ABILITY_PRANKSTER', false, battlerPranksterId, false, deps.dataContext)) {
+      return false
+    }
   }
   if ((battlerPranksterId & 1) === (battlerDefId & 1)) return false
+  const moveData = deps.dataContext.move(moveId)
   if (checkTarget && (moveData?.target === 'OPPONENTS_FIELD' || moveData?.target === 'DEPENDS')) return false
   const defBattler = state.battlers[battlerDefId]
   if (!defBattler) return false
@@ -1435,6 +1551,755 @@ function applyEncore(state: BattleState, battlerId: number, action: ChosenAction
   return { ...action, chosenMove: view, moveToBeUsed: view }
 }
 
+export function executeAction(
+  state: BattleState,
+  battlerId: number,
+  action: ChosenAction | null,
+  actionKind: 'USE_MOVE' | 'USE_ITEM' | 'SWITCH',
+  index: number,
+  order: TurnOrder,
+  deps: TurnLoopDeps,
+): ActionOutcome {
+  // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
+  // does not act. Its slot is still consumed; the action is simply finished.
+  const blank: ActionOutcome = {
+    turnOrderIndex: index,
+    battlerId,
+    action: actionKind,
+    skippedBecauseFainted: false,
+    battleOver: false,
+    missed: false,
+    targetId: null,
+    targetDamage: null,
+    attackerDamage: null,
+    cancelledBy: null,
+    confusionSelfHitDamage: null,
+    statChanges: null,
+    statusApplied: null,
+    unmodelled: [],
+    fainted: [],
+  }
+
+  // RunTurnActionsFunctions, battle_main.c:4654 -- `if (gBattleOutcome != 0)
+  // gCurrentActionFuncId = B_ACTION_FINISHED;`, checked BEFORE the action
+  // handler for this slot ever runs (so it takes priority over the
+  // liveness check right below: a battler that is still alive but whose
+  // opponent has no mons left does not act either). This batch's own
+  // extension of the C's timing -- see outcome.ts's header and this
+  // module's own header on "after each action's faints" -- means
+  // state.battleOutcome can already be set here even in a case the literal
+  // C would not have decided until later (checkteamslost is not called
+  // after an ordinary move's tryfaintmon in the real game); that is a
+  // deliberate simplification this batch's brief asks for, not an
+  // oversight.
+  if (state.battleOutcome) {
+    return { ...blank, skippedBecauseFainted: false, battleOver: true }
+  }
+
+  // HandleAction_UseMove:181-186, battle_util.c:182-183 -- alive check has an exception
+  // for extra attack explosions queued by abilities
+  if (!isBattlerAlive(state, battlerId)) {
+    const isExplosion =
+      state.processingExtraAttacks &&
+      Boolean(state.currentExtraAttack?.ability) &&
+      deps.dataContext.move(action?.chosenMove?.id ?? '')?.effect === 'EFFECT_EXPLOSION'
+    if (!isExplosion) {
+      return { ...blank, skippedBecauseFainted: true, battleOver: false }
+    }
+  }
+
+  // HandleAction_Switch, battle_util.c:378 -- runs in this slot, before any
+  // USE_MOVE slot (SWITCH actions are grouped first by
+  // setActionsAndBattlersTurnOrder; see performSwitchAction's own header).
+  if (actionKind === 'SWITCH') {
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps)
+    return { ...blank, skippedBecauseFainted: false, battleOver: false, unmodelled: switchUnmodelled }
+  }
+
+  if (actionKind !== 'USE_MOVE' || !action || action.chosenMove === null) {
+    return { ...blank, skippedBecauseFainted: false, battleOver: false }
+  }
+
+  const attackerBattler = state.battlers[battlerId]!
+  let targetId = action.target
+  const unmodelled: string[] = []
+
+  // battle_util.c:205-207, data/battle_scripts_1.s:4776: PP is not deducted for extra attacks
+  // without movePos (Metronome) or under sleepTalk (Sleep Talk), or when noPpDeduct is set.
+  const shouldDeductPp =
+    !state.processingExtraAttacks ||
+    (Boolean(state.currentExtraAttack?.movePos) &&
+      !state.battlers[battlerId]?.turn.sleepTalk &&
+      !state.currentExtraAttack?.noPpDeduct)
+
+  const performPpDeduct = () => {
+    if (shouldDeductPp && action.chosenMove) {
+      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
+    }
+  }
+
+  // Target selection: IsAffectedByFollowMe (src/battle_util.c:118-126, 263-265, 6365-6366, 6395-6396)
+  const moveData = deps.dataContext.move(action.chosenMove.id)
+  const defSide = (battlerId & 1) ^ 1
+  const isSingleTargetMove = moveData?.target === 'SELECTED' || moveData?.target === 'RANDOM'
+  if (
+    isSingleTargetMove &&
+    isAffectedByFollowMe(state, battlerId, defSide, action.chosenMove.id, deps) &&
+    (battlerId & 1) !== (state.sides[defSide].timers.followmeTarget & 1)
+  ) {
+    targetId = state.sides[defSide].timers.followmeTarget
+  }
+
+  // Torment move restriction (battle_util.c:1443-1452, 1641-1642).
+  // In C, Torment prevents selecting lastMove during move selection; when
+  // evaluated directly at action execution, gap the unmodelled restriction.
+  if (
+    hasFlag(attackerBattler.mon.status2, STATUS2_TORMENT) &&
+    action.chosenMove.id === attackerBattler.lastMove &&
+    attackerBattler.lastMove !== 'MOVE_STRUGGLE'
+  ) {
+    unmodelled.push(
+      `battler ${battlerId}: Torment move restriction (battle_util.c:1443-1452) is not enforced at selection time`,
+    )
+  }
+
+  // Cmd_attackcanceler, battle_script_commands.c:1046-1081 -- runs BEFORE any
+  // target-liveness consideration, matching the C: AtkCanceller_UnableToUseMove
+  // only ever tests the ATTACKER's own state (status1/status2/abilities), so a
+  // sleeping/frozen/paralysed/flinched/confused/loafing attacker is cancelled
+  // even when its target has already fainted this turn.
+  // attackerHoldEffect: attackCanceller.ts's own CANCELLER_MULTIHIT_MOVES
+  // needs GetBattlerHoldEffect (battle_util.c:3586) for the Loaded Dice
+  // check, same item-lookup precedent as accuracyBridge.ts's
+  // attackerHoldEffect.
+  const attackerMon = state.battlers[battlerId]?.mon
+  const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
+  const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding, action.chosenMove)
+  if (cancelResult.cancelledBy) {
+    return {
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      skippedBecauseFainted: false,
+      battleOver: false,
+      missed: false,
+      targetId,
+      targetDamage: null,
+      attackerDamage: null,
+      cancelledBy: cancelResult.cancelledBy,
+      confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
+      statChanges: null,
+      statusApplied: null,
+      unmodelled,
+      fainted: [],
+    }
+  }
+
+  const moveFlags = moveData?.flags
+
+  // Cmd_attackcanceler: Magic Coat bounce, src/battle_script_commands.c:1153-1173,
+  // and BattleScript_MagicCoatBounce / BattleScript_MagicCoatBouncePrankster (data/battle_scripts_1.s:8325-8344)
+  if (moveFlags?.magicCoatAffected && !state.battlers[battlerId]?.round.usesBouncedMove) {
+    const isBouncedByCoat = targetId !== null && Boolean(state.battlers[targetId]?.round.bounceMove)
+    const isBouncedByAbility =
+      targetId !== null &&
+      battlerHasSimAbility(
+        state,
+        state.battlers[targetId]!,
+        'ABILITY_MAGIC_BOUNCE',
+        true,
+        battlerId,
+        attackerHasMoldBreakerActive(attackerBattler, deps),
+        deps.dataContext,
+      )
+
+    if (isBouncedByCoat || isBouncedByAbility) {
+      if (isBouncedByCoat) {
+        state.battlers[targetId!]!.round.bounceMove = false
+      }
+      state.battlers[targetId!]!.round.usesBouncedMove = true
+      performPpDeduct()
+
+      if (isBouncedByCoat && blocksPrankster(state, action.chosenMove.id, targetId!, battlerId, true, deps)) {
+        // BattleScript_MagicCoatBouncePrankster (:8335-8344)
+        if (!state.processingExtraAttacks) {
+          if (state.battlers[battlerId]) {
+            state.battlers[battlerId]!.lastMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+          }
+          state.lastUsedMove = action.chosenMove.id
+        }
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: battlerId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted: [],
+        }
+      }
+
+      // setmagiccoattarget BS_ATTACKER (VARIOUS_SET_MAGIC_COAT_TARGET, battle_script_commands.c:6933-6940)
+      const bounceAttackerId = targetId!
+      const bounceDefSide = (bounceAttackerId & 1) ^ 1
+      const bounceTargetId = isAffectedByFollowMe(state, bounceAttackerId, bounceDefSide, action.chosenMove.id, deps)
+        ? state.sides[bounceDefSide].timers.followmeTarget
+        : battlerId
+
+      const bouncedMoveEffect = action.chosenMove.effect ?? moveData?.effect ?? null
+      const bouncedHandler = getMoveEffectHandler(bouncedMoveEffect)
+      if (bouncedHandler) {
+        const effectOutcome = bouncedHandler({
+          state,
+          battlerId: bounceAttackerId,
+          targetId: bounceTargetId,
+          action: { ...action, target: bounceTargetId },
+          turnOrderIndex: index,
+          order,
+          deps,
+          unmodelled,
+          deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8331)
+          applyDamage,
+        })
+        const reactiveStatChanges: StatChangeOutcome[] = []
+        runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
+        if (reactiveStatChanges.length > 0) {
+          effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
+        }
+        if (!state.processingExtraAttacks) {
+          if (state.battlers[battlerId]) {
+            state.battlers[battlerId]!.lastMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+          }
+          state.lastUsedMove = action.chosenMove.id
+        }
+        if (
+          bounceTargetId !== bounceAttackerId &&
+          !effectOutcome.missed &&
+          moveData?.flags?.mirrorMoveAffected === true &&
+          state.battlers[bounceTargetId] &&
+          isBattlerAlive(state, bounceTargetId)
+        ) {
+          state.lastTakenMove[bounceTargetId] = action.chosenMove.id
+          state.lastTakenMoveFrom[bounceTargetId][bounceAttackerId] = action.chosenMove.id
+        }
+        return { ...effectOutcome, turnOrderIndex: index, battlerId }
+      } else {
+        unmodelled.push(
+          `BattleScript_MagicCoatBounce: unhandled move effect ${bouncedMoveEffect} for bounced move ${action.chosenMove.id} is not modelled`,
+        )
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: false,
+          targetId: bounceTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted: [],
+        }
+      }
+    }
+  }
+
+  // Cmd_attackcanceler: Snatch consumer, src/battle_script_commands.c:1175-1182,
+  // and BattleScript_SnatchedMove (data/battle_scripts_1.s:8346-8355)
+  let snatcherId: number | null = null
+  for (const bId of order.battlerByTurnOrder) {
+    if (state.battlers[bId]?.round.stealMove) {
+      snatcherId = bId
+      break
+    }
+  }
+  if (snatcherId !== null && moveFlags?.snatchAffected) {
+    state.battlers[snatcherId]!.round.stealMove = false
+    performPpDeduct()
+
+    // Cmd_snatchsetbattlers (:12372-12382) + swapattackerwithtarget (:5850-5853):
+    // If attacker == target (or self-targeting move), target becomes snatcher
+    const isSelfTargeting = targetId === battlerId || moveData?.target === 'USER' || moveData?.target === 'USER_OR_ALLY'
+    const snatchedTargetId = isSelfTargeting ? snatcherId : battlerId
+
+    const snatchedMoveEffect = action.chosenMove.effect ?? moveData?.effect ?? null
+    const snatchedHandler = getMoveEffectHandler(snatchedMoveEffect)
+    if (snatchedHandler) {
+      const effectOutcome = snatchedHandler({
+        state,
+        battlerId: snatcherId,
+        targetId: snatchedTargetId,
+        action: { ...action, target: snatchedTargetId },
+        turnOrderIndex: index,
+        order,
+        deps,
+        unmodelled,
+        deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8353)
+        applyDamage,
+      })
+      const reactiveStatChanges: StatChangeOutcome[] = []
+      runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
+      if (reactiveStatChanges.length > 0) {
+        effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
+      }
+      if (!state.processingExtraAttacks) {
+        if (state.battlers[battlerId]) {
+          state.battlers[battlerId]!.lastMove = action.chosenMove.id
+          state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+          state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+        }
+        state.lastUsedMove = action.chosenMove.id
+      }
+      if (
+        snatchedTargetId !== snatcherId &&
+        !effectOutcome.missed &&
+        moveData?.flags?.mirrorMoveAffected === true &&
+        state.battlers[snatchedTargetId] &&
+        isBattlerAlive(state, snatchedTargetId)
+      ) {
+        state.lastTakenMove[snatchedTargetId] = action.chosenMove.id
+        state.lastTakenMoveFrom[snatchedTargetId][snatcherId] = action.chosenMove.id
+      }
+      return { ...effectOutcome, turnOrderIndex: index, battlerId }
+    } else {
+      unmodelled.push(
+        `BattleScript_SnatchedMove: unhandled move effect ${snatchedMoveEffect} for snatched move ${action.chosenMove.id} is not modelled`,
+      )
+      return {
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        battleOver: false,
+        missed: false,
+        targetId: snatchedTargetId,
+        targetDamage: null,
+        attackerDamage: null,
+        cancelledBy: null,
+        confusionSelfHitDamage: null,
+        statChanges: null,
+        statusApplied: null,
+        unmodelled,
+        fainted: [],
+      }
+    }
+  }
+
+  // Move effect dispatch runs between attackcanceler and the accuracy/damage path.
+  // Handled status moves (Swords Dance, Belly Drum, etc.) do not draw accuracy in
+  // C battle scripts; their script runs ppreduce and applies their effects directly.
+  const moveEffect = action.chosenMove.effect ?? deps.dataContext.move(action.chosenMove.id)?.effect ?? null
+  const handler = getMoveEffectHandler(moveEffect)
+  if (handler) {
+    const effectOutcome = handler({
+      state,
+      battlerId,
+      targetId,
+      action,
+      turnOrderIndex: index,
+      order,
+      deps,
+      unmodelled,
+      deductPp: performPpDeduct,
+      applyDamage,
+    })
+    if (targetId !== null && state.battlers[battlerId]?.round.touchedProtectLike) {
+      const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+      if (protectMoveEnd.statChanges) {
+        effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...protectMoveEnd.statChanges]
+      }
+      if (protectMoveEnd.statusApplied) {
+        effectOutcome.statusApplied = protectMoveEnd.statusApplied
+      }
+    }
+    // Nearest sim point for handled status moves (Swords Dance, etc.) to trigger
+    // ABILITYEFFECT_REACTIVE (Cmd_moveend, src/battle_script_commands.c:4330).
+    const reactiveStatChanges: StatChangeOutcome[] = []
+    runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
+    if (reactiveStatChanges.length > 0) {
+      effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
+    }
+    if (!state.processingExtraAttacks) {
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+      }
+      state.lastUsedMove = action.chosenMove.id
+    }
+    if (
+      targetId !== null &&
+      targetId !== battlerId &&
+      !effectOutcome.missed &&
+      moveData?.flags?.mirrorMoveAffected === true &&
+      state.battlers[targetId] &&
+      isBattlerAlive(state, targetId)
+    ) {
+      state.lastTakenMove[targetId] = action.chosenMove.id
+      state.lastTakenMoveFrom[targetId][battlerId] = action.chosenMove.id
+    }
+    return effectOutcome
+  }
+
+  if (targetId === null || !isBattlerAlive(state, targetId)) {
+    // No living target: the move resolves to nothing here. The real game runs
+    // a fail branch with messages and effect-specific behaviour; this batch
+    // models only that no damage is dealt.
+    return { ...blank, skippedBecauseFainted: false, battleOver: false, targetId, unmodelled }
+  }
+
+  const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
+  const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
+
+  const isContact = moveData?.flags?.contact === true
+
+  // Check Protect before accuracy check (battle_util.c:6571-6645, battle_script_commands.c:1198-1210, 1422)
+  const protectType = isBattlerProtected(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps, unmodelled)
+  if (protectType !== ProtectType.PROTECT_NONE) {
+    if (protectType === ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH || isContact) {
+      state.battlers[battlerId]!.round.touchedProtectLike = true
+    }
+  }
+  if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
+    cancelMultiTurnMoves(state.battlers[battlerId]!)
+    performPpDeduct()
+    const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+    if (state.battlers[targetId]) {
+      state.battlers[targetId]!.lastLandedMove = null
+      state.battlers[targetId]!.lastHitByType = null
+    }
+    if (!state.processingExtraAttacks) {
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+      }
+      state.lastUsedMove = action.chosenMove.id
+    }
+    return {
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      skippedBecauseFainted: false,
+      battleOver: false,
+      missed: true,
+      targetId,
+      targetDamage: null,
+      attackerDamage: null,
+      cancelledBy: null,
+      confusionSelfHitDamage: null,
+      statChanges: protectMoveEnd.statChanges,
+      statusApplied: protectMoveEnd.statusApplied,
+      unmodelled,
+      fainted: [],
+    }
+  }
+
+  // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
+  // state.rng BEFORE the damage resolver's own crit/roll draws, matching
+  // BattleScript_EffectHit (battle_scripts_1.s:2857-2863): accuracycheck,
+  // then attackstring/ppreduce, then critcalc/damagecalc inside
+  // deps.damage.resolve below.
+  const { inputs: accInputs, gaps: accGaps, defenderHasAnticipation } = buildAccuracyInputs(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps)
+  unmodelled.push(...gapsToUnmodelled(accGaps))
+  if (defenderHasAnticipation) {
+    unmodelled.push(
+      "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+    )
+  }
+  const accResult = getTotalAccuracy(accInputs)
+  unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+  // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
+  // is not special-cased: Random() % 100 is at most 99, so the comparison
+  // can never be true, and the arithmetic alone carries the sentinel.
+  const missed = state.rng.random16() % 100 >= accResult.accuracy
+
+  // Cmd_ppreduce, :1460-1506 -- after the accuracy check, on both paths:
+  // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
+  // 3094) runs ppreduce too, so a miss still costs PP.
+  performPpDeduct()
+
+  if (missed) {
+    const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+    if (!state.processingExtraAttacks) {
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+      }
+      state.lastUsedMove = action.chosenMove.id
+    }
+    if (targetId !== null && state.battlers[targetId] && isBattlerAlive(state, targetId)) {
+      state.battlers[targetId]!.lastHitBy = battlerId
+      state.battlers[targetId]!.lastLandedMove = MOVE_UNSET
+    }
+    return {
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      skippedBecauseFainted: false,
+      battleOver: false,
+      missed: true,
+      targetId,
+      targetDamage: null,
+      attackerDamage: null,
+      cancelledBy: null,
+      confusionSelfHitDamage: null,
+      statChanges: protectMoveEnd.statChanges,
+      statusApplied: protectMoveEnd.statusApplied,
+      unmodelled,
+      fainted: [],
+    }
+  }
+
+  let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
+
+  if (absorbingAbility) {
+    if (state.battlers[targetId]) {
+      state.battlers[targetId]!.lastLandedMove = null
+      state.battlers[targetId]!.lastHitByType = null
+    }
+    const absorbOutcome = applyAbsorbEffect({
+      state,
+      attackerId: battlerId,
+      targetId,
+      absorbingAbility,
+      moveId: action.chosenMove.id,
+      deps,
+      unmodelled,
+    })
+
+    // In C: JumpIfMoveFailed jumps to BattleScript_AfterAbsorbEffect (battle_script_commands.c:1221),
+    // which sets MOVE_RESULT_DOESNT_AFFECT_FOE and jumps to BattleScript_MoveEnd (battle_scripts_1.s:10038-10042).
+    // Damage calculation and secondary effects (seteffectwithchance) are skipped entirely.
+    const moveEndOutcome = runMoveEnd({
+      state,
+      attackerId: battlerId,
+      targetId,
+      moveId: action.chosenMove.id,
+      targetDamage: 0,
+      hpDealt: 0,
+      moveEffect2: null,
+      deps,
+      unmodelled,
+      fainted: [],
+    })
+
+    const finalStatChanges: StatChangeOutcome[] = []
+    if (absorbOutcome.statChanges.length > 0) finalStatChanges.push(...absorbOutcome.statChanges)
+    if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
+
+    if (!state.processingExtraAttacks) {
+      if (state.battlers[battlerId]) {
+        state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+      }
+      state.lastUsedMove = action.chosenMove.id
+    }
+
+    return {
+      turnOrderIndex: index,
+      battlerId,
+      action: actionKind,
+      skippedBecauseFainted: false,
+      battleOver: false,
+      missed: false,
+      targetId,
+      targetDamage: 0,
+      attackerDamage: moveEndOutcome.attackerDamage,
+      cancelledBy: null,
+      confusionSelfHitDamage: null,
+      statChanges: finalStatChanges.length > 0 ? finalStatChanges : null,
+      statusApplied: moveEndOutcome.statusApplied,
+      unmodelled: [...unmodelled, ...damageUnmodelled],
+      fainted: [],
+    }
+  }
+
+  // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe stops HP at 1 (:1667)
+  const targetBattler = state.battlers[targetId]
+  const isFalseSwipe = Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
+  if (targetDamage !== null && targetBattler && targetBattler.mon.hp > 0 && (targetBattler.round.endured || isFalseSwipe) && targetDamage >= targetBattler.mon.hp) {
+    targetDamage = Math.max(0, targetBattler.mon.hp - 1)
+  }
+
+  const fainted: number[] = []
+  const targetHpBefore = targetBattler?.mon.hp ?? 0
+  applyDamage(state, targetId, targetDamage, fainted)
+  const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
+
+  // Grudge faint trigger (Cmd_tryfaintmon: battle_script_commands.c:3252-3263)
+  if (
+    fainted.includes(targetId) &&
+    targetBattler &&
+    hasFlag(targetBattler.statuses3, STATUS3_GRUDGE) &&
+    (battlerId & 1) !== (targetId & 1) &&
+    attackerBattler.mon.hp > 0 &&
+    action.chosenMove.id !== 'MOVE_STRUGGLE'
+  ) {
+    // The C zeroes gBattleStruct->chosenMovePositions[attacker]; the sim has no chosen slot, so
+    // it finds the slot by move id, which a called move (Metronome etc.) does not have.
+    const moveIdx = attackerBattler.mon.moves.indexOf(action.chosenMove.id)
+    if (moveIdx !== -1) {
+      attackerBattler.mon.pp[moveIdx] = 0
+    } else {
+      unmodelled.push(
+        `battler ${battlerId}: Grudge's PP wipe (battle_script_commands.c:3252-3263) is not applied -- ${action.chosenMove.id} is not in the chosen-move slot lookup`,
+      )
+    }
+    // Not part of tryfaintmon: ClearFuryCutterDestinyBondGrudge (battle_util.c:6307-6311) on faint.
+    targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_GRUDGE)
+  }
+
+  applyDamage(state, battlerId, attackerDamage, fainted)
+
+  // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
+  const secondaryResult = applySecondaryMoveEffects({
+    state,
+    attackerId: battlerId,
+    targetId,
+    moveId: action.chosenMove.id,
+    targetDamage,
+    deps: {
+      dataContext: deps.dataContext,
+      grounding: deps.grounding,
+      moveBehaviors: deps.moveBehaviors,
+    },
+    unmodelled,
+  })
+
+  // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968).
+  const moveEndOutcome = runMoveEnd({
+    state,
+    attackerId: battlerId,
+    targetId,
+    moveId: action.chosenMove.id,
+    targetDamage: targetDamage ?? 0,
+    hpDealt,
+    isCriticalHit,
+    moveEffect2: secondaryResult?.moveEffect2 ?? null,
+    deps,
+    unmodelled,
+    fainted,
+  })
+
+  const finalStatChanges: StatChangeOutcome[] = []
+  if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
+  if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
+  const finalStatusApplied = secondaryResult?.statusApplied ?? moveEndOutcome.statusApplied
+
+  const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
+    ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)
+    : null
+
+  return {
+    turnOrderIndex: index,
+    battlerId,
+    action: actionKind,
+    skippedBecauseFainted: false,
+    battleOver: false,
+    missed: false,
+    targetId,
+    targetDamage,
+    attackerDamage: combinedAttackerDamage,
+    cancelledBy: null,
+    confusionSelfHitDamage: null,
+    statChanges: secondaryResult?.statChanges || moveEndOutcome.statChanges ? finalStatChanges : null,
+    statusApplied: finalStatusApplied,
+    unmodelled: [...unmodelled, ...damageUnmodelled],
+    fainted,
+  }
+}
+
+function buildMoveView(id: string, dataContext: SimDataContext): TurnOrderMoveView {
+  const data = dataContext.move(id)
+  return {
+    id,
+    priority: data?.priority ?? 0,
+    effect: data?.effect ?? null,
+    isStatus: data?.split === 'STATUS',
+    resolvedType: data?.type ?? 'NORMAL',
+    power: data?.power ?? 0,
+    flags: data?.flags ?? {},
+    split: data?.split ?? 'STATUS',
+    hasStrongJawBoostFlag: false,
+    isKeenEdge: false,
+    naturalGiftPriority: 0,
+    isGrassyTerrainAffected: false,
+    myceliumMightAffected: false,
+  }
+}
+
+/**
+ * Drains gQueuedExtraAttackData, matching HandleAction_TryFinish (src/battle_util.c:751-769)
+ * and TryPerformExtraAction (:771-783).
+ *
+ * In C:
+ *   while (gQueuedAttackCount) {
+ *       gQueuedExtraAttackData[0] = gQueuedExtraAttackData[gQueuedAttackCount--];
+ *       FILTER(IsBattlerAlive(gQueuedExtraAttackData[0].attacker) ||
+ *              (gQueuedExtraAttackData[0].ability && gBattleMoves[gQueuedExtraAttackData[0].move].effect == EFFECT_EXPLOSION))
+ *       ClearMiscTurnFlags();
+ *       gProcessingExtraAttacks = TRUE;
+ *       gCurrentActionFuncId = B_ACTION_USE_MOVE;
+ *       return TRUE;
+ *   }
+ *
+ * C quirk kept: gQueuedExtraAttackData is named 'queue' but drained via gQueuedAttackCount-- (:776),
+ * making it LIFO (pop from end) rather than FIFO.
+ */
+export function drainQueuedExtraAttacks(
+  state: BattleState,
+  index: number,
+  order: TurnOrder,
+  deps: TurnLoopDeps,
+  outcomes: ActionOutcome[],
+): void {
+  while (state.queuedExtraAttacks.length > 0) {
+    const extraAttack = state.queuedExtraAttacks.pop()!
+    const moveData = deps.dataContext.move(extraAttack.move)
+    const isExplosion = Boolean(extraAttack.ability) && moveData?.effect === 'EFFECT_EXPLOSION'
+
+    if (!isBattlerAlive(state, extraAttack.attacker) && !isExplosion) {
+      continue
+    }
+
+    state.processingExtraAttacks = true
+    state.currentExtraAttack = extraAttack
+
+    const moveView = buildMoveView(extraAttack.move, deps.dataContext)
+    const extraAction: ChosenAction = {
+      action: 'USE_MOVE',
+      chosenMove: moveView,
+      moveToBeUsed: moveView,
+      target: extraAttack.target,
+    }
+
+    const extraOutcome = executeAction(state, extraAttack.attacker, extraAction, 'USE_MOVE', index, order, deps)
+    outcomes.push(extraOutcome)
+    state.currentExtraAttack = null
+  }
+  state.processingExtraAttacks = false
+  state.currentExtraAttack = null
+}
+
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
   assertNoPerBattlerQuash(state)
   clearStartedFlags(state)
@@ -1450,6 +2315,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
   }
   const outcomes: ActionOutcome[] = []
+
+  // RunTurnActionsFunctions, battle_main.c:3320 -- drain any attacks queued before first action
+  if (state.queuedExtraAttacks.length > 0) {
+    drainQueuedExtraAttacks(state, 0, order, deps, outcomes)
+  }
 
   for (let index = 0; index < order.battlerByTurnOrder.length; index++) {
     // HandleAction_ActionFinished's TurnStructsClear (:856) runs after every
@@ -1467,648 +2337,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     const action = actions[battlerId] ?? null
     const actionKind = order.actionsByTurnOrder[index]
 
-    // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
-    // does not act. Its slot is still consumed; the action is simply finished.
-    const blank = {
-      turnOrderIndex: index,
-      battlerId,
-      action: actionKind,
-      missed: false,
-      targetId: null,
-      targetDamage: null,
-      attackerDamage: null,
-      cancelledBy: null,
-      confusionSelfHitDamage: null,
-      statChanges: null,
-      statusApplied: null,
-      unmodelled: [],
-      fainted: [],
-    }
-
-    // RunTurnActionsFunctions, battle_main.c:4654 -- `if (gBattleOutcome != 0)
-    // gCurrentActionFuncId = B_ACTION_FINISHED;`, checked BEFORE the action
-    // handler for this slot ever runs (so it takes priority over the
-    // liveness check right below: a battler that is still alive but whose
-    // opponent has no mons left does not act either). This batch's own
-    // extension of the C's timing -- see outcome.ts's header and this
-    // module's own header on "after each action's faints" -- means
-    // state.battleOutcome can already be set here even in a case the literal
-    // C would not have decided until later (checkteamslost is not called
-    // after an ordinary move's tryfaintmon in the real game); that is a
-    // deliberate simplification this batch's brief asks for, not an
-    // oversight.
-    if (state.battleOutcome) {
-      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: true })
-      continue
-    }
-
-    if (!isBattlerAlive(state, battlerId)) {
-      outcomes.push({ ...blank, skippedBecauseFainted: true, battleOver: false })
-      continue
-    }
-
-    // HandleAction_Switch, battle_util.c:378 -- runs in this slot, before any
-    // USE_MOVE slot (SWITCH actions are grouped first by
-    // setActionsAndBattlersTurnOrder; see performSwitchAction's own header).
-    if (actionKind === 'SWITCH') {
-      const switchUnmodelled = performSwitchAction(state, battlerId, deps)
-      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false, unmodelled: switchUnmodelled })
-      continue
-    }
-
-    if (actionKind !== 'USE_MOVE' || !action || action.chosenMove === null) {
-      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false })
-      continue
-    }
-
-    const attackerBattler = state.battlers[battlerId]!
-    let targetId = action.target
-    const unmodelled: string[] = []
-
-    // Target selection: IsAffectedByFollowMe (src/battle_util.c:118-126, 263-265, 6365-6366, 6395-6396)
-    const moveData = deps.dataContext.move(action.chosenMove.id)
-    const defSide = (battlerId & 1) ^ 1
-    const isSingleTargetMove = moveData?.target === 'SELECTED' || moveData?.target === 'RANDOM'
-    if (
-      isSingleTargetMove &&
-      isAffectedByFollowMe(state, battlerId, defSide, action.chosenMove.id, deps) &&
-      (battlerId & 1) !== (state.sides[defSide].timers.followmeTarget & 1)
-    ) {
-      targetId = state.sides[defSide].timers.followmeTarget
-    }
-
-    // Torment move restriction (battle_util.c:1443-1452, 1641-1642).
-    // In C, Torment prevents selecting lastMove during move selection; when
-    // evaluated directly at action execution, gap the unmodelled restriction.
-    if (
-      hasFlag(attackerBattler.mon.status2, STATUS2_TORMENT) &&
-      action.chosenMove.id === attackerBattler.lastMove &&
-      attackerBattler.lastMove !== 'MOVE_STRUGGLE'
-    ) {
-      unmodelled.push(
-        `battler ${battlerId}: Torment move restriction (battle_util.c:1443-1452) is not enforced at selection time`,
-      )
-    }
-
-    // Cmd_attackcanceler, battle_script_commands.c:1046-1081 -- runs BEFORE any
-    // target-liveness consideration, matching the C: AtkCanceller_UnableToUseMove
-    // only ever tests the ATTACKER's own state (status1/status2/abilities), so a
-    // sleeping/frozen/paralysed/flinched/confused/loafing attacker is cancelled
-    // even when its target has already fainted this turn.
-    // attackerHoldEffect: attackCanceller.ts's own CANCELLER_MULTIHIT_MOVES
-    // needs GetBattlerHoldEffect (battle_util.c:3586) for the Loaded Dice
-    // check, same item-lookup precedent as accuracyBridge.ts's
-    // attackerHoldEffect.
-    const attackerMon = state.battlers[battlerId]?.mon
-    const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
-    const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding, action.chosenMove)
-    if (cancelResult.cancelledBy) {
-      outcomes.push({
-        turnOrderIndex: index,
-        battlerId,
-        action: actionKind,
-        skippedBecauseFainted: false,
-        battleOver: false,
-        missed: false,
-        targetId,
-        targetDamage: null,
-        attackerDamage: null,
-        cancelledBy: cancelResult.cancelledBy,
-        confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
-        statChanges: null,
-        statusApplied: null,
-        unmodelled,
-        fainted: [],
-      })
-      continue
-    }
-
-    const moveFlags = moveData?.flags
-
-    // Cmd_attackcanceler: Magic Coat bounce, src/battle_script_commands.c:1153-1173,
-    // and BattleScript_MagicCoatBounce / BattleScript_MagicCoatBouncePrankster (data/battle_scripts_1.s:8325-8344)
-    if (moveFlags?.magicCoatAffected && !state.battlers[battlerId]?.round.usesBouncedMove) {
-      const isBouncedByCoat = targetId !== null && Boolean(state.battlers[targetId]?.round.bounceMove)
-      const isBouncedByAbility =
-        targetId !== null &&
-        battlerHasSimAbility(
-          state,
-          state.battlers[targetId]!,
-          'ABILITY_MAGIC_BOUNCE',
-          true,
-          battlerId,
-          attackerHasMoldBreakerActive(attackerBattler, deps),
-          deps.dataContext,
-        )
-
-      if (isBouncedByCoat || isBouncedByAbility) {
-        if (isBouncedByCoat) {
-          state.battlers[targetId!]!.round.bounceMove = false
-        }
-        state.battlers[targetId!]!.round.usesBouncedMove = true
-        deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
-
-        if (isBouncedByCoat && blocksPrankster(state, action.chosenMove.id, targetId!, battlerId, true, deps)) {
-          // BattleScript_MagicCoatBouncePrankster (:8335-8344)
-          if (state.battlers[battlerId]) {
-            state.battlers[battlerId]!.lastMove = action.chosenMove.id
-            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-          }
-          state.lastUsedMove = action.chosenMove.id
-          outcomes.push({
-            turnOrderIndex: index,
-            battlerId,
-            action: actionKind,
-            skippedBecauseFainted: false,
-            battleOver: false,
-            missed: true,
-            targetId: battlerId,
-            targetDamage: null,
-            attackerDamage: null,
-            cancelledBy: null,
-            confusionSelfHitDamage: null,
-            statChanges: null,
-            statusApplied: null,
-            unmodelled,
-            fainted: [],
-          })
-          continue
-        }
-
-        // setmagiccoattarget BS_ATTACKER (VARIOUS_SET_MAGIC_COAT_TARGET, battle_script_commands.c:6933-6940)
-        const bounceAttackerId = targetId!
-        const bounceDefSide = (bounceAttackerId & 1) ^ 1
-        const bounceTargetId = isAffectedByFollowMe(state, bounceAttackerId, bounceDefSide, action.chosenMove.id, deps)
-          ? state.sides[bounceDefSide].timers.followmeTarget
-          : battlerId
-
-        const bouncedMoveEffect = action.chosenMove.effect ?? moveData?.effect ?? null
-        const bouncedHandler = getMoveEffectHandler(bouncedMoveEffect)
-        if (bouncedHandler) {
-          const effectOutcome = bouncedHandler({
-            state,
-            battlerId: bounceAttackerId,
-            targetId: bounceTargetId,
-            action: { ...action, target: bounceTargetId },
-            turnOrderIndex: index,
-            order,
-            deps,
-            unmodelled,
-            deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8331)
-            applyDamage,
-          })
-          const reactiveStatChanges: StatChangeOutcome[] = []
-          runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
-          if (reactiveStatChanges.length > 0) {
-            effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
-          }
-          if (state.battlers[battlerId]) {
-            state.battlers[battlerId]!.lastMove = action.chosenMove.id
-            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-          }
-          state.lastUsedMove = action.chosenMove.id
-          if (
-            bounceTargetId !== bounceAttackerId &&
-            !effectOutcome.missed &&
-            moveData?.flags?.mirrorMoveAffected === true &&
-            state.battlers[bounceTargetId] &&
-            isBattlerAlive(state, bounceTargetId)
-          ) {
-            state.lastTakenMove[bounceTargetId] = action.chosenMove.id
-            state.lastTakenMoveFrom[bounceTargetId][bounceAttackerId] = action.chosenMove.id
-          }
-          outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
-          continue
-        } else {
-          unmodelled.push(
-            `BattleScript_MagicCoatBounce: unhandled move effect ${bouncedMoveEffect} for bounced move ${action.chosenMove.id} is not modelled`,
-          )
-          outcomes.push({
-            turnOrderIndex: index,
-            battlerId,
-            action: actionKind,
-            skippedBecauseFainted: false,
-            battleOver: false,
-            missed: false,
-            targetId: bounceTargetId,
-            targetDamage: null,
-            attackerDamage: null,
-            cancelledBy: null,
-            confusionSelfHitDamage: null,
-            statChanges: null,
-            statusApplied: null,
-            unmodelled,
-            fainted: [],
-          })
-          continue
-        }
-      }
-    }
-
-    // Cmd_attackcanceler: Snatch consumer, src/battle_script_commands.c:1175-1182,
-    // and BattleScript_SnatchedMove (data/battle_scripts_1.s:8346-8355)
-    let snatcherId: number | null = null
-    for (const bId of order.battlerByTurnOrder) {
-      if (state.battlers[bId]?.round.stealMove) {
-        snatcherId = bId
-        break
-      }
-    }
-    if (snatcherId !== null && moveFlags?.snatchAffected) {
-      state.battlers[snatcherId]!.round.stealMove = false
-      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
-
-      // Cmd_snatchsetbattlers (:12372-12382) + swapattackerwithtarget (:5850-5853):
-      // If attacker == target (or self-targeting move), target becomes snatcher
-      const isSelfTargeting = targetId === battlerId || moveData?.target === 'USER' || moveData?.target === 'USER_OR_ALLY'
-      const snatchedTargetId = isSelfTargeting ? snatcherId : battlerId
-
-      const snatchedMoveEffect = action.chosenMove.effect ?? moveData?.effect ?? null
-      const snatchedHandler = getMoveEffectHandler(snatchedMoveEffect)
-      if (snatchedHandler) {
-        const effectOutcome = snatchedHandler({
-          state,
-          battlerId: snatcherId,
-          targetId: snatchedTargetId,
-          action: { ...action, target: snatchedTargetId },
-          turnOrderIndex: index,
-          order,
-          deps,
-          unmodelled,
-          deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8353)
-          applyDamage,
-        })
-        const reactiveStatChanges: StatChangeOutcome[] = []
-        runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
-        if (reactiveStatChanges.length > 0) {
-          effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
-        }
-        if (state.battlers[battlerId]) {
-          state.battlers[battlerId]!.lastMove = action.chosenMove.id
-          state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-          state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-        }
-        state.lastUsedMove = action.chosenMove.id
-        if (
-          snatchedTargetId !== snatcherId &&
-          !effectOutcome.missed &&
-          moveData?.flags?.mirrorMoveAffected === true &&
-          state.battlers[snatchedTargetId] &&
-          isBattlerAlive(state, snatchedTargetId)
-        ) {
-          state.lastTakenMove[snatchedTargetId] = action.chosenMove.id
-          state.lastTakenMoveFrom[snatchedTargetId][snatcherId] = action.chosenMove.id
-        }
-        outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
-        continue
-      } else {
-        unmodelled.push(
-          `BattleScript_SnatchedMove: unhandled move effect ${snatchedMoveEffect} for snatched move ${action.chosenMove.id} is not modelled`,
-        )
-        outcomes.push({
-          turnOrderIndex: index,
-          battlerId,
-          action: actionKind,
-          skippedBecauseFainted: false,
-          battleOver: false,
-          missed: false,
-          targetId: snatchedTargetId,
-          targetDamage: null,
-          attackerDamage: null,
-          cancelledBy: null,
-          confusionSelfHitDamage: null,
-          statChanges: null,
-          statusApplied: null,
-          unmodelled,
-          fainted: [],
-        })
-        continue
-      }
-    }
-
-    // Move effect dispatch runs between attackcanceler and the accuracy/damage path.
-    // Handled status moves (Swords Dance, Belly Drum, etc.) do not draw accuracy in
-    // C battle scripts; their script runs ppreduce and applies their effects directly.
-    const moveEffect = action.chosenMove.effect ?? deps.dataContext.move(action.chosenMove.id)?.effect ?? null
-    const handler = getMoveEffectHandler(moveEffect)
-    if (handler) {
-      const effectOutcome = handler({
-        state,
-        battlerId,
-        targetId,
-        action,
-        turnOrderIndex: index,
-        order,
-        deps,
-        unmodelled,
-        deductPp,
-        applyDamage,
-      })
-      if (targetId !== null && state.battlers[battlerId]?.round.touchedProtectLike) {
-        const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
-        if (protectMoveEnd.statChanges) {
-          effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...protectMoveEnd.statChanges]
-        }
-        if (protectMoveEnd.statusApplied) {
-          effectOutcome.statusApplied = protectMoveEnd.statusApplied
-        }
-      }
-      // Nearest sim point for handled status moves (Swords Dance, etc.) to trigger
-      // ABILITYEFFECT_REACTIVE (Cmd_moveend, src/battle_script_commands.c:4330).
-      const reactiveStatChanges: StatChangeOutcome[] = []
-      runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
-      if (reactiveStatChanges.length > 0) {
-        effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
-      }
-      if (state.battlers[battlerId]) {
-        state.battlers[battlerId]!.lastMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-      }
-      state.lastUsedMove = action.chosenMove.id
-      if (
-        targetId !== null &&
-        targetId !== battlerId &&
-        !effectOutcome.missed &&
-        moveData?.flags?.mirrorMoveAffected === true &&
-        state.battlers[targetId] &&
-        isBattlerAlive(state, targetId)
-      ) {
-        state.lastTakenMove[targetId] = action.chosenMove.id
-        state.lastTakenMoveFrom[targetId][battlerId] = action.chosenMove.id
-      }
-      outcomes.push(effectOutcome)
-      continue
-    }
-
-    if (targetId === null || !isBattlerAlive(state, targetId)) {
-      // No living target: the move resolves to nothing here. The real game runs
-      // a fail branch with messages and effect-specific behaviour; this batch
-      // models only that no damage is dealt.
-      outcomes.push({ ...blank, skippedBecauseFainted: false, battleOver: false, targetId, unmodelled })
-      continue
-    }
-
-    const targetIndex = order.battlerByTurnOrder.indexOf(targetId)
-    const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
-
-    const isContact = moveData?.flags?.contact === true
-
-    // Check Protect before accuracy check (battle_util.c:6571-6645, battle_script_commands.c:1198-1210, 1422)
-    const protectType = isBattlerProtected(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps, unmodelled)
-    if (protectType !== ProtectType.PROTECT_NONE) {
-      if (protectType === ProtectType.PROTECT_BLOCK_ALWAYS_TOUCH || isContact) {
-        state.battlers[battlerId]!.round.touchedProtectLike = true
-      }
-    }
-    if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
-      cancelMultiTurnMoves(state.battlers[battlerId]!)
-      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
-      const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
-      if (state.battlers[targetId]) {
-        state.battlers[targetId]!.lastLandedMove = null
-        state.battlers[targetId]!.lastHitByType = null
-      }
-      if (state.battlers[battlerId]) {
-        state.battlers[battlerId]!.lastMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-      }
-      state.lastUsedMove = action.chosenMove.id
-      outcomes.push({
-        turnOrderIndex: index,
-        battlerId,
-        action: actionKind,
-        skippedBecauseFainted: false,
-        battleOver: false,
-        missed: true,
-        targetId,
-        targetDamage: null,
-        attackerDamage: null,
-        cancelledBy: null,
-        confusionSelfHitDamage: null,
-        statChanges: protectMoveEnd.statChanges,
-        statusApplied: protectMoveEnd.statusApplied,
-        unmodelled,
-        fainted: [],
-      })
-      continue
-    }
-
-    // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
-    // state.rng BEFORE the damage resolver's own crit/roll draws, matching
-    // BattleScript_EffectHit (battle_scripts_1.s:2857-2863): accuracycheck,
-    // then attackstring/ppreduce, then critcalc/damagecalc inside
-    // deps.damage.resolve below.
-    const { inputs: accInputs, gaps: accGaps, defenderHasAnticipation } = buildAccuracyInputs(state, battlerId, targetId, action.chosenMove.id, targetHasActedThisTurn, deps)
-    unmodelled.push(...gapsToUnmodelled(accGaps))
-    if (defenderHasAnticipation) {
-      unmodelled.push(
-        "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
-      )
-    }
-    const accResult = getTotalAccuracy(accInputs)
-    unmodelled.push(...gapsToUnmodelled(accResult.gaps))
-    // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
-    // is not special-cased: Random() % 100 is at most 99, so the comparison
-    // can never be true, and the arithmetic alone carries the sentinel.
-    const missed = state.rng.random16() % 100 >= accResult.accuracy
-
-    // Cmd_ppreduce, :1460-1506 -- after the accuracy check, on both paths:
-    // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
-    // 3094) runs ppreduce too, so a miss still costs PP.
-    deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
-
-    if (missed) {
-      const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
-      if (state.battlers[battlerId]) {
-        state.battlers[battlerId]!.lastMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-      }
-      state.lastUsedMove = action.chosenMove.id
-      if (targetId !== null && state.battlers[targetId] && isBattlerAlive(state, targetId)) {
-        state.battlers[targetId]!.lastHitBy = battlerId
-        state.battlers[targetId]!.lastLandedMove = MOVE_UNSET
-      }
-      outcomes.push({
-        turnOrderIndex: index,
-        battlerId,
-        action: actionKind,
-        skippedBecauseFainted: false,
-        battleOver: false,
-        missed: true,
-        targetId,
-        targetDamage: null,
-        attackerDamage: null,
-        cancelledBy: null,
-        confusionSelfHitDamage: null,
-        statChanges: protectMoveEnd.statChanges,
-        statusApplied: protectMoveEnd.statusApplied,
-        unmodelled,
-        fainted: [],
-      })
-      continue
-    }
-
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
-
-    if (absorbingAbility) {
-      if (state.battlers[targetId]) {
-        state.battlers[targetId]!.lastLandedMove = null
-        state.battlers[targetId]!.lastHitByType = null
-      }
-      const absorbOutcome = applyAbsorbEffect({
-        state,
-        attackerId: battlerId,
-        targetId,
-        absorbingAbility,
-        moveId: action.chosenMove.id,
-        deps,
-        unmodelled,
-      })
-
-      // In C: JumpIfMoveFailed jumps to BattleScript_AfterAbsorbEffect (battle_script_commands.c:1221),
-      // which sets MOVE_RESULT_DOESNT_AFFECT_FOE and jumps to BattleScript_MoveEnd (battle_scripts_1.s:10038-10042).
-      // Damage calculation and secondary effects (seteffectwithchance) are skipped entirely.
-      const moveEndOutcome = runMoveEnd({
-        state,
-        attackerId: battlerId,
-        targetId,
-        moveId: action.chosenMove.id,
-        targetDamage: 0,
-        hpDealt: 0,
-        moveEffect2: null,
-        deps,
-        unmodelled,
-        fainted: [],
-      })
-
-      const finalStatChanges: StatChangeOutcome[] = []
-      if (absorbOutcome.statChanges.length > 0) finalStatChanges.push(...absorbOutcome.statChanges)
-      if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
-
-      if (state.battlers[battlerId]) {
-        state.battlers[battlerId]!.lastMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
-        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
-      }
-      state.lastUsedMove = action.chosenMove.id
-
-      outcomes.push({
-        turnOrderIndex: index,
-        battlerId,
-        action: actionKind,
-        skippedBecauseFainted: false,
-        battleOver: false,
-        missed: false,
-        targetId,
-        targetDamage: 0,
-        attackerDamage: moveEndOutcome.attackerDamage,
-        cancelledBy: null,
-        confusionSelfHitDamage: null,
-        statChanges: finalStatChanges.length > 0 ? finalStatChanges : null,
-        statusApplied: moveEndOutcome.statusApplied,
-        unmodelled: [...unmodelled, ...damageUnmodelled],
-        fainted: [],
-      })
-      continue
-    }
-
-    // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure stops HP at 1
-    const targetBattler = state.battlers[targetId]
-    if (targetDamage !== null && targetBattler && targetBattler.mon.hp > 0 && targetBattler.round.endured && targetDamage >= targetBattler.mon.hp) {
-      targetDamage = Math.max(0, targetBattler.mon.hp - 1)
-    }
-
-    const fainted: number[] = []
-    const targetHpBefore = targetBattler?.mon.hp ?? 0
-    applyDamage(state, targetId, targetDamage, fainted)
-    const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
-
-    // Grudge faint trigger (Cmd_tryfaintmon: battle_script_commands.c:3252-3263)
-    if (
-      fainted.includes(targetId) &&
-      targetBattler &&
-      hasFlag(targetBattler.statuses3, STATUS3_GRUDGE) &&
-      (battlerId & 1) !== (targetId & 1) &&
-      attackerBattler.mon.hp > 0 &&
-      action.chosenMove.id !== 'MOVE_STRUGGLE'
-    ) {
-      // The C zeroes gBattleStruct->chosenMovePositions[attacker]; the sim has no chosen slot, so
-      // it finds the slot by move id, which a called move (Metronome etc.) does not have.
-      const moveIdx = attackerBattler.mon.moves.indexOf(action.chosenMove.id)
-      if (moveIdx !== -1) {
-        attackerBattler.mon.pp[moveIdx] = 0
-      } else {
-        unmodelled.push(
-          `battler ${battlerId}: Grudge's PP wipe (battle_script_commands.c:3252-3263) is not applied -- ${action.chosenMove.id} is not in the chosen-move slot lookup`,
-        )
-      }
-      // Not part of tryfaintmon: ClearFuryCutterDestinyBondGrudge (battle_util.c:6307-6311) on faint.
-      targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_GRUDGE)
-    }
-
-    applyDamage(state, battlerId, attackerDamage, fainted)
-
-    // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
-    const secondaryResult = applySecondaryMoveEffects({
-      state,
-      attackerId: battlerId,
-      targetId,
-      moveId: action.chosenMove.id,
-      targetDamage,
-      deps: {
-        dataContext: deps.dataContext,
-        grounding: deps.grounding,
-        moveBehaviors: deps.moveBehaviors,
-      },
-      unmodelled,
-    })
-
-    // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968).
-    const moveEndOutcome = runMoveEnd({
-      state,
-      attackerId: battlerId,
-      targetId,
-      moveId: action.chosenMove.id,
-      targetDamage: targetDamage ?? 0,
-      hpDealt,
-      isCriticalHit,
-      moveEffect2: secondaryResult?.moveEffect2 ?? null,
-      deps,
-      unmodelled,
-      fainted,
-    })
-
-    const finalStatChanges: StatChangeOutcome[] = []
-    if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
-    if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
-    const finalStatusApplied = secondaryResult?.statusApplied ?? moveEndOutcome.statusApplied
-
-    const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
-      ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)
-      : null
-
-    outcomes.push({
-      turnOrderIndex: index,
-      battlerId,
-      action: actionKind,
-      skippedBecauseFainted: false,
-      battleOver: false,
-      missed: false,
-      targetId,
-      targetDamage,
-      attackerDamage: combinedAttackerDamage,
-      cancelledBy: null,
-      confusionSelfHitDamage: null,
-      statChanges: secondaryResult?.statChanges || moveEndOutcome.statChanges ? finalStatChanges : null,
-      statusApplied: finalStatusApplied,
-      unmodelled: [...unmodelled, ...damageUnmodelled],
-      fainted,
-    })
+    const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps)
+    outcomes.push(outcome)
+    // Drain queued extra attacks immediately after action finishes, matching HandleAction_TryFinish
+    drainQueuedExtraAttacks(state, index, order, deps, outcomes)
   }
   turnStructsClear(state)
   const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
@@ -2156,6 +2388,12 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
   }
 
+  // BattleTurnPassed, battle_main.c:3483: if (gQueuedAttackCount || gQueuedSwitchCount) return;
+  // Extra attacks queued during end-turn run before replacements and wish/perish song
+  if (!state.battleOutcome && state.queuedExtraAttacks.length > 0) {
+    drainQueuedExtraAttacks(state, order.battlerByTurnOrder.length - 1, order, deps, outcomes)
+  }
+
   // HandleFaintedMonActions's state-3 gate is exactly "the whole turn (both
   // ladders) is done" -- see switchIn.ts's own header for why this is the one
   // place this batch calls applyEndOfTurnReplacements, and why it is a no-op
@@ -2191,6 +2429,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
   roundStructsClear(state)
+
+  // HandleEndTurn_ContinueBattle, battle_main.c:3446: gQueuedAttackCount = 0;
+  state.queuedExtraAttacks = []
+  state.processingExtraAttacks = false
+  state.currentExtraAttack = null
 
   // battle_main.c increments gBattleResults.battleTurnCounter after the action
   // loop and the end-turn ladders above; state.turnCount is therefore the

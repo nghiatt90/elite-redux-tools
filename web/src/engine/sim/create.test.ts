@@ -280,6 +280,9 @@ describe('createBattleState', () => {
       [null, null, null, null],
     ])
     expect(state.chosenMovePositions).toEqual([0, 0, 0, 0])
+    expect(state.queuedExtraAttacks).toEqual([])
+    expect(state.processingExtraAttacks).toBe(false)
+    expect(state.currentExtraAttack).toBeNull()
   })
 
   it('gives the two sides separate side state', () => {

@@ -657,6 +657,28 @@ export interface BattleState {
   lastTakenMoveFrom: (string | null)[][]
   /** `u8 chosenMovePositions[MAX_BATTLERS_COUNT]` (include/battle.h:633). */
   chosenMovePositions: number[]
+  /** `struct ExtraAttackActionStruct gQueuedExtraAttackData[MAX_BATTLERS_COUNT + 1]` (include/battle.h:1023, battle_main.c:182). */
+  queuedExtraAttacks: ExtraAttackAction[]
+  /** `bool8 gProcessingExtraAttacks` (battle_main.c:177). */
+  processingExtraAttacks: boolean
+  /** Currently executing extra attack, mirroring `gQueuedExtraAttackData[0]` (include/battle.h:1023, battle_main.c:4242). */
+  currentExtraAttack: ExtraAttackAction | null
+}
+
+/**
+ * `struct ExtraAttackActionStruct`, include/battle.h:585-594.
+ * Entry in `gQueuedExtraAttackData[MAX_BATTLERS_COUNT + 1]` (battle.h:1023, battle_main.c:182).
+ */
+export interface ExtraAttackAction {
+  ability?: string | null
+  move: string
+  movePower?: number
+  attacker: number
+  target: number
+  movePos?: number
+  prankster?: boolean
+  falseSwipe?: boolean
+  noPpDeduct?: boolean
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

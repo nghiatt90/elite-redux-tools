@@ -16,8 +16,8 @@ import { createBattleState, createBattlerState } from './create'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
-import type { DamageResolver, TurnLoopDeps } from './turn'
-import { executeTurn } from './turn'
+import type { ActionOutcome, DamageResolver, TurnLoopDeps } from './turn'
+import { drainQueuedExtraAttacks, executeTurn } from './turn'
 import { getMoveEffectHandler } from './moveEffects'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
@@ -9643,6 +9643,38 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
         // Instruct PP consumed: 15 -> 14
         expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+        // Instructed move PP consumed: 20 -> 19 (movePos: i + 1)
+        expect(state.battlers[1]!.mon.pp[0]).toBe(19)
+      })
+
+      it('success with damaging move: target re-executes damaging move via queue, deals damage, target PP deducted once, lastMove unchanged (battle_script_commands.c:7581-7586)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_INSTRUCT', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [20, 0, 0, 0] },
+          ],
+          rng,
+        )
+        // Target's last move was Tackle
+        state.battlers[1]!.lastMove = 'MOVE_TACKLE'
+
+        const resolver = { resolve: () => ({ targetDamage: 30, attackerDamage: null, unmodelled: [] }) }
+        const out = executeTurn(state, [useMove(1, MOVE_INSTRUCT), null], testDeps(resolver))
+
+        expect(out.actions).toHaveLength(3)
+
+        const act0 = out.actions[0]! // Instruct action
+        expect(act0.battlerId).toBe(0)
+        expect(act0.missed).toBe(false)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14) // Instruct user loses 1 PP
+
+        const act1 = out.actions[1]! // Instructed Tackle extra attack
+        expect(act1.battlerId).toBe(1)
+        expect(act1.targetDamage).toBe(30)
+        expect(state.battlers[0]!.mon.hp).toBe(70) // Target dealt 30 damage to user
+        expect(state.battlers[1]!.mon.pp[0]).toBe(19) // Instructed target's Tackle PP deducted once
+        expect(state.battlers[1]!.lastMove).toBe('MOVE_TACKLE') // Target's lastMove unchanged
       })
 
       it('failure: fails when target has no lastMove or PP is 0 (battle_script_commands.c:7570, 7578)', () => {
@@ -9917,7 +9949,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
 
     describe('Fix brief findings: Cycle 70 — Metronome, Assist, Sleep Talk, Me First (call moves)', () => {
       describe('EFFECT_METRONOME (Metronome)', () => {
-        it('success: countingRng() draws 0 -> rolls index 1 (MOVE_POUND) on 1 draw, gaps damage, deducts PP 10 -> 9 (src/battle_script_commands.c:10586-10613)', () => {
+        it('success: countingRng() draws 0 -> rolls index 1 (MOVE_POUND) on 1 draw, deals damage via queued extra attack, deducts PP 10 -> 9 (src/battle_script_commands.c:10586-10613)', () => {
           const rng = countingRng()
           const state = battle(
             [
@@ -9927,14 +9959,23 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             rng,
           )
 
-          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          const resolver = { resolve: () => ({ targetDamage: 25, attackerDamage: null, unmodelled: [] }) }
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps(resolver))
 
           // Exactly 1 RNG draw spent: (0 % 1031) + 1 = 1 (MOVE_POUND)
-          expect(rng.calls).toBe(1)
+          expect(rng.calls).toBe(2)
+          expect(out.actions).toHaveLength(3)
+
+          const act0 = out.actions[0]! // Metronome action
           expect(act0.missed).toBe(false)
-          expect(act0.unmodelled).toContain('called damaging move MOVE_POUND damage step is not modelled')
+          expect(act0.unmodelled).not.toContain('called damaging move MOVE_POUND damage step is not modelled')
           expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_METRONOME')
+
+          const act1 = out.actions[1]! // Queued Pound extra attack
+          expect(act1.battlerId).toBe(0)
+          expect(act1.targetDamage).toBe(25)
+          expect(state.battlers[1]!.mon.hp).toBe(75)
         })
 
         it('loop retry: scriptedRng draws 181 (MOVE_PROTECT, forbidden effect) then 0 (MOVE_POUND), taking 2 draws (battle_script_commands.c:10591-10603)', () => {
@@ -9949,13 +9990,21 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             rng,
           )
 
-          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          const resolver = { resolve: () => ({ targetDamage: 25, attackerDamage: null, unmodelled: [] }) }
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps(resolver))
 
-          expect(rng.calls).toBe(2)
+          expect(rng.calls).toBe(3)
+          expect(out.actions).toHaveLength(3)
+
+          const act0 = out.actions[0]!
           expect(act0.missed).toBe(false)
-          expect(act0.unmodelled).toContain('called damaging move MOVE_POUND damage step is not modelled')
+          expect(act0.unmodelled).not.toContain('called damaging move MOVE_POUND damage step is not modelled')
           expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_METRONOME')
+
+          const act1 = out.actions[1]!
+          expect(act1.targetDamage).toBe(25)
+          expect(state.battlers[1]!.mon.hp).toBe(75)
         })
 
         it('status call: scriptedRng draws 13 -> rolls index 14 (MOVE_SWORDS_DANCE), raising user Atk by +2', () => {
@@ -9970,12 +10019,13 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           )
 
           const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
 
           expect(rng.calls).toBe(1)
-          expect(act0.missed).toBe(false)
+          expect(out.actions).toHaveLength(3)
+          expect(out.actions[0]!.missed).toBe(false)
           expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
           expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_METRONOME')
         })
 
         it('failure: calling status move that cannot apply effect (Swords Dance at max Atk stage) yields empty statChanges (data/battle_scripts_1.s:4571)', () => {
@@ -9990,11 +10040,13 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           state.battlers[0]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
 
           const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
 
           expect(rng.calls).toBe(1)
-          expect(act0.statChanges).toEqual([])
+          expect(out.actions).toHaveLength(3)
+          expect(out.actions[0]!.missed).toBe(false)
+          expect(out.actions[1]!.statChanges).toEqual([])
           expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_METRONOME')
         })
       })
 
@@ -10069,7 +10121,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       })
 
       describe('EFFECT_SLEEP_TALK (Sleep Talk)', () => {
-        it('success: user asleep with status1 sleep counter 7, countingRng() draws 0 -> calls slot 0 (MOVE_TACKLE), gaps damage, deducts PP 10 -> 9 (src/battle_script_commands.c:10898-10941)', () => {
+        it('success: user asleep with status1 sleep counter 7, countingRng() draws 0 -> calls slot 0 (MOVE_TACKLE), deals damage via queued extra attack, deducts Sleep Talk PP 10 -> 9 (src/battle_script_commands.c:10898-10941)', () => {
           const rng = countingRng()
           const state = battle(
             [
@@ -10079,14 +10131,24 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             rng,
           )
 
-          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          const resolver = { resolve: () => ({ targetDamage: 20, attackerDamage: null, unmodelled: [] }) }
+          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps(resolver))
 
           // Sleep Talk moves while asleep: attackCanceller decrements sleep counter (7 -> 6 > 0), allows Sleep Talk
-          expect(rng.calls).toBe(1)
+          expect(rng.calls).toBe(2)
+          expect(out.actions).toHaveLength(3)
+
+          const act0 = out.actions[0]! // Sleep Talk action
           expect(act0.missed).toBe(false)
-          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
-          expect(state.battlers[0]!.mon.pp[1]).toBe(9)
+          expect(act0.unmodelled).not.toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[1]).toBe(9) // Sleep Talk PP deducted 10 -> 9
+          expect(state.battlers[0]!.mon.pp[0]).toBe(20) // Called Tackle PP NOT deducted twice (HITMARKER_NO_PPDEDUCT)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_SLEEP_TALK') // lastMove not overwritten
+
+          const act1 = out.actions[1]! // Queued Tackle extra attack
+          expect(act1.battlerId).toBe(0)
+          expect(act1.targetDamage).toBe(20)
+          expect(state.battlers[1]!.mon.hp).toBe(80)
         })
 
         it('Rest reroll: scriptedRng([0, 0]) draws MOVE_REST (slot 0), triggers C reroll branch, draws slot 0 again, calling MOVE_REST on 2 draws (battle_script_commands.c:10915-10919)', () => {
@@ -10101,12 +10163,15 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           )
 
           const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
 
           expect(rng.calls).toBe(2)
-          // Rest fails when user is already asleep (data/battle_scripts_1.s:4377 / handleRest)
-          expect(act0.missed).toBe(true)
+          expect(out.actions).toHaveLength(3)
+          // Sleep Talk itself succeeds in selecting the move
+          expect(out.actions[0]!.missed).toBe(false)
+          // Queued Rest fails when user is already asleep (data/battle_scripts_1.s:4377 / handleRest)
+          expect(out.actions[1]!.missed).toBe(true)
           expect(state.battlers[0]!.mon.pp[1]).toBe(9)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_SLEEP_TALK')
         })
 
         it('failure (awake): user not asleep (status1 == 0) -> fails with missed: true, still deducts PP (battle_script_commands.c:4768, 10904-10905)', () => {
@@ -10233,6 +10298,71 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           expect(act0.missed).toBe(true)
           expect(state.battlers[0]!.mon.pp[0]).toBe(19)
         })
+      })
+    })
+
+    describe('Extra Attack Queue (gQueuedExtraAttackData, src/battle_main.c:2724, 3320, 3466-3490)', () => {
+      it('empty queue is a no-op', () => {
+        const state = battle([{ hp: 100 }, { hp: 100 }], countingRng())
+        expect(state.queuedExtraAttacks).toEqual([])
+        expect(state.processingExtraAttacks).toBe(false)
+        expect(state.currentExtraAttack).toBeNull()
+
+        const order = {
+          battlerByTurnOrder: [0, 1],
+          actionsByTurnOrder: ['USE_MOVE', 'USE_MOVE'] as ChosenAction['action'][],
+        }
+        const outcomes: ActionOutcome[] = []
+        drainQueuedExtraAttacks(state, 0, order, testDeps(), outcomes)
+
+        expect(outcomes).toEqual([])
+        expect(state.queuedExtraAttacks).toEqual([])
+        expect(state.processingExtraAttacks).toBe(false)
+        expect(state.currentExtraAttack).toBeNull()
+      })
+
+      it('two queued attacks run in C LIFO order, recording outcomes and resetting flags', () => {
+        const state = battle([
+          { hp: 100, moves: ['MOVE_POUND', 'MOVE_SCRATCH', null, null], pp: [35, 35, 0, 0] },
+          { hp: 100 },
+        ], countingRng())
+        state.queuedExtraAttacks.push({
+          attacker: 0,
+          target: 1,
+          move: 'MOVE_POUND',
+          movePos: 0,
+        })
+        state.queuedExtraAttacks.push({
+          attacker: 0,
+          target: 1,
+          move: 'MOVE_SCRATCH',
+          movePos: 0,
+        })
+
+        const ran: string[] = []
+        const resolver: DamageResolver = {
+          resolve: (_s, _a, _t, act) => {
+            ran.push(act.chosenMove!.id)
+            return { targetDamage: 15, attackerDamage: null, unmodelled: [] }
+          },
+        }
+        const order = {
+          battlerByTurnOrder: [0, 1],
+          actionsByTurnOrder: ['USE_MOVE', 'USE_MOVE'] as ChosenAction['action'][],
+        }
+        const outcomes: ActionOutcome[] = []
+        drainQueuedExtraAttacks(state, 0, order, testDeps(resolver), outcomes)
+
+        // C LIFO order: Scratch (pushed 2nd) runs first, then Pound (pushed 1st)
+        expect(outcomes).toHaveLength(2)
+        expect(ran).toEqual(['MOVE_SCRATCH', 'MOVE_POUND'])
+        expect(outcomes[0]!.targetDamage).toBe(15)
+        expect(outcomes[1]!.targetDamage).toBe(15)
+
+        expect(state.battlers[1]!.mon.hp).toBe(70)
+        expect(state.queuedExtraAttacks).toEqual([])
+        expect(state.processingExtraAttacks).toBe(false)
+        expect(state.currentExtraAttack).toBeNull()
       })
     })
   })

@@ -3000,17 +3000,21 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 17: MOVEEND_UPDATE_LAST_MOVES (:4723-4772)
-  if (attacker) {
-    attacker.lastPrintedMove = moveId
+  if (!state.processingExtraAttacks) {
+    if (attacker) {
+      attacker.lastPrintedMove = moveId
+    }
+    state.lastUsedMove = moveId
   }
-  state.lastUsedMove = moveId
 
   const isBatonPassOrHealingWish =
     moveData?.effect === 'EFFECT_BATON_PASS' || moveData?.effect === 'EFFECT_HEALING_WISH'
 
   if (attacker && !isBatonPassOrHealingWish && !hasFlag(state.absentBattlerFlags, 1 << attackerId)) {
-    attacker.lastMove = moveId
-    attacker.lastResultingMove = moveId
+    if (!state.processingExtraAttacks) {
+      attacker.lastMove = moveId
+      attacker.lastResultingMove = moveId
+    }
 
     if (target && isBattlerAlive(state, targetId) && !fainted.includes(targetId)) {
       target.lastHitBy = attackerId
