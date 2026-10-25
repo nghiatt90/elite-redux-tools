@@ -1125,6 +1125,8 @@ export function applyDamage(state: BattleState, battlerId: number, damage: numbe
     // gFaintedMonCount[side], battle.h:1002 -- the count Soul Harvest and
     // Supreme Overlord read.
     state.sides[battlerId & 1].faintedCount++
+    // Cmd_tryfaintmon (src/battle_script_commands.c:3238, 3242): retaliateTimer set to 2 on faint
+    state.sides[battlerId & 1].timers.retaliateTimer = 2
     clearBattlerLastTakenMove(state, battlerId)
   }
   syncPartyHp(state, battlerId)
@@ -2194,6 +2196,23 @@ export function executeAction(
     const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, currentTargetId, targetDamage, fainted)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
+
+    // Cmd_datahpupdate damage tracking (src/battle_script_commands.c:1935-1959)
+    if (targetBattler && hpDealt > 0) {
+      const isPhysical = (currentMove.split ?? moveData?.split) === 'PHYSICAL'
+      if (isPhysical && currentMove.id !== 'MOVE_PAIN_SPLIT') {
+        targetBattler.round.physicalDmg = hpDealt
+        targetBattler.turn.physicalDmg = hpDealt
+        targetBattler.round.physicalBattlerId = battlerId
+        targetBattler.turn.physicalBattlerId = battlerId
+      } else if (!isPhysical) {
+        targetBattler.round.specialDmg = hpDealt
+        targetBattler.turn.specialDmg = hpDealt
+        targetBattler.round.specialBattlerId = battlerId
+        targetBattler.turn.specialBattlerId = battlerId
+      }
+      targetBattler.round.damaged = true
+    }
 
     // Grudge faint trigger (Cmd_tryfaintmon: battle_script_commands.c:3252-3263)
     if (

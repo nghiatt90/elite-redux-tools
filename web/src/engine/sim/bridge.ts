@@ -34,14 +34,9 @@
 // value is genuinely right when the battle opens and only drifts because nothing
 // updates it.
 //
-// Nothing sets stat stages. `createBattlerState` overwrites whatever is passed
-// with the neutral set (create.ts:364), and no sim code changes a stage
-// afterwards because there are no stat-change effects yet. So `statStages` is
-// not "right at battle start and then stale" -- it is a value no caller can even
-// supply, permanently neutral, reading as a modelled answer. It is a gap, and so
-// is everything computed from it: `condition.speed` (the stat tail scales by
-// stage) and the two stage counts that feed Punishment, Stored Power and Lash
-// Out. Those are real damage numbers that would read zero forever.
+// Stat stages are initialised neutral and modified mid-battle by statBuffs.ts,
+// so statStages, condition.speed and the stage counts are derived from live
+// sim state and no longer gapped.
 //
 // ## What this batch retires
 //
@@ -344,44 +339,22 @@ export interface BridgeResult {
   gaps: BridgeGap[]
 }
 
-/** Every field this batch does not derive, with the reason. Declared as data so
- * the test can assert the list exactly; data-backed fields are added per call
- * below when a supplied context misses an entry. */
+/** Fields the sim does not maintain or has no honest source for.
+ * Declared as data so the test can assert the list exactly; data-backed fields
+ * are added per call below when a supplied context misses an entry. */
 const BATCH1_GAPS: BridgeGap[] = [
-  // --- stat stages, and the three fields computed from them ---------------
-  // No battle-start source sets a stage, and createBattlerState:364 overwrites
-  // whatever is passed with the neutral set, so this is not merely stale --
-  // a caller cannot supply it at all.
-  { field: 'statStages', reason: 'NEVER_UPDATED', detail: 'createBattlerState forces neutral and no sim code applies a stat change' },
-  { field: 'condition.speed', reason: 'NEVER_UPDATED', detail: "GetBattlerTotalSpeedStat's tail scales by the Speed stage, which is permanently neutral" },
-  { field: 'condition.positiveStatStageCount', reason: 'NEVER_UPDATED', detail: 'counted from statStages; feeds Punishment and Stored Power, so it reads 0 forever' },
-  { field: 'condition.negativeStatStageCount', reason: 'NEVER_UPDATED', detail: 'counted from statStages; feeds Lash Out, so it reads 0 forever' },
-
   // --- state the sim has, correctly zeroed, and never updates -------------
-  { field: 'semiInvulnerable', reason: 'NEVER_UPDATED', detail: 'gStatuses3 semi-invulnerability; no sim code writes statuses3' },
-  { field: 'slowStartTimer', reason: 'NEVER_UPDATED', detail: 'volatiles.slowStartTimer; no sim code writes volatiles' },
-  { field: 'extraStatLevel', reason: 'NEVER_UPDATED', detail: "volatiles.extra*Level; no sim code writes volatiles" },
-  { field: 'isTransformed', reason: 'NEVER_UPDATED', detail: 'status2 TRANSFORMED; no sim code writes status2' },
-  { field: 'isInfatuatedWithOpponent', reason: 'NEVER_UPDATED', detail: 'status2 INFATUATED_WITH; no sim code writes status2' },
-  { field: 'hasMiracleEye', reason: 'NEVER_UPDATED', detail: 'gStatuses3 MIRACLE_EYED; no sim code writes statuses3' },
-  { field: 'condition.itemNegated', reason: 'NEVER_UPDATED', detail: 'Embargo/Magic Room; no sim code writes statuses3 or field statuses mid-battle' },
-  { field: 'condition.isInfatuated', reason: 'NEVER_UPDATED', detail: 'status2 INFATUATION' },
-  { field: 'condition.isConfused', reason: 'NEVER_UPDATED', detail: 'status2 CONFUSION' },
-  { field: 'condition.isEnraged', reason: 'NEVER_UPDATED', detail: 'status2 ENRAGED' },
-  { field: 'condition.wasDamagedThisTurnBy', reason: 'NEVER_UPDATED', detail: 'gRoundStructs physicalDmg/specialDmg; the loop never writes RoundState' },
-  { field: 'condition.recentlyFainted', reason: 'NEVER_UPDATED', detail: 'gSideTimers.retaliateTimer; no sim code writes side timers' },
-  { field: 'condition.helpingHand', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.helpingHand; the loop never writes RoundState' },
-  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO' },
-  { field: 'condition.chargedUp', reason: 'NEVER_UPDATED', detail: 'gStatuses3 CHARGED_UP' },
-  { field: 'condition.meFirst', reason: 'NEVER_UPDATED', detail: 'gStatuses3 ME_FIRST' },
-  { field: 'condition.fear', reason: 'NEVER_UPDATED', detail: 'volatiles.fear' },
-  { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; the loop never writes RoundState' },
+  { field: 'semiInvulnerable', reason: 'NEVER_UPDATED', detail: 'gStatuses3 semi-invulnerability; no sim code writes statuses3 for two-turn moves' },
+  { field: 'slowStartTimer', reason: 'NEVER_UPDATED', detail: 'volatiles.slowStartTimer; ABILITY_SLOW_START is unhandled by the simulator' },
+  { field: 'extraStatLevel', reason: 'NEVER_UPDATED', detail: 'volatiles.extra*Level; no game or sim code writes volatiles.extra*Level' },
+  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; no game or sim code writes STATUS4_GHASTLY_ECHO in ordinary play' },
+  { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; MOVE_SAFE_PASSAGE switch-in is not modelled' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'one boolean standing for per-ability activation state; volatiles.abilityState has no ability-to-slot mapping' },
-  { field: 'boostedStat', reason: 'NO_SOURCE', detail: "Protosynthesis/Quark Drive's chosen stat; only Protosynthesis's onWeather activation is ported (onEntry and Quark Drive's onTerrain are not)" },
-  { field: 'condition.lastMoveFailed', reason: 'NO_SOURCE', detail: 'gBattleStruct->lastMoveFailed is absent from the state model entirely' },
-
+  { field: 'condition.itemNegated', reason: 'NO_SOURCE', detail: 'reads only Embargo; Magic Room and Klutz are not read here' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads only Flash Fire; one boolean standing for per-ability activation state' },
+  { field: 'boostedStat', reason: 'NO_SOURCE', detail: "only Protosynthesis onWeather is ported; onEntry and Quark Drive onTerrain are not" },
+  { field: 'condition.lastMoveFailed', reason: 'NO_SOURCE', detail: 'hard-coded false; gBattleStruct->lastMoveFailed is absent from the state model entirely' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -453,10 +426,8 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     if (moveId) moveSlotPp[moveId] = mon.pp[slot]
   })
 
-  // Batch 2's unpackers. These are CALLED rather than hardcoded, so the value is
-  // right for any state a caller does set -- but every field below them stays in
-  // BATCH1_GAPS, because nothing in the sim writes the words they read. Computing
-  // a value is not the same as maintaining one; see unpack.ts's own header.
+  // Unpackers. Derived from live sim state (round damage tracking, status2,
+  // statuses3/4, side timers, and volatiles); only fields lacking writers remain gapped.
   const damaged = damagedBy(battler.round)
   // The battler on the other side of THIS calculation, from the roles the
   // caller declared -- not `battlerId ^ 1`, which assumes singles and assumes
@@ -593,10 +564,8 @@ export function buildFieldFacts(state: BattleState, deps: BridgeDeps): { weather
 
 /** Builds the complete field shape consumed by calculateMoveDamage. Side flags
  * are derived from gSideStatuses: encounters.json has battle-event sources for
- * Light Screen, Reflect and Lucky Chant (Mossdeep Gym), so they are valid at
- * battle start but can go stale because the sim turn loop does not update them.
- * Aurora Veil has no encounter start source, so its two fields remain explicit
- * NEVER_UPDATED gaps until such a source is modelled.
+ * Light Screen, Reflect and Lucky Chant (Mossdeep Gym), and the sim turn loop
+ * and move effects maintain Reflect, Light Screen, Aurora Veil and Lucky Chant.
  *
  * IsInverseRoomActive and isWonderRoomActive mirror battle_util.c:8680-8687 and
  * :8707-8714 respectively. Clueless suppresses both; Wonder Room also comes
@@ -610,10 +579,7 @@ export function buildFieldBattleState(state: BattleState, roles: CalculationRole
   const wonderRoom = !clueless && (hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM) ||
     (deps.grounding.monotypeChampType === 'NORMAL' && state.turnCount % 2 === 0))
 
-  const gaps = [...facts.gaps,
-    { field: 'field.sides.attacker.auroraVeil', reason: 'NEVER_UPDATED' as const, detail: 'gSideStatuses AURORA_VEIL; encounters.json has no battle-start source and the sim loop does not write side statuses' },
-    { field: 'field.sides.defender.auroraVeil', reason: 'NEVER_UPDATED' as const, detail: 'gSideStatuses AURORA_VEIL; encounters.json has no battle-start source and the sim loop does not write side statuses' },
-  ]
+  const gaps = [...facts.gaps]
 
   return {
     field: {

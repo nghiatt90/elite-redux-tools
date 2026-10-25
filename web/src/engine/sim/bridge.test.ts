@@ -334,36 +334,18 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     return true
   }
 
-  /** The gap list, asserted EXACTLY. The list is data specifically so batches 2
-   * and 3 delete entries from it as they fill fields in; a membership check
-   * would pass just as well if they deleted nothing, which is the drift the
-   * list exists to prevent. Update this when a gap is genuinely closed. */
+  /** The gap list, asserted EXACTLY. Updated as sim writers are ported and fields
+   * are genuinely derived. */
   const EXPECTED_GAP_FIELDS = [
     'abilityOn',
     'boostedStat',
-    'condition.chargedUp',
-    'condition.fear',
     'condition.ghastlyEcho',
-    'condition.helpingHand',
-    'condition.isConfused',
-    'condition.isEnraged',
-    'condition.isInfatuated',
     'condition.itemNegated',
     'condition.lastMoveFailed',
-    'condition.meFirst',
-    'condition.negativeStatStageCount',
-    'condition.positiveStatStageCount',
-    'condition.recentlyFainted',
     'condition.safePassage',
-    'condition.speed',
-    'condition.wasDamagedThisTurnBy',
     'extraStatLevel',
-    'hasMiracleEye',
-    'isInfatuatedWithOpponent',
-    'isTransformed',
     'semiInvulnerable',
     'slowStartTimer',
-    'statStages',
   ]
 
   it('reports EXACTLY the expected gap list, no more and no fewer', () => {
@@ -396,24 +378,27 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     // a modelled one.
     const { battler, gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const neverUpdated = gaps.filter((g) => g.reason === 'NEVER_UPDATED').map((g) => g.field)
-    expect(neverUpdated).toContain('condition.wasDamagedThisTurnBy')
-    expect(neverUpdated).toContain('condition.helpingHand')
     expect(neverUpdated).toContain('condition.safePassage')
-    expect(neverUpdated).toContain('isTransformed')
+    expect(neverUpdated).toContain('condition.ghastlyEcho')
+    expect(neverUpdated).toContain('extraStatLevel')
+    expect(neverUpdated).toContain('semiInvulnerable')
+    expect(neverUpdated).toContain('slowStartTimer')
 
     // The other half, which the comment claimed and nothing asserted: these
     // really are present and zeroed on a fresh battler. That is what makes them
     // dangerous -- a consumer reading the value alone sees a modelled answer.
-    expect(battler.condition.wasDamagedThisTurnBy).toBe('none')
-    expect(battler.condition.helpingHand).toBe(false)
     expect(battler.condition.safePassage).toBe(false)
-    expect(battler.isTransformed).toBe(false)
+    expect(battler.condition.ghastlyEcho).toBe(false)
+    expect(battler.extraStatLevel).toEqual({ atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 })
+    expect(battler.semiInvulnerable).toBe('NONE')
+    expect(battler.slowStartTimer).toBe(0)
   })
 
   it('gaps the four fields with no honest source anywhere', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const noSource = gaps.filter((g) => g.reason === 'NO_SOURCE').map((g) => g.field)
-    expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat', 'condition.lastMoveFailed']))
+    expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat', 'condition.lastMoveFailed', 'condition.itemNegated']))
+    expect(noSource).toHaveLength(4)
   })
 
   it('derives everything available from the committed data context', () => {
@@ -432,29 +417,31 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     // a lie.
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const gapped = new Set(gaps.map((g) => g.field))
-    // statStages, condition.speed and the two stage counts are NOT in this list
-    // any more: they moved to the gap side, because no battle-start source can
-    // set a stage and createBattlerState:364 overwrites one that is passed.
-    for (const derived of ['level', 'nature', 'rawStats', 'gender', 'isGrounded', 'alliesFainted', 'moveSlotPp', 'abilitySlots', 'types']) {
+    for (const derived of [
+      'level', 'nature', 'rawStats', 'gender', 'isGrounded', 'alliesFainted',
+      'moveSlotPp', 'abilitySlots', 'types', 'statStages', 'isTransformed',
+      'hasMiracleEye', 'isInfatuatedWithOpponent',
+    ]) {
       expect(gapped.has(derived)).toBe(false)
     }
-    for (const derived of ['condition.hp', 'condition.maxHp', 'condition.speciesId', 'condition.status1']) {
+    for (const derived of [
+      'condition.hp', 'condition.maxHp', 'condition.speciesId', 'condition.status1',
+      'condition.speed', 'condition.positiveStatStageCount', 'condition.negativeStatStageCount',
+      'condition.isConfused', 'condition.isEnraged', 'condition.isInfatuated',
+      'condition.helpingHand', 'condition.chargedUp', 'condition.meFirst', 'condition.fear',
+      'condition.wasDamagedThisTurnBy', 'condition.recentlyFainted',
+    ]) {
       expect(gapped.has(derived)).toBe(false)
     }
   })
 
-  it('gaps stat stages and everything computed from them', () => {
-    // The discriminator: can a real battle-start source set this? encounters
-    // and trainer parties set weather, terrain, status and full PP; NOTHING
-    // sets a stat stage, and the constructor destroys one that is passed. So
-    // this is not "right at battle start then stale" -- it is unsettable, and
-    // the three fields computed from it inherit that.
+  it('does NOT gap stat stages and fields computed from them since the sim maintains them', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const gapped = new Set(gaps.filter((g) => g.reason === 'NEVER_UPDATED').map((g) => g.field))
-    expect(gapped.has('statStages')).toBe(true)
-    expect(gapped.has('condition.speed')).toBe(true)
-    expect(gapped.has('condition.positiveStatStageCount')).toBe(true)
-    expect(gapped.has('condition.negativeStatStageCount')).toBe(true)
+    expect(gapped.has('statStages')).toBe(false)
+    expect(gapped.has('condition.speed')).toBe(false)
+    expect(gapped.has('condition.positiveStatStageCount')).toBe(false)
+    expect(gapped.has('condition.negativeStatStageCount')).toBe(false)
   })
 
   it('does NOT gap PP or status, which a trainer party really does set', () => {
@@ -467,12 +454,7 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(gapped.has('condition.status1')).toBe(false)
   })
 
-  it('computes the unpacked value AND still reports the gap', () => {
-    // The invariant that separates "wired" from "promoted". Batch 2 made the
-    // bridge call the unpackers, so a caller-set status2 now produces a real
-    // `true` instead of a hardcoded `false` -- and the gap is STILL there,
-    // because nothing in the sim writes status2, so the value is right only for
-    // as long as the caller's own setting is.
+  it('computes unpacked values for fields that now have real writers without reporting gaps', () => {
     const state = battle()
     state.battlers[0]!.mon.status2 = setFlag(0, STATUS2_TRANSFORMED)
     state.battlers[0]!.statuses3 = setFlag(0, STATUS3_MIRACLE_EYED)
@@ -486,10 +468,10 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(battler.condition.helpingHand).toBe(true)
 
     const gapped = new Set(gaps.map((g) => g.field))
-    expect(gapped.has('isTransformed')).toBe(true)
-    expect(gapped.has('hasMiracleEye')).toBe(true)
-    expect(gapped.has('condition.fear')).toBe(true)
-    expect(gapped.has('condition.helpingHand')).toBe(true)
+    expect(gapped.has('isTransformed')).toBe(false)
+    expect(gapped.has('hasMiracleEye')).toBe(false)
+    expect(gapped.has('condition.fear')).toBe(false)
+    expect(gapped.has('condition.helpingHand')).toBe(false)
   })
 
   it('takes fear from the volatile struct, not from STATUS4_FEAR', () => {
@@ -663,16 +645,13 @@ describe('buildFieldSides', () => {
 })
 
 describe('buildFieldBattleState', () => {
-  it('assembles role-relative sides and preserves the exact fresh-battle gap list', () => {
+  it('assembles role-relative sides with no default side gaps', () => {
     const built = buildFieldBattleState(battle(), ROLES, DEPS)
     expect(built.field.sides).toEqual({
       attacker: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
       defender: { reflect: false, lightScreen: false, auroraVeil: false, luckyChant: false },
     })
-    expect(built.gaps.map((gap) => gap.field)).toEqual([
-      'field.sides.attacker.auroraVeil',
-      'field.sides.defender.auroraVeil',
-    ])
+    expect(built.gaps).toEqual([])
   })
 
   it('matches the inverse and wonder room predicates, including Normal Champion parity', () => {

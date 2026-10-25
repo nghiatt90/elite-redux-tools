@@ -8,7 +8,7 @@ import type { BattleState, RandomSource, SimBattleMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
-import { THROWING_DAMAGE_RESOLVER, assertNoPerBattlerQuash, buildTurnOrderContext, executeTurn, isBattlerAlive } from './turn'
+import { THROWING_DAMAGE_RESOLVER, applyDamage, assertNoPerBattlerQuash, buildTurnOrderContext, executeTurn, isBattlerAlive } from './turn'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { STATUS3_ROOTED, STATUS_FIELD_GRAVITY, setFlag } from './constants'
@@ -555,5 +555,102 @@ describe('integration: executeTurn with the real damage resolver', () => {
     expect(state.battlers[1]!.mon.hp).toBe(0)
     expect(out.actions[0].fainted).toEqual([1])
     expect(out.actions[1].skippedBecauseFainted).toBe(true)
+  })
+
+  it('Cmd_datahpupdate: records physical damage, damager id and damaged flag during turn resolution, seen by bridge, and cleared at end of turn', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }])
+    let midTurnDamagedBy: string | null = null
+    let midTurnPhysicalDmg = 0
+    let midTurnPhysicalBattlerId = -1
+    let midTurnDamaged = false
+
+    const inspectingResolver: DamageResolver = {
+      resolve(st, attackerId) {
+        if (attackerId === 1) {
+          const b1 = st.battlers[1]!
+          midTurnDamaged = b1.round.damaged
+          midTurnPhysicalDmg = b1.round.physicalDmg
+          midTurnPhysicalBattlerId = b1.round.physicalBattlerId
+          const bridgeState = buildBattlerBattleState(st, 1, { attackerId: 0, defenderId: 1 }, realBridge)
+          midTurnDamagedBy = bridgeState.battler.condition.wasDamagedThisTurnBy
+        }
+        return { targetDamage: 30, attackerDamage: null, unmodelled: [] }
+      },
+    }
+
+    executeTurn(state, [useMove(1), useMove(0)], deps(inspectingResolver))
+
+    expect(midTurnDamaged).toBe(true)
+    expect(midTurnPhysicalDmg).toBe(30)
+    expect(midTurnPhysicalBattlerId).toBe(0)
+    expect(midTurnDamagedBy).toBe('attacker')
+
+    expect(state.battlers[1]!.round.damaged).toBe(false)
+    expect(state.battlers[1]!.round.physicalDmg).toBe(0)
+    const endTurnBridge = buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, realBridge)
+    expect(endTurnBridge.battler.condition.wasDamagedThisTurnBy).toBe('none')
+  })
+
+  it('Cmd_datahpupdate: records special damage and damager id for special moves', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }])
+    let midTurnSpecialDmg = 0
+    let midTurnSpecialBattlerId = -1
+    let midTurnPhysicalDmg = 0
+    let midTurnDamaged = false
+
+    const specialMove = moveView({ id: 'MOVE_WATER_GUN', split: 'SPECIAL' })
+
+    const inspectingResolver: DamageResolver = {
+      resolve(st, attackerId) {
+        if (attackerId === 1) {
+          const b1 = st.battlers[1]!
+          midTurnDamaged = b1.round.damaged
+          midTurnSpecialDmg = b1.round.specialDmg
+          midTurnSpecialBattlerId = b1.round.specialBattlerId
+          midTurnPhysicalDmg = b1.round.physicalDmg
+        }
+        return { targetDamage: 25, attackerDamage: null, unmodelled: [] }
+      },
+    }
+
+    executeTurn(state, [useMove(1, specialMove), useMove(0)], deps(inspectingResolver))
+
+    expect(midTurnDamaged).toBe(true)
+    expect(midTurnSpecialDmg).toBe(25)
+    expect(midTurnSpecialBattlerId).toBe(0)
+    expect(midTurnPhysicalDmg).toBe(0)
+  })
+
+  it('Cmd_tryfaintmon: sets retaliateTimer to 2 on faint, decrements to 1 on next turn (seen by recentlyFainted), then to 0', () => {
+    const state = battle([{ spe: 200 }, { spe: 50, hp: 10 }])
+    expect(state.sides[1].timers.retaliateTimer).toBe(0)
+    expect(buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, realBridge).battler.condition.recentlyFainted).toBe(false)
+
+    executeTurn(state, [useMove(1), useMove(0)], deps(fixedDamage(20)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(state.sides[1].timers.retaliateTimer).toBe(1)
+    expect(buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, realBridge).battler.condition.recentlyFainted).toBe(true)
+
+    executeTurn(state, [useMove(1), null], deps(fixedDamage(0)))
+
+    expect(state.sides[1].timers.retaliateTimer).toBe(0)
+    expect(buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, realBridge).battler.condition.recentlyFainted).toBe(false)
+  })
+
+  it('applyDamage sets retaliateTimer to 2 at the exact moment of faint', () => {
+    const state = battle([{ spe: 100 }, { spe: 100, hp: 40 }])
+    const fainted: number[] = []
+
+    applyDamage(state, 1, 20, fainted)
+    expect(state.battlers[1]!.mon.hp).toBe(20)
+    expect(fainted).toEqual([])
+    expect(state.sides[1].timers.retaliateTimer).toBe(0)
+
+    applyDamage(state, 1, 20, fainted)
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(fainted).toEqual([1])
+    expect(state.sides[1].timers.retaliateTimer).toBe(2)
+    expect(buildBattlerBattleState(state, 1, { attackerId: 0, defenderId: 1 }, realBridge).battler.condition.recentlyFainted).toBe(false)
   })
 })

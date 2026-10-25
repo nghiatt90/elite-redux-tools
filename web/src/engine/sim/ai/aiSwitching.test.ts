@@ -340,7 +340,7 @@ describe('createAiOpponentReplacement: the caller-level fallback (OpponentHandle
     const gaps: string[] = []
     rep.chooseReplacement(state, 1, gaps)
     expect(gaps.length).toBeGreaterThan(0)
-    expect(gaps.some((g) => g.includes('statStages'))).toBe(true)
+    expect(gaps.some((g) => g.includes('lastMoveFailed'))).toBe(true)
   })
 })
 
@@ -380,6 +380,6 @@ describe('end-to-end: an opponent fainting mid-battle is replaced by the AI\'s o
     // This is the fix for the reviewed gap: an AI-decision gap line now
     // reaches executeTurn's own output, not just the switch's own effects.
     expect(out.replacementUnmodelled.length).toBeGreaterThan(0)
-    expect(out.replacementUnmodelled.some((g) => g.includes('statStages'))).toBe(true)
+    expect(out.replacementUnmodelled.some((g) => g.includes('lastMoveFailed'))).toBe(true)
   })
 })
