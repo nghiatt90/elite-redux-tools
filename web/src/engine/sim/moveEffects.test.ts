@@ -48,6 +48,7 @@ import {
   STAT_SPATK,
   STAT_SPDEF,
   STATUS1_BLEED,
+  STATUS1_SLEEP,
   STATUS1_BURN,
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
@@ -73,6 +74,7 @@ import {
   STATUS3_GASTRO_ACID,
   STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
+  STATUS3_ME_FIRST,
   STATUS3_IMPRISONED_OTHERS,
   STATUS3_LASER_FOCUS,
   STATUS3_MAGNET_RISE,
@@ -349,6 +351,10 @@ const MOVE_MIRROR_MOVE = requireMove('MOVE_MIRROR_MOVE')
 const MOVE_SKETCH = requireMove('MOVE_SKETCH')
 const MOVE_DOODLE = requireMove('MOVE_DOODLE')
 const MOVE_TRANSFORM = requireMove('MOVE_TRANSFORM')
+const MOVE_ASSIST = requireMove('MOVE_ASSIST')
+const MOVE_SLEEP_TALK = requireMove('MOVE_SLEEP_TALK')
+const MOVE_ME_FIRST = requireMove('MOVE_ME_FIRST')
+const MOVE_COUNTER = requireMove('MOVE_COUNTER')
 
 const ABILITY_INTIMIDATE = requireAbility('ABILITY_INTIMIDATE')
 const ABILITY_BLAZE = requireAbility('ABILITY_BLAZE')
@@ -1106,10 +1112,23 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const syntheticMove: SimMoveData = {
+      id: 'MOVE_TEST_UNHANDLED',
+      power: 0,
+      type: 'NORMAL',
+      split: 'STATUS',
+      effect: 'EFFECT_TEST_UNHANDLED',
+      flags: {},
+      accuracy: 100,
+      pp: 10,
+    }
+    const state = battle([{ moves: ['MOVE_TEST_UNHANDLED', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
+    const deps = testDeps(dmg)
+    const originalMoveLookup = deps.dataContext.move.bind(deps.dataContext)
+    deps.dataContext.move = (id: string) => (id === 'MOVE_TEST_UNHANDLED' ? syntheticMove : originalMoveLookup(id))
 
-    const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, syntheticMove), null], deps)
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -9893,6 +9912,327 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_TRANSFORMED)).toBe(false)
         // Transform PP still deducted: 10 -> 9 (:4279)
         expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+      })
+    })
+
+    describe('Fix brief findings: Cycle 70 — Metronome, Assist, Sleep Talk, Me First (call moves)', () => {
+      describe('EFFECT_METRONOME (Metronome)', () => {
+        it('success: countingRng() draws 0 -> rolls index 1 (MOVE_POUND) on 1 draw, gaps damage, deducts PP 10 -> 9 (src/battle_script_commands.c:10586-10613)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          // Exactly 1 RNG draw spent: (0 % 1031) + 1 = 1 (MOVE_POUND)
+          expect(rng.calls).toBe(1)
+          expect(act0.missed).toBe(false)
+          expect(act0.unmodelled).toContain('called damaging move MOVE_POUND damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        })
+
+        it('loop retry: scriptedRng draws 181 (MOVE_PROTECT, forbidden effect) then 0 (MOVE_POUND), taking 2 draws (battle_script_commands.c:10591-10603)', () => {
+          // 181 % 1031 + 1 = 182 (MOVE_PROTECT, EFFECT_PROTECT is forbidden -> allowed = false -> retries)
+          // 0 % 1031 + 1 = 1 (MOVE_POUND, allowed = true -> loop terminates)
+          const rng = scriptedRng([181, 0])
+          const state = battle(
+            [
+              { moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(2)
+          expect(act0.missed).toBe(false)
+          expect(act0.unmodelled).toContain('called damaging move MOVE_POUND damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        })
+
+        it('status call: scriptedRng draws 13 -> rolls index 14 (MOVE_SWORDS_DANCE), raising user Atk by +2', () => {
+          // 13 % 1031 + 1 = 14 (MOVE_SWORDS_DANCE)
+          const rng = scriptedRng([13])
+          const state = battle(
+            [
+              { moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(1)
+          expect(act0.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        })
+
+        it('failure: calling status move that cannot apply effect (Swords Dance at max Atk stage) yields empty statChanges (data/battle_scripts_1.s:4571)', () => {
+          const rng = scriptedRng([13])
+          const state = battle(
+            [
+              { moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+          state.battlers[0]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
+
+          const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(1)
+          expect(act0.statChanges).toEqual([])
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        })
+      })
+
+      describe('EFFECT_ASSIST (Assist)', () => {
+        it('success: countingRng() draws 0 -> ((0 * 1) >> 8) = 0, calls party move MOVE_TACKLE, gaps damage, deducts PP 20 -> 19 (src/battle_script_commands.c:12004-12050)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+          state.sides[0]!.party = [
+            partyMon({ moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] }),
+            partyMon({ moves: ['MOVE_TACKLE', null, null, null], pp: [20, 0, 0, 0] }),
+          ]
+
+          const out = executeTurn(state, [useMove(1, MOVE_ASSIST), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(1)
+          expect(act0.missed).toBe(false)
+          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('deterministic pick: scriptedRng([255]) with 2 candidate moves chooses index 1 (((255 * 2) >> 8) = 1) -> calls MOVE_SWORDS_DANCE, raising Atk +2', () => {
+          const rng = scriptedRng([255])
+          const state = battle(
+            [
+              { moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+          state.sides[0]!.party = [
+            partyMon({ moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] }),
+            partyMon({ moves: ['MOVE_TACKLE', 'MOVE_SWORDS_DANCE', null, null], pp: [20, 20, 0, 0] }),
+          ]
+
+          const out = executeTurn(state, [useMove(1, MOVE_ASSIST), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(1)
+          expect(act0.missed).toBe(false)
+          expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('failure: party has no eligible moves (only banned moves) -> fails with missed: true, still deducts PP (battle_script_commands.c:6318, 12028-12030)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] },
+              { hp: 100 },
+            ],
+            rng,
+          )
+          state.sides[0]!.party = [
+            partyMon({ moves: ['MOVE_ASSIST', null, null, null], pp: [20, 0, 0, 0] }),
+            partyMon({ moves: ['MOVE_PROTECT', 'MOVE_ROAR', null, null], pp: [10, 20, 0, 0] }),
+          ]
+
+          const out = executeTurn(state, [useMove(1, MOVE_ASSIST), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+      })
+
+      describe('EFFECT_SLEEP_TALK (Sleep Talk)', () => {
+        it('success: user asleep with status1 sleep counter 7, countingRng() draws 0 -> calls slot 0 (MOVE_TACKLE), gaps damage, deducts PP 10 -> 9 (src/battle_script_commands.c:10898-10941)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TACKLE', 'MOVE_SLEEP_TALK', null, null], pp: [20, 10, 0, 0], status1: STATUS1_SLEEP },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          // Sleep Talk moves while asleep: attackCanceller decrements sleep counter (7 -> 6 > 0), allows Sleep Talk
+          expect(rng.calls).toBe(1)
+          expect(act0.missed).toBe(false)
+          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[1]).toBe(9)
+        })
+
+        it('Rest reroll: scriptedRng([0, 0]) draws MOVE_REST (slot 0), triggers C reroll branch, draws slot 0 again, calling MOVE_REST on 2 draws (battle_script_commands.c:10915-10919)', () => {
+          // Both draws return 0. Draw 1: slot 0 is MOVE_REST -> reroll = false, continue. Draw 2: slot 0 is MOVE_REST -> break.
+          const rng = scriptedRng([0, 0])
+          const state = battle(
+            [
+              { moves: ['MOVE_REST', 'MOVE_SLEEP_TALK', null, null], pp: [10, 10, 0, 0], status1: STATUS1_SLEEP },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(2)
+          // Rest fails when user is already asleep (data/battle_scripts_1.s:4377 / handleRest)
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[1]).toBe(9)
+        })
+
+        it('failure (awake): user not asleep (status1 == 0) -> fails with missed: true, still deducts PP (battle_script_commands.c:4768, 10904-10905)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_TACKLE', 'MOVE_SLEEP_TALK', null, null], pp: [20, 10, 0, 0], status1: 0 },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[1]).toBe(9)
+        })
+
+        it('failure (no usable moves): user has only Sleep Talk in moveset (unusableMovesBits == 0xf) -> fails with missed: true (battle_script_commands.c:10910-10911)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_SLEEP_TALK', null, null, null], pp: [10, 0, 0, 0], status1: STATUS1_SLEEP },
+              { hp: 100 },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(state, [useMove(1, MOVE_SLEEP_TALK), null], testDeps())
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(rng.calls).toBe(0)
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+        })
+      })
+
+      describe('EFFECT_ME_FIRST (Me First)', () => {
+        it('success: faster user (spe: 100) acts before target (spe: 50) who chose MOVE_TACKLE (power 40 > 0) -> calls MOVE_TACKLE, gaps damage, deducts PP 20 -> 19 (src/battle_script_commands.c:7301-7333)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { spe: 100, moves: ['MOVE_ME_FIRST', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, moves: ['MOVE_TACKLE', null, null, null], pp: [20, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(
+            state,
+            [useMove(1, MOVE_ME_FIRST), useMove(0, MOVE_TACKLE)],
+            testDeps(),
+          )
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(act0.missed).toBe(false)
+          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          // STATUS3_ME_FIRST cleared by MOVEEND_CLEAR_BITS at action end (battle_script_commands.c:4948)
+          expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_ME_FIRST)).toBe(false)
+        })
+
+        it('failure: slower user (spe: 50) acts after target (spe: 100) -> fails with missed: true (src/battle_script_commands.c:7305-7306)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { spe: 50, moves: ['MOVE_ME_FIRST', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 100, moves: ['MOVE_TACKLE', null, null, null], pp: [20, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(
+            state,
+            [useMove(1, MOVE_ME_FIRST), useMove(0, MOVE_TACKLE)],
+            testDeps(),
+          )
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('failure: target chosen move has power 0 (MOVE_SWORDS_DANCE) -> fails with missed: true (src/battle_script_commands.c:7314-7315)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { spe: 100, moves: ['MOVE_ME_FIRST', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [20, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(
+            state,
+            [useMove(1, MOVE_ME_FIRST), useMove(0, MOVE_SWORDS_DANCE)],
+            testDeps(),
+          )
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
+
+        it('failure: target chosen move is banned (MOVE_COUNTER) -> fails with missed: true (src/battle_script_commands.c:7317-7318)', () => {
+          const rng = countingRng()
+          const state = battle(
+            [
+              { spe: 100, moves: ['MOVE_ME_FIRST', null, null, null], pp: [20, 0, 0, 0] },
+              { spe: 50, moves: ['MOVE_COUNTER', null, null, null], pp: [20, 0, 0, 0] },
+            ],
+            rng,
+          )
+
+          const out = executeTurn(
+            state,
+            [useMove(1, MOVE_ME_FIRST), useMove(0, MOVE_COUNTER)],
+            testDeps(),
+          )
+          const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+          expect(act0.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        })
       })
     })
   })

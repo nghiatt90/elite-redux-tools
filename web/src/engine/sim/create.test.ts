@@ -279,6 +279,7 @@ describe('createBattleState', () => {
       [null, null, null, null],
       [null, null, null, null],
     ])
+    expect(state.chosenMovePositions).toEqual([0, 0, 0, 0])
   })
 
   it('gives the two sides separate side state', () => {

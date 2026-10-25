@@ -655,6 +655,8 @@ export interface BattleState {
   lastTakenMove: (string | null)[]
   /** `u16 lastTakenMoveFrom[MAX_BATTLERS_COUNT][MAX_BATTLERS_COUNT]` (include/battle.h:664, battle_script_commands.c:4778). */
   lastTakenMoveFrom: (string | null)[][]
+  /** `u8 chosenMovePositions[MAX_BATTLERS_COUNT]` (include/battle.h:633). */
+  chosenMovePositions: number[]
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

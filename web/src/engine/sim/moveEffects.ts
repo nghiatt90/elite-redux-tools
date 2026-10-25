@@ -20,6 +20,7 @@ import {
   ENUM_WEATHER_RAIN,
   ENUM_WEATHER_SANDSTORM,
   ENUM_WEATHER_SUN,
+  MAX_MON_MOVES,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   MOVE_UNSET,
@@ -85,6 +86,7 @@ import {
   STATUS3_LASER_FOCUS,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
+  STATUS3_ME_FIRST,
   STATUS3_MIRACLE_EYED,
   STATUS3_MINIMIZED,
   STATUS3_ON_AIR,
@@ -253,6 +255,7 @@ import {
 import { uq } from '../fixed'
 import { getTypeModifier, type TypeModifierInputs } from '../typeEffectiveness'
 import { TYPE_NAME_BY_ID } from './hazards'
+import { METRONOME_MOVES, MOVES_COUNT } from './metronomeMoves'
 
 export interface MoveEffectContext {
   state: BattleState
@@ -6796,6 +6799,409 @@ export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, missed: false })
 }
 
+const METRONOME_FORBIDDEN_EFFECTS = new Set([
+  'EFFECT_PROTECT',
+  'EFFECT_PLACEHOLDER',
+  'EFFECT_DO_NOTHING',
+  'EFFECT_FOLLOW_ME',
+  'EFFECT_TRICK',
+])
+
+/**
+ * EFFECT_METRONOME (Metronome)
+ * BattleScript_EffectMetronome (data/battle_scripts_1.s:4568-4577),
+ * Cmd_metronome (src/battle_script_commands.c:10586-10613).
+ */
+export function handleMetronome(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce runs before metronome in C (:4571)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. Cmd_metronome (:10586-10613):
+  // do {
+  //     move = (Random() % (MOVES_COUNT - 1)) + 1;
+  //     switch (gBattleMoves[move].effect) {
+  //         case EFFECT_PROTECT:
+  //         case EFFECT_PLACEHOLDER:
+  //         case EFFECT_DO_NOTHING:
+  //         case EFFECT_FOLLOW_ME:
+  //         case EFFECT_TRICK:
+  //             allowed = FALSE;
+  //             break;
+  //         default:
+  //             allowed = TRUE;
+  //     }
+  // } while (!allowed && !gBattleMoves[move].metronomeBanned && !gBattleMoves[move].twoTurnMove);
+  let chosenMove: string
+  let allowed: boolean
+  do {
+    const roll = state.rng.random16()
+    const moveIndex = (roll % (MOVES_COUNT - 1)) + 1
+    chosenMove = METRONOME_MOVES[moveIndex] ?? 'MOVE_POUND'
+    const moveData = deps.dataContext.move(chosenMove)
+    allowed = !moveData?.effect || !METRONOME_FORBIDDEN_EFFECTS.has(moveData.effect)
+    // C bug kept (src/battle_script_commands.c:10603): while condition uses '&&' instead of '||'.
+    // If allowed is true (not one of the 5 forbidden effects), the loop immediately terminates regardless of metronomeBanned/twoTurnMove.
+  } while (
+    !allowed &&
+    !deps.dataContext.move(chosenMove)?.flags?.metronomeBanned &&
+    !deps.dataContext.move(chosenMove)?.flags?.twoTurn &&
+    !deps.dataContext.move(chosenMove)?.flags?.twoTurnMove
+  )
+
+  const calledData = deps.dataContext.move(chosenMove)
+  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(calledData?.effect ?? null)
+  if (handler) {
+    const isTargetUser = calledData?.target === 'USER' || calledData?.target === 'USERS_FIELD'
+    const calledTargetId = isTargetUser ? battlerId : targetId
+    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: calledTargetId,
+    }
+    const res = handler({
+      ...ctx,
+      targetId: calledTargetId,
+      action: calledAction,
+      deductPp: () => {},
+    })
+    return {
+      ...res,
+      battlerId,
+      turnOrderIndex: ctx.turnOrderIndex,
+    }
+  }
+
+  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+function isTwoTurnsMove(effect: string | null): boolean {
+  return (
+    effect === 'EFFECT_SKULL_BASH' ||
+    effect === 'EFFECT_TWO_TURNS_ATTACK' ||
+    effect === 'EFFECT_SOLARBEAM' ||
+    effect === 'EFFECT_SEMI_INVULNERABLE' ||
+    effect === 'EFFECT_BIDE'
+  )
+}
+
+const ASSIST_FORBIDDEN_EFFECTS = new Set([
+  'EFFECT_PLACEHOLDER',
+  'EFFECT_PROTECT',
+  'EFFECT_DO_NOTHING',
+  'EFFECT_HIT_SWITCH_TARGET',
+  'EFFECT_ROAR',
+  'EFFECT_FOLLOW_ME',
+  'EFFECT_TRICK',
+])
+
+/**
+ * EFFECT_ASSIST (Assist)
+ * BattleScript_EffectAssist (data/battle_scripts_1.s:6315-6325),
+ * Cmd_assistattackselect (src/battle_script_commands.c:12004-12050).
+ */
+export function handleAssist(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce runs before assistattackselect in C (:6318)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. Cmd_assistattackselect (:12004-12050):
+  const side = battlerId & 1
+  const party = state.sides[side]?.party ?? []
+  const attackerBattler = state.battlers[battlerId]
+  const userPartyIndex = attackerBattler?.partyIndex ?? 0
+
+  const movesArray: string[] = []
+  for (let monId = 0; monId < party.length; monId++) {
+    if (monId === userPartyIndex) continue
+    const pMon = party[monId]
+    if (!pMon || pMon.speciesId === null) continue
+
+    for (let i = 0; i < pMon.moves.length; i++) {
+      const m = pMon.moves[i]
+      if (!m || m === MOVE_UNSET) continue
+
+      const mData = deps.dataContext.move(m)
+      if (mData?.effect && ASSIST_FORBIDDEN_EFFECTS.has(mData.effect)) continue
+      if (mData?.flags?.copycatBanned === true) continue
+      if (isTwoTurnsMove(mData?.effect ?? null)) continue
+
+      movesArray.push(m)
+    }
+  }
+
+  if (movesArray.length === 0) {
+    // assistattackselect BattleScript_ButItFailed (:6319)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // gCalledMove = movesArray[((Random() & 0xFF) * chooseableMovesNo) >> 8]; (:12044)
+  const roll = state.rng.random16()
+  const idx = ((roll & 0xff) * movesArray.length) >> 8
+  const chosenMove = movesArray[idx]!
+
+  const calledData = deps.dataContext.move(chosenMove)
+  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(calledData?.effect ?? null)
+  if (handler) {
+    const isTargetUser = calledData?.target === 'USER' || calledData?.target === 'USERS_FIELD'
+    const calledTargetId = isTargetUser ? battlerId : targetId
+    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: calledTargetId,
+    }
+    const res = handler({
+      ...ctx,
+      targetId: calledTargetId,
+      action: calledAction,
+      deductPp: () => {},
+    })
+    return {
+      ...res,
+      battlerId,
+      turnOrderIndex: ctx.turnOrderIndex,
+    }
+  }
+
+  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+const SLEEP_TALK_FORBIDDEN_EFFECTS = new Set([
+  'EFFECT_PLACEHOLDER',
+  'EFFECT_DO_NOTHING',
+  'EFFECT_HIT_SWITCH_TARGET',
+  'EFFECT_ROAR',
+])
+
+/**
+ * EFFECT_SLEEP_TALK (Sleep Talk)
+ * BattleScript_EffectSleepTalk (data/battle_scripts_1.s:4763-4784),
+ * Cmd_trychoosesleeptalkmove (src/battle_script_commands.c:10898-10941).
+ */
+export function handleSleepTalk(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const attacker = state.battlers[battlerId]!
+
+  // Check sleep / Comatose (:4765-4766)
+  const isAsleep =
+    (attacker.mon.status1 & STATUS1_SLEEP) !== 0 ||
+    battlerHasSimAbility(state, attacker, 'ABILITY_COMATOSE', false, battlerId, false, deps.dataContext)
+
+  // Failing sleep check still deducts PP in C (:4768)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (!isAsleep) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Cmd_trychoosesleeptalkmove (:10898-10941):
+  let unusableMovesBits = 0
+  for (let i = 0; i < MAX_MON_MOVES; i++) {
+    const m = attacker.mon.moves[i]
+    if (!m || m === MOVE_UNSET) {
+      unusableMovesBits |= 1 << i
+      continue
+    }
+
+    const mData = deps.dataContext.move(m)
+    if (mData?.flags?.sleepTalkBanned === true || isTwoTurnsMove(mData?.effect ?? null)) {
+      unusableMovesBits |= 1 << i
+    } else if (mData?.effect && SLEEP_TALK_FORBIDDEN_EFFECTS.has(mData.effect)) {
+      unusableMovesBits |= 1 << i
+    } else if (attacker.volatiles.disabledMove === m) {
+      unusableMovesBits |= 1 << i
+    } else if (attacker.volatiles.tauntTimer > 0 && (mData?.power ?? 0) === 0 && mData?.split === 'STATUS') {
+      unusableMovesBits |= 1 << i
+    } else if (attacker.volatiles.encoreTimer > 0 && attacker.volatiles.encoredMove !== m) {
+      unusableMovesBits |= 1 << i
+    } else if ((attacker.mon.status2 & STATUS2_TORMENT) !== 0 && attacker.lastMove === m) {
+      unusableMovesBits |= 1 << i
+    } else if (attacker.volatiles.throatChopTimer > 0 && mData?.flags?.sound === true) {
+      unusableMovesBits |= 1 << i
+    }
+  }
+
+  if (unusableMovesBits === 0xf) {
+    // trychoosesleeptalkmove failed (:4779 goto BattleScript_ButItFailed)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  let reroll = true
+  let movePosition: number
+  do {
+    movePosition = state.rng.random16() & (MAX_MON_MOVES - 1)
+    if (reroll && attacker.mon.moves[movePosition] === 'MOVE_REST') {
+      reroll = false
+      movePosition = state.rng.random16() & (MAX_MON_MOVES - 1)
+    }
+  } while ((unusableMovesBits & (1 << movePosition)) !== 0)
+
+  attacker.turn.sleepTalk = true
+
+  const chosenMove = attacker.mon.moves[movePosition]!
+  const calledData = deps.dataContext.move(chosenMove)
+  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(calledData?.effect ?? null)
+  if (handler) {
+    const isTargetUser = calledData?.target === 'USER' || calledData?.target === 'USERS_FIELD'
+    const calledTargetId = isTargetUser ? battlerId : targetId
+    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: calledTargetId,
+    }
+    const res = handler({
+      ...ctx,
+      targetId: calledTargetId,
+      action: calledAction,
+      deductPp: () => {},
+    })
+    return {
+      ...res,
+      battlerId,
+      turnOrderIndex: ctx.turnOrderIndex,
+    }
+  }
+
+  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+const ME_FIRST_BANNED_MOVES = new Set([
+  'MOVE_STRUGGLE',
+  'MOVE_CHATTER',
+  'MOVE_FOCUS_PUNCH',
+  'MOVE_THIEF',
+  'MOVE_COVET',
+  'MOVE_COUNTER',
+  'MOVE_MIRROR_COAT',
+  'MOVE_METAL_BURST',
+  'MOVE_ME_FIRST',
+  'MOVE_BEAK_BLAST',
+])
+
+/**
+ * EFFECT_ME_FIRST (Me First)
+ * BattleScript_EffectMeFirst (data/battle_scripts_1.s:2131-2140),
+ * VARIOUS_TRY_ME_FIRST (src/battle_script_commands.c:7301-7333).
+ */
+export function handleMeFirst(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const attacker = state.battlers[battlerId]!
+
+  // 1. ppreduce runs before trymefirst in C (:2134)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. Target must exist and be alive
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. VARIOUS_TRY_ME_FIRST (:7301-7333):
+  // if (GetBattlerTurnOrderNum(gBattlerAttacker) > GetBattlerTurnOrderNum(gBattlerTarget))
+  const attackerTurnOrder = ctx.order ? ctx.order.battlerByTurnOrder.indexOf(battlerId) : ctx.turnOrderIndex
+  const targetTurnOrder = ctx.order ? ctx.order.battlerByTurnOrder.indexOf(targetId) : -1
+  if (targetTurnOrder === -1 || attackerTurnOrder > targetTurnOrder) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Target's chosen move:
+  // MoveEnum move = gBattleMons[gBattlerTarget].moves[gBattleStruct->chosenMovePositions[gBattlerTarget]];
+  const target = state.battlers[targetId]!
+  const chosenPos = state.chosenMovePositions?.[targetId] ?? 0
+  const targetChosenMove = target.mon.moves[chosenPos]
+  if (!targetChosenMove || targetChosenMove === MOVE_UNSET) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // else if (gBattleMoves[...].power == 0)
+  const targetMoveData = deps.dataContext.move(targetChosenMove)
+  if (!targetMoveData || (targetMoveData.power ?? 0) === 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Banned moves switch (:7309-7321)
+  if (ME_FIRST_BANNED_MOVES.has(targetChosenMove)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Success (:7329):
+  // gStatuses3[gBattlerAttacker] |= STATUS3_ME_FIRST;
+  // Called move deals damage (power > 0) -> 1.5x power boost in C (src/battle_util.c:7061).
+  attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_ME_FIRST)
+
+  const isDamaging = (targetMoveData.power ?? 0) > 0 || targetMoveData.split === 'PHYSICAL' || targetMoveData.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${targetChosenMove} damage step is not modelled`)
+    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(targetMoveData.effect ?? null)
+  if (handler) {
+    const isTargetUser = targetMoveData.target === 'USER' || targetMoveData.target === 'USERS_FIELD'
+    const calledTargetId = isTargetUser ? battlerId : targetId
+    const calledView = makeTurnOrderMoveView(targetChosenMove, targetMoveData)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: calledTargetId,
+    }
+    const res = handler({
+      ...ctx,
+      targetId: calledTargetId,
+      action: calledAction,
+      deductPp: () => {},
+    })
+    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
+    return {
+      ...res,
+      battlerId,
+      turnOrderIndex: ctx.turnOrderIndex,
+    }
+  }
+
+  unmodelled.push(`called move effect ${targetMoveData.effect} for ${targetChosenMove} is not modelled`)
+  attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
+  return outcome(ctx, { targetId, missed: false })
+}
+
 /**
  * EFFECT_LUCKY_CHANT (Lucky Chant)
  * BattleScript_EffectLuckyChant (data/battle_scripts_1.s:2342-2351),
@@ -10433,6 +10839,10 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SKETCH: handleSketch,
   EFFECT_DOODLE: handleDoodle,
   EFFECT_TRANSFORM: handleTransform,
+  EFFECT_METRONOME: handleMetronome,
+  EFFECT_ASSIST: handleAssist,
+  EFFECT_SLEEP_TALK: handleSleepTalk,
+  EFFECT_ME_FIRST: handleMeFirst,
 
   EFFECT_LUCKY_CHANT: handleLuckyChant,
   EFFECT_QUICK_GUARD: handleQuickGuard,

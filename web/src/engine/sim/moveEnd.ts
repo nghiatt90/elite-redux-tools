@@ -63,6 +63,7 @@ import {
   STATUS3_CHARGED_UP,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
+  STATUS3_ME_FIRST,
   STATUS3_ON_AIR,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
@@ -3175,6 +3176,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     }
     attacker.round.targetAffected = false
     attacker.turn.gemBoost = false
+    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
   }
   if (target) {
     target.turn.berryReduced = false

@@ -1442,6 +1442,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
   const ctx = buildTurnOrderContext(state, deps)
   const order = setActionsAndBattlersTurnOrder(state, actions)
+  for (let i = 0; i < state.battlersCount; i++) {
+    const a = actions[i]
+    if (a?.action === 'USE_MOVE' && a.chosenMove) {
+      const pos = state.battlers[i]?.mon.moves.indexOf(a.chosenMove.id) ?? -1
+      state.chosenMovePositions[i] = pos >= 0 ? pos : 0
+    }
+  }
   const outcomes: ActionOutcome[] = []
 
   for (let index = 0; index < order.battlerByTurnOrder.length; index++) {
