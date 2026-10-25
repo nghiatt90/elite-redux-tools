@@ -103,6 +103,8 @@ export interface SimMoveData {
   sheerForceBoost?: true
   /** moves.json's `effectChance` (MoveList.proto `effect_chance`). */
   effectChance?: number
+  /** moves.json's `pp` -- gBattleMoves[move].pp, read by VARIOUS_RESTORE_PP (Lunar Dance). */
+  pp?: number
   /** moves.json's `argument` when kind is 'effect' or other structured argument. */
   argument?: {
     kind: string

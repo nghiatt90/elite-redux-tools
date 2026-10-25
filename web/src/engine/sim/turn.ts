@@ -1190,27 +1190,41 @@ export function dispatchSwitchOutAbilities(
   }
 }
 
-function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLoopDeps): string[] {
+export interface SwitchActionOptions {
+  ignoreEscapePrevention?: boolean
+  forcedPartyIndex?: number
+  healingWish?: boolean
+  lunarDance?: boolean
+}
+
+export function performSwitchAction(
+  state: BattleState,
+  battlerId: number,
+  deps: TurnLoopDeps,
+  options?: SwitchActionOptions,
+): string[] {
   const unmodelled: string[] = []
   const battler = state.battlers[battlerId]
   if (!battler) return unmodelled
 
   const escapeDeps: EscapeDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
 
-  // battle_main.c:3747-3755: the party menu refuses the switch (PARTY_ACTION_CANT_SWITCH /
-  // PARTY_ACTION_ABILITY_PREVENTS), so the game never queues it; the sim drops the action.
-  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) || !canBattlerEscape(state, battlerId, escapeDeps)) {
-    unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (cannot escape)`)
-    return unmodelled
-  }
-  const abilityTrap = isAbilityPreventingEscape(state, battlerId, escapeDeps)
-  unmodelled.push(...abilityTrap.unmodelled)
-  if (abilityTrap.prevents) {
-    unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (prevented by ability of battler ${abilityTrap.trappingBattlerId})`)
-    return unmodelled
+  if (!options?.ignoreEscapePrevention) {
+    // battle_main.c:3747-3755: the party menu refuses the switch (PARTY_ACTION_CANT_SWITCH /
+    // PARTY_ACTION_ABILITY_PREVENTS), so the game never queues it; the sim drops the action.
+    if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) || !canBattlerEscape(state, battlerId, escapeDeps)) {
+      unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (cannot escape)`)
+      return unmodelled
+    }
+    const abilityTrap = isAbilityPreventingEscape(state, battlerId, escapeDeps)
+    unmodelled.push(...abilityTrap.unmodelled)
+    if (abilityTrap.prevents) {
+      unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} refused (prevented by ability of battler ${abilityTrap.trappingBattlerId})`)
+      return unmodelled
+    }
   }
 
-  let partyIndex = battler.monToSwitchIntoId
+  let partyIndex = options?.forcedPartyIndex !== undefined ? options.forcedPartyIndex : battler.monToSwitchIntoId
   if (partyIndex === PARTY_SIZE) {
     if (!deps.replacement) {
       unmodelled.push(`executeTurn: SWITCH action for battler ${battlerId} had no monToSwitchIntoId set and no deps.replacement was supplied -- nothing to switch into`)
@@ -1232,6 +1246,8 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
     // upstream having synced it.
     outgoingSlot.hp = battler.mon.hp
     outgoingSlot.status1 = battler.mon.status1
+    // Cmd_ppreduce emits REQUEST_PP_DATA_BATTLE, so the party mon carries the spent PP.
+    outgoingSlot.pp = [...battler.mon.pp] as typeof outgoingSlot.pp
   }
 
   // Cmd_switchoutabilities (battle_scripts_1.s:7211, battle_script_commands.c:12102)
@@ -1240,6 +1256,26 @@ function performSwitchAction(state: BattleState, battlerId: number, deps: TurnLo
   if (outgoingSlot) {
     outgoingSlot.hp = battler.mon.hp
     outgoingSlot.status1 = battler.mon.status1
+  }
+
+  if (options?.healingWish) {
+    const incomingSlot = party[partyIndex]
+    if (incomingSlot) {
+      incomingSlot.hp = incomingSlot.maxHp
+      incomingSlot.status1 = 0
+      if (options.lunarDance) {
+        // VARIOUS_RESTORE_PP (battle_scripts_1.s:2396, battle_script_commands.c:7116-7129)
+        for (let mIdx = 0; mIdx < incomingSlot.moves.length; mIdx++) {
+          const mId = incomingSlot.moves[mIdx]
+          if (mId) {
+            const mData = deps.dataContext.move(mId)
+            if (mData?.pp !== undefined) {
+              incomingSlot.pp[mIdx] = mData.pp
+            }
+          }
+        }
+      }
+    }
   }
 
   switchIn(state, battlerId, partyIndex, deps, unmodelled)

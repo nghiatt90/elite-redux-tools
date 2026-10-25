@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
-import type { BattleState, RandomSource, SimBattleMon } from './state'
+import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -22,7 +22,9 @@ import { getMoveEffectHandler } from './moveEffects'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
+import type { ReplacementDeps } from './switchIn'
 import {
+  BATTLE_TYPE_ARENA,
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
@@ -139,6 +141,7 @@ function requireMove(id: string): SimMoveData {
     type2: m.type2 as string | null,
     target: m.target as string,
     argument: (m.argument ?? null) as SimMoveData['argument'],
+    pp: m.pp as number,
   }
 }
 
@@ -313,6 +316,13 @@ const MOVE_RAGE_POWDER = requireMove('MOVE_RAGE_POWDER')
 const MOVE_SPOTLIGHT = requireMove('MOVE_SPOTLIGHT')
 const MOVE_SNIPE_SHOT = requireMove('MOVE_SNIPE_SHOT')
 const MOVE_EARTHQUAKE = requireMove('MOVE_EARTHQUAKE')
+const MOVE_TELEPORT = requireMove('MOVE_TELEPORT')
+const MOVE_SAFE_PASSAGE = requireMove('MOVE_SAFE_PASSAGE')
+const MOVE_PARTING_SHOT = requireMove('MOVE_PARTING_SHOT')
+const MOVE_ROAR = requireMove('MOVE_ROAR')
+const MOVE_REVIVAL_BLESSING = requireMove('MOVE_REVIVAL_BLESSING')
+const MOVE_HEALING_WISH = requireMove('MOVE_HEALING_WISH')
+const MOVE_LUNAR_DANCE = requireMove('MOVE_LUNAR_DANCE')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -346,6 +356,7 @@ const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
 const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
 const ABILITY_PRANKSTER = requireAbility('ABILITY_PRANKSTER')
 const ABILITY_PROPELLER_TAIL = requireAbility('ABILITY_PROPELLER_TAIL')
+const ABILITY_SUCTION_CUPS = requireAbility('ABILITY_SUCTION_CUPS')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -493,9 +504,41 @@ function dummyDamage(): DamageResolver & { calls: number } {
   return r
 }
 
-function testDeps(damage: DamageResolver = dummyDamage()): TurnLoopDeps {
+function partyMon(overrides: Partial<SimPartyMon> = {}): SimPartyMon {
+  return {
+    speciesId: 'SPECIES_MUDKIP',
+    hp: 100,
+    maxHp: 100,
+    level: 50,
+    moves: ['MOVE_TACKLE', null, null, null],
+    pp: [35, 0, 0, 0],
+    itemId: null,
+    abilities: { ability: null, innates: [null, null, null] },
+    rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 },
+    nature: 'NATURE_HARDY',
+    hiddenPowerType: null,
+    speedDown: false,
+    gender: 'MALE',
+    status1: 0,
+    types: ['WATER', 'MYSTERY', 'MYSTERY'],
+    ...overrides,
+  }
+}
+
+function replacementDeps(chosenIndex: number): ReplacementDeps & { calls: { battlerId: number }[] } {
+  const calls: { battlerId: number }[] = []
+  return {
+    calls,
+    chooseReplacement(_state, battlerId) {
+      calls.push({ battlerId })
+      return chosenIndex
+    },
+  }
+}
+
+function testDeps(damage: DamageResolver = dummyDamage(), replacement?: ReplacementDeps): TurnLoopDeps {
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
-  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
+  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT, replacement }
 }
 
 describe('Move effect dispatch: 18 self stat-raise moves', () => {
@@ -8372,6 +8415,390 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             const act0_2 = out2.actions.find((a) => a.battlerId === 0)!
             expect(act0_2.targetId).toBe(3)
             expect(state.battlers[3]!.mon.hp).toBe(90)
+          })
+        })
+      })
+
+      describe('Cycle 66: switch moves', () => {
+        describe('EFFECT_SWITCH_ARGUMENT (Teleport, Safe Passage)', () => {
+          it('Teleport switches user out mid-turn to reserve, spends PP, and persists outgoing mon HP and status1', () => {
+            const lead = partyMon({ hp: 80, maxHp: 100, status1: STATUS1_POISON, moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 95, maxHp: 100, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] })
+            const foe = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, hp: 80, maxHp: 100, status1: STATUS1_POISON, moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50, hp: 100 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [foe]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_TELEPORT), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(rep.calls).toEqual([{ battlerId: 0 }])
+            expect(state.sides[0].party[0]!.hp).toBe(80)
+            expect(state.sides[0].party[0]!.status1).toBe(STATUS1_POISON)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.battlers[0]!.mon.hp).toBe(95)
+          })
+
+          it('Safe Passage ignores escape prevention (SWITCH_IGNORE_ESCAPE_PREVENTION) and switches out trapped user', () => {
+            const lead = partyMon({ moves: ['MOVE_SAFE_PASSAGE', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SAFE_PASSAGE', null, null, null], pp: [20, 0, 0, 0], status2: STATUS2_ESCAPE_PREVENTION }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SAFE_PASSAGE), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+          })
+
+          it('fails and consumes PP when user has no valid live reserve to switch into', () => {
+            const lead = partyMon({ moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle([{ spe: 100, moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_TELEPORT), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            // BattleScript_ButItFailed after ppreduce -> missed: true, PP consumed
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(rep.calls).toHaveLength(0)
+          })
+
+          it('fails and consumes PP in arena battles (jumpifbattletype BATTLE_TYPE_ARENA)', () => {
+            const lead = partyMon({ moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_TELEPORT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.battleTypeFlags |= BATTLE_TYPE_ARENA
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const out = executeTurn(state, [useMove(1, MOVE_TELEPORT), null], testDeps(dummyDamage(), replacementDeps(1)))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_PARTING_SHOT (Parting Shot)', () => {
+          it('lowers target Attack and SpAtk by 1 and switches user out to reserve', () => {
+            const lead = partyMon({ moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const foe = partyMon({ hp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [foe]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_PARTING_SHOT), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(act0.statChanges).toEqual([
+              { battlerId: 1, stat: STAT_ATK, change: -1 },
+              { battlerId: 1, stat: STAT_SPATK, change: -1 },
+            ])
+            expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE - 1)
+            expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE - 1)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+          })
+
+          it('C quirk: when Clear Body prevents both stat drops, user STILL switches out (BattleScript_EffectPartingShotSwitch)', () => {
+            const lead = partyMon({ moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const foe = partyMon({ abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] } })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50, abilities: { ability: ABILITY_CLEAR_BODY, innates: [null, null, null] } }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [foe]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_PARTING_SHOT), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            // No stat changes occurred due to Clear Body
+            expect(act0.statChanges).toEqual([])
+            expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+            expect(state.battlers[1]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE)
+            // But user STILL switches out!
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+          })
+
+          it('fails via BattleScript_CantLowerMultipleStats and skips switch when target Atk and SpAtk are both at -6', () => {
+            const lead = partyMon({ moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.battlers[1]!.mon.statStages[STAT_ATK] = MIN_STAT_STAGE
+            state.battlers[1]!.mon.statStages[STAT_SPATK] = MIN_STAT_STAGE
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_PARTING_SHOT), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.statChanges).toEqual([])
+            expect(state.battlers[0]!.partyIndex).toBe(0) // switch skipped
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19) // PP spent
+            expect(rep.calls).toHaveLength(0)
+          })
+
+          it('applies stat drops but skips switch when user has no valid live reserve (BattleScript_DoMoveSwitch)', () => {
+            const lead = partyMon({ moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle([{ spe: 100, moves: ['MOVE_PARTING_SHOT', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const out = executeTurn(state, [useMove(1, MOVE_PARTING_SHOT), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            // Stat drops applied
+            expect(act0.statChanges).toEqual([
+              { battlerId: 1, stat: STAT_ATK, change: -1 },
+              { battlerId: 1, stat: STAT_SPATK, change: -1 },
+            ])
+            // Switch skipped because user cannot switch
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_ROAR (Roar)', () => {
+          it('forces target to switch to a randomly drawn live reserve and spends PP', () => {
+            const lead = partyMon({ moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] })
+            const foeLead = partyMon({ hp: 100, moves: ['MOVE_TACKLE', null, null, null] })
+            const foeReserve1 = partyMon({ hp: 70, moves: ['MOVE_TACKLE', null, null, null] })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50, hp: 100 }],
+              { random16: () => 1 }, // draws roll 1 % 6 = 1 -> foeReserve1
+            )
+            state.sides[0].party = [lead]
+            state.sides[1].party = [foeLead, foeReserve1]
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROAR), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            // Target (battler 1) was forced to switch to party index 1
+            expect(state.battlers[1]!.partyIndex).toBe(1)
+            expect(state.battlers[1]!.mon.hp).toBe(70)
+          })
+
+          it('Suction Cups blocks forced phasing out (jumpifabilityflag BS_TARGET, ABILITY_SUCTION_CUPS)', () => {
+            const lead = partyMon({ moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] })
+            const foeLead = partyMon({ hp: 100, abilities: { ability: ABILITY_SUCTION_CUPS, innates: [null, null, null] } })
+            const foeReserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50, abilities: { ability: ABILITY_SUCTION_CUPS, innates: [null, null, null] } }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead]
+            state.sides[1].party = [foeLead, foeReserve]
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROAR), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Target did NOT switch
+            expect(state.battlers[1]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('Mold Breaker ignores Suction Cups and successfully phases target out', () => {
+            const lead = partyMon({ moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0], abilities: { ability: ABILITY_MOLD_BREAKER, innates: [null, null, null] } })
+            const foeLead = partyMon({ hp: 100, abilities: { ability: ABILITY_SUCTION_CUPS, innates: [null, null, null] } })
+            const foeReserve = partyMon({ hp: 80 })
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0], abilities: { ability: ABILITY_MOLD_BREAKER, innates: [null, null, null] } },
+                { spe: 50, abilities: { ability: ABILITY_SUCTION_CUPS, innates: [null, null, null] } },
+              ],
+              { random16: () => 1 },
+            )
+            state.sides[0].party = [lead]
+            state.sides[1].party = [foeLead, foeReserve]
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROAR), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[1]!.partyIndex).toBe(1)
+            expect(state.battlers[1]!.mon.hp).toBe(80)
+          })
+
+          it('STATUS3_ROOTED (Ingrain) blocks forced phasing out (jumpifstatus3 STATUS3_ROOTED)', () => {
+            const lead = partyMon({ moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] })
+            const foeLead = partyMon({ hp: 100 })
+            const foeReserve = partyMon({ hp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.battlers[1]!.statuses3 |= STATUS3_ROOTED
+            state.sides[0].party = [lead]
+            state.sides[1].party = [foeLead, foeReserve]
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROAR), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[1]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('phasing fails when target has no other alive Pokemon in reserve (validMons <= 1)', () => {
+            const lead = partyMon({ moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] })
+            const foeLead = partyMon({ hp: 100 })
+            const foeFainted = partyMon({ hp: 0 })
+            const state = battle([{ spe: 100, moves: ['MOVE_ROAR', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead]
+            state.sides[1].party = [foeLead, foeFainted]
+
+            const out = executeTurn(state, [useMove(1, MOVE_ROAR), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[1]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_REVIVAL_BLESSING (Revival Blessing)', () => {
+          it('revives the first fainted mon in party to half its max HP and spends PP', () => {
+            const lead = partyMon({ moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] })
+            const faintedMon = partyMon({ hp: 0, maxHp: 120 })
+            const state = battle([{ spe: 100, moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead, faintedMon]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const out = executeTurn(state, [useMove(1, MOVE_REVIVAL_BLESSING), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(0) // PP spent (1 -> 0)
+            expect(state.sides[0].party[1]!.hp).toBe(60) // Math.trunc(120 / 2)
+          })
+
+          it('fails via BattleScript_ButItFailed and spends PP when no party mon is fainted', () => {
+            const lead = partyMon({ moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] })
+            const aliveMon = partyMon({ hp: 100, maxHp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.sides[0].party = [lead, aliveMon]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const out = executeTurn(state, [useMove(1, MOVE_REVIVAL_BLESSING), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(0) // PP still spent
+          })
+
+          it('fails via BattleScript_ButItFailed and spends PP in fog weather', () => {
+            const lead = partyMon({ moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] })
+            const faintedMon = partyMon({ hp: 0, maxHp: 100 })
+            const state = battle([{ spe: 100, moves: ['MOVE_REVIVAL_BLESSING', null, null, null], pp: [1, 0, 0, 0] }, { spe: 50 }], countingRng())
+            state.field.weather = WEATHER_FOG_TEMPORARY
+            state.sides[0].party = [lead, faintedMon]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const out = executeTurn(state, [useMove(1, MOVE_REVIVAL_BLESSING), null], testDeps(dummyDamage()))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(0)
+            expect(state.sides[0].party[1]!.hp).toBe(0) // Still fainted
+          })
+        })
+
+        describe('EFFECT_HEALING_WISH (Healing Wish, Lunar Dance)', () => {
+          it('Healing Wish: user faints, replacement switches in and is healed to full HP with status cured', () => {
+            const lead = partyMon({ hp: 60, maxHp: 100, moves: ['MOVE_HEALING_WISH', null, null, null], pp: [10, 0, 0, 0] })
+            const damagedReserve = partyMon({ hp: 25, maxHp: 100, status1: STATUS1_BURN, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0] })
+            const state = battle([{ spe: 100, hp: 60, maxHp: 100, moves: ['MOVE_HEALING_WISH', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50, hp: 100 }], countingRng())
+            state.sides[0].party = [lead, damagedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_HEALING_WISH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(act0.fainted).toContain(0)
+            // Outgoing mon fainted and saved to party slot 0 with PP reduced
+            expect(state.sides[0].party[0]!.hp).toBe(0)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(9)
+            // Replacement (battler 0, partyIndex 1) healed to max HP and status cured
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+            expect(state.battlers[0]!.mon.status1).toBe(0)
+            expect(state.sides[0].party[1]!.hp).toBe(100)
+            expect(state.sides[0].party[1]!.status1).toBe(0)
+          })
+
+          it('Lunar Dance: user faints, replacement switches in, is healed to full HP, status cured, and move PP restored', () => {
+            const lead = partyMon({ hp: 100, maxHp: 100, moves: ['MOVE_LUNAR_DANCE', null, null, null], pp: [10, 0, 0, 0] })
+            const damagedReserve = partyMon({
+              hp: 30,
+              maxHp: 100,
+              status1: STATUS1_PARALYSIS,
+              moves: ['MOVE_TACKLE', null, null, null],
+              pp: [5, 0, 0, 0], // depleted
+            })
+            const state = battle([{ spe: 100, hp: 100, maxHp: 100, moves: ['MOVE_LUNAR_DANCE', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50, hp: 100 }], countingRng())
+            state.sides[0].party = [lead, damagedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_LUNAR_DANCE), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(act0.fainted).toContain(0)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+            expect(state.battlers[0]!.mon.status1).toBe(0)
+            // PP restored to Tackle's base PP in moves.json (20 in Elite Redux)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(20)
+          })
+
+          it('fails via BattleScript_ButItFailedAtkStringPpReduce and user DOES NOT faint when no valid live reserve exists', () => {
+            const lead = partyMon({ hp: 100, maxHp: 100, moves: ['MOVE_HEALING_WISH', null, null, null], pp: [10, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle([{ spe: 100, hp: 100, maxHp: 100, moves: ['MOVE_HEALING_WISH', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50, hp: 100 }], countingRng())
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_HEALING_WISH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            // User did NOT faint!
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+            expect(act0.fainted).toHaveLength(0)
+            // PP was still spent
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
           })
         })
       })

@@ -7,9 +7,11 @@
 import type { BattleState, BattlerState } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { buildAccuracyInputs, getTotalAccuracy, isBattlerAlive, isBattlerProtected, ProtectType } from './turn'
+import { buildAccuracyInputs, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
+import { hasLiveReserve } from './switchIn'
 import {
+  BATTLE_TYPE_ARENA,
   B_SIDE_PLAYER,
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_FOG,
@@ -20,6 +22,7 @@ import {
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   NUM_BATTLE_STATS,
+  PARTY_SIZE,
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -8954,7 +8957,371 @@ export function handleFollowMe(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId: isSelectedTarget ? targetId : battlerId, missed: false })
 }
 
+/**
+ * CanBattlerSwitch (src/battle_script_commands.c:5061-5172).
+ * Returns true if the battler is not commanded and has at least one alive, non-egg reserve in party.
+ */
+function canBattlerSwitch(state: BattleState, battlerId: number): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (hasFlag(battler.statuses4, STATUS4_COMMANDED)) return false
+  return hasLiveReserve(state, battlerId)
+}
+
+/**
+ * EFFECT_SWITCH_ARGUMENT (Teleport, Safe Passage).
+ * Mapping: EFFECT_SWITCH_ARGUMENT -> BattleScript_EffectBatonPass (pipeline/.upstream/er-config/MoveBehaviorConfigList.textproto:742-744).
+ * BattleScript_EffectBatonPass (data/battle_scripts_1.s:5266-5275):
+ *   attackcanceler
+ *   attackstring
+ *   ppreduce
+ *   jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed
+ *   jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed
+ *   attackanimation
+ *   waitanimation
+ *   scheduleswitch BS_ATTACKER, BattleScript_BatonPassSwitch
+ *   goto BattleScript_MoveEnd
+ *
+ * C details and quirks preserved:
+ * 1. ppreduce (:5269) runs before jumpifbattletype (:5270) and jumpifcantswitch (:5271),
+ *    so PP is consumed even when the move fails due to arena or having no valid reserve.
+ * 2. jumpifcantswitch passes SWITCH_IGNORE_ESCAPE_PREVENTION, so CanBattlerEscape is bypassed;
+ *    it only checks CanBattlerSwitch(gActiveBattler) (battle_script_commands.c:5177-5184, 5061-5172).
+ * 3. On success, scheduleswitch switches out the user (BS_ATTACKER) mid-turn.
+ */
+export function handleSwitchArgument(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5269) - costs PP on both success and failure paths
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:5270)
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed (:5271)
+  if (!canBattlerSwitch(state, battlerId)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 4. scheduleswitch BS_ATTACKER (:5274) -> mid-turn switch of user
+  const switchUnmodelled = performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true })
+  unmodelled.push(...switchUnmodelled)
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_PARTING_SHOT (Parting Shot).
+ * BattleScript_EffectPartingShot (data/battle_scripts_1.s:1091-1115),
+ * BattleScript_MoveSwitch / BattleScript_DoMoveSwitch (data/battle_scripts_1.s:5371-5401).
+ *
+ * C details and quirks preserved:
+ * 1. ppreduce (:1094) runs before stat checks and accuracy check; PP is always spent.
+ * 2. Jump to BattleScript_CantLowerMultipleStats (:1096) if both Atk and SpAtk are already at MIN_STAT_STAGE;
+ *    in that case the move fails and the switch is skipped.
+ * 3. accuracycheck (:1098) follows; if missed, the move fails and the switch is skipped.
+ * 4. Atk is lowered by 1 stage, then SpAtk by 1 stage (with onStatLowered reactions dispatched).
+ * 5. C quirk: Even if both stat drops fail (e.g. blocked by Clear Body), the script jumps from
+ *    statbuffchange to BattleScript_EffectPartingShotSwitch -> BattleScript_MoveSwitch, attempting the switch.
+ * 6. In BattleScript_DoMoveSwitch (:5376-5379), the switch is skipped if the battle has ended, in arena battles,
+ *    or if the user cannot switch (SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER: commanded or no valid reserves).
+ */
+export function handlePartingShot(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:1094)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. BattleScript_CantLowerMultipleStats check (:1095-1096)
+  const atkStage = target.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const spAtkStage = target.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+  if (atkStage === MIN_STAT_STAGE && spAtkStage === MIN_STAT_STAGE) {
+    return outcome(ctx, { targetId })
+  }
+
+  // 3. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:1098)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+
+  // 4. TryAtk: setstatchanger STAT_ATK, 1, TRUE + statbuffchange (:1104-1105)
+  const r1 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -1,
+    STAT_ATK,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (r1.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: r1.delta })
+  }
+  if (r1.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // 5. TrySpAtk: setstatchanger STAT_SPATK, 1, TRUE + statbuffchange (:1110-1111)
+  const r2 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    targetId,
+    -1,
+    STAT_SPATK,
+    STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    moveId,
+  )
+  if (r2.delta !== 0) {
+    statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: r2.delta })
+  }
+  if (r2.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+    dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
+  }
+
+  // 6. BattleScript_DoMoveSwitch (:5375-5379)
+  // Switch skipped if battle outcome set, arena battle, or user cannot switch (commanded / no valid reserve).
+  if (!state.battleOutcome && !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) && canBattlerSwitch(state, battlerId)) {
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true })
+    unmodelled.push(...switchUnmodelled)
+  }
+
+  return outcome(ctx, { targetId, statChanges, missed: false })
+}
+
+/**
+ * EFFECT_ROAR (Roar, Whirlwind).
+ * BattleScript_EffectRoar (data/battle_scripts_1.s:3755-3774),
+ * Cmd_forcerandomswitch (src/battle_script_commands.c:10047-10196),
+ * BattleScript_RoarSuccessSwitch (data/battle_scripts_1.s:7548-7561).
+ *
+ * C details and quirks preserved:
+ * 1. accuracycheck (:3757) + ppreduce (:3759); BattleScript_PrintMoveMissed (:3092-3101) also calls ppreduce,
+ *    so PP is always spent.
+ * 2. jumpifabilityflag BS_TARGET, ABILITY_SUCTION_CUPS (:3761) checks suctionCups bitfield
+ *    (Suction Cups, Guard Dog, Strong Foundation, Superheavy in abilities.cc) with mold breaker check
+ *    (checkbreakable=TRUE). If present, phasing is prevented (BattleScript_AbilityPreventsPhasingOut).
+ * 3. jumpifstatus3 BS_TARGET, STATUS3_ROOTED (:3762) prevents phasing if target is rooted by Ingrain.
+ * 4. jumpifstatus4 BS_TARGET, STATUS4_COMMANDED (:3763) prevents phasing if target is commanded.
+ * 5. jumpifbattletype BATTLE_TYPE_ARENA (:3764) fails in arena battles via BattleScript_ButItFailed.
+ * 6. Cmd_forcerandomswitch (:10156-10182) in singles counts valid alive reserves; if validMons <= 1,
+ *    phasing fails (jumps to BattleScript_End).
+ * 7. RNG draw: do { i = Random() % 6; } while (i == targetPartyIndex || party[i] empty/fainted).
+ *    Drawn via state.rng.random16() in exact C order.
+ * 8. On success, BattleScript_RoarSuccessSwitch switches out the target to party slot i.
+ */
+export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:3759) - spent on both hit and miss (BattleScript_PrintMoveMissed has ppreduce)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:3757)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. jumpifabilityflag BS_TARGET, ABILITY_SUCTION_CUPS (:3761)
+  // CheckAbilityFlag (battle_script_commands.c:6685-6686): checks suctionCups bitfield with mold breaker.
+  const attackerHasMB = attackerHasMoldBreakerActive(battler, deps)
+  const isSuctionCups =
+    battlerHasSimAbility(state, target, 'ABILITY_SUCTION_CUPS', true, battlerId, attackerHasMB, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_GUARD_DOG', true, battlerId, attackerHasMB, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_STRONG_FOUNDATION', true, battlerId, attackerHasMB, deps.dataContext) ||
+    battlerHasSimAbility(state, target, 'ABILITY_SUPERHEAVY', true, battlerId, attackerHasMB, deps.dataContext)
+  if (isSuctionCups) {
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // 4. jumpifstatus3 BS_TARGET, STATUS3_ROOTED (:3762)
+  if (hasFlag(target.statuses3, STATUS3_ROOTED)) {
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // 5. jumpifstatus4 BS_TARGET, STATUS4_COMMANDED (:3763)
+  if (hasFlag(target.statuses4, STATUS4_COMMANDED)) {
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // 6. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:3764)
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 7. Cmd_forcerandomswitch (:10156-10182)
+  const targetParty = state.sides[targetId & 1].party
+  let validMons = 0
+  for (let i = 0; i < PARTY_SIZE; i++) {
+    const slot = targetParty[i]
+    if (slot && slot.speciesId !== null && slot.hp > 0) {
+      validMons++
+    }
+  }
+
+  if (validMons <= 1) {
+    // No reserve pokemon to switch into; phasing fails
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // 8. Random selection loop (:10176-10180)
+  let chosenIndex: number
+  do {
+    const roll = state.rng.random16()
+    chosenIndex = roll % PARTY_SIZE
+  } while (
+    chosenIndex === target.partyIndex ||
+    !targetParty[chosenIndex] ||
+    targetParty[chosenIndex]!.speciesId === null ||
+    targetParty[chosenIndex]!.hp <= 0
+  )
+
+  const switchUnmodelled = performSwitchAction(state, targetId, deps, {
+    ignoreEscapePrevention: true,
+    forcedPartyIndex: chosenIndex,
+  })
+  unmodelled.push(...switchUnmodelled)
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_REVIVAL_BLESSING (Revival Blessing).
+ * BattleScript_EffectRevivalBlessing (data/battle_scripts_1.s:11835-11856),
+ * Cmd_openpartyscreen (src/battle_script_commands.c:5359-5374),
+ * VARIOUS_TRY_REVIVAL_BLESSING (src/battle_script_commands.c:8434-8461),
+ * GetFirstFaintedPartyIndex (src/battle_script_commands.c:9133-9159),
+ * battle_controller_opponent.c:1648-1651.
+ *
+ * C details and quirks preserved:
+ * 1. ppreduce (:11838) runs before fog check and party checks; PP is spent on both success and failure.
+ * 2. jumpifweatheraffected BS_ATTACKER, WEATHER_FOG_ANY (:11839): fails in fog via BattleScript_ButItFailed.
+ * 3. openpartyscreen BS_CHOOSE_FAINTED_MON (:11840, :5371-5374) / VARIOUS_TRY_REVIVAL_BLESSING (:8437-8440):
+ *    fails if no party mon is fainted (GetFirstFaintedPartyIndex returns PARTY_SIZE).
+ * 4. Revives the first fainted mon in party order to Math.trunc(maxHp / 2) (:8445).
+ * 5. In singles, the revived mon remains in the party (not sent out).
+ */
+export function handleRevivalBlessing(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:11838)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifweatheraffected BS_ATTACKER, WEATHER_FOG_ANY (:11839)
+  if (isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. Find first fainted mon in party (GetFirstFaintedPartyIndex, :9133-9159)
+  const party = state.sides[battlerId & 1].party
+  const faintedIndex = party.findIndex(
+    (slot, idx) => idx < PARTY_SIZE && slot.speciesId !== null && slot.hp === 0,
+  )
+
+  if (faintedIndex === -1) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 4. Revive to half max HP (VARIOUS_TRY_REVIVAL_BLESSING, :8445)
+  const revivedMon = party[faintedIndex]!
+  revivedMon.hp = Math.trunc(revivedMon.maxHp / 2)
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_HEALING_WISH (Healing Wish, Lunar Dance).
+ * BattleScript_EffectHealingWish (data/battle_scripts_1.s:2364-2414).
+ *
+ * C details and quirks preserved:
+ * 1. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER (:2366) runs before attackstring/ppreduce.
+ *    If user cannot switch (commanded or no valid live reserve in party), branches to
+ *    BattleScript_ButItFailedAtkStringPpReduce, spending PP and failing without user fainting.
+ * 2. If valid reserve exists, user spends PP, then faints via instanthpdrop/setatkhptozero/tryfaintmon (:2371-2373).
+ * 3. scheduleswitch BS_ATTACKER, BattleScript_HealingWishSwitch (:2374) immediately performs the mid-turn switch.
+ * 4. In BattleScript_HealingWishSwitch (:2377-2413), the incoming replacement:
+ *    - if MOVE_LUNAR_DANCE (:2394-2396): restores PP of all moves to max (VARIOUS_RESTORE_PP).
+ *    - dmgtomaxattackerhp + datahpupdate (:2402-2405): heals to full max HP.
+ *    - clearstatus (:2406): clears status1.
+ *    - switchineffects (:2412): runs entry hazards and switch-in abilities.
+ * 5. In ER's C engine, there is no side wish flag; the replacement is switched in and healed immediately.
+ */
+export function handleHealingWish(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp, applyDamage } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER (:2366)
+  if (!canBattlerSwitch(state, battlerId)) {
+    // BattleScript_ButItFailedAtkStringPpReduce (:2366)
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { missed: true })
+  }
+
+  // 2. attackstring + ppreduce (:2367-2368)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 3. User faints: instanthpdrop + setatkhptozero + tryfaintmon (:2371-2373)
+  const userHp = battler.mon.hp
+  const fainted: number[] = []
+  applyDamage(state, battlerId, userHp, fainted)
+
+  // 4. scheduleswitch BS_ATTACKER, BattleScript_HealingWishSwitch (:2374)
+  const isLunarDance = moveId === 'MOVE_LUNAR_DANCE'
+  const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+    ignoreEscapePrevention: true,
+    healingWish: true,
+    lunarDance: isLunarDance,
+  })
+  unmodelled.push(...switchUnmodelled)
+
+  return outcome(ctx, { fainted, attackerDamage: userHp, missed: false })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
+  EFFECT_SWITCH_ARGUMENT: handleSwitchArgument,
+  EFFECT_PARTING_SHOT: handlePartingShot,
+  EFFECT_ROAR: handleRoar,
+  EFFECT_REVIVAL_BLESSING: handleRevivalBlessing,
+  EFFECT_HEALING_WISH: handleHealingWish,
   EFFECT_SPITE: handleSpite,
   EFFECT_GRUDGE: handleGrudge,
   EFFECT_IMPRISON: handleImprison,

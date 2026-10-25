@@ -107,7 +107,7 @@ export interface ReplacementDeps {
 
 /** Any OTHER party slot on this battler's side that is alive and not an empty
  * slot -- the condition `applyEndOfTurnReplacements` gates a replacement on. */
-function hasLiveReserve(state: BattleState, battlerId: number): boolean {
+export function hasLiveReserve(state: BattleState, battlerId: number): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return false
   const party = state.sides[battlerId & 1].party
