@@ -25,7 +25,7 @@
 // 14   | MOVEEND_ITEM_EFFECTS_ALL        | 4666-4671  | Gapped (cond.) | Item effects for all battlers (pinch berries etc.).
 // 15   | MOVEEND_KINGSROCK               | 4672-4676  | Ported / Gap   | Ported: King's Rock / Razor Fang flinch (battle_util.c:6034-6052). Blunder Policy (:6053-6061) gapped; multi-hit moves gapped.
 // 16   | MOVEEND_SUBSTITUTE              | 4714-4722  | Ported         | Clears STATUS2_SUBSTITUTE and sets substituteDestroyedThisTurn if substituteHp is 0.
-// 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | attacker.lastMove = moveId (the only field existing in state.ts).
+// 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | Updates lastMove, lastResultingMove, lastPrintedMove, lastUsedMove, lastHitBy, lastLandedMove, lastHitByType (:4735-4772).
 // 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Unreachable    | Mirror move tracking; not modeled in BattlerState.
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
 // 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (:4268-4288), Thief (:4579-4593), Bug Bite (:4595-4597, EatTargetBerry :13221) minus the berry's own effect (gapped), Smack Down (:4598-4606).
@@ -48,6 +48,7 @@ import {
   ENUM_WEATHER_SANDSTORM,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  MOVE_UNSET,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_TOXIC_SPIKES,
@@ -2999,7 +3000,30 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   // Case 17: MOVEEND_UPDATE_LAST_MOVES (:4723-4772)
   if (attacker) {
+    attacker.lastPrintedMove = moveId
+  }
+  state.lastUsedMove = moveId
+
+  const isBatonPassOrHealingWish =
+    moveData?.effect === 'EFFECT_BATON_PASS' || moveData?.effect === 'EFFECT_HEALING_WISH'
+
+  if (attacker && !isBatonPassOrHealingWish && !hasFlag(state.absentBattlerFlags, 1 << attackerId)) {
     attacker.lastMove = moveId
+    attacker.lastResultingMove = moveId
+
+    if (target && isBattlerAlive(state, targetId) && !fainted.includes(targetId)) {
+      target.lastHitBy = attackerId
+    }
+
+    if (target) {
+      if (hpDealt > 0 || targetDamage > 0 || targetTurnDamaged) {
+        target.lastLandedMove = moveId
+        const moveType = (moveData?.type ?? 'TYPE_NORMAL').replace(/^TYPE_/, '')
+        target.lastHitByType = moveType
+      } else {
+        target.lastLandedMove = MOVE_UNSET
+      }
+    }
   }
 
   // Case 18: MOVEEND_MIRROR_MOVE (:4773-4781)

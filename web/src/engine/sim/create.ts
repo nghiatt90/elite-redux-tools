@@ -33,7 +33,7 @@ import type {
   VolatileState,
 } from './state'
 import { ABILITY_SLOT_COUNT, MOVE_HISTORY_COUNT, SWITCH_IN_ABILITY_DONE_COUNT, defaultStatStages } from './state'
-import { MAX_BATTLERS_COUNT, NUM_BATTLE_STATS, PARTY_SIZE, STAT_STAGE_CHECK_NOT_NEEDED, WEATHER_NONE } from './constants'
+import { BATTLER_NONE, MAX_BATTLERS_COUNT, NUM_BATTLE_STATS, PARTY_SIZE, STAT_STAGE_CHECK_NOT_NEEDED, WEATHER_NONE } from './constants'
 
 function nullSlot4(): Slot4<string | null> {
   return [null, null, null, null]
@@ -372,6 +372,11 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     turn: createTurnState(),
     partyIndex,
     lastMove: null,
+    lastResultingMove: null,
+    lastLandedMove: null,
+    lastHitByType: null,
+    lastHitBy: BATTLER_NONE,
+    lastPrintedMove: null,
     // PARTY_SIZE (6) is the game's "no pending switch" sentinel for BOTH arrays,
     // not 0 and not 0xFF: battle_main.c:3522 fills monToSwitchIntoId with
     // PARTY_SIZE across all MAX_BATTLERS_COUNT slots and :2710 does the same for
@@ -448,5 +453,6 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     rng: options.rng,
     statStageCheckState: STAT_STAGE_CHECK_NOT_NEEDED,
     statChangesToCheck: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<number>(NUM_BATTLE_STATS - 1).fill(0)),
+    lastUsedMove: null,
   }
 }

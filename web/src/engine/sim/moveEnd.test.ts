@@ -26,6 +26,7 @@ import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
+  BATTLER_NONE,
   DEFAULT_STAT_STAGE,
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
@@ -702,6 +703,27 @@ describe('State Bookkeeping & Clear Bits', () => {
     executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
 
     expect(state.battlers[0]!.lastMove).toBe('MOVE_TACKLE')
+  })
+
+  it('MOVEEND_UPDATE_LAST_MOVES (17): hit updates attacker lastMove/lastResultingMove/lastPrintedMove, global lastUsedMove, target lastHitBy/lastLandedMove/lastHitByType', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
+    expect(state.battlers[0]!.lastMove).toBeNull()
+    expect(state.battlers[0]!.lastResultingMove).toBeNull()
+    expect(state.battlers[0]!.lastPrintedMove).toBeNull()
+    expect(state.battlers[1]!.lastHitBy).toBe(BATTLER_NONE)
+    expect(state.battlers[1]!.lastLandedMove).toBeNull()
+    expect(state.battlers[1]!.lastHitByType).toBeNull()
+    expect(state.lastUsedMove).toBeNull()
+
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[0]!.lastMove).toBe('MOVE_TACKLE')
+    expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TACKLE')
+    expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_TACKLE')
+    expect(state.battlers[1]!.lastHitBy).toBe(0)
+    expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
+    expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
+    expect(state.lastUsedMove).toBe('MOVE_TACKLE')
   })
 
   it('MOVEEND_CHARGE (24): clears STATUS3_CHARGED_UP on Electric damaging move', () => {

@@ -5,12 +5,13 @@
 // deduct PP after attackcanceler, and apply stat changes/HP modifications directly.
 
 import type { BattleState, BattlerState } from './state'
-import type { ChosenAction, TurnOrder } from './turnOrder'
+import type { ChosenAction, TurnOrder, TurnOrderMoveView } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { buildAccuracyInputs, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
 import { hasLiveReserve } from './switchIn'
 import {
+  BATTLER_NONE,
   BATTLE_TYPE_ARENA,
   B_SIDE_PLAYER,
   DEFAULT_STAT_STAGE,
@@ -21,6 +22,7 @@ import {
   ENUM_WEATHER_SUN,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  MOVE_UNSET,
   NUM_BATTLE_STATS,
   PARTY_SIZE,
   RESOURCE_FLAG_ROOST,
@@ -69,6 +71,7 @@ import {
   STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS2_TRANSFORMED,
   STATUS2_WRAPPED,
   STATUS3_ALWAYS_HITS,
   STATUS3_ALWAYS_HITS_TURN,
@@ -195,7 +198,7 @@ import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
-import type { SimDataContext } from './dataContext'
+import type { SimDataContext, SimMoveData } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import type { StatusCheck } from './statusEffects'
 import {
@@ -247,6 +250,9 @@ import {
   isRolePlayBannedAbilityAtk,
   isWorrySeedBannedAbility,
 } from './ai/aiAbilityHelpers'
+import { uq } from '../fixed'
+import { getTypeModifier, type TypeModifierInputs } from '../typeEffectiveness'
+import { TYPE_NAME_BY_ID } from './hazards'
 
 export interface MoveEffectContext {
   state: BattleState
@@ -6135,6 +6141,365 @@ export function handleReflectType(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { targetId, missed: false })
 }
 
+function isTwoTurnsMoveEffect(effect: string | null | undefined): boolean {
+  return (
+    effect === 'EFFECT_SKULL_BASH' ||
+    effect === 'EFFECT_TWO_TURNS_ATTACK' ||
+    effect === 'EFFECT_SOLARBEAM' ||
+    effect === 'EFFECT_SEMI_INVULNERABLE' ||
+    effect === 'EFFECT_BIDE'
+  )
+}
+
+function makeTurnOrderMoveView(id: string, data: SimMoveData | undefined): TurnOrderMoveView {
+  return {
+    id,
+    priority: data?.priority ?? 0,
+    effect: data?.effect ?? null,
+    isStatus: data?.split === 'STATUS',
+    resolvedType: data?.type ?? 'NORMAL',
+    power: data?.power ?? 0,
+    flags: data?.flags ?? {},
+    split: data?.split ?? 'STATUS',
+    hasStrongJawBoostFlag: false,
+    isKeenEdge: false,
+    naturalGiftPriority: 0,
+    isGrassyTerrainAffected: false,
+    myceliumMightAffected: false,
+  }
+}
+
+/**
+ * EFFECT_CONVERSION_2 (Conversion 2)
+ * BattleScript_EffectConversion2 (data/battle_scripts_1.s:4728-4737),
+ * Cmd_settypetorandomresistance (src/battle_script_commands.c:10788-10825).
+ */
+export function handleConversion2(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const battler = state.battlers[battlerId]!
+
+  // 1. ppreduce (:4731)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. settypetorandomresistance BattleScript_EffectConversionFailed (:10788-10825)
+  let typeChanged = false
+  const lastLanded = battler.lastLandedMove
+  const hitByBattler = battler.lastHitBy !== BATTLER_NONE && battler.lastHitBy !== null ? state.battlers[battler.lastHitBy] : null
+  const isTwoTurns = lastLanded && isTwoTurnsMoveEffect(deps.dataContext.move(lastLanded)?.effect)
+  const isCharging = hitByBattler && hasFlag(hitByBattler.mon.status2, STATUS2_MULTIPLETURNS)
+
+  if (lastLanded && lastLanded !== MOVE_UNSET && !(isTwoTurns && isCharging)) {
+    if (!deps.hazardTypes) {
+      unmodelled.push(
+        `battler ${battlerId}: Conversion 2 (battle_script_commands.c:10798-10806) is not applied -- no hazardTypes (type chart) was supplied in deps`,
+      )
+    } else {
+      const hitByType = battler.lastHitByType ?? 'NORMAL'
+      const inputs: TypeModifierInputs = {
+        isInverseRoomActive: !deps.grounding.isCluelessOnField && hasFlag(state.field.statuses, STATUS_FIELD_INVERSE_ROOM),
+        isInverseBattleFlagSet: deps.hazardTypes.inverseBattle,
+        attackerHasMiracleEye: hasFlag(battler.statuses3, STATUS3_MIRACLE_EYED),
+        defenderHasMiracleEye: false,
+      }
+
+      let resistTypes = 0
+      for (let i = 0; i < TYPE_NAME_BY_ID.length; i++) {
+        const defType = TYPE_NAME_BY_ID[i]
+        const mod = getTypeModifier(hitByType, defType, deps.hazardTypes.typeChart, deps.hazardTypes.inverseTypeChart, inputs)
+        if (mod === 0 || mod === uq(0.5)) {
+          resistTypes |= (1 << i)
+        }
+      }
+
+      while (resistTypes !== 0) {
+        const i = state.rng.random16() % TYPE_NAME_BY_ID.length
+        if ((resistTypes & (1 << i)) !== 0) {
+          const typeName = TYPE_NAME_BY_ID[i]
+          if (battler.mon.types.includes(typeName)) {
+            resistTypes &= ~(1 << i)
+          } else {
+            battler.mon.types = [typeName, typeName, 'MYSTERY']
+            typeChanged = true
+            break
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Both paths reach BattleScript_EffectConversionBoost (:4737 -> :3850-3868).
+  // Kept quirk: tests STAT_ATK, not STAT_SPATK, before raising SpAtk and Speed.
+  const statChanges: StatChangeOutcome[] = []
+  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+  const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+
+  let statBoostFailed = false
+  if (atkStage < MAX_STAT_STAGE || speStage < MAX_STAT_STAGE) {
+    const r1 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPATK,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPATK, change: r1.delta })
+
+    const r2 = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      1,
+      STAT_SPEED,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+      true,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPEED, change: r2.delta })
+  } else {
+    statBoostFailed = true
+  }
+
+  if (!typeChanged && statBoostFailed) {
+    return outcome(ctx, { missed: true })
+  }
+
+  return outcome(ctx, { statChanges, missed: false })
+}
+
+const COPYCAT_BANNED_EFFECTS = new Set([
+  'EFFECT_PLACEHOLDER',
+  'EFFECT_PROTECT',
+  'EFFECT_DO_NOTHING',
+  'EFFECT_HIT_SWITCH_TARGET',
+  'EFFECT_ROAR',
+  'EFFECT_FOLLOW_ME',
+  'EFFECT_TRICK',
+])
+
+/**
+ * EFFECT_COPYCAT (Copycat)
+ * BattleScript_EffectCopycat (data/battle_scripts_1.s:1594-1605),
+ * VARIOUS_TRY_COPYCAT (src/battle_script_commands.c:7541-7562).
+ */
+export function handleCopycat(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  const calledMove = state.lastUsedMove
+  const calledData = calledMove && calledMove !== MOVE_UNSET ? deps.dataContext.move(calledMove) : null
+  const isBannedEffect = calledData?.effect ? COPYCAT_BANNED_EFFECTS.has(calledData.effect) : false
+  const isBannedFlag = calledData?.flags?.copycatBanned === true
+
+  if (!calledMove || calledMove === MOVE_UNSET || isBannedEffect || isBannedFlag) {
+    // Failing trycopycat still reduces PP in C (:1603)
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Copycat succeeds: deduct PP for Copycat
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${calledMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(calledData?.effect ?? null)
+  if (handler) {
+    const calledView = makeTurnOrderMoveView(calledMove, calledData ?? undefined)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: targetId,
+    }
+    return handler({
+      ...ctx,
+      action: calledAction,
+      deductPp: () => {},
+    })
+  }
+
+  unmodelled.push(`called move effect ${calledData?.effect} for ${calledMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+const INSTRUCT_FORBIDDEN_EFFECTS = new Set([
+  'EFFECT_ASSIST',
+  'EFFECT_BELCH',
+  'EFFECT_BIDE',
+  'EFFECT_COPYCAT',
+  'EFFECT_FOCUS_PUNCH',
+  'EFFECT_GEOMANCY',
+  'EFFECT_INSTRUCT',
+  'EFFECT_ME_FIRST',
+  'EFFECT_METRONOME',
+  'EFFECT_MIMIC',
+  'EFFECT_MIRROR_MOVE',
+  'EFFECT_NATURE_POWER',
+  'EFFECT_RAMPAGE',
+  'EFFECT_RECHARGE',
+  'EFFECT_RECOIL_25',
+  'EFFECT_ROLLOUT',
+  'EFFECT_SEMI_INVULNERABLE',
+  'EFFECT_SKETCH',
+  'EFFECT_SKULL_BASH',
+  'EFFECT_SLEEP_TALK',
+  'EFFECT_SOLARBEAM',
+  'EFFECT_TRANSFORM',
+  'EFFECT_TWO_TURNS_ATTACK',
+  'EFFECT_UPROAR',
+])
+
+/**
+ * EFFECT_INSTRUCT (Instruct)
+ * BattleScript_EffectInstruct (data/battle_scripts_1.s:1606-1615),
+ * VARIOUS_TRY_INSTRUCT (src/battle_script_commands.c:7563-7589).
+ */
+export function handleInstruct(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // ppreduce runs before tryinstruct in C (:1609)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const target = state.battlers[targetId]!
+  const instructedMove = target.lastMove
+  if (!instructedMove || instructedMove === MOVE_UNSET) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const instructedData = deps.dataContext.move(instructedMove)
+  if (
+    (instructedData?.effect && INSTRUCT_FORBIDDEN_EFFECTS.has(instructedData.effect)) ||
+    instructedMove === 'MOVE_STRUGGLE' ||
+    instructedMove === 'MOVE_KINGS_SHIELD'
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Must still be in target's moves with PP > 0 (:7578)
+  const moveSlot = target.mon.moves.indexOf(instructedMove)
+  if (moveSlot === -1 || (target.mon.pp[moveSlot] ?? 0) <= 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Target executes instructedMove
+  const isDamaging = (instructedData?.power ?? 0) > 0 || instructedData?.split === 'PHYSICAL' || instructedData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${instructedMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(instructedData?.effect ?? null)
+  if (handler) {
+    const isTargetUser = instructedData?.target === 'USER' || instructedData?.target === 'USERS_FIELD'
+    const instructedTargetId = isTargetUser ? targetId : battlerId
+    const instructedView = makeTurnOrderMoveView(instructedMove, instructedData ?? undefined)
+    const instructedAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: instructedView,
+      chosenMove: instructedView,
+      target: instructedTargetId,
+    }
+    // The instructed move runs as the target, but the outcome belongs to the Instruct user's action.
+    const instructed = handler({
+      ...ctx,
+      battlerId: targetId,
+      targetId: instructedTargetId,
+      action: instructedAction,
+      deductPp: () => {},
+    })
+    return { ...instructed, battlerId: ctx.battlerId, turnOrderIndex: ctx.turnOrderIndex }
+  }
+
+  unmodelled.push(`called move effect ${instructedData?.effect} for ${instructedMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_MIMIC (Mimic)
+ * BattleScript_EffectMimic (data/battle_scripts_1.s:4555-4566),
+ * Cmd_mimicattackcopy (src/battle_script_commands.c:10557-10584).
+ */
+export function handleMimic(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const attacker = state.battlers[battlerId]!
+
+  // 1. ppreduce (:4558)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const target = state.battlers[targetId]!
+
+  // 2. jumpifsubstituteblocks BattleScript_ButItFailed (:4559)
+  if (hasFlag(target.mon.status2, STATUS2_SUBSTITUTE)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:4560)
+  if (checkAccuracy(ctx, targetId, moveId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. mimicattackcopy BattleScript_ButItFailed (:10557-10584)
+  const targetLastMove = target.lastMove
+  if (!targetLastMove || targetLastMove === MOVE_UNSET) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const targetMoveData = deps.dataContext.move(targetLastMove)
+  if (targetMoveData?.flags?.mimicBanned === true) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  if (hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  if (attacker.mon.moves.includes(targetLastMove)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Slot of MOVE_MIMIC in attacker's moves
+  const slot = attacker.mon.moves.indexOf('MOVE_MIMIC')
+  if (slot === -1 || slot >= 4) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Rewrite slot
+  attacker.mon.moves[slot] = targetLastMove
+
+  // PP rule: if (gBattleMoves[gLastMoves[target]].pp < 5) pp = maxPP; else pp = 5;
+  const maxPp = targetMoveData?.pp ?? 5
+  attacker.mon.pp[slot] = Math.min(5, maxPp)
+
+  attacker.volatiles.mimickedMoves |= (1 << slot)
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
 /**
  * EFFECT_LUCKY_CHANT (Lucky Chant)
  * BattleScript_EffectLuckyChant (data/battle_scripts_1.s:2342-2351),
@@ -9759,7 +10124,11 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_SOAK: handleSoak,
   EFFECT_THIRD_TYPE: handleThirdType,
   EFFECT_CONVERSION: handleConversion,
+  EFFECT_CONVERSION_2: handleConversion2,
   EFFECT_REFLECT_TYPE: handleReflectType,
+  EFFECT_COPYCAT: handleCopycat,
+  EFFECT_INSTRUCT: handleInstruct,
+  EFFECT_MIMIC: handleMimic,
 
   EFFECT_LUCKY_CHANT: handleLuckyChant,
   EFFECT_QUICK_GUARD: handleQuickGuard,

@@ -145,6 +145,7 @@ import { getBattlerAbilitySlotsReverse, runMoveEnd } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import {
   BATTLE_TYPE_ARENA,
+  MOVE_UNSET,
   clearFlag,
   hasFlag,
   PARTY_SIZE,
@@ -1603,7 +1604,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
           // BattleScript_MagicCoatBouncePrankster (:8335-8344)
           if (state.battlers[battlerId]) {
             state.battlers[battlerId]!.lastMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
           }
+          state.lastUsedMove = action.chosenMove.id
           outcomes.push({
             turnOrderIndex: index,
             battlerId,
@@ -1653,7 +1657,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
           }
           if (state.battlers[battlerId]) {
             state.battlers[battlerId]!.lastMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+            state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
           }
+          state.lastUsedMove = action.chosenMove.id
           outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
           continue
         } else {
@@ -1722,7 +1729,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         }
         if (state.battlers[battlerId]) {
           state.battlers[battlerId]!.lastMove = action.chosenMove.id
+          state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+          state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
         }
+        state.lastUsedMove = action.chosenMove.id
         outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
         continue
       } else {
@@ -1786,7 +1796,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       }
       if (state.battlers[battlerId]) {
         state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
       }
+      state.lastUsedMove = action.chosenMove.id
       outcomes.push(effectOutcome)
       continue
     }
@@ -1815,9 +1828,16 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       cancelMultiTurnMoves(state.battlers[battlerId]!)
       deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
+      if (state.battlers[targetId]) {
+        state.battlers[targetId]!.lastLandedMove = null
+        state.battlers[targetId]!.lastHitByType = null
+      }
       if (state.battlers[battlerId]) {
         state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
       }
+      state.lastUsedMove = action.chosenMove.id
       outcomes.push({
         turnOrderIndex: index,
         battlerId,
@@ -1866,6 +1886,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, targetId, action.chosenMove.id, deps, unmodelled)
       if (state.battlers[battlerId]) {
         state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
+      }
+      state.lastUsedMove = action.chosenMove.id
+      if (targetId !== null && state.battlers[targetId] && isBattlerAlive(state, targetId)) {
+        state.battlers[targetId]!.lastHitBy = battlerId
+        state.battlers[targetId]!.lastLandedMove = MOVE_UNSET
       }
       outcomes.push({
         turnOrderIndex: index,
@@ -1890,6 +1917,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, targetId, action, { targetHasActedThisTurn })
 
     if (absorbingAbility) {
+      if (state.battlers[targetId]) {
+        state.battlers[targetId]!.lastLandedMove = null
+        state.battlers[targetId]!.lastHitByType = null
+      }
       const absorbOutcome = applyAbsorbEffect({
         state,
         attackerId: battlerId,
@@ -1922,7 +1953,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
       if (state.battlers[battlerId]) {
         state.battlers[battlerId]!.lastMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastResultingMove = action.chosenMove.id
+        state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
       }
+      state.lastUsedMove = action.chosenMove.id
 
       outcomes.push({
         turnOrderIndex: index,

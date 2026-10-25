@@ -76,7 +76,7 @@ export interface HazardDeps {
 
 /** gSideTimers.stealthRockType is a TYPE_* number (include/constants/pokemon.h);
  * this is the reverse of moveEffects.ts's TYPE_NAME_TO_ID, indexed by that number. */
-const TYPE_NAME_BY_ID = [
+export const TYPE_NAME_BY_ID = [
   'NORMAL', 'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'MYSTERY',
   'FIRE', 'WATER', 'GRASS', 'ELECTRIC', 'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY', 'STELLAR',
 ] as const

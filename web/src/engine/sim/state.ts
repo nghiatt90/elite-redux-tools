@@ -321,9 +321,19 @@ export interface BattlerState {
    * slot this battler is. ShouldSwitch skips it when counting reserves
    * (battle_ai_switch_items.c:658-661). */
   partyIndex: number
-  /** `gLastMoves[MAX_BATTLERS_COUNT]` (battle.h:988). Piece 8 of the research
-   * note's list, alongside BattleHistory.usedMoves. */
+  /** `gLastMoves[MAX_BATTLERS_COUNT]` (include/battle.h:988, battle_script_commands.c:4750,4754).
+   * Piece 8 of the research note's list, alongside BattleHistory.usedMoves. */
   lastMove: string | null
+  /** `gLastResultingMoves[MAX_BATTLERS_COUNT]` (include/battle.h:991, battle_script_commands.c:4751,4755). */
+  lastResultingMove: string | null
+  /** `gLastLandedMoves[MAX_BATTLERS_COUNT]` (include/battle.h:989, battle_script_commands.c:4764,4768). */
+  lastLandedMove: string | null
+  /** `gLastHitByType[MAX_BATTLERS_COUNT]` (include/battle.h:990, battle_script_commands.c:4765). */
+  lastHitByType: string | null
+  /** `gLastHitBy[MAX_BATTLERS_COUNT]` (include/battle.h:994, battle_script_commands.c:4758). 0xFF when unset. */
+  lastHitBy: number
+  /** `gLastPrintedMoves[MAX_BATTLERS_COUNT]` (include/battle.h:987, battle_script_commands.c:4742). */
+  lastPrintedMove: string | null
   /** `gBattleStruct->monToSwitchIntoId[MAX_BATTLERS_COUNT]` (battle.h:622) --
    * the party slot a pending switch will bring in. PARTY_SIZE (6) means "none
    * pending": battle_main.c:3522 initialises every entry to it and
@@ -639,6 +649,8 @@ export interface BattleState {
   /** `s8 statChangesToCheck[MAX_BATTLERS_COUNT][NUM_BATTLE_STATS - 1]` (include/battle.h:727).
    * Tracks net stat changes per battler for STAT_ATK..STAT_EVASION (indexed by statId - 1). */
   statChangesToCheck: number[][]
+  /** `gLastUsedMove` (include/battle.h:993, battle_script_commands.c:4743) -- global last move used across all battlers. */
+  lastUsedMove: string | null
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

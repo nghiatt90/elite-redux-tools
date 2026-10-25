@@ -23,7 +23,9 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
+import type { TypeChart } from '../typeEffectiveness'
 import {
+  BATTLER_NONE,
   BATTLE_TYPE_ARENA,
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
@@ -132,6 +134,8 @@ const abilityIds = new Set(snapshot<Array<{ id: string }>>('abilities.json').map
 const rawItems = snapshot<Array<SimItemData>>('items.json')
 const itemsById = new Map(rawItems.map((item) => [item.id, item]))
 const rawAbilityHooks = snapshot<Record<string, { hooks?: Record<string, unknown> }>>('abilityHooks.json')
+const typeChart = snapshot<TypeChart>('types.json')
+const inverseTypeChart = snapshot<TypeChart>('typesInverse.json')
 
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
@@ -271,6 +275,10 @@ const MOVE_FORESTS_CURSE = requireMove('MOVE_FORESTS_CURSE')
 const MOVE_TRICK_OR_TREAT = requireMove('MOVE_TRICK_OR_TREAT')
 const MOVE_INCITE = requireMove('MOVE_INCITE')
 const MOVE_CONVERSION = requireMove('MOVE_CONVERSION')
+const MOVE_CONVERSION_2 = requireMove('MOVE_CONVERSION_2')
+const MOVE_COPYCAT = requireMove('MOVE_COPYCAT')
+const MOVE_INSTRUCT = requireMove('MOVE_INSTRUCT')
+const MOVE_MIMIC = requireMove('MOVE_MIMIC')
 const MOVE_REFLECT_TYPE = requireMove('MOVE_REFLECT_TYPE')
 const MOVE_LUCKY_CHANT = requireMove('MOVE_LUCKY_CHANT')
 const MOVE_QUICK_GUARD = requireMove('MOVE_QUICK_GUARD')
@@ -551,7 +559,15 @@ function replacementDeps(chosenIndex: number): ReplacementDeps & { calls: { batt
 
 function testDeps(damage: DamageResolver = dummyDamage(), replacement?: ReplacementDeps): TurnLoopDeps {
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
-  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT, replacement }
+  return {
+    turnOrder: rest,
+    grounding: GROUNDING,
+    damage,
+    statStageRatios: RATIOS,
+    dataContext: DATA_CONTEXT,
+    replacement,
+    hazardTypes: { typeChart, inverseTypeChart, inverseBattle: false },
+  }
 }
 
 describe('Move effect dispatch: 18 self stat-raise moves', () => {
@@ -9475,6 +9491,193 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(state.battlers[0]!.mon.pp[0]).toBe(9)
           })
         })
+      })
+    })
+  })
+
+  describe('Cycle 68 moves: Conversion 2, Mirror Move, Copycat, Instruct, Mimic', () => {
+    describe('EFFECT_CONVERSION_2 (MOVE_CONVERSION_2)', () => {
+      it('success: picks a type resisting target lastHitByType and boosts SpAtk +1 and Speed +1 (src/battle_script_commands.c:10788-10825, data/battle_scripts_1.s:4728-4737)', () => {
+        // RNG returns 5, which corresponds to index 5 ('ROCK' in TYPE_NAME_BY_ID).
+        // ROCK resists FIRE (mod = 0.5 <= 0.5), so ROCK is picked.
+        const rng = scriptedRng([5])
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_CONVERSION_2', null, null, null], pp: [20, 0, 0, 0], types: ['NORMAL', 'NORMAL', 'MYSTERY'] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Battler 0 was hit by Ember (FIRE) by battler 1
+        state.battlers[0]!.lastLandedMove = 'MOVE_EMBER'
+        state.battlers[0]!.lastHitBy = 1
+        state.battlers[0]!.lastHitByType = 'FIRE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_CONVERSION_2), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Types changed to ROCK
+        expect(state.battlers[0]!.mon.types).toEqual(['ROCK', 'ROCK', 'MYSTERY'])
+        // SpAtk and Speed raised +1
+        expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+        // PP consumed: 20 -> 19
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+
+      it('failure: fails when battler has no lastLandedMove and stat boost cannot apply (battle_script_commands.c:10793, 3850-3868)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_CONVERSION_2', null, null, null], pp: [20, 0, 0, 0], types: ['NORMAL', 'NORMAL', 'MYSTERY'] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[0]!.lastLandedMove = null
+        state.battlers[0]!.lastHitBy = BATTLER_NONE
+        // Max out Atk and Speed stages so BattleScript_EffectConversionBoost also fails
+        state.battlers[0]!.mon.statStages[STAT_ATK] = MAX_STAT_STAGE
+        state.battlers[0]!.mon.statStages[STAT_SPEED] = MAX_STAT_STAGE
+
+        const out = executeTurn(state, [useMove(1, MOVE_CONVERSION_2), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.types).toEqual(['NORMAL', 'NORMAL', 'MYSTERY'])
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+    })
+
+
+    describe('EFFECT_COPYCAT (MOVE_COPYCAT)', () => {
+      it('success: calls the global lastUsedMove and applies its effect (src/battle_script_commands.c:7541-7562, data/battle_scripts_1.s:1594-1605)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_COPYCAT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Global lastUsedMove was Swords Dance
+        state.lastUsedMove = 'MOVE_SWORDS_DANCE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_COPYCAT), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Swords Dance raised user's Atk by +2
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+
+      it('failure: fails when lastUsedMove is unset or a banned move (battle_script_commands.c:7546-7555)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_COPYCAT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Global lastUsedMove is unset
+        state.lastUsedMove = null
+
+        const out = executeTurn(state, [useMove(1, MOVE_COPYCAT), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+    })
+
+    describe('EFFECT_INSTRUCT (MOVE_INSTRUCT)', () => {
+      it('success: causes target to re-execute its lastMove (src/battle_script_commands.c:7563-7589, data/battle_scripts_1.s:1606-1615)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_INSTRUCT', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [20, 0, 0, 0] },
+          ],
+          rng,
+        )
+        // Target's last move was Swords Dance
+        state.battlers[1]!.lastMove = 'MOVE_SWORDS_DANCE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_INSTRUCT), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Target re-executed Swords Dance, boosting its Atk by +2
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+        // Instruct PP consumed: 15 -> 14
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+      })
+
+      it('failure: fails when target has no lastMove or PP is 0 (battle_script_commands.c:7570, 7578)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_INSTRUCT', null, null, null], pp: [15, 0, 0, 0] },
+            { spe: 50, moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [0, 0, 0, 0] },
+          ],
+          rng,
+        )
+        // Target has lastMove Swords Dance, but PP is 0
+        state.battlers[1]!.lastMove = 'MOVE_SWORDS_DANCE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_INSTRUCT), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(14)
+      })
+    })
+
+    describe('EFFECT_MIMIC (MOVE_MIMIC)', () => {
+      it('success: copies target lastMove into Mimic slot with min(5, maxPP) (src/battle_script_commands.c:10557-10584, data/battle_scripts_1.s:4555-4566)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIMIC', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Target's last move was Ember (max PP 20)
+        state.battlers[1]!.lastMove = 'MOVE_EMBER'
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIMIC), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Mimic slot replaced with MOVE_EMBER, PP set to 5
+        expect(state.battlers[0]!.mon.moves[0]).toBe('MOVE_EMBER')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(5)
+        expect((state.battlers[0]!.volatiles.mimickedMoves & 1) !== 0).toBe(true)
+      })
+
+      it('failure: fails when target lastMove is mimicBanned (e.g. Mimic itself) (battle_script_commands.c:10558)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIMIC', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Target's last move is MOVE_MIMIC
+        state.battlers[1]!.lastMove = 'MOVE_MIMIC'
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIMIC), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.moves[0]).toBe('MOVE_MIMIC')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
       })
     })
   })

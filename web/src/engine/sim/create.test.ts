@@ -14,6 +14,7 @@ import { createRandomSource } from './rng'
 import type { SimBattleMon, SimPartyMon } from './state'
 import { ABILITY_SLOT_COUNT, SWITCH_IN_ABILITY_DONE_COUNT, defaultStatStages } from './state'
 import {
+  BATTLER_NONE,
   DEFAULT_STAT_STAGE,
   MAX_BATTLERS_COUNT,
   NUM_BATTLE_STATS,
@@ -201,6 +202,11 @@ describe('createBattlerState', () => {
     expect(b.statuses3).toBe(0)
     expect(b.statuses4).toBe(0)
     expect(b.lastMove).toBeNull()
+    expect(b.lastResultingMove).toBeNull()
+    expect(b.lastLandedMove).toBeNull()
+    expect(b.lastHitByType).toBeNull()
+    expect(b.lastHitBy).toBe(BATTLER_NONE)
+    expect(b.lastPrintedMove).toBeNull()
   })
 
   it('keeps status1 from the mon, since it survives a switch', () => {
@@ -265,6 +271,7 @@ describe('createBattleState', () => {
     expect(state.statStageCheckState).toBe(STAT_STAGE_CHECK_NOT_NEEDED)
     expect(state.statChangesToCheck).toHaveLength(MAX_BATTLERS_COUNT)
     expect(state.statChangesToCheck[0]).toHaveLength(NUM_BATTLE_STATS - 1)
+    expect(state.lastUsedMove).toBeNull()
   })
 
   it('gives the two sides separate side state', () => {

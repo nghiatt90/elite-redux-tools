@@ -84,6 +84,11 @@ export const B_ACTION_SWITCH = 2
 /** include/battle.h:45 */
 export const B_ACTION_NONE = 0xff
 
+/** String stand-in for the C's `0xFFFF` unset-move sentinel (kept a string so move-id typed consumers are unaffected); `null` is the C's 0 (MOVE_NONE) (include/constants/battle.h, battle_script_commands.c). */
+export const MOVE_UNSET = 'MOVE_UNSET'
+/** `0xFF` sentinel for unset battler in gLastHitBy (include/battle.h:994, battle_main.c:2905). */
+export const BATTLER_NONE = 0xff
+
 // ---------------------------------------------------------------------------
 // Bitfield helpers
 //
