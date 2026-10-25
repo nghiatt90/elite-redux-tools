@@ -56,7 +56,7 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
-import { B_SIDE_PLAYER } from './constants'
+import { B_SIDE_PLAYER, clearFlag } from './constants'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
@@ -199,6 +199,8 @@ export function switchIn(
   const newBattler = createBattlerState(battlerId, mon, partyIndex)
   state.battlers[battlerId] = newBattler
   clearBattlerLastTakenMove(state, battlerId)
+  // SwitchInClearSetData, battle_main.c:2914: gBattleStruct->lastMoveFailed &= ~(gBitTable[gActiveBattler])
+  state.lastMoveFailed = clearFlag(state.lastMoveFailed, 1 << battlerId)
   // SwitchInClearSetData, battle_main.c:2849-2859: Remove any queued out-of-turn attacks for switching battler
   state.queuedExtraAttacks = state.queuedExtraAttacks.filter((a) => a.attacker !== battlerId)
   if (beforeEffects) beforeEffects(newBattler)

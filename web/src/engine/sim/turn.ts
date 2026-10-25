@@ -80,9 +80,11 @@
 //     :849  monToSwitchIntoId[...] = 6 -- ported as resetPendingSwitch();
 //           once chosen switches exist, a stale slot would be reused by every
 //           later GetMostSuitableMonToSwitchInto call.
-//   Its other four statements are omitted:
-//     :857  gLastLandedMoves[gBattlerAttacker] = 0
-//     :858  gLastHitByType[gBattlerAttacker] = 0
+//     :857  gLastLandedMoves[gBattlerAttacker] = 0 -- ported below (resets
+//           battler.lastLandedMove to null).
+//     :858  gLastHitByType[gBattlerAttacker] = 0 -- ported below (resets
+//           battler.lastHitByType to null).
+//   Its other two statements are omitted:
 //     :859  ClearMiscTurnFlags()
 //     :860  TryPreemptiveActions() -- a whole mechanic, with its own
 //           onPreemptAction ability hook (battle_util.c:826) and the queued
@@ -1863,6 +1865,7 @@ export function executeAction(
             chosenMoveId: bouncedChosenMoveId,
             deps,
             noEffect: Boolean(effectOutcome.missed),
+            moveFailed: Boolean(effectOutcome.missed),
             obeys: true,
             fainted: effectOutcome.fainted ?? [],
           })
@@ -1945,6 +1948,7 @@ export function executeAction(
           chosenMoveId: snatchedChosenMoveId,
           deps,
           noEffect: Boolean(effectOutcome.missed),
+            moveFailed: Boolean(effectOutcome.missed),
           obeys: true,
           fainted: effectOutcome.fainted ?? [],
         })
@@ -2052,6 +2056,7 @@ export function executeAction(
         chosenMoveId: currentChosenMoveId,
         deps,
         noEffect: Boolean(effectOutcome.missed),
+            moveFailed: Boolean(effectOutcome.missed),
         obeys: true,
         fainted: effectOutcome.fainted ?? [],
       })
@@ -2548,7 +2553,16 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // :849 -- the finished action's battler gets its pending-switch slot reset
     // to PARTY_SIZE before the re-sort; recalculateMoveOrder only touches slots
     // >= index, so [index - 1] is still that battler.
-    if (index > 0) resetPendingSwitch(state, order.battlerByTurnOrder[index - 1])
+    if (index > 0) {
+      const prevBattlerId = order.battlerByTurnOrder[index - 1]
+      resetPendingSwitch(state, prevBattlerId)
+      // :857-858 gLastLandedMoves[gBattlerAttacker] = 0; gLastHitByType[gBattlerAttacker] = 0;
+      const prevBattler = state.battlers[prevBattlerId]
+      if (prevBattler && actions[prevBattlerId]) {
+        prevBattler.lastLandedMove = null
+        prevBattler.lastHitByType = null
+      }
+    }
     // :4546 / :839 / :851 -- re-sort THIS slot before reading who is in it.
     recalculateMoveOrder(order, state, actions, index, false, ctx, deps.statStageRatios)
 
@@ -2563,7 +2577,15 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   }
   turnStructsClear(state)
   const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
-  if (lastActor !== undefined) resetPendingSwitch(state, lastActor)
+  if (lastActor !== undefined) {
+    resetPendingSwitch(state, lastActor)
+    // :857-858 gLastLandedMoves[gBattlerAttacker] = 0; gLastHitByType[gBattlerAttacker] = 0;
+    const lastBattler = state.battlers[lastActor]
+    if (lastBattler && actions[lastActor]) {
+      lastBattler.lastLandedMove = null
+      lastBattler.lastHitByType = null
+    }
+  }
 
   // BattleTurnPassed, battle_main.c:3465-3481: TurnValuesCleanUp(TRUE), then
   // DoFieldEndTurnEffects (fieldEndTurn.ts) and DoBattlerEndTurnEffects

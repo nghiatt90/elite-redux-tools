@@ -672,6 +672,8 @@ export interface BattleState {
   currentExtraAttack: ExtraAttackAction | null
   /** `struct MegaEvolutionData mega` (include/battle.h:694, :549-564). */
   mega: MegaEvolutionState
+  /** `u8 lastMoveFailed` (include/battle.h:700, battle_script_commands.c:4725,4728,4730, battle_main.c:2914). Battler bitmask (1 << battlerId). */
+  lastMoveFailed: number
 }
 
 /**

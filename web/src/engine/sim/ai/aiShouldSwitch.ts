@@ -12,20 +12,14 @@
 // batch's brief:
 //
 //   - `gLastLandedMoves[battler]` / `gLastHitBy[battler]` (the last move that
-//     landed ON this battler, and who threw it) have NO WRITER anywhere in
-//     engine/sim -- turn.ts's own header lists `gLastLandedMoves[attacker] = 0`
-//     among the HandleAction_ActionFinished statements it deliberately does NOT
-//     port. This sim can therefore only ever read them as the C's own
-//     zero-init default (MOVE_NONE / "nothing has hit this battler"), which is
-//     the true value at the start of a fresh battle but silently stays wrong
-//     for the rest of it. `findMonThatAbsorbsOpponentsMove` and
-//     `findMonWithFlagsAndSuperEffective` both gate their very first line on
-//     `gLastLandedMoves[gActiveBattler] == 0`, which is unconditionally TRUE
-//     under this gap -- both helpers always take their "nothing landed"
-//     early-return branch, and this module reports that once, by name, every
-//     time either is reached (which is every ShouldSwitch call, since every
-//     caller of `findMonWithFlagsAndSuperEffective` is on a path that always
-//     runs it).
+//     landed ON this battler, and who threw it) ARE tracked in
+//     BattlerState.lastLandedMove / lastHitBy (written in moveEnd.ts:2902,
+//     cleared on switch-in and faint, and reset on the finished actor in
+//     turn.ts:2551,2566 per battle_util.c:857-858). However, the switch
+//     helpers below (`findMonThatAbsorbsOpponentsMove` and
+//     `findMonWithFlagsAndSuperEffective`) are unmodelled and currently
+//     read as MOVE_NONE (taking their early-return branch), reporting
+//     a gap by name whenever reached.
 //   - `AI_THINKING_STRUCT->switchMon` (`ShouldSwitchIfAllBadMoves`, :49) is set
 //     only by `AI_CheckBadMove`'s own "every move deals no/little damage"
 //     branch (battle_ai_main.c:314) -- AI_CheckBadMove is `checkBadMoveStub`
@@ -141,7 +135,7 @@ function findMonThatAbsorbsOpponentsMove(state: BattleState, battlerId: number, 
     return { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled }
   }
   unmodelled.push(
-    'FindMonThatAbsorbsOpponentsMove (battle_ai_switch_items.c:147): gLastLandedMoves is not tracked by this sim (no writer anywhere in engine/sim); read as MOVE_NONE, so this always returns FALSE past the HasSuperEffectiveMoveAgainstOpponents guard',
+    'FindMonThatAbsorbsOpponentsMove (battle_ai_switch_items.c:147): gLastLandedMoves is tracked in BattlerState.lastLandedMove, but this helper is unmodelled and reads as MOVE_NONE, so this always returns FALSE past the HasSuperEffectiveMoveAgainstOpponents guard',
   )
   return { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled }
 }
@@ -154,7 +148,7 @@ function findMonWithFlagsAndSuperEffective(): { result: false; unmodelled: strin
   return {
     result: false,
     unmodelled: [
-      'FindMonWithFlagsAndSuperEffective (battle_ai_switch_items.c:414) always reads gLastLandedMoves as MOVE_NONE (not tracked by this sim; no writer anywhere in engine/sim), so it always returns FALSE at its own first line',
+      'FindMonWithFlagsAndSuperEffective (battle_ai_switch_items.c:414) reads gLastLandedMoves as MOVE_NONE (helper unmodelled), so it always returns FALSE at its own first line',
     ],
   }
 }
@@ -173,7 +167,7 @@ function shouldSwitchIfNaturalCure(state: BattleState, battlerId: number, deps: 
   if (!hasNaturalCure && !hasSelfRepair && !hasNaturalRecovery) return NOT_DECIDED
 
   const unmodelled = [
-    'ShouldSwitchIfNaturalCure (battle_ai_switch_items.c:265): gLastLandedMoves is not tracked by this sim (no writer anywhere in engine/sim); read as MOVE_NONE, matching the C at battle start but not after any move has actually landed on this battler',
+    'ShouldSwitchIfNaturalCure (battle_ai_switch_items.c:265): gLastLandedMoves is tracked in BattlerState.lastLandedMove, but this helper reads it as MOVE_NONE, matching the C at battle start but not after any move has actually landed on this battler',
   ]
 
   // :275 -- `(gLastLandedMoves == 0 || == 0xFFFF) && Random() & 1`. Under the

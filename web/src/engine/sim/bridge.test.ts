@@ -35,12 +35,14 @@ import {
   STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
   STATUS2_TRANSFORMED,
+  STATUS3_EMBARGO,
   STATUS3_MIRACLE_EYED,
   STATUS3_ON_AIR,
   STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
   STATUS_FIELD_INVERSE_ROOM,
+  STATUS_FIELD_MAGIC_ROOM,
   STATUS_FIELD_WONDER_ROOM,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_LIGHTSCREEN,
@@ -341,8 +343,6 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     'abilityOn',
     'boostedStat',
     'condition.ghastlyEcho',
-    'condition.itemNegated',
-    'condition.lastMoveFailed',
     'condition.safePassage',
     'extraStatLevel',
   ]
@@ -393,11 +393,11 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(battler.slowStartTimer).toBe(0)
   })
 
-  it('gaps the four fields with no honest source anywhere', () => {
+  it('gaps the two fields with no honest source anywhere', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const noSource = gaps.filter((g) => g.reason === 'NO_SOURCE').map((g) => g.field)
-    expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat', 'condition.lastMoveFailed', 'condition.itemNegated']))
-    expect(noSource).toHaveLength(4)
+    expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat']))
+    expect(noSource).toHaveLength(2)
   })
 
   it('derives everything available from the committed data context', () => {
@@ -605,6 +605,66 @@ describe('wasDamagedThisTurnBy is role-relative', () => {
     // opponent is still battler 1, so this holds either way here -- but the id
     // now comes from the declared roles rather than from `battlerId ^ 1`.
     expect(buildBattlerBattleState(state, 0, { attackerId: 1, defenderId: 0 }, DEPS).battler.isInfatuatedWithOpponent).toBe(true)
+  })
+
+  it('derives lastMoveFailed from the state bitmask (battle_util.c:7041)', () => {
+    const state = battle()
+    state.lastMoveFailed = 1 << 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.lastMoveFailed).toBe(true)
+    expect(buildBattlerBattleState(state, 1, ROLES, DEPS).battler.condition.lastMoveFailed).toBe(false)
+
+    state.lastMoveFailed = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.lastMoveFailed).toBe(false)
+  })
+
+  it('derives itemNegated from Embargo and Klutz, not Magic Room (battle_util.c:6520-6524)', () => {
+    const state = battle()
+    // baseline: neither is negated
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(false)
+
+    // Embargo on battler 0
+    state.battlers[0]!.statuses3 = STATUS3_EMBARGO
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(true)
+    expect(buildBattlerBattleState(state, 1, ROLES, DEPS).battler.condition.itemNegated).toBe(false)
+    state.battlers[0]!.statuses3 = 0
+
+    // Klutz on battler 0
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_KLUTZ', innates: [null, null, null] }
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(true)
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_NONE', innates: [null, null, null] }
+
+    // Magic Room is not part of IsItemNegated (battle_util.c:6520-6524)
+    state.field.statuses = STATUS_FIELD_MAGIC_ROOM
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(false)
+  })
+
+  it('derives abilityOn from Flash Fire, Slow Start, and Ambush', () => {
+    const state = battle()
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Flash Fire
+    state.battlers[0]!.volatiles.flashFire = true
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.flashFire = false
+
+    // Slow Start active when timer > 0
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_SLOW_START', innates: [null, null, null] }
+    state.battlers[0]!.volatiles.slowStartTimer = 5
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.slowStartTimer = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Ambush active on first turn
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_AMBUSH', innates: [null, null, null] }
+    state.battlers[0]!.volatiles.isFirstTurn = 2
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Neither ability present: even if isFirstTurn > 0, abilityOn is false
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_NONE', innates: [null, null, null] }
+    state.battlers[0]!.volatiles.isFirstTurn = 2
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
   })
 })
 

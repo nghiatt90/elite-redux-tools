@@ -181,7 +181,6 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
     const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
     const remainingStructuralGaps = [
-      'attackerTrepidationNonzero',
       'myceliumMightActive',
       // accuracy.ts's own unconditional gap (IsStatDropBlocked), appended after
       // accuracyBridge.ts's structural list.
@@ -193,6 +192,7 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
 
     // Pruned gaps with real writers must never be reported as unmodelled structural gaps
     const prunedFields = [
+      'attackerTrepidationNonzero',
       'attackerUsedMicleBerry',
       'attackerAccStage',
       'defenderEvasionStage',

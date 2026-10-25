@@ -8923,7 +8923,8 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(switchedIn.volatiles.perishSongTimer).toBe(2)
             expect(switchedIn.volatiles.perishSongTimerStartValue).toBe(3)
             expect(switchedIn.volatiles.dazed).toBe(1)
-            expect(switchedIn.volatiles.trepidation).toBe(1)
+            // ticks down 1 -> 0 at the end of the turn (SUBTRACT_VOLATILE_TIMER, battle_util.c:2976)
+            expect(switchedIn.volatiles.trepidation).toBe(0)
             expect(switchedIn.volatiles.drenched).toBe(1)
 
             // Outgoing mon spent PP (20 -> 19)

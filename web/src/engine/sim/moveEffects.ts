@@ -11213,6 +11213,13 @@ export function applySecondaryMoveEffects(
       // before its `&& gBattleScripting.moveEffect` (battle_script_commands.c:3113).
       state.rng.random16()
     }
+  } else if (moveEffect === 'EFFECT_TREPIDATION') {
+    // BattleScript_EffectTrepidation (data/battle_scripts_1.s:12502-12523, VARIOUS_TREPIDATION battle_script_commands.c:8715-8723)
+    const targetBattler = state.battlers[targetId]
+    if (targetBattler && targetBattler.volatiles.trepidation === 0) {
+      targetBattler.volatiles.trepidation = 3
+      targetBattler.volatiles.started.trepidation = true
+    }
   } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
     // Pure damaging move with no secondary effect
   } else {

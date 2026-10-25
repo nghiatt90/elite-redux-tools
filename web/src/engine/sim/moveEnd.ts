@@ -2799,6 +2799,9 @@ export interface MoveEndBookkeepingContext {
   chosenMoveId: string
   deps: { dataContext: TurnLoopDeps['dataContext'] }
   noEffect: boolean
+  /** (gMoveResultFlags & (MOVE_RESULT_FAILED | MOVE_RESULT_DOESNT_AFFECT_FOE)), battle_script_commands.c:4724. A plain
+   * miss (MOVE_RESULT_MISSED) or a Protect block is NOT this. */
+  moveFailed?: boolean
   obeys?: boolean
   fainted?: number[]
   /** Run Case 30 (MOVEEND_CLEAR_BITS) here. runMoveEnd passes false: it runs Case 30 itself, after cases 19-29 that read these bits. Default true (paths that skip the rest of the ladder). */
@@ -2837,6 +2840,7 @@ export function runMoveEndBookkeeping(ctx: MoveEndBookkeepingContext): void {
     chosenMoveId,
     deps,
     noEffect,
+    moveFailed = false,
     obeys = true,
     fainted = [],
   } = ctx
@@ -2851,6 +2855,18 @@ export function runMoveEndBookkeeping(ctx: MoveEndBookkeepingContext): void {
   const origMoveData = originallyUsedMove ? deps.dataContext.move(originallyUsedMove) : null
 
   // 1. Case 17: MOVEEND_UPDATE_LAST_MOVES (battle_script_commands.c:4723-4772)
+  if (attacker) {
+    if (
+      moveFailed ||
+      (currentMoveData?.effect === 'EFFECT_FOCUS_PUNCH' &&
+        (attacker.round.physicalDmg > 0 || attacker.round.specialDmg > 0))
+    ) {
+      state.lastMoveFailed = setFlag(state.lastMoveFailed, 1 << attackerId)
+    } else {
+      state.lastMoveFailed = clearFlag(state.lastMoveFailed, 1 << attackerId)
+    }
+  }
+
   if (!state.processingExtraAttacks) {
     if (attacker) {
       const movePos =
@@ -3185,6 +3201,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     chosenMoveId,
     deps,
     noEffect: isNoEffect,
+    moveFailed: isNoEffect,
     obeys: true,
     fainted,
     clearBits: false,

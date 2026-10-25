@@ -58,6 +58,7 @@ import type { GroundingContext } from './grounding'
 // Only isGravityActive: the full grounding port belongs to the simulator's own
 // consumers, not to BattlerBattleState.isGrounded -- see that field's comment.
 import { isGravityActive } from './grounding'
+import { battlerHasSimAbility } from './statBuffs'
 import { findAbilitySlot } from './statusEffects'
 import type { TurnOrderContext } from './turnOrder'
 import { TOTAL_SPEED_FULL, getBattlerTotalSpeedStat } from './turnOrder'
@@ -349,10 +350,8 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'condition.itemNegated', reason: 'NO_SOURCE', detail: 'reads only Embargo; Magic Room and Klutz are not read here' },
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads only Flash Fire; one boolean standing for per-ability activation state' },
-  { field: 'boostedStat', reason: 'NO_SOURCE', detail: "only Protosynthesis onWeather is ported; onEntry and Quark Drive onTerrain are not" },
-  { field: 'condition.lastMoveFailed', reason: 'NO_SOURCE', detail: 'hard-coded false; gBattleStruct->lastMoveFailed is absent from the state model entirely' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush; Unburden, Stakeout, Power Outage, Chuckster, Drakelp Head have no writers in the sim' },
+  { field: 'boostedStat', reason: 'NO_SOURCE', detail: 'only Protosynthesis onWeather is ported; switchInAbility.ts onEntry dispatch and Quark Drive onTerrain hook are not ported' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -439,10 +438,10 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     isMegaEvolved: (species?.megas?.length ?? 0) > 0 || (species?.primals?.length ?? 0) > 0,
     itemId: mon.itemId,
     resolvedHoldEffect: item?.resolvedHoldEffect ?? null,
-    // Embargo only. Magic Room and Klutz are the other two causes and are not
-    // read here, so this is a PARTIAL predicate -- which is a second reason it
-    // stays gapped, on top of nothing writing statuses3.
-    itemNegated: hasEmbargo(battler.statuses3),
+    // IsItemNegated (battle_util.c:6520-6524): Embargo or Klutz. Magic Room is not part of it in the C.
+    itemNegated:
+      hasEmbargo(battler.statuses3) ||
+      battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext),
     status1: status1ToSet(mon.status1),
     hasComatose,
     hasBloodStainEffect,
@@ -484,7 +483,8 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     fear: battlerFear(battler.volatiles),
     safePassage: hasSafePassage(battler.round),
     itemResolvedHoldEffectStrength: item?.holdEffectStrength ?? null,
-    lastMoveFailed: false,
+    // Stomping Tantrum read (battle_util.c:7041): gBattleStruct->lastMoveFailed & (1 << battlerAtk)
+    lastMoveFailed: hasFlag(state.lastMoveFailed, 1 << battlerId),
   }
 
   const result: BattlerBattleState = {
@@ -515,10 +515,14 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
      * in this field. */
     isGrounded: !mon.types.includes('FLYING'),
     semiInvulnerable: semiInvulnerableState(battler.statuses3),
-    // RESOURCE_FLAG_FLASH_FIRE is the only activation state the sim tracks so far. abilityOn is one
-    // per-battler toggle, so a Flash Fire holder that also has Unburden / Slow Start / Stakeout etc.
-    // would flip those too -- acceptable until those abilities get their own state.
-    abilityOn: Boolean(battler.volatiles.flashFire),
+    // RESOURCE_FLAG_FLASH_FIRE, ABILITY_SLOW_START (slowStartTimer > 0), and ABILITY_AMBUSH (isFirstTurn > 0).
+    // Unburden, Stakeout, Power Outage, Chuckster, Drakelp Head have no writers in the sim yet.
+    abilityOn: (() => {
+      const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
+      const hasSlowStart = abilityIds.includes('ABILITY_SLOW_START') && battler.volatiles.slowStartTimer > 0
+      const hasAmbush = abilityIds.includes('ABILITY_AMBUSH') && battler.volatiles.isFirstTurn > 0
+      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush
+    })(),
     gender: mon.gender,
     boostedStat: paradoxBoostedStat(battler),
     // Derived: the turn loop maintains this one.

@@ -463,6 +463,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     processingExtraAttacks: false,
     currentExtraAttack: null,
     mega: createMegaEvolutionState(),
+    lastMoveFailed: 0,
   }
 }
 

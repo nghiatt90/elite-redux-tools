@@ -58,7 +58,6 @@ const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/,
  * `field` names. */
 function structuralGaps(): BridgeGap[] {
   return [
-    { field: 'attackerTrepidationNonzero', reason: 'NEVER_UPDATED', detail: 'volatiles.trepidation; no sim code writes volatiles.trepidation' },
     { field: 'myceliumMightActive', reason: 'NO_SOURCE', detail: 'gHitMarker HITMARKER_MYCELIUM_MIGHT is a per-turn engine flag with no sim-state counterpart' },
   ]
 }
@@ -142,7 +141,7 @@ export function buildAccuracyInputs(
     moveTarget: move?.target ?? null,
 
     attackerTypes: attacker.mon.types,
-    // Gapped (structuralGaps): volatiles.trepidation is never written in ordinary play.
+    // Derived: written by BattleScript_EffectTrepidation (:8715-8723) and decremented in ENDTURN_GENERIC_BATTLER_TIMERS (:2976).
     attackerTrepidationNonzero: attacker.volatiles.trepidation > 0,
     attackerHoldEffect: attackerItem?.resolvedHoldEffect ?? null,
     attackerHoldEffectParam: attackerItem?.holdEffectStrength ?? 0,

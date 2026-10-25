@@ -1130,16 +1130,17 @@ export function runEndTurnEffects(
       battler.volatiles.slowStartTimer--
     }
 
-    // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- six of its nine sub-fields
-    // are real elsewhere (see header); gapped without the `.started` gating
-    // the C applies, since that flag has no reader anywhere either.
+    // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- SUBTRACT_VOLATILE_TIMER(trepidation) (:2976)
+    if (battler.volatiles.trepidation > 0 && !battler.volatiles.started.trepidation) {
+      battler.volatiles.trepidation--
+    }
+
     gapIf(
       battler.volatiles.rapidResponse ||
         battler.volatiles.showdownMode ||
         battler.volatiles.violentRush ||
         battler.volatiles.onTheProwl ||
-        battler.volatiles.dazed !== 0 ||
-        battler.volatiles.trepidation !== 0,
+        battler.volatiles.dazed !== 0,
       unmodelled,
       `battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented`,
     )
