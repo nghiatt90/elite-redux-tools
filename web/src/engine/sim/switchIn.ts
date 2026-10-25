@@ -57,7 +57,7 @@
 
 import { createBattlerState } from './create'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
-import type { BattleState, SimBattleMon, SimPartyMon } from './state'
+import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
 import {
   applyBattleStartPass,
@@ -169,7 +169,14 @@ function buildSwitchedInMon(incoming: SimPartyMon): SimBattleMon {
  * switch-in effects apply by name (see this module's header). Throws on an
  * invalid `partyIndex` -- see this batch's brief on why a silent fallback would
  * be the wrong failure mode here. */
-export function switchIn(state: BattleState, battlerId: number, partyIndex: number, deps: HazardDeps, unmodelled: string[]): void {
+export function switchIn(
+  state: BattleState,
+  battlerId: number,
+  partyIndex: number,
+  deps: HazardDeps,
+  unmodelled: string[],
+  beforeEffects?: (newBattler: BattlerState) => void,
+): void {
   const battler = state.battlers[battlerId]
   if (!battler) throw new Error(`switchIn: no battler at id ${battlerId}`)
   const side = battlerId & 1
@@ -180,7 +187,9 @@ export function switchIn(state: BattleState, battlerId: number, partyIndex: numb
   }
 
   const mon = buildSwitchedInMon(incoming)
-  state.battlers[battlerId] = createBattlerState(battlerId, mon, partyIndex)
+  const newBattler = createBattlerState(battlerId, mon, partyIndex)
+  state.battlers[battlerId] = newBattler
+  if (beforeEffects) beforeEffects(newBattler)
   syncPartyHp(state, battlerId)
 
   applySwitchInHazards(state, battlerId, deps, unmodelled)

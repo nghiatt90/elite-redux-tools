@@ -9018,6 +9018,416 @@ export function handleSwitchArgument(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * EFFECT_BATON_PASS (Baton Pass).
+ * Mapping: EFFECT_BATON_PASS -> BattleScript_EffectBatonPass (pipeline/.upstream/er-config/MoveBehaviorConfigList.textproto:611-613).
+ * BattleScript_EffectBatonPass (data/battle_scripts_1.s:5266-5275):
+ *   attackcanceler
+ *   attackstring
+ *   ppreduce
+ *   jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed
+ *   jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed
+ *   attackanimation
+ *   waitanimation
+ *   scheduleswitch BS_ATTACKER, BattleScript_BatonPassSwitch
+ *   goto BattleScript_MoveEnd
+ *
+ * C details and carry-over state preserved:
+ * 1. ppreduce (:5269) runs before jumpifbattletype (:5270) and jumpifcantswitch (:5271),
+ *    so PP is consumed even when the move fails due to arena or having no valid reserve.
+ * 2. jumpifcantswitch passes SWITCH_IGNORE_ESCAPE_PREVENTION, so CanBattlerEscape is bypassed;
+ *    it only checks CanBattlerSwitch(gActiveBattler) (battle_script_commands.c:5061-5172).
+ * 3. On success, scheduleswitch switches out the user mid-turn.
+ * 4. State carry-over (SwitchInClearSetData, battle_main.c:2808-2833; ZERO(gVolatileStructs):2876-2890;
+ *    Cmd_switchindataupdate, battle_script_commands.c:5023-5026):
+ *    - statStages are NOT reset to neutral (DEFAULT_STAT_STAGE).
+ *    - status2 keeps (STATUS2_CONFUSION | STATUS2_SUBSTITUTE | STATUS2_ESCAPE_PREVENTION | STATUS2_CURSED | STATUS2_POWDER | STATUS2_ENRAGED).
+ *    - statuses3 keeps (STATUS3_LEECHSEED_BATTLER | STATUS3_LEECHSEED | STATUS3_ALWAYS_HITS | STATUS3_PERISH_SONG | STATUS3_ROOTED |
+ *      STATUS3_GASTRO_ACID | STATUS3_EMBARGO | STATUS3_TELEKINESIS | STATUS3_MAGNET_RISE | STATUS3_HEAL_BLOCK | STATUS3_AQUA_RING | STATUS3_POWER_TRICK).
+ *    - statuses4 keeps STATUS4_SALT_CURE.
+ *    - Opposing battler sure-hit update (battle_main.c:2826-2832): sure-hit on this battler is reset to STATUS3_ALWAYS_HITS_TURN(2).
+ *    - Power Trick (battle_main.c:2833): if STATUS3_POWER_TRICK is set, incoming mon's attack and defense are swapped.
+ *    - Volatiles kept: started, substituteHp, battlerWithSureHit, perishSongTimer, perishSongTimerStartValue,
+ *      battlerPreventingEscape, critBoost, parasiticSpores, dazed, trepidation, drenched.
+ */
+export function handleBatonPass(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5269)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:5270)
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed (:5271)
+  if (!canBattlerSwitch(state, battlerId)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 4. scheduleswitch BS_ATTACKER, BattleScript_BatonPassSwitch (:5274)
+  const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+    ignoreEscapePrevention: true,
+    batonPass: true,
+  })
+  unmodelled.push(...switchUnmodelled)
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_SHED_TAIL handler (MOVE_SHED_TAIL).
+ * BattleScript_EffectShedTail, data/battle_scripts_1.s:5351-5370.
+ * Cmd_setsubstitute, src/battle_script_commands.c:10535-10555.
+ * SwitchInClearSetData, src/battle_main.c:2834-2837, 2890-2892.
+ *
+ * Flow:
+ * 1. ppreduce (:5354)
+ * 2. jumpifstatus2 BS_ATTACKER, STATUS2_SUBSTITUTE, BattleScript_AlreadyHasSubstitute (:5356)
+ * 3. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:5357)
+ * 4. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed (:5358)
+ * 5. setsubstitute (:5359, Cmd_setsubstitute):
+ *    hp = max(1, maxHP / 4)
+ *    damage = max(1, maxHP / 2)
+ *    if (battler.hp <= damage) fails without damage or substitute
+ *    else: takes damage, status2 |= STATUS2_SUBSTITUTE, clears STATUS2_WRAPPED, substituteHp = hp
+ * 6. goto BattleScript_MoveSwitchOpenPartyScreen (:5369): switches user out passing ONLY substitute
+ */
+export function handleShedTail(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp, applyDamage } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5354)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. jumpifstatus2 BS_ATTACKER, STATUS2_SUBSTITUTE, BattleScript_AlreadyHasSubstitute (:5356)
+  if (hasFlag(battler.mon.status2, STATUS2_SUBSTITUTE)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 3. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:5357)
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 4. jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed (:5358)
+  if (!canBattlerSwitch(state, battlerId)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 5. setsubstitute (:5359, Cmd_setsubstitute:10535-10555)
+  const hp = Math.max(1, Math.floor(battler.mon.maxHp / 4))
+  const damage = Math.max(1, Math.floor(battler.mon.maxHp / 2))
+
+  if (battler.mon.hp <= damage) {
+    return outcome(ctx, { missed: true })
+  }
+
+  battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_SUBSTITUTE)
+  battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_WRAPPED)
+  battler.volatiles.substituteHp = hp
+
+  const fainted: number[] = []
+  applyDamage(state, battlerId, damage, fainted)
+
+  // 6. goto BattleScript_MoveSwitchOpenPartyScreen (:5369)
+  const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+    ignoreEscapePrevention: true,
+    shedTail: true,
+  })
+  unmodelled.push(...switchUnmodelled)
+
+  return outcome(ctx, { missed: false, attackerDamage: damage, fainted })
+}
+
+/**
+ * EFFECT_CHILLY_RECEPTION handler (MOVE_CHILLY_RECEPTION).
+ * BattleScript_EffectChillyReception, data/battle_scripts_1.s:5298-5315.
+ * checkprimalweather, battle_script.inc:2511-2526.
+ * setbattleweather ENUM_WEATHER_HAIL (VARIOUS_SET_WEATHER, src/battle_script_commands.c:8634-8644).
+ * TryChangeBattleWeather, src/battle_util.c:3721-3743.
+ * BattleScript_MoveSwitch, data/battle_scripts_1.s:5371-5390.
+ */
+export function handleChillyReception(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:5302)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const canSwitch = !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) && canBattlerSwitch(state, battlerId)
+
+  if (canSwitch) {
+    // BattleScript_EffectChillyReception_NoFail (:5310-5314):
+    // If primal weather is active, checkprimalweather skips directly to BattleScript_MoveSwitch (:5312).
+    // Otherwise, attempts to set hail; on failure, also branches to BattleScript_MoveSwitch (:5313).
+    if (!hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+      const changed = tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_HAIL, false, deps)
+      if (changed) {
+        dispatchOnWeatherChange(state, deps, unmodelled)
+      }
+    }
+
+    // Switches user out via BattleScript_MoveSwitch (:5314)
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+      ignoreEscapePrevention: true,
+    })
+    unmodelled.push(...switchUnmodelled)
+
+    return outcome(ctx, { missed: false })
+  }
+
+  // BattleScript_EffectChillyReception_FailIfPrimal (:5306-5309):
+  // 1. checkprimalweather BattleScript_ButItFailed (:5307)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    return outcome(ctx, { missed: true })
+  }
+
+  // 2. setbattleweather ENUM_WEATHER_HAIL, BattleScript_ButItFailed, TRUE (:5308)
+  const changed = tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_HAIL, false, deps)
+  if (!changed) {
+    return outcome(ctx, { missed: true })
+  }
+  dispatchOnWeatherChange(state, deps, unmodelled)
+
+  // 3. goto BattleScript_MoveSwitch (:5309) -> jumpifcantswitch / jumpifbattletype ends cleanly (:5378-5379)
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_SEPTIC_SWITCH handler (MOVE_SEPTIC_SWITCH).
+ * BattleScript_SepticSwitch, data/battle_scripts_1.s:12602-12620.
+ * Cmd_setgastroacid, src/battle_script_commands.c:11831-11838.
+ * BattleScript_MoveSwitch, data/battle_scripts_1.s:5371-5390.
+ */
+export function handleSepticSwitch(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:12604)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+
+  // 2. ppreduce (:12606)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. setgastroacid BattleScript_SepticSwitch_FailIfNoSwitch (:12607, Cmd_setgastroacid:11831-11838)
+  const failsGastroAcid = hasFlag(target.statuses3, STATUS3_GASTRO_ACID) || doesBattlerHaveAbilityShield(target, deps)
+  const canSwitch = !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) && canBattlerSwitch(state, battlerId)
+
+  if (failsGastroAcid) {
+    // BattleScript_SepticSwitch_FailIfNoSwitch (:12616-12620):
+    // jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_ButItFailed (:12617)
+    if (!canSwitch) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+
+    // Switched out via BattleScript_MoveSwitch (:12620)
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+      ignoreEscapePrevention: true,
+    })
+    unmodelled.push(...switchUnmodelled)
+
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // Success branch of setgastroacid:
+  target.statuses3 = setFlag(target.statuses3, STATUS3_GASTRO_ACID)
+
+  // trytoclearprimalweather (:12612)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    unmodelled.push('trytoclearprimalweather not modelled')
+  }
+
+  // goto BattleScript_MoveSwitch (:12615)
+  if (canSwitch) {
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+      ignoreEscapePrevention: true,
+    })
+    unmodelled.push(...switchUnmodelled)
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_SHOWTIME handler (MOVE_SHOWTIME).
+ * BattleScript_EffectShowtime, data/battle_scripts_1.s:12479-12500.
+ * VARIOUS_SHOWTIME, src/battle_script_commands.c:8692-8712.
+ * BattleScript_MoveSwitch, data/battle_scripts_1.s:5371-5390.
+ *
+ * Flow:
+ * 1. ppreduce (:12481)
+ * 2. showtime 0 (:12482): clears Trick Room, Wonder Room, Inverse Room timers and status flags.
+ * 3. showtime 1 (:12486 / :12492): sets Magic Room timer to MAGIC_ROOM_DURATION (5) and status flag if not active.
+ * 4. BattleScript_MoveSwitch (:12490 / :12486): switches user out if canSwitch (not arena, has live reserve).
+ *    Never fails in C (no failure branch exists).
+ */
+export function handleShowtime(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]
+  if (!battler) return outcome(ctx)
+
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. ppreduce (:12481)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // 2. showtime 0 (:12482, VARIOUS_SHOWTIME mode 0)
+  // C quirk kept (battle_script_commands.c:8697-8699): only the timers are zeroed, the STATUS_FIELD_*_ROOM
+  // flags in gFieldStatuses are left set.
+  if (state.field.timers.trickRoomTimer || state.field.timers.wonderRoomTimer || state.field.timers.inverseRoomTimer) {
+    state.field.timers.trickRoomTimer = 0
+    state.field.timers.wonderRoomTimer = 0
+    state.field.timers.inverseRoomTimer = 0
+  }
+
+  // 3. showtime 1 (:12486 / :12492, VARIOUS_SHOWTIME mode 1; battle_script_commands.c:8704-8711)
+  // C quirk kept: only magicRoomTimer and started.magicRoom are written, STATUS_FIELD_MAGIC_ROOM is never set.
+  if (!state.field.timers.magicRoomTimer) {
+    state.field.timers.magicRoomTimer = MAGIC_ROOM_DURATION
+    state.field.timers.started.magicRoom = true
+  }
+
+  // 4. goto BattleScript_MoveSwitch (:12490)
+  const canSwitch = !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) && canBattlerSwitch(state, battlerId)
+  if (canSwitch) {
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
+      ignoreEscapePrevention: true,
+    })
+    unmodelled.push(...switchUnmodelled)
+  }
+
+  return outcome(ctx, { missed: false })
+}
+
+/**
+ * EFFECT_SPECTRAL_FLAME handler (MOVE_SPECTRAL_FLAME).
+ * BattleScript_EffectSpectralFlame, data/battle_scripts_1.s:2933-2956.
+ * BattleScript_EffectWillOWisp, data/battle_scripts_1.s:6090-6103.
+ * Cmd_setgastroacid, src/battle_script_commands.c:11831-11838.
+ *
+ * Flow:
+ * 1. jumpifweatheraffected BS_ATTACKER, WEATHER_FOG_ANY (:2934):
+ *    - If NOT in Fog: jumps to BattleScript_EffectWillOWisp (:2935).
+ *      Note C quirk: despite move description, Will-O-Wisp uses standard requirecandoeffect
+ *      MOVE_EFFECT_BURN which checks CanBeBurned, blocking Fire types outside Fog.
+ *    - If in Fog: continues to BattleScript_EffectSpectralFlame_Continue (:2936).
+ * 2. In Fog:
+ *    - accuracycheck (:2938)
+ *    - ppreduce (:2940)
+ *    - jumpifsubstituteblocks (:2941)
+ *    - setgastroacid (:2942):
+ *      - If successful: suppresses target ability with STATUS3_GASTRO_ACID and applies Burn
+ *        via seteffectprimary (:2945).
+ *      - If target has STATUS3_GASTRO_ACID or Ability Shield: branches to
+ *        BattleScript_EffectSpectralFlame_NoSuppress (:2949), checks canBeBurned and Safeguard,
+ *        then applies Burn.
+ */
+export function handleSpectralFlame(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+
+  // 1. jumpifweatheraffected BS_ATTACKER, WEATHER_FOG_ANY (:2934)
+  if (!isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) {
+    return handleWillOWisp(ctx)
+  }
+
+  // 2. In Fog: BattleScript_EffectSpectralFlame_Continue (:2936)
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2938)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+
+  // ppreduce (:2940)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // jumpifsubstituteblocks BattleScript_ButItFailed (:2941)
+  if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // setgastroacid BattleScript_EffectSpectralFlame_NoSuppress (:2942)
+  const failsGastroAcid = hasFlag(target.statuses3, STATUS3_GASTRO_ACID) || doesBattlerHaveAbilityShield(target, deps)
+
+  if (failsGastroAcid) {
+    // BattleScript_EffectSpectralFlame_NoSuppress (:2949-2955):
+    // requirecandoeffect BS_TARGET, MOVE_EFFECT_BURN (:2950)
+    if (!canBeBurned(state, targetId, battlerId, deps)) {
+      return outcome(ctx, { targetId })
+    }
+
+    // jumpifsafeguard BattleScript_SafeguardProtected (:2951)
+    if (hasFlag(state.sides[targetId & 1].statuses, SIDE_STATUS_SAFEGUARD)) {
+      return outcome(ctx, { targetId })
+    }
+
+    // setmoveeffect MOVE_EFFECT_BURN, seteffectprimary (:2953-2954)
+    const res = applyPrimaryStatusEffect(
+      state,
+      battlerId,
+      targetId,
+      MOVE_EFFECT_BURN,
+      moveId,
+      deps,
+      unmodelled,
+      true,
+      false,
+    )
+    const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'BURN' } : null
+    return outcome(ctx, { targetId, statusApplied })
+  }
+
+  // Success branch of setgastroacid:
+  target.statuses3 = setFlag(target.statuses3, STATUS3_GASTRO_ACID)
+
+  // setmoveeffect MOVE_EFFECT_BURN, seteffectprimary (:2944-2945)
+  const res = applyPrimaryStatusEffect(
+    state,
+    battlerId,
+    targetId,
+    MOVE_EFFECT_BURN,
+    moveId,
+    deps,
+    unmodelled,
+    true,
+    false,
+  )
+  const statusApplied: StatusAppliedOutcome | null = res.applied ? { battlerId: targetId, status: 'BURN' } : null
+  return outcome(ctx, { targetId, statusApplied })
+}
+
+/**
  * EFFECT_PARTING_SHOT (Parting Shot).
  * BattleScript_EffectPartingShot (data/battle_scripts_1.s:1091-1115),
  * BattleScript_MoveSwitch / BattleScript_DoMoveSwitch (data/battle_scripts_1.s:5371-5401).
@@ -9317,6 +9727,12 @@ export function handleHealingWish(ctx: MoveEffectContext): ActionOutcome {
 }
 
 const HANDLERS: Record<string, MoveEffectHandler> = {
+  EFFECT_BATON_PASS: handleBatonPass,
+  EFFECT_SHED_TAIL: handleShedTail,
+  EFFECT_CHILLY_RECEPTION: handleChillyReception,
+  EFFECT_SEPTIC_SWITCH: handleSepticSwitch,
+  EFFECT_SHOWTIME: handleShowtime,
+  EFFECT_SPECTRAL_FLAME: handleSpectralFlame,
   EFFECT_SWITCH_ARGUMENT: handleSwitchArgument,
   EFFECT_PARTING_SHOT: handlePartingShot,
   EFFECT_ROAR: handleRoar,

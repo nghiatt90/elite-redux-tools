@@ -152,11 +152,30 @@ import {
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_WIDE_GUARD,
   STATUS1_ANY,
+  STATUS2_CONFUSION,
+  STATUS2_CURSED,
+  STATUS2_ENRAGED,
+  STATUS2_ESCAPE_PREVENTION,
+  STATUS2_POWDER,
+  STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS3_ALWAYS_HITS,
+  STATUS3_ALWAYS_HITS_TURN,
+  STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
+  STATUS3_EMBARGO,
+  STATUS3_GASTRO_ACID,
   STATUS3_GRUDGE,
+  STATUS3_HEAL_BLOCK,
+  STATUS3_LEECHSEED,
+  STATUS3_LEECHSEED_BATTLER,
+  STATUS3_MAGNET_RISE,
   STATUS3_PERISH_SONG,
+  STATUS3_POWER_TRICK,
+  STATUS3_ROOTED,
   STATUS3_SEMI_INVULNERABLE,
+  STATUS3_TELEKINESIS,
+  STATUS4_SALT_CURE,
   STATUS_FIELD_TRICK_ROOM,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
@@ -1195,6 +1214,8 @@ export interface SwitchActionOptions {
   forcedPartyIndex?: number
   healingWish?: boolean
   lunarDance?: boolean
+  batonPass?: boolean
+  shedTail?: boolean
 }
 
 export function performSwitchAction(
@@ -1258,6 +1279,68 @@ export function performSwitchAction(
     outgoingSlot.status1 = battler.mon.status1
   }
 
+  // State carry-over capture for Baton Pass and Shed Tail
+  // (Cmd_switchindataupdate, battle_script_commands.c:5023-5026; SwitchInClearSetData, battle_main.c:2808-2838, 2878-2892)
+  const savedStatStages = options?.batonPass ? [...battler.mon.statStages] : null
+  const savedStatus2 = options?.batonPass
+    ? (battler.mon.status2 &
+        (STATUS2_CONFUSION |
+          STATUS2_SUBSTITUTE |
+          STATUS2_ESCAPE_PREVENTION |
+          STATUS2_CURSED |
+          STATUS2_POWDER |
+          STATUS2_ENRAGED))
+    : options?.shedTail
+      ? (battler.mon.status2 & STATUS2_SUBSTITUTE)
+      : null
+  const savedStatuses3 = options?.batonPass
+    ? (battler.statuses3 &
+        (STATUS3_LEECHSEED_BATTLER |
+          STATUS3_LEECHSEED |
+          STATUS3_ALWAYS_HITS |
+          STATUS3_PERISH_SONG |
+          STATUS3_ROOTED |
+          STATUS3_GASTRO_ACID |
+          STATUS3_EMBARGO |
+          STATUS3_TELEKINESIS |
+          STATUS3_MAGNET_RISE |
+          STATUS3_HEAL_BLOCK |
+          STATUS3_AQUA_RING |
+          STATUS3_POWER_TRICK))
+    : null
+  const savedStatuses4 = options?.batonPass ? (battler.statuses4 & STATUS4_SALT_CURE) : null
+  const savedVolatiles = options?.batonPass
+    ? {
+        started: { ...battler.volatiles.started },
+        substituteHp: battler.volatiles.substituteHp,
+        battlerWithSureHit: battler.volatiles.battlerWithSureHit,
+        perishSongTimer: battler.volatiles.perishSongTimer,
+        perishSongTimerStartValue: battler.volatiles.perishSongTimerStartValue,
+        battlerPreventingEscape: battler.volatiles.battlerPreventingEscape,
+        critBoost: battler.volatiles.critBoost,
+        parasiticSpores: battler.volatiles.parasiticSpores,
+        dazed: battler.volatiles.dazed,
+        trepidation: battler.volatiles.trepidation,
+        drenched: battler.volatiles.drenched,
+      }
+    : null
+  const savedSubstituteHp = options?.shedTail ? battler.volatiles.substituteHp : 0
+
+  if (options?.batonPass) {
+    // battle_main.c:2826-2832: update opposing battlers with sure-hit targeting active battler
+    for (let i = 0; i < state.battlersCount; i++) {
+      const opp = state.battlers[i]
+      if (
+        opp &&
+        (battlerId & 1) !== (i & 1) &&
+        hasFlag(opp.statuses3, STATUS3_ALWAYS_HITS) &&
+        opp.volatiles.battlerWithSureHit === battlerId
+      ) {
+        opp.statuses3 = clearFlag(opp.statuses3, STATUS3_ALWAYS_HITS) | STATUS3_ALWAYS_HITS_TURN(2)
+      }
+    }
+  }
+
   if (options?.healingWish) {
     const incomingSlot = party[partyIndex]
     if (incomingSlot) {
@@ -1278,7 +1361,37 @@ export function performSwitchAction(
     }
   }
 
-  switchIn(state, battlerId, partyIndex, deps, unmodelled)
+  switchIn(state, battlerId, partyIndex, deps, unmodelled, (newBattler) => {
+    if (options?.batonPass) {
+      if (savedStatStages) newBattler.mon.statStages = [...savedStatStages]
+      if (savedStatus2 !== null) newBattler.mon.status2 = savedStatus2
+      if (savedStatuses3 !== null) newBattler.statuses3 = savedStatuses3
+      if (savedStatuses4 !== null) newBattler.statuses4 = savedStatuses4
+      if (savedVolatiles) {
+        newBattler.volatiles.started = { ...savedVolatiles.started }
+        newBattler.volatiles.substituteHp = savedVolatiles.substituteHp
+        newBattler.volatiles.battlerWithSureHit = savedVolatiles.battlerWithSureHit
+        newBattler.volatiles.perishSongTimer = savedVolatiles.perishSongTimer
+        newBattler.volatiles.perishSongTimerStartValue = savedVolatiles.perishSongTimerStartValue
+        newBattler.volatiles.battlerPreventingEscape = savedVolatiles.battlerPreventingEscape
+        newBattler.volatiles.critBoost = savedVolatiles.critBoost
+        newBattler.volatiles.parasiticSpores = savedVolatiles.parasiticSpores
+        newBattler.volatiles.dazed = savedVolatiles.dazed
+        newBattler.volatiles.trepidation = savedVolatiles.trepidation
+        newBattler.volatiles.drenched = savedVolatiles.drenched
+      }
+      // Power trick swap (battle_main.c:2833)
+      if (savedStatuses3 !== null && hasFlag(savedStatuses3, STATUS3_POWER_TRICK)) {
+        newBattler.mon.rawStats = { ...newBattler.mon.rawStats }
+        const atk = newBattler.mon.rawStats.atk
+        newBattler.mon.rawStats.atk = newBattler.mon.rawStats.def
+        newBattler.mon.rawStats.def = atk
+      }
+    } else if (options?.shedTail) {
+      if (savedStatus2 !== null) newBattler.mon.status2 = savedStatus2
+      newBattler.volatiles.substituteHp = savedSubstituteHp
+    }
+  })
   return unmodelled
 }
 

@@ -83,6 +83,7 @@ import {
   STATUS4_ELECTRIFIED,
   STATUS4_FEAR,
   STATUS4_FORESIGHT,
+  STATUS4_SALT_CURE,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
   STATUS_FIELD_GRASSY_TERRAIN,
@@ -90,15 +91,21 @@ import {
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
+  STATUS_FIELD_WONDER_ROOM,
+  STATUS_FIELD_MAGIC_ROOM,
+  MAGIC_ROOM_DURATION,
   STATUS_FIELD_FAIRY_LOCK,
   STATUS_FIELD_MUDSPORT,
   STATUS_FIELD_WATERSPORT,
   SPORT_DURATION,
   QUASH_DURATION,
   WEATHER_FOG_TEMPORARY,
+  WEATHER_HAIL_ANY,
+  WEATHER_HAIL_TEMPORARY,
   WEATHER_RAIN_TEMPORARY,
   WEATHER_SANDSTORM_TEMPORARY,
   WEATHER_SUN_ANY,
+  WEATHER_SUN_PRIMAL,
   WEATHER_SUN_TEMPORARY,
   getCounter,
   setFlag,
@@ -307,6 +314,12 @@ const MOVE_KINESIS = requireMove('MOVE_KINESIS')
 const MOVE_DRAIN_BRAIN = requireMove('MOVE_DRAIN_BRAIN')
 const MOVE_WATERLOG = requireMove('MOVE_WATERLOG')
 const MOVE_BATON_PASS = requireMove('MOVE_BATON_PASS')
+const MOVE_METRONOME = requireMove('MOVE_METRONOME')
+const MOVE_SHED_TAIL = requireMove('MOVE_SHED_TAIL')
+const MOVE_CHILLY_RECEPTION = requireMove('MOVE_CHILLY_RECEPTION')
+const MOVE_SEPTIC_SWITCH = requireMove('MOVE_SEPTIC_SWITCH')
+const MOVE_SHOWTIME = requireMove('MOVE_SHOWTIME')
+const MOVE_SPECTRAL_FLAME = requireMove('MOVE_SPECTRAL_FLAME')
 const MOVE_TRICK = requireMove('MOVE_TRICK')
 const MOVE_SWITCHEROO = requireMove('MOVE_SWITCHEROO')
 const MOVE_SNATCH = requireMove('MOVE_SNATCH')
@@ -1067,10 +1080,10 @@ describe('Move effect dispatch: 18 self stat-raise moves', () => {
 
   it('Unhandled status move still behaves exactly as before: accuracy roll drawn, statChanges is null', () => {
     const rng = countingRng()
-    const state = battle([{ moves: ['MOVE_BATON_PASS', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
+    const state = battle([{ moves: ['MOVE_METRONOME', null, null, null], pp: [10, 0, 0, 0] }, {}], rng)
     const dmg = dummyDamage()
 
-    const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dmg))
+    const out = executeTurn(state, [useMove(1, MOVE_METRONOME), null], testDeps(dmg))
 
     // Unhandled status moves keep today's path: one accuracy draw, then the damage resolver.
     expect(rng.calls).toBe(1)
@@ -8798,6 +8811,667 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(state.battlers[0]!.mon.hp).toBe(100)
             expect(act0.fainted).toHaveLength(0)
             // PP was still spent
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_BATON_PASS (Baton Pass)', () => {
+          it('switches user out and passes stat stages, substitute, and designated volatiles/statuses to replacement', () => {
+            const lead = partyMon({ moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            // Setup outgoing battler's state to be carried over or cleared
+            const b0 = state.battlers[0]!
+            b0.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
+            b0.mon.statStages[STAT_SPEED] = DEFAULT_STAT_STAGE + 1
+            // status2: SUBSTITUTE & CURSED should carry over; NIGHTMARE should be cleared
+            b0.mon.status2 = STATUS2_SUBSTITUTE | STATUS2_CURSED | STATUS2_NIGHTMARE
+            b0.volatiles.substituteHp = 25
+            // statuses3: ROOTED & AQUA_RING should carry over; CHARGED_UP should be cleared
+            b0.statuses3 = STATUS3_ROOTED | STATUS3_AQUA_RING | STATUS3_CHARGED_UP
+            // statuses4: SALT_CURE should carry over; CUTTHROAT should be cleared
+            b0.statuses4 = STATUS4_SALT_CURE | STATUS4_CUTTHROAT
+            // volatiles to carry over
+            b0.volatiles.critBoost = 1
+            b0.volatiles.perishSongTimer = 2
+            b0.volatiles.perishSongTimerStartValue = 3
+            b0.volatiles.dazed = 1
+            b0.volatiles.trepidation = 1
+            b0.volatiles.drenched = 1
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Replacement battler 0 (partyIndex 1) is now active
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            const switchedIn = state.battlers[0]!
+
+            // Stat stages preserved (battle_main.c:2808, battle_script_commands.c:5024)
+            expect(switchedIn.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(switchedIn.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+
+            // status2 carried: SUBSTITUTE & CURSED kept; FLINCHED cleared (:2820-2821)
+            expect(hasFlag(switchedIn.mon.status2, STATUS2_SUBSTITUTE)).toBe(true)
+            expect(hasFlag(switchedIn.mon.status2, STATUS2_CURSED)).toBe(true)
+            expect(hasFlag(switchedIn.mon.status2, STATUS2_NIGHTMARE)).toBe(false)
+            expect(switchedIn.volatiles.substituteHp).toBe(25)
+
+            // statuses3 carried: ROOTED & AQUA_RING kept; CHARGED_UP cleared (:2822-2824)
+            expect(hasFlag(switchedIn.statuses3, STATUS3_ROOTED)).toBe(true)
+            expect(hasFlag(switchedIn.statuses3, STATUS3_AQUA_RING)).toBe(true)
+            expect(hasFlag(switchedIn.statuses3, STATUS3_CHARGED_UP)).toBe(false)
+
+            // statuses4 carried: SALT_CURE kept; CUTTHROAT cleared (:2825)
+            expect(hasFlag(switchedIn.statuses4, STATUS4_SALT_CURE)).toBe(true)
+            expect(hasFlag(switchedIn.statuses4, STATUS4_CUTTHROAT)).toBe(false)
+
+            // Volatiles carried (:2878-2890)
+            expect(switchedIn.volatiles.critBoost).toBe(1)
+            expect(switchedIn.volatiles.perishSongTimer).toBe(2)
+            expect(switchedIn.volatiles.perishSongTimerStartValue).toBe(3)
+            expect(switchedIn.volatiles.dazed).toBe(1)
+            expect(switchedIn.volatiles.trepidation).toBe(1)
+            expect(switchedIn.volatiles.drenched).toBe(1)
+
+            // Outgoing mon spent PP (20 -> 19)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+          })
+
+          it('swaps replacement mon attack and defense if STATUS3_POWER_TRICK is carried over (battle_main.c:2833)', () => {
+            const lead = partyMon({ moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({
+              hp: 100,
+              rawStats: { atk: 70, def: 130, spatk: 60, spdef: 60, spe: 50 },
+            })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            state.battlers[0]!.statuses3 |= STATUS3_POWER_TRICK
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            // attack and defense are swapped for the incoming mon!
+            expect(state.battlers[0]!.mon.rawStats.atk).toBe(130)
+            expect(state.battlers[0]!.mon.rawStats.def).toBe(70)
+            expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_POWER_TRICK)).toBe(true)
+          })
+
+          it('fails and consumes PP when user cannot switch (no live reserves)', () => {
+            const lead = partyMon({ moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('fails and consumes PP in arena battles (jumpifbattletype BATTLE_TYPE_ARENA)', () => {
+            const lead = partyMon({ moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_BATON_PASS', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.battleTypeFlags |= BATTLE_TYPE_ARENA
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_BATON_PASS), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_SHED_TAIL (Shed Tail)', () => {
+          it('cuts user half HP, creates substitute with 25% max HP, and passes ONLY substitute to replacement', () => {
+            const lead = partyMon({
+              moves: ['MOVE_SHED_TAIL', null, null, null],
+              pp: [10, 0, 0, 0],
+              hp: 200,
+              maxHp: 200,
+            })
+            const reserve = partyMon({ hp: 100, maxHp: 100 })
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SHED_TAIL', null, null, null], pp: [10, 0, 0, 0], hp: 200, maxHp: 200 },
+                { spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            // Outgoing battler has stat stages and statuses that Baton Pass passes, but Shed Tail MUST NOT pass
+            const b0 = state.battlers[0]!
+            b0.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
+            b0.statuses3 = STATUS3_AQUA_RING
+            b0.statuses4 = STATUS4_SALT_CURE
+            b0.volatiles.critBoost = 1
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHED_TAIL), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(act0.attackerDamage).toBe(100) // floor(200 / 2)
+            // Replacement battler 0 is now active
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            const switchedIn = state.battlers[0]!
+
+            // Only substitute is carried over (battle_main.c:2835, 2891)
+            expect(hasFlag(switchedIn.mon.status2, STATUS2_SUBSTITUTE)).toBe(true)
+            expect(switchedIn.volatiles.substituteHp).toBe(50) // floor(200 / 4)
+
+            // Stat stages are reset to default (NOT carried over)
+            expect(switchedIn.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+
+            // statuses3 and statuses4 are 0 (NOT carried over)
+            expect(switchedIn.statuses3).toBe(0)
+            expect(switchedIn.statuses4).toBe(0)
+            expect(switchedIn.volatiles.critBoost).toBe(0)
+
+            // Outgoing mon HP is 100 and spent PP (10 -> 9)
+            expect(state.sides[0].party[0]!.hp).toBe(100)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(9)
+          })
+
+          it('fails and consumes PP when user already has a Substitute (battle_scripts_1.s:5356)', () => {
+            const lead = partyMon({
+              moves: ['MOVE_SHED_TAIL', null, null, null],
+              pp: [10, 0, 0, 0],
+              hp: 200,
+              maxHp: 200,
+            })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SHED_TAIL', null, null, null], pp: [10, 0, 0, 0], hp: 200, maxHp: 200 },
+                { spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            state.battlers[0]!.mon.status2 |= STATUS2_SUBSTITUTE
+            state.battlers[0]!.volatiles.substituteHp = 20
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHED_TAIL), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.hp).toBe(200)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails and consumes PP when user HP <= half max HP (Cmd_setsubstitute:10541)', () => {
+            // maxHp: 200, damage: 100. Current HP: 100 <= 100 -> fails without damage or substitute.
+            const lead = partyMon({
+              moves: ['MOVE_SHED_TAIL', null, null, null],
+              pp: [10, 0, 0, 0],
+              hp: 100,
+              maxHp: 200,
+            })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SHED_TAIL', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 200 },
+                { spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHED_TAIL), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.hp).toBe(100)
+            expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_SUBSTITUTE)).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails and consumes PP when user cannot switch (no live reserves)', () => {
+            const lead = partyMon({
+              moves: ['MOVE_SHED_TAIL', null, null, null],
+              pp: [10, 0, 0, 0],
+              hp: 200,
+              maxHp: 200,
+            })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SHED_TAIL', null, null, null], pp: [10, 0, 0, 0], hp: 200, maxHp: 200 },
+                { spe: 50 },
+              ],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHED_TAIL), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.hp).toBe(200)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_CHILLY_RECEPTION (Chilly Reception)', () => {
+          it('sets Hail weather and switches user out to reserve (data/battle_scripts_1.s:5310-5314)', () => {
+            const lead = partyMon({ moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_CHILLY_RECEPTION), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Replacement battler 0 is now active
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            // Hail weather is active
+            expect(hasFlag(state.field.weather, WEATHER_HAIL_ANY)).toBe(true)
+            // Outgoing mon spent PP (10 -> 9)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(9)
+          })
+
+          it('still switches out successfully when Hail is already active (battle_scripts_1.s:5313)', () => {
+            const lead = partyMon({ moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.field.weather = WEATHER_HAIL_TEMPORARY
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_CHILLY_RECEPTION), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(hasFlag(state.field.weather, WEATHER_HAIL_ANY)).toBe(true)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(9)
+          })
+
+          it('fails and consumes PP when user cannot switch and Hail is already active (battle_scripts_1.s:5308)', () => {
+            const lead = partyMon({ moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.field.weather = WEATHER_HAIL_TEMPORARY
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_CHILLY_RECEPTION), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('sets Hail and succeeds without switching when user cannot switch and Hail is not active (battle_scripts_1.s:5308-5309)', () => {
+            const lead = partyMon({ moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_CHILLY_RECEPTION), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            // Hail was successfully set, switch was skipped, move did NOT fail (:5379)
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(hasFlag(state.field.weather, WEATHER_HAIL_ANY)).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails and consumes PP when user cannot switch and primal weather is active (battle_scripts_1.s:5307)', () => {
+            const lead = partyMon({ moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_CHILLY_RECEPTION', null, null, null], pp: [10, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.field.weather = WEATHER_SUN_PRIMAL
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_CHILLY_RECEPTION), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.field.weather).toBe(WEATHER_SUN_PRIMAL)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+        })
+
+        describe('EFFECT_SEPTIC_SWITCH (Septic Switch)', () => {
+          it('suppresses target ability via STATUS3_GASTRO_ACID and switches user out (data/battle_scripts_1.s:12602-12615)', () => {
+            const lead = partyMon({ moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const target = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [target]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SEPTIC_SWITCH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Target ability suppressed
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(true)
+            // User switched out to reserve
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            // Outgoing mon spent PP (20 -> 19)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+          })
+
+          it('switches out successfully when target already has STATUS3_GASTRO_ACID but user can switch (battle_scripts_1.s:12616-12620)', () => {
+            const lead = partyMon({ moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SEPTIC_SWITCH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(19)
+          })
+
+          it('fails and consumes PP when target already has STATUS3_GASTRO_ACID and user cannot switch (battle_scripts_1.s:12617)', () => {
+            const lead = partyMon({ moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SEPTIC_SWITCH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+
+          it('fails and consumes PP on accuracy miss (battle_scripts_1.s:12604)', () => {
+            const rng = scriptedRng([90]) // roll 90 >= 66 -> misses at +1 Evasion
+            const lead = partyMon({ moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SEPTIC_SWITCH', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }],
+              rng,
+            )
+            state.battlers[1]!.mon.statStages[STAT_EVASION] = DEFAULT_STAT_STAGE + 1
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SEPTIC_SWITCH), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          })
+        })
+
+        describe('EFFECT_SHOWTIME (Showtime)', () => {
+          it('clears active rooms, sets Magic Room, and switches user out to reserve (data/battle_scripts_1.s:12479-12500)', () => {
+            const lead = partyMon({ moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.field.timers.trickRoomTimer = 3
+            state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
+            state.field.timers.wonderRoomTimer = 2
+            state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM)
+
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHOWTIME), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Trick Room and Wonder Room cleared (:12482, VARIOUS_SHOWTIME mode 0)
+            // C quirk: only the timers are zeroed (battle_script_commands.c:8697-8699); the field flags stay set.
+            expect(state.field.timers.trickRoomTimer).toBeLessThanOrEqual(0)
+            expect(state.field.timers.wonderRoomTimer).toBeLessThanOrEqual(0)
+            expect(hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)).toBe(true)
+            expect(hasFlag(state.field.statuses, STATUS_FIELD_WONDER_ROOM)).toBe(true)
+
+            // Magic Room timer set (:12486, VARIOUS_SHOWTIME mode 1); C quirk: STATUS_FIELD_MAGIC_ROOM is never set,
+            // so the end-of-turn tick (gated on that flag) does not run and the timer stays at its starting value.
+            expect(state.field.timers.magicRoomTimer).toBe(MAGIC_ROOM_DURATION)
+            expect(state.field.timers.started.magicRoom).toBe(true)
+            expect(hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)).toBe(false)
+
+            // User switched out to reserve (:12490)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(4)
+          })
+
+          it('succeeds without switching when user cannot switch (no live reserves) (data/battle_scripts_1.s:5379)', () => {
+            const lead = partyMon({ moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] })
+            const faintedReserve = partyMon({ hp: 0 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.sides[0].party = [lead, faintedReserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHOWTIME), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            // Never fails in C; switch is skipped cleanly
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(0)
+            expect(state.field.timers.magicRoomTimer).toBe(MAGIC_ROOM_DURATION)
+            expect(hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)).toBe(false) // C quirk, see above
+            expect(state.battlers[0]!.mon.pp[0]).toBe(4)
+          })
+
+          it('switches out successfully when Magic Room is already active (VARIOUS_SHOWTIME mode 1 branch)', () => {
+            const lead = partyMon({ moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] })
+            const reserve = partyMon({ hp: 100 })
+            const state = battle(
+              [{ spe: 100, moves: ['MOVE_SHOWTIME', null, null, null], pp: [5, 0, 0, 0] }, { spe: 50 }],
+              countingRng(),
+            )
+            state.field.timers.magicRoomTimer = 3
+            state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)
+
+            state.sides[0].party = [lead, reserve]
+            state.sides[1].party = [partyMon({ hp: 100 })]
+
+            const rep = replacementDeps(1)
+            const out = executeTurn(state, [useMove(1, MOVE_SHOWTIME), null], testDeps(dummyDamage(), rep))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.partyIndex).toBe(1)
+            // Existing magic room timer preserved (3 ticked to 2 at end of turn, not reset to 5)
+            expect(state.field.timers.magicRoomTimer).toBe(2)
+            expect(hasFlag(state.field.statuses, STATUS_FIELD_MAGIC_ROOM)).toBe(true)
+            expect(state.sides[0].party[0]!.pp[0]).toBe(4)
+          })
+        })
+
+        describe('EFFECT_SPECTRAL_FLAME (Spectral Flame)', () => {
+          it('burns non-Fire target outside Fog via Will-O-Wisp delegation (data/battle_scripts_1.s:2935)', () => {
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SPECTRAL_FLAME', null, null, null], pp: [10, 0, 0, 0] },
+                { spe: 50, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPECTRAL_FLAME), null], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[1]!.mon.status1).toBe(STATUS1_BURN)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('fails to burn Fire-type target outside Fog due to C requirecandoeffect check (C quirk: data/battle_scripts_1.s:6095)', () => {
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SPECTRAL_FLAME', null, null, null], pp: [10, 0, 0, 0] },
+                { spe: 50, types: ['FIRE', 'MYSTERY', 'MYSTERY'] },
+              ],
+              countingRng(),
+            )
+
+            executeTurn(state, [useMove(1, MOVE_SPECTRAL_FLAME), null], testDeps())
+
+            // Fails cleanly via requirecandoeffect (CanBeBurned blocks Fire types)
+            expect(state.battlers[1]!.mon.status1).toBe(0)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('in Fog, suppresses target ability via STATUS3_GASTRO_ACID and inflicts Burn (data/battle_scripts_1.s:2936-2948)', () => {
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SPECTRAL_FLAME', null, null, null], pp: [10, 0, 0, 0] },
+                { spe: 50, types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+              ],
+              countingRng(),
+            )
+            state.field.weather = WEATHER_FOG_TEMPORARY
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPECTRAL_FLAME), null], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Ability suppressed via STATUS3_GASTRO_ACID (:2942)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(true)
+            // Burn inflicted (:2945)
+            expect(state.battlers[1]!.mon.status1).toBe(STATUS1_BURN)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('in Fog, burns target even when Ability Shield prevents ability suppression (data/battle_scripts_1.s:2949-2955)', () => {
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SPECTRAL_FLAME', null, null, null], pp: [10, 0, 0, 0] },
+                { spe: 50, itemId: 'ITEM_ABILITY_SHIELD', types: ['NORMAL', 'MYSTERY', 'MYSTERY'] },
+              ],
+              countingRng(),
+            )
+            state.field.weather = WEATHER_FOG_TEMPORARY
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPECTRAL_FLAME), null], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(false)
+            // Gastro Acid was prevented by Ability Shield (:11833)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(false)
+            // Burn still inflicted via BattleScript_EffectSpectralFlame_NoSuppress (:2954)
+            expect(state.battlers[1]!.mon.status1).toBe(STATUS1_BURN)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+          })
+
+          it('in Fog, fails and consumes PP on accuracy miss (data/battle_scripts_1.s:2938)', () => {
+            // Accuracy 85: roll 90 >= 85 -> misses
+            const rng = scriptedRng([90])
+            const state = battle(
+              [
+                { spe: 100, moves: ['MOVE_SPECTRAL_FLAME', null, null, null], pp: [10, 0, 0, 0] },
+                { spe: 50 },
+              ],
+              rng,
+            )
+            state.field.weather = WEATHER_FOG_TEMPORARY
+
+            const out = executeTurn(state, [useMove(1, MOVE_SPECTRAL_FLAME), null], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+            expect(act0.missed).toBe(true)
+            expect(hasFlag(state.battlers[1]!.statuses3, STATUS3_GASTRO_ACID)).toBe(false)
+            expect(state.battlers[1]!.mon.status1).toBe(0)
             expect(state.battlers[0]!.mon.pp[0]).toBe(9)
           })
         })
