@@ -454,5 +454,24 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     statStageCheckState: STAT_STAGE_CHECK_NOT_NEEDED,
     statChangesToCheck: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<number>(NUM_BATTLE_STATS - 1).fill(0)),
     lastUsedMove: null,
+    lastTakenMove: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
+    lastTakenMoveFrom: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<string | null>(MAX_BATTLERS_COUNT).fill(null)),
+  }
+}
+
+/**
+ * SwitchInClearSetData (battle_main.c:2908-2922) and FaintClearSetData (battle_main.c:2982-2995):
+ * Clears lastTakenMove and lastTakenMoveFrom when battlerId switches in or faints.
+ */
+export function clearBattlerLastTakenMove(state: BattleState, battlerId: number): void {
+  state.lastTakenMove[battlerId] = null
+  for (let k = 0; k < MAX_BATTLERS_COUNT; k++) {
+    state.lastTakenMoveFrom[battlerId][k] = null
+  }
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (i !== battlerId && (i & 1) !== (battlerId & 1)) {
+      state.lastTakenMove[i] = null
+    }
+    state.lastTakenMoveFrom[i][battlerId] = null
   }
 }

@@ -651,6 +651,10 @@ export interface BattleState {
   statChangesToCheck: number[][]
   /** `gLastUsedMove` (include/battle.h:993, battle_script_commands.c:4743) -- global last move used across all battlers. */
   lastUsedMove: string | null
+  /** `u16 lastTakenMove[MAX_BATTLERS_COUNT]` (include/battle.h:645, battle_script_commands.c:4777). */
+  lastTakenMove: (string | null)[]
+  /** `u16 lastTakenMoveFrom[MAX_BATTLERS_COUNT][MAX_BATTLERS_COUNT]` (include/battle.h:664, battle_script_commands.c:4778). */
+  lastTakenMoveFrom: (string | null)[][]
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

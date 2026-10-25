@@ -6501,6 +6501,302 @@ export function handleMimic(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * EFFECT_MIRROR_MOVE (Mirror Move)
+ * BattleScript_EffectMirrorMove (data/battle_scripts_1.s:3575-3585),
+ * Cmd_trymirrormove (src/battle_script_commands.c:9276-9307).
+ */
+export function handleMirrorMove(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // ppreduce (:3580 on failure; called move runs its own ppreduce on success)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // Cmd_trymirrormove (:9276-9307):
+  const movesArray: string[] = []
+  for (let i = 0; i < state.battlersCount; i++) {
+    if (i !== battlerId) {
+      const m = state.lastTakenMoveFrom[battlerId]?.[i]
+      if (m && m !== MOVE_UNSET) {
+        movesArray.push(m)
+      }
+    }
+  }
+
+  let chosenMove: string | null = null
+  const direct = state.lastTakenMove[battlerId]
+  if (direct && direct !== MOVE_UNSET) {
+    chosenMove = direct
+  } else if (movesArray.length > 0) {
+    const idx = state.rng.random16() % movesArray.length
+    chosenMove = movesArray[idx]
+  }
+
+  if (!chosenMove) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const calledData = deps.dataContext.move(chosenMove)
+  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
+  if (isDamaging) {
+    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  const handler = getMoveEffectHandler(calledData?.effect ?? null)
+  if (handler) {
+    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
+    const calledAction: ChosenAction = {
+      action: 'USE_MOVE',
+      moveToBeUsed: calledView,
+      chosenMove: calledView,
+      target: targetId,
+    }
+    const res = handler({
+      ...ctx,
+      action: calledAction,
+      deductPp: () => {},
+    })
+    return {
+      ...res,
+      battlerId,
+      turnOrderIndex: ctx.turnOrderIndex,
+    }
+  }
+
+  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_SKETCH (Sketch)
+ * BattleScript_EffectSketch (data/battle_scripts_1.s:4752-4761),
+ * Cmd_copymovepermanently (src/battle_script_commands.c:10834-10873),
+ * REQUEST_MOVES_PP_BATTLE (src/battle_controller_player.c:3839-3845).
+ */
+export function handleSketch(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const attacker = state.battlers[battlerId]!
+
+  // 1. ppreduce (:4755)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const target = state.battlers[targetId]!
+  const targetMove = target.lastPrintedMove
+
+  // Cmd_copymovepermanently (:10834-10873):
+  // if (!(gBattleMons[gBattlerAttacker].status2 & STATUS2_TRANSFORMED) && gLastPrintedMoves[gBattlerTarget] != MOVE_STRUGGLE &&
+  //     gLastPrintedMoves[gBattlerTarget] != 0 && gLastPrintedMoves[gBattlerTarget] != 0xFFFF && gLastPrintedMoves[gBattlerTarget] != MOVE_SKETCH)
+  if (
+    hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED) ||
+    !targetMove ||
+    targetMove === MOVE_UNSET ||
+    targetMove === 'MOVE_STRUGGLE' ||
+    targetMove === 'MOVE_SKETCH'
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Already knows move (skipping slot holding Sketch itself)
+  for (let i = 0; i < attacker.mon.moves.length; i++) {
+    if (attacker.mon.moves[i] === 'MOVE_SKETCH') continue
+    if (attacker.mon.moves[i] === targetMove) {
+      return outcome(ctx, { targetId, missed: true })
+    }
+  }
+
+  const slot = attacker.mon.moves.indexOf('MOVE_SKETCH')
+  if (slot === -1 || slot >= 4) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const targetMoveData = deps.dataContext.move(targetMove)
+  const maxPp = targetMoveData?.pp ?? 0
+
+  // Replace active battler move & PP
+  attacker.mon.moves[slot] = targetMove
+  attacker.mon.pp[slot] = maxPp
+
+  // Persist to party mon (REQUEST_MOVES_PP_BATTLE, battle_controller_player.c:3839-3845)
+  const party = state.sides[battlerId & 1].party
+  const partyMon = party[attacker.partyIndex]
+  if (partyMon) {
+    partyMon.moves[slot] = targetMove
+    partyMon.pp[slot] = maxPp
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_DOODLE (Doodle)
+ * BattleScript_EffectDoodle (data/battle_scripts_1.s:2284-2319),
+ * VARIOUS_COPY_ABILITY (src/battle_script_commands.c:7245-7257),
+ * IsEntrainmentBannedAbilityAttacker / IsEntrainmentTargetOrSimpleBeamBannedAbility (battle_util.c:8448-8464),
+ * HasAbilityIgnoringSuppression / ReplaceAbility (battle_util.c:9315-9325).
+ */
+export function handleDoodle(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  if (targetId === null || !state.battlers[targetId] || state.battlers[targetId]!.mon.hp === 0) {
+    return outcome(ctx, { targetId })
+  }
+
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // 1. accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:2286)
+  const missed = checkAccuracy(ctx, targetId, moveId)
+  // 2. ppreduce (:2288)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  if (missed) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. trycopyabilitybetween BS_TARGET, BS_ATTACKER, BattleScript_EffectDoodle_NoAttacker
+  // (VARIOUS_COPY_ABILITY:7245-7257)
+  const targetAbility = target.mon.abilities.ability ?? 'ABILITY_NONE'
+  const userAbility = battler.mon.abilities.ability ?? 'ABILITY_NONE'
+
+  const failsAttacker =
+    isEntrainmentBannedAbilityAttacker(targetAbility) ||
+    isEntrainmentTargetOrSimpleBeamBannedAbility(userAbility) ||
+    hasAbilityIgnoringSuppression(battler, targetAbility) ||
+    doesBattlerHaveAbilityShield(battler, deps)
+
+  // In singles: partner does not exist, so failing attacker means Doodle fails entirely.
+  // In doubles: try partner if attacker fails or succeeds.
+  const partnerId = battlerId ^ 2
+  const partner = state.battlers[partnerId]
+  const hasPartner = Boolean(partner && isBattlerAlive(state, partnerId))
+
+  if (failsAttacker && !hasPartner) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  let anyCopied = false
+  if (!failsAttacker) {
+    updateAbilityStateForNewAbility(battler, targetAbility)
+    battler.mon.abilities.ability = targetAbility
+    applySwitchInAbilities(state, battlerId, deps, unmodelled)
+    anyCopied = true
+  }
+
+  if (hasPartner) {
+    const partnerAbility = partner!.mon.abilities.ability ?? 'ABILITY_NONE'
+    // VARIOUS_COPY_ABILITY applies the same four checks to every call; two of them read the
+    // attacker / target, not the battler receiving the ability (battle_script_commands.c:7249-7252).
+    const failsPartner =
+      isEntrainmentBannedAbilityAttacker(targetAbility) ||
+      isEntrainmentTargetOrSimpleBeamBannedAbility(partnerAbility) ||
+      hasAbilityIgnoringSuppression(battler, targetAbility) ||
+      doesBattlerHaveAbilityShield(partner!, deps)
+    if (!failsPartner) {
+      updateAbilityStateForNewAbility(partner!, targetAbility)
+      partner!.mon.abilities.ability = targetAbility
+      applySwitchInAbilities(state, partnerId, deps, unmodelled)
+      anyCopied = true
+    }
+  }
+
+  if (!anyCopied) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_TRANSFORM (Transform)
+ * BattleScript_EffectTransform (data/battle_scripts_1.s:4276-4290),
+ * Cmd_transformdataexecution (src/battle_script_commands.c:10482-10533).
+ */
+export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const attacker = state.battlers[battlerId]!
+
+  // 1. ppreduce (:4279)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  const target = state.battlers[targetId]!
+
+  // 2. trytoclearprimalweather (:4280)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    unmodelled.push('trytoclearprimalweather not modelled')
+  }
+
+  // 3. transformdataexecution (:10482-10533):
+  // if (gBattleMons[gBattlerTarget].status2 & STATUS2_TRANSFORMED || gBattleStruct->illusion[gBattlerTarget].on ||
+  //     gStatuses3[gBattlerTarget] & STATUS3_SEMI_INVULNERABLE) -> fail
+  if (
+    hasFlag(target.mon.status2, STATUS2_TRANSFORMED) ||
+    hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)
+  ) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // Set transformed status2 & clear volatile states
+  attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_TRANSFORMED)
+  attacker.volatiles.disabledMove = null
+  attacker.volatiles.disableTimer = 0
+  attacker.volatiles.transformedMonPersonality = target.volatiles.transformedMonPersonality ?? 0
+  attacker.volatiles.mimickedMoves = 0
+  attacker.volatiles.usedMoves = 0
+
+  // Update ability state indices for target's abilities (UpdateAbilityStateIndices:8833-8862)
+  updateAbilityStateForNewAbilities(attacker, abilitySlotIds(target))
+
+  // Copy species, stats (excluding HP/maxHP), types, speedDown, abilities, moves, statStages
+  attacker.mon.speciesId = target.mon.speciesId
+  attacker.mon.rawStats = {
+    atk: target.mon.rawStats.atk,
+    def: target.mon.rawStats.def,
+    spatk: target.mon.rawStats.spatk,
+    spdef: target.mon.rawStats.spdef,
+    spe: target.mon.rawStats.spe,
+  }
+  attacker.mon.types = [...target.mon.types]
+  attacker.mon.speedDown = target.mon.speedDown
+  attacker.mon.abilities = {
+    ability: target.mon.abilities.ability,
+    innates: [...target.mon.abilities.innates],
+  }
+  attacker.mon.moves = [...target.mon.moves]
+  attacker.mon.statStages = [...target.mon.statStages]
+
+  // Copy PP: min(5, maxPp)
+  for (let i = 0; i < 4; i++) {
+    const m = attacker.mon.moves[i]
+    if (m) {
+      const mData = deps.dataContext.move(m)
+      const maxPp = mData?.pp ?? 5
+      attacker.mon.pp[i] = Math.min(5, maxPp)
+    } else {
+      attacker.mon.pp[i] = 0
+    }
+  }
+
+  // 4. switchinabilities BS_ATTACKER (:4289)
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
+
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
  * EFFECT_LUCKY_CHANT (Lucky Chant)
  * BattleScript_EffectLuckyChant (data/battle_scripts_1.s:2342-2351),
  * VARIOUS_SET_LUCKY_CHANT (src/battle_script_commands.c:7201-7212).
@@ -6689,9 +6985,8 @@ function hasAbilityIgnoringSuppression(battler: BattlerState, abilityId: string)
  * new slot takes switchInAbilityDone, turnAbilityTriggers and abilityState from the first old slot
  * holding the same ability, else zero. Called before ReplaceAbility, so the old slot 0 is still in place.
  */
-function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: string): void {
+function updateAbilityStateForNewAbilities(battler: BattlerState, newAbilities: string[]): void {
   const oldAbilities = abilitySlotIds(battler)
-  const newAbilities = [newAbility, ...oldAbilities.slice(1)]
   const switchInAbilityDone = newAbilities.map(() => false)
   const turnAbilityTriggers = newAbilities.map(() => false)
   const abilityState = newAbilities.map(() => 0)
@@ -6705,6 +7000,11 @@ function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: stri
   battler.volatiles.switchInAbilityDone = switchInAbilityDone
   battler.turn.turnAbilityTriggers = turnAbilityTriggers
   battler.volatiles.abilityState = abilityState
+}
+
+function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: string): void {
+  const oldAbilities = abilitySlotIds(battler)
+  updateAbilityStateForNewAbilities(battler, [newAbility, ...oldAbilities.slice(1)])
 }
 
 /**
@@ -10129,6 +10429,10 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_COPYCAT: handleCopycat,
   EFFECT_INSTRUCT: handleInstruct,
   EFFECT_MIMIC: handleMimic,
+  EFFECT_MIRROR_MOVE: handleMirrorMove,
+  EFFECT_SKETCH: handleSketch,
+  EFFECT_DOODLE: handleDoodle,
+  EFFECT_TRANSFORM: handleTransform,
 
   EFFECT_LUCKY_CHANT: handleLuckyChant,
   EFFECT_QUICK_GUARD: handleQuickGuard,

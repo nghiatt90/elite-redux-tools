@@ -133,7 +133,7 @@ export { buildAccuracyInputs, getTotalAccuracy }
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
-import { createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
+import { clearBattlerLastTakenMove, createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
 import type { EndTurnEffectResult } from './endTurn'
 import { canBattlerHeal, runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
@@ -996,6 +996,7 @@ export function applyDamage(state: BattleState, battlerId: number, damage: numbe
     // gFaintedMonCount[side], battle.h:1002 -- the count Soul Harvest and
     // Supreme Overlord read.
     state.sides[battlerId & 1].faintedCount++
+    clearBattlerLastTakenMove(state, battlerId)
   }
   syncPartyHp(state, battlerId)
   state.battleOutcome = computeBattleOutcome(state)
@@ -1661,6 +1662,16 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
             state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
           }
           state.lastUsedMove = action.chosenMove.id
+          if (
+            bounceTargetId !== bounceAttackerId &&
+            !effectOutcome.missed &&
+            moveData?.flags?.mirrorMoveAffected === true &&
+            state.battlers[bounceTargetId] &&
+            isBattlerAlive(state, bounceTargetId)
+          ) {
+            state.lastTakenMove[bounceTargetId] = action.chosenMove.id
+            state.lastTakenMoveFrom[bounceTargetId][bounceAttackerId] = action.chosenMove.id
+          }
           outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
           continue
         } else {
@@ -1733,6 +1744,16 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
           state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
         }
         state.lastUsedMove = action.chosenMove.id
+        if (
+          snatchedTargetId !== snatcherId &&
+          !effectOutcome.missed &&
+          moveData?.flags?.mirrorMoveAffected === true &&
+          state.battlers[snatchedTargetId] &&
+          isBattlerAlive(state, snatchedTargetId)
+        ) {
+          state.lastTakenMove[snatchedTargetId] = action.chosenMove.id
+          state.lastTakenMoveFrom[snatchedTargetId][snatcherId] = action.chosenMove.id
+        }
         outcomes.push({ ...effectOutcome, turnOrderIndex: index, battlerId })
         continue
       } else {
@@ -1800,6 +1821,17 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         state.battlers[battlerId]!.lastPrintedMove = action.chosenMove.id
       }
       state.lastUsedMove = action.chosenMove.id
+      if (
+        targetId !== null &&
+        targetId !== battlerId &&
+        !effectOutcome.missed &&
+        moveData?.flags?.mirrorMoveAffected === true &&
+        state.battlers[targetId] &&
+        isBattlerAlive(state, targetId)
+      ) {
+        state.lastTakenMove[targetId] = action.chosenMove.id
+        state.lastTakenMoveFrom[targetId][battlerId] = action.chosenMove.id
+      }
       outcomes.push(effectOutcome)
       continue
     }

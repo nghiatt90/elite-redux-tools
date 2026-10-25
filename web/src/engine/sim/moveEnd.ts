@@ -26,7 +26,7 @@
 // 15   | MOVEEND_KINGSROCK               | 4672-4676  | Ported / Gap   | Ported: King's Rock / Razor Fang flinch (battle_util.c:6034-6052). Blunder Policy (:6053-6061) gapped; multi-hit moves gapped.
 // 16   | MOVEEND_SUBSTITUTE              | 4714-4722  | Ported         | Clears STATUS2_SUBSTITUTE and sets substituteDestroyedThisTurn if substituteHp is 0.
 // 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | Updates lastMove, lastResultingMove, lastPrintedMove, lastUsedMove, lastHitBy, lastLandedMove, lastHitByType (:4735-4772).
-// 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Unreachable    | Mirror move tracking; not modeled in BattlerState.
+// 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Ported         | Updates lastTakenMove, lastTakenMoveFrom (:4773-4781).
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
 // 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (:4268-4288), Thief (:4579-4593), Bug Bite (:4595-4597, EatTargetBerry :13221) minus the berry's own effect (gapped), Smack Down (:4598-4606).
 // 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Unreachable    | Double battle second target iteration; sim is single battle.
@@ -3027,7 +3027,19 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 18: MOVEEND_MIRROR_MOVE (:4773-4781)
-  // Mirror Move tracking. Not in BattlerState.
+  if (
+    attacker &&
+    target &&
+    attackerId !== targetId &&
+    !hasFlag(state.absentBattlerFlags, 1 << attackerId) &&
+    moveData?.flags?.mirrorMoveAffected === true &&
+    !fainted.includes(targetId) &&
+    isBattlerAlive(state, targetId) &&
+    (hpDealt > 0 || targetDamage > 0 || targetTurnDamaged || moveData?.split === 'STATUS')
+  ) {
+    state.lastTakenMove[targetId] = moveId
+    state.lastTakenMoveFrom[targetId][attackerId] = moveId
+  }
 
   // Case 19: MOVEEND_MULTIHIT_MOVE (:4880-4921)
   // Multi-hit loop. Total-damage resolved in sim.

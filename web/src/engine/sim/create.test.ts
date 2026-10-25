@@ -272,6 +272,13 @@ describe('createBattleState', () => {
     expect(state.statChangesToCheck).toHaveLength(MAX_BATTLERS_COUNT)
     expect(state.statChangesToCheck[0]).toHaveLength(NUM_BATTLE_STATS - 1)
     expect(state.lastUsedMove).toBeNull()
+    expect(state.lastTakenMove).toEqual([null, null, null, null])
+    expect(state.lastTakenMoveFrom).toEqual([
+      [null, null, null, null],
+      [null, null, null, null],
+      [null, null, null, null],
+      [null, null, null, null],
+    ])
   })
 
   it('gives the two sides separate side state', () => {

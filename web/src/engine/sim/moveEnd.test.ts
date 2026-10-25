@@ -240,6 +240,7 @@ const MOVE_FIRE_PUNCH = requireMove('MOVE_FIRE_PUNCH')
 const MOVE_THUNDERBOLT = requireMove('MOVE_THUNDERBOLT')
 const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
 const MOVE_RAPID_SPIN = requireMove('MOVE_RAPID_SPIN')
+const MOVE_COUNTER = requireMove('MOVE_COUNTER')
 // requireMove() omits effectChance (adding it would start firing secondary effects in every older test); Knock Off's
 // seteffectwithchance needs moves.json's effectChance (100) as its percentChance.
 const MOVE_KNOCK_OFF: SimMoveData = { ...requireMove('MOVE_KNOCK_OFF'), effectChance: movesById.get('MOVE_KNOCK_OFF')!.effectChance as number }
@@ -714,6 +715,8 @@ describe('State Bookkeeping & Clear Bits', () => {
     expect(state.battlers[1]!.lastLandedMove).toBeNull()
     expect(state.battlers[1]!.lastHitByType).toBeNull()
     expect(state.lastUsedMove).toBeNull()
+    expect(state.lastTakenMove[1]).toBeNull()
+    expect(state.lastTakenMoveFrom[1][0]).toBeNull()
 
     executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
 
@@ -724,6 +727,26 @@ describe('State Bookkeeping & Clear Bits', () => {
     expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
     expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
     expect(state.lastUsedMove).toBe('MOVE_TACKLE')
+    expect(state.lastTakenMove[1]).toBe('MOVE_TACKLE')
+    expect(state.lastTakenMoveFrom[1][0]).toBe('MOVE_TACKLE')
+  })
+
+  it('MOVEEND_MIRROR_MOVE (18): move without mirrorMoveAffected does not set lastTakenMove', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_COUNTER), null], testDepsWithDamage(fixedDamage(20)))
+
+    expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_COUNTER')
+    expect(state.lastTakenMove[1]).toBeNull()
+    expect(state.lastTakenMoveFrom[1][0]).toBeNull()
+  })
+
+  it('MOVEEND_MIRROR_MOVE (18): faint clears lastTakenMove and lastTakenMoveFrom (FaintClearSetData, battle_main.c:2982-2995)', () => {
+    const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
+    executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(100)))
+
+    expect(state.battlers[1]!.mon.hp).toBe(0)
+    expect(state.lastTakenMove[1]).toBeNull()
+    expect(state.lastTakenMoveFrom[1][0]).toBeNull()
   })
 
   it('MOVEEND_CHARGE (24): clears STATUS3_CHARGED_UP on Electric damaging move', () => {

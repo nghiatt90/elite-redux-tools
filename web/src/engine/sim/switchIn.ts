@@ -55,7 +55,7 @@
 //   `case HOLD_EFFECT_*` list, same "transcribed by name" precedent as
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
-import { createBattlerState } from './create'
+import { clearBattlerLastTakenMove, createBattlerState } from './create'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
@@ -189,6 +189,7 @@ export function switchIn(
   const mon = buildSwitchedInMon(incoming)
   const newBattler = createBattlerState(battlerId, mon, partyIndex)
   state.battlers[battlerId] = newBattler
+  clearBattlerLastTakenMove(state, battlerId)
   if (beforeEffects) beforeEffects(newBattler)
   syncPartyHp(state, battlerId)
 

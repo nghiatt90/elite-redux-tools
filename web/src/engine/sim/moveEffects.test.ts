@@ -65,6 +65,7 @@ import {
   STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS2_TRANSFORMED,
   STATUS3_ALWAYS_HITS,
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
@@ -344,6 +345,13 @@ const MOVE_ROAR = requireMove('MOVE_ROAR')
 const MOVE_REVIVAL_BLESSING = requireMove('MOVE_REVIVAL_BLESSING')
 const MOVE_HEALING_WISH = requireMove('MOVE_HEALING_WISH')
 const MOVE_LUNAR_DANCE = requireMove('MOVE_LUNAR_DANCE')
+const MOVE_MIRROR_MOVE = requireMove('MOVE_MIRROR_MOVE')
+const MOVE_SKETCH = requireMove('MOVE_SKETCH')
+const MOVE_DOODLE = requireMove('MOVE_DOODLE')
+const MOVE_TRANSFORM = requireMove('MOVE_TRANSFORM')
+
+const ABILITY_INTIMIDATE = requireAbility('ABILITY_INTIMIDATE')
+const ABILITY_BLAZE = requireAbility('ABILITY_BLAZE')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -434,6 +442,7 @@ function battle(
     spdef?: number
     hp?: number
     maxHp?: number
+    speciesId?: string
     abilities?: SimBattleMon['abilities']
     moves?: SimBattleMon['moves']
     pp?: SimBattleMon['pp']
@@ -450,6 +459,7 @@ function battle(
       createBattlerState(
         i,
         mon({
+          speciesId: s.speciesId ?? 'SPECIES_MUDKIP',
           // The foe defaults slower so turn order needs no speed-tie draw (GetWhoStrikesFirst, battle_main.c:4397).
           rawStats: { atk: s.atk ?? 100, def: s.def ?? 90, spatk: s.spatk ?? 80, spdef: s.spdef ?? 85, spe: s.spe ?? (i === 0 ? 100 : 50) },
           hp: s.hp ?? 100,
@@ -9677,6 +9687,211 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
 
         expect(act0.missed).toBe(true)
         expect(state.battlers[0]!.mon.moves[0]).toBe('MOVE_MIMIC')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+      })
+    })
+
+    describe('EFFECT_MIRROR_MOVE (MOVE_MIRROR_MOVE)', () => {
+      it('success: calls lastTakenMove (Swords Dance), boosting user Atk by +2 (src/battle_script_commands.c:9276-9307, data/battle_scripts_1.s:3575-3585)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIRROR_MOVE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Battler 0 took Swords Dance from Battler 1
+        state.lastTakenMove[0] = 'MOVE_SWORDS_DANCE'
+        state.lastTakenMoveFrom[0][1] = 'MOVE_SWORDS_DANCE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIRROR_MOVE), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // User called Swords Dance, boosting user's own Atk by +2
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+        // Mirror Move PP deducted: 20 -> 19
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+
+      it('failure: fails when user has no lastTakenMove / lastTakenMoveFrom (battle_script_commands.c:9305)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIRROR_MOVE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIRROR_MOVE), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+        // Mirror Move still deducts PP on failure: 20 -> 19 (:3580)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
+    })
+
+    describe('EFFECT_SKETCH (MOVE_SKETCH)', () => {
+      it('success: permanently sketches target lastPrintedMove into active mon and party mon (src/battle_script_commands.c:10834-10873, data/battle_scripts_1.s:4752-4761)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_SKETCH', null, null, null], pp: [1, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Target's lastPrintedMove is MOVE_EMBER (PP 20)
+        state.battlers[1]!.lastPrintedMove = 'MOVE_EMBER'
+        state.sides[0].party = [partyMon({ moves: ['MOVE_SKETCH', null, null, null], pp: [1, 0, 0, 0] })]
+
+        const out = executeTurn(state, [useMove(1, MOVE_SKETCH), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Active battler moves & PP updated
+        expect(state.battlers[0]!.mon.moves[0]).toBe('MOVE_EMBER')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(20)
+        // Party mon record permanently updated (REQUEST_MOVES_PP_BATTLE)
+        const persisted = state.sides[0].party[state.battlers[0]!.partyIndex]!
+        expect(persisted.moves[0]).toBe('MOVE_EMBER')
+        expect(persisted.pp[0]).toBe(20)
+      })
+
+      it('failure: fails when target lastPrintedMove is MOVE_STRUGGLE (battle_script_commands.c:10838)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_SKETCH', null, null, null], pp: [1, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        state.battlers[1]!.lastPrintedMove = 'MOVE_STRUGGLE'
+
+        const out = executeTurn(state, [useMove(1, MOVE_SKETCH), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.moves[0]).toBe('MOVE_SKETCH')
+        // PP spent on failure: 1 -> 0 (:4755)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(0)
+      })
+    })
+
+    describe('EFFECT_DOODLE (MOVE_DOODLE)', () => {
+      it('success: copies target ability to user (data/battle_scripts_1.s:2284-2319, src/battle_script_commands.c:7245-7257)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DOODLE', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_INTIMIDATE, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+
+        const out = executeTurn(state, [useMove(1, MOVE_DOODLE), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_INTIMIDATE')
+        // Doodle PP consumed: 10 -> 9
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+      })
+
+      it('failure: fails when target ability is unsuppressable/banned (e.g. Comatose) (battle_util.c:8448-8455)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_DOODLE', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50, abilities: { ability: ABILITY_COMATOSE, innates: [null, null, null] } },
+          ],
+          rng,
+        )
+
+        const out = executeTurn(state, [useMove(1, MOVE_DOODLE), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(state.battlers[0]!.mon.abilities.ability).not.toBe('ABILITY_COMATOSE')
+        // Doodle PP consumed on failure: 10 -> 9
+        expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+      })
+    })
+
+    describe('EFFECT_TRANSFORM (MOVE_TRANSFORM)', () => {
+      it('success: transforms into target, copying stats/types/ability/moves/PP (src/battle_script_commands.c:10482-10533, data/battle_scripts_1.s:4276-4290)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TRANSFORM', null, null, null], pp: [10, 0, 0, 0], hp: 100, maxHp: 100 },
+            {
+              spe: 50,
+              speciesId: 'SPECIES_CHARIZARD',
+              types: ['FIRE', 'FLYING', 'MYSTERY'],
+              abilities: { ability: ABILITY_BLAZE, innates: [null, null, null] },
+              moves: ['MOVE_EMBER', 'MOVE_FLAMETHROWER', null, null],
+              hp: 150,
+              maxHp: 150,
+              atk: 120,
+              def: 85,
+              spatk: 130,
+              spdef: 90,
+            },
+          ],
+          rng,
+        )
+        // Give target a stat stage change
+        state.battlers[1]!.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
+
+        const out = executeTurn(state, [useMove(1, MOVE_TRANSFORM), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_TRANSFORMED)).toBe(true)
+        expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_CHARIZARD')
+        expect(state.battlers[0]!.mon.types).toEqual(['FIRE', 'FLYING', 'MYSTERY'])
+        expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_BLAZE')
+        expect(state.battlers[0]!.mon.rawStats.atk).toBe(120)
+        expect(state.battlers[0]!.mon.rawStats.def).toBe(85)
+        expect(state.battlers[0]!.mon.rawStats.spatk).toBe(130)
+        expect(state.battlers[0]!.mon.rawStats.spdef).toBe(90)
+        expect(state.battlers[0]!.mon.rawStats.spe).toBe(50)
+        // User HP does NOT change
+        expect(state.battlers[0]!.mon.hp).toBe(100)
+        expect(state.battlers[0]!.mon.maxHp).toBe(100)
+        // Stat stages copied
+        expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+        // Moves copied with min(5, maxPP) = 5
+        expect(state.battlers[0]!.mon.moves).toEqual(['MOVE_EMBER', 'MOVE_FLAMETHROWER', null, null])
+        expect(state.battlers[0]!.mon.pp[0]).toBe(5)
+        expect(state.battlers[0]!.mon.pp[1]).toBe(5)
+        expect(state.battlers[0]!.mon.pp[2]).toBe(0)
+        expect(state.battlers[0]!.mon.pp[3]).toBe(0)
+      })
+
+      it('failure: fails when target is already transformed (battle_script_commands.c:10485)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_TRANSFORM', null, null, null], pp: [10, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Target is already transformed
+        state.battlers[1]!.mon.status2 |= STATUS2_TRANSFORMED
+
+        const out = executeTurn(state, [useMove(1, MOVE_TRANSFORM), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(true)
+        expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_TRANSFORMED)).toBe(false)
+        // Transform PP still deducted: 10 -> 9 (:4279)
         expect(state.battlers[0]!.mon.pp[0]).toBe(9)
       })
     })
