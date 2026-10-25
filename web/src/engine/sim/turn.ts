@@ -120,7 +120,7 @@
 //     buildTurnOrderContext below assembles a context whose isBattlerGrounded is
 //     the real port.
 
-import type { BattleOutcome, BattleState, SimPartyMon } from './state'
+import type { BattleOutcome, BattleState, BattlerState, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderContext, TurnOrder, TurnOrderMoveView } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
@@ -150,6 +150,7 @@ import {
   clearFlag,
   hasFlag,
   PARTY_SIZE,
+  setFlag,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_WIDE_GUARD,
@@ -158,6 +159,7 @@ import {
   STATUS2_CURSED,
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
+  STATUS2_MULTIPLETURNS,
   STATUS2_POWDER,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
@@ -172,11 +174,15 @@ import {
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
   STATUS3_MAGNET_RISE,
+  STATUS3_ON_AIR,
   STATUS3_PERISH_SONG,
+  STATUS3_PHANTOM_FORCE,
   STATUS3_POWER_TRICK,
   STATUS3_ROOTED,
   STATUS3_SEMI_INVULNERABLE,
   STATUS3_TELEKINESIS,
+  STATUS3_UNDERGROUND,
+  STATUS3_UNDERWATER,
   STATUS4_SALT_CURE,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_FOG_ANY,
@@ -189,9 +195,11 @@ import {
   battlerHasSimAbility,
   B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffsImplicit,
+  consumeHeldItem,
   dispatchOnStatLowered,
   isBattlerWeatherAffected,
   isSimAbilitySuppressed,
+  isUnnerveAbilityOnOpposingSide,
   MOVE_EFFECT_ATK_MINUS_1,
   MOVE_EFFECT_DEF_MINUS_1,
   MOVE_EFFECT_SP_DEF_MINUS_1,
@@ -213,6 +221,35 @@ import {
   testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
+
+/**
+ * Cmd_setsemiinvulnerablebit, src/battle_script_commands.c:11541-11566.
+ * Sets the appropriate semi-invulnerable status flag on battler.statuses3 for two-turn moves.
+ */
+export function setSemiInvulnerableBit(battler: BattlerState, moveId: string): void {
+  switch (moveId) {
+    case 'MOVE_FLY':
+    case 'MOVE_BOUNCE':
+    case 'MOVE_ROCK_CLIMB':
+    case 'MOVE_SKY_DROP':
+    case 'MOVE_SEISMIC_TOSS':
+      battler.statuses3 = setFlag(battler.statuses3, STATUS3_ON_AIR)
+      break
+    case 'MOVE_DIG':
+      battler.statuses3 = setFlag(battler.statuses3, STATUS3_UNDERGROUND)
+      break
+    case 'MOVE_DIVE':
+    case 'MOVE_TOXIC_PLUNGE':
+      battler.statuses3 = setFlag(battler.statuses3, STATUS3_UNDERWATER)
+      break
+    case 'MOVE_PHANTOM_FORCE':
+    case 'MOVE_SHADOW_FORCE':
+    case 'MOVE_CHEAP_SHOT':
+    case 'MOVE_READY_OR_NOT':
+      battler.statuses3 = setFlag(battler.statuses3, STATUS3_PHANTOM_FORCE)
+      break
+  }
+}
 
 /** IsBattlerAlive, src/battle_util.c:6685-6694 -- all three conditions, in
  * order: zero HP, an id past gBattlersCount, or the absent-battler bit. A null
@@ -2021,7 +2058,91 @@ export function executeAction(
       return effectOutcome
     }
 
+    // Two-turn semi-invulnerable moves (Fly, Bounce, Dig, Dive, Phantom Force, etc.)
+    // BattleScript_EffectSemiInvulnerable (data/battle_scripts_1.s:5848-5895)
+    let isSecondTurnSemiInvuln = false
+    if (moveEffect === 'EFFECT_SEMI_INVULNERABLE') {
+      const attackerBattler = state.battlers[battlerId]!
+      if (!hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
+        // BattleScriptFirstChargingTurn (data/battle_scripts_1.s:4079-4093) + BattleScript_FirstTurnSemiInvulnerable (:5876-5879)
+        performPpDeduct()
+        attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+        attackerBattler.round.chargingTurn = true
+
+        // Cmd_setsemiinvulnerablebit (src/battle_script_commands.c:11541-11566)
+        setSemiInvulnerableBit(attackerBattler, currentMove.id)
+
+        // twoturnmoveacceleratecheck (:5879)
+        const hasAccelerate = battlerHasSimAbility(
+          state,
+          attackerBattler,
+          'ABILITY_ACCELERATE',
+          false,
+          battlerId,
+          false,
+          deps.dataContext,
+        )
+        let accelerated = hasAccelerate
+        if (!accelerated) {
+          const itemId = attackerBattler.mon.itemId
+          const itemNegated =
+            hasFlag(attackerBattler.statuses3, STATUS3_EMBARGO) ||
+            battlerHasSimAbility(state, attackerBattler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+          if (!itemNegated && itemId === 'ITEM_ENIGMA_BERRY') {
+            unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
+          }
+          const holdEffect = !itemNegated && itemId ? (deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null) : null
+          if (holdEffect === 'HOLD_EFFECT_POWER_HERB' && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
+            consumeHeldItem(state, attackerBattler, unmodelled)
+            accelerated = true
+          }
+        }
+
+        if (!accelerated) {
+          runMoveEndBookkeeping({
+            state,
+            attackerId: battlerId,
+            targetId: currentTargetId,
+            currentMoveId: currentMove.id,
+            chosenMoveId: currentChosenMoveId,
+            deps,
+            noEffect: false,
+            obeys: true,
+            fainted: [],
+          })
+          return {
+            turnOrderIndex: index,
+            battlerId,
+            action: actionKind,
+            skippedBecauseFainted: false,
+            battleOver: false,
+            missed: false,
+            targetId: currentTargetId,
+            targetDamage: null,
+            attackerDamage: null,
+            cancelledBy: null,
+            confusionSelfHitDamage: null,
+            statChanges: null,
+            statusApplied: null,
+            unmodelled,
+            fainted: [],
+          }
+        }
+      }
+
+      // Turn 2 (or accelerated Turn 1): BattleScript_SecondTurnSemiInvulnerable (data/battle_scripts_1.s:5880-5895)
+      // clearstatusfromeffect BS_ATTACKER (:5884)
+      attackerBattler.mon.status2 = clearFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+      if (battlerHasSimAbility(state, attackerBattler, 'ABILITY_ACCELERATE', false, battlerId, false, deps.dataContext)) {
+        attackerBattler.round.chargingTurn = false
+      }
+      isSecondTurnSemiInvuln = true
+    }
+
     if (currentTargetId === null || !isBattlerAlive(state, currentTargetId)) {
+      if (isSecondTurnSemiInvuln) {
+        state.battlers[battlerId]!.statuses3 = clearFlag(state.battlers[battlerId]!.statuses3, STATUS3_SEMI_INVULNERABLE)
+      }
       // No living target: the move resolves to nothing here. The real game runs
       // a fail branch with messages and effect-specific behaviour; this batch
       // models only that no damage is dealt.
@@ -2042,7 +2163,9 @@ export function executeAction(
     }
     if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
       cancelMultiTurnMoves(state.battlers[battlerId]!)
-      performPpDeduct()
+      if (!isSecondTurnSemiInvuln) {
+        performPpDeduct()
+      }
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
       runMoveEndBookkeeping({
         state,
@@ -2088,15 +2211,28 @@ export function executeAction(
     }
     const accResult = getTotalAccuracy(accInputs)
     unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+    // battle_script_commands.c:1383-1384
+    if (state.battlers[battlerId]?.round.usedMicleBerry) {
+      state.battlers[battlerId]!.round.usedMicleBerry = false
+    }
     // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
     // is not special-cased: Random() % 100 is at most 99, so the comparison
     // can never be true, and the arithmetic alone carries the sentinel.
     const missed = state.rng.random16() % 100 >= accResult.accuracy
 
+    // Cmd_clearsemiinvulnerablebit (src/battle_script_commands.c:11568-11571)
+    // Cleared on both hit and miss paths: BattleScript_SemiInvulnerableTryHit (:5889) and BattleScript_SemiInvulnerableMiss (:5893).
+    if (isSecondTurnSemiInvuln) {
+      state.battlers[battlerId]!.statuses3 = clearFlag(state.battlers[battlerId]!.statuses3, STATUS3_SEMI_INVULNERABLE)
+    }
+
     // Cmd_ppreduce, :1460-1506 -- after the accuracy check, on both paths:
     // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
     // 3094) runs ppreduce too, so a miss still costs PP.
-    performPpDeduct()
+    // HITMARKER_NO_PPDEDUCT on turn 2 skips second deduction.
+    if (!isSecondTurnSemiInvuln) {
+      performPpDeduct()
+    }
 
     if (missed) {
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)

@@ -58,23 +58,7 @@ const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/,
  * `field` names. */
 function structuralGaps(): BridgeGap[] {
   return [
-    { field: 'attackerTrepidationNonzero', reason: 'NEVER_UPDATED', detail: 'volatiles.trepidation; no sim code writes volatiles' },
-    { field: 'attackerUsedMicleBerry', reason: 'NEVER_UPDATED', detail: 'round.usedMicleBerry; no sim code writes RoundState, so it can never read true' },
-    { field: 'attackerAccStage', reason: 'NEVER_UPDATED', detail: 'statStages[STAT_ACC]; createBattlerState forces neutral and no sim code applies a stat change' },
-    { field: 'defenderEvasionStage', reason: 'NEVER_UPDATED', detail: 'statStages[STAT_EVASION]; createBattlerState forces neutral and no sim code applies a stat change' },
-    { field: 'defenderHasForesight', reason: 'NEVER_UPDATED', detail: 'statuses4 STATUS4_FORESIGHT; no sim code writes statuses4' },
-    { field: 'defenderHasAlwaysHits', reason: 'NEVER_UPDATED', detail: 'statuses3 STATUS3_ALWAYS_HITS; no sim code writes statuses3' },
-    { field: 'battlerWithSureHitIsAttacker', reason: 'NEVER_UPDATED', detail: 'volatiles.battlerWithSureHit; no sim code writes volatiles' },
-    { field: 'defenderHasTelekinesis', reason: 'NEVER_UPDATED', detail: 'statuses3 STATUS3_TELEKINESIS; no sim code writes statuses3' },
-    { field: 'defenderHasPhantomForce', reason: 'NEVER_UPDATED', detail: 'statuses3 semi-invulnerability; no sim code writes statuses3' },
-    { field: 'defenderIsOnAir', reason: 'NEVER_UPDATED', detail: 'statuses3 semi-invulnerability; no sim code writes statuses3' },
-    { field: 'defenderIsUnderground', reason: 'NEVER_UPDATED', detail: 'statuses3 semi-invulnerability; no sim code writes statuses3' },
-    { field: 'defenderIsUnderwater', reason: 'NEVER_UPDATED', detail: 'statuses3 semi-invulnerability; no sim code writes statuses3' },
-    {
-      field: 'defenderSmokescreenActive',
-      reason: 'NEVER_UPDATED',
-      detail: 'side.timers.smokescreenTimer; unlike reflect/lightScreen/luckyChant, encounters.json has no battle-start source for Smokescreen at all, so this can never read true',
-    },
+    { field: 'attackerTrepidationNonzero', reason: 'NEVER_UPDATED', detail: 'volatiles.trepidation; no sim code writes volatiles.trepidation' },
     { field: 'myceliumMightActive', reason: 'NO_SOURCE', detail: 'gHitMarker HITMARKER_MYCELIUM_MIGHT is a per-turn engine flag with no sim-state counterpart' },
   ]
 }
@@ -158,17 +142,17 @@ export function buildAccuracyInputs(
     moveTarget: move?.target ?? null,
 
     attackerTypes: attacker.mon.types,
-    // Gapped (structuralGaps); the C tests a live 2-bit counter this sim never
-    // writes, so the only honest placeholder is "no trepidation".
-    attackerTrepidationNonzero: false,
+    // Gapped (structuralGaps): volatiles.trepidation is never written in ordinary play.
+    attackerTrepidationNonzero: attacker.volatiles.trepidation > 0,
     attackerHoldEffect: attackerItem?.resolvedHoldEffect ?? null,
     attackerHoldEffectParam: attackerItem?.holdEffectStrength ?? 0,
-    // Gapped: statStages is permanently neutral (see structuralGaps).
+    // Derived: statStages is maintained by applyStatBuff (statBuffs.ts:544).
     attackerAccStage: attacker.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE,
     attackerAbilitySlots: attacker.mon.abilities,
     attackerActsAfterDefender,
-    // Gapped: RoundState.usedMicleBerry is never written, so it can never be true.
-    attackerUsedMicleBerry: false,
+    // Derived: RoundState.usedMicleBerry is written by Micle Berry activation (moveEffects.ts:8837)
+    // and cleared by Cmd_accuracycheck (battle_script_commands.c:1383-1384 / turn.ts).
+    attackerUsedMicleBerry: attacker.round.usedMicleBerry,
     myceliumMightActive: false,
 
     defenderHoldEffect: defenderItem?.resolvedHoldEffect ?? null,
@@ -185,7 +169,8 @@ export function buildAccuracyInputs(
     defenderIsOnAir: semiInvulnerableState(defender.statuses3) === 'AIRBORNE',
     defenderIsUnderground: semiInvulnerableState(defender.statuses3) === 'UNDERGROUND',
     defenderIsUnderwater: semiInvulnerableState(defender.statuses3) === 'UNDERWATER',
-    defenderSmokescreenActive: false,
+    // Derived: side smokescreenTimer (battle_script_commands.c:1393)
+    defenderSmokescreenActive: (state.sides[targetId & 1]?.timers.smokescreenTimer ?? 0) > 0,
     defenderAbilitySlots: defender.mon.abilities,
     defenderIsWrapped: hasFlag(defender.mon.status2, STATUS2_WRAPPED),
     isAbilitySuppressed: (side, abilityId) =>

@@ -177,14 +177,9 @@
 //                           only in attackCanceller.ts's "Unreachable" comment
 //                           for CANCELLER_THROAT_CHOP, never read by
 //                           executable code.
-//   ENDTURN_SLOW_START      Gapped (timer sub-branch only) -- volatiles.
-//                           slowStartTimer is read for real by bridge.ts/
-//                           unpack.ts (itself NEVER_UPDATED there for the same
-//                           "no sim code writes volatiles" reason as several
-//                           accuracy fields). Gapped when slowStartTimer is
-//                           nonzero and the battler holds ABILITY_SLOW_START or
-//                           ABILITY_LETHARGY. The DISCIPLINE sub-branch
-//                           (:2943-2952) is Unreachable: volatiles.
+//   ENDTURN_SLOW_START      Ported (timer decrement, :2930-2941) -- decrements
+//                           volatiles.slowStartTimer when > 0. The DISCIPLINE
+//                           sub-branch (:2943-2952) is Unreachable: volatiles.
 //                           disciplineCounter/gBattleStruct->choicedMove have
 //                           no reader anywhere.
 //   ENDTURN_PLASMA_FISTS    Unreachable -- STATUS4_PLASMA_FISTS has no reader
@@ -1130,14 +1125,10 @@ export function runEndTurnEffects(
     // ENDTURN_POWDER, :2919-2921 -- unconditional.
     battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_POWDER)
 
-    // ENDTURN_SLOW_START, :2930-2941 -- timer sub-branch only.
-    gapIf(
-      battler.volatiles.slowStartTimer !== 0 &&
-        (battlerHasAbility(battler.mon.abilities, 'ABILITY_SLOW_START', NO_SUPPRESSION) ||
-          battlerHasAbility(battler.mon.abilities, 'ABILITY_LETHARGY', NO_SUPPRESSION)),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_SLOW_START's timer sub-branch (battle_util.c:2930-2941) is not applied -- slowStartTimer was not decremented`,
-    )
+    // ENDTURN_SLOW_START, :2930-2941 -- timer decrement.
+    if (battler.volatiles.slowStartTimer > 0) {
+      battler.volatiles.slowStartTimer--
+    }
 
     // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- six of its nine sub-fields
     // are real elsewhere (see header); gapped without the `.started` gating

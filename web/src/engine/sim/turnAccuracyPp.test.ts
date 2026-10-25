@@ -180,21 +180,63 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
   it('every structural accuracy gap is reported, exactly, for a plain hit with no Pressure/Anticipation/Stockpile', () => {
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
     const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    const gapFields = [
-      'attackerTrepidationNonzero', 'attackerUsedMicleBerry', 'attackerAccStage', 'defenderEvasionStage',
-      'defenderHasForesight', 'defenderHasAlwaysHits', 'battlerWithSureHitIsAttacker', 'defenderHasTelekinesis',
-      'defenderHasPhantomForce', 'defenderIsOnAir', 'defenderIsUnderground', 'defenderIsUnderwater',
-      'defenderSmokescreenActive', 'myceliumMightActive',
+    const remainingStructuralGaps = [
+      'attackerTrepidationNonzero',
+      'myceliumMightActive',
       // accuracy.ts's own unconditional gap (IsStatDropBlocked), appended after
       // accuracyBridge.ts's structural list.
       'attackerAccuracyDropBlockedSpecific',
     ]
-    for (const field of gapFields) {
+    for (const field of remainingStructuralGaps) {
       expect(out.actions[0].unmodelled.some((u) => u.startsWith(`${field}:`))).toBe(true)
     }
+
+    // Pruned gaps with real writers must never be reported as unmodelled structural gaps
+    const prunedFields = [
+      'attackerUsedMicleBerry',
+      'attackerAccStage',
+      'defenderEvasionStage',
+      'defenderHasForesight',
+      'defenderHasAlwaysHits',
+      'battlerWithSureHitIsAttacker',
+      'defenderHasTelekinesis',
+      'defenderHasPhantomForce',
+      'defenderIsOnAir',
+      'defenderIsUnderground',
+      'defenderIsUnderwater',
+      'defenderSmokescreenActive',
+    ]
+    for (const field of prunedFields) {
+      expect(out.actions[0].unmodelled.some((u) => u.startsWith(`${field}:`))).toBe(false)
+    }
+
     // And nothing else -- no Pressure/Anticipation/Stockpile note when none apply.
     expect(out.actions[0].unmodelled.some((u) => u.includes('Anticipation'))).toBe(false)
     expect(out.actions[0].unmodelled.some((u) => u.includes('Pressure'))).toBe(false)
+  })
+
+  it('Micle Berry: round.usedMicleBerry is read by accuracy bridge and cleared by Cmd_accuracycheck', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
+    state.battlers[0]!.round.usedMicleBerry = true
+    const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    expect(out.actions[0].unmodelled.some((u) => u.startsWith('attackerUsedMicleBerry:'))).toBe(true) // only the Ripen gap, which is real
+    expect(state.battlers[0]!.round.usedMicleBerry).toBe(false)
+  })
+
+  it('Smokescreen: defenderSmokescreenActive is derived from side smokescreenTimer and reduces accuracy by 25%', () => {
+    const state = battle([{ spe: 200 }, { spe: 50 }], scripted(74, 75))
+    state.sides[1]!.timers.smokescreenTimer = 3
+    // Accuracy 100 becomes Math.trunc(100 * 0.75) = 75.
+    // scripted(74): 74 < 75 -> hits
+    const out1 = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    expect(out1.actions[0].missed).toBe(false)
+    expect(out1.actions[0].unmodelled.some((u) => u.startsWith('defenderSmokescreenActive:'))).toBe(false)
+
+    // scripted(75): 75 >= 75 -> misses
+    const state2 = battle([{ spe: 200 }, { spe: 50 }], scripted(75))
+    state2.sides[1]!.timers.smokescreenTimer = 3
+    const out2 = executeTurn(state2, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    expect(out2.actions[0].missed).toBe(true)
   })
 
   it('gaps Cmd_accuracycheck\'s own Anticipation branch by name only when the defender holds it', () => {

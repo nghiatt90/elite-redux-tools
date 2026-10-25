@@ -344,11 +344,9 @@ export interface BridgeResult {
  * are added per call below when a supplied context misses an entry. */
 const BATCH1_GAPS: BridgeGap[] = [
   // --- state the sim has, correctly zeroed, and never updates -------------
-  { field: 'semiInvulnerable', reason: 'NEVER_UPDATED', detail: 'gStatuses3 semi-invulnerability; no sim code writes statuses3 for two-turn moves' },
-  { field: 'slowStartTimer', reason: 'NEVER_UPDATED', detail: 'volatiles.slowStartTimer; ABILITY_SLOW_START is unhandled by the simulator' },
-  { field: 'extraStatLevel', reason: 'NEVER_UPDATED', detail: 'volatiles.extra*Level; no game or sim code writes volatiles.extra*Level' },
-  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; no game or sim code writes STATUS4_GHASTLY_ECHO in ordinary play' },
-  { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; MOVE_SAFE_PASSAGE switch-in is not modelled' },
+  { field: 'extraStatLevel', reason: 'NEVER_UPDATED', detail: 'volatiles.extra*Level; written only by battle_events.c:207,435 in special boss events, never in ordinary play' },
+  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; written only by MOVE_GHASTLY_ECHO (battle_script_commands.c:8381), which is not in the 40 fights\' movesets' },
+  { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
   { field: 'condition.itemNegated', reason: 'NO_SOURCE', detail: 'reads only Embargo; Magic Room and Klutz are not read here' },

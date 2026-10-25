@@ -1442,6 +1442,12 @@ export function applySwitchInAbilities(
       continue
     }
 
+    if (abilityId === 'ABILITY_SLOW_START' || abilityId === 'ABILITY_LETHARGY') {
+      // abilities.cc:1744 (Impl<ABILITY_SLOW_START>.onEntry) / 4964 (Impl<ABILITY_LETHARGY>.onEntry)
+      battler.volatiles.slowStartTimer = 5
+      continue
+    }
+
     unmodelled.push(
       `battler ${battlerId}: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ${abilityId}'s onEntry hook was not run`,
     )

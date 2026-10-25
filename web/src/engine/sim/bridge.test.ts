@@ -36,6 +36,7 @@ import {
   STATUS1_TOXIC_POISON,
   STATUS2_TRANSFORMED,
   STATUS3_MIRACLE_EYED,
+  STATUS3_ON_AIR,
   STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRAVITY,
@@ -344,8 +345,6 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     'condition.lastMoveFailed',
     'condition.safePassage',
     'extraStatLevel',
-    'semiInvulnerable',
-    'slowStartTimer',
   ]
 
   it('reports EXACTLY the expected gap list, no more and no fewer', () => {
@@ -381,8 +380,8 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(neverUpdated).toContain('condition.safePassage')
     expect(neverUpdated).toContain('condition.ghastlyEcho')
     expect(neverUpdated).toContain('extraStatLevel')
-    expect(neverUpdated).toContain('semiInvulnerable')
-    expect(neverUpdated).toContain('slowStartTimer')
+    expect(neverUpdated).not.toContain('semiInvulnerable')
+    expect(neverUpdated).not.toContain('slowStartTimer')
 
     // The other half, which the comment claimed and nothing asserted: these
     // really are present and zeroed on a fresh battler. That is what makes them
@@ -420,7 +419,7 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     for (const derived of [
       'level', 'nature', 'rawStats', 'gender', 'isGrounded', 'alliesFainted',
       'moveSlotPp', 'abilitySlots', 'types', 'statStages', 'isTransformed',
-      'hasMiracleEye', 'isInfatuatedWithOpponent',
+      'hasMiracleEye', 'isInfatuatedWithOpponent', 'semiInvulnerable', 'slowStartTimer',
     ]) {
       expect(gapped.has(derived)).toBe(false)
     }
@@ -457,19 +456,24 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
   it('computes unpacked values for fields that now have real writers without reporting gaps', () => {
     const state = battle()
     state.battlers[0]!.mon.status2 = setFlag(0, STATUS2_TRANSFORMED)
-    state.battlers[0]!.statuses3 = setFlag(0, STATUS3_MIRACLE_EYED)
+    state.battlers[0]!.statuses3 = setFlag(0, STATUS3_MIRACLE_EYED | STATUS3_ON_AIR)
     state.battlers[0]!.volatiles.fear = true
+    state.battlers[0]!.volatiles.slowStartTimer = 4
     state.battlers[0]!.round.helpingHand = true
 
     const { battler, gaps } = buildBattlerBattleState(state, 0, ROLES, DEPS)
     expect(battler.isTransformed).toBe(true)
     expect(battler.hasMiracleEye).toBe(true)
+    expect(battler.semiInvulnerable).toBe('AIRBORNE')
+    expect(battler.slowStartTimer).toBe(4)
     expect(battler.condition.fear).toBe(true)
     expect(battler.condition.helpingHand).toBe(true)
 
     const gapped = new Set(gaps.map((g) => g.field))
     expect(gapped.has('isTransformed')).toBe(false)
     expect(gapped.has('hasMiracleEye')).toBe(false)
+    expect(gapped.has('semiInvulnerable')).toBe(false)
+    expect(gapped.has('slowStartTimer')).toBe(false)
     expect(gapped.has('condition.fear')).toBe(false)
     expect(gapped.has('condition.helpingHand')).toBe(false)
   })
