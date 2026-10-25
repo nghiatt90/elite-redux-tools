@@ -120,6 +120,8 @@ export function buildAccuracyInputs(
   if (weatherGap) gaps.push(weatherGap)
 
   const defenderHasAnticipation = defender.mon.abilities.ability === 'ABILITY_ANTICIPATION' || defender.mon.abilities.innates.includes('ABILITY_ANTICIPATION')
+  const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
+  const defenderHoldEffect = deps.grounding.holdEffectOf(targetId)
 
   const inputs: AccuracyInputs = {
     moveId,
@@ -143,8 +145,8 @@ export function buildAccuracyInputs(
     attackerTypes: attacker.mon.types,
     // Derived: written by BattleScript_EffectTrepidation (:8715-8723) and decremented in ENDTURN_GENERIC_BATTLER_TIMERS (:2976).
     attackerTrepidationNonzero: attacker.volatiles.trepidation > 0,
-    attackerHoldEffect: attackerItem?.resolvedHoldEffect ?? null,
-    attackerHoldEffectParam: attackerItem?.holdEffectStrength ?? 0,
+    attackerHoldEffect,
+    attackerHoldEffectParam: attackerHoldEffect ? (attackerItem?.holdEffectStrength ?? 0) : 0,
     // Derived: statStages is maintained by applyStatBuff (statBuffs.ts:544).
     attackerAccStage: attacker.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE,
     attackerAbilitySlots: attacker.mon.abilities,
@@ -154,8 +156,8 @@ export function buildAccuracyInputs(
     attackerUsedMicleBerry: attacker.round.usedMicleBerry,
     myceliumMightActive: false,
 
-    defenderHoldEffect: defenderItem?.resolvedHoldEffect ?? null,
-    defenderHoldEffectParam: defenderItem?.holdEffectStrength ?? 0,
+    defenderHoldEffect,
+    defenderHoldEffectParam: defenderHoldEffect ? (defenderItem?.holdEffectStrength ?? 0) : 0,
     defenderEvasionStage: defender.mon.statStages[STAT_EVASION] ?? DEFAULT_STAT_STAGE,
     defenderHasForesight: hasFlag(defender.statuses4, STATUS4_FORESIGHT),
     defenderHasAlwaysHits: hasFlag(defender.statuses3, STATUS3_ALWAYS_HITS),

@@ -457,6 +457,8 @@ export interface DamageResolution {
   unmodelled: string[]
   absorbingAbility?: string | null
   isCriticalHit?: boolean
+  berryReduced?: boolean
+  isSuperEffective?: boolean
 }
 
 export interface DamageResolveContext {
@@ -2278,7 +2280,12 @@ export function executeAction(
       target: currentTargetId,
     }
 
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, currentTargetId, currentMoveAction, { targetHasActedThisTurn })
+    if (attackerBattler.round.usedCustapBerry && deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_CUSTAP_BERRY') {
+      // BattleScript_CustapBerryActivation (battle_main.c:4616-4618): removeitem BS_ATTACKER
+      attackerBattler.mon.itemId = null
+    }
+
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective } = deps.damage.resolve(state, battlerId, currentTargetId, currentMoveAction, { targetHasActedThisTurn })
 
     if (absorbingAbility) {
       const absorbOutcome = applyAbsorbEffect({
@@ -2332,11 +2339,36 @@ export function executeAction(
       }
     }
 
-    // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe stops HP at 1 (:1667)
+    // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673)
     const targetBattler = state.battlers[currentTargetId]
     const isFalseSwipe = Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
-    if (targetDamage !== null && targetBattler && targetBattler.mon.hp > 0 && (targetBattler.round.endured || isFalseSwipe) && targetDamage >= targetBattler.mon.hp) {
+    const targetHoldEffect = deps.grounding.holdEffectOf(currentTargetId)
+    const hasFocusSash =
+      targetHoldEffect === 'HOLD_EFFECT_FOCUS_SASH' &&
+      !isUnnerveAbilityOnOpposingSide(state, currentTargetId, deps.dataContext) &&
+      targetBattler &&
+      targetBattler.mon.hp === targetBattler.mon.maxHp
+    if (
+      targetDamage !== null &&
+      targetBattler &&
+      targetBattler.mon.hp > 0 &&
+      (targetBattler.round.endured || isFalseSwipe || hasFocusSash) &&
+      targetDamage >= targetBattler.mon.hp
+    ) {
       targetDamage = Math.max(0, targetBattler.mon.hp - 1)
+      if (hasFocusSash && !targetBattler.round.endured && !isFalseSwipe) {
+        // BattleScript_HangedOnMsg (data/battle_scripts_1.s:10962-10963): removeitem BS_TARGET
+        targetBattler.mon.itemId = null
+      }
+    }
+
+    // Check damage reducing berries (battle_script_commands.c:1693-1697)
+    if (berryReduced && targetBattler) {
+      targetBattler.turn.berryReduced = true
+    }
+    if (targetBattler?.turn.berryReduced && targetDamage !== null && targetDamage > 0 && targetBattler.mon.itemId) {
+      // BattleScript_TargetAteItem (data/battle_scripts_1.s:10786-10793): removeitem BS_TARGET
+      targetBattler.mon.itemId = null
     }
 
     const fainted: number[] = []
@@ -2411,6 +2443,7 @@ export function executeAction(
       targetDamage: targetDamage ?? 0,
       hpDealt,
       isCriticalHit,
+      isSuperEffective,
       moveEffect2: secondaryResult?.moveEffect2 ?? null,
       deps,
       unmodelled,
@@ -2524,6 +2557,23 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   assertNoPerBattlerQuash(state)
   clearStartedFlags(state)
   actions = actions.map((a, id) => applyEncore(state, id, a, deps))
+
+  // TurnBasedPriority (battle_main.c:4411-4414) -- Custap Berry
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    if (!b || b.mon.hp === 0) continue
+    const holdEffect = deps.grounding.holdEffectOf(i)
+    if (
+      holdEffect === 'HOLD_EFFECT_CUSTAP_BERRY' &&
+      !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext)
+    ) {
+      const hasGluttony = battlerHasSimAbility(state, b, 'ABILITY_GLUTTONY', false, i, false, deps.dataContext)
+      const threshold = Math.floor(b.mon.maxHp / (hasGluttony ? 2 : 4))
+      if (b.mon.hp <= threshold) {
+        b.round.usedCustapBerry = true
+      }
+    }
+  }
 
   const ctx = buildTurnOrderContext(state, deps)
   const order = setActionsAndBattlersTurnOrder(state, actions)

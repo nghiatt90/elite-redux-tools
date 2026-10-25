@@ -153,9 +153,19 @@ function scripted(...values: number[]): RandomSource {
   return { random16: () => values[i++] ?? 0 }
 }
 
-function deps(damage: DamageResolver = THROWING_DAMAGE_RESOLVER): TurnLoopDeps {
+/** `itemsOf` makes grounding.holdEffectOf read the battlers' real held items, as the production wiring does. */
+function deps(damage: DamageResolver = THROWING_DAMAGE_RESOLVER, itemsOf?: BattleState): TurnLoopDeps {
   const { isBattlerGrounded: _dropped, ...rest } = NEUTRAL_TURN_ORDER_CONTEXT
-  return { turnOrder: rest, grounding: GROUNDING, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
+  const grounding = itemsOf
+    ? {
+        ...GROUNDING,
+        holdEffectOf: (id: number) => {
+          const itemId = itemsOf.battlers[id]?.mon.itemId
+          return itemId ? (DATA_CONTEXT.item(itemId)?.resolvedHoldEffect ?? null) : null
+        },
+      }
+    : GROUNDING
+  return { turnOrder: rest, grounding, damage, statStageRatios: RATIOS, dataContext: DATA_CONTEXT }
 }
 
 describe('executeTurn: end-turn ladder -- ENDTURN_POISON (battle_util.c:2492-2515)', () => {
@@ -315,24 +325,26 @@ describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header t
     expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${BAD_DREAMS}'s onEndTurn hook was not run`)
   })
 
-  it('gaps ENDTURN_ITEMS1/ENDTURN_ITEMS2 exactly when the battler holds a recognised hold effect, and not otherwise', () => {
-    const withItem = battle([{ spe: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }, { spe: 50, maxHp: 100 }], scripted())
-    const out1 = executeTurn(withItem, [null, null], deps())
-    expect(out1.endTurnUnmodelled).toContain(
-      `battler 0: ENDTURN_ITEMS1/ENDTURN_ITEMS2 (battle_util.c:5622-5855) are not applied -- ITEM_LEFTOVERS's end-of-turn hold effect (HOLD_EFFECT_LEFTOVERS) was not run`,
-    )
+  it('restores HP with Leftovers at end of turn and does not emit ENDTURN_ITEMS1 gap', () => {
+    const withItem = battle([{ spe: 100, hp: 80, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }, { spe: 50, maxHp: 100 }], scripted())
+    const out1 = executeTurn(withItem, [null, null], deps(undefined, withItem))
+    expect(withItem.battlers[0]!.mon.hp).toBe(86) // 80 + floor(100/16) = 86
+    expect(out1.endTurn).toEqual([
+      { battlerId: 0, effect: 'ITEM', hpChange: 6, fainted: false },
+    ])
+    expect(out1.endTurnUnmodelled.some((m) => m.includes('ENDTURN_ITEMS'))).toBe(false)
 
     const withoutItem = battle([{ spe: 100, maxHp: 100 }, { spe: 50, maxHp: 100 }], scripted())
     const out2 = executeTurn(withoutItem, [null, null], deps())
     expect(out2.endTurnUnmodelled.some((m) => m.includes('ENDTURN_ITEMS'))).toBe(false)
   })
 
-  it('gaps ENDTURN_ORBS exactly when the battler holds an orb-class item, and not otherwise', () => {
+  it('inflicts toxic poison with Toxic Orb at end of turn and does not emit ENDTURN_ORBS gap', () => {
     const withOrb = battle([{ spe: 100, maxHp: 100, itemId: 'ITEM_TOXIC_ORB' }, { spe: 50, maxHp: 100 }], scripted())
-    const out1 = executeTurn(withOrb, [null, null], deps())
-    expect(out1.endTurnUnmodelled).toContain(
-      `battler 0: ENDTURN_ORBS (battle_util.c:6252-6288) is not applied -- ITEM_TOXIC_ORB's orb effect (HOLD_EFFECT_TOXIC_ORB) was not run`,
-    )
+    const out1 = executeTurn(withOrb, [null, null], deps(undefined, withOrb))
+    expect(withOrb.battlers[0]!.mon.status1 & STATUS1_TOXIC_POISON).toBe(STATUS1_TOXIC_POISON)
+    expect(withOrb.battlers[0]!.mon.hp).toBe(94) // 100 - floor(100/16) = 94 from bad poison
+    expect(out1.endTurnUnmodelled.some((m) => m.includes('ENDTURN_ORBS'))).toBe(false)
 
     const withoutOrb = battle([{ spe: 100, maxHp: 100 }, { spe: 50, maxHp: 100 }], scripted())
     const out2 = executeTurn(withoutOrb, [null, null], deps())

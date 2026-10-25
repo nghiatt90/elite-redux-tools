@@ -209,7 +209,7 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { StatusDeps } from './statusEffects'
-import { canSleep, cancelMultiTurnMoves } from './statusEffects'
+import { canBeBurned, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -268,8 +268,6 @@ const ITEMS_1_2_HOLD_EFFECTS = new Set([
   'HOLD_EFFECT_RESTORE_PCT_HP',
   'HOLD_EFFECT_RESTORE_PP',
   'HOLD_EFFECT_RESTORE_STATS',
-  'HOLD_EFFECT_BLACK_SLUDGE',
-  'HOLD_EFFECT_LEFTOVERS',
   'HOLD_EFFECT_CONFUSE_SPICY',
   'HOLD_EFFECT_CONFUSE_DRY',
   'HOLD_EFFECT_CONFUSE_SWEET',
@@ -292,9 +290,6 @@ const ITEMS_1_2_HOLD_EFFECTS = new Set([
   'HOLD_EFFECT_MENTAL_HERB',
   'HOLD_EFFECT_MICLE_BERRY',
 ])
-
-/** ITEMEFFECT_ORBS's own switch, battle_util.c:6252-6288. */
-const ORBS_HOLD_EFFECTS = new Set(['HOLD_EFFECT_TOXIC_ORB', 'HOLD_EFFECT_FLAME_ORB', 'HOLD_EFFECT_FROST_ORB', 'HOLD_EFFECT_STICKY_BARB'])
 
 /** abilityHooks.json (data/v2.65beta, pinned SHA) -- unported ability ids whose
  * `hooks.onEndTurn` is present, read once during porting rather than looked up
@@ -442,7 +437,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -958,20 +953,66 @@ export function runEndTurnEffects(
     const abilityResults = runEndTurnAbilities(state, battlerId, battler, dataContext, deps, unmodelled)
     results.push(...abilityResults)
 
-    // ENDTURN_ITEMS1 / ENDTURN_ITEMS2, :2460-2467.
-    const heldEffect = battler.mon.itemId ? (dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
-    gapIf(
-      heldEffect !== null && ITEMS_1_2_HOLD_EFFECTS.has(heldEffect),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_ITEMS1/ENDTURN_ITEMS2 (battle_util.c:5622-5855) are not applied -- ${battler.mon.itemId}'s end-of-turn hold effect (${heldEffect}) was not run`,
-    )
+    // ENDTURN_ITEMS1 / ENDTURN_ITEMS2, :2460-2467 (battle_util.c:5622-5855).
+    const holdEffect = statusDeps.grounding.holdEffectOf(battlerId)
+    if (holdEffect === 'HOLD_EFFECT_LEFTOVERS') {
+      if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+        const heal = Math.max(1, Math.floor(battler.mon.maxHp / 16))
+        const prevHp = battler.mon.hp
+        applyEndTurnHp(state, battlerId, battler, heal)
+        const actualHeal = battler.mon.hp - prevHp
+        if (actualHeal > 0) {
+          results.push({ battlerId, effect: 'ITEM', hpChange: actualHeal, fainted: false })
+        }
+      }
+    } else if (holdEffect === 'HOLD_EFFECT_BLACK_SLUDGE') {
+      if (battler.mon.hp > 0) {
+        if (battler.mon.types.includes('POISON')) {
+          if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+            const heal = Math.max(1, Math.floor(battler.mon.maxHp / 16))
+            const prevHp = battler.mon.hp
+            applyEndTurnHp(state, battlerId, battler, heal)
+            const actualHeal = battler.mon.hp - prevHp
+            if (actualHeal > 0) {
+              results.push({ battlerId, effect: 'ITEM', hpChange: actualHeal, fainted: false })
+            }
+          }
+        } else if (!isMagicGuardProtected(state, battler)) {
+          const dmg = Math.max(1, Math.floor(battler.mon.maxHp / 8))
+          const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+          results.push({ battlerId, effect: 'ITEM', hpChange: -dmg, fainted })
+        }
+      }
+    } else {
+      gapIf(
+        holdEffect !== null && ITEMS_1_2_HOLD_EFFECTS.has(holdEffect),
+        unmodelled,
+        `battler ${battlerId}: ENDTURN_ITEMS1/ENDTURN_ITEMS2 (battle_util.c:5622-5855) are not applied -- ${battler.mon.itemId}'s end-of-turn hold effect (${holdEffect}) was not run`,
+      )
+    }
 
-    // ENDTURN_ORBS, :2468-2471.
-    gapIf(
-      heldEffect !== null && ORBS_HOLD_EFFECTS.has(heldEffect),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_ORBS (battle_util.c:6252-6288) is not applied -- ${battler.mon.itemId}'s orb effect (${heldEffect}) was not run`,
-    )
+    // ENDTURN_ORBS, :2468-2471 (battle_util.c:6252-6288).
+    if (battler.mon.hp > 0) {
+      if (holdEffect === 'HOLD_EFFECT_TOXIC_ORB') {
+        if (canBePoisoned(state, battlerId, battlerId, null, statusDeps)) {
+          battler.mon.status1 = STATUS1_TOXIC_POISON
+        }
+      } else if (holdEffect === 'HOLD_EFFECT_FLAME_ORB') {
+        if (canBeBurned(state, battlerId, battlerId, statusDeps)) {
+          battler.mon.status1 = STATUS1_BURN
+        }
+      } else if (holdEffect === 'HOLD_EFFECT_FROST_ORB') {
+        if (canGetFrostbite(state, battlerId, battlerId, statusDeps)) {
+          battler.mon.status1 = STATUS1_FROSTBITE
+        }
+      } else if (holdEffect === 'HOLD_EFFECT_STICKY_BARB') {
+        if (!isMagicGuardProtected(state, battler)) {
+          const dmg = Math.max(1, Math.floor(battler.mon.maxHp / 8))
+          const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+          results.push({ battlerId, effect: 'ITEM', hpChange: -dmg, fainted })
+        }
+      }
+    }
 
     // ENDTURN_LEECH_SEED, :2472-2486.
     const leechResults = runLeechSeed(state, battlerId, battler, dataContext, unmodelled)

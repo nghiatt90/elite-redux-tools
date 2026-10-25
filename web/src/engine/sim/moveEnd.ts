@@ -21,8 +21,8 @@
 // 10   | MOVEEND_ATTACKER_INVISIBLE      | 4677-4686  | Unreachable    | Semi-invulnerable sprite invisibility; visual only.
 // 11   | MOVEEND_ATTACKER_VISIBLE        | 4687-4701  | Unreachable    | Semi-invulnerable sprite visibility; visual only.
 // 12   | MOVEEND_TARGET_VISIBLE          | 4702-4713  | Unreachable    | Target sprite visibility; visual only.
-// 13   | MOVEEND_ITEM_EFFECTS_TARGET     | 4569-4572  | Ported / Gap   | Ported: Rocky Helmet (floor(maxHp/6) to contact attacker). Other target items gapped.
-// 14   | MOVEEND_ITEM_EFFECTS_ALL        | 4666-4671  | Gapped (cond.) | Item effects for all battlers (pinch berries etc.).
+// 13   | MOVEEND_ITEM_EFFECTS_TARGET     | 4569-4572  | Ported / Gap   | Ported: Rocky Helmet, Air Balloon, Weakness Policy. Other target items gapped.
+// 14   | MOVEEND_ITEM_EFFECTS_ALL        | 4666-4671  | Ported         | Ported: White Herb, Lum/status berries, Sitrus, Oran, pinch stat/confuse berries.
 // 15   | MOVEEND_KINGSROCK               | 4672-4676  | Ported / Gap   | Ported: King's Rock / Razor Fang flinch (battle_util.c:6034-6052). Blunder Policy (:6053-6061) gapped; multi-hit moves gapped.
 // 16   | MOVEEND_SUBSTITUTE              | 4714-4722  | Ported         | Clears STATUS2_SUBSTITUTE and sets substituteDestroyedThisTurn if substituteHp is 0.
 // 17   | MOVEEND_UPDATE_LAST_MOVES       | 4723-4772  | Ported         | Updates lastMove, lastResultingMove, lastPrintedMove, lastUsedMove, lastHitBy, lastLandedMove, lastHitByType (:4735-4772).
@@ -34,7 +34,7 @@
 // 23   | MOVEEND_RECOIL                  | 4457-4517  | Ported         | Recoil self-damage; Magic Guard, noRecoil (Rock Head/Steel Barrel/Bruteforce), halfRecoil.
 // 24   | MOVEEND_CHARGE                  | 4922-4933  | Ported         | Clears STATUS3_CHARGED_UP on Electric damaging move.
 // 25   | MOVEEND_ABILITIES_AFTER_RECOIL  | 4518-4522  | Gapped (cond.) | ABILITYEFFECT_AFTER_RECOIL hook.
-// 26   | MOVEEND_LIFEORB_SHELLBELL       | 4823-4827  | Ported         | Life Orb (floor(maxHp/10) self-damage, Sheer Force/Magic Guard checks) and Shell Bell (savedDmg/4, min 1).
+// 26   | MOVEEND_LIFEORB_SHELLBELL       | 4823-4827  | Ported         | Life Orb (floor(maxHp/10) self-damage, Sheer Force/Magic Guard checks), Shell Bell (savedDmg/4, min 1), and Throat Spray (+1 SpAtk on sound move).
 // 27   | MOVEEND_CHANGED_ITEMS           | 4656-4665  | Ported         | Assigns the stolen item Thief parked in changedItems at Case 20.
 // 28   | MOVEEND_DEFROST                 | 4444-4456  | Unreachable    | Frostbite cured by fire move on target.
 // 29   | MOVEEND_PICKPOCKET              | 4828-4853  | Gapped (cond.) | Pickpocket item theft; gapped if target has ABILITY_PICKPOCKET.
@@ -52,7 +52,14 @@ import {
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_TOXIC_SPIKES,
+  STATUS1_BURN,
+  STATUS1_FREEZE,
+  STATUS1_FROSTBITE,
+  STATUS1_PARALYSIS,
+  STATUS1_POISON_ANY,
+  STATUS1_SLEEP,
   STATUS2_CONFUSION,
+  STATUS2_NIGHTMARE,
   STATUS2_CURSED,
   STATUS2_ENRAGED,
   STATUS2_FLINCHED,
@@ -127,6 +134,7 @@ import {
   dispatchOnStatLowered,
   getHighestAttackingStatId,
   isSimAbilitySuppressed,
+  isUnnerveAbilityOnOpposingSide,
   runReactiveAbilityEffects,
 } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
@@ -516,8 +524,6 @@ const ON_RECOIL_ABILITIES = [
 const TARGET_ITEM_EFFECTS = new Set([
   'HOLD_EFFECT_RED_CARD',
   'HOLD_EFFECT_EJECT_BUTTON',
-  'HOLD_EFFECT_AIR_BALLOON',
-  'HOLD_EFFECT_WEAKNESS_POLICY',
   'HOLD_EFFECT_SNOWBALL',
   'HOLD_EFFECT_LUMINOUS_MOSS',
   'HOLD_EFFECT_CELL_BATTERY',
@@ -2987,6 +2993,7 @@ export interface MoveEndContext {
   /** gTurnStructs[attacker].savedDmg -- the HP actually removed from the target (gHpDealt, :4335). */
   hpDealt: number
   isCriticalHit?: boolean
+  isSuperEffective?: boolean
   /** gBattleStruct->moveEffect2, set by seteffectwithchance (moveEffects.ts applySecondaryMoveEffects). */
   moveEffect2?: string | null
   deps: TurnLoopDeps
@@ -2996,6 +3003,206 @@ export interface MoveEndContext {
   chosenMoveId?: string
   /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
   noEffect?: boolean
+}
+
+/**
+ * HasRipenEffect, battle_util.c:5162-5165.
+ */
+function hasRipenEffect(state: BattleState, battlerId: number, deps: { dataContext: SimDataContext }): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  return (
+    battlerHasSimAbility(state, battler, 'ABILITY_RIPEN', false, battlerId, false, deps.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_SUGAR_RUSH', false, battlerId, false, deps.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_APPLE_PIE', false, battlerId, false, deps.dataContext)
+  )
+}
+
+/**
+ * ItemBattleEffects(ITEMEFFECT_MOVE_END, 0, FALSE), battle_util.c:5874-6033.
+ * Iterates all battlers for post-move items: White Herb, Lum/status berries, Sitrus, Oran, pinch berries.
+ */
+export function applyMoveEndItemEffectsAll(
+  state: BattleState,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): { statChanges: StatChangeOutcome[] } {
+  const statChanges: StatChangeOutcome[] = []
+  for (let bId = 0; bId < state.battlersCount; bId++) {
+    const battler = state.battlers[bId]
+    if (!battler || battler.mon.hp === 0) continue
+    const holdEffect = deps.grounding.holdEffectOf(bId)
+    if (!holdEffect) continue
+    const itemData = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : null
+
+    // White Herb, battle_util.c:6007-6021
+    if (holdEffect === 'HOLD_EFFECT_RESTORE_STATS') {
+      if (!isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+        let restored = false
+        for (let s = 0; s < 7; s++) {
+          if (battler.mon.statStages[s] < DEFAULT_STAT_STAGE) {
+            const diff = DEFAULT_STAT_STAGE - battler.mon.statStages[s]
+            battler.mon.statStages[s] = DEFAULT_STAT_STAGE
+            statChanges.push({ battlerId: bId, stat: s, change: diff })
+            restored = true
+          }
+        }
+        if (restored) {
+          battler.mon.itemId = null
+        }
+      }
+      continue
+    }
+
+    // Lum Berry / Status-curing items, battle_util.c:5925-6005
+    if (holdEffect === 'HOLD_EFFECT_CURE_STATUS') {
+      if (
+        (battler.mon.status1 !== 0 || hasFlag(battler.mon.status2, STATUS2_CONFUSION)) &&
+        !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)
+      ) {
+        battler.mon.status1 = 0
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION | STATUS2_NIGHTMARE)
+        battler.mon.itemId = null
+      }
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_PAR' && hasFlag(battler.mon.status1, STATUS1_PARALYSIS) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_PARALYSIS)
+      battler.mon.itemId = null
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_PSN' && hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_POISON_ANY)
+      battler.mon.itemId = null
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_BRN' && hasFlag(battler.mon.status1, STATUS1_BURN) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_BURN)
+      battler.mon.itemId = null
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_FRZ' && (hasFlag(battler.mon.status1, STATUS1_FREEZE) || hasFlag(battler.mon.status1, STATUS1_FROSTBITE)) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_FREEZE | STATUS1_FROSTBITE)
+      battler.mon.itemId = null
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_SLP' && hasFlag(battler.mon.status1, STATUS1_SLEEP) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status1 = 0
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+      battler.mon.itemId = null
+      continue
+    }
+    if (holdEffect === 'HOLD_EFFECT_CURE_CONFUSION' && hasFlag(battler.mon.status2, STATUS2_CONFUSION) && !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)) {
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
+      battler.mon.itemId = null
+      continue
+    }
+
+    // Sitrus Berry, battle_util.c:5889-5891, 5311-5333
+    if (holdEffect === 'HOLD_EFFECT_RESTORE_PCT_HP') {
+      if (
+        battler.mon.hp <= Math.floor(battler.mon.maxHp / 2) &&
+        !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
+        canBattlerHeal(state, bId, battler, unmodelled)
+      ) {
+        const pct = itemData?.holdEffectStrength ?? 25
+        let heal = Math.max(1, Math.floor((battler.mon.maxHp * pct) / 100))
+        if (hasRipenEffect(state, bId, deps)) heal *= 2
+        battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+        syncPartyHp(state, bId)
+        battler.mon.itemId = null
+      }
+      continue
+    }
+
+    // Oran Berry / Berry Juice, battle_util.c:5883-5885, 5311-5333
+    if (holdEffect === 'HOLD_EFFECT_RESTORE_HP') {
+      if (
+        battler.mon.hp <= Math.floor(battler.mon.maxHp / 2) &&
+        !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
+        canBattlerHeal(state, bId, battler, unmodelled)
+      ) {
+        let heal = itemData?.holdEffectStrength ?? 10
+        if (hasRipenEffect(state, bId, deps)) heal *= 2
+        battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+        syncPartyHp(state, bId)
+        battler.mon.itemId = null
+      }
+      continue
+    }
+
+    // Confuse berries (Figy, Wiki, Mago, Aguav, Iapapa), battle_util.c:5892-5906, 5167-5193
+    if (
+      holdEffect === 'HOLD_EFFECT_CONFUSE_SPICY' ||
+      holdEffect === 'HOLD_EFFECT_CONFUSE_DRY' ||
+      holdEffect === 'HOLD_EFFECT_CONFUSE_SWEET' ||
+      holdEffect === 'HOLD_EFFECT_CONFUSE_BITTER' ||
+      holdEffect === 'HOLD_EFFECT_CONFUSE_SOUR'
+    ) {
+      const hasGluttony = battlerHasSimAbility(state, battler, 'ABILITY_GLUTTONY', false, bId, false, deps.dataContext)
+      const threshold = Math.floor(battler.mon.maxHp / (hasGluttony ? 2 : 4))
+      if (
+        battler.mon.hp <= threshold &&
+        !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
+        canBattlerHeal(state, bId, battler, unmodelled)
+      ) {
+        const param = itemData?.holdEffectStrength ?? 3
+        let heal = Math.max(1, Math.floor(battler.mon.maxHp / param))
+        if (hasRipenEffect(state, bId, deps)) heal *= 2
+        battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+        syncPartyHp(state, bId)
+        battler.mon.itemId = null
+      }
+      continue
+    }
+
+    // Pinch stat berries (Salac, Liechi, Ganlon, Petaya, Apicot), battle_util.c:5907-5921, 5195-5215
+    if (
+      holdEffect === 'HOLD_EFFECT_SPEED_UP' ||
+      holdEffect === 'HOLD_EFFECT_ATTACK_UP' ||
+      holdEffect === 'HOLD_EFFECT_DEFENSE_UP' ||
+      holdEffect === 'HOLD_EFFECT_SP_ATTACK_UP' ||
+      holdEffect === 'HOLD_EFFECT_SP_DEFENSE_UP'
+    ) {
+      const statId =
+        holdEffect === 'HOLD_EFFECT_ATTACK_UP'
+          ? STAT_ATK
+          : holdEffect === 'HOLD_EFFECT_DEFENSE_UP'
+            ? STAT_DEF
+            : holdEffect === 'HOLD_EFFECT_SPEED_UP'
+              ? STAT_SPEED
+              : holdEffect === 'HOLD_EFFECT_SP_ATTACK_UP'
+                ? STAT_SPATK
+                : STAT_SPDEF
+      const hasGluttony = battlerHasSimAbility(state, battler, 'ABILITY_GLUTTONY', false, bId, false, deps.dataContext)
+      const threshold = Math.floor(battler.mon.maxHp / (hasGluttony ? 2 : 4))
+      if (
+        battler.mon.hp <= threshold &&
+        !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
+        canRaiseStat(state, bId, statId, deps.dataContext)
+      ) {
+        const boost = hasRipenEffect(state, bId, deps) ? 2 : 1
+        const res = changeStatBuffs(
+          state,
+          bId,
+          bId,
+          bId,
+          boost,
+          statId,
+          STAT_BUFF_ALLOW_PTR,
+          false,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+        )
+        if (res.delta !== 0) {
+          statChanges.push({ battlerId: bId, stat: statId, change: res.delta })
+        }
+        battler.mon.itemId = null
+      }
+      continue
+    }
+  }
+  return { statChanges }
 }
 
 export interface MoveEndOutcome {
@@ -3159,16 +3366,71 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Case 12: MOVEEND_TARGET_VISIBLE (:4702-4713)
   // Target sprite visibility (visual only).
 
+  const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
+
   // Case 13: MOVEEND_ITEM_EFFECTS_TARGET (:4569-4572, :6126-6250)
-  if (target && targetDamage > 0 && attacker && attacker.mon.hp > 0) {
+  if (target && !isNoEffect) {
     const targetHoldEffect = deps.grounding.holdEffectOf(targetId)
     if (targetHoldEffect === 'HOLD_EFFECT_ROCKY_HELMET') {
-      const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
-      if (isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
-        const helmetDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 6))
-        applyDamage(state, attackerId, helmetDmg, fainted)
-        totalAttackerDamage += helmetDmg
-        hadAttackerDamage = true
+      if (targetTurnDamaged && attacker && attacker.mon.hp > 0) {
+        const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
+        if (isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
+          const helmetDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 6))
+          applyDamage(state, attackerId, helmetDmg, fainted)
+          totalAttackerDamage += helmetDmg
+          hadAttackerDamage = true
+        }
+      }
+    } else if (targetHoldEffect === 'HOLD_EFFECT_AIR_BALLOON') {
+      // Air Balloon pops when holder is damaged by an attack (:6154-6159, battle_scripts_1.s:10912-10916)
+      if (attackerId !== targetId && targetTurnDamaged) {
+        target.mon.itemId = null
+      }
+    } else if (targetHoldEffect === 'HOLD_EFFECT_WEAKNESS_POLICY') {
+      // Weakness Policy raises Atk and SpAtk by 2 when hit super-effectively (:6171-6176, battle_scripts_1.s:7576-7600)
+      if (
+        target.mon.hp > 0 &&
+        targetTurnDamaged &&
+        ctx.isSuperEffective &&
+        !isUnnerveAbilityOnOpposingSide(state, targetId, deps.dataContext)
+      ) {
+        const canBoostAtk = canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)
+        const canBoostSpAtk = canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)
+        if (canBoostAtk || canBoostSpAtk) {
+          const atkRes = changeStatBuffs(
+            state,
+            targetId,
+            targetId,
+            targetId,
+            2,
+            STAT_ATK,
+            STAT_BUFF_ALLOW_PTR,
+            false,
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          const spAtkRes = changeStatBuffs(
+            state,
+            targetId,
+            targetId,
+            targetId,
+            2,
+            STAT_SPATK,
+            STAT_BUFF_ALLOW_PTR,
+            false,
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          if (atkRes.delta !== 0) {
+            statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: atkRes.delta })
+          }
+          if (spAtkRes.delta !== 0) {
+            statChanges.push({ battlerId: targetId, stat: STAT_SPATK, change: spAtkRes.delta })
+          }
+          target.mon.itemId = null
+        }
       }
     } else if (targetHoldEffect && TARGET_ITEM_EFFECTS.has(targetHoldEffect)) {
       unmodelled.push(`move-end target hold effect ${targetHoldEffect} is not modelled yet`)
@@ -3176,7 +3438,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 14: MOVEEND_ITEM_EFFECTS_ALL (:4666-4671)
-  // Item effects for all battlers.
+  // Item effects for all battlers: White Herb, Lum/status berries, Sitrus, Oran, pinch berries.
+  const itemOutcome = applyMoveEndItemEffectsAll(state, deps, unmodelled)
+  if (itemOutcome.statChanges.length > 0) {
+    statChanges.push(...itemOutcome.statChanges)
+  }
 
   // Case 15: MOVEEND_KINGSROCK (:4672-4676)
   if (attacker && target && deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_FLINCH') {
@@ -3192,7 +3458,6 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Cases 17, 18, 30: MOVEEND_UPDATE_LAST_MOVES (:4723-4772), MOVEEND_MIRROR_MOVE (:4773-4781), MOVEEND_CLEAR_BITS (:4934-4957)
-  const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
   runMoveEndBookkeeping({
     state,
     attackerId,
@@ -3291,31 +3556,63 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     syncPartyHp(state, attackerId)
   }
 
-  // Case 26: MOVEEND_LIFEORB_SHELLBELL (:4823-4827, :6066-6110)
-  if (attacker && attacker.mon.hp > 0 && targetDamage > 0 && attackerId !== targetId) {
+  // Case 26: MOVEEND_LIFEORB_SHELLBELL (:4823-4827, :6066-6124)
+  if (attacker && attacker.mon.hp > 0) {
     const atkHoldEffect = deps.grounding.holdEffectOf(attackerId)
     if (atkHoldEffect === 'HOLD_EFFECT_LIFE_ORB') {
-      const sheerForce = testSheerForceFlag(state, attackerId, moveId, {
-        dataContext: deps.dataContext,
-        grounding: deps.grounding,
-      })
-      if (!sheerForce && !isMagicGuardProtected(state, attacker)) {
-        const loDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 10))
-        applyDamage(state, attackerId, loDmg, fainted)
-        totalAttackerDamage += loDmg
-        hadAttackerDamage = true
+      if (targetDamage > 0 && attackerId !== targetId) {
+        const sheerForce = testSheerForceFlag(state, attackerId, moveId, {
+          dataContext: deps.dataContext,
+          grounding: deps.grounding,
+        })
+        if (!sheerForce && !isMagicGuardProtected(state, attacker)) {
+          const loDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 10))
+          applyDamage(state, attackerId, loDmg, fainted)
+          totalAttackerDamage += loDmg
+          hadAttackerDamage = true
+        }
       }
     } else if (atkHoldEffect === 'HOLD_EFFECT_SHELL_BELL') {
-      // REQUIRE chain, battle_util.c:6068-6073; the heal is savedDmg / 4 (min 1), :6077-6078, capped at maxHp by datahpupdate.
+      if (targetDamage > 0 && attackerId !== targetId) {
+        // REQUIRE chain, battle_util.c:6068-6073; the heal is savedDmg / 4 (min 1), :6077-6078, capped at maxHp by datahpupdate.
+        if (
+          hpDealt > 0 &&
+          attacker.mon.hp < attacker.mon.maxHp &&
+          canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+          !testSheerForceFlag(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding })
+        ) {
+          const heal = Math.max(1, Math.floor(hpDealt / 4))
+          attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+          syncPartyHp(state, attackerId)
+        }
+      }
+    } else if (atkHoldEffect === 'HOLD_EFFECT_THROAT_SPRAY') {
+      // Throat Spray raises SpAtk by 1 when using a sound move (:6111-6124, battle_scripts_1.s:7618-7632). The C does not require a
+      // damaging move, but this ladder only runs for damaging moves, so a sound STATUS move (handler path) never triggers it here.
+      const isSound = Boolean(moveData?.flags?.sound)
+      const hitOrAffected = !isNoEffect || targetTurnDamaged || targetDamage > 0
       if (
-        hpDealt > 0 &&
-        attacker.mon.hp < attacker.mon.maxHp &&
-        canBattlerHeal(state, attackerId, attacker, unmodelled) &&
-        !testSheerForceFlag(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding })
+        isSound &&
+        hitOrAffected &&
+        canRaiseStat(state, attackerId, STAT_SPATK, deps.dataContext)
       ) {
-        const heal = Math.max(1, Math.floor(hpDealt / 4))
-        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
-        syncPartyHp(state, attackerId)
+        const res = changeStatBuffs(
+          state,
+          attackerId,
+          attackerId,
+          attackerId,
+          1,
+          STAT_SPATK,
+          STAT_BUFF_ALLOW_PTR,
+          false,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          statChanges.push({ battlerId: attackerId, stat: STAT_SPATK, change: res.delta })
+        }
+        attacker.mon.itemId = null
       }
     }
   }

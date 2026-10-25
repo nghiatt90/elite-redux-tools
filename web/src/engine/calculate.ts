@@ -174,6 +174,7 @@ export interface DamageCalcResult {
   effectiveMoveType: string
   typeEffectiveness: number // UQ_4_12
   isImmune: boolean
+  berryReduced?: boolean
   unmodelled: string[]
   /** null for a move that only ever hits once. Otherwise the resolved hit count
    * (Double Hit's 2, Population Bomb's 10, a variable EFFECT_MULTI_HIT/Parental
@@ -830,7 +831,7 @@ function calcInternal(
    * unlike hitModifier which is a FINAL-stage multiplier. 0 for every non-multi-hit
    * move and for every hit of a move whose OWN scaling isn't hit-index-based. */
   hitIndex: number = 0,
-): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[]; absorbingAbility?: string | null } {
+): { dmg: number; typeEffectiveness: number; resolvedMoveType: string; unmodelled: string[]; absorbingAbility?: string | null; berryReduced?: boolean } {
   const unmodelled: string[] = []
   const { attacker, defender, move, field, moveBehaviors, battleConstants } = scenario
   const statStageRatios = battleConstants.statStageRatios
@@ -1066,6 +1067,7 @@ function calcInternal(
     },
     attackerHasMoldBreaker,
   )
+  const berryMult = resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness)
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),
     abilityMultiplier,
@@ -1087,7 +1089,7 @@ function calcInternal(
       screensApply(field, split) &&
       !computeInfiltratesScreens(attacker.abilitySlots, { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
     isDoubleBattle: field.isDoubleBattle,
-    resistBerryMultiplier: resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness),
+    resistBerryMultiplier: berryMult,
     attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow, move.flags, split),
     // Real bug found auditing this: was checking only move.effect ===
     // 'EFFECT_MISC_HIT', which is true for ALL 8 current EFFECT_MISC_HIT moves
@@ -1107,7 +1109,7 @@ function calcInternal(
     hitsSemiInvulnerableInAir: move.hitsAir === 'DOUBLE_DAMAGE' && defender.semiInvulnerable === 'AIRBORNE',
   })
 
-  return { dmg: finalResult.dmg, typeEffectiveness, resolvedMoveType: moveType, unmodelled }
+  return { dmg: finalResult.dmg, typeEffectiveness, resolvedMoveType: moveType, unmodelled, berryReduced: berryMult !== null }
 }
 
 /**
@@ -1327,7 +1329,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     forceCrit: boolean,
     hitModifier: number,
     hitIndex: number = 0,
-  ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[]; absorbingAbility?: string | null } {
+  ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[]; absorbingAbility?: string | null; berryReduced?: boolean } {
     const primary = evaluate(moveType, forceCrit, hitModifier, hitIndex)
     let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
@@ -1336,7 +1338,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
       if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
     }
 
-    if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility }
+    if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility, berryReduced: best.berryReduced }
 
     // random factor, src/battle_util.c:7815-7821 -- Bad Luck/Bad Omen force
     // roll=15 on the defender's side; surfaced via the result's own
@@ -1345,7 +1347,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     // CALLER's job to know only rolls[0] is reachable when that flag is set.
     let dmg = idiv(best.dmg * (100 - damageRoll), 100)
     if (dmg === 0) dmg = 1
-    return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility }
+    return { dmg, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility, berryReduced: best.berryReduced }
   }
 
   const unmodelled = new Set<string>()
@@ -1353,6 +1355,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   let typeEffectiveness = uq(1.0)
   let effectiveMoveType = moveType
   let absorbingAbility: string | null = null
+  let berryReduced = false
   // `roll` is the C's own roll variable (multiplier = (100-roll)%, so roll=0 is the
   // maximum 100% hit and roll=15 the minimum 85% hit, src/battle_util.c:7816-7817).
   // Iterated 15 -> 0 here so the OUTPUT array itself reads ascending (index 0 =
@@ -1364,6 +1367,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     typeEffectiveness = result.typeEffectiveness
     effectiveMoveType = result.effectiveMoveType
     if (result.absorbingAbility) absorbingAbility = result.absorbingAbility
+    if (result.berryReduced) berryReduced = true
     result.unmodelled.forEach((u) => unmodelled.add(u))
   }
 
@@ -1424,6 +1428,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     effectiveMoveType,
     typeEffectiveness,
     isImmune,
+    berryReduced,
     unmodelled: [...unmodelled],
     hitCount,
     totalRolls,
