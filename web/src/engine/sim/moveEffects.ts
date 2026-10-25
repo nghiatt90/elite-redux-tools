@@ -269,6 +269,11 @@ export interface MoveEffectContext {
   deductPp: (state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]) => void
   applyDamage: (state: BattleState, battlerId: number, damage: number | null, fainted: number[]) => void
   /**
+   * Sets gChosenMove (src/battle_script_commands.c:10483, 10836) for the current action.
+   * Transform and Sketch set gChosenMove = 0xFFFF (MOVE_UNSET).
+   */
+  setChosenMove?: (moveId: string) => void
+  /**
    * Cmd_jumptocalledmove (battle_script_commands.c:5906-5914):
    * Re-enters move pipeline for calledMoveId within the same action.
    * keepChosenMove is true when operand is TRUE (gCurrentMove = gCalledMove, preserving gChosenMove).
@@ -6512,16 +6517,19 @@ export function handleMirrorMove(ctx: MoveEffectContext): ActionOutcome {
  * REQUEST_MOVES_PP_BATTLE (src/battle_controller_player.c:3839-3845).
  */
 export function handleSketch(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, setChosenMove } = ctx
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   const attacker = state.battlers[battlerId]!
+
+  // Cmd_copymovepermanently (src/battle_script_commands.c:10836): gChosenMove = 0xFFFF;
+  setChosenMove?.(MOVE_UNSET)
 
   // 1. ppreduce (:4755)
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
   if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
-    return outcome(ctx, { targetId, missed: true })
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
   }
 
   const target = state.battlers[targetId]!
@@ -6537,20 +6545,20 @@ export function handleSketch(ctx: MoveEffectContext): ActionOutcome {
     targetMove === 'MOVE_STRUGGLE' ||
     targetMove === 'MOVE_SKETCH'
   ) {
-    return outcome(ctx, { targetId, missed: true })
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
   }
 
   // Already knows move (skipping slot holding Sketch itself)
   for (let i = 0; i < attacker.mon.moves.length; i++) {
     if (attacker.mon.moves[i] === 'MOVE_SKETCH') continue
     if (attacker.mon.moves[i] === targetMove) {
-      return outcome(ctx, { targetId, missed: true })
+      return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
     }
   }
 
   const slot = attacker.mon.moves.indexOf('MOVE_SKETCH')
   if (slot === -1 || slot >= 4) {
-    return outcome(ctx, { targetId, missed: true })
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
   }
 
   const targetMoveData = deps.dataContext.move(targetMove)
@@ -6568,7 +6576,7 @@ export function handleSketch(ctx: MoveEffectContext): ActionOutcome {
     partyMon.pp[slot] = maxPp
   }
 
-  return outcome(ctx, { targetId, missed: false })
+  return outcome(ctx, { targetId, missed: false, chosenMoveId: MOVE_UNSET })
 }
 
 /**
@@ -6656,16 +6664,19 @@ export function handleDoodle(ctx: MoveEffectContext): ActionOutcome {
  * Cmd_transformdataexecution (src/battle_script_commands.c:10482-10533).
  */
 export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, setChosenMove } = ctx
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   const attacker = state.battlers[battlerId]!
+
+  // Cmd_transformdataexecution (src/battle_script_commands.c:10483): gChosenMove = 0xFFFF;
+  setChosenMove?.(MOVE_UNSET)
 
   // 1. ppreduce (:4279)
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
   if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
-    return outcome(ctx, { targetId, missed: true })
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
   }
 
   const target = state.battlers[targetId]!
@@ -6678,11 +6689,13 @@ export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
   // 3. transformdataexecution (:10482-10533):
   // if (gBattleMons[gBattlerTarget].status2 & STATUS2_TRANSFORMED || gBattleStruct->illusion[gBattlerTarget].on ||
   //     gStatuses3[gBattlerTarget] & STATUS3_SEMI_INVULNERABLE) -> fail
+  // Note: gBattleStruct->illusion[target].on is absent from BattleState (Illusion mechanics
+  // are stubbed in this sim, see state.ts:48).
   if (
     hasFlag(target.mon.status2, STATUS2_TRANSFORMED) ||
     hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)
   ) {
-    return outcome(ctx, { targetId, missed: true })
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
   }
 
   // Set transformed status2 & clear volatile states
@@ -6729,7 +6742,7 @@ export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
   // 4. switchinabilities BS_ATTACKER (:4289)
   applySwitchInAbilities(state, battlerId, deps, unmodelled)
 
-  return outcome(ctx, { targetId, missed: false })
+  return outcome(ctx, { targetId, missed: false, chosenMoveId: MOVE_UNSET })
 }
 
 const METRONOME_FORBIDDEN_EFFECTS = new Set([

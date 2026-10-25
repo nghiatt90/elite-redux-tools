@@ -9577,6 +9577,32 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(state.battlers[0]!.mon.types).toEqual(['NORMAL', 'NORMAL', 'MYSTERY'])
         expect(state.battlers[0]!.mon.pp[0]).toBe(19)
       })
+
+      it('success: Conversion 2 reacts to a landed status move (Taunt) (battle_script_commands.c:4764-4765, 10787-10815)', () => {
+        // Random() % 20 = 1 -> TYPE_FIGHTING, a type that resists Dark. (countingRng's constant 0 would loop forever: type 0 is Normal, which does not resist Dark.)
+        const rng = scriptedRng([1])
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_CONVERSION_2', null, null, null], pp: [20, 0, 0, 0], types: ['NORMAL', 'NORMAL', 'MYSTERY'] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Battler 0 was hit by Taunt (DARK) by battler 1
+        state.battlers[0]!.lastLandedMove = 'MOVE_TAUNT'
+        state.battlers[0]!.lastHitBy = 1
+        state.battlers[0]!.lastHitByType = 'DARK'
+
+        const out = executeTurn(state, [useMove(1, MOVE_CONVERSION_2), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // DARK resistance types include FIGHTING, DARK, FAIRY
+        expect(state.battlers[0]!.mon.types).toEqual(['FIGHTING', 'FIGHTING', 'MYSTERY'])
+        expect(state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 1)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+      })
     })
 
 
@@ -9852,6 +9878,34 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(state.lastUsedMove).toBe('MOVE_TACKLE')
         expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
         expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
+      })
+
+      it('success with status move: Mirror Move sees landed MOVE_TAUNT recorded in lastTakenMove', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIRROR_MOVE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50 },
+          ],
+          rng,
+        )
+        // Battler 0 took Taunt from Battler 1
+        state.lastTakenMove[0] = 'MOVE_TAUNT'
+        state.lastTakenMoveFrom[0][1] = 'MOVE_TAUNT'
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIRROR_MOVE), null], testDeps())
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        // Battler 1 receives Taunt
+        expect(state.battlers[1]!.volatiles.tauntTimer).toBeGreaterThan(0)
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(state.battlers[0]!.lastMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TAUNT')
+        expect(state.lastUsedMove).toBe('MOVE_TAUNT')
+        expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TAUNT')
+        expect(state.battlers[1]!.lastHitByType).toBe('DARK')
       })
 
       it('failure: fails when user has no lastTakenMove / lastTakenMoveFrom (battle_script_commands.c:9305)', () => {
@@ -10367,9 +10421,12 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
 
           const meFirstAttack = resolves.find((r) => r.attacker === 0)
           expect(meFirstAttack?.move).toBe('MOVE_TACKLE')
-          expect(meFirstAttack?.hadMeFirst).toBe(true)
+          // C bug kept: BattleScript_EffectMeFirst ends with `goto BattleScript_MoveEnd` (battle_scripts_1.s:2139), so
+          // Me First's own MOVEEND_CLEAR_BITS (battle_script_commands.c:4948) clears STATUS3_ME_FIRST (set at :7329)
+          // before the queued attack runs: the 1.5x power boost (battle_util.c:7061) never applies in this ROM.
+          expect(meFirstAttack?.hadMeFirst).toBe(false)
 
-          // STATUS3_ME_FIRST cleared by MOVEEND_CLEAR_BITS at end of queued attack (battle_script_commands.c:4948)
+          // STATUS3_ME_FIRST is clear afterwards (battle_script_commands.c:4948)
           expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_ME_FIRST)).toBe(false)
         })
 

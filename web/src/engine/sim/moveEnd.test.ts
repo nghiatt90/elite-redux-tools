@@ -28,6 +28,7 @@ import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import {
   BATTLER_NONE,
   DEFAULT_STAT_STAGE,
+  MOVE_UNSET,
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_TOXIC_SPIKES,
@@ -44,6 +45,7 @@ import {
   STATUS3_HEAL_BLOCK,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
+  STATUS3_ME_FIRST,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
   STAT_ACC,
@@ -69,6 +71,8 @@ import {
   ON_DEFENDER_ABILITIES,
   PORTED_DEFENDER_ABILITIES,
   RECOIL_FRACTIONS,
+  runMoveEnd,
+  runMoveEndBookkeeping,
 } from './moveEnd'
 
 // ---------------------------------------------------------------------------
@@ -244,6 +248,9 @@ const MOVE_COUNTER = requireMove('MOVE_COUNTER')
 // requireMove() omits effectChance (adding it would start firing secondary effects in every older test); Knock Off's
 // seteffectwithchance needs moves.json's effectChance (100) as its percentChance.
 const MOVE_KNOCK_OFF: SimMoveData = { ...requireMove('MOVE_KNOCK_OFF'), effectChance: movesById.get('MOVE_KNOCK_OFF')!.effectChance as number }
+const MOVE_TAUNT = requireMove('MOVE_TAUNT')
+const MOVE_TRANSFORM = requireMove('MOVE_TRANSFORM')
+const MOVE_SKETCH = requireMove('MOVE_SKETCH')
 
 const ABILITY_ROCK_HEAD = requireAbility('ABILITY_ROCK_HEAD')
 const ABILITY_STEEL_BARREL = requireAbility('ABILITY_STEEL_BARREL')
@@ -747,6 +754,150 @@ describe('State Bookkeeping & Clear Bits', () => {
     expect(state.battlers[1]!.mon.hp).toBe(0)
     expect(state.lastTakenMove[1]).toBeNull()
     expect(state.lastTakenMoveFrom[1][0]).toBeNull()
+  })
+
+  describe('Cycle 73: last-move bookkeeping for status moves and misses; Transform / Sketch chosen-move quirk', () => {
+    it('MOVEEND on miss: writes attacker lastMove/lastResultingMove/lastPrintedMove, global lastUsedMove, target lastHitBy and lastLandedMove = MOVE_UNSET, and clears bits', () => {
+      const rng = scriptedRng([99, 0])
+      const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], rng)
+      state.battlers[0]!.mon.statStages[STAT_ACC] = 0 // -6 accuracy stages: 100 * 3/9 = 33 -> 99 >= 33 misses
+      state.battlers[0]!.statuses3 |= STATUS3_ME_FIRST
+      state.battlers[0]!.turn.gemBoost = true
+
+      const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
+
+      expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(true)
+      expect(state.battlers[0]!.lastMove).toBe('MOVE_TACKLE')
+      expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TACKLE')
+      expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_TACKLE')
+      expect(state.lastUsedMove).toBe('MOVE_TACKLE')
+      expect(state.battlers[1]!.lastHitBy).toBe(0)
+      expect(state.battlers[1]!.lastLandedMove).toBe(MOVE_UNSET)
+      expect(state.lastTakenMove[1]).toBeNull()
+      expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_ME_FIRST)).toBe(false)
+      expect(state.battlers[0]!.turn.gemBoost).toBe(false)
+    })
+
+    it('MOVEEND on status move: connected Taunt writes target lastLandedMove, lastHitBy, lastHitByType, and Mirror Move lastTakenMove', () => {
+      const state = battle([{ spe: 100, hp: 100, maxHp: 100 }, { spe: 50, hp: 100, maxHp: 100 }], scriptedRng())
+      const out = executeTurn(state, [useMove(1, MOVE_TAUNT), null], testDepsWithDamage(fixedDamage(0)))
+
+      const act0 = out.actions.find((a) => a.battlerId === 0)!
+      expect(act0.missed).toBe(false)
+      expect(state.battlers[0]!.lastMove).toBe('MOVE_TAUNT')
+      expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TAUNT')
+      expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_TAUNT')
+      expect(state.lastUsedMove).toBe('MOVE_TAUNT')
+      expect(state.battlers[1]!.lastHitBy).toBe(0)
+      expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TAUNT')
+      expect(state.battlers[1]!.lastHitByType).toBe('DARK')
+      expect(state.lastTakenMove[1]).toBe('MOVE_TAUNT')
+      expect(state.lastTakenMoveFrom[1][0]).toBe('MOVE_TAUNT')
+    })
+
+    it('MOVEEND on Transform: writes lastMove = MOVE_UNSET, lastPrintedMove = MOVE_UNSET, lastResultingMove = MOVE_TRANSFORM, lastUsedMove = MOVE_TRANSFORM, target lastLandedMove = MOVE_UNSET', () => {
+      const state = battle([{ spe: 100, hp: 100, maxHp: 100 }, { spe: 50, hp: 100, maxHp: 100 }], scriptedRng())
+      const out = executeTurn(state, [useMove(1, MOVE_TRANSFORM), null], testDepsWithDamage(fixedDamage(0)))
+
+      const act0 = out.actions.find((a) => a.battlerId === 0)!
+      expect(act0.missed).toBe(false)
+      expect(state.battlers[0]!.lastMove).toBe(MOVE_UNSET)
+      expect(state.battlers[0]!.lastPrintedMove).toBe(MOVE_UNSET)
+      expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TRANSFORM')
+      expect(state.lastUsedMove).toBe('MOVE_TRANSFORM')
+      expect(state.battlers[1]!.lastHitBy).toBe(0)
+      expect(state.battlers[1]!.lastLandedMove).toBe(MOVE_UNSET)
+      expect(state.lastTakenMove[1]).toBeNull()
+    })
+
+    it('MOVEEND on Sketch: writes lastMove = MOVE_UNSET, lastPrintedMove = MOVE_UNSET, lastResultingMove = MOVE_SKETCH, lastUsedMove = MOVE_SKETCH, target lastLandedMove = MOVE_UNSET', () => {
+      const state = battle(
+        [
+          { spe: 100, moves: ['MOVE_SKETCH', null, null, null], hp: 100, maxHp: 100 },
+          { spe: 50, hp: 100, maxHp: 100 },
+        ],
+        scriptedRng(),
+      )
+      state.battlers[1]!.lastPrintedMove = 'MOVE_EMBER'
+
+      const out = executeTurn(state, [useMove(1, MOVE_SKETCH), null], testDepsWithDamage(fixedDamage(0)))
+
+      const act0 = out.actions.find((a) => a.battlerId === 0)!
+      expect(act0.missed).toBe(false)
+      expect(state.battlers[0]!.lastMove).toBe(MOVE_UNSET)
+      expect(state.battlers[0]!.lastPrintedMove).toBe(MOVE_UNSET)
+      expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_SKETCH')
+      expect(state.lastUsedMove).toBe('MOVE_SKETCH')
+      expect(state.battlers[1]!.lastHitBy).toBe(0)
+      expect(state.battlers[1]!.lastLandedMove).toBe(MOVE_UNSET)
+      expect(state.lastTakenMove[1]).toBeNull()
+    })
+
+    it('MOVEEND during processingExtraAttacks: writes only what C writes (target lastHitBy, lastLandedMove, lastHitByType, Mirror Move; leaves attacker lastMove/lastPrintedMove/lastResultingMove and global lastUsedMove unchanged; leaves rolloutCounter untouched)', () => {
+      const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
+      state.processingExtraAttacks = true
+      state.battlers[0]!.lastMove = 'MOVE_HEAD_CHARGE'
+      state.battlers[0]!.lastResultingMove = 'MOVE_HEAD_CHARGE'
+      state.battlers[0]!.lastPrintedMove = 'MOVE_HEAD_CHARGE'
+      state.lastUsedMove = 'MOVE_HEAD_CHARGE'
+      state.battlers[0]!.volatiles.rolloutCounter = 3
+
+      runMoveEnd({
+        state,
+        attackerId: 0,
+        targetId: 1,
+        moveId: 'MOVE_TACKLE',
+        chosenMoveId: 'MOVE_TACKLE',
+        targetDamage: 20,
+        hpDealt: 20,
+        deps: testDepsWithDamage(fixedDamage(20)),
+        unmodelled: [],
+        fainted: [],
+      })
+
+      // Attacker bookkeeping must be untouched (:4738, 4749, 4943)
+      expect(state.battlers[0]!.lastMove).toBe('MOVE_HEAD_CHARGE')
+      expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_HEAD_CHARGE')
+      expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_HEAD_CHARGE')
+      expect(state.lastUsedMove).toBe('MOVE_HEAD_CHARGE')
+      expect(state.battlers[0]!.volatiles.rolloutCounter).toBe(3)
+
+      // Target bookkeeping and Mirror Move must be written (:4758, 4764, 4777)
+      expect(state.battlers[1]!.lastHitBy).toBe(0)
+      expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
+      expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
+      expect(state.lastTakenMove[1]).toBe('MOVE_TACKLE')
+      expect(state.lastTakenMoveFrom[1][0]).toBe('MOVE_TACKLE')
+    })
+
+    it('MOVEEND with originallyUsedMove as Baton Pass: skips lastMove/lastResultingMove and target lastHitBy/lastLandedMove', () => {
+      const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
+      state.battlers[0]!.lastMove = null
+      state.battlers[0]!.lastResultingMove = null
+      state.battlers[1]!.lastHitBy = BATTLER_NONE
+      state.battlers[1]!.lastLandedMove = null
+
+      runMoveEndBookkeeping({
+        state,
+        attackerId: 0,
+        targetId: 1,
+        currentMoveId: 'MOVE_BATON_PASS',
+        chosenMoveId: 'MOVE_BATON_PASS',
+        deps: testDepsWithDamage(fixedDamage(0)),
+        noEffect: false,
+        obeys: true,
+        fainted: [],
+      })
+
+      // Baton Pass guard (:4747): skips attacker lastMove/lastResultingMove and target lastHitBy/lastLandedMove
+      expect(state.battlers[0]!.lastMove).toBeNull()
+      expect(state.battlers[0]!.lastResultingMove).toBeNull()
+      expect(state.battlers[1]!.lastHitBy).toBe(BATTLER_NONE)
+      expect(state.battlers[1]!.lastLandedMove).toBeNull()
+      // but lastPrintedMove and lastUsedMove are still set (:4742-4743)
+      expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_BATON_PASS')
+      expect(state.lastUsedMove).toBe('MOVE_BATON_PASS')
+    })
   })
 
   it('MOVEEND_CHARGE (24): clears STATUS3_CHARGED_UP on Electric damaging move', () => {

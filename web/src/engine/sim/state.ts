@@ -619,6 +619,8 @@ export interface BattleState {
   /** `gAbsentBattlerFlags` (battle.h:981) -- a battler bitmask for "fainted or
    * otherwise not on the field right now", distinct from a null slot. */
   absentBattlerFlags: number
+  /** `u8 field_91` (include/battle.h:638, battle_script_commands.c:4746,4774) -- related to gAbsentBattlerFlags. */
+  field_91: number
   /** Indexed by B_SIDE_PLAYER / B_SIDE_OPPONENT. */
   sides: [SideState, SideState]
   field: FieldState

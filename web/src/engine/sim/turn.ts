@@ -141,11 +141,10 @@ import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
-import { getBattlerAbilitySlotsReverse, runMoveEnd } from './moveEnd'
+import { getBattlerAbilitySlotsReverse, runMoveEnd, runMoveEndBookkeeping } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import {
   BATTLE_TYPE_ARENA,
-  MOVE_UNSET,
   clearFlag,
   hasFlag,
   PARTY_SIZE,
@@ -316,6 +315,11 @@ export interface ActionOutcome {
    * battle script, which this batch does not model, so the order here is the
    * loop's own and a later batch should assert against the script. */
   fainted: number[]
+  /**
+   * Overrides gChosenMove for move-end bookkeeping (src/battle_script_commands.c:10483, 10836).
+   * E.g. Transform and Sketch set gChosenMove = 0xFFFF (MOVE_UNSET).
+   */
+  chosenMoveId?: string
   /**
    * Cmd_jumptocalledmove (battle_script_commands.c:5906-5914):
    * When set on a handler outcome, instructs executeAction to re-enter the move pipeline for moveId.
@@ -1707,27 +1711,13 @@ export function executeAction(
     }
   }
 
-  // Helper to update last moves mirroring C: Cmd_jumptocalledmove (battle_script_commands.c:5906-5914)
-  // and MOVEEND_UPDATE_LAST_MOVES (:4740-4752).
-  // When operand is TRUE: gCurrentMove = gCalledMove while gChosenMove is unchanged.
-  // When operand is FALSE: gChosenMove = gCurrentMove = gCalledMove.
-  const updateLastMoves = (chosenMoveId: string, currentMoveId: string) => {
-    if (!state.processingExtraAttacks) {
-      if (state.battlers[battlerId]) {
-        state.battlers[battlerId]!.lastMove = chosenMoveId
-        state.battlers[battlerId]!.lastResultingMove = currentMoveId
-        state.battlers[battlerId]!.lastPrintedMove = chosenMoveId
-      }
-      state.lastUsedMove = currentMoveId
-    }
-  }
-
   const runMovePipeline = (
     currentMove: TurnOrderMoveView,
     chosenMove: TurnOrderMoveView,
     currentTargetId: number | null,
     _isCalledJump: boolean,
   ): ActionOutcome => {
+    let currentChosenMoveId = chosenMove.id
     const moveData = deps.dataContext.move(currentMove.id)
     const moveFlags = moveData?.flags
 
@@ -1756,7 +1746,17 @@ export function executeAction(
 
         if (isBouncedByCoat && blocksPrankster(state, currentMove.id, currentTargetId!, battlerId, true, deps)) {
           // BattleScript_MagicCoatBouncePrankster (:8335-8344)
-          updateLastMoves(chosenMove.id, currentMove.id)
+          runMoveEndBookkeeping({
+            state,
+            attackerId: battlerId,
+            targetId: currentTargetId,
+            currentMoveId: currentMove.id,
+            chosenMoveId: currentChosenMoveId,
+            deps,
+            noEffect: true,
+            obeys: true,
+            fainted: [],
+          })
           return {
             turnOrderIndex: index,
             battlerId,
@@ -1786,6 +1786,7 @@ export function executeAction(
         const bouncedMoveEffect = currentMove.effect ?? moveData?.effect ?? null
         const bouncedHandler = getMoveEffectHandler(bouncedMoveEffect)
         if (bouncedHandler) {
+          let bouncedChosenMoveId = chosenMove.id
           const effectOutcome = bouncedHandler({
             state,
             battlerId: bounceAttackerId,
@@ -1797,23 +1798,29 @@ export function executeAction(
             unmodelled,
             deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8331)
             applyDamage,
+            setChosenMove: (mId: string) => {
+              bouncedChosenMoveId = mId
+            },
           })
+          if (effectOutcome.chosenMoveId !== undefined) {
+            bouncedChosenMoveId = effectOutcome.chosenMoveId
+          }
           const reactiveStatChanges: StatChangeOutcome[] = []
           runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
           if (reactiveStatChanges.length > 0) {
             effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
           }
-          updateLastMoves(chosenMove.id, currentMove.id)
-          if (
-            bounceTargetId !== bounceAttackerId &&
-            !effectOutcome.missed &&
-            moveData?.flags?.mirrorMoveAffected === true &&
-            state.battlers[bounceTargetId] &&
-            isBattlerAlive(state, bounceTargetId)
-          ) {
-            state.lastTakenMove[bounceTargetId] = chosenMove.id
-            state.lastTakenMoveFrom[bounceTargetId][bounceAttackerId] = chosenMove.id
-          }
+          runMoveEndBookkeeping({
+            state,
+            attackerId: bounceAttackerId,
+            targetId: bounceTargetId,
+            currentMoveId: currentMove.id,
+            chosenMoveId: bouncedChosenMoveId,
+            deps,
+            noEffect: Boolean(effectOutcome.missed),
+            obeys: true,
+            fainted: effectOutcome.fainted ?? [],
+          })
           return { ...effectOutcome, turnOrderIndex: index, battlerId }
         } else {
           unmodelled.push(
@@ -1861,6 +1868,7 @@ export function executeAction(
       const snatchedMoveEffect = currentMove.effect ?? moveData?.effect ?? null
       const snatchedHandler = getMoveEffectHandler(snatchedMoveEffect)
       if (snatchedHandler) {
+        let snatchedChosenMoveId = chosenMove.id
         const effectOutcome = snatchedHandler({
           state,
           battlerId: snatcherId,
@@ -1872,23 +1880,29 @@ export function executeAction(
           unmodelled,
           deductPp: () => {}, // PP already deducted with HITMARKER_NO_PPDEDUCT (:8353)
           applyDamage,
+          setChosenMove: (mId: string) => {
+            snatchedChosenMoveId = mId
+          },
         })
+        if (effectOutcome.chosenMoveId !== undefined) {
+          snatchedChosenMoveId = effectOutcome.chosenMoveId
+        }
         const reactiveStatChanges: StatChangeOutcome[] = []
         runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
         if (reactiveStatChanges.length > 0) {
           effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
         }
-        updateLastMoves(chosenMove.id, currentMove.id)
-        if (
-          snatchedTargetId !== snatcherId &&
-          !effectOutcome.missed &&
-          moveData?.flags?.mirrorMoveAffected === true &&
-          state.battlers[snatchedTargetId] &&
-          isBattlerAlive(state, snatchedTargetId)
-        ) {
-          state.lastTakenMove[snatchedTargetId] = chosenMove.id
-          state.lastTakenMoveFrom[snatchedTargetId][snatcherId] = chosenMove.id
-        }
+        runMoveEndBookkeeping({
+          state,
+          attackerId: snatcherId,
+          targetId: snatchedTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: snatchedChosenMoveId,
+          deps,
+          noEffect: Boolean(effectOutcome.missed),
+          obeys: true,
+          fainted: effectOutcome.fainted ?? [],
+        })
         return { ...effectOutcome, turnOrderIndex: index, battlerId }
       } else {
         unmodelled.push(
@@ -1937,6 +1951,9 @@ export function executeAction(
         unmodelled,
         deductPp: performPpDeduct,
         applyDamage,
+        setChosenMove: (mId: string) => {
+          currentChosenMoveId = mId
+        },
         jumpToCalledMove: (calledMoveId: string, keepChosenMove: boolean = true, overrideTargetId?: number | null): ActionOutcome => {
           const nextChosenMove = keepChosenMove ? chosenMove : buildMoveView(calledMoveId, deps.dataContext)
           const nextCurrentMove = buildMoveView(calledMoveId, deps.dataContext)
@@ -1962,6 +1979,10 @@ export function executeAction(
         return runMovePipeline(nextCurrentMove, nextChosenMove, nextTargetId, true)
       }
 
+      if (effectOutcome.chosenMoveId !== undefined) {
+        currentChosenMoveId = effectOutcome.chosenMoveId
+      }
+
       if (currentTargetId !== null && state.battlers[battlerId]?.round.touchedProtectLike) {
         const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
         if (protectMoveEnd.statChanges) {
@@ -1978,18 +1999,17 @@ export function executeAction(
       if (reactiveStatChanges.length > 0) {
         effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...reactiveStatChanges]
       }
-      updateLastMoves(chosenMove.id, currentMove.id)
-      if (
-        currentTargetId !== null &&
-        currentTargetId !== battlerId &&
-        !effectOutcome.missed &&
-        moveData?.flags?.mirrorMoveAffected === true &&
-        state.battlers[currentTargetId] &&
-        isBattlerAlive(state, currentTargetId)
-      ) {
-        state.lastTakenMove[currentTargetId] = chosenMove.id
-        state.lastTakenMoveFrom[currentTargetId][battlerId] = chosenMove.id
-      }
+      runMoveEndBookkeeping({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        currentMoveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        deps,
+        noEffect: Boolean(effectOutcome.missed),
+        obeys: true,
+        fainted: effectOutcome.fainted ?? [],
+      })
       return effectOutcome
     }
 
@@ -2016,11 +2036,17 @@ export function executeAction(
       cancelMultiTurnMoves(state.battlers[battlerId]!)
       performPpDeduct()
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
-      if (state.battlers[currentTargetId]) {
-        state.battlers[currentTargetId]!.lastLandedMove = null
-        state.battlers[currentTargetId]!.lastHitByType = null
-      }
-      updateLastMoves(chosenMove.id, currentMove.id)
+      runMoveEndBookkeeping({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        currentMoveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        deps,
+        noEffect: true,
+        obeys: true,
+        fainted: [],
+      })
       return {
         turnOrderIndex: index,
         battlerId,
@@ -2066,11 +2092,17 @@ export function executeAction(
 
     if (missed) {
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
-      updateLastMoves(chosenMove.id, currentMove.id)
-      if (currentTargetId !== null && state.battlers[currentTargetId] && isBattlerAlive(state, currentTargetId)) {
-        state.battlers[currentTargetId]!.lastHitBy = battlerId
-        state.battlers[currentTargetId]!.lastLandedMove = MOVE_UNSET
-      }
+      runMoveEndBookkeeping({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        currentMoveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        deps,
+        noEffect: true,
+        obeys: true,
+        fainted: [],
+      })
       return {
         turnOrderIndex: index,
         battlerId,
@@ -2100,10 +2132,6 @@ export function executeAction(
     let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit } = deps.damage.resolve(state, battlerId, currentTargetId, currentMoveAction, { targetHasActedThisTurn })
 
     if (absorbingAbility) {
-      if (state.battlers[currentTargetId]) {
-        state.battlers[currentTargetId]!.lastLandedMove = null
-        state.battlers[currentTargetId]!.lastHitByType = null
-      }
       const absorbOutcome = applyAbsorbEffect({
         state,
         attackerId: battlerId,
@@ -2122,9 +2150,10 @@ export function executeAction(
         attackerId: battlerId,
         targetId: currentTargetId,
         moveId: currentMove.id,
-        chosenMoveId: chosenMove.id,
+        chosenMoveId: currentChosenMoveId,
         targetDamage: 0,
         hpDealt: 0,
+        noEffect: true,
         moveEffect2: null,
         deps,
         unmodelled,
@@ -2134,8 +2163,6 @@ export function executeAction(
       const finalStatChanges: StatChangeOutcome[] = []
       if (absorbOutcome.statChanges.length > 0) finalStatChanges.push(...absorbOutcome.statChanges)
       if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
-
-      updateLastMoves(chosenMove.id, currentMove.id)
 
       return {
         turnOrderIndex: index,
@@ -2214,7 +2241,7 @@ export function executeAction(
       attackerId: battlerId,
       targetId: currentTargetId,
       moveId: currentMove.id,
-      chosenMoveId: chosenMove.id,
+      chosenMoveId: currentChosenMoveId,
       targetDamage: targetDamage ?? 0,
       hpDealt,
       isCriticalHit,

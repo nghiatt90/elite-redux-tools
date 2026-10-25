@@ -2791,6 +2791,177 @@ function isKingsRockAffected(moveData: SimMoveData | undefined, deps: TurnLoopDe
 // MoveEnd Ladder
 // ---------------------------------------------------------------------------
 
+export interface MoveEndBookkeepingContext {
+  state: BattleState
+  attackerId: number
+  targetId: number | null
+  currentMoveId: string
+  chosenMoveId: string
+  deps: { dataContext: TurnLoopDeps['dataContext'] }
+  noEffect: boolean
+  obeys?: boolean
+  fainted?: number[]
+  /** Run Case 30 (MOVEEND_CLEAR_BITS) here. runMoveEnd passes false: it runs Case 30 itself, after cases 19-29 that read these bits. Default true (paths that skip the rest of the ladder). */
+  clearBits?: boolean
+}
+
+/**
+ * Factored move-end bookkeeping implementing:
+ * - Case 17: MOVEEND_UPDATE_LAST_MOVES (src/battle_script_commands.c:4723-4772)
+ * - Case 18: MOVEEND_MIRROR_MOVE (src/battle_script_commands.c:4773-4781)
+ * - Case 30: MOVEEND_CLEAR_BITS (src/battle_script_commands.c:4934-4957)
+ *
+ * In the C engine, every move ends with `goto BattleScript_MoveEnd` (or `moveendall`),
+ * running these cases for hits, misses, status moves, protected/absorbed hits, etc.
+ *
+ * Conditions from C:
+ * - `HITMARKER_OBEYS` (:4748, 4760, 4775): set in Cmd_attackcanceler (:1146). In the sim,
+ *   all moves reaching this function passed attack cancellers and obeyed (obeys = true).
+ * - `MOVE_RESULT_NO_EFFECT` (:4760, 4776, 4938): defined as (MOVE_RESULT_MISSED |
+ *   MOVE_RESULT_DOESNT_AFFECT_FOE | MOVE_RESULT_FAILED) in include/constants/battle.h:389.
+ *   Derived as true on misses, failures, protect blocks, type immunities, or absorbing abilities.
+ * - `gProcessingExtraAttacks` (:4738, 4749, 4943): extra attacks skip usedMoves, lastPrintedMove,
+ *   lastUsedMove, lastMove, lastResultingMove, and rolloutCounter reset.
+ * - `!(gHitMarker & HITMARKER_FAINTED(gBattlerTarget))` (:4758, 4776): target must be alive
+ *   and not fainted this action to record lastHitBy and Mirror Move.
+ * - `!(gAbsentBattlerFlags & gBitTable[attacker]) && !(field_91 & gBitTable[attacker])` (:4746, 4774).
+ * - `originallyUsedMove` (:4318-4321): if gChosenMove == 0xFFFF, originallyUsedMove = 0 (MOVE_NONE).
+ *   Checked for EFFECT_BATON_PASS / EFFECT_HEALING_WISH (:4747) and FLAG_MIRROR_MOVE_AFFECTED (:4775).
+ */
+export function runMoveEndBookkeeping(ctx: MoveEndBookkeepingContext): void {
+  const {
+    state,
+    attackerId,
+    targetId,
+    currentMoveId,
+    chosenMoveId,
+    deps,
+    noEffect,
+    obeys = true,
+    fainted = [],
+  } = ctx
+
+  const attacker = state.battlers[attackerId]
+  const target = targetId !== null ? state.battlers[targetId] : null
+  const currentMoveData = deps.dataContext.move(currentMoveId)
+
+  // originallyUsedMove (src/battle_script_commands.c:4318-4321):
+  // if (gChosenMove == 0xFFFF) originallyUsedMove = 0; else originallyUsedMove = gChosenMove;
+  const originallyUsedMove = chosenMoveId === MOVE_UNSET || !chosenMoveId ? null : chosenMoveId
+  const origMoveData = originallyUsedMove ? deps.dataContext.move(originallyUsedMove) : null
+
+  // 1. Case 17: MOVEEND_UPDATE_LAST_MOVES (battle_script_commands.c:4723-4772)
+  if (!state.processingExtraAttacks) {
+    if (attacker) {
+      const movePos =
+        chosenMoveId !== MOVE_UNSET && chosenMoveId
+          ? attacker.mon.moves.indexOf(chosenMoveId)
+          : -1
+      if (movePos >= 0 && movePos < 4) {
+        attacker.volatiles.usedMoves |= 1 << movePos
+      }
+      attacker.lastPrintedMove = chosenMoveId
+    }
+    state.lastUsedMove = currentMoveId
+  }
+
+  const isBatonPassOrHealingWish =
+    origMoveData?.effect === 'EFFECT_BATON_PASS' || origMoveData?.effect === 'EFFECT_HEALING_WISH'
+
+  const attackerAbsent =
+    hasFlag(state.absentBattlerFlags, 1 << attackerId) ||
+    hasFlag(state.field_91 ?? 0, 1 << attackerId)
+
+  if (attacker && !attackerAbsent && !isBatonPassOrHealingWish) {
+    if (obeys) {
+      if (!state.processingExtraAttacks) {
+        attacker.lastMove = chosenMoveId
+        attacker.lastResultingMove = currentMoveId
+      }
+    } else {
+      attacker.lastMove = MOVE_UNSET
+      attacker.lastResultingMove = MOVE_UNSET
+    }
+
+    const targetFainted =
+      targetId === null ||
+      !target ||
+      !isBattlerAlive(state, targetId) ||
+      fainted.includes(targetId) ||
+      target.mon.hp <= 0
+
+    if (target && !targetFainted) {
+      target.lastHitBy = attackerId
+    }
+
+    if (target) {
+      if (obeys && !noEffect) {
+        if (chosenMoveId === MOVE_UNSET) {
+          target.lastLandedMove = MOVE_UNSET
+        } else {
+          target.lastLandedMove = currentMoveId
+          const moveType = (currentMoveData?.type ?? 'TYPE_NORMAL').replace(/^TYPE_/, '')
+          target.lastHitByType = moveType
+        }
+      } else {
+        target.lastLandedMove = MOVE_UNSET
+      }
+    }
+  }
+
+  // 2. Case 18: MOVEEND_MIRROR_MOVE (battle_script_commands.c:4773-4781)
+  const targetFaintedForMirror =
+    targetId === null ||
+    !target ||
+    !isBattlerAlive(state, targetId) ||
+    fainted.includes(targetId) ||
+    target.mon.hp <= 0
+
+  if (
+    attacker &&
+    target &&
+    attackerId !== targetId &&
+    !attackerAbsent &&
+    origMoveData?.flags?.mirrorMoveAffected === true &&
+    obeys &&
+    !targetFaintedForMirror &&
+    !noEffect
+  ) {
+    state.lastTakenMove[targetId] = chosenMoveId
+    state.lastTakenMoveFrom[targetId][attackerId] = chosenMoveId
+  }
+
+  // 3. Case 30: MOVEEND_CLEAR_BITS (battle_script_commands.c:4934-4957)
+  if (ctx.clearBits ?? true) {
+    applyMoveEndClearBits(state, attackerId, targetId, currentMoveId, deps)
+  }
+}
+
+/** Case 30: MOVEEND_CLEAR_BITS (src/battle_script_commands.c:4934-4957). */
+export function applyMoveEndClearBits(
+  state: BattleState,
+  attackerId: number,
+  targetId: number | null,
+  currentMoveId: string,
+  deps: { dataContext: TurnLoopDeps['dataContext'] },
+): void {
+  const attacker = state.battlers[attackerId]
+  const target = targetId !== null ? state.battlers[targetId] : null
+  const currentMoveData = deps.dataContext.move(currentMoveId)
+  if (attacker) {
+    if (!state.processingExtraAttacks && currentMoveData?.effect !== 'EFFECT_ROLLOUT') {
+      attacker.volatiles.rolloutCounter = 0
+    }
+    attacker.round.usesBouncedMove = false
+    attacker.round.targetAffected = false
+    attacker.turn.gemBoost = false
+    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
+  }
+  if (target) {
+    target.turn.berryReduced = false
+  }
+}
+
 export interface MoveEndContext {
   state: BattleState
   attackerId: number
@@ -2807,6 +2978,8 @@ export interface MoveEndContext {
   fainted: number[]
   /** gChosenMove (:4321) -- defaults to moveId when not a called move. */
   chosenMoveId?: string
+  /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
+  noEffect?: boolean
 }
 
 export interface MoveEndOutcome {
@@ -3002,53 +3175,20 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     }
   }
 
-  // Case 17: MOVEEND_UPDATE_LAST_MOVES (:4723-4772)
-  if (!state.processingExtraAttacks) {
-    if (attacker) {
-      attacker.lastPrintedMove = chosenMoveId
-    }
-    state.lastUsedMove = moveId
-  }
-
-  const isBatonPassOrHealingWish =
-    moveData?.effect === 'EFFECT_BATON_PASS' || moveData?.effect === 'EFFECT_HEALING_WISH'
-
-  if (attacker && !isBatonPassOrHealingWish && !hasFlag(state.absentBattlerFlags, 1 << attackerId)) {
-    if (!state.processingExtraAttacks) {
-      attacker.lastMove = chosenMoveId
-      attacker.lastResultingMove = moveId
-    }
-
-    if (target && isBattlerAlive(state, targetId) && !fainted.includes(targetId)) {
-      target.lastHitBy = attackerId
-    }
-
-    if (target) {
-      if (hpDealt > 0 || targetDamage > 0 || targetTurnDamaged) {
-        target.lastLandedMove = moveId
-        const moveType = (moveData?.type ?? 'TYPE_NORMAL').replace(/^TYPE_/, '')
-        target.lastHitByType = moveType
-      } else {
-        target.lastLandedMove = MOVE_UNSET
-      }
-    }
-  }
-
-  // Case 18: MOVEEND_MIRROR_MOVE (:4773-4781)
-  const chosenMoveData = deps.dataContext.move(chosenMoveId)
-  if (
-    attacker &&
-    target &&
-    attackerId !== targetId &&
-    !hasFlag(state.absentBattlerFlags, 1 << attackerId) &&
-    chosenMoveData?.flags?.mirrorMoveAffected === true &&
-    !fainted.includes(targetId) &&
-    isBattlerAlive(state, targetId) &&
-    (hpDealt > 0 || targetDamage > 0 || targetTurnDamaged || moveData?.split === 'STATUS')
-  ) {
-    state.lastTakenMove[targetId] = chosenMoveId
-    state.lastTakenMoveFrom[targetId][attackerId] = chosenMoveId
-  }
+  // Cases 17, 18, 30: MOVEEND_UPDATE_LAST_MOVES (:4723-4772), MOVEEND_MIRROR_MOVE (:4773-4781), MOVEEND_CLEAR_BITS (:4934-4957)
+  const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
+  runMoveEndBookkeeping({
+    state,
+    attackerId,
+    targetId,
+    currentMoveId: moveId,
+    chosenMoveId,
+    deps,
+    noEffect: isNoEffect,
+    obeys: true,
+    fainted,
+    clearBits: false,
+  })
 
   // Case 19: MOVEEND_MULTIHIT_MOVE (:4880-4921)
   // Multi-hit loop. Total-damage resolved in sim.
@@ -3178,17 +3318,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 30: MOVEEND_CLEAR_BITS (:4934-4957)
-  if (attacker) {
-    if (moveData?.effect !== 'EFFECT_ROLLOUT') {
-      attacker.volatiles.rolloutCounter = 0
-    }
-    attacker.round.targetAffected = false
-    attacker.turn.gemBoost = false
-    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
-  }
-  if (target) {
-    target.turn.berryReduced = false
-  }
+  applyMoveEndClearBits(state, attackerId, targetId, moveId, deps)
 
   // Every other faint this action caused (the attacker, from recoil / Rocky Helmet / Rough Skin / Life Orb) goes through
   // BattleScript_FaintAttacker -> onfaintedbyother (battle_scripts_1.s:6892), after moveend.
