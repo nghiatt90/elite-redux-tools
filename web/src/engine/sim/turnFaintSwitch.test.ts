@@ -297,7 +297,8 @@ describe('applyEndOfTurnReplacements', () => {
     expect(battler0.mon.statStages.every((s) => s === DEFAULT_STAT_STAGE)).toBe(true)
     expect(battler0.statuses3).toBe(0)
     expect(battler0.statuses4).toBe(0)
-    expect(battler0.volatiles.isFirstTurn).toBe(2)
+    // Decremented from 2 to 1 at end-of-turn cleanup (TurnValuesCleanUp, src/battle_main.c:4491)
+    expect(battler0.volatiles.isFirstTurn).toBe(1)
 
     // The fainted mon's own party record shows HP 0.
     expect(state.sides[0].party[0]!.hp).toBe(0)

@@ -2299,8 +2299,7 @@ export function handleProtect(ctx: MoveEffectContext): ActionOutcome {
 
   // BattleScript_EffectMatBlock (data/battle_scripts_1.s:5029-5032): jumpifnotfirstturn BattleScript_ButItFailedAtkStringPpReduce
   // (Cmd_jumpifnotfirstturn, src/battle_script_commands.c:9439-9446)
-  // gProcessingExtraAttacks is never set in the sim. isFirstTurn is never decremented either
-  // (TurnValuesCleanUp's :4491 is unported), so this cannot fail yet.
+  // isFirstTurn is decremented at end of turn (TurnValuesCleanUp, src/battle_main.c:4491).
   if (moveEffect === 'EFFECT_MAT_BLOCK' && !battler.volatiles.isFirstTurn) {
     return outcome(ctx, { missed: true })
   }
@@ -8825,7 +8824,7 @@ export function handleTrick(ctx: MoveEffectContext): ActionOutcome {
  * 2. Fails when `gCurrentTurnActionNumber == gBattlersCount - 1` (user acts last in the turn order).
  * 3. Otherwise sets `gRoundStructs[gBattlerAttacker].stealMove = TRUE`.
  * 4. Consumer in Cmd_attackcanceler (src/battle_script_commands.c:1175-1182, BattleScript_SnatchedMove at
- *    data/battle_scripts_1.s:8346-8355) is not ported in attackCanceller.ts / turn.ts.
+ *    data/battle_scripts_1.s:8346-8355) is ported in turn.ts (cycle 65).
  */
 export function handleSnatch(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, unmodelled, deductPp, turnOrderIndex, order } = ctx
@@ -8841,9 +8840,6 @@ export function handleSnatch(ctx: MoveEffectContext): ActionOutcome {
   }
 
   battler.round.stealMove = true
-  unmodelled.push(
-    "Snatch's stealMove consumer in Cmd_attackcanceler (battle_script_commands.c:1175-1182, BattleScript_SnatchedMove at data/battle_scripts_1.s:8346-8355) is not modelled; subsequent FLAG_SNATCH_AFFECTED moves this turn are not stolen",
-  )
 
   return outcome(ctx, { missed: false })
 }
@@ -8859,7 +8855,7 @@ export function handleSnatch(ctx: MoveEffectContext): ActionOutcome {
  * 3. Fails when `gCurrentTurnActionNumber == gBattlersCount - 1` (user acts last in the turn order).
  * 4. Otherwise sets `gRoundStructs[gBattlerAttacker].bounceMove = TRUE`.
  * 5. Consumer in Cmd_attackcanceler (src/battle_script_commands.c:1153-1166, BattleScript_MagicCoatBounce /
- *    BattleScript_MagicCoatBouncePrankster at data/battle_scripts_1.s:8325-8344) is not ported in attackCanceller.ts / turn.ts.
+ *    BattleScript_MagicCoatBouncePrankster at data/battle_scripts_1.s:8325-8344) is ported in turn.ts (cycle 65).
  */
 export function handleMagicCoat(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, unmodelled, deductPp, turnOrderIndex, order } = ctx
@@ -8875,9 +8871,6 @@ export function handleMagicCoat(ctx: MoveEffectContext): ActionOutcome {
   }
 
   battler.round.bounceMove = true
-  unmodelled.push(
-    "Magic Coat's bounceMove consumer in Cmd_attackcanceler (battle_script_commands.c:1153-1166, BattleScript_MagicCoatBounce at data/battle_scripts_1.s:8325-8344) is not modelled; incoming FLAG_MAGIC_COAT_AFFECTED moves this turn are not reflected",
-  )
 
   return outcome(ctx, { missed: false })
 }
@@ -8934,9 +8927,9 @@ export function handleAllySwitch(ctx: MoveEffectContext): ActionOutcome {
  * 2. Cmd_setforcedtarget (:11614-11616) always sets `followmeTimer = 1`, `followmeTarget = gBattlerAttacker`, and
  *    `followmePowder = TestMoveFlags(gCurrentMove, FLAG_POWDER)` on `gSideTimers[GetBattlerSide(gBattlerAttacker)]`,
  *    even for MOVE_SPOTLIGHT (which has target MOVE_TARGET_SELECTED in moves.json but shares EFFECT_FOLLOW_ME).
- * 3. Neither the target-redirection consumer IsAffectedByFollowMe (src/battle_util.c:118-126, 263-265, 6365-6366,
- *    6395-6396) nor the end-of-turn clear of followmeTimer in TurnValuesCleanUp (src/battle_main.c:4507-4508) is
- *    ported in turn.ts.
+ * 3. Target-redirection consumer IsAffectedByFollowMe (src/battle_util.c:118-126, 263-265, 6365-6366,
+ *    6395-6396) and end-of-turn clear of followmeTimer in TurnValuesCleanUp (src/battle_main.c:4507-4508) are
+ *    ported in turn.ts (cycle 65).
  */
 export function handleFollowMe(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
@@ -8957,10 +8950,6 @@ export function handleFollowMe(ctx: MoveEffectContext): ActionOutcome {
   sideTimers.followmeTimer = 1
   sideTimers.followmeTarget = battlerId
   sideTimers.followmePowder = Boolean(moveData?.flags?.powderAffected)
-
-  unmodelled.push(
-    "Follow Me's IsAffectedByFollowMe target-redirection consumer (battle_util.c:118-126, 263-265, 6365-6366, 6395-6396) and TurnValuesCleanUp's end-of-turn clear of followmeTimer (battle_main.c:4507-4508) are not modelled in turn.ts",
-  )
 
   return outcome(ctx, { targetId: isSelectedTarget ? targetId : battlerId, missed: false })
 }

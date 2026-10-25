@@ -364,6 +364,7 @@ describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Speed Boost (battle
       [{ spe: 100, maxHp: 100, abilities: { ability: SPEED_BOOST, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
+    state.battlers[0]!.volatiles.isFirstTurn = 2
     expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(2)
     executeTurn(state, [null, null], deps())
     expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
@@ -433,6 +434,7 @@ describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Rain Dish (abilitie
       [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: RAIN_DISH, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
+    state.battlers[0]!.volatiles.isFirstTurn = 2
     state.field.weather = WEATHER_RAIN_TEMPORARY
     const out = executeTurn(state, [null, null], deps())
     expect(out.endTurn).toEqual([])
@@ -521,6 +523,7 @@ describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Dry Skin (abilities
       [{ spe: 100, maxHp: 80, hp: 50, abilities: { ability: DRY_SKIN, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
+    state.battlers[0]!.volatiles.isFirstTurn = 2
     expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(2)
     state.field.weather = WEATHER_SUN_TEMPORARY
     const out = executeTurn(state, [null, null], deps())
@@ -688,6 +691,7 @@ describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: Self-Sufficient (ab
       [{ spe: 100, maxHp: 160, hp: 100, abilities: { ability: SELF_SUFFICIENT, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
+    state.battlers[0]!.volatiles.isFirstTurn = 2
     const out = executeTurn(state, [null, null], deps())
     expect(out.endTurn).toEqual([])
     expect(state.battlers[0]!.mon.hp).toBe(100)

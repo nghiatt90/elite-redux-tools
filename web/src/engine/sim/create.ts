@@ -424,6 +424,13 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
   assertRosterHoldsActiveBattlers(options.playerParty, battlers, 0)
   assertRosterHoldsActiveBattlers(options.opponentParty, battlers, 1)
 
+  // TurnValuesCleanUp(FALSE), battle_main.c:3406 -- battle-start call decrements isFirstTurn
+  for (const battler of battlers) {
+    if (battler && battler.volatiles.isFirstTurn) {
+      battler.volatiles.isFirstTurn--
+    }
+  }
+
   return {
     battlers,
     // gBattlersCount is 2 in singles and 4 in doubles (battle.h:957); derived

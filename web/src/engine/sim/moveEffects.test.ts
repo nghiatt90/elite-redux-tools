@@ -311,6 +311,8 @@ const MOVE_MAGIC_COAT = requireMove('MOVE_MAGIC_COAT')
 const MOVE_ALLY_SWITCH = requireMove('MOVE_ALLY_SWITCH')
 const MOVE_RAGE_POWDER = requireMove('MOVE_RAGE_POWDER')
 const MOVE_SPOTLIGHT = requireMove('MOVE_SPOTLIGHT')
+const MOVE_SNIPE_SHOT = requireMove('MOVE_SNIPE_SHOT')
+const MOVE_EARTHQUAKE = requireMove('MOVE_EARTHQUAKE')
 
 const ABILITY_OBLIVIOUS = requireAbility('ABILITY_OBLIVIOUS')
 const ABILITY_AROMA_VEIL = requireAbility('ABILITY_AROMA_VEIL')
@@ -342,6 +344,8 @@ const ABILITY_PLUS = requireAbility('ABILITY_PLUS')
 const ABILITY_MINUS = requireAbility('ABILITY_MINUS')
 const ABILITY_STICKY_HOLD = requireAbility('ABILITY_STICKY_HOLD')
 const ABILITY_MOLD_BREAKER = requireAbility('ABILITY_MOLD_BREAKER')
+const ABILITY_PRANKSTER = requireAbility('ABILITY_PRANKSTER')
+const ABILITY_PROPELLER_TAIL = requireAbility('ABILITY_PROPELLER_TAIL')
 
 const ITEM_UTILITY_UMBRELLA = requireItem('ITEM_UTILITY_UMBRELLA')
 const ITEM_BOOSTER_ENERGY = requireItem('ITEM_BOOSTER_ENERGY')
@@ -5824,6 +5828,35 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           expect(act.missed).toBe(true)
           expect(state.battlers[0]!.mon.pp[0]).toBe(9) // ButItFailedAtkStringPpReduce
         })
+
+        it('succeeds naturally on turn 1 (isFirstTurn starts at 1) and fails on turn 2 after isFirstTurn decrements to 0', () => {
+          const deps = testDeps()
+          const rng = countingRng()
+          const state = battle(
+            [
+              { moves: ['MOVE_MAT_BLOCK', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+              { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+            ],
+            rng,
+          )
+          // Battle-start call (TurnValuesCleanUp, src/battle_main.c:3406) decremented isFirstTurn from 2 to 1
+          expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(1)
+
+          // Turn 1: Mat Block succeeds
+          const out1 = executeTurn(state, [useMove(1, MOVE_MAT_BLOCK), null], deps)
+          const act0_1 = out1.actions.find((a) => a.battlerId === 0)!
+          expect(act0_1.missed).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+
+          // End of turn 1 (TurnValuesCleanUp, src/battle_main.c:4491) decremented isFirstTurn from 1 to 0
+          expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(0)
+
+          // Turn 2: Mat Block fails
+          const out2 = executeTurn(state, [useMove(1, MOVE_MAT_BLOCK), null], deps)
+          const act0_2 = out2.actions.find((a) => a.battlerId === 0)!
+          expect(act0_2.missed).toBe(true)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(8)
+        })
       })
 
       describe('EFFECT_SMOKESCREEN', () => {
@@ -7880,6 +7913,10 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           })
         })
 
+        const flatDamage10: DamageResolver = {
+          resolve: () => ({ targetDamage: 10, attackerDamage: null, unmodelled: [] }),
+        }
+
         describe('EFFECT_SNATCH', () => {
           it('sets user round.stealMove when user does not act last in the turn', () => {
             const state = battle(
@@ -7903,7 +7940,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(act.missed).toBe(false)
             expect(state.battlers[0]!.mon.pp[0]).toBe(9)
             expect(stealMoveDuringTurn).toBe(true)
-            expect(act.unmodelled.some((u) => u.includes('stealMove'))).toBe(true)
+            expect(act.unmodelled.some((u) => u.includes('stealMove'))).toBe(false)
             // Cleared at end of turn by roundStructsClear
             expect(state.battlers[0]!.round.stealMove).toBe(false)
           })
@@ -7923,6 +7960,47 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(act.missed).toBe(true)
             expect(state.battlers[0]!.mon.pp[0]).toBe(9)
             expect(act.unmodelled).toEqual([])
+          })
+
+          it('steals a FLAG_SNATCH_AFFECTED move (Swords Dance)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SNATCH', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [30, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_SNATCH), useMove(1, MOVE_SWORDS_DANCE)], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            expect(act0.missed).toBe(false)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+
+            const act1 = out.actions.find((a) => a.battlerId === 1)!
+            // Original attacker loses PP
+            expect(state.battlers[1]!.mon.pp[0]).toBe(29)
+            // Snatcher (battler 0) receives the stat boost, original attacker (battler 1) receives none
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
+            expect(state.battlers[1]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+            expect(act1.statChanges).toEqual([{ battlerId: 0, stat: STAT_ATK, change: 2 }])
+          })
+
+          it('does not steal a move without FLAG_SNATCH_AFFECTED (Tackle)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_SNATCH', null, null, null], pp: [10, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(0, MOVE_SNATCH), useMove(0, MOVE_TACKLE)], testDeps(flatDamage10))
+            const act1 = out.actions.find((a) => a.battlerId === 1)!
+            expect(act1.missed).toBe(false)
+            expect(act1.targetId).toBe(0)
+            expect(act1.targetDamage).toBe(10)
+            expect(state.battlers[0]!.mon.hp).toBe(90)
+            expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
           })
         })
 
@@ -7950,7 +8028,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(act.targetId).toBe(0)
             expect(state.battlers[0]!.mon.pp[0]).toBe(14)
             expect(bounceMoveDuringTurn).toBe(true)
-            expect(act.unmodelled.some((u) => u.includes('bounceMove'))).toBe(true)
+            expect(act.unmodelled.some((u) => u.includes('bounceMove'))).toBe(false)
             expect(state.battlers[0]!.round.bounceMove).toBe(false)
           })
 
@@ -7970,6 +8048,77 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(act.targetId).toBe(0)
             expect(state.battlers[0]!.mon.pp[0]).toBe(14)
             expect(act.unmodelled).toEqual([])
+          })
+
+          it('reflects a FLAG_MAGIC_COAT_AFFECTED status move aimed at the user (Taunt)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TAUNT', null, null, null], pp: [20, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_MAGIC_COAT', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+
+            // Battler 1 uses Magic Coat; Battler 0 uses Taunt aimed at Battler 1
+            const out = executeTurn(state, [useMove(1, MOVE_TAUNT), useMove(1, MOVE_MAGIC_COAT)], testDeps())
+            const act1 = out.actions.find((a) => a.battlerId === 1)!
+            expect(act1.missed).toBe(false)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(14)
+
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            // Original attacker loses PP
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            // Reflected onto battler 0: battler 0 receives Taunt, battler 1 does not
+            expect(state.battlers[0]!.volatiles.tauntTimer).toBeGreaterThan(0)
+            expect(state.battlers[1]!.volatiles.tauntTimer).toBe(0)
+            expect(act0.missed).toBe(false)
+            expect(act0.targetId).toBe(0)
+          })
+
+          it('does not reflect a move without FLAG_MAGIC_COAT_AFFECTED (Tackle)', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_MAGIC_COAT', null, null, null], pp: [15, 0, 0, 0], spe: 100 },
+              ],
+              countingRng(),
+            )
+
+            const out = executeTurn(state, [useMove(1, MOVE_TACKLE), useMove(1, MOVE_MAGIC_COAT)], testDeps(flatDamage10))
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            expect(act0.missed).toBe(false)
+            expect(act0.targetId).toBe(1)
+            expect(act0.targetDamage).toBe(10)
+            expect(state.battlers[1]!.mon.hp).toBe(90)
+          })
+
+          it('reflected status move fails against a Dark-type attacker when bouncer has Prankster (BlocksPrankster)', () => {
+            const state = battle(
+              [
+                {
+                  moves: ['MOVE_TAUNT', null, null, null],
+                  pp: [20, 0, 0, 0],
+                  spe: 50,
+                  types: ['DARK', 'MYSTERY', 'MYSTERY'],
+                },
+                {
+                  moves: ['MOVE_MAGIC_COAT', null, null, null],
+                  pp: [15, 0, 0, 0],
+                  spe: 100,
+                  abilities: { ability: ABILITY_PRANKSTER, innates: [null, null, null] },
+                },
+              ],
+              countingRng(),
+            )
+
+            // Battler 1 (Prankster) uses Magic Coat; Battler 0 (Dark) uses Taunt
+            const out = executeTurn(state, [useMove(1, MOVE_TAUNT), useMove(1, MOVE_MAGIC_COAT)], testDeps())
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            // BlocksPrankster causes BattleScript_MagicCoatBouncePrankster -> missed: true
+            expect(act0.missed).toBe(true)
+            expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+            expect(state.battlers[0]!.volatiles.tauntTimer).toBe(0)
+            expect(state.battlers[1]!.volatiles.tauntTimer).toBe(0)
           })
         })
 
@@ -8036,10 +8185,11 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(fmAct.targetId).toBe(0)
             expect(fmRng.calls).toBe(0)
             expect(fmState.battlers[0]!.mon.pp[0]).toBe(19)
-            expect(fmState.sides[0].timers.followmeTimer).toBe(1)
+            // Cleared at end of turn by roundStructsClear (TurnValuesCleanUp, src/battle_main.c:4507-4508)
+            expect(fmState.sides[0].timers.followmeTimer).toBe(0)
             expect(fmState.sides[0].timers.followmeTarget).toBe(0)
             expect(fmState.sides[0].timers.followmePowder).toBe(false)
-            expect(fmAct.unmodelled.some((u) => u.includes('IsAffectedByFollowMe'))).toBe(true)
+            expect(fmAct.unmodelled.some((u) => u.includes('IsAffectedByFollowMe'))).toBe(false)
 
             // Rage Powder (on battler 1, side 1): followmePowder = true
             const rpState = battle(
@@ -8054,7 +8204,8 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(rpAct.missed).toBe(false)
             expect(rpAct.targetId).toBe(1)
             expect(rpState.battlers[1]!.mon.pp[0]).toBe(19)
-            expect(rpState.sides[1].timers.followmeTimer).toBe(1)
+            // Cleared at end of turn by roundStructsClear
+            expect(rpState.sides[1].timers.followmeTimer).toBe(0)
             expect(rpState.sides[1].timers.followmeTarget).toBe(1)
             expect(rpState.sides[1].timers.followmePowder).toBe(true)
 
@@ -8071,10 +8222,156 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(spAct.missed).toBe(false)
             expect(spAct.targetId).toBe(1)
             expect(spState.battlers[0]!.mon.pp[0]).toBe(14)
-            expect(spState.sides[0].timers.followmeTimer).toBe(1)
+            // Cleared at end of turn by roundStructsClear
+            expect(spState.sides[0].timers.followmeTimer).toBe(0)
             expect(spState.sides[0].timers.followmeTarget).toBe(0)
             expect(spState.sides[0].timers.followmePowder).toBe(false)
             expect(spState.sides[1].timers.followmeTimer).toBe(0)
+          })
+
+          it('redirects an opposing single-target move to the user in doubles', () => {
+            const doublesState = battle(
+              [
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+
+            // Battler 0 chooses to attack battler 3, but battler 1 uses Follow Me
+            const out = executeTurn(
+              doublesState,
+              [useMove(3, MOVE_TACKLE), useMove(1, MOVE_FOLLOW_ME), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(flatDamage10),
+            )
+            const act0 = out.actions.find((a) => a.battlerId === 0)!
+            expect(act0.missed).toBe(false)
+            // Redirected from 3 to 1!
+            expect(act0.targetId).toBe(1)
+            expect(doublesState.battlers[1]!.mon.hp).toBe(90)
+            expect(doublesState.battlers[3]!.mon.hp).toBe(100)
+          })
+
+          it('ignores moves the C excludes: Snipe Shot, Propeller Tail, and non-single-target moves', () => {
+            // 1. Snipe Shot ignores Follow Me (battle_util.c:119)
+            const snipeState = battle(
+              [
+                { moves: ['MOVE_SNIPE_SHOT', null, null, null], pp: [15, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+            const snipeOut = executeTurn(
+              snipeState,
+              [useMove(3, MOVE_SNIPE_SHOT), useMove(1, MOVE_FOLLOW_ME), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const snipeAct = snipeOut.actions.find((a) => a.battlerId === 0)!
+            expect(snipeAct.targetId).toBe(3)
+
+            // 2. Propeller Tail ignores redirection (IsAbilityStatusProtected CHECK_REDIRECTION, :120)
+            const ptState = battle(
+              [
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [35, 0, 0, 0],
+                  spe: 50,
+                  abilities: { ability: ABILITY_PROPELLER_TAIL, innates: [null, null, null] },
+                },
+                { moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+            const ptOut = executeTurn(
+              ptState,
+              [useMove(3, MOVE_TACKLE), useMove(1, MOVE_FOLLOW_ME), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const ptAct = ptOut.actions.find((a) => a.battlerId === 0)!
+            expect(ptAct.targetId).toBe(3)
+
+            // 3. Non-single-target moves (Earthquake, FOES_AND_ALLY) are not redirected
+            const eqState = battle(
+              [
+                { moves: ['MOVE_EARTHQUAKE', null, null, null], pp: [10, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_FOLLOW_ME', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+            const eqOut = executeTurn(
+              eqState,
+              [useMove(3, MOVE_EARTHQUAKE), useMove(1, MOVE_FOLLOW_ME), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            const eqAct = eqOut.actions.find((a) => a.battlerId === 0)!
+            expect(eqAct.targetId).toBe(3)
+          })
+
+          it('Rage Powder respects the powder-immunity rule (Grass-type attacker is not redirected)', () => {
+            const rpState = battle(
+              [
+                {
+                  moves: ['MOVE_TACKLE', null, null, null],
+                  pp: [35, 0, 0, 0],
+                  spe: 50,
+                  types: ['GRASS', 'MYSTERY', 'MYSTERY'],
+                },
+                { moves: ['MOVE_RAGE_POWDER', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+
+            const rpOut = executeTurn(
+              rpState,
+              [useMove(3, MOVE_TACKLE), useMove(1, MOVE_RAGE_POWDER), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(flatDamage10),
+            )
+            const rpAct = rpOut.actions.find((a) => a.battlerId === 0)!
+            // Grass type is powder immune, so IsAffectedByFollowMe returns FALSE -> hits 3, not redirected to 1!
+            expect(rpAct.targetId).toBe(3)
+            expect(rpState.battlers[3]!.mon.hp).toBe(90)
+            expect(rpState.battlers[1]!.mon.hp).toBe(100)
+          })
+
+          it('followmeTimer clears at end of turn and does not redirect subsequent turns', () => {
+            const state = battle(
+              [
+                { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], spe: 50 },
+                { moves: ['MOVE_FOLLOW_ME', 'MOVE_CELEBRATE', null, null], pp: [20, 10, 0, 0], spe: 100 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 40 },
+                { moves: ['MOVE_CELEBRATE', null, null, null], pp: [10, 0, 0, 0], spe: 30 },
+              ],
+              countingRng(),
+            )
+
+            // Turn 1: battler 1 uses Follow Me, battler 0's Tackle redirected to 1
+            executeTurn(
+              state,
+              [useMove(3, MOVE_TACKLE), useMove(1, MOVE_FOLLOW_ME), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(),
+            )
+            // End of turn 1: followmeTimer cleared to 0 (TurnValuesCleanUp, src/battle_main.c:4507-4508)
+            expect(state.sides[1].timers.followmeTimer).toBe(0)
+
+            // Turn 2: battler 1 uses Celebrate (not Follow Me), battler 0 attacks battler 3
+            const out2 = executeTurn(
+              state,
+              [useMove(3, MOVE_TACKLE), useMove(1, MOVE_CELEBRATE), useMove(1, MOVE_CELEBRATE), useMove(0, MOVE_CELEBRATE)],
+              testDeps(flatDamage10),
+            )
+            const act0_2 = out2.actions.find((a) => a.battlerId === 0)!
+            expect(act0_2.targetId).toBe(3)
+            expect(state.battlers[3]!.mon.hp).toBe(90)
           })
         })
       })
