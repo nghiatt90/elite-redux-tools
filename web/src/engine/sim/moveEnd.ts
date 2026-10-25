@@ -2805,6 +2805,8 @@ export interface MoveEndContext {
   deps: TurnLoopDeps
   unmodelled: string[]
   fainted: number[]
+  /** gChosenMove (:4321) -- defaults to moveId when not a called move. */
+  chosenMoveId?: string
 }
 
 export interface MoveEndOutcome {
@@ -2819,6 +2821,7 @@ export interface MoveEndOutcome {
  */
 export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   const { state, attackerId, targetId, moveId, targetDamage, hpDealt, deps, unmodelled, fainted } = ctx
+  const chosenMoveId = ctx.chosenMoveId ?? moveId
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
   const moveData = deps.dataContext.move(moveId)
@@ -3002,7 +3005,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Case 17: MOVEEND_UPDATE_LAST_MOVES (:4723-4772)
   if (!state.processingExtraAttacks) {
     if (attacker) {
-      attacker.lastPrintedMove = moveId
+      attacker.lastPrintedMove = chosenMoveId
     }
     state.lastUsedMove = moveId
   }
@@ -3012,7 +3015,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   if (attacker && !isBatonPassOrHealingWish && !hasFlag(state.absentBattlerFlags, 1 << attackerId)) {
     if (!state.processingExtraAttacks) {
-      attacker.lastMove = moveId
+      attacker.lastMove = chosenMoveId
       attacker.lastResultingMove = moveId
     }
 
@@ -3032,18 +3035,19 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 18: MOVEEND_MIRROR_MOVE (:4773-4781)
+  const chosenMoveData = deps.dataContext.move(chosenMoveId)
   if (
     attacker &&
     target &&
     attackerId !== targetId &&
     !hasFlag(state.absentBattlerFlags, 1 << attackerId) &&
-    moveData?.flags?.mirrorMoveAffected === true &&
+    chosenMoveData?.flags?.mirrorMoveAffected === true &&
     !fainted.includes(targetId) &&
     isBattlerAlive(state, targetId) &&
     (hpDealt > 0 || targetDamage > 0 || targetTurnDamaged || moveData?.split === 'STATUS')
   ) {
-    state.lastTakenMove[targetId] = moveId
-    state.lastTakenMoveFrom[targetId][attackerId] = moveId
+    state.lastTakenMove[targetId] = chosenMoveId
+    state.lastTakenMoveFrom[targetId][attackerId] = chosenMoveId
   }
 
   // Case 19: MOVEEND_MULTIHIT_MOVE (:4880-4921)

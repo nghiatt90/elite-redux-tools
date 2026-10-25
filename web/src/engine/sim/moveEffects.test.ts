@@ -9600,6 +9600,49 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         // Swords Dance raised user's Atk by +2
         expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
         expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(state.battlers[0]!.lastMove).toBe('MOVE_COPYCAT')
+        expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_COPYCAT')
+        expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_SWORDS_DANCE')
+        expect(state.lastUsedMove).toBe('MOVE_SWORDS_DANCE')
+      })
+
+      it('success with damaging move: calls lastUsedMove (MOVE_TACKLE), deals damage via jumptocalledmove, deducts Copycat PP once, respects operand TRUE (battle_script_commands.c:5906-5914, 7541-7562)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_COPYCAT', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, hp: 100 },
+          ],
+          rng,
+        )
+        state.lastUsedMove = 'MOVE_TACKLE'
+
+        let recordedMove: string | null = null
+        const resolver = {
+          resolve: (_s: BattleState, _att: number, _tgt: number, action: any) => {
+            recordedMove = action?.chosenMove?.id ?? null
+            return { targetDamage: 25, attackerDamage: null, unmodelled: [] }
+          },
+        }
+
+        const out = executeTurn(state, [useMove(1, MOVE_COPYCAT), null], testDeps(resolver))
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        expect(act0.targetDamage).toBe(25)
+        expect(state.battlers[1]!.mon.hp).toBe(75)
+        expect(recordedMove).toBe('MOVE_TACKLE')
+        expect(act0.unmodelled).not.toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+
+        // Operand TRUE: gChosenMove = MOVE_COPYCAT, gCurrentMove = MOVE_TACKLE (battle_script_commands.c:5906-5914)
+        // MOVEEND_UPDATE_LAST_MOVES (:4740-4752)
+        expect(state.battlers[0]!.lastMove).toBe('MOVE_COPYCAT')
+        expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_COPYCAT')
+        expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TACKLE')
+        expect(state.lastUsedMove).toBe('MOVE_TACKLE')
+        expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
+        expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
       })
 
       it('failure: fails when lastUsedMove is unset or a banned move (battle_script_commands.c:7546-7555)', () => {
@@ -9764,6 +9807,51 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
         // Mirror Move PP deducted: 20 -> 19
         expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+        expect(state.battlers[0]!.lastMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_SWORDS_DANCE')
+        expect(state.lastUsedMove).toBe('MOVE_SWORDS_DANCE')
+      })
+
+      it('success with damaging move: calls lastTakenMove (MOVE_TACKLE), deals damage via jumptocalledmove, deducts Mirror Move PP once, respects operand TRUE (battle_script_commands.c:5906-5914, 9276-9307)', () => {
+        const rng = countingRng()
+        const state = battle(
+          [
+            { spe: 100, moves: ['MOVE_MIRROR_MOVE', null, null, null], pp: [20, 0, 0, 0] },
+            { spe: 50, hp: 100 },
+          ],
+          rng,
+        )
+        // Battler 0 took Tackle from Battler 1
+        state.lastTakenMove[0] = 'MOVE_TACKLE'
+        state.lastTakenMoveFrom[0][1] = 'MOVE_TACKLE'
+
+        let recordedMove: string | null = null
+        const resolver = {
+          resolve: (_s: BattleState, _att: number, _tgt: number, action: any) => {
+            recordedMove = action?.chosenMove?.id ?? null
+            return { targetDamage: 25, attackerDamage: null, unmodelled: [] }
+          },
+        }
+
+        const out = executeTurn(state, [useMove(1, MOVE_MIRROR_MOVE), null], testDeps(resolver))
+        const act0 = out.actions.find((a) => a.battlerId === 0)!
+
+        expect(act0.missed).toBe(false)
+        expect(act0.targetDamage).toBe(25)
+        expect(state.battlers[1]!.mon.hp).toBe(75)
+        expect(recordedMove).toBe('MOVE_TACKLE')
+        expect(act0.unmodelled).not.toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+        expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+
+        // Operand TRUE: gChosenMove = MOVE_MIRROR_MOVE, gCurrentMove = MOVE_TACKLE (battle_script_commands.c:5906-5914, 9276-9307)
+        // MOVEEND_UPDATE_LAST_MOVES (:4740-4752)
+        expect(state.battlers[0]!.lastMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_MIRROR_MOVE')
+        expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TACKLE')
+        expect(state.lastUsedMove).toBe('MOVE_TACKLE')
+        expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
+        expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
       })
 
       it('failure: fails when user has no lastTakenMove / lastTakenMoveFrom (battle_script_commands.c:9305)', () => {
@@ -10051,7 +10139,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       })
 
       describe('EFFECT_ASSIST (Assist)', () => {
-        it('success: countingRng() draws 0 -> ((0 * 1) >> 8) = 0, calls party move MOVE_TACKLE, gaps damage, deducts PP 20 -> 19 (src/battle_script_commands.c:12004-12050)', () => {
+        it('success: countingRng() draws 0 -> ((0 * 1) >> 8) = 0, calls party move MOVE_TACKLE, deals damage via jumptocalledmove, deducts PP 20 -> 19 (src/battle_script_commands.c:12004-12050)', () => {
           const rng = countingRng()
           const state = battle(
             [
@@ -10065,13 +10153,35 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             partyMon({ moves: ['MOVE_TACKLE', null, null, null], pp: [20, 0, 0, 0] }),
           ]
 
-          const out = executeTurn(state, [useMove(1, MOVE_ASSIST), null], testDeps())
+          let recordedMove: string | null = null
+          const resolver = {
+            resolve: (_s: BattleState, _att: number, _tgt: number, action: any) => {
+              recordedMove = action?.chosenMove?.id ?? null
+              return { targetDamage: 10, attackerDamage: null, unmodelled: [] }
+            },
+          }
+
+          const out = executeTurn(state, [useMove(1, MOVE_ASSIST), null], testDeps(resolver))
           const act0 = out.actions.find((a) => a.battlerId === 0)!
 
-          expect(rng.calls).toBe(1)
+          // Draw 1: Assist random move selection; Draw 2: Tackle accuracy check
+          expect(rng.calls).toBe(2)
           expect(act0.missed).toBe(false)
-          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
-          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(act0.targetDamage).toBe(10)
+          expect(state.battlers[1]!.mon.hp).toBe(90)
+          expect(recordedMove).toBe('MOVE_TACKLE')
+          expect(act0.unmodelled).not.toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          // C quirk kept: BattleScript_EffectAssist runs ppreduce (battle_scripts_1.s:6318) and the called move's own script runs ppreduce again, so Assist costs 2 PP (no HITMARKER_NO_PPDEDUCT is set in between).
+          expect(state.battlers[0]!.mon.pp[0]).toBe(18)
+
+          // Operand TRUE: gChosenMove = MOVE_ASSIST, gCurrentMove = MOVE_TACKLE (battle_script_commands.c:5906-5914, 6315-6325)
+          // MOVEEND_UPDATE_LAST_MOVES (:4740-4752)
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_ASSIST')
+          expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_ASSIST')
+          expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_TACKLE')
+          expect(state.lastUsedMove).toBe('MOVE_TACKLE')
+          expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_TACKLE')
+          expect(state.battlers[1]!.lastHitByType).toBe('NORMAL')
         })
 
         it('deterministic pick: scriptedRng([255]) with 2 candidate moves chooses index 1 (((255 * 2) >> 8) = 1) -> calls MOVE_SWORDS_DANCE, raising Atk +2', () => {
@@ -10094,7 +10204,11 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           expect(rng.calls).toBe(1)
           expect(act0.missed).toBe(false)
           expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 2)
-          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(18) // two ppreduce, see the Assist note above
+          expect(state.battlers[0]!.lastMove).toBe('MOVE_ASSIST')
+          expect(state.battlers[0]!.lastPrintedMove).toBe('MOVE_ASSIST')
+          expect(state.battlers[0]!.lastResultingMove).toBe('MOVE_SWORDS_DANCE')
+          expect(state.lastUsedMove).toBe('MOVE_SWORDS_DANCE')
         })
 
         it('failure: party has no eligible moves (only banned moves) -> fails with missed: true, still deducts PP (battle_script_commands.c:6318, 12028-12030)', () => {
@@ -10212,7 +10326,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       })
 
       describe('EFFECT_ME_FIRST (Me First)', () => {
-        it('success: faster user (spe: 100) acts before target (spe: 50) who chose MOVE_TACKLE (power 40 > 0) -> calls MOVE_TACKLE, gaps damage, deducts PP 20 -> 19 (src/battle_script_commands.c:7301-7333)', () => {
+        it('success: faster user (spe: 100) acts before target (spe: 50) who chose MOVE_TACKLE (power 40 > 0) -> calls MOVE_TACKLE via queued extra attack with STATUS3_ME_FIRST boost, deducts PP 20 -> 19 (src/battle_script_commands.c:7301-7333)', () => {
           const rng = countingRng()
           const state = battle(
             [
@@ -10222,17 +10336,40 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             rng,
           )
 
+          const resolves: { attacker: number; move: string | null; hadMeFirst: boolean }[] = []
+          const resolver = {
+            resolve: (s: BattleState, att: number, _tgt: number, action: any) => {
+              resolves.push({
+                attacker: att,
+                move: action?.chosenMove?.id ?? null,
+                hadMeFirst: hasFlag(s.battlers[att]!.statuses3, STATUS3_ME_FIRST),
+              })
+              return { targetDamage: 15, attackerDamage: null, unmodelled: [] }
+            },
+          }
+
           const out = executeTurn(
             state,
             [useMove(1, MOVE_ME_FIRST), useMove(0, MOVE_TACKLE)],
-            testDeps(),
+            testDeps(resolver),
           )
-          const act0 = out.actions.find((a) => a.battlerId === 0)!
+          const act0 = out.actions[0]! // Me First action
+          const act1 = out.actions[1]! // Queued Tackle extra attack
 
+          expect(act0.battlerId).toBe(0)
           expect(act0.missed).toBe(false)
-          expect(act0.unmodelled).toContain('called damaging move MOVE_TACKLE damage step is not modelled')
+          expect(act0.unmodelled).not.toContain('called damaging move MOVE_TACKLE damage step is not modelled')
           expect(state.battlers[0]!.mon.pp[0]).toBe(19)
-          // STATUS3_ME_FIRST cleared by MOVEEND_CLEAR_BITS at action end (battle_script_commands.c:4948)
+
+          expect(act1.battlerId).toBe(0)
+          expect(act1.missed).toBe(false)
+          expect(act1.targetDamage).toBe(15)
+
+          const meFirstAttack = resolves.find((r) => r.attacker === 0)
+          expect(meFirstAttack?.move).toBe('MOVE_TACKLE')
+          expect(meFirstAttack?.hadMeFirst).toBe(true)
+
+          // STATUS3_ME_FIRST cleared by MOVEEND_CLEAR_BITS at end of queued attack (battle_script_commands.c:4948)
           expect(hasFlag(state.battlers[0]!.statuses3, STATUS3_ME_FIRST)).toBe(false)
         })
 

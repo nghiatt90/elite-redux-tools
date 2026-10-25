@@ -5,7 +5,7 @@
 // deduct PP after attackcanceler, and apply stat changes/HP modifications directly.
 
 import type { BattleState, BattlerState } from './state'
-import type { ChosenAction, TurnOrder, TurnOrderMoveView } from './turnOrder'
+import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
@@ -200,7 +200,7 @@ import { dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
-import type { SimDataContext, SimMoveData } from './dataContext'
+import type { SimDataContext } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import type { StatusCheck } from './statusEffects'
 import {
@@ -268,6 +268,12 @@ export interface MoveEffectContext {
   unmodelled: string[]
   deductPp: (state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]) => void
   applyDamage: (state: BattleState, battlerId: number, damage: number | null, fainted: number[]) => void
+  /**
+   * Cmd_jumptocalledmove (battle_script_commands.c:5906-5914):
+   * Re-enters move pipeline for calledMoveId within the same action.
+   * keepChosenMove is true when operand is TRUE (gCurrentMove = gCalledMove, preserving gChosenMove).
+   */
+  jumpToCalledMove?: (calledMoveId: string, keepChosenMove?: boolean, targetId?: number | null) => ActionOutcome
 }
 
 export type MoveEffectHandler = (ctx: MoveEffectContext) => ActionOutcome
@@ -6154,23 +6160,6 @@ function isTwoTurnsMoveEffect(effect: string | null | undefined): boolean {
   )
 }
 
-function makeTurnOrderMoveView(id: string, data: SimMoveData | undefined): TurnOrderMoveView {
-  return {
-    id,
-    priority: data?.priority ?? 0,
-    effect: data?.effect ?? null,
-    isStatus: data?.split === 'STATUS',
-    resolvedType: data?.type ?? 'NORMAL',
-    power: data?.power ?? 0,
-    flags: data?.flags ?? {},
-    split: data?.split ?? 'STATUS',
-    hasStrongJawBoostFlag: false,
-    isKeenEdge: false,
-    naturalGiftPriority: 0,
-    isGrassyTerrainAffected: false,
-    myceliumMightAffected: false,
-  }
-}
 
 /**
  * EFFECT_CONVERSION_2 (Conversion 2)
@@ -6309,33 +6298,18 @@ export function handleCopycat(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // Copycat succeeds: deduct PP for Copycat
-  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  // BattleScript_EffectCopycat has no ppreduce on the success path (data/battle_scripts_1.s:1594-1601):
+  // the called move's own script deducts PP once (jumptocalledmove).
 
-  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
-  if (isDamaging) {
-    unmodelled.push(`called damaging move ${calledMove} damage step is not modelled`)
-    return outcome(ctx, { targetId, missed: false })
+  // Target in C: gBattlerTarget = GetMoveTarget(gBattlerAttacker, gCalledMove, 0); (:7560)
+  const calledTargetId = getMoveTarget(state, battlerId, calledMove, deps)
+
+  // jumptocalledmove TRUE (data/battle_scripts_1.s:1601, battle_script_commands.c:5906-5914)
+  if (ctx.jumpToCalledMove) {
+    return ctx.jumpToCalledMove(calledMove, true, calledTargetId)
   }
 
-  const handler = getMoveEffectHandler(calledData?.effect ?? null)
-  if (handler) {
-    const calledView = makeTurnOrderMoveView(calledMove, calledData ?? undefined)
-    const calledAction: ChosenAction = {
-      action: 'USE_MOVE',
-      moveToBeUsed: calledView,
-      chosenMove: calledView,
-      target: targetId,
-    }
-    return handler({
-      ...ctx,
-      action: calledAction,
-      deductPp: () => {},
-    })
-  }
-
-  unmodelled.push(`called move effect ${calledData?.effect} for ${calledMove} is not modelled`)
-  return outcome(ctx, { targetId, missed: false })
+  return outcome(ctx, { targetId: calledTargetId, missed: false })
 }
 
 const INSTRUCT_FORBIDDEN_EFFECTS = new Set([
@@ -6492,8 +6466,8 @@ export function handleMirrorMove(ctx: MoveEffectContext): ActionOutcome {
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
 
-  // ppreduce (:3580 on failure; called move runs its own ppreduce on success)
-  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  // ppreduce only on the failure path (data/battle_scripts_1.s:3580); on success the called
+  // move's own script deducts PP.
 
   // Cmd_trymirrormove (:9276-9307):
   const movesArray: string[] = []
@@ -6516,39 +6490,19 @@ export function handleMirrorMove(ctx: MoveEffectContext): ActionOutcome {
   }
 
   if (!chosenMove) {
+    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
     return outcome(ctx, { targetId, missed: true })
   }
 
-  const calledData = deps.dataContext.move(chosenMove)
-  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
-  if (isDamaging) {
-    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
-    return outcome(ctx, { targetId, missed: false })
+  // gBattlerTarget = GetMoveTarget(gBattlerAttacker, gCurrentMove, 0); (:9296, :9302)
+  const calledTargetId = getMoveTarget(state, battlerId, chosenMove, deps)
+
+  // Cmd_trymirrormove jumps to called move's effect script with gChosenMove untouched (:9295-9297)
+  if (ctx.jumpToCalledMove) {
+    return ctx.jumpToCalledMove(chosenMove, true, calledTargetId)
   }
 
-  const handler = getMoveEffectHandler(calledData?.effect ?? null)
-  if (handler) {
-    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
-    const calledAction: ChosenAction = {
-      action: 'USE_MOVE',
-      moveToBeUsed: calledView,
-      chosenMove: calledView,
-      target: targetId,
-    }
-    const res = handler({
-      ...ctx,
-      action: calledAction,
-      deductPp: () => {},
-    })
-    return {
-      ...res,
-      battlerId,
-      turnOrderIndex: ctx.turnOrderIndex,
-    }
-  }
-
-  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
-  return outcome(ctx, { targetId, missed: false })
+  return outcome(ctx, { targetId: calledTargetId, missed: false })
 }
 
 /**
@@ -6913,39 +6867,15 @@ export function handleAssist(ctx: MoveEffectContext): ActionOutcome {
   const idx = ((roll & 0xff) * movesArray.length) >> 8
   const chosenMove = movesArray[idx]!
 
-  const calledData = deps.dataContext.move(chosenMove)
-  const isDamaging = (calledData?.power ?? 0) > 0 || calledData?.split === 'PHYSICAL' || calledData?.split === 'SPECIAL'
-  if (isDamaging) {
-    unmodelled.push(`called damaging move ${chosenMove} damage step is not modelled`)
-    return outcome(ctx, { targetId, missed: false })
+  // gBattlerTarget = GetMoveTarget(gBattlerAttacker, gCalledMove, 0); (:12045)
+  const calledTargetId = getMoveTarget(state, battlerId, chosenMove, deps)
+
+  // jumptocalledmove TRUE (data/battle_scripts_1.s:6324, battle_script_commands.c:5906-5914)
+  if (ctx.jumpToCalledMove) {
+    return ctx.jumpToCalledMove(chosenMove, true, calledTargetId)
   }
 
-  const handler = getMoveEffectHandler(calledData?.effect ?? null)
-  if (handler) {
-    const isTargetUser = calledData?.target === 'USER' || calledData?.target === 'USERS_FIELD'
-    const calledTargetId = isTargetUser ? battlerId : targetId
-    const calledView = makeTurnOrderMoveView(chosenMove, calledData ?? undefined)
-    const calledAction: ChosenAction = {
-      action: 'USE_MOVE',
-      moveToBeUsed: calledView,
-      chosenMove: calledView,
-      target: calledTargetId,
-    }
-    const res = handler({
-      ...ctx,
-      targetId: calledTargetId,
-      action: calledAction,
-      deductPp: () => {},
-    })
-    return {
-      ...res,
-      battlerId,
-      turnOrderIndex: ctx.turnOrderIndex,
-    }
-  }
-
-  unmodelled.push(`called move effect ${calledData?.effect} for ${chosenMove} is not modelled`)
-  return outcome(ctx, { targetId, missed: false })
+  return outcome(ctx, { targetId: calledTargetId, missed: false })
 }
 
 const SLEEP_TALK_FORBIDDEN_EFFECTS = new Set([
@@ -7096,45 +7026,22 @@ export function handleMeFirst(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // Success (:7329):
-  // gStatuses3[gBattlerAttacker] |= STATUS3_ME_FIRST;
-  // Called move deals damage (power > 0) -> 1.5x power boost in C (src/battle_util.c:7061).
+  // Success (:7323-7330):
+  // Target: GetMoveTarget(gBattlerAttacker, gCalledMove, 0) (:7326)
+  const targetForExtraAttack = getMoveTarget(state, battlerId, targetChosenMove, deps)
+  const prankster = battlerHasSimAbility(state, attacker, 'ABILITY_PRANKSTER', false, battlerId, false, deps.dataContext)
+
+  state.queuedExtraAttacks.push({
+    attacker: battlerId,
+    move: targetChosenMove,
+    target: targetForExtraAttack,
+    prankster,
+  })
+
+  // gStatuses3[gBattlerAttacker] |= STATUS3_ME_FIRST; (:7329)
+  // Power boost 1.5x in battle_util.c:7061, cleared at MOVEEND_CLEAR_BITS (:4948).
   attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_ME_FIRST)
 
-  const isDamaging = (targetMoveData.power ?? 0) > 0 || targetMoveData.split === 'PHYSICAL' || targetMoveData.split === 'SPECIAL'
-  if (isDamaging) {
-    unmodelled.push(`called damaging move ${targetChosenMove} damage step is not modelled`)
-    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
-    return outcome(ctx, { targetId, missed: false })
-  }
-
-  const handler = getMoveEffectHandler(targetMoveData.effect ?? null)
-  if (handler) {
-    const isTargetUser = targetMoveData.target === 'USER' || targetMoveData.target === 'USERS_FIELD'
-    const calledTargetId = isTargetUser ? battlerId : targetId
-    const calledView = makeTurnOrderMoveView(targetChosenMove, targetMoveData)
-    const calledAction: ChosenAction = {
-      action: 'USE_MOVE',
-      moveToBeUsed: calledView,
-      chosenMove: calledView,
-      target: calledTargetId,
-    }
-    const res = handler({
-      ...ctx,
-      targetId: calledTargetId,
-      action: calledAction,
-      deductPp: () => {},
-    })
-    attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
-    return {
-      ...res,
-      battlerId,
-      turnOrderIndex: ctx.turnOrderIndex,
-    }
-  }
-
-  unmodelled.push(`called move effect ${targetMoveData.effect} for ${targetChosenMove} is not modelled`)
-  attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
   return outcome(ctx, { targetId, missed: false })
 }
 
