@@ -10,8 +10,7 @@
 //  - A stone with `megaBadgeRequirement` needs that many badges; before gym N the player holds N-1.
 //  - Monotype Champion rewards are end-game: never available before the Elite Four.
 //  - Legendary sage items are post-game only (the solver is not used for post-game fights): never available.
-//  - Adoption Center stones have no badge gate in the data; they are treated as available from gym 5
-//    and listed as `unverified` so a result that relies on one can be checked.
+//  - Adoption Center stones are available as soon as the Mega Bracelet is (confirmed by the player), so from gym 5.
 
 import type { SimDataBundle } from './loadSimData'
 
@@ -53,7 +52,9 @@ export function stoneAvailability(item: RawItem, gym: number): StoneAvailability
     return { available: true, reason: `${text} (no badge requirement in data)`, unverified: true }
   }
 
-  return { available: true, reason: `${hint.kind} stone, no gate in data`, unverified: true }
+  if (hint.kind === 'adoptionCenter') return { available: true, reason: 'Adoption Center (opens with the Mega Bracelet)', unverified: false }
+
+  return { available: false, reason: `unknown hint kind ${hint.kind}`, unverified: false }
 }
 
 /** Stones available at `gym`, with the reason for each. */
