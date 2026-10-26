@@ -153,5 +153,40 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         isSuperEffective: result.typeEffectiveness >= 8192,
       }
     },
+
+    confusionSelfHit(state: BattleState, battlerId: number, power: number) {
+      // MOVE_NONE is a physical NORMAL move with power 0 (moves.json); the C overrides the power and passes TYPE_MYSTERY
+      // as the move type, so there is no STAB and no type effectiveness.
+      const moveNone = deps.moveData('MOVE_NONE')
+      if (!moveNone) return { damage: null, unmodelled: ['confusion self-hit: MOVE_NONE data is unavailable'] }
+      const roles = { attackerId: battlerId, defenderId: battlerId }
+      const self = buildBattlerBattleState(state, battlerId, roles, deps)
+      const field = buildFieldBattleState(state, roles, deps)
+      const unmodelled = [...gapsToUnmodelled(self.gaps).map((gap) => `attacker.${gap}`), ...gapsToUnmodelled(field.gaps)]
+      const result = calculateMoveDamage({
+        move: { ...moveNone, power, type: 'MYSTERY' },
+        attacker: self.battler,
+        defender: self.battler,
+        field: field.field,
+        typeChart: deps.typeChart,
+        inverseTypeChart: deps.inverseTypeChart,
+        moveBehaviors: deps.moveBehaviors,
+        battleConstants: deps.battleConstants,
+        attackerActsFirst: false,
+        sameMoveTurnsInARow: 0,
+        hitCount: 0,
+        defenderIsSwitching: false,
+        magnitudeTier: null,
+        attackerRolloutCounter: 0,
+        attackerHasDefenseCurl: false,
+        attackerWasHitThisTurn: false,
+        beatUpBaseAttack: self.battler.rawStats.atk,
+        beatUpHitCount: 1,
+        defenderUsedGlaiveRush: false,
+      })
+      unmodelled.push(...result.unmodelled)
+      // randomFactor is 0 in the C call, so the roll is the full-damage entry (index 15 of the ascending 85-100% array).
+      return { damage: result.isImmune ? 0 : (result.rolls?.[15] ?? null), unmodelled }
+    },
   }
 }

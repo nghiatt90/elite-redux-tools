@@ -293,3 +293,21 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
     expect(resolver().resolve(state(), 0, 1, action('MOVE_TACKLE')).unmodelled.some((u) => u.includes('defenderIsSwitching'))).toBe(false)
   })
 })
+
+describe('createBridgeDamageResolver: confusionSelfHit (battle_util.c:3376-3378)', () => {
+  // Level 50, Atk 100 vs the same mon's Def 90: floor(floor(22 * power * 100 / 90) / 50) + 2 = 21 at power 40 and 41 at 80,
+  // no crit and no random roll (randomFactor 0 in the C call). The C passes TYPE_MYSTERY as the move type and every mon's
+  // type3 is TYPE_MYSTERY when it has no third type, so IS_BATTLER_OF_TYPE (battle.h:753) grants STAB: 21 * 1.5 and 41 * 1.5,
+  // rounded half up by ApplyModifier (battle_util.c:6787), give 32 and 62.
+  it('is 32 at power 40 and 62 at power 80 (Cosmic Daze), with the TYPE_MYSTERY STAB', () => {
+    const r = resolver()
+    expect(r.confusionSelfHit!(state(), 0, 40).damage).toBe(32)
+    expect(r.confusionSelfHit!(state(), 0, 80).damage).toBe(62)
+  })
+  it('draws no random numbers', () => {
+    let draws = 0
+    const counting: RandomSource = { random16: () => { draws++; return 0 } }
+    resolver(counting).confusionSelfHit!(state(), 0, 40)
+    expect(draws).toBe(0)
+  })
+})

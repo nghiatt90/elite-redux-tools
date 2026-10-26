@@ -544,15 +544,10 @@ export function runAttackCanceller(
         return NO_CANCEL
       }
       if (state.rng.random16() % 3 === 0) {
-        // :3375-3388 -- self-hit. CalculateMoveDamage's own call (:3376-3378) is
-        // gapped by name: computing it needs the full damage engine bridge
-        // turn.ts's DamageResolver seam defers (see this module's header and
-        // AttackCancellerResult.confusionSelfHitDamage's own doc).
+        // :3375-3388 -- self-hit. The damage itself (CalculateMoveDamage :3376-3378) is computed by turn.ts through
+        // DamageResolver.confusionSelfHit, which owns the damage engine; this canceller only decides that it happens.
         attacker.round.confusionSelfDmg = true
         attacker.round.attackCancelled = true
-        unmodelled.push(
-          "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
-        )
         return { cancelledBy: 'CONFUSION', confusionSelfHitDamage: null }
       }
       // :3395-3398 -- confused but acted through it. Not a cancellation; the

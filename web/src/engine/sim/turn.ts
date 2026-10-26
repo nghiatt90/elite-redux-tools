@@ -475,6 +475,10 @@ export interface DamageResolveContext {
 
 export interface DamageResolver {
   resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context?: DamageResolveContext): DamageResolution
+  /** CANCELLER_CONFUSED's CalculateMoveDamage(MOVE_NONE, battler, battler, &TYPE_MYSTERY, power, FALSE, 0, TRUE),
+   * battle_util.c:3376-3378: a typeless physical hit on itself with no crit and no random roll. Optional: a resolver without
+   * a damage engine behind it leaves the self-hit unmodelled. */
+  confusionSelfHit?(state: BattleState, battlerId: number, power: number): { damage: number | null; unmodelled: string[] }
 }
 
 /** A resolver that THROWS rather than returning zero.
@@ -1776,6 +1780,23 @@ export function executeAction(
   const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
   const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding, action.chosenMove)
   if (cancelResult.cancelledBy) {
+    let confusionSelfHitDamage = cancelResult.confusionSelfHitDamage
+    const cancelFainted: number[] = []
+    if (cancelResult.cancelledBy === 'CONFUSION') {
+      // BattleScript_MoveUsedIsConfused (data/battle_scripts_1.s): datahpupdate BS_ATTACKER, tryfaintmon BS_ATTACKER.
+      // Power is 80 with an opposing Cosmic Daze, else 40 (battle_util.c:3376-3378).
+      const power = isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_COSMIC_DAZE') ? 80 : 40
+      const selfHit = deps.damage.confusionSelfHit?.(state, battlerId, power)
+      if (selfHit && selfHit.damage !== null) {
+        unmodelled.push(...selfHit.unmodelled)
+        confusionSelfHitDamage = selfHit.damage
+        applyDamage(state, battlerId, selfHit.damage, cancelFainted)
+      } else {
+        unmodelled.push(
+          "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
+        )
+      }
+    }
     return {
       turnOrderIndex: index,
       battlerId,
@@ -1785,13 +1806,13 @@ export function executeAction(
       missed: false,
       targetId,
       targetDamage: null,
-      attackerDamage: null,
+      attackerDamage: confusionSelfHitDamage,
       cancelledBy: cancelResult.cancelledBy,
-      confusionSelfHitDamage: cancelResult.confusionSelfHitDamage,
+      confusionSelfHitDamage,
       statChanges: null,
       statusApplied: null,
       unmodelled,
-      fainted: [],
+      fainted: cancelFainted,
     }
   }
 

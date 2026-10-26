@@ -435,3 +435,35 @@ describe('High Jump Kick (EFFECT_RECOIL_IF_MISS)', () => {
     expect(guarded.battlers[0]?.mon.hp).toBe(100)
   })
 })
+
+describe('Confusion self-hit (CANCELLER_CONFUSED, battle_util.c:3368-3399)', () => {
+  const selfHit = (damage: number): DamageResolver => ({
+    ...fixedDamage(30),
+    confusionSelfHit: () => ({ damage, unmodelled: [] }),
+  })
+
+  it('removes the damage from the confused user and cancels its move when the 1-in-3 roll hits', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, {}], scriptedRng([0, 0, 0, 0]))
+    state.battlers[0]!.mon.status2 |= 3 << 0 // STATUS2_CONFUSION counter 3 -> 2 on this move
+    const turn = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(selfHit(21)))
+    expect(turn.actions[0]?.cancelledBy).toBe('CONFUSION')
+    expect(state.battlers[0]?.mon.hp).toBe(79)
+    expect(state.battlers[1]?.mon.hp).toBe(100)
+  })
+
+  it('the user faints when the self-hit is lethal', () => {
+    const state = battle([{ hp: 10, moves: slot('MOVE_TACKLE'), pp: pps }, {}], scriptedRng([0, 0, 0, 0]))
+    state.battlers[0]!.mon.status2 |= 3 << 0
+    const turn = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(selfHit(21)))
+    expect(state.battlers[0]?.mon.hp).toBe(0)
+    expect(turn.actions[0]?.fainted).toContain(0)
+  })
+
+  it('does nothing and acts normally on a failed roll', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, {}], scriptedRng([1, 0, 0, 0]))
+    state.battlers[0]!.mon.status2 |= 3 << 0
+    const turn = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(selfHit(21)))
+    expect(turn.actions[0]?.cancelledBy).toBeNull()
+    expect(state.battlers[0]?.mon.hp).toBe(100)
+  })
+})
