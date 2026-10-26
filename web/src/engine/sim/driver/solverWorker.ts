@@ -10,6 +10,6 @@ const data = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.c
 const trainer = data.trainersById.get(trainerId)
 if (!trainer) throw new Error(`unknown trainer ${trainerId}`)
 
-parentPort!.on('message', (msg: { id: number; team: Team; games: number }) => {
-  parentPort!.postMessage({ id: msg.id, fitness: scoreTeam(data, trainer, tier, msg.team, msg.games) })
+parentPort!.on('message', (msg: { id: number; team: Team; games: number; seedOffset?: number }) => {
+  parentPort!.postMessage({ id: msg.id, fitness: scoreTeam(data, trainer, tier, msg.team, msg.games, undefined, msg.seedOffset ?? 0) })
 })

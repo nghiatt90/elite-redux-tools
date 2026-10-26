@@ -27,6 +27,7 @@ async function main(): Promise<void> {
   const workerCount = Number(arg('workers', String(Math.max(1, cpus().length - 1))))
   const passes = Number(arg('passes', String(DEFAULT_SEARCH.passes)))
   const out = arg('out', '')
+  const allowedStones = new Set(arg('stones', '').split(',').filter(Boolean))
 
   const data = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
   const workerPath = new URL('./solverWorker.mjs', import.meta.url)
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
     waiting.shift()?.()
   }
 
-  const evaluate: FitnessEvaluator = (teams, games) =>
+  const evaluateAt = (teams: Team[], games: number, seedOffset: number): Promise<Fitness[]> =>
     Promise.all(
       teams.map(async (team) => {
         const worker = await acquire()
@@ -59,19 +60,23 @@ async function main(): Promise<void> {
           }
           worker.on('message', onMessage)
           worker.on('error', reject)
-          worker.postMessage({ id, team, games })
+          worker.postMessage({ id, team, games, seedOffset })
         })
       }),
     )
 
-  const start: Team = species.map((s) => defaultSet(data, s, level))
+  const evaluate: FitnessEvaluator = (teams, games) => evaluateAt(teams, games, 0)
+  const start: Team = species.map((s) => defaultSet(data, s, level, allowedStones))
   const result = await improveTeam(data, start, evaluate, {
     ...DEFAULT_SEARCH,
     passes,
+    allowedStones,
     onProgress: (m) => console.log(m),
   })
-  console.log(JSON.stringify({ fitness: result.fitness, team: result.team }, null, 2))
-  if (out) writeFileSync(out, JSON.stringify({ trainerId, tier, fitness: result.fitness, team: result.team }, null, 2))
+  const [fresh] = await evaluateAt([result.team], 40, 1000)
+  console.log(`fresh seeds (40 games): win ${fresh.winRate.toFixed(2)} score ${fresh.meanScore.toFixed(2)}`)
+  console.log(JSON.stringify({ fitness: result.fitness, fresh, team: result.team }, null, 2))
+  if (out) writeFileSync(out, JSON.stringify({ trainerId, tier, fitness: result.fitness, fresh, team: result.team }, null, 2))
   for (const w of workers) await w.terminate()
 }
 

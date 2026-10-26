@@ -144,7 +144,13 @@ export function candidateMoves(data: SimDataBundle, speciesId: string, level: nu
 }
 
 /** A sensible starting set: the four best-ranked damaging moves, Life Orb, a stat-appropriate nature and EVs. */
-export function defaultSet(data: SimDataBundle, speciesId: string, level: number): PlayerMonSpec {
+export function defaultSet(
+  data: SimDataBundle,
+  requestedSpecies: string,
+  level: number,
+  allowedStones: ReadonlySet<string>,
+): PlayerMonSpec {
+  const speciesId = megaFormsFor(data, requestedSpecies, allowedStones)[0] ?? requestedSpecies
   const species = data.speciesById.get(speciesId)
   const stats = species?.baseStats as Record<StatKey, number>
   const physical = (stats?.atk ?? 0) >= (stats?.spatk ?? 0)
@@ -156,13 +162,34 @@ export function defaultSet(data: SimDataBundle, speciesId: string, level: number
     nature: physical ? 'NATURE_ADAMANT' : 'NATURE_MODEST',
     evs: physical ? EV_TEMPLATES.atkSpe : EV_TEMPLATES.spaSpe,
     ability: (species?.abilities as string[] | undefined)?.[0] ?? null,
-    item: 'ITEM_LIFE_ORB',
+    item: speciesId === requestedSpecies ? 'ITEM_LIFE_ORB' : null,
     moves: moves.map((m) => (m === '' ? null : m)),
   }
 }
 
+/**
+ * Mega forms of `speciesId`. Under Permanent Mega Mode a mon whose stone is in the bag is simply its
+ * Mega species outside battle too (GetFormChangeForMon, src/pokemon.c:6019-6021; UndoMegaEvolution
+ * returns early, src/battle_util.c:8192), so a Mega form is a species choice and uses no held item.
+ */
+export function megaFormsFor(data: SimDataBundle, speciesId: string, allowedStones: ReadonlySet<string>): string[] {
+  const forms: string[] = []
+  for (const s of data.speciesById.values()) {
+    for (const m of (s.megas ?? []) as Array<{ from: string; item: string }>) {
+      if (m.from === speciesId && allowedStones.has(m.item)) forms.push(s.id as string)
+    }
+  }
+  return forms
+}
+
+/** The base species a form belongs to (itself when it is not a Mega form). */
+export function baseSpeciesOf(data: SimDataBundle, speciesId: string): string {
+  const megas = (data.speciesById.get(speciesId)?.megas ?? []) as Array<{ from: string }>
+  return megas[0]?.from ?? speciesId
+}
+
 /** Every one-attribute change of one team member. */
-export function neighbours(data: SimDataBundle, team: Team, index: number): Team[] {
+export function neighbours(data: SimDataBundle, team: Team, index: number, allowedStones: ReadonlySet<string>): Team[] {
   const base = team[index]
   const out: Team[] = []
   const replace = (patch: Partial<PlayerMonSpec>): void => {
@@ -171,6 +198,13 @@ export function neighbours(data: SimDataBundle, team: Team, index: number): Team
     out.push(copy)
   }
 
+  const baseSpecies = baseSpeciesOf(data, base.species)
+  for (const form of [baseSpecies, ...megaFormsFor(data, baseSpecies, allowedStones)]) {
+    if (form !== base.species) {
+      const formData = data.speciesById.get(form)
+      replace({ species: form, ability: (formData?.abilities as string[] | undefined)?.[0] ?? null })
+    }
+  }
   const species = data.speciesById.get(base.species)
   for (const ability of (species?.abilities as string[] | undefined) ?? []) {
     if (ability && ability !== base.ability) replace({ ability })
@@ -208,6 +242,8 @@ export interface SearchOptions {
   epsilon: number
   /** Cap on neighbours screened per member per pass (random subset when exceeded). */
   maxNeighbours: number
+  /** Mega stones the player owns at this point of the game; a Mega form needs its stone in the bag. */
+  allowedStones: ReadonlySet<string>
   onProgress?: (message: string) => void
 }
 
@@ -218,6 +254,7 @@ export const DEFAULT_SEARCH: SearchOptions = {
   passes: 2,
   epsilon: 0.01,
   maxNeighbours: 120,
+  allowedStones: new Set<string>(),
 }
 
 function shuffled<T>(items: T[], seed: number): T[] {
@@ -246,7 +283,7 @@ export async function improveTeam(
   for (let pass = 0; pass < options.passes; pass++) {
     let changed = false
     for (let index = 0; index < team.length; index++) {
-      const all = neighbours(data, team, index)
+      const all = neighbours(data, team, index, options.allowedStones)
       const candidates = all.length > options.maxNeighbours ? shuffled(all, pass * 131 + index).slice(0, options.maxNeighbours) : all
       const [incumbentScreen] = await evaluate([team], options.screenGames)
       const screened = await evaluate(candidates, options.screenGames)
@@ -298,13 +335,14 @@ export function scoreTeam(
   team: Team,
   games: number,
   expectimax?: import('./expectimax').ExpectimaxOptions,
+  seedOffset = 0,
 ): Fitness {
   const level = Math.max(...team.map((m) => m.level ?? 50))
   const party = buildPlayerParty(team, level, data)
   let wins = 0
   let scoreSum = 0
   for (let g = 1; g <= games; g++) {
-    const result = playExpectimaxBattle({ data, playerParty: party, opponentTrainer: trainer, tier, seed: g, expectimax })
+    const result = playExpectimaxBattle({ data, playerParty: party, opponentTrainer: trainer, tier, seed: seedOffset + g, expectimax })
     if (result.outcome === 'WON') wins++
     scoreSum += Math.max(-1, Math.min(1, result.finalScore / 6))
   }
