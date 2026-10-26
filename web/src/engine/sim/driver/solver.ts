@@ -108,19 +108,6 @@ export const UTILITY_MOVES = new Set([
   'MOVE_ENCORE',
 ])
 
-/** Effects whose raw power overstates their value in a normal turn-by-turn fight. */
-const EFFECT_RANK_FACTOR: Record<string, number> = {
-  EFFECT_RECHARGE: 0.45,
-  EFFECT_FOCUS_PUNCH: 0.3,
-  EFFECT_EXPLOSION: 0.1,
-  EFFECT_RAMPAGE: 0.75,
-  EFFECT_SOLARBEAM: 0.55,
-  EFFECT_SEMI_INVULNERABLE: 0.6,
-  EFFECT_SKY_ATTACK: 0.55,
-  EFFECT_SKULL_BASH: 0.55,
-  EFFECT_RAZOR_WIND: 0.55,
-}
-
 function learnableMoves(data: SimDataBundle, speciesId: string, level: number): string[] {
   const species = data.speciesById.get(speciesId)
   const learnset = species?.learnset as
@@ -133,7 +120,7 @@ function learnableMoves(data: SimDataBundle, speciesId: string, level: number): 
 }
 
 /** Moves worth considering for a species: its strongest damaging moves plus the utility whitelist. */
-export function candidateMoves(data: SimDataBundle, speciesId: string, level: number, damagingCount = 14): string[] {
+export function candidateMoves(data: SimDataBundle, speciesId: string, level: number, damagingCount = 40): string[] {
   const species = data.speciesById.get(speciesId)
   const ownTypes = new Set(((species?.types ?? []) as string[]).map((t) => t.replace('TYPE_', '')))
   const learnable = learnableMoves(data, speciesId, level)
@@ -150,7 +137,7 @@ export function candidateMoves(data: SimDataBundle, speciesId: string, level: nu
     if (!move.power || move.power <= 1) continue
     const stab = ownTypes.has((move.type ?? '').replace('TYPE_', '')) ? 1.5 : 1
     const accuracy = move.accuracy && move.accuracy > 0 ? move.accuracy / 100 : 1
-    damaging.push({ id, rank: move.power * stab * accuracy * (EFFECT_RANK_FACTOR[move.effect ?? ''] ?? 1) })
+    damaging.push({ id, rank: move.power * stab * accuracy })
   }
   damaging.sort((a, b) => b.rank - a.rank)
   return [...damaging.slice(0, damagingCount).map((d) => d.id), ...utility]
