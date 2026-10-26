@@ -18,7 +18,8 @@ import type { AiDamageDeps } from '../ai/aiCalcDamage'
 import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
-import type { ChosenAction } from '../turnOrder'
+import { canMegaEvolve } from '../formChange'
+import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import type { ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -94,6 +95,45 @@ export function firstLiveReplacement(state: BattleState): number {
   return PARTY_SIZE
 }
 
+export function aiDamageDepsFor(data: SimDataBundle): AiDamageDeps {
+  return {
+    grounding: data.grounding,
+    turnOrder: data.turnOrder,
+    statStageRatios: data.statStageRatios,
+    dataContext: data.dataContext,
+    inverseBattle: false,
+    moveData: data.moveData,
+    typeChart: data.typeChart,
+    inverseTypeChart: data.inverseTypeChart,
+    moveBehaviors: data.moveBehaviors,
+    battleConstants: data.battleConstants,
+    holdEffectIds: data.holdEffectIds,
+  }
+}
+
+/** A MOVE action for `moveId` aimed at the other side (or the user for self-targeting moves). */
+export function buildMoveAction(state: BattleState, data: SimDataBundle, battlerId: number, moveId: string): ChosenAction {
+  const mData = data.dataContext.move(moveId)
+  const view: TurnOrderMoveView = {
+    id: moveId,
+    priority: mData?.priority ?? 0,
+    effect: mData?.effect ?? null,
+    isStatus: mData?.split === 'STATUS',
+    resolvedType: mData?.type ?? 'NORMAL',
+    power: mData?.power ?? 0,
+    flags: mData?.flags ?? {},
+    split: mData?.split ?? 'STATUS',
+    hasStrongJawBoostFlag: false,
+    isKeenEdge: false,
+    naturalGiftPriority: 0,
+    isGrassyTerrainAffected: false,
+    myceliumMightAffected: false,
+  }
+  const target = mData?.target === 'USER' ? battlerId : battlerId ^ 1
+  const mega = canMegaEvolve(state, battlerId, data.dataContext)
+  return { action: 'USE_MOVE', moveToBeUsed: view, chosenMove: view, target, ...(mega ? { mega: true } : {}) }
+}
+
 /** Builds the dependency objects around `state`. Nothing here captures `state.rng` itself. */
 function buildDeps(
   state: BattleState,
@@ -116,19 +156,7 @@ function buildDeps(
     random,
   })
 
-  const aiDamageDeps: AiDamageDeps = {
-    grounding: data.grounding,
-    turnOrder: data.turnOrder,
-    statStageRatios: data.statStageRatios,
-    dataContext: data.dataContext,
-    inverseBattle: false,
-    moveData: data.moveData,
-    typeChart: data.typeChart,
-    inverseTypeChart: data.inverseTypeChart,
-    moveBehaviors: data.moveBehaviors,
-    battleConstants: data.battleConstants,
-    holdEffectIds: data.holdEffectIds,
-  }
+  const aiDamageDeps = aiDamageDepsFor(data)
   const chooseAiDeps: ChooseAiActionDeps = { ...aiDamageDeps, trainer }
 
   const aiOpponentReplacement = createAiOpponentReplacement(aiDamageDeps)
@@ -217,13 +245,17 @@ export interface StepResult {
   unmodelled: string[]
 }
 
-/** Chooses the opponent's action with the ported AI, then runs one turn with `playerAction`. */
-export function stepTurn(session: BattleSession, playerAction: ChosenAction | null): StepResult {
+/** Chooses the opponent's action with the ported AI (or uses `fixedOpponentAction`, `null` meaning no action), then runs one turn with `playerAction`. */
+export function stepTurn(
+  session: BattleSession,
+  playerAction: ChosenAction | null,
+  fixedOpponentAction?: ChosenAction | null,
+): StepResult {
   const { state } = session
   const unmodelled: string[] = []
 
-  let opponentAction: ChosenAction | null = null
-  if (state.battlers[1] && state.battlers[1].mon.hp > 0) {
+  let opponentAction: ChosenAction | null = fixedOpponentAction ?? null
+  if (fixedOpponentAction === undefined && state.battlers[1] && state.battlers[1].mon.hp > 0) {
     const aiResult = chooseAiAction(state, 1, session.chooseAiDeps)
     opponentAction = aiResult.action
     unmodelled.push(...aiResult.unmodelled)
