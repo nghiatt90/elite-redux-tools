@@ -343,7 +343,6 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     'abilityOn',
     'condition.ghastlyEcho',
     'condition.safePassage',
-    'extraStatLevel',
   ]
 
   it('reports EXACTLY the expected gap list, no more and no fewer', () => {
@@ -378,7 +377,7 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     const neverUpdated = gaps.filter((g) => g.reason === 'NEVER_UPDATED').map((g) => g.field)
     expect(neverUpdated).toContain('condition.safePassage')
     expect(neverUpdated).toContain('condition.ghastlyEcho')
-    expect(neverUpdated).toContain('extraStatLevel')
+    expect(neverUpdated).not.toContain('extraStatLevel')
     expect(neverUpdated).not.toContain('semiInvulnerable')
     expect(neverUpdated).not.toContain('slowStartTimer')
 

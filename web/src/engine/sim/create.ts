@@ -464,6 +464,10 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     currentExtraAttack: null,
     mega: createMegaEvolutionState(),
     lastMoveFailed: 0,
+    battleEvents: [],
+    currentBattleEvent: 0,
+    lastBattleEvent: null,
+    battleEventsDone: false,
   }
 }
 

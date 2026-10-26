@@ -403,9 +403,18 @@ export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
 ]
 
 /** include/constants/battle.h:66, 67 -- BattleTypeFlags */
+export const BATTLE_TYPE_DOUBLE = 1 << 0
 export const BATTLE_TYPE_PALACE = 1 << 17
 export const BATTLE_TYPE_ARENA = 1 << 18
 
 /** include/battle.h:69 -- BattleResources.flags */
 export const RESOURCE_FLAG_ROOST = 0x2
+
+/** include/battle_events.h:4 -- BATTLE_EVENTS_MAX_REGISTERABLE */
+export const BATTLE_EVENTS_MAX_REGISTERABLE = 16
+
+/** include/battle_events.h:35-38 -- ExecBattleEvents return values */
+export const EXEC_BATTLE_EVENTS_ALL_CLEAR = 0
+export const EXEC_BATTLE_EVENTS_NEEDS_SCRIPT_CALL = 1
+
 

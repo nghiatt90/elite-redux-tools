@@ -223,6 +223,7 @@ import {
   testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
+import { runBattleEvents } from './battleEvents'
 
 /**
  * Cmd_setsemiinvulnerablebit, src/battle_script_commands.c:11541-11566.
@@ -419,6 +420,8 @@ export interface TurnOutcome {
   megaEvolutions?: number
   /** Which battlers evolved this turn, in battler order (CheckMegaEvolutionBeforeTurn, battle_main.c:4513-4541). */
   megaEvolved?: { battlerId: number; speciesId: string; unmodelled: string[] }[]
+  /** battleEvents.ts's own gap channel. */
+  battleEventsUnmodelled?: string[]
 }
 
 /**
@@ -2554,6 +2557,17 @@ export function drainQueuedExtraAttacks(
 }
 
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
+  // HandleBattleEvents (src/battle_main.c:5888, :3417, :3527)
+  const battleEventsUnmodelled: string[] = []
+  runBattleEvents(
+    state,
+    {
+      dataContext: deps.dataContext,
+      grounding: deps.grounding,
+    },
+    battleEventsUnmodelled,
+  )
+
   assertNoPerBattlerQuash(state)
   clearStartedFlags(state)
   actions = actions.map((a, id) => applyEncore(state, id, a, deps))
@@ -2739,6 +2753,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // bridge.ts's parity checks. battle_main.c:3512-3513 saturates the u8
   // counter at 0xFF.
   state.turnCount = Math.min(0xFF, state.turnCount + 1)
+  state.battleEventsDone = false
   return {
     actions: outcomes,
     order,
@@ -2751,5 +2766,6 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     replacementUnmodelled,
     megaEvolutions,
     megaEvolved,
+    battleEventsUnmodelled,
   }
 }

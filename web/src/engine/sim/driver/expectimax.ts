@@ -17,7 +17,7 @@ import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState } from '../state'
 import type { ChosenAction } from '../turnOrder'
-import { aiDamageDepsFor, buildMoveAction, cloneSession, createSession, firstLiveReplacement, stepTurn, type BattleSession } from './session'
+import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
 export interface ExpectimaxOptions {
@@ -203,6 +203,7 @@ export interface ExpectimaxBattleOptions {
   seed: number
   maxTurns?: number
   expectimax?: ExpectimaxOptions
+  battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
 }
 
 export interface ExpectimaxBattleResult {
@@ -223,10 +224,12 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     tier: options.tier,
     rng: createRandomSource(options.seed),
     playerReplacement: createHeuristicPlayerReplacement(options.data),
+    battleEvents: options.battleEvents,
   })
   let turns = 0
   while (!session.state.battleOutcome && turns < maxTurns) {
     turns++
+    beginTurn(session)
     const choice = chooseExpectimaxAction(session, expectimax, (options.seed * 31 + turns) >>> 0)
     if (choice) applyChoice(session, choice)
     stepTurn(session, choice ? choice.action : null)

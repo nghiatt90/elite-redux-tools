@@ -674,6 +674,24 @@ export interface BattleState {
   mega: MegaEvolutionState
   /** `u8 lastMoveFailed` (include/battle.h:700, battle_script_commands.c:4725,4728,4730, battle_main.c:2914). Battler bitmask (1 << battlerId). */
   lastMoveFailed: number
+  /** `struct BattleEvent gBattleEvents[BATTLE_EVENTS_MAX_REGISTERABLE]` (include/battle_events.h:18, battle_events.c:24). */
+  battleEvents: BattleEventEntry[]
+  /** `u8 gCurrBattleEvent` (battle_events.c:21). Cursor into gBattleEvents. */
+  currentBattleEvent: number
+  /** `u8 gLastBattleEvent` (battle_events.c:22). ID of the last executed battle event. */
+  lastBattleEvent: string | null
+  /** `u8 battleEventDone` (battle_main.c:5890). Tracks whether battle events ran for the current turn. */
+  battleEventsDone: boolean
+}
+
+/**
+ * Structure that holds one battle event ID and two 4-bit data values.
+ * include/battle_events.h:12-17
+ */
+export interface BattleEventEntry {
+  id: string
+  data0: number
+  data1: number
 }
 
 /**

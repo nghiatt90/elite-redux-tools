@@ -56,6 +56,15 @@ export interface TrainerData extends TrainerAiRow {
   parties: TrainerPartiesData
 }
 
+export interface EncounterBattleEvent {
+  event: string
+  data0: number | null
+  data1: number | null
+  guard: string | null
+  map: string
+  script: string
+}
+
 export interface SimDataBundle {
   dataContext: SimDataContext
   typeChart: TypeChart
@@ -72,6 +81,7 @@ export interface SimDataBundle {
   movesById: Map<string, any>
   trainersById: Map<string, TrainerData>
   trainers: TrainerData[]
+  battleEvents: EncounterBattleEvent[]
 }
 
 export interface LoadSimDataOptions {
@@ -94,6 +104,8 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
   const holdEffectIds = readJson<Record<string, number>>('holdEffectIds.json')
   const typeChart = readJson<TypeChart>('types.json')
   const inverseTypeChart = readJson<TypeChart>('typesInverse.json')
+  const rawEncounters = readJson<{ battleEvents?: EncounterBattleEvent[] }>('encounters.json')
+  const battleEvents = rawEncounters.battleEvents ?? []
 
   const speciesById = new Map<string, any>(rawSpecies.map((s) => [s.id as string, s]))
   const movesById = new Map<string, any>(rawMoves.map((m) => [m.id as string, m]))
@@ -246,5 +258,6 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
     movesById,
     trainersById,
     trainers,
+    battleEvents,
   }
 }

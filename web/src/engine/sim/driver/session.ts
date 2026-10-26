@@ -11,6 +11,7 @@ import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
 import { executeTurn, type TurnLoopDeps, type TurnOutcome } from '../turn'
 import { applyBattleStartPass } from '../switchInAbility'
+import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { battleAiSetupFlags } from '../ai/aiFlags'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
@@ -34,6 +35,7 @@ export interface SessionOptions {
   rng: RandomSource
   /** Which party slot the player sends in after a faint; default is the first live mon that is not already out. */
   playerReplacement?: (state: BattleState) => number
+  battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
 }
 
 export interface BattleSession {
@@ -208,6 +210,12 @@ export function createSession(options: SessionOptions): BattleSession {
     rng: options.rng,
   })
 
+  if (options.battleEvents) {
+    for (const ev of options.battleEvents) {
+      registerBattleEvent(state, ev.event, ev.data0 ?? 0, ev.data1 ?? 0)
+    }
+  }
+
   const playerReplacement = options.playerReplacement ?? firstLiveReplacement
   const { turnDeps, chooseAiDeps } = buildDeps(state, data, options.opponentTrainer, playerReplacement)
 
@@ -219,6 +227,14 @@ export function createSession(options: SessionOptions): BattleSession {
       dataContext: data.dataContext,
       turnOrder: data.turnOrder,
       statStageRatios: data.statStageRatios,
+    },
+    startUnmodelled,
+  )
+  runBattleEvents(
+    state,
+    {
+      dataContext: data.dataContext,
+      grounding: data.grounding,
     },
     startUnmodelled,
   )
@@ -254,6 +270,15 @@ export function stepTurn(
   const { state } = session
   const unmodelled: string[] = []
 
+  runBattleEvents(
+    state,
+    {
+      dataContext: session.data.dataContext,
+      grounding: session.data.grounding,
+    },
+    unmodelled,
+  )
+
   let opponentAction: ChosenAction | null = fixedOpponentAction ?? null
   if (fixedOpponentAction === undefined && state.battlers[1] && state.battlers[1].mon.hp > 0) {
     const aiResult = chooseAiAction(state, 1, session.chooseAiDeps)
@@ -263,6 +288,22 @@ export function stepTurn(
 
   const outcome = executeTurn(state, [playerAction, opponentAction, null, null], session.turnDeps)
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)
-  unmodelled.push(...outcome.endTurnUnmodelled, ...outcome.fieldEndTurnUnmodelled, ...outcome.replacementUnmodelled)
+  unmodelled.push(
+    ...outcome.endTurnUnmodelled,
+    ...outcome.fieldEndTurnUnmodelled,
+    ...outcome.replacementUnmodelled,
+    ...(outcome.battleEventsUnmodelled ?? []),
+  )
   return { outcome, unmodelled }
+}
+
+/**
+ * Runs the turn-start battle events (HandleBattleEvents, src/battle_main.c:5888). A policy that looks ahead must
+ * call this before it decides, so it sees the same position the AI and the turn loop will; it is idempotent
+ * within a turn, so stepTurn's own call does nothing a second time.
+ */
+export function beginTurn(session: BattleSession): string[] {
+  const unmodelled: string[] = []
+  runBattleEvents(session.state, { dataContext: session.data.dataContext, grounding: session.data.grounding }, unmodelled)
+  return unmodelled
 }

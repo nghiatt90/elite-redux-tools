@@ -345,7 +345,6 @@ export interface BridgeResult {
  * are added per call below when a supplied context misses an entry. */
 const BATCH1_GAPS: BridgeGap[] = [
   // --- state the sim has, correctly zeroed, and never updates -------------
-  { field: 'extraStatLevel', reason: 'NEVER_UPDATED', detail: 'volatiles.extra*Level; written only by battle_events.c:207,435 in special boss events, never in ordinary play' },
   { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; written only by MOVE_GHASTLY_ECHO (battle_script_commands.c:8381), which is not in the 40 fights\' movesets' },
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
