@@ -24,6 +24,7 @@ import {
   STATUS3_GASTRO_ACID,
   STATUS3_HEAL_BLOCK,
   STATUS_FIELD_TOXIC_TERRAIN,
+  WEATHER_FOG_TEMPORARY,
   WEATHER_HAIL_TEMPORARY,
   WEATHER_RAIN_TEMPORARY,
   WEATHER_SUN_TEMPORARY,
@@ -55,6 +56,7 @@ function requireItem(id: string): SimItemData {
     holdEffectStrength: (it.holdEffectStrength as number | null) ?? null,
     holdEffectType: (it.holdEffectType as string | null) ?? null,
     naturalGift: (it.naturalGift as { power: number; type: string } | null) ?? null,
+    grouping: (it.grouping as string | null) ?? null,
   }
 }
 function requireSpecies(id: string): string {
@@ -83,7 +85,7 @@ const SELF_SUFFICIENT = requireAbility('ABILITY_SELF_SUFFICIENT')
 const SELF_REPAIR = requireAbility('ABILITY_SELF_REPAIR')
 const DUNE_VEIL = requireAbility('ABILITY_DUNE_VEIL')
 const POISON_ABSORB = requireAbility('ABILITY_POISON_ABSORB')
-const BAD_DREAMS = requireAbility('ABILITY_BAD_DREAMS')
+const GAPPED_END_TURN_ABILITY = requireAbility('ABILITY_LIFE_STEAL') // onEndTurn hook still unported (Bad Dreams used to stand here)
 const LEFTOVERS = requireItem('ITEM_LEFTOVERS')
 if (LEFTOVERS.resolvedHoldEffect !== 'HOLD_EFFECT_LEFTOVERS') throw new Error('ITEM_LEFTOVERS no longer resolves to HOLD_EFFECT_LEFTOVERS')
 const TOXIC_ORB = requireItem('ITEM_TOXIC_ORB')
@@ -404,9 +406,9 @@ describe('executeTurn: end-turn ladder -- fainting and battler order', () => {
 
 describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header table)', () => {
   it('gaps ENDTURN_ABILITIES exactly when the battler\'s own ability has an unmodelled onEndTurn hook, and not otherwise', () => {
-    const withHook = battle([{ spe: 100, maxHp: 100, abilities: { ability: BAD_DREAMS, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }], scripted())
+    const withHook = battle([{ spe: 100, maxHp: 100, abilities: { ability: GAPPED_END_TURN_ABILITY, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }], scripted())
     const out1 = executeTurn(withHook, [null, null], deps())
-    expect(out1.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${BAD_DREAMS}'s onEndTurn hook was not run`)
+    expect(out1.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${GAPPED_END_TURN_ABILITY}'s onEndTurn hook was not run`)
 
     const withoutHook = battle(
       [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
@@ -418,11 +420,11 @@ describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header t
 
   it('gaps ENDTURN_ABILITIES for an innate slot too (ABILITYEFFECT_ENDTURN loops every slot, battle_util.c:4397-4399)', () => {
     const state = battle(
-      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, BAD_DREAMS, null] } }, { spe: 50, maxHp: 100 }],
+      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, GAPPED_END_TURN_ABILITY, null] } }, { spe: 50, maxHp: 100 }],
       scripted(),
     )
     const out = executeTurn(state, [null, null], deps())
-    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${BAD_DREAMS}'s onEndTurn hook was not run`)
+    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${GAPPED_END_TURN_ABILITY}'s onEndTurn hook was not run`)
   })
 
   it('restores HP with Leftovers at end of turn and does not emit ENDTURN_ITEMS1 gap', () => {
@@ -932,5 +934,61 @@ describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES: slot dispatch, inna
     expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
     expect(out.endTurn).toEqual([])
     expect(out.endTurnUnmodelled).toEqual([])
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_ABILITIES (Sweet Dreams, Peaceful Rest, Leaf Guard, Healer, Harvest, Bad Dreams)', () => {
+  const ab = (id: string) => ({ ability: requireAbility(id), innates: [null, null, null] as [null, null, null] })
+
+  it('Sweet Dreams heals maxHp/8 while asleep, not while awake', () => {
+    const asleep = battle([{ spe: 100, maxHp: 160, hp: 100, status1: STATUS1_SLEEP, abilities: ab('ABILITY_SWEET_DREAMS') }, { spe: 50 }], scripted())
+    executeTurn(asleep, [null, null], deps())
+    expect(asleep.battlers[0]!.mon.hp).toBe(120)
+    const awake = battle([{ spe: 100, maxHp: 160, hp: 100, abilities: ab('ABILITY_SWEET_DREAMS') }, { spe: 50 }], scripted())
+    executeTurn(awake, [null, null], deps())
+    expect(awake.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('Peaceful Rest heals maxHp/8 in fog only', () => {
+    const fog = battle([{ spe: 100, maxHp: 160, hp: 100, abilities: ab('ABILITY_PEACEFUL_REST') }, { spe: 50 }], scripted())
+    fog.field.weather |= WEATHER_FOG_TEMPORARY
+    executeTurn(fog, [null, null], deps())
+    expect(fog.battlers[0]!.mon.hp).toBe(120)
+    const clear = battle([{ spe: 100, maxHp: 160, hp: 100, abilities: ab('ABILITY_PEACEFUL_REST') }, { spe: 50 }], scripted())
+    executeTurn(clear, [null, null], deps())
+    expect(clear.battlers[0]!.mon.hp).toBe(100)
+  })
+
+  it('Leaf Guard cures the primary status in sun', () => {
+    const state = battle([{ spe: 100, maxHp: 160, status1: STATUS1_SLEEP, abilities: ab('ABILITY_LEAF_GUARD') }, { spe: 50 }], scripted())
+    state.field.weather |= WEATHER_SUN_TEMPORARY
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.status1).toBe(0)
+  })
+
+  it('Healer cures its own status on a roll under 30', () => {
+    const cured = battle([{ spe: 100, maxHp: 160, status1: STATUS1_BURN, abilities: ab('ABILITY_HEALER') }, { spe: 50 }], scripted(10, 10, 10, 10))
+    executeTurn(cured, [null, null], deps())
+    expect(cured.battlers[0]!.mon.status1).toBe(0)
+    const kept = battle([{ spe: 100, maxHp: 160, status1: STATUS1_BURN, abilities: ab('ABILITY_HEALER') }, { spe: 50 }], scripted(60, 60, 60, 60))
+    executeTurn(kept, [null, null], deps())
+    expect(kept.battlers[0]!.mon.status1).toBe(STATUS1_BURN)
+  })
+
+  it('Harvest restores the last consumed berry in sun', () => {
+    const state = battle([{ spe: 100, maxHp: 160, abilities: ab('ABILITY_HARVEST') }, { spe: 50 }], scripted())
+    state.field.weather |= WEATHER_SUN_TEMPORARY
+    state.battlers[0]!.usedHeldItem = 'ITEM_ORAN_BERRY'
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_ORAN_BERRY')
+  })
+
+  it('Bad Dreams takes maxHp/4 from a sleeping foe, and Sweet Dreams on the foe prevents it', () => {
+    const state = battle([{ spe: 100, maxHp: 160, abilities: ab('ABILITY_BAD_DREAMS') }, { spe: 50, maxHp: 80, status1: STATUS1_SLEEP }], scripted())
+    executeTurn(state, [null, null], deps())
+    expect(state.battlers[1]!.mon.hp).toBe(60)
+    const protectedFoe = battle([{ spe: 100, maxHp: 160, abilities: ab('ABILITY_BAD_DREAMS') }, { spe: 50, maxHp: 80, status1: STATUS1_SLEEP, abilities: ab('ABILITY_SWEET_DREAMS') }], scripted())
+    executeTurn(protectedFoe, [null, null], deps())
+    expect(protectedFoe.battlers[1]!.mon.hp).toBe(80)
   })
 })

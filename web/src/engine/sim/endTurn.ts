@@ -209,7 +209,7 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { StatusDeps } from './statusEffects'
-import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves } from './statusEffects'
+import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -252,9 +252,11 @@ import {
   STATUS4_ELECTRIFIED,
   STATUS4_GHASTLY_ECHO,
   STATUS_FIELD_MAGIC_ROOM,
+  STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_HAIL_ANY,
   WEATHER_RAIN_ANY,
+  WEATHER_FOG_ANY,
   WEATHER_SUN_ANY,
   clearFlag,
   getCounter,
@@ -744,6 +746,28 @@ function isBattlerTerrainAffectedByToxicTerrain(
   return battlerHasAbility(battler.mon.abilities, 'ABILITY_TOXIC_SURGE', NO_SUPPRESSION)
 }
 
+const NO_GROUNDING: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
+
+/** An ability heal at end of turn: the shared tail of the ported abilities below. */
+function healEndTurn(state: BattleState, battlerId: number, battler: BattlerState, amount: number, results: EndTurnEffectResult[]): void {
+  const prevHp = battler.mon.hp
+  applyEndTurnHp(state, battlerId, battler, amount)
+  const actualHeal = battler.mon.hp - prevHp
+  if (actualHeal > 0) {
+    results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+  }
+}
+
+/** AbilityHealMonStatus, battle_util.c:4036-4057: clears every primary status and Nightmare. */
+function healMonStatus(state: BattleState, battlerId: number, battler: BattlerState): boolean {
+  if (!hasFlag(battler.mon.status1, STATUS1_ANY)) return false
+  battler.mon.status1 = 0
+  battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+  const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+  if (partySlot) partySlot.status1 = 0
+  return true
+}
+
 /**
  * ENDTURN_ABILITIES, battle_util.c:2452-2459 -> AbilityBattleEffects(ABILITYEFFECT_ENDTURN, ...)
  * (:4397-4399) -> HandleEndTurnAbility (:9213-9239).
@@ -929,6 +953,96 @@ function runEndTurnAbilities(
           if (actualHeal > 0) {
             results.push({ battlerId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
           }
+        }
+        break
+      }
+
+      case 'ABILITY_SWEET_DREAMS': {
+        // src/abilities.cc:4288-4300: maxHP / 8 while asleep or Comatose
+        const asleep = hasFlag(battler.mon.status1, STATUS1_SLEEP) || battlerHasAbility(battler.mon.abilities, 'ABILITY_COMATOSE', NO_SUPPRESSION)
+        if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled) && asleep) {
+          healEndTurn(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 8)), results)
+        }
+        break
+      }
+
+      case 'ABILITY_PEACEFUL_REST':
+      case 'ABILITY_WHITE_NOISE': {
+        // src/abilities.cc (Impl<PEACEFUL_REST>.onEndTurn), BattleScript_RainDishActivates: maxHP / 8 in fog
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, { dataContext, grounding: deps?.grounding })
+        ) {
+          healEndTurn(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 8)), results)
+        }
+        break
+      }
+
+      case 'ABILITY_CELESTIAL_BLESSING':
+      case 'ABILITY_ETERNAL_BLESSING': {
+        // Impl<CELESTIAL_BLESSING>.onEndTurn, BattleScript_SelfSufficientActivates: maxHP / 12 on Misty Terrain
+        if (
+          battler.mon.hp !== battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          battler.volatiles.isFirstTurn !== 2 &&
+          isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_MISTY_TERRAIN, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING })
+        ) {
+          healEndTurn(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 12)), results)
+        }
+        break
+      }
+
+      case 'ABILITY_LEAF_GUARD': {
+        // Impl<LEAF_GUARD>.onEndTurn: sun -> AbilityHealMonStatus (battle_util.c:4036-4057)
+        if (isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, { dataContext, grounding: deps?.grounding })) {
+          healMonStatus(state, battlerId, battler)
+        }
+        break
+      }
+
+      case 'ABILITY_HEALER':
+      case 'ABILITY_CARETAKER': {
+        // Impl<HEALER>.onEndTurn: Random() % 100 < 30, then the partner (none in singles) or the battler itself
+        if (state.rng.random16() % 100 < 30) healMonStatus(state, battlerId, battler)
+        break
+      }
+
+      case 'ABILITY_HARVEST':
+      case 'ABILITY_SUNS_BOUNTY':
+      case 'ABILITY_BIG_LEAVES': {
+        // Impl<HARVEST>.onEndTurn (Sun's Bounty / Big Leaves are Harvest | Leaf Guard): restore the last consumed berry
+        const used = battler.usedHeldItem
+        if (!battler.mon.itemId && used && dataContext.item(used)?.grouping === 'POCKET_BERRIES') {
+          if (isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, { dataContext, grounding: deps?.grounding }) || state.rng.random16() % 2) {
+            battler.mon.itemId = used
+            battler.usedHeldItem = null
+          }
+        }
+        if (slotAbility !== 'ABILITY_HARVEST' && isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, { dataContext, grounding: deps?.grounding })) {
+          healMonStatus(state, battlerId, battler)
+        }
+        break
+      }
+
+      case 'ABILITY_BAD_DREAMS': {
+        // BattleScript_BadDreamsActivates / Cmd_trygetbaddreamstarget (battle_script_commands.c:13072-13089): every sleeping or Comatose
+        // foe loses maxHP / 4 unless it has Sweet Dreams or Peaceful Slumber; Magic Guard skips the damage.
+        for (const target of state.battlers) {
+          if (!target || (target.id & 1) === (battlerId & 1) || target.mon.hp === 0) continue
+          const dreaming = hasFlag(target.mon.status1, STATUS1_SLEEP) || battlerHasAbility(target.mon.abilities, 'ABILITY_COMATOSE', NO_SUPPRESSION)
+          if (!dreaming) continue
+          if (
+            battlerHasAbility(target.mon.abilities, 'ABILITY_SWEET_DREAMS', NO_SUPPRESSION) ||
+            battlerHasAbility(target.mon.abilities, 'ABILITY_PEACEFUL_SLUMBER', NO_SUPPRESSION)
+          ) {
+            continue
+          }
+          if (isMagicGuardProtected(state, target)) continue
+          const dmg = Math.max(1, Math.trunc(target.mon.maxHp / 4))
+          const fainted = applyEndTurnHp(state, target.id, target, -dmg)
+          results.push({ battlerId: target.id, effect: 'ABILITY', hpChange: -dmg, fainted })
         }
         break
       }
