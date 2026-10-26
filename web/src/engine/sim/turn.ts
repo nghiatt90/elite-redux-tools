@@ -192,15 +192,19 @@ import {
   STATUS4_SALT_CURE,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_FOG_ANY,
+  WEATHER_SUN_ANY,
+  MOVE_EFFECT_ATK_PLUS_1,
+  MOVE_EFFECT_EVS_PLUS_1,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, getMoveEffectHandler } from './moveEffects'
+import { applySecondaryMoveEffects, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
   B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffsImplicit,
+  MOVE_EFFECT_AFFECTS_USER,
   consumeHeldItem,
   dispatchOnStatLowered,
   isBattlerWeatherAffected,
@@ -1667,6 +1671,13 @@ function applyLockedMove(state: BattleState, battlerId: number, action: ChosenAc
   return { action: 'USE_MOVE', chosenMove: view, moveToBeUsed: view, target }
 }
 
+const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_SEMI_INVULNERABLE',
+  'EFFECT_SOLARBEAM',
+  'EFFECT_TWO_TURN_SECONDARY',
+  'EFFECT_TWO_TURN_RETALIATION',
+])
+
 export function executeAction(
   state: BattleState,
   battlerId: number,
@@ -2136,12 +2147,24 @@ export function executeAction(
       return effectOutcome
     }
 
-    // Two-turn semi-invulnerable moves (Fly, Bounce, Dig, Dive, Phantom Force, etc.)
-    // BattleScript_EffectSemiInvulnerable (data/battle_scripts_1.s:5848-5895)
+    // Two-turn moves: semi-invulnerable (Fly, Bounce, Dig, Dive, Phantom Force, etc.; BattleScript_EffectSemiInvulnerable,
+    // data/battle_scripts_1.s:5848-5895), Solar Beam / Solar Blade (:5706-5722), Meteor Beam / Skull Bash / Sky Attack (:4399-4416)
+    // and Freeze Shock / Ice Burn (:4424-4438). `isSecondTurnSemiInvuln` also marks "no PP on this pass".
     let isSecondTurnSemiInvuln = false
-    if (moveEffect === 'EFFECT_SEMI_INVULNERABLE') {
+    if (moveEffect !== null && TWO_TURN_EFFECTS.has(moveEffect)) {
       const attackerBattler = state.battlers[battlerId]!
-      if (!hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
+      // BattleScript_EffectSolarbeam (:5706-5709): Chloroplast-flag abilities, Accelerate and sun skip the charge turn entirely.
+      const solarSkipsCharge =
+        moveEffect === 'EFFECT_SOLARBEAM' &&
+        (['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE', 'ABILITY_ACCELERATE'].some((ab) =>
+          battlerHasSimAbility(state, attackerBattler, ab, false, battlerId, false, deps.dataContext),
+        ) ||
+          isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, deps))
+      if (solarSkipsCharge && !hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
+        // BattleScript_SolarbeamOnFirstTurn (:5716-5722): ppreduce, then straight into the second-turn hit.
+        performPpDeduct()
+        isSecondTurnSemiInvuln = true
+      } else if (!hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
         // BattleScriptFirstChargingTurn (data/battle_scripts_1.s:4079-4093) + BattleScript_FirstTurnSemiInvulnerable (:5876-5879)
         performPpDeduct()
         attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
@@ -2150,7 +2173,23 @@ export function executeAction(
         state.lockedMoves[battlerId] = currentMove.id
 
         // Cmd_setsemiinvulnerablebit (src/battle_script_commands.c:11541-11566)
-        setSemiInvulnerableBit(attackerBattler, currentMove.id)
+        if (moveEffect === 'EFFECT_SEMI_INVULNERABLE') setSemiInvulnerableBit(attackerBattler, currentMove.id)
+
+        // BattleScript_EffectTwoTurnSecondary (:4405-4408): argumenttomoveeffect; seteffectprimary on the charge turn
+        // (Meteor Beam's Sp. Atk boost, Skull Bash's Defense boost), then setmoveeffect 0.
+        if (moveEffect === 'EFFECT_TWO_TURN_SECONDARY') {
+          const arg = moveData?.argument
+          const effectName = arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string' ? arg.effect : null
+          const effectNum = effectName ? SECONDARY_MOVE_EFFECT_MAP[effectName] : undefined
+          if (effectNum !== undefined && effectNum >= MOVE_EFFECT_ATK_PLUS_1 && effectNum <= MOVE_EFFECT_EVS_PLUS_1) {
+            changeStatBuffsImplicit(
+              state, battlerId, currentTargetId!, 1, effectNum - MOVE_EFFECT_ATK_PLUS_1 + 1,
+              MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT, false, deps, unmodelled, currentMove.id,
+            )
+          } else {
+            unmodelled.push(`EFFECT_TWO_TURN_SECONDARY: charge-turn effect ${effectName} is not modelled`)
+          }
+        }
 
         // twoturnmoveacceleratecheck (:5879)
         const hasAccelerate = battlerHasSimAbility(
@@ -2179,6 +2218,9 @@ export function executeAction(
         }
 
         if (!accelerated) {
+          if (moveEffect === 'EFFECT_TWO_TURN_RETALIATION') {
+            unmodelled.push('BattleScript_EffectTwoTurnRetaliation_SetRetaliation (data/battle_scripts_1.s:4434): setbeakblast is not modelled')
+          }
           runMoveEndBookkeeping({
             state,
             attackerId: battlerId,

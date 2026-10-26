@@ -11145,7 +11145,8 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_ARGUMENT_HIT' ||
     moveEffect === 'EFFECT_RECOIL_IF_MISS' ||
     moveEffect === 'EFFECT_EXPLOSION' ||
-    moveEffect === 'EFFECT_MIND_BLOWN'
+    moveEffect === 'EFFECT_MIND_BLOWN' ||
+    moveEffect === 'EFFECT_TWO_TURN_RETALIATION'
   ) {
     // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
     // argumenttomoveeffect; goto BattleScript_EffectHit. Recoil-if-miss (:4146-4147), Explosion (:3517-3518) and
@@ -11332,7 +11333,11 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_HIT_ESCAPE' ||
     moveEffect === 'EFFECT_SUCKER_PUNCH' ||
     moveEffect === 'EFFECT_STEEL_BEAM' ||
-    moveEffect === 'EFFECT_BRICK_BREAK'
+    moveEffect === 'EFFECT_BRICK_BREAK' ||
+    // Second-turn hit with moveEffect cleared (BattleScript_EffectTwoTurnSecondarySecondTurn, :4410-4416); turn.ts applies the
+    // charge-turn effect and the Solar Beam charge logic.
+    moveEffect === 'EFFECT_SOLARBEAM' ||
+    moveEffect === 'EFFECT_TWO_TURN_SECONDARY'
   ) {
     // Pure damaging move or handled elsewhere with no secondary effect
   } else {

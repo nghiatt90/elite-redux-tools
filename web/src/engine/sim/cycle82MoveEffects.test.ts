@@ -21,6 +21,8 @@ import {
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
   STAT_ACC,
+  STAT_SPATK,
+  WEATHER_SUN_TEMPORARY,
   STAT_ATK,
   STAT_DEF,
   STAT_SPDEF,
@@ -504,5 +506,52 @@ describe('Locked moves (gLockedMoves) and Rampage (Thrash)', () => {
     executeTurn(state, [useMove(1, move('MOVE_THRASH')), null], testDeps(fixedDamage(10)))
     expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
     expect(state.lockedMoves[0]).toBeNull()
+  })
+})
+
+describe('Two-turn moves (Solar Beam, Meteor Beam, Freeze Shock)', () => {
+  it('Solar Beam charges on turn 1 and hits on turn 2 for one PP', () => {
+    const state = battle([{ moves: slot('MOVE_SOLAR_BEAM'), pp: pps }, {}], countingRng())
+    const deps = testDeps(fixedDamage(30))
+    executeTurn(state, [useMove(1, move('MOVE_SOLAR_BEAM')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(100)
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(true)
+    expect(state.battlers[0]?.mon.pp[0]).toBe(19)
+    executeTurn(state, [useMove(1, move('MOVE_SOLAR_BEAM')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(70)
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+    expect(state.battlers[0]?.mon.pp[0]).toBe(19)
+  })
+
+  it('Solar Beam hits at once in sun, and at once with a Chloroplast-flag ability', () => {
+    const sunny = battle([{ moves: slot('MOVE_SOLAR_BEAM'), pp: pps }, {}], countingRng())
+    sunny.field.weather |= WEATHER_SUN_TEMPORARY
+    executeTurn(sunny, [useMove(1, move('MOVE_SOLAR_BEAM')), null], testDeps(fixedDamage(30)))
+    expect(sunny.battlers[1]?.mon.hp).toBe(70)
+    expect(sunny.battlers[0]?.mon.pp[0]).toBe(19)
+
+    const leaves = battle([{ moves: slot('MOVE_SOLAR_BEAM'), pp: pps, abilities: hasAbility('ABILITY_CHLOROPLAST') }, {}], countingRng())
+    executeTurn(leaves, [useMove(1, move('MOVE_SOLAR_BEAM')), null], testDeps(fixedDamage(30)))
+    expect(leaves.battlers[1]?.mon.hp).toBe(70)
+  })
+
+  it('Meteor Beam raises Sp. Atk on the charge turn, then hits on turn 2', () => {
+    const state = battle([{ moves: slot('MOVE_METEOR_BEAM'), pp: pps }, {}], countingRng())
+    const deps = testDeps(fixedDamage(30))
+    executeTurn(state, [useMove(1, move('MOVE_METEOR_BEAM')), null], deps)
+    expect(state.battlers[0]?.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(state.battlers[1]?.mon.hp).toBe(100)
+    executeTurn(state, [useMove(1, move('MOVE_METEOR_BEAM')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(70)
+    expect(state.battlers[0]?.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+
+  it('Freeze Shock charges, then hits', () => {
+    const state = battle([{ moves: slot('MOVE_FREEZE_SHOCK'), pp: pps }, {}], countingRng())
+    const deps = testDeps(fixedDamage(30))
+    executeTurn(state, [useMove(1, move('MOVE_FREEZE_SHOCK')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(100)
+    executeTurn(state, [useMove(1, move('MOVE_FREEZE_SHOCK')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(70)
   })
 })
