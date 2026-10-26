@@ -108,6 +108,19 @@ export const UTILITY_MOVES = new Set([
   'MOVE_ENCORE',
 ])
 
+/** Effects whose raw power overstates their value in a normal turn-by-turn fight. */
+const EFFECT_RANK_FACTOR: Record<string, number> = {
+  EFFECT_RECHARGE: 0.45,
+  EFFECT_FOCUS_PUNCH: 0.3,
+  EFFECT_EXPLOSION: 0.1,
+  EFFECT_RAMPAGE: 0.75,
+  EFFECT_SOLARBEAM: 0.55,
+  EFFECT_SEMI_INVULNERABLE: 0.6,
+  EFFECT_SKY_ATTACK: 0.55,
+  EFFECT_SKULL_BASH: 0.55,
+  EFFECT_RAZOR_WIND: 0.55,
+}
+
 function learnableMoves(data: SimDataBundle, speciesId: string, level: number): string[] {
   const species = data.speciesById.get(speciesId)
   const learnset = species?.learnset as
@@ -137,7 +150,7 @@ export function candidateMoves(data: SimDataBundle, speciesId: string, level: nu
     if (!move.power || move.power <= 1) continue
     const stab = ownTypes.has((move.type ?? '').replace('TYPE_', '')) ? 1.5 : 1
     const accuracy = move.accuracy && move.accuracy > 0 ? move.accuracy / 100 : 1
-    damaging.push({ id, rank: move.power * stab * accuracy })
+    damaging.push({ id, rank: move.power * stab * accuracy * (EFFECT_RANK_FACTOR[move.effect ?? ''] ?? 1) })
   }
   damaging.sort((a, b) => b.rank - a.rank)
   return [...damaging.slice(0, damagingCount).map((d) => d.id), ...utility]
@@ -154,7 +167,27 @@ export function defaultSet(
   const species = data.speciesById.get(speciesId)
   const stats = species?.baseStats as Record<StatKey, number>
   const physical = (stats?.atk ?? 0) >= (stats?.spatk ?? 0)
-  const moves = candidateMoves(data, speciesId, level, 4).filter((m) => !UTILITY_MOVES.has(m)).slice(0, 4)
+  const pool = candidateMoves(data, speciesId, level, 24).filter((m) => !UTILITY_MOVES.has(m))
+  const moves: string[] = []
+  const usedTypes = new Map<string, number>()
+  while (moves.length < 4 && moves.length < pool.length) {
+    let best = ''
+    let bestScore = -1
+    for (let i = 0; i < pool.length; i++) {
+      const id = pool[i]
+      if (moves.includes(id)) continue
+      // pool is already sorted best-first; discount a type that is already covered so the set is not four Normals
+      const type = data.dataContext.move(id)?.type ?? ''
+      const score = (pool.length - i) * (usedTypes.has(type) ? 0.6 : 1)
+      if (score > bestScore) {
+        bestScore = score
+        best = id
+      }
+    }
+    moves.push(best)
+    const type = data.dataContext.move(best)?.type ?? ''
+    usedTypes.set(type, (usedTypes.get(type) ?? 0) + 1)
+  }
   while (moves.length < 4) moves.push('')
   return {
     species: speciesId,

@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const out = arg('out', '')
   const gym = Number(arg('gym', '0'))
   const mapName = arg('map', '') || mapForTrainer(trainerId)
-  const defeatedArg = arg('defeated', 'all')
+  const defeatedArg = arg('defeated', 'none')
   const data0 = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
   const stoneInfo = gym > 0 ? availableStones(data0, gym) : new Map()
   const allowedStones = new Set<string>([...stoneInfo.keys(), ...arg('stones', '').split(',').filter(Boolean)])
