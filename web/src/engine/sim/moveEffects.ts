@@ -240,7 +240,7 @@ import {
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
-import { canBattlerHeal, isHealingBlocked } from './endTurn'
+import { canBattlerHeal, isHealingBlocked, isMagicGuardProtected } from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
@@ -11105,6 +11105,8 @@ export interface SecondaryMoveEffectContext {
   targetHasActedThisTurn?: boolean
   deps: StatusDeps & { moveBehaviors?: MoveBehaviors }
   unmodelled: string[]
+  snapJawRaiseSpeed?: boolean | null
+  order?: readonly number[]
 }
 
 /**
@@ -11461,10 +11463,10 @@ export function applySecondaryMoveEffects(
       certain: false,
     })
   } else if (moveEffect === 'EFFECT_SNAP_JAW') {
-    // BattleScript_EffectSnapJaw (data/battle_scripts_1.s:1251-1258)
-    // setrandom 2; if 0 -> MOVE_EFFECT_SPD_PLUS_1 | MOVE_EFFECT_AFFECTS_USER; else -> MOVE_EFFECT_SPD_MINUS_1
-    const roll = state.rng.random16() % 2
-    if (roll === 0) {
+    // BattleScript_EffectSnapJaw (data/battle_scripts_1.s:12415-12422)
+    // setrandom 2 runs BEFORE accuracycheck in the script; ctx.snapJawRaiseSpeed carries that result.
+    const raiseSpeed = ctx.snapJawRaiseSpeed ?? (state.rng.random16() % 2 === 0)
+    if (raiseSpeed) {
       effectSpecs.push({
         effectName: 'MOVE_EFFECT_SPD_PLUS_1',
         chance: moveData?.effectChance ?? 0,
@@ -11613,12 +11615,15 @@ export function applySecondaryMoveEffects(
       statusAppliedOutcome = { battlerId: targetId, status: 'OCTOLOCK' }
     }
   } else if (moveEffect === 'EFFECT_SAPPY_SEED') {
-    // BattleScript_EffectSappySeed (data/battle_scripts_1.s:1040-1064, Cmd_setseeded battle_script_commands.c:9341-9355)
+    // BattleScript_EffectSappySeed (data/battle_scripts_1.s:471-495, Cmd_setseeded battle_script_commands.c:9341-9355)
+    // Cmd_setseeded has no Mycelium Might gate; Grass types are immune.
     const targetBattler = state.battlers[targetId]
     if (
       targetBattler &&
+      targetBattler.mon.hp > 0 &&
+      (targetDamage ?? 0) > 0 &&
       !hasFlag(targetBattler.statuses3, STATUS3_LEECHSEED) &&
-      (!targetBattler.mon.types.includes('GRASS') || isMyceliumMightActive(state, attackerId, deps))
+      !targetBattler.mon.types.includes('GRASS')
     ) {
       targetBattler.statuses3 = setFlag(
         targetBattler.statuses3,
@@ -12371,16 +12376,22 @@ export function applySecondaryMoveEffects(
 
     // MOVE_EFFECT_FLAME_BURST (battle_script_commands.c:2872-2878)
     if (baseEffectNum === MOVE_EFFECT_FLAME_BURST) {
-      // In singles battles, no partner is on the field, so Flame Burst splash damage does not trigger.
+      // In singles battles (or when partner is absent/fainted), partner is not alive, so splash damage does not trigger.
       const partnerId = targetId ^ 2
-      const partner = state.battlers[partnerId]
-      if (
-        partner &&
-        partner.mon.hp > 0 &&
-        !battlerHasSimAbility(state, partner, 'ABILITY_MAGIC_GUARD', false, partnerId, false, deps.dataContext)
-      ) {
-        const dmg = Math.max(1, Math.floor(partner.mon.hp / 4))
-        partner.mon.hp = Math.max(0, partner.mon.hp - dmg)
+      if (partnerId < state.battlersCount && !hasFlag(state.absentBattlerFlags, 1 << partnerId)) {
+        const partner = state.battlers[partnerId]
+        if (
+          partner &&
+          partner.mon.hp > 0 &&
+          !isMagicGuardProtected(state, partner)
+        ) {
+          const dmg = Math.max(1, Math.floor(partner.mon.hp / 4))
+          partner.mon.hp = Math.max(0, partner.mon.hp - dmg)
+          syncPartyHp(state, partnerId)
+          if (partner.mon.hp === 0) {
+            state.sides[partnerId & 1].faintedCount++
+          }
+        }
       }
       continue
     }
@@ -12394,8 +12405,12 @@ export function applySecondaryMoveEffects(
 
     // MOVE_EFFECT_CORE_ENFORCER (battle_script_commands.c:2926-2930, battle_scripts_1.s:1027-1035, Cmd_setgastroacid :11831-11838)
     if (baseEffectNum === MOVE_EFFECT_CORE_ENFORCER) {
+      const targetOrderedFirst = ctx.order
+        ? ctx.order.indexOf(attackerId) > ctx.order.indexOf(targetId)
+        : Boolean(ctx.targetHasActedThisTurn)
       if (
-        ctx.targetHasActedThisTurn &&
+        targetOrderedFirst &&
+        effectBattler.mon.hp > 0 &&
         !hasFlag(effectBattler.statuses3, STATUS3_GASTRO_ACID) &&
         !doesBattlerHaveAbilityShield(effectBattler, deps)
       ) {

@@ -260,10 +260,25 @@ function getStatDropBlock(
   return false
 }
 
-function hasClearAmulet(battler: BattlerState, dataContext: SimDataContext): boolean {
+export function hasClearAmulet(battler: BattlerState, dataContext: SimDataContext): boolean {
   if (hasFlag(battler.statuses3, STATUS3_EMBARGO)) return false
   if (!battler.mon.itemId) return false
   return dataContext.item(battler.mon.itemId)?.resolvedHoldEffect === 'HOLD_EFFECT_CLEAR_AMULET'
+}
+
+/**
+ * IsStatDropBlocked, src/abilities.cc:432-435.
+ * Checks whether a stat drop on battler is blocked by its own or partner's abilities.
+ */
+export function isStatDropBlocked(
+  state: BattleState,
+  battler: BattlerState,
+  statId: number,
+  selfStatDrop: boolean,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+): boolean {
+  return getStatDropBlock(state, battler, statId, selfStatDrop, battler.id, false, deps, unmodelled)
 }
 
 function hasMirrorArmor(

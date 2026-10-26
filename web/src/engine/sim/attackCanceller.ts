@@ -70,7 +70,7 @@
 //                          other cancel script here, which goes straight to
 //                          BattleScript_MoveEnd, this one deducts PP itself) is
 //                          not modelled either.
-//   CANCELLER_THROAT_CHOP Unreachable -- volatiles.throatChopTimer has no writer.
+//   CANCELLER_THROAT_CHOP Ported (:3481-3490) -- sound moves blocked while throatChopTimer > 0.
 //   CANCELLER_SKY_DROP    Unreachable -- volatiles.skyDropped has no writer.
 //   CANCELLER_QUICK_GUARD Ported (:3272-3280) -- gProcessingExtraAttacks is never
 //                          set in the sim. Priority comes from the action's own
@@ -130,7 +130,7 @@
 // the C's Random() call sites cited on each branch.
 
 import type { BattleState, BattlerState } from './state'
-import type { SimMoveData } from './dataContext'
+import type { SimDataContext, SimMoveData } from './dataContext'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { getMovePriority, type TurnOrderMoveView } from './turnOrder'
@@ -154,9 +154,10 @@ import {
   hasFlag,
   setCounter,
 } from './constants'
-import { cancelMultiTurnMoves } from './statusEffects'
+import { cancelMultiTurnMoves, isSoundMove, type StatusDeps } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { isGravityActive, type GroundingContext } from './grounding'
+import { NO_GROUNDING } from './endTurn'
 
 export const CANCEL_REASONS = [
   'SLEEP',
@@ -172,6 +173,7 @@ export const CANCEL_REASONS = [
   'TAUNT',
   'IMPRISON',
   'QUICK_GUARD',
+  'THROAT_CHOP',
 ] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
@@ -352,6 +354,7 @@ export function runAttackCanceller(
   attackerHoldEffect: string | null = null,
   grounding?: GroundingContext,
   moveView: TurnOrderMoveView | null = null,
+  dataContext?: SimDataContext,
 ): AttackCancellerResult {
   const attacker = state.battlers[attackerId]
   if (!attacker) return NO_CANCEL
@@ -514,7 +517,27 @@ export function runAttackCanceller(
     )
   }
 
-  // CANCELLER_THROAT_CHOP (:3481-3490), CANCELLER_SKY_DROP (:3264-3271) -- unreachable, see header.
+  // CANCELLER_THROAT_CHOP, battle_util.c:3481-3490:
+  if (attacker.volatiles.throatChopTimer > 0) {
+    if (!dataContext) {
+      unmodelled.push(
+        'CANCELLER_THROAT_CHOP (battle_util.c:3481-3490): dataContext is required to evaluate isSoundMove',
+      )
+    } else {
+      const statusDeps: StatusDeps = {
+        dataContext,
+        grounding: grounding ?? NO_GROUNDING,
+      }
+      if (isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)) {
+        attacker.round.usedThroatChopPreventedMove = true
+        cancelMultiTurnMoves(attacker)
+        attacker.round.attackCancelled = true
+        return { cancelledBy: 'THROAT_CHOP', confusionSelfHitDamage: null }
+      }
+    }
+  }
+
+  // CANCELLER_SKY_DROP (:3264-3271) -- unreachable, see header.
 
   // CANCELLER_QUICK_GUARD, battle_util.c:3272-3280:
   // BattleScript_ButItFailed with HITMARKER_NO_ATTACKSTRING -- no ppreduce.

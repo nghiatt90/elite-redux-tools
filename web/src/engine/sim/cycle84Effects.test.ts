@@ -308,11 +308,17 @@ describe('Part 1: SetMoveEffect cases missing from SECONDARY_MOVE_EFFECT_MAP', (
 
     it('is blocked by C gate: does not re-apply if volatiles.fear is already true', () => {
       const state = battle([{ moves: slot('MOVE_TERROR_CHARGE'), pp: pps }, {}], countingRng())
-      state.battlers[1]!.volatiles.fear = true
-      state.battlers[1]!.statuses4 |= STATUS4_FEAR
+      // Turn 1 applies Fear: sets fear = true and started.fear = true, preserved across turn 1 end
       executeTurn(state, [useMove(1, move('MOVE_TERROR_CHARGE')), null], testDeps())
       expect(state.battlers[1]!.volatiles.fear).toBe(true)
       expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FEAR)).toBe(true)
+
+      // Turn 2: started.fear is cleared before actions (turn.ts:654-664). Second Terror Charge is
+      // blocked by C gate (!volatiles.fear) from re-applying (so started.fear remains false),
+      // and Fear clears at end of the next turn (battle_util.c:2960-2964).
+      executeTurn(state, [useMove(1, move('MOVE_TERROR_CHARGE')), null], testDeps())
+      expect(state.battlers[1]!.volatiles.fear).toBe(false)
+      expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_FEAR)).toBe(false)
     })
   })
 
@@ -435,17 +441,20 @@ describe('Part 1: SetMoveEffect cases missing from SECONDARY_MOVE_EFFECT_MAP', (
   })
 
   describe('MOVE_EFFECT_SYRUP (battle_script_commands.c:2971-2982)', () => {
-    it('sets syrupTimer = 3 on target', () => {
+    it('sets syrupTimer = 3 on target, decremented to 2 at end of turn (battle_util.c:2444-2450)', () => {
       const state = battle([{ moves: slot('MOVE_SYRUP_BOMB'), pp: pps }, {}], countingRng())
       executeTurn(state, [useMove(1, move('MOVE_SYRUP_BOMB')), null], testDeps())
-      expect(state.battlers[1]!.volatiles.syrupTimer).toBe(3)
+      // In C (battle_util.c:2444-2450): ENDTURN_SYRUP decrements syrupTimer at turn end (3 -> 2).
+      expect(state.battlers[1]!.volatiles.syrupTimer).toBe(2)
+      expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
     })
 
-    it('is blocked by C gate: does not overwrite existing syrupTimer', () => {
+    it('is blocked by C gate: does not overwrite existing syrupTimer; decrements at end of turn', () => {
       const state = battle([{ moves: slot('MOVE_SYRUP_BOMB'), pp: pps }, {}], countingRng())
       state.battlers[1]!.volatiles.syrupTimer = 1
       executeTurn(state, [useMove(1, move('MOVE_SYRUP_BOMB')), null], testDeps())
-      expect(state.battlers[1]!.volatiles.syrupTimer).toBe(1)
+      // In C: not overwritten, and decremented from 1 to 0 at turn end.
+      expect(state.battlers[1]!.volatiles.syrupTimer).toBe(0)
     })
   })
 
@@ -550,8 +559,8 @@ describe('Part 2: Stat and user-effect scripts', () => {
     })
 
     it('drops target Speed by 1 when random % 2 === 1', () => {
-      // rolls: acc check (0), random % 2 = 1 (target Speed drop), chance check (0 < 100 passes)
-      const state = battle([{ moves: slot('MOVE_KILOBITE'), pp: pps }, {}], scriptedRng([0, 1, 0]))
+      // rolls: random % 2 = 1 (target Speed drop), acc check (0), chance check (0 < 100 passes)
+      const state = battle([{ moves: slot('MOVE_KILOBITE'), pp: pps }, {}], scriptedRng([1, 0, 0]))
       executeTurn(state, [useMove(1, move('MOVE_KILOBITE')), null], testDeps())
       expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
       expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
@@ -651,10 +660,11 @@ describe('Part 3: Status and field-on-target scripts', () => {
   })
 
   describe('EFFECT_THROAT_CHOP (battle_scripts_1.s:1143-1147)', () => {
-    it('sets throatChopTimer = 2 on target', () => {
+    it('sets throatChopTimer = 2 on target, decremented to 1 by endTurn', () => {
       const state = battle([{ moves: slot('MOVE_THROAT_CHOP'), pp: pps }, {}], countingRng())
       executeTurn(state, [useMove(1, move('MOVE_THROAT_CHOP')), null], testDeps())
-      expect(state.battlers[1]!.volatiles.throatChopTimer).toBe(2)
+      // ENDTURN_THROAT_CHOP (battle_util.c:2923-2929) decrements 2 -> 1 at end of turn
+      expect(state.battlers[1]!.volatiles.throatChopTimer).toBe(1)
     })
   })
 

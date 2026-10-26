@@ -257,7 +257,7 @@ function idiv(a: number, b: number): number {
   return Math.trunc(a / b)
 }
 
-function battlerSide(battlerId: number): number {
+export function battlerSide(battlerId: number): number {
   // GET_BATTLER_SIDE -- position & BIT_SIDE, and in singles/doubles the battler
   // id equals its position (gBattlerPositions is the identity for these
   // formats), so the parity of the id is the side.

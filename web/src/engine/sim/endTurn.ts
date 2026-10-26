@@ -60,8 +60,8 @@
 //                           with Big Root / Absorbant bonus.
 //   ENDTURN_AQUA_RING       Ported (:2435-2443) -- heals maxHP/16 at end of turn
 //                           with Big Root / Absorbant bonus.
-//   ENDTURN_SYRUP           Unreachable -- volatiles.syrupTimer has no reader
-//                           outside create.ts's zero default.
+//   ENDTURN_SYRUP           Ported (:2444-2450) plus BattleScript_SyrupDropsSpeed
+//                           (Speed -1 stage, gates, syrupTimer decrement).
 //   ENDTURN_ABILITIES       PORTED (subset) / Gapped -- AbilityBattleEffects(
 //                           ENDTURN,...) (:4397-4399) runs HandleEndTurnAbility
 //                           (:9213-9239) walking slots from GetNumPossibleAbilitiesForBattler()
@@ -98,8 +98,8 @@
 //                           input surface can read.
 //   ENDTURN_POISON          PORTED.
 //   ENDTURN_BAD_POISON      PORTED.
-//   ENDTURN_SEA_OF_FIRE_DAMAGE Unreachable -- side.timers.fireSeaTimer has no
-//                           reader outside create.ts's zero default.
+//   ENDTURN_SEA_OF_FIRE_DAMAGE Ported (:2545-2562) -- maxHP/8 damage to non-Fire
+//                           battlers without Magic Guard / Flare Boost on the side with fireSeaTimer.
 //   ENDTURN_PARASITIC_SPORES_DAMAGE Unreachable -- volatiles.parasiticSpores
 //                           has no reader outside create.ts's false default.
 //   ENDTURN_BURN            PORTED.
@@ -121,16 +121,15 @@
 //   ENDTURN_CURSE           Unreachable -- STATUS2_CURSED has no reader
 //                           outside constants.ts, and IsBattlerCursed (a
 //                           separate ghost-curse condition) has no port.
-//   ENDTURN_SALT_CURE       Unreachable -- STATUS4_SALT_CURE has no reader
-//                           outside constants.ts; the monotype-champion
-//                           sub-condition is unreachable for the same reason
-//                           as ENDTURN_TOXIC_WASTE_DAMAGE.
+//   ENDTURN_SALT_CURE       Ported (:2634-2648) -- STATUS4_SALT_CURE damage (1/4 for
+//                           Water/Steel else 1/8, Magic Guard); monotype-champion
+//                           Rock condition is unmodelled external fact.
 //   ENDTURN_WRAP             Unreachable -- STATUS2_WRAPPED/wrapTurns/
 //                           wrapAbility have no reader outside constants.ts/
 //                           create.ts; the monotype-champion sub-condition is
 //                           unreachable for the same reason as above.
-//   ENDTURN_OCTOLOCK        Unreachable -- volatiles.octolock has no reader
-//                           outside create.ts's false default.
+//   ENDTURN_OCTOLOCK        Ported (:2708-2716) plus BattleScript_OctolockEndTurn
+//                           (Def and SpDef -1, gates IsStatDropBlocked, Clear Amulet).
 //   ENDTURN_UPROAR          Unreachable -- STATUS2_UPROAR has no reader
 //                           outside constants.ts; the case also needs
 //                           CancelMultiTurnMoves/IsSoundproof, neither ported.
@@ -173,10 +172,7 @@
 //   ENDTURN_ELECTRIFY       Ported (:2915-2918) -- clears STATUS4_ELECTRIFIED at end of turn.
 //   ENDTURN_POWDER          Ported (:2919-2921) -- unconditionally clears
 //                           STATUS2_POWDER every end of turn.
-//   ENDTURN_THROAT_CHOP     Unreachable -- volatiles.throatChopTimer is named
-//                           only in attackCanceller.ts's "Unreachable" comment
-//                           for CANCELLER_THROAT_CHOP, never read by
-//                           executable code.
+//   ENDTURN_THROAT_CHOP     Ported (:2923-2929) -- decrements volatiles.throatChopTimer.
 //   ENDTURN_SLOW_START      Ported (timer decrement, :2930-2941) -- decrements
 //                           volatiles.slowStartTimer when > 0. The DISCIPLINE
 //                           sub-branch (:2943-2952) is Unreachable: volatiles.
@@ -184,17 +180,10 @@
 //                           no reader anywhere.
 //   ENDTURN_PLASMA_FISTS    Unreachable -- STATUS4_PLASMA_FISTS has no reader
 //                           outside constants.ts.
-//   ENDTURN_GENERIC_BATTLER_TIMERS Gapped -- of its nine sub-fields,
-//                           rapidResponse/showdownMode/violentRush/onTheProwl/
-//                           dazed (turnOrder.ts) and trepidation
-//                           (accuracy.ts/accuracyBridge.ts, itself
-//                           NEVER_UPDATED there) are read for real; fear
-//                           (STATUS4_FEAR) and readiedAction have no reader
-//                           anywhere. Gapped, without the `.started` gating the
-//                           C applies (that flag has no reader anywhere either,
-//                           so this port cannot tell "began this turn" apart
-//                           from "still active"), whenever any of the six real
-//                           fields is nonzero/true.
+//   ENDTURN_GENERIC_BATTLER_TIMERS Gapped (subset ported) -- fear (STATUS4_FEAR /
+//                           volatiles.fear) cleared when !started.fear (:2961-2964);
+//                           trepidation timer decremented. Other volatile timers
+//                           remain gapped.
 //   ENDTURN_BATTLER_COUNT   The ladder's own terminal case (:2981-2985) --
 //                           not a residual effect; ported as the loop's own
 //                           per-battler advance, see runEndTurnEffects below.
@@ -208,14 +197,17 @@ import type { BattleState, BattlerState } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
+import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
-import { changeStatBuffs, isBattlerWeatherAffected, isSimAbilitySuppressed, MOVE_EFFECT_AFFECTS_USER, runReactiveAbilityEffects } from './statBuffs'
+import { changeStatBuffs, changeStatBuffsImplicit, hasClearAmulet, isBattlerWeatherAffected, isSimAbilitySuppressed, isStatDropBlocked, MOVE_EFFECT_AFFECTS_USER, runReactiveAbilityEffects, STAT_BUFF_ALLOW_PTR } from './statBuffs'
 import {
+  STAT_DEF,
+  STAT_SPDEF,
   STAT_SPEED,
   STATUS1_ANY,
   STATUS1_BLEED,
@@ -250,7 +242,9 @@ import {
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_ELECTRIFIED,
+  STATUS4_FEAR,
   STATUS4_GHASTLY_ECHO,
+  STATUS4_SALT_CURE,
   STATUS_FIELD_MAGIC_ROOM,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
@@ -444,7 +438,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'CURSE' | 'WRAP' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'CURSE' | 'WRAP' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM' | 'SEA_OF_FIRE' | 'SALT_CURE'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -746,7 +740,7 @@ function isBattlerTerrainAffectedByToxicTerrain(
   return battlerHasAbility(battler.mon.abilities, 'ABILITY_TOXIC_SURGE', NO_SUPPRESSION)
 }
 
-const NO_GROUNDING: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
+export const NO_GROUNDING: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
 
 /** An ability heal at end of turn: the shared tail of the ported abilities below. */
 function healEndTurn(state: BattleState, battlerId: number, battler: BattlerState, amount: number, results: EndTurnEffectResult[]): void {
@@ -1156,6 +1150,22 @@ export function runEndTurnEffects(
       }
     }
 
+    // ENDTURN_SYRUP, battle_util.c:2444-2450, BattleScript_SyrupDropsSpeed (data/battle_scripts_1.s:8224-8231).
+    if (battler.volatiles.syrupTimer > 0) {
+      battler.volatiles.syrupTimer--
+      changeStatBuffsImplicit(
+        state,
+        battlerId,
+        battlerId,
+        -1,
+        STAT_SPEED,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext, grounding: statusDeps.grounding },
+        unmodelled,
+      )
+    }
+
     // ENDTURN_ABILITIES, :2452-2459 -- AbilityBattleEffects(ABILITYEFFECT_ENDTURN)
     // runs HandleEndTurnAbility over EVERY ability slot in descending order (:4397-4399, :9213).
     const abilityResults = runEndTurnAbilities(state, battlerId, battler, dataContext, deps, unmodelled)
@@ -1231,6 +1241,21 @@ export function runEndTurnEffects(
     const badPoison = poison ? null : runBadPoison(state, battlerId, battler, unmodelled)
     if (badPoison) results.push(badPoison)
 
+    // ENDTURN_SEA_OF_FIRE_DAMAGE, battle_util.c:2545-2562.
+    // maxHP/8 to non-Fire battlers without Magic Guard / Flare Boost on the side with fireSeaTimer.
+    if (
+      !hasFlag(state.absentBattlerFlags, 1 << battlerId) &&
+      battler.mon.hp > 0 &&
+      !battler.mon.types.includes('FIRE') &&
+      (state.sides[battlerSide(battlerId)]?.timers.fireSeaTimer ?? 0) > 0 &&
+      !isMagicGuardProtected(state, battler) &&
+      !battlerHasAbility(battler.mon.abilities, 'ABILITY_FLARE_BOOST', NO_SUPPRESSION)
+    ) {
+      const dmg = Math.max(1, Math.floor(battler.mon.maxHp / 8))
+      const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+      results.push({ battlerId, effect: 'SEA_OF_FIRE', hpChange: -dmg, fainted })
+    }
+
     const frostbite = runFrostbite(state, battlerId, battler)
     if (frostbite) results.push(frostbite)
 
@@ -1243,8 +1268,52 @@ export function runEndTurnEffects(
     const curse = runCurse(state, battlerId, battler)
     if (curse) results.push(curse)
 
+    // ENDTURN_SALT_CURE, battle_util.c:2634-2648.
+    // STATUS4_SALT_CURE damage (1/4 for Water/Steel else 1/8, Magic Guard).
+    // getMonotypeChampType() == TYPE_ROCK half is not modelled (external fact, see header).
+    if (hasFlag(battler.statuses4, STATUS4_SALT_CURE) && battler.mon.hp !== 0) {
+      if (!isMagicGuardProtected(state, battler)) {
+        const isWaterOrSteel = battler.mon.types.includes('WATER') || battler.mon.types.includes('STEEL')
+        const fraction = isWaterOrSteel ? 4 : 8
+        const dmg = Math.max(1, Math.floor(battler.mon.maxHp / fraction))
+        const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+        results.push({ battlerId, effect: 'SALT_CURE', hpChange: -dmg, fainted })
+      }
+    }
+
     const wrap = runWrap(state, battlerId, battler, dataContext, deps?.grounding)
     if (wrap) results.push(wrap)
+
+    // ENDTURN_OCTOLOCK, battle_util.c:2708-2716, BattleScript_OctolockEndTurn (data/battle_scripts_1.s:282-305).
+    if (
+      battler.volatiles.octolock &&
+      !isStatDropBlocked(state, battler, STAT_DEF, false, { dataContext, grounding: statusDeps.grounding }, unmodelled) &&
+      !isStatDropBlocked(state, battler, STAT_SPDEF, false, { dataContext, grounding: statusDeps.grounding }, unmodelled) &&
+      !hasClearAmulet(battler, dataContext)
+    ) {
+      changeStatBuffsImplicit(
+        state,
+        battlerId,
+        battlerId,
+        -1,
+        STAT_DEF,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext, grounding: statusDeps.grounding },
+        unmodelled,
+      )
+      changeStatBuffsImplicit(
+        state,
+        battlerId,
+        battlerId,
+        -1,
+        STAT_SPDEF,
+        STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext, grounding: statusDeps.grounding },
+        unmodelled,
+      )
+    }
 
     const burn = runBurn(state, battlerId, battler)
     if (burn) results.push(burn)
@@ -1381,6 +1450,11 @@ export function runEndTurnEffects(
     // ENDTURN_POWDER, :2919-2921 -- unconditional.
     battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_POWDER)
 
+    // ENDTURN_THROAT_CHOP, battle_util.c:2923-2929 -- timer decrement.
+    if (battler.volatiles.throatChopTimer > 0) {
+      battler.volatiles.throatChopTimer--
+    }
+
     // ENDTURN_SLOW_START, :2930-2941 -- timer decrement.
     if (battler.volatiles.slowStartTimer > 0) {
       battler.volatiles.slowStartTimer--
@@ -1389,6 +1463,10 @@ export function runEndTurnEffects(
     // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- SUBTRACT_VOLATILE_TIMER(trepidation) (:2976)
     if (battler.volatiles.trepidation > 0 && !battler.volatiles.started.trepidation) {
       battler.volatiles.trepidation--
+    }
+    if (!battler.volatiles.started.fear) {
+      battler.statuses4 = clearFlag(battler.statuses4, STATUS4_FEAR)
+      battler.volatiles.fear = false
     }
 
     gapIf(

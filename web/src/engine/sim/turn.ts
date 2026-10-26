@@ -1860,7 +1860,18 @@ export function executeAction(
   // attackerHoldEffect.
   const attackerMon = state.battlers[battlerId]?.mon
   const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
-  const cancelResult = runAttackCanceller(state, battlerId, targetId, action.chosenMove.id, deps.dataContext.move(action.chosenMove.id), unmodelled, attackerHoldEffect, deps.grounding, action.chosenMove)
+  const cancelResult = runAttackCanceller(
+    state,
+    battlerId,
+    targetId,
+    action.chosenMove.id,
+    deps.dataContext.move(action.chosenMove.id),
+    unmodelled,
+    attackerHoldEffect,
+    deps.grounding,
+    action.chosenMove,
+    deps.dataContext,
+  )
   if (cancelResult.cancelledBy) {
     let confusionSelfHitDamage = cancelResult.confusionSelfHitDamage
     const cancelFainted: number[] = []
@@ -2623,6 +2634,13 @@ export function executeAction(
       }
     }
 
+    // BattleScript_EffectSnapJaw (data/battle_scripts_1.s:12415-12422):
+    // setrandom 2 runs BEFORE BattleScript_EffectHit's accuracycheck.
+    let snapJawRaiseSpeed: boolean | null = null
+    if (moveEffect === 'EFFECT_SNAP_JAW') {
+      snapJawRaiseSpeed = (state.rng.random16() % 2) === 0
+    }
+
     // Cmd_accuracycheck, battle_script_commands.c:1398-1447. Drawn from
     // state.rng BEFORE the damage resolver's own crit/roll draws, matching
     // BattleScript_EffectHit (battle_scripts_1.s:2857-2863): accuracycheck,
@@ -2953,6 +2971,8 @@ export function executeAction(
       moveId: currentMove.id,
       targetDamage,
       targetHasActedThisTurn,
+      snapJawRaiseSpeed,
+      order: order.battlerByTurnOrder,
       deps: {
         dataContext: deps.dataContext,
         grounding: deps.grounding,
