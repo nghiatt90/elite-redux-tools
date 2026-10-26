@@ -122,7 +122,12 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
-import { dispatchOnWeatherChange } from './onWeather'
+import {
+  dispatchOnTerrainChange,
+  dispatchOnWeatherChange,
+  protosynthesisHandler,
+  quarkDriveHandler,
+} from './onWeather'
 import {
   B_MSG_DEFENDER_STAT_FELL,
   B_MSG_STAT_WONT_DECREASE,
@@ -983,7 +988,7 @@ export function applySwitchInAbilities(
     { slotIndex: 0, abilityId: battler.mon.abilities.ability },
   ]
 
-  for (const { abilityId } of slotEntries) {
+  for (const { abilityId, slotIndex } of slotEntries) {
     if (!abilityId) continue
     if (!SWITCH_IN_ABILITY_IDS.has(abilityId)) continue
     if (isSimAbilitySuppressed(state, battler, abilityId, false, battler.id, false, deps.dataContext)) {
@@ -1006,10 +1011,13 @@ export function applySwitchInAbilities(
     const terrainFlag = TERRAIN_SETTER_MAP[abilityId]
     if (terrainFlag !== undefined) {
       const success = tryChangeBattleTerrain(state, battlerId, terrainFlag, deps)
-      if (terrainFlag === STATUS_FIELD_ELECTRIC_TERRAIN && success) {
-        for (let i = 0; i < state.battlersCount; i++) {
-          disableSwitchInAbility(state, i, 'ABILITY_GENERATOR', deps.dataContext)
-          disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
+      if (success) {
+        dispatchOnTerrainChange(state, deps, unmodelled)
+        if (terrainFlag === STATUS_FIELD_ELECTRIC_TERRAIN) {
+          for (let i = 0; i < state.battlersCount; i++) {
+            disableSwitchInAbility(state, i, 'ABILITY_GENERATOR', deps.dataContext)
+            disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
+          }
         }
       }
       continue
@@ -1019,6 +1027,7 @@ export function applySwitchInAbilities(
       // Impl<ABILITY_ELECTRIC_SURGE>.onEntry | Impl<ABILITY_DRIZZLE>.onEntry (abilities.cc:10485)
       const success = tryChangeBattleTerrain(state, battlerId, STATUS_FIELD_ELECTRIC_TERRAIN, deps)
       if (success) {
+        dispatchOnTerrainChange(state, deps, unmodelled)
         for (let i = 0; i < state.battlersCount; i++) {
           disableSwitchInAbility(state, i, 'ABILITY_GENERATOR', deps.dataContext)
           disableSwitchInAbility(state, i, 'ABILITY_ENERGIZED', deps.dataContext)
@@ -1042,7 +1051,9 @@ export function applySwitchInAbilities(
       } else {
         flag = state.rng.random16() % 2 === 0 ? STATUS_FIELD_GRASSY_TERRAIN : STATUS_FIELD_PSYCHIC_TERRAIN
       }
-      tryChangeBattleTerrain(state, battlerId, flag, deps)
+      if (tryChangeBattleTerrain(state, battlerId, flag, deps)) {
+        dispatchOnTerrainChange(state, deps, unmodelled)
+      }
       continue
     }
 
@@ -1445,6 +1456,17 @@ export function applySwitchInAbilities(
     if (abilityId === 'ABILITY_SLOW_START' || abilityId === 'ABILITY_LETHARGY') {
       // abilities.cc:1744 (Impl<ABILITY_SLOW_START>.onEntry) / 4964 (Impl<ABILITY_LETHARGY>.onEntry)
       battler.volatiles.slowStartTimer = 5
+      continue
+    }
+
+    // 7. Paradox abilities onEntry (src/abilities.cc:6970, 7026)
+    if (abilityId === 'ABILITY_PROTOSYNTHESIS') {
+      protosynthesisHandler(state, battlerId, slotIndex, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_QUARK_DRIVE') {
+      quarkDriveHandler(state, battlerId, slotIndex, deps, unmodelled)
       continue
     }
 

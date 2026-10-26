@@ -196,7 +196,7 @@ import {
 import { canBattlerHeal, isHealingBlocked } from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
-import { dispatchOnWeatherChange } from './onWeather'
+import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
@@ -3138,10 +3138,10 @@ function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /** Abilities with an onTerrain hook (abilityHooks.json), run by BattleScript_OnTerrainChanged
- * (data/battle_scripts_1.s:9947-9955, VARIOUS_ON_TERRAIN_CHANGE) -- not ported. */
-const ON_TERRAIN_ABILITIES = [
+ * (data/battle_scripts_1.s:9947-9955, VARIOUS_ON_TERRAIN_CHANGE) -- Quark Drive is ported; others unmodelled. */
+const ON_TERRAIN_UNMODELLED_ABILITIES = [
   'ABILITY_DRAKELP_HEAD', 'ABILITY_ENERGIZED', 'ABILITY_GENERATOR', 'ABILITY_HARUKAZE',
-  'ABILITY_MIMICRY', 'ABILITY_QUARK_DRIVE', 'ABILITY_TOXIC_BOOST',
+  'ABILITY_MIMICRY', 'ABILITY_TOXIC_BOOST',
 ]
 
 /**
@@ -3162,9 +3162,11 @@ function applyTerrainMove(ctx: MoveEffectContext, terrainFlag: number): ActionOu
   state.field.timers.terrainTimer =
     deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_TERRAIN_EXTENDER' ? TERRAIN_DURATION_EXTENDED : TERRAIN_DURATION
 
+  dispatchOnTerrainChange(state, deps, unmodelled)
+
   for (let i = 0; i < state.battlersCount; i++) {
     const b = state.battlers[i]
-    const held = b && ON_TERRAIN_ABILITIES.find((id) => battlerHasSimAbility(state, b, id, false, i, false, deps.dataContext))
+    const held = b && ON_TERRAIN_UNMODELLED_ABILITIES.find((id) => battlerHasSimAbility(state, b, id, false, i, false, deps.dataContext))
     if (held) unmodelled.push(`battler ${i}: ${held}'s onTerrain reaction (BattleScript_OnTerrainChanged, battle_scripts_1.s:9947-9955) is not applied`)
   }
   return outcome(ctx, {})
@@ -3764,6 +3766,10 @@ function handleRecycle(ctx: MoveEffectContext): ActionOutcome {
   if (usedItem && usedItem !== 'ITEM_NONE' && (!currentItem || currentItem === 'ITEM_NONE')) {
     battler.mon.itemId = usedItem
     battler.usedHeldItem = null
+    const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
+    if (slotU !== -1) battler.volatiles.abilityState[slotU] = 0
+    const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+    if (slotS !== -1) battler.volatiles.abilityState[slotS] = 0
     return outcome(ctx, {})
   }
 
@@ -9120,10 +9126,12 @@ function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | null, d
 function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
   const itemId = battler.mon.itemId
   if (!itemId) return
+  const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
+  if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1
+  const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+  if (slotS !== -1) battler.volatiles.abilityState[slotS] = 1
+
   const hasAbility = (b: BattlerState, id: string) => findAbilitySlot(b.mon.abilities, id) !== -1
-  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
-    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
-  }
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
     unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
   }
@@ -9184,14 +9192,11 @@ export function handleBestow(ctx: MoveEffectContext): ActionOutcome {
     // UpdateBattlerItem(gBattlerAttacker, ITEM_NONE), then UpdateBattlerItem(gBattlerTarget, gLastUsedItem) (:7709-7710)
     clearBattlerItem(state, battler, unmodelled)
     if (targetItem !== attackerItem) {
-      if (
-        targetItem === null &&
-        (findAbilitySlot(target.mon.abilities, 'ABILITY_UNBURDEN') !== -1 ||
-          findAbilitySlot(target.mon.abilities, 'ABILITY_SUGAR_RUSH') !== -1)
-      ) {
-        unmodelled.push(
-          "UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2194-2197) is not modelled",
-        )
+      if (targetItem === null) {
+        const slotU = findAbilitySlot(target.mon.abilities, 'ABILITY_UNBURDEN')
+        if (slotU !== -1) target.volatiles.abilityState[slotU] = 0
+        const slotS = findAbilitySlot(target.mon.abilities, 'ABILITY_SUGAR_RUSH')
+        if (slotS !== -1) target.volatiles.abilityState[slotS] = 0
       }
       target.mon.itemId = attackerItem
     }
@@ -9717,14 +9722,10 @@ export function handleTrick(ctx: MoveEffectContext): ActionOutcome {
   const applyUpdateBattlerItem = (holder: BattlerState, oldItem: string | null, newItem: string | null): void => {
     if (oldItem === newItem) return
     if (oldItem === null) {
-      if (
-        findAbilitySlot(holder.mon.abilities, 'ABILITY_UNBURDEN') !== -1 ||
-        findAbilitySlot(holder.mon.abilities, 'ABILITY_SUGAR_RUSH') !== -1
-      ) {
-        unmodelled.push(
-          "UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2197-2200) is not modelled",
-        )
-      }
+      const slotU = findAbilitySlot(holder.mon.abilities, 'ABILITY_UNBURDEN')
+      if (slotU !== -1) holder.volatiles.abilityState[slotU] = 0
+      const slotS = findAbilitySlot(holder.mon.abilities, 'ABILITY_SUGAR_RUSH')
+      if (slotS !== -1) holder.volatiles.abilityState[slotS] = 0
       holder.mon.itemId = newItem
     } else if (newItem === null) {
       clearBattlerItem(state, holder, unmodelled)

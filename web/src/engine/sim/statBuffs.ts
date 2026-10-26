@@ -29,6 +29,7 @@ import {
   hasFlag,
 } from './constants'
 import { battlerHasAbility } from '../abilities/dispatch'
+import { findAbilitySlot } from './statusEffects'
 import type { SimDataContext } from './dataContext'
 import { MOLD_BREAKABLE_ABILITIES, UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
 import { weatherHasEffect } from './fieldEndTurn'
@@ -952,10 +953,12 @@ export function consumeHeldItem(state: BattleState, battler: BattlerState, unmod
   if (itemId) {
     battler.usedHeldItem = itemId
   }
+  const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
+  if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1
+  const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+  if (slotS !== -1) battler.volatiles.abilityState[slotS] = 1
+
   const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
-  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
-    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
-  }
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
     unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
   }

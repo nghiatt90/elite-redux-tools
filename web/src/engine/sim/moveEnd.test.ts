@@ -1928,7 +1928,7 @@ describe('Knock Off (MOVEEND_MOVE_EFFECTS2_ON_EACH)', () => {
     expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
   })
 
-  it('gaps UpdateBattlerItem ability state only when the target actually has Unburden', () => {
+  it('writes Unburden ability state (no gap) when the target actually has Unburden', () => {
     const withUnburden = battle(
       [
         { hp: 100, maxHp: 100 },
@@ -1937,7 +1937,8 @@ describe('Knock Off (MOVEEND_MOVE_EFFECTS2_ON_EACH)', () => {
       scriptedRng([0, 0]),
     )
     const gapped = executeTurn(withUnburden, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
-    expect(gapped.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Unburden'))).toBe(true)
+    expect(gapped.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Unburden'))).toBe(false)
+    expect(withUnburden.battlers[1]!.volatiles.abilityState[0]).toBe(1)
 
     const plain = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
     const clean = executeTurn(plain, [useMove(1, MOVE_KNOCK_OFF), null], knockOffDeps(fixedDamage(30)))
@@ -2056,13 +2057,13 @@ describe('Thief (MOVE_EFFECT_STEAL_ITEM, battle_script_commands.c:4579-4593)', (
     expect(state.battlers[1]!.mon.itemId).toBe('ITEM_LEFTOVERS')
   })
 
-  it('gaps the receiver\'s Unburden reset only when the thief actually has Unburden', () => {
+  it('no longer gaps the receiver\'s Unburden reset (ported in cycle 80)', () => {
     const withUnburden = battle(
       [{ abilities: { ability: requireAbility('ABILITY_UNBURDEN'), innates: [null, null, null] } }, { itemId: 'ITEM_LEFTOVERS' }],
       scriptedRng([0, 0]),
     )
     const gapped = executeTurn(withUnburden, [useMove(1, MOVE_THIEF), null], deps())
-    expect(actionOf(gapped, 0).unmodelled.some((m) => m.includes('Unburden'))).toBe(true)
+    expect(actionOf(gapped, 0).unmodelled.some((m) => m.includes('Unburden'))).toBe(false)
 
     const plain = battle([{}, { itemId: 'ITEM_LEFTOVERS' }], scriptedRng([0, 0]))
     const clean = executeTurn(plain, [useMove(1, MOVE_THIEF), null], deps())

@@ -92,6 +92,12 @@ import {
 } from './switchInAbility'
 import { switchIn } from './switchIn'
 import type { HazardDeps } from './hazards'
+import {
+  PARADOX_BOOSTER_ENERGY,
+  PARADOX_WEATHER_ACTIVE,
+  dispatchOnTerrainChange,
+} from './onWeather'
+import { consumeHeldItem } from './statBuffs'
 
 // ---------------------------------------------------------------------------
 // Verbatim Fixture Block from moveEnd.test.ts
@@ -1825,6 +1831,348 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
     disableSwitchInAbility(state, 0, 'ABILITY_WIND_RIDER', DATA_CONTEXT)
     expect(state.battlers[0]!.volatiles.switchInAbilityDone[1]).toBe(true)
     expect(state.battlers[0]!.volatiles.switchInAbilityDone[0]).toBe(false)
+  })
+})
+
+describe('cycle 80: Paradox abilities (Protosynthesis, Quark Drive, Booster Energy) and abilityOn writers', () => {
+  it('Protosynthesis onEntry starts boost in sun on highest stat and does not consume Booster Energy', () => {
+    const state = battle(
+      [
+        {
+          atk: 120,
+          def: 90,
+          spe: 100,
+          spatk: 80,
+          spdef: 85,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.field.weather = WEATHER_SUN_TEMPORARY
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_WEATHER_ACTIVE | (STAT_ATK << 2))
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_BOOSTER_ENERGY')
+    expect(state.battlers[0]!.usedHeldItem ?? null).toBeNull()
+  })
+
+  it('Protosynthesis onEntry consumes Booster Energy when sun is absent', () => {
+    const state = battle(
+      [
+        {
+          atk: 120,
+          def: 90,
+          spe: 100,
+          spatk: 80,
+          spdef: 85,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.field.weather = WEATHER_NONE
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_ATK << 2))
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+    expect(state.battlers[0]!.usedHeldItem ?? null).toBeNull()
+  })
+
+  it('Protosynthesis onEntry does not activate or consume item when Booster Energy is negated', () => {
+    const state = battle(
+      [
+        {
+          atk: 120,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.field.weather = WEATHER_NONE
+    // holdEffectOf returns null (simulating Klutz or Embargo)
+    const deps = makeTestDeps({ 0: null as unknown as string })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_BOOSTER_ENERGY')
+  })
+
+  it('Protosynthesis onEntry does not activate without sun or Booster Energy', () => {
+    const state = battle(
+      [
+        {
+          atk: 120,
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.field.weather = WEATHER_NONE
+    const deps = makeTestDeps()
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+  })
+
+  it('Quark Drive onEntry starts boost in Electric Terrain on highest stat and does not consume Booster Energy', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          atk: 100,
+          def: 90,
+          spatk: 80,
+          spdef: 85,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.field.statuses |= STATUS_FIELD_ELECTRIC_TERRAIN
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_WEATHER_ACTIVE | (STAT_SPEED << 2))
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_BOOSTER_ENERGY')
+  })
+
+  it('Quark Drive onEntry consumes Booster Energy when Electric Terrain is absent', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          atk: 100,
+          def: 90,
+          spatk: 80,
+          spdef: 85,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_SPEED << 2))
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+  })
+
+  it('Quark Drive onEntry does not activate or consume item when Booster Energy is negated', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    const deps = makeTestDeps({ 0: null as unknown as string })
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+    expect(state.battlers[0]!.mon.itemId).toBe('ITEM_BOOSTER_ENERGY')
+  })
+
+  it('Quark Drive onEntry does not activate without Electric Terrain or Booster Energy', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    const deps = makeTestDeps()
+    applySwitchInAbilities(state, 0, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+  })
+
+  it('Quark Drive activates when Electric Surge setter switches in', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          atk: 100,
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {
+          spe: 50,
+          abilities: { ability: requireAbility('ABILITY_ELECTRIC_SURGE'), innates: [null, null, null] },
+        },
+      ],
+      scriptedRng(),
+    )
+    const deps = makeTestDeps()
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+
+    // Battler 1 switches in and sets Electric Terrain, triggering dispatchOnTerrainChange
+    applySwitchInAbilities(state, 1, deps, [])
+
+    expect(state.field.statuses & STATUS_FIELD_ELECTRIC_TERRAIN).toBeTruthy()
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_WEATHER_ACTIVE | (STAT_SPEED << 2))
+  })
+
+  it('Quark Drive deactivates when Electric Terrain ends without Booster Energy', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.battlers[0]!.volatiles.abilityState[0] = PARADOX_WEATHER_ACTIVE | (STAT_SPEED << 2)
+    // Terrain is not active
+    const deps = makeTestDeps()
+    dispatchOnTerrainChange(state, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+  })
+
+  it('Quark Drive transitions to Booster Energy and consumes item when Electric Terrain ends', () => {
+    const state = battle(
+      [
+        {
+          spe: 130,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_QUARK_DRIVE'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    state.battlers[0]!.volatiles.abilityState[0] = PARADOX_WEATHER_ACTIVE | (STAT_SPEED << 2)
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+    dispatchOnTerrainChange(state, deps, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_SPEED << 2))
+    expect(state.battlers[0]!.mon.itemId).toBeNull()
+  })
+
+  it('tie-breaking follows C struct order: ATK > DEF > SPEED > SPATK > SPDEF', () => {
+    const deps = makeTestDeps({ 0: 'HOLD_EFFECT_BOOSTER_ENERGY' })
+
+    // ATK == DEF -> ATK wins
+    const stateAtkDef = battle(
+      [
+        {
+          atk: 120,
+          def: 120,
+          spe: 100,
+          spatk: 100,
+          spdef: 100,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateAtkDef, 0, deps, [])
+    expect(stateAtkDef.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_ATK << 2))
+
+    // DEF == SPEED -> DEF wins
+    const stateDefSpe = battle(
+      [
+        {
+          atk: 100,
+          def: 120,
+          spe: 120,
+          spatk: 100,
+          spdef: 100,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateDefSpe, 0, deps, [])
+    expect(stateDefSpe.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_DEF << 2))
+
+    // SPEED == SPATK -> SPEED wins
+    const stateSpeSpatk = battle(
+      [
+        {
+          atk: 100,
+          def: 100,
+          spe: 120,
+          spatk: 120,
+          spdef: 100,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSpeSpatk, 0, deps, [])
+    expect(stateSpeSpatk.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_SPEED << 2))
+
+    // SPATK == SPDEF -> SPATK wins
+    const stateSpatkSpdef = battle(
+      [
+        {
+          atk: 100,
+          def: 100,
+          spe: 100,
+          spatk: 120,
+          spdef: 120,
+          itemId: 'ITEM_BOOSTER_ENERGY',
+          abilities: { ability: requireAbility('ABILITY_PROTOSYNTHESIS'), innates: [null, null, null] },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateSpatkSpdef, 0, deps, [])
+    expect(stateSpatkSpdef.battlers[0]!.volatiles.abilityState[0]).toBe(PARADOX_BOOSTER_ENERGY | (STAT_SPATK << 2))
+  })
+
+  it('consumeHeldItem sets abilityState for Unburden and Sugar Rush', () => {
+    const state = battle(
+      [
+        {
+          itemId: 'ITEM_SITRUS_BERRY',
+          abilities: {
+            ability: requireAbility('ABILITY_UNBURDEN'),
+            innates: [requireAbility('ABILITY_SUGAR_RUSH'), null, null],
+          },
+        },
+        {},
+      ],
+      scriptedRng(),
+    )
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+    expect(state.battlers[0]!.volatiles.abilityState[1]).toBe(0)
+
+    consumeHeldItem(state, state.battlers[0]!, [])
+
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(1)
+    expect(state.battlers[0]!.volatiles.abilityState[1]).toBe(1)
   })
 })
 

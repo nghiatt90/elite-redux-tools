@@ -10,12 +10,13 @@
 import type { BattleState } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
-import { canBeBurned } from './statusEffects'
+import { canBeBurned, isTerrainActive } from './statusEffects'
 import {
   DEFAULT_STAT_STAGE_RATIOS,
   STATUS1_BURN,
   STATUS2_ENRAGED,
   STATUS2_TRANSFORMED,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_SUN_ANY,
@@ -41,9 +42,9 @@ export interface OnWeatherDeps {
 }
 
 /** ParadoxBoostSource, include/battle_util.h:109-113. */
-const PARADOX_BOOST_NOT_ACTIVE = 0
-const PARADOX_BOOSTER_ENERGY = 1
-const PARADOX_WEATHER_ACTIVE = 2
+export const PARADOX_BOOST_NOT_ACTIVE = 0
+export const PARADOX_BOOSTER_ENERGY = 1
+export const PARADOX_WEATHER_ACTIVE = 2
 
 /** IsWeatherActive, src/battle_util.c:8638-8641. */
 function isWeatherActive(state: BattleState, weather: number, grounding: GroundingContext): boolean {
@@ -52,7 +53,7 @@ function isWeatherActive(state: BattleState, weather: number, grounding: Groundi
 
 /** ProtosynthesisHandler, src/abilities.cc:6927-6967. abilityState packs ParadoxBoost
  * (include/battle_util.h:115-118) as `source:2` then `statId:3`. */
-function protosynthesisHandler(state: BattleState, battlerId: number, slot: number, deps: OnWeatherDeps, unmodelled: string[]): void {
+export function protosynthesisHandler(state: BattleState, battlerId: number, slot: number, deps: OnWeatherDeps, unmodelled: string[]): void {
   const battler = state.battlers[battlerId]!
   const source = (battler.volatiles.abilityState[slot] ?? 0) & 3
   const ratios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
@@ -72,6 +73,40 @@ function protosynthesisHandler(state: BattleState, battlerId: number, slot: numb
   if (source === PARADOX_BOOST_NOT_ACTIVE && sun) {
     activate(PARADOX_WEATHER_ACTIVE)
   } else if (source === PARADOX_WEATHER_ACTIVE && !sun) {
+    if (hasBoosterEnergy()) {
+      activate(PARADOX_BOOSTER_ENERGY)
+      removeItem()
+    } else {
+      battler.volatiles.abilityState[slot] = 0
+    }
+  } else if (source === PARADOX_BOOST_NOT_ACTIVE && hasBoosterEnergy()) {
+    activate(PARADOX_BOOSTER_ENERGY)
+    removeItem()
+  }
+}
+
+/** QuarkDriveHandler, src/abilities.cc:6983-7023. abilityState packs ParadoxBoost
+ * (include/battle_util.h:115-118) as `source:2` then `statId:3`. */
+export function quarkDriveHandler(state: BattleState, battlerId: number, slot: number, deps: OnWeatherDeps, unmodelled: string[]): void {
+  const battler = state.battlers[battlerId]!
+  const source = (battler.volatiles.abilityState[slot] ?? 0) & 3
+  const ratios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
+  const electric = isTerrainActive(state, STATUS_FIELD_ELECTRIC_TERRAIN, deps)
+  const hasBoosterEnergy = () => deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_BOOSTER_ENERGY'
+  const activate = (boostSource: number) => {
+    battler.volatiles.abilityState[slot] = boostSource | (getHighestStatId(state, battlerId, ratios) << 2)
+  }
+  // RemoveItem (battle_script_commands.c:2231) is UpdateBattlerItem alone; usedHeldItems
+  // belongs to Cmd_removeitem, so consumeHeldItem's write to it is undone.
+  const removeItem = () => {
+    const used = battler.usedHeldItem
+    consumeHeldItem(state, battler, unmodelled)
+    battler.usedHeldItem = used
+  }
+
+  if (source === PARADOX_BOOST_NOT_ACTIVE && electric) {
+    activate(PARADOX_WEATHER_ACTIVE)
+  } else if (source === PARADOX_WEATHER_ACTIVE && !electric) {
     if (hasBoosterEnergy()) {
       activate(PARADOX_BOOSTER_ENERGY)
       removeItem()
@@ -163,3 +198,34 @@ export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps,
     }
   }
 }
+
+/**
+ * BattleScript_OnTerrainChanged (data/battle_scripts_1.s:9947-9955) and
+ * VARIOUS_ON_TERRAIN_CHANGE (src/battle_script_commands.c:8191-8198).
+ *
+ * Walks gBattlerAttacker over 0..gBattlersCount-1 with no alive or absent check,
+ * and each step runs ON_ABILITY (include/battle_util.h:269-275) with checkMoldBreaker
+ * FALSE: slots from the last innate down to the ability, skipping suppressed ones,
+ * calling every onTerrain hook in place.
+ */
+export function dispatchOnTerrainChange(state: BattleState, deps: OnWeatherDeps, unmodelled: string[]): void {
+  for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+    const battler = state.battlers[battlerId]
+    if (!battler) continue
+    const { ability, innates } = battler.mon.abilities
+    const slots = [ability, ...innates]
+
+    for (let slot = slots.length - 1; slot >= 0; slot--) {
+      const abilityId = slots[slot]
+      if (!abilityId) continue
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+
+      switch (abilityId) {
+        case 'ABILITY_QUARK_DRIVE':
+          quarkDriveHandler(state, battlerId, slot, deps, unmodelled)
+          break
+      }
+    }
+  }
+}
+

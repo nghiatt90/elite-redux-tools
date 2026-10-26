@@ -227,7 +227,7 @@ import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { isHealingBlocked, isMagicGuardProtected, type EndTurnEffectResult } from './endTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
-import { dispatchOnWeatherChange } from './onWeather'
+import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import {
   hasFlag,
   clearFlag,
@@ -754,6 +754,7 @@ export function runFieldEndTurnEffects(
     state.field.timers.terrainTimer--
     if (state.field.timers.terrainTimer === 0) {
       state.field.statuses = clearFlag(clearFlag(state.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN), STATUS_FIELD_TERRAIN_PERMANENT)
+      dispatchOnTerrainChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
     }
   }
 
@@ -764,7 +765,10 @@ export function runFieldEndTurnEffects(
     !state.field.timers.started.terrain
   ) {
     state.field.timers.terrainTimer--
-    if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)
+    if (state.field.timers.terrainTimer === 0) {
+      state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_MISTY_TERRAIN)
+      dispatchOnTerrainChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
+    }
   }
 
   // ENDTURN_GRASSY_TERRAIN, :2070-2081. checkgrassyterrainheal expands to
@@ -779,7 +783,10 @@ export function runFieldEndTurnEffects(
   if (hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)) {
     if (!hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) && !state.field.timers.started.terrain) {
       state.field.timers.terrainTimer--
-      if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
+      if (state.field.timers.terrainTimer === 0) {
+        state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
+        dispatchOnTerrainChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
+      }
     }
     for (const battlerId of order) {
       // The C's own gate here (battle_script_commands.c:6877-6879) is exactly
@@ -808,7 +815,10 @@ export function runFieldEndTurnEffects(
     !state.field.timers.started.terrain
   ) {
     state.field.timers.terrainTimer--
-    if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_PSYCHIC_TERRAIN)
+    if (state.field.timers.terrainTimer === 0) {
+      state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_PSYCHIC_TERRAIN)
+      dispatchOnTerrainChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
+    }
   }
 
   // ENDTURN_TOXIC_TERRAIN, :2124-2146 (the FILTER chain is :2134-2139). The
@@ -825,7 +835,10 @@ export function runFieldEndTurnEffects(
     const stenchOnField = isAbilityOnField(state, 'ABILITY_STENCH')
     if (!hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) && !state.field.timers.started.terrain && !stenchOnField) {
       state.field.timers.terrainTimer--
-      if (state.field.timers.terrainTimer === 0) state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)
+      if (state.field.timers.terrainTimer === 0) {
+        state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)
+        dispatchOnTerrainChange(state, { dataContext, grounding, statStageRatios }, unmodelled)
+      }
     }
     for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
       if (!isAlive(state, battlerId)) continue

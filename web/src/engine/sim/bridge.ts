@@ -350,8 +350,7 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush; Unburden, Stakeout, Power Outage, Chuckster, Drakelp Head have no writers in the sim' },
-  { field: 'boostedStat', reason: 'NO_SOURCE', detail: 'only Protosynthesis onWeather is ported; switchInAbility.ts onEntry dispatch and Quark Drive onTerrain hook are not ported' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout; Power Outage (onAttacker type-removal), Chuckster (onDefender switch), Drakelp Head (single-use counter) have no writers in the sim' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -515,13 +514,23 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
      * in this field. */
     isGrounded: !mon.types.includes('FLYING'),
     semiInvulnerable: semiInvulnerableState(battler.statuses3),
-    // RESOURCE_FLAG_FLASH_FIRE, ABILITY_SLOW_START (slowStartTimer > 0), and ABILITY_AMBUSH (isFirstTurn > 0).
-    // Unburden, Stakeout, Power Outage, Chuckster, Drakelp Head have no writers in the sim yet.
+    // RESOURCE_FLAG_FLASH_FIRE, ABILITY_SLOW_START / ABILITY_LETHARGY (slowStartTimer > 0), ABILITY_AMBUSH (isFirstTurn > 0),
+    // ABILITY_UNBURDEN / ABILITY_SUGAR_RUSH (abilityState[slot] > 0),
+    // ABILITY_STAKEOUT / ABILITY_OVERWATCH (opponent volatiles.isFirstTurn === 2).
+    // Power Outage (onAttacker type-removal), Chuckster (onDefender switch), Drakelp Head (single-use counter)
+    // have no writers in the sim.
     abilityOn: (() => {
       const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
-      const hasSlowStart = abilityIds.includes('ABILITY_SLOW_START') && battler.volatiles.slowStartTimer > 0
+      const hasSlowStart = (abilityIds.includes('ABILITY_SLOW_START') || abilityIds.includes('ABILITY_LETHARGY')) && battler.volatiles.slowStartTimer > 0
       const hasAmbush = abilityIds.includes('ABILITY_AMBUSH') && battler.volatiles.isFirstTurn > 0
-      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush
+      const unburdenSlot = findAbilitySlot(mon.abilities, 'ABILITY_UNBURDEN')
+      const hasUnburden = unburdenSlot !== -1 && Boolean(battler.volatiles.abilityState[unburdenSlot])
+      const sugarRushSlot = findAbilitySlot(mon.abilities, 'ABILITY_SUGAR_RUSH')
+      const hasSugarRush = sugarRushSlot !== -1 && Boolean(battler.volatiles.abilityState[sugarRushSlot])
+      const hasStakeout =
+        (abilityIds.includes('ABILITY_STAKEOUT') || abilityIds.includes('ABILITY_OVERWATCH')) &&
+        Boolean(state.battlers[opponentId]?.volatiles.isFirstTurn === 2)
+      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout
     })(),
     gender: mon.gender,
     boostedStat: paradoxBoostedStat(battler),

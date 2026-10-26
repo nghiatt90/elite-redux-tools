@@ -341,7 +341,6 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
    * are genuinely derived. */
   const EXPECTED_GAP_FIELDS = [
     'abilityOn',
-    'boostedStat',
     'condition.ghastlyEcho',
     'condition.safePassage',
     'extraStatLevel',
@@ -393,11 +392,11 @@ describe('buildBattlerBattleState: what it reports as a gap', () => {
     expect(battler.slowStartTimer).toBe(0)
   })
 
-  it('gaps the two fields with no honest source anywhere', () => {
+  it('gaps the one field with no honest source anywhere', () => {
     const { gaps } = buildBattlerBattleState(battle(), 0, ROLES, DEPS)
     const noSource = gaps.filter((g) => g.reason === 'NO_SOURCE').map((g) => g.field)
-    expect(noSource).toEqual(expect.arrayContaining(['abilityOn', 'boostedStat']))
-    expect(noSource).toHaveLength(2)
+    expect(noSource).toEqual(['abilityOn'])
+    expect(noSource).toHaveLength(1)
   })
 
   it('derives everything available from the committed data context', () => {
@@ -638,7 +637,7 @@ describe('wasDamagedThisTurnBy is role-relative', () => {
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(false)
   })
 
-  it('derives abilityOn from Flash Fire, Slow Start, and Ambush', () => {
+  it('derives abilityOn from Flash Fire, Slow Start, Ambush, Unburden, and Stakeout', () => {
     const state = battle()
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
 
@@ -661,9 +660,40 @@ describe('wasDamagedThisTurnBy is role-relative', () => {
     state.battlers[0]!.volatiles.isFirstTurn = 0
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
 
+    // Unburden active when item lost (abilityState[slot] > 0)
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_UNBURDEN', innates: [null, null, null] }
+    state.battlers[0]!.volatiles.abilityState[0] = 1
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.abilityState[0] = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Sugar Rush (Unburden clone)
+    state.battlers[0]!.mon.abilities = { ability: null, innates: ['ABILITY_SUGAR_RUSH', null, null] }
+    state.battlers[0]!.volatiles.abilityState[1] = 1
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.abilityState[1] = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Stakeout active when opponent switched in this turn (opponent isFirstTurn === 2)
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_STAKEOUT', innates: [null, null, null] }
+    state.battlers[1]!.volatiles.isFirstTurn = 2
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[1]!.volatiles.isFirstTurn = 1
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+    state.battlers[1]!.volatiles.isFirstTurn = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
+    // Overwatch (Stakeout clone)
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_OVERWATCH', innates: [null, null, null] }
+    state.battlers[1]!.volatiles.isFirstTurn = 2
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[1]!.volatiles.isFirstTurn = 0
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+
     // Neither ability present: even if isFirstTurn > 0, abilityOn is false
     state.battlers[0]!.mon.abilities = { ability: 'ABILITY_NONE', innates: [null, null, null] }
     state.battlers[0]!.volatiles.isFirstTurn = 2
+    state.battlers[1]!.volatiles.isFirstTurn = 2
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
   })
 })

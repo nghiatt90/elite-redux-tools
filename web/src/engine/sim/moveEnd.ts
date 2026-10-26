@@ -89,6 +89,7 @@ import {
 } from './constants'
 import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
+import { findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { canBattlerHeal, isMagicGuardProtected } from './endTurn'
 import { isBattlerGrounded } from './grounding'
@@ -141,7 +142,7 @@ import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './tu
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import { tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
-import { dispatchOnWeatherChange } from './onWeather'
+import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -1597,7 +1598,9 @@ function handleDefenderMoveEndAbility(
   // 23. Seed Sower (src/abilities.cc:6859-6866, battle_util.c:3778-3795)
   if (abilityId === 'ABILITY_SEED_SOWER') {
     if (target.mon.hp > 0) {
-      tryChangeBattleTerrain(state, targetId, STATUS_FIELD_GRASSY_TERRAIN, deps)
+      if (tryChangeBattleTerrain(state, targetId, STATUS_FIELD_GRASSY_TERRAIN, deps)) {
+        dispatchOnTerrainChange(state, deps, unmodelled)
+      }
     }
   }
 
@@ -2630,10 +2633,12 @@ function applyKnockOff(
  */
 function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
   const itemId = battler.mon.itemId
+  const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
+  if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1
+  const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+  if (slotS !== -1) battler.volatiles.abilityState[slotS] = 1
+
   const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
-  if (hasAbility(battler, 'ABILITY_UNBURDEN') || hasAbility(battler, 'ABILITY_SUGAR_RUSH')) {
-    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state (battle_script_commands.c:2198-2204) is not modelled")
-  }
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
     unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
   }
@@ -2671,10 +2676,10 @@ function applyStealItem(
 
   // StealTargetItem, battle_script_commands.c:2224-2229: UpdateBattlerItem(target, NONE), then UpdateBattlerItem(attacker, item).
   clearBattlerItem(state, target, unmodelled)
-  const hasAbility = (id: string) => battlerHasAbility(attacker.mon.abilities, id, () => false)
-  if (hasAbility('ABILITY_UNBURDEN') || hasAbility('ABILITY_SUGAR_RUSH')) {
-    unmodelled.push("UpdateBattlerItem's Unburden / Sugar Rush ability state reset (battle_script_commands.c:2194-2197) is not modelled")
-  }
+  const slotU = findAbilitySlot(attacker.mon.abilities, 'ABILITY_UNBURDEN')
+  if (slotU !== -1) attacker.volatiles.abilityState[slotU] = 0
+  const slotS = findAbilitySlot(attacker.mon.abilities, 'ABILITY_SUGAR_RUSH')
+  if (slotS !== -1) attacker.volatiles.abilityState[slotS] = 0
   // gBattleMons[attacker].item = 0 until MOVEEND_CHANGED_ITEMS (:4585-4586).
   changedItems.set(attackerId, itemId)
 }
