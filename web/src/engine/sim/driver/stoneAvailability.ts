@@ -49,7 +49,9 @@ export function stoneAvailability(item: RawItem, gym: number): StoneAvailability
         ? { available: true, reason: `${text} (needs ${required} badges)`, unverified: false }
         : { available: false, reason: `${text} (needs ${required} badges, have ${badges})`, unverified: false }
     }
-    return { available: true, reason: `${text} (no badge requirement in data)`, unverified: true }
+    // Lapras X (Oceanic Museum) and Shucklenite (Route 110) are the only two with no badge requirement; the
+    // player confirmed both are reachable before gym 5.
+    return { available: true, reason: `${text} (no badge requirement)`, unverified: false }
   }
 
   if (hint.kind === 'adoptionCenter') return { available: true, reason: 'Adoption Center (opens with the Mega Bracelet)', unverified: false }
