@@ -457,7 +457,9 @@ describe('Protect move family: success rates and consecutive uses', () => {
       expect(tackleAction.missed).toBe(true)
       expect(tackleAction.statusApplied).toEqual({ battlerId: 1, status: 'BLEED' })
       expect(state.battlers[1]!.mon.status1 & STATUS1_BLEED).not.toBe(0)
-      expect(state.battlers[1]!.mon.hp).toBe(100) // NO direct recoil damage from the shield itself
+      // NO direct recoil damage from the shield itself: the only loss is ENDTURN_BLEED's maxHP / 16 = 6.
+      expect(out.endTurn).toEqual([{ battlerId: 1, effect: 'BLEED', hpChange: -6, fainted: false }])
+      expect(state.battlers[1]!.mon.hp).toBe(94)
       expect(state.battlers[0]!.mon.hp).toBe(100)
     }
 

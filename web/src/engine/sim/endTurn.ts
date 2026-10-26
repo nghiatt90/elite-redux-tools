@@ -437,7 +437,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -543,6 +543,43 @@ function runBurn(state: BattleState, battlerId: number, battler: BattlerState): 
   const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / 16)) // :2577-2578
   const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
   return { battlerId, effect: 'BURN', hpChange, fainted }
+}
+
+/** ENDTURN_FROSTBITE, battle_util.c:2584-2596 (B_BURN_DAMAGE >= GEN_7: maxHP / 16). */
+function runFrostbite(state: BattleState, battlerId: number, battler: BattlerState): EndTurnEffectResult | null {
+  if (!hasFlag(battler.mon.status1, STATUS1_FROSTBITE)) return null
+  if (battler.mon.hp === 0) return null
+  if (isMagicGuardProtected(state, battler)) return null // MAGIC_GUARD_CHECK
+
+  const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / 16))
+  const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
+  return { battlerId, effect: 'FROSTBITE', hpChange, fainted }
+}
+
+/** ENDTURN_BLEED, battle_util.c:2598-2607 (BLEED_DAMAGE(hp) = hp / 16, include/constants/battle.h:142). */
+function runBleed(state: BattleState, battlerId: number, battler: BattlerState): EndTurnEffectResult | null {
+  if (!hasFlag(battler.mon.status1, STATUS1_BLEED) && !isBloodStainAffected(battler)) return null
+  if (battler.mon.hp === 0) return null
+  if (isMagicGuardProtected(state, battler)) return null // MAGIC_GUARD_CHECK
+
+  const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / 16))
+  const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
+  return { battlerId, effect: 'BLEED', hpChange, fainted }
+}
+
+/** ENDTURN_NIGHTMARES, battle_util.c:2608-2622: maxHP / 4 while asleep, otherwise the flag is silently cleared. */
+function runNightmare(state: BattleState, battlerId: number, battler: BattlerState): EndTurnEffectResult | null {
+  if (!hasFlag(battler.mon.status2, STATUS2_NIGHTMARE)) return null
+  if (battler.mon.hp === 0) return null
+  if (isMagicGuardProtected(state, battler)) return null // MAGIC_GUARD_CHECK precedes the sleep check
+  if (!hasFlag(battler.mon.status1, STATUS1_SLEEP)) {
+    battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+    return null
+  }
+
+  const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / 4))
+  const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
+  return { battlerId, effect: 'NIGHTMARE', hpChange, fainted }
 }
 
 /**
@@ -1023,28 +1060,14 @@ export function runEndTurnEffects(
     const badPoison = poison ? null : runBadPoison(state, battlerId, battler, unmodelled)
     if (badPoison) results.push(badPoison)
 
-    // ENDTURN_FROSTBITE, :2584-2596 -- same shape as BURN, out of this batch's
-    // requested scope.
-    gapIf(
-      hasFlag(battler.mon.status1, STATUS1_FROSTBITE) && battler.mon.hp !== 0,
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_FROSTBITE (battle_util.c:2584-2596) is not applied -- frostbite damage was skipped`,
-    )
+    const frostbite = runFrostbite(state, battlerId, battler)
+    if (frostbite) results.push(frostbite)
 
-    // ENDTURN_BLEED, :2598-2607.
-    gapIf(
-      (hasFlag(battler.mon.status1, STATUS1_BLEED) || isBloodStainAffected(battler)) && battler.mon.hp !== 0,
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_BLEED (battle_util.c:2598-2607) is not applied -- bleed damage was skipped`,
-    )
+    const bleed = runBleed(state, battlerId, battler)
+    if (bleed) results.push(bleed)
 
-    // ENDTURN_NIGHTMARES, :2608-2622 -- only the damage sub-branch (asleep) is
-    // gapped; the silent-clear sub-branch (awake) has no numeric consequence.
-    gapIf(
-      hasFlag(battler.mon.status2, STATUS2_NIGHTMARE) && battler.mon.hp !== 0 && hasFlag(battler.mon.status1, STATUS1_SLEEP),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_NIGHTMARES (battle_util.c:2608-2622) is not applied -- maxHP/4 nightmare damage was skipped`,
-    )
+    const nightmare = runNightmare(state, battlerId, battler)
+    if (nightmare) results.push(nightmare)
 
     const burn = runBurn(state, battlerId, battler)
     if (burn) results.push(burn)

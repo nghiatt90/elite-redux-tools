@@ -4299,7 +4299,9 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           // Cmd_tryhealhalfhealth (battle_script_commands.c:9255-9274): CanBattlerHeal fails on bleed, so the
           // heal is 0; BattleScript_RestoreHp (battle_scripts_1.s:3949-3955) has no bleed branch.
           expect(state.battlers[0]!.mon.status1).toBe(STATUS1_BLEED)
-          expect(state.battlers[0]!.mon.hp).toBe(50)
+          // No heal (50), then ENDTURN_BLEED (battle_util.c:2598-2607) takes maxHP / 16 = 6 at the end of the turn.
+          expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'BLEED', hpChange: -6, fainted: false }])
+          expect(state.battlers[0]!.mon.hp).toBe(44)
         })
       })
 
@@ -4384,8 +4386,10 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           const act = out.actions.find((a) => a.battlerId === 0)!
           expect(act.missed).toBe(false)
           expect(state.battlers[0]!.mon.pp[0]).toBe(9)
-          // Fully healed: 30 -> 100
-          expect(state.battlers[0]!.mon.hp).toBe(100)
+          // Fully healed 30 -> 100, then the surviving Nightmare costs maxHP / 4 = 25 at the end of the turn
+          // (ENDTURN_NIGHTMARES, battle_util.c:2608-2622; the user is asleep after Rest).
+          expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'NIGHTMARE', hpChange: -25, fainted: false }])
+          expect(state.battlers[0]!.mon.hp).toBe(75)
           // Burn replaced by sleep for 3 turns (STATUS1_SLEEP_TURN(3)); Cmd_trysetrest writes status1 only,
           // so Nightmare stays.
           expect(state.battlers[0]!.mon.status1).toBe(3)

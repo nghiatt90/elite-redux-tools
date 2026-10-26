@@ -11,10 +11,14 @@ import type { BattleState, RandomSource, SimBattleMon } from './state'
 import {
   DEFAULT_STAT_STAGE,
   STAT_SPEED,
+  STATUS1_BLEED,
   STATUS1_BURN,
+  STATUS1_FROSTBITE,
   STATUS1_POISON,
+  STATUS1_SLEEP,
   STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
+  STATUS2_NIGHTMARE,
   STATUS3_GASTRO_ACID,
   STATUS3_HEAL_BLOCK,
   STATUS_FIELD_TOXIC_TERRAIN,
@@ -276,6 +280,61 @@ describe('executeTurn: end-turn ladder -- ENDTURN_BURN (battle_util.c:2573-2582)
     const out = executeTurn(state, [null, null], deps())
     expect(out.endTurn).toEqual([])
     expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_FROSTBITE (battle_util.c:2584-2596)', () => {
+  it('deals floor(maxHp/16), minimum 1', () => {
+    const state = battle([{ spe: 100, maxHp: 160, status1: STATUS1_FROSTBITE }, { spe: 50, maxHp: 100 }], scripted())
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'FROSTBITE', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(150)
+
+    const tiny = battle([{ spe: 100, maxHp: 15, status1: STATUS1_FROSTBITE }, { spe: 50, maxHp: 100 }], scripted())
+    expect(executeTurn(tiny, [null, null], deps()).endTurn).toEqual([{ battlerId: 0, effect: 'FROSTBITE', hpChange: -1, fainted: false }])
+  })
+
+  it('Magic Guard prevents it', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, status1: STATUS1_FROSTBITE, abilities: { ability: MAGIC_GUARD, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    expect(executeTurn(state, [null, null], deps()).endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.hp).toBe(160)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_BLEED (battle_util.c:2598-2607)', () => {
+  it('deals floor(maxHp/16) (BLEED_DAMAGE), minimum 1', () => {
+    const state = battle([{ spe: 100, maxHp: 160, status1: STATUS1_BLEED }, { spe: 50, maxHp: 100 }], scripted())
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'BLEED', hpChange: -10, fainted: false }])
+    expect(state.battlers[0]!.mon.hp).toBe(150)
+  })
+
+  it('Magic Guard prevents it', () => {
+    const state = battle(
+      [{ spe: 100, maxHp: 160, status1: STATUS1_BLEED, abilities: { ability: MAGIC_GUARD, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
+      scripted(),
+    )
+    expect(executeTurn(state, [null, null], deps()).endTurn).toEqual([])
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_NIGHTMARES (battle_util.c:2608-2622)', () => {
+  it('deals floor(maxHp/4) while asleep', () => {
+    const state = battle([{ spe: 100, maxHp: 160, status1: STATUS1_SLEEP }, { spe: 50, maxHp: 100 }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_NIGHTMARE
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'NIGHTMARE', hpChange: -40, fainted: false }])
+  })
+
+  it('silently clears the flag when the battler is awake', () => {
+    const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100 }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_NIGHTMARE
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.status2 & STATUS2_NIGHTMARE).toBe(0)
   })
 })
 
