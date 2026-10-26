@@ -12,6 +12,7 @@ import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn } from './turn'
+import { applySwitchInAbilities } from './switchInAbility'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
@@ -668,5 +669,33 @@ describe('EFFECT_HIT_SWITCH_TARGET (Dragon Tail)', () => {
     state.sides[1].party = [partyMon({ hp: 100 }), partyMon({ hp: 70 })]
     executeTurn(state, [useMove(1, move('MOVE_DRAGON_TAIL')), null], testDeps(fixedDamage(10)))
     expect(state.battlers[1]?.partyIndex).toBe(0)
+  })
+})
+
+describe('On-entry abilities: AddBattlerType and announce-only (abilities.cc:239-261)', () => {
+  const entryDeps = { grounding: GROUNDING, dataContext: DATA_CONTEXT, typeChart: typeChart, inverseTypeChart: inverseTypeChart, inverseBattle: false }
+
+  it('Phantom (and its alias Ominous Shroud) adds Ghost as the third type once', () => {
+    for (const ability of ['ABILITY_PHANTOM', 'ABILITY_OMINOUS_SHROUD']) {
+      const state = battle([{ abilities: hasAbility(ability) }, {}], countingRng())
+      const unmodelled: string[] = []
+      applySwitchInAbilities(state, 0, entryDeps, unmodelled)
+      expect(state.battlers[0]?.mon.types).toEqual(['NORMAL', 'MYSTERY', 'GHOST'])
+      expect(unmodelled.filter((n) => n.includes('onEntry hook was not run'))).toEqual([])
+    }
+  })
+
+  it('does nothing when the mon already has the type', () => {
+    const state = battle([{ abilities: hasAbility('ABILITY_PHANTOM'), types: ['GHOST', 'MYSTERY', 'MYSTERY'] }, {}], countingRng())
+    applySwitchInAbilities(state, 0, entryDeps, [])
+    expect(state.battlers[0]?.mon.types).toEqual(['GHOST', 'MYSTERY', 'MYSTERY'])
+  })
+
+  it('announce-only abilities change nothing and raise no gap note', () => {
+    const state = battle([{ abilities: hasAbility('ABILITY_MOLD_BREAKER') }, {}], countingRng())
+    const unmodelled: string[] = []
+    applySwitchInAbilities(state, 0, entryDeps, unmodelled)
+    expect(state.battlers[0]?.mon.types).toEqual(['NORMAL', 'MYSTERY', 'MYSTERY'])
+    expect(unmodelled.filter((n) => n.includes('onEntry hook was not run'))).toEqual([])
   })
 })

@@ -957,6 +957,54 @@ function applyDownload(
   )
 }
 
+/** abilities.cc AddBattlerType users: ability -> type, including the abilities whose onEntry is Impl<BASE>.onEntry. */
+const ADD_TYPE_ON_ENTRY: Record<string, string> = {
+  ABILITY_PHANTOM: 'GHOST',
+  ABILITY_OMINOUS_SHROUD: 'GHOST',
+  ABILITY_BARK_SKIN: 'GHOST',
+  ABILITY_TURBOBLAZE: 'FIRE',
+  ABILITY_LIGHT_SABER: 'FIRE',
+  ABILITY_GROUNDED: 'GROUND',
+  ABILITY_TERAVOLT: 'ELECTRIC',
+  ABILITY_LIGHTNING_BORN: 'ELECTRIC',
+  ABILITY_HALF_DRAKE: 'DRAGON',
+  ABILITY_DRAGONFLY: 'DRAGON',
+  ABILITY_DRAGONFRUIT: 'DRAGON',
+  ABILITY_DRACONIC_MIGHT: 'DRAGON',
+  ABILITY_KOMODO: 'DRAGON',
+  ABILITY_METALLIC: 'STEEL',
+  ABILITY_METALLIC_JAWS: 'STEEL',
+  ABILITY_VOLTRON: 'STEEL',
+  ABILITY_AQUATIC: 'WATER',
+  ABILITY_WATERBORNE: 'WATER',
+  ABILITY_ICE_AGE: 'ICE',
+  ABILITY_BRUISER: 'FIGHTING',
+  ABILITY_FAIRY_TALE: 'FAIRY',
+  ABILITY_FEY_FLIGHT: 'FAIRY',
+  ABILITY_HOVER: 'PSYCHIC',
+  ABILITY_WITCH_BROOM: 'PSYCHIC',
+  ABILITY_ROCKY_EXTERIOR: 'ROCK',
+  ABILITY_ROCK_ARMOR: 'ROCK',
+}
+
+/** onEntry == `return SwitchInAnnounce(...)` and nothing else (abilityHooks.json), plus the aliases that delegate to those. */
+const ANNOUNCE_ONLY_ON_ENTRY: ReadonlySet<string> = new Set([
+  'ABILITY_MOLD_BREAKER',
+  'ABILITY_BLIND_RAGE',
+  'ABILITY_UNNERVE',
+  'ABILITY_FAIRY_AURA',
+  'ABILITY_PIXIE_POWER',
+  'ABILITY_DARK_AURA',
+  'ABILITY_AS_ONE_ICE_RIDER',
+  'ABILITY_AS_ONE_SHADOW_RIDER',
+  'ABILITY_PERMANENCE',
+  'ABILITY_AURA_BREAK',
+  'ABILITY_NIHIL_BLASTER',
+  'ABILITY_BLOOD_STAIN',
+  'ABILITY_CROWNED_KING',
+  'ABILITY_POWER_OUTAGE',
+])
+
 /**
  * Dispatches switch-in abilities for a single battler.
  * Ported from HandleSwitchInAbility (battle_util.c:9103-9204) and
@@ -1469,6 +1517,21 @@ export function applySwitchInAbilities(
       quarkDriveHandler(state, battlerId, slotIndex, deps, unmodelled)
       continue
     }
+
+    // AddBattlerType (src/abilities.cc:254-261): CHECK_NOT(IS_BATTLER_OF_TYPE), then type3 = type. Aliases delegate to the base
+    // ability's onEntry (Impl<ABILITY_X>.onEntry).
+    const addedType = ADD_TYPE_ON_ENTRY[abilityId]
+    if (addedType !== undefined) {
+      if (!battler.mon.types.includes(addedType)) {
+        battler.mon.types = [battler.mon.types[0], battler.mon.types[1], addedType]
+      }
+      continue
+    }
+
+    // SwitchInAnnounce (src/abilities.cc:239-243) only sets the message and BattleScript_SwitchInAbilityMsg: no game state. The
+    // abilities listed here have no other onEntry work (Mold Breaker, Unnerve, the auras, Aura Break...); their effects live in the
+    // damage and move paths that read the ability.
+    if (ANNOUNCE_ONLY_ON_ENTRY.has(abilityId)) continue
 
     unmodelled.push(
       `battler ${battlerId}: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ${abilityId}'s onEntry hook was not run`,
