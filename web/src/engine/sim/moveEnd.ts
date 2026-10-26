@@ -3506,13 +3506,50 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     case 'MOVE_EFFECT_SMACK_DOWN':
       applySmackDown(state, attackerId, targetId, deps)
       break
+    case 'MOVE_EFFECT_REMOVE_STATUS':
+      // C: battle_script_commands.c:4606-4625
+      if (target && target.mon.hp > 0 && targetTurnDamaged) {
+        let statusToClear = 0
+        if (typeof moveData?.argumentInt === 'number' && moveData.argumentInt > 0) {
+          statusToClear = moveData.argumentInt
+        } else if (moveData?.argument && typeof moveData.argument === 'object') {
+          if ('value' in moveData.argument && typeof moveData.argument.value === 'number') {
+            statusToClear = moveData.argument.value
+          } else if ('status' in moveData.argument && typeof moveData.argument.status === 'number') {
+            statusToClear = moveData.argument.status
+          }
+        }
+        if (statusToClear === 0) {
+          if (moveData?.effect === 'EFFECT_SPARKLING_ARIA') {
+            statusToClear = STATUS1_BURN
+          } else if (moveData?.effect === 'EFFECT_WAKE_UP_SLAP') {
+            statusToClear = STATUS1_SLEEP
+          } else if (moveData?.effect === 'EFFECT_SMELLING_SALTS') {
+            statusToClear = STATUS1_PARALYSIS
+          }
+        }
+        if (statusToClear !== 0 && hasFlag(target.mon.status1, statusToClear)) {
+          target.mon.status1 = clearFlag(target.mon.status1, statusToClear)
+        }
+      }
+      break
   }
 
   // Case 21: MOVEEND_NEXT_TARGET (:4782-4822)
   // Double battle second target loop.
 
   // Case 22: MOVEEND_MOVE_EFFECTS2 (:4633-4655)
-  if (moveData?.effect && MOVE_EFFECTS2.has(moveData.effect)) {
+  if (ctx.moveEffect2 === 'MOVE_EFFECT_BURN_UP') {
+    // C: battle_script_commands.c:4640-4643, battle_scripts_1.s:873-877 (VARIOUS_LOSE_TYPE :7620-7639)
+    if (attacker && attacker.mon.hp > 0 && moveData?.type) {
+      const moveType = moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type
+      attacker.mon.types = attacker.mon.types.map((t) => (t === moveType ? 'MYSTERY' : t)) as [
+        string,
+        string,
+        string,
+      ]
+    }
+  } else if (moveData?.effect && MOVE_EFFECTS2.has(moveData.effect)) {
     unmodelled.push(`move-end effect ${moveData.effect} is not modelled yet`)
   }
 

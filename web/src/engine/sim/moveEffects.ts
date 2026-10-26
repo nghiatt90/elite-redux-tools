@@ -190,6 +190,33 @@ import {
   MOVE_EFFECT_STICKY_WEB,
   MOVE_EFFECT_THRASH,
   STATUS2_LOCK_CONFUSE,
+  MOVE_EFFECT_PAYDAY,
+  MOVE_EFFECT_INCINERATE,
+  MOVE_EFFECT_REMOVE_STATUS,
+  MOVE_EFFECT_BURN_UP,
+  MOVE_EFFECT_CLEAR_SMOG,
+  MOVE_EFFECT_FLAME_BURST,
+  MOVE_EFFECT_FEINT,
+  MOVE_EFFECT_SPECTRAL_THIEF,
+  MOVE_EFFECT_V_CREATE,
+  MOVE_EFFECT_CORE_ENFORCER,
+  MOVE_EFFECT_THROAT_CHOP,
+  MOVE_EFFECT_TRAP_BOTH,
+  MOVE_EFFECT_GLAIVE_RUSH,
+  MOVE_EFFECT_SALT_CURE,
+  MOVE_EFFECT_ORDER_UP,
+  MOVE_EFFECT_WATER_PLEDGE,
+  MOVE_EFFECT_FIRE_PLEDGE,
+  MOVE_EFFECT_GRASS_PLEDGE,
+  MOVE_EFFECT_RAINBOW,
+  MOVE_EFFECT_FIRE_SEA,
+  MOVE_EFFECT_SWAMP,
+  MOVE_EFFECT_SYRUP,
+  MOVE_EFFECT_DIRE_CLAW,
+  MOVE_EFFECT_FEAR,
+  MOVE_EFFECT_PSYCHIC_NOISE,
+  PLEDGE_DURATION,
+  STATUS4_SALT_CURE,
 } from './constants'
 import {
   MOVE_EFFECT_AFFECTS_USER,
@@ -7242,7 +7269,7 @@ export function handleFairyLock(ctx: MoveEffectContext): ActionOutcome {
  * DoesBattlerHaveAbilityShield, battle_util.c:6539-6545. No ability sets blocksAbilitySuppression in
  * abilityHooks.json, so only the held Ability Shield (unless Embargoed) can return true.
  */
-function doesBattlerHaveAbilityShield(battler: BattlerState, deps: TurnLoopDeps): boolean {
+function doesBattlerHaveAbilityShield(battler: BattlerState, deps: { dataContext: SimDataContext }): boolean {
   if (battler.mon.itemId) {
     const item = deps.dataContext.item(battler.mon.itemId)
     if (item?.resolvedHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD' && !hasFlag(battler.statuses3, STATUS3_EMBARGO)) {
@@ -11018,6 +11045,31 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_LEECH_SEED: MOVE_EFFECT_LEECH_SEED,
   MOVE_EFFECT_STICKY_WEB: MOVE_EFFECT_STICKY_WEB,
   MOVE_EFFECT_THRASH: MOVE_EFFECT_THRASH,
+  MOVE_EFFECT_PAYDAY: MOVE_EFFECT_PAYDAY,
+  MOVE_EFFECT_INCINERATE: MOVE_EFFECT_INCINERATE,
+  MOVE_EFFECT_REMOVE_STATUS: MOVE_EFFECT_REMOVE_STATUS,
+  MOVE_EFFECT_BURN_UP: MOVE_EFFECT_BURN_UP,
+  MOVE_EFFECT_CLEAR_SMOG: MOVE_EFFECT_CLEAR_SMOG,
+  MOVE_EFFECT_FLAME_BURST: MOVE_EFFECT_FLAME_BURST,
+  MOVE_EFFECT_FEINT: MOVE_EFFECT_FEINT,
+  MOVE_EFFECT_SPECTRAL_THIEF: MOVE_EFFECT_SPECTRAL_THIEF,
+  MOVE_EFFECT_V_CREATE: MOVE_EFFECT_V_CREATE,
+  MOVE_EFFECT_CORE_ENFORCER: MOVE_EFFECT_CORE_ENFORCER,
+  MOVE_EFFECT_THROAT_CHOP: MOVE_EFFECT_THROAT_CHOP,
+  MOVE_EFFECT_TRAP_BOTH: MOVE_EFFECT_TRAP_BOTH,
+  MOVE_EFFECT_GLAIVE_RUSH: MOVE_EFFECT_GLAIVE_RUSH,
+  MOVE_EFFECT_SALT_CURE: MOVE_EFFECT_SALT_CURE,
+  MOVE_EFFECT_ORDER_UP: MOVE_EFFECT_ORDER_UP,
+  MOVE_EFFECT_WATER_PLEDGE: MOVE_EFFECT_WATER_PLEDGE,
+  MOVE_EFFECT_FIRE_PLEDGE: MOVE_EFFECT_FIRE_PLEDGE,
+  MOVE_EFFECT_GRASS_PLEDGE: MOVE_EFFECT_GRASS_PLEDGE,
+  MOVE_EFFECT_RAINBOW: MOVE_EFFECT_RAINBOW,
+  MOVE_EFFECT_FIRE_SEA: MOVE_EFFECT_FIRE_SEA,
+  MOVE_EFFECT_SWAMP: MOVE_EFFECT_SWAMP,
+  MOVE_EFFECT_SYRUP: MOVE_EFFECT_SYRUP,
+  MOVE_EFFECT_DIRE_CLAW: MOVE_EFFECT_DIRE_CLAW,
+  MOVE_EFFECT_FEAR: MOVE_EFFECT_FEAR,
+  MOVE_EFFECT_PSYCHIC_NOISE: MOVE_EFFECT_PSYCHIC_NOISE,
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
@@ -11033,6 +11085,8 @@ const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
   'MOVE_EFFECT_STEAL_ITEM',
   'MOVE_EFFECT_BUG_BITE',
   'MOVE_EFFECT_SMACK_DOWN',
+  'MOVE_EFFECT_REMOVE_STATUS',
+  'MOVE_EFFECT_BURN_UP',
 ])
 
 export interface SecondaryEffectsResult {
@@ -11048,6 +11102,7 @@ export interface SecondaryMoveEffectContext {
   targetId: number
   moveId: string
   targetDamage: number | null
+  targetHasActedThisTurn?: boolean
   deps: StatusDeps & { moveBehaviors?: MoveBehaviors }
   unmodelled: string[]
 }
@@ -11103,6 +11158,8 @@ export function applySecondaryMoveEffects(
   const { state, attackerId, targetId, moveId, targetDamage, deps, unmodelled } = ctx
   const moveData = deps.dataContext.move(moveId)
   const moveEffect = moveData?.effect ?? null
+
+  let statusAppliedOutcome: StatusAppliedOutcome | null = null
 
   interface EffectSpec {
     effectName: string
@@ -11162,7 +11219,9 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_EXPLOSION' ||
     moveEffect === 'EFFECT_MIND_BLOWN' ||
     moveEffect === 'EFFECT_TWO_TURN_RETALIATION' ||
-    moveEffect === 'EFFECT_HIT_SWITCH_TARGET'
+    moveEffect === 'EFFECT_HIT_SWITCH_TARGET' ||
+    moveEffect === 'EFFECT_HEAT_CRASH' ||
+    moveEffect === 'EFFECT_FALSE_SWIPE'
   ) {
     // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
     // argumenttomoveeffect; goto BattleScript_EffectHit. Recoil-if-miss (:4146-4147), Explosion (:3517-3518) and
@@ -11340,6 +11399,268 @@ export function applySecondaryMoveEffects(
       affectsUser: false,
       certain: false,
     })
+  } else if (moveEffect === 'EFFECT_DEFENSE_UP2_HIT') {
+    // BattleScript_EffectDefenseUp2Hit (data/battle_scripts_1.s:427-429)
+    // setmoveeffect MOVE_EFFECT_DEF_PLUS_2 | MOVE_EFFECT_AFFECTS_USER
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_DEF_PLUS_2',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: true,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_ATTACKER_DEFENSE_DOWN_HIT') {
+    // BattleScript_EffectAttackerDefenseDownHit (data/battle_scripts_1.s:450-452)
+    // setmoveeffect MOVE_EFFECT_DEF_MINUS_1 | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_DEF_MINUS_1',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_HYPERSPACE_FURY') {
+    // BattleScript_EffectHyperspaceFury (data/battle_scripts_1.s:365-380):
+    // Hoopa Unbound applies MOVE_EFFECT_FEINT and MOVE_EFFECT_DEF_MINUS_1 | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    const attacker = state.battlers[attackerId]
+    if (attacker?.mon.speciesId === 'SPECIES_HOOPA_UNBOUND') {
+      effectSpecs.push({
+        effectName: 'MOVE_EFFECT_FEINT',
+        chance: 100,
+        affectsUser: false,
+        certain: true,
+      })
+      effectSpecs.push({
+        effectName: 'MOVE_EFFECT_DEF_MINUS_1',
+        chance: 100,
+        affectsUser: true,
+        certain: true,
+      })
+    }
+  } else if (moveEffect === 'EFFECT_V_CREATE') {
+    // BattleScript_EffectVCreate (data/battle_scripts_1.s:414-416)
+    // setmoveeffect MOVE_EFFECT_V_CREATE | MOVE_EFFECT_AFFECTS_USER
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_V_CREATE',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_RIP_AND_TEAR') {
+    // BattleScript_EffectRipAndTear (data/battle_scripts_1.s:458-480)
+    // 1. setmoveeffect MOVE_EFFECT_SPD_MINUS_1; seteffectsecondary
+    // 2. setmoveeffect MOVE_EFFECT_BLEED; seteffectwithchance
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_SPD_MINUS_1',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_BLEED',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_SNAP_JAW') {
+    // BattleScript_EffectSnapJaw (data/battle_scripts_1.s:1251-1258)
+    // setrandom 2; if 0 -> MOVE_EFFECT_SPD_PLUS_1 | MOVE_EFFECT_AFFECTS_USER; else -> MOVE_EFFECT_SPD_MINUS_1
+    const roll = state.rng.random16() % 2
+    if (roll === 0) {
+      effectSpecs.push({
+        effectName: 'MOVE_EFFECT_SPD_PLUS_1',
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: true,
+        certain: false,
+      })
+    } else {
+      effectSpecs.push({
+        effectName: 'MOVE_EFFECT_SPD_MINUS_1',
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: false,
+        certain: false,
+      })
+    }
+  } else if (moveEffect === 'EFFECT_BULLDOZE') {
+    // BattleScript_EffectBulldoze (data/battle_scripts_1.s:925-928)
+    // setmoveeffect MOVE_EFFECT_SPD_MINUS_1
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_SPD_MINUS_1',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_ARGUMENT_HIT_IF_STAT_UP') {
+    // BattleScript_EffectArgumentHitIfStatUp (data/battle_scripts_1.s:11979-11985)
+    // VARIOUS_GOTO_IF_STAT_UP (src/battle_script_commands.c:8475-8484)
+    const attacker = state.battlers[attackerId]
+    const target = state.battlers[targetId]
+    const attackerHasUnaware = attacker
+      ? battlerHasSimAbility(state, attacker, 'ABILITY_UNAWARE', false, attackerId, false, deps.dataContext)
+      : false
+    const targetBleeding = target ? hasFlag(target.mon.status1, STATUS1_BLEED) : false
+    const targetHasStatBoost = target
+      ? [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF, STAT_ACC, STAT_EVASION].some(
+          (s) => (target.mon.statStages[s] ?? DEFAULT_STAT_STAGE) > DEFAULT_STAT_STAGE,
+        )
+      : false
+    if (!attackerHasUnaware && !targetBleeding && targetHasStatBoost) {
+      const arg = moveData?.argument
+      if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+        effectSpecs.push({
+          effectName: arg.effect,
+          chance: moveData?.effectChance ?? 0,
+          affectsUser: Boolean(arg.affectsUser),
+          certain: Boolean(arg.certain),
+        })
+      }
+    }
+  } else if (moveEffect === 'EFFECT_JAW_LOCK') {
+    // BattleScript_EffectJawLock (data/battle_scripts_1.s:139-141)
+    // setmoveeffect MOVE_EFFECT_TRAP_BOTH | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_TRAP_BOTH',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_FLAME_BURST') {
+    // BattleScript_EffectFlameBurst (data/battle_scripts_1.s:143-145)
+    // setmoveeffect MOVE_EFFECT_FLAME_BURST | MOVE_EFFECT_AFFECTS_USER
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_FLAME_BURST',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: true,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_THROAT_CHOP') {
+    // BattleScript_EffectThroatChop (data/battle_scripts_1.s:178-181)
+    // setmoveeffect MOVE_EFFECT_THROAT_CHOP | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_THROAT_CHOP',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_CORE_ENFORCER') {
+    // BattleScript_EffectCoreEnforcer (data/battle_scripts_1.s:423-425)
+    // setmoveeffect MOVE_EFFECT_CORE_ENFORCER | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_CORE_ENFORCER',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_CLEAR_SMOG') {
+    // BattleScript_EffectClearSmog (data/battle_scripts_1.s:394-396)
+    // setmoveeffect MOVE_EFFECT_CLEAR_SMOG
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_CLEAR_SMOG',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_SPECTRAL_THIEF') {
+    // BattleScript_EffectSpectralThief (data/battle_scripts_1.s:608-610)
+    // setmoveeffect MOVE_EFFECT_SPECTRAL_THIEF
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_SPECTRAL_THIEF',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_FEINT') {
+    // BattleScript_EffectFeint (data/battle_scripts_1.s:755-757)
+    // setmoveeffect MOVE_EFFECT_FEINT
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_FEINT',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_INCINERATE') {
+    // BattleScript_EffectIncinerate (data/battle_scripts_1.s:1247-1249)
+    // setmoveeffect MOVE_EFFECT_INCINERATE | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_INCINERATE',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_SPARKLING_ARIA' || moveEffect === 'EFFECT_WAKE_UP_SLAP') {
+    // BattleScript_EffectSparklingAria / WakeUpSlap (data/battle_scripts_1.s:859-864)
+    // setmoveeffect MOVE_EFFECT_REMOVE_STATUS | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_REMOVE_STATUS',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_UPPER_HAND') {
+    // BattleScript_EffectUpperHand (data/battle_scripts_1.s:11986-11990)
+    // setmoveeffect MOVE_EFFECT_FLINCH
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_FLINCH',
+      chance: 100,
+      affectsUser: false,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_OCTOLOCK') {
+    // BattleScript_EffectOctolock (data/battle_scripts_1.s:968-990, VARIOUS_SET_OCTOLOCK battle_script_commands.c:8107-8115)
+    const targetBattler = state.battlers[targetId]
+    if (targetBattler && !targetBattler.volatiles.octolock && targetBattler.mon.hp > 0) {
+      targetBattler.volatiles.octolock = true
+      targetBattler.mon.status2 = setFlag(targetBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)
+      targetBattler.volatiles.battlerPreventingEscape = attackerId
+      statusAppliedOutcome = { battlerId: targetId, status: 'OCTOLOCK' }
+    }
+  } else if (moveEffect === 'EFFECT_SAPPY_SEED') {
+    // BattleScript_EffectSappySeed (data/battle_scripts_1.s:1040-1064, Cmd_setseeded battle_script_commands.c:9341-9355)
+    const targetBattler = state.battlers[targetId]
+    if (
+      targetBattler &&
+      !hasFlag(targetBattler.statuses3, STATUS3_LEECHSEED) &&
+      (!targetBattler.mon.types.includes('GRASS') || isMyceliumMightActive(state, attackerId, deps))
+    ) {
+      targetBattler.statuses3 = setFlag(
+        targetBattler.statuses3,
+        STATUS3_LEECHSEED | (attackerId & STATUS3_LEECHSEED_BATTLER),
+      )
+      statusAppliedOutcome = { battlerId: targetId, status: 'LEECH_SEED' }
+    }
+  } else if (moveEffect === 'EFFECT_BURN_UP') {
+    // BattleScript_EffectBurnUp (data/battle_scripts_1.s:729-738)
+    // setmoveeffect MOVE_EFFECT_BURN_UP
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_BURN_UP',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_MORTAL_SPIN') {
+    // BattleScript_EffectMortalSpin (data/battle_scripts_1.s:1013-1035)
+    // 1. setmoveeffect MOVE_EFFECT_RAPIDSPIN | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    // 2. argumenttomoveeffect; seteffectwithchance
+    const attacker = state.battlers[attackerId]
+    if (attacker && attacker.mon.hp > 0 && !testSheerForceFlag(state, attackerId, moveId, deps)) {
+      rapidSpinFree(state, attackerId)
+    }
+    const arg = moveData?.argument
+    if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
+      effectSpecs.push({
+        effectName: arg.effect,
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: Boolean(arg.affectsUser),
+        certain: Boolean(arg.certain),
+      })
+    }
+  } else if (moveEffect === 'EFFECT_MATCHA_GOTCHA') {
+    // BattleScript_EffectMatchaGotcha (data/battle_scripts_1.s:946-966)
+    // setmoveeffect MOVE_EFFECT_BURN; seteffectwithchance (drain handled in turn.ts)
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_BURN',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
   } else if (
     moveEffect === 'EFFECT_HIT' ||
     !moveEffect ||
@@ -11373,10 +11694,11 @@ export function applySecondaryMoveEffects(
   }
 
   if (effectSpecs.length === 0) {
-    return null
+    return statusAppliedOutcome
+      ? { statusApplied: statusAppliedOutcome, statChanges: [], moveEffect2: null }
+      : null
   }
 
-  let statusAppliedOutcome: StatusAppliedOutcome | null = null
   const statChanges: StatChangeOutcome[] = []
   let moveEffect2: string | null = null
 
@@ -11820,8 +12142,337 @@ export function applySecondaryMoveEffects(
       continue
     }
 
-    // Primary status effects and confusion (battle_script_commands.c:2390-2580, 2655-2664)
     const certainForStatus = spec.certain || percentChance >= 100
+
+    // MOVE_EFFECT_DIRE_CLAW (battle_script_commands.c:2708-2713)
+    if (baseEffectNum === MOVE_EFFECT_DIRE_CLAW) {
+      if (effectBattler.mon.status1 === 0) {
+        const direClawEffects = [MOVE_EFFECT_POISON, MOVE_EFFECT_BLEED, MOVE_EFFECT_PARALYSIS]
+        const roll = state.rng.random16() % 3
+        const pickedEffect = direClawEffects[roll]
+        const res = applyPrimaryStatusEffect(
+          state,
+          attackerId,
+          targetId,
+          pickedEffect | (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0),
+          moveId,
+          deps,
+          unmodelled,
+          false,
+          certainForStatus,
+        )
+        if (res.applied && res.status) {
+          statusAppliedOutcome = {
+            battlerId: effectBattlerId,
+            status: res.status,
+          }
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_FEAR (battle_script_commands.c:2996-3000, battle_scripts_1.s:2444-2458)
+    if (baseEffectNum === MOVE_EFFECT_FEAR) {
+      if (!effectBattler.volatiles.fear && !hasFlag(effectBattler.statuses4, STATUS4_FEAR)) {
+        effectBattler.statuses4 = setFlag(effectBattler.statuses4, STATUS4_FEAR)
+        effectBattler.volatiles.fear = true
+        effectBattler.volatiles.started.fear = true
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'FEAR' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_WATER/FIRE/GRASS_PLEDGE (battle_script_commands.c:2612-2635)
+    if (
+      baseEffectNum === MOVE_EFFECT_WATER_PLEDGE ||
+      baseEffectNum === MOVE_EFFECT_FIRE_PLEDGE ||
+      baseEffectNum === MOVE_EFFECT_GRASS_PLEDGE
+    ) {
+      const attackerBattler = state.battlers[attackerId]
+      const attackerSide = attackerId & 1
+      const targetSide = targetId & 1
+      const inSun =
+        isBattlerWeatherAffected(state, attackerId, WEATHER_SUN_ANY, deps) ||
+        (attackerBattler ? hasChloroplast(state, attackerBattler, deps) : false)
+      const inRain = isBattlerWeatherAffected(state, attackerId, WEATHER_RAIN_ANY, deps)
+      const inGrassy = hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)
+
+      if (baseEffectNum === MOVE_EFFECT_WATER_PLEDGE) {
+        if (inSun && !state.sides[attackerSide].timers.rainbowTimer) {
+          state.sides[attackerSide].timers.started.rainbow = true
+          state.sides[attackerSide].timers.rainbowTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: attackerId, status: 'RAINBOW' }
+        }
+        if (inGrassy && !state.sides[targetSide].timers.swampTimer) {
+          state.sides[targetSide].timers.started.swamp = true
+          state.sides[targetSide].timers.swampTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: targetId, status: 'SWAMP' }
+        }
+      } else if (baseEffectNum === MOVE_EFFECT_FIRE_PLEDGE) {
+        if (inRain && !state.sides[attackerSide].timers.rainbowTimer) {
+          state.sides[attackerSide].timers.started.rainbow = true
+          state.sides[attackerSide].timers.rainbowTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: attackerId, status: 'RAINBOW' }
+        }
+        if (inGrassy && !state.sides[targetSide].timers.fireSeaTimer) {
+          state.sides[targetSide].timers.started.fireSea = true
+          state.sides[targetSide].timers.fireSeaTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: targetId, status: 'FIRE_SEA' }
+        }
+      } else if (baseEffectNum === MOVE_EFFECT_GRASS_PLEDGE) {
+        if (inSun && !state.sides[targetSide].timers.fireSeaTimer) {
+          state.sides[targetSide].timers.started.fireSea = true
+          state.sides[targetSide].timers.fireSeaTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: targetId, status: 'FIRE_SEA' }
+        }
+        if (inRain && !state.sides[targetSide].timers.swampTimer) {
+          state.sides[targetSide].timers.started.swamp = true
+          state.sides[targetSide].timers.swampTimer = PLEDGE_DURATION
+          statusAppliedOutcome = { battlerId: targetId, status: 'SWAMP' }
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_RAINBOW / SWAMP / FIRE_SEA (battle_script_commands.c:2636-2656)
+    if (
+      baseEffectNum === MOVE_EFFECT_RAINBOW ||
+      baseEffectNum === MOVE_EFFECT_SWAMP ||
+      baseEffectNum === MOVE_EFFECT_FIRE_SEA
+    ) {
+      const side = effectBattlerId & 1
+      if (baseEffectNum === MOVE_EFFECT_RAINBOW && !state.sides[side].timers.rainbowTimer) {
+        state.sides[side].timers.started.rainbow = true
+        state.sides[side].timers.rainbowTimer = PLEDGE_DURATION
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'RAINBOW' }
+      } else if (baseEffectNum === MOVE_EFFECT_SWAMP && !state.sides[side].timers.swampTimer) {
+        state.sides[side].timers.started.swamp = true
+        state.sides[side].timers.swampTimer = PLEDGE_DURATION
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'SWAMP' }
+      } else if (baseEffectNum === MOVE_EFFECT_FIRE_SEA && !state.sides[side].timers.fireSeaTimer) {
+        state.sides[side].timers.started.fireSea = true
+        state.sides[side].timers.fireSeaTimer = PLEDGE_DURATION
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'FIRE_SEA' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_GLAIVE_RUSH (battle_script_commands.c:2961-2963)
+    if (baseEffectNum === MOVE_EFFECT_GLAIVE_RUSH) {
+      const attacker = state.battlers[attackerId]
+      if (attacker) attacker.round.glaiveRush = true
+      continue
+    }
+
+    // MOVE_EFFECT_ORDER_UP (battle_script_commands.c:2595-2611)
+    if (baseEffectNum === MOVE_EFFECT_ORDER_UP) {
+      const partnerId = attackerId ^ 2
+      const partner = state.battlers[partnerId]
+      const attacker = state.battlers[attackerId]
+      if (
+        attacker?.mon.speciesId === 'SPECIES_DONDOZO' &&
+        partner &&
+        partner.mon.hp > 0 &&
+        battlerHasSimAbility(state, partner, 'ABILITY_COMMANDER', false, partnerId, false, deps.dataContext)
+      ) {
+        let statId = STAT_ATK
+        if (partner.mon.speciesId === 'SPECIES_TATSUGIRI_DROOPY') statId = STAT_DEF
+        else if (partner.mon.speciesId === 'SPECIES_TATSUGIRI_STRETCHY') statId = STAT_SPEED
+        const res = changeStatBuffsImplicit(
+          state,
+          attackerId,
+          targetId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT,
+          false,
+          deps,
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) statChanges.push({ battlerId: attackerId, stat: statId, change: res.delta })
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_PSYCHIC_NOISE (battle_script_commands.c:3006-3012)
+    if (baseEffectNum === MOVE_EFFECT_PSYCHIC_NOISE) {
+      if (!hasFlag(effectBattler.statuses3, STATUS3_HEAL_BLOCK)) {
+        effectBattler.statuses3 = setFlag(effectBattler.statuses3, STATUS3_HEAL_BLOCK)
+        effectBattler.volatiles.healBlockTimer = 2
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'HEAL_BLOCK' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_SALT_CURE (battle_script_commands.c:2964-2970)
+    if (baseEffectNum === MOVE_EFFECT_SALT_CURE) {
+      if (!hasFlag(effectBattler.statuses4, STATUS4_SALT_CURE)) {
+        effectBattler.statuses4 = setFlag(effectBattler.statuses4, STATUS4_SALT_CURE)
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'SALT_CURE' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_SYRUP (battle_script_commands.c:2971-2982)
+    if (baseEffectNum === MOVE_EFFECT_SYRUP) {
+      if (!effectBattler.volatiles.syrupTimer) {
+        effectBattler.volatiles.syrupTimer = 3
+        effectBattler.volatiles.syrupBombIsShiny = false
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'SYRUP' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_PAYDAY (battle_script_commands.c:2679-2691): outside player prize money (unmodelled),
+    // has no effect on battle state.
+    if (baseEffectNum === MOVE_EFFECT_PAYDAY) {
+      continue
+    }
+
+    // MOVE_EFFECT_V_CREATE (battle_script_commands.c:2923-2925, battle_scripts_1.s:1052-1077)
+    if (baseEffectNum === MOVE_EFFECT_V_CREATE) {
+      const statsToDrop = [STAT_DEF, STAT_SPDEF, STAT_SPEED]
+      for (const statId of statsToDrop) {
+        const res = changeStatBuffsImplicit(
+          state,
+          attackerId,
+          targetId,
+          -1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN | STAT_BUFF_NOT_PROTECT_AFFECTED,
+          true,
+          deps,
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          statChanges.push({ battlerId: attackerId, stat: statId, change: res.delta })
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_TRAP_BOTH (battle_script_commands.c:2941-2954)
+    if (baseEffectNum === MOVE_EFFECT_TRAP_BOTH) {
+      const targetBattler = state.battlers[targetId]
+      const attackerBattler = state.battlers[attackerId]
+      if (targetBattler && !hasFlag(targetBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+        targetBattler.volatiles.battlerPreventingEscape = attackerId
+        targetBattler.mon.status2 = setFlag(targetBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)
+      }
+      if (attackerBattler && !hasFlag(attackerBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+        attackerBattler.volatiles.battlerPreventingEscape = targetId
+        attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)
+      }
+      statusAppliedOutcome = { battlerId: targetId, status: 'ESCAPE_PREVENTION' }
+      continue
+    }
+
+    // MOVE_EFFECT_FLAME_BURST (battle_script_commands.c:2872-2878)
+    if (baseEffectNum === MOVE_EFFECT_FLAME_BURST) {
+      // In singles battles, no partner is on the field, so Flame Burst splash damage does not trigger.
+      const partnerId = targetId ^ 2
+      const partner = state.battlers[partnerId]
+      if (
+        partner &&
+        partner.mon.hp > 0 &&
+        !battlerHasSimAbility(state, partner, 'ABILITY_MAGIC_GUARD', false, partnerId, false, deps.dataContext)
+      ) {
+        const dmg = Math.max(1, Math.floor(partner.mon.hp / 4))
+        partner.mon.hp = Math.max(0, partner.mon.hp - dmg)
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_THROAT_CHOP (battle_script_commands.c:2931-2933)
+    if (baseEffectNum === MOVE_EFFECT_THROAT_CHOP) {
+      effectBattler.volatiles.throatChopTimer = 2
+      statusAppliedOutcome = { battlerId: effectBattlerId, status: 'THROAT_CHOP' }
+      continue
+    }
+
+    // MOVE_EFFECT_CORE_ENFORCER (battle_script_commands.c:2926-2930, battle_scripts_1.s:1027-1035, Cmd_setgastroacid :11831-11838)
+    if (baseEffectNum === MOVE_EFFECT_CORE_ENFORCER) {
+      if (
+        ctx.targetHasActedThisTurn &&
+        !hasFlag(effectBattler.statuses3, STATUS3_GASTRO_ACID) &&
+        !doesBattlerHaveAbilityShield(effectBattler, deps)
+      ) {
+        effectBattler.statuses3 = setFlag(effectBattler.statuses3, STATUS3_GASTRO_ACID)
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'GASTRO_ACID' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_CLEAR_SMOG (battle_script_commands.c:2863-2871)
+    if (baseEffectNum === MOVE_EFFECT_CLEAR_SMOG) {
+      if ((targetDamage ?? 0) > 0) {
+        for (let i = 0; i < NUM_BATTLE_STATS; i++) {
+          const currentStage = effectBattler.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+          if (currentStage !== DEFAULT_STAT_STAGE) {
+            effectBattler.mon.statStages[i] = DEFAULT_STAT_STAGE
+            statChanges.push({ battlerId: effectBattlerId, stat: i, change: DEFAULT_STAT_STAGE - currentStage })
+          }
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_SPECTRAL_THIEF (battle_script_commands.c:2892-2922, 6892-6909)
+    if (baseEffectNum === MOVE_EFFECT_SPECTRAL_THIEF) {
+      const attackerBattler = state.battlers[attackerId]
+      if (attackerBattler) {
+        for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+          const targetStage = effectBattler.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+          const attackerStage = attackerBattler.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+          if (targetStage > DEFAULT_STAT_STAGE && attackerStage < MAX_STAT_STAGE) {
+            let stealAmount = targetStage - DEFAULT_STAT_STAGE
+            if (attackerStage + stealAmount > MAX_STAT_STAGE) {
+              stealAmount = MAX_STAT_STAGE - attackerStage
+            }
+            effectBattler.mon.statStages[i] = DEFAULT_STAT_STAGE
+            statChanges.push({ battlerId: effectBattlerId, stat: i, change: DEFAULT_STAT_STAGE - targetStage })
+            attackerBattler.mon.statStages[i] = attackerStage + stealAmount
+            statChanges.push({ battlerId: attackerId, stat: i, change: stealAmount })
+          }
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_FEINT (battle_script_commands.c:2879-2891, IS_BATTLER_PROTECTED include/battle.h:762-764)
+    if (baseEffectNum === MOVE_EFFECT_FEINT) {
+      const targetSide = effectBattlerId & 1
+      const isProtected =
+        Boolean(effectBattler.round.protectMove) ||
+        Boolean(
+          state.sides[targetSide].statuses &
+            (SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK),
+        )
+      if (isProtected) {
+        effectBattler.round.protectMove = null
+        state.sides[targetSide].statuses = clearFlag(
+          state.sides[targetSide].statuses,
+          SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK,
+        )
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_INCINERATE (battle_script_commands.c:2934-2940)
+    if (baseEffectNum === MOVE_EFFECT_INCINERATE) {
+      const targetItem = effectBattler.mon.itemId
+      const isBerry = !!targetItem && deps.dataContext.item(targetItem)?.grouping === 'POCKET_BERRIES'
+      const isGem = !!targetItem && (deps.grounding ? deps.grounding.holdEffectOf(effectBattlerId) === 'HOLD_EFFECT_GEMS' : false)
+      if (isBerry || isGem) {
+        effectBattler.mon.itemId = null
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'INCINERATE' }
+      }
+      continue
+    }
+
+    // Primary status effects and confusion (battle_script_commands.c:2390-2580, 2655-2664)
     const res = applyPrimaryStatusEffect(
       state,
       attackerId,

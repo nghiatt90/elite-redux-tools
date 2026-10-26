@@ -960,7 +960,7 @@ export function isBattlerProtected(
     evadesProtect = true
   } else if (!protectAffected) {
     evadesProtect = true
-  } else if (moveData?.effect === 'EFFECT_FEINT') {
+  } else if (moveData?.effect === 'EFFECT_FEINT' || moveData?.effect === 'EFFECT_HYPERSPACE_FURY') {
     evadesProtect = true
   }
 
@@ -2427,6 +2427,155 @@ export function executeAction(
         preAttackerDamage = Math.floor(attackerBattler.mon.maxHp / 2)
         applyDamage(state, battlerId, preAttackerDamage, preFainted)
       }
+    } else if (moveEffect === 'EFFECT_HYPERSPACE_FURY') {
+      // BattleScript_EffectHyperspaceFury (data/battle_scripts_1.s:364-386)
+      if (attackerBattler.mon.speciesId === 'SPECIES_HOOPA_UNBOUND') {
+        // BattleScript_EffectHyperspaceFuryUnbound (:371): proceeds to accuracycheck, ppreduce, hit
+      } else if (attackerBattler.mon.speciesId === 'SPECIES_HOOPA') {
+        // BattleScript_ButHoopaCantUseIt (:382): prints STRINGID_BUTHOOPACANTUSEIT, skips PP deduct, fails
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: true,
+          obeys: true,
+          moveFailed: true,
+          fainted: preFainted,
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: [],
+          statusApplied: null,
+          unmodelled,
+          fainted: preFainted,
+        }
+      } else {
+        // Other species (:367): prints STRINGID_BUTPOKEMONCANTUSETHEMOVE, skips PP deduct, fails
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: true,
+          obeys: true,
+          moveFailed: true,
+          fainted: preFainted,
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: [],
+          statusApplied: null,
+          unmodelled,
+          fainted: preFainted,
+        }
+      }
+    } else if (moveEffect === 'EFFECT_BURN_UP') {
+      // BattleScript_EffectBurnUp (data/battle_scripts_1.s:847-857, Cmd_jumpbasedontype battle_script_commands.c:3406-3427):
+      // ppreduce, then jumpiftype BS_ATTACKER, TYPE_CURRENT_MOVE. Fails if user is not of move's type.
+      const moveData = deps.dataContext.move(currentMove.id)
+      const rawMoveType = moveData?.type ?? ''
+      const bareMoveType = rawMoveType.replace(/^TYPE_/, '')
+      const hasMoveType = Boolean(
+        bareMoveType &&
+          (attackerBattler.mon.types.includes(bareMoveType) ||
+            attackerBattler.mon.types.includes(`TYPE_${bareMoveType}`)),
+      )
+      if (!hasMoveType) {
+        performPpDeduct()
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: true,
+          obeys: true,
+          moveFailed: true,
+          fainted: preFainted,
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: [],
+          statusApplied: null,
+          unmodelled,
+          fainted: preFainted,
+        }
+      }
+    } else if (moveEffect === 'EFFECT_UPPER_HAND') {
+      // BattleScript_EffectUpperHand (data/battle_scripts_1.s:11986-11990, VARIOUS_TRY_UPPER_HAND battle_script_commands.c:8485-8498)
+      // Fails if target has already acted or target's chosen move priority is not > 0.
+      const targetMovePos = state.chosenMovePositions[currentTargetId] ?? 0
+      const targetMoveId = targetBattlerPre?.mon.moves[targetMovePos]
+      const targetMoveData = targetMoveId ? deps.dataContext.move(targetMoveId) : null
+      const targetPriority = targetMoveData?.priority ?? 0
+      if (targetHasActedThisTurn || targetPriority <= 0) {
+        performPpDeduct()
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: true,
+          obeys: true,
+          moveFailed: true,
+          fainted: preFainted,
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: [],
+          statusApplied: null,
+          unmodelled,
+          fainted: preFainted,
+        }
+      }
     }
 
     const isContact = moveData?.flags?.contact === true
@@ -2803,6 +2952,7 @@ export function executeAction(
       targetId: currentTargetId,
       moveId: currentMove.id,
       targetDamage,
+      targetHasActedThisTurn,
       deps: {
         dataContext: deps.dataContext,
         grounding: deps.grounding,

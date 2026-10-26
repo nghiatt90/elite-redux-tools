@@ -122,7 +122,7 @@ const MOVE_SWAGGER = requireMove('MOVE_SWAGGER')
 const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
 const MOVE_RELIC_SONG = requireMove('MOVE_RELIC_SONG')
 const MOVE_TRI_ATTACK = requireMove('MOVE_TRI_ATTACK')
-const MOVE_THROAT_CHOP = requireMove('MOVE_THROAT_CHOP')
+const MOVE_EERIE_SPELL = requireMove('MOVE_EERIE_SPELL')
 const MOVE_WATER_PULSE = requireMove('MOVE_WATER_PULSE')
 const MOVE_ZEN_HEADBUTT = requireMove('MOVE_ZEN_HEADBUTT')
 const MOVE_ROCK_SMASH = requireMove('MOVE_ROCK_SMASH')
@@ -1211,15 +1211,16 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
 
   it('unported legacy secondary effect produces named gap', () => {
     // Derivation:
-    // Throat Chop has legacyConfig: BattleScript_EffectThroatChop, not ported in batch 3a.
+    // Eerie Spell has legacyConfig: BattleScript_EffectEerieSpell (battle_scripts_1.s:4796-4820),
+    // whose target PP deduction (eeriespellppreduce) is unmodelled in the sim.
     // Damaging move execution reaches applySecondaryMoveEffects, pushing named gap.
     const rng = scriptedRng([0])
     const state = battle([{}, {}], rng)
     const deps = testDeps(fixedDamage(20), rawBehaviors)
-    const out = executeTurn(state, [useMove(1, MOVE_THROAT_CHOP), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    const out = executeTurn(state, [useMove(1, MOVE_EERIE_SPELL), useMove(0, MOVE_SWORDS_DANCE)], deps)
 
     expect(out.actions[0].statusApplied).toBeNull()
-    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_THROAT_CHOP not modelled')
+    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_EERIE_SPELL not modelled')
   })
 
   it('confusion secondary effect applies and draws duration', () => {
