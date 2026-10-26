@@ -144,9 +144,6 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         : (crit ? result.totalCritRolls : result.totalRolls)
       if (!values) return { targetDamage: null, attackerDamage: null, unmodelled, absorbingAbility: null }
       if (result.hitCount !== null) unmodelled.push('multi-hit per-hit rolls and crits are not independently drawn')
-      if (move.effect === 'EFFECT_ABSORB') {
-        unmodelled.push('drain is not modelled yet')
-      }
       return {
         targetDamage: values[15 - roll],
         attackerDamage: null,

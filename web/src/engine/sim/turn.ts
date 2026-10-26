@@ -141,9 +141,9 @@ import { canBattlerHeal, runEndTurnEffects } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
-import { applyEndOfTurnReplacements, switchIn } from './switchIn'
+import { applyEndOfTurnReplacements, hasLiveReserve, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
-import { getBattlerAbilitySlotsReverse, runMoveEnd, runMoveEndBookkeeping } from './moveEnd'
+import { getBattlerAbilitySlotsReverse, HALF_RECOIL_ABILITIES, NO_RECOIL_ABILITIES, runMoveEnd, runMoveEndBookkeeping } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
 import {
@@ -155,14 +155,18 @@ import {
   setFlag,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_MAT_BLOCK,
+  SIDE_STATUS_SCREEN_ANY,
+  SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_WIDE_GUARD,
   STATUS1_ANY,
+  STATUS1_SLEEP,
   STATUS2_CONFUSION,
   STATUS2_CURSED,
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_MULTIPLETURNS,
   STATUS2_POWDER,
+  STATUS2_RECHARGE,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
   STATUS3_ALWAYS_HITS,
@@ -552,6 +556,27 @@ export function assertNoPerBattlerQuash(state: BattleState): void {
   }
 }
 
+/** IsAbilityOnField(ability), battle_util.c: any alive battler with the ability, no mold-breaker suppression. */
+function isAbilityOnField(state: BattleState, abilityId: string, deps: { dataContext: SimDataContext }): boolean {
+  return state.battlers.some(
+    (b) => b !== null && b.mon.hp > 0 && battlerHasSimAbility(state, b, abilityId, false, b.id, false, deps.dataContext),
+  )
+}
+
+/** The `jumpifabilityflag ... ABILITY_ROCK_HEAD` / `jumpifmagicguard` pair guarding Steel Beam's and Mind Blown's dmg_1_2_attackerhp
+ * (data/battle_scripts_1.s:80-82, 3540-3542): the noRecoil ability flag, or Magic Guard. */
+function attackerIsRecoilImmune(state: BattleState, attacker: BattlerState, battlerId: number, deps: { dataContext: SimDataContext }): boolean {
+  return (
+    battlerHasSimAbility(state, attacker, 'ABILITY_MAGIC_GUARD', false, battlerId, false, deps.dataContext) ||
+    [...NO_RECOIL_ABILITIES].some((ab) => battlerHasSimAbility(state, attacker, ab, false, battlerId, false, deps.dataContext))
+  )
+}
+
+/** ON_ABILITY(gBattlerAttacker, FALSE, halfRecoil, ...) in Cmd_manipulatedamage, battle_script_commands.c:9358-9362. */
+function hasHalfRecoilAbility(state: BattleState, attacker: BattlerState, battlerId: number, deps: { dataContext: SimDataContext }): boolean {
+  return [...HALF_RECOIL_ABILITIES].some((ab) => battlerHasSimAbility(state, attacker, ab, false, battlerId, false, deps.dataContext))
+}
+
 /**
  * Runs one turn.
  *
@@ -590,8 +615,9 @@ function resetPendingSwitch(state: BattleState, battlerId: number): void {
   if (battler) battler.monToSwitchIntoId = PARTY_SIZE
 }
 
-/** TurnValuesCleanUp(FALSE), battle_main.c:4490-4492, 4505-4508 -- ZERO(gRoundStructs[i]) for every battler,
- * decrement isFirstTurn, clear the one-turn side shields (Wide Guard, Crafty Shield, Mat Block),
+/** TurnValuesCleanUp(FALSE), battle_main.c:4490-4497, 4505-4508 -- ZERO(gRoundStructs[i]) for every battler,
+ * decrement isFirstTurn, decrement rechargeTimer and clear STATUS2_RECHARGE when 0,
+ * clear the one-turn side shields (Wide Guard, Crafty Shield, Mat Block),
  * and clear followmeTimer. */
 export function roundStructsClear(state: BattleState): void {
   for (const battler of state.battlers) {
@@ -599,6 +625,12 @@ export function roundStructsClear(state: BattleState): void {
       battler.round = createRoundState()
       if (battler.volatiles.isFirstTurn) {
         battler.volatiles.isFirstTurn--
+      }
+      if (battler.volatiles.rechargeTimer) {
+        battler.volatiles.rechargeTimer--
+        if (battler.volatiles.rechargeTimer === 0) {
+          battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_RECHARGE)
+        }
       }
     }
   }
@@ -2162,6 +2194,97 @@ export function executeAction(
     const targetIndex = order.battlerByTurnOrder.indexOf(currentTargetId)
     const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < index
 
+    const targetBattlerPre = state.battlers[currentTargetId]
+    let preFail = false
+    if (moveEffect === 'EFFECT_FAKE_OUT') {
+      // BattleScript_EffectFakeOut (data/battle_scripts_1.s:5932-5934): jumpifnotfirstturn -> BattleScript_ButItFailedAtkStringPpReduce;
+      // Cmd_jumpifnotfirstturn, battle_script_commands.c:9439-9446
+      if (!attackerBattler.volatiles.isFirstTurn && !state.processingExtraAttacks) {
+        preFail = true
+      }
+    } else if (moveEffect === 'EFFECT_SUCKER_PUNCH') {
+      // BattleScript_EffectSuckerPunch (data/battle_scripts_1.s:2336-2340) -> VARIOUS_SUCKER_PUNCH_CHECK (src/battle_script_commands.c:7213-7219)
+      if (targetHasActedThisTurn) {
+        preFail = true
+      } else {
+        const targetMovePos = state.chosenMovePositions[currentTargetId] ?? 0
+        const targetMoveId = targetBattlerPre?.mon.moves[targetMovePos]
+        const targetMove = targetMoveId ? deps.dataContext.move(targetMoveId) : null
+        if (!targetMove || targetMove.split === 'STATUS') {
+          preFail = true
+        }
+      }
+    } else if (moveEffect === 'EFFECT_DREAM_EATER') {
+      // BattleScript_EffectDreamEater (data/battle_scripts_1.s:3564-3573): substitute blocks, or the target is neither asleep nor Comatose
+      const isTargetAsleep =
+        targetBattlerPre &&
+        (hasFlag(targetBattlerPre.mon.status1, STATUS1_SLEEP) ||
+          battlerHasSimAbility(state, targetBattlerPre, 'ABILITY_COMATOSE', true, battlerId, false, deps.dataContext))
+      if (
+        doesSubstituteBlockMove(state, battlerId, currentTargetId, currentMove.id, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled) ||
+        !isTargetAsleep
+      ) {
+        preFail = true
+      }
+    } else if (moveEffect === 'EFFECT_MIND_BLOWN' && isAbilityOnField(state, 'ABILITY_DAMP', deps)) {
+      // BattleScript_EffectMindBlown (data/battle_scripts_1.s:3536-3538): jumpifabilitypresent ABILITY_DAMP -> _Failed
+      preFail = true
+    } else if (moveEffect === 'EFFECT_EXPLOSION' && !state.processingExtraAttacks && isAbilityOnField(state, 'ABILITY_DAMP', deps)) {
+      // Cmd_faintifabilitynotdamp (battle_script_commands.c:9208-9215) -> BattleScript_DampStopsExplosion
+      preFail = true
+    }
+
+    if (preFail) {
+      if (!isSecondTurnSemiInvuln) {
+        performPpDeduct()
+      }
+      runMoveEndBookkeeping({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        currentMoveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        deps,
+        noEffect: true,
+        moveFailed: true,
+        obeys: true,
+        fainted: [],
+      })
+      return {
+        turnOrderIndex: index,
+        battlerId,
+        action: actionKind,
+        skippedBecauseFainted: false,
+        battleOver: false,
+        missed: true,
+        targetId: currentTargetId,
+        targetDamage: null,
+        attackerDamage: null,
+        cancelledBy: null,
+        confusionSelfHitDamage: null,
+        statChanges: null,
+        statusApplied: null,
+        unmodelled,
+        fainted: [],
+      }
+    }
+
+    // Explosion / Mind Blown pay their cost after ppreduce and before accuracy (BattleScript_EffectExplosion,
+    // data/battle_scripts_1.s:3492-3499; BattleScript_EffectMindBlown, :3536-3548), so a miss or a Protect still costs it.
+    const preFainted: number[] = []
+    let preAttackerDamage = 0
+    if (moveEffect === 'EFFECT_EXPLOSION' && !state.processingExtraAttacks) {
+      // Cmd_faintifabilitynotdamp / Cmd_setatkhptozero (battle_script_commands.c:9217-9238)
+      preAttackerDamage = attackerBattler.mon.hp
+      applyDamage(state, battlerId, attackerBattler.mon.hp, preFainted)
+    } else if (moveEffect === 'EFFECT_MIND_BLOWN') {
+      // jumpifabilityflag ROCK_HEAD / jumpifmagicguard skip dmg_1_2_attackerhp (maxHP / 2)
+      if (!attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
+        preAttackerDamage = Math.floor(attackerBattler.mon.maxHp / 2)
+        applyDamage(state, battlerId, preAttackerDamage, preFainted)
+      }
+    }
+
     const isContact = moveData?.flags?.contact === true
 
     // Check Protect before accuracy check (battle_util.c:6571-6645, battle_script_commands.c:1198-1210, 1422)
@@ -2186,7 +2309,7 @@ export function executeAction(
         deps,
         noEffect: true,
         obeys: true,
-        fainted: [],
+        fainted: preFainted,
       })
       return {
         turnOrderIndex: index,
@@ -2197,13 +2320,13 @@ export function executeAction(
         missed: true,
         targetId: currentTargetId,
         targetDamage: null,
-        attackerDamage: null,
+        attackerDamage: preAttackerDamage || null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
         statChanges: protectMoveEnd.statChanges,
         statusApplied: protectMoveEnd.statusApplied,
         unmodelled,
-        fainted: [],
+        fainted: preFainted,
       }
     }
 
@@ -2245,6 +2368,27 @@ export function executeAction(
     }
 
     if (missed) {
+      let missedAttackerDamage: number | null = preAttackerDamage || null
+      const missedFainted: number[] = [...preFainted]
+
+      if (moveEffect === 'EFFECT_RECOIL_IF_MISS') {
+        // BattleScript_MoveMissedDoDamage / _RecoilIfMissCrashed (data/battle_scripts_1.s:4148-4165):
+        // Magic Guard skips it; manipulatedamage DMG_RECOIL_FROM_MISS = maxHP / 2, halved by halfRecoil (battle_script_commands.c:9358-9362)
+        if (!battlerHasSimAbility(state, attackerBattler, 'ABILITY_MAGIC_GUARD', false, battlerId, false, deps.dataContext)) {
+          let crashDamage = Math.floor(attackerBattler.mon.maxHp / 2)
+          if (hasHalfRecoilAbility(state, attackerBattler, battlerId, deps)) crashDamage = Math.floor(crashDamage / 2)
+          applyDamage(state, battlerId, crashDamage, missedFainted)
+          missedAttackerDamage = crashDamage
+        }
+      } else if (moveEffect === 'EFFECT_STEEL_BEAM') {
+        // BattleScript_SteelBeamMiss (data/battle_scripts_1.s:99-106): Rock Head / Magic Guard skip dmg_1_2_attackerhp
+        if (!attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
+          const selfDmg = Math.floor(attackerBattler.mon.maxHp / 2)
+          applyDamage(state, battlerId, selfDmg, missedFainted)
+          missedAttackerDamage = selfDmg
+        }
+      }
+
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
       runMoveEndBookkeeping({
         state,
@@ -2255,7 +2399,7 @@ export function executeAction(
         deps,
         noEffect: true,
         obeys: true,
-        fainted: [],
+        fainted: missedFainted,
       })
       return {
         turnOrderIndex: index,
@@ -2266,13 +2410,13 @@ export function executeAction(
         missed: true,
         targetId: currentTargetId,
         targetDamage: null,
-        attackerDamage: null,
+        attackerDamage: missedAttackerDamage,
         cancelledBy: null,
         confusionSelfHitDamage: null,
         statChanges: protectMoveEnd.statChanges,
         statusApplied: protectMoveEnd.statusApplied,
         unmodelled,
-        fainted: [],
+        fainted: missedFainted,
       }
     }
 
@@ -2286,6 +2430,17 @@ export function executeAction(
     if (attackerBattler.round.usedCustapBerry && deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_CUSTAP_BERRY') {
       // BattleScript_CustapBerryActivation (battle_main.c:4616-4618): removeitem BS_ATTACKER
       attackerBattler.mon.itemId = null
+    }
+
+    // BattleScript_EffectBrickBreak (data/battle_scripts_1.s:6380-6386): removelightscreenreflect runs after the
+    // accuracy check and before damagecalc. Cmd_removelightscreenreflect, battle_script_commands.c:12384-12410.
+    if (moveEffect === 'EFFECT_BRICK_BREAK') {
+      const targetSideState = state.sides[currentTargetId & 1]
+      targetSideState.statuses = clearFlag(targetSideState.statuses, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SMOKESCREEN)
+      targetSideState.timers.reflectTimer = 0
+      targetSideState.timers.lightscreenTimer = 0
+      targetSideState.timers.auroraVeilTimer = 0
+      targetSideState.timers.smokescreenTimer = 0
     }
 
     let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective } = deps.damage.resolve(state, battlerId, currentTargetId, currentMoveAction, { targetHasActedThisTurn })
@@ -2316,7 +2471,7 @@ export function executeAction(
         moveEffect2: null,
         deps,
         unmodelled,
-        fainted: [],
+        fainted: preFainted,
       })
 
       const finalStatChanges: StatChangeOutcome[] = []
@@ -2332,13 +2487,13 @@ export function executeAction(
         missed: false,
         targetId: currentTargetId,
         targetDamage: 0,
-        attackerDamage: moveEndOutcome.attackerDamage,
+        attackerDamage: preAttackerDamage || moveEndOutcome.attackerDamage ? preAttackerDamage + (moveEndOutcome.attackerDamage ?? 0) : null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
         statChanges: finalStatChanges.length > 0 ? finalStatChanges : null,
         statusApplied: moveEndOutcome.statusApplied,
         unmodelled: [...unmodelled, ...damageUnmodelled],
-        fainted: [],
+        fainted: preFainted,
       }
     }
 
@@ -2374,7 +2529,7 @@ export function executeAction(
       targetBattler.mon.itemId = null
     }
 
-    const fainted: number[] = []
+    const fainted: number[] = [...preFainted]
     const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, currentTargetId, targetDamage, fainted)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
@@ -2420,6 +2575,43 @@ export function executeAction(
     }
 
     applyDamage(state, battlerId, attackerDamage, fainted)
+    if (preAttackerDamage) attackerDamage = (attackerDamage ?? 0) + preAttackerDamage
+
+    // BattleScript_EffectSteelBeam (data/battle_scripts_1.s:70-98): self-damage after seteffectwithchance,
+    // skipped by Rock Head / Magic Guard. Applied before the secondary effects here only because it has none.
+    if (moveEffect === 'EFFECT_STEEL_BEAM' && !attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
+      const selfDmg = Math.floor(attackerBattler.mon.maxHp / 2)
+      applyDamage(state, battlerId, selfDmg, fainted)
+      attackerDamage = (attackerDamage ?? 0) + selfDmg
+    }
+
+    // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3286-3324), also reached by
+    // Dream Eater (:3567). manipulatedamage DMG_TO_HP_FROM_MOVE, battle_script_commands.c:9398-9411.
+    if ((moveEffect === 'EFFECT_ABSORB' || moveEffect === 'EFFECT_DREAM_EATER') && hpDealt > 0) {
+      if (canBattlerHeal(state, battlerId, attackerBattler, unmodelled)) {
+        const argument = moveData?.argumentInt ?? 0
+        let drainHp = argument !== 0 ? Math.floor((hpDealt * argument) / 100) : Math.floor(hpDealt / 2)
+        // GetDrainedBigRootHp, battle_util.c:2369-2377
+        if (drainHp === 0) drainHp = 1
+        if (deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_BIG_ROOT') drainHp = Math.floor((drainHp * 3) / 2)
+        if (battlerHasSimAbility(state, attackerBattler, 'ABILITY_ABSORBANT', false, battlerId, false, deps.dataContext)) {
+          drainHp = Math.floor((drainHp * 3) / 2)
+        }
+        if (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_LIQUID_OOZE', false, battlerId, false, deps.dataContext)) {
+          applyDamage(state, battlerId, drainHp, fainted)
+          attackerDamage = (attackerDamage ?? 0) + drainHp
+        } else {
+          attackerBattler.mon.hp = Math.min(attackerBattler.mon.maxHp, attackerBattler.mon.hp + drainHp)
+          syncPartyHp(state, battlerId)
+        }
+        if (
+          battlerHasSimAbility(state, attackerBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext) ||
+          (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext))
+        ) {
+          unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3306-3313) is not modelled')
+        }
+      }
+    }
 
     // Secondary move effects (BattleScript_EffectHit, seteffectwithchance).
     const secondaryResult = applySecondaryMoveEffects({
@@ -2457,6 +2649,19 @@ export function executeAction(
     if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
     if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
     const finalStatusApplied = secondaryResult?.statusApplied ?? moveEndOutcome.statusApplied
+
+    // BattleScript_EffectHitEscape (data/battle_scripts_1.s:2788-2790) -> BattleScript_MoveSwitch / _DoMoveSwitch
+    // (:5371-5379): the switch is queued by scheduleswitch and runs after MoveEnd; skipped when the move had no effect,
+    // the battle is over, or no reserve exists (jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION).
+    if (
+      moveEffect === 'EFFECT_HIT_ESCAPE' &&
+      hpDealt > 0 &&
+      isBattlerAlive(state, battlerId) &&
+      !state.battleOutcome &&
+      hasLiveReserve(state, battlerId)
+    ) {
+      unmodelled.push(...performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true }))
+    }
 
     const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
       ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)

@@ -363,6 +363,34 @@ export function getHighestStatId(
   return highestId
 }
 
+/**
+ * GetHighestStatIdExcept with includeStatStages = FALSE, src/battle_util.c:8724-8744. The only caller,
+ * MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1 (battle_script_commands.c:3013), passes FALSE.
+ */
+export function getHighestStatIdExcept(battler: BattlerState, excludeStat: number): number {
+  const stats: Array<[number, keyof BattlerState['mon']['rawStats']]> = [
+    [STAT_ATK, 'atk'],
+    [STAT_DEF, 'def'],
+    [STAT_SPEED, 'spe'],
+    [STAT_SPATK, 'spatk'],
+    [STAT_SPDEF, 'spdef'],
+  ]
+
+  let highestId = STAT_ATK
+  let highestStat = 0
+
+  for (const [id, key] of stats) {
+    if (id === excludeStat) continue
+    const val = battler.mon.rawStats[key]
+    if (val > highestStat) {
+      highestStat = val
+      highestId = id
+    }
+  }
+
+  return highestId
+}
+
 // src/battle_script_commands.h:50-52
 export const RESET_ALL_STATS = 0
 export const RESET_STAT_BUFFS = 1
@@ -638,6 +666,10 @@ export const MOVE_EFFECT_SP_ATK_MINUS_2 = 51
 export const MOVE_EFFECT_SP_DEF_MINUS_2 = 52
 export const MOVE_EFFECT_ACC_MINUS_2 = 53
 export const MOVE_EFFECT_EVS_MINUS_2 = 54
+export const MOVE_EFFECT_ATK_DEF_DOWN = 39
+export const MOVE_EFFECT_DEF_SPDEF_DOWN = 57
+export const MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1 = 91
+export const MOVE_EFFECT_RECHARGE = 31
 
 /**
  * Port of ReverseStatChangeMoveEffect, src/battle_script_commands.c:9641-9705.

@@ -144,6 +144,7 @@ import {
   STATUS2_FLINCHED,
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
+  STATUS2_RECHARGE,
   STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
   STATUS3_IMPRISONED_OTHERS,
@@ -163,6 +164,7 @@ export const CANCEL_REASONS = [
   'PARALYSIS',
   'FLINCH',
   'TRUANT',
+  'RECHARGE',
   'CONFUSION',
   'DISABLE',
   'GRAVITY',
@@ -405,7 +407,14 @@ export function runAttackCanceller(
     return { cancelledBy: 'TRUANT', confusionSelfHitDamage: null }
   }
 
-  // CANCELLER_RECHARGE (:3294-3304) -- unreachable, see header.
+  // CANCELLER_RECHARGE, :3294-3304.
+  if (hasFlag(attacker.mon.status2, STATUS2_RECHARGE) && !state.processingExtraAttacks) {
+    attacker.mon.status2 = clearFlag(attacker.mon.status2, STATUS2_RECHARGE)
+    attacker.volatiles.rechargeTimer = 0
+    cancelMultiTurnMoves(attacker)
+    attacker.round.attackCancelled = true
+    return { cancelledBy: 'RECHARGE', confusionSelfHitDamage: null }
+  }
 
   // CANCELLER_FLINCH, :3305-3314.
   if (hasFlag(attacker.mon.status2, STATUS2_FLINCHED) && !state.processingExtraAttacks) {

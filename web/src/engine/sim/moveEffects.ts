@@ -141,6 +141,7 @@ import {
   hasFlag,
   setCounter,
   setFlag,
+  STATUS2_RECHARGE,
   statusInfatuatedWith,
 } from './constants'
 import {
@@ -188,8 +189,13 @@ import {
   consumeHeldItem,
   dispatchOnStatLowered,
   getHighestAttackingStatId,
+  getHighestStatIdExcept,
   isBattlerWeatherAffected,
   isUnnerveAbilityOnOpposingSide,
+  MOVE_EFFECT_ATK_DEF_DOWN,
+  MOVE_EFFECT_DEF_SPDEF_DOWN,
+  MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
+  MOVE_EFFECT_RECHARGE,
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
@@ -10967,6 +10973,10 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_SP_DEF_MINUS_2: MOVE_EFFECT_SP_DEF_MINUS_2,
   MOVE_EFFECT_ACC_MINUS_2: MOVE_EFFECT_ACC_MINUS_2,
   MOVE_EFFECT_EVS_MINUS_2: MOVE_EFFECT_EVS_MINUS_2,
+  MOVE_EFFECT_DEF_SPDEF_DOWN: MOVE_EFFECT_DEF_SPDEF_DOWN,
+  MOVE_EFFECT_ATK_DEF_DOWN: MOVE_EFFECT_ATK_DEF_DOWN,
+  MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1: MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
+  MOVE_EFFECT_RECHARGE: MOVE_EFFECT_RECHARGE,
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
@@ -11221,8 +11231,44 @@ export function applySecondaryMoveEffects(
       targetBattler.volatiles.trepidation = 3
       targetBattler.volatiles.started.trepidation = true
     }
+  } else if (moveEffect === 'EFFECT_CLOSE_COMBAT') {
+    // BattleScript_EffectCloseCombat
+    // data/battle_scripts_1.s:6341: setmoveeffect MOVE_EFFECT_DEF_SPDEF_DOWN | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_DEF_SPDEF_DOWN',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_SUPERPOWER') {
+    // BattleScript_EffectSuperpower (data/battle_scripts_1.s:6337):
+    // setmoveeffect MOVE_EFFECT_ATK_DEF_DOWN | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_ATK_DEF_DOWN',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_RECHARGE') {
+    // BattleScript_EffectRecharge (data/battle_scripts_1.s:4532-4536):
+    // setmoveeffect MOVE_EFFECT_RECHARGE | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_RECHARGE',
+      chance: 100,
+      affectsUser: true,
+      certain: true,
+    })
+  } else if (moveEffect === 'EFFECT_FAKE_OUT') {
+    // BattleScript_EffectFakeOut (data/battle_scripts_1.s:5932-5936):
+    // setmoveeffect MOVE_EFFECT_FLINCH, then BattleScript_EffectHit: no CERTAIN bit, chance = the move's effectChance
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_FLINCH',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
+      certain: false,
+    })
   } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
-    // Pure damaging move with no secondary effect
+    // Pure damaging move or handled elsewhere with no secondary effect
   } else {
     // Any other legacy script reached by a damaging move:
     unmodelled.push(`secondary effect of ${moveEffect} not modelled`)
@@ -11484,6 +11530,63 @@ export function applySecondaryMoveEffects(
       }
       if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (attackerId & 1) !== (targetId & 1)) {
         dispatchOnStatLowered(state, targetId, attackerId, deps, unmodelled, statChanges)
+      }
+      continue
+    }
+
+    // Stat changes: MOVE_EFFECT_DEF_SPDEF_DOWN (battle_script_commands.c:2843-2847) calls BattleScript_DefSpDefDown
+    // (data/battle_scripts_1.s:8264+), gated on the attacker lacking Bad Company; MOVE_EFFECT_ATK_DEF_DOWN
+    // (:2840-2842) calls BattleScript_AtkDefDown (:8245-8262) with no gate. Both drop two stats by 1 with
+    // statbuffchange MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN | STAT_BUFF_ALLOW_PTR.
+    if (baseEffectNum === MOVE_EFFECT_DEF_SPDEF_DOWN || baseEffectNum === MOVE_EFFECT_ATK_DEF_DOWN) {
+      const attacker = state.battlers[attackerId]
+      if (
+        baseEffectNum === MOVE_EFFECT_DEF_SPDEF_DOWN &&
+        attacker &&
+        battlerHasSimAbility(state, attacker, 'ABILITY_BAD_COMPANY', false, attackerId, false, deps.dataContext)
+      ) {
+        continue
+      }
+      const dropped = baseEffectNum === MOVE_EFFECT_DEF_SPDEF_DOWN ? [STAT_DEF, STAT_SPDEF] : [STAT_ATK, STAT_DEF]
+      for (const statId of dropped) {
+        const res = changeStatBuffsImplicit(
+          state,
+          attackerId,
+          targetId,
+          -1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN | STAT_BUFF_ALLOW_PTR,
+          true,
+          deps,
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          statChanges.push({ battlerId: attackerId, stat: statId, change: res.delta })
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1 (battle_script_commands.c:3013-3015): re-dispatched as
+    // MOVE_EFFECT_ATK_PLUS_1 - STAT_ATK + GetHighestStatIdExcept(effectBattler, FALSE, STAT_SPEED), keeping affectsUser.
+    if (baseEffectNum === MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1) {
+      const statId = getHighestStatIdExcept(effectBattler, STAT_SPEED)
+      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      const res = changeStatBuffsImplicit(state, attackerId, targetId, 1, statId, flags, false, deps, unmodelled, moveId)
+      if (res.delta !== 0) {
+        statChanges.push({ battlerId: effectBattlerId, stat: statId, change: res.delta })
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_RECHARGE (battle_script_commands.c:2813-2819)
+    if (baseEffectNum === MOVE_EFFECT_RECHARGE) {
+      if (!state.processingExtraAttacks) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_RECHARGE)
+        effectBattler.volatiles.rechargeTimer = 2
+        // gLockedMoves[effectBattler] = gCurrentMove is not stored: its only reader, GetMoveToBeUsed
+        // (battle_util.c:155), feeds target resolution, which is unambiguous in singles.
       }
       continue
     }
