@@ -100,6 +100,8 @@ async function main(): Promise<void> {
   const result = await improveTeam(data, start, evaluate, {
     ...DEFAULT_SEARCH,
     passes,
+    confirmGames: Number(arg('confirm', String(DEFAULT_SEARCH.confirmGames))),
+    screenGames: Number(arg('screen', String(DEFAULT_SEARCH.screenGames))),
     allowedStones,
     onProgress: (m) => console.log(m),
   })
