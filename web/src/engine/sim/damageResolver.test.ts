@@ -274,9 +274,19 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
     expect(plain.some((u) => u.includes('attackerRolloutCounter'))).toBe(false)
     expect(plain.some((u) => u.includes('beatUpBaseAttack'))).toBe(false)
   })
-  it('fires attackerWasHitThisTurn for EFFECT_FOCUS_PUNCH and for the move id MOVE_SELF_DESTRUCT specifically', () => {
-    expect(resolver().resolve(state(), 0, 1, action('MOVE_FOCUS_PUNCH')).unmodelled.some((u) => u.includes('attackerWasHitThisTurn'))).toBe(true)
-    expect(resolver().resolve(state(), 0, 1, action('MOVE_SELF_DESTRUCT')).unmodelled.some((u) => u.includes('attackerWasHitThisTurn'))).toBe(true)
+  it('Focus Punch drops to 40 power, and Self-Destruct doubles, once the attacker was hit this turn (battle_util.c:6876-6877, :6926-6927)', () => {
+    for (const [id, direction] of [['MOVE_FOCUS_PUNCH', 'down'], ['MOVE_SELF_DESTRUCT', 'up']] as const) {
+      const fresh = state()
+      const hit = state()
+      hit.battlers[0]!.round.damaged = true
+      hit.battlers[0]!.round.physicalBattlerId = 1
+      hit.battlers[0]!.round.physicalDmg = 10
+      const before = resolver(scripted(0, 0, 0, 0)).resolve(fresh, 0, 1, action(id))
+      const after = resolver(scripted(0, 0, 0, 0)).resolve(hit, 0, 1, action(id))
+      expect(after.unmodelled.some((u) => u.includes('attackerWasHitThisTurn'))).toBe(false)
+      if (direction === 'down') expect(after.targetDamage!).toBeLessThan(before.targetDamage!)
+      else expect(after.targetDamage!).toBeGreaterThan(before.targetDamage!)
+    }
   })
   it('fires defenderIsSwitching only for EFFECT_PURSUIT', () => {
     expect(resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT')).unmodelled.some((u) => u.includes('defenderIsSwitching'))).toBe(true)

@@ -96,7 +96,6 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // state.ts's sameMoveTurns doc.
       if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
       if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
-      if (move.effect === 'EFFECT_FOCUS_PUNCH' || move.id === 'MOVE_SELF_DESTRUCT') unmodelled.push('attackerWasHitThisTurn is not tracked by the simulator')
       if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
       const scenario: DamageCalcScenario = {
         move,
