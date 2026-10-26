@@ -59,11 +59,14 @@ import {
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   PLEDGE_DURATION,
+  QUASH_DURATION,
   SCREEN_DURATION,
   SCREEN_DURATION_SHORT,
   SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
@@ -77,7 +80,10 @@ import {
   STAT_SPDEF,
   STATUS2_DEFENSE_CURL,
   STATUS2_ENRAGED,
+  STATUS2_ESCAPE_PREVENTION,
   STATUS2_SUBSTITUTE,
+  STATUS3_AQUA_RING,
+  STATUS3_CHARGED_UP,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -122,11 +128,14 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
+import { canBattlerHeal } from './endTurn'
 import {
   dispatchOnTerrainChange,
   dispatchOnWeatherChange,
+  flareBoostHandler,
   protosynthesisHandler,
   quarkDriveHandler,
+  toxicBoostHandler,
 } from './onWeather'
 import {
   B_MSG_DEFENDER_STAT_FELL,
@@ -233,6 +242,7 @@ export const WEATHER_SETTER_MAP: Readonly<Record<string, number>> = {
   ABILITY_DESOLATE_LAND: ENUM_WEATHER_SUN_PRIMAL,
   ABILITY_PRIMORDIAL_SEA: ENUM_WEATHER_RAIN_PRIMAL,
   ABILITY_DELTA_STREAM: ENUM_WEATHER_STRONG_WINDS,
+  ABILITY_LOW_VISIBILITY: ENUM_WEATHER_FOG,
 }
 
 /**
@@ -735,6 +745,47 @@ export function disableSwitchInAbility(
 }
 
 /**
+ * GetSingleUseAbilityCounter, battle_util.c:3954-3958.
+ * Reads gBattleStruct->singleuseability[gBattlerPartyIndexes[battler]][index][GetBattlerSide(battler)].
+ */
+export function getSingleUseAbilityCounter(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  dataContext: SimDataContext,
+): number {
+  const battler = state.battlers[battlerId]
+  if (!battler) return -1
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index >= 4) return -1
+  const partyIndex = battler.partyIndex
+  const side = battlerId & 1
+  return state.singleUseAbility?.[partyIndex]?.[index]?.[side] ?? 0
+}
+
+/**
+ * SetSingleUseAbilityCounter, battle_util.c:3960-3965.
+ * Writes gBattleStruct->singleuseability[gBattlerPartyIndexes[battler]][index][GetBattlerSide(battler)].
+ */
+export function setSingleUseAbilityCounter(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  value: number,
+  dataContext: SimDataContext,
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index >= 4) return
+  const partyIndex = battler.partyIndex
+  const side = battlerId & 1
+  if (state.singleUseAbility?.[partyIndex]?.[index]) {
+    state.singleUseAbility[partyIndex][index][side] = value
+  }
+}
+
+/**
  * The 12 abilities with tauntImmune = TRUE (abilities.cc).
  * IsBattlerImmuneToLowerStatsFromIntimidateClone (battle_script_commands.c:10275-10281).
  */
@@ -1196,6 +1247,62 @@ export function applySwitchInAbilities(
       continue
     }
 
+    if (abilityId === 'ABILITY_REJECTION') {
+      // abilities.cc:7741-7749
+      if (state.field.timers.quashTimer === 0) {
+        state.field.timers.quashTimer = QUASH_DURATION
+        state.field.timers.started.quash = true
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_PASTEL_VEIL') {
+      // abilities.cc:3531-3543
+      const side = battlerId & 1
+      const sideState = state.sides[side]
+      if (sideState && !hasFlag(sideState.statuses, SIDE_STATUS_SAFEGUARD)) {
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SAFEGUARD)
+        sideState.timers.started.safeguard = true
+        sideState.timers.safeguardBattlerId = battlerId
+        sideState.timers.safeguardTimer = SCREEN_DURATION
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_HOT_COALS') {
+      // abilities.cc:8802-8809
+      const oppSide = (battlerId & 1) ^ 1
+      const targetSide = state.sides[oppSide]
+      if (targetSide && !targetSide.timers.hotCoals) {
+        targetSide.timers.hotCoals = true
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_PICKUP') {
+      // abilities.cc:1171-1185
+      const side = battlerId & 1
+      const sideState = state.sides[side]
+      if (sideState) {
+        let hazardBits = SIDE_STATUS_HAZARDS_ANY
+        if (sideState.timers.foamyWeb) {
+          hazardBits &= ~SIDE_STATUS_STICKY_WEB
+        }
+        if (
+          hasFlag(sideState.statuses, hazardBits) ||
+          sideState.timers.hotCoals ||
+          sideState.timers.caltrops
+        ) {
+          sideState.statuses = clearFlag(sideState.statuses, hazardBits)
+          sideState.timers.spikesAmount = 0
+          sideState.timers.toxicSpikesAmount = 0
+          sideState.timers.hotCoals = false
+          sideState.timers.caltrops = false
+        }
+      }
+      continue
+    }
+
     // 4. Entry moves via UseEntryMove (Cycle 45)
     const entryMoveId = USE_ENTRY_MOVE_MAP[abilityId]
     if (entryMoveId !== undefined) {
@@ -1293,7 +1400,11 @@ export function applySwitchInAbilities(
       continue
     }
 
-    if (abilityId === 'ABILITY_EMBODY_ASPECT_WELLSPRING') {
+    if (
+      abilityId === 'ABILITY_EMBODY_ASPECT_WELLSPRING' ||
+      abilityId === 'ABILITY_HEADSTRONG'
+    ) {
+      // abilities.cc:9790-9799 (Headstrong)
       if (canRaiseStat(state, battler, STAT_SPDEF, deps.dataContext)) {
         changeStatBuffs(
           state,
@@ -1307,6 +1418,115 @@ export function applySwitchInAbilities(
           deps,
           unmodelled,
         )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_WIND_RIDER') {
+      // abilities.cc:6267-6281
+      const side = battlerId & 1
+      if (hasFlag(state.sides[side]?.statuses ?? 0, SIDE_STATUS_TAILWIND)) {
+        const statId = getHighestAttackingStatId(state, battlerId, statStageRatios)
+        if (canRaiseStat(state, battler, statId, deps.dataContext)) {
+          changeStatBuffs(
+            state,
+            battlerId,
+            battlerId,
+            battlerId,
+            1,
+            statId,
+            MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+            false,
+            deps,
+            unmodelled,
+          )
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_LAWNMOWER') {
+      // abilities.cc:7636-7654
+      if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)) {
+        const currentTerrain = state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+        const statId =
+          currentTerrain === STATUS_FIELD_TOXIC_TERRAIN ||
+          currentTerrain === STATUS_FIELD_PSYCHIC_TERRAIN ||
+          currentTerrain === STATUS_FIELD_MISTY_TERRAIN
+            ? STAT_SPDEF
+            : STAT_DEF
+        state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+        dispatchOnTerrainChange(state, deps, unmodelled)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TURF_WAR') {
+      // abilities.cc:11054-11063
+      if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)) {
+        const statId = getHighestStatId(state, battlerId, statStageRatios)
+        state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+        dispatchOnTerrainChange(state, deps, unmodelled)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_CURSE_OF_FAMINE') {
+      // abilities.cc:10786-10793, BattleScript_CurseOfFamine
+      if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)) {
+        const currentTerrain = state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+        const statId =
+          currentTerrain === STATUS_FIELD_TOXIC_TERRAIN ||
+          currentTerrain === STATUS_FIELD_PSYCHIC_TERRAIN ||
+          currentTerrain === STATUS_FIELD_MISTY_TERRAIN
+            ? STAT_SPDEF
+            : STAT_DEF
+        state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+        dispatchOnTerrainChange(state, deps, unmodelled)
+        changeStatBuffs(
+          state,
+          battlerId,
+          battlerId,
+          battlerId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          deps,
+          unmodelled,
+        )
+        if (
+          battler.mon.hp > 0 &&
+          battler.mon.hp < battler.mon.maxHp &&
+          canBattlerHeal(state, battlerId, battler, unmodelled)
+        ) {
+          const heal = Math.max(1, Math.floor(battler.mon.maxHp / 4))
+          battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+        }
       }
       continue
     }
@@ -1488,6 +1708,93 @@ export function applySwitchInAbilities(
       if (!hasFlag(battler.statuses4, STATUS4_CUTTHROAT)) {
         battler.statuses4 |= STATUS4_CUTTHROAT
       }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_WATER_VEIL' || abilityId === 'ABILITY_PURIFYING_WATERS') {
+      // abilities.cc:1030-1044 / 6457-6463
+      if (!hasFlag(battler.statuses3, STATUS3_AQUA_RING)) {
+        battler.statuses3 = setFlag(battler.statuses3, STATUS3_AQUA_RING)
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_COWARD') {
+      // abilities.cc:5441-5451
+      if (!getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext)) {
+        setSingleUseAbilityCounter(state, battlerId, abilityId, 1, deps.dataContext)
+        battler.round.protectMove = 'MOVE_PROTECT'
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_PARASITIC_SPORES') {
+      // abilities.cc:7709-7716
+      if (!battler.volatiles.parasiticSpores) {
+        battler.volatiles.parasiticSpores = true
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_READIED_ACTION' || abilityId === 'ABILITY_DEMOLITIONIST') {
+      // abilities.cc:7095-7100 / 7771-7785
+      battler.volatiles.readiedAction = true
+      battler.volatiles.started.readiedAction = true
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SALT_CIRCLE') {
+      // abilities.cc:6890-6911
+      const oppId = battlerId ^ 1
+      const targets = [oppId, ...(state.battlersCount > 2 ? [oppId ^ 2] : [])]
+      for (const tid of targets) {
+        const target = state.battlers[tid]
+        if (target && target.mon.hp > 0 && !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+          target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+          target.volatiles.battlerPreventingEscape = battlerId
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_GENERATOR' || abilityId === 'ABILITY_ENERGIZED') {
+      // abilities.cc:6174-6206 / 8721-8733
+      if (!hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) {
+        let any = false
+        if (hasFlag(state.field.statuses, STATUS_FIELD_ELECTRIC_TERRAIN)) {
+          any = true
+        } else if (!getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext)) {
+          setSingleUseAbilityCounter(state, battlerId, abilityId, 1, deps.dataContext)
+          any = true
+        }
+        if (any) {
+          battler.statuses3 = setFlag(battler.statuses3, STATUS3_CHARGED_UP)
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TOXIC_BOOST') {
+      // abilities.cc:1981-2001
+      toxicBoostHandler(state, battlerId, deps)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_FLARE_BOOST') {
+      // abilities.cc:2003-2026
+      flareBoostHandler(state, battlerId, deps)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_GALLANTRY') {
+      // abilities.cc:7423-7433: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability));
+      // pushes BattleScript_BattlerHasASingleNoDamageHit (printstring only; no state change onEntry).
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TOXIC_SPILL' || abilityId === 'ABILITY_TRASH_HEAP') {
+      // abilities.cc:5199-5250: onEntry pushes BattleScript_BattlerAnnouncedToxicSpill
+      // (printstring only). State effect is onEndTurn (:5208-5242).
       continue
     }
 

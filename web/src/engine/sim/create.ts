@@ -466,6 +466,9 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     processingExtraAttacks: false,
     currentExtraAttack: null,
     mega: createMegaEvolutionState(),
+    singleUseAbility: Array.from({ length: PARTY_SIZE }, () =>
+      Array.from({ length: ABILITY_SLOT_COUNT }, () => [0, 0]),
+    ),
     lastMoveFailed: 0,
     battleEvents: [],
     currentBattleEvent: 0,

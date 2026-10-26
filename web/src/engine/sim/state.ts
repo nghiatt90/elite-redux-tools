@@ -679,6 +679,10 @@ export interface BattleState {
   currentExtraAttack: ExtraAttackAction | null
   /** `struct MegaEvolutionData mega` (include/battle.h:694, :549-564). */
   mega: MegaEvolutionState
+  /** `bool8 singleuseability[PARTY_SIZE][NUM_INNATE_PER_SPECIES + 1][2]` (include/battle.h:726).
+   * Backing store for GetSingleUseAbilityCounter / SetSingleUseAbilityCounter (battle_util.c:3950-3965).
+   * Indexed by [partyIndex][slotIndex][side]. */
+  singleUseAbility: number[][][]
   /** `u8 lastMoveFailed` (include/battle.h:700, battle_script_commands.c:4725,4728,4730, battle_main.c:2914). Battler bitmask (1 << battlerId). */
   lastMoveFailed: number
   /** `struct BattleEvent gBattleEvents[BATTLE_EVENTS_MAX_REGISTERABLE]` (include/battle_events.h:18, battle_events.c:24). */

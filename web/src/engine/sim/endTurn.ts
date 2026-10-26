@@ -100,8 +100,8 @@
 //   ENDTURN_BAD_POISON      PORTED.
 //   ENDTURN_SEA_OF_FIRE_DAMAGE Ported (:2545-2562) -- maxHP/8 damage to non-Fire
 //                           battlers without Magic Guard / Flare Boost on the side with fireSeaTimer.
-//   ENDTURN_PARASITIC_SPORES_DAMAGE Unreachable -- volatiles.parasiticSpores
-//                           has no reader outside create.ts's false default.
+//   ENDTURN_PARASITIC_SPORES_DAMAGE Ported (:2561-2570) -- maxHP/8 to non-Ghost
+//                           battlers without Magic Guard when volatiles.parasiticSpores is set.
 //   ENDTURN_BURN            PORTED.
 //   ENDTURN_FROSTBITE       Gapped -- STATUS1_FROSTBITE is read for real by
 //                           attackCanceller.ts (thaw). Gapped when set and
@@ -438,7 +438,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'CURSE' | 'WRAP' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM' | 'SEA_OF_FIRE' | 'SALT_CURE'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'CURSE' | 'WRAP' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM' | 'SEA_OF_FIRE' | 'SALT_CURE' | 'PARASITIC_SPORES'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -1254,6 +1254,20 @@ export function runEndTurnEffects(
       const dmg = Math.max(1, Math.floor(battler.mon.maxHp / 8))
       const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
       results.push({ battlerId, effect: 'SEA_OF_FIRE', hpChange: -dmg, fainted })
+    }
+
+    // ENDTURN_PARASITIC_SPORES_DAMAGE, battle_util.c:2561-2570.
+    // maxHP/8 to non-Ghost battlers with parasiticSpores without Magic Guard.
+    if (
+      !hasFlag(state.absentBattlerFlags, 1 << battlerId) &&
+      battler.mon.hp > 0 &&
+      battler.volatiles.parasiticSpores &&
+      !battler.mon.types.includes('GHOST') &&
+      !isMagicGuardProtected(state, battler)
+    ) {
+      const dmg = Math.max(1, Math.floor(battler.mon.maxHp / 8))
+      const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+      results.push({ battlerId, effect: 'PARASITIC_SPORES', hpChange: -dmg, fainted })
     }
 
     const frostbite = runFrostbite(state, battlerId, battler)

@@ -10,13 +10,16 @@
 import type { BattleState } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
-import { canBeBurned, isTerrainActive } from './statusEffects'
+import { isBattlerGrounded } from './grounding'
+import { canBeBurned, canBePoisoned, isTerrainActive } from './statusEffects'
 import {
   DEFAULT_STAT_STAGE_RATIOS,
   STATUS1_BURN,
+  STATUS1_POISON,
   STATUS2_ENRAGED,
   STATUS2_TRANSFORMED,
   STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_SUN_ANY,
@@ -119,6 +122,43 @@ export function quarkDriveHandler(state: BattleState, battlerId: number, slot: n
   }
 }
 
+/** FlareBoostHandler, src/abilities.cc:2003-2013. */
+export function flareBoostHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext; grounding: GroundingContext },
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (
+    canBeBurned(state, battlerId, battlerId, deps) &&
+    isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)
+  ) {
+    battler.mon.status1 = setFlag(battler.mon.status1, STATUS1_BURN)
+    return true
+  }
+  return false
+}
+
+/** ToxicBoostHandler, src/abilities.cc:1981-1992. */
+export function toxicBoostHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext; grounding: GroundingContext },
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (
+    hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN) &&
+    isBattlerGrounded(state, battlerId, deps.grounding) &&
+    canBePoisoned(state, battlerId, battlerId, null, deps)
+  ) {
+    battler.mon.status1 = setFlag(battler.mon.status1, STATUS1_POISON)
+    return true
+  }
+  return false
+}
+
 export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps, unmodelled: string[]): void {
   for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
     const battler = state.battlers[battlerId]
@@ -137,9 +177,7 @@ export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps,
           break
         case 'ABILITY_FLARE_BOOST':
           // FlareBoostHandler, src/abilities.cc:2003-2013.
-          if (canBeBurned(state, battlerId, battlerId, deps) && isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) {
-            battler.mon.status1 = setFlag(battler.mon.status1, STATUS1_BURN)
-          }
+          flareBoostHandler(state, battlerId, deps)
           break
         case 'ABILITY_MADNESS_ENHANCEMENT':
           // MadnessEnhancementHandler, src/abilities.cc:9934-9943.
@@ -223,6 +261,10 @@ export function dispatchOnTerrainChange(state: BattleState, deps: OnWeatherDeps,
       switch (abilityId) {
         case 'ABILITY_QUARK_DRIVE':
           quarkDriveHandler(state, battlerId, slot, deps, unmodelled)
+          break
+        case 'ABILITY_TOXIC_BOOST':
+          // ToxicBoostHandler, src/abilities.cc:1981-1992.
+          toxicBoostHandler(state, battlerId, deps)
           break
       }
     }
