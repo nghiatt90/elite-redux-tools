@@ -143,13 +143,6 @@ import {
   setFlag,
   STATUS2_RECHARGE,
   statusInfatuatedWith,
-} from './constants'
-import {
-  MOVE_EFFECT_AFFECTS_USER,
-  MOVE_EFFECT_CERTAIN,
-  STAT_BUFF_ALLOW_PTR,
-  STAT_BUFF_NOT_PROTECT_AFFECTED,
-  STAT_BUFF_UPDATE_MOVE_EFFECT,
   MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_DEF_PLUS_1,
   MOVE_EFFECT_SPD_PLUS_1,
@@ -179,6 +172,17 @@ import {
   MOVE_EFFECT_SP_DEF_MINUS_2,
   MOVE_EFFECT_ACC_MINUS_2,
   MOVE_EFFECT_EVS_MINUS_2,
+  MOVE_EFFECT_ATK_DEF_DOWN,
+  MOVE_EFFECT_DEF_SPDEF_DOWN,
+  MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
+  MOVE_EFFECT_RECHARGE,
+} from './constants'
+import {
+  MOVE_EFFECT_AFFECTS_USER,
+  MOVE_EFFECT_CERTAIN,
+  STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
   attackerHasMoldBreakerActive,
   B_MSG_DEFENDER_STAT_FELL,
   battlerHasSimAbility,
@@ -192,10 +196,6 @@ import {
   getHighestStatIdExcept,
   isBattlerWeatherAffected,
   isUnnerveAbilityOnOpposingSide,
-  MOVE_EFFECT_ATK_DEF_DOWN,
-  MOVE_EFFECT_DEF_SPDEF_DOWN,
-  MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
-  MOVE_EFFECT_RECHARGE,
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
@@ -11115,9 +11115,15 @@ export function applySecondaryMoveEffects(
         }
       }
     }
-  } else if (moveEffect === 'EFFECT_ARGUMENT_HIT') {
+  } else if (
+    moveEffect === 'EFFECT_ARGUMENT_HIT' ||
+    moveEffect === 'EFFECT_RECOIL_IF_MISS' ||
+    moveEffect === 'EFFECT_EXPLOSION' ||
+    moveEffect === 'EFFECT_MIND_BLOWN'
+  ) {
     // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
-    // argumenttomoveeffect; goto BattleScript_EffectHit
+    // argumenttomoveeffect; goto BattleScript_EffectHit. Recoil-if-miss (:4146-4147), Explosion (:3517-3518) and
+    // Mind Blown (reaches ExplosionLoop) run the same argumenttomoveeffect; seteffectwithchance on a hit.
     const arg = moveData?.argument
     if (arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string') {
       effectSpecs.push({
@@ -11267,7 +11273,17 @@ export function applySecondaryMoveEffects(
       affectsUser: false,
       certain: false,
     })
-  } else if (moveEffect === 'EFFECT_HIT' || !moveEffect) {
+  } else if (
+    moveEffect === 'EFFECT_HIT' ||
+    !moveEffect ||
+    // Scripts with no setmoveeffect / argumenttomoveeffect before their hit; the rest of each effect lives in turn.ts.
+    moveEffect === 'EFFECT_ABSORB' ||
+    moveEffect === 'EFFECT_DREAM_EATER' ||
+    moveEffect === 'EFFECT_HIT_ESCAPE' ||
+    moveEffect === 'EFFECT_SUCKER_PUNCH' ||
+    moveEffect === 'EFFECT_STEEL_BEAM' ||
+    moveEffect === 'EFFECT_BRICK_BREAK'
+  ) {
     // Pure damaging move or handled elsewhere with no secondary effect
   } else {
     // Any other legacy script reached by a damaging move:

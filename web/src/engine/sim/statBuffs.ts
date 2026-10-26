@@ -27,6 +27,34 @@ import {
   WEATHER_SANDSTORM_ANY,
   WEATHER_SUN_ANY,
   hasFlag,
+  MOVE_EFFECT_ATK_PLUS_1,
+  MOVE_EFFECT_DEF_PLUS_1,
+  MOVE_EFFECT_SPD_PLUS_1,
+  MOVE_EFFECT_SP_ATK_PLUS_1,
+  MOVE_EFFECT_SP_DEF_PLUS_1,
+  MOVE_EFFECT_ACC_PLUS_1,
+  MOVE_EFFECT_EVS_PLUS_1,
+  MOVE_EFFECT_ATK_MINUS_1,
+  MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_EFFECT_SP_ATK_MINUS_1,
+  MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_EFFECT_ACC_MINUS_1,
+  MOVE_EFFECT_EVS_MINUS_1,
+  MOVE_EFFECT_ATK_PLUS_2,
+  MOVE_EFFECT_DEF_PLUS_2,
+  MOVE_EFFECT_SPD_PLUS_2,
+  MOVE_EFFECT_SP_ATK_PLUS_2,
+  MOVE_EFFECT_SP_DEF_PLUS_2,
+  MOVE_EFFECT_ACC_PLUS_2,
+  MOVE_EFFECT_EVS_PLUS_2,
+  MOVE_EFFECT_ATK_MINUS_2,
+  MOVE_EFFECT_DEF_MINUS_2,
+  MOVE_EFFECT_SPD_MINUS_2,
+  MOVE_EFFECT_SP_ATK_MINUS_2,
+  MOVE_EFFECT_SP_DEF_MINUS_2,
+  MOVE_EFFECT_ACC_MINUS_2,
+  MOVE_EFFECT_EVS_MINUS_2,
 } from './constants'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { findAbilitySlot } from './statusEffects'
@@ -636,41 +664,6 @@ export function changeStatBuffsImplicit(
   )
 }
 
-// pipeline/.upstream/er-config/MoveEffect.proto:28-41, 47, 52-65
-export const MOVE_EFFECT_ATK_PLUS_1 = 17
-export const MOVE_EFFECT_DEF_PLUS_1 = 18
-export const MOVE_EFFECT_SPD_PLUS_1 = 19
-export const MOVE_EFFECT_SP_ATK_PLUS_1 = 20
-export const MOVE_EFFECT_SP_DEF_PLUS_1 = 21
-export const MOVE_EFFECT_ACC_PLUS_1 = 22
-export const MOVE_EFFECT_EVS_PLUS_1 = 23
-export const MOVE_EFFECT_ATK_MINUS_1 = 24
-export const MOVE_EFFECT_DEF_MINUS_1 = 25
-export const MOVE_EFFECT_SPD_MINUS_1 = 26
-export const MOVE_EFFECT_SP_ATK_MINUS_1 = 27
-export const MOVE_EFFECT_SP_DEF_MINUS_1 = 28
-export const MOVE_EFFECT_ACC_MINUS_1 = 29
-export const MOVE_EFFECT_EVS_MINUS_1 = 30
-export const MOVE_EFFECT_ALL_STATS_UP = 36
-export const MOVE_EFFECT_ATK_PLUS_2 = 41
-export const MOVE_EFFECT_DEF_PLUS_2 = 42
-export const MOVE_EFFECT_SPD_PLUS_2 = 43
-export const MOVE_EFFECT_SP_ATK_PLUS_2 = 44
-export const MOVE_EFFECT_SP_DEF_PLUS_2 = 45
-export const MOVE_EFFECT_ACC_PLUS_2 = 46
-export const MOVE_EFFECT_EVS_PLUS_2 = 47
-export const MOVE_EFFECT_ATK_MINUS_2 = 48
-export const MOVE_EFFECT_DEF_MINUS_2 = 49
-export const MOVE_EFFECT_SPD_MINUS_2 = 50
-export const MOVE_EFFECT_SP_ATK_MINUS_2 = 51
-export const MOVE_EFFECT_SP_DEF_MINUS_2 = 52
-export const MOVE_EFFECT_ACC_MINUS_2 = 53
-export const MOVE_EFFECT_EVS_MINUS_2 = 54
-export const MOVE_EFFECT_ATK_DEF_DOWN = 39
-export const MOVE_EFFECT_DEF_SPDEF_DOWN = 57
-export const MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1 = 91
-export const MOVE_EFFECT_RECHARGE = 31
-
 /**
  * Port of ReverseStatChangeMoveEffect, src/battle_script_commands.c:9641-9705.
  * Reverses a stat change move effect (+1 <-> -1, +2 <-> -2) under Contrary.
@@ -1262,3 +1255,41 @@ export function runReactiveAbilityEffects(
 
   return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive
 }
+
+// Defined in constants.ts (a leaf module) so moveEffects.ts can build SECONDARY_MOVE_EFFECT_MAP without an import cycle
+// leaving them undefined; re-exported here for the existing importers.
+export {
+  MOVE_EFFECT_ATK_PLUS_1,
+  MOVE_EFFECT_DEF_PLUS_1,
+  MOVE_EFFECT_SPD_PLUS_1,
+  MOVE_EFFECT_SP_ATK_PLUS_1,
+  MOVE_EFFECT_SP_DEF_PLUS_1,
+  MOVE_EFFECT_ACC_PLUS_1,
+  MOVE_EFFECT_EVS_PLUS_1,
+  MOVE_EFFECT_ATK_MINUS_1,
+  MOVE_EFFECT_DEF_MINUS_1,
+  MOVE_EFFECT_SPD_MINUS_1,
+  MOVE_EFFECT_SP_ATK_MINUS_1,
+  MOVE_EFFECT_SP_DEF_MINUS_1,
+  MOVE_EFFECT_ACC_MINUS_1,
+  MOVE_EFFECT_EVS_MINUS_1,
+  MOVE_EFFECT_ALL_STATS_UP,
+  MOVE_EFFECT_ATK_PLUS_2,
+  MOVE_EFFECT_DEF_PLUS_2,
+  MOVE_EFFECT_SPD_PLUS_2,
+  MOVE_EFFECT_SP_ATK_PLUS_2,
+  MOVE_EFFECT_SP_DEF_PLUS_2,
+  MOVE_EFFECT_ACC_PLUS_2,
+  MOVE_EFFECT_EVS_PLUS_2,
+  MOVE_EFFECT_ATK_MINUS_2,
+  MOVE_EFFECT_DEF_MINUS_2,
+  MOVE_EFFECT_SPD_MINUS_2,
+  MOVE_EFFECT_SP_ATK_MINUS_2,
+  MOVE_EFFECT_SP_DEF_MINUS_2,
+  MOVE_EFFECT_ACC_MINUS_2,
+  MOVE_EFFECT_EVS_MINUS_2,
+  MOVE_EFFECT_ATK_DEF_DOWN,
+  MOVE_EFFECT_DEF_SPDEF_DOWN,
+  MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
+  MOVE_EFFECT_RECHARGE,
+} from './constants'
