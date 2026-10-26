@@ -204,6 +204,8 @@ import {
   battlerHasSimAbility,
   B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffsImplicit,
+  tryResetBattlerStatChanges,
+  RESET_ALL_STATS,
   MOVE_EFFECT_AFFECTS_USER,
   consumeHeldItem,
   dispatchOnStatLowered,
@@ -1671,6 +1673,59 @@ function applyLockedMove(state: BattleState, battlerId: number, action: ChosenAc
   return { action: 'USE_MOVE', chosenMove: view, moveToBeUsed: view, target }
 }
 
+const FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_COUNTER',
+  'EFFECT_MIRROR_COAT',
+  'EFFECT_METAL_BURST',
+  'EFFECT_ENDEAVOR',
+  'EFFECT_SUPER_FANG',
+  'EFFECT_SUPER_FANG_HAZE',
+  'EFFECT_LEVEL_DAMAGE',
+  'EFFECT_FINAL_GAMBIT',
+])
+
+/**
+ * The fixed damage of the moves whose scripts bypass damagecalc (battle_script_commands.c): Cmd_counterdamagecalculator
+ * (:10663-10682), Cmd_mirrorcoatdamagecalculator (:10684-10704), Cmd_metalburstdamagecalculator (:13102-13130),
+ * Cmd_setdamagetohealthdifference (:11857-11864), Cmd_calculatesetdamage (:10626-10659) and DMG_CURR_ATTACKER_HP (:9381).
+ * `fail` is the script's jump to BattleScript_ButItFailedAtkStringPpReduce, taken before the accuracy check.
+ */
+function fixedDamageFor(state: BattleState, battlerId: number, targetId: number, moveEffect: string): { fail: boolean; damage: number } {
+  const attacker = state.battlers[battlerId]
+  const target = state.battlers[targetId]
+  if (!attacker || !target) return { fail: true, damage: 0 }
+  const hitBy = (damage: number, byId: number) => damage > 0 && (byId & 1) !== (battlerId & 1) && (state.battlers[byId]?.mon.hp ?? 0) > 0
+  switch (moveEffect) {
+    case 'EFFECT_COUNTER':
+      return hitBy(attacker.round.physicalDmg, attacker.round.physicalBattlerId)
+        ? { fail: false, damage: Math.max(1, attacker.round.physicalDmg * 2) }
+        : { fail: true, damage: 0 }
+    case 'EFFECT_MIRROR_COAT':
+      return hitBy(attacker.round.specialDmg, attacker.round.specialBattlerId)
+        ? { fail: false, damage: Math.max(1, attacker.round.specialDmg * 2) }
+        : { fail: true, damage: 0 }
+    case 'EFFECT_METAL_BURST':
+      if (hitBy(attacker.round.physicalDmg, attacker.round.physicalBattlerId)) {
+        return { fail: false, damage: Math.max(1, Math.trunc((attacker.round.physicalDmg * 150) / 100)) }
+      }
+      if (hitBy(attacker.round.specialDmg, attacker.round.specialBattlerId)) {
+        return { fail: false, damage: Math.max(1, Math.trunc((attacker.round.specialDmg * 150) / 100)) }
+      }
+      return { fail: true, damage: 0 }
+    case 'EFFECT_ENDEAVOR':
+      return target.mon.hp <= attacker.mon.hp ? { fail: true, damage: 0 } : { fail: false, damage: target.mon.hp - attacker.mon.hp }
+    case 'EFFECT_SUPER_FANG':
+    case 'EFFECT_SUPER_FANG_HAZE':
+      return { fail: false, damage: Math.max(1, Math.trunc(target.mon.hp / 2)) }
+    case 'EFFECT_LEVEL_DAMAGE':
+      return { fail: false, damage: Math.max(1, attacker.mon.level) }
+    case 'EFFECT_FINAL_GAMBIT':
+      return { fail: false, damage: Math.max(1, attacker.mon.hp) }
+    default:
+      return { fail: true, damage: 0 }
+  }
+}
+
 const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SEMI_INVULNERABLE',
   'EFFECT_SOLARBEAM',
@@ -2310,6 +2365,10 @@ export function executeAction(
       ) {
         preFail = true
       }
+    } else if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect) && fixedDamageFor(state, battlerId, currentTargetId, moveEffect).fail) {
+      // counterdamagecalculator / mirrorcoatdamagecalculator / metalburstdamagecalculator / setdamagetohealthdifference jump to
+      // BattleScript_ButItFailedAtkStringPpReduce (data/battle_scripts_1.s:3589-3590, 4143, 4154).
+      preFail = true
     } else if (moveEffect === 'EFFECT_MIND_BLOWN' && isAbilityOnField(state, 'ABILITY_DAMP', deps)) {
       // BattleScript_EffectMindBlown (data/battle_scripts_1.s:3536-3538): jumpifabilitypresent ABILITY_DAMP -> _Failed
       preFail = true
@@ -2581,6 +2640,17 @@ export function executeAction(
       }
     }
 
+    // Fixed-damage scripts (calculatesetdamage and friends) set gBattleMoveDamage themselves, with no crit and no random roll. The
+    // resolver above still ran for the type-immunity answer (0), so the fixed amount only replaces a non-zero result.
+    if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect) && targetDamage !== null && targetDamage > 0) {
+      targetDamage = fixedDamageFor(state, battlerId, currentTargetId, moveEffect).damage
+      isCriticalHit = false
+    }
+    if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect)) {
+      // The engine's own "EFFECT_X: not modelled" note (basePower.ts UNMODELLED_BASE_POWER_EFFECTS) is answered by this block.
+      damageUnmodelled = damageUnmodelled.filter((note) => note !== `${moveEffect}: not modelled`)
+    }
+
     // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673)
     const targetBattler = state.battlers[currentTargetId]
     const isFalseSwipe = Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
@@ -2660,6 +2730,20 @@ export function executeAction(
 
     applyDamage(state, battlerId, attackerDamage, fainted)
     if (preAttackerDamage) attackerDamage = (attackerDamage ?? 0) + preAttackerDamage
+
+    // BattleScript_EffectFinalGambit (data/battle_scripts_1.s:4172-4194): dmgtocurrattackerhp; datahpupdate BS_ATTACKER, so the user
+    // faints unless the hit had no effect.
+    if (moveEffect === 'EFFECT_FINAL_GAMBIT' && targetDamage !== null && targetDamage > 0) {
+      const gambitHp = attackerBattler.mon.hp
+      applyDamage(state, battlerId, gambitHp, fainted)
+      attackerDamage = (attackerDamage ?? 0) + gambitHp
+    }
+
+    // normalisebuffs (Cmd_normalisebuffs, battle_script_commands.c:9988-9995): Haze for every battler. Super Fang Haze skips it when the
+    // hit did not affect the foe (BattleScript_EffectSuperFangHaze); Freezy Frost does it unconditionally.
+    if ((moveEffect === 'EFFECT_SUPER_FANG_HAZE' && targetDamage !== null && targetDamage > 0) || moveEffect === 'EFFECT_FREEZY_FROST') {
+      for (let i = 0; i < state.battlersCount; i++) tryResetBattlerStatChanges(state, i, RESET_ALL_STATS)
+    }
 
     // BattleScript_EffectSteelBeam (data/battle_scripts_1.s:70-98): self-damage after seteffectwithchance,
     // skipped by Rock Head / Magic Guard. Applied before the secondary effects here only because it has none.

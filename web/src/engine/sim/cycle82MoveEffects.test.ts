@@ -555,3 +555,61 @@ describe('Two-turn moves (Solar Beam, Meteor Beam, Freeze Shock)', () => {
     expect(state.battlers[1]?.mon.hp).toBe(70)
   })
 })
+
+describe('Fixed-damage moves (Counter, Mirror Coat, Metal Burst, Endeavor, Super Fang, Night Shade, Final Gambit)', () => {
+  // Battler 0 is faster; battler 1 uses the reactive move after being hit by battler 0.
+  it('Counter returns double the physical damage taken this turn', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, { moves: slot('MOVE_COUNTER'), pp: pps }], countingRng())
+    executeTurn(state, [useMove(1, move('MOVE_TACKLE')), useMove(0, move('MOVE_COUNTER'))], testDeps(fixedDamage(20)))
+    expect(state.battlers[1]?.mon.hp).toBe(80)
+    expect(state.battlers[0]?.mon.hp).toBe(60) // 20 * 2
+  })
+
+  it('Counter fails, but costs PP, when nothing physical hit the user', () => {
+    const state = battle([{ moves: slot('MOVE_COUNTER'), pp: pps }, {}], countingRng())
+    executeTurn(state, [useMove(1, move('MOVE_COUNTER')), null], testDeps(fixedDamage(20)))
+    expect(state.battlers[1]?.mon.hp).toBe(100)
+    expect(state.battlers[0]?.mon.pp[0]).toBe(19)
+  })
+
+  it('Metal Burst returns 1.5x of the last damage taken', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, { moves: slot('MOVE_METAL_BURST'), pp: pps }], countingRng())
+    executeTurn(state, [useMove(1, move('MOVE_TACKLE')), useMove(0, move('MOVE_METAL_BURST'))], testDeps(fixedDamage(20)))
+    expect(state.battlers[0]?.mon.hp).toBe(70)
+  })
+
+  it('Endeavor brings the target down to the user HP, and fails when the target has no more HP than the user', () => {
+    const state = battle([{ hp: 40, moves: slot('MOVE_ENDEAVOR'), pp: pps }, {}], countingRng())
+    executeTurn(state, [useMove(1, move('MOVE_ENDEAVOR')), null], testDeps(fixedDamage(5)))
+    expect(state.battlers[1]?.mon.hp).toBe(40)
+    const failing = battle([{ hp: 100, moves: slot('MOVE_ENDEAVOR'), pp: pps }, {}], countingRng())
+    executeTurn(failing, [useMove(1, move('MOVE_ENDEAVOR')), null], testDeps(fixedDamage(5)))
+    expect(failing.battlers[1]?.mon.hp).toBe(100)
+  })
+
+  it('Super Fang halves the target HP and Night Shade deals the user level', () => {
+    const fang = battle([{ moves: slot('MOVE_SUPER_FANG'), pp: pps }, { hp: 90 }], countingRng())
+    executeTurn(fang, [useMove(1, move('MOVE_SUPER_FANG')), null], testDeps(fixedDamage(1)))
+    expect(fang.battlers[1]?.mon.hp).toBe(45)
+    const shade = battle([{ moves: slot('MOVE_NIGHT_SHADE'), pp: pps }, {}], countingRng())
+    executeTurn(shade, [useMove(1, move('MOVE_NIGHT_SHADE')), null], testDeps(fixedDamage(1)))
+    expect(shade.battlers[1]?.mon.hp).toBe(50) // level 50
+  })
+
+  it('Final Gambit deals the user current HP and the user faints', () => {
+    const state = battle([{ hp: 70, moves: slot('MOVE_FINAL_GAMBIT'), pp: pps }, {}], countingRng())
+    const turn = executeTurn(state, [useMove(1, move('MOVE_FINAL_GAMBIT')), null], testDeps(fixedDamage(1)))
+    expect(state.battlers[1]?.mon.hp).toBe(30)
+    expect(state.battlers[0]?.mon.hp).toBe(0)
+    expect(turn.actions[0]?.fainted).toContain(0)
+  })
+
+  it('Freezy Frost resets every battler\'s stat stages (normalisebuffs)', () => {
+    const state = battle([{ moves: slot('MOVE_FREEZY_FROST'), pp: pps }, {}], countingRng())
+    state.battlers[0]!.mon.statStages[STAT_ATK] = DEFAULT_STAT_STAGE + 2
+    state.battlers[1]!.mon.statStages[STAT_DEF] = DEFAULT_STAT_STAGE - 2
+    executeTurn(state, [useMove(1, move('MOVE_FREEZY_FROST')), null], testDeps(fixedDamage(10)))
+    expect(state.battlers[0]?.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
+    expect(state.battlers[1]?.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+  })
+})

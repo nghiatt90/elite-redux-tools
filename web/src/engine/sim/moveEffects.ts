@@ -11337,7 +11337,17 @@ export function applySecondaryMoveEffects(
     // Second-turn hit with moveEffect cleared (BattleScript_EffectTwoTurnSecondarySecondTurn, :4410-4416); turn.ts applies the
     // charge-turn effect and the Solar Beam charge logic.
     moveEffect === 'EFFECT_SOLARBEAM' ||
-    moveEffect === 'EFFECT_TWO_TURN_SECONDARY'
+    moveEffect === 'EFFECT_TWO_TURN_SECONDARY' ||
+    // Fixed-damage and Haze scripts (turn.ts fixedDamageFor): no setmoveeffect before their hit.
+    moveEffect === 'EFFECT_COUNTER' ||
+    moveEffect === 'EFFECT_MIRROR_COAT' ||
+    moveEffect === 'EFFECT_METAL_BURST' ||
+    moveEffect === 'EFFECT_ENDEAVOR' ||
+    moveEffect === 'EFFECT_SUPER_FANG' ||
+    moveEffect === 'EFFECT_SUPER_FANG_HAZE' ||
+    moveEffect === 'EFFECT_LEVEL_DAMAGE' ||
+    moveEffect === 'EFFECT_FINAL_GAMBIT' ||
+    moveEffect === 'EFFECT_FREEZY_FROST'
   ) {
     // Pure damaging move or handled elsewhere with no secondary effect
   } else {

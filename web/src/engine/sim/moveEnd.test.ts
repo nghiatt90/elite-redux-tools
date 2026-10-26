@@ -244,7 +244,7 @@ const MOVE_FIRE_PUNCH = requireMove('MOVE_FIRE_PUNCH')
 const MOVE_THUNDERBOLT = requireMove('MOVE_THUNDERBOLT')
 const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
 const MOVE_RAPID_SPIN = requireMove('MOVE_RAPID_SPIN')
-const MOVE_COUNTER = requireMove('MOVE_COUNTER')
+const MOVE_AQUA_FANG = requireMove('MOVE_AQUA_FANG')
 // requireMove() omits effectChance (adding it would start firing secondary effects in every older test); Knock Off's
 // seteffectwithchance needs moves.json's effectChance (100) as its percentChance.
 const MOVE_KNOCK_OFF: SimMoveData = { ...requireMove('MOVE_KNOCK_OFF'), effectChance: movesById.get('MOVE_KNOCK_OFF')!.effectChance as number }
@@ -738,11 +738,12 @@ describe('State Bookkeeping & Clear Bits', () => {
     expect(state.lastTakenMoveFrom[1][0]).toBe('MOVE_TACKLE')
   })
 
+  // Aqua Fang: a damaging move without the mirrorMoveAffected flag (Counter used to stand in, but it now fails when nothing hit the user first).
   it('MOVEEND_MIRROR_MOVE (18): move without mirrorMoveAffected does not set lastTakenMove', () => {
     const state = battle([{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100 }], scriptedRng())
-    executeTurn(state, [useMove(1, MOVE_COUNTER), null], testDepsWithDamage(fixedDamage(20)))
+    executeTurn(state, [useMove(1, MOVE_AQUA_FANG), null], testDepsWithDamage(fixedDamage(20)))
 
-    expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_COUNTER')
+    expect(state.battlers[1]!.lastLandedMove).toBe('MOVE_AQUA_FANG')
     expect(state.lastTakenMove[1]).toBeNull()
     expect(state.lastTakenMoveFrom[1][0]).toBeNull()
   })
