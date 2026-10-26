@@ -25,7 +25,11 @@ import {
   STAT_DEF,
   STAT_SPDEF,
   STATUS1_SLEEP,
+  STATUS2_CONFUSION,
+  STATUS2_LOCK_CONFUSE,
+  STATUS2_MULTIPLETURNS,
   STATUS2_RECHARGE,
+  getCounter,
   STATUS3_HEAL_BLOCK,
   hasFlag,
 } from './constants'
@@ -134,7 +138,7 @@ function battle(
           maxHp: s.maxHp ?? 100,
           abilities: s.abilities ?? { ability: null, innates: [null, null, null] },
           moves: s.moves ?? ['MOVE_TACKLE', null, null, null],
-          pp: s.pp ?? [35, 0, 0, 0],
+          pp: s.pp ? ([...s.pp] as SimBattleMon['pp']) : [35, 0, 0, 0],
           types: s.types ?? ['NORMAL', 'MYSTERY', 'MYSTERY'],
           itemId: s.itemId ?? null,
           gender: s.gender ?? 'MALE',
@@ -465,5 +469,40 @@ describe('Confusion self-hit (CANCELLER_CONFUSED, battle_util.c:3368-3399)', () 
     const turn = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(selfHit(21)))
     expect(turn.actions[0]?.cancelledBy).toBeNull()
     expect(state.battlers[0]?.mon.hp).toBe(100)
+  })
+})
+
+describe('Locked moves (gLockedMoves) and Rampage (Thrash)', () => {
+  it('a recharging user is forced back into the locked move whatever it picks, and the cancel costs no PP', () => {
+    const state = battle([{ moves: slot('MOVE_HYPER_BEAM', 'MOVE_TACKLE'), pp: pps }, {}], countingRng())
+    const deps = testDeps(fixedDamage(10))
+    executeTurn(state, [useMove(1, move('MOVE_HYPER_BEAM')), null], deps)
+    expect(state.lockedMoves[0]).toBe('MOVE_HYPER_BEAM')
+    const turn2 = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], deps)
+    expect(turn2.actions[0]?.cancelledBy).toBe('RECHARGE')
+    expect(state.battlers[0]?.mon.pp).toEqual([19, 20, 0, 0])
+  })
+
+  it('Thrash locks the user for 2-3 turns, costs PP once, then confuses the user', () => {
+    const state = battle([{ moves: slot('MOVE_THRASH', 'MOVE_TACKLE'), pp: pps }, {}], scriptedRng(Array<number>(8).fill(0)))
+    const deps = testDeps(fixedDamage(10))
+    executeTurn(state, [useMove(1, move('MOVE_THRASH')), null], deps)
+    expect(state.lockedMoves[0]).toBe('MOVE_THRASH')
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(true)
+    expect(getCounter(state.battlers[0]!.mon.status2, STATUS2_LOCK_CONFUSE)).toBe(1) // (0 & 1) + 2 = 2, minus ENDTURN_THRASH
+
+    // The player picks Tackle but Thrash is used again; no PP, and the lock ends this turn.
+    executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], deps)
+    expect(state.battlers[1]?.mon.hp).toBe(80)
+    expect(state.battlers[0]?.mon.pp).toEqual([19, 20, 0, 0])
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+    expect(getCounter(state.battlers[0]!.mon.status2, STATUS2_CONFUSION)).toBe(3) // (0 % 2) + 3
+  })
+
+  it('Discipline turns Thrash into a plain hit with no lock', () => {
+    const state = battle([{ moves: slot('MOVE_THRASH'), pp: pps, abilities: hasAbility('ABILITY_DISCIPLINE') }, {}], countingRng())
+    executeTurn(state, [useMove(1, move('MOVE_THRASH')), null], testDeps(fixedDamage(10)))
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false)
+    expect(state.lockedMoves[0]).toBeNull()
   })
 })

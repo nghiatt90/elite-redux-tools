@@ -86,10 +86,12 @@ import {
   hasFlag,
   setFlag,
   statusInfatuatedWith,
+  STATUS2_LOCK_CONFUSE,
+  getCounter,
 } from './constants'
 import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
-import { findAbilitySlot } from './statusEffects'
+import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { canBattlerHeal, isMagicGuardProtected } from './endTurn'
 import { isBattlerGrounded } from './grounding'
@@ -2960,7 +2962,7 @@ export function runMoveEndBookkeeping(ctx: MoveEndBookkeepingContext): void {
 
   // 3. Case 30: MOVEEND_CLEAR_BITS (battle_script_commands.c:4934-4957)
   if (ctx.clearBits ?? true) {
-    applyMoveEndClearBits(state, attackerId, targetId, currentMoveId, deps)
+    applyMoveEndClearBits(state, attackerId, targetId, currentMoveId, deps, noEffect)
   }
 }
 
@@ -2971,10 +2973,20 @@ export function applyMoveEndClearBits(
   targetId: number | null,
   currentMoveId: string,
   deps: { dataContext: TurnLoopDeps['dataContext'] },
+  noEffect = false,
 ): void {
   const attacker = state.battlers[attackerId]
   const target = targetId !== null ? state.battlers[targetId] : null
   const currentMoveData = deps.dataContext.move(currentMoveId)
+  // B_RAMPAGE_CANCELLING >= GEN_5 (:4936-4942): an unusable rampage move that does not end this turn cancels the lock.
+  if (
+    attacker &&
+    currentMoveData?.effect === 'EFFECT_RAMPAGE' &&
+    noEffect &&
+    getCounter(attacker.mon.status2, STATUS2_LOCK_CONFUSE) !== 1
+  ) {
+    cancelMultiTurnMoves(attacker)
+  }
   if (attacker) {
     if (!state.processingExtraAttacks && currentMoveData?.effect !== 'EFFECT_ROLLOUT') {
       attacker.volatiles.rolloutCounter = 0
@@ -3637,7 +3649,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 30: MOVEEND_CLEAR_BITS (:4934-4957)
-  applyMoveEndClearBits(state, attackerId, targetId, moveId, deps)
+  applyMoveEndClearBits(state, attackerId, targetId, moveId, deps, isNoEffect)
 
   // Every other faint this action caused (the attacker, from recoil / Rocky Helmet / Rough Skin / Life Orb) goes through
   // BattleScript_FaintAttacker -> onfaintedbyother (battle_scripts_1.s:6892), after moveend.

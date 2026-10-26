@@ -460,6 +460,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     lastTakenMoveFrom: Array.from({ length: MAX_BATTLERS_COUNT }, () => new Array<string | null>(MAX_BATTLERS_COUNT).fill(null)),
     chosenMovePositions: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
     wrappedMove: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
+    lockedMoves: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
     wrappedBy: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
     queuedExtraAttacks: [],
     processingExtraAttacks: false,

@@ -463,4 +463,5 @@ export const MOVE_EFFECT_CREEPING_THORNS = 101
 export const MOVE_EFFECT_SPIKES = 102
 export const MOVE_EFFECT_LEECH_SEED = 103
 export const MOVE_EFFECT_STICKY_WEB = 104
-
+// pipeline/.upstream/er-config/MoveEffect.proto:66
+export const MOVE_EFFECT_THRASH = 55

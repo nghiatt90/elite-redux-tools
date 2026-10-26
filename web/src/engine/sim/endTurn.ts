@@ -209,7 +209,7 @@ import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { StatusDeps } from './statusEffects'
-import { canBeBurned, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves } from './statusEffects'
+import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -227,6 +227,9 @@ import {
   STATUS1_SLEEP,
   STATUS2_FLINCHED,
   STATUS2_CURSED,
+  STATUS2_CONFUSION,
+  STATUS2_LOCK_CONFUSE,
+  STATUS2_MULTIPLETURNS,
   STATUS2_NIGHTMARE,
   STATUS2_WRAPPED,
   STATUS2_POWDER,
@@ -559,6 +562,16 @@ function runFrostbite(state: BattleState, battlerId: number, battler: BattlerSta
 }
 
 /** ENDTURN_BLEED, battle_util.c:2598-2607 (BLEED_DAMAGE(hp) = hp / 16, include/constants/battle.h:142). */
+/** WasUnableToUseMove, battle_util.c:1181-1190. */
+function wasUnableToUseMove(battler: BattlerState): boolean {
+  const r = battler.round
+  return (
+    r.prlzImmobility || r.usedImprisonedMove || r.loveImmobility || r.usedDisabledMove || r.usedTauntedMove ||
+    r.usedGravityPreventedMove || r.usedHealBlockedMove || r.flag2Unknown || r.flinchImmobility || r.powderSelfDmg ||
+    r.usedThroatChopPreventedMove
+  )
+}
+
 const GRAPPLER_ABILITIES = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK']
 
 /** ENDTURN_CURSE, battle_util.c:2624-2633: maxHP / 4. The IsBattlerCursed alternative (Ghost monotype champion) has no port. */
@@ -1121,6 +1134,21 @@ export function runEndTurnEffects(
 
     const burn = runBurn(state, battlerId, battler)
     if (burn) results.push(burn)
+
+    // ENDTURN_THRASH, :2753-2768: count the Outrage / Thrash / Petal Dance lock down; an interrupted lock is cancelled, and a lock
+    // that runs out confuses the user (MOVE_EFFECT_CONFUSION | MOVE_EFFECT_AFFECTS_USER through SetMoveEffect).
+    if (hasFlag(battler.mon.status2, STATUS2_LOCK_CONFUSE)) {
+      const remaining = getCounter(battler.mon.status2, STATUS2_LOCK_CONFUSE) - 1
+      battler.mon.status2 = setCounter(battler.mon.status2, STATUS2_LOCK_CONFUSE, remaining)
+      if (wasUnableToUseMove(battler)) {
+        cancelMultiTurnMoves(battler)
+      } else if (remaining === 0 && hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS)) {
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_MULTIPLETURNS)
+        if (!hasFlag(battler.mon.status2, STATUS2_CONFUSION) && canBeConfused(state, battlerId, battlerId, statusDeps)) {
+          battler.mon.status2 = setCounter(battler.mon.status2, STATUS2_CONFUSION, (state.rng.random16() % 2) + 3)
+        }
+      }
+    }
 
     // ENDTURN_FLINCH, :2770-2772 -- the C clears STATUS2_FLINCHED
     // unconditionally every end of turn.

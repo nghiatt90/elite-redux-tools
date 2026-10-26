@@ -1652,6 +1652,21 @@ function applyEncore(state: BattleState, battlerId: number, action: ChosenAction
   return { ...action, chosenMove: view, moveToBeUsed: view }
 }
 
+/**
+ * HandleAction_UseMove (battle_util.c:217-219): a battler with STATUS2_MULTIPLETURNS or STATUS2_RECHARGE uses
+ * gLockedMoves[battler] whatever it chose, and the party menu is never offered (the controllers skip move selection).
+ * A lock the sim never wrote (lockedMoves null) leaves the action alone.
+ */
+function applyLockedMove(state: BattleState, battlerId: number, action: ChosenAction | null, deps: TurnLoopDeps): ChosenAction | null {
+  const battler = state.battlers[battlerId]
+  const locked = state.lockedMoves[battlerId]
+  if (!action || !battler || battler.mon.hp === 0 || !locked || !hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS | STATUS2_RECHARGE)) return action
+  if (action.action === 'USE_MOVE' && action.chosenMove?.id === locked) return action
+  const view = action.chosenMove ? moveViewFor(action.chosenMove, locked, deps.dataContext) : buildMoveView(locked, deps.dataContext)
+  const target = action.target ?? (deps.dataContext.move(locked)?.target === 'USER' ? battlerId : battlerId ^ 1)
+  return { action: 'USE_MOVE', chosenMove: view, moveToBeUsed: view, target }
+}
+
 export function executeAction(
   state: BattleState,
   battlerId: number,
@@ -2131,6 +2146,8 @@ export function executeAction(
         performPpDeduct()
         attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
         attackerBattler.round.chargingTurn = true
+        // MOVE_EFFECT_CHARGING (battle_script_commands.c:2670-2674)
+        state.lockedMoves[battlerId] = currentMove.id
 
         // Cmd_setsemiinvulnerablebit (src/battle_script_commands.c:11541-11566)
         setSemiInvulnerableBit(attackerBattler, currentMove.id)
@@ -2202,6 +2219,10 @@ export function executeAction(
       isSecondTurnSemiInvuln = true
     }
 
+    // BattleScript_EffectRampage (data/battle_scripts_1.s:3749-3750): jumpifstatus2 STATUS2_MULTIPLETURNS skips ppreduce, so only
+    // the first turn of Outrage / Thrash / Petal Dance costs PP.
+    const rampageContinues = moveEffect === 'EFFECT_RAMPAGE' && hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+
     if (currentTargetId === null || !isBattlerAlive(state, currentTargetId)) {
       if (isSecondTurnSemiInvuln) {
         state.battlers[battlerId]!.statuses3 = clearFlag(state.battlers[battlerId]!.statuses3, STATUS3_SEMI_INVULNERABLE)
@@ -2256,7 +2277,7 @@ export function executeAction(
     }
 
     if (preFail) {
-      if (!isSecondTurnSemiInvuln) {
+      if (!isSecondTurnSemiInvuln && !rampageContinues) {
         performPpDeduct()
       }
       runMoveEndBookkeeping({
@@ -2317,7 +2338,7 @@ export function executeAction(
     }
     if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
       cancelMultiTurnMoves(state.battlers[battlerId]!)
-      if (!isSecondTurnSemiInvuln) {
+      if (!isSecondTurnSemiInvuln && !rampageContinues) {
         performPpDeduct()
       }
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
@@ -2384,7 +2405,7 @@ export function executeAction(
     // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
     // 3094) runs ppreduce too, so a miss still costs PP.
     // HITMARKER_NO_PPDEDUCT on turn 2 skips second deduction.
-    if (!isSecondTurnSemiInvuln) {
+    if (!isSecondTurnSemiInvuln && !rampageContinues) {
       performPpDeduct()
     }
 
@@ -2796,7 +2817,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
   assertNoPerBattlerQuash(state)
   clearStartedFlags(state)
-  actions = actions.map((a, id) => applyEncore(state, id, a, deps))
+  actions = actions.map((a, id) => applyEncore(state, id, applyLockedMove(state, id, a, deps), deps))
 
   // TurnBasedPriority (battle_main.c:4411-4414) -- Custap Berry
   for (let i = 0; i < state.battlersCount; i++) {

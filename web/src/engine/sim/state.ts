@@ -666,6 +666,9 @@ export interface BattleState {
   chosenMovePositions: number[]
   /** `u16 wrappedMove[MAX_BATTLERS_COUNT]` (gBattleStruct, battle_script_commands.c:2740): the move that wrapped each battler. */
   wrappedMove: (string | null)[]
+  /** `MoveEnum gLockedMoves[MAX_BATTLERS_COUNT]` (battle_main.c:215): the move a battler is locked into while STATUS2_MULTIPLETURNS
+   * or STATUS2_RECHARGE is set. Read by GetMoveToBeUsed (battle_util.c:155) and HandleAction_UseMove (:217-219). */
+  lockedMoves: (string | null)[]
   /** `u8 wrappedBy[MAX_BATTLERS_COUNT]` (gBattleStruct, battle_script_commands.c:2741): who wrapped each battler; read by ENDTURN_WRAP. */
   wrappedBy: number[]
   /** `struct ExtraAttackActionStruct gQueuedExtraAttackData[MAX_BATTLERS_COUNT + 1]` (include/battle.h:1023, battle_main.c:182). */

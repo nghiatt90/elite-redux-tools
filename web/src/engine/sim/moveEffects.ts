@@ -188,6 +188,8 @@ import {
   MOVE_EFFECT_SPIKES,
   MOVE_EFFECT_LEECH_SEED,
   MOVE_EFFECT_STICKY_WEB,
+  MOVE_EFFECT_THRASH,
+  STATUS2_LOCK_CONFUSE,
 } from './constants'
 import {
   MOVE_EFFECT_AFFECTS_USER,
@@ -11000,6 +11002,7 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_SPIKES: MOVE_EFFECT_SPIKES,
   MOVE_EFFECT_LEECH_SEED: MOVE_EFFECT_LEECH_SEED,
   MOVE_EFFECT_STICKY_WEB: MOVE_EFFECT_STICKY_WEB,
+  MOVE_EFFECT_THRASH: MOVE_EFFECT_THRASH,
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
@@ -11187,6 +11190,20 @@ export function applySecondaryMoveEffects(
       affectsUser: true,
       certain: false,
     })
+  } else if (moveEffect === 'EFFECT_RAMPAGE') {
+    // BattleScript_EffectRampage (data/battle_scripts_1.s:3744-3753): Discipline jumps to BattleScript_EffectHit (a plain hit);
+    // otherwise Cmd_confuseifrepeatingattackends (battle_script_commands.c:10008-10011) sets MOVE_EFFECT_THRASH | MOVE_EFFECT_AFFECTS_USER
+    // unless the user is already locked or a Dancer copy is running, then BattleScript_HitFromCritCalc reaches seteffectwithchance.
+    const rampager = state.battlers[attackerId]
+    const hasDiscipline = rampager ? battlerHasSimAbility(state, rampager, 'ABILITY_DISCIPLINE', false, attackerId, false, deps.dataContext) : false
+    if (rampager && !hasDiscipline && !hasFlag(rampager.mon.status2, STATUS2_LOCK_CONFUSE) && !rampager.turn.dancerUsedMove) {
+      effectSpecs.push({
+        effectName: 'MOVE_EFFECT_THRASH',
+        chance: moveData?.effectChance ?? 0,
+        affectsUser: true,
+        certain: false,
+      })
+    }
   } else if (moveEffect === 'EFFECT_HIT_PREVENT_ESCAPE') {
     // Legacy script: BattleScript_EffectHitPreventEscape (data/battle_scripts_1.s:4886-4888)
     // setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE
@@ -11634,8 +11651,17 @@ export function applySecondaryMoveEffects(
       if (!state.processingExtraAttacks) {
         effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_RECHARGE)
         effectBattler.volatiles.rechargeTimer = 2
-        // gLockedMoves[effectBattler] = gCurrentMove is not stored: its only reader, GetMoveToBeUsed
-        // (battle_util.c:155), feeds target resolution, which is unambiguous in singles.
+        state.lockedMoves[effectBattlerId] = moveId
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_THRASH (battle_script_commands.c:2854-2862): locks the user in for 2-3 turns.
+    if (baseEffectNum === MOVE_EFFECT_THRASH) {
+      if (!hasFlag(effectBattler.mon.status2, STATUS2_LOCK_CONFUSE) && !state.processingExtraAttacks) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_MULTIPLETURNS)
+        state.lockedMoves[effectBattlerId] = moveId
+        effectBattler.mon.status2 = setCounter(effectBattler.mon.status2, STATUS2_LOCK_CONFUSE, (state.rng.random16() & 1) + 2)
       }
       continue
     }
