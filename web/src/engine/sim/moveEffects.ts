@@ -176,6 +176,18 @@ import {
   MOVE_EFFECT_DEF_SPDEF_DOWN,
   MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
   MOVE_EFFECT_RECHARGE,
+  STATUS3_LEECHSEED_BATTLER,
+  MOVE_EFFECT_WRAP,
+  MOVE_EFFECT_PREVENT_ESCAPE,
+  MOVE_EFFECT_ATTRACT,
+  MOVE_EFFECT_CURSE,
+  MOVE_EFFECT_YAWN,
+  MOVE_EFFECT_DRENCH,
+  MOVE_EFFECT_STEALTH_ROCK,
+  MOVE_EFFECT_CREEPING_THORNS,
+  MOVE_EFFECT_SPIKES,
+  MOVE_EFFECT_LEECH_SEED,
+  MOVE_EFFECT_STICKY_WEB,
 } from './constants'
 import {
   MOVE_EFFECT_AFFECTS_USER,
@@ -215,7 +227,6 @@ import {
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
-  MOVE_EFFECT_DRENCH,
   MOVE_EFFECT_ENRAGE,
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FREEZE,
@@ -246,6 +257,7 @@ import {
   getMoveEffectChance,
   isAbilityStatusProtected,
   isBattlerTerrainAffected,
+  isMyceliumMightActive,
   isPreventableSecondaryEffect,
   testSheerForceFlag,
   type StatusDeps,
@@ -10931,7 +10943,7 @@ export function isHandledMoveEffect(effect: string | null): boolean {
 // Secondary Move Effects (Post-Damage)
 // ---------------------------------------------------------------------------
 
-// pipeline/.upstream/er-config/MoveEffect.proto:12-22, 28-41, 47, 52-65
+// pipeline/.upstream/er-config/MoveEffect.proto:12-22, 26, 28-41, 45, 47, 52-65, 83, 84, 99, 109-114
 export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_SLEEP: MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_POISON: MOVE_EFFECT_POISON,
@@ -10977,6 +10989,17 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_ATK_DEF_DOWN: MOVE_EFFECT_ATK_DEF_DOWN,
   MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1: MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1,
   MOVE_EFFECT_RECHARGE: MOVE_EFFECT_RECHARGE,
+  MOVE_EFFECT_WRAP: MOVE_EFFECT_WRAP,
+  MOVE_EFFECT_PREVENT_ESCAPE: MOVE_EFFECT_PREVENT_ESCAPE,
+  MOVE_EFFECT_ATTRACT: MOVE_EFFECT_ATTRACT,
+  MOVE_EFFECT_CURSE: MOVE_EFFECT_CURSE,
+  MOVE_EFFECT_YAWN: MOVE_EFFECT_YAWN,
+  MOVE_EFFECT_DRENCH: MOVE_EFFECT_DRENCH,
+  MOVE_EFFECT_STEALTH_ROCK: MOVE_EFFECT_STEALTH_ROCK,
+  MOVE_EFFECT_CREEPING_THORNS: MOVE_EFFECT_CREEPING_THORNS,
+  MOVE_EFFECT_SPIKES: MOVE_EFFECT_SPIKES,
+  MOVE_EFFECT_LEECH_SEED: MOVE_EFFECT_LEECH_SEED,
+  MOVE_EFFECT_STICKY_WEB: MOVE_EFFECT_STICKY_WEB,
 }
 export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 
@@ -11162,6 +11185,16 @@ export function applySecondaryMoveEffects(
       effectName: 'MOVE_EFFECT_SPD_PLUS_1',
       chance: moveData?.effectChance ?? 0,
       affectsUser: true,
+      certain: false,
+    })
+  } else if (moveEffect === 'EFFECT_HIT_PREVENT_ESCAPE') {
+    // Legacy script: BattleScript_EffectHitPreventEscape (data/battle_scripts_1.s:4886-4888)
+    // setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE
+    // goto BattleScript_EffectHit
+    effectSpecs.push({
+      effectName: 'MOVE_EFFECT_PREVENT_ESCAPE',
+      chance: moveData?.effectChance ?? 0,
+      affectsUser: false,
       certain: false,
     })
   } else if (moveEffect === 'EFFECT_PARALYZE_HIT') {
@@ -11603,6 +11636,129 @@ export function applySecondaryMoveEffects(
         effectBattler.volatiles.rechargeTimer = 2
         // gLockedMoves[effectBattler] = gCurrentMove is not stored: its only reader, GetMoveToBeUsed
         // (battle_util.c:155), feeds target resolution, which is unambiguous in singles.
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_CURSE (battle_script_commands.c:2721-2726)
+    if (baseEffectNum === MOVE_EFFECT_CURSE) {
+      if (!hasFlag(effectBattler.mon.status2, STATUS2_CURSED)) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_CURSED)
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'CURSE' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_ATTRACT (battle_script_commands.c:2727-2732, battle_util.c:5135-5143)
+    if (baseEffectNum === MOVE_EFFECT_ATTRACT) {
+      if (canInfatuate(state, attackerId, effectBattlerId, deps)) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, statusInfatuatedWith(attackerId))
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'INFATUATION' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_WRAP (battle_script_commands.c:2733-2750, WrapDuration :2300-2309)
+    if (baseEffectNum === MOVE_EFFECT_WRAP) {
+      if (!hasFlag(effectBattler.mon.status2, STATUS2_WRAPPED)) {
+        const attackerBattler = state.battlers[attackerId]
+        const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
+          attackerBattler ? battlerHasSimAbility(state, attackerBattler, ab, false, attackerId, false, deps.dataContext) : false,
+        )
+        const hasGripClaw = deps.grounding ? deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_GRIP_CLAW' : false
+        effectBattler.volatiles.wrapTurns =
+          hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_WRAPPED)
+        state.wrappedMove[effectBattlerId] = moveId
+        state.wrappedBy[effectBattlerId] = attackerId
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'WRAP' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_PREVENT_ESCAPE (battle_script_commands.c:2823-2826)
+    if (baseEffectNum === MOVE_EFFECT_PREVENT_ESCAPE) {
+      effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_ESCAPE_PREVENTION)
+      effectBattler.volatiles.battlerPreventingEscape = attackerId
+      statusAppliedOutcome = { battlerId: effectBattlerId, status: 'ESCAPE_PREVENTION' }
+      continue
+    }
+
+    // MOVE_EFFECT_YAWN (battle_script_commands.c:3001-3005, BattleScript_SetYawnMoveEffect data/battle_scripts_1.s:2434-2442, Cmd_setyawn battle_script_commands.c:11840-11855)
+    if (baseEffectNum === MOVE_EFFECT_YAWN) {
+      if (
+        canSleep(state, effectBattlerId, attackerId, deps) &&
+        !hasFlag(effectBattler.statuses3, STATUS3_YAWN) &&
+        !hasFlag(effectBattler.mon.status1, STATUS1_ANY) &&
+        !isBattlerTerrainAffected(state, effectBattlerId, STATUS_FIELD_ELECTRIC_TERRAIN, deps) &&
+        !isBattlerTerrainAffected(state, effectBattlerId, STATUS_FIELD_MISTY_TERRAIN, deps)
+      ) {
+        effectBattler.statuses3 = setCounter(effectBattler.statuses3, STATUS3_YAWN, 2)
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'YAWN' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_DRENCH (battle_script_commands.c:3031-3036)
+    if (baseEffectNum === MOVE_EFFECT_DRENCH) {
+      if (canBeDrenched(state, effectBattlerId, attackerId, deps)) {
+        effectBattler.volatiles.drenched = 2 + (state.rng.random16() % 2)
+        effectBattler.volatiles.started.drenched = true
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'DRENCH' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_CREEPING_THORNS / MOVE_EFFECT_STEALTH_ROCK (battle_script_commands.c:3037-3044)
+    if (baseEffectNum === MOVE_EFFECT_CREEPING_THORNS || baseEffectNum === MOVE_EFFECT_STEALTH_ROCK) {
+      const targetSide = targetId & 1
+      const sideState = state.sides[targetSide]
+      if (sideState && !hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
+        sideState.timers.stealthRockType = baseEffectNum === MOVE_EFFECT_CREEPING_THORNS ? 12 : 5
+        statusAppliedOutcome = {
+          battlerId: targetId,
+          status: baseEffectNum === MOVE_EFFECT_CREEPING_THORNS ? 'CREEPING_THORNS' : 'STEALTH_ROCK',
+        }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_SPIKES (battle_script_commands.c:3045-3050)
+    if (baseEffectNum === MOVE_EFFECT_SPIKES) {
+      const targetSide = targetId & 1
+      const sideState = state.sides[targetSide]
+      if (sideState && sideState.timers.spikesAmount < 3) {
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SPIKES)
+        sideState.timers.spikesAmount++
+        statusAppliedOutcome = { battlerId: targetId, status: 'SPIKES' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_LEECH_SEED (battle_script_commands.c:3051-3057)
+    // C quirk: REQUIRE(IsMyceliumMightActive(gBattlerAttacker) || IS_BATTLER_OF_TYPE(gBattlerTarget, TYPE_GRASS))
+    if (baseEffectNum === MOVE_EFFECT_LEECH_SEED) {
+      if (
+        !hasFlag(effectBattler.statuses3, STATUS3_LEECHSEED) &&
+        (isMyceliumMightActive(state, attackerId, deps) || effectBattler.mon.types.includes('GRASS'))
+      ) {
+        effectBattler.statuses3 = setFlag(
+          effectBattler.statuses3,
+          STATUS3_LEECHSEED | (attackerId & STATUS3_LEECHSEED_BATTLER),
+        )
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'LEECH_SEED' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_STICKY_WEB (battle_script_commands.c:3058-3063)
+    if (baseEffectNum === MOVE_EFFECT_STICKY_WEB) {
+      const targetSide = targetId & 1
+      const sideState = state.sides[targetSide]
+      if (sideState && !hasFlag(sideState.statuses, SIDE_STATUS_STICKY_WEB)) {
+        trySetStickyWeb(state, targetSide, 0, false)
+        statusAppliedOutcome = { battlerId: targetId, status: 'STICKY_WEB' }
       }
       continue
     }

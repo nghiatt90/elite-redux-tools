@@ -226,7 +226,9 @@ import {
   STATUS1_POISON,
   STATUS1_SLEEP,
   STATUS2_FLINCHED,
+  STATUS2_CURSED,
   STATUS2_NIGHTMARE,
+  STATUS2_WRAPPED,
   STATUS2_POWDER,
   STATUS3_ALWAYS_HITS,
   STATUS3_ALWAYS_HITS_TURN,
@@ -437,7 +439,7 @@ export interface EndTurnEffectResult {
    * ladder's own entries (fieldEndTurn.ts) -- reusing this same shape rather
    * than a parallel one, since all are "one residual HP effect for one
    * battler". 'ABILITY' is the ENDTURN_ABILITIES ladder case (battle_util.c:2452-2459). */
-  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
+  effect: 'POISON' | 'TOXIC' | 'BURN' | 'FROSTBITE' | 'BLEED' | 'NIGHTMARE' | 'CURSE' | 'WRAP' | 'SANDSTORM' | 'HAIL' | 'GRASSY_TERRAIN' | 'TOXIC_TERRAIN' | 'LEECH_SEED' | 'ABILITY' | 'INGRAIN' | 'AQUA_RING' | 'WISH' | 'ITEM'
   /** HP change applied to the battler: negative is damage, positive is a heal
    * (Poison Heal). Already floored/capped against 0..maxHp by the caller. */
   hpChange: number
@@ -557,6 +559,48 @@ function runFrostbite(state: BattleState, battlerId: number, battler: BattlerSta
 }
 
 /** ENDTURN_BLEED, battle_util.c:2598-2607 (BLEED_DAMAGE(hp) = hp / 16, include/constants/battle.h:142). */
+const GRAPPLER_ABILITIES = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK']
+
+/** ENDTURN_CURSE, battle_util.c:2624-2633: maxHP / 4. The IsBattlerCursed alternative (Ghost monotype champion) has no port. */
+function runCurse(state: BattleState, battlerId: number, battler: BattlerState): EndTurnEffectResult | null {
+  if (!hasFlag(battler.mon.status2, STATUS2_CURSED)) return null
+  if (battler.mon.hp === 0) return null
+  if (isMagicGuardProtected(state, battler)) return null // MAGIC_GUARD_CHECK
+
+  const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / 4))
+  const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
+  return { battlerId, effect: 'CURSE', hpChange, fainted }
+}
+
+/**
+ * ENDTURN_WRAP, battle_util.c:2646-2711, the STATUS2_WRAPPED branch (the Bug monotype champion branch has no port):
+ * --wrapTurns; while it is nonzero the battler takes maxHP / 6 (the wrapper has a grappler ability or Binding Band)
+ * or maxHP / 8, otherwise the status ends.
+ */
+function runWrap(state: BattleState, battlerId: number, battler: BattlerState, dataContext: SimDataContext, grounding: GroundingContext | undefined): EndTurnEffectResult | null {
+  if (!hasFlag(battler.mon.status2, STATUS2_WRAPPED)) return null
+  if (battler.mon.hp === 0) return null
+
+  battler.volatiles.wrapTurns--
+  if (battler.volatiles.wrapTurns === 0) {
+    battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_WRAPPED)
+    battler.volatiles.wrapAbility = null
+    return null
+  }
+  if (isMagicGuardProtected(state, battler)) return null // MAGIC_GUARD_CHECK
+
+  const wrapper = state.battlers[state.wrappedBy[battlerId]]
+  // HasGrappler = the `grappler` ability flag (abilityHooks.json: Grappler, Tangled Tails, Tentalock).
+  const hasGrappler =
+    !!wrapper && GRAPPLER_ABILITIES.some((ab) => battlerHasAbility(wrapper.mon.abilities, ab, NO_SUPPRESSION))
+  const hasBindingBand = grounding?.holdEffectOf(state.wrappedBy[battlerId]) === 'HOLD_EFFECT_BINDING_BAND'
+  void dataContext
+  const divisor = hasGrappler || hasBindingBand ? 6 : 8
+  const hpChange = -Math.max(1, Math.trunc(battler.mon.maxHp / divisor))
+  const fainted = applyEndTurnHp(state, battlerId, battler, hpChange)
+  return { battlerId, effect: 'WRAP', hpChange, fainted }
+}
+
 function runBleed(state: BattleState, battlerId: number, battler: BattlerState): EndTurnEffectResult | null {
   if (!hasFlag(battler.mon.status1, STATUS1_BLEED) && !isBloodStainAffected(battler)) return null
   if (battler.mon.hp === 0) return null
@@ -1068,6 +1112,12 @@ export function runEndTurnEffects(
 
     const nightmare = runNightmare(state, battlerId, battler)
     if (nightmare) results.push(nightmare)
+
+    const curse = runCurse(state, battlerId, battler)
+    if (curse) results.push(curse)
+
+    const wrap = runWrap(state, battlerId, battler, dataContext, deps?.grounding)
+    if (wrap) results.push(wrap)
 
     const burn = runBurn(state, battlerId, battler)
     if (burn) results.push(burn)

@@ -18,7 +18,9 @@ import {
   STATUS1_SLEEP,
   STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
+  STATUS2_CURSED,
   STATUS2_NIGHTMARE,
+  STATUS2_WRAPPED,
   STATUS3_GASTRO_ACID,
   STATUS3_HEAL_BLOCK,
   STATUS_FIELD_TOXIC_TERRAIN,
@@ -335,6 +337,45 @@ describe('executeTurn: end-turn ladder -- ENDTURN_NIGHTMARES (battle_util.c:2608
     const out = executeTurn(state, [null, null], deps())
     expect(out.endTurn).toEqual([])
     expect(state.battlers[0]!.mon.status2 & STATUS2_NIGHTMARE).toBe(0)
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_CURSE (battle_util.c:2624-2633)', () => {
+  it('deals floor(maxHp/4)', () => {
+    const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100 }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_CURSED
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'CURSE', hpChange: -40, fainted: false }])
+  })
+})
+
+describe('executeTurn: end-turn ladder -- ENDTURN_WRAP (battle_util.c:2662-2704)', () => {
+  it('--wrapTurns, then maxHp/8 while turns remain', () => {
+    const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100 }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_WRAPPED
+    state.battlers[0]!.volatiles.wrapTurns = 3
+    state.wrappedBy[0] = 1
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'WRAP', hpChange: -20, fainted: false }])
+    expect(state.battlers[0]!.volatiles.wrapTurns).toBe(2)
+  })
+
+  it('breaks free without damage when the counter reaches 0', () => {
+    const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100 }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_WRAPPED
+    state.battlers[0]!.volatiles.wrapTurns = 1
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([])
+    expect(state.battlers[0]!.mon.status2 & STATUS2_WRAPPED).toBe(0)
+  })
+
+  it('maxHp/6 when the wrapper has a grappler ability (HasGrappler)', () => {
+    const state = battle([{ spe: 100, maxHp: 160 }, { spe: 50, maxHp: 100, abilities: { ability: 'ABILITY_GRAPPLER', innates: [null, null, null] } }], scripted())
+    state.battlers[0]!.mon.status2 |= STATUS2_WRAPPED
+    state.battlers[0]!.volatiles.wrapTurns = 3
+    state.wrappedBy[0] = 1
+    const out = executeTurn(state, [null, null], deps())
+    expect(out.endTurn).toEqual([{ battlerId: 0, effect: 'WRAP', hpChange: -26, fainted: false }])
   })
 })
 

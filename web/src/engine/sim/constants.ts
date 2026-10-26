@@ -451,3 +451,16 @@ export const MOVE_EFFECT_ATK_DEF_DOWN = 39
 export const MOVE_EFFECT_DEF_SPDEF_DOWN = 57
 export const MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1 = 91
 export const MOVE_EFFECT_RECHARGE = 31
+// pipeline/.upstream/er-config/MoveEffect.proto:26, 45, 83, 84, 99, 109-114
+export const MOVE_EFFECT_WRAP = 15
+export const MOVE_EFFECT_PREVENT_ESCAPE = 34
+export const MOVE_EFFECT_ATTRACT = 73
+export const MOVE_EFFECT_CURSE = 74
+export const MOVE_EFFECT_YAWN = 89
+export const MOVE_EFFECT_DRENCH = 99
+export const MOVE_EFFECT_STEALTH_ROCK = 100
+export const MOVE_EFFECT_CREEPING_THORNS = 101
+export const MOVE_EFFECT_SPIKES = 102
+export const MOVE_EFFECT_LEECH_SEED = 103
+export const MOVE_EFFECT_STICKY_WEB = 104
+

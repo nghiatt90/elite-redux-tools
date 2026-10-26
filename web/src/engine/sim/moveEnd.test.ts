@@ -3071,7 +3071,8 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
 
     expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
-    expect(state.battlers[1]!.volatiles.wrapTurns).toBe(4)
+    // Grip Pincer wraps for 4; ENDTURN_WRAP (battle_util.c:2663) decrements it once in the same turn.
+    expect(state.battlers[1]!.volatiles.wrapTurns).toBe(3)
     expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain('Grip Pincer set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
   })
 

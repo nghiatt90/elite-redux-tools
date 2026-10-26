@@ -664,6 +664,10 @@ export interface BattleState {
   lastTakenMoveFrom: (string | null)[][]
   /** `u8 chosenMovePositions[MAX_BATTLERS_COUNT]` (include/battle.h:633). */
   chosenMovePositions: number[]
+  /** `u16 wrappedMove[MAX_BATTLERS_COUNT]` (gBattleStruct, battle_script_commands.c:2740): the move that wrapped each battler. */
+  wrappedMove: (string | null)[]
+  /** `u8 wrappedBy[MAX_BATTLERS_COUNT]` (gBattleStruct, battle_script_commands.c:2741): who wrapped each battler; read by ENDTURN_WRAP. */
+  wrappedBy: number[]
   /** `struct ExtraAttackActionStruct gQueuedExtraAttackData[MAX_BATTLERS_COUNT + 1]` (include/battle.h:1023, battle_main.c:182). */
   queuedExtraAttacks: ExtraAttackAction[]
   /** `bool8 gProcessingExtraAttacks` (battle_main.c:177). */
