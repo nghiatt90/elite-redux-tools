@@ -336,13 +336,14 @@ export function scoreTeam(
   games: number,
   expectimax?: import('./expectimax').ExpectimaxOptions,
   seedOffset = 0,
+  battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>,
 ): Fitness {
   const level = Math.max(...team.map((m) => m.level ?? 50))
   const party = buildPlayerParty(team, level, data)
   let wins = 0
   let scoreSum = 0
   for (let g = 1; g <= games; g++) {
-    const result = playExpectimaxBattle({ data, playerParty: party, opponentTrainer: trainer, tier, seed: seedOffset + g, expectimax })
+    const result = playExpectimaxBattle({ data, playerParty: party, opponentTrainer: trainer, tier, seed: seedOffset + g, expectimax, battleEvents })
     if (result.outcome === 'WON') wins++
     scoreSum += Math.max(-1, Math.min(1, result.finalScore / 6))
   }

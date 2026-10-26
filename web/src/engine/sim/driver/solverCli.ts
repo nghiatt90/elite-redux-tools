@@ -7,11 +7,23 @@
 
 import { Worker } from 'node:worker_threads'
 import { cpus } from 'node:os'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { loadSimData } from './loadSimData'
 import { availableStones } from './stoneAvailability'
+import { eventsForFight } from './battleEventSetup'
 import { DEFAULT_SEARCH, defaultSet, improveTeam, type Fitness, type FitnessEvaluator, type Team } from './solver'
+
+/** The map a boss fight happens in, from the evidence column of docs/battle-sim/boss-fight-coverage.md. */
+function mapForTrainer(trainerId: string): string {
+  const doc = readFileSync(resolve(process.cwd(), 'docs/battle-sim/boss-fight-coverage.md'), 'utf8')
+  for (const line of doc.split('\n')) {
+    if (!line.includes('`' + trainerId + '`')) continue
+    const m = /`(\w+):\d+/.exec(line.slice(line.indexOf(trainerId) + trainerId.length))
+    if (m) return m[1]
+  }
+  return ''
+}
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`)
@@ -29,14 +41,27 @@ async function main(): Promise<void> {
   const passes = Number(arg('passes', String(DEFAULT_SEARCH.passes)))
   const out = arg('out', '')
   const gym = Number(arg('gym', '0'))
+  const mapName = arg('map', '') || mapForTrainer(trainerId)
+  const defeatedArg = arg('defeated', 'all')
   const data0 = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
   const stoneInfo = gym > 0 ? availableStones(data0, gym) : new Map()
   const allowedStones = new Set<string>([...stoneInfo.keys(), ...arg('stones', '').split(',').filter(Boolean)])
+  const allEvents = eventsForFight(data0.battleEvents, mapName, new Set<string>()).events
+  const defeatable = new Set<string>()
+  for (const row of data0.battleEvents) {
+    const m = /^!defeated\(([^)]+)\)$/.exec(row.guard ?? '')
+    if (row.map === mapName && m) defeatable.add(m[1])
+  }
+  const defeated = defeatedArg === 'all' ? defeatable : defeatedArg === 'none' ? new Set<string>() : new Set(defeatedArg.split(','))
+  const fight = eventsForFight(data0.battleEvents, mapName, defeated)
+  const battleEvents = fight.events.map((e) => ({ event: e.event, data0: e.data0, data1: e.data1 }))
+  console.log(`map ${mapName || '(none)'}: ${battleEvents.length}/${allEvents.length} gym events active (defeated: ${[...defeated].join(',') || 'none'})`)
+  if (fight.skippedGuards.length) console.log('skipped guards:', fight.skippedGuards.join('; '))
   console.log(`gym ${gym || '(not set)'}: ${allowedStones.size} Mega stones available`)
 
   const data = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
   const workerPath = new URL('./solverWorker.mjs', import.meta.url)
-  const workers = Array.from({ length: workerCount }, () => new Worker(workerPath, { workerData: { trainerId, tier } }))
+  const workers = Array.from({ length: workerCount }, () => new Worker(workerPath, { workerData: { trainerId, tier, battleEvents } }))
   const idle = [...workers]
   const waiting: Array<() => void> = []
   let nextId = 0
