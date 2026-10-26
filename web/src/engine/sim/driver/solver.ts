@@ -119,6 +119,42 @@ function learnableMoves(data: SimDataBundle, speciesId: string, level: number): 
   return [...moves]
 }
 
+/**
+ * Two moves that differ only in split (and contact), such as Giga Impact and Hyper Beam, are the same move
+ * for a mon whose attacking stats are lopsided: the one that uses its stronger stat is better in practice.
+ * The weaker-split twin is dropped when the stronger stat is at least 1.25x the other. This only removes
+ * moves that are dominated for the species; it does not rank by effect.
+ */
+function dropDominatedSplits(
+  data: SimDataBundle,
+  speciesId: string,
+  moves: Array<{ id: string; rank: number }>,
+): Array<{ id: string; rank: number }> {
+  const stats = data.speciesById.get(speciesId)?.baseStats as Record<StatKey, number> | undefined
+  if (!stats) return moves
+  const strong: 'PHYSICAL' | 'SPECIAL' | null =
+    stats.atk >= stats.spatk * 1.25 ? 'PHYSICAL' : stats.spatk >= stats.atk * 1.25 ? 'SPECIAL' : null
+  if (!strong) return moves
+
+  const keyOf = (id: string): string => {
+    const m = data.dataContext.move(id) as unknown as Record<string, unknown>
+    return JSON.stringify([m.type, m.type2, m.power, m.accuracy, m.effect, m.priority, m.target, m.hitCount, m.argument])
+  }
+  const splitOf = (id: string): string | null | undefined => data.dataContext.move(id)?.split
+  const hasStrongTwin = new Set<string>()
+  const byKey = new Map<string, string[]>()
+  for (const { id } of moves) {
+    const k = keyOf(id)
+    byKey.set(k, [...(byKey.get(k) ?? []), id])
+  }
+  for (const ids of byKey.values()) {
+    if (ids.some((id) => splitOf(id) === strong)) {
+      for (const id of ids) if (splitOf(id) !== strong) hasStrongTwin.add(id)
+    }
+  }
+  return moves.filter((m) => !hasStrongTwin.has(m.id))
+}
+
 /** Moves worth considering for a species: its strongest damaging moves plus the utility whitelist. */
 export function candidateMoves(data: SimDataBundle, speciesId: string, level: number, damagingCount = 40): string[] {
   const species = data.speciesById.get(speciesId)
@@ -140,7 +176,8 @@ export function candidateMoves(data: SimDataBundle, speciesId: string, level: nu
     damaging.push({ id, rank: move.power * stab * accuracy })
   }
   damaging.sort((a, b) => b.rank - a.rank)
-  return [...damaging.slice(0, damagingCount).map((d) => d.id), ...utility]
+  const kept = dropDominatedSplits(data, speciesId, damaging)
+  return [...kept.slice(0, damagingCount).map((d) => d.id), ...utility]
 }
 
 /** A sensible starting set: the four best-ranked damaging moves, Life Orb, a stat-appropriate nature and EVs. */
