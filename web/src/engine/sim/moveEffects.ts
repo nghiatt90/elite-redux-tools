@@ -3694,10 +3694,7 @@ function handleDestinyBond(ctx: MoveEffectContext): ActionOutcome {
 
   battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_DESTINY_BOND)
 
-  unmodelled.push(
-    'Destiny Bond faint trigger on KO (battle_script_commands.c:3244-3251) is not modelled in faint path yet',
-  )
-
+  // The KO trigger lives in turn.ts (Cmd_tryfaintmon, battle_script_commands.c:3244-3248).
   return outcome(ctx, {})
 }
 
@@ -10496,8 +10493,6 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId })
   }
 
-  const battler = state.battlers[battlerId]!
-  const target = state.battlers[targetId]!
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
 
@@ -10510,6 +10505,27 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId, missed: true })
   }
 
+  // 3-8. The phasing checks, the random pick and the switch.
+  const phased = forceRandomSwitch(state, battlerId, targetId, deps, unmodelled)
+  return outcome(ctx, { targetId, missed: phased === 'ARENA' })
+}
+
+/**
+ * The part of BattleScript_EffectRoar after the accuracy check (data/battle_scripts_1.s:3761-3774) and Cmd_forcerandomswitch
+ * (battle_script_commands.c:10047-10196), shared by Roar / Whirlwind and by EFFECT_HIT_SWITCH_TARGET's tryhitswitchtarget.
+ * Returns 'ARENA' when the arena check sends it to BattleScript_ButItFailed, 'BLOCKED' when an ability, Ingrain, Commander or a lack of
+ * reserves stops it, 'SWITCHED' otherwise.
+ */
+export function forceRandomSwitch(
+  state: BattleState,
+  battlerId: number,
+  targetId: number,
+  deps: MoveEffectContext['deps'],
+  unmodelled: string[],
+): 'ARENA' | 'BLOCKED' | 'SWITCHED' {
+  const battler = state.battlers[battlerId]!
+  const target = state.battlers[targetId]!
+
   // 3. jumpifabilityflag BS_TARGET, ABILITY_SUCTION_CUPS (:3761)
   // CheckAbilityFlag (battle_script_commands.c:6685-6686): checks suctionCups bitfield with mold breaker.
   const attackerHasMB = attackerHasMoldBreakerActive(battler, deps)
@@ -10519,22 +10535,22 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
     battlerHasSimAbility(state, target, 'ABILITY_STRONG_FOUNDATION', true, battlerId, attackerHasMB, deps.dataContext) ||
     battlerHasSimAbility(state, target, 'ABILITY_SUPERHEAVY', true, battlerId, attackerHasMB, deps.dataContext)
   if (isSuctionCups) {
-    return outcome(ctx, { targetId, missed: false })
+    return 'BLOCKED'
   }
 
   // 4. jumpifstatus3 BS_TARGET, STATUS3_ROOTED (:3762)
   if (hasFlag(target.statuses3, STATUS3_ROOTED)) {
-    return outcome(ctx, { targetId, missed: false })
+    return 'BLOCKED'
   }
 
   // 5. jumpifstatus4 BS_TARGET, STATUS4_COMMANDED (:3763)
   if (hasFlag(target.statuses4, STATUS4_COMMANDED)) {
-    return outcome(ctx, { targetId, missed: false })
+    return 'BLOCKED'
   }
 
   // 6. jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_ButItFailed (:3764)
   if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
-    return outcome(ctx, { targetId, missed: true })
+    return 'ARENA'
   }
 
   // 7. Cmd_forcerandomswitch (:10156-10182)
@@ -10549,7 +10565,7 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
 
   if (validMons <= 1) {
     // No reserve pokemon to switch into; phasing fails
-    return outcome(ctx, { targetId, missed: false })
+    return 'BLOCKED'
   }
 
   // 8. Random selection loop (:10176-10180)
@@ -10569,8 +10585,7 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
     forcedPartyIndex: chosenIndex,
   })
   unmodelled.push(...switchUnmodelled)
-
-  return outcome(ctx, { targetId, missed: false })
+  return 'SWITCHED'
 }
 
 /**
@@ -11146,7 +11161,8 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_RECOIL_IF_MISS' ||
     moveEffect === 'EFFECT_EXPLOSION' ||
     moveEffect === 'EFFECT_MIND_BLOWN' ||
-    moveEffect === 'EFFECT_TWO_TURN_RETALIATION'
+    moveEffect === 'EFFECT_TWO_TURN_RETALIATION' ||
+    moveEffect === 'EFFECT_HIT_SWITCH_TARGET'
   ) {
     // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
     // argumenttomoveeffect; goto BattleScript_EffectHit. Recoil-if-miss (:4146-4147), Explosion (:3517-3518) and

@@ -1606,13 +1606,13 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
     }
   })
 
-  it('EFFECT_DESTINY_BOND: sets STATUS2_DESTINY_BOND on user and logs unmodelled KO trigger gap', () => {
+  it('EFFECT_DESTINY_BOND: sets STATUS2_DESTINY_BOND on user (the KO trigger is covered in cycle82MoveEffects.test.ts)', () => {
     const state = battle([{ moves: ['MOVE_DESTINY_BOND', null, null, null], pp: [5, 0, 0, 0] }, {}], countingRng())
     const out = executeTurn(state, [useMove(1, MOVE_DESTINY_BOND), null], testDeps())
     const actionOutcome = out.actions.find((a) => a.battlerId === 0)!
     expect(actionOutcome.missed).toBe(false)
     expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_DESTINY_BOND)).toBe(true)
-    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Destiny Bond faint trigger on KO'))).toBe(true)
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled.some((m) => m.includes('Destiny Bond'))).toBe(false)
   })
 
   describe('EFFECT_KARMA', () => {

@@ -162,6 +162,7 @@ import {
   STATUS1_SLEEP,
   STATUS2_CONFUSION,
   STATUS2_CURSED,
+  STATUS2_DESTINY_BOND,
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_MULTIPLETURNS,
@@ -198,7 +199,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -2705,6 +2706,20 @@ export function executeAction(
       targetBattler.round.damaged = true
     }
 
+    // Destiny Bond (Cmd_tryfaintmon: battle_script_commands.c:3244-3248, TrySetDestinyBondToHappen :10948-10954): a Destiny Bonded
+    // target that faints to a move from the other side takes the attacker with it (BattleScript_DestinyBondTakesLife).
+    if (
+      fainted.includes(currentTargetId) &&
+      targetBattler &&
+      hasFlag(targetBattler.mon.status2, STATUS2_DESTINY_BOND) &&
+      (battlerId & 1) !== (currentTargetId & 1) &&
+      attackerBattler.mon.hp > 0
+    ) {
+      const bondHp = attackerBattler.mon.hp
+      applyDamage(state, battlerId, bondHp, fainted)
+      attackerDamage = (attackerDamage ?? 0) + bondHp
+    }
+
     // Grudge faint trigger (Cmd_tryfaintmon: battle_script_commands.c:3252-3263)
     if (
       fainted.includes(currentTargetId) &&
@@ -2829,6 +2844,24 @@ export function executeAction(
       hasLiveReserve(state, battlerId)
     ) {
       unmodelled.push(...performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true }))
+    }
+
+    // BattleScript_EffectHitSwitchTarget (data/battle_scripts_1.s:3799-3829): Dragon Tail, Circle Throw, Roar of Time...
+    // VARIOUS_TRY_HIT_SWITCH_TARGET (battle_script_commands.c:7516-7530) queues BattleScript_ForceRandomSwitch when both sides are
+    // alive and the target took damage; the pick and the Suction Cups / Ingrain / Commander checks are forceRandomSwitch's.
+    // Roar of Time with Temporal Rupture is a plain hit (:3799-3800).
+    if (
+      moveEffect === 'EFFECT_HIT_SWITCH_TARGET' &&
+      hpDealt > 0 &&
+      isBattlerAlive(state, battlerId) &&
+      isBattlerAlive(state, currentTargetId) &&
+      !state.battleOutcome &&
+      !(
+        currentMove.id === 'MOVE_ROAR_OF_TIME' &&
+        battlerHasSimAbility(state, attackerBattler, 'ABILITY_TEMPORAL_RUPTURE', false, battlerId, false, deps.dataContext)
+      )
+    ) {
+      forceRandomSwitch(state, battlerId, currentTargetId, deps, unmodelled)
     }
 
     const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)

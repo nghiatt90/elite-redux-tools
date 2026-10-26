@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createBattleState, createBattlerState } from './create'
-import type { BattleState, RandomSource, SimBattleMon } from './state'
+import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -28,6 +28,7 @@ import {
   STAT_SPDEF,
   STATUS1_SLEEP,
   STATUS2_CONFUSION,
+  STATUS2_DESTINY_BOND,
   STATUS2_LOCK_CONFUSE,
   STATUS2_MULTIPLETURNS,
   STATUS2_RECHARGE,
@@ -611,5 +612,61 @@ describe('Fixed-damage moves (Counter, Mirror Coat, Metal Burst, Endeavor, Super
     executeTurn(state, [useMove(1, move('MOVE_FREEZY_FROST')), null], testDeps(fixedDamage(10)))
     expect(state.battlers[0]?.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
     expect(state.battlers[1]?.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+  })
+})
+
+describe('Destiny Bond (Cmd_tryfaintmon, battle_script_commands.c:3244-3248)', () => {
+  it('a Destiny Bonded target that faints to a move takes the attacker with it', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, { hp: 10 }], countingRng())
+    state.battlers[1]!.mon.status2 |= STATUS2_DESTINY_BOND
+    const turn = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(fixedDamage(30)))
+    expect(state.battlers[1]?.mon.hp).toBe(0)
+    expect(state.battlers[0]?.mon.hp).toBe(0)
+    expect(turn.actions[0]?.fainted).toEqual(expect.arrayContaining([0, 1]))
+  })
+
+  it('does nothing when the target survives', () => {
+    const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, {}], countingRng())
+    state.battlers[1]!.mon.status2 |= STATUS2_DESTINY_BOND
+    executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(fixedDamage(30)))
+    expect(state.battlers[0]?.mon.hp).toBe(100)
+  })
+})
+
+describe('EFFECT_HIT_SWITCH_TARGET (Dragon Tail)', () => {
+  const partyMon = (overrides: Partial<SimPartyMon> = {}): SimPartyMon => ({
+    speciesId: 'SPECIES_MUDKIP',
+    hp: 100,
+    maxHp: 100,
+    level: 50,
+    moves: ['MOVE_TACKLE', null, null, null],
+    pp: [35, 0, 0, 0],
+    itemId: null,
+    abilities: { ability: null, innates: [null, null, null] },
+    rawStats: { atk: 100, def: 90, spatk: 80, spdef: 85, spe: 100 },
+    nature: 'NATURE_HARDY',
+    hiddenPowerType: null,
+    speedDown: false,
+    gender: 'MALE',
+    status1: 0,
+    types: ['WATER', 'MYSTERY', 'MYSTERY'],
+    ...overrides,
+  })
+
+  it('forces the damaged target out to a randomly drawn reserve', () => {
+    const state = battle([{ moves: slot('MOVE_DRAGON_TAIL'), pp: pps }, {}], { random16: () => 1 })
+    state.sides[0].party = [partyMon()]
+    state.sides[1].party = [partyMon({ hp: 100 }), partyMon({ hp: 70 })]
+    executeTurn(state, [useMove(1, move('MOVE_DRAGON_TAIL')), null], testDeps(fixedDamage(10)))
+    expect(state.battlers[1]?.partyIndex).toBe(1)
+    expect(state.battlers[1]?.mon.hp).toBe(70)
+  })
+
+  it('does not switch a target with Suction Cups', () => {
+    const state = battle([{ moves: slot('MOVE_DRAGON_TAIL'), pp: pps }, { abilities: hasAbility('ABILITY_SUCTION_CUPS') }], { random16: () => 1 })
+    state.sides[0].party = [partyMon()]
+    state.sides[1].party = [partyMon({ hp: 100 }), partyMon({ hp: 70 })]
+    executeTurn(state, [useMove(1, move('MOVE_DRAGON_TAIL')), null], testDeps(fixedDamage(10)))
+    expect(state.battlers[1]?.partyIndex).toBe(0)
   })
 })
