@@ -1324,18 +1324,26 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
 
   const evaluate = (mtype: string, forceCrit: boolean, hitModifier: number, hitIndex: number) => calcInternal(scenario, mtype, split, forceCrit, hitModifier, hitIndex)
 
+  const bestByPass = new Map<string, ReturnType<typeof evaluate> & { effectiveMoveType: string }>()
+
   function fullDamageForRoll(
     damageRoll: number,
     forceCrit: boolean,
     hitModifier: number,
     hitIndex: number = 0,
   ): { dmg: number; typeEffectiveness: number; effectiveMoveType: string; unmodelled: string[]; absorbingAbility?: string | null; berryReduced?: boolean } {
-    const primary = evaluate(moveType, forceCrit, hitModifier, hitIndex)
-    let best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
+    // Nothing in evaluate() depends on damageRoll, so the 16 rolls of one (crit, hit) pass share it.
+    const memoKey = `${forceCrit ? 1 : 0}:${hitModifier}:${hitIndex}`
+    let best = bestByPass.get(memoKey)
+    if (!best) {
+      const primary = evaluate(moveType, forceCrit, hitModifier, hitIndex)
+      best = { ...primary, effectiveMoveType: primary.resolvedMoveType }
 
-    if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
-      const alt = evaluate(move.type2, forceCrit, hitModifier, hitIndex)
-      if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
+      if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
+        const alt = evaluate(move.type2, forceCrit, hitModifier, hitIndex)
+        if (alt.dmg > best.dmg) best = { ...alt, effectiveMoveType: alt.resolvedMoveType }
+      }
+      bestByPass.set(memoKey, best)
     }
 
     if (best.dmg < 0) return { dmg: 0, typeEffectiveness: best.typeEffectiveness, effectiveMoveType: best.effectiveMoveType, unmodelled: best.unmodelled, absorbingAbility: best.absorbingAbility, berryReduced: best.berryReduced }
