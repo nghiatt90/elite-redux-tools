@@ -42,3 +42,4 @@ uv.lock.bak
 !/data/
 !/web/src/data/
 .playwright-mcp/
+dist-solver/

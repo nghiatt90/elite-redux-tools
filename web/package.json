@@ -11,7 +11,8 @@
     "build": "tsc -b && npm run lint && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "solver:build": "vite build --config vite.solver.config.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
