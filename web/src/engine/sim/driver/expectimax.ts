@@ -183,8 +183,8 @@ export function chooseExpectimaxAction(
 
 /** After a faint the player's replacement comes from the game's own "most suitable mon" heuristic. */
 export function createHeuristicPlayerReplacement(data: SimDataBundle): (state: BattleState) => number {
-  const deps = aiDamageDepsFor(data)
   return (state) => {
+    const deps = aiDamageDepsFor(data, state)
     const battler = state.battlers[0]
     if (!battler) return PARTY_SIZE
     const saved = battler.monToSwitchIntoId

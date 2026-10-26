@@ -20,6 +20,10 @@ import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
+import type { GroundingContext } from '../grounding'
+import { battlerHasSimAbility } from '../statBuffs'
+import { hasEmbargo } from '../unpack'
+import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import type { ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
@@ -97,9 +101,24 @@ export function firstLiveReplacement(state: BattleState): number {
   return PARTY_SIZE
 }
 
-export function aiDamageDepsFor(data: SimDataBundle): AiDamageDeps {
+/** GetBattlerHoldEffect(battler, TRUE), battle_util.c:6526-6537: the held item's hold effect unless IsItemNegated
+ * (Embargo or Klutz, battle_util.c:6520-6524). Reads the live state, so it cannot live in the shared data bundle. */
+export function holdEffectOfBattler(state: BattleState, battlerId: number, dataContext: SimDataContext): string | null {
+  const battler = state.battlers[battlerId]
+  if (!battler || !battler.mon.itemId) return null
+  if (hasEmbargo(battler.statuses3) || battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, dataContext)) return null
+  return dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null
+}
+
+/** The shared grounding context with `holdEffectOf` bound to this state. The bundle's own `holdEffectOf` always
+ * returned null, which switched off every held-item effect read through it (Life Orb, Assault Vest, Choice items, ...). */
+export function groundingFor(data: SimDataBundle, state: BattleState): GroundingContext {
+  return { ...data.grounding, holdEffectOf: (battlerId) => holdEffectOfBattler(state, battlerId, data.dataContext) }
+}
+
+export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDamageDeps {
   return {
-    grounding: data.grounding,
+    grounding: groundingFor(data, state),
     turnOrder: data.turnOrder,
     statStageRatios: data.statStageRatios,
     dataContext: data.dataContext,
@@ -144,9 +163,10 @@ function buildDeps(
   playerReplacement: (state: BattleState) => number,
 ): { turnDeps: TurnLoopDeps; chooseAiDeps: ChooseAiActionDeps } {
   const random: RandomSource = { random16: () => state.rng.random16() }
+  const grounding = groundingFor(data, state)
   const damageResolver = createBridgeDamageResolver({
     dataContext: data.dataContext,
-    grounding: data.grounding,
+    grounding,
     turnOrder: data.turnOrder,
     statStageRatios: data.statStageRatios,
     inverseBattle: false,
@@ -158,7 +178,7 @@ function buildDeps(
     random,
   })
 
-  const aiDamageDeps = aiDamageDepsFor(data)
+  const aiDamageDeps = aiDamageDepsFor(data, state)
   const chooseAiDeps: ChooseAiActionDeps = { ...aiDamageDeps, trainer }
 
   const aiOpponentReplacement = createAiOpponentReplacement(aiDamageDeps)
@@ -171,7 +191,7 @@ function buildDeps(
 
   const turnDeps: TurnLoopDeps = {
     turnOrder: data.turnOrder,
-    grounding: data.grounding,
+    grounding,
     damage: damageResolver,
     statStageRatios: data.statStageRatios,
     dataContext: data.dataContext,
@@ -223,7 +243,7 @@ export function createSession(options: SessionOptions): BattleSession {
   applyBattleStartPass(
     state,
     {
-      grounding: data.grounding,
+      grounding: groundingFor(data, state),
       dataContext: data.dataContext,
       turnOrder: data.turnOrder,
       statStageRatios: data.statStageRatios,
@@ -234,7 +254,7 @@ export function createSession(options: SessionOptions): BattleSession {
     state,
     {
       dataContext: data.dataContext,
-      grounding: data.grounding,
+      grounding: groundingFor(data, state),
     },
     startUnmodelled,
   )
@@ -274,7 +294,7 @@ export function stepTurn(
     state,
     {
       dataContext: session.data.dataContext,
-      grounding: session.data.grounding,
+      grounding: session.turnDeps.grounding,
     },
     unmodelled,
   )
@@ -304,6 +324,6 @@ export function stepTurn(
  */
 export function beginTurn(session: BattleSession): string[] {
   const unmodelled: string[] = []
-  runBattleEvents(session.state, { dataContext: session.data.dataContext, grounding: session.data.grounding }, unmodelled)
+  runBattleEvents(session.state, { dataContext: session.data.dataContext, grounding: session.turnDeps.grounding }, unmodelled)
   return unmodelled
 }
