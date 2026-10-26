@@ -9,8 +9,9 @@
 //    (ScrCmd_giveBattleItems, src/scrcmd.c:2489), so every `nurseJoy` stone is available from gym 5.
 //  - A stone with `megaBadgeRequirement` needs that many badges; before gym N the player holds N-1.
 //  - Monotype Champion rewards are end-game: never available before the Elite Four.
-//  - Adoption Center and legendary sage stones have no badge gate in the data; they are treated as
-//    available from gym 5 and listed as `unverified` so a result that relies on one can be checked.
+//  - Legendary sage items are post-game only (the solver is not used for post-game fights): never available.
+//  - Adoption Center stones have no badge gate in the data; they are treated as available from gym 5
+//    and listed as `unverified` so a result that relies on one can be checked.
 
 import type { SimDataBundle } from './loadSimData'
 
@@ -35,6 +36,8 @@ export function stoneAvailability(item: RawItem, gym: number): StoneAvailability
   const hint = item.megaStoneHint
   const badges = gym - 1
   if (!hint) return { available: false, reason: 'no known unlock method', unverified: false }
+
+  if (hint.kind === 'legendarySage') return { available: false, reason: 'post-game only', unverified: false }
 
   if (hint.kind === 'nurseJoy') return { available: true, reason: 'Nurse Joy stone (given at gym 5)', unverified: false }
 
