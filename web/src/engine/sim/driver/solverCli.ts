@@ -10,6 +10,7 @@ import { cpus } from 'node:os'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { loadSimData } from './loadSimData'
+import { availableStones } from './stoneAvailability'
 import { DEFAULT_SEARCH, defaultSet, improveTeam, type Fitness, type FitnessEvaluator, type Team } from './solver'
 
 function arg(name: string, fallback?: string): string {
@@ -27,7 +28,11 @@ async function main(): Promise<void> {
   const workerCount = Number(arg('workers', String(Math.max(1, cpus().length - 1))))
   const passes = Number(arg('passes', String(DEFAULT_SEARCH.passes)))
   const out = arg('out', '')
-  const allowedStones = new Set(arg('stones', '').split(',').filter(Boolean))
+  const gym = Number(arg('gym', '0'))
+  const data0 = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
+  const stoneInfo = gym > 0 ? availableStones(data0, gym) : new Map()
+  const allowedStones = new Set<string>([...stoneInfo.keys(), ...arg('stones', '').split(',').filter(Boolean)])
+  console.log(`gym ${gym || '(not set)'}: ${allowedStones.size} Mega stones available`)
 
   const data = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
   const workerPath = new URL('./solverWorker.mjs', import.meta.url)
@@ -73,6 +78,12 @@ async function main(): Promise<void> {
     allowedStones,
     onProgress: (m) => console.log(m),
   })
+  for (const mon of result.team) {
+    for (const m of (data.speciesById.get(mon.species)?.megas ?? []) as Array<{ item: string }>) {
+      const info = stoneInfo.get(m.item)
+      console.log(`Mega form ${mon.species} needs ${m.item}: ${info ? info.reason + (info.unverified ? ' [UNVERIFIED]' : '') : 'listed with --stones'}`)
+    }
+  }
   const [fresh] = await evaluateAt([result.team], 40, 1000)
   console.log(`fresh seeds (40 games): win ${fresh.winRate.toFixed(2)} score ${fresh.meanScore.toFixed(2)}`)
   console.log(JSON.stringify({ fitness: result.fitness, fresh, team: result.team }, null, 2))
