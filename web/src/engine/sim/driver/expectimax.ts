@@ -17,7 +17,7 @@ import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState } from '../state'
 import type { ChosenAction } from '../turnOrder'
-import { aiDamageDepsFor, buildMoveAction, cloneSession, createSession, stepTurn, type BattleSession } from './session'
+import { aiDamageDepsFor, buildMoveAction, cloneSession, createSession, firstLiveReplacement, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
 export interface ExpectimaxOptions {
@@ -69,6 +69,11 @@ function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number
 export function evaluateState(state: BattleState): number {
   if (state.battleOutcome === 'WON') return 100
   if (state.battleOutcome === 'LOST') return -100
+  return positionScore(state)
+}
+
+/** The material and boost balance, ignoring whether the battle is already decided. */
+export function positionScore(state: BattleState): number {
   const me = sideScore(state, 0)
   const them = sideScore(state, 1)
   return me.hp - them.hp + 0.3 * (me.alive - them.alive) + 0.04 * (me.stages - them.stages)
@@ -186,7 +191,7 @@ export function createHeuristicPlayerReplacement(data: SimDataBundle): (state: B
     battler.monToSwitchIntoId = PARTY_SIZE
     const result = getMostSuitableMonToSwitchInto(state, 0, deps)
     battler.monToSwitchIntoId = saved
-    return result.partyIndex
+    return result.partyIndex === PARTY_SIZE ? firstLiveReplacement(state) : result.partyIndex
   }
 }
 
@@ -203,6 +208,8 @@ export interface ExpectimaxBattleOptions {
 export interface ExpectimaxBattleResult {
   outcome: 'WON' | 'LOST' | 'DREW' | 'MAX_TURNS'
   turns: number
+  /** positionScore at the end of the battle. */
+  finalScore: number
 }
 
 /** Plays one battle with the expectimax policy on the player's side. */
@@ -224,7 +231,7 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     if (choice) applyChoice(session, choice)
     stepTurn(session, choice ? choice.action : null)
   }
-  return { outcome: session.state.battleOutcome ?? 'MAX_TURNS', turns }
+  return { outcome: session.state.battleOutcome ?? 'MAX_TURNS', turns, finalScore: positionScore(session.state) }
 }
 
 /** Fraction of `games` seeded battles the player wins. */
