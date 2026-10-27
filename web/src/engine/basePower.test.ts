@@ -305,12 +305,27 @@ describe('applyPreModifierBasePower', () => {
     expect(applyPreModifierBasePower(90, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG', ctx(), 0, null, false).power).toBe(90)
   })
 
-  it('surfaces the genuinely unmodelled MISC_EFFECT sub-cases without touching power', () => {
-    for (const miscEffect of ['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', 'MISC_EFFECT_TRANSMUTE']) {
+  it('leaves the draw-dependent and history-dependent sub-cases unmodelled when the caller supplies no value', () => {
+    for (const miscEffect of ['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFECT_TOOK_DAMAGE_BOOST']) {
       const result = applyPreModifierBasePower(100, 'EFFECT_MISC_HIT', miscEffect, ctx(), 0, null, false)
       expect(result.power).toBe(100)
       expect(result.unmodelled).toHaveLength(1)
     }
+  })
+
+  it('MISC_EFFECT_TOOK_DAMAGE_BOOST adds 20 per time damaged, capped at 6 times (battle_util.c:6869-6871)', () => {
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', ctx({ attackerTimesDamaged: 0 }), 0, null, false)).toEqual({ power: 80, unmodelled: [] })
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', ctx({ attackerTimesDamaged: 3 }), 0, null, false).power).toBe(140)
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', ctx({ attackerTimesDamaged: 9 }), 0, null, false).power).toBe(200)
+  })
+
+  it('MISC_EFFECT_DOUBLE_DAMAGE doubles power only when the caller\'s draw succeeded (battle_util.c:6872-6874)', () => {
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE', ctx({ miscDoubleDamage: true }), 0, null, false)).toEqual({ power: 160, unmodelled: [] })
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_DOUBLE_DAMAGE', ctx({ miscDoubleDamage: false }), 0, null, false)).toEqual({ power: 80, unmodelled: [] })
+  })
+
+  it('MISC_EFFECT_TRANSMUTE is a plain-power hit; its Recycle half is the faint hook (moveEnd.ts)', () => {
+    expect(applyPreModifierBasePower(80, 'EFFECT_MISC_HIT', 'MISC_EFFECT_TRANSMUTE', ctx(), 0, null, false)).toEqual({ power: 80, unmodelled: [] })
   })
 
   it('leaves power untouched for every other move effect', () => {

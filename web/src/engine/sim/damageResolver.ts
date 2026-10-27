@@ -37,6 +37,7 @@ import type { TypeChart } from '../typeEffectiveness'
 import type { BattleState, RandomSource } from './state'
 import type { BridgeDeps } from './bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from './bridge'
+import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, hasFlag } from './constants'
 import type { DamageResolution, DamageResolveContext, DamageResolver } from './turn'
 import type { ChosenAction } from './turnOrder'
 
@@ -94,8 +95,24 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // Bond sequencing is not modelled) -- which is the CORRECT value for
       // every scenario this batch can represent, not a guess: see
       // state.ts's sameMoveTurns doc.
-      if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
-      if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
+      // Rollout / Ice Ball / Flame Wheel read gVolatileStructs[atk].rolloutCounter AFTER Cmd_handlerollout bumped it (turn.ts runs that
+      // before this call, as BattleScript_EffectRollout does, data/battle_scripts_1.s:5125-5132) and STATUS2_DEFENSE_CURL (:6813-6821).
+      const attackerBattlerState = state.battlers[attackerId]!
+      // tryfling (hitScripts.ts) emptied the slot already; Fling's power and a Gem's type read the item it recorded.
+      const flungId = move.effect === 'EFFECT_FLING' ? attackerBattlerState.turn.flungItem : null
+      const flungData = flungId ? deps.dataContext.item(flungId) : undefined
+      // Beat Up's hit k is powered by party slot k (CalcBeatUpPower, battle_util.c:101-116: `party[gBattleCommunication[0] - 1]`,
+      // which BattleScript_EffectBeatUp's Gen 5+ branch raises by one per hit, data/battle_scripts_1.s:5775-5779), whether or not
+      // that slot is a mon that counted toward the hit total. An empty slot reads gBaseStats[SPECIES_NONE].baseAttack, which is 0.
+      let beatUpBaseAttack = attacker.battler.rawStats.atk
+      if (move.effect === 'EFFECT_BEAT_UP') {
+        if (context.hitIndex === undefined) {
+          unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
+        } else {
+          const slotSpecies = state.sides[attackerId & 1].party[context.hitIndex]?.speciesId ?? null
+          beatUpBaseAttack = slotSpecies ? (deps.dataContext.species(slotSpecies)?.baseStats.atk ?? 0) : 0
+        }
+      }
       if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
       const scenario: DamageCalcScenario = {
         move,
@@ -118,23 +135,39 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         hitCount: state.battlers[attackerId]!.turn.multiHitCounter,
         defenderIsSwitching: false,
         magnitudeTier: move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
-        attackerRolloutCounter: 0,
-        attackerHasDefenseCurl: false,
+        attackerRolloutCounter: Math.min(3, Math.max(0, attackerBattlerState.volatiles.rolloutCounter)) as 0 | 1 | 2 | 3,
+        attackerHasDefenseCurl: hasFlag(attackerBattlerState.mon.status2, STATUS2_DEFENSE_CURL),
         attackerWasHitThisTurn: attacker.battler.condition.wasDamagedThisTurnBy !== 'none',
-        // DamageContext documents this as a representative party member's
-        // base Attack; no party roster exists, so keep the attacker as the
-        // explicit representative and report the gap for Beat Up.
-        beatUpBaseAttack: attacker.battler.rawStats.atk,
+        // Without a hitIndex DamageContext's one-representative stand-in applies (the attacker's own Attack, with the gap
+        // reported above); with one, the hit's own party slot (beatUpBaseAttack above).
+        beatUpBaseAttack,
         beatUpHitCount: 1,
         defenderUsedGlaiveRush: false,
+        singleHitIndex: context.hitIndex,
+        // MISC_EFFECT_TOOK_DAMAGE_BOOST (battle_util.c:6869-6871) and MISC_EFFECT_DOUBLE_DAMAGE (:6872-6874): the latter's
+        // Random() is drawn inside CalcMoveBasePower, i.e. before the damage roll below.
+        // GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197)
+        attackerElectrified: hasFlag(attackerBattlerState.statuses4, STATUS4_ELECTRIFIED),
+        ionDelugeActive: hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE),
+        attackerPlasmaFists: hasFlag(attackerBattlerState.statuses4, STATUS4_PLASMA_FISTS),
+        attackerTimesDamaged: state.sides[attackerId & 1]?.timesDamaged[attackerBattlerState.partyIndex] ?? 0,
+        miscDoubleDamage: move.miscEffect === 'MISC_EFFECT_DOUBLE_DAMAGE' ? deps.random.random16() % 100 < move.effectChance : undefined,
+        flungItem: flungId
+          ? { id: flungId, holdEffect: flungData?.resolvedHoldEffect ?? null, holdEffectType: flungData?.holdEffectType?.replace(/^TYPE_/, '') ?? null }
+          : null,
       }
       const result = calculateMoveDamage(scenario)
       unmodelled.push(...result.unmodelled)
       if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled, absorbingAbility: result.absorbingAbility ?? null }
 
-      // Cmd_critcalc runs before Cmd_damagecalc (battle_script_commands.c:1568-1585).
+      // Cmd_critcalc runs before Cmd_damagecalc (battle_script_commands.c:1568-1585). A later hit of a multi-hit move arrives
+      // with the turn loop's own gCritRoll (MakeCritRoll(), :1586, drawn at MOVEEND_MULTIHIT_MOVE :4885); SetCritFlag
+      // (:1588-1594) tests `!(critRoll % critChance)`, and the loop's roll is Random() % 24, so the divisors 24/8/2/1 of
+      // sCriticalHitChance (:1510) all divide it exactly.
       const denominator = result.critChanceDenominator
-      const crit = denominator === 1 || (denominator !== null && deps.random.random16() % denominator === 0)
+      const crit =
+        denominator === 1 ||
+        (denominator !== null && (context.critRoll !== undefined ? context.critRoll : deps.random.random16()) % denominator === 0)
       // battle_util.c:7790-7795 uses r = Random()%16 and indexes the ascending
       // 85..100% result arrays as 15-r; Bad Luck forces r=15.
       const roll = result.isForcedMinRoll ? 15 : deps.random.random16() % 16

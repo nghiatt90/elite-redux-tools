@@ -499,6 +499,9 @@ export interface SideState {
   statuses: number
   timers: SideTimerState
   faintedCount: number
+  /** `gBattleStruct->timesDamaged[partyIndex][side]` (battle_script_commands.c:1859-1862, capped at 100): how often each party slot
+   * took direct damage this battle. Rage Fist's MISC_EFFECT_TOOK_DAMAGE_BOOST reads it (battle_util.c:6869-6871). */
+  timesDamaged: number[]
   /** The reserve roster for this side, party slot order. Up to PARTY_SIZE. */
   party: SimPartyMon[]
 }
@@ -683,6 +686,11 @@ export interface BattleState {
    * Backing store for GetSingleUseAbilityCounter / SetSingleUseAbilityCounter (battle_util.c:3950-3965).
    * Indexed by [partyIndex][slotIndex][side]. */
   singleUseAbility: number[][][]
+  /** `u8 stickyWebUser` (include/battle.h:724): the battler that last set Sticky Web with the move (Cmd_setstickyweb,
+   * battle_script_commands.c:11469), 0xFF when none. Mirror Armor and the Speed drop on switch-in read it
+   * (VARIOUS_SET_ATTACKER_STICKY_WEB_USER, :8082-8088). SwitchInClearSetData resets it for the slot switched into (battle_main.c:2917);
+   * FaintClearSetData (:2990) is covered by readers treating a fainted slot as unset. */
+  stickyWebUser: number
   /** `u8 lastMoveFailed` (include/battle.h:700, battle_script_commands.c:4725,4728,4730, battle_main.c:2914). Battler bitmask (1 << battlerId). */
   lastMoveFailed: number
   /** `struct BattleEvent gBattleEvents[BATTLE_EVENTS_MAX_REGISTERABLE]` (include/battle_events.h:18, battle_events.c:24). */

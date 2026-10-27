@@ -229,6 +229,10 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
         m.effect === 'EFFECT_DOUBLE_HIT' && arg?.kind === 'int'
           ? (arg.value as number)
           : null,
+      argumentStatus:
+        m.effect === 'EFFECT_DOUBLE_DMG_IF_STATUS1' && arg?.kind === 'status'
+          ? (arg.status as string)
+          : null,
       target: m.target as string | undefined,
     }
   }

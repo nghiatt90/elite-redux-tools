@@ -223,14 +223,6 @@ export function applyMoveBehaviorDamage(baseDamage: number, behaviorId: string |
   return { power: customDamageFn(baseDamage, ctx), unmodelled: [] }
 }
 
-/** MISC_EFFECT_* sub-cases NOT ported by applyPreModifierBasePower below --
- * DOUBLE_DAMAGE is a coin-flip roll (`Random() % 100 < secondaryEffectChance`, no
- * honest default for a deterministic calculator), TOOK_DAMAGE_BOOST needs a
- * "times hit this battle" counter this engine has no scenario field for, and
- * TRANSMUTE (battle_script_commands.c:7205) isn't a damage effect at all (it
- * copies the target's type onto the user). */
-const UNMODELLED_MISC_EFFECTS = new Set(['MISC_EFFECT_DOUBLE_DAMAGE', 'MISC_EFFECT_TOOK_DAMAGE_BOOST', 'MISC_EFFECT_TRANSMUTE'])
-
 /**
  * The single-snapshot slice of CalcMoveBasePower's own switch (:6870-6907) --
  * EFFECT_WAKE_UP_SLAP/EFFECT_SMELLINGSALT (a plain status check) and
@@ -309,6 +301,14 @@ export function applyPreModifierBasePower(
     // applies on top, same as every other move.
     return { power: attackerNaturalGiftPower ?? 0, unmodelled: [] }
   }
+  if (moveEffect === 'EFFECT_FLING') {
+    // CalcMoveBasePower's first case (battle_util.c:6804-6812): `gTurnStructs[].flungItem ? flungItem : the battler's item`.
+    // tryfling (VARIOUS_TRY_FLING, battle_script_commands.c:8402-8433) records the flung item and then empties the slot, so the
+    // simulator supplies it as DamageContext.flungItemId; the calculator (no tryfling) reads the held item. Iron Ball and Big
+    // Nugget give 130; every other item keeps the declared power.
+    const item = ctx.flungItemId ?? ctx.attacker.itemId
+    return { power: item === 'ITEM_IRON_BALL' || item === 'ITEM_BIG_NUGGET' ? 130 : basePower, unmodelled: [] }
+  }
   if (moveEffect === 'EFFECT_TRIPLE_KICK') {
     // battle_util.c:6850-6852: basePower *= 4 - multiHitCounter, where
     // multiHitCounter COUNTS DOWN from hitCount to 1 across the 3 hits (3,2,1) --
@@ -373,6 +373,14 @@ export function applyPreModifierBasePower(
       return { power: basePower + 10 * attackerAlliesFainted, unmodelled: [] }
     case 'MISC_EFFECT_ELECTRIC_TERRAIN_BOOST':
       return { power: ctx.field.terrain === 'TERRAIN_ELECTRIC' ? idiv(basePower * 3, 2) : basePower, unmodelled: [] }
+    case 'MISC_EFFECT_TOOK_DAMAGE_BOOST':
+      // battle_util.c:6869-6871
+      if (ctx.attackerTimesDamaged === undefined) return { power: basePower, unmodelled: [`${miscEffect}: not modelled`] }
+      return { power: basePower + 20 * Math.min(6, ctx.attackerTimesDamaged), unmodelled: [] }
+    case 'MISC_EFFECT_DOUBLE_DAMAGE':
+      // battle_util.c:6872-6874: the draw is the caller's (damageResolver.ts), made before the damage roll as CalcMoveBasePower is
+      if (ctx.miscDoubleDamage === undefined) return { power: basePower, unmodelled: [`${miscEffect}: not modelled`] }
+      return { power: ctx.miscDoubleDamage ? basePower * 2 : basePower, unmodelled: [] }
     case 'MISC_EFFECT_DOUBLE_DAMAGE_VS_BLEEDING':
       return { power: isBleeding ? basePower * 2 : basePower, unmodelled: [] }
     case 'MISC_EFFECT_50_PERCENT_PLUS_DAMAGE_VS_BLEEDING':
@@ -380,7 +388,6 @@ export function applyPreModifierBasePower(
     case 'MISC_EFFECT_DOUBLE_DAMAGE_IN_FOG':
       return { power: ctx.field.weather === 'FOG' ? basePower * 2 : basePower, unmodelled: [] }
     default:
-      if (miscEffect && UNMODELLED_MISC_EFFECTS.has(miscEffect)) return { power: basePower, unmodelled: [`${miscEffect}: not modelled`] }
       return { power: basePower, unmodelled: [] }
   }
 }

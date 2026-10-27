@@ -122,7 +122,6 @@ const MOVE_SWAGGER = requireMove('MOVE_SWAGGER')
 const MOVE_FLAMETHROWER = requireMove('MOVE_FLAMETHROWER')
 const MOVE_RELIC_SONG = requireMove('MOVE_RELIC_SONG')
 const MOVE_TRI_ATTACK = requireMove('MOVE_TRI_ATTACK')
-const MOVE_EERIE_SPELL = requireMove('MOVE_EERIE_SPELL')
 const MOVE_WATER_PULSE = requireMove('MOVE_WATER_PULSE')
 const MOVE_ZEN_HEADBUTT = requireMove('MOVE_ZEN_HEADBUTT')
 const MOVE_ROCK_SMASH = requireMove('MOVE_ROCK_SMASH')
@@ -1211,16 +1210,16 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
 
   it('unported legacy secondary effect produces named gap', () => {
     // Derivation:
-    // Eerie Spell has legacyConfig: BattleScript_EffectEerieSpell (battle_scripts_1.s:4796-4820),
-    // whose target PP deduction (eeriespellppreduce) is unmodelled in the sim.
-    // Damaging move execution reaches applySecondaryMoveEffects, pushing named gap.
+    // Future Sight has legacyConfig: BattleScript_EffectFutureSight (battle_scripts_1.s:5692), whose delayed hit is unmodelled in
+    // the sim (Eerie Spell, used here until cycle 87, is ported now). Damaging move execution reaches applySecondaryMoveEffects,
+    // pushing the named gap.
     const rng = scriptedRng([0])
     const state = battle([{}, {}], rng)
     const deps = testDeps(fixedDamage(20), rawBehaviors)
-    const out = executeTurn(state, [useMove(1, MOVE_EERIE_SPELL), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    const out = executeTurn(state, [useMove(1, requireMove('MOVE_FUTURE_SIGHT')), useMove(0, MOVE_SWORDS_DANCE)], deps)
 
     expect(out.actions[0].statusApplied).toBeNull()
-    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_EERIE_SPELL not modelled')
+    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_FUTURE_SIGHT not modelled')
   })
 
   it('confusion secondary effect applies and draws duration', () => {

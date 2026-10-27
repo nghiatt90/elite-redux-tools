@@ -266,8 +266,15 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
     expect(boosted.targetDamage).not.toBeNull()
     expect(boosted.targetDamage!).toBeGreaterThan(baseline.targetDamage!)
   })
-  it('fires the rollout/defense-curl note for EFFECT_ROLLOUT and the beat-up note for EFFECT_BEAT_UP', () => {
-    expect(resolver().resolve(state(), 0, 1, action('MOVE_ROLLOUT')).unmodelled.some((u) => u.includes('attackerRolloutCounter'))).toBe(true)
+  it('reads the rollout counter and Defense Curl off the attacker, and fires the beat-up note only for a one-shot (no hitIndex) EFFECT_BEAT_UP', () => {
+    // The simulator tracks both rollout inputs now (volatiles.rolloutCounter, STATUS2_DEFENSE_CURL): no note, and the counter changes the damage.
+    expect(resolver().resolve(state(), 0, 1, action('MOVE_ROLLOUT')).unmodelled.some((u) => u.includes('attackerRolloutCounter'))).toBe(false)
+    const fresh = state()
+    const chained = state()
+    chained.battlers[0]!.volatiles.rolloutCounter = 3
+    const base = resolver(scripted(1, 0)).resolve(fresh, 0, 1, action('MOVE_ROLLOUT')).targetDamage!
+    const third = resolver(scripted(1, 0)).resolve(chained, 0, 1, action('MOVE_ROLLOUT')).targetDamage!
+    expect(third).toBeGreaterThan(base)
     expect(resolver().resolve(state(), 0, 1, action('MOVE_BEAT_UP')).unmodelled.some((u) => u.includes('beatUpBaseAttack'))).toBe(true)
     // Tackle triggers neither -- the notes are keyed on the move's effect, not emitted unconditionally.
     const plain = resolver().resolve(state(), 0, 1, action('MOVE_TACKLE')).unmodelled

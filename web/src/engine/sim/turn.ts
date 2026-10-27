@@ -158,7 +158,11 @@ import {
   SIDE_STATUS_SCREEN_ANY,
   SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_WIDE_GUARD,
+  STAT_DEF,
+  STAT_SPDEF,
+  STATUS2_DEFENSE_CURL,
   STATUS1_ANY,
+  STATUS1_FREEZE,
   STATUS1_SLEEP,
   STATUS2_CONFUSION,
   STATUS2_CURSED,
@@ -191,9 +195,11 @@ import {
   STATUS3_UNDERGROUND,
   STATUS3_UNDERWATER,
   STATUS4_SALT_CURE,
+  STATUS4_GHASTLY_ECHO,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_FOG_ANY,
   WEATHER_SUN_ANY,
+  WEATHER_RAIN_ANY,
   MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_EVS_PLUS_1,
 } from './constants'
@@ -204,7 +210,9 @@ import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
   B_MSG_DEFENDER_STAT_FELL,
+  changeStatBuffs,
   changeStatBuffsImplicit,
+  STAT_BUFF_DONT_SET_BUFFERS,
   tryResetBattlerStatChanges,
   RESET_ALL_STATS,
   MOVE_EFFECT_AFFECTS_USER,
@@ -235,6 +243,8 @@ import {
   type StatusDeps,
 } from './statusEffects'
 import { runBattleEvents } from './battleEvents'
+import { runLegacyPostHit, runLegacyPreHit } from './hitScripts'
+import { SOUNDPROOF_ABILITIES } from './ai/aiAbilityHelpers'
 
 /**
  * Cmd_setsemiinvulnerablebit, src/battle_script_commands.c:11541-11566.
@@ -478,6 +488,13 @@ export interface DamageResolution {
 export interface DamageResolveContext {
   /** Whether the target's action slot was already reached this turn. */
   targetHasActedThisTurn: boolean
+  /** 0-based index of the hit being resolved in a multi-hit sequence. The turn loop re-runs the move script once per hit
+   * (MOVEEND_MULTIHIT_MOVE, battle_script_commands.c:4880-4921), so a resolver given this returns that ONE hit's damage
+   * (Triple Kick's power scaling, Beat Up's party-slot power) with its own roll and crit. Absent: the one-shot total. */
+  hitIndex?: number
+  /** gCritRoll for this hit (`MakeCritRoll()`, Random() % 24, battle_script_commands.c:1586), drawn by the turn loop at
+   * MOVEEND_MULTIHIT_MOVE (:4885). Absent: the resolver draws the crit check itself, as it does for a first hit. */
+  critRoll?: number
 }
 
 export interface DamageResolver {
@@ -1156,7 +1173,15 @@ export function handleProtectLikeMoveEnd(
  * sim to model -- not a gap, since there is nothing for it to be wrong
  * about).
  */
-export function deductPp(state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]): void {
+export function deductPp(
+  state: BattleState,
+  attackerId: number,
+  moveId: string,
+  moveEffect: string | null,
+  unmodelled: string[],
+  /** What TryUseStockpile's ChangeStatBuffs needs; without it a Spit Up / Swallow user with Stockpile charges is gapped. */
+  deps?: { dataContext: SimDataContext; grounding?: GroundingContext },
+): void {
   const attacker = state.battlers[attackerId]
   if (!attacker) return
   const slot = attacker.mon.moves.findIndex((id) => id === moveId)
@@ -1179,7 +1204,27 @@ export function deductPp(state: BattleState, attackerId: number, moveId: string,
   }
 
   if (moveEffect === 'EFFECT_SPIT_UP' || moveEffect === 'EFFECT_SWALLOW') {
-    unmodelled.push('Spit Up/Swallow PP refund via TryUseStockpile (battle_script_commands.c:1476-1483) is not modelled; PP was deducted as if Stockpile were empty')
+    // :1476-1483. Each Stockpile charge is spent INSTEAD of a PP (TryUseStockpile, :9521-9535: one charge, and one stage back off
+    // Defense / Sp. Def for each stage that Stockpile raised); the PP is only touched once the charges run out.
+    const volatiles = attacker.volatiles
+    while (ppToDeduct) {
+      if (!volatiles.stockpileCounter) break
+      if (!deps) {
+        unmodelled.push('Spit Up/Swallow PP refund via TryUseStockpile (battle_script_commands.c:1476-1483): no stat deps supplied, so the Stockpile charges were not spent')
+        break
+      }
+      volatiles.stockpileCounter--
+      if (volatiles.stockpileDef) {
+        volatiles.stockpileDef--
+        changeStatBuffs(state, attackerId, attackerId, attackerId, -1, STAT_DEF, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS, false, deps, unmodelled, moveId)
+      }
+      if (volatiles.stockpileSpDef) {
+        volatiles.stockpileSpDef--
+        changeStatBuffs(state, attackerId, attackerId, attackerId, -1, STAT_SPDEF, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS, false, deps, unmodelled, moveId)
+      }
+      ppToDeduct--
+    }
+    if (!ppToDeduct) return
   }
 
   // :1485. Reads the PP slot BEFORE deduction; a slot already at 0 deducts
@@ -1435,7 +1480,20 @@ export function dispatchSwitchOutAbilities(
   }
 }
 
+/** IsSoundproof, battle_util.c:8864-8871: the battler's own abilities, then a living partner's (isSoundproof is set only on Soundproof and Noise Cancel). */
+function isSoundproof(state: BattleState, battlerId: number, deps: TurnLoopDeps): boolean {
+  const check = (id: number) => {
+    const b = state.battlers[id]
+    return Boolean(b) && SOUNDPROOF_ABILITIES.some((a) => battlerHasSimAbility(state, b!, a, true, id, false, deps.dataContext))
+  }
+  if (check(battlerId)) return true
+  const ally = battlerId ^ 2
+  return isBattlerAlive(state, ally) && check(ally)
+}
+
 export interface SwitchActionOptions {
+  /** Ghastly Echo's BattleScript_SwitchGhastlyEcho (data/battle_scripts_1.s:2816-2840): `setghastlyecho BS_ATTACKER` on the incoming mon. */
+  ghastlyEcho?: boolean
   ignoreEscapePrevention?: boolean
   forcedPartyIndex?: number
   healingWish?: boolean
@@ -1588,6 +1646,11 @@ export function performSwitchAction(
   }
 
   switchIn(state, battlerId, partyIndex, deps, unmodelled, (newBattler) => {
+    // VARIOUS_GHASTLY_ECHO (battle_script_commands.c:8379-8384), run after switchinanim and before switchineffects.
+    if (options?.ghastlyEcho && !hasFlag(newBattler.statuses4, STATUS4_GHASTLY_ECHO) && !isSoundproof(state, battlerId, deps)) {
+      newBattler.statuses4 = setFlag(newBattler.statuses4, STATUS4_GHASTLY_ECHO)
+      newBattler.volatiles.ghastlyEchoTimer = 2
+    }
     if (options?.batonPass) {
       if (savedStatStages) newBattler.mon.statStages = [...savedStatStages]
       if (savedStatus2 !== null) newBattler.mon.status2 = savedStatus2
@@ -1732,6 +1795,7 @@ const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SOLARBEAM',
   'EFFECT_TWO_TURN_SECONDARY',
   'EFFECT_TWO_TURN_RETALIATION',
+  'EFFECT_ELECTRO_SHOT',
 ])
 
 export function executeAction(
@@ -1820,7 +1884,7 @@ export function executeAction(
   // failure into BattleScript_EffectPoison, Assist's ppreduce before jumptocalledmove) deducts twice.
   const performPpDeduct = () => {
     if (shouldDeductPp && action.chosenMove) {
-      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled)
+      deductPp(state, battlerId, action.chosenMove.id, action.chosenMove.effect, unmodelled, deps)
     }
   }
 
@@ -2244,9 +2308,16 @@ export function executeAction(
 
         // BattleScript_EffectTwoTurnSecondary (:4405-4408): argumenttomoveeffect; seteffectprimary on the charge turn
         // (Meteor Beam's Sp. Atk boost, Skull Bash's Defense boost), then setmoveeffect 0.
-        if (moveEffect === 'EFFECT_TWO_TURN_SECONDARY') {
+        // BattleScript_EffectElectroShot (:5723-5732) names the effect itself (`setmoveeffect MOVE_EFFECT_SP_ATK_PLUS_1 |
+        // MOVE_EFFECT_AFFECTS_USER; seteffectprimary`) instead of reading the move's argument.
+        if (moveEffect === 'EFFECT_TWO_TURN_SECONDARY' || moveEffect === 'EFFECT_ELECTRO_SHOT') {
           const arg = moveData?.argument
-          const effectName = arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string' ? arg.effect : null
+          const effectName =
+            moveEffect === 'EFFECT_ELECTRO_SHOT'
+              ? 'MOVE_EFFECT_SP_ATK_PLUS_1'
+              : arg && typeof arg === 'object' && arg.kind === 'effect' && typeof arg.effect === 'string'
+                ? arg.effect
+                : null
           const effectNum = effectName ? SECONDARY_MOVE_EFFECT_MAP[effectName] : undefined
           if (effectNum !== undefined && effectNum >= MOVE_EFFECT_ATK_PLUS_1 && effectNum <= MOVE_EFFECT_EVS_PLUS_1) {
             changeStatBuffsImplicit(
@@ -2268,7 +2339,9 @@ export function executeAction(
           false,
           deps.dataContext,
         )
-        let accelerated = hasAccelerate
+        // Electro Shot (s:5730) checks `jumpifweatheraffected BS_ATTACKER, WEATHER_RAIN_ANY` ahead of twoturnmoveacceleratecheck: in rain it
+        // goes straight to the second-turn hit (after the Sp. Atk raise) without touching a Power Herb.
+        let accelerated = hasAccelerate || (moveEffect === 'EFFECT_ELECTRO_SHOT' && isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, deps))
         if (!accelerated) {
           const itemId = attackerBattler.mon.itemId
           const itemNegated =
@@ -2286,7 +2359,11 @@ export function executeAction(
 
         if (!accelerated) {
           if (moveEffect === 'EFFECT_TWO_TURN_RETALIATION') {
-            unmodelled.push('BattleScript_EffectTwoTurnRetaliation_SetRetaliation (data/battle_scripts_1.s:4434): setbeakblast is not modelled')
+            // BattleScript_EffectTwoTurnRetaliation_SetRetaliation (data/battle_scripts_1.s:4433-4435): setbeakblast BS_ATTACKER, i.e.
+            // VARIOUS_SET_BEAK_BLAST (battle_script_commands.c:7815-7817) gRoundStructs[].protectMove = gCurrentMove. Ice Burn / Freeze
+            // Shock then protect the charging user (IsBattlerProtected's default case, battle_util.c:6625-6626) and burn / paralyse
+            // contact attackers (MOVEEND_PROTECT_LIKE_EFFECT, handleProtectLikeMoveEnd).
+            attackerBattler.round.protectMove = currentMove.id
           }
           runMoveEndBookkeeping({
             state,
@@ -2347,6 +2424,8 @@ export function executeAction(
 
     const targetBattlerPre = state.battlers[currentTargetId]
     let preFail = false
+    let preFailDeductsPp = true
+    const preHitStatChanges: StatChangeOutcome[] = []
     if (moveEffect === 'EFFECT_FAKE_OUT') {
       // BattleScript_EffectFakeOut (data/battle_scripts_1.s:5932-5934): jumpifnotfirstturn -> BattleScript_ButItFailedAtkStringPpReduce;
       // Cmd_jumpifnotfirstturn, battle_script_commands.c:9439-9446
@@ -2387,10 +2466,30 @@ export function executeAction(
     } else if (moveEffect === 'EFFECT_EXPLOSION' && !state.processingExtraAttacks && isAbilityOnField(state, 'ABILITY_DAMP', deps)) {
       // Cmd_faintifabilitynotdamp (battle_script_commands.c:9208-9215) -> BattleScript_DampStopsExplosion
       preFail = true
+    } else if (moveEffect !== null) {
+      // The legacy scripts' own checks between ppreduce and the hit (hitScripts.ts).
+      const gate = runLegacyPreHit({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        moveId: currentMove.id,
+        moveEffect,
+        deps,
+        unmodelled,
+        deductPp: performPpDeduct,
+      })
+      if (gate) {
+        if (gate.retarget !== undefined) currentTargetId = gate.retarget
+        preHitStatChanges.push(...gate.statChanges)
+        if (gate.fail) {
+          preFail = true
+          preFailDeductsPp = gate.deductPpOnFail
+        }
+      }
     }
 
     if (preFail) {
-      if (!isSecondTurnSemiInvuln && !rampageContinues) {
+      if (!isSecondTurnSemiInvuln && !rampageContinues && preFailDeductsPp) {
         performPpDeduct()
       }
       runMoveEndBookkeeping({
@@ -2417,7 +2516,7 @@ export function executeAction(
         attackerDamage: null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
-        statChanges: null,
+        statChanges: preHitStatChanges.length > 0 ? preHitStatChanges : null,
         statusApplied: null,
         unmodelled,
         fainted: [],
@@ -2662,7 +2761,11 @@ export function executeAction(
     // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
     // is not special-cased: Random() % 100 is at most 99, so the comparison
     // can never be true, and the arithmetic alone carries the sentinel.
-    const missed = state.rng.random16() % 100 >= accResult.accuracy
+    // BattleScript_EffectClearWeatherAndTerrainHit (s:685-715) and _EffectRemoveTerrainNoFail (s:717-744) have no accuracycheck at
+    // all (attackcanceler, attackstring, ppreduce, damagecalc): they cannot miss and consume no draw.
+    const scriptHasNoAccuracyCheck =
+      moveEffect === 'EFFECT_CLEAR_WEATHER_AND_TERRAIN_HIT' || moveEffect === 'EFFECT_REMOVE_TERRAIN_NO_FAIL'
+    const missed = scriptHasNoAccuracyCheck ? false : state.rng.random16() % 100 >= accResult.accuracy
 
     // Cmd_clearsemiinvulnerablebit (src/battle_script_commands.c:11568-11571)
     // Cleared on both hit and miss paths: BattleScript_SemiInvulnerableTryHit (:5889) and BattleScript_SemiInvulnerableMiss (:5893).
@@ -2754,7 +2857,53 @@ export function executeAction(
       targetSideState.timers.smokescreenTimer = 0
     }
 
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective } = deps.damage.resolve(state, battlerId, currentTargetId, currentMoveAction, { targetHasActedThisTurn })
+    // The hit loop. A multi-hit move's script is re-run once per hit from MOVEEND_MULTIHIT_MOVE (battle_script_commands.c:4880-4921)
+    // -- every hit has its own damage roll and crit check, its own seteffectwithchance and its own moveend cases 0-18 (contact
+    // abilities, Rocky Helmet, King's Rock, ...); cases 20-30 (recoil, Life Orb, Shell Bell, ...) run once after the last hit, on
+    // the summed `savedDmg`. gTurnStructs[attacker].multiHitCounter was set by CANCELLER_MULTIHIT_MOVES (attackCanceller.ts) and
+    // is counted down here the way the C does. A move whose counter is 0 (every single-hit move) takes exactly one pass and runs
+    // the whole ladder in one runMoveEnd call, as before. Beat Up always goes through the per-hit resolver: its power comes from
+    // the party slot of the hit (CalcBeatUpPower), even when the canceller counted no eligible mon.
+    // The loop body is deliberately not re-indented so the single-hit diff stays reviewable.
+    const fainted: number[] = [...preFainted]
+    // Cmd_handlerollout (battle_script_commands.c:11151-11167), the `handlerollout` between typecalc and damagecalc of
+    // BattleScript_EffectRollout (data/battle_scripts_1.s:5125-5132): Defense Curl pre-counts a first use, and the counter rises to 3.
+    // The damage below reads the raised value (CalcMoveBasePower, battle_util.c:6813-6821). A type-immune target undoes it after the
+    // damage call (the NO_EFFECT branch, :11152-11154).
+    if (moveEffect === 'EFFECT_ROLLOUT') {
+      const rolloutVolatiles = attackerBattler.volatiles
+      if (hasFlag(attackerBattler.mon.status2, STATUS2_DEFENSE_CURL) && !rolloutVolatiles.rolloutCounter) rolloutVolatiles.rolloutCounter++
+      if (
+        !state.processingExtraAttacks &&
+        attackerBattler.turn.parentalBondOn === attackerBattler.turn.parentalBondInitialCount &&
+        rolloutVolatiles.rolloutCounter < 3
+      ) {
+        rolloutVolatiles.rolloutCounter++
+      }
+    }
+    const perHitResolution = attackerBattler.turn.multiHitCounter > 0 || moveEffect === 'EFFECT_BEAT_UP'
+    let hitIndex = 0
+    let hitCritRoll: number | undefined
+    let sumTargetDamage: number | null = null
+    let sumHpDealt = 0
+    let sumAttackerDamage: number | null = null
+    let sumMoveEffect2: string | null = null
+    const sumStatChanges: StatChangeOutcome[] = [...preHitStatChanges]
+    let sawStatChanges = preHitStatChanges.length > 0
+    let sumStatusApplied: StatusAppliedOutcome | null = null
+    const sumDamageUnmodelled: string[] = []
+    let lastHitNoEffect = false
+    let lastCritical: boolean | undefined
+    let lastSuperEffective: boolean | undefined
+    for (;;) {
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective } = deps.damage.resolve(
+      state,
+      battlerId,
+      currentTargetId,
+      currentMoveAction,
+      perHitResolution ? { targetHasActedThisTurn, hitIndex, critRoll: hitCritRoll } : { targetHasActedThisTurn },
+    )
+    if (moveEffect === 'EFFECT_ROLLOUT' && targetDamage === 0) attackerBattler.volatiles.rolloutCounter = 0
 
     if (absorbingAbility) {
       const absorbOutcome = applyAbsorbEffect({
@@ -2851,7 +3000,6 @@ export function executeAction(
       targetBattler.mon.itemId = null
     }
 
-    const fainted: number[] = [...preFainted]
     const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, currentTargetId, targetDamage, fainted)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
@@ -2859,6 +3007,11 @@ export function executeAction(
     // Cmd_datahpupdate damage tracking (src/battle_script_commands.c:1935-1959)
     if (targetBattler && hpDealt > 0) {
       const isPhysical = (currentMove.split ?? moveData?.split) === 'PHYSICAL'
+      if ((isPhysical && currentMove.id !== 'MOVE_PAIN_SPLIT') || !isPhysical) {
+        // IncrementTimesTookDamage (:1859-1862), called from both branches below; not for Pain Split, which neither branch takes.
+        const timesDamaged = state.sides[currentTargetId & 1].timesDamaged
+        timesDamaged[targetBattler.partyIndex] = Math.min(100, (timesDamaged[targetBattler.partyIndex] ?? 0) + 1)
+      }
       if (isPhysical && currentMove.id !== 'MOVE_PAIN_SPLIT') {
         targetBattler.round.physicalDmg = hpDealt
         targetBattler.turn.physicalDmg = hpDealt
@@ -2911,7 +3064,7 @@ export function executeAction(
     }
 
     applyDamage(state, battlerId, attackerDamage, fainted)
-    if (preAttackerDamage) attackerDamage = (attackerDamage ?? 0) + preAttackerDamage
+    if (preAttackerDamage && hitIndex === 0) attackerDamage = (attackerDamage ?? 0) + preAttackerDamage
 
     // BattleScript_EffectFinalGambit (data/battle_scripts_1.s:4172-4194): dmgtocurrattackerhp; datahpupdate BS_ATTACKER, so the user
     // faints unless the hit had no effect.
@@ -2981,7 +3134,33 @@ export function executeAction(
       unmodelled,
     })
 
-    // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968).
+    // BattleScript_EffectNaturalGift (data/battle_scripts_1.s:3067-3068): `jumpifmovehadnoeffect; removeitem BS_ATTACKER` -- the berry
+    // is spent once the hit did something. (The effect it carried was applied by seteffectsecondary above.)
+    if (moveEffect === 'EFFECT_NATURAL_GIFT' && targetDamage !== null && targetDamage > 0) {
+      consumeHeldItem(state, attackerBattler, unmodelled)
+    }
+
+    // Passive damage an effect took from the user (Struggle's quarter-HP recoil, BattleScript_MoveEffectRecoil).
+    if (secondaryResult?.attackerDamage) {
+      applyDamage(state, battlerId, secondaryResult.attackerDamage, fainted)
+      attackerDamage = (attackerDamage ?? 0) + secondaryResult.attackerDamage
+    }
+
+    // The steps hit-plus-X scripts run after `call BattleScript_EffectHit_Return` (seteffectwithchance + tryfaintmon) and before
+    // BattleScript_MoveEnd (hitScripts.ts). These scripts do not test jumpifmovehadnoeffect, so a type-immune hit still reaches them.
+    runLegacyPostHit({
+      state,
+      attackerId: battlerId,
+      targetId: currentTargetId,
+      moveId: currentMove.id,
+      moveEffect,
+      targetDamage,
+      deps,
+      unmodelled,
+    })
+
+    // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968). A multi-hit move walks only cases 0-18 here and
+    // cases 19-30 after its last hit (MoveEndContext.part).
     const moveEndOutcome = runMoveEnd({
       state,
       attackerId: battlerId,
@@ -2996,6 +3175,7 @@ export function executeAction(
       deps,
       unmodelled,
       fainted,
+      part: perHitResolution ? 'FIRST' : 'FULL',
     })
 
     const finalStatChanges: StatChangeOutcome[] = []
@@ -3003,17 +3183,136 @@ export function executeAction(
     if (moveEndOutcome.statChanges) finalStatChanges.push(...moveEndOutcome.statChanges)
     const finalStatusApplied = secondaryResult?.statusApplied ?? moveEndOutcome.statusApplied
 
+    const hitAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
+      ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)
+      : null
+
+    // Everything this hit contributes to the action's totals. A single-hit move passes through here exactly once.
+    if (targetDamage !== null) sumTargetDamage = (sumTargetDamage ?? 0) + targetDamage
+    sumHpDealt += hpDealt
+    attackerBattler.turn.savedDmg = sumHpDealt // MOVEEND_SUM_DAMAGE (:4334-4337)
+    if (hitAttackerDamage !== null) sumAttackerDamage = (sumAttackerDamage ?? 0) + hitAttackerDamage
+    if (secondaryResult?.moveEffect2) sumMoveEffect2 = secondaryResult.moveEffect2
+    if (secondaryResult?.statChanges || moveEndOutcome.statChanges) {
+      sawStatChanges = true
+      sumStatChanges.push(...finalStatChanges)
+    }
+    if (finalStatusApplied) sumStatusApplied = finalStatusApplied
+    for (const note of damageUnmodelled) if (!sumDamageUnmodelled.includes(note)) sumDamageUnmodelled.push(note)
+    lastCritical = isCriticalHit
+    lastSuperEffective = isSuperEffective
+
+    // MOVEEND_MULTIHIT_MOVE (:4880-4921). `!(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)` is read here as "the hit dealt damage": the
+    // resolver reports 0 for a type-immune target and null when no damage could be computed.
+    lastHitNoEffect = targetDamage === null || targetDamage === 0
+    if (!perHitResolution || lastHitNoEffect || attackerBattler.turn.multiHitCounter === 0) break
+
+    // gCritRoll = MakeCritRoll() is drawn after EVERY counted hit, the last one included (:4885), before the counter is tested.
+    hitCritRoll = state.rng.random16() % 24
+    attackerBattler.turn.multiHitCounter--
+    if (attackerBattler.turn.multiHitCounter === 0) break
+    const nextTarget = state.battlers[currentTargetId]
+    if (
+      !(attackerBattler.mon.hp > 0 && nextTarget && nextTarget.mon.hp > 0) ||
+      !(currentChosenMoveId === 'MOVE_SLEEP_TALK' || !hasFlag(attackerBattler.mon.status1, STATUS1_SLEEP)) ||
+      hasFlag(attackerBattler.mon.status1, STATUS1_FREEZE)
+    ) {
+      break
+    }
+    attackerBattler.turn.multiHitsUsed++
+    hitIndex++
+
+    // The script restarts at attackcanceler (the ladder's tracker is already at CANCELLER_END, so it does nothing more) and
+    // Cmd_accuracycheck: from the second hit on, the check is skipped unless the move is Triple Kick / Population Bomb and the
+    // attacker has none of Kunoichi's Blade, Skill Link or Loaded Dice (:1412-1416).
+    const checksEveryHit =
+      (moveEffect === 'EFFECT_TRIPLE_KICK' || moveEffect === 'EFFECT_TEN_HITS') &&
+      !battlerHasSimAbility(state, attackerBattler, 'ABILITY_KUNOICHI_BLADE', false, battlerId, false, deps.dataContext) &&
+      !battlerHasSimAbility(state, attackerBattler, 'ABILITY_SKILL_LINK', false, battlerId, false, deps.dataContext) &&
+      deps.grounding.holdEffectOf(battlerId) !== 'HOLD_EFFECT_LOADED_DICE'
+    if (checksEveryHit) {
+      const hitAcc = buildAccuracyInputs(state, battlerId, currentTargetId, currentMove.id, targetHasActedThisTurn, deps)
+      unmodelled.push(...gapsToUnmodelled(hitAcc.gaps))
+      const hitAccResult = getTotalAccuracy(hitAcc.inputs)
+      unmodelled.push(...gapsToUnmodelled(hitAccResult.gaps))
+      if (state.rng.random16() % 100 >= hitAccResult.accuracy) {
+        // A miss ends the sequence: PrintMoveMissed -> BattleScript_MoveEnd with MOVE_RESULT_MISSED, so cases 0-18 run for an
+        // effect-less hit (which clears the target's lastLandedMove) and MOVEEND_MULTIHIT_MOVE zeroes the counter.
+        lastHitNoEffect = true
+        lastCritical = undefined
+        lastSuperEffective = undefined
+        const missOutcome = runMoveEnd({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          moveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          targetDamage: 0,
+          hpDealt: 0,
+          noEffect: true,
+          moveEffect2: null,
+          deps,
+          unmodelled,
+          fainted,
+          part: 'FIRST',
+        })
+        if (missOutcome.attackerDamage !== null) sumAttackerDamage = (sumAttackerDamage ?? 0) + missOutcome.attackerDamage
+        if (missOutcome.statChanges) {
+          sawStatChanges = true
+          sumStatChanges.push(...missOutcome.statChanges)
+        }
+        if (missOutcome.statusApplied) sumStatusApplied = missOutcome.statusApplied
+        break
+      }
+    }
+    }
+
+    // MOVEEND_MULTIHIT_MOVE's tail (:4917-4919) -- the counters are cleared once the sequence is over -- then the rest of the ladder.
+    let tailAttackerDamage: number | null = null
+    if (perHitResolution) {
+      attackerBattler.turn.multiHitCounter = 0
+      attackerBattler.turn.parentalBondOn = attackerBattler.turn.parentalBondInitialCount = 0
+      attackerBattler.turn.multiHitsUsed = 0
+      const tailOutcome = runMoveEnd({
+        state,
+        attackerId: battlerId,
+        targetId: currentTargetId,
+        moveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        targetDamage: sumTargetDamage ?? 0,
+        hpDealt: sumHpDealt,
+        noEffect: lastHitNoEffect,
+        isCriticalHit: lastCritical,
+        isSuperEffective: lastSuperEffective,
+        moveEffect2: sumMoveEffect2,
+        deps,
+        unmodelled,
+        fainted,
+        part: 'SECOND',
+      })
+      tailAttackerDamage = tailOutcome.attackerDamage
+      if (tailOutcome.statChanges) {
+        sawStatChanges = true
+        sumStatChanges.push(...tailOutcome.statChanges)
+      }
+      if (tailOutcome.statusApplied && !sumStatusApplied) sumStatusApplied = tailOutcome.statusApplied
+    }
+
     // BattleScript_EffectHitEscape (data/battle_scripts_1.s:2788-2790) -> BattleScript_MoveSwitch / _DoMoveSwitch
     // (:5371-5379): the switch is queued by scheduleswitch and runs after MoveEnd; skipped when the move had no effect,
     // the battle is over, or no reserve exists (jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION).
+    // BattleScript_EffectGhastlyEcho (:2793-2814) is the same hit + scheduleswitch; BattleScript_SwitchGhastlyEcho (:2816-2840)
+    // adds `setghastlyecho BS_ATTACKER` for the incoming mon.
     if (
-      moveEffect === 'EFFECT_HIT_ESCAPE' &&
-      hpDealt > 0 &&
+      (moveEffect === 'EFFECT_HIT_ESCAPE' || moveEffect === 'EFFECT_GHASTLY_ECHO') &&
+      sumHpDealt > 0 &&
       isBattlerAlive(state, battlerId) &&
       !state.battleOutcome &&
       hasLiveReserve(state, battlerId)
     ) {
-      unmodelled.push(...performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true }))
+      unmodelled.push(
+        ...performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true, ghastlyEcho: moveEffect === 'EFFECT_GHASTLY_ECHO' }),
+      )
     }
 
     // BattleScript_EffectHitSwitchTarget (data/battle_scripts_1.s:3799-3829): Dragon Tail, Circle Throw, Roar of Time...
@@ -3022,7 +3321,7 @@ export function executeAction(
     // Roar of Time with Temporal Rupture is a plain hit (:3799-3800).
     if (
       moveEffect === 'EFFECT_HIT_SWITCH_TARGET' &&
-      hpDealt > 0 &&
+      sumHpDealt > 0 &&
       isBattlerAlive(state, battlerId) &&
       isBattlerAlive(state, currentTargetId) &&
       !state.battleOutcome &&
@@ -3034,9 +3333,7 @@ export function executeAction(
       forceRandomSwitch(state, battlerId, currentTargetId, deps, unmodelled)
     }
 
-    const combinedAttackerDamage = (attackerDamage !== null || moveEndOutcome.attackerDamage !== null)
-      ? (attackerDamage ?? 0) + (moveEndOutcome.attackerDamage ?? 0)
-      : null
+    const combinedAttackerDamage = sumAttackerDamage !== null || tailAttackerDamage !== null ? (sumAttackerDamage ?? 0) + (tailAttackerDamage ?? 0) : null
 
     return {
       turnOrderIndex: index,
@@ -3046,13 +3343,13 @@ export function executeAction(
       battleOver: false,
       missed: false,
       targetId: currentTargetId,
-      targetDamage,
+      targetDamage: sumTargetDamage,
       attackerDamage: combinedAttackerDamage,
       cancelledBy: null,
       confusionSelfHitDamage: null,
-      statChanges: secondaryResult?.statChanges || moveEndOutcome.statChanges ? finalStatChanges : null,
-      statusApplied: finalStatusApplied,
-      unmodelled: [...unmodelled, ...damageUnmodelled],
+      statChanges: sawStatChanges ? sumStatChanges : null,
+      statusApplied: sumStatusApplied,
+      unmodelled: [...unmodelled, ...sumDamageUnmodelled],
       fainted,
     }
   }

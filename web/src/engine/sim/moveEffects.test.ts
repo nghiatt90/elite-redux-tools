@@ -6864,7 +6864,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         })
 
         describe('EFFECT_ELECTRIFY', () => {
-          it('succeeds when the user acts before the target: bumps protectUses and notes the unported type reader', () => {
+          it('succeeds when the user acts before the target: bumps protectUses (the type reader is calculate.ts\'s, tested in cycle87Effects.test.ts)', () => {
             const state = battle(
               [
                 { moves: ['MOVE_ELECTRIFY', null, null, null], pp: [3, 0, 0, 0], spe: 100 },
@@ -6878,7 +6878,8 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(act.missed).toBe(false)
             expect(state.battlers[0]!.volatiles.protectUses).toBe(1)
             expect(state.battlers[0]!.mon.pp[0]).toBe(2)
-            expect(act.unmodelled.some((m) => m.includes('STATUS4_ELECTRIFIED'))).toBe(true)
+            expect(act.unmodelled.some((m) => m.includes('STATUS4_ELECTRIFIED'))).toBe(false)
+            expect(hasFlag(state.battlers[1]!.statuses4, STATUS4_ELECTRIFIED)).toBe(false) // ENDTURN_ELECTRIFY ran in the same turn
           })
 
           it('fails when the target has already acted (gCurrentTurnActionNumber >= target turn order), resets protectUses and costs PP', () => {
@@ -6935,7 +6936,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         })
 
         describe('EFFECT_ION_DELUGE', () => {
-          it('costs PP and succeeds, noting the unported type reader (the flag itself is cleared by ENDTURN_ION_DELUGE in the same executeTurn)', () => {
+          it('costs PP and succeeds (the flag itself is cleared by ENDTURN_ION_DELUGE in the same executeTurn; its type reader is calculate.ts\'s)', () => {
             const state = battle(
               [
                 { moves: ['MOVE_ION_DELUGE', null, null, null], pp: [20, 0, 0, 0] },
@@ -6948,7 +6949,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             const act = out.actions.find((a) => a.battlerId === 0)!
             expect(act.missed).toBe(false)
             expect(state.battlers[0]!.mon.pp[0]).toBe(19)
-            expect(act.unmodelled.some((m) => m.includes('STATUS_FIELD_ION_DELUGE'))).toBe(true)
+            expect(act.unmodelled.some((m) => m.includes('STATUS_FIELD_ION_DELUGE'))).toBe(false)
           })
         })
 

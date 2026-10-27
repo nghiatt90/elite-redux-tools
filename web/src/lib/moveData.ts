@@ -30,5 +30,6 @@ export function toMoveData(move: Move): MoveData {
     changeTypeHoldEffect: move.effect === 'EFFECT_CHANGE_TYPE_ON_ITEM' && move.argument?.kind === 'other' ? move.argument.value : null,
     miscEffect: move.effect === 'EFFECT_MISC_HIT' && move.argument?.kind === 'misc' ? move.argument.misc : null,
     multiHitArgument: move.effect === 'EFFECT_DOUBLE_HIT' && move.argument?.kind === 'int' ? move.argument.value : null,
+    argumentStatus: move.effect === 'EFFECT_DOUBLE_DMG_IF_STATUS1' && move.argument?.kind === 'status' ? move.argument.status : null,
   }
 }

@@ -74,7 +74,9 @@ export interface SimItemData {
   resolvedHoldEffect: string | null
   holdEffectStrength: number | null
   holdEffectType: string | null
-  naturalGift: { power: number; type: string } | null
+  /** items.json's `naturalGift` (gNaturalGiftTable entry). `effect` / `affectsUser` / `certain` are the table's MoveEffect
+   * (Natural Gift's SetMoveEffect case, battle_script_commands.c:3020-3024); absent in hand-built fixtures. */
+  naturalGift: { power: number; type: string; effect?: string; affectsUser?: boolean; certain?: boolean } | null
   /** items.json's `grouping` (ItemList.proto Pocket, e.g. POCKET_BERRIES) --
    * `gItems[id].pocket` (ItemGenerator.kt:25), read by ItemId_GetPocket. */
   grouping?: string | null

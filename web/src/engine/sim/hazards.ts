@@ -17,9 +17,9 @@
 // mon itself and why grounding is evaluated with no Mold Breaker attacker.
 //
 // NOT ported, gapped only when the real condition holds: Hot Coals and Caltrops
-// (:8798-8830, no writer anywhere in this sim), Mirror Armor on a Sticky Web
-// switch-in (reflects onto gBattleStruct->stickyWebUser, which BattleState does
-// not track), and SetOnMoveEffectReactionFlags after Toxic Spikes poisons.
+// (:8798-8830, no writer anywhere in this sim) and SetOnMoveEffectReactionFlags
+// after Toxic Spikes poisons. Sticky Web's setter (and so Mirror Armor's reflection)
+// is state.stickyWebUser.
 // SIDE_STATUS_STEALTH_ROCK_DAMAGED / STICKY_WEB_DAMAGED (:8750, :8795) are not
 // written: nothing in the pinned source reads them and the second pass would
 // clear them again.
@@ -50,12 +50,13 @@ import {
 import { applyDamage } from './turn'
 import { isMagicGuardProtected } from './endTurn'
 import {
-  attackerHasMoldBreakerActive,
   B_MSG_DEFENDER_STAT_FELL,
   battlerHasSimAbility,
   changeStatBuffsImplicit,
   dispatchOnStatLowered,
+  MOVE_EFFECT_AFFECTS_USER,
   STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
 } from './statBuffs'
 import { canBePoisoned, MOVE_EFFECT_POISON, SET_STATE_ON_EFFECT_MAP } from './statusEffects'
 
@@ -199,19 +200,21 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
   // HAZARD_MODE_WEBS, :8789-8798 + BattleScript_StickyWebOnSwitchIn (data/battle_scripts_1.s:7753-7771).
   if (isAlive(state, battlerId) && hasFlag(side.statuses, SIDE_STATUS_STICKY_WEB) && isBattlerAffectedByHazards(state, battlerId, false, false, deps) && grounded()) {
     const battler = state.battlers[battlerId]!
+    // setattackertostickywebuser (VARIOUS_SET_ATTACKER_STICKY_WEB_USER, :8082-8088): gBattlerAttacker starts as the switching mon (the
+    // "fail" condition) and becomes the web's setter when there is one. FaintClearSetData (battle_main.c:2990) unsets a user that has
+    // fainted, so a slot whose mon is down counts as none.
+    const webUser = state.stickyWebUser !== 0xff && isAlive(state, state.stickyWebUser) ? state.stickyWebUser : battlerId
+    const statDeps = { dataContext: deps.dataContext, grounding }
     if (MIRROR_ARMOR_ABILITIES.some((id) => battlerHasSimAbility(state, battler, id, true, battlerId, false, deps.dataContext))) {
-      unmodelled.push(`battler ${battlerId}: Sticky Web's Mirror Armor reflection (data/battle_scripts_1.s:7759, :3711-3716) is not applied -- gBattleStruct->stickyWebUser is not tracked, so no Speed drop was applied either`)
-    } else {
-      // setattackertostickywebuser (VARIOUS_SET_ATTACKER_STICKY_WEB_USER, :8083-8088): the attacker is the web's setter.
-      // That is not tracked; the opposing active battler is used. It only matters to ChangeStatBuffs through Subdue,
-      // Mold Breaker-family and Infiltrator, which are gapped below when the opposing mon has one.
-      const foe = state.battlers[opposite]
-      if (foe && (battlerHasSimAbility(state, foe, 'ABILITY_SUBDUE', false, opposite, false, deps.dataContext) || battlerHasSimAbility(state, foe, 'ABILITY_INFILTRATOR', false, opposite, false, deps.dataContext) || attackerHasMoldBreakerActive(foe, { grounding }))) {
-        unmodelled.push(`battler ${battlerId}: Sticky Web's attacker (gBattleStruct->stickyWebUser) is not tracked; the opposing active battler was used, and it has an ability that changes ChangeStatBuffs`)
+      // BattleScript_MirrorArmorReflectStickyWeb (data/battle_scripts_1.s:3711-3715): no user on the field -> no stat loss; otherwise
+      // the user's Speed falls (MirrorArmorReflectStatLoss, :3693-3704, statbuffchange with MOVE_EFFECT_AFFECTS_USER).
+      if (webUser !== battlerId) {
+        changeStatBuffsImplicit(state, webUser, battlerId, -1, STAT_SPEED, MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | STAT_BUFF_ALLOW_PTR, true, statDeps, unmodelled)
       }
-      const res = changeStatBuffsImplicit(state, opposite, battlerId, -1, STAT_SPEED, STAT_BUFF_ALLOW_PTR, true, { dataContext: deps.dataContext, grounding }, unmodelled)
-      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (opposite & 1) !== (battlerId & 1)) {
-        dispatchOnStatLowered(state, battlerId, opposite, { dataContext: deps.dataContext, grounding }, unmodelled)
+    } else {
+      const res = changeStatBuffsImplicit(state, webUser, battlerId, -1, STAT_SPEED, STAT_BUFF_ALLOW_PTR, true, statDeps, unmodelled)
+      if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (webUser & 1) !== (battlerId & 1)) {
+        dispatchOnStatLowered(state, battlerId, webUser, statDeps, unmodelled)
       }
     }
   }

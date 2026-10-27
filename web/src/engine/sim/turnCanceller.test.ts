@@ -409,7 +409,10 @@ describe('executeTurn: attack canceller -- CANCELLER_MULTIHIT_MOVES (battle_util
     const out = executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
     expect(rec.seen[0]).toBe(5)
     expect(out.actions[0].missed).toBe(false) // proves the 3rd scripted value (50) was consumed by accuracy, not a 3rd hit-count draw
-    expect(out.actions[0].targetDamage).toBe(10)
+    // The script re-runs once per counted hit (MOVEEND_MULTIHIT_MOVE, battle_script_commands.c:4880-4921): five hits of the
+    // fixed 10 damage, and the counter the resolver sees counts down 5, 4, 3, 2, 1 the way the C's --multiHitCounter does.
+    expect(rec.seen).toEqual([5, 4, 3, 2, 1])
+    expect(out.actions[0].targetDamage).toBe(50)
   })
 
   it('MULTIHIT_TWO_TO_FIVE: the other draw pair (0, 1) rolls a hit count of 2', () => {
@@ -486,6 +489,7 @@ describe('executeTurn: attack canceller -- CANCELLER_MULTIHIT_MOVES (battle_util
     executeTurn(state, [useMove(1, ARM_THRUST), null], deps(rec))
     expect(state.battlers[0]!.turn.multiHitCounter).toBe(0) // cleared after the action, as ZERO(gTurnStructs) does
     executeTurn(state, [useMove(1, TACKLE), null], deps(rec))
-    expect(rec.seen).toEqual([5, 0])
+    // Arm Thrust's five hits see the counter 5..1 (see the first test above); Tackle then sees 0.
+    expect(rec.seen).toEqual([5, 4, 3, 2, 1, 0])
   })
 })

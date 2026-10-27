@@ -311,12 +311,13 @@ describe('executeTurn: PP deduction (Cmd_ppreduce, battle_script_commands.c:1460
     expect(state.battlers[0]!.mon.pp[0]).toBe(9)
   })
 
-  it('gaps Spit Up/Swallow\'s Stockpile PP refund by name, only for that move effect', () => {
+  it('Spit Up with no Stockpile charges costs its PP like any move (TryUseStockpile finds nothing to spend, :1476-1483); with charges see cycle87Effects.test.ts', () => {
     const spitUpId = rawMoves.find((m) => m.effect === 'EFFECT_SPIT_UP')?.id as string | undefined
     if (!spitUpId) return // no EFFECT_SPIT_UP move in this snapshot; nothing to assert
     const spitUp = requireMove(spitUpId)
     const state = battle([{ spe: 200, pp: [10, 0, 0, 0], moves: [spitUpId, null, null, null] }, { spe: 50 }], scripted(0))
     const out = executeTurn(state, [useMove(1, spitUp), null], deps(fixedDamage(10)))
-    expect(out.actions[0].unmodelled.some((u) => u.includes('Stockpile'))).toBe(true)
+    expect(state.battlers[0]!.mon.pp[0]).toBe(9)
+    expect(out.actions[0].unmodelled.some((u) => u.includes('Stockpile'))).toBe(false)
   })
 })

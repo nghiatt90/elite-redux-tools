@@ -157,6 +157,12 @@ export interface DamageContext {
    * plain scenario fact, no turn simulation needed, same shape as
    * defenderIsSwitching. */
   attackerWasHitThisTurn: boolean
+  /** gBattleStruct->timesDamaged[attacker party slot][side] (battle_util.c:6869-6871), for MISC_EFFECT_TOOK_DAMAGE_BOOST. The
+   * simulator supplies it; the calculator leaves it unset and that sub-case stays "not modelled". */
+  attackerTimesDamaged?: number
+  /** The outcome of MISC_EFFECT_DOUBLE_DAMAGE's `Random() % 100 < secondaryEffectChance` draw (battle_util.c:6872-6874). The
+   * simulator draws it; unset leaves that sub-case "not modelled". */
+  miscDoubleDamage?: boolean
   /** CalcBeatUpPower's own per-hit formula (battle_util.c:102-117): floor(base
    * Attack / 10) + 5, using the SPECIFIC party member (by index) hitting this
    * time -- a genuine "no party roster" gap, same class as Soul Harvest/Supreme
@@ -176,6 +182,9 @@ export interface DamageContext {
    * gap, exposed as a direct hit-count toggle since there's nothing else to
    * derive it from. 1-6 (the user alone, up to 5 more allies). */
   beatUpHitCount: number
+  /** gTurnStructs[].flungItem (EFFECT_FLING, battle_util.c:6804-6812): the item tryfling just flung, which has already left the
+   * attacker's slot. The simulator sets it; the calculator leaves it unset and Fling reads the held item. */
+  flungItemId?: string | null
 }
 
 // ---------------------------------------------------------------------------

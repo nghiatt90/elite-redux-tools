@@ -261,6 +261,7 @@ import {
   MOVE_EFFECT_FREEZE,
   MOVE_EFFECT_FROSTBITE,
   MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES,
+  MOVE_EFFECT_NIGHTMARE,
   MOVE_EFFECT_PARALYSIS,
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
@@ -2985,9 +2986,15 @@ function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
   const moveEffect = action.chosenMove!.effect
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 
+  startTailwind(state, battlerId, moveId, deps, unmodelled)
+  return outcome(ctx, {})
+}
+
+/** Cmd_settailwind + BattleScript_OnTailwindStart, shared by Tailwind itself and by Bleakwind Storm's EFFECT_TAILWIND_HIT. False when it was already up. */
+export function startTailwind(state: BattleState, battlerId: number, moveId: string, deps: TurnLoopDeps, unmodelled: string[]): boolean {
   const side = battlerId & 1
   if (!trySetTailwind(state, side, battlerId, 3)) {
-    return outcome(ctx, {})
+    return false
   }
 
   // BattleScript_OnTailwindStart (data/battle_scripts_1.s:9266-9296): callifability is
@@ -3010,7 +3017,7 @@ function handleTailwind(ctx: MoveEffectContext): ActionOutcome {
     }
   }
 
-  return outcome(ctx, {})
+  return true
 }
 
 /**
@@ -3098,9 +3105,7 @@ function handleStickyWeb(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, {})
   }
 
-  unmodelled.push(
-    'Cmd_setstickyweb (battle_script_commands.c:11469): gBattleStruct->stickyWebUser is not modelled in BattleState',
-  )
+  state.stickyWebUser = battlerId // Cmd_setstickyweb, battle_script_commands.c:11469 ("For Mirror Armor")
 
   return outcome(ctx, {})
 }
@@ -3204,7 +3209,13 @@ const ON_TERRAIN_UNMODELLED_ABILITIES = [
 function applyTerrainMove(ctx: MoveEffectContext, terrainFlag: number): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
   deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
-  if (hasFlag(state.field.statuses, terrainFlag)) return outcome(ctx, { missed: true })
+  if (!setFieldTerrain(state, battlerId, terrainFlag, deps, unmodelled)) return outcome(ctx, { missed: true })
+  return outcome(ctx, {})
+}
+
+/** HandleTerrainMove's setting half (src/battle_script_commands.c:6451-6462) plus BattleScript_OnTerrainChanged. False when that terrain is already up. */
+export function setFieldTerrain(state: BattleState, battlerId: number, terrainFlag: number, deps: TurnLoopDeps, unmodelled: string[]): boolean {
+  if (hasFlag(state.field.statuses, terrainFlag)) return false
 
   state.field.statuses = setFlag(clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY), terrainFlag)
   state.field.timers.started.terrain = true
@@ -3219,7 +3230,7 @@ function applyTerrainMove(ctx: MoveEffectContext, terrainFlag: number): ActionOu
     const held = b && ON_TERRAIN_UNMODELLED_ABILITIES.find((id) => battlerHasSimAbility(state, b, id, false, i, false, deps.dataContext))
     if (held) unmodelled.push(`battler ${i}: ${held}'s onTerrain reaction (BattleScript_OnTerrainChanged, battle_scripts_1.s:9947-9955) is not applied`)
   }
-  return outcome(ctx, {})
+  return true
 }
 
 function handleElectricTerrain(ctx: MoveEffectContext): ActionOutcome {
@@ -7922,10 +7933,8 @@ export function handleElectrify(ctx: MoveEffectContext): ActionOutcome {
   }
 
   battler.volatiles.protectUses++
+  // Its reader, GetMoveTypeInternal (battle_main.c:5196), is calculate.ts's `attackerElectrified`, fed by damageResolver.ts.
   target.statuses4 = setFlag(target.statuses4, STATUS4_ELECTRIFIED)
-  unmodelled.push(
-    "STATUS4_ELECTRIFIED's reader, GetMoveTypeInternal (battle_main.c:5196), lives in the damage engine's move-type resolution, which does not read it -- the target's moves this turn are still typed as normal",
-  )
 
   return outcome(ctx, { targetId, missed: false })
 }
@@ -7978,10 +7987,8 @@ export function handleIonDeluge(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
   if (missed) return outcome(ctx, { missed: true })
 
+  // Its reader, GetMoveTypeInternal (battle_main.c:5196), is calculate.ts's `ionDelugeActive`, fed by damageResolver.ts.
   state.field.statuses = setFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE)
-  unmodelled.push(
-    "STATUS_FIELD_ION_DELUGE's reader, GetMoveTypeInternal (battle_main.c:5196), lives in the damage engine's move-type resolution, which does not read it -- Normal moves this turn are still typed Normal",
-  )
 
   return outcome(ctx, { missed: false })
 }
@@ -8801,7 +8808,7 @@ function hasRipenEffect(
  * Checks that the battler's item is not negated by STATUS3_EMBARGO or ABILITY_KLUTZ
  * and belongs to POCKET_BERRIES.
  */
-function hasNonNegatedBerry(
+export function hasNonNegatedBerry(
   state: BattleState,
   battlerId: number,
   deps: TurnLoopDeps,
@@ -8860,7 +8867,7 @@ function finishBerryRemoval(
  * dispatching ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END, battlerId, FALSE)
  * (src/battle_util.c:5872-6033).
  */
-function consumeBerryWithOverride(
+export function consumeBerryWithOverride(
   state: BattleState,
   attackerId: number,
   battlerId: number,
@@ -9155,7 +9162,7 @@ export function handleStuffCheeks(ctx: MoveEffectContext): ActionOutcome {
  * CanBattlerGetOrLoseItem (src/battle_util.c:8250-8273).
  * Returns true when itemId is null (ITEM_NONE in C has HOLD_EFFECT_NONE and is not ITEM_ENIGMA_BERRY).
  */
-function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | null, deps: TurnLoopDeps): boolean {
+export function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | null, deps: TurnLoopDeps): boolean {
   if (!itemId) return true
   if (itemId === 'ITEM_ENIGMA_BERRY') return false
   const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
@@ -9170,7 +9177,7 @@ function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | null, d
 /**
  * UpdateBattlerItem(battler, ITEM_NONE) / RemoveItem(battler) (src/battle_script_commands.c:2194-2221, 2231).
  */
-function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
+export function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
   const itemId = battler.mon.itemId
   if (!itemId) return
   const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
@@ -11003,6 +11010,7 @@ export const SECONDARY_MOVE_EFFECT_MAP: Record<string, number> = {
   MOVE_EFFECT_CONFUSION: MOVE_EFFECT_CONFUSION,
   MOVE_EFFECT_FLINCH: MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_TRI_ATTACK: MOVE_EFFECT_TRI_ATTACK,
+  MOVE_EFFECT_NIGHTMARE: MOVE_EFFECT_NIGHTMARE,
   MOVE_EFFECT_ATK_PLUS_1: MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_DEF_PLUS_1: MOVE_EFFECT_DEF_PLUS_1,
   MOVE_EFFECT_SPD_PLUS_1: MOVE_EFFECT_SPD_PLUS_1,
@@ -11080,9 +11088,19 @@ export const SECONDARY_STATUS_EFFECT_MAP = SECONDARY_MOVE_EFFECT_MAP
 // Downstream, getMoveEffectChance only compares against FLINCH / BURN / FROSTBITE, so any value outside the real enum
 // range behaves identically.
 const MOVE_EFFECT_STORED_FOR_MOVEEND = -1
+// MOVE_EFFECT_DOUBLESLAP is generated too; same reasoning as above (it is re-dispatched as MOVE_EFFECT_CONFUSION before any
+// comparison that depends on its value).
+const MOVE_EFFECT_DOUBLESLAP = -2
+// MOVE_EFFECT_RECOIL_HP_25 (Struggle, BattleScript_EffectRecoilHP25 data/battle_scripts_1.s:6538-6542), generated like the two above.
+const MOVE_EFFECT_RECOIL_HP_25 = -3
+const GENERATED_MOVE_EFFECT_NUMBERS: Record<string, number> = {
+  MOVE_EFFECT_DOUBLESLAP,
+  MOVE_EFFECT_RECOIL_HP_25,
+}
 
 // SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores these in gBattleStruct->moveEffect2 and
-// returns; MOVEEND_MOVE_EFFECTS2_ON_EACH (moveEnd.ts) applies them.
+// returns; MOVEEND_MOVE_EFFECTS2_ON_EACH / MOVEEND_MOVE_EFFECTS2 (moveEnd.ts) apply them. MAKE_IT_RAIN is in the C switch too,
+// but no move in moves.json carries it (Make It Rain's argument is MOVE_EFFECT_SP_ATK_MINUS_1), so it is not listed.
 const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
   'MOVE_EFFECT_KNOCK_OFF',
   'MOVE_EFFECT_STEAL_ITEM',
@@ -11090,9 +11108,25 @@ const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
   'MOVE_EFFECT_SMACK_DOWN',
   'MOVE_EFFECT_REMOVE_STATUS',
   'MOVE_EFFECT_BURN_UP',
+  'MOVE_EFFECT_SCALE_SHOT',
+  'MOVE_EFFECT_WYRM_WIND',
 ])
 
+/** VARIOUS_TRY_FLING's item -> gBattleScripting.moveEffect switch (battle_script_commands.c:8405-8426). */
+const FLING_ITEM_EFFECTS: Record<string, string> = {
+  ITEM_FLAME_ORB: 'MOVE_EFFECT_BURN',
+  ITEM_RAZOR_FANG: 'MOVE_EFFECT_FLINCH',
+  ITEM_KINGS_ROCK: 'MOVE_EFFECT_FLINCH',
+  ITEM_TOXIC_ORB: 'MOVE_EFFECT_TOXIC',
+  ITEM_FROST_ORB: 'MOVE_EFFECT_FROSTBITE',
+  ITEM_LIGHT_BALL: 'MOVE_EFFECT_PARALYSIS',
+  ITEM_BLACK_SLUDGE: 'MOVE_EFFECT_POISON',
+  ITEM_POISON_BARB: 'MOVE_EFFECT_POISON',
+}
+
 export interface SecondaryEffectsResult {
+  /** HP the effects took from the ATTACKER (Struggle's recoil); the caller applies it so a faint is recorded. */
+  attackerDamage?: number
   statusApplied: StatusAppliedOutcome | null
   statChanges: StatChangeOutcome[]
   /** gBattleStruct->moveEffect2 (battle_script_commands.c:2332), consumed by MOVEEND_MOVE_EFFECTS2_ON_EACH. */
@@ -11165,6 +11199,7 @@ export function applySecondaryMoveEffects(
   const moveEffect = moveData?.effect ?? null
 
   let statusAppliedOutcome: StatusAppliedOutcome | null = null
+  let attackerSelfDamage = 0
 
   interface EffectSpec {
     effectName: string
@@ -11226,7 +11261,12 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_TWO_TURN_RETALIATION' ||
     moveEffect === 'EFFECT_HIT_SWITCH_TARGET' ||
     moveEffect === 'EFFECT_HEAT_CRASH' ||
-    moveEffect === 'EFFECT_FALSE_SWIPE'
+    moveEffect === 'EFFECT_FALSE_SWIPE' ||
+    // BattleScript_EffectRemoveTerrainNoFail (s:717-744): argumenttomoveeffect, seteffectwithchance, then removeterrain (hitScripts.ts)
+    moveEffect === 'EFFECT_REMOVE_TERRAIN_NO_FAIL' ||
+    // er-config MoveBehaviorConfigList.textproto:128-131 maps EFFECT_MULTI_HIT to BattleScript_EffectArgumentHit, so every hit
+    // of Double Slap / Scale Shot / Toxic Needles / ... re-runs the same argumenttomoveeffect + seteffectwithchance.
+    moveEffect === 'EFFECT_MULTI_HIT'
   ) {
     // Legacy script: BattleScript_EffectArgumentHit (data/battle_scripts_1.s:11831)
     // argumenttomoveeffect; goto BattleScript_EffectHit. Recoil-if-miss (:4146-4147), Explosion (:3517-3518) and
@@ -11660,6 +11700,36 @@ export function applySecondaryMoveEffects(
         certain: Boolean(arg.certain),
       })
     }
+  } else if (moveEffect === 'EFFECT_NIGHTMARE') {
+    // BattleScript_EffectNightmare (data/battle_scripts_1.s:4909-4916): after the sleep check hitScripts.ts ran,
+    // `setmoveeffect MOVE_EFFECT_NIGHTMARE; goto BattleScript_EffectHit` -- the move's own effectChance rolls in seteffectwithchance.
+    effectSpecs.push({ effectName: 'MOVE_EFFECT_NIGHTMARE', chance: moveData?.effectChance ?? 0, affectsUser: false, certain: false })
+  } else if (moveEffect === 'EFFECT_SNORE') {
+    // BattleScript_EffectSnore (data/battle_scripts_1.s:4709-4726): `setmoveeffect MOVE_EFFECT_FLINCH; goto BattleScript_HitFromCritCalc`
+    // -- the move's own 30% flinch chance rolls in seteffectwithchance.
+    effectSpecs.push({ effectName: 'MOVE_EFFECT_FLINCH', chance: moveData?.effectChance ?? 0, affectsUser: false, certain: false })
+  } else if (moveEffect === 'EFFECT_FLING') {
+    // BattleScript_EffectFling (data/battle_scripts_1.s:3036-3044): VARIOUS_TRY_FLING (battle_script_commands.c:8402-8433) set
+    // gBattleScripting.moveEffect from the item it flung; HitFromCritCalc then runs seteffectwithchance with that effect. Any other
+    // item flings for damage only.
+    const flungItem = state.battlers[attackerId]?.turn.flungItem
+    const flungEffect = flungItem ? FLING_ITEM_EFFECTS[flungItem] : undefined
+    if (flungEffect) {
+      effectSpecs.push({ effectName: flungEffect, chance: moveData?.effectChance ?? 0, affectsUser: false, certain: false })
+    }
+  } else if (moveEffect === 'EFFECT_NATURAL_GIFT') {
+    // BattleScript_EffectNaturalGift (data/battle_scripts_1.s:3046-3071): after the hit, `setmoveeffect MOVE_EFFECT_NATURAL_GIFT;
+    // seteffectsecondary`, and SetMoveEffect's NATURAL_GIFT case (battle_script_commands.c:3020-3024) re-dispatches the berry's
+    // gNaturalGiftTable[].effect -- here items.json's naturalGift.effect -- with no chance draw. turn.ts removes the berry afterwards.
+    const berryId = state.battlers[attackerId]?.mon.itemId ?? null
+    const berryGift = berryId ? deps.dataContext.item(berryId)?.naturalGift : null
+    if (berryGift?.effect) {
+      effectSpecs.push({ effectName: berryGift.effect, chance: 0, affectsUser: Boolean(berryGift.affectsUser), certain: Boolean(berryGift.certain), secondary: true })
+    }
+  } else if (moveEffect === 'EFFECT_RECOIL_HP_25') {
+    // BattleScript_EffectRecoilHP25 (data/battle_scripts_1.s:6538-6542): setmoveeffect MOVE_EFFECT_RECOIL_HP_25 | AFFECTS_USER |
+    // CERTAIN, then BattleScript_EffectHit. Struggle is the only user.
+    effectSpecs.push({ effectName: 'MOVE_EFFECT_RECOIL_HP_25', chance: moveData?.effectChance ?? 0, affectsUser: true, certain: true })
   } else if (moveEffect === 'EFFECT_MATCHA_GOTCHA') {
     // BattleScript_EffectMatchaGotcha (data/battle_scripts_1.s:946-966)
     // setmoveeffect MOVE_EFFECT_BURN; seteffectwithchance (drain handled in turn.ts)
@@ -11683,6 +11753,8 @@ export function applySecondaryMoveEffects(
     // charge-turn effect and the Solar Beam charge logic.
     moveEffect === 'EFFECT_SOLARBEAM' ||
     moveEffect === 'EFFECT_TWO_TURN_SECONDARY' ||
+    // Electro Shot (s:5723-5732) ends in BattleScript_EffectTwoTurnSecondarySecondTurn as well; its Sp. Atk raise is turn.ts's charge turn.
+    moveEffect === 'EFFECT_ELECTRO_SHOT' ||
     // Fixed-damage and Haze scripts (turn.ts fixedDamageFor): no setmoveeffect before their hit.
     moveEffect === 'EFFECT_COUNTER' ||
     moveEffect === 'EFFECT_MIRROR_COAT' ||
@@ -11692,7 +11764,67 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_SUPER_FANG_HAZE' ||
     moveEffect === 'EFFECT_LEVEL_DAMAGE' ||
     moveEffect === 'EFFECT_FINAL_GAMBIT' ||
-    moveEffect === 'EFFECT_FREEZY_FROST'
+    moveEffect === 'EFFECT_FREEZY_FROST' ||
+    // Multi-hit scripts that are a plain hit (MoveBehaviorConfigList.textproto: EFFECT_DOUBLE_HIT :237, EFFECT_TRIPLE_KICK :529,
+    // EFFECT_TEN_HITS :2053 -> BattleScript_EffectHit; EFFECT_BEAT_UP :746 -> BattleScript_EffectBeatUp, whose Gen 5+ branch
+    // data/battle_scripts_1.s:5775-5779 is addbyte + goto BattleScript_HitFromAtkString). The hits themselves are turn.ts's hit loop.
+    moveEffect === 'EFFECT_DOUBLE_HIT' ||
+    moveEffect === 'EFFECT_TRIPLE_KICK' ||
+    moveEffect === 'EFFECT_TEN_HITS' ||
+    moveEffect === 'EFFECT_BEAT_UP' ||
+    // Damage-rule effects whose script is a plain hit (BattleScript_EffectHit, MoveBehaviorConfigList.textproto) or a hit behind
+    // a check hitScripts.ts runs first, with no setmoveeffect of its own; the engine carries the damage rule (cycle87Effects.test.ts
+    // has a numeric case for each): Hidden Power :649, Body Press :1670, Facade :806, Weather Ball :977, Flail :509,
+    // Stomping Tantrum :1594, Fell Stinger :694 (its Attack raise is the faint hook, moveEnd.ts), Synchronoise :1487, Foul Play
+    // :1200, Double-Damage-If-Status :1931, Spit Up :774, and the BattleScript_EffectPoltergeist / EffectLastResort /
+    // EffectMagnitude / EffectRollout / EffectBerrySmash scripts (hit via BattleScript_HitFromCritCalc / HitFromAccCheck).
+    moveEffect === 'EFFECT_HIDDEN_POWER' ||
+    moveEffect === 'EFFECT_BODY_PRESS' ||
+    moveEffect === 'EFFECT_FACADE' ||
+    moveEffect === 'EFFECT_WEATHER_BALL' ||
+    moveEffect === 'EFFECT_FLAIL' ||
+    moveEffect === 'EFFECT_STOMPING_TANTRUM' ||
+    moveEffect === 'EFFECT_FELL_STINGER' ||
+    moveEffect === 'EFFECT_SYNCHRONOISE' ||
+    moveEffect === 'EFFECT_FOUL_PLAY' ||
+    moveEffect === 'EFFECT_DOUBLE_DMG_IF_STATUS1' ||
+    moveEffect === 'EFFECT_SPIT_UP' ||
+    moveEffect === 'EFFECT_POLTERGEIST' ||
+    moveEffect === 'EFFECT_LAST_RESORT' ||
+    moveEffect === 'EFFECT_MAGNITUDE' ||
+    moveEffect === 'EFFECT_ROLLOUT' ||
+    moveEffect === 'EFFECT_BELCH' ||
+    moveEffect === 'EFFECT_BERRY_SMASH' ||
+    // Plain BattleScript_EffectHit (MoveBehaviorConfigList.textproto: CHANGE_TYPE_ON_ITEM :1463, SNIPE_SHOT :1706, MISC_HIT :2080,
+    // GUST data/battle_scripts_1.s:5703 -> EffectHit). Their rules live in the damage path: type from the held Plate/Memory
+    // (battle_main.c:5036/5137), redirection ignored (turn.ts, battle_util.c:119/9353), MISC_HIT's argument cases
+    // (battle_util.c:6861-6885, 7509, 7684) and the Transmute faint hook (moveEnd.ts). Focus Punch (s:6177-6181) only prints
+    // the lost-focus line before the same hit; its 40-power rule is battle_util.c:6851-6853.
+    moveEffect === 'EFFECT_CHANGE_TYPE_ON_ITEM' ||
+    moveEffect === 'EFFECT_SNIPE_SHOT' ||
+    moveEffect === 'EFFECT_MISC_HIT' ||
+    moveEffect === 'EFFECT_GUST' ||
+    moveEffect === 'EFFECT_FOCUS_PUNCH' ||
+    // Shell Trap (s:4672-4676): the gate and retarget are hitScripts.ts's runLegacyPreHit, then a plain BattleScript_HitFromAtkString hit.
+    moveEffect === 'EFFECT_SHELL_TRAP' ||
+    // Decorate (s:582-584) and Hit Enemy Heal Ally (s:1556-1558) hit a foe through BattleScript_EffectHit; an ALLY target takes
+    // the status-move branch, which is not ported (so it keeps the note).
+    ((moveEffect === 'EFFECT_DECORATE' || moveEffect === 'EFFECT_HIT_ENEMY_HEAL_ALLY') && (targetId & 1) !== (attackerId & 1)) ||
+    // Hit-plus-field/side scripts: the hit goes through `call BattleScript_EffectHit_Return` (s:3465-3490, which carries
+    // seteffectwithchance), then the step runLegacyPostHit (hitScripts.ts) performs.
+    moveEffect === 'EFFECT_RAIN_HIT' ||
+    moveEffect === 'EFFECT_SANDSTORM_HIT' ||
+    moveEffect === 'EFFECT_GRASSY_TERRAIN_HIT' ||
+    moveEffect === 'EFFECT_FAIRY_TERRAIN_HIT' ||
+    moveEffect === 'EFFECT_TAILWIND_HIT' ||
+    moveEffect === 'EFFECT_CLEAR_WEATHER_AND_TERRAIN_HIT' ||
+    moveEffect === 'EFFECT_SPARKLY_SWIRL' ||
+    moveEffect === 'EFFECT_GLITZY_GLOW' ||
+    moveEffect === 'EFFECT_BADDY_BAD' ||
+    moveEffect === 'EFFECT_SMELLINGSALT' ||
+    moveEffect === 'EFFECT_PLASMA_FISTS' ||
+    moveEffect === 'EFFECT_EERIE_SPELL' ||
+    moveEffect === 'EFFECT_GHASTLY_ECHO'
   ) {
     // Pure damaging move or handled elsewhere with no secondary effect
   } else {
@@ -11712,18 +11844,21 @@ export function applySecondaryMoveEffects(
 
   for (const spec of effectSpecs) {
     const storedForMoveEnd = MOVE_EFFECTS_STORED_FOR_MOVEEND.has(spec.effectName)
-    const baseEffectNum = storedForMoveEnd ? MOVE_EFFECT_STORED_FOR_MOVEEND : SECONDARY_MOVE_EFFECT_MAP[spec.effectName]
+    const isDoubleSlap = spec.effectName === 'MOVE_EFFECT_DOUBLESLAP'
+    let baseEffectNum = storedForMoveEnd
+      ? MOVE_EFFECT_STORED_FOR_MOVEEND
+      : (SECONDARY_MOVE_EFFECT_MAP[spec.effectName] ?? GENERATED_MOVE_EFFECT_NUMBERS[spec.effectName])
     if (baseEffectNum === undefined) {
       unmodelled.push(`secondary effect of ${spec.effectName} not modelled`)
       continue
     }
 
-    const effectNumWithFlags =
+    let effectNumWithFlags =
       baseEffectNum |
       (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) |
       (spec.certain ? MOVE_EFFECT_CERTAIN : 0)
 
-    if (spec.secondary) {
+    if (spec.secondary && storedForMoveEnd) {
       moveEffect2 = spec.effectName
       continue
     }
@@ -11746,7 +11881,10 @@ export function applySecondaryMoveEffects(
     const isImmune = targetDamage === 0 || targetDamage === null
 
     let chancePasses = false
-    if (spec.certain) {
+    if (spec.secondary) {
+      // Cmd_seteffectsecondary (:3132-3135): SetMoveEffect(FALSE, 0) -- no chance draw and no NO_EFFECT test.
+      chancePasses = true
+    } else if (spec.certain) {
       // MOVE_EFFECT_CERTAIN skips the RNG draw
       chancePasses = !isImmune
     } else {
@@ -11765,6 +11903,15 @@ export function applySecondaryMoveEffects(
     if (storedForMoveEnd) {
       moveEffect2 = spec.effectName
       continue
+    }
+
+    // MOVE_EFFECT_DOUBLESLAP (battle_script_commands.c:3016-3019): `REQUIRE(multiHitsUsed >= 2)` then SET_MOVE_EFFECT_AS
+    // (MOVE_EFFECT_CONFUSION | affectsUser) -- SetMoveEffect again, with the confusion gates. The chance draw above happens on
+    // every hit; only the third and later hits can confuse. multiHitsUsed is the count of EXTRA hits (:4906), 0 on the first.
+    if (isDoubleSlap) {
+      if ((state.battlers[attackerId]?.turn.multiHitsUsed ?? 0) < 2) continue
+      baseEffectNum = MOVE_EFFECT_CONFUSION
+      effectNumWithFlags = MOVE_EFFECT_CONFUSION | (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | (spec.certain ? MOVE_EFFECT_CERTAIN : 0)
     }
 
     const effectBattlerId = spec.affectsUser ? attackerId : targetId
@@ -12326,6 +12473,24 @@ export function applySecondaryMoveEffects(
       continue
     }
 
+    // MOVE_EFFECT_NIGHTMARE (battle_script_commands.c:2827-2831), ported with its typo: the guard is `status2 && STATUS2_NIGHTMARE` (a
+    // logical AND), so ANY nonzero status2 on the target -- confusion, a Substitute, the flinch flag -- stops the nightmare, and
+    // a clean status2 is the only case that sets it.
+    if (baseEffectNum === MOVE_EFFECT_NIGHTMARE) {
+      if (effectBattler.mon.status2 === 0) {
+        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, STATUS2_NIGHTMARE)
+        statusAppliedOutcome = { battlerId: effectBattlerId, status: 'NIGHTMARE' }
+      }
+      continue
+    }
+
+    // MOVE_EFFECT_RECOIL_HP_25 (battle_script_commands.c:2848-2853): gBattleMoveDamage = maxHP / 4 (at least 1), applied by
+    // BattleScript_MoveEffectRecoil (data/battle_scripts_1.s:9001-9009) as passive damage -- no Magic Guard / Rock Head test.
+    if (baseEffectNum === MOVE_EFFECT_RECOIL_HP_25) {
+      attackerSelfDamage += Math.max(1, Math.trunc(effectBattler.mon.maxHp / 4))
+      continue
+    }
+
     // MOVE_EFFECT_PAYDAY (battle_script_commands.c:2679-2691): outside player prize money (unmodelled),
     // has no effect on battle state.
     if (baseEffectNum === MOVE_EFFECT_PAYDAY) {
@@ -12508,5 +12673,6 @@ export function applySecondaryMoveEffects(
     statusApplied: statusAppliedOutcome,
     statChanges,
     moveEffect2,
+    ...(attackerSelfDamage > 0 ? { attackerDamage: attackerSelfDamage } : {}),
   }
 }

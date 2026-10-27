@@ -175,6 +175,8 @@ interface Hazards {
   toxic?: number
   rockType?: number
   web?: boolean
+  /** gBattleStruct->stickyWebUser: the battler that set the web (0xFF / unset = none on the field). */
+  webUser?: number
   foamyWeb?: boolean
 }
 const TYPE_ROCK = 5
@@ -195,6 +197,7 @@ function setHazards(state: BattleState, sideIndex: 0 | 1, h: Hazards): void {
     side.timers.stealthRockType = h.rockType
   }
   if (h.web) side.statuses |= SIDE_STATUS_STICKY_WEB
+  if (h.webUser !== undefined) state.stickyWebUser = h.webUser
   if (h.foamyWeb) side.timers.foamyWeb = true
 }
 
@@ -437,20 +440,32 @@ describe('Sticky Web', () => {
     expect(enterReserve(reserve, { web: true }).battler.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
   })
 
-  it('Mirror Armor takes no drop and is gapped (reflection target untracked)', () => {
-    const { battler, out } = enterReserve(partyMon({ abilities: { ability: MIRROR_ARMOR, innates: [null, null, null] } }), { web: true })
+  const mirror = partyMon({ abilities: { ability: MIRROR_ARMOR, innates: [null, null, null] } })
+
+  it('Mirror Armor reflects the drop onto the web\'s setter (BattleScript_MirrorArmorReflectStickyWeb, s:3711-3715)', () => {
+    const { battler, state, out } = enterReserve(mirror, { web: true, webUser: 1 })
     expect(battler.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
-    expect(out.replacementUnmodelled.some((g) => g.includes('Mirror Armor'))).toBe(true)
+    expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(out.replacementUnmodelled.some((g) => g.includes('Mirror Armor'))).toBe(false)
   })
 
-  it('the opposing active battler stands in for stickyWebUser: its Subdue doubles the drop and is reported', () => {
-    const { battler, out } = enterReserve(partyMon(), { web: true }, {}, SUBDUE)
+  it('Mirror Armor with no setter on the field (stickyWebUser unset or fainted) takes no drop and reflects nothing (s:3713)', () => {
+    const none = enterReserve(mirror, { web: true })
+    expect(none.battler.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+    expect(none.state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+    // A setter whose mon is down counts as none (FaintClearSetData, battle_main.c:2990).
+    const downed = battle([partyMon({ hp: 5 }), mirror], null)
+    setHazards(downed, 0, { web: true, webUser: 1 })
+    downed.battlers[1]!.mon.hp = 0
+    executeTurn(downed, [null, moveAction(0)], deps(fixedDamage(999), { replacement: chooser(1) }))
+    expect(downed.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('the setter is the attacker of the drop: its Subdue doubles it (VARIOUS_SET_ATTACKER_STICKY_WEB_USER, :8082-8088)', () => {
+    const { battler } = enterReserve(partyMon(), { web: true, webUser: 1 }, {}, SUBDUE)
     expect(battler.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 2)
-    expect(out.replacementUnmodelled.some((g) => g.includes('stickyWebUser'))).toBe(true)
-  })
-
-  it('emits no stickyWebUser gap when the opposing ability cannot change the drop', () => {
-    expect(enterReserve(partyMon(), { web: true }).out.replacementUnmodelled.some((g) => g.includes('stickyWebUser'))).toBe(false)
+    // With no setter the switching mon is its own attacker, so the foe's Subdue does nothing.
+    expect(enterReserve(partyMon(), { web: true }, {}, SUBDUE).battler.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
   })
 })
 

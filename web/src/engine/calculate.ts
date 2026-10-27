@@ -103,6 +103,11 @@ export interface MoveData {
    * 1063-1064) -- MULTIHIT_THREE when 3, MULTIHIT_TWO (the default) otherwise.
    * Narrowed from Move.argument's `int` variant. `null` for every other move. */
   multiHitArgument: number | null
+  /** EFFECT_DOUBLE_DMG_IF_STATUS1's own argument (`gBattleMoves[move].argument`, CalcMoveBasePowerAfterModifiers
+   * src/battle_util.c:7015-7019) -- the bare STATUS1_* name (Venoshock: STATUS1_POISON_ANY, Volt Bolt: STATUS1_PARALYSIS).
+   * Optional for the same reason as `target`: every earlier MoveData fixture predates it, and absent reads as null (no status
+   * named, so the move never doubles). */
+  argumentStatus?: string | null
   /** moves.json's own `target` (MoveTargetEnum bare spelling -- 'USER',
    * 'SELECTED', 'BOTH', ...), not the C's packed `MOVE_TARGET_*` bitfield.
    * Added for aiCheckBadMove.ts's `moveTarget & MOVE_TARGET_USER`-shaped
@@ -149,6 +154,14 @@ export interface DamageCalcScenario {
   /** See DamageContext.attackerWasHitThisTurn's own doc (EFFECT_FOCUS_PUNCH,
    * MOVE_SELF_DESTRUCT). */
   attackerWasHitThisTurn: boolean
+  /** See DamageContext.attackerTimesDamaged / miscDoubleDamage (MISC_EFFECT_TOOK_DAMAGE_BOOST / _DOUBLE_DAMAGE). */
+  attackerTimesDamaged?: number
+  miscDoubleDamage?: boolean
+  /** GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197): STATUS4_ELECTRIFIED on the attacker (any move),
+   * STATUS_FIELD_ION_DELUGE and STATUS4_PLASMA_FISTS (Normal moves). Set by the simulator; the calculator leaves them unset. */
+  attackerElectrified?: boolean
+  ionDelugeActive?: boolean
+  attackerPlasmaFists?: boolean
   /** See DamageContext.beatUpBaseAttack's own doc (EFFECT_BEAT_UP). */
   beatUpBaseAttack: number
   /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
@@ -161,6 +174,16 @@ export interface DamageCalcScenario {
    * true -- it was permanently dead despite looking wired. A plain per-turn
    * scenario fact, same shape as attackerWasHitThisTurn. */
   defenderUsedGlaiveRush: boolean
+  /** The simulator's per-hit multi-hit path (sim/turn.ts re-runs the move script once per hit,
+   * MOVEEND_MULTIHIT_MOVE, battle_script_commands.c:4880-4921): when set, `rolls`/`critRolls` are the 16
+   * rolls of THAT one hit (0-indexed; Triple Kick's power scaling and a Parental Bond bonus hit's modifier
+   * follow the index) and no `totalRolls` are built. Unset everywhere else, which keeps the calculator's
+   * one-shot total. */
+  singleHitIndex?: number
+  /** EFFECT_FLING after tryfling (battle_script_commands.c:8402-8433): the flung item, already removed from the attacker. Its
+   * hold effect / type give a Gem its type (GetMoveTypeInternal, battle_main.c:5133-5135) and its id decides the 130-power
+   * items (battle_util.c:6804-6812). Unset in the calculator, where Fling reads the held item. */
+  flungItem?: { id: string; holdEffect: string | null; holdEffectType: string | null } | null
 }
 
 export interface DamageCalcResult {
@@ -210,6 +233,39 @@ export interface DamageCalcResult {
   absorbingAbility?: string | null
 }
 
+/** The first slot of `types` (type1, type2, type3 by index) that holds a real type: the C's `!= TYPE_MYSTERY` chain. A missing
+ * entry (the calculator UI passes 1-3 names, the simulator all three with MYSTERY padding) reads as MYSTERY. null when none. */
+function attackerTypeOrder(types: string[], order: readonly number[]): string | null {
+  for (const i of order) {
+    const t = types[i]
+    if (t && t !== 'MYSTERY') return t
+  }
+  return null
+}
+
+/** GetMoveTypeInternal's EFFECT_FLING case (src/battle_main.c:5133-5135): a Gem decides the type. The flung item when the simulator
+ * supplied one (tryfling has already emptied the slot), else the held item. */
+function flingGemType(scenario: DamageCalcScenario): string | null {
+  const flung = scenario.flungItem
+  if (flung) return flung.holdEffect === 'HOLD_EFFECT_GEMS' ? flung.holdEffectType : null
+  const attacker = scenario.attacker
+  return attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_GEMS' ? attacker.holdEffectType : null
+}
+
+/** GetMoveTypeInternal's EFFECT_SYNCHRONOISE / MISC_EFFECT_IVY_CUDGEL switch (src/battle_main.c:5151-5159). */
+function ogerponMaskType(speciesId: string): string | null {
+  switch (speciesId) {
+    case 'SPECIES_OGERPON_HEARTHFLAME_MASK':
+      return 'FIRE'
+    case 'SPECIES_OGERPON_WELLSPRING_MASK':
+      return 'WATER'
+    case 'SPECIES_OGERPON_CORNERSTONE_MASK':
+      return 'ROCK'
+    default:
+      return null
+  }
+}
+
 function toDamageContext(scenario: DamageCalcScenario): DamageContext {
   return {
     attacker: scenario.attacker.condition,
@@ -222,8 +278,11 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
     attackerRolloutCounter: scenario.attackerRolloutCounter,
     attackerHasDefenseCurl: scenario.attackerHasDefenseCurl,
     attackerWasHitThisTurn: scenario.attackerWasHitThisTurn,
+    attackerTimesDamaged: scenario.attackerTimesDamaged,
+    miscDoubleDamage: scenario.miscDoubleDamage,
     beatUpBaseAttack: scenario.beatUpBaseAttack,
     beatUpHitCount: scenario.beatUpHitCount,
+    flungItemId: scenario.flungItem?.id ?? null,
   }
 }
 
@@ -663,7 +722,13 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
     // NEVER_CRIT from an onCrit hook (e.g. Battle Armor/Shell Armor) folds into the
     // same "blocked" outcome as Lucky Chant -- both mean "this hit can never crit".
     isBlocked: field.sides.defender.luckyChant || abilityBonus === NEVER_CRIT,
-    isGuaranteed: move.crit === 'ALWAYS',
+    // CalcCritChanceStage's "Always Critical" (battle_script_commands.c:1540-1544). In this build Flail / Reversal / Struggle Bug /
+    // Trump Card (EFFECT_FLAIL) keep their flat declared power (their behavior is a plain BattleScript_EffectHit,
+    // MoveBehaviorConfigList.textproto:508-511, and CalcMoveBasePower has no case for it); the HP-dependent part is this crit.
+    // Laser Focus (STATUS3_LASER_FOCUS) and showdownMode are not carried by BattlerBattleState and stay out.
+    isGuaranteed:
+      move.crit === 'ALWAYS' ||
+      (move.effect === 'EFFECT_FLAIL' && attacker.condition.hp <= Math.trunc(attacker.condition.maxHp / 2)),
     abilityCritBonus: abilityBonus === NEVER_CRIT ? 0 : abilityBonus,
     hasHighCritFlag: move.crit === 'HIGH',
     hasScopeLens: attacker.condition.resolvedHoldEffect === 'HOLD_EFFECT_SCOPE_LENS',
@@ -857,14 +922,32 @@ function calcInternal(
           ? weatherBallType(field.weather, attackerHasAuroraBorealis)
           : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
             ? attacker.hiddenPowerType
-            : null
+            : // GetMoveTypeInternal's remaining attacker-keyed cases (src/battle_main.c:5133-5167): Fling with a Gem reads the gem's
+              // type; Spit Up and Revelation Dance take the user's first real type; Synchronoise (and Ivy Cudgel, which shares its
+              // effect) the user's second, else first, else third -- Ivy Cudgel first by Ogerpon's mask forms.
+              move.effect === 'EFFECT_FLING' && flingGemType(scenario) !== null
+              ? flingGemType(scenario)
+              : move.effect === 'EFFECT_SPIT_UP' || move.effect === 'EFFECT_REVELATION_DANCE'
+                ? attackerTypeOrder(attacker.types, [0, 1, 2])
+                : move.effect === 'EFFECT_SYNCHRONOISE'
+                  ? (move.id === 'MOVE_IVY_CUDGEL' ? ogerponMaskType(attacker.condition.speciesId) : null) ?? attackerTypeOrder(attacker.types, [1, 0, 2])
+                  : null
 
   // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
   // terrain-boost base-power check all key off the resolved type, not the move's
   // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
+  // GetMoveTypeInternal, battle_main.c:5194-5197, between the effect switch and the onMoveType abilities: Ion Deluge turns Normal
+  // moves Electric, Electrify (STATUS4_ELECTRIFIED on the attacker) every move, Plasma Fists' status Normal moves again.
+  const electrified =
+    scenario.attackerElectrified === true ||
+    (inputMoveType === 'NORMAL' && (scenario.ionDelugeActive === true || scenario.attackerPlasmaFists === true))
   const { moveType, ateBoost } =
-    itemMoveType !== null ? { moveType: itemMoveType, ateBoost: false } : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+    itemMoveType !== null
+      ? { moveType: itemMoveType, ateBoost: false }
+      : electrified
+        ? { moveType: 'ELECTRIC', ateBoost: false }
+        : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
 
   const defenderTypes = distinctDefendingTypes(defender.types)
 
@@ -931,12 +1014,12 @@ function calcInternal(
     defenderHasUnnerve: battlerHasAbility(defender.abilitySlots, 'ABILITY_UNNERVE', () => false),
     moveDoubleDamageVsMega: Boolean(move.flags.doubleDamageVsMega),
     moveEffect: move.effect,
-    moveArgumentStatus: null, // EFFECT_DOUBLE_DMG_IF_STATUS1's argument -- caller can extend later
+    moveArgumentStatus: move.argumentStatus ?? null,
   }
 
   const behaviorResult = applyMoveBehaviorDamage(move.power, move.effect, moveBehaviors, toDamageContext(scenario))
   unmodelled.push(...behaviorResult.unmodelled)
-  // "not modelled" alone, matching UNMODELLED_MISC_EFFECTS's own message shape
+  // "not modelled" alone, matching the MISC_EFFECT notes' own message shape
   // (basePower.ts) -- an earlier "(needs turn history)" suffix here was accurate
   // for some of this set's entries (Counter/Mirror Coat/Bide) but not others
   // (Super Fang/Endeavor/Final Gambit/etc. need a real, unported formula, not
@@ -1364,13 +1447,31 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   let effectiveMoveType = moveType
   let absorbingAbility: string | null = null
   let berryReduced = false
+
+  const hitPlanResult = resolveHitPlan(
+    move,
+    attacker.abilitySlots,
+    defender.abilitySlots,
+    hasFlag(attacker.abilitySlots, 'skillLink'),
+    attacker.condition.resolvedHoldEffect,
+    scenario.hitCount,
+    { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
+    scenario.beatUpHitCount,
+  )
+  // scenario.singleHitIndex: the one hit the sim asked for. The hit plan still supplies the hit's modifier (a Parental
+  // Bond bonus hit), and the index itself drives Triple Kick's power scaling.
+  const singleHitIndex = scenario.singleHitIndex
+  const firstHitIndex = singleHitIndex ?? 0
+  const firstHitModifier =
+    singleHitIndex !== undefined && hitPlanResult && !('unmodelled' in hitPlanResult) ? hitPlanResult.hitModifier(singleHitIndex) : uq(1.0)
+
   // `roll` is the C's own roll variable (multiplier = (100-roll)%, so roll=0 is the
   // maximum 100% hit and roll=15 the minimum 85% hit, src/battle_util.c:7816-7817).
   // Iterated 15 -> 0 here so the OUTPUT array itself reads ascending (index 0 =
   // smallest/85% roll, index 15 = largest/100% roll) -- the conventional order for
   // presenting a damage range.
   for (let roll = 15; roll >= 0; roll--) {
-    const result = fullDamageForRoll(roll, false, uq(1.0))
+    const result = fullDamageForRoll(roll, false, firstHitModifier, firstHitIndex)
     rolls.push(result.dmg)
     typeEffectiveness = result.typeEffectiveness
     effectiveMoveType = result.effectiveMoveType
@@ -1388,7 +1489,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   if (canCrit !== null) {
     critRolls = []
     for (let roll = 15; roll >= 0; roll--) {
-      critRolls.push(fullDamageForRoll(roll, true, uq(1.0)).dmg)
+      critRolls.push(fullDamageForRoll(roll, true, firstHitModifier, firstHitIndex).dmg)
     }
   }
 
@@ -1398,22 +1499,12 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   // Bond bonus hit) assigns it. See multiHit.ts and DamageCalcResult's own doc for
   // why this sums independently-rolled percentiles rather than modelling the true
   // joint distribution.
-  const hitPlanResult = resolveHitPlan(
-    move,
-    attacker.abilitySlots,
-    defender.abilitySlots,
-    hasFlag(attacker.abilitySlots, 'skillLink'),
-    attacker.condition.resolvedHoldEffect,
-    scenario.hitCount,
-    { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
-    scenario.beatUpHitCount,
-  )
   let hitCount: number | null = null
   let totalRolls: number[] | null = null
   let totalCritRolls: number[] | null = null
   if (hitPlanResult && 'unmodelled' in hitPlanResult) {
     unmodelled.add(hitPlanResult.unmodelled)
-  } else if (hitPlanResult) {
+  } else if (hitPlanResult && singleHitIndex === undefined) {
     hitCount = hitPlanResult.hitCount
     totalRolls = [...rolls]
     totalCritRolls = critRolls ? [...critRolls] : null

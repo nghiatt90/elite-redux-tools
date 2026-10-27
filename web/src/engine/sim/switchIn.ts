@@ -201,6 +201,8 @@ export function switchIn(
   clearBattlerLastTakenMove(state, battlerId)
   // SwitchInClearSetData, battle_main.c:2914: gBattleStruct->lastMoveFailed &= ~(gBitTable[gActiveBattler])
   state.lastMoveFailed = clearFlag(state.lastMoveFailed, 1 << battlerId)
+  // battle_main.c:2917: switching into the Sticky Web user's slot resets it
+  if (state.stickyWebUser === battlerId) state.stickyWebUser = 0xff
   // SwitchInClearSetData, battle_main.c:2849-2859: Remove any queued out-of-turn attacks for switching battler
   state.queuedExtraAttacks = state.queuedExtraAttacks.filter((a) => a.attacker !== battlerId)
   if (beforeEffects) beforeEffects(newBattler)

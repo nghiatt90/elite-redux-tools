@@ -287,6 +287,7 @@ export function createSideState(party: SimPartyMon[] = []): SideState {
     statuses: 0,
     timers: createSideTimerState(),
     faintedCount: 0,
+    timesDamaged: [0, 0, 0, 0, 0, 0],
     party,
   }
 }
@@ -469,6 +470,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     singleUseAbility: Array.from({ length: PARTY_SIZE }, () =>
       Array.from({ length: ABILITY_SLOT_COUNT }, () => [0, 0]),
     ),
+    stickyWebUser: 0xff,
     lastMoveFailed: 0,
     battleEvents: [],
     currentBattleEvent: 0,

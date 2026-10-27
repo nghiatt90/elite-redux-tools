@@ -2836,6 +2836,50 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
   const statChanges: StatChangeOutcome[] = []
   if (state.battleOutcome) return statChanges
 
+  // VARIOUS_TRY_ACTIVATE_FELL_STINGER (battle_script_commands.c:7176-7189), `tryactivatefellstinger BS_ATTACKER` ahead of
+  // onfaintedbyattacker in BattleScript_FaintTarget (data/battle_scripts_1.s:6911-6912): a Fell Stinger KO raises the user's Attack by
+  // THREE stages (B_FELL_STINGER_STAT_RAISE >= GEN_7) unless it is already maxed. The NoAliveMonsForEitherParty break is the
+  // battleOutcome return above. The same case runs MISC_EFFECT_TRANSMUTE's BattleScript_TryRecycle (:7185-7187, s:6356-6360), i.e.
+  // Cmd_tryrecycleitem (:12296-12311): REQUIRE(IsBattlerAlive) and HasAttackerFaintedTarget gate it just as they gate Fell Stinger.
+  // (Transmute's type change is not in this tree's scripts or commands: grep finds MISC_EFFECT_TRANSMUTE only at :7185.)
+  if (
+    byAttacker &&
+    ctx.moveData?.effect === 'EFFECT_MISC_HIT' &&
+    ctx.moveData.argument?.kind === 'misc' &&
+    ctx.moveData.argument.misc === 'MISC_EFFECT_TRANSMUTE' &&
+    hasAttackerFaintedTarget(ctx) &&
+    isBattlerAlive(state, attackerId)
+  ) {
+    const recycler = state.battlers[attackerId]
+    const used = recycler?.usedHeldItem
+    if (recycler && used && used !== 'ITEM_NONE' && !recycler.mon.itemId) {
+      recycler.mon.itemId = used
+      recycler.usedHeldItem = null
+      const slotU = findAbilitySlot(recycler.mon.abilities, 'ABILITY_UNBURDEN')
+      if (slotU !== -1) recycler.volatiles.abilityState[slotU] = 0
+      const slotS = findAbilitySlot(recycler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+      if (slotS !== -1) recycler.volatiles.abilityState[slotS] = 0
+    }
+  }
+  if (byAttacker && ctx.moveData?.effect === 'EFFECT_FELL_STINGER' && hasAttackerFaintedTarget(ctx)) {
+    const stinger = state.battlers[attackerId]
+    if (stinger && isBattlerAlive(state, attackerId) && (stinger.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE) {
+      const res = changeStatBuffsImplicit(
+        state,
+        attackerId,
+        targetId,
+        3,
+        STAT_ATK,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) statChanges.push({ battlerId: attackerId, stat: STAT_ATK, change: res.delta })
+    }
+  }
+
   for (let i = 0; i < state.battlersCount; i++) {
     const holder = state.battlers[i]
     if (!holder || !isBattlerAlive(state, i)) continue
@@ -3347,6 +3391,13 @@ export interface MoveEndContext {
   chosenMoveId?: string
   /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
   noEffect?: boolean
+  /**
+   * Which half of the ladder to walk. MOVEEND_MULTIHIT_MOVE (case 19, :4880-4921) sits in the middle of it: for every hit but
+   * the last it resets `moveendState` to 0 and re-runs the move's script, so cases 0-18 run once per hit and cases 20-30 once,
+   * after the last. 'FIRST' is cases 0-18 (plus the faint hook and ABILITYEFFECT_REACTIVE that bracket them), 'SECOND' is cases
+   * 19-30, 'FULL' (the default, every single-hit move) is both in one call.
+   */
+  part?: 'FULL' | 'FIRST' | 'SECOND'
 }
 
 /**
@@ -3582,6 +3633,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // gBattleStruct->changedItems: items parked at MOVEEND_MOVE_EFFECTS2_ON_EACH and handed over at MOVEEND_CHANGED_ITEMS.
   const changedItems = new Map<number, string>()
 
+  const part = ctx.part ?? 'FULL'
+  const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
+
+  // Cases 0-18 (see MoveEndContext.part). The block is not re-indented so the single-hit diff stays readable.
+  if (part !== 'SECOND') {
   // BattleScript_MoveEndTryFaintTarget -> BattleScript_FaintTarget -> onfaintedbyattacker
   // (battle_scripts_1.s:2881-2882, 6911-6912), which runs before moveendall.
   if (target && target.mon.hp === 0 && fainted.includes(targetId)) {
@@ -3710,8 +3766,6 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Case 12: MOVEEND_TARGET_VISIBLE (:4702-4713)
   // Target sprite visibility (visual only).
 
-  const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
-
   // Case 13: MOVEEND_ITEM_EFFECTS_TARGET (:4569-4572, :6126-6250)
   if (target && !isNoEffect) {
     const targetHoldEffect = deps.grounding.holdEffectOf(targetId)
@@ -3816,8 +3870,16 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     clearBits: false,
   })
 
-  // Case 19: MOVEEND_MULTIHIT_MOVE (:4880-4921)
-  // Multi-hit loop. Total-damage resolved in sim.
+  }
+
+  // Case 19: MOVEEND_MULTIHIT_MOVE (:4880-4921) is the boundary between the two halves; the per-hit loop itself is turn.ts's.
+  if (part === 'FIRST') {
+    return {
+      attackerDamage: hadAttackerDamage ? totalAttackerDamage : null,
+      statChanges: statChanges.length > 0 ? statChanges : null,
+      statusApplied,
+    }
+  }
 
   // Case 20: MOVEEND_MOVE_EFFECTS2_ON_EACH (:4573-4632)
   switch (ctx.moveEffect2) {
@@ -3875,6 +3937,35 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         string,
         string,
       ]
+    }
+  } else if (ctx.moveEffect2 === 'MOVE_EFFECT_SCALE_SHOT' || ctx.moveEffect2 === 'MOVE_EFFECT_WYRM_WIND') {
+    // C: battle_script_commands.c:4644-4651 -> BattleScript_MoveEffectScaleShot / _WyrmWind (data/battle_scripts_1.s:195-208):
+    // `setmoveeffect X_MINUS_1 | AFFECTS_USER | CERTAIN; seteffectsecondary; setmoveeffect SPD_PLUS_1 | AFFECTS_USER;
+    // seteffectsecondary`. seteffectsecondary is SetMoveEffect(FALSE, 0) (:3132-3135), which draws no chance but still stops at
+    // TestSheerForceFlag (:2361) and a fainted effect battler (:2364-2383); the user is the effect battler, so the Shield Dust,
+    // Safeguard and Substitute gates do not apply. The stat calls are the ones SetMoveEffect makes for MOVE_EFFECT_*_MINUS_1 /
+    // _PLUS_1 (:2751-2781) with affectsUser | STAT_BUFF_UPDATE_MOVE_EFFECT.
+    const dropStat = ctx.moveEffect2 === 'MOVE_EFFECT_SCALE_SHOT' ? STAT_DEF : STAT_SPDEF
+    if (
+      attacker &&
+      attacker.mon.hp > 0 &&
+      !testSheerForceFlag(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding })
+    ) {
+      for (const [delta, stat] of [[-1, dropStat], [1, STAT_SPEED]] as const) {
+        const res = changeStatBuffsImplicit(
+          state,
+          attackerId,
+          targetId,
+          delta,
+          stat,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT,
+          delta < 0,
+          deps,
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) statChanges.push({ battlerId: attackerId, stat, change: res.delta })
+      }
     }
   } else if (moveData?.effect && MOVE_EFFECTS2.has(moveData.effect)) {
     unmodelled.push(`move-end effect ${moveData.effect} is not modelled yet`)

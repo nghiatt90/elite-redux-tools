@@ -146,10 +146,9 @@
 //                           or move is forgotten.
 //   ENDTURN_LOCK_ON         Ported (:2809-2812) -- decrements STATUS3_ALWAYS_HITS
 //                           counter by STATUS3_ALWAYS_HITS_TURN(1).
-//   ENDTURN_GHASTLY_ECHO    Gapped -- STATUS4_GHASTLY_ECHO is read for real by
-//                           unpack.ts. Its paired ghastlyEchoTimer has no
-//                           reader anywhere, so the exact expiry turn cannot be
-//                           computed; gapped whenever the bit is set.
+//   ENDTURN_GHASTLY_ECHO    Ported (:2813-2816) -- ghastlyEchoTimer (written by
+//                           turn.ts when Ghastly Echo's switch-in sets the status)
+//                           counts down and clears STATUS4_GHASTLY_ECHO at 0.
 //   ENDTURN_COILED_UP       Gapped -- STATUS4_COILED and STATUS4_CUTTHROAT are
 //                           both read for real by turnOrder.ts (priority).
 //                           Gapped whenever either bit is set.
@@ -178,8 +177,8 @@
 //                           sub-branch (:2943-2952) is Unreachable: volatiles.
 //                           disciplineCounter/gBattleStruct->choicedMove have
 //                           no reader anywhere.
-//   ENDTURN_PLASMA_FISTS    Unreachable -- STATUS4_PLASMA_FISTS has no reader
-//                           outside constants.ts.
+//   ENDTURN_PLASMA_FISTS    Ported (:2956-2959) -- clears STATUS4_PLASMA_FISTS; the
+//                           reader is calculate.ts's attackerPlasmaFists.
 //   ENDTURN_GENERIC_BATTLER_TIMERS Gapped (subset ported) -- fear (STATUS4_FEAR /
 //                           volatiles.fear) cleared when !started.fear (:2961-2964);
 //                           trepidation timer decremented. Other volatile timers
@@ -242,6 +241,7 @@ import {
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS4_ELECTRIFIED,
+  STATUS4_PLASMA_FISTS,
   STATUS4_FEAR,
   STATUS4_GHASTLY_ECHO,
   STATUS4_SALT_CURE,
@@ -1385,11 +1385,9 @@ export function runEndTurnEffects(
     }
 
     // ENDTURN_GHASTLY_ECHO, :2813-2816.
-    gapIf(
-      hasFlag(battler.statuses4, STATUS4_GHASTLY_ECHO),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_GHASTLY_ECHO (battle_util.c:2813-2816) is not applied -- ghastlyEchoTimer has no reader anywhere, so its expiry cannot be computed`,
-    )
+    if (battler.volatiles.ghastlyEchoTimer && --battler.volatiles.ghastlyEchoTimer === 0) {
+      battler.statuses4 = clearFlag(battler.statuses4, STATUS4_GHASTLY_ECHO)
+    }
 
     // ENDTURN_COILED_UP, :2818-2829.
     gapIf(
@@ -1473,6 +1471,9 @@ export function runEndTurnEffects(
     if (battler.volatiles.slowStartTimer > 0) {
       battler.volatiles.slowStartTimer--
     }
+
+    // ENDTURN_PLASMA_FISTS, :2956-2959 -- clears STATUS4_PLASMA_FISTS (its reader is calculate.ts's attackerPlasmaFists).
+    battler.statuses4 = clearFlag(battler.statuses4, STATUS4_PLASMA_FISTS)
 
     // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- SUBTRACT_VOLATILE_TIMER(trepidation) (:2976)
     if (battler.volatiles.trepidation > 0 && !battler.volatiles.started.trepidation) {
