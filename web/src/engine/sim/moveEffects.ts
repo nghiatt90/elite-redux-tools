@@ -266,6 +266,9 @@ import {
   MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_TOXIC,
   MOVE_EFFECT_TRI_ATTACK,
+  applyAttractEffect,
+  applyDrenchEffect,
+  applyFearEffect,
   applyPrimaryStatusEffect,
   canBeBurned,
   canBeConfused,
@@ -7300,13 +7303,13 @@ function hasAbilityIgnoringSuppression(battler: BattlerState, abilityId: string)
 function updateAbilityStateForNewAbilities(battler: BattlerState, newAbilities: string[]): void {
   const oldAbilities = abilitySlotIds(battler)
   const switchInAbilityDone = newAbilities.map(() => false)
-  const turnAbilityTriggers = newAbilities.map(() => false)
+  const turnAbilityTriggers = newAbilities.map(() => 0)
   const abilityState = newAbilities.map(() => 0)
   for (let i = 0; i < newAbilities.length; i++) {
     const j = oldAbilities.indexOf(newAbilities[i]!)
     if (j < 0) continue
     switchInAbilityDone[i] = battler.volatiles.switchInAbilityDone[j] ?? false
-    turnAbilityTriggers[i] = battler.turn.turnAbilityTriggers[j] ?? false
+    turnAbilityTriggers[i] = battler.turn.turnAbilityTriggers[j] ?? 0
     abilityState[i] = battler.volatiles.abilityState[j] ?? 0
   }
   battler.volatiles.switchInAbilityDone = switchInAbilityDone
@@ -12035,8 +12038,7 @@ export function applySecondaryMoveEffects(
 
     // MOVE_EFFECT_ATTRACT (battle_script_commands.c:2727-2732, battle_util.c:5135-5143)
     if (baseEffectNum === MOVE_EFFECT_ATTRACT) {
-      if (canInfatuate(state, attackerId, effectBattlerId, deps)) {
-        effectBattler.mon.status2 = setFlag(effectBattler.mon.status2, statusInfatuatedWith(attackerId))
+      if (applyAttractEffect(state, attackerId, effectBattlerId, deps)) {
         statusAppliedOutcome = { battlerId: effectBattlerId, status: 'INFATUATION' }
       }
       continue
@@ -12085,9 +12087,7 @@ export function applySecondaryMoveEffects(
 
     // MOVE_EFFECT_DRENCH (battle_script_commands.c:3031-3036)
     if (baseEffectNum === MOVE_EFFECT_DRENCH) {
-      if (canBeDrenched(state, effectBattlerId, attackerId, deps)) {
-        effectBattler.volatiles.drenched = 2 + (state.rng.random16() % 2)
-        effectBattler.volatiles.started.drenched = true
+      if (applyDrenchEffect(state, effectBattlerId, attackerId, deps)) {
         statusAppliedOutcome = { battlerId: effectBattlerId, status: 'DRENCH' }
       }
       continue
@@ -12178,10 +12178,7 @@ export function applySecondaryMoveEffects(
 
     // MOVE_EFFECT_FEAR (battle_script_commands.c:2996-3000, battle_scripts_1.s:2444-2458)
     if (baseEffectNum === MOVE_EFFECT_FEAR) {
-      if (!effectBattler.volatiles.fear && !hasFlag(effectBattler.statuses4, STATUS4_FEAR)) {
-        effectBattler.statuses4 = setFlag(effectBattler.statuses4, STATUS4_FEAR)
-        effectBattler.volatiles.fear = true
-        effectBattler.volatiles.started.fear = true
+      if (applyFearEffect(state, effectBattlerId)) {
         statusAppliedOutcome = { battlerId: effectBattlerId, status: 'FEAR' }
       }
       continue

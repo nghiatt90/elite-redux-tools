@@ -373,7 +373,7 @@ describe('struct constructors are independent', () => {
 
     const t = createTurnState()
     expect(t.turnAbilityTriggers).toHaveLength(ABILITY_SLOT_COUNT)
-    expect(t.turnAbilityTriggers.every((x) => x === false)).toBe(true)
+    expect(t.turnAbilityTriggers.every((x) => x === 0)).toBe(true)
 
     const f1 = createFieldState()
     const f2 = createFieldState()

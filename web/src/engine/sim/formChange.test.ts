@@ -221,7 +221,7 @@ describe('Form change primitive: changeBattlerForm and updateAbilityStateIndices
 
     // Simulate that THICK_FAT (slot 2) had its switch-in effect executed and turn trigger set
     battler.volatiles.switchInAbilityDone[2] = true
-    battler.turn.turnAbilityTriggers[2] = true
+    battler.turn.turnAbilityTriggers[2] = 1
     battler.volatiles.abilityState[2] = 42
 
     // Mega Venusaur innates: [ABILITY_FOREST_RAGE, ABILITY_THICK_FAT, ABILITY_POISON_ABSORB]
@@ -235,12 +235,12 @@ describe('Form change primitive: changeBattlerForm and updateAbilityStateIndices
 
     // Slot 1 (new ability FOREST_RAGE) must start fresh
     expect(battler.volatiles.switchInAbilityDone[1]).toBe(false)
-    expect(battler.turn.turnAbilityTriggers[1]).toBe(false)
+    expect(battler.turn.turnAbilityTriggers[1]).toBe(0)
     expect(battler.volatiles.abilityState[1]).toBe(0)
 
     // Slot 2 (retained ability THICK_FAT) preserves state
     expect(battler.volatiles.switchInAbilityDone[2]).toBe(true)
-    expect(battler.turn.turnAbilityTriggers[2]).toBe(true)
+    expect(battler.turn.turnAbilityTriggers[2]).toBe(1)
     expect(battler.volatiles.abilityState[2]).toBe(42)
   })
 })

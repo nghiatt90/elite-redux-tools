@@ -164,7 +164,7 @@ export function updateAbilityStateIndices(
   ]
 
   const newSwitchInAbilityDone = new Array<boolean>(SWITCH_IN_ABILITY_DONE_COUNT).fill(false)
-  const newTurnAbilityTriggers = new Array<boolean>(ABILITY_SLOT_COUNT).fill(false)
+  const newTurnAbilityTriggers = new Array<number>(ABILITY_SLOT_COUNT).fill(0)
   const newAbilityState = new Array<number>(ABILITY_SLOT_COUNT).fill(0)
 
   for (let i = 0; i < ABILITY_SLOT_COUNT; i++) {
@@ -176,7 +176,7 @@ export function updateAbilityStateIndices(
     }
     if (j >= ABILITY_SLOT_COUNT) continue
     newSwitchInAbilityDone[i] = battler.volatiles.switchInAbilityDone[j] ?? false
-    newTurnAbilityTriggers[i] = battler.turn.turnAbilityTriggers[j] ?? false
+    newTurnAbilityTriggers[i] = battler.turn.turnAbilityTriggers[j] ?? 0
     newAbilityState[i] = battler.volatiles.abilityState[j] ?? 0
   }
 

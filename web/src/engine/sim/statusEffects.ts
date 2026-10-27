@@ -36,6 +36,7 @@ import {
   STATUS2_SUBSTITUTE,
   STATUS2_UPROAR,
   STATUS3_SEMI_INVULNERABLE,
+  STATUS4_FEAR,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
@@ -47,6 +48,7 @@ import {
   hasFlag,
   setCounter,
   setFlag,
+  statusInfatuatedWith,
 } from './constants'
 import {
   attackerHasMoldBreakerActive,
@@ -1255,6 +1257,55 @@ export function canInfatuate(
   if (isMyceliumMightActive(state, attackerId, deps)) return true
   if (isAbilityStatusProtected(state, targetId, CHECK_INFATUATE, attackerId, deps)) return false
   return true
+}
+
+/**
+ * SetMoveEffect MOVE_EFFECT_DRENCH (src/battle_script_commands.c:3031-3036).
+ */
+export function applyDrenchEffect(
+  state: BattleState,
+  targetId: number,
+  attackerId: number | null | undefined,
+  deps: StatusDeps,
+): boolean {
+  const target = state.battlers[targetId]
+  if (!target || !canBeDrenched(state, targetId, attackerId, deps)) return false
+  target.volatiles.drenched = 2 + (state.rng.random16() % 2)
+  target.volatiles.started.drenched = true
+  return true
+}
+
+/**
+ * SetMoveEffect MOVE_EFFECT_ATTRACT (src/battle_script_commands.c:2727-2732, battle_util.c:5135-5143).
+ */
+export function applyAttractEffect(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  deps: StatusDeps,
+): boolean {
+  const target = state.battlers[targetId]
+  if (!target || !canInfatuate(state, attackerId, targetId, deps)) return false
+  target.mon.status2 = setFlag(target.mon.status2, statusInfatuatedWith(attackerId))
+  return true
+}
+
+/**
+ * SetMoveEffect MOVE_EFFECT_FEAR (src/battle_script_commands.c:2996-3000, battle_scripts_1.s:2444-2458).
+ */
+export function applyFearEffect(
+  state: BattleState,
+  targetId: number,
+): boolean {
+  const target = state.battlers[targetId]
+  if (!target) return false
+  if (!target.volatiles.fear && !hasFlag(target.statuses4, STATUS4_FEAR)) {
+    target.statuses4 = setFlag(target.statuses4, STATUS4_FEAR)
+    target.volatiles.fear = true
+    target.volatiles.started.fear = true
+    return true
+  }
+  return false
 }
 
 // ---------------------------------------------------------------------------

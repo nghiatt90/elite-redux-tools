@@ -82,6 +82,8 @@ import {
   STAT_SPEED,
   WEATHER_PRIMAL_ANY,
   WEATHER_SANDSTORM_ANY,
+  STATUS1_ANY,
+  STATUS4_FEAR,
   clearFlag,
   hasFlag,
   setFlag,
@@ -89,7 +91,7 @@ import {
   STATUS2_LOCK_CONFUSE,
   getCounter,
 } from './constants'
-import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted } from '../abilities/dispatchCalc'
+import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
@@ -100,18 +102,26 @@ import { resolveMultihitType } from './attackCanceller'
 import {
   CHECK_FLINCH,
   CHECK_RESTRICTING,
+  MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_ENRAGE,
   MOVE_EFFECT_FLINCH,
   MOVE_EFFECT_FROSTBITE,
   MOVE_EFFECT_PARALYSIS,
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
+  MOVE_EFFECT_TOXIC,
+  applyAttractEffect,
+  applyDrenchEffect,
+  applyFearEffect,
   applyPrimaryStatusEffect,
   canBeBurned,
   canBeConfused,
+  canBeDrenched,
   canBeParalyzed,
   canBePoisoned,
+  canBleed,
   canGetFrostbite,
   canInfatuate,
   canSleep,
@@ -143,7 +153,7 @@ import {
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
-import { tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
+import { getOncePerTurnAbilityCounter, setOncePerTurnAbilityCounter, tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 
 // ---------------------------------------------------------------------------
@@ -737,37 +747,68 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
 //   - Pickpocket: ABILITY_PICKPOCKET (battle_script_commands.c:4294, :4828-4853)
 export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_ABSORBANT',
+  'ABILITY_AFTERMATH',
   'ABILITY_AFTERSHOCK',
+  'ABILITY_ATOMIC_BURST',
   'ABILITY_BLADE_DANCE',
   'ABILITY_BLIGHT_SCALE',
   'ABILITY_CUTE_CHARM',
   'ABILITY_DAMP',
+  'ABILITY_DEVIATE',
   'ABILITY_ELEMENTAL_CHARGE',
+  'ABILITY_EMANATE',
+  'ABILITY_ENERGY_TAP',
+  'ABILITY_ENLIGHTENED',
   'ABILITY_ENVENOM',
+  'ABILITY_FEARMONGER',
+  'ABILITY_FERTILIZE',
   'ABILITY_FLAME_BODY',
   'ABILITY_FLAMING_JAWS',
   'ABILITY_FLAMING_MAW',
+  'ABILITY_FREEZING_POINT',
+  'ABILITY_GALVANIZE',
   'ABILITY_GRIP_PINCER',
   'ABILITY_GROWING_TOOTH',
   'ABILITY_HIGH_TIDE',
+  'ABILITY_HYDRATE',
   'ABILITY_ILLUMINATE',
+  'ABILITY_IMMOLATE',
+  'ABILITY_INTOXICATE',
+  'ABILITY_LEAD_CLAWS',
   'ABILITY_LOUD_BANG',
+  'ABILITY_MENACING_SITUATION',
+  'ABILITY_MINERALIZE',
+  'ABILITY_MOB_BOSS',
+  'ABILITY_MOLTEN_COAT',
   'ABILITY_PICKPOCKET',
+  'ABILITY_PIXILATE',
   'ABILITY_POISON_POINT',
   'ABILITY_POISON_QUILLS',
   'ABILITY_POISON_TOUCH',
   'ABILITY_PURE_LOVE',
   'ABILITY_PURPLE_HAZE',
+  'ABILITY_RAZOR_SHARP',
+  'ABILITY_REFRIGERATE',
+  'ABILITY_RESONANCE',
   'ABILITY_SERPENT_BIND',
+  'ABILITY_SLUDGY_MIX',
   'ABILITY_SMOLDERING_WOOD',
+  'ABILITY_SOLAR_FLARE',
+  'ABILITY_SOLENOGLYPHS',
+  'ABILITY_SPECTRALIZE',
   'ABILITY_STATIC',
   'ABILITY_STENCH',
+  'ABILITY_STRIKER_PIXILATE',
   'ABILITY_SUPER_HOT_GOO',
   'ABILITY_TENDER_AFFECTION',
   'ABILITY_TENTALOCK',
   'ABILITY_TOXIC_SHELL',
+  'ABILITY_TO_THE_BONE',
+  'ABILITY_UNICORN',
   'ABILITY_VENOM_CROWN',
+  'ABILITY_VITAL_SPIRIT',
   'ABILITY_VOLCANO_RAGE',
+  'ABILITY_WHIPLASH',
   'ABILITY_WHITE_NOISE',
   'ABILITY_WORLD_SERPENT',
 ])
@@ -1773,6 +1814,75 @@ function handleDefenderMoveEndAbility(
   return result
 }
 
+type AteStatusSpec = {
+  type: string
+  effect: number | 'DRENCH' | 'ATTRACT' | 'FEAR'
+  can: (state: BattleState, attackerId: number, targetId: number, deps: StatusDeps) => boolean
+}
+
+/** abilities.cc "-ate" status abilities: attacker type == move type -> 10% status on the target. */
+const ATE_ON_HIT_STATUS: Record<string, AteStatusSpec> = {
+  ABILITY_HYDRATE: { type: 'WATER', effect: 'DRENCH', can: (st, a, t, d) => canBeDrenched(st, t, a, d) },
+  ABILITY_PIXILATE: { type: 'FAIRY', effect: 'ATTRACT', can: (st, a, t, d) => canInfatuate(st, a, t, d) },
+  ABILITY_STRIKER_PIXILATE: { type: 'FAIRY', effect: 'ATTRACT', can: (st, a, t, d) => canInfatuate(st, a, t, d) },
+  ABILITY_UNICORN: { type: 'FAIRY', effect: 'ATTRACT', can: (st, a, t, d) => canInfatuate(st, a, t, d) },
+  ABILITY_MINERALIZE: { type: 'ROCK', effect: MOVE_EFFECT_BLEED, can: (st, a, t, d) => canBleed(st, t, a, d) },
+  ABILITY_LEAD_CLAWS: { type: 'ROCK', effect: MOVE_EFFECT_BLEED, can: (st, a, t, d) => canBleed(st, t, a, d) },
+  ABILITY_GALVANIZE: { type: 'ELECTRIC', effect: MOVE_EFFECT_PARALYSIS, can: (st, a, t, d) => canBeParalyzed(st, a, t, d) },
+  ABILITY_ATOMIC_BURST: { type: 'ELECTRIC', effect: MOVE_EFFECT_PARALYSIS, can: (st, a, t, d) => canBeParalyzed(st, a, t, d) },
+  ABILITY_REFRIGERATE: { type: 'ICE', effect: MOVE_EFFECT_FROSTBITE, can: (st, a, t, d) => canGetFrostbite(st, t, a, d) },
+  ABILITY_INTOXICATE: { type: 'POISON', effect: MOVE_EFFECT_TOXIC, can: (st, a, t, d) => canBePoisoned(st, a, t, 'MOVE_NONE', d) },
+  ABILITY_SLUDGY_MIX: { type: 'POISON', effect: MOVE_EFFECT_TOXIC, can: (st, a, t, d) => canBePoisoned(st, a, t, 'MOVE_NONE', d) },
+  ABILITY_EMANATE: { type: 'PSYCHIC', effect: MOVE_EFFECT_CONFUSION, can: (st, a, t, d) => canBeConfused(st, t, a, d) },
+  ABILITY_ENLIGHTENED: { type: 'PSYCHIC', effect: MOVE_EFFECT_CONFUSION, can: (st, a, t, d) => canBeConfused(st, t, a, d) },
+  ABILITY_IMMOLATE: { type: 'FIRE', effect: MOVE_EFFECT_BURN, can: (st, a, t, d) => canBeBurned(st, t, a, d) },
+  ABILITY_SOLAR_FLARE: { type: 'FIRE', effect: MOVE_EFFECT_BURN, can: (st, a, t, d) => canBeBurned(st, t, a, d) },
+  ABILITY_SPECTRALIZE: { type: 'GHOST', effect: 'FEAR', can: (st, _a, t, _d) => Boolean(st.battlers[t] && !st.battlers[t]!.volatiles.fear && !hasFlag(st.battlers[t]!.statuses4, STATUS4_FEAR)) },
+  ABILITY_DEVIATE: { type: 'DARK', effect: MOVE_EFFECT_ENRAGE, can: (st, _a, t, _d) => Boolean(st.battlers[t] && !hasFlag(st.battlers[t]!.mon.status2, STATUS2_ENRAGED)) },
+  ABILITY_MOB_BOSS: { type: 'DARK', effect: MOVE_EFFECT_ENRAGE, can: (st, _a, t, _d) => Boolean(st.battlers[t] && !hasFlag(st.battlers[t]!.mon.status2, STATUS2_ENRAGED)) },
+}
+
+/** AbilityStatusEffect (abilities.cc:263-268): sets gBattleScripting.moveEffect and runs BattleScript_AbilityStatusEffect, ignoring Safeguard. */
+function applyAbilityOnHitStatus(
+  state: BattleState,
+  effect: number | 'DRENCH' | 'ATTRACT' | 'FEAR',
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+  result: { statusApplied: StatusAppliedOutcome | null },
+): void {
+  const target = state.battlers[targetId]
+  if (!target || target.mon.hp === 0) return
+
+  if (testSheerForceFlag(state, attackerId, moveId, statusDeps)) return
+  if (doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) return
+
+  if (effect === 'DRENCH') {
+    if (applyDrenchEffect(state, targetId, attackerId, statusDeps)) {
+      result.statusApplied = { battlerId: targetId, status: 'DRENCH' }
+    }
+    return
+  }
+  if (effect === 'ATTRACT') {
+    if (applyAttractEffect(state, attackerId, targetId, statusDeps)) {
+      result.statusApplied = { battlerId: targetId, status: 'INFATUATION' }
+    }
+    return
+  }
+  if (effect === 'FEAR') {
+    if (applyFearEffect(state, targetId)) {
+      result.statusApplied = { battlerId: targetId, status: 'FEAR' }
+    }
+    return
+  }
+  const res = applyPrimaryStatusEffect(state, attackerId, targetId, effect, moveId, statusDeps, unmodelled, false, false, true)
+  if (res.applied && res.status) {
+    result.statusApplied = { battlerId: targetId, status: res.status }
+  }
+}
+
 function handleAttackerMoveEndAbility(
   state: BattleState,
   abilityId: string,
@@ -1786,6 +1896,7 @@ function handleAttackerMoveEndAbility(
   deps: TurnLoopDeps,
   statusDeps: StatusDeps,
   unmodelled: string[],
+  isCriticalHit = false,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -1795,7 +1906,222 @@ function handleAttackerMoveEndAbility(
 
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
-  if (!attacker || attacker.mon.hp <= 0 || !target) return result
+  if (!attacker || !target) return result
+
+  // "-ate" abilities' 10% on-hit status (src/abilities.cc: Hydrate :4122, Pixilate :2468, Mineralize :5090, Galvanize :2811,
+  // Refrigerate :2372, Intoxicate :4201, Emanate :6015, Immolate / Solar Flare :3742, :4638, Spectralize :4870, Deviate / Mob Boss :9760, :12453)
+  const ateStatus = ATE_ON_HIT_STATUS[abilityId]
+  if (ateStatus) {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    if (
+      attacker.mon.types.includes(ateStatus.type) &&
+      effectiveType === ateStatus.type &&
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      ateStatus.can(state, attackerId, targetId, statusDeps) &&
+      state.rng.random16() % 10 === 0
+    ) {
+      applyAbilityOnHitStatus(state, ateStatus.effect, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Resonance (src/abilities.cc:7871-7880): sound move bleeds target 50%
+  if (abilityId === 'ABILITY_RESONANCE') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBleed(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.sound) &&
+      state.rng.random16() % 100 < 50
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Solenoglyphs (src/abilities.cc:4371-4380): Strong Jaw / bite move toxic poisons target 50%
+  if (abilityId === 'ABILITY_SOLENOGLYPHS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps) &&
+      Boolean(moveData?.flags?.biteBased) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Razor Sharp (src/abilities.cc:9021-9029) & To The Bone (:9032): critical hit bleeds target
+  if (abilityId === 'ABILITY_RAZOR_SHARP' || abilityId === 'ABILITY_TO_THE_BONE') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isCriticalHit === true &&
+      canBleed(state, targetId, attackerId, statusDeps)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Fearmonger (src/abilities.cc:5170-5180): contact move inflicts Fear 10%
+  if (abilityId === 'ABILITY_FEARMONGER') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !target.volatiles.fear &&
+      !hasFlag(target.statuses4, STATUS4_FEAR) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < 10
+    ) {
+      applyAbilityOnHitStatus(state, 'FEAR', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Menacing Situation on attacker (src/abilities.cc:7905-7919): contact move inflicts Fear 30%
+  if (abilityId === 'ABILITY_MENACING_SITUATION') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !target.volatiles.fear &&
+      !hasFlag(target.statuses4, STATUS4_FEAR) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, 'FEAR', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Freezing Point on attacker (src/abilities.cc:6360-6371): inflicts Frostbite (contact 20%, non-contact 30%)
+  if (abilityId === 'ABILITY_FREEZING_POINT') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canGetFrostbite(state, targetId, attackerId, statusDeps)
+    ) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 20 : 30
+      if (state.rng.random16() % 100 < chance) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_FROSTBITE, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Vital Spirit (src/abilities.cc:1351-1364): using a Fighting move heals user's status1 (AbilityHealMonStatus)
+  if (abilityId === 'ABILITY_VITAL_SPIRIT') {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    if (effectiveType === 'FIGHTING' && hasFlag(attacker.mon.status1, STATUS1_ANY)) {
+      attacker.mon.status1 = 0
+      attacker.mon.status2 = clearFlag(attacker.mon.status2, STATUS2_NIGHTMARE)
+      const partySlot = state.sides[attackerId & 1].party[attacker.partyIndex]
+      if (partySlot) partySlot.status1 = 0
+    }
+  }
+
+  // Whiplash (src/abilities.cc:8942-8954): physical move lowers target Defense by 1 stage, once per turn per target
+  if (abilityId === 'ABILITY_WHIPLASH') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveData?.split === 'PHYSICAL' &&
+      canLowerStatOrMirrorArmor(state, targetId, STAT_DEF, deps.dataContext)
+    ) {
+      const affected = getOncePerTurnAbilityCounter(state, attackerId, abilityId, deps.dataContext)
+      if ((affected & (1 << targetId)) === 0) {
+        setOncePerTurnAbilityCounter(state, attackerId, abilityId, affected | (1 << targetId), deps.dataContext)
+        if (!testSheerForceFlag(state, attackerId, moveId, statusDeps)) {
+          if (!doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) {
+            const res = changeStatBuffs(
+              state,
+              targetId,
+              attackerId,
+              targetId,
+              -1,
+              STAT_DEF,
+              STAT_BUFF_ALLOW_PTR,
+              false,
+              { dataContext: deps.dataContext, grounding: deps.grounding },
+              unmodelled,
+              moveId,
+            )
+            if (res.delta !== 0) {
+              result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: res.delta })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Aftermath on attacker (src/abilities.cc:1655-1662): Explosion flinches target
+  if (abilityId === 'ABILITY_AFTERMATH') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveData?.effect === 'EFFECT_EXPLOSION'
+    ) {
+      if (!isAbilityStatusProtected(state, targetId, CHECK_FLINCH, attackerId, statusDeps)) {
+        target.mon.status2 = setFlag(target.mon.status2, STATUS2_FLINCHED)
+      }
+    }
+  }
+
+  // Energy Tap (src/abilities.cc:10623-10634): recovers 1/8 of hp dealt
+  if (abilityId === 'ABILITY_ENERGY_TAP') {
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attacker.mon.hp < attacker.mon.maxHp &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled)
+    ) {
+      const heal = Math.max(1, Math.floor(hpDealt / 8))
+      attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+      syncPartyHp(state, attackerId)
+    }
+  }
+
+  // Fertilize (src/abilities.cc:6506-6520): Grass move by Grass attacker recovers 1/10 of hp dealt
+  if (abilityId === 'ABILITY_FERTILIZE') {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    if (
+      attacker.mon.types.includes('GRASS') &&
+      effectiveType === 'GRASS' &&
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attacker.mon.hp < attacker.mon.maxHp &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled)
+    ) {
+      const heal = Math.max(1, Math.floor(hpDealt / 10))
+      attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+      syncPartyHp(state, attackerId)
+    }
+  }
+
+  // Molten Coat (src/abilities.cc:10313-10324): Rock move burns target 50%
+  if (abilityId === 'ABILITY_MOLTEN_COAT') {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      effectiveType === 'ROCK' &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
 
   // 1. Poison Point on attacker (src/abilities.cc:987-995, 2100, 9519, 9526, 10147, 11535)
   if (
@@ -2257,7 +2583,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
     statChanges: [],
     statusApplied: null,
   }
-  if (!attacker || attacker.mon.hp <= 0) return result
+  if (!attacker) return result
 
   const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
@@ -2281,6 +2607,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         deps,
         statusDeps,
         unmodelled,
+        ctx.isCriticalHit ?? false,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -3339,7 +3666,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   // Case 6: MOVEEND_ABILITIES_ATTACKER (:4532-4536)
   // Attacker contact/move-end abilities
-  if (attacker && attacker.mon.hp > 0) {
+  if (attacker) {
     const atkAbResult = dispatchMoveEndAttackerAbilities({
       state,
       attackerId,

@@ -786,6 +786,62 @@ export function setSingleUseAbilityCounter(
 }
 
 /**
+ * GetOncePerTurnAbilityCounter, battle_util.c:1701-1707.
+ * Reads gTurnStructs[battler].turnAbilityTriggers[index].
+ */
+export function getOncePerTurnAbilityCounter(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  dataContext: SimDataContext,
+): number {
+  const battler = state.battlers[battlerId]
+  if (!battler) return 0
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index >= 4) return 0
+  return battler.turn.turnAbilityTriggers[index] ?? 0
+}
+
+/**
+ * SetOncePerTurnAbilityCounter, battle_util.c:1709-1715.
+ * Writes gTurnStructs[battler].turnAbilityTriggers[index].
+ */
+export function setOncePerTurnAbilityCounter(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  value: number,
+  dataContext: SimDataContext,
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index >= 4) return
+  battler.turn.turnAbilityTriggers[index] = value
+}
+
+/**
+ * CheckAndSetOncePerTurnAbility, battle_util.c:1717-1728.
+ * Checks if the turnAbilityTriggers counter is 0, increments it, and returns true.
+ */
+export function checkAndSetOncePerTurnAbility(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const index = getAbilityIndex(state, battler, abilityId, dataContext)
+  if (index >= 4) return false
+  if (!battler.turn.turnAbilityTriggers[index]) {
+    battler.turn.turnAbilityTriggers[index]++
+    return true
+  }
+  return false
+}
+
+/**
  * The 12 abilities with tauntImmune = TRUE (abilities.cc).
  * IsBattlerImmuneToLowerStatsFromIntimidateClone (battle_script_commands.c:10275-10281).
  */

@@ -194,7 +194,7 @@ export function createTurnState(): TurnState {
     flungItem: null,
     redirectedAbility: null,
     sturdyAbility: null,
-    turnAbilityTriggers: new Array<boolean>(ABILITY_SLOT_COUNT).fill(false),
+    turnAbilityTriggers: new Array<number>(ABILITY_SLOT_COUNT).fill(0),
     gemParam: 0,
     physicalBattlerId: 0,
     specialBattlerId: 0,

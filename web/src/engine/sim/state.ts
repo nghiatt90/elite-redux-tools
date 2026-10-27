@@ -273,7 +273,7 @@ export interface TurnState {
   sturdyAbility: string | null
   /** `bool8 turnAbilityTriggers[NUM_INNATE_PER_SPECIES + 1]` -- one per ability
    * slot, same indexing as SimBattleMon.abilities. */
-  turnAbilityTriggers: boolean[]
+  turnAbilityTriggers: number[]
   gemParam: number
   physicalBattlerId: number
   specialBattlerId: number
