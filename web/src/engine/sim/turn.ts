@@ -137,7 +137,7 @@ import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
 import { clearBattlerLastTakenMove, createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
 import type { EndTurnEffectResult } from './endTurn'
-import { canBattlerHeal, runEndTurnEffects } from './endTurn'
+import { canBattlerHeal, runEndTurnEffects, strikeoutClearFlags } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
@@ -1472,7 +1472,7 @@ export function dispatchSwitchOutAbilities(
         case 'ABILITY_STRIKEOUT': {
           // Impl<ABILITY_STRIKEOUT>.onExit (abilities.cc:11158-11160, onExitFor = APPLY_ON_FOE):
           //   StrikeoutClearFlags(battler, ability, switchingBattler)
-          unmodelled.push(`battler ${battlerId}: switch-out StrikeoutClearFlags for switching battler ${switchingBattlerId} is not modelled`)
+          strikeoutClearFlags(battler, abilityId, switchingBattlerId)
           break
         }
       }

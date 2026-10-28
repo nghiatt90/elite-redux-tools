@@ -106,7 +106,7 @@ import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted, resolveEffectiveMov
 import { battlerHasAbility } from '../abilities/dispatch'
 import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
-import { canBattlerHeal, isMagicGuardProtected } from './endTurn'
+import { canBattlerHeal, isMagicGuardProtected, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import { syncPartyHp } from './outcome'
 import { resolveMultihitType } from './attackCanceller'
@@ -783,6 +783,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_MAGICAL_DUST',
   'ABILITY_FRAGRANT_DAZE',
   'ABILITY_HYPNOTIC_TOUCH',
+  'ABILITY_STRIKEOUT', // Cycle 89b (:11143-11155)
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -1064,6 +1065,13 @@ function handleDefenderMoveEndAbility(
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
   if (!attacker || !target) return result
+
+  // Strikeout (src/abilities.cc:11143-11155): CHECK(DidMoveHit()), CHECK(GetBattlerSide(attacker) != GetBattlerSide(battler)); DidMoveHit is
+  // read as "the move dealt damage", like the other ports here. Unlike most defender hooks it does not require the holder to be alive.
+  if (abilityId === 'ABILITY_STRIKEOUT') {
+    if (targetDamage > 0 && (attackerId & 1) !== (targetId & 1)) strikeoutMarkDamagedBy(target, abilityId, attackerId)
+    return result
+  }
 
   // 1. Rough Skin family (src/abilities.cc:784-793, 2262, 7325, 10149, 11224)
   if (
@@ -3409,6 +3417,12 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
       const flag = ON_BATTLER_FAINTS_FOR[abilityId]
       if (!flag || !faintHookApplies(flag, i, faintedId, byAttacker ? attackerId : null)) continue
       if (isSimAbilitySuppressed(state, holder, abilityId, false, attackerId, false, deps.dataContext)) continue
+
+      if (abilityId === 'ABILITY_STRIKEOUT') {
+        // Impl<ABILITY_STRIKEOUT>.onBattlerFaints (src/abilities.cc:11157): StrikeoutClearFlags(battler, ability, fainted)
+        strikeoutClearFlags(holder, abilityId, faintedId)
+        continue
+      }
 
       const raise = KO_STAT_RAISES[abilityId]
       if (raise) {

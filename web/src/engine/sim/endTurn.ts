@@ -75,7 +75,10 @@
 //                           Apple Pie, Dune Veil), Poison Absorb, Acid Reflux,
 //                           Blood Price, Chokehold (and Tentalock, Serpent Bind),
 //                           Flame Coat, Funeral Pyre, Home Run, Honey Gather,
-//                           Life Steal, Soul Tap, Moody, Truant. Unported
+//                           Life Steal, Soul Tap, Moody, Truant, Peaceful Slumber,
+//                           Sap Trap, Soothsayer, Talon Trap, Sumo Wrestler,
+//                           Strikeout, Winter Throne, Christmas Nightmare,
+//                           Color Spectrum. Unported
 //                           hooks remain conditionally gapped (ENDTURN_ABILITY_IDS).
 //   ENDTURN_ITEMS1          Gapped -- gapped when the battler's item's
 //   ENDTURN_ITEMS2          resolvedHoldEffect is one of ITEMS_1_2_HOLD_EFFECTS
@@ -203,6 +206,7 @@ import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
+import { isHailImmune, weatherHasEffect } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
@@ -812,6 +816,59 @@ function setOncePerTurnTrigger(battler: BattlerState, abilityId: string, value: 
   if (slot !== -1) battler.turn.turnAbilityTriggers[slot] = value
 }
 
+/** `Type` enum order, include/constants/pokemon.h:30-52 (NUMBER_OF_MON_TYPES is its length). */
+const TYPE_NAMES_BY_ID = [
+  'NORMAL', 'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'MYSTERY',
+  'FIRE', 'WATER', 'GRASS', 'ELECTRIC', 'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY', 'STELLAR',
+] as const
+
+/** StrikeoutState (include/battle_util.h:139-144): four u8s, counter1 / counter2 / damagedBy1 / damagedBy2, packed low byte first into the slot's abilityState. */
+export interface StrikeoutState {
+  counter1: number
+  counter2: number
+  damagedBy1: number
+  damagedBy2: number
+}
+
+export function unpackStrikeoutState(packed: number): StrikeoutState {
+  return { counter1: packed & 0xff, counter2: (packed >>> 8) & 0xff, damagedBy1: (packed >>> 16) & 0xff, damagedBy2: (packed >>> 24) & 0xff }
+}
+
+export function packStrikeoutState(s: StrikeoutState): number {
+  return (s.counter1 | (s.counter2 << 8) | (s.damagedBy1 << 16) | (s.damagedBy2 << 24)) >>> 0
+}
+
+/** StrikeoutClearFlags, src/abilities.cc:11082-11095: `clearFor` is a battler id; 0 and 1 map to the "1" half, anything else to the "2" half. */
+export function strikeoutClearFlags(battler: BattlerState, abilityId: string, clearFor: number): void {
+  const s = unpackStrikeoutState(getAbilityStateOf(battler, abilityId))
+  if (clearFor === 0 || clearFor === 1) {
+    s.damagedBy1 = 0
+    s.counter1 = 0
+  } else {
+    s.damagedBy2 = 0
+    s.counter2 = 0
+  }
+  setAbilityStateOf(battler, abilityId, packStrikeoutState(s))
+}
+
+/** Strikeout's onDefender (src/abilities.cc:11143-11155, `attacker == 0 || attacker == 1` selects damagedBy1), after its own side checks. */
+export function strikeoutMarkDamagedBy(battler: BattlerState, abilityId: string, attackerId: number): void {
+  const s = unpackStrikeoutState(getAbilityStateOf(battler, abilityId))
+  if (attackerId === 0 || attackerId === 1) s.damagedBy1 = 1
+  else s.damagedBy2 = 1
+  setAbilityStateOf(battler, abilityId, packStrikeoutState(s))
+}
+
+/** `IsAbilityOnField(ability) - 1`, battle_util.c:4803-4811: the lowest-numbered alive holder, or -1. */
+function firstFieldHolder(state: BattleState, abilityId: string, dataContext: SimDataContext): number {
+  for (let i = 0; i < state.battlersCount; i++) {
+    const holder = state.battlers[i]
+    if (!holder || holder.mon.hp === 0) continue
+    if (battlerHasSimAbility(state, holder, abilityId, true, i, false, dataContext)) return i
+  }
+  return -1
+}
+
 /** VARIOUS_HP_FRACTION_TO_DAMAGE, battle_script_commands.c:9017-9022: maxHP / fraction, capped at the current hp, minimum 1. */
 function hpFractionToDamage(battler: BattlerState, fraction: number): number {
   let damage = Math.trunc(battler.mon.maxHp / fraction)
@@ -1056,6 +1113,20 @@ function runEndTurnAbilities(
         break
       }
 
+      case 'ABILITY_PEACEFUL_SLUMBER': {
+        // src/abilities.cc:6341-6347: Sweet Dreams' hook (:4288-4300, maxHP / 8 while asleep or Comatose); when it declines, Self Sufficient's
+        // (:4041-4054, maxHP / 16, not on the first turn). When Sweet Dreams ran, gBattleMoveDamage -= maxHP / 16 makes it an extra 1/16.
+        if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled)) break // both hooks open with these two CHECKs
+        const asleep = hasFlag(battler.mon.status1, STATUS1_SLEEP) || battlerHasAbility(battler.mon.abilities, 'ABILITY_COMATOSE', NO_SUPPRESSION)
+        if (asleep) {
+          const sweetDreams = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
+          healEndTurn(state, battlerId, battler, sweetDreams + Math.trunc(battler.mon.maxHp / 16), results)
+        } else if (battler.volatiles.isFirstTurn !== 2) {
+          healEndTurn(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 16)), results)
+        }
+        break
+      }
+
       case 'ABILITY_PEACEFUL_REST':
       case 'ABILITY_WHITE_NOISE': {
         // src/abilities.cc (Impl<PEACEFUL_REST>.onEndTurn), BattleScript_RainDishActivates: maxHP / 8 in fog
@@ -1198,6 +1269,23 @@ function runEndTurnAbilities(
         break
       }
 
+      case 'ABILITY_SAP_TRAP': {
+        // src/abilities.cc:11390-11411: Speed -1 on BATTLE_OPPOSITE(battler), then on its partner, each only if alive and CanLowerStat.
+        // AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1, battler, target) (:277-284) is applied as in the Chokehold family above.
+        for (const targetId of [battlerId ^ 1, battlerId ^ 3]) {
+          const target = state.battlers[targetId]
+          if (!target || target.mon.hp === 0) continue // IsBattlerAlive(target)
+          if (!canLowerStat(state, targetId, STAT_SPEED, dataContext)) continue
+          gapIf(
+            hasFlag(target.mon.status2, STATUS2_SUBSTITUTE),
+            unmodelled,
+            `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${targetId} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
+          )
+          changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_SPEED, 0, true, { dataContext, grounding: deps?.grounding }, unmodelled)
+        }
+        break
+      }
+
       case 'ABILITY_FLAME_COAT':
       case 'ABILITY_FUNERAL_PYRE': {
         // src/abilities.cc:9480-9495 (Flame Coat) / :8260-8274 (Funeral Pyre); BattleScript_FireCoatDamage (maxHP / 8) and
@@ -1312,6 +1400,121 @@ function runEndTurnAbilities(
             }
           }
         }
+        break
+      }
+
+      case 'ABILITY_SOOTHSAYER': {
+        // src/abilities.cc:9442-9448 (the counter is set to 4 by its onEntry, switchInAbility.ts; the type-effectiveness half reads it as
+        // `defenderAbilityOn`, which the sim's damage path does not derive from this state)
+        const counter = getAbilityStateOf(battler, slotAbility)
+        if (counter) setAbilityStateOf(battler, slotAbility, counter - 1)
+        break
+      }
+
+      case 'ABILITY_TALON_TRAP': {
+        // src/abilities.cc:4738-4741 (onEntry sets the state, the on-either half :4713-4730 is not ported)
+        setAbilityStateOf(battler, slotAbility, 0)
+        break
+      }
+
+      case 'ABILITY_SUMO_WRESTLER': {
+        // src/abilities.cc:12098-12115: every other turn, queue Circle Throw at power 20. GetOppositeSide(battler) is the side index
+        // (0 or 1) used as the target battler id, exactly as written.
+        if (battler.volatiles.isFirstTurn === 2) break
+        if (getAbilityStateOf(battler, slotAbility)) {
+          state.queuedExtraAttacks.push({
+            ability: slotAbility,
+            move: 'MOVE_CIRCLE_THROW',
+            movePower: 20,
+            attacker: battlerId,
+            target: (battlerId & 1) ^ 1,
+          })
+          setAbilityStateOf(battler, slotAbility, 0)
+        } else {
+          setAbilityStateOf(battler, slotAbility, 1)
+        }
+        break
+      }
+
+      case 'ABILITY_STRIKEOUT': {
+        // src/abilities.cc:11099-11141. StrikeoutState (battle_util.h:139-144) is four u8s: counter1, counter2, damagedBy1, damagedBy2.
+        const strikeout = unpackStrikeoutState(getAbilityStateOf(battler, slotAbility))
+        let { counter1, counter2 } = strikeout
+        if (battler.volatiles.isFirstTurn !== 2) {
+          if (!strikeout.damagedBy1) counter1++
+          if (!strikeout.damagedBy2) counter2++
+        }
+        const side = battlerId & 1
+        const queueWhirlwind = (targetId: number) => {
+          const target = state.battlers[targetId]
+          if (target && target.mon.hp > 0) {
+            state.queuedExtraAttacks.push({ ability: slotAbility, move: 'MOVE_WHIRLWIND', movePower: 20, attacker: battlerId, target: targetId })
+          }
+        }
+        if (counter2 >= 3) {
+          counter2 = 0
+          queueWhirlwind((side ^ 1) ^ 2) // BATTLE_PARTNER(BATTLE_OPPOSITE(GetBattlerSide(battler)))
+        }
+        if (counter1 >= 3) {
+          counter1 = 0
+          queueWhirlwind(side ^ 1) // BATTLE_OPPOSITE(GetBattlerSide(battler))
+        }
+        setAbilityStateOf(battler, slotAbility, packStrikeoutState({ counter1, counter2, damagedBy1: 0, damagedBy2: 0 })) // damagedBy1/2 cleared (:11152-11153)
+        break
+      }
+
+      case 'ABILITY_WINTER_THRONE': {
+        // src/abilities.cc:10532-10555; BattleScript_WinterThroneDamage (battle_scripts_1.s:8637-8643, maxHP / 8) and
+        // BattleScript_HealStack1HpOver8End3 (:9556-9561), both sizing the amount with hpfractiontodamage (battle_script_commands.c:9017-9022:
+        // capped at the target's current hp, minimum 1 -- so a low-hp Ice-type heals at most its current hp).
+        if (firstFieldHolder(state, slotAbility, dataContext) !== battlerId) break // CHECK(IsAbilityOnField(ability) - 1 == battler)
+        for (let targetId = 0; targetId < state.battlersCount; targetId++) {
+          const target = state.battlers[targetId]
+          if (!target || target.mon.hp === 0) continue
+          if (!target.mon.types.includes('ICE')) {
+            if (isMagicGuardProtected(state, target)) continue
+            const dmg = hpFractionToDamage(target, 8)
+            const fainted = applyEndTurnHp(state, targetId, target, -dmg)
+            results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -dmg, fainted })
+          } else {
+            if (target.mon.hp === target.mon.maxHp) continue
+            if (!canBattlerHeal(state, targetId, target, unmodelled)) continue
+            healEndTurn(state, targetId, target, hpFractionToDamage(target, 8), results)
+          }
+        }
+        break
+      }
+
+      case 'ABILITY_CHRISTMAS_NIGHTMARE': {
+        // src/abilities.cc:10566-10594: IsAbilityOnSide(GetBattlerSide(battler), ability) passes the SIDE as a battler id, so it
+        // finds the first alive holder among battlers `side` and `side ^ 2` (as onWeather.ts does for this ability's onWeather hook).
+        const side = battlerId & 1
+        const holdsAbility = (id: number) => {
+          const b = state.battlers[id]
+          return !!b && b.mon.hp > 0 && battlerHasSimAbility(state, b, slotAbility, true, id, false, dataContext)
+        }
+        const firstHolder = holdsAbility(side) ? side : holdsAbility(side ^ 2) ? side ^ 2 : -1
+        if (firstHolder !== battlerId) break
+        const grounding = deps?.grounding ?? NO_GROUNDING
+        if (!hasFlag(state.field.weather, WEATHER_HAIL_ANY) || !weatherHasEffect(state, grounding)) break // IsWeatherActive(WEATHER_HAIL_ANY)
+        for (let targetId = side ^ 1; targetId < state.battlersCount; targetId += 2) {
+          const target = state.battlers[targetId]
+          if (!target || target.mon.hp === 0) continue
+          if (isHailImmune(state, target, dataContext)) continue
+          const dmg = hpFractionToDamage(target, 8) // BattleScript_WinterThroneDamage
+          const fainted = applyEndTurnHp(state, targetId, target, -dmg)
+          results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -dmg, fainted })
+        }
+        break
+      }
+
+      case 'ABILITY_COLOR_SPECTRUM': {
+        // src/abilities.cc:8736-8754: re-roll Random() % NUMBER_OF_MON_TYPES until it is not Mystery, Stellar or a type the battler has
+        let newType: string
+        do {
+          newType = TYPE_NAMES_BY_ID[state.rng.random16() % TYPE_NAMES_BY_ID.length]!
+        } while (newType === 'MYSTERY' || newType === 'STELLAR' || battler.mon.types.includes(newType))
+        battler.mon.types = [newType, newType, 'MYSTERY']
         break
       }
 

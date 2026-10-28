@@ -1115,6 +1115,10 @@ const ANNOUNCE_ONLY_ON_ENTRY: ReadonlySet<string> = new Set([
   // nothing but this same announcement gate reads for these two. Their damage is in endTurn.ts.
   'ABILITY_FLAME_COAT',
   'ABILITY_FUNERAL_PYRE',
+  // Winter Throne (abilities.cc:10530-10532) and Christmas Nightmare (:10559-10564): onEntry is only CHECKs (hail active /
+  // CheckAbilityWasAnnounced[By], whose sole side effect is the same done-flag as above) plus SwitchInAnnounce. Their damage is in endTurn.ts.
+  'ABILITY_WINTER_THRONE',
+  'ABILITY_CHRISTMAS_NIGHTMARE',
 ])
 
 /**
@@ -1850,6 +1854,21 @@ export function applySwitchInAbilities(
     if (abilityId === 'ABILITY_GALLANTRY') {
       // abilities.cc:7423-7433: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability));
       // pushes BattleScript_BattlerHasASingleNoDamageHit (printstring only; no state change onEntry).
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SOOTHSAYER') {
+      // abilities.cc:9436-9441: once per battle, the state becomes 4 (endTurn.ts counts it down); the rest is the announcement
+      if (!getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext)) {
+        setSingleUseAbilityCounter(state, battlerId, abilityId, 1, deps.dataContext)
+        battler.volatiles.abilityState[slotIndex] = 4
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TALON_TRAP') {
+      // abilities.cc:4733-4737 (its on-either half, :4713-4730, is not ported)
+      if (battler.volatiles.isFirstTurn !== 2) battler.volatiles.abilityState[slotIndex] = 1
       continue
     }
 
