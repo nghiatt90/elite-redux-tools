@@ -741,6 +741,34 @@ export function canRaiseStat(
   return contrary ? stage > MIN_STAT_STAGE : stage < MAX_STAT_STAGE
 }
 
+/**
+ * CanLowerStat, src/battle_util.c:9363 -> CompareStat (:8545-8561), which flips under Contrary.
+ */
+export function canLowerStat(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const stage = battler.mon.statStages[statId] ?? DEFAULT_STAT_STAGE
+  const contrary = battlerHasSimAbility(state, battler, 'ABILITY_CONTRARY', true, battlerId, false, dataContext)
+  return contrary ? stage < MAX_STAT_STAGE : stage > MIN_STAT_STAGE
+}
+
+/** StatLowerableOrMirrorArmor, src/battle_util.c:8538-8542 (HasMirrorArmor :9335-9338). */
+export function canLowerStatOrMirrorArmor(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  dataContext: SimDataContext,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  return canLowerStat(state, battlerId, statId, dataContext) || hasMirrorArmor(state, battler, battlerId, false, dataContext)
+}
+
 const UNNERVE_ABILITIES = [
   'ABILITY_UNNERVE',
   'ABILITY_AS_ONE_ICE_RIDER',

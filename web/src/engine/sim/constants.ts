@@ -46,6 +46,8 @@ export const STAT_SPATK = 4
 export const STAT_SPDEF = 5
 export const STAT_ACC = 6
 export const STAT_EVASION = 7
+/** include/constants/global.h:68 -- `#define NUM_STATS 6` (HP + the five battle stats). */
+export const NUM_STATS = 6
 /** include/constants/pokemon.h:120 -- `NUM_STATS + 2`, so statStages[] is 8 long. */
 export const NUM_BATTLE_STATS = 8
 

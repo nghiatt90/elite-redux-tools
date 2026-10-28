@@ -72,7 +72,10 @@
 //                           Ice Body (and Sundae), Dry Skin, Hydration (and
 //                           Purifying Waters), Shed Skin (and Pattern Change,
 //                           Wonder Scale), Self-Sufficient (and Self-Repair,
-//                           Apple Pie, Dune Veil), Poison Absorb. Unported
+//                           Apple Pie, Dune Veil), Poison Absorb, Acid Reflux,
+//                           Blood Price, Chokehold (and Tentalock, Serpent Bind),
+//                           Flame Coat, Funeral Pyre, Home Run, Honey Gather,
+//                           Life Steal, Soul Tap, Moody, Truant. Unported
 //                           hooks remain conditionally gapped (ENDTURN_ABILITY_IDS).
 //   ENDTURN_ITEMS1          Gapped -- gapped when the battler's item's
 //   ENDTURN_ITEMS2          resolvedHoldEffect is one of ITEMS_1_2_HOLD_EFFECTS
@@ -198,13 +201,32 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
-import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, isBattlerTerrainAffected } from './statusEffects'
+import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
-import { changeStatBuffs, changeStatBuffsImplicit, hasClearAmulet, isBattlerWeatherAffected, isSimAbilitySuppressed, isStatDropBlocked, MOVE_EFFECT_AFFECTS_USER, runReactiveAbilityEffects, STAT_BUFF_ALLOW_PTR } from './statBuffs'
 import {
+  battlerHasSimAbility,
+  canLowerStat,
+  canLowerStatOrMirrorArmor,
+  canRaiseStat,
+  changeStatBuffs,
+  changeStatBuffsImplicit,
+  hasClearAmulet,
+  isBattlerWeatherAffected,
+  isSimAbilitySuppressed,
+  isStatDropBlocked,
+  MOVE_EFFECT_AFFECTS_USER,
+  MOVE_EFFECT_CERTAIN,
+  runReactiveAbilityEffects,
+  STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_NOT_PROTECT_AFFECTED,
+} from './statBuffs'
+import {
+  MOVE_UNSET,
+  NUM_STATS,
+  STAT_ATK,
   STAT_DEF,
   STAT_SPDEF,
   STAT_SPEED,
@@ -222,6 +244,7 @@ import {
   STATUS2_LOCK_CONFUSE,
   STATUS2_MULTIPLETURNS,
   STATUS2_NIGHTMARE,
+  STATUS2_SUBSTITUTE,
   STATUS2_WRAPPED,
   STATUS2_POWDER,
   STATUS3_ALWAYS_HITS,
@@ -742,6 +765,15 @@ function isBattlerTerrainAffectedByToxicTerrain(
 
 export const NO_GROUNDING: GroundingContext = { holdEffectOf: () => null, monotypeChampType: null, isCluelessOnField: false, attackerHasMoldBreaker: false }
 
+export interface EndTurnDeps {
+  grounding?: GroundingContext
+  statStageRatios?: [number, number][]
+  /** `gChosenMoveByBattler[]` (battle_main.c:218), indexed by battler id: the move each battler chose this turn, null when it chose
+   * no move (a switch, or no action). The C clears it only after the end-turn phase (battle_main.c:3517-3520), so it is still set
+   * here; the sim has no such field, so the turn loop supplies it. Absent means "no battler chose a move". */
+  chosenMoveByBattler?: readonly (string | null)[]
+}
+
 /** An ability heal at end of turn: the shared tail of the ported abilities below. */
 function healEndTurn(state: BattleState, battlerId: number, battler: BattlerState, amount: number, results: EndTurnEffectResult[]): void {
   const prevHp = battler.mon.hp
@@ -762,6 +794,70 @@ function healMonStatus(state: BattleState, battlerId: number, battler: BattlerSt
   return true
 }
 
+/** GetAbilityState, battle_util.c:3974-3980: gVolatileStructs[battler].abilityState[GetAbilityIndex(battler, ability)] (0 when the battler lacks the ability). */
+function getAbilityStateOf(battler: BattlerState, abilityId: string): number {
+  const slot = findAbilitySlot(battler.mon.abilities, abilityId)
+  return slot === -1 ? 0 : (battler.volatiles.abilityState[slot] ?? 0)
+}
+
+/** SetAbilityState, battle_util.c:3984-3990. */
+function setAbilityStateOf(battler: BattlerState, abilityId: string, value: number): void {
+  const slot = findAbilitySlot(battler.mon.abilities, abilityId)
+  if (slot !== -1) battler.volatiles.abilityState[slot] = value
+}
+
+/** SetOncePerTurnAbilityCounter, battle_util.c:1709-1715 (switchInAbility.ts has the same write, but imports this module). */
+function setOncePerTurnTrigger(battler: BattlerState, abilityId: string, value: number): void {
+  const slot = findAbilitySlot(battler.mon.abilities, abilityId)
+  if (slot !== -1) battler.turn.turnAbilityTriggers[slot] = value
+}
+
+/** VARIOUS_HP_FRACTION_TO_DAMAGE, battle_script_commands.c:9017-9022: maxHP / fraction, capped at the current hp, minimum 1. */
+function hpFractionToDamage(battler: BattlerState, fraction: number): number {
+  let damage = Math.trunc(battler.mon.maxHp / fraction)
+  if (damage > battler.mon.hp) damage = battler.mon.hp
+  return damage === 0 ? 1 : damage
+}
+
+/**
+ * Life Steal / Soul Tap's shared body (src/abilities.cc:9101-9114, :9959-9973): every alive, non-Magic-Guard opposing battler runs
+ * BattleScript_AbilityDrainsHp (data/battle_scripts_1.s:3257-3266) with the holder as gStackBattler1 and the foe as gStackBattler2 --
+ * the foe loses maxHP / 10, then BattleScript_AbsorbLeech (:3293-3335) heals the holder by that amount (or damages it, under Liquid Ooze).
+ */
+function abilityDrainsHp(
+  state: BattleState,
+  holderId: number,
+  holder: BattlerState,
+  unmodelled: string[],
+  results: EndTurnEffectResult[],
+): void {
+  for (let targetId = (holderId & 1) ^ 1; targetId < state.battlersCount; targetId += 2) {
+    const target = state.battlers[targetId]
+    if (!target || target.mon.hp === 0) continue // FILTER(IsBattlerAlive(target))
+    if (isMagicGuardProtected(state, target)) continue // FILTER_NOT(IsMagicGuardProtected(target))
+
+    const damage = hpFractionToDamage(target, 10) // hpfractiontodamage BS_STACK_2, 10
+    const targetFainted = applyEndTurnHp(state, targetId, target, -damage) // datahpupdate BS_TARGET
+    results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -damage, fainted: targetFainted })
+
+    // BattleScript_AbsorbLeech_Test (:3298-3308), BattleScript_AbsorbLiquidOoze (:3318-3323), BattleScript_AbsorbUpdateHp (:3324-3329)
+    if (battlerHasAbility(target.mon.abilities, 'ABILITY_LIQUID_OOZE', NO_SUPPRESSION)) {
+      const prevHp = holder.mon.hp
+      const holderFainted = applyEndTurnHp(state, holderId, holder, -damage)
+      results.push({ battlerId: holderId, effect: 'ABILITY', hpChange: holder.mon.hp - prevHp, fainted: holderFainted })
+      continue
+    }
+    if (!canBattlerHeal(state, holderId, holder, unmodelled)) continue // jumpifhealingblocked + jumpifstatus STATUS1_BLEED
+    if (
+      battlerHasAbility(holder.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION) ||
+      battlerHasAbility(target.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION)
+    ) {
+      unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3309-3317): the second hit on the drained battler is not modelled')
+    }
+    if (holder.mon.hp > 0) healEndTurn(state, holderId, holder, damage, results)
+  }
+}
+
 /**
  * ENDTURN_ABILITIES, battle_util.c:2452-2459 -> AbilityBattleEffects(ABILITYEFFECT_ENDTURN, ...)
  * (:4397-4399) -> HandleEndTurnAbility (:9213-9239).
@@ -774,7 +870,7 @@ function runEndTurnAbilities(
   battlerId: number,
   battler: BattlerState,
   dataContext: SimDataContext,
-  deps: { grounding?: GroundingContext; statStageRatios?: [number, number][] } | undefined,
+  deps: EndTurnDeps | undefined,
   unmodelled: string[],
 ): EndTurnEffectResult[] {
   const results: EndTurnEffectResult[] = []
@@ -1041,6 +1137,184 @@ function runEndTurnAbilities(
         break
       }
 
+      case 'ABILITY_ACID_REFLUX': {
+        // src/abilities.cc:12253-12258: the once-per-turn counter takes over the live state so a second attack queued later in the
+        // end-turn phase is still suppressed. (The state is set by Acid Reflux's onReactive, which the sim does not run yet.)
+        setOncePerTurnTrigger(battler, slotAbility, getAbilityStateOf(battler, slotAbility))
+        setAbilityStateOf(battler, slotAbility, 0)
+        break
+      }
+
+      case 'ABILITY_BLOOD_PRICE': {
+        // src/abilities.cc:6783-6794, BattleScript_AbilitySelfDamage (data/battle_scripts_1.s:9597-9604)
+        const lastMove = battler.lastResultingMove
+        if (!lastMove || lastMove === MOVE_UNSET) break // CHECK(gLastResultingMoves[battler]), CHECK(!= 0xFFFF)
+        const lastMoveData = dataContext.move(lastMove)
+        if (!lastMoveData) {
+          unmodelled.push(`battler ${battlerId}: Blood Price's IS_MOVE_STATUS(${lastMove}) (abilities.cc:6786) could not be evaluated: move data is unavailable`)
+          break
+        }
+        if (lastMoveData.split === 'STATUS') break // CHECK_NOT(IS_MOVE_STATUS(...))
+        if (isMagicGuardProtected(state, battler)) break
+        const dmg = Math.max(1, Math.trunc(battler.mon.maxHp / 10)) // :6790-6791
+        const prevHp = battler.mon.hp
+        const fainted = applyEndTurnHp(state, battlerId, battler, -dmg)
+        results.push({ battlerId, effect: 'ABILITY', hpChange: battler.mon.hp - prevHp, fainted })
+        break
+      }
+
+      case 'ABILITY_SERPENT_BIND':
+      case 'ABILITY_TENTALOCK':
+      case 'ABILITY_CHOKEHOLD': {
+        // Impl<ABILITY_SERPENT_BIND>.onEndTurn, src/abilities.cc:12008-12024 (Tentalock :12080, Chokehold :12087 alias it).
+        for (let i = state.battlersCount - 1; i >= 0; i--) {
+          const wrapped = state.battlers[i]
+          if (!wrapped) continue
+          if (!hasFlag(wrapped.mon.status2, STATUS2_WRAPPED)) continue
+          if (state.wrappedBy[i] !== battlerId) continue
+          if (!canLowerStatOrMirrorArmor(state, i, STAT_SPEED, dataContext)) continue
+          // AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1, battler, i) (:277-284) -> SetMoveEffect (battle_script_commands.c:2765-2779):
+          // ChangeStatBuffsImplicit(-1, STAT_SPEED, affectsUser(0) | (Mirror Armor reflected ? STAT_BUFF_ALLOW_PTR : 0)); the sim's
+          // ChangeStatBuffs does not reflect (it reports a Mirror Armor target as unmodelled), so the flag stays 0. Shield Dust is skipped
+          // because HITMARKER_IGNORE_SAFEGUARD is set (:2348). The Sheer Force / substitute (:2388) / Mist / Protect checks there read
+          // gCurrentMove, which the sim does not keep across the end-turn phase.
+          gapIf(
+            hasFlag(wrapped.mon.status2, STATUS2_SUBSTITUTE),
+            unmodelled,
+            `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${i} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
+          )
+          changeStatBuffsImplicit(
+            state,
+            battlerId,
+            i,
+            -1,
+            STAT_SPEED,
+            0,
+            true,
+            { dataContext, grounding: deps?.grounding },
+            unmodelled,
+          )
+        }
+        break
+      }
+
+      case 'ABILITY_FLAME_COAT':
+      case 'ABILITY_FUNERAL_PYRE': {
+        // src/abilities.cc:9480-9495 (Flame Coat) / :8260-8274 (Funeral Pyre); BattleScript_FireCoatDamage (maxHP / 8) and
+        // BattleScript_FuneralPyreDamage (maxHP / 4), data/battle_scripts_1.s:8629-8651, both ending in BattleScript_DoTurnDmg.
+        // CHECK(IsAbilityOnField(ability) - 1 == battler): only the lowest-numbered alive holder runs the hook (battle_util.c:4803-4811).
+        let firstHolder = -1
+        for (let i = 0; i < state.battlersCount; i++) {
+          const holder = state.battlers[i]
+          if (!holder || holder.mon.hp === 0) continue
+          if (battlerHasSimAbility(state, holder, slotAbility, true, i, false, dataContext)) {
+            firstHolder = i
+            break
+          }
+        }
+        if (firstHolder !== battlerId) break
+        const flameCoat = slotAbility === 'ABILITY_FLAME_COAT'
+        for (let targetId = 0; targetId < state.battlersCount; targetId++) {
+          const target = state.battlers[targetId]
+          if (!target || target.mon.hp === 0) continue // FILTER(IsBattlerAlive(target))
+          if (flameCoat ? target.mon.types.includes('FIRE') : target.mon.types.includes('GHOST') || target.mon.types.includes('DARK')) continue
+          if (isMagicGuardProtected(state, target)) continue
+          if (flameCoat && battlerHasSimAbility(state, target, 'ABILITY_FLARE_BOOST', true, targetId, false, dataContext)) continue
+          const dmg = hpFractionToDamage(target, flameCoat ? 8 : 4)
+          const fainted = applyEndTurnHp(state, targetId, target, -dmg)
+          results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -dmg, fainted })
+        }
+        break
+      }
+
+      case 'ABILITY_HOME_RUN': {
+        // src/abilities.cc:11927-11931 (the onAttacker half, :11932-11984, needs CalculateStat for all five stats and is not ported)
+        if (getAbilityStateOf(battler, slotAbility)) setAbilityStateOf(battler, slotAbility, 0)
+        break
+      }
+
+      case 'ABILITY_HONEY_GATHER': {
+        // src/abilities.cc:1813-1822, BattleScript_HoneyGatherActivates (message only)
+        if (battler.mon.itemId) break // CHECK_NOT(gBattleMons[battler].item)
+        if (!(state.rng.random16() % 2)) break // CHECK(Random() % 2)
+        // UpdateBattlerItem(battler, ITEM_HONEY), battle_script_commands.c:2194-2204: the battler held nothing, so Unburden and Sugar Rush reset.
+        setAbilityStateOf(battler, 'ABILITY_UNBURDEN', 0)
+        setAbilityStateOf(battler, 'ABILITY_SUGAR_RUSH', 0)
+        battler.mon.itemId = 'ITEM_HONEY'
+        break
+      }
+
+      case 'ABILITY_LIFE_STEAL': {
+        // src/abilities.cc:9101-9114
+        abilityDrainsHp(state, battlerId, battler, unmodelled, results)
+        break
+      }
+
+      case 'ABILITY_SOUL_TAP': {
+        // src/abilities.cc:9959-9973: Life Steal's drain, but only in fog
+        if (isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, { dataContext, grounding: deps?.grounding })) {
+          abilityDrainsHp(state, battlerId, battler, unmodelled, results)
+        }
+        break
+      }
+
+      case 'ABILITY_MOODY': {
+        // src/abilities.cc:2053-2083, BattleScript_MoodyActivates (data/battle_scripts_1.s:9459-9477)
+        if (battler.volatiles.isFirstTurn === 2) break
+        let validToRaise = 0
+        let validToLower = 0
+        for (let i = STAT_ATK; i < NUM_STATS; i++) {
+          if (canLowerStat(state, battlerId, i, dataContext)) validToLower |= 1 << i
+          if (canRaiseStat(state, battlerId, i, dataContext)) validToRaise |= 1 << i
+        }
+        if (!validToLower && !validToRaise) break
+        // `(Random() % NUM_STATS - STAT_ATK) + STAT_ATK` is Random() % NUM_STATS: it can land on 0 (HP), which is never a valid bit, so the
+        // loop re-rolls.
+        let raiseStat = 0
+        let lowerStat = 0
+        if (validToRaise) {
+          do {
+            raiseStat = state.rng.random16() % NUM_STATS
+          } while (!(validToRaise & (1 << raiseStat)))
+          validToLower &= ~(1 << raiseStat)
+        }
+        if (validToLower) {
+          do {
+            lowerStat = state.rng.random16() % NUM_STATS
+          } while (!(validToLower & (1 << lowerStat)))
+        }
+        battler.round.disableEjectPack = true
+        // The script gates each statbuffchange on sSTATCHANGER / sSAVED_STAT_CHANGER being non-zero; the C leaves those stale from an
+        // earlier stat change when its side had no valid stat, which the sim cannot reproduce, so an empty side is treated as zero.
+        const moodyFlags = MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN | STAT_BUFF_NOT_PROTECT_AFFECTED
+        const moodyDeps = { dataContext, grounding: deps?.grounding }
+        if (raiseStat !== 0) {
+          changeStatBuffsImplicit(state, battlerId, battlerId, 2, raiseStat, moodyFlags, true, moodyDeps, unmodelled)
+        }
+        if (lowerStat !== 0) {
+          changeStatBuffsImplicit(state, battlerId, battlerId, -1, lowerStat, moodyFlags, true, moodyDeps, unmodelled)
+        }
+        break
+      }
+
+      case 'ABILITY_TRUANT': {
+        // src/abilities.cc:1189-1195; the flag is read by CANCELLER_TRUANT (attackCanceller.ts)
+        if (getAbilityStateOf(battler, slotAbility)) {
+          setAbilityStateOf(battler, slotAbility, 0)
+        } else {
+          const chosenMove = deps?.chosenMoveByBattler?.[battlerId] ?? null
+          if (chosenMove) {
+            const chosenMoveData = dataContext.move(chosenMove)
+            if (!chosenMoveData) {
+              unmodelled.push(`battler ${battlerId}: Truant's IS_MOVE_STATUS(${chosenMove}) (abilities.cc:1192) could not be evaluated: move data is unavailable`)
+            } else if (chosenMoveData.split !== 'STATUS') {
+              setAbilityStateOf(battler, slotAbility, 1)
+            }
+          }
+        }
+        break
+      }
+
       default: {
         if (ENDTURN_ABILITY_IDS.has(slotAbility)) {
           // Conditional gap for unmodelled abilities:
@@ -1071,7 +1345,7 @@ export function runEndTurnEffects(
   state: BattleState,
   battlerOrder: readonly number[],
   dataContext: SimDataContext,
-  deps?: { grounding?: GroundingContext; statStageRatios?: [number, number][] },
+  deps?: EndTurnDeps,
 ): { results: EndTurnEffectResult[]; unmodelled: string[] } {
   const results: EndTurnEffectResult[] = []
   const unmodelled: string[] = []

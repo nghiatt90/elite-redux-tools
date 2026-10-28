@@ -1110,6 +1110,11 @@ const ANNOUNCE_ONLY_ON_ENTRY: ReadonlySet<string> = new Set([
   'ABILITY_BLOOD_STAIN',
   'ABILITY_CROWNED_KING',
   'ABILITY_POWER_OUTAGE',
+  // Flame Coat (abilities.cc:9476-9479) and Funeral Pyre (:8255-8259): onEntry is CHECK_NOT(CheckAbilityWasAnnounced) + SwitchInAnnounce;
+  // CheckAbilityWasAnnounced (:227-235) can only set another holder's switchInAbilityDone flag (via CheckAndSetSwitchInAbility), which
+  // nothing but this same announcement gate reads for these two. Their damage is in endTurn.ts.
+  'ABILITY_FLAME_COAT',
+  'ABILITY_FUNERAL_PYRE',
 ])
 
 /**

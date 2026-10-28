@@ -3560,6 +3560,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       const battlerResult = runEndTurnEffects(state, endTurnOrder, deps.dataContext, {
         grounding: deps.grounding,
         statStageRatios: deps.statStageRatios,
+        // gChosenMoveByBattler (battle_main.c:3690, :3914): still set during the end-turn phase, cleared only after it (:3517-3520).
+        chosenMoveByBattler: Array.from({ length: state.battlersCount }, (_, id) => {
+          const action = actions[id]
+          return action?.action === 'USE_MOVE' && action.chosenMove ? action.chosenMove.id : null
+        }),
       })
       endTurn = battlerResult.results
       endTurnUnmodelled = battlerResult.unmodelled
