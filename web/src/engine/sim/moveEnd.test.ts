@@ -953,15 +953,15 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps an unported attacker ability (ABILITY_CHAINSAW) on damaging hit', () => {
+  it('conditionally gaps an unported attacker ability (ABILITY_BACKFLIP) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_CHAINSAW'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_BACKFLIP'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_CHAINSAW is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_BACKFLIP is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1148,17 +1148,27 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 70 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 80 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
       'ABILITY_AFTERSHOCK',
+      'ABILITY_ANGELS_WRATH',
+      'ABILITY_ARCHMAGE',
+      'ABILITY_ASSASSINS_TOOLS',
       'ABILITY_ATOMIC_BURST',
+      'ABILITY_BEAUTIFUL_MUSIC',
       'ABILITY_BLADE_DANCE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_CHAINSAW',
+      'ABILITY_CRUSHING_JAW',
       'ABILITY_CRYO_PROFICIENCY',
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
+      'ABILITY_DAREDEVIL',
+      'ABILITY_DEAD_POWER',
+      'ABILITY_DEEP_CUTS',
+      'ABILITY_DENTING_BLOWS',
       'ABILITY_DEVIATE',
       'ABILITY_ELEMENTAL_CHARGE',
       'ABILITY_EMANATE',

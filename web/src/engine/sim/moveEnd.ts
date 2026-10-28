@@ -83,6 +83,7 @@ import {
   STATUS3_TELEKINESIS,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STAT_ATK,
   STAT_DEF,
@@ -138,8 +139,10 @@ import {
   canSleep,
   doesSubstituteBlockMove,
   isAbilityStatusProtected,
+  isKeenEdgeMove,
   isPowderImmune,
   isPreventableSecondaryEffect,
+  isSoundMove,
   testSheerForceFlag,
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
@@ -556,6 +559,16 @@ const ON_RECOIL_ABILITIES = [
   'ABILITY_SUPER_STRAIN',
 ]
 
+// The move types each ON_RECOIL ability's onRecoil(100, battler, moveType) answers non-zero for; null = every type.
+// Read for IsRecklessBoosted (src/abilities.cc:463-470). Doom Blast :9297, Dual Shadow :9569, Electric Burst :4337, Infernal Rage :5474, Super Strain :6317.
+const ON_RECOIL_TYPES: Record<string, readonly string[] | null> = {
+  ABILITY_DOOM_BLAST: ['DARK'],
+  ABILITY_DUAL_SHADOW: ['ELECTRIC', 'DARK'],
+  ABILITY_ELECTRIC_BURST: ['ELECTRIC'],
+  ABILITY_INFERNAL_RAGE: ['FIRE'],
+  ABILITY_SUPER_STRAIN: null,
+}
+
 // Target items in ITEMEFFECT_TARGET (battle_util.c:6126-6250) other than Rocky Helmet
 const TARGET_ITEM_EFFECTS = new Set([
   'HOLD_EFFECT_RED_CARD',
@@ -881,6 +894,16 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_FRAGRANT_DAZE',
   'ABILITY_HYPNOTIC_TOUCH',
   'ABILITY_MAGICAL_DUST',
+  'ABILITY_DEEP_CUTS',
+  'ABILITY_BEAUTIFUL_MUSIC',
+  'ABILITY_DEAD_POWER',
+  'ABILITY_ASSASSINS_TOOLS',
+  'ABILITY_CRUSHING_JAW',
+  'ABILITY_CHAINSAW',
+  'ABILITY_DENTING_BLOWS',
+  'ABILITY_DAREDEVIL',
+  'ABILITY_ARCHMAGE',
+  'ABILITY_ANGELS_WRATH',
 ])
 
 /**
@@ -2341,10 +2364,17 @@ const ATE_ON_HIT_STATUS: Record<string, AteStatusSpec> = {
   ABILITY_MOB_BOSS: { type: 'DARK', effect: MOVE_EFFECT_ENRAGE, can: (st, _a, t, _d) => Boolean(st.battlers[t] && !hasFlag(st.battlers[t]!.mon.status2, STATUS2_ENRAGED)) },
 }
 
+/** CanBeDisabled (src/battle_util.c:5019-5022): no disabledMove yet and not ability-protected (CHECK_RESTRICTING). */
+function canBeDisabled(state: BattleState, targetId: number, attackerId: number, statusDeps: StatusDeps): boolean {
+  const target = state.battlers[targetId]
+  if (!target) return false
+  return target.volatiles.disabledMove === null && isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null
+}
+
 /** AbilityStatusEffect (abilities.cc:263-268): sets gBattleScripting.moveEffect and runs BattleScript_AbilityStatusEffect, ignoring Safeguard. */
 function applyAbilityOnHitStatus(
   state: BattleState,
-  effect: number | 'DRENCH' | 'ATTRACT' | 'FEAR',
+  effect: number | 'DRENCH' | 'ATTRACT' | 'FEAR' | 'CURSE' | 'PREVENT_ESCAPE' | 'DISABLE',
   attackerId: number,
   targetId: number,
   moveId: string,
@@ -2376,9 +2406,103 @@ function applyAbilityOnHitStatus(
     }
     return
   }
+  if (effect === 'CURSE') {
+    // MOVE_EFFECT_CURSE (battle_script_commands.c:2721-2726)
+    if (!hasFlag(target.mon.status2, STATUS2_CURSED)) {
+      target.mon.status2 = setFlag(target.mon.status2, STATUS2_CURSED)
+      result.statusApplied = { battlerId: targetId, status: 'CURSE' }
+    }
+    return
+  }
+  if (effect === 'PREVENT_ESCAPE') {
+    // MOVE_EFFECT_PREVENT_ESCAPE (battle_script_commands.c:2823-2826): no already-set check in the case itself
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+    target.volatiles.battlerPreventingEscape = attackerId
+    result.statusApplied = { battlerId: targetId, status: 'ESCAPE_PREVENTION' }
+    return
+  }
+  if (effect === 'DISABLE') {
+    // MOVE_EFFECT_DISABLE (battle_script_commands.c:2955-2959): CanBeDisabled, then DisableLastUsedMove (:10714-10737; B_DISABLE_TURNS GEN_7 -> 4)
+    const lastMove = target.lastMove
+    const moveIdx = lastMove ? target.mon.moves.indexOf(lastMove) : -1
+    if (canBeDisabled(state, targetId, attackerId, statusDeps) && moveIdx !== -1 && (target.mon.pp[moveIdx] ?? 0) !== 0) {
+      target.volatiles.disabledMove = lastMove
+      target.volatiles.disableTimer = 4
+      target.volatiles.disableTimerStartValue = 4
+    }
+    return
+  }
   const res = applyPrimaryStatusEffect(state, attackerId, targetId, effect, moveId, statusDeps, unmodelled, false, false, true)
   if (res.applied && res.status) {
     result.statusApplied = { battlerId: targetId, status: res.status }
+  }
+}
+
+/**
+ * AbilityStatusEffect(MOVE_EFFECT_<STAT>_MINUS_1) on the target (abilities.cc:263-268; SetMoveEffect, battle_script_commands.c:2361, 2388, 2765-2781),
+ * shaped exactly like Whiplash's: Sheer Force and Substitute gates, then a -1 stage change.
+ */
+function applyAbilityStatDrop(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  statId: number,
+  moveId: string,
+  deps: TurnLoopDeps,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+  result: { statChanges: StatChangeOutcome[] },
+): void {
+  if (testSheerForceFlag(state, attackerId, moveId, statusDeps)) return
+  if (doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) return
+  const res = changeStatBuffs(
+    state,
+    targetId,
+    attackerId,
+    targetId,
+    -1,
+    statId,
+    STAT_BUFF_ALLOW_PTR,
+    false,
+    { dataContext: deps.dataContext, grounding: deps.grounding },
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    result.statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
+  }
+}
+
+/**
+ * AbilityStatusEffect(MOVE_EFFECT_<STAT>_PLUS_1 | MOVE_EFFECT_AFFECTS_USER) (abilities.cc:263-268; SetMoveEffect, battle_script_commands.c:2336-2339, 2361,
+ * 2751-2764): the Sheer Force gate still applies (:2361), the Substitute gate does not for an affects-user effect (:2388).
+ */
+function applyAbilitySelfStatRaise(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  statId: number,
+  moveId: string,
+  deps: TurnLoopDeps,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+  result: { statChanges: StatChangeOutcome[] },
+): void {
+  if (testSheerForceFlag(state, attackerId, moveId, statusDeps)) return
+  const res = changeStatBuffsImplicit(
+    state,
+    attackerId,
+    targetId,
+    1,
+    statId,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT,
+    false,
+    { dataContext: deps.dataContext, grounding: deps.grounding },
+    unmodelled,
+    moveId,
+  )
+  if (res.delta !== 0) {
+    result.statChanges.push({ battlerId: attackerId, stat: statId, change: res.delta })
   }
 }
 
@@ -2649,6 +2773,305 @@ function handleAttackerMoveEndAbility(
       state.rng.random16() % 2 !== 0
     ) {
       applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Deep Cuts (src/abilities.cc:9088-9097): CanBleed, Keen Edge move, then the 50% roll (C's CHECK order -- the roll is drawn last)
+  if (abilityId === 'ABILITY_DEEP_CUTS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBleed(state, targetId, attackerId, statusDeps) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Beautiful Music (src/abilities.cc:7838-7846): the 50% roll comes BEFORE IsSoundMove in the C, so it is drawn for every hit by the holder.
+  // MOVE_EFFECT_ATTRACT runs CanInfatuate inside SetMoveEffect (battle_script_commands.c:2727-2732), i.e. in applyAttractEffect.
+  if (abilityId === 'ABILITY_BEAUTIFUL_MUSIC') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      state.rng.random16() % 2 !== 0 &&
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
+    ) {
+      applyAbilityOnHitStatus(state, 'ATTRACT', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Dead Power (src/abilities.cc:7585-7598): contact hit curses a target that is not already cursed, 20%
+  if (abilityId === 'ABILITY_DEAD_POWER') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !hasFlag(target.mon.status2, STATUS2_CURSED) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < 20
+    ) {
+      applyAbilityOnHitStatus(state, 'CURSE', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Assassin's Tools (src/abilities.cc:8598-8621): contact hit, then Random() % 3 picks ONE branch (poison / paralysis / bleed); a branch whose
+  // CanX fails does nothing (no reroll). MOVE_EFFECT_POISON, not Toxic.
+  if (abilityId === 'ABILITY_ASSASSINS_TOOLS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      const branch = state.rng.random16() % 3
+      if (branch === 0 && canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_POISON, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      } else if (branch === 1 && canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_PARALYSIS, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      } else if (branch === 2 && canBleed(state, targetId, attackerId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Crushing Jaw (src/abilities.cc:11597-11607): FLAG_STRONG_JAW_BOOST (= biteBased), 50% roll, then StatLowerableOrMirrorArmor(target, STAT_DEF)
+  if (abilityId === 'ABILITY_CRUSHING_JAW') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      Boolean(moveData?.flags?.biteBased) &&
+      state.rng.random16() % 2 !== 0 &&
+      canLowerStatOrMirrorArmor(state, targetId, STAT_DEF, deps.dataContext)
+    ) {
+      applyAbilityStatDrop(state, attackerId, targetId, STAT_DEF, moveId, deps, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Chainsaw (src/abilities.cc:11236-11248) and Denting Blows (:8045-8057): Whiplash's once-per-turn-per-target Defense drop, gated on a
+  // Keen Edge move / a hammer move (gBattleMoves[move].hammerBased). The target's bit is recorded before the effect is applied.
+  if (abilityId === 'ABILITY_CHAINSAW' || abilityId === 'ABILITY_DENTING_BLOWS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      (abilityId === 'ABILITY_CHAINSAW'
+        ? isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled)
+        : Boolean(moveData?.flags?.hammerBased)) &&
+      canLowerStatOrMirrorArmor(state, targetId, STAT_DEF, deps.dataContext)
+    ) {
+      const affected = getOncePerTurnAbilityCounter(state, attackerId, abilityId, deps.dataContext)
+      if ((affected & (1 << targetId)) === 0) {
+        setOncePerTurnAbilityCounter(state, attackerId, abilityId, affected | (1 << targetId), deps.dataContext)
+        applyAbilityStatDrop(state, attackerId, targetId, STAT_DEF, moveId, deps, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Daredevil (src/abilities.cc:12382-12391): ShouldApplyOnHitEffect(battler), IsRecklessBoosted (abilities.cc:463-470: FLAG_RECKLESS_BOOST,
+  // STATUS2_ENRAGED, or power && an onRecoil ability that answers for this move type), CanRaiseStat, then
+  // AbilityStatusEffect(MOVE_EFFECT_ATK_PLUS_1 | MOVE_EFFECT_AFFECTS_USER) -- SetMoveEffect still runs the Sheer Force gate (battle_script_commands.c:2361)
+  // but skips the Substitute gate for an affects-user effect (:2388).
+  if (abilityId === 'ABILITY_DAREDEVIL') {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    const recklessBoosted =
+      Boolean(moveData?.flags?.reckless) ||
+      hasFlag(attacker.mon.status2, STATUS2_ENRAGED) ||
+      (Boolean(moveData && moveData.power > 0) &&
+        Object.entries(ON_RECOIL_TYPES).some(
+          ([ab, types]) =>
+            battlerHasAbility(attacker.mon.abilities, ab, () => false) && (types === null || (effectiveType !== null && types.includes(effectiveType))),
+        ))
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      recklessBoosted &&
+      canRaiseStat(state, attackerId, STAT_ATK, deps.dataContext)
+    ) {
+      applyAbilitySelfStatRaise(state, attackerId, targetId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Archmage (src/abilities.cc:5851-5988): DidMoveHit, not a status move, 30% roll (drawn for every damaging hit, before the type switch), then one
+  // effect keyed on the move's type. Every case but Rock also needs the target alive (IsBattlerAlive(target)); Bug is a TODO in the C and does nothing.
+  // AbilityStatusEffect cases go through applyAbilityOnHitStatus (Sheer Force / Substitute gates); the BattleScriptCall cases (terrains, Encore,
+  // Stealth Rock) bypass SetMoveEffect, so they carry no such gates.
+  if (abilityId === 'ABILITY_ARCHMAGE') {
+    if (
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveData?.split !== 'STATUS' &&
+      state.rng.random16() % 100 < 30
+    ) {
+      const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+      const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+      const targetAlive = target.mon.hp > 0
+      const sideOfTarget = state.sides[targetId & 1]!
+      switch (effectiveType) {
+        case 'POISON':
+          if (targetAlive && canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+            applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'ICE':
+          if (targetAlive && canGetFrostbite(state, targetId, attackerId, statusDeps)) {
+            applyAbilityOnHitStatus(state, MOVE_EFFECT_FROSTBITE, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'WATER':
+          if (targetAlive && canBeConfused(state, targetId, attackerId, statusDeps)) {
+            applyAbilityOnHitStatus(state, MOVE_EFFECT_CONFUSION, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'FIRE':
+          if (targetAlive && canBeBurned(state, targetId, attackerId, statusDeps)) {
+            applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'ELECTRIC':
+        case 'PSYCHIC':
+        // Fairy AND Grass both set MISTY terrain in the C (abilities.cc:5901-5906 and :5908-5913: the Grass case passes STATUS_FIELD_MISTY_TERRAIN while its
+        // script prints "grassy"). Ported as written, not "fixed" to Grassy.
+        case 'FAIRY':
+        case 'GRASS': {
+          const terrainFlag =
+            effectiveType === 'ELECTRIC'
+              ? STATUS_FIELD_ELECTRIC_TERRAIN
+              : effectiveType === 'PSYCHIC'
+                ? STATUS_FIELD_PSYCHIC_TERRAIN
+                : STATUS_FIELD_MISTY_TERRAIN
+          if (targetAlive && tryChangeBattleTerrain(state, attackerId, terrainFlag, deps)) {
+            dispatchOnTerrainChange(state, deps, unmodelled)
+          }
+          break
+        }
+        case 'NORMAL': {
+          // SetEncore (battle_script_commands.c:10739-10758); the C moves[] search finds the slot holding gLastMoves[target]
+          const lastMove = target.lastMove
+          const moveIdx = lastMove ? target.mon.moves.indexOf(lastMove) : -1
+          if (
+            targetAlive &&
+            target.volatiles.encoreTimer === 0 &&
+            isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null &&
+            lastMove !== 'MOVE_STRUGGLE' &&
+            lastMove !== 'MOVE_ENCORE' &&
+            lastMove !== 'MOVE_MIRROR_MOVE' &&
+            target.volatiles.encoredMove === null &&
+            moveIdx !== -1 &&
+            (target.mon.pp[moveIdx] ?? 0) !== 0
+          ) {
+            target.volatiles.encoredMove = lastMove
+            target.volatiles.encoredMovePos = moveIdx
+            target.volatiles.encoreTimer = 3
+            target.volatiles.encoreTimerStartValue = 3
+          }
+          break
+        }
+        case 'ROCK':
+          if (!hasFlag(sideOfTarget.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+            sideOfTarget.statuses = setFlag(sideOfTarget.statuses, SIDE_STATUS_STEALTH_ROCK)
+            sideOfTarget.timers.stealthRockType = TYPE_NAME_BY_ID.indexOf('ROCK')
+          }
+          break
+        case 'GHOST':
+          if (targetAlive && canBeDisabled(state, targetId, attackerId, statusDeps)) {
+            applyAbilityOnHitStatus(state, 'DISABLE', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'DARK':
+          if (targetAlive && canBleed(state, targetId, attackerId, statusDeps)) {
+            applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        case 'FIGHTING':
+        case 'FLYING':
+        case 'STEEL': {
+          const statId = effectiveType === 'FIGHTING' ? STAT_SPATK : effectiveType === 'FLYING' ? STAT_SPEED : STAT_DEF
+          if (targetAlive && canRaiseStat(state, attackerId, statId, deps.dataContext)) {
+            applyAbilitySelfStatRaise(state, attackerId, targetId, statId, moveId, deps, statusDeps, unmodelled, result)
+          }
+          break
+        }
+        case 'DRAGON':
+          if (targetAlive && canLowerStatOrMirrorArmor(state, targetId, STAT_ATK, deps.dataContext)) {
+            applyAbilityStatDrop(state, attackerId, targetId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
+          }
+          break
+        case 'GROUND':
+          if (targetAlive && !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+            applyAbilityOnHitStatus(state, 'PREVENT_ESCAPE', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+          }
+          break
+        default:
+          break
+      }
+    }
+  }
+
+  // Angel's Wrath (src/abilities.cc:5570-5666): a `switch (move)` on the literal move used. Tackle (:5573), Electroweb (:5643) and Bug Bite (:5654) are
+  // ported; String Shot (:5592), Harden (:5617) and Iron Defense (:5635) read gMoveResultFlags / WasMoveSuccessful, which MoveEndAbilitiesContext does not
+  // carry, so those three only push an unmodelled note. Its onAccuracy / onTypeEffectiveness / onModifyEffectChance / onCanStatusType hooks are damage-path.
+  if (abilityId === 'ABILITY_ANGELS_WRATH') {
+    if (moveId === 'MOVE_TACKLE') {
+      // CHECK(ShouldApplyOnHitEffect(target)), !IsAbilityStatusProtected(CHECK_RESTRICTING), not (encoreTimer AND disableTimer); each missing half is
+      // set from the target's slot-0 move (gBattleMons[target].moves[0]); BattleScriptCall only prints.
+      if (
+        target.mon.hp > 0 &&
+        hpDealt > 0 &&
+        attackerId !== targetId &&
+        isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null &&
+        (target.volatiles.encoreTimer === 0 || target.volatiles.disableTimer === 0)
+      ) {
+        if (target.volatiles.encoreTimer === 0) {
+          target.volatiles.encoreTimer = 2
+          target.volatiles.encoredMove = target.mon.moves[0] ?? null
+        }
+        if (target.volatiles.disableTimer === 0) {
+          target.volatiles.disableTimer = 2
+          target.volatiles.disableTimerStartValue = 2
+          target.volatiles.disabledMove = target.mon.moves[0] ?? null
+        }
+      }
+    } else if (moveId === 'MOVE_ELECTROWEB') {
+      // CHECK(ShouldApplyOnHitEffect(target)), not already trapped, Speed not already -6: Speed to -6 and STATUS2_ESCAPE_PREVENTION (no battlerPreventingEscape write in the C)
+      const speedStage = target.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
+      if (
+        target.mon.hp > 0 &&
+        hpDealt > 0 &&
+        attackerId !== targetId &&
+        !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION) &&
+        speedStage !== MIN_STAT_STAGE
+      ) {
+        target.mon.statStages[STAT_SPEED] = MIN_STAT_STAGE
+        target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+        result.statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: MIN_STAT_STAGE - speedStage })
+      }
+    } else if (moveId === 'MOVE_BUG_BITE') {
+      // CHECK(ShouldApplyOnHitEffect(battler)), not at max HP, CanBattlerHeal: gBattleMoveDamage = -gHpDealt, then BattleScript_AngelsWrath_Effect_Bug_Bite_2
+      // runs manipulatedamage DMG_TO_HP_FROM_ABILITY = GetDrainedBigRootHp (battle_util.c:2369-2377: Big Root x3/2, Absorbant x3/2) and heals by it.
+      if (
+        attacker.mon.hp > 0 &&
+        hpDealt > 0 &&
+        attackerId !== targetId &&
+        attacker.mon.hp < attacker.mon.maxHp &&
+        canBattlerHeal(state, attackerId, attacker, unmodelled)
+      ) {
+        let heal = hpDealt
+        if (deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_BIG_ROOT') heal = Math.trunc((heal * 3) / 2)
+        if (battlerHasSimAbility(state, attacker, 'ABILITY_ABSORBANT', false, attackerId, false, deps.dataContext)) heal = Math.trunc((heal * 3) / 2)
+        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+        syncPartyHp(state, attackerId)
+      }
+    } else if (moveId === 'MOVE_STRING_SHOT' || moveId === 'MOVE_HARDEN' || moveId === 'MOVE_IRON_DEFENSE') {
+      unmodelled.push(
+        `Angel's Wrath's ${moveId} case (abilities.cc:5592-5642) is not modelled: it reads gMoveResultFlags / WasMoveSuccessful, which the move-end context does not carry`,
+      )
     }
   }
 
