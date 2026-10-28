@@ -11807,6 +11807,12 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_FOCUS_PUNCH' ||
     // Shell Trap (s:4672-4676): the gate and retarget are hitScripts.ts's runLegacyPreHit, then a plain BattleScript_HitFromAtkString hit.
     moveEffect === 'EFFECT_SHELL_TRAP' ||
+    // Pursuit, Grassy Glide and Revelation Dance are legacy_config "BattleScript_EffectHit" in er-config MoveBehaviorConfigList.textproto
+    // (:614-617, :1694-1696, :1531-1533): a plain hit. Their rules live elsewhere (basePower.ts, turnOrder.ts:396, calculate.ts);
+    // Pursuit's switch interception keeps its own note (damageResolver.ts, battle_script_commands.c:11294-11325, s:7197-7209).
+    moveEffect === 'EFFECT_PURSUIT' ||
+    moveEffect === 'EFFECT_GRASSY_GLIDE' ||
+    moveEffect === 'EFFECT_REVELATION_DANCE' ||
     // Decorate (s:582-584) and Hit Enemy Heal Ally (s:1556-1558) hit a foe through BattleScript_EffectHit; an ALLY target takes
     // the status-move branch, which is not ported (so it keeps the note).
     ((moveEffect === 'EFFECT_DECORATE' || moveEffect === 'EFFECT_HIT_ENEMY_HEAL_ALLY') && (targetId & 1) !== (attackerId & 1)) ||

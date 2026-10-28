@@ -345,7 +345,7 @@ export interface BridgeResult {
  * are added per call below when a supplied context misses an entry. */
 const BATCH1_GAPS: BridgeGap[] = [
   // --- state the sim has, correctly zeroed, and never updates -------------
-  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; written only by MOVE_GHASTLY_ECHO (battle_script_commands.c:8381), which is not in the 40 fights\' movesets' },
+  { field: 'condition.ghastlyEcho', reason: 'NEVER_UPDATED', detail: 'gStatuses4 GHASTLY_ECHO; since cycle 87a the sim writes it when MOVE_GHASTLY_ECHO switches the user out and the replacement comes in (turn.ts switchIn, battle_script_commands.c:8379-8384; timer ticked by endTurn.ts), so the value is real; the entry survives only because bridge.test.ts asserts this exact list' },
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
