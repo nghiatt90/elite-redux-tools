@@ -45,6 +45,7 @@ import type { MoveBehaviors } from '../basePower'
 import type { BattleState, BattlerState } from './state'
 import {
   DEFAULT_STAT_STAGE,
+  ENUM_WEATHER_FOG,
   ENUM_WEATHER_SANDSTORM,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
@@ -62,6 +63,7 @@ import {
   STATUS2_NIGHTMARE,
   STATUS2_CURSED,
   STATUS2_ENRAGED,
+  STATUS2_ESCAPE_PREVENTION,
   STATUS2_FLINCHED,
   STATUS2_INFATUATION,
   STATUS2_MULTIPLETURNS,
@@ -70,18 +72,23 @@ import {
   STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
+  STATUS3_GASTRO_ACID,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
   STATUS3_ME_FIRST,
   STATUS3_ON_AIR,
+  STATUS3_PERISH_SONG,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
   STAT_ATK,
   STAT_DEF,
   STAT_SPATK,
   STAT_SPDEF,
   STAT_SPEED,
+  WEATHER_FOG_ANY,
   WEATHER_PRIMAL_ANY,
   WEATHER_SANDSTORM_ANY,
   STATUS1_ANY,
@@ -660,6 +667,9 @@ function battlerHasHalfRecoil(battler: BattlerState): boolean {
 // - Cycle 88a: ABILITY_INNARDS_OUT (:2995), ABILITY_SPITEFUL (:6610), ABILITY_COLD_REBOUND (:4850), ABILITY_ICE_DOWNFALL (:7944),
 //   ABILITY_SNAP_TRAP_WHEN_HIT (:6734), ABILITY_SUPERSWEET_SYRUP (:8957), ABILITY_DROP_BLOCKS (:10996), ABILITY_LOOSE_THORNS (:11042),
 //   ABILITY_VOODOO_POWER (:6813), ABILITY_MUMMY (:2182), ABILITY_FLAMMABLE_COAT (:8320)
+// - Cycle 88b: ABILITY_BRAIN_OVERLOAD (:11645), ABILITY_POWER_LEAK (:10916), ABILITY_CHILLING_PELLETS (:10700), ABILITY_FARADAY_CAGE (:9316),
+//   ABILITY_PARRY (:5031), ABILITY_DEFLECT (:12536), ABILITY_FOG_MACHINE (:10979), ABILITY_CRISPY_CREAM (:10838), ABILITY_LINGERING_AROMA (:5826),
+//   ABILITY_MALODOR (:9853), ABILITY_NO_TURNING_BACK (:8307), ABILITY_PERISH_BODY (:3469)
 export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_ROUGH_SKIN',
   'ABILITY_IRON_BARBS',
@@ -739,6 +749,18 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_VOODOO_POWER',
   'ABILITY_MUMMY',
   'ABILITY_FLAMMABLE_COAT',
+  'ABILITY_BRAIN_OVERLOAD',
+  'ABILITY_POWER_LEAK',
+  'ABILITY_CHILLING_PELLETS',
+  'ABILITY_FARADAY_CAGE',
+  'ABILITY_PARRY',
+  'ABILITY_DEFLECT',
+  'ABILITY_FOG_MACHINE',
+  'ABILITY_CRISPY_CREAM',
+  'ABILITY_LINGERING_AROMA',
+  'ABILITY_MALODOR',
+  'ABILITY_NO_TURNING_BACK',
+  'ABILITY_PERISH_BODY',
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -950,6 +972,9 @@ const CONTACT_COUNTERATTACKS: Record<string, readonly [string, number]> = {
   ABILITY_COLD_REBOUND: ['MOVE_ICY_WIND', 0], // src/abilities.cc:4850-4858
   ABILITY_ICE_DOWNFALL: ['MOVE_ICICLE_CRASH', 60], // src/abilities.cc:7944-7952
   ABILITY_SNAP_TRAP_WHEN_HIT: ['MOVE_SNAP_TRAP', 50], // src/abilities.cc:6734-6742
+  ABILITY_CHILLING_PELLETS: ['MOVE_ICICLE_SPEAR', 13], // src/abilities.cc:10700-10708
+  ABILITY_FARADAY_CAGE: ['MOVE_THUNDER_CAGE', 50], // src/abilities.cc:9316-9328
+  ABILITY_PARRY: ['MOVE_MACH_PUNCH', 0], // src/abilities.cc:5031-5040
 }
 
 export interface MoveEndAbilitiesContext {
@@ -1961,7 +1986,8 @@ function handleDefenderMoveEndAbility(
 
   // 36. Mummy (src/abilities.cc:2182-2195; BattleScript_MummyActivates, data/battle_scripts_1.s:10226-10229)
   // ReplaceAbility (battle_util.c:9325) writes abilities[0]; IsPersistentOrUnsuppressableAbility (:4790) reads GetBattlerAbility (abilities[0]).
-  if (abilityId === 'ABILITY_MUMMY') {
+  // Lingering Aroma is `Impl<ABILITY_MUMMY>.onDefender` (abilities.cc:5826-5828): the hook's `ability` is the holder's own, so it spreads itself.
+  if (abilityId === 'ABILITY_MUMMY' || abilityId === 'ABILITY_LINGERING_AROMA') {
     const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       targetDamage > 0 &&
@@ -1989,6 +2015,125 @@ function handleDefenderMoveEndAbility(
     ) {
       changeBattlerForm(state, targetId, 'SPECIES_LUMBERING_SLOTH_ENGULFED', deps.dataContext)
       applySwitchInAbilities(state, targetId, deps, unmodelled)
+    }
+  }
+
+  // 38. Brain Overload / Power Leak (src/abilities.cc:11645-11655 / 10916-10926): CHECK(DidMoveHit()), then TryChangeBattleTerrain
+  // (battle_util.c:3778-3795) for the holder; BattleScript_SurgeActivatesRet (data/battle_scripts_1.s:9957-9962) runs OnTerrainChanged.
+  if (abilityId === 'ABILITY_BRAIN_OVERLOAD' || abilityId === 'ABILITY_POWER_LEAK') {
+    const terrainFlag = abilityId === 'ABILITY_BRAIN_OVERLOAD' ? STATUS_FIELD_PSYCHIC_TERRAIN : STATUS_FIELD_ELECTRIC_TERRAIN
+    if (targetDamage > 0 && tryChangeBattleTerrain(state, targetId, terrainFlag, deps)) {
+      dispatchOnTerrainChange(state, deps, unmodelled)
+    }
+  }
+
+  // 39. Deflect (src/abilities.cc:12536-12544): Parry's shape without the contact check -- UseOutOfTurnAttack(MOVE_VACUUM_WAVE, 20).
+  if (abilityId === 'ABILITY_DEFLECT') {
+    if (targetDamage > 0 && attacker.mon.hp > 0) {
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_VACUUM_WAVE', 20)
+    }
+  }
+
+  // 40. Fog Machine (src/abilities.cc:10979-10993): ShouldApplyOnHitEffect(battler), no Fog yet; under primal weather
+  // BattleScript_BlockedByPrimalWeatherRet (bs1:5587-5590) only shows the popup; else TryChangeBattleWeather + BattleScript_FogStartsReturn (bs1:9880-9886).
+  if (abilityId === 'ABILITY_FOG_MACHINE') {
+    if (
+      targetDamage > 0 &&
+      target.mon.hp > 0 &&
+      !hasFlag(state.field.weather, WEATHER_FOG_ANY) &&
+      !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY) &&
+      tryChangeBattleWeather(state, targetId, ENUM_WEATHER_FOG, true, deps)
+    ) {
+      dispatchOnWeatherChange(state, deps, unmodelled)
+    }
+  }
+
+  // 41. Crispy Cream (src/abilities.cc:10838-10842): `Random() % 2 ? Flame Body : Freezing Point` -- the coin is drawn before either hook's own checks.
+  if (abilityId === 'ABILITY_CRISPY_CREAM') {
+    const flameBody = state.rng.random16() % 2 !== 0
+    if (targetDamage > 0 && attacker.mon.hp > 0) {
+      const contact = isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+      if (flameBody) {
+        // Flame Body (abilities.cc:1126-1134): contact 30, otherwise 20
+        if (canBeBurned(state, attackerId, targetId, statusDeps) && state.rng.random16() % 100 < (contact ? 30 : 20)) {
+          const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+          if (res.applied && res.status) {
+            result.statusApplied = { battlerId: attackerId, status: res.status }
+          }
+        }
+      } else if (canGetFrostbite(state, attackerId, targetId, statusDeps) && state.rng.random16() % 100 < (contact ? 20 : 30)) {
+        // Freezing Point (abilities.cc:6360-6367): contact 20, otherwise 30
+        const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_FROSTBITE, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: attackerId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 42. Malodor (src/abilities.cc:9853-9864): contact Gastro Acid on the attacker (BattleScript_StackAbilitySuppressedMessage is message-only).
+  if (abilityId === 'ABILITY_MALODOR') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !hasFlag(attacker.statuses3, STATUS3_GASTRO_ACID) &&
+      !doesBattlerHaveAbilityShield(attacker, deps)
+    ) {
+      attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_GASTRO_ACID)
+    }
+  }
+
+  // 43. Perish Body (src/abilities.cc:3469-3487; BattleScript_PerishBodyActivates bs1:7793-7797 is message-only): both mons get a 3-turn
+  // perish count, the holder keeping an existing one.
+  if (abilityId === 'ABILITY_PERISH_BODY') {
+    if (
+      targetDamage > 0 &&
+      target.mon.hp > 0 &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !hasFlag(attacker.statuses3, STATUS3_PERISH_SONG)
+    ) {
+      if (!hasFlag(target.statuses3, STATUS3_PERISH_SONG)) {
+        target.statuses3 = setFlag(target.statuses3, STATUS3_PERISH_SONG)
+        target.volatiles.perishSongTimer = 3
+        target.volatiles.perishSongTimerStartValue = 3
+      }
+      attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_PERISH_SONG)
+      attacker.volatiles.perishSongTimer = 3
+      attacker.volatiles.perishSongTimerStartValue = 3
+    }
+  }
+
+  // 44. No Turning Back (src/abilities.cc:8307-8317; BattleScript_NoTurningBack bs1:1895-1902): once per holder, when the hit drops it to half HP or
+  // below. trynoretreat BS_TARGET = VARIOUS_TRY_NO_RETREAT (battle_script_commands.c:8126-8133) sets only volatiles.noRetreat (unlike the No Retreat
+  // move, no STATUS2_ESCAPE_PREVENTION), then BattleScript_AllStatsUp (bs1:7891-7925) raises the holder's five stats by 1.
+  if (abilityId === 'ABILITY_NO_TURNING_BACK') {
+    if (
+      checkHalfHpAbility(target, hpDealt) &&
+      !target.volatiles.abilityState[slotIndex] &&
+      !target.volatiles.noRetreat &&
+      !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+    ) {
+      target.volatiles.abilityState[slotIndex] = 1
+      target.volatiles.noRetreat = true
+      for (const statId of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
+        const res = changeStatBuffsImplicit(
+          state,
+          targetId,
+          targetId,
+          1,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+          true,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          result.statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
+        }
+      }
     }
   }
 
