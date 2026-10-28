@@ -1039,7 +1039,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 90 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 102 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
       'ABILITY_ANGER_POINT',
       'ABILITY_ANGER_SHELL',
@@ -1056,6 +1056,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_CRISPY_CREAM',
       'ABILITY_CROWNED_SHIELD',
       'ABILITY_CROWNED_SWORD',
+      'ABILITY_CRYO_PROFICIENCY',
       'ABILITY_CURSED_BODY',
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
@@ -1070,11 +1071,14 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_FLAMMABLE_COAT',
       'ABILITY_FOG_MACHINE',
       'ABILITY_FORTITUDE',
+      'ABILITY_FRAGRANT_DAZE',
+      'ABILITY_FREEZING_POINT',
       'ABILITY_FURNACE',
       'ABILITY_GOING_BERSERK',
       'ABILITY_GOOEY',
       'ABILITY_GUILT_TRIP',
       'ABILITY_HAUNTED_SPIRIT',
+      'ABILITY_HYPNOTIC_TOUCH',
       'ABILITY_ICE_DOWNFALL',
       'ABILITY_ILL_WILL',
       'ABILITY_INFLATABLE',
@@ -1085,6 +1089,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_LOOSE_QUILLS',
       'ABILITY_LOOSE_ROCKS',
       'ABILITY_LOOSE_THORNS',
+      'ABILITY_MAGICAL_DUST',
       'ABILITY_MALODOR',
       'ABILITY_MASSIVE_PELT',
       'ABILITY_MOUSTACHE',
@@ -1101,6 +1106,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_PURE_LOVE',
       'ABILITY_RAGE_POINT',
       'ABILITY_RATTLED',
+      'ABILITY_RESILIENCE',
       'ABILITY_ROUGH_SKIN',
       'ABILITY_SAND_SPIT',
       'ABILITY_SCARECROW',
@@ -1110,6 +1116,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SLIME_MOLD',
       'ABILITY_SMOLDERING_WOOD',
       'ABILITY_SNAP_TRAP_WHEN_HIT',
+      'ABILITY_SPIKE_ARMOR',
       'ABILITY_SPITEFUL',
       'ABILITY_STAMINA',
       'ABILITY_STATIC',
@@ -1123,19 +1130,24 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_TIPPING_POINT',
       'ABILITY_TOXIC_DEBRIS',
       'ABILITY_TOXIC_SHELL',
+      'ABILITY_ULTRA_INSTINCT',
       'ABILITY_UNLOCKED_POTENTIAL',
+      'ABILITY_UNSTABLE_CORE',
       'ABILITY_VENGEFUL_SPIRIT',
       'ABILITY_VENOM_CROWN',
+      'ABILITY_VICTORY_BOMB',
       'ABILITY_VOODOO_POWER',
+      'ABILITY_WANDERING_SPIRIT',
       'ABILITY_WATER_COMPACTION',
       'ABILITY_WEAK_ARMOR',
       'ABILITY_WHITE_NOISE',
+      'ABILITY_WIND_CHIMES',
       'ABILITY_WIND_POWER',
     ])
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 65 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 70 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1143,6 +1155,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_ATOMIC_BURST',
       'ABILITY_BLADE_DANCE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_CRYO_PROFICIENCY',
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
       'ABILITY_DEVIATE',
@@ -1156,17 +1169,20 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_FLAME_BODY',
       'ABILITY_FLAMING_JAWS',
       'ABILITY_FLAMING_MAW',
+      'ABILITY_FRAGRANT_DAZE',
       'ABILITY_FREEZING_POINT',
       'ABILITY_GALVANIZE',
       'ABILITY_GRIP_PINCER',
       'ABILITY_GROWING_TOOTH',
       'ABILITY_HIGH_TIDE',
       'ABILITY_HYDRATE',
+      'ABILITY_HYPNOTIC_TOUCH',
       'ABILITY_ILLUMINATE',
       'ABILITY_IMMOLATE',
       'ABILITY_INTOXICATE',
       'ABILITY_LEAD_CLAWS',
       'ABILITY_LOUD_BANG',
+      'ABILITY_MAGICAL_DUST',
       'ABILITY_MENACING_SITUATION',
       'ABILITY_MINERALIZE',
       'ABILITY_MOB_BOSS',
@@ -1187,6 +1203,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SOLAR_FLARE',
       'ABILITY_SOLENOGLYPHS',
       'ABILITY_SPECTRALIZE',
+      'ABILITY_SPIKE_ARMOR',
       'ABILITY_STATIC',
       'ABILITY_STENCH',
       'ABILITY_STRIKER_PIXILATE',

@@ -46,6 +46,7 @@ import type { BattleState, BattlerState } from './state'
 import {
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_FOG,
+  ENUM_WEATHER_HAIL,
   ENUM_WEATHER_SANDSTORM,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
@@ -89,6 +90,7 @@ import {
   STAT_SPDEF,
   STAT_SPEED,
   WEATHER_FOG_ANY,
+  WEATHER_HAIL_ANY,
   WEATHER_PRIMAL_ANY,
   WEATHER_SANDSTORM_ANY,
   STATUS1_ANY,
@@ -162,7 +164,15 @@ import {
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
-import { applySwitchInAbilities, getOncePerTurnAbilityCounter, setOncePerTurnAbilityCounter, tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
+import {
+  applySwitchInAbilities,
+  getOncePerTurnAbilityCounter,
+  getSingleUseAbilityCounter,
+  setOncePerTurnAbilityCounter,
+  setSingleUseAbilityCounter,
+  tryChangeBattleTerrain,
+  tryChangeBattleWeather,
+} from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { changeBattlerForm } from './formChange'
 import { TYPE_NAME_BY_ID } from './hazards'
@@ -761,6 +771,18 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_MALODOR',
   'ABILITY_NO_TURNING_BACK',
   'ABILITY_PERISH_BODY',
+  'ABILITY_FREEZING_POINT',
+  'ABILITY_CRYO_PROFICIENCY',
+  'ABILITY_RESILIENCE',
+  'ABILITY_ULTRA_INSTINCT',
+  'ABILITY_UNSTABLE_CORE',
+  'ABILITY_VICTORY_BOMB',
+  'ABILITY_WANDERING_SPIRIT',
+  'ABILITY_WIND_CHIMES',
+  'ABILITY_SPIKE_ARMOR',
+  'ABILITY_MAGICAL_DUST',
+  'ABILITY_FRAGRANT_DAZE',
+  'ABILITY_HYPNOTIC_TOUCH',
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -853,6 +875,11 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_WHIPLASH',
   'ABILITY_WHITE_NOISE',
   'ABILITY_WORLD_SERPENT',
+  'ABILITY_CRYO_PROFICIENCY',
+  'ABILITY_SPIKE_ARMOR',
+  'ABILITY_FRAGRANT_DAZE',
+  'ABILITY_HYPNOTIC_TOUCH',
+  'ABILITY_MAGICAL_DUST',
 ])
 
 /**
@@ -975,6 +1002,20 @@ const CONTACT_COUNTERATTACKS: Record<string, readonly [string, number]> = {
   ABILITY_CHILLING_PELLETS: ['MOVE_ICICLE_SPEAR', 13], // src/abilities.cc:10700-10708
   ABILITY_FARADAY_CAGE: ['MOVE_THUNDER_CAGE', 50], // src/abilities.cc:9316-9328
   ABILITY_PARRY: ['MOVE_MACH_PUNCH', 0], // src/abilities.cc:5031-5040
+  ABILITY_ULTRA_INSTINCT: ['MOVE_VACUUM_WAVE', 20], // src/abilities.cc:8226-8235
+}
+
+/**
+ * ON_EITHER abilities that run on both sides of a contact hit (abilities.cc ON_EITHER_ABILITY, :54): `can` is the CanX predicate on the victim, `chance` the
+ * Random() % 100 bound. Defender and attacker halves share the table; AbilityStatusEffectSafe(effect, battler, opponent) makes the holder the inflicter.
+ */
+const ON_EITHER_CONTACT_STATUS: Record<
+  string,
+  { effect: number; can: (state: BattleState, victimId: number, sourceId: number, deps: StatusDeps) => boolean; chance: number }
+> = {
+  ABILITY_SPIKE_ARMOR: { effect: MOVE_EFFECT_BLEED, can: canBleed, chance: 30 }, // src/abilities.cc:6798-6806
+  ABILITY_FRAGRANT_DAZE: { effect: MOVE_EFFECT_CONFUSION, can: canBeConfused, chance: 30 }, // src/abilities.cc:7792-7800
+  ABILITY_HYPNOTIC_TOUCH: { effect: MOVE_EFFECT_SLEEP, can: canSleep, chance: 20 }, // src/abilities.cc:11267-11275
 }
 
 export interface MoveEndAbilitiesContext {
@@ -2137,6 +2178,130 @@ function handleDefenderMoveEndAbility(
     }
   }
 
+  // 45. Freezing Point (src/abilities.cc:6359-6367 FreezingPointOnEither) and Cryo Proficiency (:6387-6391: `Impl<ABILITY_FREEZING_POINT>.onDefender(...) |
+  // CryoProficiencyHail(battler)`, a non-short-circuit `|`, so the Frostbite roll is drawn before the Hail check). Frostbite: ShouldApplyOnHitEffect(opponent),
+  // CanGetFrostbite, then Random() % 100 < (contact ? 20 : 30); AbilityStatusEffectSafe(MOVE_EFFECT_FROSTBITE, battler, opponent) = holder inflicts, attacker receives.
+  if (abilityId === 'ABILITY_FREEZING_POINT' || abilityId === 'ABILITY_CRYO_PROFICIENCY') {
+    if (targetDamage > 0 && attacker.mon.hp > 0 && canGetFrostbite(state, attackerId, targetId, statusDeps)) {
+      const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 20 : 30
+      if (state.rng.random16() % 100 < chance) {
+        const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_FROSTBITE, moveId, statusDeps, unmodelled, false, false, true)
+        if (res.applied && res.status) {
+          result.statusApplied = { battlerId: attackerId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // 46. CryoProficiencyHail (src/abilities.cc:6373-6385): ShouldApplyOnHitEffect(battler), no Hail up; under primal weather BattleScript_BlockedByPrimalWeatherRet
+  // (bs1:5587-5590) only shows the popup; else TryChangeBattleWeather(battler, ENUM_WEATHER_HAIL, TRUE) + BattleScript_CryoProficiencyActivates (bs1:9629-9634,
+  // ends in BattleScript_OnWeatherChange). Same shape as Fog Machine.
+  if (abilityId === 'ABILITY_CRYO_PROFICIENCY') {
+    if (
+      targetDamage > 0 &&
+      target.mon.hp > 0 &&
+      !hasFlag(state.field.weather, WEATHER_HAIL_ANY) &&
+      !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY) &&
+      tryChangeBattleWeather(state, targetId, ENUM_WEATHER_HAIL, true, deps)
+    ) {
+      dispatchOnWeatherChange(state, deps, unmodelled)
+    }
+  }
+
+  // 51. Spike Armor / Fragrant Daze / Hypnotic Touch, defender half (ON_EITHER hooks, abilities.cc:6798-6806 / 7792-7800 / 11267-11275): ShouldApplyOnHitEffect(opponent),
+  // CanX(opponent), IsMoveMakingContact, Random() % 100 < chance, AbilityStatusEffectSafe(effect, battler, opponent) = holder inflicts, the attacker receives.
+  const contactStatus = ON_EITHER_CONTACT_STATUS[abilityId]
+  if (contactStatus) {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      contactStatus.can(state, attackerId, targetId, statusDeps) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < contactStatus.chance
+    ) {
+      const res = applyPrimaryStatusEffect(state, targetId, attackerId, contactStatus.effect, moveId, statusDeps, unmodelled, false, false, true)
+      if (res.applied && res.status) {
+        result.statusApplied = { battlerId: attackerId, status: res.status }
+      }
+    }
+  }
+
+  // 52. Magical Dust, defender half (src/abilities.cc:3990-4003 MagicalDustOnEither): ShouldApplyOnHitEffect(opponent), contact, opponent not already Psychic ->
+  // type1 = type2 = Psychic, type3 = Mystery (BattleScript_StackBecameTheTypeFull is message-only).
+  if (abilityId === 'ABILITY_MAGICAL_DUST') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !attacker.mon.types.includes('PSYCHIC')
+    ) {
+      attacker.mon.types = ['PSYCHIC', 'PSYCHIC', 'MYSTERY']
+    }
+  }
+
+  // 47. Resilience (src/abilities.cc:12161-12175; BattleScript_ResilienceActivates bs1:12582-12589): once per holder, when the hit takes it from above half
+  // HP to half or below (CheckHalfHpAbility, battle_util.c:9043-9048), CanBattlerHeal, and GetSingleUseAbilityCounter is 0 (-1, "no such ability slot", is
+  // also non-zero and blocks). Heals maxHP / 4 (minimum 1) through the passive-damage path of datahpupdate (capped at max HP).
+  if (abilityId === 'ABILITY_RESILIENCE') {
+    if (
+      checkHalfHpAbility(target, hpDealt) &&
+      canBattlerHeal(state, targetId, target, unmodelled) &&
+      getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0
+    ) {
+      const heal = Math.max(1, Math.floor(target.mon.maxHp / 4))
+      target.mon.hp = Math.min(target.mon.maxHp, target.mon.hp + heal)
+      syncPartyHp(state, targetId)
+      setSingleUseAbilityCounter(state, targetId, abilityId, 1, deps.dataContext)
+    }
+  }
+
+  // 48. Wind Chimes (src/abilities.cc:12513-12522): Deflect's shape with Hyper Voice at power 30 -- ShouldApplyOnHitEffect(attacker), no contact check.
+  if (abilityId === 'ABILITY_WIND_CHIMES') {
+    if (targetDamage > 0 && attacker.mon.hp > 0) {
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_HYPER_VOICE', 30)
+    }
+  }
+
+  // 49. Victory Bomb (src/abilities.cc:9006-9018) and Unstable Core (:12525-12528 = `Impl<ABILITY_AFTERMATH>.onDefender`, :1663-1670): CHECK_NOT(IsBattlerAlive(battler)),
+  // then UseOutOfTurnAttack(battler, attacker, ability, move, 100). The fainted holder is allowed because the move is EFFECT_EXPLOSION (battle_util.c:3764).
+  // Aftermath/Unstable Core pick Outburst over Explosion when GetHighestAttackingStatId(battler, TRUE) is Sp. Atk (ties go to Attack).
+  if (abilityId === 'ABILITY_VICTORY_BOMB') {
+    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_EXPLOSION', 100)
+    }
+  }
+  if (abilityId === 'ABILITY_UNSTABLE_CORE') {
+    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+      const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
+    }
+  }
+
+  // 50. Wandering Spirit (src/abilities.cc:3490-3515; BattleScript_WanderingSpiritActivates bs1:10242-10248, ..._Swap :10231-10240 is popups only): swap slot-0
+  // abilities with a contact attacker. GetBattlerAbility(battler) == ability means only the holder's slot 0 counts (an innate Wandering Spirit does nothing).
+  // The two UpdateAbilityStateIndicesForNewAbility calls (battle_util.c:8819-8862) pass the attacker's and the holder's OWN current ability, so as written they
+  // are identity remaps; ported as written, not "fixed" to pass the incoming ability. The script then runs `switchinabilities` for the attacker and the
+  // holder (VARIOUS_SWITCHIN_ABILITIES, battle_script_commands.c:7090-7101; REQUIRE alive), which applySwitchInAbilities mirrors.
+  if (abilityId === 'ABILITY_WANDERING_SPIRIT') {
+    const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      target.mon.abilities.ability === abilityId &&
+      !hasAbilityIgnoringSuppression(attacker, abilityId) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(attackerPrimary) &&
+      !doesBattlerHaveAbilityShield(attacker, deps)
+    ) {
+      updateAbilityStateForNewAbility(attacker, attackerPrimary)
+      updateAbilityStateForNewAbility(target, abilityId)
+      target.mon.abilities.ability = attacker.mon.abilities.ability
+      attacker.mon.abilities.ability = abilityId
+      applySwitchInAbilities(state, attackerId, deps, unmodelled)
+      applySwitchInAbilities(state, targetId, deps, unmodelled)
+    }
+  }
+
   return result
 }
 
@@ -2325,7 +2490,8 @@ function handleAttackerMoveEndAbility(
   }
 
   // Freezing Point on attacker (src/abilities.cc:6360-6371): inflicts Frostbite (contact 20%, non-contact 30%)
-  if (abilityId === 'ABILITY_FREEZING_POINT') {
+  // Cryo Proficiency's onAttacker is `Impl<ABILITY_FREEZING_POINT>.onAttacker` (abilities.cc:6388)
+  if (abilityId === 'ABILITY_FREEZING_POINT' || abilityId === 'ABILITY_CRYO_PROFICIENCY') {
     if (
       target.mon.hp > 0 &&
       hpDealt > 0 &&
@@ -2336,6 +2502,35 @@ function handleAttackerMoveEndAbility(
       if (state.rng.random16() % 100 < chance) {
         applyAbilityOnHitStatus(state, MOVE_EFFECT_FROSTBITE, attackerId, targetId, moveId, statusDeps, unmodelled, result)
       }
+    }
+  }
+
+  // Spike Armor / Fragrant Daze / Hypnotic Touch, attacker half (ON_EITHER hooks, abilities.cc:6798-6806 / 7792-7800 / 11267-11275):
+  // ShouldApplyOnHitEffect(target), CanX(target), contact, Random() % 100 < chance, AbilityStatusEffectSafe(effect, battler, target).
+  const contactStatus = ON_EITHER_CONTACT_STATUS[abilityId]
+  if (contactStatus) {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      contactStatus.can(state, targetId, attackerId, statusDeps) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < contactStatus.chance
+    ) {
+      applyAbilityOnHitStatus(state, contactStatus.effect, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Magical Dust, attacker half (abilities.cc:3990-4003 MagicalDustOnEither): contact hit turns the target Psychic (type3 Mystery).
+  if (abilityId === 'ABILITY_MAGICAL_DUST') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !target.mon.types.includes('PSYCHIC')
+    ) {
+      target.mon.types = ['PSYCHIC', 'PSYCHIC', 'MYSTERY']
     }
   }
 
