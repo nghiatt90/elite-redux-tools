@@ -7283,7 +7283,7 @@ export function handleFairyLock(ctx: MoveEffectContext): ActionOutcome {
  * DoesBattlerHaveAbilityShield, battle_util.c:6539-6545. No ability sets blocksAbilitySuppression in
  * abilityHooks.json, so only the held Ability Shield (unless Embargoed) can return true.
  */
-function doesBattlerHaveAbilityShield(battler: BattlerState, deps: { dataContext: SimDataContext }): boolean {
+export function doesBattlerHaveAbilityShield(battler: BattlerState, deps: { dataContext: SimDataContext }): boolean {
   if (battler.mon.itemId) {
     const item = deps.dataContext.item(battler.mon.itemId)
     if (item?.resolvedHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD' && !hasFlag(battler.statuses3, STATUS3_EMBARGO)) {
@@ -7302,7 +7302,7 @@ function abilitySlotIds(battler: BattlerState): string[] {
  * HasAbilityIgnoringSuppression, battle_util.c:9315-9323 -- every slot, suppressed or not. An empty
  * slot is ABILITY_NONE, so asking about ABILITY_NONE matches a battler with an empty innate slot.
  */
-function hasAbilityIgnoringSuppression(battler: BattlerState, abilityId: string): boolean {
+export function hasAbilityIgnoringSuppression(battler: BattlerState, abilityId: string): boolean {
   return abilitySlotIds(battler).includes(abilityId)
 }
 
@@ -7328,7 +7328,7 @@ function updateAbilityStateForNewAbilities(battler: BattlerState, newAbilities: 
   battler.volatiles.abilityState = abilityState
 }
 
-function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: string): void {
+export function updateAbilityStateForNewAbility(battler: BattlerState, newAbility: string): void {
   const oldAbilities = abilitySlotIds(battler)
   updateAbilityStateForNewAbilities(battler, [newAbility, ...oldAbilities.slice(1)])
 }

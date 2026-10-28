@@ -66,8 +66,10 @@ import {
   STATUS2_INFATUATION,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
+  STATUS2_TRANSFORMED,
   STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
+  STATUS3_EMBARGO,
   STATUS3_LEECHSEED,
   STATUS3_MAGNET_RISE,
   STATUS3_ME_FIRST,
@@ -153,8 +155,12 @@ import {
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
-import { getOncePerTurnAbilityCounter, setOncePerTurnAbilityCounter, tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
+import { applySwitchInAbilities, getOncePerTurnAbilityCounter, setOncePerTurnAbilityCounter, tryChangeBattleTerrain, tryChangeBattleWeather } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
+import { changeBattlerForm } from './formChange'
+import { TYPE_NAME_BY_ID } from './hazards'
+import { doesBattlerHaveAbilityShield, hasAbilityIgnoringSuppression, updateAbilityStateForNewAbility } from './moveEffects'
+import { PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
 
 // ---------------------------------------------------------------------------
 // Pinned Ability Lists (derived strictly from abilityHooks.json)
@@ -651,6 +657,9 @@ function battlerHasHalfRecoil(battler: BattlerState): boolean {
 // - Cursed Body: ABILITY_CURSED_BODY (:1910)
 // - Justified-style defender stat raises: ABILITY_RATTLED (:2213), ABILITY_WATER_COMPACTION (:2650), ABILITY_STEAM_ENGINE (:3291), ABILITY_THERMAL_EXCHANGE (:7339), ABILITY_THERMAL_ENTROPY (:12404)
 // - Electromorphosis family: ABILITY_ELECTROMORPHOSIS (:5299), ABILITY_ATOMIC_BURST (:5313)
+// - Cycle 88a: ABILITY_INNARDS_OUT (:2995), ABILITY_SPITEFUL (:6610), ABILITY_COLD_REBOUND (:4850), ABILITY_ICE_DOWNFALL (:7944),
+//   ABILITY_SNAP_TRAP_WHEN_HIT (:6734), ABILITY_SUPERSWEET_SYRUP (:8957), ABILITY_DROP_BLOCKS (:10996), ABILITY_LOOSE_THORNS (:11042),
+//   ABILITY_VOODOO_POWER (:6813), ABILITY_MUMMY (:2182), ABILITY_FLAMMABLE_COAT (:8320)
 export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_ROUGH_SKIN',
   'ABILITY_IRON_BARBS',
@@ -719,6 +728,17 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_THERMAL_ENTROPY',
   'ABILITY_ELECTROMORPHOSIS',
   'ABILITY_ATOMIC_BURST',
+  'ABILITY_INNARDS_OUT',
+  'ABILITY_SPITEFUL',
+  'ABILITY_COLD_REBOUND',
+  'ABILITY_ICE_DOWNFALL',
+  'ABILITY_SNAP_TRAP_WHEN_HIT',
+  'ABILITY_SUPERSWEET_SYRUP',
+  'ABILITY_DROP_BLOCKS',
+  'ABILITY_LOOSE_THORNS',
+  'ABILITY_VOODOO_POWER',
+  'ABILITY_MUMMY',
+  'ABILITY_FLAMMABLE_COAT',
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -899,6 +919,37 @@ function moveTypeMatches(moveData: SimMoveData | undefined, ...types: string[]):
   if (!moveData || !moveData.type) return false
   const clean = moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type
   return types.includes(clean)
+}
+
+/**
+ * UseOutOfTurnAttack (src/battle_util.c:3759-3777): queue `moveId` as an extra attack from `battlerId` at `targetId`.
+ * `movePower` 0 means "the move's own power" (CalcMoveBasePowerAfterModifiers `fixedPower ? fixedPower : basePower`, :6969).
+ */
+function queueOutOfTurnAttack(
+  state: BattleState,
+  deps: TurnLoopDeps,
+  battlerId: number,
+  targetId: number,
+  abilityId: string,
+  moveId: string,
+  movePower: number,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (battler.turn.dancerUsedMove) return false
+  if (hasFlag(battler.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) return false
+  if (!isBattlerAlive(state, battlerId) && !(abilityId && deps.dataContext.move(moveId)?.effect === 'EFFECT_EXPLOSION')) return false
+
+  battler.turn.dancerUsedMove = true
+  state.queuedExtraAttacks.push({ ability: abilityId, move: moveId, attacker: battlerId, target: targetId, movePower })
+  return true
+}
+
+/** The contact counterattack abilities: [move, movePower] passed to UseOutOfTurnAttack(battler, attacker, ability, move, movePower). */
+const CONTACT_COUNTERATTACKS: Record<string, readonly [string, number]> = {
+  ABILITY_COLD_REBOUND: ['MOVE_ICY_WIND', 0], // src/abilities.cc:4850-4858
+  ABILITY_ICE_DOWNFALL: ['MOVE_ICICLE_CRASH', 60], // src/abilities.cc:7944-7952
+  ABILITY_SNAP_TRAP_WHEN_HIT: ['MOVE_SNAP_TRAP', 50], // src/abilities.cc:6734-6742
 }
 
 export interface MoveEndAbilitiesContext {
@@ -1808,6 +1859,136 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_ELECTROMORPHOSIS' || abilityId === 'ABILITY_ATOMIC_BURST') {
     if (target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
       target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
+    }
+  }
+
+  // 29. Innards Out (src/abilities.cc:2995-3005; BattleScript_AftermathDmg, data/battle_scripts_1.s:8585-8592)
+  // gBattleMoveDamage = gTurnStructs[battler].dmg: the sim does not maintain TurnState.dmg (first damage taken this turn, :1933),
+  // so the hit's own hp dealt stands in -- identical for a single-hit KO of a mon that was undamaged this turn.
+  if (abilityId === 'ABILITY_INNARDS_OUT') {
+    if (targetDamage > 0 && attacker.mon.hp > 0 && target.mon.hp <= 0 && !isMagicGuardProtected(state, attacker)) {
+      applyDamage(state, attackerId, hpDealt, fainted)
+      result.attackerDamage += hpDealt
+    }
+  }
+
+  // 30. Spiteful (src/abilities.cc:6610-6620; BattleScript_AbilitySpiteful, data/battle_scripts_1.s:4833-4840;
+  // Cmd_tryspiteppreduce, src/battle_script_commands.c:10975-11020). swapbattlerandtargetvia34 makes gBattlerTarget the attacker,
+  // so Spite's PP cut lands on gLastMoves[attacker] -- the attacker's PREVIOUS move, since MOVEEND_UPDATE_LAST_MOVES (:4750)
+  // runs after MOVEEND_ABILITIES. B_CAN_SPITE_FAIL / B_PP_REDUCED_BY_SPITE take the Gen 4+ branch, as handleSpite does.
+  if (abilityId === 'ABILITY_SPITEFUL') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      moveId !== 'MOVE_STRUGGLE' &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      (attacker.mon.pp[state.chosenMovePositions[attackerId] ?? 0] ?? 0) > 0
+    ) {
+      const lastMove = attacker.lastMove
+      const slot = lastMove && lastMove !== MOVE_UNSET ? attacker.mon.moves.indexOf(lastMove) : -1
+      if (lastMove && lastMove !== 'MOVE_NONE' && slot !== -1 && (attacker.mon.pp[slot] ?? 0) !== 0) {
+        const ppToDeduct = Math.min(4, attacker.mon.pp[slot] ?? 0)
+        attacker.mon.pp[slot] = (attacker.mon.pp[slot] ?? 0) - ppToDeduct
+        if (attacker.mon.pp[slot] === 0) cancelMultiTurnMoves(attacker)
+      }
+    }
+  }
+
+  // 31. Contact counterattacks: Cold Rebound, Ice Downfall, Snap Trap (ability) -- UseOutOfTurnAttack(battler, attacker, ability, move, power)
+  const counterattack = CONTACT_COUNTERATTACKS[abilityId]
+  if (counterattack) {
+    if (targetDamage > 0 && attacker.mon.hp > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, counterattack[0], counterattack[1])
+    }
+  }
+
+  // 32. Supersweet Syrup (src/abilities.cc:8957-8972; BattleScript_AnnounceAttackerItemDisabled, data/battle_scripts_1.s:12448-12451)
+  if (abilityId === 'ABILITY_SUPERSWEET_SYRUP') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !hasFlag(attacker.statuses3, STATUS3_EMBARGO) &&
+      attacker.mon.itemId !== null
+    ) {
+      attacker.volatiles.embargoTimer = 2
+      attacker.statuses3 = setFlag(attacker.statuses3, STATUS3_EMBARGO)
+    }
+  }
+
+  // 33. Drop Blocks (src/abilities.cc:10996-11004; BattleScript_DefenderSetsSpikeLayer_Scrapyard, data/battle_scripts_1.s:9390-9398).
+  // Scrapyard's hook without the contact check. checkcondition CONDITION_SPIKES (battle_script_commands.c:9606-9611) layers the
+  // attacker's side (gBattlerTarget after swapbattlerandtargetvia34).
+  if (abilityId === 'ABILITY_DROP_BLOCKS') {
+    if (targetDamage > 0) {
+      const sideState = state.sides[(targetId & 1) ^ 1]!
+      if (sideState.timers.spikesAmount < 3) {
+        sideState.timers.spikesAmount++
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_SPIKES)
+      }
+    }
+  }
+
+  // 34. Loose Thorns (src/abilities.cc:11042-11051; BattleScript_DefenderSetsCreepingThorns, data/battle_scripts_1.s:9439-9447;
+  // CONDITION_CREEPING_THORNS, battle_script_commands.c:9627-9633): Stealth Rock slot filled with TYPE_GRASS.
+  if (abilityId === 'ABILITY_LOOSE_THORNS') {
+    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+      const sideState = state.sides[(targetId & 1) ^ 1]!
+      if (!hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+        sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
+        sideState.timers.stealthRockType = TYPE_NAME_BY_ID.indexOf('GRASS')
+      }
+    }
+  }
+
+  // 35. Voodoo Power (src/abilities.cc:6813-6823): AbilityStatusEffect(MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_BLEED) bleeds the attacker.
+  // IS_MOVE_SPECIAL reads GetBattleMoveSplit (battle_util.c:8348-8357), which gSwapDamageCategory can flip; the sim carries no such
+  // flag past damage calculation, so the declared split is used.
+  if (abilityId === 'ABILITY_VOODOO_POWER') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      moveData?.split === 'SPECIAL' &&
+      canBleed(state, attackerId, attackerId, statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_BLEED | MOVE_EFFECT_AFFECTS_USER, moveId, statusDeps, unmodelled, false, false, true)
+      if (res.applied && res.status) {
+        result.statusApplied = { battlerId: attackerId, status: res.status }
+      }
+    }
+  }
+
+  // 36. Mummy (src/abilities.cc:2182-2195; BattleScript_MummyActivates, data/battle_scripts_1.s:10226-10229)
+  // ReplaceAbility (battle_util.c:9325) writes abilities[0]; IsPersistentOrUnsuppressableAbility (:4790) reads GetBattlerAbility (abilities[0]).
+  if (abilityId === 'ABILITY_MUMMY') {
+    const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      !hasAbilityIgnoringSuppression(attacker, abilityId) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(attackerPrimary) &&
+      !doesBattlerHaveAbilityShield(attacker, deps)
+    ) {
+      updateAbilityStateForNewAbility(attacker, abilityId)
+      attacker.mon.abilities.ability = abilityId
+    }
+  }
+
+  // 37. Flammable Coat (src/abilities.cc:8320-8344; BattleScript_TargetFormChange, data/battle_scripts_1.s:8532-8540)
+  // Handle-form-change cases 0-2 (battle_script_commands.c:7491-7512) are changeBattlerForm; `switchinabilities BS_ATTACKER` runs after
+  // swapbattlerandtargetvia34, i.e. for the holder. This hook is reached only for a damaging hit (the call site's targetDamage gate),
+  // so the RESOURCE_FLAG_FLASH_FIRE half of the CHECK matters only for a hit that damaged an already-Flash-Fire-boosted holder.
+  if (abilityId === 'ABILITY_FLAMMABLE_COAT') {
+    if (
+      ((targetDamage > 0 && target.mon.hp > 0) || target.volatiles.flashFire) &&
+      moveTypeMatches(moveData, 'FIRE') &&
+      target.mon.speciesId === 'SPECIES_LUMBERING_SLOTH' &&
+      !hasFlag(target.mon.status2, STATUS2_TRANSFORMED)
+    ) {
+      changeBattlerForm(state, targetId, 'SPECIES_LUMBERING_SLOTH_ENGULFED', deps.dataContext)
+      applySwitchInAbilities(state, targetId, deps, unmodelled)
     }
   }
 

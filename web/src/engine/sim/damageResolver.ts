@@ -65,7 +65,16 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
   return {
     resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context: DamageResolveContext = { targetHasActedThisTurn: false }): DamageResolution {
       if (action.action !== 'USE_MOVE' || !action.chosenMove) return { targetDamage: null, attackerDamage: null, unmodelled: [] }
-      const move = deps.moveData(action.chosenMove.id)
+      const declaredMove = deps.moveData(action.chosenMove.id)
+      // Cmd_damagecalc (battle_script_commands.c:1598-1611) passes gQueuedExtraAttackData[0].movePower as CalculateMoveDamage's
+      // fixedBasePower, and CalcMoveBasePowerAfterModifiers takes `fixedPower ? fixedPower : basePower` (battle_util.c:6969).
+      // Every move queued with a power today (Ice Downfall's Icicle Crash 60, Snap Trap 50) is a plain-power effect, so
+      // overriding the declared power is equivalent to replacing CalcMoveBasePower's result.
+      const extra = state.processingExtraAttacks ? state.currentExtraAttack : null
+      const move =
+        declaredMove && extra?.movePower && extra.attacker === attackerId && extra.move === declaredMove.id
+          ? { ...declaredMove, power: extra.movePower }
+          : declaredMove
       if (!move) return { targetDamage: null, attackerDamage: null, unmodelled: [`move ${action.chosenMove.id}: move data is unavailable`] }
       if (move.split === 'STATUS') return { targetDamage: null, attackerDamage: null, unmodelled: ['status effects are not modelled yet'] }
 

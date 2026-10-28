@@ -78,13 +78,13 @@ function scripted(...values: number[]): RandomSource { let i = 0; return { rando
  * `critRolls`/`totalRolls` arrays are the independent ground truth a scripted
  * resolver run's `targetDamage` gets checked against, rather than re-deriving
  * the resolver's own output and trivially agreeing with itself. */
-function directResult(moveId: string, a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, scenarioOverrides: Partial<DamageCalcScenario> = {}): DamageCalcResult {
+function directResult(moveId: string, a: Partial<SimBattleMon> = {}, d: Partial<SimBattleMon> = {}, scenarioOverrides: Partial<DamageCalcScenario> = {}, movePatch: Record<string, unknown> = {}): DamageCalcResult {
   const s = state(a, d)
   const roles = { attackerId: 0, defenderId: 1 }
   const attacker = buildBattlerBattleState(s, 0, roles, bridge)
   const defender = buildBattlerBattleState(s, 1, roles, bridge)
   const field = buildFieldBattleState(s, roles, bridge)
-  const move = toMoveData(moveId)
+  const move = { ...toMoveData(moveId), ...movePatch }
   const scenario: DamageCalcScenario = {
     move, attacker: attacker.battler, defender: defender.battler, field: field.field,
     typeChart: chart, inverseTypeChart: inverseChart, moveBehaviors, battleConstants: constants,
@@ -316,5 +316,33 @@ describe('createBridgeDamageResolver: confusionSelfHit (battle_util.c:3376-3378)
     const counting: RandomSource = { random16: () => { draws++; return 0 } }
     resolver(counting).confusionSelfHit!(state(), 0, 40)
     expect(draws).toBe(0)
+  })
+})
+
+describe('createBridgeDamageResolver: queued extra attack movePower (battle_script_commands.c:1598-1611, battle_util.c:6969)', () => {
+  // Cmd_damagecalc passes gQueuedExtraAttackData[0].movePower as fixedBasePower and CalcMoveBasePowerAfterModifiers uses
+  // `fixedPower ? fixedPower : basePower`: Ice Downfall's Icicle Crash (declared 85) runs at 60, movePower 0 keeps the declared power.
+  const extra = (patch: Record<string, unknown> = {}) => ({ ability: 'ABILITY_ICE_DOWNFALL', move: 'MOVE_ICICLE_CRASH', attacker: 0, target: 1, movePower: 60, ...patch })
+  function resolveWith(extraAttack: ReturnType<typeof extra> | null, processing = true): number | null {
+    const s = state()
+    if (extraAttack) {
+      s.processingExtraAttacks = processing
+      s.currentExtraAttack = extraAttack
+    }
+    return resolver(scripted(1, 0)).resolve(s, 0, 1, action('MOVE_ICICLE_CRASH')).targetDamage
+  }
+  const natural = () => directResult('MOVE_ICICLE_CRASH').rolls[15]
+  const atSixty = () => directResult('MOVE_ICICLE_CRASH', {}, {}, {}, { power: 60 }).rolls[15]
+
+  it('replaces the declared power with movePower while the extra attack is being processed', () => {
+    expect(atSixty()).toBeLessThan(natural())
+    expect(resolveWith(extra())).toBe(atSixty())
+  })
+  it('keeps the declared power for movePower 0, an unqueued move, and a different attacker or move', () => {
+    expect(resolveWith(extra({ movePower: 0 }))).toBe(natural())
+    expect(resolveWith(null)).toBe(natural())
+    expect(resolveWith(extra(), false)).toBe(natural())
+    expect(resolveWith(extra({ attacker: 1 }))).toBe(natural())
+    expect(resolveWith(extra({ move: 'MOVE_TACKLE' }))).toBe(natural())
   })
 })
