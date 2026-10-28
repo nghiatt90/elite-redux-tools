@@ -83,7 +83,7 @@ const MIRROR_ARMOR = requireAbility('ABILITY_MIRROR_ARMOR')
 const SHIELD_DUST = requireAbility('ABILITY_SHIELD_DUST')
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 // An onEntry ability that is still unported, so it reports the HandleSwitchInAbility gap.
-const UNPORTED_ENTRY = requireAbility('ABILITY_ANTICIPATION')
+const UNPORTED_ENTRY = requireAbility('ABILITY_FOREWARN')
 const CORROSION = requireAbility('ABILITY_CORROSION')
 const HEMOTOXIN = requireAbility('ABILITY_HEMOTOXIN')
 const SUBDUE = requireAbility('ABILITY_SUBDUE')

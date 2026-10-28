@@ -58,6 +58,7 @@ import {
   INVERSE_ROOM_DURATION_SHORT,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  NUM_BATTLE_STATS,
   PLEDGE_DURATION,
   QUASH_DURATION,
   SCREEN_DURATION,
@@ -65,6 +66,7 @@ import {
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_MIST,
   SIDE_STATUS_REFLECT,
   SIDE_STATUS_SAFEGUARD,
   SIDE_STATUS_SMOKESCREEN,
@@ -78,12 +80,17 @@ import {
   STAT_SPEED,
   STAT_SPATK,
   STAT_SPDEF,
+  STATUS1_ANY,
+  STATUS1_BLEED,
   STATUS2_DEFENSE_CURL,
   STATUS2_ENRAGED,
   STATUS2_ESCAPE_PREVENTION,
+  STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
+  STATUS3_EMBARGO,
+  STATUS3_HEAL_BLOCK,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -101,6 +108,7 @@ import {
   TERRAIN_DURATION_EXTENDED,
   TRICK_ROOM_DURATION_SHORT,
   WEATHER_DURATION,
+  WEATHER_ANY,
   WEATHER_DURATION_EXTENDED,
   WEATHER_FOG_ANY,
   WEATHER_FOG_PERMANENT,
@@ -129,6 +137,7 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { weatherHasEffect } from './fieldEndTurn'
 import { canBattlerHeal } from './endTurn'
+import { isTerrainActive } from './statusEffects'
 import {
   dispatchOnTerrainChange,
   dispatchOnWeatherChange,
@@ -150,6 +159,7 @@ import {
   isSimAbilitySuppressed,
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
+  RESET_ALL_STATS,
   RESET_STAT_BUFFS,
   RESET_STAT_DROPS,
   STAT_BUFF_NOT_PROTECT_AFFECTED,
@@ -1064,6 +1074,97 @@ function applyDownload(
   )
 }
 
+/** BATTLE_PARTNER(battler) as a live battler: `battler ^ 2`, present only in a double battle. */
+function livePartner(state: BattleState, battlerId: number): BattlerState | undefined {
+  if (state.battlersCount <= 2) return undefined
+  const partner = state.battlers[battlerId ^ 2]
+  return partner && partner.mon.hp > 0 ? partner : undefined
+}
+
+/**
+ * Impl<ABILITY_HOSPITALITY>.onEntry (abilities.cc:8526-8537) with BattleScript_Hospitality_AfterPopup
+ * (data/battle_scripts_1.s:3921-3934): the partner heals maxHP / 4 (min 1; `-maxHP / 4` truncates toward zero) unless
+ * healing-blocked or bleeding, via datahpupdate's heal branch (battle_script_commands.c:1912-1916), capped at maxHP.
+ */
+function applyHospitality(state: BattleState, battlerId: number): void {
+  const partner = livePartner(state, battlerId)
+  if (!partner || partner.mon.hp >= partner.mon.maxHp) return
+  if (hasFlag(partner.statuses3, STATUS3_HEAL_BLOCK) || hasFlag(partner.mon.status1, STATUS1_BLEED)) return
+  const heal = Math.max(1, Math.trunc(partner.mon.maxHp / 4))
+  partner.mon.hp = Math.min(partner.mon.maxHp, partner.mon.hp + heal)
+}
+
+/**
+ * Impl<ABILITY_SOOTHING_AROMA>.onEntry (abilities.cc:6284-6307) with BattleScript_EffectSoothingAroma ->
+ * BattleScript_HealAllPartyStatus (battle_scripts_1.s:4870-4886), which zeroes gCurrentMove, so Cmd_healpartystatus takes its
+ * Aromatherapy branch (battle_script_commands.c:11079-11092): the holder and its (present) partner lose status1 and
+ * STATUS2_NIGHTMARE, and every party slot loses status1. The gate is any party mon with status1 (the active mon's live
+ * status1 lives on its BattlerState, the C's single copy being the party slot).
+ */
+function applySoothingAroma(state: BattleState, battlerId: number): void {
+  const side = state.sides[battlerId & 1]
+  if (!side) return
+  const active = state.battlers.filter((b): b is BattlerState => !!b && (b.id & 1) === (battlerId & 1))
+  const activeFor = (partyIndex: number): BattlerState | undefined => active.find((b) => b.partyIndex === partyIndex)
+  // A side may carry no roster at all (state.ts "no roster data"), so the active mons are read directly as well.
+  const anyStatus =
+    active.some((b) => hasFlag(b.mon.status1, STATUS1_ANY)) ||
+    side.party.some((mon, i) => !activeFor(i) && hasFlag(mon.status1, STATUS1_ANY))
+  if (!anyStatus) return
+
+  const holder = state.battlers[battlerId]!
+  holder.mon.status1 = 0
+  holder.mon.status2 = clearFlag(holder.mon.status2, STATUS2_NIGHTMARE)
+  if (state.battlersCount > 2) {
+    const partner = state.battlers[battlerId ^ 2]
+    if (partner) {
+      partner.mon.status1 = 0
+      partner.mon.status2 = clearFlag(partner.mon.status2, STATUS2_NIGHTMARE)
+    }
+  }
+  for (const mon of side.party) mon.status1 = 0
+}
+
+/**
+ * Impl<ABILITY_FURNACE>.onEntry (abilities.cc:5787-5794): own side has Stealth Rock set as Rock-typed -> Speed +2.
+ * Impl<ABILITY_MOLTEN_CORE>.onEntry runs it first (abilities.cc:10637-10640).
+ */
+function applyFurnace(state: BattleState, battlerId: number, deps: SwitchInAbilityDeps, unmodelled: string[]): void {
+  const side = battlerId & 1
+  if (
+    hasFlag(state.sides[side]?.statuses ?? 0, SIDE_STATUS_STEALTH_ROCK) &&
+    state.sides[side]?.timers.stealthRockType === TYPE_ROCK_ID
+  ) {
+    changeStatBuffs(state, battlerId, battlerId, battlerId, 2, STAT_SPEED, MOVE_EFFECT_AFFECTS_USER, false, deps, unmodelled)
+  }
+}
+
+/** VARIOUS_REMOVE_WEATHER (battle_script_commands.c:7938-7959): primal weather and Delta Stream's winds cannot be ended;
+ * anything else (fog and the permanent bits included) is cleared. Same body as hitScripts.ts's private copy. */
+function removeBattleWeather(state: BattleState): void {
+  const field = state.field
+  if (hasFlag(field.weather, WEATHER_SUN_PRIMAL) || hasFlag(field.weather, WEATHER_RAIN_PRIMAL) || hasFlag(field.weather, WEATHER_STRONG_WINDS)) return
+  field.weatherDuration = 0
+  field.weather = 0
+}
+
+/**
+ * Impl<ABILITY_FRISK>.onEntry (abilities.cc:1826-1840) with BattleScript_FriskActivates -> VARIOUS_TRY_FRISK
+ * (battle_script_commands.c:6817-6832): every live opposing battler holding an item gets Embargo for 2 turns (unless it
+ * already has it). The hook's own CHECK(any) is the same predicate. The C also RecordItemEffectBattle()s the item for the AI,
+ * which the sim does not track.
+ */
+function applyFrisk(state: BattleState, battlerId: number): void {
+  for (let i = 0; i < state.battlersCount; i++) {
+    const target = state.battlers[i]
+    if (!target || (i & 1) === (battlerId & 1) || target.mon.hp <= 0 || !target.mon.itemId) continue
+    if (!hasFlag(target.statuses3, STATUS3_EMBARGO)) {
+      target.statuses3 = setFlag(target.statuses3, STATUS3_EMBARGO)
+      target.volatiles.embargoTimer = 2
+    }
+  }
+}
+
 /** abilities.cc AddBattlerType users: ability -> type, including the abilities whose onEntry is Impl<BASE>.onEntry. */
 const ADD_TYPE_ON_ENTRY: Record<string, string> = {
   ABILITY_PHANTOM: 'GHOST',
@@ -1391,7 +1492,8 @@ export function applySwitchInAbilities(
     if (intimidateInfo !== undefined) {
       applyIntimidateClone(state, battlerId, intimidateInfo, deps, unmodelled)
       if (abilityId === 'ABILITY_GLEAM_EYES') {
-        unmodelled.push(`battler ${battlerId}: Gleam Eyes' onEntry also runs Impl<ABILITY_FRISK>.onEntry (abilities.cc:8832), which is not ported`)
+        // abilities.cc:8832: UseIntimidateClone(...) | Impl<ABILITY_FRISK>.onEntry
+        applyFrisk(state, battlerId)
       }
       continue
     }
@@ -1696,24 +1798,7 @@ export function applySwitchInAbilities(
     }
 
     if (abilityId === 'ABILITY_FURNACE') {
-      const side = battlerId & 1
-      if (
-        hasFlag(state.sides[side]?.statuses ?? 0, SIDE_STATUS_STEALTH_ROCK) &&
-        state.sides[side]?.timers.stealthRockType === TYPE_ROCK_ID
-      ) {
-        changeStatBuffs(
-          state,
-          battlerId,
-          battlerId,
-          battlerId,
-          2,
-          STAT_SPEED,
-          MOVE_EFFECT_AFFECTS_USER,
-          false,
-          deps,
-          unmodelled,
-        )
-      }
+      applyFurnace(state, battlerId, deps, unmodelled)
       continue
     }
 
@@ -1854,6 +1939,204 @@ export function applySwitchInAbilities(
     if (abilityId === 'ABILITY_GALLANTRY') {
       // abilities.cc:7423-7433: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability));
       // pushes BattleScript_BattlerHasASingleNoDamageHit (printstring only; no state change onEntry).
+      continue
+    }
+
+    if (abilityId === 'ABILITY_CHEATING_DEATH') {
+      // abilities.cc:5418-5433: onEntry only computes `2 - counter` and pushes BattleScript_BattlerHasASingleNoDamageHit /
+      // BattleScript_BattlerHasNoDamageHits (battle_scripts_1.s:9350-9353, :9365-9368), both printstring-only: no state
+      // change on entry. The hits themselves are .noDamageHits = 2 (damage path), which the sim does not read yet.
+      continue
+    }
+
+    if (abilityId === 'ABILITY_CLOUD_NINE' || abilityId === 'ABILITY_CLUELESS') {
+      // abilities.cc:654-659 (Clueless :5412-5415 -> Cloud Nine) -> BattleScript_AnnounceAirLockCloudNine
+      // (battle_scripts_1.s:11194-11205): `removeweather`, then BattleScript_OnWeatherChange on every branch (the primal branches
+      // only change which message prints).
+      removeBattleWeather(state)
+      dispatchOnWeatherChange(state, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_FRISK') {
+      applyFrisk(state, battlerId)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_COMATOSE' || abilityId === 'ABILITY_DREAMSCAPE') {
+      // abilities.cc:2966-2979 (Dreamscape :10395-10407 -> Comatose): BattleScript_AnnounceStatusAbility
+      // (battle_scripts_1.s:10403-10407) is printfromtable + updatestatusicon (Cmd_updatestatusicon, battle_script_commands.c:10431-10438,
+      // only emits a UI controller command): no game-state change. The sleep itself is .alwaysSleeping, read on the status paths.
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SUPREME_OVERLORD' || abilityId === 'ABILITY_ANTICIPATION') {
+      // Supreme Overlord abilities.cc:7265-7275 (CHECK fainted-count, then SwitchInAnnounce; the stat boost is in its onStat) and
+      // Anticipation :1673-1697 (CalcTypeEffectivenessMultiplier scan, then SwitchInAnnounce). SwitchInAnnounce ->
+      // BattleScript_SwitchInAbilityMsg (battle_scripts_1.s:10409-10413) is printfromtable only: no state change.
+      continue
+    }
+
+    if (abilityId === 'ABILITY_MADNESS_ENHANCEMENT') {
+      // abilities.cc:9934-9955 MadnessEnhancementHandler: fog-affected and not already enraged -> STATUS2_ENRAGED
+      // (BattleScript_MadnessEnhancementRet is animation + message). onWeather.ts already runs the same handler on weather change.
+      if (isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) && !hasFlag(battler.mon.status2, STATUS2_ENRAGED)) {
+        battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_ENRAGED)
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_SPYWARE') {
+      // abilities.cc:10872-10904: target = BATTLE_OPPOSITE(battler) (the `!IsBattlerAlive(battler)` partner fallback tests the
+      // holder, who is alive here, so it never applies); the stat that counters the target's highest is raised by 2 (Speed
+      // for Speed or any unlisted result)
+      const target = state.battlers[battlerId ^ 1]
+      if (target) {
+        let statId: number
+        switch (getHighestStatId(state, battlerId ^ 1, statStageRatios)) {
+          case STAT_ATK:
+            statId = STAT_DEF
+            break
+          case STAT_DEF:
+            statId = STAT_ATK
+            break
+          case STAT_SPATK:
+            statId = STAT_SPDEF
+            break
+          case STAT_SPDEF:
+            statId = STAT_SPATK
+            break
+          default:
+            statId = STAT_SPEED
+            break
+        }
+        changeStatBuffs(state, battlerId, battlerId, battlerId, 2, statId, MOVE_EFFECT_AFFECTS_USER, false, deps, unmodelled)
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_POWER_OF_ALCHEMY') {
+      // abilities.cc:3077-3091: every live opposing battler holding a berry has it replaced by Black Sludge via UpdateBattlerItem
+      // (battle_script_commands.c:2194-2222; berry -> sludge touches neither the Unburden/Sugar Rush nor Greedy nor
+      // choicedMove branches, all of which need an ITEM_NONE side)
+      for (let i = (battlerId & 1) ^ 1; i < state.battlersCount; i += 2) {
+        const target = state.battlers[i]
+        if (!target || target.mon.hp <= 0 || !target.mon.itemId) continue
+        if (deps.dataContext.item(target.mon.itemId)?.grouping === 'POCKET_BERRIES') {
+          target.mon.itemId = 'ITEM_BLACK_SLUDGE'
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TERAFORM_ZERO') {
+      // abilities.cc:9128-9139 + BattleScript_TeraformZero (battle_scripts_1.s:8486-8499): once per battle (the counter is
+      // spent even when nothing is on the field), removeweather, then removeterrain (+ BattleScript_OnTerrainChanged when a
+      // terrain was removed). The script does not call BattleScript_OnWeatherChange.
+      if (!getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext)) {
+        setSingleUseAbilityCounter(state, battlerId, abilityId, 1, deps.dataContext)
+        if (
+          (hasFlag(state.field.weather, WEATHER_ANY) && weatherHasEffect(state, deps.grounding)) ||
+          isTerrainActive(state, STATUS_FIELD_TERRAIN_ANY, deps)
+        ) {
+          removeBattleWeather(state)
+          if ((state.field.statuses & STATUS_FIELD_TERRAIN_PERMANENT) !== STATUS_FIELD_TERRAIN_PERMANENT) {
+            state.field.timers.terrainTimer = 0
+            const hadTerrain = hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+            state.field.statuses = clearFlag(state.field.statuses, STATUS_FIELD_TERRAIN_ANY)
+            if (hadTerrain) dispatchOnTerrainChange(state, deps, unmodelled)
+          }
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_COSTAR') {
+      // abilities.cc:7145-7160: copy every stat stage ATK..EVASION from the live partner
+      const partner = livePartner(state, battlerId)
+      if (partner) {
+        for (let i = STAT_ATK; i < NUM_BATTLE_STATS; i++) {
+          if (battler.mon.statStages[i] !== partner.mon.statStages[i]) {
+            battler.mon.statStages[i] = partner.mon.statStages[i] ?? DEFAULT_STAT_STAGE
+          }
+        }
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_CURIOUS_MEDICINE') {
+      // abilities.cc:3578-3589: double battle, live partner, TryResetBattlerStatChanges(partner, RESET_ALL_STATS)
+      if (livePartner(state, battlerId)) {
+        tryResetBattlerStatChanges(state, battlerId ^ 2, RESET_ALL_STATS)
+      }
+      continue
+    }
+
+    if (
+      abilityId === 'ABILITY_HOSPITALITY' ||
+      abilityId === 'ABILITY_FOOD_LOVERS' ||
+      abilityId === 'ABILITY_SOOTHING_AROMA' ||
+      abilityId === 'ABILITY_BUTTER_UP'
+    ) {
+      // Hospitality abilities.cc:8526-8537, Food Lovers :10856-10859 (-> Hospitality), Soothing Aroma :6284-6307,
+      // Butter Up :8540-8542 (Hospitality | Soothing Aroma, both always evaluated, in that order)
+      if (abilityId !== 'ABILITY_SOOTHING_AROMA') applyHospitality(state, battlerId)
+      if (abilityId === 'ABILITY_SOOTHING_AROMA' || abilityId === 'ABILITY_BUTTER_UP') applySoothingAroma(state, battlerId)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_MOLTEN_CORE') {
+      // abilities.cc:10637-10653: Furnace's onEntry first, then Stealth Rock on the own side is removed
+      applyFurnace(state, battlerId, deps, unmodelled)
+      const sideState = state.sides[battlerId & 1]
+      if (sideState && hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
+        sideState.statuses = clearFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_OVERCAST') {
+      // abilities.cc:11727-11742. The C tests `gSideStatuses[battler]` -- indexed by the BATTLER id, not the side (ported as
+      // written): battlers 0 and 1 read their own side, battlers 2 and 3 read past the 2-entry array (undefined in the C;
+      // treated here as "no Mist bit").
+      const mistSide = state.sides[battlerId]
+      const mistAlreadySet = battlerId < 2 && !!mistSide && hasFlag(mistSide.statuses, SIDE_STATUS_MIST)
+      if (!mistAlreadySet) {
+        const ownSide = state.sides[battlerId & 1]
+        if (ownSide) {
+          ownSide.statuses = setFlag(ownSide.statuses, SIDE_STATUS_MIST)
+          ownSide.timers.started.mist = true
+          ownSide.timers.mistTimer = SCREEN_DURATION
+          ownSide.timers.mistBattlerId = battlerId
+        }
+      }
+      // `| Impl<ABILITY_LOW_VISIBILITY>.onEntry` (:7807-7818): fog; the else-branch (blocked by primal weather) only prints
+      if (tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_FOG, true, deps)) {
+        dispatchOnWeatherChange(state, deps, unmodelled)
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_DEEP_FRIED') {
+      // abilities.cc:10845-10853 -> MOVE_EFFECT_FIRE_SEA on the opposing side (battle_script_commands.c:2650-2656).
+      // AbilityStatusEffectSafe passes GetOppositeSide() (0 or 1) as the target battler id; gEffectBattler = that id and
+      // GET_BATTLER_SIDE of 0/1 is the same value, so the sea still lands on the opposing side.
+      const oppSide = state.sides[(battlerId & 1) ^ 1]
+      if (oppSide && !oppSide.timers.fireSeaTimer) {
+        oppSide.timers.started.fireSea = true
+        oppSide.timers.fireSeaTimer = PLEDGE_DURATION
+      }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_TASTE_THE_RAINBOW' || abilityId === 'ABILITY_RAINBOW_SCALES') {
+      // abilities.cc:11908-11916 (Rainbow Scales :11919-11923 -> same onEntry): MOVE_EFFECT_RAINBOW | AFFECTS_USER, so
+      // gEffectBattler is the holder (battle_script_commands.c:2636-2642)
+      const ownSide = state.sides[battlerId & 1]
+      if (ownSide && !ownSide.timers.rainbowTimer) {
+        ownSide.timers.started.rainbow = true
+        ownSide.timers.rainbowTimer = PLEDGE_DURATION
+      }
       continue
     }
 

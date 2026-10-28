@@ -466,10 +466,10 @@ describe('switch-in ability dispatch and weather setters', () => {
   })
 
   it('a non-ported onEntry ability still produces its gap line, for leads too', () => {
-    // Lead with unported onEntry ability (Anticipation)
+    // Lead with unported onEntry ability (Forewarn: needs Future Sight state the sim lacks)
     const stateLead = battle(
       [
-        { abilities: { ability: requireAbility('ABILITY_ANTICIPATION'), innates: [null, null, null] }, spe: 100 },
+        { abilities: { ability: requireAbility('ABILITY_FOREWARN'), innates: [null, null, null] }, spe: 100 },
         { spe: 50 },
       ],
       scriptedRng(),
@@ -478,10 +478,10 @@ describe('switch-in ability dispatch and weather setters', () => {
     applyBattleStartPass(stateLead, makeTestDeps(), unmodelledLead)
 
     expect(unmodelledLead).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_ANTICIPATION\'s onEntry hook was not run',
+      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_FOREWARN\'s onEntry hook was not run',
     )
 
-    // Replacement switch-in with unported onEntry ability (Frisk)
+    // Replacement switch-in with unported onEntry ability (Imposter: Transform on entry)
     const stateReplacement = battle(
       [
         { hp: 0, spe: 100 },
@@ -491,7 +491,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     )
     stateReplacement.sides[0].party[1] = {
       ...mon({
-        abilities: { ability: requireAbility('ABILITY_FRISK'), innates: [null, null, null] },
+        abilities: { ability: requireAbility('ABILITY_IMPOSTER'), innates: [null, null, null] },
         hp: 100,
       }),
     }
@@ -499,7 +499,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     switchIn(stateReplacement, 0, 1, makeTestDeps(), unmodelledRepl)
 
     expect(unmodelledRepl).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_FRISK\'s onEntry hook was not run',
+      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_IMPOSTER\'s onEntry hook was not run',
     )
   })
 
