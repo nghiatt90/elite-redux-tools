@@ -953,15 +953,17 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps an unported attacker ability (ABILITY_VIRUS) on damaging hit', () => {
+  // ABILITY_TALON_TRAP is the last ON_ATTACKER_ABILITIES entry that is still not ported (its wrap half needs
+  // wrapAbility / wrappedMove state and the isFirstTurn ability-state gate; see cycle 109's queue).
+  it('conditionally gaps an unported attacker ability (ABILITY_TALON_TRAP) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_VIRUS'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_TALON_TRAP'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_VIRUS is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_TALON_TRAP is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1152,7 +1154,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 136 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 144 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1274,6 +1276,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_STRIKER_PIXILATE',
       'ABILITY_STUN_SHOCK',
       'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TANGLED_TAILS',
       'ABILITY_TEMPORAL_RUPTURE',
       'ABILITY_TENDER_AFFECTION',
       'ABILITY_TENTALOCK',
@@ -1284,12 +1287,19 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_TO_THE_BONE',
       'ABILITY_TWO_STEP',
       'ABILITY_UNICORN',
+      'ABILITY_VENOBLAZE_PINCERS',
       'ABILITY_VENOM_CROWN',
+      'ABILITY_VIRUS',
+      'ABILITY_VITALITY_STRIKE',
       'ABILITY_VITAL_SPIRIT',
       'ABILITY_VOLCANO_RAGE',
       'ABILITY_WHIPLASH',
       'ABILITY_WHITE_NOISE',
+      'ABILITY_WINGS_OF_PESTILENCE',
+      'ABILITY_WOODLAND_CURSE',
       'ABILITY_WORLD_SERPENT',
+      'ABILITY_WRESTLE_SHOWMAN',
+      'ABILITY_YUKI_ONNA',
     ])
   })
 })

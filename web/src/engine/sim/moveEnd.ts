@@ -1021,6 +1021,18 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_SINISTER_CLAWS',
   'ABILITY_SPECTRAL_SHROUD',
   'ABILITY_SPINNING_TOP',
+  // Cycle 106c: third on-hit attacker batch -- Tangled Tails, onAttacker half (= Know Your Place's lambda, :12001-12004),
+  // Venoblaze Pincers (:8129-8146), Virus (:10907-10913), Vitality Strike (:8545-8556),
+  // Wings of Pestilence (:11297-11313), Woodland Curse onAttacker (:9835-9845, ON_EITHER),
+  // Wrestle Showman (:11716-11725), Yuki Onna onAttacker (:6425-6433).
+  'ABILITY_TANGLED_TAILS',
+  'ABILITY_VENOBLAZE_PINCERS',
+  'ABILITY_VIRUS',
+  'ABILITY_VITALITY_STRIKE',
+  'ABILITY_WINGS_OF_PESTILENCE',
+  'ABILITY_WOODLAND_CURSE',
+  'ABILITY_WRESTLE_SHOWMAN',
+  'ABILITY_YUKI_ONNA',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -4572,7 +4584,9 @@ function handleAttackerMoveEndAbility(
   // timer itself is decremented by ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979, SUBTRACT_VOLATILE_TIMER),
   // which endTurn.ts still notes as unapplied. BattleScript_TargetDazed (data/battle_scripts_1.s:12469-12472) is the
   // message alone. No roll.
-  if (abilityId === 'ABILITY_KNOW_YOUR_PLACE') {
+  // Tangled Tails (src/abilities.cc:12001-12004) is `.onAttacker = Impl<ABILITY_KNOW_YOUR_PLACE>.onAttacker`, so the
+  // same lambda runs for it; its `.grappler = TRUE` is a damage-side flag (not this hook) and is not touched here.
+  if (abilityId === 'ABILITY_KNOW_YOUR_PLACE' || abilityId === 'ABILITY_TANGLED_TAILS') {
     if (
       target.mon.hp > 0 &&
       hpDealt > 0 &&
@@ -4711,6 +4725,151 @@ function handleAttackerMoveEndAbility(
       if (res.delta !== 0) {
         result.statChanges.push({ battlerId: attackerId, stat: STAT_SPEED, change: res.delta })
       }
+    }
+  }
+
+  // ---- Cycle 106c: third batch of on-hit attacker abilities. Same ShouldApplyOnHitEffect(x) approximation as the
+  // Cycle 106 / 106b blocks above (target alive, hpDealt > 0, attacker != target); `moveTypeName()` is the effective
+  // (ate-adjusted) move type.
+
+  // Venoblaze Pincers (src/abilities.cc:8129-8146): ShouldApplyOnHitEffect(target), a physical move, then the 20% roll,
+  // then a SECOND draw switching on Random() % 2: case 0 CanBeBurned(target) -> MOVE_EFFECT_BURN, case 1
+  // CanBePoisoned(battler, target, MOVE_NONE) -> MOVE_EFFECT_TOXIC. The %2 draw is consumed even when the branch's own
+  // CHECK fails (a failing CanX does nothing, no reroll), and the switch has no default. Its onOffensiveMultiplier
+  // (:8147-8150, physical moves MUL(1.2)) is the damage side and is not this hook.
+  if (abilityId === 'ABILITY_VENOBLAZE_PINCERS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveData?.split === 'PHYSICAL' &&
+      state.rng.random16() % 100 < 20
+    ) {
+      const branch = state.rng.random16() % 2
+      if (branch === 0 && canBeBurned(state, targetId, attackerId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      } else if (branch === 1 && canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Virus (src/abilities.cc:10907-10913): ShouldApplyOnHitEffect(target), moveType == TYPE_ELECTRIC, then
+  // CanBePoisoned(battler, target, move) -- the REAL move id, not MOVE_NONE: CanPoisonType (battle_script_commands.c:
+  // 6462-6468) hands the move to each onCanStatusType hook, and the sim's canPoisonType only reads it for Poison Sting's
+  // Angel's Wrath bypass -- then AbilityStatusEffect(MOVE_EFFECT_POISON). No roll.
+  if (abilityId === 'ABILITY_VIRUS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveTypeName() === 'ELECTRIC' &&
+      canBePoisoned(state, attackerId, targetId, moveId, statusDeps)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_POISON, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Vitality Strike (src/abilities.cc:8545-8556): ShouldApplyOnHitEffect(battler) -- the ATTACKER -- then not at max HP,
+  // CanBattlerHeal(battler), IsIronFistBoosted(battler, move) (battle_util.c:9375 -> DoesMoveMatchFlag(... MOVE_FLAG_PUNCH)).
+  // gBattleMoveDamage = -gHpDealt / 10 (s32, truncating toward zero), bumped to -1 when zero, then
+  // BattleScript_HydroCircuitAbsorbEffectActivated (data/battle_scripts_1.s:11563-11570) -- the same script Hydro Circuit
+  // uses: manipulatedamage DMG_TO_HP_FROM_ABILITY (GetDrainedBigRootHp, battle_util.c:2369-2377: Big Root and Absorbant
+  // both multiply by 3/2), healthbarupdate/datahpupdate BS_ATTACKER. Nothing else follows.
+  if (abilityId === 'ABILITY_VITALITY_STRIKE') {
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      attacker.mon.hp < attacker.mon.maxHp &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS')
+    ) {
+      healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 10)), deps)
+    }
+  }
+
+  // Wings of Pestilence (src/abilities.cc:11297-11313): ShouldApplyOnHitEffect(target), then TWO unconditional draws.
+  // C `&&` order matters: the 10% curse roll is drawn FIRST and the STATUS2_CURSED test runs only after it (so the draw
+  // happens even when the target is already cursed), and the 20% bleed roll is likewise drawn before CanBleed(target).
+  // The curse is the C's own direct `gBattleMons[target].status2 |= STATUS2_CURSED` -- NOT AbilityStatusEffect, so
+  // neither SetMoveEffect's Sheer Force gate (battle_script_commands.c:2361) nor its Substitute gate (:2388) applies;
+  // BattleScript_MoveEffectCurse (data/battle_scripts_1.s:3378-3382) is statusanimation + message alone.
+  if (abilityId === 'ABILITY_WINGS_OF_PESTILENCE') {
+    if (target.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+      if (state.rng.random16() % 100 < 10 && !hasFlag(target.mon.status2, STATUS2_CURSED)) {
+        target.mon.status2 = setFlag(target.mon.status2, STATUS2_CURSED)
+        if (!result.statusApplied) result.statusApplied = { battlerId: targetId, status: 'CURSE' }
+      }
+      if (state.rng.random16() % 100 < 20 && canBleed(state, targetId, attackerId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Woodland Curse onAttacker (src/abilities.cc:9835-9845). ON_EITHER_ABILITY (:54) assigns that lambda to BOTH hooks, so
+  // on this path `battler` is the holder and `opponent` is the target. ShouldApplyOnHitEffect(opponent), IsMoveMakingContact, the target is not
+  // already a Grass type (IS_BATTLER_OF_TYPE checks type1/type2/type3, include/battle.h:753-754), then the single write
+  // `gBattleMons[opponent].type3 = TYPE_GRASS` -- type1 and type2 are left alone, unlike SET_BATTLER_TYPE.
+  // BattleScript_StackAddedTheTypeRet (data/battle_scripts_1.s) is the message alone. Its onEntry (Forest's Curse) and
+  // its onDefender half are separate hooks and are not touched here.
+  if (abilityId === 'ABILITY_WOODLAND_CURSE') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !target.mon.types.includes('GRASS')
+    ) {
+      target.mon.types = [target.mon.types[0], target.mon.types[1], 'GRASS']
+    }
+  }
+
+  // Wrestle Showman (src/abilities.cc:11716-11725): move == MOVE_FLYING_PRESS, ShouldApplyOnHitEffect(target),
+  // IsBattlerAlive(target) (redundant with the hook above), !IsAbilityStatusProtected(target, CHECK_RESTRICTING), then
+  // "not already taunted". BattleScript_WrestleShowman_Effect_FlyingPress (data/battle_scripts_1.s:12560-12565) re-runs
+  // `jumpifabilitystatusimmunity BS_TARGET, MOVE_TAUNT` (the same CHECK_RESTRICTING gate) and then `settaunt`, i.e.
+  // Cmd_settaunt (battle_script_commands.c:11678-11698): the Oblivious branch, then the tauntTimer == 0 branch, then
+  // B_TAUNT_TURNS >= GEN_5's `turns = 4; if (GetBattlerTurnOrderNum(target) > GetBattlerTurnOrderNum(attacker))
+  // turns--;` and `tauntTimer = tauntTimer2 = turns`. turn.ts supplies that ordering fact as `targetHasActedThisTurn`
+  // (turn.ts:2572: target's slot index < the attacker's), so turns = 3 when the target has not moved yet, else 4. The
+  // script has no ppreduce / accuracycheck of its own -- those belong to BattleScript_EffectTaunt, not here.
+  if (abilityId === 'ABILITY_WRESTLE_SHOWMAN') {
+    if (
+      moveId === 'MOVE_FLYING_PRESS' &&
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null &&
+      target.volatiles.tauntTimer === 0
+    ) {
+      if (targetHasActedThisTurn === undefined) {
+        const msg = "Wrestle Showman's turn-order check (battle_script_commands.c:11684-11686) needs the target's turn-order slot, which this move-end call was not given"
+        if (!unmodelled.includes(msg)) unmodelled.push(msg)
+      } else {
+        const attackerHasMB = attackerHasMoldBreakerActive(attacker, deps)
+        if (!battlerHasSimAbility(state, target, 'ABILITY_OBLIVIOUS', true, attackerId, attackerHasMB, deps.dataContext)) {
+          const turns = targetHasActedThisTurn ? 4 : 3
+          target.volatiles.tauntTimer = turns
+          target.volatiles.tauntTimer2 = turns
+        }
+      }
+    }
+  }
+
+  // Yuki Onna onAttacker (src/abilities.cc:6425-6433): ShouldApplyOnHitEffect(target), CanInfatuate(battler, target)
+  // -- the holder is the infatuating side, so the sim's canInfatuate(state, attackerId, targetId) argument order --
+  // BEFORE the 30% roll, then AbilityStatusEffect(MOVE_EFFECT_ATTRACT). Its onEntry (UseIntimidateClone) is a separate
+  // hook and is not touched here.
+  if (abilityId === 'ABILITY_YUKI_ONNA') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canInfatuate(state, attackerId, targetId, statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, 'ATTRACT', attackerId, targetId, moveId, statusDeps, unmodelled, result)
     }
   }
 
