@@ -9,9 +9,10 @@ proportionate to that.
 
 - Pokedex (Elite Redux data) — first tool, in progress (`pipeline/` + `web/`)
 - Damage calculator — **built** (`web/src/engine/`), singles only
-- Battle simulator + team-build solver — planned, unstarted. Turn loop, AI port and
-  solver on top of the damage engine. Plan lives outside the repo, in the user's
-  `~/.claude/plans/`.
+- Battle simulator + team-build solver — in progress on branch `battle-sim`
+  (`web/src/engine/sim/`: turn loop, AI port, Mega/primal forms, singles solver prototype).
+  Plan: `docs/battle-sim/plan.md`; cycle queue: `.omc/team-pilot/STATE.md`. Doubles, tag
+  battles, trainer chains and the full solver are not built.
 - Save editor
 - Build recommender — no upstream data source (`recommended_sets.h` is an empty stub).
   Likely falls out of the solver rather than needing its own source.
