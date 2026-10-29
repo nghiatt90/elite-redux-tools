@@ -2,7 +2,7 @@
 // BattlerHasAbility / IsAbilityOnField reads built on it. A leaf module -- it
 // must not import aiScorers or aiCheckBadMove (pinned by aiAbilityHelpers.test.ts).
 import type { BattleState, BattlerState } from '../state'
-import { hasFlag, STATUS3_GASTRO_ACID, STATUS3_EMBARGO } from '../constants'
+import { hasFlag, PARTY_SIZE, STATUS3_GASTRO_ACID, STATUS3_EMBARGO } from '../constants'
 import { battlerHasAbility } from '../../abilities/dispatch'
 import type { AiDamageDeps } from './aiCalcDamage'
 
@@ -213,4 +213,24 @@ export function isEntrainmentBannedAbilityAttacker(ability: string | null): bool
  * `sEntrainmentTargetSimpleBeamBannedAbilities` (:97-99) is just Truant. */
 export function isEntrainmentTargetOrSimpleBeamBannedAbility(ability: string | null): boolean {
   return !!ability && (PERSISTENT_OR_UNSUPPRESSABLE_SET.has(ability) || ability === 'ABILITY_TRUANT')
+}
+
+/**
+ * CountUsablePartyMons, battle_ai_util.c:2447-2474 -- singles-only (both
+ * "on field" slots collapse to the same `battlerOnField1 === battlerOnField2`
+ * the C's own else branch sets at :2461-2462). Eggs are not modelled (same
+ * precedent as aiSwitching.ts's own SimPartyMon doc).
+ */
+export function countUsablePartyMons(state: BattleState, battlerId: number): number {
+  const battler = state.battlers[battlerId]
+  if (!battler) return 0
+  const side = battlerId & 1
+  const party = state.sides[side].party
+  let count = 0
+  for (let i = 0; i < PARTY_SIZE; i++) {
+    if (i === battler.partyIndex) continue
+    const mon = party[i]
+    if (mon && mon.speciesId !== null && mon.hp !== 0) count++
+  }
+  return count
 }

@@ -212,8 +212,7 @@ import {
   tryScheduleSwitch,
   updateAbilityStateForNewAbility,
 } from './moveEffects'
-import { PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
-import { countUsablePartyMons } from './ai/aiPipeline'
+import { countUsablePartyMons, PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
 
 export { getBattlerBattleMoveTargetFlags, isMegaLauncherBoostedMove }
 

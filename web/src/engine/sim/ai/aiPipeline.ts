@@ -25,6 +25,7 @@ import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitch
 import type { AiDamageDeps } from './aiCalcDamage'
 import { computeMoveLimitations } from './aiMoveLimitations'
 import { isAbilityPreventingEscape } from '../escape'
+import { countUsablePartyMons } from './aiAbilityHelpers'
 
 /** include/constants/battle.h:18, 66. Same values aiSwitching.ts's own module
  * header cites (BATTLE_TYPE_ARENA) and state.ts's aiFlags doc cites
@@ -153,27 +154,8 @@ export function computeBattleAiScores(state: BattleState, battlerAtk: number, ba
   return { scores, unmodelled }
 }
 
-/**
- * CountUsablePartyMons, battle_ai_util.c:2447-2474 -- singles-only (both
- * "on field" slots collapse to the same `battlerOnField1 === battlerOnField2`
- * the C's own else branch sets at :2461-2462). Eggs are not modelled (same
- * precedent as aiSwitching.ts's own SimPartyMon doc).
- */
-export function countUsablePartyMons(state: BattleState, battlerId: number): number {
-  const battler = state.battlers[battlerId]
-  if (!battler) return 0
-  const side = battlerId & 1
-  const party = state.sides[side].party
-  let count = 0
-  for (let i = 0; i < PARTY_SIZE; i++) {
-    if (i === battler.partyIndex) continue
-    const mon = party[i]
-    if (mon && mon.speciesId !== null && mon.hp !== 0) count++
-  }
-  return count
-}
-
 export { isAbilityPreventingEscape }
+export { countUsablePartyMons }
 
 /** GetTotalBaseStat -- reused from species data via `deps.dataContext.species`
  * (SimSpeciesData.baseStats, engine/sim/dataContext.ts). */
