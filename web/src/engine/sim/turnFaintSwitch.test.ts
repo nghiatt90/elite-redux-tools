@@ -51,7 +51,9 @@ function requireSpecies(id: string): string {
 // this batch's gap lines depend on, per the brief's "verify every id" rule.
 const MUDKIP = requireSpecies('SPECIES_MUDKIP')
 // An onEntry ability that is still unported, so it reports the HandleSwitchInAbility gap.
-const UNPORTED_ENTRY = requireAbility('ABILITY_FOREWARN')
+// (Forewarn was the sentinel until cycle 109c ported its onEntry hook; Locust Swarm's onEntry
+// is still unported -- its ported half is onEndTurn/form change only.)
+const UNPORTED_ENTRY = requireAbility('ABILITY_LOCUST_SWARM')
 if (!abilityHooks[UNPORTED_ENTRY]?.hooks?.onEntry) throw new Error(`${UNPORTED_ENTRY} no longer has an onEntry hook in abilityHooks.json`)
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 if (abilityHooks[MAGIC_GUARD]?.hooks?.onEntry) throw new Error(`${MAGIC_GUARD} unexpectedly gained an onEntry hook -- pick a different "no gap" ability`)

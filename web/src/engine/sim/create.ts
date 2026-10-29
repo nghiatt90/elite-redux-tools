@@ -341,6 +341,10 @@ export function createFieldState(): FieldState {
     weatherDuration: 0,
     wishCounter: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
     wishPartyId: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
+    futureSightCounter: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
+    futureSightMove: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
+    futureSightPower: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
+    futureSightAttacker: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
   }
 }
 

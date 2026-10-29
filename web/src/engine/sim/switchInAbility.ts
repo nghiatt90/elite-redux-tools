@@ -65,6 +65,7 @@ import {
   SCREEN_DURATION,
   SCREEN_DURATION_SHORT,
   SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_FUTUREATTACK,
   SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_MIST,
@@ -2344,6 +2345,26 @@ export function applySwitchInAbilities(
       if ((battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE) {
         battler.mon.statStages[STAT_DEF] = MAX_STAT_STAGE
       }
+      continue
+    }
+
+    if (abilityId === 'ABILITY_FOREWARN') {
+      // Impl<ABILITY_FOREWARN>.onEntry (src/abilities.cc:1700-1715). The target starts as
+      // BATTLE_OPPOSITE(battler) and is switched to BATTLE_PARTNER of that when the opposite
+      // is dead OR already has a pending Future Sight; then both CHECKs fail the hook silently.
+      let target = battlerId ^ 1
+      if (!isBattlerAlive(state, target) || state.field.futureSightCounter[target]) target = target ^ 2
+      if (!isBattlerAlive(state, target)) continue
+      if (state.field.futureSightCounter[target]) continue
+
+      // gSideStatuses[GET_BATTLER_SIDE(target)] |= SIDE_STATUS_FUTUREATTACK, then the four
+      // arrays; the power is 80 here, not the move table's 120 (:1708-1712).
+      // BattleScript_ForewarnReworkActivates (battle_scripts_1.s:9344) is message-only.
+      state.sides[target & 1].statuses = setFlag(state.sides[target & 1].statuses, SIDE_STATUS_FUTUREATTACK)
+      state.field.futureSightMove[target] = 'MOVE_FUTURE_SIGHT'
+      state.field.futureSightPower[target] = 80
+      state.field.futureSightAttacker[target] = battlerId
+      state.field.futureSightCounter[target] = 3
       continue
     }
 

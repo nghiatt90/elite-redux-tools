@@ -1210,16 +1210,17 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
 
   it('unported legacy secondary effect produces named gap', () => {
     // Derivation:
-    // Future Sight has legacyConfig: BattleScript_EffectFutureSight (battle_scripts_1.s:5692), whose delayed hit is unmodelled in
-    // the sim (Eerie Spell, used here until cycle 87, is ported now). Damaging move execution reaches applySecondaryMoveEffects,
-    // pushing the named gap.
+    // Party Favors has legacyConfig: BattleScript_EffectPartyFavors and no handler in moveEffects.ts, no entry in the pure
+    // damaging-move list and no generated `behavior.attack.secondaryEffects`, so damaging move execution reaches
+    // applySecondaryMoveEffects' fallback and pushes the named gap. (Future Sight, used here until cycle 109c, is now
+    // ported; Eerie Spell was ported in cycle 87.)
     const rng = scriptedRng([0])
     const state = battle([{}, {}], rng)
     const deps = testDeps(fixedDamage(20), rawBehaviors)
-    const out = executeTurn(state, [useMove(1, requireMove('MOVE_FUTURE_SIGHT')), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    const out = executeTurn(state, [useMove(1, requireMove('MOVE_PARTY_FAVORS')), useMove(0, MOVE_SWORDS_DANCE)], deps)
 
     expect(out.actions[0].statusApplied).toBeNull()
-    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_FUTURE_SIGHT not modelled')
+    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_PARTY_FAVORS not modelled')
   })
 
   it('confusion secondary effect applies and draws duration', () => {

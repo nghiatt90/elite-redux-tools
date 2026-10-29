@@ -592,12 +592,25 @@ export interface FieldState {
   weather: number
   timers: FieldTimerState
   /** `gWishFutureKnock.weatherDuration` (battle.h:340) -- weather's own countdown,
-   * which lives outside gFieldTimers. Future Sight is not modelled yet. */
+   * which lives outside gFieldTimers. */
   weatherDuration: number
   /** `u8 wishCounter[MAX_BATTLERS_COUNT]` (struct WishFutureKnock, include/battle.h:338). */
   wishCounter: number[]
   /** `u8 wishPartyId[MAX_BATTLERS_COUNT]` (struct WishFutureKnock, include/battle.h:339). */
   wishPartyId: number[]
+  /** `u8 futureSightCounter[MAX_BATTLERS_COUNT]` (struct WishFutureKnock,
+   * include/battle.h:334) -- turns remaining before the delayed hit; 0 means none.
+   * Decremented in HandleWishPerishSongOnTurnEnd state 0 (battle_util.c:3001-3031). */
+  futureSightCounter: number[]
+  /** `u16 futureSightMove[MAX_BATTLERS_COUNT]` (battle.h:336). A stored move id, not
+   * re-read from the move table. `null` is the C's 0 (MOVE_NONE), matching lastMove. */
+  futureSightMove: (string | null)[]
+  /** `u8 futureSightPower[MAX_BATTLERS_COUNT]` (battle.h:337) -- the power recorded when
+   * the attack was set; Cmd_damagecalc uses it as fixedBasePower (battle_script_commands.c:1605-1610). */
+  futureSightPower: number[]
+  /** `u8 futureSightAttacker[MAX_BATTLERS_COUNT]` (battle.h:335) -- the battler slot that used
+   * the move (or the Forewarn holder), which the delayed hit reads its stats from. */
+  futureSightAttacker: number[]
 }
 
 // ---------------------------------------------------------------------------

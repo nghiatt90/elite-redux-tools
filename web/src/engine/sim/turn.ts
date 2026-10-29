@@ -150,6 +150,7 @@ import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, hasLiveReserve, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
 import {
+  applyMoveEndItemEffectsAll,
   ATTACKER_FOLLOWUP_ABILITIES,
   dispatchMoveEndAttackerAbilities,
   getBattlerAbilitySlotsReverse,
@@ -170,6 +171,7 @@ import {
   PARTY_SIZE,
   setFlag,
   SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_FUTUREATTACK,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_SCREEN_ANY,
   SIDE_STATUS_SMOKESCREEN,
@@ -218,6 +220,7 @@ import {
   WEATHER_RAIN_ANY,
   MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_EVS_PLUS_1,
+  MOVE_UNSET,
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
@@ -3700,6 +3703,142 @@ function runPoppedExtraAttack(
   return true
 }
 
+/**
+ * HandleWishPerishSongOnTurnEnd state 0 (battle_util.c:2998-3031): the Future Sight /
+ * Doom Desire countdown, and the delayed hit when a counter reaches 0.
+ *
+ * The C walks `gBattleStruct->wishPerishSongBattlerId` from 0 to gBattlersCount-1 --
+ * plain battler index order, unlike state 1's Perish Song loop, which uses
+ * gBattlerByTurnOrder. `--counter` is evaluated before the `hp != 0` test (:3005), so a
+ * fainted holder still ticks to 0 and simply never gets hit.
+ *
+ * Returns true when the hit fainted someone (the caller then runs end-of-turn
+ * replacements, the same handling the Perish Song loop uses).
+ *
+ * BattleScript_MonTookFutureAttack (data/battle_scripts_1.s:8008-8049) has NO
+ * attackcanceler and NO ppreduce: only accuracycheck, damagecalc, adjustdamage, the HP
+ * update / messages, tryfaintmon, and `moveendcase MOVEEND_RAGE` +
+ * `moveendfromto MOVEEND_ITEM_EFFECTS_ALL, MOVEEND_UPDATE_LAST_MOVES`. This function
+ * therefore draws accuracy itself and calls the damage resolver directly rather than
+ * going through executeAction's canceller/PP ladder.
+ */
+function runFutureSightCountdown(
+  state: BattleState,
+  actions: (ChosenAction | null)[],
+  order: TurnOrder,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): boolean {
+  let faintedAnyone = false
+
+  for (let holderId = 0; holderId < state.battlersCount; holderId++) {
+    // gAbsentBattlerFlags check (:3003-3007): an absent slot is skipped WITHOUT a decrement.
+    if (hasFlag(state.absentBattlerFlags, 1 << holderId)) continue
+    const holder = state.battlers[holderId]
+    if (!holder) continue
+    if (state.field.futureSightCounter[holderId] === 0) continue
+
+    // `--gWishFutureKnock.futureSightCounter[gActiveBattler] == 0` in the C condition (:3005).
+    state.field.futureSightCounter[holderId]--
+    if (state.field.futureSightCounter[holderId] !== 0 || holder.mon.hp === 0) continue
+
+    const moveId = state.field.futureSightMove[holderId]
+    const attackerId = state.field.futureSightAttacker[holderId]
+    const power = state.field.futureSightPower[holderId]
+    if (!moveId || !state.battlers[attackerId]) continue
+
+    // SIDE_STATUS_FUTUREATTACK clears only when this battler's counter AND its flank
+    // partner's are both 0 (:3023-3026). BIT_FLANK is 2 (include/constants/battle.h:46);
+    // in singles the partner index is a spare MAX_BATTLERS_COUNT entry that stays 0.
+    // C reaches this immediately after BattleScriptExecute -- the miss is resolved INSIDE
+    // the queued script (:8010-8013), so the flag clears on a miss too.
+    if (
+      state.field.futureSightCounter[holderId] === 0 &&
+      (state.field.futureSightCounter[holderId ^ 2] ?? 0) === 0
+    ) {
+      state.sides[holderId & 1].statuses = clearFlag(state.sides[holderId & 1].statuses, SIDE_STATUS_FUTUREATTACK)
+    }
+
+    // gBattlerTarget = holder; gBattlerAttacker = futureSightAttacker[holder];
+    // gCurrentMove = futureSightMove[holder] (:3013-3016). Only the HOLDER's HP is
+    // tested, so a fainted (or replaced) attacker slot is used as-is.
+    const attackerTurnIndex = order.battlerByTurnOrder.indexOf(attackerId)
+    const targetTurnIndex = order.battlerByTurnOrder.indexOf(holderId)
+    const targetHasActedThisTurn =
+      attackerTurnIndex >= 0 && targetTurnIndex >= 0 && targetTurnIndex < attackerTurnIndex
+
+    // accuracycheck BattleScript_FutureAttackMiss (:8010-8013): Random() % 100 >= accuracy is a miss.
+    const { inputs, gaps } = buildAccuracyInputs(state, attackerId, holderId, moveId, targetHasActedThisTurn, deps)
+    unmodelled.push(...gapsToUnmodelled(gaps))
+    const accResult = getTotalAccuracy(inputs)
+    unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+    if (state.rng.random16() % 100 >= accResult.accuracy) {
+      // BattleScript_FutureAttackMiss (:8043-8049) only reports failure: no damage, no moveend.
+      continue
+    }
+
+    const moveView = buildMoveView(moveId, deps.dataContext)
+    const action: ChosenAction = { action: 'USE_MOVE', chosenMove: moveView, moveToBeUsed: moveView, target: holderId }
+
+    // Cmd_damagecalc (battle_script_commands.c:1605-1610): `if (gCurrentMove ==
+    // futureSightMove[target] && futureSightCounter[target] == 0) movePower =
+    // futureSightPower[target]`. The sim's resolver already reads a power override
+    // from the queued-extra-attack slot, so park the recorded power there for the call.
+    const previousProcessing = state.processingExtraAttacks
+    const previousExtra = state.currentExtraAttack
+    state.processingExtraAttacks = true
+    state.currentExtraAttack = { move: moveId, movePower: power, attacker: attackerId, target: holderId }
+    let resolution: DamageResolution
+    try {
+      // No critRoll is passed, so the resolver draws crit then the damage roll, after the
+      // accuracy draw above -- Cmd_critcalc (:1568) then Cmd_damagecalc (:1598).
+      resolution = deps.damage.resolve(state, attackerId, holderId, action, { targetHasActedThisTurn })
+    } finally {
+      state.processingExtraAttacks = previousProcessing
+      state.currentExtraAttack = previousExtra
+    }
+    unmodelled.push(...resolution.unmodelled)
+
+    // `tryfaintmon BS_TARGET` (:8035) -> applyDamage; replacements run after the loop,
+    // like the Perish Song block below.
+    const fainted: number[] = []
+    const targetHpBefore = holder.mon.hp
+    applyDamage(state, holderId, resolution.targetDamage, fainted, deps)
+    const hpDealt = targetHpBefore - holder.mon.hp
+    const noEffect = !(hpDealt > 0 || (resolution.targetDamage ?? 0) > 0)
+    if (fainted.length > 0) faintedAnyone = true
+
+    // MOVEEND tail (:8037-8042): `moveendcase MOVEEND_RAGE` (case 2) then
+    // `moveendfromto MOVEEND_ITEM_EFFECTS_ALL, MOVEEND_UPDATE_LAST_MOVES` (cases 14-17).
+    // Case 2 is a no-op here (STATUS2_RAGE is not in the sim's state). Case 14 is
+    // applyMoveEndItemEffectsAll. Case 17 is folded into runMoveEndBookkeeping; case 18
+    // (MIRROR_MOVE) sits inside that helper but cannot fire because Future Sight / Doom
+    // Desire have no mirrorMoveAffected flag, and MOVEEND_CLEAR_BITS (case 30) is turned
+    // off because it is outside the C's range. Cases 15 (KINGSROCK) and 16 (SUBSTITUTE)
+    // are left -- see REPORT.md.
+    applyMoveEndItemEffectsAll(state, deps, unmodelled)
+    const recordedAction = actions[attackerId]
+    runMoveEndBookkeeping({
+      state,
+      attackerId,
+      targetId: holderId,
+      currentMoveId: moveId,
+      chosenMoveId:
+        recordedAction?.action === 'USE_MOVE' && recordedAction.chosenMove
+          ? recordedAction.chosenMove.id
+          : MOVE_UNSET,
+      deps,
+      noEffect,
+      moveFailed: noEffect,
+      obeys: true,
+      fainted,
+      clearBits: false,
+    })
+  }
+
+  return faintedAnyone
+}
+
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
   // HandleBattleEvents (src/battle_main.c:5888, :3417, :3527)
   const battleEventsUnmodelled: string[] = []
@@ -3896,6 +4035,15 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // state 1: perishSongTimer (:3032-3053), state 2: arenaTurnCounter (:3060-3072). Wish itself is not
   // in HandleWishPerishSongOnTurnEnd; it is in DoFieldEndTurnEffects / ENDTURN_WISH (battle_util.c:1943-1958)
   // in fieldEndTurn.ts, which runs during runFieldEndTurnEffects above.
+  // State 0 precedes state 1 (:3001 vs :3032), so the Future Sight countdown/hit runs first.
+  if (!state.battleOutcome) {
+    const futureSightUnmodelled: string[] = []
+    const futureSightFainted = runFutureSightCountdown(state, actions, order, deps, futureSightUnmodelled)
+    endTurnUnmodelled.push(...futureSightUnmodelled)
+    if (futureSightFainted && deps.replacement) {
+      applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+    }
+  }
   // HandleWishPerishSongOnTurnEnd's perishSongTimer runs after HandleFaintedMonActions
   // (battle_main.c:3485-3489), over gBattlerByTurnOrder (endTurnOrder) skipping absent battlers.
   // BattleScript_PerishSongTakesLife's faint is then replaced on the next HandleFaintedMonActions pass.

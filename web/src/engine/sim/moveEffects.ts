@@ -29,6 +29,7 @@ import {
   RESOURCE_FLAG_ROOST,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_FUTUREATTACK,
   SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_LUCKY_CHANT,
@@ -4554,6 +4555,43 @@ function handleWish(ctx: MoveEffectContext): ActionOutcome {
   state.field.wishCounter[battlerId] = 2
   state.field.wishPartyId[battlerId] = battler.partyIndex
   return outcome(ctx, {})
+}
+
+/**
+ * EFFECT_FUTURE_SIGHT handler (Future Sight, Doom Desire).
+ * BattleScript_EffectFutureSight, data/battle_scripts_1.s:5692-5701:
+ * attackcanceler, attackstring, ppreduce (:5696), trysetfutureattack
+ * BattleScript_ButItFailed (:5697), animation, message, goto BattleScript_MoveEnd.
+ * There is no accuracy check and no damage on the use turn.
+ * Cmd_trysetfutureattack, src/battle_script_commands.c:11483-11500.
+ */
+function handleFutureSight(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const chosenMove = action.chosenMove!
+  // gCurrentMove, which Cmd_trysetfutureattack records -- not gChosenMove (they differ
+  // when this effect is reached through Metronome / Mirror Move).
+  const currentMove = action.moveToBeUsed ?? chosenMove
+
+  // 1. ppreduce (:5696) -- before trysetfutureattack, so a failed re-use still costs PP.
+  deductPp(state, battlerId, chosenMove.id, chosenMove.effect, unmodelled)
+
+  // 2. trysetfutureattack BattleScript_ButItFailed (:5697, Cmd_trysetfutureattack:11483-11486).
+  //    The counter is per TARGET battler (:11484), not per side.
+  if (targetId === null || !state.battlers[targetId] || state.field.futureSightCounter[targetId] !== 0) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 3. gSideStatuses[GET_BATTLER_SIDE(gBattlerTarget)] |= SIDE_STATUS_FUTUREATTACK; then
+  //    futureSightMove/Power/Attacker/Counter (:11487-11491). The power is
+  //    gBattleMoves[gCurrentMove].power -- the move table, recorded now and not re-read later.
+  const side = targetId & 1
+  state.sides[side].statuses = setFlag(state.sides[side].statuses, SIDE_STATUS_FUTUREATTACK)
+  state.field.futureSightMove[targetId] = currentMove.id
+  state.field.futureSightPower[targetId] = deps.dataContext.move(currentMove.id)?.power ?? currentMove.power ?? 0
+  state.field.futureSightAttacker[targetId] = battlerId
+  state.field.futureSightCounter[targetId] = 3
+
+  return outcome(ctx, { targetId })
 }
 
 /**
@@ -11037,6 +11075,7 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_PERISH_SONG: handlePerishSong,
   EFFECT_MINIMIZE: handleMinimize,
   EFFECT_WISH: handleWish,
+  EFFECT_FUTURE_SIGHT: handleFutureSight,
   EFFECT_HEAL_BELL: handleHealBell,
   EFFECT_REFRESH: handleRefresh,
   EFFECT_PURIFY: handlePurify,
