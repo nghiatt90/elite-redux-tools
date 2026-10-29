@@ -11,7 +11,7 @@ import { createBattleState, createBattlerState } from './create'
 import type { MoveBehaviors } from '../basePower'
 import type { BattleConstants } from '../types'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
-import { PARTY_SIZE, STAT_ATK, STATUS2_TORMENT, STATUS3_HEAL_BLOCK, STATUS3_IMPRISONED_OTHERS, STATUS_FIELD_GRAVITY } from './constants'
+import { PARTY_SIZE, STAT_ATK, STATUS2_TORMENT, STATUS3_EMBARGO, STATUS3_HEAL_BLOCK, STATUS3_IMPRISONED_OTHERS, STATUS_FIELD_GRAVITY } from './constants'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
@@ -441,18 +441,28 @@ describe('Cycle 98 - CheckMoveLimitations bitmask (battle_util.c:1622-1666)', ()
     expect(limits(state).unmodelled.some((n) => n.includes('battle_util.c:'))).toBe(false)
   })
 
-  it('reports the Choice item lock as unmodelled, naming battle_util.c:1646', () => {
+  it('flags every slot but the recorded choicedMove for a Choice item holder (:1646)', () => {
+    // MOVEEND_CHOICE_MOVE records gBattleStruct->choicedMove (battle_script_commands.c:4547-4568); until it
+    // does, *choicedMove == 0 and the :1646 line flags nothing. Once Water Gun (slot 1) is locked in, the C's
+    // `*choicedMove != moves[i]` FILTER_NOT sets bits 0, 2 and 3 -> 0b1101.
     const state = battle({ moves: slot('MOVE_TACKLE', 'MOVE_WATER_GUN', 'MOVE_EMBER', 'MOVE_VINE_WHIP'), pp: pps(35, 20, 20, 20), itemId: 'ITEM_CHOICE_BAND' })
-    const result = limits(state)
-    // No invented bit: choicedMove is not in the sim state.
-    expect(result.mask).toBe(0)
-    expect(result.unmodelled.some((n) => n.includes('battle_util.c:1646'))).toBe(true)
+    expect(limits(state).mask).toBe(0)
+    state.battlers[0]!.choicedMove = 'MOVE_WATER_GUN'
+    expect(limits(state).mask).toBe(0b1101)
   })
 
-  it('does not report the Choice note for a negated item (Embargo/Klutz, battle_util.c:6520-6524)', () => {
+  it('choice lock is read through GetBattlerHoldEffect(TRUE): Klutz/Embargo negate it (:1623, :6520-6524)', () => {
+    // The CHOICE gate reads the NEGATED hold effect, so a Klutz holder's recorded lock flags nothing even
+    // though the array still holds the move (the C does not clear it on ability suppression).
     const state = battle({ moves: slot('MOVE_TACKLE', 'MOVE_WATER_GUN', 'MOVE_EMBER', 'MOVE_VINE_WHIP'), pp: pps(35, 20, 20, 20), itemId: 'ITEM_CHOICE_BAND' })
+    state.battlers[0]!.choicedMove = 'MOVE_WATER_GUN'
     state.battlers[0]!.mon.abilities = hasAbility('ABILITY_KLUTZ')
-    expect(limits(state).unmodelled.some((n) => n.includes('battle_util.c:1646'))).toBe(false)
+    expect(limits(state).mask).toBe(0)
+
+    const embargoed = battle({ moves: slot('MOVE_TACKLE', 'MOVE_WATER_GUN', 'MOVE_EMBER', 'MOVE_VINE_WHIP'), pp: pps(35, 20, 20, 20), itemId: 'ITEM_CHOICE_BAND' })
+    embargoed.battlers[0]!.choicedMove = 'MOVE_WATER_GUN'
+    embargoed.battlers[0]!.statuses3 |= STATUS3_EMBARGO
+    expect(limits(embargoed).mask).toBe(0)
   })
 
   it('does not compute limitations for a fainted battler (AI_DATA->moveLimitations is per live battler)', () => {

@@ -91,6 +91,16 @@ export const MOVE_UNSET = 'MOVE_UNSET'
 /** `0xFF` sentinel for unset battler in gLastHitBy (include/battle.h:994, battle_main.c:2905). */
 export const BATTLER_NONE = 0xff
 
+/** include/constants/hold_effects.h:6 --
+ * `HOLD_EFFECT_CHOICE(holdEffect)` tests exactly these three. Shared by the move-end lock writer
+ * (moveEnd.ts, battle_script_commands.c:4553), the AI's CheckMoveLimitations (:1646) and the player
+ * selection check (battle_util.c:1565). */
+export const CHOICE_HOLD_EFFECTS: readonly string[] = [
+  'HOLD_EFFECT_CHOICE_BAND',
+  'HOLD_EFFECT_CHOICE_SCARF',
+  'HOLD_EFFECT_CHOICE_SPECS',
+]
+
 // ---------------------------------------------------------------------------
 // Bitfield helpers
 //

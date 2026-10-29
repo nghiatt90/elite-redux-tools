@@ -385,6 +385,9 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     lastMove: null,
     lastResultingMove: null,
     lastLandedMove: null,
+    // gBattleStruct->choicedMove: AllocZeroed at battle start (the C's 0 sentinel), and SwitchInClearSetData
+    // (battle_main.c:2925) / FaintClearSetData (:2980) clear it on every rebuild -- createBattlerState is that rebuild.
+    choicedMove: null,
     lastHitByType: null,
     lastHitBy: BATTLER_NONE,
     lastPrintedMove: null,
@@ -515,8 +518,14 @@ export function createMegaEvolutionState(): MegaEvolutionState {
 /**
  * SwitchInClearSetData (battle_main.c:2908-2922) and FaintClearSetData (battle_main.c:2982-2995):
  * Clears lastTakenMove and lastTakenMoveFrom when battlerId switches in or faints.
+ *
+ * Also clears `gBattleStruct->choicedMove[battler]` (SwitchInClearSetData battle_main.c:2925,
+ * FaintClearSetData :2980). Both callers (switchIn.ts and turn.ts's faint path) are exactly those
+ * two C functions' sim ports; createBattlerState also starts it null for the rebuilt mon.
  */
 export function clearBattlerLastTakenMove(state: BattleState, battlerId: number): void {
+  const battler = state.battlers[battlerId]
+  if (battler) battler.choicedMove = null
   state.lastTakenMove[battlerId] = null
   for (let k = 0; k < MAX_BATTLERS_COUNT; k++) {
     state.lastTakenMoveFrom[battlerId][k] = null

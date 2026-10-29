@@ -353,6 +353,12 @@ export interface BattlerState {
   lastHitBy: number
   /** `gLastPrintedMoves[MAX_BATTLERS_COUNT]` (include/battle.h:987, battle_script_commands.c:4742). */
   lastPrintedMove: string | null
+  /** `gBattleStruct->choicedMove[battler]` (include/battle.h, written at battle_script_commands.c:4547-4568
+   * MOVEEND_CHOICE_MOVE and cleared by UpdateBattlerItem (:2214) / SwitchInClearSetData (battle_main.c:2925) /
+   * FaintClearSetData (:2980)). The C stores a u16 move id with 0/0xFFFF meaning "unset"; `null` is that sentinel.
+   * It is the move a Choice Band/Scarf/Specs holder is locked into and the only state CheckMoveLimitations'
+   * :1646 line and TrySetCantSelectMoveBattleScript's :1565-1571 check read. */
+  choicedMove: string | null
   /** `gBattleStruct->monToSwitchIntoId[MAX_BATTLERS_COUNT]` (battle.h:622) --
    * the party slot a pending switch will bring in. PARTY_SIZE (6) means "none
    * pending": battle_main.c:3522 initialises every entry to it and

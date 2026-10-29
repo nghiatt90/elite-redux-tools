@@ -16,7 +16,7 @@
 // silenced by an ability/name list.
 
 import type { BattleState } from '../state'
-import { STATUS2_TORMENT, STATUS3_EMBARGO, STATUS3_HEAL_BLOCK, hasFlag } from '../constants'
+import { CHOICE_HOLD_EFFECTS, STATUS2_TORMENT, STATUS3_EMBARGO, STATUS3_HEAL_BLOCK, hasFlag } from '../constants'
 import { getImprisonedMovesCount, isGravityPreventingMove, isHealingMoveEffect } from '../attackCanceller'
 import { isSoundMove } from '../statusEffects'
 import { defAbility, getBattlerHoldEffect, selfAbility } from './aiAbilityHelpers'
@@ -32,9 +32,6 @@ const MOVE_LIMITATION_IMPRISON = 1 << 5
 /** `check` is 0xFF at the AI's own call site (battle_ai_main.c:218), so every
  * MOVE_LIMITATION_* bit above is enabled. */
 const MOVE_LIMITATION_CHECK_ALL = 0xff
-
-/** include/constants/hold_effects.h:6 -- `HOLD_EFFECT_CHOICE(holdEffect)`. */
-const CHOICE_HOLD_EFFECTS: readonly string[] = ['HOLD_EFFECT_CHOICE_BAND', 'HOLD_EFFECT_CHOICE_SCARF', 'HOLD_EFFECT_CHOICE_SPECS']
 
 export interface MoveLimitationsResult {
   /** `unusableMoves` return value; bit i == slot i. */
@@ -67,17 +64,16 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
   const moveData = (moveId: string | null) => (moveId ? deps.moveData(moveId) : undefined)
   const moves = battler.mon.moves
 
-  // :1646 -- `HOLD_EFFECT_CHOICE(holdEffect) && *choicedMove != 0 && ...`.
-  // gBattleStruct->choicedMove has no field in the sim (moveEnd.ts's own
-  // MOVEEND_CHOICE_MOVE note), so this line can flag nothing.
-  if (holdEffect !== null && CHOICE_HOLD_EFFECTS.includes(holdEffect)) {
-    note("CheckMoveLimitations' choice-item lock (battle_util.c:1646) is not modelled: gBattleStruct->choicedMove has no state in the sim, so a Choice item holder's previously-locked move is never flagged unusable")
-  }
+  // :1646 -- `HOLD_EFFECT_CHOICE(holdEffect) && *choicedMove != 0 && *choicedMove != 0xFFFF &&
+  // *choicedMove != moves[i]`. The per-slot bit is set in the loop below, where moves[i] is known;
+  // `battler.choicedMove` is the state MOVEEND_CHOICE_MOVE writes (moveEnd.ts applyMoveEndChoiceMove).
   // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First
   // (the per-slot bit is set in the loop below, where the move's split is known).
-  // :1654-1655 -- Discipline reads the same choicedMove array.
+  // :1654-1655 -- Discipline reads the same choicedMove array. The array now exists, but only the
+  // HOLD_EFFECT_CHOICE half of the writer (MOVEEND_CHOICE_MOVE) is ported, so a Discipline holder
+  // never gets a lock recorded and this line can flag nothing.
   if (selfAbility(state, deps, battler, 'ABILITY_DISCIPLINE')) {
-    note("CheckMoveLimitations' Discipline choicedMove lock (battle_util.c:1654-1655) is not modelled: gBattleStruct->choicedMove has no state in the sim")
+    note("CheckMoveLimitations' Discipline choicedMove lock (battle_util.c:1654-1655) is not modelled: MOVEEND_CHOICE_MOVE's Discipline-rampage branch (battle_script_commands.c:4555-4556) is not ported, so Discipline never records a choicedMove")
   }
   // :1651 -- IsBelchPreventingMove (:1406-1412) reads gBattleStruct->ateBerry
   // and the item pocket; neither is modelled.
@@ -106,7 +102,7 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
     defAbility(state, deps, battler, 'ABILITY_GORILLA_TACTICS', deps.grounding.attackerHasMoldBreaker) ||
     defAbility(state, deps, battler, 'ABILITY_SAGE_POWER', deps.grounding.attackerHasMoldBreaker)
   ) {
-    note("CheckMoveLimitations' Gorilla Tactics / Sage Power choicedMove lock (battle_util.c:1660-1661) is not modelled: gBattleStruct->choicedMove has no state in the sim")
+    note("CheckMoveLimitations' Gorilla Tactics / Sage Power choicedMove lock (battle_util.c:1660-1661) is not modelled: MOVEEND_CHOICE_MOVE's Gorilla Tactics / Sage Power branches (battle_script_commands.c:4552-4554) are not ported, so those abilities never record a choicedMove")
   }
 
   // IsHealBlockPreventingMove, battle_util.c:1400-1404: Heal Block on this
@@ -152,7 +148,15 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
     if (moveId !== null && getImprisonedMovesCount(state, battlerId, moveId) > 0 && MOVE_LIMITATION_CHECK_ALL & MOVE_LIMITATION_IMPRISON) continue
     // :1645 -- Encore locks every slot but the encored move.
     if (battler.volatiles.encoreTimer && battler.volatiles.encoredMove !== moveId) continue
-    // :1646 choice -- see the note above (no choicedMove state).
+    // :1646 -- Choice item lock. `holdEffect` already went through GetBattlerHoldEffect(TRUE)'s
+    // negation, so Klutz/Embargo keep the full menu (the C reads the same negated value at :1623).
+    if (
+      holdEffect !== null &&
+      CHOICE_HOLD_EFFECTS.includes(holdEffect) &&
+      battler.choicedMove !== null &&
+      battler.choicedMove !== moveId
+    )
+      continue
     // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First.
     if (
       (holdEffect === 'HOLD_EFFECT_ASSAULT_VEST' || holdEffect === 'HOLD_EFFECT_TACTICAL_VEST') &&

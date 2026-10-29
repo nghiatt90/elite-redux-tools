@@ -1108,6 +1108,9 @@ export function consumeHeldItem(state: BattleState, battler: BattlerState, unmod
   const itemId = battler.mon.itemId
   if (itemId) {
     battler.usedHeldItem = itemId
+    // Cmd_removeitem -> UpdateBattlerItem(battler, ITEM_NONE)
+    // (battle_script_commands.c:6040-6053, :2214): losing the item drops a Choice lock.
+    battler.choicedMove = null
   }
   const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
   if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1

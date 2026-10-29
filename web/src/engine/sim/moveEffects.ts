@@ -9311,6 +9311,9 @@ export function canBattlerGetOrLoseItem(battler: BattlerState, itemId: string | 
 export function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
   const itemId = battler.mon.itemId
   if (!itemId) return
+  // UpdateBattlerItem's `if (newItem == ITEM_NONE) gBattleStruct->choicedMove[battler] = 0;` (:2214). The
+  // early return above mirrors UpdateBattlerItem's own `oldItem == newItem` return (NONE -> NONE).
+  battler.choicedMove = null
   const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
   if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1
   const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')

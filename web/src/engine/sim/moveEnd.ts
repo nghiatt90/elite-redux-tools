@@ -17,7 +17,7 @@
 //  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Ported / Gap   | Attacker contact abilities (Static, Flame Body, Poison Point/Touch). Other attacker abilities gapped.
 //  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Ported         | Re-checks every battler's status after the move; a removesStatusOnImmunity onStatusImmune ability cures it (battle_util.c:4505-4609), re-entering until a full pass cures nothing.
 //  8   | MOVEEND_SYNCHRONIZE_ATTACKER    | 4543-4546  | Gapped (cond.) | Attacker Synchronize.
-//  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Unreachable    | Choice item move lock; choicedMove array is not in BattlerState.
+//  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Ported         | Choice item move lock (choicedMove), incl. the clear-if-not-in-moveset tail; run from runMoveEndBookkeeping (see applyMoveEndChoiceMove).
 // 10   | MOVEEND_ATTACKER_INVISIBLE      | 4677-4686  | Unreachable    | Semi-invulnerable sprite invisibility; visual only.
 // 11   | MOVEEND_ATTACKER_VISIBLE        | 4687-4701  | Unreachable    | Semi-invulnerable sprite visibility; visual only.
 // 12   | MOVEEND_TARGET_VISIBLE          | 4702-4713  | Unreachable    | Target sprite visibility; visual only.
@@ -46,6 +46,7 @@ import type { BattleState, BattlerState } from './state'
 import {
   BATTLE_TYPE_ARENA,
   BATTLE_TYPE_TRAINER,
+  CHOICE_HOLD_EFFECTS,
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_FOG,
   ENUM_WEATHER_HAIL,
@@ -122,6 +123,7 @@ import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { canBattlerHeal, getAbilityStateOf, isMagicGuardProtected, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
 import { isBattlerGrounded } from './grounding'
+import type { GroundingContext } from './grounding'
 import { syncPartyHp } from './outcome'
 import { resolveMultihitType } from './attackCanceller'
 import {
@@ -5922,6 +5924,8 @@ function applyKnockOff(
  */
 function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled: string[]): void {
   const itemId = battler.mon.itemId
+  // UpdateBattlerItem's `if (newItem == ITEM_NONE) gBattleStruct->choicedMove[battler] = 0;` (:2214).
+  battler.choicedMove = null
   const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
   if (slotU !== -1) battler.volatiles.abilityState[slotU] = 1
   const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
@@ -6097,7 +6101,9 @@ export interface MoveEndBookkeepingContext {
   targetId: number | null
   currentMoveId: string
   chosenMoveId: string
-  deps: { dataContext: TurnLoopDeps['dataContext'] }
+  /** `grounding` is read by applyMoveEndChoiceMove (GetBattlerHoldEffect(attacker, TRUE)); every caller passes
+   * the full TurnLoopDeps it already had, so this only widens the structural type. */
+  deps: { dataContext: TurnLoopDeps['dataContext']; grounding: GroundingContext }
   noEffect: boolean
   /** (gMoveResultFlags & (MOVE_RESULT_FAILED | MOVE_RESULT_DOESNT_AFFECT_FOE)), battle_script_commands.c:4724. A plain
    * miss (MOVE_RESULT_MISSED) or a Protect block is NOT this. */
@@ -6109,7 +6115,71 @@ export interface MoveEndBookkeepingContext {
 }
 
 /**
+ * Case 9: MOVEEND_CHOICE_MOVE, src/battle_script_commands.c:4547-4568. Records the move a Choice
+ * Band/Scarf/Specs holder is locked into, then clears a stored move that is no longer in the moveset.
+ *
+ *   ++moveendState;
+ *   REQUIRE_NOT(!gProcessingExtraAttacks && gRoundStructs[attacker].confusionSelfDmg)  -> return
+ *   if (HITMARKER_OBEYS && gChosenMove != MOVE_STRUGGLE && gChosenMove && !gProcessingExtraAttacks &&
+ *       attacker == GetTurnBattler() && (*choicedMove == 0 || *choicedMove == 0xFFFF) &&
+ *       (HOLD_EFFECT_CHOICE(holdEffect) || Discipline rampage || Gorilla Tactics || Sage Power)) {
+ *       if ((BP || Healing Wish) && !(gMoveResultFlags & MOVE_RESULT_FAILED)) break;   -> return
+ *       *choicedMove = gChosenMove;
+ *   }
+ *   for (i = 0; i < MAX_MON_MOVES; ++i) if (moves[i] == *choicedMove) break;
+ *   if (i == MAX_MON_MOVES) *choicedMove = 0;
+ *
+ * Discipline / Gorilla Tactics / Sage Power share this array in the C but are NOT ported here (their
+ * ability-side effects are out of this cycle's scope): only the HOLD_EFFECT_CHOICE half can record.
+ *
+ * Applicability notes:
+ * - HITMARKER_OBEYS (:1133-1146) can only be clear when a disobedience roll fires; the sim does not model
+ *   disobedience, so `obeys` is true on every path (same simplification runMoveEndBookkeeping documents).
+ * - `gBattlerAttacker == GetTurnBattler()` holds for every sim action: the turn loop only runs the attacker's
+ *   own action and extra attacks are dispatched with processingExtraAttacks set (already excluded above).
+ * - `confusionSelfDmg` is attacker.round.confusionSelfDmg (attackCanceller.ts:603), which is only ever set by
+ *   CANCELLER_CONFUSED -- and that path returns before any move-end ladder runs, so this guard is structural.
+ */
+function applyMoveEndChoiceMove(
+  state: BattleState,
+  attackerId: number,
+  chosenMoveId: string,
+  moveFailed: boolean,
+  deps: { dataContext: TurnLoopDeps['dataContext']; grounding: GroundingContext },
+): void {
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return
+
+  // REQUIRE_NOT(!gProcessingExtraAttacks && gRoundStructs[attacker].confusionSelfDmg): skips BOTH the
+  // record and the clear-if-not-in-moveset tail. Unreachable here (see the doc above), kept for fidelity.
+  if (!state.processingExtraAttacks && attacker.round.confusionSelfDmg) return
+
+  if (
+    chosenMoveId !== 'MOVE_STRUGGLE' &&
+    chosenMoveId !== MOVE_UNSET && // the C's 0xFFFF sentinel; its gBattleMoves[gChosenMove] read is UB and the tail would null it anyway
+    !state.processingExtraAttacks &&
+    attacker.choicedMove === null && // *choicedMove == 0 || *choicedMove == 0xFFFF
+    CHOICE_HOLD_EFFECTS.includes(deps.grounding.holdEffectOf(attackerId) ?? '')
+  ) {
+    // Discipline's rampage branch (:4555-4556, sets disciplineCounter = 3) is not ported with the rest of Discipline.
+    const effect = deps.dataContext.move(chosenMoveId)?.effect ?? null
+    if ((effect === 'EFFECT_BATON_PASS' || effect === 'EFFECT_HEALING_WISH') && !moveFailed) {
+      // `break` in the C leaves the case before both the write and the clear tail.
+      return
+    }
+    attacker.choicedMove = chosenMoveId
+  }
+
+  // Clear a stored move that is not in the current four (the C compares by move id, so a duplicate
+  // slot keeps the lock). Null when unset keeps the C's 0.
+  if (attacker.choicedMove !== null && !attacker.mon.moves.includes(attacker.choicedMove)) {
+    attacker.choicedMove = null
+  }
+}
+
+/**
  * Factored move-end bookkeeping implementing:
+ * - Case 9: MOVEEND_CHOICE_MOVE (src/battle_script_commands.c:4547-4568)
  * - Case 17: MOVEEND_UPDATE_LAST_MOVES (src/battle_script_commands.c:4723-4772)
  * - Case 18: MOVEEND_MIRROR_MOVE (src/battle_script_commands.c:4773-4781)
  * - Case 30: MOVEEND_CLEAR_BITS (src/battle_script_commands.c:4934-4957)
@@ -6148,6 +6218,11 @@ export function runMoveEndBookkeeping(ctx: MoveEndBookkeepingContext): void {
   const attacker = state.battlers[attackerId]
   const target = targetId !== null ? state.battlers[targetId] : null
   const currentMoveData = deps.dataContext.move(currentMoveId)
+
+  // 0. Case 9: MOVEEND_CHOICE_MOVE (battle_script_commands.c:4547-4568). Executed here, not at the case-9
+  // slot inside runMoveEnd, because every sim path that reaches cases 17/18/30 passed case 9 in the C (status
+  // moves, protect blocks, Magic Coat, called moves), and no case 10-16 writes choicedMove or the moveset.
+  applyMoveEndChoiceMove(state, attackerId, chosenMoveId, moveFailed, deps)
 
   // originallyUsedMove (src/battle_script_commands.c:4318-4321):
   // if (gChosenMove == 0xFFFF) originallyUsedMove = 0; else originallyUsedMove = gChosenMove;
@@ -6419,7 +6494,9 @@ export function applyMoveEndItemEffectsAll(
         canBattlerHeal(state, bId, battler, unmodelled)
       ) {
         const pct = itemData?.holdEffectStrength ?? 25
-        let heal = Math.max(1, Math.floor((battler.mon.maxHp * pct) / 100))
+        // ItemHealHp (battle_util.c:5311-5320): gBattleMoveDamage = maxHP * param / 100, with NO minimum --
+        // a maxHp < 4 Sitrus heals 0 and is still consumed (BattleScript_ItemHealHP_RemoveItem).
+        let heal = Math.floor((battler.mon.maxHp * pct) / 100)
         if (hasRipenEffect(state, bId, deps)) heal *= 2
         battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
         syncPartyHp(state, bId)
@@ -6756,7 +6833,8 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Attacker synchronize.
 
   // Case 9: MOVEEND_CHOICE_MOVE (:4547-4568)
-  // Choice lock updates. Not in BattlerState.
+  // Choice lock updates run in runMoveEndBookkeeping (applyMoveEndChoiceMove), the shared point every
+  // move-end path reaches; no case between 9 and 17 touches choicedMove or the moveset.
 
   // Case 10: MOVEEND_ATTACKER_INVISIBLE (:4677-4686)
   // Semi-invulnerable sprite invisibility (visual only).
@@ -7043,7 +7121,8 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       }
     } else if (atkHoldEffect === 'HOLD_EFFECT_SHELL_BELL') {
       if (targetDamage > 0 && attackerId !== targetId) {
-        // REQUIRE chain, battle_util.c:6068-6073; the heal is savedDmg / 4 (min 1), :6077-6078, capped at maxHp by datahpupdate.
+        // REQUIRE chain, battle_util.c:6070-6075; the heal is savedDmg / 4 with the `if (gBattleMoveDamage == 0) = -1`
+        // floor (:6080-6081), capped at maxHp by datahpupdate.
         if (
           hpDealt > 0 &&
           attacker.mon.hp < attacker.mon.maxHp &&

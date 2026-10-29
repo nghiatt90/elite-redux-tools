@@ -13,7 +13,7 @@
 
 import { chooseAiAction } from '../ai/chooseAiAction'
 import { getMostSuitableMonToSwitchInto } from '../ai/aiSwitching'
-import { PARTY_SIZE } from '../constants'
+import { CHOICE_HOLD_EFFECTS, PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState } from '../state'
 import type { ChosenAction } from '../turnOrder'
@@ -89,10 +89,17 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   // with GetBattlerHoldEffect(battler, TRUE) (battle_util.c:1418), so Klutz/Embargo leave the menu untouched.
   const vestHoldEffect = holdEffectOfBattler(state, 0, data.dataContext)
   const vestBlocksStatus = vestHoldEffect === 'HOLD_EFFECT_ASSAULT_VEST' || vestHoldEffect === 'HOLD_EFFECT_TACTICAL_VEST'
+  // TrySetCantSelectMoveBattleScript's choice branch (battle_util.c:1565-1571): a Choice Band/Scarf/Specs
+  // holder whose choicedMove is set may only select that move. Both the hold effect and the lock are read
+  // exactly as the C reads them: GetBattlerHoldEffect(battler, TRUE) (Klutz/Embargo negate) and
+  // gBattleStruct->choicedMove (0/0xFFFF == null). This is a selection-time filter only -- the turn loop,
+  // like the C, does not re-validate a move that was already chosen.
+  const holdsChoiceItem = vestHoldEffect !== null && CHOICE_HOLD_EFFECTS.includes(vestHoldEffect)
   for (let i = 0; i < battler.mon.moves.length; i++) {
     const moveId = battler.mon.moves[i]
     if (moveId && battler.mon.pp[i] > 0) {
       if (vestBlocksStatus && moveId !== 'MOVE_ME_FIRST' && data.dataContext.move(moveId)?.split === 'STATUS') continue
+      if (holdsChoiceItem && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
       const action = buildMoveAction(state, data, 0, moveId)
       choices.push({ action })
     }
