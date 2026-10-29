@@ -62,6 +62,124 @@ function magnitudeTier(random: RandomSource): 4 | 5 | 6 | 7 | 8 | 9 | 10 {
 }
 
 export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): DamageResolver {
+  /** Everything calculateMoveDamage reads for one attacker/target/move, built
+   * from sim state. Split out of `resolve` so the accuracy check's
+   * type-effectiveness-only call (see `typeEffectiveness` below) builds the
+   * same scenario instead of a second, subtly different one.
+   *
+   * `drawRandom` gates the two scenario fields whose values come from a
+   * Random() draw -- Magnitude's tier and MISC_EFFECT_DOUBLE_DAMAGE. Both only
+   * feed the base-power stage, which type effectiveness never reads, so the
+   * type-effectiveness call passes false and consumes no draw; GetTotalAccuracy
+   * itself draws nothing, and the accuracy check must not shift the stream
+   * ahead of the damage step's own crit/roll draws. */
+  function buildScenarioFor(
+    state: BattleState,
+    attackerId: number,
+    targetId: number,
+    move: MoveData,
+    context: DamageResolveContext,
+    drawRandom: boolean,
+  ): { scenario: DamageCalcScenario; unmodelled: string[] } {
+  const roles = { attackerId, defenderId: targetId }
+  const attacker = buildBattlerBattleState(state, attackerId, roles, deps)
+  const defender = buildBattlerBattleState(state, targetId, roles, deps)
+  const field = buildFieldBattleState(state, roles, deps)
+  const unmodelled = [
+    ...gapsToUnmodelled(attacker.gaps).map((gap) => `attacker.${gap}`),
+    ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),
+    ...gapsToUnmodelled(field.gaps),
+  ]
+  // attackerFinalItemMultiplier (calculate.ts:1219-1222) is the ONLY real
+  // consumer of sameMoveTurnsInARow -- HOLD_EFFECT_METRONOME's per-move-in-
+  // a-row damage boost, for ANY move the attacker uses. It is not keyed on
+  // Echoed Voice: this dataset's MOVE_ECHOED_VOICE has effect
+  // EFFECT_TRIPLE_KICK (not EFFECT_ECHOED_VOICE, which appears nowhere in
+  // moves.json), so basePower.ts's EFFECT_ECHOED_VOICE case is unreachable
+  // and Echoed Voice's own power scaling is Triple-Kick-shaped, not tied to
+  // this toggle at all.
+  //
+  // No longer a gap: turn.ts's deductPp now maintains
+  // BattlerState.sameMoveTurns for real (Cmd_ppreduce,
+  // battle_script_commands.c:1486-1493). It is always 0 for the scenarios
+  // this batch represents, which is the C's own value: the increment branch
+  // needs parentalBondOn > 0 AND parentalBondOn != parentalBondInitialCount
+  // (a later Parental Bond hit), and Cmd_ppreduce returns at :1472 for those
+  // hits (HITMARKER_NO_ATTACKSTRING, :4903) before reaching it. On the first
+  // hit both counters are the full count, so the reset branch runs. See
+  // state.ts's sameMoveTurns doc.
+  // Rollout / Ice Ball / Flame Wheel read gVolatileStructs[atk].rolloutCounter AFTER Cmd_handlerollout bumped it (turn.ts runs that
+  // before this call, as BattleScript_EffectRollout does, data/battle_scripts_1.s:5125-5132) and STATUS2_DEFENSE_CURL (:6813-6821).
+  const attackerBattlerState = state.battlers[attackerId]!
+  // tryfling (hitScripts.ts) emptied the slot already; Fling's power and a Gem's type read the item it recorded.
+  const flungId = move.effect === 'EFFECT_FLING' ? attackerBattlerState.turn.flungItem : null
+  const flungData = flungId ? deps.dataContext.item(flungId) : undefined
+  // Beat Up's hit k is powered by party slot k (CalcBeatUpPower, battle_util.c:101-116: `party[gBattleCommunication[0] - 1]`,
+  // which BattleScript_EffectBeatUp's Gen 5+ branch raises by one per hit, data/battle_scripts_1.s:5775-5779), whether or not
+  // that slot is a mon that counted toward the hit total. An empty slot reads gBaseStats[SPECIES_NONE].baseAttack, which is 0.
+  let beatUpBaseAttack = attacker.battler.rawStats.atk
+  if (move.effect === 'EFFECT_BEAT_UP') {
+    if (context.hitIndex === undefined) {
+      unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
+    } else {
+      const slotSpecies = state.sides[attackerId & 1].party[context.hitIndex]?.speciesId ?? null
+      beatUpBaseAttack = slotSpecies ? (deps.dataContext.species(slotSpecies)?.baseStats.atk ?? 0) : 0
+    }
+  }
+  if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
+  const scenario: DamageCalcScenario = {
+    move,
+    attacker: attacker.battler,
+    defender: defender.battler,
+    field: field.field,
+    typeChart: deps.typeChart,
+    inverseTypeChart: deps.inverseTypeChart,
+    moveBehaviors: deps.moveBehaviors,
+    battleConstants: deps.battleConstants,
+    attackerActsFirst: !context.targetHasActedThisTurn,
+    sameMoveTurnsInARow: state.battlers[attackerId]!.sameMoveTurns,
+    // CANCELLER_MULTIHIT_MOVES (attackCanceller.ts) already drew this and
+    // wrote it onto TurnState before the accuracy check ran -- see this
+    // module's own header. 0 when unset: resolveHitPlan (multiHit.ts)
+    // does not read scenarioHitCount at all for an ordinary single-hit
+    // move with no Parental Bond ability, so the placeholder is inert for
+    // every move this batch's own defects actually touch (see header for
+    // the one pre-existing exception this value cannot fix).
+    hitCount: state.battlers[attackerId]!.turn.multiHitCounter,
+    defenderIsSwitching: false,
+    magnitudeTier: drawRandom && move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
+    attackerRolloutCounter: Math.min(3, Math.max(0, attackerBattlerState.volatiles.rolloutCounter)) as 0 | 1 | 2 | 3,
+    attackerHasDefenseCurl: hasFlag(attackerBattlerState.mon.status2, STATUS2_DEFENSE_CURL),
+    attackerWasHitThisTurn: attacker.battler.condition.wasDamagedThisTurnBy !== 'none',
+    // Without a hitIndex DamageContext's one-representative stand-in applies (the attacker's own Attack, with the gap
+    // reported above); with one, the hit's own party slot (beatUpBaseAttack above).
+    beatUpBaseAttack,
+    beatUpHitCount: 1,
+    // GetParentalBondCount's MINION_CONTROL branch (battle_script_commands.c:1023-1040). Cmd_attackcanceler
+    // (:1082-1091) stored the live party count in parentalBondInitialCount and never changes it for the
+    // rest of the sequence (only parentalBondOn moves), so this is that count on every hit.
+    minionControlCount:
+      attackerBattlerState.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL'
+        ? attackerBattlerState.turn.parentalBondInitialCount
+        : undefined,
+    defenderUsedGlaiveRush: false,
+    singleHitIndex: context.hitIndex,
+    // MISC_EFFECT_TOOK_DAMAGE_BOOST (battle_util.c:6869-6871) and MISC_EFFECT_DOUBLE_DAMAGE (:6872-6874): the latter's
+    // Random() is drawn inside CalcMoveBasePower, i.e. before the damage roll below.
+    // GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197)
+    attackerElectrified: hasFlag(attackerBattlerState.statuses4, STATUS4_ELECTRIFIED),
+    ionDelugeActive: hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE),
+    attackerPlasmaFists: hasFlag(attackerBattlerState.statuses4, STATUS4_PLASMA_FISTS),
+    attackerTimesDamaged: state.sides[attackerId & 1]?.timesDamaged[attackerBattlerState.partyIndex] ?? 0,
+    miscDoubleDamage:
+      drawRandom && move.miscEffect === 'MISC_EFFECT_DOUBLE_DAMAGE' ? deps.random.random16() % 100 < move.effectChance : undefined,
+    flungItem: flungId
+      ? { id: flungId, holdEffect: flungData?.resolvedHoldEffect ?? null, holdEffectType: flungData?.holdEffectType?.replace(/^TYPE_/, '') ?? null }
+      : null,
+  }
+  return { scenario, unmodelled }
+  }
+
   return {
     resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context: DamageResolveContext = { targetHasActedThisTurn: false }): DamageResolution {
       if (action.action !== 'USE_MOVE' || !action.chosenMove) return { targetDamage: null, attackerDamage: null, unmodelled: [] }
@@ -78,101 +196,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       if (!move) return { targetDamage: null, attackerDamage: null, unmodelled: [`move ${action.chosenMove.id}: move data is unavailable`] }
       if (move.split === 'STATUS') return { targetDamage: null, attackerDamage: null, unmodelled: ['status effects are not modelled yet'] }
 
-      const roles = { attackerId, defenderId: targetId }
-      const attacker = buildBattlerBattleState(state, attackerId, roles, deps)
-      const defender = buildBattlerBattleState(state, targetId, roles, deps)
-      const field = buildFieldBattleState(state, roles, deps)
-      const unmodelled = [
-        ...gapsToUnmodelled(attacker.gaps).map((gap) => `attacker.${gap}`),
-        ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),
-        ...gapsToUnmodelled(field.gaps),
-      ]
-      // attackerFinalItemMultiplier (calculate.ts:1219-1222) is the ONLY real
-      // consumer of sameMoveTurnsInARow -- HOLD_EFFECT_METRONOME's per-move-in-
-      // a-row damage boost, for ANY move the attacker uses. It is not keyed on
-      // Echoed Voice: this dataset's MOVE_ECHOED_VOICE has effect
-      // EFFECT_TRIPLE_KICK (not EFFECT_ECHOED_VOICE, which appears nowhere in
-      // moves.json), so basePower.ts's EFFECT_ECHOED_VOICE case is unreachable
-      // and Echoed Voice's own power scaling is Triple-Kick-shaped, not tied to
-      // this toggle at all.
-      //
-      // No longer a gap: turn.ts's deductPp now maintains
-      // BattlerState.sameMoveTurns for real (Cmd_ppreduce,
-      // battle_script_commands.c:1486-1493). It is always 0 for the scenarios
-      // this batch represents, which is the C's own value: the increment branch
-      // needs parentalBondOn > 0 AND parentalBondOn != parentalBondInitialCount
-      // (a later Parental Bond hit), and Cmd_ppreduce returns at :1472 for those
-      // hits (HITMARKER_NO_ATTACKSTRING, :4903) before reaching it. On the first
-      // hit both counters are the full count, so the reset branch runs. See
-      // state.ts's sameMoveTurns doc.
-      // Rollout / Ice Ball / Flame Wheel read gVolatileStructs[atk].rolloutCounter AFTER Cmd_handlerollout bumped it (turn.ts runs that
-      // before this call, as BattleScript_EffectRollout does, data/battle_scripts_1.s:5125-5132) and STATUS2_DEFENSE_CURL (:6813-6821).
-      const attackerBattlerState = state.battlers[attackerId]!
-      // tryfling (hitScripts.ts) emptied the slot already; Fling's power and a Gem's type read the item it recorded.
-      const flungId = move.effect === 'EFFECT_FLING' ? attackerBattlerState.turn.flungItem : null
-      const flungData = flungId ? deps.dataContext.item(flungId) : undefined
-      // Beat Up's hit k is powered by party slot k (CalcBeatUpPower, battle_util.c:101-116: `party[gBattleCommunication[0] - 1]`,
-      // which BattleScript_EffectBeatUp's Gen 5+ branch raises by one per hit, data/battle_scripts_1.s:5775-5779), whether or not
-      // that slot is a mon that counted toward the hit total. An empty slot reads gBaseStats[SPECIES_NONE].baseAttack, which is 0.
-      let beatUpBaseAttack = attacker.battler.rawStats.atk
-      if (move.effect === 'EFFECT_BEAT_UP') {
-        if (context.hitIndex === undefined) {
-          unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
-        } else {
-          const slotSpecies = state.sides[attackerId & 1].party[context.hitIndex]?.speciesId ?? null
-          beatUpBaseAttack = slotSpecies ? (deps.dataContext.species(slotSpecies)?.baseStats.atk ?? 0) : 0
-        }
-      }
-      if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
-      const scenario: DamageCalcScenario = {
-        move,
-        attacker: attacker.battler,
-        defender: defender.battler,
-        field: field.field,
-        typeChart: deps.typeChart,
-        inverseTypeChart: deps.inverseTypeChart,
-        moveBehaviors: deps.moveBehaviors,
-        battleConstants: deps.battleConstants,
-        attackerActsFirst: !context.targetHasActedThisTurn,
-        sameMoveTurnsInARow: state.battlers[attackerId]!.sameMoveTurns,
-        // CANCELLER_MULTIHIT_MOVES (attackCanceller.ts) already drew this and
-        // wrote it onto TurnState before the accuracy check ran -- see this
-        // module's own header. 0 when unset: resolveHitPlan (multiHit.ts)
-        // does not read scenarioHitCount at all for an ordinary single-hit
-        // move with no Parental Bond ability, so the placeholder is inert for
-        // every move this batch's own defects actually touch (see header for
-        // the one pre-existing exception this value cannot fix).
-        hitCount: state.battlers[attackerId]!.turn.multiHitCounter,
-        defenderIsSwitching: false,
-        magnitudeTier: move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
-        attackerRolloutCounter: Math.min(3, Math.max(0, attackerBattlerState.volatiles.rolloutCounter)) as 0 | 1 | 2 | 3,
-        attackerHasDefenseCurl: hasFlag(attackerBattlerState.mon.status2, STATUS2_DEFENSE_CURL),
-        attackerWasHitThisTurn: attacker.battler.condition.wasDamagedThisTurnBy !== 'none',
-        // Without a hitIndex DamageContext's one-representative stand-in applies (the attacker's own Attack, with the gap
-        // reported above); with one, the hit's own party slot (beatUpBaseAttack above).
-        beatUpBaseAttack,
-        beatUpHitCount: 1,
-        // GetParentalBondCount's MINION_CONTROL branch (battle_script_commands.c:1023-1040). Cmd_attackcanceler
-        // (:1082-1091) stored the live party count in parentalBondInitialCount and never changes it for the
-        // rest of the sequence (only parentalBondOn moves), so this is that count on every hit.
-        minionControlCount:
-          attackerBattlerState.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL'
-            ? attackerBattlerState.turn.parentalBondInitialCount
-            : undefined,
-        defenderUsedGlaiveRush: false,
-        singleHitIndex: context.hitIndex,
-        // MISC_EFFECT_TOOK_DAMAGE_BOOST (battle_util.c:6869-6871) and MISC_EFFECT_DOUBLE_DAMAGE (:6872-6874): the latter's
-        // Random() is drawn inside CalcMoveBasePower, i.e. before the damage roll below.
-        // GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197)
-        attackerElectrified: hasFlag(attackerBattlerState.statuses4, STATUS4_ELECTRIFIED),
-        ionDelugeActive: hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE),
-        attackerPlasmaFists: hasFlag(attackerBattlerState.statuses4, STATUS4_PLASMA_FISTS),
-        attackerTimesDamaged: state.sides[attackerId & 1]?.timesDamaged[attackerBattlerState.partyIndex] ?? 0,
-        miscDoubleDamage: move.miscEffect === 'MISC_EFFECT_DOUBLE_DAMAGE' ? deps.random.random16() % 100 < move.effectChance : undefined,
-        flungItem: flungId
-          ? { id: flungId, holdEffect: flungData?.resolvedHoldEffect ?? null, holdEffectType: flungData?.holdEffectType?.replace(/^TYPE_/, '') ?? null }
-          : null,
-      }
+      const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, true)
       const result = calculateMoveDamage(scenario)
       unmodelled.push(...result.unmodelled)
       if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled, absorbingAbility: result.absorbingAbility ?? null }
@@ -202,6 +226,29 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         berryReduced: Boolean(result.berryReduced),
         isSuperEffective: result.typeEffectiveness >= 8192,
       }
+    },
+
+    /** CalcTypeEffectivenessMultiplier (battle_util.c:7985-7996) for one move,
+     * as the UQ_4_12 value the damage step itself reports. GetTotalAccuracy's
+     * onAccuracy loop (:1354-1362) runs BEFORE the damage step, so Fatal
+     * Precision and its aliases (abilities.cc:4397-4407) need this number
+     * before the accuracy roll; `resolve` above cannot supply it without
+     * dealing damage and drawing the crit/roll RNG.
+     *
+     * Deterministic and side-effect free: buildScenarioFor with drawRandom
+     * false draws nothing, and calculateMoveDamage draws nothing (it reports
+     * all 16 rolls). Calling this before the accuracy roll therefore leaves the
+     * random stream exactly where Cmd_accuracycheck expects it. */
+    typeEffectiveness(state: BattleState, attackerId: number, targetId: number, moveId: string, context: DamageResolveContext = { targetHasActedThisTurn: false }) {
+      const move = deps.moveData(moveId)
+      if (!move) return { effectiveness: null, unmodelled: [`move ${moveId}: move data is unavailable`] }
+      // CalcTypeEffectivenessMultiplier forces SPLIT_STATUS back to UQ_4_12(1.0) (:7992), and
+      // every caller of this method is the accuracy check, whose own gate already excludes
+      // status moves (abilities.cc:4399's CHECK_NOT(IS_MOVE_STATUS(move))). Not a number to guess.
+      if (move.split === 'STATUS') return { effectiveness: null, unmodelled: [`move ${moveId}: type effectiveness is not computed for status moves`] }
+      const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, false)
+      const result = calculateMoveDamage(scenario)
+      return { effectiveness: result.typeEffectiveness, unmodelled: [...unmodelled, ...result.unmodelled] }
     },
 
     confusionSelfHit(state: BattleState, battlerId: number, power: number) {

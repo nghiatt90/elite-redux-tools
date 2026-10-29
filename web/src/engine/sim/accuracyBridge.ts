@@ -34,7 +34,9 @@
 import type { BridgeDeps, BridgeGap } from './bridge'
 import { weatherFromBitfield } from './bridge'
 import type { AccuracyInputs } from './accuracy'
+import { SUPER_EFFECTIVE_ACCURACY_ABILITIES, SUPER_EFFECTIVE_MULTIPLIER, getSlotsInReverse } from './accuracy'
 import type { BattleState } from './state'
+import type { DamageResolver } from './turn'
 import { isBattlerGrounded, isGravityActive } from './grounding'
 import {
   DEFAULT_STAT_STAGE,
@@ -47,7 +49,7 @@ import {
   hasFlag,
 } from './constants'
 import { isPhantomForce, semiInvulnerableState } from './unpack'
-import { isSimAbilitySuppressed } from './statBuffs'
+import { battlerHasSimAbility, isSimAbilitySuppressed } from './statBuffs'
 
 const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/, '')
 
@@ -62,7 +64,16 @@ function structuralGaps(): BridgeGap[] {
   ]
 }
 
-export interface AccuracyBridgeDeps extends Pick<BridgeDeps, 'grounding' | 'dataContext'> {}
+export interface AccuracyBridgeDeps extends Pick<BridgeDeps, 'grounding' | 'dataContext'> {
+  /** The combat resolver's type-effectiveness-only path. Optional so the
+   * existing callers that only need the accuracy number keep their
+   * `{ grounding, dataContext }` literals compiling; when absent (or when the
+   * resolver does not implement the method) AccuracyInputs.isSuperEffective
+   * stays undefined and accuracy.ts reports the gap. turn.ts's TurnLoopDeps
+   * already carries the full DamageResolver, so every in-battle call site
+   * supplies it without a new argument. */
+  damage?: Pick<DamageResolver, 'typeEffectiveness'>
+}
 
 export interface AccuracyBridgeResult {
   inputs: AccuracyInputs
@@ -123,6 +134,41 @@ export function buildAccuracyInputs(
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
   const defenderHoldEffect = deps.grounding.holdEffectOf(targetId)
 
+  // IsMegaLauncherBoosted is DoesMoveMatchFlag(MOVE_FLAG_MEGA_LAUNCHER)
+  // (battle_util.c:9373), and DoesMoveMatchFlag falls through to the holder's
+  // onModifyMoveFlags abilities (abilities.cc:374-388). Gunman is the only one
+  // of those that answers TRUE for MEGA_LAUNCHER (abilities.cc:9533-9543: a
+  // status move), so a Gunman holder's status moves count as Mega-Launcher
+  // boosted for Artillery/Deadeye/Super Scope. The other onModifyMoveFlags
+  // abilities (Brawling Wyvern PUNCH, Junshi Sanda PUNCH/KICK, Mixed Martial
+  // Arts PUNCH/KICK, Rite of Passage/Festivities DANCE/SOUND, Musical Notes,
+  // Reverbate, Taekkyeon) never grant MEGA_LAUNCHER and are not consulted.
+  const moveFlagMegaLauncher =
+    Boolean(move?.flags.bulletBased) ||
+    (move?.split === 'STATUS' && battlerHasSimAbility(state, attacker, 'ABILITY_GUNMAN', false, attackerId, false, deps.dataContext))
+
+  // GetTotalAccuracy runs its onAccuracy loop (:1354-1362) BEFORE the damage
+  // step, so Fatal Precision and its aliases (abilities.cc:4397-4407) need
+  // CalcTypeEffectivenessMultiplier before the accuracy roll. Only holders pay
+  // for it; the value is the damage engine's own UQ_4_12 result (the same one
+  // the later damage step reports), computed without drawing RNG.
+  let isSuperEffective: boolean | undefined
+  const attackerNeedsTypeEffectiveness = getSlotsInReverse(attacker.mon.abilities).some((abilityId) =>
+    SUPER_EFFECTIVE_ACCURACY_ABILITIES.has(abilityId),
+  )
+  if (attackerNeedsTypeEffectiveness && move && move.split !== 'STATUS' && deps.damage?.typeEffectiveness) {
+    const effectiveness = deps.damage.typeEffectiveness(state, attackerId, targetId, moveId)
+    if (effectiveness.effectiveness === null) {
+      gaps.push({
+        field: 'isSuperEffective',
+        reason: 'NEEDS_DATA',
+        detail: `${moveId}'s type effectiveness could not be computed: ${effectiveness.unmodelled.join('; ')}`,
+      })
+    } else {
+      isSuperEffective = effectiveness.effectiveness >= SUPER_EFFECTIVE_MULTIPLIER
+    }
+  }
+
   const inputs: AccuracyInputs = {
     moveId,
     moveAccuracy: move?.accuracy ?? 0,
@@ -134,9 +180,10 @@ export function buildAccuracyInputs(
     moveFlagDmgUnderground: Boolean(move?.flags.hitsUnderground),
     moveFlagDmgUnderwater: Boolean(move?.flags.hitsUnderwater),
     moveSplit: move?.split ?? null,
-    // moves.json renames FLAG_MEGA_LAUNCHER/STRIKER/KEEN_EDGE (pipeline/src/erdata/emit.py:89-92). DoesMoveMatchFlag's
-    // ability-granted flags are not applied here.
-    moveFlagMegaLauncher: Boolean(move?.flags.bulletBased),
+    // moves.json renames FLAG_MEGA_LAUNCHER/STRIKER/KEEN_EDGE (pipeline/src/erdata/emit.py:89-92).
+    // Gunman is folded in above; the STRIKER/KEEN_EDGE ability-granted flags
+    // are still not applied here (their hooks are a later cycle's work).
+    moveFlagMegaLauncher,
     moveFlagArrowBased: Boolean(move?.flags.arrowBased),
     moveFlagStriker: Boolean(move?.flags.kickBased),
     moveFlagKeenEdge: Boolean(move?.flags.sliceBased),
@@ -155,6 +202,7 @@ export function buildAccuracyInputs(
     // and cleared by Cmd_accuracycheck (battle_script_commands.c:1383-1384 / turn.ts).
     attackerUsedMicleBerry: attacker.round.usedMicleBerry,
     myceliumMightActive: false,
+    isSuperEffective,
 
     defenderHoldEffect,
     defenderHoldEffectParam: defenderHoldEffect ? (defenderItem?.holdEffectStrength ?? 0) : 0,

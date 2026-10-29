@@ -33,41 +33,44 @@
 //     branch (:1383-1389) is still ported -- it is real, data-driven state the
 //     caller supplies -- but always takes the non-Ripen (+20%) multiplier, and
 //     the ambiguity is reported as a gap whenever the berry was actually used.
-//   - The onAccuracy ability loop (:1354-1362) iterates every ability slot on
-//     the attacker and defender (in singles, the only two battlers the C's own
-//     FILTER admits) and runs each one's onAccuracy hook. Of the 50 abilities
-//     in the pinned checkout that declare one -- cross-checked mechanically
-//     both against data/v2.65beta/abilityHooks.json's `hooks.onAccuracy` and
-//     against a grep of every `constexpr Ability Impl<ABILITY_X>` block in
-//     src/abilities.cc that declares `.onAccuracy` (aliases count: an alias
-//     assignment like `Impl<ABILITY_RADIANCE>.onAccuracy =
-//     Impl<ABILITY_ILLUMINATE>.onAccuracy` is a live hook, not a gap) -- NONE
-//     has a port: web/src/engine/abilities/impl/09-hub-abilities.ts and
-//     23-mold-breaker.ts each say so explicitly in a comment. Every slot that
-//     names one of the 50 is gapped by ability id.
+//   - The onAccuracy ability loop (:1354-1362) is PORTED: it iterates every
+//     ability slot on the attacker and defender (in singles, the only two
+//     battlers the C's own FILTER admits), in reverse slot order, running
+//     each slot's hook through runAttackerAbilityHook / runDefenderAbilityHook
+//     below. Those two switches cover every ability in the pinned checkout
+//     that declares `.onAccuracy` -- cross-checked mechanically both against
+//     data/v2.65beta/abilityHooks.json's `hooks.onAccuracy` and against a grep
+//     of every `constexpr Ability Impl<ABILITY_X>` block in src/abilities.cc
+//     (aliases count: `Impl<ABILITY_RADIANCE>.onAccuracy =
+//     Impl<ABILITY_ILLUMINATE>.onAccuracy` is a live hook, not a gap). The one
+//     remaining hole is ABILITY_COMMANDER, which needs GetAbilityState state
+//     the sim does not carry; it is named in UNPORTED_ACCURACY_ABILITIES and
+//     gapped by ability id when a slot holds it.
 //
-// One ability check IS ported for real, because its flag already exists in
-// the registry: IsUnaware (:9006) is exactly `RETURN_ABILITY_IF_FLAG(battler,
-// TRUE, unaware)`, and abilities/dispatchCalc.ts's `hasFlag` already answers
-// that question for the damage path. This module calls the same function.
+// One ability check outside the hook loop IS ported for real, because its flag
+// already exists in the registry: IsUnaware (:9006) is exactly
+// `RETURN_ABILITY_IF_FLAG(battler, TRUE, unaware)`, and
+// abilities/dispatchCalc.ts's `hasFlag` already answers that question for the
+// damage path. This module calls the same function.
 
 import type { BridgeGap } from './bridge'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { computeAttackerHasMoldBreaker, hasFlag as abilityHasFlag } from '../abilities/dispatchCalc'
 import type { WeatherKind } from '../types'
+import { uq } from '../fixed'
 import { DEFAULT_STAT_STAGE } from './constants'
 
 // ---------------------------------------------------------------------------
-// AccuracyPriority, include/abilities.hh:74-81. Six values; this port only
-// ever PRODUCES three of them (NO_RESULT, HITS_IF_POSSIBLE, ALWAYS_MISSES),
-// because MULTIPLICATIVE/ADDITIVE/ALWAYS_HITS are only ever returned by an
-// onAccuracy ability hook, and none is ported (see the header). The full
-// six-value ordering is still transcribed here, not trimmed to the three
-// this module reaches, because the numeric ordering IS the ladder: :1286's
-// `if (prio < ACCURACY_HITS_IF_POSSIBLE)` gate and the final switch (:1364-
-// 1371) both depend on the exact relative order, and a caller wiring in a
-// real ability port later must not have to rediscover it.
+// AccuracyPriority, include/abilities.hh:74-81. Six values, all six of them
+// PRODUCED by this port: NO_RESULT is the initial value, MULTIPLICATIVE and
+// ADDITIVE come from the hooks that scale moveAcc, HITS_IF_POSSIBLE from both
+// a scaling hook and the move-level exceptions, ALWAYS_MISSES from the
+// semi-invulnerability/Trepidation branches, and ALWAYS_HITS from the No
+// Guard/Qigong-class hooks. The numeric ordering IS the ladder: :1286's
+// `if (prio < ACCURACY_HITS_IF_POSSIBLE)` gate, the per-slot `max(prio,
+// result)` fold and the final switch (:1364-1371) all depend on the exact
+// relative order.
 // ---------------------------------------------------------------------------
 export const ACCURACY_PRIORITY = {
   NO_RESULT: 0,
@@ -292,9 +295,9 @@ export interface AccuracyInputs {
 export interface AccuracyResult {
   /** The C's own return type. 101 is the "cannot miss" sentinel: the final
    * line is `min(moveAcc, 100)`, so 101 can only ever come from one of the
-   * three early `return 101` branches (:1262-1265) or the ability-loop
-   * switch's ALWAYS_HITS/HITS_IF_POSSIBLE case (:1365-1367, unreachable here
-   * since no onAccuracy hook is ported) -- never from the stage/item math. */
+   * early `return 101` branches (:1262-1265) or the ability-loop switch's
+   * ALWAYS_HITS/HITS_IF_POSSIBLE case (:1365-1367) -- never from the
+   * stage/item math. */
   accuracy: number
   gaps: BridgeGap[]
 }
@@ -310,8 +313,18 @@ export const BREAKABLE_DEFENDER_ACCURACY_ABILITIES = new Set([
   'ABILITY_RAIN_SHROUD',
 ])
 
+/** GetSuperEffectiveMult(), abilities.cc:430: `UQ_4_12(2.0)` outside Hell
+ * mode's HELL_MODE_TYPE_EFFECTIVENESS_CHANGE, which this sim does not model
+ * (the same build-level toggle as the rest of the damage path). This checkout's
+ * UQ_4_12 precision is 10 bits (include/global.h:113, `UQ_4_12_PRECISION 10`),
+ * so 2.0 is 2048 -- the same `uq(2.0)` calculate.ts:1099 compares against.
+ * (damageResolver.ts:203's literal 8192 is on the 12-bit scale and is a
+ * pre-existing bug in the damage path's own isSuperEffective flag; it is not
+ * copied here.) */
+export const SUPER_EFFECTIVE_MULTIPLIER = uq(2.0)
+
 /** onAccuracy hooks gated on CalcTypeEffectivenessMultiplier >= GetSuperEffectiveMult(). */
-const SUPER_EFFECTIVE_ACCURACY_ABILITIES = new Set([
+export const SUPER_EFFECTIVE_ACCURACY_ABILITIES = new Set([
   'ABILITY_FATAL_PRECISION',
   'ABILITY_DEADLY_PRECISION',
   'ABILITY_FINAL_BLOW',

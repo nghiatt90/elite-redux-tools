@@ -514,6 +514,19 @@ export interface DamageResolveContext {
 
 export interface DamageResolver {
   resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context?: DamageResolveContext): DamageResolution
+  /** CalcTypeEffectivenessMultiplier's UQ_4_12 result for one move, with no
+   * damage, no RNG draw and no state mutation. GetTotalAccuracy's onAccuracy
+   * loop (:1354-1362) runs BEFORE the damage step, so Fatal Precision and its
+   * aliases (abilities.cc:4397-4407) need this number before the accuracy
+   * roll. Optional: a resolver without it leaves AccuracyInputs.isSuperEffective
+   * undefined, which accuracy.ts reports as a gap. */
+  typeEffectiveness?(
+    state: BattleState,
+    attackerId: number,
+    targetId: number,
+    moveId: string,
+    context?: DamageResolveContext,
+  ): { effectiveness: number | null; unmodelled: string[] }
   /** CANCELLER_CONFUSED's CalculateMoveDamage(MOVE_NONE, battler, battler, &TYPE_MYSTERY, power, FALSE, 0, TRUE),
    * battle_util.c:3376-3378: a typeless physical hit on itself with no crit and no random roll. Optional: a resolver without
    * a damage engine behind it leaves the self-hit unmodelled. */
