@@ -81,7 +81,7 @@ export function tryPreemptiveActions(
           break
         case 'ABILITY_SUPER_SNIPER':
           // src/abilities.cc:9832 -- UseTurnAttackAsPursuit with no extra condition.
-          useTurnAttackAsPursuit(state, holder.id, abilityId, turnBattler, turnAction, order, actions, deps, statusDeps)
+          runTurnAttackAsPursuit(state, holder.id, abilityId, turnBattler, turnAction, order, actions, deps, statusDeps)
           break
         case 'ABILITY_SURPRISE':
           tryPreemptSurprise(state, holder.id, abilityId, turnBattler, turnAction, actions, deps, statusDeps)
@@ -131,7 +131,7 @@ function tryPreemptDreamcatcher(
   if (!actor) return
   // `gBattleMons[turnBattler].status1 & STATUS1_SLEEP || IsComatose(turnBattler)`
   if (!hasFlag(actor.mon.status1, STATUS1_SLEEP) && !isComatose(state, turnBattler, deps)) return
-  useTurnAttackAsPursuit(state, holderId, ability, turnBattler, turnAction, order, actions, deps, statusDeps)
+  runTurnAttackAsPursuit(state, holderId, ability, turnBattler, turnAction, order, actions, deps, statusDeps)
 }
 
 /**
@@ -144,7 +144,7 @@ function tryPreemptDreamcatcher(
  * own slot is overwritten with B_ACTION_FINISHED so it does not use the move a
  * second time later in the turn.
  */
-function useTurnAttackAsPursuit(
+function runTurnAttackAsPursuit(
   state: BattleState,
   holderId: number,
   ability: string,
