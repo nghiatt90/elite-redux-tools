@@ -136,7 +136,7 @@ import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
-import { getParentalBondMultiplier } from '../abilities/dispatchCalc'
+import { getParentalBondMultiplier, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
 import type { ParentalBondTrigger } from '../abilities/types'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
@@ -1118,13 +1118,17 @@ export function handleProtectLikeMoveEnd(
 
   // :4415-4427
   if (protectMove === 'MOVE_CAMOUFLAGE') {
-    const moveType = deps.dataContext.move(currentMoveId)?.type
-    if (!moveType) return none
-    const bareType = moveType.replace(/^TYPE_/, '')
-    if (target.mon.types.includes(bareType)) return none
-    target.mon.types[2] = bareType
+    const moveData = deps.dataContext.move(currentMoveId)
+    if (!moveData?.type) return none
+    // GET_MOVE_TYPE(gCurrentMove, moveType) (include/battle.h:735-741) reads the RESOLVED
+    // type (gBattleStruct->dynamicMoveType, written by SetTypeBeforeUsingMove's
+    // GetMoveTypeInternal). resolveEffectiveMoveType is the sim's existing resolver for its
+    // onMoveType (-ate) branch; the branches below are NOT covered, so the note stays.
+    const moveType = resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
+    if (target.mon.types.includes(moveType)) return none
+    target.mon.types[2] = moveType
     unmodelled.push(
-      "Camouflage's added type reads the move's declared type; GET_MOVE_TYPE's dynamic type changes (:4417) are not applied",
+      "Camouflage applies GET_MOVE_TYPE's onMoveType (-ate) resolution only; the item/effect/field dynamic-type branches (Judgment/Plate, Natural Gift, Weather Ball, Hidden Power, Fling gem, Revelation Dance/Spit Up/Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma Fists) are not applied",
     )
     return none
   }

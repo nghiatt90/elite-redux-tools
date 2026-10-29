@@ -44,9 +44,10 @@ export type StatStages = number[]
  * `nickname`, `otName`, `friendship`, `ppBonuses` (no effect on any AI score or
  * damage path), `wasalreadytotemboosted` (totem boosts are a wild-battle
  * mechanic, and the 40 fights are all trainer battles), `abilityNum` (superseded
- * by the resolved `abilities` slots below). `personality` would also be needed
- * for Illusion, which SetBattlerData stubs out anyway -- ShouldFailForIllusion
- * is `return FALSE` at battle_ai_util.c:518. */
+ * by the resolved `abilities` slots below). `personality` is also not needed by
+ * the Illusion state the sim does carry -- that lives in `BattlerState.illusion`
+ * (GetIllusionMonPtr/SetIllusionMon, battle_util.c:8281-8330) and its only AI
+ * reader, ShouldFailForIllusion, is `return FALSE` at battle_ai_util.c:518. */
 export interface SimBattleMon {
   speciesId: string // SpeciesEnum species (:164) -- exact SPECIES_* id
   /** `u16 stats[5]` / the attack..spDefense union (:165-174). Out-of-battle
@@ -331,6 +332,14 @@ export interface BattlerState {
    * slot this battler is. ShouldSwitch skips it when counting reserves
    * (battle_ai_switch_items.c:658-661). */
   partyIndex: number
+  /** `struct Illusion illusion[MAX_BATTLERS_COUNT]` (include/battle.h:566-572,
+   * :706), `gBattleStruct->illusion[battler]`. `set` records that SetIllusionMon
+   * has run -- GetIllusionMonPtr performs that call lazily on first read
+   * (battle_util.c:8281-8292). `on`/`broken` are the disguise state the
+   * ABILITY_ILLUSION hooks read; `partyId` is the disguise target's party slot
+   * (meaningless unless `on`). All four are ZEROed by ClearIllusionMon
+   * (battle_util.c:8294) on every switch-in (battle_main.c:2807). */
+  illusion: { set: boolean; on: boolean; broken: boolean; partyId: number }
   /** `gLastMoves[MAX_BATTLERS_COUNT]` (include/battle.h:988, battle_script_commands.c:4750,4754).
    * Piece 8 of the research note's list, alongside BattleHistory.usedMoves. */
   lastMove: string | null

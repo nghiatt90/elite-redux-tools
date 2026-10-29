@@ -793,6 +793,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_GUILT_TRIP',
   'ABILITY_HAUNTED_SPIRIT',
   'ABILITY_VENGEFUL_SPIRIT',
+  'ABILITY_ILLUSION',
   'ABILITY_ILL_WILL',
   'ABILITY_ITCHY_DEFENSE',
   'ABILITY_SAND_SPIT',
@@ -1451,6 +1452,21 @@ function handleDefenderMoveEndAbility(
     ) {
       applyDamage(state, attackerId, targetDamage, fainted, deps)
       result.attackerDamage += targetDamage
+    }
+    return result
+  }
+
+  // Illusion (src/abilities.cc:2145-2150): CHECK(DidMoveHit()), CHECK(illusion.on),
+  // CHECK_NOT(illusion.broken), then BattleScriptCall(BattleScript_IllusionOff). DidMoveHit
+  // (:4060) is `WasMoveSuccessful() && TARGET_TURN_DAMAGED`, read here as "the move dealt
+  // damage", the same reading as Strikeout below. BattleScript_IllusionOff itself is message
+  // and animation only (data/battle_scripts_1.s:8542-8551); the state change lives in
+  // battle_gfx_sfx_util.c:405-406 (`broken = 1; on = 0`), run when that animation launches --
+  // so the break happens here, where the hook fires.
+  if (abilityId === 'ABILITY_ILLUSION') {
+    if (targetDamage > 0 && target.illusion.on && !target.illusion.broken) {
+      target.illusion.broken = true
+      target.illusion.on = false
     }
     return result
   }

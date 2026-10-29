@@ -1044,7 +1044,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 113 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 114 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
       'ABILITY_AFTERMATH',
       'ABILITY_ANGER_POINT',
@@ -1091,6 +1091,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_HAUNTED_SPIRIT',
       'ABILITY_HYPNOTIC_TOUCH',
       'ABILITY_ICE_DOWNFALL',
+      'ABILITY_ILLUSION',
       'ABILITY_ILL_WILL',
       'ABILITY_INFLATABLE',
       'ABILITY_INNARDS_OUT',

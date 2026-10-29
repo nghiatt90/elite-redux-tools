@@ -374,6 +374,10 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     round: createRoundState(),
     turn: createTurnState(),
     partyIndex,
+    // ClearIllusionMon (battle_util.c:8294) runs at the top of SwitchInClearSetData
+    // (battle_main.c:2807), and createBattlerState is the sim's switch-in rebuild. The
+    // battle-start state is the same ZERO (gBattleStruct is AllocZeroed).
+    illusion: { set: false, on: false, broken: false, partyId: 0 },
     lastMove: null,
     lastResultingMove: null,
     lastLandedMove: null,

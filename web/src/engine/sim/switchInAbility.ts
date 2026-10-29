@@ -59,6 +59,7 @@ import {
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   NUM_BATTLE_STATS,
+  PARTY_SIZE,
   PLEDGE_DURATION,
   QUASH_DURATION,
   SCREEN_DURATION,
@@ -133,7 +134,7 @@ import {
   hasFlag,
   setFlag,
 } from './constants'
-import type { BattleState, BattlerState } from './state'
+import type { BattleState, BattlerState, SimPartyMon } from './state'
 import type { SimDataContext } from './dataContext'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
@@ -1095,6 +1096,60 @@ function livePartner(state: BattleState, battlerId: number): BattlerState | unde
   if (state.battlersCount <= 2) return undefined
   const partner = state.battlers[battlerId ^ 2]
   return partner && partner.mon.hp > 0 ? partner : undefined
+}
+
+/**
+ * SetIllusionMon, src/battle_util.c:8296-8330. Scans the side's party from
+ * PARTY_SIZE-1 down to 0 and disguises the holder as the LAST slot that has a
+ * species, HP > 0, is not the active mon and is not a live partner's mon. The
+ * C's MON_DATA_IS_EGG test is omitted: eggs are not modelled by this sim
+ * (state.ts's SimPartyMon note). `hasAbilityIgnoringSuppression` stands in for
+ * `ability != ABILITY_ILLUSION && !MonHasInnate(mon, ABILITY_ILLUSION, ...)`
+ * (:8302-8305) -- it tests all four resolved ability slots.
+ *
+ * `set` is written even when the holder lacks Illusion or no candidate exists,
+ * exactly like the C (:8304 runs before either failure path).
+ */
+export function setIllusionMon(state: BattleState, battlerId: number): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+
+  battler.illusion.set = true
+  if (!hasAbilityIgnoringSuppression(battler, 'ABILITY_ILLUSION')) return false
+
+  const party = state.sides[battlerId & 1].party
+  const partner = livePartner(state, battlerId)
+  for (let i = PARTY_SIZE - 1; i >= 0; i--) {
+    const mon = party[i]
+    // MON_DATA_SANITY_HAS_SPECIES / MON_DATA_HP (:8318-8319).
+    if (!mon || mon.speciesId === null || mon.hp <= 0) continue
+    // `&party[id] != mon` (:8319) -- the current battler's own party slot.
+    if (i === battler.partyIndex) continue
+    // `&party[id] != partnerMon` (:8319); when no partner is alive the C aliases
+    // partnerMon to mon itself, already excluded above.
+    if (partner && i === partner.partyIndex) continue
+
+    battler.illusion.on = true
+    battler.illusion.broken = false
+    battler.illusion.partyId = i
+    return true
+  }
+  return false
+}
+
+/**
+ * GetIllusionMonPtr, src/battle_util.c:8281-8292: `broken` short-circuits, a
+ * still-unset state triggers SetIllusionMon lazily, and `!on` then reads as
+ * "no disguise". The C returns a pointer into the side's party; the sim returns
+ * that party entry, or null.
+ */
+export function getIllusionMonPtr(state: BattleState, battlerId: number): SimPartyMon | null {
+  const battler = state.battlers[battlerId]
+  if (!battler) return null
+  if (battler.illusion.broken) return null
+  if (!battler.illusion.set) setIllusionMon(state, battlerId)
+  if (!battler.illusion.on) return null
+  return state.sides[battlerId & 1].party[battler.illusion.partyId] ?? null
 }
 
 /**
@@ -2264,8 +2319,11 @@ export function applySwitchInAbilities(
       if (!transformTarget) continue
       if (hasFlag(transformTarget.mon.status2, STATUS2_TRANSFORMED | STATUS2_SUBSTITUTE)) continue
       if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) continue
-      // CHECK_NOT(gBattleStruct->illusion[gBattlerTarget].on): Illusion is stubbed in this sim
-      // (state.ts:48, see also handleTransform's same note), so this check is a no-op here.
+      // CHECK_NOT(gBattleStruct->illusion[gBattlerTarget].on) (abilities.cc:2165). The C's
+      // display code has already run GetIllusionMonPtr by switch-in time; this call is the
+      // sim's equivalent lazy set (battle_util.c:8281-8292).
+      getIllusionMonPtr(state, target)
+      if (transformTarget.illusion.on) continue
       if (hasFlag(transformTarget.statuses3, STATUS3_SEMI_INVULNERABLE)) continue
 
       applyTransformCopy(state, battlerId, target, deps)

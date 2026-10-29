@@ -304,7 +304,7 @@ import {
   testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
-import { applySwitchInAbilities } from './switchInAbility'
+import { applySwitchInAbilities, getIllusionMonPtr } from './switchInAbility'
 import {
   isEntrainmentBannedAbilityAttacker,
   isEntrainmentTargetOrSimpleBeamBannedAbility,
@@ -6832,10 +6832,12 @@ export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
   // 3. transformdataexecution (:10482-10533):
   // if (gBattleMons[gBattlerTarget].status2 & STATUS2_TRANSFORMED || gBattleStruct->illusion[gBattlerTarget].on ||
   //     gStatuses3[gBattlerTarget] & STATUS3_SEMI_INVULNERABLE) -> fail
-  // Note: gBattleStruct->illusion[target].on is absent from BattleState (Illusion mechanics
-  // are stubbed in this sim, see state.ts:48).
+  // The C's other readers (display/message code) have already set illusion[] by the time
+  // the move runs; GetIllusionMonPtr is the sim's lazy set, mirroring battle_util.c:8281-8292.
+  getIllusionMonPtr(state, targetId)
   if (
     hasFlag(target.mon.status2, STATUS2_TRANSFORMED) ||
+    target.illusion.on ||
     hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)
   ) {
     return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })

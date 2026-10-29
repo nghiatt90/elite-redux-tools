@@ -64,7 +64,7 @@ import { findAbilitySlot } from './statusEffects'
 // slot through GetAbilityIndex, so a suppressed ability reads -1/absent rather
 // than a stale stored counter. Imported rather than re-derived to keep the
 // bridge's value identical to the simulator's own consumers.
-import { getSingleUseAbilityCounter } from './switchInAbility'
+import { getIllusionMonPtr, getSingleUseAbilityCounter } from './switchInAbility'
 import type { TurnOrderContext } from './turnOrder'
 import { TOTAL_SPEED_FULL, getBattlerTotalSpeedStat } from './turnOrder'
 import {
@@ -354,7 +354,7 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239), Drakelp Head (single-use counter, written by moveEnd.ts:2626) and Soothsayer (abilityState, set to 4 by switchInAbility.ts onEntry and ticked down by endTurn.ts; Cycle 109); Chuckster now also writes abilityState (moveEnd.ts:2610-2623, Cycle 98b), but this closure does not read that slot' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239), Drakelp Head (single-use counter, written by moveEnd.ts:2626), Soothsayer (abilityState, set to 4 by switchInAbility.ts onEntry and ticked down by endTurn.ts; Cycle 109) and Illusion (battler.illusion.on && !broken, lazily armed by GetIllusionMonPtr; Cycle 109b); Chuckster now also writes abilityState (moveEnd.ts:2610-2623, Cycle 98b), but this closure does not read that slot' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -533,6 +533,12 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     // leaves its slot out of the read set above.
     abilityOn: (() => {
       const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
+      // ABILITY_ILLUSION's onOffensiveMultiplier (abilities.cc:2152-2156) reads
+      // gBattleStruct->illusion[battler].on && !gBattleStruct->illusion[battler].broken.
+      // GetIllusionMonPtr (battle_util.c:8281-8292) is the lazy SetIllusionMon: the C's display
+      // code arms the flag at switch-in, and this call stands in for that first read.
+      getIllusionMonPtr(state, battlerId)
+      const hasIllusion = battler.illusion.on && !battler.illusion.broken
       const hasSlowStart = (abilityIds.includes('ABILITY_SLOW_START') || abilityIds.includes('ABILITY_LETHARGY')) && battler.volatiles.slowStartTimer > 0
       const hasAmbush = abilityIds.includes('ABILITY_AMBUSH') && battler.volatiles.isFirstTurn > 0
       const unburdenSlot = findAbilitySlot(mon.abilities, 'ABILITY_UNBURDEN')
@@ -554,7 +560,7 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
       const hasStakeout =
         (abilityIds.includes('ABILITY_STAKEOUT') || abilityIds.includes('ABILITY_OVERWATCH')) &&
         Boolean(state.battlers[opponentId]?.volatiles.isFirstTurn === 2)
-      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout || hasPowerOutage || hasDrakelpHead || hasSoothsayer
+      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout || hasPowerOutage || hasDrakelpHead || hasSoothsayer || hasIllusion
     })(),
     gender: mon.gender,
     boostedStat: paradoxBoostedStat(battler),
