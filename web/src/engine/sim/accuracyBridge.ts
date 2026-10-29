@@ -46,12 +46,39 @@ import {
   STATUS3_ALWAYS_HITS,
   STATUS3_TELEKINESIS,
   STATUS4_FORESIGHT,
+  WEATHER_FOG_ANY,
+  WEATHER_HAIL_ANY,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
+  WEATHER_STRONG_WINDS,
+  WEATHER_SUN_ANY,
   hasFlag,
 } from './constants'
 import { isPhantomForce, semiInvulnerableState } from './unpack'
-import { battlerHasSimAbility, isSimAbilitySuppressed } from './statBuffs'
+import { battlerHasSimAbility, isBattlerWeatherAffected, isSimAbilitySuppressed } from './statBuffs'
+import { isKeenEdgeMove, isStrikerMove } from './statusEffects'
+import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
 
 const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/, '')
+
+/** WeatherKind -> the WEATHER_*_ANY mask the C reads for that weather. Every
+ * weather read GetTotalAccuracy performs is `IsBattlerWeatherAffected(target,
+ * <flag>)` (battle_script_commands.c:1294 rain, :1320 hail, :1327 fog,
+ * :1350 sun; the onAccuracy hooks use the same per-weather flags, e.g.
+ * abilities.cc:599-608 SANDSTORM_ANY), so the bridge only needs to know which
+ * mask corresponds to the single weather the bitfield already resolved to. */
+const WEATHER_KIND_FLAGS: Partial<Record<string, number>> = {
+  SUN_PERMANENT: WEATHER_SUN_ANY,
+  SUN_TEMPORARY: WEATHER_SUN_ANY,
+  SUN_PRIMAL: WEATHER_SUN_ANY,
+  RAIN_PERMANENT: WEATHER_RAIN_ANY,
+  RAIN_TEMPORARY: WEATHER_RAIN_ANY,
+  RAIN_PRIMAL: WEATHER_RAIN_ANY,
+  SANDSTORM: WEATHER_SANDSTORM_ANY,
+  HAIL: WEATHER_HAIL_ANY,
+  FOG: WEATHER_FOG_ANY,
+  STRONG_WINDS: WEATHER_STRONG_WINDS,
+}
 
 /** Every AccuracyInputs field this bridge cannot honestly derive, because
  * nothing in the turn loop writes the C array it comes from. Declared once,
@@ -126,9 +153,37 @@ export function buildAccuracyInputs(
   // gravityActive, and weatherFromBitfield needs no deps at all. Same two
   // real derivations (weather can go stale after battle start; gravity is a
   // genuine port), just without carrying fields this module has no use for.
-  const { weather, gap: weatherGap } = weatherFromBitfield(state.field.weather)
+
+  // statusEffects.ts's StatusDeps (and moveTargetFlags.ts's dependency shape):
+  // the same grounding/dataContext pair AccuracyBridgeDeps already carries.
+  // The weather gates below, the STRIKER/KEEN_EDGE predicates and the Ole
+  // target-flag lookup are all built from it.
+  const statusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+
+  const { weather: rawWeather, gap: weatherGap } = weatherFromBitfield(state.field.weather)
   const gravityActive = isGravityActive(state, deps.grounding)
   if (weatherGap) gaps.push(weatherGap)
+  // Every weather read in accuracy.ts -- the Thunder/Hurricane rain clause
+  // (battle_script_commands.c:1294), Blizzard (:1320), Eerie Spell/Vexing Void
+  // (:1327), the sun drop (:1350) and the Sand Veil / Snow Cloak / Rain Shroud
+  // / Smokey Maneuvers hooks (abilities.cc:599-608, :1449-1456, :11475-11483,
+  // :8187-8195) -- is `IsBattlerWeatherAffected(battlerDef, <weather's flag>)`
+  // in the C. That is TRUE only while WEATHER_HAS_EFFECT (no clearSkiesTimer,
+  // no Cloud Nine / Air Lock / Clueless on the field) and, for sun/rain, only
+  // when the TARGET is not holding a Utility Umbrella (battle_util.c:8644-8653,
+  // include/battle_util.h:45-46). When the check fails the C sees no weather at
+  // all, so hand accuracy.ts 'NONE' rather than the raw field weather.
+  // Echolocation (abilities.cc:11364-11371) is the one attacker-side read; it
+  // uses WEATHER_FOG_ANY, for which IsBattlerWeatherAffected cannot differ
+  // between the two battlers (the Utility Umbrella clause only covers sun and
+  // rain), so the target's answer is also the attacker's answer there.
+  const rawWeatherFlags = WEATHER_KIND_FLAGS[rawWeather] ?? 0
+  const weather =
+    rawWeather === 'NONE' ||
+    (rawWeatherFlags !== 0 &&
+      isBattlerWeatherAffected(state, targetId, rawWeatherFlags, statusDeps))
+      ? rawWeather
+      : 'NONE'
 
   const defenderHasAnticipation = defender.mon.abilities.ability === 'ABILITY_ANTICIPATION' || defender.mon.abilities.innates.includes('ABILITY_ANTICIPATION')
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
@@ -181,13 +236,22 @@ export function buildAccuracyInputs(
     moveFlagDmgUnderwater: Boolean(move?.flags.hitsUnderwater),
     moveSplit: move?.split ?? null,
     // moves.json renames FLAG_MEGA_LAUNCHER/STRIKER/KEEN_EDGE (pipeline/src/erdata/emit.py:89-92).
-    // Gunman is folded in above; the STRIKER/KEEN_EDGE ability-granted flags
-    // are still not applied here (their hooks are a later cycle's work).
+    // Gunman is folded in above. STRIKER (IsStrikerBoosted, battle_util.c:9377)
+    // and KEEN_EDGE (IsKeenEdge, :9381) are DoesMoveMatchFlag over the static
+    // flag PLUS the attacker's onModifyMoveFlags abilities -- statusEffects.ts's
+    // isStrikerMove / isKeenEdgeMove are that port, so the ability-granted
+    // flags are applied, not just the raw moves.json bits.
     moveFlagMegaLauncher,
     moveFlagArrowBased: Boolean(move?.flags.arrowBased),
-    moveFlagStriker: Boolean(move?.flags.kickBased),
-    moveFlagKeenEdge: Boolean(move?.flags.sliceBased),
-    moveTarget: move?.target ?? null,
+    moveFlagStriker: isStrikerMove(state, attackerId, moveId, statusDeps),
+    moveFlagKeenEdge: isKeenEdgeMove(state, attackerId, moveId, statusDeps),
+    // Ole's hook switches on GetBattlerBattleMoveTargetFlags(move, battler)
+    // with `battler` = the ATTACKER (abilities.cc:7556-7570; the ON_ABILITY
+    // macro passes battlerAtk as `battler`, battle_script_commands.c:1354-1362),
+    // not on the raw moves.json target: an ability that widens a SELECTED move
+    // to BOTH (Artillery / Amplifier / Sweeping Edge, battle_util.c:142-147)
+    // makes Ole return NO_RESULT. moveEnd.ts delegates to moveTargetFlags.ts.
+    moveTarget: move ? getBattlerBattleMoveTargetFlags(state, attackerId, moveId, move, statusDeps, statusDeps) : null,
 
     attackerTypes: attacker.mon.types,
     // Derived: written by BattleScript_EffectTrepidation (:8715-8723) and decremented in ENDTURN_GENERIC_BATTLER_TIMERS (:2976).

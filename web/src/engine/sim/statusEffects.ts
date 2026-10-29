@@ -708,6 +708,56 @@ export function isKeenEdgeMove(
 }
 
 /**
+ * IsStrikerBoosted, src/battle_util.c:9377:
+ * DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_KICK).
+ * Checks the move's static kickBased flag (FLAG_STRIKER_BOOST, moves.json
+ * `kickBased`) and the onModifyMoveFlags abilities that grant MOVE_FLAG_KICK
+ * (src/abilities.cc:358-388):
+ *   - Junshi Sanda (:7613-7622) when the move has FLAG_IRON_FIST_BOOST (`punchBased`);
+ *   - Mixed Martial Arts (:9898-9905) when the move's own data type is TYPE_NORMAL;
+ *   - Backstreet Boy (:11570-11583) when the move has FLAG_DANCE (`dance`).
+ * Every other onModifyMoveFlags ability in the checkout grants PUNCH, SOUND,
+ * DANCE, MEGA_LAUNCHER or KEEN_EDGE only (Brawling Wyvern :7603, Gunman :9535,
+ * Festivities :10194, Reverbate :10657, Taekkyeon :10666, Chestnut Axe :11709,
+ * Musical Notes :11988), never KICK, so unlike isSoundMove/isKeenEdgeMove there
+ * is no DoesMoveMatchFlag gap to push here.
+ */
+export function isStrikerMove(
+  state: BattleState,
+  attackerId: number,
+  moveId: string | null | undefined,
+  deps: StatusDeps,
+): boolean {
+  if (!moveId) return false
+  const moveData = deps.dataContext.move(moveId)
+  if (moveData?.flags?.kickBased) return true
+
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return false
+
+  if (
+    moveData?.flags?.punchBased &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_JUNSHI_SANDA', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
+  }
+  if (
+    moveData?.type === 'NORMAL' &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_MIXED_MARTIAL_ARTS', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
+  }
+  if (
+    moveData?.flags?.dance &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_BACKSTREET_BOY', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
  * Infiltrates(battlerAtk, move, moveType, INFILTRATE_SUBSTITUTE), src/battle_script_commands.c:12246-12250.
  * Runs onInfiltrate hooks and checks (result & INFILTRATE_SUBSTITUTE).
  * - Infiltrator and aliases (Duality, King of the Jungle, Marine Apex) return SCREENS | SUBSTITUTE.
