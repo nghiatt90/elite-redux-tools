@@ -29,11 +29,12 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_STAT_STAGE, SIDE_STATUS_FUTUREATTACK, STAT_EVASION, hasFlag } from './constants'
 import { createBattleState, createBattlerState } from './create'
 import type { SimMoveData } from './dataContext'
+import { createBridgeDamageResolver } from './damageResolver'
 import { loadSimData } from './driver/loadSimData'
 import type { BattleState, RandomSource, SimBattleMon } from './state'
 import type { SwitchInAbilityDeps } from './switchInAbility'
 import { applySwitchInAbilities } from './switchInAbility'
-import type { DamageResolveContext, DamageResolver, TurnLoopDeps, TurnOutcome } from './turn'
+import type { DamageResolution, DamageResolveContext, DamageResolver, TurnLoopDeps, TurnOutcome } from './turn'
 import { executeTurn } from './turn'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 
@@ -85,7 +86,7 @@ function scriptedRng(rolls: number[]): RandomSource & { calls: number } {
 
 function battle(a: SimBattleMon, b: SimBattleMon, rng: RandomSource = { random16: () => 0 }): BattleState {
   // The two battlers must not tie on Speed: getFastestBattler (turnOrder.ts:583) breaks a
-  // Speed tie by drawing Random() % 2 from the SAME state.rng the accuracy/crit/damage rolls
+  // Speed tie by drawing Random() % 2 from the SAME state.rng the accuracy/damage rolls
   // come from, which would put stray draws in front of every assertion below. `monFor` gives
   // every mon Speed 100, so the second battler is made one point slower (it moves second,
   // as it does in a real singles turn).
@@ -148,19 +149,21 @@ function powerEchoResolver(): EchoResolver {
   }
 }
 
-/** Draws crit then the damage roll inside resolve, the order the real resolver uses
- * (Cmd_critcalc then Cmd_damagecalc). The accuracy draw is made by the turn loop BEFORE
- * this is called, so a scripted [accuracy, crit, roll] sequence lands in that order. */
+/** Records the gCritRoll the turn loop hands it and draws only the damage roll inside
+ * resolve: BattleScript_MonTookFutureAttack has no critcalc instruction (:8008-8049), so
+ * the C passes the already-set gCritRoll = CRIT_ROLL_ONLY_IF_GUARANTEED (battle_util.c:752)
+ * into Cmd_damagecalc and draws nothing for the crit. The accuracy draw is made by the turn
+ * loop BEFORE this is called, so a scripted [accuracy, roll] sequence lands in that order. */
 interface DrawOrderResolver extends DamageResolver {
-  calls: Array<{ critRoll: number; roll: number; power: number }>
+  calls: Array<{ critRoll: number | undefined; roll: number; power: number }>
 }
 
 function drawOrderResolver(): DrawOrderResolver {
   const calls: DrawOrderResolver['calls'] = []
   return {
     calls,
-    resolve(state, _attackerId, _targetId, action, _context?: DamageResolveContext) {
-      const critRoll = state.rng.random16()
+    resolve(state, _attackerId, _targetId, action, context?: DamageResolveContext) {
+      const critRoll = context?.critRoll
       const roll = state.rng.random16() % 16
       const power = state.currentExtraAttack?.movePower ?? action.chosenMove?.power ?? 0
       calls.push({ critRoll, roll, power })
@@ -205,7 +208,7 @@ describe('Cycle 109c - Future Sight use turn (Cmd_trysetfutureattack)', () => {
     expect(state.field.futureSightAttacker[1]).toBe(0)
     expect(hasFlag(state.sides[1].statuses, SIDE_STATUS_FUTUREATTACK)).toBe(true)
 
-    // No damage on the use turn and no accuracy/crit/roll draw: nothing called the resolver.
+    // No damage on the use turn and no accuracy/damage-roll draw: nothing called the resolver.
     expect(damage.calls).toHaveLength(0)
     expect(state.battlers[1]!.mon.hp).toBe(1000)
     expect(actionOf(out, 0).targetDamage).toBeNull()
@@ -302,7 +305,7 @@ describe('Cycle 109c - end-of-turn countdown and delayed hit', () => {
     expect(damageLow.calls.at(-1)?.power).toBe(60)
   })
 
-  it('misses when the accuracy roll fails: no damage, and no crit/roll draw after it', () => {
+  it('misses when the accuracy roll fails: no damage, and no damage-roll draw after it', () => {
     // Cmd_accuracycheck (battle_script_commands.c:1433): (Random() % 100) >= accuracy is a
     // MISS. Stat stages are stored 0..12 with DEFAULT_STAT_STAGE == 6 (constants.ts:59), so
     // +6 evasion is index 12 and accuracy.ts:705 computes buff = 6 + 6 - 12 = 0, giving
@@ -329,12 +332,14 @@ describe('Cycle 109c - end-of-turn countdown and delayed hit', () => {
     expect(hasFlag(state.sides[1].statuses, SIDE_STATUS_FUTUREATTACK)).toBe(false)
   })
 
-  it('draws accuracy, then crit, then the damage roll -- in that order', () => {
+  it('draws accuracy, then only the damage roll -- no crit draw', () => {
     // The turn loop draws (Random() % 100) for accuracy (Cmd_accuracycheck:1433), then the
-    // resolver draws the crit roll (Cmd_critcalc:1577) and the 0..15 damage roll
-    // (battle_util.c:7790-7795). Scripted [50, 5, 7]: accuracy 50 < 100 hits, critRoll 5,
-    // roll 7, so the echo+roll resolver deals 120 + 7 = 127.
-    const rng = scriptedRng([50, 5, 7])
+    // resolver draws the 0..15 damage roll (battle_util.c:7790-7795). BattleScript_MonTookFutureAttack
+    // has no critcalc (:8008-8049) and Cmd_damagecalc passes the gCritRoll that
+    // HandleAction_TryFinish already set to CRIT_ROLL_ONLY_IF_GUARANTEED, so nothing draws a
+    // crit: scripted [50, 7] gives accuracy 50 < 100 (hit), gCritRoll 1, roll 7, so the
+    // echo+roll resolver deals 120 + 7 = 127.
+    const rng = scriptedRng([50, 7])
     const state = battle(monFor('SPECIES_MUDKIP'), monFor('SPECIES_MUDKIP'), rng)
     const damage = drawOrderResolver()
     const deps = loopDeps(damage)
@@ -344,9 +349,53 @@ describe('Cycle 109c - end-of-turn countdown and delayed hit', () => {
     executeTurn(state, [null, null], deps)
     executeTurn(state, [null, null], deps)
 
-    expect(rng.calls).toBe(3)
-    expect(damage.calls).toEqual([{ critRoll: 5, roll: 7, power: 120 }])
+    expect(rng.calls).toBe(2) // accuracy + damage roll; no crit roll
+    expect(damage.calls).toEqual([{ critRoll: 1, roll: 7, power: 120 }])
     expect(state.battlers[1]!.mon.hp).toBe(873) // 1000 - (120 + 7)
+  })
+
+  it('a guaranteed-crit setup still crits on the same two draws (critRoll 1 meets a denominator of 1)', () => {
+    // SetCritFlag is `!(critRoll % critChance)` (battle_script_commands.c:1588-1594), so the
+    // non-drawn CRIT_ROLL_ONLY_IF_GUARANTEED value 1 still crits whenever the denominator is 1
+    // (criticalHitChance[ALWAYS_CRIT], crit.ts:52-55). No snapshot move is both Future Sight
+    // and always-crit, so this case only forces the move's EXISTING crit flag to 'ALWAYS' for
+    // MOVE_FUTURE_SIGHT; the resolver under test is the real bridge resolver, not a double.
+    const rng = scriptedRng([50, 7])
+    const state = battle(monFor('SPECIES_MUDKIP'), monFor('SPECIES_MUDKIP'), rng)
+    const inner = createBridgeDamageResolver({
+      moveData: (id) => {
+        const m = simData.moveData(id)
+        return m && id === 'MOVE_FUTURE_SIGHT' ? { ...m, crit: 'ALWAYS' as const } : m
+      },
+      typeChart: simData.typeChart,
+      inverseTypeChart: simData.inverseTypeChart,
+      moveBehaviors: simData.moveBehaviors,
+      battleConstants: simData.battleConstants,
+      random: rng,
+      grounding: GROUNDING,
+      turnOrder: simData.turnOrder,
+      statStageRatios: RATIOS,
+      dataContext: DATA_CONTEXT,
+      inverseBattle: false,
+    })
+    const resolutions: DamageResolution[] = []
+    const damage: DamageResolver = {
+      resolve(state, attackerId, targetId, action, context) {
+        const resolution = inner.resolve(state, attackerId, targetId, action, context)
+        resolutions.push(resolution)
+        return resolution
+      },
+    }
+    const deps = loopDeps(damage)
+
+    executeTurn(state, [useMove(1, FS), null], deps) // counter 3 -> 2
+    executeTurn(state, [null, null], deps) // counter 2 -> 1
+    executeTurn(state, [null, null], deps) // counter 1 -> 0, the delayed hit lands
+
+    expect(rng.calls).toBe(2) // accuracy + one damage roll; the crit draw is skipped
+    expect(resolutions).toHaveLength(1)
+    expect(resolutions[0]!.isCriticalHit).toBe(true)
+    expect(state.battlers[1]!.mon.hp).toBeLessThan(1000)
   })
 
   it('a fainted holder still ticks its counter to 0 but takes no hit', () => {

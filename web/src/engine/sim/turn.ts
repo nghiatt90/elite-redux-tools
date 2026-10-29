@@ -3790,9 +3790,18 @@ function runFutureSightCountdown(
     state.currentExtraAttack = { move: moveId, movePower: power, attacker: attackerId, target: holderId }
     let resolution: DamageResolution
     try {
-      // No critRoll is passed, so the resolver draws crit then the damage roll, after the
-      // accuracy draw above -- Cmd_critcalc (:1568) then Cmd_damagecalc (:1598).
-      resolution = deps.damage.resolve(state, attackerId, holderId, action, { targetHasActedThisTurn })
+      // BattleScript_MonTookFutureAttack has no critcalc instruction (data/battle_scripts_1.s:8008-8049):
+      // it runs accuracycheck, damagecalc, adjustdamage. Cmd_damagecalc passes the global gCritRoll
+      // into CalculateMoveDamage without drawing one (battle_script_commands.c:1598-1613), and
+      // HandleAction_TryFinish sets gCritRoll = CRIT_ROLL_ONLY_IF_GUARANTEED (battle_util.c:752),
+      // which is 1 (include/battle_script_commands.h:78), after every action -- so at this
+      // end-of-turn countdown gCritRoll is 1. SetCritFlag's `!(critRoll % critChance)`
+      // (:1588-1594) then crits only for a divisor of 1 (a guaranteed crit). The delayed hit
+      // therefore draws NO crit random: accuracy (above) then the damage roll.
+      resolution = deps.damage.resolve(state, attackerId, holderId, action, {
+        targetHasActedThisTurn,
+        critRoll: 1, // CRIT_ROLL_ONLY_IF_GUARANTEED
+      })
     } finally {
       state.processingExtraAttacks = previousProcessing
       state.currentExtraAttack = previousExtra
