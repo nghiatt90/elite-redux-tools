@@ -116,10 +116,17 @@ proportionate to that.
   agent reasoned about whether a move deals damage from its description rather than from its
   script. `docs/battle-sim/boss-fight-coverage.md` shows what the scripts settle that the
   declared data cannot — a 95-power move whose script has no damage step at all.
-- **Multi-agent work runs through OMC's `/team` skill**, not the Claude-native team setup this
-  project used earlier. `.claude/agents/plan-reviewer.md`, `implementer.md` and
-  `code-reviewer.md` are kept only as deprecated reference — they predate OMC and are not
-  wired into the current workflow. OMC's own roster (`planner`, `executor`, `code-reviewer`,
-  `verifier`, etc., see the `wiki` skill) already carries the plan → execute → review → verify
-  discipline this project relies on, driven by this file's project facts the same way the old
-  agents were.
+- **Battle-sim cycles run through an external driver, not one long session** (a single session's
+  context fills within a few cycles). `.omc/team-pilot/drive.sh` runs one cycle at a time: a fresh
+  `claude -p` writes the brief, `dispatch` hands it to a cheaper worker (agy or DeepSeek) in an
+  isolated worktree, `validate.sh` runs tsc, the full suite, the build and both sim audits and prints
+  one PASS/FAIL line, a second fresh `claude -p` reviews the diff against the C, and the shell
+  fast-forwards and pushes `battle-sim`. The queue and resume state are `.omc/team-pilot/STATE.md`;
+  the role prompts are `iteration.md`. A worker's worktree holds the tracked files plus a copy of
+  `pipeline/.upstream/` and nothing from `.omc/`: briefs use repo-relative paths, workers never run
+  `git push/merge/reset/checkout/commit`, and run `npx tsc -b web` plus their own test file only.
+  Audit counts are lower bounds (they only count notes the sim raises) and a name appearing in the
+  code is not proof of a port, so read the code and the C before claiming a gap or a fix. Keep the
+  main checkout clean while the driver runs; stop it with `touch .omc/team-pilot/STOP`.
+  `/team` remains for ad-hoc multi-agent work. `.claude/agents/plan-reviewer.md`, `implementer.md`
+  and `code-reviewer.md` are deprecated reference only.
