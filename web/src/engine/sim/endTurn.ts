@@ -179,11 +179,13 @@
 //   ENDTURN_POWDER          Ported (:2919-2921) -- unconditionally clears
 //                           STATUS2_POWDER every end of turn.
 //   ENDTURN_THROAT_CHOP     Ported (:2923-2929) -- decrements volatiles.throatChopTimer.
-//   ENDTURN_SLOW_START      Ported (timer decrement, :2930-2941) -- decrements
-//                           volatiles.slowStartTimer when > 0. The DISCIPLINE
-//                           sub-branch (:2943-2952) is Unreachable: volatiles.
-//                           disciplineCounter/gBattleStruct->choicedMove have
-//                           no reader anywhere.
+//   ENDTURN_SLOW_START      Ported (:2930-2952) -- decrements
+//                           volatiles.slowStartTimer when > 0, then the
+//                           Discipline sub-branch: decrements
+//                           volatiles.disciplineCounter and clears
+//                           battler.choicedMove at 0, unless a Choice item,
+//                           Gorilla Tactics or Sage Power holds the lock.
+//                           BattleScript_DisciplineLockEnds only prints.
 //   ENDTURN_PLASMA_FISTS    Ported (:2956-2959) -- clears STATUS4_PLASMA_FISTS; the
 //                           reader is calculate.ts's attackerPlasmaFists.
 //   ENDTURN_GENERIC_BATTLER_TIMERS Gapped (subset ported) -- fear (STATUS4_FEAR /
@@ -239,6 +241,7 @@ import {
   STAT_BUFF_NOT_PROTECT_AFFECTED,
 } from './statBuffs'
 import {
+  CHOICE_HOLD_EFFECTS,
   MOVE_UNSET,
   NUM_STATS,
   STAT_ATK,
@@ -2183,6 +2186,24 @@ export function runEndTurnEffects(
     // ENDTURN_SLOW_START, :2930-2941 -- timer decrement.
     if (battler.volatiles.slowStartTimer > 0) {
       battler.volatiles.slowStartTimer--
+    }
+
+    // ENDTURN_SLOW_START's Discipline sub-branch, :2943-2952. GetBattlerHoldEffect(b, FALSE) does NOT go
+    // through IsItemNegated (:6526-6527, Klutz/Embargo), so the raw item hold effect is read directly --
+    // the same FALSE-mode read accuracyBridge.ts uses for the Ability Shield.
+    const rawHoldEffect = battler.mon.itemId ? (dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
+    if (
+      battlerHasSimAbility(state, battler, 'ABILITY_DISCIPLINE', true, battlerId, false, dataContext) &&
+      !battlerHasSimAbility(state, battler, 'ABILITY_GORILLA_TACTICS', true, battlerId, false, dataContext) &&
+      !battlerHasSimAbility(state, battler, 'ABILITY_SAGE_POWER', true, battlerId, false, dataContext) &&
+      !CHOICE_HOLD_EFFECTS.includes(rawHoldEffect ?? '') &&
+      battler.volatiles.disciplineCounter !== 0
+    ) {
+      battler.volatiles.disciplineCounter--
+      if (battler.volatiles.disciplineCounter === 0) {
+        // BattleScript_DisciplineLockEnds (data/battle_scripts_1.s:8119) only prints and ends.
+        battler.choicedMove = null
+      }
     }
 
     // ENDTURN_PLASMA_FISTS, :2956-2959 -- clears STATUS4_PLASMA_FISTS (its reader is calculate.ts's attackerPlasmaFists).

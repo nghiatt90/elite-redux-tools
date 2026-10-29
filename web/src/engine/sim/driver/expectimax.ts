@@ -15,6 +15,7 @@ import { chooseAiAction } from '../ai/chooseAiAction'
 import { getMostSuitableMonToSwitchInto } from '../ai/aiSwitching'
 import { CHOICE_HOLD_EFFECTS, PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
+import { battlerHasSimAbility } from '../statBuffs'
 import type { BattleState } from '../state'
 import type { ChosenAction } from '../turnOrder'
 import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
@@ -95,11 +96,20 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   // gBattleStruct->choicedMove (0/0xFFFF == null). This is a selection-time filter only -- the turn loop,
   // like the C, does not re-validate a move that was already chosen.
   const holdsChoiceItem = vestHoldEffect !== null && CHOICE_HOLD_EFFECTS.includes(vestHoldEffect)
+  // TrySetCantSelectMoveBattleScript's "Sage Power and Gorilla Tactics" block (battle_util.c:1585-1596):
+  // Discipline, Gorilla Tactics and Sage Power all lock the holder to the recorded choicedMove. All three
+  // use BATTLER_HAS_ABILITY (checkMoldBreaker=TRUE); the battler's own ability cannot be mold-broken by
+  // itself, so attackerHasMoldBreaker is false. Selection-time filter only, like the Choice branch above.
+  const abilityLocksMove =
+    battlerHasSimAbility(state, battler, 'ABILITY_DISCIPLINE', true, 0, false, data.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_GORILLA_TACTICS', true, 0, false, data.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_SAGE_POWER', true, 0, false, data.dataContext)
   for (let i = 0; i < battler.mon.moves.length; i++) {
     const moveId = battler.mon.moves[i]
     if (moveId && battler.mon.pp[i] > 0) {
       if (vestBlocksStatus && moveId !== 'MOVE_ME_FIRST' && data.dataContext.move(moveId)?.split === 'STATUS') continue
       if (holdsChoiceItem && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
+      if (abilityLocksMove && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
       const action = buildMoveAction(state, data, 0, moveId)
       choices.push({ action })
     }

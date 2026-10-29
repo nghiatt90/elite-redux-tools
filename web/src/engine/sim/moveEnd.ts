@@ -17,7 +17,7 @@
 //  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Ported / Gap   | Attacker contact abilities (Static, Flame Body, Poison Point/Touch). Other attacker abilities gapped.
 //  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Ported         | Re-checks every battler's status after the move; a removesStatusOnImmunity onStatusImmune ability cures it (battle_util.c:4505-4609), re-entering until a full pass cures nothing.
 //  8   | MOVEEND_SYNCHRONIZE_ATTACKER    | 4543-4546  | Gapped (cond.) | Attacker Synchronize.
-//  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Ported         | Choice item move lock (choicedMove), incl. the clear-if-not-in-moveset tail; run from runMoveEndBookkeeping (see applyMoveEndChoiceMove).
+//  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Ported         | Choice item / Discipline-rampage / Gorilla Tactics / Sage Power move lock (choicedMove), incl. the clear-if-not-in-moveset tail; run from runMoveEndBookkeeping (see applyMoveEndChoiceMove).
 // 10   | MOVEEND_ATTACKER_INVISIBLE      | 4677-4686  | Unreachable    | Semi-invulnerable sprite invisibility; visual only.
 // 11   | MOVEEND_ATTACKER_VISIBLE        | 4687-4701  | Unreachable    | Semi-invulnerable sprite visibility; visual only.
 // 12   | MOVEEND_TARGET_VISIBLE          | 4702-4713  | Unreachable    | Target sprite visibility; visual only.
@@ -6129,8 +6129,10 @@ export interface MoveEndBookkeepingContext {
  *   for (i = 0; i < MAX_MON_MOVES; ++i) if (moves[i] == *choicedMove) break;
  *   if (i == MAX_MON_MOVES) *choicedMove = 0;
  *
- * Discipline / Gorilla Tactics / Sage Power share this array in the C but are NOT ported here (their
- * ability-side effects are out of this cycle's scope): only the HOLD_EFFECT_CHOICE half can record.
+ * Discipline (only when the chosen move is EFFECT_RAMPAGE), Gorilla Tactics and Sage Power share this
+ * array in the C and are ported here alongside HOLD_EFFECT_CHOICE. The Discipline rampage branch also
+ * arms volatiles.disciplineCounter there (:4555-4556), BEFORE the Baton Pass / Healing Wish early exit,
+ * exactly as the C orders it; endTurn.ts's ENDTURN_SLOW_START decrements it.
  *
  * Applicability notes:
  * - HITMARKER_OBEYS (:1133-1146) can only be clear when a disobedience roll fires; the sim does not model
@@ -6154,15 +6156,24 @@ function applyMoveEndChoiceMove(
   // record and the clear-if-not-in-moveset tail. Unreachable here (see the doc above), kept for fidelity.
   if (!state.processingExtraAttacks && attacker.round.confusionSelfDmg) return
 
+  const effect = deps.dataContext.move(chosenMoveId)?.effect ?? null
+  // Discipline only records/gates on rampage moves (:4554); Gorilla Tactics / Sage Power on any move.
+  const disciplineRampage =
+    effect === 'EFFECT_RAMPAGE' &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_DISCIPLINE', false, attackerId, false, deps.dataContext)
+
   if (
     chosenMoveId !== 'MOVE_STRUGGLE' &&
     chosenMoveId !== MOVE_UNSET && // the C's 0xFFFF sentinel; its gBattleMoves[gChosenMove] read is UB and the tail would null it anyway
     !state.processingExtraAttacks &&
     attacker.choicedMove === null && // *choicedMove == 0 || *choicedMove == 0xFFFF
-    CHOICE_HOLD_EFFECTS.includes(deps.grounding.holdEffectOf(attackerId) ?? '')
+    (CHOICE_HOLD_EFFECTS.includes(deps.grounding.holdEffectOf(attackerId) ?? '') ||
+      disciplineRampage ||
+      battlerHasSimAbility(state, attacker, 'ABILITY_GORILLA_TACTICS', false, attackerId, false, deps.dataContext) ||
+      battlerHasSimAbility(state, attacker, 'ABILITY_SAGE_POWER', false, attackerId, false, deps.dataContext))
   ) {
-    // Discipline's rampage branch (:4555-4556, sets disciplineCounter = 3) is not ported with the rest of Discipline.
-    const effect = deps.dataContext.move(chosenMoveId)?.effect ?? null
+    // :4555-4556 -- arms the end-of-turn countdown, before the Baton Pass / Healing Wish early exit.
+    if (disciplineRampage) attacker.volatiles.disciplineCounter = 3
     if ((effect === 'EFFECT_BATON_PASS' || effect === 'EFFECT_HEALING_WISH') && !moveFailed) {
       // `break` in the C leaves the case before both the write and the clear tail.
       return

@@ -69,12 +69,8 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
   // `battler.choicedMove` is the state MOVEEND_CHOICE_MOVE writes (moveEnd.ts applyMoveEndChoiceMove).
   // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First
   // (the per-slot bit is set in the loop below, where the move's split is known).
-  // :1654-1655 -- Discipline reads the same choicedMove array. The array now exists, but only the
-  // HOLD_EFFECT_CHOICE half of the writer (MOVEEND_CHOICE_MOVE) is ported, so a Discipline holder
-  // never gets a lock recorded and this line can flag nothing.
-  if (selfAbility(state, deps, battler, 'ABILITY_DISCIPLINE')) {
-    note("CheckMoveLimitations' Discipline choicedMove lock (battle_util.c:1654-1655) is not modelled: MOVEEND_CHOICE_MOVE's Discipline-rampage branch (battle_script_commands.c:4555-4556) is not ported, so Discipline never records a choicedMove")
-  }
+  // :1654-1655 -- Discipline and :1660-1661 Gorilla Tactics / Sage Power read the
+  // same choicedMove array; both are filters in the loop below, where moves[i] is known.
   // :1651 -- IsBelchPreventingMove (:1406-1412) reads gBattleStruct->ateBerry
   // and the item pocket; neither is modelled.
   if (moves.includes('MOVE_BELCH')) {
@@ -96,13 +92,6 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
   // the player's side under a Fighting monotype champion.
   if (deps.grounding.monotypeChampType === 'FIGHTING' && (battlerId & 1) === 0 && moves.some((m) => m !== null && moveData(m)?.split === 'STATUS')) {
     note("CheckMoveLimitations' monotype-champion status-move lock (battle_util.c:1632-1633) is not modelled")
-  }
-  // :1660-1661 -- Gorilla Tactics / Sage Power, the same choicedMove lock.
-  if (
-    defAbility(state, deps, battler, 'ABILITY_GORILLA_TACTICS', deps.grounding.attackerHasMoldBreaker) ||
-    defAbility(state, deps, battler, 'ABILITY_SAGE_POWER', deps.grounding.attackerHasMoldBreaker)
-  ) {
-    note("CheckMoveLimitations' Gorilla Tactics / Sage Power choicedMove lock (battle_util.c:1660-1661) is not modelled: MOVEEND_CHOICE_MOVE's Gorilla Tactics / Sage Power branches (battle_script_commands.c:4552-4554) are not ported, so those abilities never record a choicedMove")
   }
 
   // IsHealBlockPreventingMove, battle_util.c:1400-1404: Heal Block on this
@@ -171,11 +160,28 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
       const md = moveData(moveId)
       if (isHealingMoveEffect(md?.effect ?? null) && md?.split === 'STATUS') continue
     }
-    // :1651 Belch / :1653 Stuff Cheeks / :1654-1655 Discipline /
-    // :1656-1658 every-other-turn / :1659 sleep clause / :1660-1661 Gorilla
-    // Tactics & Sage Power -- all noted above, each with no state to test.
+    // :1651 Belch / :1653 Stuff Cheeks / :1656-1658 every-other-turn / :1659
+    // sleep clause -- all noted above, each with no state to test.
     // :1652 -- Throat Chop vs sound moves.
     if (battler.volatiles.throatChopTimer && moveId !== null && isSoundMove(state, battlerId, moveId, statusDeps, unmodelled)) continue
+    // :1654-1655 -- Discipline reads the same choicedMove array. The C passes FALSE for mold breaker
+    // (BattlerHasAbility(b, ..., FALSE)), so selfAbility; the lock is written by MOVEEND_CHOICE_MOVE's
+    // Discipline-rampage branch (moveEnd.ts applyMoveEndChoiceMove).
+    if (
+      selfAbility(state, deps, battler, 'ABILITY_DISCIPLINE') &&
+      battler.choicedMove !== null &&
+      battler.choicedMove !== moveId
+    )
+      continue
+    // :1660-1661 -- Gorilla Tactics / Sage Power, the same choicedMove lock. BATTLER_HAS_ABILITY is the
+    // checkMoldBreaker=TRUE form, so defAbility (the same helper the old note used).
+    if (
+      (defAbility(state, deps, battler, 'ABILITY_GORILLA_TACTICS', deps.grounding.attackerHasMoldBreaker) ||
+        defAbility(state, deps, battler, 'ABILITY_SAGE_POWER', deps.grounding.attackerHasMoldBreaker)) &&
+      battler.choicedMove !== null &&
+      battler.choicedMove !== moveId
+    )
+      continue
     // :1662 -- isMoveDisabled (pokemon.c:6265-6289): every branch of its body
     // is commented out and it returns FALSE unconditionally, so this line can
     // never fire. Ported as the C reads today, not as its comment blocks wish.
