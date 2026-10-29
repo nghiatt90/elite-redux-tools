@@ -829,7 +829,7 @@ function reducesRecoil(state: BattleState, deps: AiDamageDeps, battler: BattlerS
 
 /** CanAIFaintTarget, battle_ai_util.c:972-989, called with numHits=0 at this
  * batch's one call site (the recoil tail). `AI_DATA->moveLimitations` is not
- * modelled (nothing is limited), same precedent aiScorers.ts's own
+ * read here (nothing is limited), same precedent aiScorers.ts's own
  * `canTargetFaintAi` doc already establishes for the identical dependency --
  * this is the mirror-image helper (the AI's OWN moves against the target,
  * where canTargetFaintAi checks the target's moves against the AI). */

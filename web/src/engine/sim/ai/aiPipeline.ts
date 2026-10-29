@@ -23,6 +23,7 @@ import { aiCheckBadMove } from './aiCheckBadMove'
 import { aiCheckViability } from './aiCheckViability'
 import { getMostSuitableMonToSwitchInto, type AiSwitchingDeps } from './aiSwitching'
 import type { AiDamageDeps } from './aiCalcDamage'
+import { computeMoveLimitations } from './aiMoveLimitations'
 import { isAbilityPreventingEscape } from '../escape'
 
 /** include/constants/battle.h:18, 66. Same values aiSwitching.ts's own module
@@ -60,12 +61,14 @@ const DISPATCH: Record<number, Scorer> = {
  * BattleAI_SetupAIData, battle_ai_main.c:158-188, called as
  * `BattleAI_SetupAIData(0xF)` by ComputeBattleAiScores -- every score slot
  * starts at 100. `AI_DATA->moveLimitations` (Taunt/Disable/Torment/Imprison/
- * heal-block-style move limitations, CheckMoveLimitations) is not modelled by
- * this sim (no caller populates a limitations bitmask), so the C's own
- * `if (gBitTable[i] & moveLimitations) score[i] = 0` never fires here -- a gap
- * only in the sense that a limited move would incorrectly score, reported once
- * per `setupAiScores` call as a standing caveat rather than a per-move note,
- * since there is no per-move signal to attach it to.
+ * heal-block-style move limitations) is computed for real as of cycle 98
+ * (`computeMoveLimitations`, aiMoveLimitations.ts, CheckMoveLimitations
+ * battle_util.c:1622-1666) and zeroes every flagged score slot exactly like the
+ * C's own `if (gBitTable[i] & moveLimitations) score[i] = 0` (:185-187).
+ *
+ * The C memsets AI_THINKING_STRUCT before scoring (:164), which also clears
+ * `switchMon` (the persistent "step 1 chose AI_CHOICE_SWITCH" flag consumed by
+ * ShouldSwitchIfAllBadMoves); `state.aiSwitchMon` is reset here for that reason.
  *
  * `gBattlerTarget = SetRandomTarget(sBattler_AI)` (:186) is NOT a caller
  * responsibility to seed RNG for: SetRandomTarget (battle_util.c:6326-6341)
@@ -73,15 +76,18 @@ const DISPATCH: Record<number, Scorer> = {
  * singles-only sim never takes -- the else branch is a pure function of side,
  * `targets[side][0]`, equal to `battlerId ^ 1` in singles. No RNG draw.
  */
-export function setupAiScores(state: BattleState, battlerAtk: number): { scores: [number, number, number, number]; unmodelled: string[] } {
+export function setupAiScores(state: BattleState, battlerAtk: number, deps: AiDamageDeps): { scores: [number, number, number, number]; unmodelled: string[] } {
+  // :164-166 -- memset preserves only aiFlags; switchMon goes back to FALSE.
+  state.aiSwitchMon = false
   const battler = state.battlers[battlerAtk]
-  const unmodelled = ['AI_DATA->moveLimitations (Taunt/Disable/Torment/Imprison/heal-block move limitations) is not modelled; every move is treated as usable by BattleAI_SetupAIData']
   const scores: [number, number, number, number] = [100, 100, 100, 100]
-  if (!battler) return { scores, unmodelled }
+  if (!battler) return { scores, unmodelled: [] }
+  const limits = computeMoveLimitations(state, battlerAtk, deps)
+  // :183-187.
   for (let i = 0; i < 4; i++) {
-    if (!battler.mon.moves[i] || battler.mon.pp[i] === 0) scores[i] = 0
+    if (limits.mask & (1 << i)) scores[i] = 0
   }
-  return { scores, unmodelled }
+  return { scores, unmodelled: limits.unmodelled }
 }
 
 /** SetRandomTarget's singles-only else branch, battle_util.c:6337 -- see
@@ -134,7 +140,7 @@ export function doAiProcessing(state: BattleState, battlerAtk: number, battlerDe
  * `executeTurn` already uses for round-state resets elsewhere.
  */
 export function computeBattleAiScores(state: BattleState, battlerAtk: number, battlerDef: number, deps: AiDamageDeps): { scores: [number, number, number, number]; unmodelled: string[] } {
-  const setup = setupAiScores(state, battlerAtk)
+  const setup = setupAiScores(state, battlerAtk, deps)
   const scores = setup.scores
   const unmodelled = [...setup.unmodelled]
   const aiFlags = state.aiFlags
@@ -220,6 +226,11 @@ export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number
         const result = getMostSuitableMonToSwitchInto(state, battlerAtk, deps)
         unmodelled.push(...result.unmodelled)
         if (result.partyIndex !== PARTY_SIZE) {
+          // battle_ai_main.c:313-315 -- `AI_THINKING_STRUCT->switchMon = TRUE;`
+          // before returning AI_CHOICE_SWITCH. Consumed by
+          // ShouldSwitchIfAllBadMoves (battle_ai_switch_items.c:49-62) in the
+          // same chooseAiAction call.
+          state.aiSwitchMon = true
           return { choice: { kind: 'switch' }, unmodelled }
         }
       }

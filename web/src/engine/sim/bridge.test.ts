@@ -636,7 +636,7 @@ describe('wasDamagedThisTurnBy is role-relative', () => {
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.condition.itemNegated).toBe(false)
   })
 
-  it('derives abilityOn from Flash Fire, Slow Start, Ambush, Unburden, and Stakeout', () => {
+  it('derives abilityOn from Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage and Drakelp Head', () => {
     const state = battle()
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
 
@@ -694,6 +694,23 @@ describe('wasDamagedThisTurnBy is role-relative', () => {
     state.battlers[0]!.volatiles.isFirstTurn = 2
     state.battlers[1]!.volatiles.isFirstTurn = 2
     expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+    state.battlers[0]!.volatiles.isFirstTurn = 0
+    state.battlers[1]!.volatiles.isFirstTurn = 0
+
+    // Power Outage: flag set == already discharged (inverted read in the calc).
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_POWER_OUTAGE', innates: [null, null, null] }
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+    state.battlers[0]!.volatiles.abilityState[0] = 1
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.battlers[0]!.volatiles.abilityState[0] = 0
+
+    // Drakelp Head: the real single-use store (gBattleStruct->singleuseability
+    // [partyIndex][abilityIndex][side]), not abilityState.
+    state.battlers[0]!.mon.abilities = { ability: 'ABILITY_DRAKELP_HEAD', innates: [null, null, null] }
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(false)
+    state.singleUseAbility[0]![0]![0] = 1
+    expect(buildBattlerBattleState(state, 0, ROLES, DEPS).battler.abilityOn).toBe(true)
+    state.singleUseAbility[0]![0]![0] = 0
   })
 })
 

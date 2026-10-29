@@ -8,15 +8,14 @@
 // GetAIPartyIndexes' singles-only else branch (firstId=0, lastId=6) is used
 // throughout, same precedent as aiSwitching.ts's own header.
 //
-// ONE STATE-MODEL GAP, named "gapped by name, only when reached" per this
-// batch's brief:
-//
-//   - `AI_THINKING_STRUCT->switchMon` (`ShouldSwitchIfAllBadMoves`, :49) is set
-//     only by `AI_CheckBadMove`'s own "every move deals no/little damage"
-//     branch (battle_ai_main.c:314) -- AI_CheckBadMove is `checkBadMoveStub`
-//     in aiPipeline.ts (a batch 2-3 stub, out of this batch's scope), so
-//     `switchMon` can never become true anywhere reachable from this sim.
-//     `ShouldSwitchIfAllBadMoves` is therefore always FALSE, gapped by name.
+// `AI_THINKING_STRUCT->switchMon` (`ShouldSwitchIfAllBadMoves`,
+// battle_ai_switch_items.c:49-62) is set by ChooseMoveOrAction_Singles' own
+// second switch check once every move score is at or below the cap and a
+// suitable reserve exists (battle_ai_main.c:313-315). `state.aiSwitchMon` holds
+// it; `setupAiScores` clears it at the start of every scoring pass, matching
+// BattleAI_SetupAIData's memset (:164), and `shouldSwitchIfAllBadMoves` clears
+// it as it consumes it, so a second evaluation in the same selection returns
+// NOT_DECIDED.
 
 import type { BattleState, SimPartyMon } from '../state'
 import {
@@ -73,16 +72,18 @@ function isInvalidReserveSlot(state: BattleState, battlerId: number, index: numb
   return !mon || mon.speciesId === null || mon.hp === 0 || index === battler.partyIndex || index === battler.monToSwitchIntoId
 }
 
-/** ShouldSwitchIfAllBadMoves, :49-62 -- always FALSE. See this module's header
- * for why `AI_THINKING_STRUCT->switchMon` can never be TRUE here. */
-function shouldSwitchIfAllBadMoves(): SwitchHelperResult {
-  return {
-    decided: false,
-    chosenPartyIndex: PARTY_SIZE,
-    unmodelled: [
-      "ShouldSwitchIfAllBadMoves (battle_ai_switch_items.c:49) always reads switchMon as FALSE -- it is set only by AI_CheckBadMove's 'every move deals no/little damage' branch (battle_ai_main.c:314), which is a checkBadMoveStub no-op in this sim",
-    ],
-  }
+/** ShouldSwitchIfAllBadMoves, battle_ai_switch_items.c:49-62. Reads and CLEARS
+ * `state.aiSwitchMon` (the C's `gBattleResources->ai->switchMon = 0`), queues
+ * the `PARTY_SIZE` sentinel into `AI_monToSwitchIntoId` (the caller's `AI_monToSwitchIntoId[battlerId]`
+ * write, which `decide` performs from `chosenPartyIndex`), and reports the
+ * switch. NOT_DECIDED otherwise. */
+function shouldSwitchIfAllBadMoves(state: BattleState, battlerId: number): SwitchHelperResult {
+  if (!state.aiSwitchMon) return NOT_DECIDED
+  // :51-53.
+  state.aiSwitchMon = false
+  const battler = state.battlers[battlerId]
+  if (battler) battler.aiMonToSwitchIntoId = PARTY_SIZE
+  return { decided: true, chosenPartyIndex: PARTY_SIZE, unmodelled: [] }
 }
 
 /** ShouldSwitchIfPerishSong, :64-77. */
@@ -529,7 +530,7 @@ export function shouldSwitch(state: BattleState, battlerId: number, deps: AiDama
     return r.decided
   }
 
-  if (decide(shouldSwitchIfAllBadMoves())) return { shouldSwitch: true, unmodelled }
+  if (decide(shouldSwitchIfAllBadMoves(state, battlerId))) return { shouldSwitch: true, unmodelled }
   if (decide(shouldSwitchIfPerishSong(state, battlerId))) return { shouldSwitch: true, unmodelled }
   if (decide(findMonThatAbsorbsOpponentsMove(state, battlerId, deps))) return { shouldSwitch: true, unmodelled }
   if (!isMonHealthyEnoughToSwitch(state, battlerId)) return { shouldSwitch: false, unmodelled }

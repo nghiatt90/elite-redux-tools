@@ -452,6 +452,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     battleHistory: createBattleHistoryState(),
     battleTypeFlags: options.battleTypeFlags ?? 0,
     aiFlags: options.aiFlags ?? 0,
+    aiSwitchMon: false,
     turnCount: 0,
     rng: options.rng,
     statStageCheckState: STAT_STAGE_CHECK_NOT_NEEDED,

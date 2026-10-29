@@ -1039,7 +1039,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 104 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 105 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
       'ABILITY_ANGER_POINT',
       'ABILITY_ANGER_SHELL',
@@ -1063,6 +1063,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_DEFLECT',
       'ABILITY_DOUBLE_IRON_BARBS',
       'ABILITY_DRAGONFRUIT',
+      'ABILITY_DRAKELP_HEAD',
       'ABILITY_DROP_BLOCKS',
       'ABILITY_EFFECT_SPORE',
       'ABILITY_ELECTROMORPHOSIS',
@@ -1149,7 +1150,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 111 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 112 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1227,6 +1228,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_POISON_POINT',
       'ABILITY_POISON_QUILLS',
       'ABILITY_POISON_TOUCH',
+      'ABILITY_POWER_OUTAGE',
       'ABILITY_PURE_LOVE',
       'ABILITY_PURPLE_HAZE',
       'ABILITY_PYRO_SHELLS',

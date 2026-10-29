@@ -118,10 +118,10 @@ export function canIndexMoveFaintTarget(state: BattleState, battlerAtk: number, 
  * function whose OWN battlerAtk/battlerDef are the AI's attacker/target).
  *
  * `AI_DATA->moveLimitations[battlerDef]` (disabled/PP-exhausted/Taunted moves)
- * is not modelled by this sim yet (no caller populates it) -- CHECK_BAD_MOVE
- * and CHECK_VIABILITY, the batches that maintain move limitations, are stubs
- * in this one, so `unusable` reads as "nothing is limited", the same
- * "effect absent" default this project uses elsewhere for an unwired dependency.
+ * is computed since cycle 98 (`aiMoveLimitations.ts`, called from
+ * `setupAiScores`) but this scorer does not read it: `unusable` still reads as
+ * "nothing is limited". CHECK_BAD_MOVE's own limitations check remains
+ * unported, so the mask is zero-score-only for now.
  * `GetMovesArray` (:1349-1357) is also not ported: it returns EITHER the real
  * moveset OR the AI's revealed-move history depending on AI_FLAG_CHECK_FOE and
  * whether the battler is itself AI-controlled, and every trainer in the 40

@@ -287,8 +287,9 @@ function findAbilitySlot(slots: AbilitySlots, abilityId: string): number {
   return [slots.ability, ...slots.innates].indexOf(abilityId)
 }
 
-/** IsHealingMoveEffect, src/battle_util.c:8880-8904. */
-function isHealingMoveEffect(effect: string | null): boolean {
+/** IsHealingMoveEffect, src/battle_util.c:8880-8904. Exported for
+ * `ai/aiMoveLimitations.ts`'s IsHealBlockPreventingMove port (:1400-1404). */
+export function isHealingMoveEffect(effect: string | null): boolean {
   switch (effect) {
     case 'EFFECT_ABSORB':
     case 'EFFECT_MORNING_SUN':
@@ -317,8 +318,9 @@ function isHealingMoveEffect(effect: string | null): boolean {
 /**
  * GetImprisonedMovesCount, src/battle_util.c:1683-1699.
  * Checks whether an opposing battler has STATUS3_IMPRISONED_OTHERS and knows the move.
+ * Exported for `ai/aiMoveLimitations.ts`'s CheckMoveLimitations port (:1644).
  */
-function getImprisonedMovesCount(state: BattleState, battlerId: number, moveId: string): number {
+export function getImprisonedMovesCount(state: BattleState, battlerId: number, moveId: string): number {
   let imprisonedMoves = 0
   const battlerSide = battlerId & 1
   for (let i = 0; i < state.battlers.length; i++) {

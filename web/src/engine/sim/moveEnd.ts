@@ -705,6 +705,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_ROUGH_SKIN',
   'ABILITY_IRON_BARBS',
   'ABILITY_DRAGONFRUIT',
+  'ABILITY_DRAKELP_HEAD', // Cycle 98 (:12055-12079)
   'ABILITY_DOUBLE_IRON_BARBS',
   'ABILITY_POISON_QUILLS',
   'ABILITY_STATIC',
@@ -872,6 +873,7 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_POISON_POINT',
   'ABILITY_POISON_QUILLS',
   'ABILITY_POISON_TOUCH',
+  'ABILITY_POWER_OUTAGE', // Cycle 98 (:12352-12371)
   'ABILITY_PURE_LOVE',
   'ABILITY_PURPLE_HAZE',
   'ABILITY_RAZOR_SHARP',
@@ -1053,6 +1055,21 @@ function moveTypeMatches(moveData: SimMoveData | undefined, ...types: string[]):
   if (!moveData || !moveData.type) return false
   const clean = moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type
   return types.includes(clean)
+}
+
+/**
+ * `losetype BS_ATTACKER, TYPE_CURRENT_MOVE` (data/battle_scripts_1.s:873-877,
+ * BattleScript_BurnUpRemoveType -> battle_script_commands.c:7620-7639
+ * VARIOUS_LOSE_TYPE): replaces every copy of the current move's type on the
+ * battler with TYPE_MYSTERY. TYPE_CURRENT_MOVE is the effective (ate-adjusted)
+ * move type, so callers pass `moveTypeName()`.
+ */
+function loseCurrentMoveType(
+  battler: { mon: { types: [string, string, string] } },
+  moveType: string | null,
+): void {
+  if (!moveType) return
+  battler.mon.types = battler.mon.types.map((t) => (t === moveType ? 'MYSTERY' : t)) as [string, string, string]
 }
 
 /**
@@ -2606,6 +2623,33 @@ function handleDefenderMoveEndAbility(
       attacker.mon.abilities.ability = abilityId
       applySwitchInAbilities(state, attackerId, deps, unmodelled)
       applySwitchInAbilities(state, targetId, deps, unmodelled)
+    }
+  }
+
+  // 51. Drakelp Head (src/abilities.cc:12055-12079). CHECK(DidMoveHit()) is read
+  // as "the move dealt damage" like the other defender ports; the single-use
+  // counter makes it one-shot and is set BEFORE the stat-drop gate
+  // (:12060-12062), so a blocked drop still spends it. ShouldApplyOnHitEffect
+  // (attacker) = DidMoveHit && IsBattlerAlive(attacker);
+  // StatLowerableOrMirrorArmor(attacker, STAT_ATK) is
+  // canLowerStatOrMirrorArmor. AbilityStatusEffectSafe(MOVE_EFFECT_ATK_MINUS_1,
+  // battler, attacker) makes the HOLDER gBattlerAttacker and the attacker
+  // gBattlerTarget (data/battle_scripts_1.s:10588-10594), so the attacker's
+  // Attack is the stat that drops.
+  // The reform handler (DrakelpHeadReformHandler, :12044-12053) is not modelled:
+  // it clears this counter on re-entry / toxic terrain, and the sim's terrain
+  // dispatch (onWeather.ts's dispatchOnTerrainChange) cannot reach the counter
+  // helpers in switchInAbility.ts without a module cycle.
+  if (abilityId === 'ABILITY_DRAKELP_HEAD') {
+    if (targetDamage > 0 && getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0) {
+      setSingleUseAbilityCounter(state, targetId, abilityId, 1, deps.dataContext)
+      const canLowerStat = attacker.mon.hp > 0 && canLowerStatOrMirrorArmor(state, attackerId, STAT_ATK, deps.dataContext)
+      if (canLowerStat) {
+        applyAbilityStatDrop(state, targetId, attackerId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
+      }
+      const reformNote =
+        "Drakelp Head's reform handler (abilities.cc:12044-12053, onEntry/onTerrain) is not modelled: the single-use counter is never cleared by a toxic terrain or a repeated switch-in, so the damage-reduction half cannot be re-armed in the sim"
+      if (!unmodelled.includes(reformNote)) unmodelled.push(reformNote)
     }
   }
 
@@ -4202,6 +4246,23 @@ function handleAttackerMoveEndAbility(
     }
   }
 
+  // 21. Power Outage (src/abilities.cc:12352-12371). Electric move with the
+  // ability state still clear: SetAbilityState(TRUE) runs BEFORE the type
+  // check (:12355-12357), then only if the ATTACKER is itself Electric type
+  // does BattleScript_BurnUpRemoveType (data/battle_scripts_1.s:873-877,
+  // `losetype BS_ATTACKER, TYPE_CURRENT_MOVE`) drop the move's type from it.
+  // The flag is one-shot: the ability's onOffensiveMultiplier (:12365-12368) is
+  // the damage-path half and reads the same store.
+  if (abilityId === 'ABILITY_POWER_OUTAGE') {
+    const slot = findAbilitySlot(attacker.mon.abilities, 'ABILITY_POWER_OUTAGE')
+    if (slot !== -1 && moveTypeName() === 'ELECTRIC' && !attacker.volatiles.abilityState[slot]) {
+      attacker.volatiles.abilityState[slot] = 1
+      if (attacker.mon.types.includes('ELECTRIC')) {
+        loseCurrentMoveType(attacker, moveTypeName())
+      }
+    }
+  }
+
   return result
 }
 
@@ -5645,11 +5706,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     // C: battle_script_commands.c:4640-4643, battle_scripts_1.s:873-877 (VARIOUS_LOSE_TYPE :7620-7639)
     if (attacker && attacker.mon.hp > 0 && moveData?.type) {
       const moveType = moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type
-      attacker.mon.types = attacker.mon.types.map((t) => (t === moveType ? 'MYSTERY' : t)) as [
-        string,
-        string,
-        string,
-      ]
+      loseCurrentMoveType(attacker, moveType)
     }
   } else if (ctx.moveEffect2 === 'MOVE_EFFECT_SCALE_SHOT' || ctx.moveEffect2 === 'MOVE_EFFECT_WYRM_WIND') {
     // C: battle_script_commands.c:4644-4651 -> BattleScript_MoveEffectScaleShot / _WyrmWind (data/battle_scripts_1.s:195-208):

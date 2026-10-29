@@ -60,6 +60,11 @@ import type { GroundingContext } from './grounding'
 import { isGravityActive } from './grounding'
 import { battlerHasSimAbility } from './statBuffs'
 import { findAbilitySlot } from './statusEffects'
+// Full GetSingleUseAbilityCounter (battle_util.c:3948-3954): resolves the ability
+// slot through GetAbilityIndex, so a suppressed ability reads -1/absent rather
+// than a stale stored counter. Imported rather than re-derived to keep the
+// bridge's value identical to the simulator's own consumers.
+import { getSingleUseAbilityCounter } from './switchInAbility'
 import type { TurnOrderContext } from './turnOrder'
 import { TOTAL_SPEED_FULL, getBattlerTotalSpeedStat } from './turnOrder'
 import {
@@ -349,7 +354,7 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout; Power Outage (onAttacker type-removal), Chuckster (onDefender switch), Drakelp Head (single-use counter) have no writers in the sim' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239) and Drakelp Head (single-use counter, written by moveEnd.ts:2626); Chuckster (onDefender switch) still has no writer in the sim' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -515,9 +520,13 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     semiInvulnerable: semiInvulnerableState(battler.statuses3),
     // RESOURCE_FLAG_FLASH_FIRE, ABILITY_SLOW_START / ABILITY_LETHARGY (slowStartTimer > 0), ABILITY_AMBUSH (isFirstTurn > 0),
     // ABILITY_UNBURDEN / ABILITY_SUGAR_RUSH (abilityState[slot] > 0),
-    // ABILITY_STAKEOUT / ABILITY_OVERWATCH (opponent volatiles.isFirstTurn === 2).
-    // Power Outage (onAttacker type-removal), Chuckster (onDefender switch), Drakelp Head (single-use counter)
-    // have no writers in the sim.
+    // ABILITY_STAKEOUT / ABILITY_OVERWATCH (opponent volatiles.isFirstTurn === 2),
+    // ABILITY_POWER_OUTAGE (volatiles.abilityState[slot], set by moveEnd.ts's
+    // :4239 block) and ABILITY_DRAKELP_HEAD (the real single-use counter store,
+    // battle_util.c:3944-3954, set by moveEnd.ts's :2626 block). Both are
+    // INVERTED reads in the calculator (flag set == discharged), matching
+    // abilities.cc:12364-12368 / :12073-12075 -- so `abilityOn` is the raw flag.
+    // Chuckster (onDefender switch) still has no writer in the sim.
     abilityOn: (() => {
       const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
       const hasSlowStart = (abilityIds.includes('ABILITY_SLOW_START') || abilityIds.includes('ABILITY_LETHARGY')) && battler.volatiles.slowStartTimer > 0
@@ -526,10 +535,16 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
       const hasUnburden = unburdenSlot !== -1 && Boolean(battler.volatiles.abilityState[unburdenSlot])
       const sugarRushSlot = findAbilitySlot(mon.abilities, 'ABILITY_SUGAR_RUSH')
       const hasSugarRush = sugarRushSlot !== -1 && Boolean(battler.volatiles.abilityState[sugarRushSlot])
+      const powerOutageSlot = findAbilitySlot(mon.abilities, 'ABILITY_POWER_OUTAGE')
+      const hasPowerOutage = powerOutageSlot !== -1 && Boolean(battler.volatiles.abilityState[powerOutageSlot])
+      // GetSingleUseAbilityCounter returns -1 for "no such (or suppressed)
+      // ability slot"; that is C's own "not triggered" value (the modifier tests
+      // `!counter`), so only a positive stored counter means discharged.
+      const hasDrakelpHead = getSingleUseAbilityCounter(state, battlerId, 'ABILITY_DRAKELP_HEAD', deps.dataContext) > 0
       const hasStakeout =
         (abilityIds.includes('ABILITY_STAKEOUT') || abilityIds.includes('ABILITY_OVERWATCH')) &&
         Boolean(state.battlers[opponentId]?.volatiles.isFirstTurn === 2)
-      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout
+      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout || hasPowerOutage || hasDrakelpHead
     })(),
     gender: mon.gender,
     boostedStat: paradoxBoostedStat(battler),

@@ -109,19 +109,19 @@ describe('setRandomTargetSingles', () => {
 describe('setupAiScores', () => {
   it('starts every slot at 100 (defaultScoreMoves=0xF)', () => {
     const s = state({ moves: ['MOVE_TACKLE', 'MOVE_EMBER', 'MOVE_WATER_GUN', 'MOVE_SWORDS_DANCE'], pp: [10, 10, 10, 10] })
-    const { scores } = setupAiScores(s, 0)
+    const { scores } = setupAiScores(s, 0, deps)
     expect(scores).toEqual([100, 100, 100, 100])
   })
 
   it('zeroes a slot whose move is MOVE_NONE', () => {
     const s = state({ moves: ['MOVE_TACKLE', null, null, null] })
-    const { scores } = setupAiScores(s, 0)
+    const { scores } = setupAiScores(s, 0, deps)
     expect(scores).toEqual([100, 0, 0, 0])
   })
 
   it('zeroes a slot whose PP is exhausted', () => {
     const s = state({ moves: ['MOVE_TACKLE', 'MOVE_EMBER', null, null], pp: [0, 10, 0, 0] })
-    const { scores } = setupAiScores(s, 0)
+    const { scores } = setupAiScores(s, 0, deps)
     expect(scores[0]).toBe(0)
     expect(scores[1]).toBe(100)
   })
@@ -163,7 +163,8 @@ describe('computeBattleAiScores', () => {
     // The stub itself is silent (pass-through); this test instead asserts the
     // dispatch actually reaches bit 0 and bit 2 without throwing, which a
     // future non-stub replacement would immediately break if mis-wired.
-    expect(unmodelled.length).toBeGreaterThan(0) // at least setupAiScores' own moveLimitations caveat
+    expect(unmodelled.length).toBeGreaterThan(0) // scorers' own gaps, not a standing moveLimitations caveat
+    expect(unmodelled.some((u) => u.includes('moveLimitations'))).toBe(false)
   })
 
   it('produces four finite scores for a real trainer-shaped aiFlags word', () => {

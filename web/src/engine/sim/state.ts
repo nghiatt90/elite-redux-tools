@@ -646,6 +646,13 @@ export interface BattleState {
    * opponent B's own flags are never read. AI_FLAG_DOUBLE_BATTLE is OR'd in at
    * :154. */
   aiFlags: number
+  /** `AI_THINKING_STRUCT->switchMon` (include/battle.h:373) -- set TRUE by
+   * ChooseMoveOrAction_Singles' second switch check (battle_ai_main.c:313-315)
+   * and consumed (read then cleared) by ShouldSwitchIfAllBadMoves
+   * (battle_ai_switch_items.c:49-62) later in the same action-selection call.
+   * BattleAI_SetupAIData memsets AI_THINKING_STRUCT (:164), so it is reset at
+   * the start of every `setupAiScores`. */
+  aiSwitchMon: boolean
   /** `gBattleResults.battleTurnCounter` (battle.h:448). Turn parity is read by
    * Monotype Champion's Wonder Room alternation and by Truant. */
   turnCount: number

@@ -98,7 +98,8 @@
 //     `IsAbilityStatusProtected`'s onCanStatusType scan reuse the SAME gap
 //     shape aiCheckBadMove.ts's own header already establishes for each
 //     (secondary damage: always 0/false; Unnerve: always false; hazard-avoid:
-//     always false; move limitations: never limited; status-immunity
+//     always false; move limitations: mask not read (computed since cycle 98,
+//     but this scorer still treats every move as usable); status-immunity
 //     ability hooks: never protected) -- named again at each new call site
 //     here since this is the first batch to reach them.
 //   - `HasMoveWithLowAccuracy`'s `AI_GetMoveAccuracy` (the fully-modified
@@ -305,7 +306,8 @@ function isBloodStainAffected(state: BattleState, deps: AiDamageDeps, battler: B
  * batch's scope, so both checks are gapped, treated as absent (the common
  * case). Gapped only when the battler is actually asleep/poisoned enough for
  * it to matter is not tracked either; reported once per call as a standing
- * caveat like aiPipeline.ts's own moveLimitations note. */
+ * caveat. (The aiPipeline moveLimitations note this used to cite was retired
+ * by cycle 98, when that mask became real.) */
 function canBattlerHeal(state: BattleState, deps: AiDamageDeps, battler: BattlerState, unmodelled: string[]): boolean {
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
@@ -351,9 +353,9 @@ function canAiFaintTarget(state: BattleState, battlerAtk: number, battlerDef: nu
 /** `CanTargetFaintAiWithMod(battlerDef, battlerAtk, hpMod, dmgMod)`,
  * battle_ai_util.c:1005-1021 -- same shape as `canTargetFaintAi` (loops the
  * POTENTIAL ATTACKER's moveset against the AI), with `hpMod` added to the AI's
- * HP and `dmgMod` multiplying each hit. `AI_DATA->moveLimitations` is not
- * modelled (same gap `canTargetFaintAi`'s own header documents) -- every move
- * is treated as usable. */
+ * HP and `dmgMod` multiplying each hit. `AI_DATA->moveLimitations` is computed
+ * since cycle 98 but not read here (same gap `canTargetFaintAi`'s own header
+ * documents) -- every move is treated as usable. */
 function canTargetFaintAiWithMod(state: BattleState, battlerDef: number, battlerAtk: number, hpMod: number, dmgMod: number, deps: AiDamageDeps): { canFaint: boolean; unmodelled: string[] } {
   const potentialAttacker = state.battlers[battlerDef]
   const aiMon = state.battlers[battlerAtk]?.mon
@@ -388,8 +390,8 @@ function canMoveFaintBattler(state: BattleState, moveId: string | null, attacker
  * accuracy) is approximated by each move's own declared `accuracy` (see this
  * module's header gap note); the MOVE_TARGET_USER/OPPONENTS_FIELD exclusion is
  * skipped (status-move accuracy==0 already covers the dominant real case,
- * "always hits" moves). `AI_DATA->moveLimitations` is not modelled (every move
- * usable, same as elsewhere in this batch). */
+ * "always hits" moves). `AI_DATA->moveLimitations` is not read here (every
+ * move usable, same as elsewhere in this batch). */
 function hasMoveWithLowAccuracy(battler: BattlerState, accCheck: number, ignoreStatus: boolean, deps: AiDamageDeps, unmodelled: string[]): boolean {
   unmodelled.push('HasMoveWithLowAccuracy: AI_GetMoveAccuracy (weather/item/ability-modified accuracy) is approximated by the move\'s own declared accuracy')
   for (const moveId of battler.mon.moves) {
@@ -1379,13 +1381,13 @@ function itemPocket(itemId: string | null, deps: AiDamageDeps, unmodelled: strin
  * HasMoveWithLowAccuracy's `continue`). `AI_GetMoveAccuracy < 85` is
  * approximated by the move's own declared accuracy (an accuracy of 0 is
  * "no check" and is not counted as low), the same stand-in
- * `hasMoveWithLowAccuracy` documents; `AI_DATA->moveLimitations` is not
- * modelled (every move usable). */
+ * `hasMoveWithLowAccuracy` documents; `AI_DATA->moveLimitations` is not read
+ * here (every move usable). */
 function hasSleepMoveWithLowAccuracy(battler: BattlerState, deps: AiDamageDeps, unmodelled: string[]): boolean {
   for (const moveId of battler.mon.moves) {
     if (!moveId) break
     if (deps.moveData(moveId)?.effect !== 'EFFECT_SLEEP') continue
-    unmodelled.push('HasSleepMoveWithLowAccuracy: AI_GetMoveAccuracy (weather/item/ability-modified accuracy) is approximated by the move\'s own declared accuracy; AI_DATA->moveLimitations is not modelled')
+    unmodelled.push('HasSleepMoveWithLowAccuracy: AI_GetMoveAccuracy (weather/item/ability-modified accuracy) is approximated by the move\'s own declared accuracy; AI_DATA->moveLimitations is not read here')
     const accuracy = deps.dataContext.move(moveId)?.accuracy ?? 0
     if (accuracy !== 0 && accuracy < 85) return true
   }
@@ -1402,7 +1404,7 @@ function isHealingMoveEffect(effect: string | null): boolean {
   return !!effect && HEALING_MOVE_EFFECTS.has(effect)
 }
 /** `HasHealingEffect(battlerId)`, battle_ai_util.c:1463-1471 -- a plain moveset
- * scan, no moveLimitations. */
+ * scan, no moveLimitations read. */
 function hasHealingEffect(battler: BattlerState, deps: AiDamageDeps): boolean {
   return battler.mon.moves.some((m) => !!m && isHealingMoveEffect(deps.moveData(m)?.effect ?? null))
 }
