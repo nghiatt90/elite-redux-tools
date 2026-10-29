@@ -1124,7 +1124,7 @@ export function handleProtectLikeMoveEnd(
     // type (gBattleStruct->dynamicMoveType, written by SetTypeBeforeUsingMove's
     // GetMoveTypeInternal). resolveEffectiveMoveType is the sim's existing resolver for its
     // onMoveType (-ate) branch; the branches below are NOT covered, so the note stays.
-    const moveType = resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
+    const moveType = resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType.replace(/^TYPE_/, '')
     if (target.mon.types.includes(moveType)) return none
     target.mon.types[2] = moveType
     unmodelled.push(
