@@ -60,6 +60,9 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext } from './dataContext'
 import { SOUNDPROOF_ABILITIES } from './ai/aiAbilityHelpers'
+// ON_ABILITY's reverse slot order (battle_util.h:269-275). accuracy.ts has no
+// dependency on statusEffects, so this import closes no runtime cycle.
+import { getSlotsInReverse } from './accuracy'
 
 // ---------------------------------------------------------------------------
 // Constants and Bitflags
@@ -926,6 +929,199 @@ export function testSheerForceFlag(
 // Status Immunity and Eligibility Predicates
 // ---------------------------------------------------------------------------
 
+/** One onStatusImmune ability's condition, in the EXACT order
+ * IsAbilityStatusProtected tests them. `extra` models the hook's own additional
+ * CHECK (GetAbilityState, weather, Grass-type). The table exists so the
+ * cure-on-immunity helper (findCureOnImmunityAbility, below) can ask the same
+ * per-ability question without duplicating or reordering the predicates. */
+type StatusImmuneCondition = {
+  ability: string
+  statusMask: number
+  extra?: (state: BattleState, battlerId: number, battler: BattlerState, deps: StatusDeps) => boolean
+}
+
+/** Every own-slot onStatusImmune ability, in isAbilityStatusProtected's order.
+ * Order is load-bearing: the first match is the ability the C's ON_ABILITY
+ * loop (battle_util.h:269-275, reverse slot order) would name. */
+const OWN_STATUS_IMMUNE_CONDITIONS: readonly StatusImmuneCondition[] = [
+  // CHECK_SLEEP
+  { ability: 'ABILITY_INSOMNIA', statusMask: CHECK_SLEEP },
+  { ability: 'ABILITY_VITAL_SPIRIT', statusMask: CHECK_SLEEP },
+  { ability: 'ABILITY_SWEET_VEIL', statusMask: CHECK_SLEEP },
+  {
+    ability: 'ABILITY_RUDE_AWAKENING',
+    statusMask: CHECK_SLEEP,
+    // abilities.cc:1364-1366 -- CHECK(GetAbilityState(battler, ability))
+    extra: (_state, _battlerId, battler) => {
+      const slot = findAbilitySlot(battler.mon.abilities, 'ABILITY_RUDE_AWAKENING')
+      return slot !== -1 && (battler.volatiles.abilityState[slot] ?? 0) !== 0
+    },
+  },
+  // CHECK_BURN
+  { ability: 'ABILITY_WATER_VEIL', statusMask: CHECK_BURN },
+  { ability: 'ABILITY_PURIFYING_WATERS', statusMask: CHECK_BURN },
+  { ability: 'ABILITY_WATER_BUBBLE', statusMask: CHECK_BURN },
+  { ability: 'ABILITY_FLAME_BUBBLE', statusMask: CHECK_BURN },
+  { ability: 'ABILITY_THERMAL_EXCHANGE', statusMask: CHECK_BURN },
+  { ability: 'ABILITY_THERMAL_ENTROPY', statusMask: CHECK_BURN },
+  // CHECK_PARALYSIS
+  { ability: 'ABILITY_LIMBER', statusMask: CHECK_PARALYSIS },
+  { ability: 'ABILITY_JUGGERNAUT', statusMask: CHECK_PARALYSIS },
+  { ability: 'ABILITY_SUMO_GUARD', statusMask: CHECK_PARALYSIS },
+  { ability: 'ABILITY_IRON_GIANT', statusMask: CHECK_PARALYSIS },
+  // CHECK_FROSTBITE
+  { ability: 'ABILITY_MAGMA_ARMOR', statusMask: CHECK_FROSTBITE },
+  // CHECK_BLEED
+  { ability: 'ABILITY_BLOOD_BATH', statusMask: CHECK_BLEED },
+  { ability: 'ABILITY_BLOODLUST', statusMask: CHECK_BLEED },
+  // Immunity blocks non-sleep status1 (src/abilities.cc:713)
+  { ability: 'ABILITY_IMMUNITY', statusMask: CHECK_STATUS1 & ~CHECK_SLEEP },
+  // Full status1 immunities
+  { ability: 'ABILITY_COMATOSE', statusMask: CHECK_STATUS1 },
+  { ability: 'ABILITY_DREAMSCAPE', statusMask: CHECK_STATUS1 },
+  { ability: 'ABILITY_PURIFYING_SALT', statusMask: CHECK_STATUS1 },
+  { ability: 'ABILITY_BLOOD_STAIN', statusMask: CHECK_STATUS1 },
+  { ability: 'ABILITY_BLOOD_STIGMA', statusMask: CHECK_STATUS1 },
+  { ability: 'ABILITY_HYPER_CLEANSE', statusMask: CHECK_STATUS1 },
+  {
+    ability: 'ABILITY_SHIELDS_DOWN',
+    statusMask: CHECK_STATUS1,
+    extra: (_state, _battlerId, battler) =>
+      SHIELDS_DOWN_PROTECTED_SPECIES.includes(
+        battler.mon.speciesId as (typeof SHIELDS_DOWN_PROTECTED_SPECIES)[number],
+      ),
+  },
+  {
+    ability: 'ABILITY_FLOWER_VEIL',
+    statusMask: CHECK_STATUS1,
+    extra: (_state, _battlerId, battler) => battler.mon.types.includes('GRASS'),
+  },
+  {
+    ability: 'ABILITY_JUNGLES_GUARD',
+    statusMask: CHECK_STATUS1,
+    extra: (_state, _battlerId, battler) => battler.mon.types.includes('GRASS'),
+  },
+  {
+    ability: 'ABILITY_DESERT_CLOAK',
+    statusMask: CHECK_STATUS1,
+    extra: (state, battlerId, _battler, deps) =>
+      isBattlerWeatherAffected(state, battlerId, WEATHER_SANDSTORM_ANY, deps),
+  },
+  {
+    ability: 'ABILITY_DUNE_VEIL',
+    statusMask: CHECK_STATUS1,
+    extra: (state, battlerId, _battler, deps) =>
+      isBattlerWeatherAffected(state, battlerId, WEATHER_SANDSTORM_ANY, deps),
+  },
+  // CHECK_CONFUSION
+  { ability: 'ABILITY_OWN_TEMPO', statusMask: CHECK_CONFUSION },
+  { ability: 'ABILITY_DISCIPLINE', statusMask: CHECK_CONFUSION },
+  // CHECK_INFATUATE | CHECK_RESTRICTING
+  { ability: 'ABILITY_OBLIVIOUS', statusMask: CHECK_INFATUATE | CHECK_RESTRICTING },
+  // CHECK_INFATUATE | CHECK_RESTRICTING | CHECK_HEAL_BLOCK
+  { ability: 'ABILITY_AROMA_VEIL', statusMask: CHECK_INFATUATE | CHECK_RESTRICTING | CHECK_HEAL_BLOCK },
+  // CHECK_DRENCH
+  { ability: 'ABILITY_AMPHIBIOUS', statusMask: CHECK_DRENCH },
+  // CHECK_FLINCH
+  { ability: 'ABILITY_INNER_FOCUS', statusMask: CHECK_FLINCH },
+  { ability: 'ABILITY_ENLIGHTENED', statusMask: CHECK_FLINCH },
+  { ability: 'ABILITY_UNLOCKED_POTENTIAL', statusMask: CHECK_FLINCH },
+  { ability: 'ABILITY_WAY_OF_PRECISION', statusMask: CHECK_FLINCH },
+  // CHECK_REDIRECTION
+  { ability: 'ABILITY_PROPELLER_TAIL', statusMask: CHECK_REDIRECTION },
+  { ability: 'ABILITY_STALWART', statusMask: CHECK_REDIRECTION },
+]
+
+const STATUS_IMMUNE_CONDITION_BY_ABILITY = new Map(
+  OWN_STATUS_IMMUNE_CONDITIONS.map((condition) => [condition.ability, condition]),
+)
+
+/** Every ability whose abilityHooks.json `bitfields.removesStatusOnImmunity` is
+ * TRUE and that declares an onStatusImmune hook. Extraction:
+ * `python3 -c "import json; d=json.load(open('data/v2.65beta/abilityHooks.json'));
+ * print(sorted(k for k,v in d.items() if
+ * v.get('bitfields',{}).get('removesStatusOnImmunity')))"` -- 29 entries. The
+ * three that carry the bitfield but declare NO onStatusImmune hook
+ * (Bruteforce, Rock Head, Steel Barrel) are omitted: ON_ABILITY's own
+ * `removesStatusOnImmunity && onStatusImmune` filter means they can never cure
+ * anything, so 26 remain. The list is pinned to the snapshot by
+ * cycle103StatusImmune.test.ts. */
+export const REMOVES_STATUS_ON_IMMUNITY_ABILITIES: readonly string[] = [
+  'ABILITY_BLOODLUST',
+  'ABILITY_BLOOD_BATH',
+  'ABILITY_BLOOD_STAIN',
+  'ABILITY_BLOOD_STIGMA',
+  'ABILITY_COMATOSE',
+  'ABILITY_DISCIPLINE',
+  'ABILITY_DREAMSCAPE',
+  'ABILITY_FLAME_BUBBLE',
+  'ABILITY_HYPER_CLEANSE',
+  'ABILITY_IMMUNITY',
+  'ABILITY_INSOMNIA',
+  'ABILITY_IRON_GIANT',
+  'ABILITY_JUGGERNAUT',
+  'ABILITY_LIMBER',
+  'ABILITY_MAGMA_ARMOR',
+  'ABILITY_OBLIVIOUS',
+  'ABILITY_OWN_TEMPO',
+  'ABILITY_PURIFYING_SALT',
+  'ABILITY_PURIFYING_WATERS',
+  'ABILITY_RUDE_AWAKENING',
+  'ABILITY_SUMO_GUARD',
+  'ABILITY_THERMAL_ENTROPY',
+  'ABILITY_THERMAL_EXCHANGE',
+  'ABILITY_VITAL_SPIRIT',
+  'ABILITY_WATER_BUBBLE',
+  'ABILITY_WATER_VEIL',
+]
+const REMOVES_STATUS_ON_IMMUNITY_SET = new Set(REMOVES_STATUS_ON_IMMUNITY_ABILITIES)
+
+/** The onStatusImmune half of one ability: does the hook itself return TRUE for
+ * this status? Used by both isAbilityStatusProtected (via the table loop) and
+ * findCureOnImmunityAbility (per slot). */
+function abilityStatusImmuneMatches(
+  condition: StatusImmuneCondition,
+  status: StatusCheck,
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  deps: StatusDeps,
+): boolean {
+  if ((status & condition.statusMask) === 0) return false
+  if (condition.extra && !condition.extra(state, battlerId, battler, deps)) return false
+  return true
+}
+
+/**
+ * MOVEEND_STATUS_IMMUNITY_ABILITIES' per-ability question: find the first
+ * ability in ON_ABILITY order (reverse slots, battle_util.h:269-275) whose
+ * removesStatusOnImmunity bitfield is set and whose onStatusImmune hook returns
+ * TRUE for `status` (battle_util.c:4560-4609). checkMoldBreaker is FALSE there,
+ * so a breakable ability is NOT suppressed by a Mold Breaker move that landed
+ * the status -- the whole point of this move-end re-check.
+ *
+ * Suppression uses the same isSimAbilitySuppressed helper the ON_ABILITY macro's
+ * FILTER_NOT(IsSuppressed(...)) transcribes (Gastro Acid / Neutralizing Gas,
+ * plus the Ability Shield escape).
+ */
+export function findCureOnImmunityAbility(
+  state: BattleState,
+  battlerId: number,
+  status: StatusCheck,
+  deps: StatusDeps,
+): string | null {
+  const battler = state.battlers[battlerId]
+  if (!battler) return null
+  for (const abilityId of getSlotsInReverse(battler.mon.abilities)) {
+    if (!REMOVES_STATUS_ON_IMMUNITY_SET.has(abilityId)) continue
+    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+    const condition = STATUS_IMMUNE_CONDITION_BY_ABILITY.get(abilityId)
+    if (!condition) continue
+    if (abilityStatusImmuneMatches(condition, status, state, battlerId, battler, deps)) return abilityId
+  }
+  return null
+}
+
 /**
  * IsAbilityStatusProtected, src/battle_script_commands.c:6579-6591.
  * Returns the protecting ability ID if protected, or null if not protected.
@@ -947,101 +1143,9 @@ export function isAbilityStatusProtected(
     battlerHasSimAbility(state, battler, abilityId, true, attackerId ?? -1, attackerHasMoldBreaker, deps.dataContext)
 
   // 1. Direct abilities on battler
-  if (status & CHECK_SLEEP) {
-    if (has('ABILITY_INSOMNIA')) return 'ABILITY_INSOMNIA'
-    if (has('ABILITY_VITAL_SPIRIT')) return 'ABILITY_VITAL_SPIRIT'
-    if (has('ABILITY_SWEET_VEIL')) return 'ABILITY_SWEET_VEIL'
-    if (has('ABILITY_RUDE_AWAKENING')) {
-      const slot = findAbilitySlot(battler.mon.abilities, 'ABILITY_RUDE_AWAKENING')
-      if (slot !== -1 && (battler.volatiles.abilityState[slot] ?? 0) !== 0) {
-        return 'ABILITY_RUDE_AWAKENING'
-      }
-    }
-  }
-
-  if (status & CHECK_BURN) {
-    if (has('ABILITY_WATER_VEIL')) return 'ABILITY_WATER_VEIL'
-    if (has('ABILITY_PURIFYING_WATERS')) return 'ABILITY_PURIFYING_WATERS'
-    if (has('ABILITY_WATER_BUBBLE')) return 'ABILITY_WATER_BUBBLE'
-    if (has('ABILITY_FLAME_BUBBLE')) return 'ABILITY_FLAME_BUBBLE'
-    if (has('ABILITY_THERMAL_EXCHANGE')) return 'ABILITY_THERMAL_EXCHANGE'
-    if (has('ABILITY_THERMAL_ENTROPY')) return 'ABILITY_THERMAL_ENTROPY'
-  }
-
-  if (status & CHECK_PARALYSIS) {
-    if (has('ABILITY_LIMBER')) return 'ABILITY_LIMBER'
-    if (has('ABILITY_JUGGERNAUT')) return 'ABILITY_JUGGERNAUT'
-    if (has('ABILITY_SUMO_GUARD')) return 'ABILITY_SUMO_GUARD'
-    if (has('ABILITY_IRON_GIANT')) return 'ABILITY_IRON_GIANT'
-  }
-
-  if (status & CHECK_FROSTBITE) {
-    if (has('ABILITY_MAGMA_ARMOR')) return 'ABILITY_MAGMA_ARMOR'
-  }
-
-  if (status & CHECK_BLEED) {
-    if (has('ABILITY_BLOOD_BATH')) return 'ABILITY_BLOOD_BATH'
-    if (has('ABILITY_BLOODLUST')) return 'ABILITY_BLOODLUST'
-  }
-
-  // Immunity blocks non-sleep status1 (src/abilities.cc:713)
-  if (status & (CHECK_STATUS1 & ~CHECK_SLEEP)) {
-    if (has('ABILITY_IMMUNITY')) return 'ABILITY_IMMUNITY'
-  }
-
-  // Full status1 immunities
-  if (status & CHECK_STATUS1) {
-    if (has('ABILITY_COMATOSE')) return 'ABILITY_COMATOSE'
-    if (has('ABILITY_DREAMSCAPE')) return 'ABILITY_DREAMSCAPE'
-    if (has('ABILITY_PURIFYING_SALT')) return 'ABILITY_PURIFYING_SALT'
-    if (has('ABILITY_BLOOD_STAIN')) return 'ABILITY_BLOOD_STAIN'
-    if (has('ABILITY_BLOOD_STIGMA')) return 'ABILITY_BLOOD_STIGMA'
-    if (has('ABILITY_HYPER_CLEANSE')) return 'ABILITY_HYPER_CLEANSE'
-    if (
-      SHIELDS_DOWN_PROTECTED_SPECIES.includes(
-        battler.mon.speciesId as (typeof SHIELDS_DOWN_PROTECTED_SPECIES)[number],
-      ) &&
-      has('ABILITY_SHIELDS_DOWN')
-    ) {
-      return 'ABILITY_SHIELDS_DOWN'
-    }
-    if (battler.mon.types.includes('GRASS')) {
-      if (has('ABILITY_FLOWER_VEIL')) return 'ABILITY_FLOWER_VEIL'
-      if (has('ABILITY_JUNGLES_GUARD')) return 'ABILITY_JUNGLES_GUARD'
-    }
-    if (isBattlerWeatherAffected(state, battlerId, WEATHER_SANDSTORM_ANY, deps)) {
-      if (has('ABILITY_DESERT_CLOAK')) return 'ABILITY_DESERT_CLOAK'
-      if (has('ABILITY_DUNE_VEIL')) return 'ABILITY_DUNE_VEIL'
-    }
-  }
-
-  if (status & CHECK_CONFUSION) {
-    if (has('ABILITY_OWN_TEMPO')) return 'ABILITY_OWN_TEMPO'
-    if (has('ABILITY_DISCIPLINE')) return 'ABILITY_DISCIPLINE'
-  }
-
-  if (status & (CHECK_INFATUATE | CHECK_RESTRICTING)) {
-    if (has('ABILITY_OBLIVIOUS')) return 'ABILITY_OBLIVIOUS'
-  }
-
-  if (status & (CHECK_INFATUATE | CHECK_RESTRICTING | CHECK_HEAL_BLOCK)) {
-    if (has('ABILITY_AROMA_VEIL')) return 'ABILITY_AROMA_VEIL'
-  }
-
-  if (status & CHECK_DRENCH) {
-    if (has('ABILITY_AMPHIBIOUS')) return 'ABILITY_AMPHIBIOUS'
-  }
-
-  if (status & CHECK_FLINCH) {
-    if (has('ABILITY_INNER_FOCUS')) return 'ABILITY_INNER_FOCUS'
-    if (has('ABILITY_ENLIGHTENED')) return 'ABILITY_ENLIGHTENED'
-    if (has('ABILITY_UNLOCKED_POTENTIAL')) return 'ABILITY_UNLOCKED_POTENTIAL'
-    if (has('ABILITY_WAY_OF_PRECISION')) return 'ABILITY_WAY_OF_PRECISION'
-  }
-
-  if (status & CHECK_REDIRECTION) {
-    if (has('ABILITY_PROPELLER_TAIL')) return 'ABILITY_PROPELLER_TAIL'
-    if (has('ABILITY_STALWART')) return 'ABILITY_STALWART'
+  for (const condition of OWN_STATUS_IMMUNE_CONDITIONS) {
+    if (!abilityStatusImmuneMatches(condition, status, state, battlerId, battler, deps)) continue
+    if (has(condition.ability)) return condition.ability
   }
 
   // 2. Partner abilities (APPLY_ON_ALLY) in doubles

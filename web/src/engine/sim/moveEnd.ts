@@ -15,7 +15,7 @@
 //  4   | MOVEEND_DANCER                  | 4854-4879  | Gapped (cond.) | Dancer copying dance moves; gapped if danceBased move and other battler has ABILITY_DANCER.
 //  5   | MOVEEND_ABILITIES               | 4527-4531  | Ported / Gap   | Target contact abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey). Other defender abilities gapped.
 //  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Ported / Gap   | Attacker contact abilities (Static, Flame Body, Poison Point/Touch). Other attacker abilities gapped.
-//  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Unreachable    | Re-checks immunities to cure status; no-op in single-action sim.
+//  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Ported         | Re-checks every battler's status after the move; a removesStatusOnImmunity onStatusImmune ability cures it (battle_util.c:4505-4609), re-entering until a full pass cures nothing.
 //  8   | MOVEEND_SYNCHRONIZE_ATTACKER    | 4543-4546  | Gapped (cond.) | Attacker Synchronize.
 //  9   | MOVEEND_CHOICE_MOVE             | 4547-4568  | Unreachable    | Choice item move lock; choicedMove array is not in BattlerState.
 // 10   | MOVEEND_ATTACKER_INVISIBLE      | 4677-4686  | Unreachable    | Semi-invulnerable sprite invisibility; visual only.
@@ -59,6 +59,7 @@ import {
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_TOXIC_SPIKES,
   SIDE_STATUS_WIDE_GUARD,
+  STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_FREEZE,
   STATUS1_FROSTBITE,
@@ -74,6 +75,7 @@ import {
   STATUS2_INFATUATION,
   STATUS2_MULTIPLETURNS,
   STATUS2_SUBSTITUTE,
+  STATUS2_TORMENT,
   STATUS2_TRANSFORMED,
   STATUS2_WRAPPED,
   STATUS3_CHARGED_UP,
@@ -117,8 +119,17 @@ import { isBattlerGrounded } from './grounding'
 import { syncPartyHp } from './outcome'
 import { resolveMultihitType } from './attackCanceller'
 import {
+  CHECK_BLEED,
+  CHECK_BURN,
+  CHECK_CONFUSION,
   CHECK_FLINCH,
+  CHECK_FROSTBITE,
+  CHECK_INFATUATE,
+  CHECK_NONE,
+  CHECK_PARALYSIS,
+  CHECK_POISON,
   CHECK_RESTRICTING,
+  CHECK_SLEEP,
   MOVE_EFFECT_BLEED,
   MOVE_EFFECT_BURN,
   MOVE_EFFECT_CONFUSION,
@@ -143,6 +154,7 @@ import {
   canInfatuate,
   canSleep,
   doesSubstituteBlockMove,
+  findCureOnImmunityAbility,
   isAbilityStatusProtected,
   isKeenEdgeMove,
   isPowderImmune,
@@ -5303,6 +5315,64 @@ export interface MoveEndOutcome {
 }
 
 /**
+ * ABILITYEFFECT_IMMUNITY's status pick, battle_util.c:4508-4524. ONE status by
+ * fixed priority: poison-any, bleed, burn, frostbite, sleep, paralysis,
+ * confusion, infatuation, restricting (taunt/disable/encore timer or
+ * STATUS2_TORMENT). STATUS1_FREEZE is deliberately absent -- the C's list does
+ * not test it either.
+ */
+function pickImmunityStatus(battler: BattlerState): number {
+  if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY)) return CHECK_POISON
+  if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return CHECK_BLEED
+  if (hasFlag(battler.mon.status1, STATUS1_BURN)) return CHECK_BURN
+  if (hasFlag(battler.mon.status1, STATUS1_FROSTBITE)) return CHECK_FROSTBITE
+  if (hasFlag(battler.mon.status1, STATUS1_SLEEP)) return CHECK_SLEEP
+  if (hasFlag(battler.mon.status1, STATUS1_PARALYSIS)) return CHECK_PARALYSIS
+  if (hasFlag(battler.mon.status2, STATUS2_CONFUSION)) return CHECK_CONFUSION
+  if (hasFlag(battler.mon.status2, STATUS2_INFATUATION)) return CHECK_INFATUATE
+  if (
+    battler.volatiles.tauntTimer ||
+    battler.volatiles.disableTimer ||
+    battler.volatiles.encoreTimer ||
+    hasFlag(battler.mon.status2, STATUS2_TORMENT)
+  ) {
+    return CHECK_RESTRICTING
+  }
+  return CHECK_NONE
+}
+
+/**
+ * The cure half of ABILITYEFFECT_IMMUNITY, battle_util.c:4585-4609 (the `effect`
+ * switch): status1 -> 0 (also written back to the party, matching
+ * AbilityHealMonStatus), confusion/infatuation cleared from status2, and the
+ * restricting timers + STATUS2_TORMENT zeroed.
+ */
+function cureStatusForImmunity(state: BattleState, battlerId: number, battler: BattlerState, status: number): void {
+  switch (status) {
+    case CHECK_CONFUSION:
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
+      break
+    case CHECK_INFATUATE:
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_INFATUATION)
+      break
+    case CHECK_RESTRICTING:
+      battler.volatiles.tauntTimer = 0
+      battler.volatiles.disableTimer = 0
+      battler.volatiles.encoreTimer = 0
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_TORMENT)
+      break
+    default:
+      // Every remaining picked value is a status1 condition.
+      battler.mon.status1 = 0
+      {
+        const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+        if (partySlot) partySlot.status1 = 0
+      }
+      break
+  }
+}
+
+/**
  * Cmd_moveend state machine ladder, src/battle_script_commands.c:4309-4968.
  * Walks cases 0 through 30 in numerical C enum order.
  */
@@ -5447,7 +5517,30 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 7: MOVEEND_STATUS_IMMUNITY_ABILITIES (:4537-4542)
-  // Status immunities loop. Unreachable/no-op in current sim.
+  // AbilityBattleEffects(ABILITYEFFECT_IMMUNITY) re-checks every battler's
+  // status and lets a `removesStatusOnImmunity` ability cure it
+  // (battle_util.c:4505-4609). The caller only increments moveendState when the
+  // call returns 0, and the body returns immediately after a cure, so each
+  // re-entry restarts the scan at battler 0. Mirror both: one status per pass,
+  // then loop again until a full pass cures nothing.
+  {
+    const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+    for (;;) {
+      let cured = false
+      for (let bId = 0; bId < state.battlersCount; bId++) {
+        const battler = state.battlers[bId]
+        if (!battler) continue
+        const status = pickImmunityStatus(battler)
+        if (status === CHECK_NONE) continue
+        const ability = findCureOnImmunityAbility(state, bId, status, statusDeps)
+        if (ability === null) continue
+        cureStatusForImmunity(state, bId, battler, status)
+        cured = true
+        break // `return effect` in the C: caller re-runs this case from battler 0
+      }
+      if (!cured) break
+    }
+  }
 
   // Case 8: MOVEEND_SYNCHRONIZE_ATTACKER (:4543-4546)
   // Attacker synchronize.

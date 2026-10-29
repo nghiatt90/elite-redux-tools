@@ -55,7 +55,7 @@ import {
   hasFlag,
 } from './constants'
 import { isPhantomForce, semiInvulnerableState } from './unpack'
-import { battlerHasSimAbility, isBattlerWeatherAffected, isSimAbilitySuppressed } from './statBuffs'
+import { battlerHasSimAbility, getStatDropBlockType, isBattlerWeatherAffected, isSimAbilitySuppressed } from './statBuffs'
 import { isKeenEdgeMove, isStrikerMove } from './statusEffects'
 import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
 
@@ -189,6 +189,17 @@ export function buildAccuracyInputs(
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
   const defenderHoldEffect = deps.grounding.holdEffectOf(targetId)
 
+  // IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC
+  // (battle_script_commands.c:1336): the ATTACKER is the ability holder, the
+  // stat is accuracy and it is not a self-drop. statBuffs.ts's
+  // getStatDropBlockType is the real GetStatDropBlock port (own + partner scan).
+  const accuracyBlockUnmodelled: string[] = []
+  const attackerAccuracyDropBlockedSpecific =
+    getStatDropBlockType(state, attackerId, STAT_ACC, false, statusDeps, accuracyBlockUnmodelled) === 'SPECIFIC'
+  for (const detail of accuracyBlockUnmodelled) {
+    gaps.push({ field: 'attackerAccuracyDropBlockedSpecific', reason: 'NO_SOURCE', detail })
+  }
+
   // IsMegaLauncherBoosted is DoesMoveMatchFlag(MOVE_FLAG_MEGA_LAUNCHER)
   // (battle_util.c:9373), and DoesMoveMatchFlag falls through to the holder's
   // onModifyMoveFlags abilities (abilities.cc:374-388). Gunman is the only one
@@ -260,6 +271,7 @@ export function buildAccuracyInputs(
     attackerHoldEffectParam: attackerHoldEffect ? (attackerItem?.holdEffectStrength ?? 0) : 0,
     // Derived: statStages is maintained by applyStatBuff (statBuffs.ts:544).
     attackerAccStage: attacker.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE,
+    attackerAccuracyDropBlockedSpecific,
     attackerAbilitySlots: attacker.mon.abilities,
     attackerActsAfterDefender,
     // Derived: RoundState.usedMicleBerry is written by Micle Berry activation (moveEffects.ts:8837)

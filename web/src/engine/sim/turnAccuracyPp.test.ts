@@ -180,12 +180,9 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
   it('every structural accuracy gap is reported, exactly, for a plain hit with no Pressure/Anticipation/Stockpile', () => {
     const state = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
     const out = executeTurn(state, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    const remainingStructuralGaps = [
-      'myceliumMightActive',
-      // accuracy.ts's own unconditional gap (IsStatDropBlocked), appended after
-      // accuracyBridge.ts's structural list.
-      'attackerAccuracyDropBlockedSpecific',
-    ]
+    // Cycle 103: attackerAccuracyDropBlockedSpecific is no longer a gap -- it is
+    // a derived input (statBuffs.ts's getStatDropBlockType).
+    const remainingStructuralGaps = ['myceliumMightActive']
     for (const field of remainingStructuralGaps) {
       expect(out.actions[0].unmodelled.some((u) => u.startsWith(`${field}:`))).toBe(true)
     }

@@ -58,6 +58,7 @@ import {
 } from './constants'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { findAbilitySlot } from './statusEffects'
+import { getSlotsInReverse } from './accuracy'
 import type { SimDataContext } from './dataContext'
 import { MOLD_BREAKABLE_ABILITIES, UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
 import { weatherHasEffect } from './fieldEndTurn'
@@ -209,7 +210,74 @@ export const STAT_DROP_BLOCK_ABILITIES = [
   'ABILITY_JUNGLES_GUARD',
 ] as const
 
-/** GetStatDropBlock, src/abilities.cc:437-461. */
+/** StatDropBlockType, include/abilities.hh -- the hook's return value, not a
+ * boolean: accuracy's check (battle_script_commands.c:1336) only acts on
+ * SPECIFIC, while a real stat drop blocks on ANY nonzero value (:9757-9800). */
+export type StatDropBlockType = 'NONE' | 'ALL' | 'SPECIFIC'
+
+const STAT_DROP_BLOCK_SET = new Set<string>(STAT_DROP_BLOCK_ABILITIES)
+
+/** Partner-scan abilities whose `onBlockStatDropsFor` is APPLY_ON_ALLY
+ * (abilityHooks.json `applyOn`): Desert Cloak, Dune Veil, Flower Veil,
+ * Jungle's Guard. Every other stat-drop blocker's default APPLY_ON_SELF can
+ * never match a partner (IsApplyOnFlagAppropriate, abilities.cc:190-197). */
+const PARTNER_STAT_DROP_BLOCK_ABILITIES = [
+  'ABILITY_DESERT_CLOAK',
+  'ABILITY_DUNE_VEIL',
+  'ABILITY_FLOWER_VEIL',
+  'ABILITY_JUNGLES_GUARD',
+] as const
+const PARTNER_STAT_DROP_BLOCK_SET = new Set<string>(PARTNER_STAT_DROP_BLOCK_ABILITIES)
+
+/**
+ * One ability's onBlockStatDrops hook body. `target` is always the battler the
+ * drop lands on -- abilities.cc:445-458 passes `*battler` to the hook even when
+ * the ability belongs to the PARTNER, so Desert Cloak's sandstorm check and
+ * Flower Veil's Grass check are evaluated for the target, not the holder.
+ */
+function statDropBlockForAbility(
+  abilityId: string,
+  state: BattleState,
+  target: BattlerState,
+  statId: number,
+  affectsUser: boolean,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+): StatDropBlockType {
+  switch (abilityId) {
+    // Clear Body (:851-855) and Full Metal Body (alias, :860-861): block always.
+    case 'ABILITY_CLEAR_BODY':
+    case 'ABILITY_FULL_METAL_BODY':
+      return 'ALL'
+    // Limber (:583-590) and Lucky Halo (:12312-12317): CHECK(selfStatDrop) only.
+    case 'ABILITY_LIMBER':
+    case 'ABILITY_LUCKY_HALO':
+      return affectsUser ? 'ALL' : 'NONE'
+    // Keen Eye (:1141-1150) and Mind's Eye (:6770-6774): CHECK_NOT(selfStatDrop), stat == STAT_ACC.
+    case 'ABILITY_KEEN_EYE':
+    case 'ABILITY_MINDS_EYE':
+      return !affectsUser && statId === STAT_ACC ? 'SPECIFIC' : 'NONE'
+    // Hyper Cutter (:1156-1163): CHECK_NOT(selfStatDrop), stat == STAT_ATK || STAT_SPATK.
+    case 'ABILITY_HYPER_CUTTER':
+      return !affectsUser && (statId === STAT_ATK || statId === STAT_SPATK) ? 'SPECIFIC' : 'NONE'
+    // Desert Cloak (:5253-5263) / Dune Veil alias: sandstorm must affect the target.
+    case 'ABILITY_DESERT_CLOAK':
+    case 'ABILITY_DUNE_VEIL':
+      return !affectsUser && isBattlerWeatherAffected(state, target.id, WEATHER_SANDSTORM_ANY, deps) ? 'ALL' : 'NONE'
+    // Flower Veil (:2308-2316) / Jungle's Guard alias: target must be Grass.
+    case 'ABILITY_FLOWER_VEIL':
+    case 'ABILITY_JUNGLES_GUARD':
+      return !affectsUser && target.mon.types.includes('GRASS') ? 'ALL' : 'NONE'
+    default:
+      return 'NONE'
+  }
+}
+
+/**
+ * GetStatDropBlock, src/abilities.cc:437-461.
+ * Returns the TYPE the first matching onBlockStatDrops hook produces. Both own
+ * and partner scans follow ON_ABILITY's reverse slot order (battle_util.h:269-275),
+ * since the C's BattlerHasAbility stops at the first nonzero hook result.
+ */
 function getStatDropBlock(
   state: BattleState,
   battler: BattlerState,
@@ -218,46 +286,31 @@ function getStatDropBlock(
   attackerId: number,
   attackerHasMoldBreaker: boolean,
   deps: { dataContext: SimDataContext; grounding?: GroundingContext },
-  unmodelled: string[],
-): boolean {
-  // Clear Body (:852) and Full Metal Body (:861) block unconditionally.
-  if (battlerHasSimAbility(state, battler, 'ABILITY_CLEAR_BODY', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-  if (battlerHasSimAbility(state, battler, 'ABILITY_FULL_METAL_BODY', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-
-  // Self-stat drops (affectsUser == TRUE) are blocked by Limber (:588) and Lucky Halo (:12313).
-  if (affectsUser) {
-    if (battlerHasSimAbility(state, battler, 'ABILITY_LIMBER', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-    if (battlerHasSimAbility(state, battler, 'ABILITY_LUCKY_HALO', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
+  _unmodelled: string[],
+): StatDropBlockType {
+  for (const abilityId of getSlotsInReverse(battler.mon.abilities)) {
+    if (!STAT_DROP_BLOCK_SET.has(abilityId)) continue
+    if (isSimAbilitySuppressed(state, battler, abilityId, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) continue
+    const type = statDropBlockForAbility(abilityId, state, battler, statId, affectsUser, deps)
+    if (type !== 'NONE') return type
   }
 
-  // External stat drops (!affectsUser) are blocked by specific-stat or conditional abilities.
-  if (!affectsUser) {
-    if (statId === STAT_ACC && battlerHasSimAbility(state, battler, 'ABILITY_KEEN_EYE', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-    if (statId === STAT_ACC && battlerHasSimAbility(state, battler, 'ABILITY_MINDS_EYE', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-    if ((statId === STAT_ATK || statId === STAT_SPATK) && battlerHasSimAbility(state, battler, 'ABILITY_HYPER_CUTTER', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) return true
-    if (
-      isBattlerWeatherAffected(state, battler.id, WEATHER_SANDSTORM_ANY, deps) &&
-      (battlerHasSimAbility(state, battler, 'ABILITY_DESERT_CLOAK', true, attackerId, attackerHasMoldBreaker, deps.dataContext) ||
-       battlerHasSimAbility(state, battler, 'ABILITY_DUNE_VEIL', true, attackerId, attackerHasMoldBreaker, deps.dataContext))
-    ) {
-      return true
-    }
-    if (
-      battler.mon.types.includes('GRASS') &&
-      (battlerHasSimAbility(state, battler, 'ABILITY_FLOWER_VEIL', true, attackerId, attackerHasMoldBreaker, deps.dataContext) ||
-       battlerHasSimAbility(state, battler, 'ABILITY_JUNGLES_GUARD', true, attackerId, attackerHasMoldBreaker, deps.dataContext))
-    ) {
-      return true
-    }
-  }
-
-  // Doubles partner scan (:447-458): only when a partner exists.
+  // Partner scan, abilities.cc:447-458: only partners alive, only the
+  // APPLY_ON_ALLY hooks, and the hook is still called with the target battler.
   const partnerId = battler.id ^ 2
   if (partnerId < state.battlersCount && isAlive(state, partnerId)) {
-    unmodelled.push('GetStatDropBlock partner scan (abilities.cc:447-458) is not modelled')
+    const partner = state.battlers[partnerId]
+    if (partner) {
+      for (const abilityId of getSlotsInReverse(partner.mon.abilities)) {
+        if (!PARTNER_STAT_DROP_BLOCK_SET.has(abilityId)) continue
+        if (isSimAbilitySuppressed(state, partner, abilityId, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) continue
+        const type = statDropBlockForAbility(abilityId, state, battler, statId, affectsUser, deps)
+        if (type !== 'NONE') return type
+      }
+    }
   }
 
-  return false
+  return 'NONE'
 }
 
 export function hasClearAmulet(battler: BattlerState, dataContext: SimDataContext): boolean {
@@ -278,7 +331,27 @@ export function isStatDropBlocked(
   deps: { dataContext: SimDataContext; grounding?: GroundingContext },
   unmodelled: string[],
 ): boolean {
-  return getStatDropBlock(state, battler, statId, selfStatDrop, battler.id, false, deps, unmodelled)
+  return getStatDropBlock(state, battler, statId, selfStatDrop, battler.id, false, deps, unmodelled) !== 'NONE'
+}
+
+/**
+ * GetStatDropBlock's TYPE, for GetTotalAccuracy's
+ * `IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC`
+ * check (battle_script_commands.c:1336-1337). Called with the attacker as the
+ * ability holder, so the suppression args are the same defaults
+ * IsStatDropBlocked uses.
+ */
+export function getStatDropBlockType(
+  state: BattleState,
+  battlerId: number,
+  statId: number,
+  selfStatDrop: boolean,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+): StatDropBlockType {
+  const battler = state.battlers[battlerId]
+  if (!battler) return 'NONE'
+  return getStatDropBlock(state, battler, statId, selfStatDrop, battlerId, false, deps, unmodelled)
 }
 
 function hasMirrorArmor(
@@ -562,7 +635,10 @@ export function changeStatBuffs(
     } else if (currentMoveId !== 'MOVE_CURSE' && !notProtectAffected && jumpIfMoveAffectedByProtect(state, targetId, unmodelled)) {
       // :9787-9791 -- JumpIfMoveAffectedByProtect(0) sets MOVE_RESULT_MISSED and returns 0
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: true }
-    } else if (dropBlocked) {
+    } else if (dropBlocked !== 'NONE') {
+      // :9757-9800 -- `statBlockAbility` is set by ANY nonzero GetStatDropBlock
+      // result, so ALL and SPECIFIC both block here (unlike accuracy's
+      // SPECIFIC-only check at :1336).
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
     } else if (hasMirrorArmor(state, battler, attackerId, attackerHasMoldBreaker, deps.dataContext) && !affectsUser && attackerId !== targetId && battlerId === targetId) {
       unmodelled.push("Mirror Armor stat reflection (battle_script_commands.c:9811) is not modelled")

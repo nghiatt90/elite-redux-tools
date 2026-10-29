@@ -94,17 +94,12 @@ function baseInputs(overrides: Partial<AccuracyInputs> = {}): AccuracyInputs {
   }
 }
 
-/** The IsStatDropBlocked gap (see accuracy.ts's header) is unconditional --
- * every result carries it. Tests that don't care about the exact gap list
- * strip it first so their own assertions read as the branch under test, not
- * as a repeat of this one structural fact. */
-const STAT_DROP_BLOCKED_GAP = {
-  field: 'attackerAccuracyDropBlockedSpecific',
-  reason: 'NO_SOURCE',
-  detail: 'IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC needs the onBlockStatDrops ability hook chain, which has no type, dispatch or registry entry anywhere in web/src/engine/abilities/; treated as false',
-}
+/** Cycle 103: IsStatDropBlocked is no longer an unconditional gap -- it is an
+ * input (attackerAccuracyDropBlockedSpecific) and this module no longer emits
+ * a gap for it. Kept as an identity so every branch assertion below still
+ * reads as the branch under test. */
 function otherGaps(gaps: { field: string }[]) {
-  return gaps.filter((g) => g.field !== 'attackerAccuracyDropBlockedSpecific')
+  return gaps
 }
 
 describe('AccuracyPriority ladder ordering, include/abilities.hh:74-81', () => {
@@ -440,10 +435,10 @@ describe('final cap, :1395', () => {
   })
 })
 
-describe('gap cases -- IsStatDropBlocked, structural and unconditional', () => {
-  it('every call carries the IsStatDropBlocked gap exactly once', () => {
+describe('gap cases -- IsStatDropBlocked is an input now', () => {
+  it('a plain call carries no gap at all (the cycle 103 port removed it)', () => {
     const result = getTotalAccuracy(baseInputs())
-    expect(result.gaps).toEqual([STAT_DROP_BLOCKED_GAP])
+    expect(result.gaps).toEqual([])
   })
 })
 

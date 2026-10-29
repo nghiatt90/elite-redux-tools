@@ -18,16 +18,13 @@
 //
 // Same rule as bridge.ts's header: a field this module cannot honestly derive
 // is a GAP, not a value, and the gap is returned alongside the number rather
-// than folded into it silently. Three whole branches of the C have no port
-// anywhere in this codebase and are gapped unconditionally:
+// than folded into it silently. Of the C's branches:
 //
 //   - IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC
-//     (:1336) needs the onBlockStatDrops ability hook chain (Clear Body, White
-//     Smoke, Mist, Flower Veil, ...), which web/src/engine/abilities/ has no
-//     type, dispatch or registry entry for at all -- checked, not assumed
-//     (types.ts's AbilityImpl has no onBlockStatDrops field). Treated as
-//     always false, which is the correct answer whenever neither battler holds
-//     one of those abilities.
+//     (:1336) IS a caller input (attackerAccuracyDropBlockedSpecific), derived
+//     by accuracyBridge.ts from statBuffs.ts's getStatDropBlockType -- the
+//     onBlockStatDrops hook chain lives in statBuffs.ts, not in the abilities
+//     registry this header used to cite.
 //   - HasRipenEffect(battlerAtk) (:1385) needs the `ripen` ability flag, which
 //     AbilityFlags (abilities/types.ts) does not declare. The Micle Berry
 //     branch (:1383-1389) is still ported -- it is real, data-driven state the
@@ -198,6 +195,13 @@ export interface AccuracyInputs {
    * makes: IsUnaware (:1338, via abilities/dispatchCalc.hasFlag) and the
    * onAccuracy loop (:1354-1362). */
   attackerAbilitySlots: AbilitySlots
+  /** `IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC`
+   * (battle_script_commands.c:1336-1337). True when the ATTACKER's own (or, in
+   * doubles, its partner's ALLY-applying) stat-drop-blocking ability answers
+   * SPECIFIC for accuracy -- Keen Eye / Mind's Eye. Such an attacker ignores
+   * the defender's evasion boosts: `evasionStage = min(evasionStage, default)`.
+   * Derived by accuracyBridge.ts from statBuffs.ts's getStatDropBlockType. */
+  attackerAccuracyDropBlockedSpecific?: boolean
   /** GetBattlerTurnOrderNum(battlerAtk) > GetBattlerTurnOrderNum(battlerDef)
    * (:1380) -- does the attacker act AFTER the defender this turn? Zoom
    * Lens's own condition; Wide Lens has no such gate. A turn-order fact the
@@ -681,15 +685,6 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
   // bearing on the accuracy NUMBER this function returns, so there is
   // nothing to port for it.
   let evasionStage = inputs.defenderEvasionStage
-  // IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC
-  // has no port anywhere in this codebase (see this module's header) and is
-  // therefore always treated as false; gapped unconditionally rather than
-  // per-call, since it is a structural absence, not a per-scenario one.
-  gaps.push({
-    field: 'attackerAccuracyDropBlockedSpecific',
-    reason: 'NO_SOURCE',
-    detail: 'IsStatDropBlocked(battlerAtk, STAT_ACC, FALSE) == STAT_DROP_BLOCK_SPECIFIC needs the onBlockStatDrops ability hook chain, which has no type, dispatch or registry entry anywhere in web/src/engine/abilities/; treated as false',
-  })
   // IsUnaware(battlerAtk) (:9006) -- checkMoldBreaker=TRUE in the C, but
   // IsSuppressed's mold-breaker branch (battle_util.c:9254-9261) only ever
   // fires when `battler != gBattlerAttacker`, and battlerAtk IS
@@ -698,7 +693,8 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
   // input -- an argument that must always take one value invites a future
   // caller to pass the other.
   const attackerIsUnaware = abilityHasFlag(inputs.attackerAbilitySlots, 'unaware', false)
-  if (inputs.moveFlagStatStagesIgnored) {
+  // :1336-1337 -- the SPECIFIC check is the FIRST arm; Unaware is the `else if`.
+  if (inputs.moveFlagStatStagesIgnored || inputs.attackerAccuracyDropBlockedSpecific) {
     evasionStage = Math.min(evasionStage, DEFAULT_STAT_STAGE)
   } else if (attackerIsUnaware) {
     evasionStage = DEFAULT_STAT_STAGE
