@@ -953,15 +953,15 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps an unported attacker ability (ABILITY_BACKFLIP) on damaging hit', () => {
+  it('conditionally gaps an unported attacker ability (ABILITY_ARC_FLASH) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_BACKFLIP'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_ARC_FLASH'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_BACKFLIP is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ARC_FLASH is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1148,7 +1148,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 90 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 104 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1157,12 +1157,16 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_ARCHMAGE',
       'ABILITY_ASSASSINS_TOOLS',
       'ABILITY_ATOMIC_BURST',
+      'ABILITY_BACKFLIP',
       'ABILITY_BEAUTIFUL_MUSIC',
       'ABILITY_BLADE_DANCE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_BREAK_IT_DOWN',
       'ABILITY_CHAINSAW',
+      'ABILITY_CHUNKY_BASS_LINE',
       'ABILITY_CRUSHING_JAW',
       'ABILITY_CRYO_PROFICIENCY',
+      'ABILITY_CURRENT_CRASH',
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
       'ABILITY_DAREDEVIL',
@@ -1183,13 +1187,17 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_FLAME_BODY',
       'ABILITY_FLAMING_JAWS',
       'ABILITY_FLAMING_MAW',
+      'ABILITY_FORECAST',
       'ABILITY_FRAGRANT_DAZE',
       'ABILITY_FREEZING_POINT',
       'ABILITY_FROM_THE_SHADOWS',
       'ABILITY_FROSTMAW',
+      'ABILITY_FROST_BURN',
+      'ABILITY_FROST_DRAGON',
       'ABILITY_FUNGAL_INFECTION',
       'ABILITY_GALVANIZE',
       'ABILITY_GHOST_PEPPER',
+      'ABILITY_GLACIAL_RAGE',
       'ABILITY_GRASS_FLUTE',
       'ABILITY_GRIP_PINCER',
       'ABILITY_GROWING_TOOTH',
@@ -1203,6 +1211,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_INTOXICATE',
       'ABILITY_LEAD_CLAWS',
       'ABILITY_LOUD_BANG',
+      'ABILITY_LUNAR_WRATH',
       'ABILITY_MAGICAL_DUST',
       'ABILITY_MENACING_SITUATION',
       'ABILITY_MINERALIZE',
@@ -1215,10 +1224,12 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_POISON_TOUCH',
       'ABILITY_PURE_LOVE',
       'ABILITY_PURPLE_HAZE',
+      'ABILITY_PYRO_SHELLS',
       'ABILITY_RAZOR_SHARP',
       'ABILITY_REFRIGERATE',
       'ABILITY_RESONANCE',
       'ABILITY_SERPENT_BIND',
+      'ABILITY_SLUDGE_SPIT',
       'ABILITY_SLUDGY_MIX',
       'ABILITY_SMOLDERING_WOOD',
       'ABILITY_SOLAR_FLARE',
@@ -1231,8 +1242,11 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SUPER_HOT_GOO',
       'ABILITY_TENDER_AFFECTION',
       'ABILITY_TENTALOCK',
+      'ABILITY_THUNDERCALL',
+      'ABILITY_THUNDER_CLOUDS',
       'ABILITY_TOXIC_SHELL',
       'ABILITY_TO_THE_BONE',
+      'ABILITY_TWO_STEP',
       'ABILITY_UNICORN',
       'ABILITY_VENOM_CROWN',
       'ABILITY_VITAL_SPIRIT',

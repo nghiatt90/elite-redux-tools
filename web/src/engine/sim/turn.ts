@@ -143,7 +143,15 @@ import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, hasLiveReserve, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
-import { getBattlerAbilitySlotsReverse, HALF_RECOIL_ABILITIES, NO_RECOIL_ABILITIES, runMoveEnd, runMoveEndBookkeeping } from './moveEnd'
+import {
+  ATTACKER_FOLLOWUP_ABILITIES,
+  dispatchMoveEndAttackerAbilities,
+  getBattlerAbilitySlotsReverse,
+  HALF_RECOIL_ABILITIES,
+  NO_RECOIL_ABILITIES,
+  runMoveEnd,
+  runMoveEndBookkeeping,
+} from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
 import {
@@ -2256,8 +2264,31 @@ export function executeAction(
           effectOutcome.statusApplied = protectMoveEnd.statusApplied
         }
       }
-      // Nearest sim point for handled status moves (Swords Dance, etc.) to trigger
-      // ABILITYEFFECT_REACTIVE (Cmd_moveend, src/battle_script_commands.c:4330).
+      // Nearest sim point for handled status moves (Swords Dance, Weather moves, etc.) to trigger
+      // MOVEEND_ABILITIES_ATTACKER follow-up hooks (battle_script_commands.c:4532-4536, battle_util.c:4491-4495, 9011-9041)
+      // and ABILITYEFFECT_REACTIVE (:4330). Restricted to ATTACKER_FOLLOWUP_ABILITIES via onlyFollowupAbilities so
+      // non-follow-up attacker abilities in other slots do not run after status moves.
+      const statusAttacker = state.battlers[battlerId]
+      if (
+        statusAttacker &&
+        !(!state.processingExtraAttacks && statusAttacker.round.confusionSelfDmg) &&
+        getBattlerAbilitySlotsReverse(statusAttacker.mon.abilities).some(({ abilityId }) => ATTACKER_FOLLOWUP_ABILITIES.has(abilityId))
+      ) {
+        dispatchMoveEndAttackerAbilities({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId ?? getMoveTarget(state, battlerId, currentMove.id, deps),
+          moveId: currentMove.id,
+          moveData,
+          targetDamage: 0,
+          hpDealt: 0,
+          noEffect: Boolean(effectOutcome.missed),
+          onlyFollowupAbilities: true,
+          deps,
+          unmodelled,
+          fainted: effectOutcome.fainted ?? [],
+        })
+      }
       const reactiveStatChanges: StatChangeOutcome[] = []
       runReactiveAbilityEffects(state, deps, unmodelled, reactiveStatChanges, order.battlerByTurnOrder)
       if (reactiveStatChanges.length > 0) {
@@ -3169,6 +3200,7 @@ export function executeAction(
       chosenMoveId: currentChosenMoveId,
       targetDamage: targetDamage ?? 0,
       hpDealt,
+      noEffect: targetDamage === null || targetDamage === 0,
       isCriticalHit,
       isSuperEffective,
       moveEffect2: secondaryResult?.moveEffect2 ?? null,

@@ -85,6 +85,7 @@ import {
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
   STAT_ATK,
   STAT_DEF,
   STAT_SPATK,
@@ -139,6 +140,7 @@ import {
   canSleep,
   doesSubstituteBlockMove,
   isAbilityStatusProtected,
+  isBattlerTerrainAffected,
   isKeenEdgeMove,
   isPowderImmune,
   isPreventableSecondaryEffect,
@@ -165,10 +167,11 @@ import {
   runReactiveAbilityEffects,
 } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { applyDamage, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
+import { ProtectType, applyDamage, getMoveTarget, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive, isBattlerProtected } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import {
   applySwitchInAbilities,
+  checkAndSetOncePerTurnAbility,
   getOncePerTurnAbilityCounter,
   getSingleUseAbilityCounter,
   setOncePerTurnAbilityCounter,
@@ -914,6 +917,38 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_GRASS_FLUTE',
   'ABILITY_HARDENED_SHEATH',
   'ABILITY_HAUNTING_FRENZY',
+  'ABILITY_BACKFLIP',
+  'ABILITY_BREAK_IT_DOWN',
+  'ABILITY_CHUNKY_BASS_LINE',
+  'ABILITY_CURRENT_CRASH',
+  'ABILITY_FORECAST',
+  'ABILITY_FROST_BURN',
+  'ABILITY_FROST_DRAGON',
+  'ABILITY_GLACIAL_RAGE',
+  'ABILITY_LUNAR_WRATH',
+  'ABILITY_PYRO_SHELLS',
+  'ABILITY_SLUDGE_SPIT',
+  'ABILITY_THUNDERCALL',
+  'ABILITY_THUNDER_CLOUDS',
+  'ABILITY_TWO_STEP',
+])
+
+/** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
+export const ATTACKER_FOLLOWUP_ABILITIES = new Set([
+  'ABILITY_BACKFLIP',
+  'ABILITY_BREAK_IT_DOWN',
+  'ABILITY_CHUNKY_BASS_LINE',
+  'ABILITY_CURRENT_CRASH',
+  'ABILITY_FORECAST',
+  'ABILITY_FROST_BURN',
+  'ABILITY_FROST_DRAGON',
+  'ABILITY_GLACIAL_RAGE',
+  'ABILITY_LUNAR_WRATH',
+  'ABILITY_PYRO_SHELLS',
+  'ABILITY_SLUDGE_SPIT',
+  'ABILITY_THUNDERCALL',
+  'ABILITY_THUNDER_CLOUDS',
+  'ABILITY_TWO_STEP',
 ])
 
 /**
@@ -1028,6 +1063,192 @@ function queueOutOfTurnAttack(
   return true
 }
 
+/** FollowupType constants (src/abilities.cc:201-205), passed to AdjustFollowupMoveTarget. */
+export const FOLLOWUP_STANDARD = 0
+export const FOLLOWUP_ALLOW_FAILED = 1 << 0
+export const FOLLOWUP_ALLOW_SELF = 1 << 1
+
+/**
+ * IsMegaLauncherBoosted (src/battle_util.c:9373) -> DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_MEGA_LAUNCHER)
+ * (src/abilities.cc:358-388): static FLAG_MEGA_LAUNCHER_BOOST (`bulletBased` in moves.json), else ABILITY_GUNMAN's
+ * onModifyMoveFlags (:9535-9540) which grants MOVE_FLAG_MEGA_LAUNCHER to status moves.
+ */
+export function isMegaLauncherBoostedMove(
+  state: BattleState,
+  battlerId: number,
+  moveData: SimMoveData | undefined,
+  deps: TurnLoopDeps,
+): boolean {
+  if (!moveData) return false
+  if (moveData.flags?.bulletBased) return true
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  return moveData.split === 'STATUS' && battlerHasSimAbility(state, battler, 'ABILITY_GUNMAN', false, battlerId, false, deps.dataContext)
+}
+
+/**
+ * IsDance (src/battle_util.c:9245) / DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_DANCE) (src/abilities.cc:358-388):
+ * static FLAG_DANCE (`dance` in moves.json), else onModifyMoveFlags abilities granting MOVE_FLAG_DANCE:
+ * Festivities (:10194-10203, sound moves), Taekkyeon (:10666-10671, non-status moves), Backstreet Boy (:11570-11583, kick moves).
+ */
+export function isDanceMove(
+  state: BattleState,
+  battlerId: number,
+  moveData: SimMoveData | undefined,
+  deps: TurnLoopDeps,
+): boolean {
+  if (!moveData) return false
+  if (moveData.flags?.dance) return true
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (moveData.flags?.sound && battlerHasSimAbility(state, battler, 'ABILITY_FESTIVITIES', false, battlerId, false, deps.dataContext)) {
+    return true
+  }
+  if (moveData.split !== 'STATUS' && battlerHasSimAbility(state, battler, 'ABILITY_TAEKKYEON', false, battlerId, false, deps.dataContext)) {
+    return true
+  }
+  if (moveData.flags?.kickBased && battlerHasSimAbility(state, battler, 'ABILITY_BACKSTREET_BOY', false, battlerId, false, deps.dataContext)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * GetBattlerBattleMoveTargetFlags (src/battle_util.c:128-149), read by AdjustFollowupMoveTarget.
+ */
+function getBattlerBattleMoveTargetFlags(
+  state: BattleState,
+  battlerId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  deps: TurnLoopDeps,
+  statusDeps: StatusDeps,
+): string {
+  if (moveData?.effect === 'EFFECT_EXPANDING_FORCE' && isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_PSYCHIC_TERRAIN, statusDeps)) {
+    return 'BOTH'
+  }
+  if (
+    moveData?.effect === 'EFFECT_TOXIC_THREAD' &&
+    isBattlerGrounded(state, battlerId, deps.grounding) &&
+    hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)
+  ) {
+    return 'BOTH'
+  }
+
+  if (
+    moveId === 'MOVE_RAIN_DANCE' ||
+    moveId === 'MOVE_SUNNY_DAY' ||
+    moveId === 'MOVE_SANDSTORM' ||
+    moveId === 'MOVE_HAIL' ||
+    moveId === 'MOVE_EERIE_FOG'
+  ) {
+    const holder = state.battlers[battlerId]
+    if (!holder || !battlerHasSimAbility(state, holder, 'ABILITY_FORECAST', false, battlerId, false, deps.dataContext)) {
+      return 'USER'
+    }
+  }
+
+  let flag = moveData?.target ?? 'SELECTED'
+  const battler = state.battlers[battlerId]
+  if (battler && (flag === 'SELECTED' || flag === 'RANDOM')) {
+    if (
+      (battlerHasSimAbility(state, battler, 'ABILITY_ARTILLERY', false, battlerId, false, deps.dataContext) ||
+        battlerHasSimAbility(state, battler, 'ABILITY_SUPER_SCOPE', false, battlerId, false, deps.dataContext)) &&
+      isMegaLauncherBoostedMove(state, battlerId, moveData, deps)
+    ) {
+      flag = 'BOTH'
+    } else if (
+      (battlerHasSimAbility(state, battler, 'ABILITY_AMPLIFIER', false, battlerId, false, deps.dataContext) ||
+        battlerHasSimAbility(state, battler, 'ABILITY_BASS_BOOSTED', false, battlerId, false, deps.dataContext) ||
+        battlerHasSimAbility(state, battler, 'ABILITY_WIND_CHIMES', false, battlerId, false, deps.dataContext)) &&
+      isSoundMove(state, battlerId, moveId, statusDeps)
+    ) {
+      flag = 'BOTH'
+    } else if (
+      (battlerHasSimAbility(state, battler, 'ABILITY_SWEEPING_EDGE', false, battlerId, false, deps.dataContext) ||
+        battlerHasSimAbility(state, battler, 'ABILITY_SWEEPING_EDGE_PLUS', false, battlerId, false, deps.dataContext)) &&
+      isKeenEdgeMove(state, battlerId, moveId, statusDeps)
+    ) {
+      flag = 'BOTH'
+    }
+  }
+  return flag
+}
+
+/**
+ * AdjustFollowupMoveTarget (src/abilities.cc:207-225). Returns the adjusted target battler id, or null if the check fails.
+ */
+export function adjustFollowupMoveTarget(
+  state: BattleState,
+  battlerId: number,
+  targetId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  type: number,
+  noEffect: boolean,
+  deps: TurnLoopDeps,
+  statusDeps: StatusDeps,
+): number | null {
+  if (noEffect && !(type & FOLLOWUP_ALLOW_FAILED)) return null
+
+  const targetFlag = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveData, deps, statusDeps)
+  if (targetFlag === 'BOTH' || targetFlag === 'FOES_AND_ALLY') {
+    const adjusted = getMoveTarget(state, battlerId, 'MOVE_POUND', deps, 1)
+    return isBattlerAlive(state, adjusted) ? adjusted : null
+  }
+
+  let adjusted = targetId
+  if (adjusted === battlerId || adjusted === (battlerId ^ 2)) {
+    if (type & FOLLOWUP_ALLOW_SELF) {
+      adjusted = getMoveTarget(state, battlerId, 'MOVE_POUND', deps, 1)
+    } else {
+      return null
+    }
+  }
+
+  return battlerId !== adjusted && isBattlerAlive(state, adjusted) ? adjusted : null
+}
+
+/**
+ * CanUseExtraMove (src/battle_util.c:8716-8722).
+ */
+export function canUseExtraMove(state: BattleState, attackerId: number, targetId: number): boolean {
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return false
+  return (
+    attackerId !== targetId &&
+    isBattlerAlive(state, attackerId) &&
+    isBattlerAlive(state, targetId) &&
+    !attacker.round.attackCancelled
+  )
+}
+
+/**
+ * UseAttackerFollowUpMove (src/battle_util.c:4021-4033): checks CanUseExtraMove and CheckAndSetOncePerTurnAbility,
+ * then pushes `{ ability, move: extraMove, attacker: battlerId, target: targetId, movePower }` onto `state.queuedExtraAttacks`.
+ */
+export function queueAttackerFollowUpMove(
+  state: BattleState,
+  battlerId: number,
+  targetId: number,
+  abilityId: string,
+  extraMove: string,
+  movePower: number,
+  deps: TurnLoopDeps,
+): boolean {
+  if (!canUseExtraMove(state, battlerId, targetId)) return false
+  if (!checkAndSetOncePerTurnAbility(state, battlerId, abilityId, deps.dataContext)) return false
+
+  state.queuedExtraAttacks.push({
+    ability: abilityId,
+    attacker: battlerId,
+    target: targetId,
+    move: extraMove,
+    movePower,
+  })
+  return false
+}
+
 /** The contact counterattack abilities: [move, movePower] passed to UseOutOfTurnAttack(battler, attacker, ability, move, movePower). */
 const CONTACT_COUNTERATTACKS: Record<string, readonly [string, number]> = {
   ABILITY_COLD_REBOUND: ['MOVE_ICY_WIND', 0], // src/abilities.cc:4850-4858
@@ -1064,6 +1285,10 @@ export interface MoveEndAbilitiesContext {
   /** The turn loop's "target's slot was already reached" (turn.ts targetHasActedThisTurn); the negation of
    * `GetBattlerTurnOrderNum(target) >= gCurrentTurnActionNumber`, read by From the Shadows. Undefined = not supplied. */
   targetHasActedThisTurn?: boolean
+  /** `Boolean(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)` (include/constants/battle.h:389), read by AdjustFollowupMoveTarget. */
+  noEffect?: boolean
+  /** When true, only evaluate abilities in `ATTACKER_FOLLOWUP_ABILITIES` (used by the status-move path in `turn.ts`). */
+  onlyFollowupAbilities?: boolean
   deps: TurnLoopDeps
   unmodelled: string[]
   fainted: number[]
@@ -2571,6 +2796,7 @@ function handleAttackerMoveEndAbility(
   unmodelled: string[],
   isCriticalHit = false,
   targetHasActedThisTurn?: boolean,
+  noEffect?: boolean,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -3286,6 +3512,155 @@ function handleAttackerMoveEndAbility(
     }
   }
 
+  // ---- Cycle 92: onAttacker abilities that run AdjustFollowupMoveTarget + UseAttackerFollowUpMove (src/abilities.cc:201-225, battle_util.c:4021-4033).
+  // When noEffect is not supplied by the caller, a move blocked by isBattlerProtected (RoundState.protectMove, turn.ts:895-1045)
+  // or a non-status move that dealt 0 damage is treated as MOVE_RESULT_NO_EFFECT.
+  const moveHadNoEffect =
+    Boolean(noEffect) ||
+    (isBattlerProtected(state, attackerId, targetId, moveId, Boolean(targetHasActedThisTurn), deps, unmodelled) &
+      ProtectType.PROTECT_BLOCK) !==
+      0 ||
+    (noEffect === undefined && moveData?.split !== 'STATUS' && !(hpDealt > 0 || targetDamage > 0))
+
+  // Forecast (src/abilities.cc:1251-1266): Sunny Day / Rain Dance / Sandstorm / Hail / Eerie Fog -> FOLLOWUP_ALLOW_FAILED -> Weather Ball (power 0)
+  if (abilityId === 'ABILITY_FORECAST') {
+    if (
+      moveId === 'MOVE_SUNNY_DAY' ||
+      moveId === 'MOVE_RAIN_DANCE' ||
+      moveId === 'MOVE_SANDSTORM' ||
+      moveId === 'MOVE_HAIL' ||
+      moveId === 'MOVE_EERIE_FOG'
+    ) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_ALLOW_FAILED, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_WEATHER_BALL', 0, deps)
+      }
+    }
+  }
+
+  // Thundercall (src/abilities.cc:4915-4922) & Current Crash (:12376-12379, Impl<ABILITY_THUNDERCALL>.onAttacker):
+  // Electric move -> FOLLOWUP_STANDARD -> Smite at .2 * gBattleMoves[MOVE_SMITE].power (trunc(0.2 * 120) = 24)
+  if (abilityId === 'ABILITY_THUNDERCALL' || abilityId === 'ABILITY_CURRENT_CRASH') {
+    if (moveTypeName() === 'ELECTRIC') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        const smitePower = Math.trunc(0.2 * (deps.dataContext.move('MOVE_SMITE')?.power ?? 120))
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_SMITE', smitePower, deps)
+      }
+    }
+  }
+
+  // Pyro Shells (src/abilities.cc:5006-5013): IsMegaLauncherBoosted(battler, move) -> FOLLOWUP_STANDARD -> Outburst (power 50)
+  if (abilityId === 'ABILITY_PYRO_SHELLS') {
+    if (isMegaLauncherBoostedMove(state, attackerId, moveData, deps)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_OUTBURST', 50, deps)
+      }
+    }
+  }
+
+  // Frost Burn (src/abilities.cc:6144-6151): Fire move -> FOLLOWUP_STANDARD -> Ice Beam (power 40)
+  if (abilityId === 'ABILITY_FROST_BURN') {
+    if (moveTypeName() === 'FIRE') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_ICE_BEAM', 40, deps)
+      }
+    }
+  }
+
+  // Two Step (src/abilities.cc:6600-6607): IsDance(battler, move) -> FOLLOWUP_ALLOW_SELF -> Revelation Dance (power 50)
+  if (abilityId === 'ABILITY_TWO_STEP') {
+    if (isDanceMove(state, attackerId, moveData, deps)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_ALLOW_SELF, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_REVELATION_DANCE', 50, deps)
+      }
+    }
+  }
+
+  // Chunky Bass Line (src/abilities.cc:8027-8034): IsSoundMove(battler, move) -> FOLLOWUP_STANDARD -> Earthquake (power 40)
+  if (abilityId === 'ABILITY_CHUNKY_BASS_LINE') {
+    if (isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_EARTHQUAKE', 40, deps)
+      }
+    }
+  }
+
+  // Glacial Rage (src/abilities.cc:9635-9642): Ice move -> FOLLOWUP_STANDARD -> Blizzard (power 50)
+  if (abilityId === 'ABILITY_GLACIAL_RAGE') {
+    if (moveTypeName() === 'ICE') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_BLIZZARD', 50, deps)
+      }
+    }
+  }
+
+  // Sludge Spit (src/abilities.cc:10674-10681): gBattleMoves[move].power -> FOLLOWUP_STANDARD -> Venom Bolt (power 35)
+  if (abilityId === 'ABILITY_SLUDGE_SPIT') {
+    if (Boolean(moveData && moveData.power > 0)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_VENOM_BOLT', 35, deps)
+      }
+    }
+  }
+
+  // Lunar Wrath (src/abilities.cc:10862-10869): Ghost move -> FOLLOWUP_STANDARD -> Moongeist Beam (power 50)
+  if (abilityId === 'ABILITY_LUNAR_WRATH') {
+    if (moveTypeName() === 'GHOST') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_MOONGEIST_BEAM', 50, deps)
+      }
+    }
+  }
+
+  // Break It Down (src/abilities.cc:11558-11565): gBattleMoves[move].power -> FOLLOWUP_STANDARD -> Rapid Spin (power 20)
+  if (abilityId === 'ABILITY_BREAK_IT_DOWN') {
+    if (Boolean(moveData && moveData.power > 0)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_RAPID_SPIN', 20, deps)
+      }
+    }
+  }
+
+  // Backflip (src/abilities.cc:11587-11594): DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_DANCE) -> FOLLOWUP_ALLOW_SELF -> Chip Away (power 50)
+  if (abilityId === 'ABILITY_BACKFLIP') {
+    if (isDanceMove(state, attackerId, moveData, deps)) {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_ALLOW_SELF, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_CHIP_AWAY', 50, deps)
+      }
+    }
+  }
+
+  // Thunder Clouds (src/abilities.cc:12150-12158): gBattleMoves[move].power && IS_MOVE_SPECIAL(move) -> FOLLOWUP_STANDARD -> Thunderbolt (power 35)
+  if (abilityId === 'ABILITY_THUNDER_CLOUDS') {
+    if (Boolean(moveData && moveData.power > 0) && moveData?.split === 'SPECIAL') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_THUNDERBOLT', 35, deps)
+      }
+    }
+  }
+
+  // Frost Dragon (src/abilities.cc:12394-12401): Ice or Dragon move -> FOLLOWUP_STANDARD -> Blizzard (power 50)
+  if (abilityId === 'ABILITY_FROST_DRAGON') {
+    const mType = moveTypeName()
+    if (mType === 'ICE' || mType === 'DRAGON') {
+      const followupTarget = adjustFollowupMoveTarget(state, attackerId, targetId, moveId, moveData, FOLLOWUP_STANDARD, moveHadNoEffect, deps, statusDeps)
+      if (followupTarget !== null) {
+        queueAttackerFollowUpMove(state, attackerId, followupTarget, abilityId, 'MOVE_BLIZZARD', 50, deps)
+      }
+    }
+  }
+
   // 1. Poison Point on attacker (src/abilities.cc:987-995, 2100, 9519, 9526, 10147, 11535)
   if (
     abilityId === 'ABILITY_POISON_POINT' ||
@@ -3753,6 +4128,9 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
   const slots = getBattlerAbilitySlotsReverse(attacker.mon.abilities)
 
   for (const { abilityId } of slots) {
+    if (ctx.onlyFollowupAbilities && !ATTACKER_FOLLOWUP_ABILITIES.has(abilityId)) {
+      continue
+    }
     if (isSimAbilitySuppressed(state, attacker, abilityId, false, attackerId, false, deps.dataContext)) {
       continue
     }
@@ -3772,6 +4150,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         unmodelled,
         ctx.isCriticalHit ?? false,
         ctx.targetHasActedThisTurn,
+        ctx.noEffect,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -4905,6 +5284,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       hpDealt,
       isCriticalHit: ctx.isCriticalHit ?? false,
       targetHasActedThisTurn: ctx.targetHasActedThisTurn,
+      noEffect: isNoEffect,
       deps,
       unmodelled,
       fainted,
