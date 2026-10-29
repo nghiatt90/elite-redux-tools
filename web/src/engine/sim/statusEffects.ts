@@ -43,6 +43,7 @@ import {
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TERRAIN_ANY,
+  MOVE_EFFECT_WRAP,
   WEATHER_SANDSTORM_ANY,
   clearFlag,
   hasFlag,
@@ -298,10 +299,52 @@ export const SET_STATE_ON_EFFECT_ABILITIES = [
  */
 export const SET_STATE_ON_EFFECT_MAP: Record<number, string[]> = {
   [MOVE_EFFECT_BLEED]: ['ABILITY_BLOOD_BATH'],
+  [MOVE_EFFECT_WRAP]: ['ABILITY_CHOKEHOLD'],
   [MOVE_EFFECT_CONFUSION]: ['ABILITY_ENTRANCE'],
   [MOVE_EFFECT_FROSTBITE]: ['ABILITY_CRYOSTASIS', 'ABILITY_FROSTBIND'],
   [MOVE_EFFECT_POISON]: ['ABILITY_HEMOTOXIN', 'ABILITY_NEUROTOXIN', 'ABILITY_POISON_PUPPETEER'],
   [MOVE_EFFECT_BURN]: ['ABILITY_SET_ABLAZE'],
+}
+
+/**
+ * SetOnMoveEffectReactionFlags, src/battle_script_commands.c:2294-2298.
+ *
+ * ON_ABILITY(attacker, FALSE, gAbilities[ability].setStateOnEffect == effect,
+ *            SetBattlerAffectedFlag(attacker, target, ability))
+ *
+ * `holderId` is SetMoveEffect's gBattleScripting.battler -- the attacker for a normal effect
+ * (:2338-2343) and the TARGET for a MOVE_EFFECT_AFFECTS_USER effect. The loop walks the holder's
+ * slots in reverse (battle_util.h:269-275) and skips suppressed abilities (checkMoldBreaker FALSE).
+ * SetBattlerAffectedFlag (:13190-13195) ORs `1 << target` into the holder's ability-state byte, but
+ * GetAbilityState/SetAbilityState resolve the ability through GetAbilityIndex, i.e. the FIRST forward
+ * slot holding it, so a duplicate slot writes the same byte.
+ *
+ * The armed bit is consumed by PoisonPuppeteerClone (src/abilities.cc:286-312), which filters
+ * `battler != target`; a self-set bit (holder == effectBattler) is therefore never applied.
+ */
+export function setOnMoveEffectReactionFlags(
+  state: BattleState,
+  holderId: number,
+  effectBattlerId: number,
+  moveEffect: number,
+  deps: StatusDeps,
+): void {
+  const holder = state.battlers[holderId]
+  if (!holder || holder.mon.hp === 0) return
+
+  // `int effect = moveEffect == MOVE_EFFECT_TOXIC ? MOVE_EFFECT_POISON : moveEffect;` (:2295)
+  const effect = moveEffect === MOVE_EFFECT_TOXIC ? MOVE_EFFECT_POISON : moveEffect
+  const reactionAbilities = SET_STATE_ON_EFFECT_MAP[effect]
+  if (!reactionAbilities) return
+
+  for (const abilityId of getSlotsInReverse(holder.mon.abilities)) {
+    if (!reactionAbilities.includes(abilityId)) continue
+    if (isSimAbilitySuppressed(state, holder, abilityId, false, holderId, false, deps.dataContext)) continue
+
+    const slot = findAbilitySlot(holder.mon.abilities, abilityId)
+    if (slot < 0) continue
+    holder.volatiles.abilityState[slot] = (holder.volatiles.abilityState[slot] ?? 0) | (1 << effectBattlerId)
+  }
 }
 
 /**
@@ -1475,7 +1518,7 @@ export function applyFearEffect(
  *
  * Applies primary status effects (SLEEP, POISON, TOXIC, BURN, PARALYSIS, FROSTBITE, BLEED)
  * and CONFUSION, setting the exact status1/status2 bits, drawing sleep and confusion durations,
- * and pushing unmodelled gaps for Synchronize and SetOnMoveEffectReactionFlags when they apply.
+ * arming SetOnMoveEffectReactionFlags, and pushing the Synchronize gap when it applies.
  *
  * @returns ApplyStatusResult indicating whether applied and whether MOVE_RESULT_DOESNT_AFFECT_FOE was set.
  */
@@ -1484,7 +1527,8 @@ export function applyPrimaryStatusEffect(
   attackerId: number,
   targetId: number,
   moveEffect: number,
-  moveId: string,
+  /** null for an ability script whose gCurrentMove is not threaded through (PoisonPuppeteerClone). */
+  moveId: string | null,
   deps: StatusDeps,
   unmodelled?: string[],
   primary: boolean = true,
@@ -1694,18 +1738,8 @@ export function applyPrimaryStatusEffect(
         return { applied: false, doesntAffectFoe: false }
       }
 
-      // SetOnMoveEffectReactionFlags (:2659)
-      if (attackerBattler) {
-        const reactionAbilities = SET_STATE_ON_EFFECT_MAP[MOVE_EFFECT_CONFUSION]
-        if (reactionAbilities) {
-          for (const ability of reactionAbilities) {
-            if (battlerHasSimAbility(state, attackerBattler, ability, false, attackerId, false, deps.dataContext)) {
-              unmodelled?.push('SetOnMoveEffectReactionFlags')
-              break
-            }
-          }
-        }
-      }
+      // SetOnMoveEffectReactionFlags (:2659) -- holder is gBattleScripting.battler (userBattlerId)
+      setOnMoveEffectReactionFlags(state, userBattlerId, effectBattlerId, MOVE_EFFECT_CONFUSION, deps)
 
       // Confusion duration draw: (Random() % 2) + 3 turns (src/battle_script_commands.c:2660)
       const confusionTurns = (state.rng.random16() % 2) + 3
@@ -1764,19 +1798,9 @@ export function applyPrimaryStatusEffect(
       unmodelled?.push('synchronizeMoveEffect')
     }
 
-    // SetOnMoveEffectReactionFlags (src/battle_script_commands.c:2294-2298, 2580)
-    if (attackerBattler) {
-      const reactionEffect = baseEffect === MOVE_EFFECT_TOXIC ? MOVE_EFFECT_POISON : baseEffect
-      const reactionAbilities = SET_STATE_ON_EFFECT_MAP[reactionEffect]
-      if (reactionAbilities) {
-        for (const ability of reactionAbilities) {
-          if (battlerHasSimAbility(state, attackerBattler, ability, false, attackerId, false, deps.dataContext)) {
-            unmodelled?.push('SetOnMoveEffectReactionFlags')
-            break
-          }
-        }
-      }
-    }
+    // SetOnMoveEffectReactionFlags (src/battle_script_commands.c:2294-2298, 2580). The holder is
+    // gBattleScripting.battler: gBattlerAttacker normally, gBattlerTarget for AFFECTS_USER (:2338-2343).
+    setOnMoveEffectReactionFlags(state, userBattlerId, effectBattlerId, baseEffect, deps)
 
     return { applied: true, doesntAffectFoe: false, status: PRIMARY_STATUS_NAMES[baseEffect] }
   }
@@ -1832,6 +1856,8 @@ export function getMoveEffectChance(
 ): number {
   // battle_script_commands.c:3073:
   // if (moveEffect == MOVE_EFFECT_FLINCH && gTurnStructs[gBattlerAttacker].parentalBondOn < gTurnStructs[gBattlerAttacker].parentalBondInitialCount) return 0;
+  // The next guard (:3076) -- FLINCH with baseChance < 100 on isHellMode() + B_SIDE_PLAYER -- has no
+  // hell-mode flag in BattleState, so it is not modelled (the sim has no such mode).
   const attacker = state.battlers[attackerId]
   if (
     moveEffect === MOVE_EFFECT_FLINCH &&
@@ -1857,11 +1883,17 @@ export function getMoveEffectChance(
     if (!abilityBattler) continue
     if (i !== 0 && abilityBattler.mon.hp === 0) continue
 
+    // IsApplyOnFlagAppropriate(battler, abilityBattler, gAbilities[ability].onModifyEffectChanceFor).
+    // The field defaults to APPLY_ON_SELF (0, include/abilities.hh:142, 236), which is why the 12 other
+    // hooks only run for the attacker; Bad Luck sets APPLY_ON_FOE (abilities.cc:4315), so an ally's Bad
+    // Luck never applies (same side -> needs APPLY_ON_ALLY, abilities.cc:190-197).
     const isAttacker = abilityBattlerId === attackerId
     const isFoe = (abilityBattlerId & 1) !== (attackerId & 1)
 
-    const abilities = [abilityBattler.mon.abilities.ability, ...abilityBattler.mon.abilities.innates]
-    for (const abilityId of abilities) {
+    // ON_ABILITY walks the slots in reverse (include/battle_util.h:269-275: idx 3 -> 0). The order is
+    // observable because Corrupted Mind multiplies an int by 1.4 (`*effectChance *= 1.4`, abilities.cc:9469)
+    // and Bad Luck zeroes the running value, so the reverse order is reproduced here.
+    for (const abilityId of getSlotsInReverse(abilityBattler.mon.abilities)) {
       if (!abilityId) continue
       if (isSimAbilitySuppressed(state, abilityBattler, abilityId, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
         continue

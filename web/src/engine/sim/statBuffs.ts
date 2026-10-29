@@ -21,12 +21,15 @@ import {
   STAT_STAGE_CHECK_NOT_NEEDED,
   STATUS1_BLEED,
   STATUS1_POISON_ANY,
+  STATUS2_FLINCHED,
+  STATUS2_SUBSTITUTE,
   STATUS3_EMBARGO,
   STATUS3_GASTRO_ACID,
   WEATHER_RAIN_ANY,
   WEATHER_SANDSTORM_ANY,
   WEATHER_SUN_ANY,
   hasFlag,
+  setFlag,
   MOVE_EFFECT_ATK_PLUS_1,
   MOVE_EFFECT_DEF_PLUS_1,
   MOVE_EFFECT_SPD_PLUS_1,
@@ -57,7 +60,16 @@ import {
   MOVE_EFFECT_EVS_MINUS_2,
 } from './constants'
 import { battlerHasAbility } from '../abilities/dispatch'
-import { findAbilitySlot } from './statusEffects'
+import {
+  MOVE_EFFECT_CONFUSION,
+  MOVE_EFFECT_PARALYSIS,
+  applyAttractEffect,
+  applyFearEffect,
+  applyPrimaryStatusEffect,
+  canInfatuate,
+  findAbilitySlot,
+} from './statusEffects'
+import type { StatusDeps } from './statusEffects'
 import { getSlotsInReverse } from './accuracy'
 import type { SimDataContext } from './dataContext'
 import { MOLD_BREAKABLE_ABILITIES, UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
@@ -1137,34 +1149,39 @@ export function runReactiveAbilityEffects(
   statChanges?: { battlerId: number; stat: number; change: number }[],
   battlerOrder?: readonly number[],
 ): boolean {
-  if ((state.statStageCheckState ?? STAT_STAGE_CHECK_NOT_NEEDED) !== STAT_STAGE_CHECK_NEEDED) {
-    return false
-  }
+  // The Mirror Herb scan and the copy passes are gated on STAT_STAGE_CHECK_NEEDED, but the onReactive
+  // loop below is NOT: AbilityBattleEffects(ABILITYEFFECT_REACTIVE, ...) walks every alive battler at
+  // every call site (battle_util.c:4765-4768; move-end :4330, end-of-turn :2401, switch-in
+  // battle_main.c:3356) whether or not a stat change is pending. PoisonPuppeteerClone depends on this
+  // -- it consumes a bit armed by a wrap/status that never touches statChangesToCheck.
+  const checkNeeded = (state.statStageCheckState ?? STAT_STAGE_CHECK_NOT_NEEDED) === STAT_STAGE_CHECK_NEEDED
 
   // 1. Mirror Herb scan (battle_util.c:4737-4751)
   let mirrorHerbFound = false
-  for (let i = 0; i < state.battlersCount; i++) {
-    if (!isAlive(state, i)) continue
-    const battler = state.battlers[i]
-    if (!battler) continue
-    const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
-    if (
-      item?.resolvedHoldEffect === 'HOLD_EFFECT_MIRROR_HERB' &&
-      !hasFlag(battler.statuses3, STATUS3_EMBARGO) &&
-      !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext)
-    ) {
-      for (let statId = STAT_ATK; statId < NUM_BATTLE_STATS; statId++) {
-        for (let j = 0; j < state.battlersCount; j++) {
-          if ((i & 1) === (j & 1)) continue // opponents only
-          if ((state.statChangesToCheck?.[j]?.[statId - 1] ?? 0) > 0) {
-            mirrorHerbFound = true
-            break
+  if (checkNeeded) {
+    for (let i = 0; i < state.battlersCount; i++) {
+      if (!isAlive(state, i)) continue
+      const battler = state.battlers[i]
+      if (!battler) continue
+      const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
+      if (
+        item?.resolvedHoldEffect === 'HOLD_EFFECT_MIRROR_HERB' &&
+        !hasFlag(battler.statuses3, STATUS3_EMBARGO) &&
+        !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext)
+      ) {
+        for (let statId = STAT_ATK; statId < NUM_BATTLE_STATS; statId++) {
+          for (let j = 0; j < state.battlersCount; j++) {
+            if ((i & 1) === (j & 1)) continue // opponents only
+            if ((state.statChangesToCheck?.[j]?.[statId - 1] ?? 0) > 0) {
+              mirrorHerbFound = true
+              break
+            }
           }
+          if (mirrorHerbFound) break
         }
-        if (mirrorHerbFound) break
       }
+      if (mirrorHerbFound) break
     }
-    if (mirrorHerbFound) break
   }
 
   if (mirrorHerbFound) {
@@ -1174,6 +1191,7 @@ export function runReactiveAbilityEffects(
   // 2. onReactive for every alive battler (battle_util.c:4765-4768)
   const egoistActive: boolean[] = new Array(state.battlersCount).fill(false)
   let sharingIsCaringActive = false
+  let cloneFired = false
 
   for (let i = 0; i < state.battlersCount; i++) {
     if (!isAlive(state, i)) continue
@@ -1186,12 +1204,21 @@ export function runReactiveAbilityEffects(
         continue
       }
 
+      if (POISON_PUPPETEER_CLONE_ABILITIES.has(abilityId)) {
+        // src/abilities.cc:286-312 via the onReactive hook of each setStateOnEffect ability.
+        if (runPoisonPuppeteerClone(state, i, abilityId, deps, unmodelled)) cloneFired = true
+        continue
+      }
+
       if (abilityId === 'ABILITY_EGOIST') {
         // abilities.cc:7075-7091
         if (state.statStageCheckState !== STAT_STAGE_CHECK_NOT_NEEDED) {
           let opponentHasPositive = false
           for (let opp = (i & 1) ^ 1; opp < state.battlersCount; opp += 2) {
-            for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
+            // `stat < ARRAY_COUNT(gBattleStruct->statChangesToCheck[opponent])` (abilities.cc:7080) is
+            // NUM_BATTLE_STATS - 1 = 7 (include/battle.h:727), so detection scans stat 1..6 and never
+            // sees the Evasion slot at index 6. The copy pass below still includes it (:8209).
+            for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS - 1; stat++) {
               if ((state.statChangesToCheck?.[opp]?.[stat - 1] ?? 0) > 0) {
                 opponentHasPositive = true
                 break
@@ -1227,7 +1254,10 @@ export function runReactiveAbilityEffects(
     }
   }
 
-  // If no reactive effect triggered, reset to NOT_NEEDED and zero (battle_util.c:4770-4773)
+  // If no stat-copy effect triggered, reset to NOT_NEEDED and zero (battle_util.c:4770-4773). A
+  // PoisonPuppeteerClone can still have run (e.g. Neurotoxin lowers a stat, which re-arms the NEEDED
+  // flag through ChangeStatBuffs's recording at battle_script_commands.c:9937-9940); the C's `effect`
+  // counter keeps that hook's return value because the reset block does not touch it, so report it.
   if (state.statStageCheckState === STAT_STAGE_CHECK_NEEDED) {
     state.statStageCheckState = STAT_STAGE_CHECK_NOT_NEEDED
     if (state.statChangesToCheck) {
@@ -1235,7 +1265,7 @@ export function runReactiveAbilityEffects(
         state.statChangesToCheck[b]?.fill(0)
       }
     }
-    return false
+    return cloneFired
   }
 
   // 3. Perform copy effects (battle_script_commands.c:8202-8309)
@@ -1372,7 +1402,156 @@ export function runReactiveAbilityEffects(
   }
   state.statStageCheckState = STAT_STAGE_CHECK_NOT_NEEDED
 
-  return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive
+  return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive || cloneFired
+}
+
+// The nine abilities whose `.setStateOnEffect` field (src/abilities.cc, data/v2.65beta/abilityHooks.json
+// bitfields.setStateOnEffect) arms a PoisonPuppeteerClone bit; see SET_STATE_ON_EFFECT_ABILITIES in
+// statusEffects.ts for the same list (kept local so this module does not read a const from
+// statusEffects at init time -- statusEffects imports this module, so the cycle would hit a TDZ).
+const POISON_PUPPETEER_CLONE_ABILITIES = new Set([
+  'ABILITY_BLOOD_BATH',
+  'ABILITY_CHOKEHOLD',
+  'ABILITY_CRYOSTASIS',
+  'ABILITY_ENTRANCE',
+  'ABILITY_FROSTBIND',
+  'ABILITY_HEMOTOXIN',
+  'ABILITY_NEUROTOXIN',
+  'ABILITY_POISON_PUPPETEER',
+  'ABILITY_SET_ABLAZE',
+])
+
+/**
+ * PoisonPuppeteerClone, src/abilities.cc:286-312.
+ *
+ * `int flag = GetAbilityState(battler, ability); if (!flag) return FALSE;` then the byte is CLEARED
+ * before the target loop, so every call consumes it even when every predicate fails. Targets are
+ * scanned in index order (0..gBattlersCount-1), skipping `battler == target`, targets without the bit
+ * and dead targets, then the predicate runs and the ability's script is called.
+ *
+ * Script bodies (data/battle_scripts_1.s:10514-10543, 6842-6866):
+ * - CHOKEHOLD     BattleScript_Chokehold   -> setmoveeffect MOVE_EFFECT_PARALYSIS; seteffectsecondary
+ * - ENTRANCE      BattleScript_Entrance    -> setmoveeffect MOVE_EFFECT_ATTRACT; seteffectsecondary
+ * - NEUROTOXIN    BattleScript_Neurotoxin  -> setstatchanger STAT_ATK/STAT_SPATK/STAT_SPEED, 1, TRUE;
+ *                                             statbuffchange 0, ... (ChangeStatBuffs, flags 0)
+ * - POISON_PUPPETEER BattleScript_PoisonPuppeteer -> MOVE_EFFECT_CONFUSION; seteffectsecondary
+ * - BLOOD_BATH / SET_ABLAZE BattleScript_Bloodlust -> MOVE_EFFECT_FEAR; seteffectsecondary
+ * - CRYOSTASIS    predicate only: status2 |= STATUS2_FLINCHED and returns FALSE (callback nullptr)
+ * FROSTBIND (BattleScript_Frostbind -> MOVE_EFFECT_DISABLE) and HEMOTOXIN (its predicate sets
+ * STATUS3_GASTRO_ACID; the script is a message) are not modelled here: they keep one note.
+ */
+function runPoisonPuppeteerClone(
+  state: BattleState,
+  holderId: number,
+  abilityId: string,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+  unmodelled: string[],
+): boolean {
+  const holder = state.battlers[holderId]
+  if (!holder) return false
+  // GetAbilityState/SetAbilityState resolve through GetAbilityIndex, i.e. the first forward slot.
+  const slot = findAbilitySlot(holder.mon.abilities, abilityId)
+  if (slot < 0) return false
+  const flag = holder.volatiles.abilityState[slot] ?? 0
+  if (!flag) return false
+  holder.volatiles.abilityState[slot] = 0
+
+  if (abilityId === 'ABILITY_FROSTBIND' || abilityId === 'ABILITY_HEMOTOXIN') {
+    const script = abilityId === 'ABILITY_FROSTBIND' ? 'MOVE_EFFECT_DISABLE' : 'STATUS3_GASTRO_ACID'
+    const msg = `PoisonPuppeteerClone: ${abilityId} applies ${script} (src/abilities.cc:10000, 10083); that effect is not modelled`
+    if (!unmodelled.includes(msg)) unmodelled.push(msg)
+    return false
+  }
+
+  const statusDeps: StatusDeps = {
+    dataContext: deps.dataContext,
+    grounding: deps.grounding ?? {
+      holdEffectOf: () => null,
+      monotypeChampType: null,
+      isCluelessOnField: false,
+      attackerHasMoldBreaker: false,
+    },
+  }
+
+  let any = false
+  for (let target = 0; target < state.battlersCount; target++) {
+    if (target === holderId) continue
+    if (!(flag & (1 << target))) continue
+    if (!isAlive(state, target)) continue
+    const targetBattler = state.battlers[target]
+    if (!targetBattler) continue
+
+    // The scripts reach SetMoveEffect(FALSE, 0) (:10543) with HITMARKER_IGNORE_SUBSTITUTE, but
+    // DoesSubstituteBlockMove (:12252-12260) does not read that flag and still blocks non-sound moves.
+    // The move that armed the bit is not threaded here, so a Substitute target is skipped with a note.
+    if (hasFlag(targetBattler.mon.status2, STATUS2_SUBSTITUTE)) {
+      const msg = `PoisonPuppeteerClone: ${abilityId} is blocked by a Substitute in the C unless the arming move is sound or FLAG_HIT_IN_SUBSTITUTE; the move id is not threaded here`
+      if (!unmodelled.includes(msg)) unmodelled.push(msg)
+      continue
+    }
+
+    switch (abilityId) {
+      case 'ABILITY_CHOKEHOLD': {
+        // BattleScript_Chokehold -> SetMoveEffect(FALSE, 0) with MOVE_EFFECT_PARALYSIS and
+        // HITMARKER_IGNORE_SAFEGUARD (battle_script_commands.c:2474-2517). The predicate has already
+        // run CanBeParalyzed; the primary=false path still breaks on a blocking ability (:2489-2490).
+        const res = applyPrimaryStatusEffect(state, holderId, target, MOVE_EFFECT_PARALYSIS, null, statusDeps, unmodelled, false, false, true)
+        if (res.applied) any = true
+        break
+      }
+      case 'ABILITY_ENTRANCE': {
+        // BattleScript_Entrance -> SetMoveEffect(MOVE_EFFECT_ATTRACT): :2727-2732, CanInfatuate.
+        if (!canInfatuate(state, holderId, target, statusDeps)) continue
+        if (applyAttractEffect(state, holderId, target, statusDeps)) any = true
+        break
+      }
+      case 'ABILITY_NEUROTOXIN': {
+        // BattleScript_Neurotoxin (:6842-6866): STAT_ATK, STAT_SPATK, STAT_SPEED in that order, each
+        // ChangeStatBuffsImplicit(-1, stat, flags = 0, jumpPtr != NULL) == ChangeStatBuffs(target, ...).
+        if (!canLowerStat(state, target, STAT_ATK, deps.dataContext) &&
+            !canLowerStat(state, target, STAT_SPATK, deps.dataContext) &&
+            !canLowerStat(state, target, STAT_SPEED, deps.dataContext)) {
+          continue
+        }
+        for (const statId of [STAT_ATK, STAT_SPATK, STAT_SPEED]) {
+          const res = changeStatBuffs(
+            state,
+            target,
+            holderId,
+            target,
+            -1,
+            statId,
+            0,
+            true,
+            { dataContext: deps.dataContext, grounding: statusDeps.grounding },
+            unmodelled,
+          )
+          if (res.delta !== 0) any = true
+        }
+        break
+      }
+      case 'ABILITY_POISON_PUPPETEER': {
+        // BattleScript_PoisonPuppeteer -> MOVE_EFFECT_CONFUSION (predicate CanBeConfused already ran).
+        const res = applyPrimaryStatusEffect(state, holderId, target, MOVE_EFFECT_CONFUSION, null, statusDeps, unmodelled, false, false, true)
+        if (res.applied) any = true
+        break
+      }
+      case 'ABILITY_BLOOD_BATH':
+      case 'ABILITY_SET_ABLAZE': {
+        // BattleScript_Bloodlust -> MOVE_EFFECT_FEAR (predicate: target is not already feared).
+        if (applyFearEffect(state, target)) any = true
+        break
+      }
+      case 'ABILITY_CRYOSTASIS': {
+        // The predicate itself flinches and returns FALSE, so there is no script call and no popup.
+        targetBattler.mon.status2 = setFlag(targetBattler.mon.status2, STATUS2_FLINCHED)
+        break
+      }
+      default:
+        break
+    }
+  }
+  return any
 }
 
 // Defined in constants.ts (a leaf module) so moveEffects.ts can build SECONDARY_MOVE_EFFECT_MAP without an import cycle

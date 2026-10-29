@@ -292,6 +292,7 @@ import {
   isBattlerTerrainAffected,
   isMyceliumMightActive,
   isPreventableSecondaryEffect,
+  setOnMoveEffectReactionFlags,
   testSheerForceFlag,
   type StatusDeps,
 } from './statusEffects'
@@ -12240,6 +12241,9 @@ export function applySecondaryMoveEffects(
     // MOVE_EFFECT_WRAP (battle_script_commands.c:2733-2750, WrapDuration :2300-2309)
     if (baseEffectNum === MOVE_EFFECT_WRAP) {
       if (!hasFlag(effectBattler.mon.status2, STATUS2_WRAPPED)) {
+        // SetOnMoveEffectReactionFlags(gBattleScripting.battler, gEffectBattler, MOVE_EFFECT_WRAP)
+        // (src/battle_script_commands.c:2735), inside the not-already-wrapped branch.
+        setOnMoveEffectReactionFlags(state, attackerId, effectBattlerId, MOVE_EFFECT_WRAP, deps)
         const attackerBattler = state.battlers[attackerId]
         const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
           attackerBattler ? battlerHasSimAbility(state, attackerBattler, ab, false, attackerId, false, deps.dataContext) : false,

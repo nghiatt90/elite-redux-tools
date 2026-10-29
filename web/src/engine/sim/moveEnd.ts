@@ -103,6 +103,7 @@ import {
   WEATHER_HAIL_ANY,
   WEATHER_PRIMAL_ANY,
   WEATHER_SANDSTORM_ANY,
+  MOVE_EFFECT_WRAP,
   STATUS1_ANY,
   STATUS4_FEAR,
   clearFlag,
@@ -142,6 +143,7 @@ import {
   MOVE_EFFECT_POISON,
   MOVE_EFFECT_SLEEP,
   MOVE_EFFECT_TOXIC,
+  SET_STATE_ON_EFFECT_ABILITIES,
   applyAttractEffect,
   applyDrenchEffect,
   applyFearEffect,
@@ -162,6 +164,7 @@ import {
   isPowderImmune,
   isPreventableSecondaryEffect,
   isSoundMove,
+  setOnMoveEffectReactionFlags,
   testSheerForceFlag,
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
@@ -2001,6 +2004,14 @@ function handleDefenderMoveEndAbility(
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(attacker.mon.status2, STATUS2_WRAPPED)
     ) {
+      // SetOnMoveEffectReactionFlags(battler, attacker, MOVE_EFFECT_WRAP) (src/abilities.cc:6160)
+      setOnMoveEffectReactionFlags(
+        state,
+        targetId,
+        attackerId,
+        MOVE_EFFECT_WRAP,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+      )
       attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_WRAPPED)
       // HasGrappler: bitfields.grappler (grep '"grappler"' abilityHooks.json -> Grappler, Tangled Tails, Tentalock)
       const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
@@ -4083,6 +4094,14 @@ function handleAttackerMoveEndAbility(
       !hasFlag(target.mon.status2, STATUS2_WRAPPED)
     ) {
       if (state.rng.random16() % 2 !== 0) {
+        // SetOnMoveEffectReactionFlags(battler, target, MOVE_EFFECT_WRAP) (src/abilities.cc:4697, 4720, 12032)
+        setOnMoveEffectReactionFlags(
+          state,
+          attackerId,
+          targetId,
+          MOVE_EFFECT_WRAP,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+        )
         target.mon.status2 = setFlag(target.mon.status2, STATUS2_WRAPPED)
         const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
           battlerHasSimAbility(state, attacker, ab, false, attackerId, false, deps.dataContext),
@@ -4674,6 +4693,20 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
       if (abilityId === 'ABILITY_STRIKEOUT') {
         // Impl<ABILITY_STRIKEOUT>.onBattlerFaints (src/abilities.cc:11157): StrikeoutClearFlags(battler, ability, fainted)
         strikeoutClearFlags(holder, abilityId, faintedId)
+        continue
+      }
+
+      // Impl<ABILITY_POISON_PUPPETEER>.onBattlerFaints (src/abilities.cc:7722-7726, shared with
+      // CHOKEHOLD / ENTRANCE / NEUROTOXIN / BLOOD_BATH / CRYOSTASIS / FROSTBIND / HEMOTOXIN / SET_ABLAZE):
+      //   int state = GetAbilityState(battler, ability);
+      //   if (state & (1 << fainted)) SetAbilityState(battler, ability, state ^ (1 << fainted));
+      // i.e. clear only the fainted battler's armed bit, leaving the other targets' bits alone.
+      if ((SET_STATE_ON_EFFECT_ABILITIES as readonly string[]).includes(abilityId)) {
+        const slot = findAbilitySlot(holder.mon.abilities, abilityId)
+        if (slot !== -1) {
+          const armed = holder.volatiles.abilityState[slot] ?? 0
+          if (armed & (1 << faintedId)) holder.volatiles.abilityState[slot] = armed ^ (1 << faintedId)
+        }
         continue
       }
 
