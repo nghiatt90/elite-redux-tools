@@ -11,9 +11,9 @@
 //   GetHighestAttackingStatId ties prefer Attack; UseOutOfTurnAttack's two moves are
 //   MOVE_OUTBURST (special) / MOVE_EXPLOSION (physical), both 250 power, power overridden to 100.
 // - Impl<ABILITY_GULP_MISSILE>.onDefender (src/abilities.cc:3289-3301); scripts
-//   data/battle_scripts_1.s:7799-7836 (Gorging) / :7837-7881 (Gulping), including
-//   `jumpifmagicguard BS_ATTACKER` (:7802/:7842), `getbattlerfainted BS_ATTACKER`
-//   (:7808-7810/:7848-7850) and `jumpifholdeffect BS_ATTACKER, HOLD_EFFECT_CLEAR_AMULET` (:7850).
+//   data/battle_scripts_1.s:7799-7836 (Gorging) / :7837-7880 (Gulping), including
+//   `jumpifmagicguard BS_ATTACKER` (:7806/:7844), `getbattlerfainted BS_ATTACKER`
+//   (:7810-7811/:7849-7850) and `jumpifholdeffect BS_ATTACKER, HOLD_EFFECT_CLEAR_AMULET` (:7850).
 // - Impl<ABILITY_SOOTHSAYER>.onAfterTypeEffectiveness (src/abilities.cc:9449-9453): state 4 is
 //   armed by onEntry (:9436-9441), ticked by onEndTurn (:9442-9448); `if (*mod >= UQ_4_12(1.0))
 //   *mod = UQ_4_12(0.5)`. UQ_4_12 has PRECISION 10 (engine/fixed.ts), so 1.0 == 1024 and
@@ -323,7 +323,7 @@ describe('Cycle 109 - Aftermath (abilities.cc:1663-1670)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Gulp Missile (src/abilities.cc:3289-3301, battle_scripts_1.s:7799-7881)
+// Gulp Missile (src/abilities.cc:3289-3301, battle_scripts_1.s:7799-7880)
 // ---------------------------------------------------------------------------
 describe('Cycle 109 - Gulp Missile onDefender (abilities.cc:3289-3301)', () => {
   function gulpMon(form: 'SPECIES_CRAMORANT_GORGING' | 'SPECIES_CRAMORANT_GULPING'): SimBattleMon {
@@ -341,7 +341,7 @@ describe('Cycle 109 - Gulp Missile onDefender (abilities.cc:3289-3301)', () => {
     expect(result.attackerDamage).toBe(25)
     // The form write after the script (:3292-3293, :3296).
     expect(state.battlers[1]!.mon.speciesId).toBe('SPECIES_CRAMORANT')
-    // BattleScript_GulpMissileDoDefense (bs1:7852-7869): STAT_DEF, -1, STAT_BUFF_NOT_PROTECT_AFFECTED.
+    // BattleScript_GulpMissileDoDefense (bs1:7860-7870): STAT_DEF, -1, STAT_BUFF_NOT_PROTECT_AFFECTED.
     expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
     expect(state.battlers[0]!.mon.status1 & STATUS1_PARALYSIS).toBe(0)
   })
@@ -377,7 +377,7 @@ describe('Cycle 109 - Gulp Missile onDefender (abilities.cc:3289-3301)', () => {
     const result = defenderHit(state, 'MOVE_TACKLE', 10)
     expect(state.battlers[0]!.mon.hp).toBe(100)
     expect(result.attackerDamage).toBe(0)
-    // The script's jump lands AFTER the form change (bs1:7819/7833), so the revert still happens.
+    // The script's jump lands AFTER the form change (bs1:7820/7859), so the revert still happens.
     expect(state.battlers[1]!.mon.speciesId).toBe('SPECIES_CRAMORANT')
     expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE - 1)
   })
@@ -389,7 +389,54 @@ describe('Cycle 109 - Gulp Missile onDefender (abilities.cc:3289-3301)', () => {
     expect(state.battlers[0]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
   })
 
-  it('a fainted attacker takes the damage but gets no paralysis (getbattlerfainted jump, bs1:7808-7810)', () => {
+  it('a Magic Guard + Clear Amulet attacker skips the amulet jump (bs1:7844 lands past :7850)', () => {
+    // BattleScript_GulpMissileNoDmgGulping (:7851) is the line AFTER `jumpifholdeffect BS_ATTACKER,
+    // HOLD_EFFECT_CLEAR_AMULET` (:7850), so the :7844 Magic Guard jump lands one instruction past the
+    // amulet check and the script still reaches `statbuffchange`. That instruction then runs
+    // ChangeStatBuffs, which re-checks the amulet itself (battle_script_commands.c:9827) and refuses
+    // the stage drop anyway -- so the observable stage is still neutral. What this asserts is that the
+    // call now happens: `changedStatsBattlerId = gBattlerAttacker` is the first write in
+    // ChangeStatBuffs (:9736), and a skipped call would leave it at its zeroed value. The holder is on
+    // battler 0 and the attacker on battler 1 so the written id (1) is distinguishable from the default.
+    const state = createBattleState({
+      battlers: [
+        createBattlerState(0, gulpMon('SPECIES_CRAMORANT_GULPING'), 0),
+        createBattlerState(
+          1,
+          monFor('SPECIES_MUDKIP', {
+            abilities: ability('ABILITY_MAGIC_GUARD'),
+            itemId: 'ITEM_CLEAR_AMULET',
+          }),
+          0,
+        ),
+      ],
+      rng: { random16: () => 0 },
+    })
+    const result = dispatchMoveEndDefenderAbilities({
+      state,
+      attackerId: 1,
+      targetId: 0,
+      moveId: 'MOVE_TACKLE',
+      moveData: DATA_CONTEXT.move('MOVE_TACKLE'),
+      targetDamage: 10,
+      hpDealt: 10,
+      deps: depsWith((id) => (id === 1 ? 'HOLD_EFFECT_CLEAR_AMULET' : null)),
+      unmodelled: [],
+      fainted: [],
+    })
+
+    // jumpifmagicguard BS_ATTACKER (:7844): no HP loss, hence no faint and no NoSecondEffect jump.
+    expect(state.battlers[1]!.mon.hp).toBe(100)
+    expect(result.attackerDamage).toBe(0)
+    // The revert happens on both paths (the jump lands after the form change).
+    expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_CRAMORANT')
+    // ChangeStatBuffs was reached ...
+    expect(state.battlers[1]!.turn.changedStatsBattlerId).toBe(1)
+    // ... and its own Clear Amulet check (battle_script_commands.c:9827) blocked the stage drop.
+    expect(state.battlers[1]!.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+  })
+
+  it('a fainted attacker takes the damage but gets no paralysis (getbattlerfainted jump, bs1:7810-7811)', () => {
     const state = battle(
       monFor('SPECIES_MUDKIP', { abilities: noAbility, hp: 20 }),
       gulpMon('SPECIES_CRAMORANT_GORGING'),
@@ -520,6 +567,23 @@ describe('Cycle 109 - Acid Reflux onReactive (abilities.cc:12260-12276)', () => 
     // CHECK_NOT(GetAbilityState) blocks a second queue in the same turn.
     expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, [])).toBe(false)
     expect(state.queuedExtraAttacks).toHaveLength(1)
+  })
+
+  it('uses BATTLE_OPPOSITE (`id ^ 1`) in doubles: battler 2 queues against battler 3', () => {
+    // A four-battler state with the holder on battler 2. `(id & 1) ^ 1` would send battler 2's Acid
+    // at battler 0; BATTLE_OPPOSITE is `((id) ^ 1)` (include/constants/battle.h:36), so it targets 3.
+    const state = createBattleState({
+      battlers: [0, 1, 2, 3].map((id) =>
+        createBattlerState(id, id === 2 ? acidMon() : monFor('SPECIES_MUDKIP', { abilities: noAbility }), 0),
+      ),
+      rng: { random16: () => 0 },
+    })
+    state.battlers[2]!.round.damaged = true
+
+    expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, [])).toBe(true)
+    expect(state.queuedExtraAttacks).toEqual([
+      { ability: 'ABILITY_ACID_REFLUX', move: 'MOVE_ACID', movePower: 20, attacker: 2, target: 3 },
+    ])
   })
 
   it('does nothing when the holder was not damaged', () => {

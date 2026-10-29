@@ -2898,14 +2898,16 @@ function handleDefenderMoveEndAbility(
   }
 
   // Gulp Missile onDefender (src/abilities.cc:3289-3301; Gorging script data/battle_scripts_1.s:7799-7836,
-  // Gulping :7837-7881). CHECK(ShouldApplyOnHitEffect(attacker)) -> the hit dealt damage and the attacker is
+  // Gulping :7837-7880). CHECK(ShouldApplyOnHitEffect(attacker)) -> the hit dealt damage and the attacker is
   // alive. The holder must still be Cramorant-Gorging or -Gulping. gBattleMoveDamage = attacker.maxHP / 4,
   // floored to a minimum of 1 (:3294-3295), dealt to the ATTACKER (healthbarupdate/datahpupdate BS_ATTACKER)
-  // unless the attacker is Magic Guard protected (`jumpifmagicguard BS_ATTACKER`, :7802 / :7842). If that
+  // unless the attacker is Magic Guard protected (`jumpifmagicguard BS_ATTACKER`, :7806 / :7844). If that
   // damage faints the attacker, `getbattlerfainted BS_ATTACKER; jumpifbyte CMP_EQUAL, ..., NoSecondEffect...`
-  // (:7808-7810 / :7848-7850) skips the secondary effect. Either way the holder reverts to SPECIES_CRAMORANT
+  // (:7810-7811 / :7849-7850) skips the secondary effect. The Gulping Clear Amulet jump (:7850) sits
+  // AFTER the Magic Guard jump's landing label (:7851), so a Magic Guard attacker is never checked for
+  // the amulet at the script level. Either way the holder reverts to SPECIES_CRAMORANT
   // (:3292-3293, the write after the script at :3296) and the script runs `switchinabilities BS_ATTACKER`
-  // after swapbattlerandtargetvia34 (:7819 / :7833 -- after the swap BS_ATTACKER is the holder), which is
+  // after swapbattlerandtargetvia34 (:7820 / :7859 -- after the swap BS_ATTACKER is the holder), which is
   // applySwitchInAbilities for the holder, exactly as the onAttacker half's BattleScript_AttackerFormChange.
   if (abilityId === 'ABILITY_GULP_MISSILE') {
     const species = target.mon.speciesId
@@ -2916,7 +2918,15 @@ function handleDefenderMoveEndAbility(
     ) {
       const gorging = species === 'SPECIES_CRAMORANT_GORGING'
       let attackerFainted = false
-      if (!isMagicGuardProtected(state, attacker)) {
+      // `jumpifmagicguard BS_ATTACKER, BattleScript_GulpMissileNoDmgGulping` (:7844) jumps PAST the
+      // healthbarupdate/datahpupdate/tryfaintmon AND the `jumpifholdeffect BS_ATTACKER,
+      // HOLD_EFFECT_CLEAR_AMULET` line (:7850), landing on BattleScript_GulpMissileNoDmgGulping
+      // (:7851), which falls through into BattleScript_GulpMissileDoDefense. So the amulet check is
+      // reached only when the damage path ran: a Magic Guard attacker holding Clear Amulet still
+      // reaches `statbuffchange` (ChangeStatBuffs itself is a separate question -- it re-checks the
+      // amulet at battle_script_commands.c:9827 and blocks the stage drop, see REPORT.md).
+      const magicGuardProtected = isMagicGuardProtected(state, attacker)
+      if (!magicGuardProtected) {
         const dmg = Math.max(1, Math.trunc(attacker.mon.maxHp / 4))
         applyDamage(state, attackerId, dmg, fainted, deps)
         result.attackerDamage += dmg
@@ -2936,11 +2946,13 @@ function handleDefenderMoveEndAbility(
           if (res.applied && res.status) {
             result.statusApplied = { battlerId: attackerId, status: res.status }
           }
-        } else if (attackerHoldEffect !== 'HOLD_EFFECT_CLEAR_AMULET') {
-          // BattleScript_GulpMissileDoDefense (data/battle_scripts_1.s:7852-7869); the Clear Amulet jump is
-          // :7850. `statbuffchange STAT_BUFF_NOT_PROTECT_AFFECTED` targets gBattlerAttacker after the
-          // script's swapattackerwithtarget, i.e. the move's attacker, and its `changedStatsBattlerId` is
-          // also that same attacker, so no onStatLowered dispatch fires (battle_util.c:1222-1255).
+        } else if (magicGuardProtected || attackerHoldEffect !== 'HOLD_EFFECT_CLEAR_AMULET') {
+          // BattleScript_GulpMissileDoDefense (data/battle_scripts_1.s:7860-7870). The Clear Amulet
+          // jump is :7850 and is unreachable for a Magic Guard attacker: the :7844 jump lands on
+          // :7851, one line past it. `statbuffchange STAT_BUFF_NOT_PROTECT_AFFECTED` targets
+          // gBattlerAttacker after the script's swapattackerwithtarget, i.e. the move's attacker, and
+          // its `changedStatsBattlerId` is also that same attacker, so no onStatLowered dispatch fires
+          // (battle_util.c:1222-1255).
           const dropRes = changeStatBuffs(
             state,
             attackerId,

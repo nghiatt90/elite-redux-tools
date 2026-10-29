@@ -1259,7 +1259,9 @@ export function runReactiveAbilityEffects(
         // CHECK_NOT(GetAbilityState(battler, ability)) and CHECK_NOT(GetOncePerTurnAbilityCounter)
         // (battle_util.c:1701-1707 -> gTurnStructs[battler].turnAbilityTriggers[index]). On a pass:
         // SetAbilityState(battler, ability, TRUE) and queue `{ MOVE_ACID, movePower 20, attacker =
-        // battler, target = BATTLE_OPPOSITE(battler) = battler ^ 1 }`. The once-per-turn counter is
+        // battler, target = BATTLE_OPPOSITE(battler) }`. BATTLE_OPPOSITE is
+        // include/constants/battle.h:36 `((id) ^ 1)` -- NOT `(id & 1) ^ 1`, so battler 2 targets 3
+        // and battler 3 targets 2. The once-per-turn counter is
         // what keeps a hit later in the SAME end-turn phase (after the onEndTurn hook has moved the
         // state into the counter, endTurn.ts) from queuing a second Acid.
         if (battler.round.damaged && !battler.volatiles.abilityState[slotIndex] && !battler.turn.turnAbilityTriggers[slotIndex]) {
@@ -1269,7 +1271,7 @@ export function runReactiveAbilityEffects(
             move: 'MOVE_ACID',
             movePower: 20,
             attacker: i,
-            target: (i & 1) ^ 1,
+            target: i ^ 1,
           })
           acidRefluxActivated = true
         }
