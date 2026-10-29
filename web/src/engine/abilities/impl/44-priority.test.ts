@@ -9,6 +9,7 @@ function inputs(overrides: Partial<PriorityDispatchInputs> = {}): PriorityDispat
     battlerId: '0',
     holderSlots: { ability: null, innates: [null, null, null] },
     moveId: 'MOVE_TACKLE',
+    moveEffect: null,
     moveType: 'NORMAL',
     movePower: 40,
     movePriority: 0,
@@ -33,6 +34,7 @@ describe('the Gale Wings family', () => {
     ['ABILITY_WATER_GALE_WINGS', 'WATER'],
     ['ABILITY_FLAMING_SOUL', 'FIRE'],
     ['ABILITY_VOLT_RUSH', 'ELECTRIC'],
+    ['ABILITY_EARLY_GRAVE', 'GHOST'],
   ]
 
   it.each(family)('%s boosts its own type at full HP', (id, type) => {
@@ -130,6 +132,18 @@ describe('Temporal Rupture', () => {
   })
 })
 
+describe('Triage', () => {
+  it('adds +3 priority to a healing move effect regardless of split', () => {
+    expect(withAbility('ABILITY_TRIAGE', { moveEffect: 'EFFECT_RESTORE_HP', moveSplit: 'STATUS' })).toBe(3)
+    expect(withAbility('ABILITY_TRIAGE', { moveEffect: 'EFFECT_ABSORB', moveSplit: 'SPECIAL' })).toBe(3)
+  })
+
+  it('does nothing for non-healing effects or null effect', () => {
+    expect(withAbility('ABILITY_TRIAGE', { moveEffect: 'EFFECT_ATTACK_UP_2', moveSplit: 'STATUS' })).toBe(0)
+    expect(withAbility('ABILITY_TRIAGE', { moveEffect: null })).toBe(0)
+  })
+})
+
 describe('the dispatch itself', () => {
   it('returns 0 for a battler with no abilities', () => {
     expect(computeAbilityPriorityBonus(inputs())).toBe(0)
@@ -162,9 +176,9 @@ describe('the dispatch itself', () => {
 })
 
 describe('the remaining list', () => {
-  it('names the 10 not ported, with no duplicates', () => {
-    expect(REMAINING_ON_PRIORITY).toHaveLength(10)
-    expect(new Set(REMAINING_ON_PRIORITY.map((r) => r.id)).size).toBe(10)
+  it('names the 8 not ported, with no duplicates', () => {
+    expect(REMAINING_ON_PRIORITY).toHaveLength(8)
+    expect(new Set(REMAINING_ON_PRIORITY.map((r) => r.id)).size).toBe(8)
   })
 
   it('none of them contributes anything yet', () => {

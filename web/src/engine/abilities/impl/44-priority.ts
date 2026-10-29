@@ -55,6 +55,28 @@ function galeWingsClone(type: string): AbilityImpl['onPriority'] {
   return (ctx) => (ctx.moveType === type && ctx.holderAtMaxHp ? 1 : 0)
 }
 
+// IsHealingMoveEffect, src/battle_util.c:8880-8903.
+const HEALING = new Set<string>([
+  'EFFECT_ABSORB',
+  'EFFECT_MORNING_SUN',
+  'EFFECT_MOONLIGHT',
+  'EFFECT_RESTORE_HP',
+  'EFFECT_REST',
+  'EFFECT_ROOST',
+  'EFFECT_WISH',
+  'EFFECT_HEALING_WISH',
+  'EFFECT_REVIVAL_BLESSING',
+  'EFFECT_SOFTBOILED',
+  'EFFECT_SYNTHESIS',
+  'EFFECT_SHORE_UP',
+  'EFFECT_JUNGLE_HEALING',
+  'EFFECT_HEAL_PULSE',
+  'EFFECT_MATCHA_GOTCHA',
+  'EFFECT_STRENGTH_SAP',
+  'EFFECT_DRAIN_BRAIN',
+  'EFFECT_PARTY_FAVORS',
+])
+
 export const PRIORITY_ABILITIES: AbilityImpl[] = [
   {
     // The Gale Wings family: eight abilities, one macro, differing only in type.
@@ -76,6 +98,11 @@ export const PRIORITY_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_VOLT_RUSH',
     src: 'src/abilities.cc:5454',
     onPriority: galeWingsClone('ELECTRIC'),
+  },
+  {
+    id: 'ABILITY_EARLY_GRAVE',
+    src: 'src/abilities.cc:6651',
+    onPriority: galeWingsClone('GHOST'),
   },
   {
     // CHECK(IS_MOVE_STATUS(move)) return 1. No HP gate, no type gate -- the
@@ -127,21 +154,23 @@ export const PRIORITY_ABILITIES: AbilityImpl[] = [
     src: 'src/abilities.cc:10043',
     onPriority: (ctx) => (ctx.moveId === 'MOVE_ROAR_OF_TIME' ? -ctx.movePriority : 0),
   },
+  {
+    id: 'ABILITY_TRIAGE',
+    src: 'src/abilities.cc:2803',
+    onPriority: (ctx) => (ctx.moveEffect !== null && HEALING.has(ctx.moveEffect) ? 3 : 0),
+  },
 ]
 
-/** The 10 onPriority abilities not ported, because no Elite-tier party in the 40
+/** The 8 onPriority abilities not ported, because no Elite-tier party in the 40
  * boss fights fields them. Data rather than a comment so it can be iterated,
  * diffed and counted -- priorityCoverage.test.ts asserts this list plus the
  * ported ones accounts for every onPriority ability in abilityHooks.json, so it
  * cannot silently drift out of date.
  *
- * `needs` names what is missing beyond a registry entry. Eight of the ten need
- * nothing at all: they are GALE_WINGS_CLONE with a different type and are one
- * call to galeWingsClone() each. */
+ * `needs` names what is missing beyond a registry entry. */
 export const REMAINING_ON_PRIORITY: { id: string; src: string; needs: string }[] = [
   { id: 'ABILITY_CUTE_ANTECEDENCE', src: 'src/abilities.cc:7891', needs: "nothing -- galeWingsClone('FAIRY')" },
   { id: 'ABILITY_DARK_GALE_WINGS', src: 'src/abilities.cc:7103', needs: "nothing -- galeWingsClone('DARK')" },
-  { id: 'ABILITY_EARLY_GRAVE', src: 'src/abilities.cc:6651', needs: "nothing -- galeWingsClone('GHOST')" },
   { id: 'ABILITY_FROZEN_SOUL', src: 'src/abilities.cc:4614', needs: "nothing -- galeWingsClone('ICE')" },
   {
     id: 'ABILITY_GALEFORCE_WINGS',
@@ -167,10 +196,5 @@ export const REMAINING_ON_PRIORITY: { id: string; src: string; needs: string }[]
     id: 'ABILITY_PRESTO',
     src: 'src/abilities.cc:9397',
     needs: 'an IsSoundMove predicate (max-HP gate plus a sound-flag check that abilities can grant, same shape as isIronFistBoosted)',
-  },
-  {
-    id: 'ABILITY_TRIAGE',
-    src: 'src/abilities.cc:2803',
-    needs: 'an IsHealingMoveEffect predicate over the move effect list; returns +3, the largest delta in the family',
   },
 ]

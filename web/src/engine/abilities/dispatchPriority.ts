@@ -43,6 +43,8 @@ export interface PriorityDispatchInputs {
   battlerId: string
   holderSlots: AbilitySlots
   moveId: string
+  /** `gBattleMoves[move].effect`, bare `EFFECT_*`, read by Triage. */
+  moveEffect: string | null
   /** GetTypeBeforeUsingMove's result -- the RESOLVED type, not the declared one. */
   moveType: string
   movePower: number
@@ -62,6 +64,7 @@ export function computeAbilityPriorityBonus(inputs: PriorityDispatchInputs): num
     battlerId: inputs.battlerId,
     moveType: inputs.moveType,
     moveId: inputs.moveId,
+    moveEffect: inputs.moveEffect,
     movePower: inputs.movePower,
     movePriority: inputs.movePriority,
     isStatus: inputs.moveSplit === 'STATUS',

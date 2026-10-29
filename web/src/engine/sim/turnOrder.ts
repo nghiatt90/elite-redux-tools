@@ -382,6 +382,7 @@ export function getMovePriority(state: BattleState, battlerId: number, move: Tur
     battlerId: String(battlerId),
     holderSlots: battler.mon.abilities,
     moveId: move.id,
+    moveEffect: move.effect,
     moveType: move.resolvedType,
     movePower: move.power,
     movePriority: move.priority,

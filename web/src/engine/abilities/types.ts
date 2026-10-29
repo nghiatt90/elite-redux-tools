@@ -333,6 +333,8 @@ export interface OnPriorityContext {
    * declared one. The Gale Wings family compares against it. */
   moveType: string
   moveId: string
+  /** `gBattleMoves[move].effect`, bare `EFFECT_*`, read by Triage. */
+  moveEffect: string | null
   /** `gBattleMoves[move].power` -- Perfectionist's whole condition. */
   movePower: number
   /** `gBattleMoves[move].priority`, the DECLARED value -- Temporal Rupture

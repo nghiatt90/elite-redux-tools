@@ -56,9 +56,10 @@ describe('onPriority coverage gate', () => {
     })
     // 0 -> 9 (batch AS: the 9 fielded by the 40 Elite boss fights -- 8 new
     // entries in 44-priority.ts plus Perfectionist's onPriority added to its
-    // existing onCrit entry in batch O). A DECREASE means an ability lost its
-    // hook; investigate rather than lowering this.
-    expect(ported.length).toBeGreaterThanOrEqual(9)
+    // existing onCrit entry in batch O) -> 11 (cycle 94: Early Grave, Triage).
+    // A DECREASE means an ability lost its hook; investigate rather than
+    // lowering this.
+    expect(ported.length).toBeGreaterThanOrEqual(11)
   })
 
   it('every remaining entry cites the RIGHT source line and says what it needs', () => {
