@@ -886,10 +886,11 @@ function calcInternal(
   forceCrit: boolean,
   // UQ_4_12 -- GetParentalBondMultiplier's own return, folded into CalcFinalDmg's
   // stage #10 EXACTLY where the C applies it (finalDamage.ts's own
-  // parentalBondMultiplier stage). uq(1.0) for the first/only hit of any move and
-  // for every hit of a move's OWN multi-hit effect (Population Bomb, Double Hit,
-  // ...), which never scale power per hit -- only a Parental-Bond-family bonus hit
-  // uses anything else. See multiHit.ts's resolveHitPlan.
+  // parentalBondMultiplier stage). uq(1.0) for the first/only hit of any move
+  // except a DUAL_WIELD-triggered one (that trigger scales hit 0 too, 0.7x --
+  // battle_util.c:7483-7484) and for every hit of a move's OWN multi-hit effect
+  // (Population Bomb, Double Hit, ...), which never scale power per hit -- only a
+  // Parental-Bond-family hit uses anything else. See multiHit.ts's resolveHitPlan.
   hitModifier: number,
   /** Which hit (0-indexed) of the current move use this is -- Triple Kick/Triple
    * Axel's own base-power scaling reads this directly (applyPreModifierBasePower),
@@ -1462,8 +1463,12 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   // Bond bonus hit), and the index itself drives Triple Kick's power scaling.
   const singleHitIndex = scenario.singleHitIndex
   const firstHitIndex = singleHitIndex ?? 0
+  // Hit 0's own modifier comes from the plan too: DUAL_WIELD scales every hit
+  // including turn 0 (GetParentalBondMultiplier's DUAL_WIELD case has no
+  // REQUIRE(turn), battle_util.c:7483-7484), while every other plan returns
+  // uq(1.0) for hit 0. With no plan this is the single-hit uq(1.0).
   const firstHitModifier =
-    singleHitIndex !== undefined && hitPlanResult && !('unmodelled' in hitPlanResult) ? hitPlanResult.hitModifier(singleHitIndex) : uq(1.0)
+    hitPlanResult && !('unmodelled' in hitPlanResult) ? hitPlanResult.hitModifier(singleHitIndex ?? 0) : uq(1.0)
 
   // `roll` is the C's own roll variable (multiplier = (100-roll)%, so roll=0 is the
   // maximum 100% hit and roll=15 the minimum 85% hit, src/battle_util.c:7816-7817).
@@ -1493,12 +1498,13 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     }
   }
 
-  // Multi-hit: the first hit is exactly what `rolls`/`critRolls` already computed
-  // (hitModifier uq(1.0)) -- only hits 1..N-1 need a fresh pass, using whatever
-  // modifier this hit's mechanism (a move's own multi-hit effect, or a Parental
-  // Bond bonus hit) assigns it. See multiHit.ts and DamageCalcResult's own doc for
-  // why this sums independently-rolled percentiles rather than modelling the true
-  // joint distribution.
+  // Multi-hit: `rolls`/`critRolls` already computed hit 0 (with the plan's own
+  // hitModifier(0), which is uq(1.0) for every mechanism except DUAL_WIELD's 0.7x)
+  // -- only hits 1..N-1 need a fresh pass, using whatever modifier this hit's
+  // mechanism (a move's own multi-hit effect, or a Parental Bond bonus hit) assigns
+  // it. See multiHit.ts and DamageCalcResult's own doc for why this sums
+  // independently-rolled percentiles rather than modelling the true joint
+  // distribution.
   let hitCount: number | null = null
   let totalRolls: number[] | null = null
   let totalCritRolls: number[] | null = null

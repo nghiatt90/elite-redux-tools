@@ -10,8 +10,9 @@
 // Skill-Link/Loaded-Dice-boosted forms of EFFECT_MULTI_HIT) deals FULL,
 // unscaled power via THIS module's hitModifier -- confirmed against
 // CalcMoveBasePower's own switch (battle_util.c:6825-6907), which has no case
-// for these effects at all. Only a Parental-Bond-family bonus hit (index >= 1)
-// uses anything other than 1.0 here. Triple Kick/Triple Axel (MULTIHIT_TRIPLE_KICK)
+// for these effects at all. Only a Parental-Bond-family hit uses anything other
+// than 1.0 here, and for DUAL_WIELD even hit 0 is scaled (0.7x -- see the
+// hitModifier construction below). Triple Kick/Triple Axel (MULTIHIT_TRIPLE_KICK)
 // scale power too, but NOT via hitModifier -- their scaling happens at
 // CalcMoveBasePower's own pipeline stage (basePower.ts's applyPreModifierBasePower,
 // keyed on hitIndex), which calculate.ts's per-hit loop threads separately from
@@ -23,6 +24,7 @@
 
 import { uq } from './fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from './abilities/dispatchCalc'
+import { battlerHasAbility } from './abilities/dispatch'
 import type { AbilitySlots } from './abilities/dispatch'
 import type { OnParentalBondContext, ParentalBondTrigger } from './abilities/types'
 
@@ -34,6 +36,56 @@ export interface HitPlan {
 }
 
 export type HitPlanResult = HitPlan | { unmodelled: string } | null
+
+/**
+ * The C's `twoTurnMove` bit (include/pokemon.h:273), which IsMoveAffectedByParentalBond
+ * reads at battle_script_commands.c:13169. The pipeline emits no such flag in
+ * moves.json (zero moves carry one), so this reproduces the codegen's own definition:
+ * `move.twoTurn || move.effect.getOption(twoTurn)`
+ * (tools/codegen/src/er/move/BattleMovesGenerator.kt:94,106). er-config's
+ * MoveBehavior.proto declares the `two_turn` option on exactly these eight effects
+ * (:93, :164, :168, :354, :419, :443, :451, :467) and no move in MoveList.textproto
+ * sets the per-move `two_turn` field, so the effect set IS the bit on this pinned
+ * config. Note sim/turn.ts's TWO_TURN_EFFECTS lists only five of the eight (it omits
+ * EFFECT_GEOMANCY, EFFECT_SKY_DROP and EFFECT_TWO_TURNS_ATTACK); this is the complete
+ * set the C data actually has -- see REPORT.md.
+ */
+const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_TWO_TURNS_ATTACK',
+  'EFFECT_SOLARBEAM',
+  'EFFECT_SEMI_INVULNERABLE',
+  'EFFECT_GEOMANCY',
+  'EFFECT_TWO_TURN_SECONDARY',
+  'EFFECT_ELECTRO_SHOT',
+  'EFFECT_SKY_DROP',
+  'EFFECT_TWO_TURN_RETALIATION',
+])
+
+/**
+ * WEATHER_SUN_ANY / WEATHER_RAIN_ANY (include/constants/battle.h), narrowed to the
+ * calculator's own WeatherKind union (engine/types.ts:87-104). That union has no
+ * RAIN_DOWNPOUR member -- the header marks WEATHER_RAIN_DOWNPOUR unused and
+ * sim/bridge.ts surfaces it as a NO_SOURCE gap -- so there is nothing to add for it.
+ * Like every other calc-level weather check (e.g. basePower.ts:747), this reads the
+ * bare weather kind the scenario already carries; Cloud Nine/Air Lock/Clueless
+ * (WEATHER_HAS_EFFECT) and Utility Umbrella are not modelled anywhere in the calc.
+ */
+const SUN_WEATHERS: ReadonlySet<string> = new Set(['SUN_PERMANENT', 'SUN_TEMPORARY', 'SUN_PRIMAL'])
+const RAIN_WEATHERS: ReadonlySet<string> = new Set(['RAIN_PERMANENT', 'RAIN_TEMPORARY', 'RAIN_PRIMAL'])
+
+/**
+ * HasChloroplast, src/battle_util.c:9340 (`RETURN_ABILITY_IF_FLAG(battler, FALSE,
+ * chloroplast)`, i.e. checkMoldBreaker=FALSE). Only three abilities carry the
+ * bitfield: ABILITY_CHLOROPLAST (src/abilities.cc:3651), ABILITY_SOLAR_FLARE (:4641)
+ * and ABILITY_BIG_LEAVES (:4753), confirmed against abilityHooks.json's `bitfields`.
+ * The pipeline does not emit a `chloroplast` bitfield into the calc (see
+ * basePower.ts:243-248), so they are listed by id here.
+ */
+const CHLOROPLAST_ABILITIES = ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE'] as const
+
+function isTwoTurnEffect(effect: string | null): boolean {
+  return effect !== null && TWO_TURN_EFFECTS.has(effect)
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -119,11 +171,24 @@ export function resolveHitPlan(
   }
 
   // Parental Bond family (IsMoveAffectedByParentalBond + GetParentalBondType/Count,
-  // battle_script_commands.c:992-1004,1011-1040,13190+) -- only the two cheap,
-  // already-available exclusion checks are ported (status moves, and the move's
-  // own noParentalBond flag); the doubles-only and two-turn-move exclusions don't
-  // apply to this v1 singles, non-charge-turn engine.
+  // battle_script_commands.c:992-1004,1011-1040,13164-13184). The eligibility checks
+  // run in the C's own order:
+  //   1. status move                     -> not eligible (:13165)
+  //   2. parentalBondBanned flag         -> not eligible (:13166)
+  //   3. Solar Beam in sun / Chloroplast -> ELIGIBLE, returns TRUE before the two-turn
+  //                                         check ever runs (:13167)
+  //   4. Electro Shot in rain            -> ELIGIBLE, same early return (:13168)
+  //   5. two-turn move without Accelerate -> not eligible (:13169)
+  //   6. the BATTLE_TYPE_DOUBLE target-count block (:13170-13181) is doubles-only;
+  //      this engine is singles, so it has no singles-relevant effect to port.
   if (move.split === 'STATUS' || move.flags.noParentalBond) return null
+  const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attackerSlots, id, () => false))
+  const twoTurnExempt =
+    (move.effect === 'EFFECT_SOLARBEAM' && (SUN_WEATHERS.has(parentalBondCtx.weather) || hasChloroplast)) ||
+    (move.effect === 'EFFECT_ELECTRO_SHOT' && RAIN_WEATHERS.has(parentalBondCtx.weather))
+  // BattlerHasAbility(battlerId, ABILITY_ACCELERATE, FALSE) -- the non-mold-breaker-
+  // suppressible form, hence the always-false suppression predicate.
+  if (!twoTurnExempt && isTwoTurnEffect(move.effect) && !battlerHasAbility(attackerSlots, 'ABILITY_ACCELERATE', () => false)) return null
   const trigger = computeParentalBondTrigger(attackerSlots, defenderSlots, parentalBondCtx)
   if (!trigger) return null
   const countResult = parentalBondHitCount(trigger)
@@ -131,6 +196,12 @@ export function resolveHitPlan(
   if (countResult.hitCount <= 1) return null
   return {
     hitCount: countResult.hitCount,
-    hitModifier: (hitIndex) => (hitIndex === 0 ? uq(1.0) : getParentalBondMultiplier(trigger, hitIndex)),
+    // GetParentalBondMultiplier(trigger, parentalBondInitialCount - parentalBondOn),
+    // battle_util.c:7631-7635. Cmd_attackcanceler sets parentalBondOn =
+    // parentalBondInitialCount = count (battle_script_commands.c:1083-1090), so the
+    // FIRST hit is turn 0 -- and DUAL_WIELD's case has no REQUIRE(turn)
+    // (battle_util.c:7483-7484), so it is 0.7x from hit 0 onward. Every other trigger
+    // passes REQUIRE(turn) and therefore stays 1.0x at hit 0.
+    hitModifier: (hitIndex) => getParentalBondMultiplier(trigger, hitIndex),
   }
 }
