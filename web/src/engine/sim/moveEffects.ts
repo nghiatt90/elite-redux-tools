@@ -9683,11 +9683,18 @@ export function handleWaterlog(ctx: MoveEffectContext): ActionOutcome {
     deps,
     unmodelled,
   )
-  const minionControlFirstHit =
+  // Cmd_seteffectwithchance's Minion Control no-op, battle_script_commands.c:3110-3112:
+  //   } else if (gTurnStructs[attacker].parentalBondTrigger == ABILITY_MINION_CONTROL &&
+  //              gTurnStructs[attacker].parentalBondOn < gTurnStructs[attacker].parentalBondInitialCount) {
+  //       // No-op
+  // i.e. on a BONUS hit of a Minion Control sequence neither the `Random() % 100`
+  // draw (:3113) nor the effect happens. The sim stores the trigger as
+  // 'ABILITY_' + the ability id, which is why the comparison adds the prefix.
+  const minionControlBonusHit =
     battler.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL' &&
     battler.turn.parentalBondOn < battler.turn.parentalBondInitialCount
 
-  if (!minionControlFirstHit && state.rng.random16() % 100 < percentChance) {
+  if (!minionControlBonusHit && state.rng.random16() % 100 < percentChance) {
     // SetMoveEffect(isStatus = TRUE, 0) (:2361, 2364, 2388, 3031-3036)
     if (
       !testSheerForceFlag(state, battlerId, moveId, deps) &&
@@ -11891,8 +11898,20 @@ export function applySecondaryMoveEffects(
       // Cmd_seteffectsecondary (:3132-3135): SetMoveEffect(FALSE, 0) -- no chance draw and no NO_EFFECT test.
       chancePasses = true
     } else if (spec.certain) {
-      // MOVE_EFFECT_CERTAIN skips the RNG draw
+      // MOVE_EFFECT_CERTAIN skips the RNG draw. The C tests it BEFORE the
+      // Minion Control no-op below (:3107-3109 vs :3110-3112), so a certain
+      // effect still applies on a bonus hit.
       chancePasses = !isImmune
+    } else if (
+      // Cmd_seteffectwithchance, battle_script_commands.c:3110-3112: on a Minion
+      // Control bonus hit (`parentalBondOn < parentalBondInitialCount` and the
+      // trigger is MINION_CONTROL) the command is a no-op -- neither the
+      // `Random() % 100` draw nor the effect happens. The guard sits after
+      // GetMoveEffectChance (:3106), which draws nothing.
+      state.battlers[attackerId]?.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL' &&
+      (state.battlers[attackerId]?.turn.parentalBondOn ?? 0) < (state.battlers[attackerId]?.turn.parentalBondInitialCount ?? 0)
+    ) {
+      chancePasses = false
     } else {
       // Real RNG draw: Random() % 100 < percentChance
       const roll = state.rng.random16() % 100

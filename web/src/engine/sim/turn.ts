@@ -53,10 +53,12 @@
 // construction rather than by omission, and are documented rather than
 // gapped at runtime:
 //   - the multi-hit/Parental-Bond second-hit accuracy exemption (:1412-1416)
-//     needs gTurnStructs.multiHitsUsed/parentalBondOn, which nothing in this
-//     loop ever sets (multi-hit sequencing is not modelled), so the
-//     condition is always false and the standard accuracy-check branch
-//     always runs -- exactly the behaviour this loop can represent anyway.
+//     needs gTurnStructs.multiHitsUsed/parentalBondOn. Both are now real:
+//     CANCELLER_MULTIHIT_MOVES and Cmd_attackcanceler's own Parental Bond setup
+//     (attackCanceller.ts, battle_script_commands.c:1082-1091) set them, and
+//     the hit loop increments multiHitsUsed per extra hit. The loop only rolls
+//     accuracy again for `checksEveryHit` (Triple Kick / Population Bomb), so
+//     a Parental Bond bonus hit skips the roll exactly as the C does.
 //   - JumpIfMoveAffectedByProtect (:1422) needs a Protecting target, which
 //     RoundState.protectMove can represent but which nothing in this loop
 //     ever sets (Protect is not modelled), so it is always unset.
@@ -133,6 +135,9 @@ import { gapsToUnmodelled } from './bridge'
 import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
+import { applyModifier } from '../fixed'
+import { getParentalBondMultiplier } from '../abilities/dispatchCalc'
+import type { ParentalBondTrigger } from '../abilities/types'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
@@ -1242,9 +1247,14 @@ export function deductPp(
   if (attacker.mon.pp[slot] > 0) {
     attacker.round.notFirstStrike = true
     // gBattleStruct->sameMoveTurns[attacker], :1486-1493 -- the increment
-    // branch needs gTurnStructs.parentalBondOn > 0, which nothing in this
-    // loop ever writes (see state.ts's field doc), so the reset branch
-    // always runs.
+    // branch needs `parentalBondOn > 0 && parentalBondOn != parentalBondInitialCount`,
+    // i.e. a later hit of a Parental Bond sequence (Parental Bond is now set up
+    // by attackCanceller.ts). Cmd_ppreduce still returns before that branch on
+    // every such hit: MOVEEND_MULTIHIT_MOVE sets HITMARKER_NO_ATTACKSTRING for
+    // the restarted hits (battle_script_commands.c:4903), and :1472 returns for it.
+    // The first hit has parentalBondOn == parentalBondInitialCount, so the reset
+    // branch runs. This loop only calls deductPp once per action, before the hit
+    // loop, so the reset-to-0 branch is the correct one here.
     attacker.sameMoveTurns = 0
     attacker.mon.pp[slot] = Math.max(0, attacker.mon.pp[slot] - ppToDeduct)
   }
@@ -1756,6 +1766,21 @@ const FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SUPER_FANG_HAZE',
   'EFFECT_LEVEL_DAMAGE',
   'EFFECT_FINAL_GAMBIT',
+])
+
+/** The subset of FIXED_DAMAGE_EFFECTS whose C script calls
+ * AdjustFixedDamageForParentalBond (battle_script_commands.c:10615-10624):
+ * Cmd_calculatesetdamage (:10653, LEVEL_DAMAGE / SUPER_FANG / SUPER_FANG_HAZE),
+ * Cmd_counterdamagecalculator (:10680), Cmd_mirrorcoatdamagecalculator (:10702)
+ * and Cmd_metalburstdamagecalculator (:13130). Endeavor
+ * (Cmd_setdamagetohealthdifference) and Final Gambit do NOT. */
+const PARENTAL_BOND_FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_COUNTER',
+  'EFFECT_MIRROR_COAT',
+  'EFFECT_METAL_BURST',
+  'EFFECT_SUPER_FANG',
+  'EFFECT_SUPER_FANG_HAZE',
+  'EFFECT_LEVEL_DAMAGE',
 ])
 
 /**
@@ -2994,6 +3019,22 @@ export function executeAction(
     // resolver above still ran for the type-immunity answer (0), so the fixed amount only replaces a non-zero result.
     if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect) && targetDamage !== null && targetDamage > 0) {
       targetDamage = fixedDamageFor(state, battlerId, currentTargetId, moveEffect).damage
+      // AdjustFixedDamageForParentalBond, battle_script_commands.c:10615-10624, called from Cmd_calculatesetdamage
+      // (:10653), Cmd_counterdamagecalculator (:10680), Cmd_mirrorcoatdamagecalculator (:10702) and
+      // Cmd_metalburstdamagecalculator (:13130). Dragon Rage / Psywave / Sky Drop are omitted because
+      // fixedDamageFor does not model them. Endeavor and Final Gambit are NOT scaled (neither script calls it).
+      // Order matters: the C scales first, then its `if (!damage) damage = 1` failsafe.
+      if (PARENTAL_BOND_FIXED_DAMAGE_EFFECTS.has(moveEffect) && attackerBattler.turn.parentalBondOn > 0) {
+        const trigger = attackerBattler.turn.parentalBondTrigger?.replace(/^ABILITY_/, '') ?? null
+        targetDamage = applyModifier(
+          getParentalBondMultiplier(
+            trigger as ParentalBondTrigger | null,
+            attackerBattler.turn.parentalBondInitialCount - attackerBattler.turn.parentalBondOn,
+          ),
+          targetDamage,
+        )
+        if (!targetDamage) targetDamage = 1
+      }
       isCriticalHit = false
     }
     if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect)) {
@@ -3254,6 +3295,12 @@ export function executeAction(
     ) {
       break
     }
+    // MOVEEND_MULTIHIT_MOVE (:4898-4906): on a hit that continues to another one,
+    // `if (parentalBondOn) parentalBondOn--;` runs BEFORE `multiHitsUsed++`. That
+    // keeps the invariant hitIndex == parentalBondInitialCount - parentalBondOn,
+    // which is exactly the `turn` GetParentalBondMultiplier is called with
+    // (battle_util.c:7631-7635).
+    if (attackerBattler.turn.parentalBondOn > 0) attackerBattler.turn.parentalBondOn--
     attackerBattler.turn.multiHitsUsed++
     hitIndex++
 

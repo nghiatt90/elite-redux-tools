@@ -98,11 +98,12 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       //
       // No longer a gap: turn.ts's deductPp now maintains
       // BattlerState.sameMoveTurns for real (Cmd_ppreduce,
-      // battle_script_commands.c:1486-1493). It is always 0 in this batch --
-      // the C's own increment branch needs gTurnStructs.parentalBondOn > 0,
-      // which nothing in this codebase's turn loop writes (multi-hit/Parental
-      // Bond sequencing is not modelled) -- which is the CORRECT value for
-      // every scenario this batch can represent, not a guess: see
+      // battle_script_commands.c:1486-1493). It is always 0 for the scenarios
+      // this batch represents, which is the C's own value: the increment branch
+      // needs parentalBondOn > 0 AND parentalBondOn != parentalBondInitialCount
+      // (a later Parental Bond hit), and Cmd_ppreduce returns at :1472 for those
+      // hits (HITMARKER_NO_ATTACKSTRING, :4903) before reaching it. On the first
+      // hit both counters are the full count, so the reset branch runs. See
       // state.ts's sameMoveTurns doc.
       // Rollout / Ice Ball / Flame Wheel read gVolatileStructs[atk].rolloutCounter AFTER Cmd_handlerollout bumped it (turn.ts runs that
       // before this call, as BattleScript_EffectRollout does, data/battle_scripts_1.s:5125-5132) and STATUS2_DEFENSE_CURL (:6813-6821).
@@ -151,6 +152,13 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         // reported above); with one, the hit's own party slot (beatUpBaseAttack above).
         beatUpBaseAttack,
         beatUpHitCount: 1,
+        // GetParentalBondCount's MINION_CONTROL branch (battle_script_commands.c:1023-1040). Cmd_attackcanceler
+        // (:1082-1091) stored the live party count in parentalBondInitialCount and never changes it for the
+        // rest of the sequence (only parentalBondOn moves), so this is that count on every hit.
+        minionControlCount:
+          attackerBattlerState.turn.parentalBondTrigger === 'ABILITY_MINION_CONTROL'
+            ? attackerBattlerState.turn.parentalBondInitialCount
+            : undefined,
         defenderUsedGlaiveRush: false,
         singleHitIndex: context.hitIndex,
         // MISC_EFFECT_TOOK_DAMAGE_BOOST (battle_util.c:6869-6871) and MISC_EFFECT_DOUBLE_DAMAGE (:6872-6874): the latter's

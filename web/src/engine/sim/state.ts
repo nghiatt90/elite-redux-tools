@@ -354,9 +354,11 @@ export interface BattlerState {
    * by Cmd_ppreduce, battle_script_commands.c:1486-1493) -- another
    * per-battler gBattleStruct field, same precedent as monToSwitchIntoId
    * above. Cmd_ppreduce's own increment branch requires
-   * `gTurnStructs[battler].parentalBondOn > 0`, which this sim never sets
-   * (multi-hit/Parental Bond sequencing is not modelled), so ppreduce's port
-   * always takes the reset-to-0 branch -- see turn.ts's deductPp. */
+   * `gTurnStructs[battler].parentalBondOn > 0` AND
+   * `parentalBondOn != parentalBondInitialCount`, which is never true for the
+   * first hit of a Parental Bond sequence (both are the full count) and never
+   * reached for a later one (HITMARKER_NO_ATTACKSTRING at :1472 returns first);
+   * so the reset-to-0 branch always runs -- see turn.ts's deductPp. */
   sameMoveTurns: number
   /** `gBattleStruct->usedHeldItems[gBattlerPartyIndexes[b]][side]` (battle_util.c:8637,
    * GetUsedHeldItem) -- the item this battler's mon last consumed, which Recycle

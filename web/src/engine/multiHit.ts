@@ -94,9 +94,9 @@ function clamp(value: number, min: number, max: number): number {
 /**
  * GetParentalBondCount, src/battle_script_commands.c:1010-1044. MINION_CONTROL's
  * own count is a live count of the attacker's non-fainted, non-egg, non-status
- * party members -- this v1 singles engine has no party/team concept (same class
- * of gap as Soul Harvest/Supreme Overlord before alliesFainted existed), so it's
- * surfaced as unmodelled rather than guessed. TWO_TO_FIVE (Unrelenting,
+ * party members (:1023-1040); a caller that can see the party passes it as
+ * `minionControlCount`, and a caller that cannot (the standalone calculator) keeps
+ * the unmodelled result rather than guessing. TWO_TO_FIVE (Unrelenting,
  * src/abilities.cc:12247-12249's onParentalBond) has NO case in that switch --
  * only PARENTAL_BOND_HYPER_AGGRESSIVE/PRIMAL_MAW/DUAL_WIELD/ICE_COLD_HUNTER/
  * THREE_HEADED/MINION_CONTROL are handled (include/abilities.hh:36-54's
@@ -105,7 +105,7 @@ function clamp(value: number, min: number, max: number): number {
  * multiHitCounter/parentalBondOn at all -- Unrelenting never actually grants a
  * bonus hit in the real game.
  */
-function parentalBondHitCount(trigger: ParentalBondTrigger): { hitCount: number } | { unmodelled: string } {
+export function parentalBondHitCount(trigger: ParentalBondTrigger, minionControlCount?: number): { hitCount: number } | { unmodelled: string } {
   switch (trigger) {
     case 'HYPER_AGGRESSIVE':
     case 'PRIMAL_MAW':
@@ -117,7 +117,9 @@ function parentalBondHitCount(trigger: ParentalBondTrigger): { hitCount: number 
     case 'TWO_TO_FIVE':
       return { hitCount: 1 }
     case 'MINION_CONTROL':
-      return { unmodelled: 'Minion Control: party-based hit count not modelled (no team concept in this engine)' }
+      // :1023-1040 -- `count = 1`, then +1 per OTHER eligible party member.
+      if (minionControlCount !== undefined) return { hitCount: minionControlCount }
+      return { unmodelled: 'Minion Control: party-based hit count not modelled (caller supplied no minionControlCount)' }
   }
 }
 
@@ -126,6 +128,43 @@ export interface MultiHitMoveData {
   multiHitArgument: number | null
   split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
   flags: Record<string, true>
+}
+
+/** The three fields IsMoveAffectedByParentalBond reads. Narrower than MultiHitMoveData
+ * (and matching sim/dataContext.ts's SimMoveData) so the simulator's Cmd_attackcanceler
+ * port can share the function without inventing a multiHitArgument it does not have. */
+export interface ParentalBondMoveData {
+  effect: string | null
+  split: 'PHYSICAL' | 'SPECIAL' | 'STATUS' | null
+  flags: Record<string, true>
+}
+
+/**
+ * IsMoveAffectedByParentalBond, src/battle_script_commands.c:13164-13184 -- the
+ * eligibility gate GetParentalBondType (:992) applies before the ability loop.
+ * Shared by multiHit.ts's resolveHitPlan (the calculator) and sim/attackCanceller.ts
+ * (Cmd_attackcanceler's :1083-1091 setup), so the two can never disagree.
+ *
+ * The checks run in the C's own order:
+ *   1. status move                     -> not eligible (:13165)
+ *   2. parentalBondBanned flag         -> not eligible (:13166)
+ *   3. Solar Beam in sun / Chloroplast -> ELIGIBLE, returns TRUE before the two-turn
+ *                                         check ever runs (:13167)
+ *   4. Electro Shot in rain            -> ELIGIBLE, same early return (:13168)
+ *   5. two-turn move without Accelerate -> not eligible (:13169)
+ *   6. the BATTLE_TYPE_DOUBLE target-count block (:13170-13181) is doubles-only;
+ *      this engine is singles, so it has no singles-relevant effect to port.
+ */
+export function isMoveAffectedByParentalBond(move: ParentalBondMoveData, attackerSlots: AbilitySlots, ctx: OnParentalBondContext): boolean {
+  if (move.split === 'STATUS' || move.flags.noParentalBond) return false
+  const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attackerSlots, id, () => false))
+  const twoTurnExempt =
+    (move.effect === 'EFFECT_SOLARBEAM' && (SUN_WEATHERS.has(ctx.weather) || hasChloroplast)) ||
+    (move.effect === 'EFFECT_ELECTRO_SHOT' && RAIN_WEATHERS.has(ctx.weather))
+  // BattlerHasAbility(battlerId, ABILITY_ACCELERATE, FALSE) -- the non-mold-breaker-
+  // suppressible form, hence the always-false suppression predicate.
+  if (!twoTurnExempt && isTwoTurnEffect(move.effect) && !battlerHasAbility(attackerSlots, 'ABILITY_ACCELERATE', () => false)) return false
+  return true
 }
 
 export function resolveHitPlan(
@@ -137,6 +176,10 @@ export function resolveHitPlan(
   scenarioHitCount: number,
   parentalBondCtx: OnParentalBondContext,
   scenarioBeatUpHitCount: number,
+  /** GetParentalBondCount's MINION_CONTROL branch (:1023-1040): the live party
+   * count the simulator can supply. Absent for the standalone calculator, which
+   * keeps the unmodelled result. */
+  minionControlCount?: number,
 ): HitPlanResult {
   // A move's own multi-hit effect (CANCELLER_MULTIHIT_MOVES, battle_util.c:3496-3542).
   if (move.effect === 'EFFECT_DOUBLE_HIT') {
@@ -172,26 +215,11 @@ export function resolveHitPlan(
 
   // Parental Bond family (IsMoveAffectedByParentalBond + GetParentalBondType/Count,
   // battle_script_commands.c:992-1004,1011-1040,13164-13184). The eligibility checks
-  // run in the C's own order:
-  //   1. status move                     -> not eligible (:13165)
-  //   2. parentalBondBanned flag         -> not eligible (:13166)
-  //   3. Solar Beam in sun / Chloroplast -> ELIGIBLE, returns TRUE before the two-turn
-  //                                         check ever runs (:13167)
-  //   4. Electro Shot in rain            -> ELIGIBLE, same early return (:13168)
-  //   5. two-turn move without Accelerate -> not eligible (:13169)
-  //   6. the BATTLE_TYPE_DOUBLE target-count block (:13170-13181) is doubles-only;
-  //      this engine is singles, so it has no singles-relevant effect to port.
-  if (move.split === 'STATUS' || move.flags.noParentalBond) return null
-  const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attackerSlots, id, () => false))
-  const twoTurnExempt =
-    (move.effect === 'EFFECT_SOLARBEAM' && (SUN_WEATHERS.has(parentalBondCtx.weather) || hasChloroplast)) ||
-    (move.effect === 'EFFECT_ELECTRO_SHOT' && RAIN_WEATHERS.has(parentalBondCtx.weather))
-  // BattlerHasAbility(battlerId, ABILITY_ACCELERATE, FALSE) -- the non-mold-breaker-
-  // suppressible form, hence the always-false suppression predicate.
-  if (!twoTurnExempt && isTwoTurnEffect(move.effect) && !battlerHasAbility(attackerSlots, 'ABILITY_ACCELERATE', () => false)) return null
+  // are isMoveAffectedByParentalBond's (see its doc for the C order).
+  if (!isMoveAffectedByParentalBond(move, attackerSlots, parentalBondCtx)) return null
   const trigger = computeParentalBondTrigger(attackerSlots, defenderSlots, parentalBondCtx)
   if (!trigger) return null
-  const countResult = parentalBondHitCount(trigger)
+  const countResult = parentalBondHitCount(trigger, minionControlCount)
   if ('unmodelled' in countResult) return countResult
   if (countResult.hitCount <= 1) return null
   return {

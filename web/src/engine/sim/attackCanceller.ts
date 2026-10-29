@@ -158,6 +158,10 @@ import { cancelMultiTurnMoves, isSoundMove, type StatusDeps } from './statusEffe
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { isGravityActive, type GroundingContext } from './grounding'
 import { NO_GROUNDING } from './endTurn'
+import { weatherFromBitfield } from './bridge'
+import { isMoveAffectedByParentalBond, parentalBondHitCount } from '../multiHit'
+import { computeParentalBondTrigger } from '../abilities/dispatchCalc'
+import type { OnParentalBondContext } from '../abilities/types'
 
 export const CANCEL_REASONS = [
   'SLEEP',
@@ -190,6 +194,31 @@ export interface AttackCancellerResult {
 }
 
 const bareType = (type: string | null | undefined): string => (type ?? '').replace(/^TYPE_/, '')
+
+/** All-empty AbilitySlots -- `GetParentalBondType` still needs a defender for
+ * HasFortKnox (battle_script_commands.c:1005-1008), which a null target cannot
+ * have, and an empty slot set reads exactly like a battler with no abilities. */
+const NO_ABILITY_SLOTS: AbilitySlots = { ability: null, innates: [null, null, null] }
+
+/**
+ * GetParentalBondCount's MINION_CONTROL branch, battle_script_commands.c:1020-1041:
+ * `count = 1`, then +1 for every party slot that is not the attacker's own
+ * (`FILTER(gBattlerPartyIndexes[gBattlerAttacker] != i)`) and has nonzero HP, a real
+ * species and no non-volatile status (`FILTER_NOT(GetMonData ... MON_DATA_STATUS)`).
+ * The egg filter (MON_DATA_SPECIES2 != SPECIES_EGG) is always true here -- eggs
+ * cannot occur (state.ts's SimPartyMon doc). No Random() draw.
+ */
+function getParentalBondCountMinionControl(state: BattleState, attackerId: number): number {
+  const attacker = state.battlers[attackerId]
+  const party = state.sides[attackerId & 1].party
+  let count = 1
+  for (let i = 0; i < party.length; i++) {
+    if (attacker && i === attacker.partyIndex) continue
+    const mon = party[i]
+    if (mon.hp !== 0 && mon.speciesId !== null && mon.status1 === 0) count++
+  }
+  return count
+}
 
 /**
  * Moves prevented under Gravity.
@@ -628,6 +657,57 @@ export function runAttackCanceller(
         attacker.turn.multiHitCounter = count
         break
       }
+    }
+  }
+
+  // Cmd_attackcanceler's Parental Bond setup, battle_script_commands.c:1082-1091:
+  //
+  //   if (!gTurnStructs[gBattlerAttacker].multiHitCounter) {
+  //       parentalBondTrigger = GetParentalBondType(...);
+  //       i = GetParentalBondCount(gBattlerAttacker, parentalBondTrigger);
+  //       if (i > 1) { multiHitCounter = parentalBondOn = parentalBondInitialCount = i; }
+  //   }
+  //
+  // It runs AFTER AtkCanceller_UnableToUseMove (:1081), i.e. after
+  // CANCELLER_MULTIHIT_MOVES had its chance to set the counter, so Parental Bond
+  // only applies when the move's own multi-hit logic left multiHitCounter at 0.
+  // Reached only on the not-cancelled path: every canceller branch above returns
+  // early, exactly as the C returns at :1081. No Random() anywhere in the setup.
+  if (!attacker.turn.multiHitCounter) {
+    const attackerSlots = attacker.mon.abilities
+    const defenderBattler = targetId !== null ? state.battlers[targetId] : undefined
+    const defenderSlots = defenderBattler ? defenderBattler.mon.abilities : NO_ABILITY_SLOTS
+    // The same two facts sim/damageResolver.ts feeds calculateMoveDamage's
+    // OnParentalBondContext: the scenario's moveType is `move.type ?? 'NORMAL'`
+    // (bare spelling) and its weather is weatherFromBitfield(state.field.weather)
+    // via buildFieldBattleState/buildFieldFacts.
+    const parentalBondCtx: OnParentalBondContext = {
+      moveType: bareType(move?.type) || 'NORMAL',
+      moveFlags: move?.flags ?? {},
+      weather: weatherFromBitfield(state.field.weather).weather,
+      attackerHeads: dataContext?.species(attacker.mon.speciesId)?.heads ?? 1,
+    }
+    if (move && isMoveAffectedByParentalBond(move, attackerSlots, parentalBondCtx)) {
+      const trigger = computeParentalBondTrigger(attackerSlots, defenderSlots, parentalBondCtx)
+      // The C always assigns parentalBondTrigger here, even when the type is
+      // MULTIHIT_SINGLE (0); the count switch then falls through to `return 1`.
+      attacker.turn.parentalBondTrigger = trigger ? `ABILITY_${trigger}` : null
+      if (trigger) {
+        const countResult = parentalBondHitCount(
+          trigger,
+          trigger === 'MINION_CONTROL' ? getParentalBondCountMinionControl(state, attackerId) : undefined,
+        )
+        const count = 'hitCount' in countResult ? countResult.hitCount : 1
+        if (count > 1) {
+          attacker.turn.multiHitCounter = count
+          attacker.turn.parentalBondOn = count
+          attacker.turn.parentalBondInitialCount = count
+        }
+      }
+    } else {
+      // Not eligible: GetParentalBondType's own IsMoveAffectedByParentalBond gate
+      // (:992) returns MULTIHIT_SINGLE without consulting any ability.
+      attacker.turn.parentalBondTrigger = null
     }
   }
 

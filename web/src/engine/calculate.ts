@@ -166,6 +166,12 @@ export interface DamageCalcScenario {
   beatUpBaseAttack: number
   /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
   beatUpHitCount: number
+  /** GetParentalBondCount's MINION_CONTROL branch (battle_script_commands.c:1023-1040):
+   * the live count of the attacker's other non-fainted, non-egg, non-status party
+   * members + 1. Only the simulator can supply it (sim/damageResolver.ts reads it
+   * off TurnState.parentalBondInitialCount); the standalone calculator leaves it
+   * unset, which keeps the "not modelled" result multiHit.ts has always returned. */
+  minionControlCount?: number
   /** gRoundStructs[battlerDef].glaiveRush (battle_util.c:7704) -- whether the
    * DEFENDER used Glaive Rush earlier this same turn (its own move effect sets
    * this on itself, making it take double damage from the next hit it takes
@@ -1458,6 +1464,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     scenario.hitCount,
     { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
     scenario.beatUpHitCount,
+    scenario.minionControlCount,
   )
   // scenario.singleHitIndex: the one hit the sim asked for. The hit plan still supplies the hit's modifier (a Parental
   // Bond bonus hit), and the index itself drives Triple Kick's power scaling.
