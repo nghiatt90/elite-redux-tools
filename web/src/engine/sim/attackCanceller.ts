@@ -29,11 +29,15 @@
 //                          backing store); nothing else in the sim writes it,
 //                          same as sleep/paralysis/confusion being externally
 //                          settable statuses a caller can construct directly.
-//   CANCELLER_RECHARGE    Unreachable -- STATUS2_RECHARGE's only writer in the
-//                          whole C tree is MOVE_EFFECT_RECHARGE
-//                          (battle_script_commands.c:2815), a move-effect Cmd
-//                          this sim does not run; grepped, no writer exists
-//                          anywhere in web/src/engine/sim either.
+//   CANCELLER_RECHARGE    Ported -- STATUS2_RECHARGE's writer is the
+//                          MOVE_EFFECT_RECHARGE move effect
+//                          (battle_script_commands.c:2813-2819, reached from
+//                          BattleScript_EffectRecharge), which also arms
+//                          volatiles.rechargeTimer = 2. It is ported at
+//                          moveEffects.ts, searched as
+//                          `baseEffectNum === MOVE_EFFECT_RECHARGE` (~line 12330).
+//                          This branch rejects the forced next move and clears
+//                          the flag plus the timer (:3296-3297).
 //   CANCELLER_FLINCH      Ported.
 //   CANCELLER_DISABLED    Ported (:3315-3325) -- cancels move if it matches
 //                          volatiles.disabledMove.
@@ -453,6 +457,9 @@ export function runAttackCanceller(
   // CANCELLER_FLINCH, :3305-3314.
   if (hasFlag(attacker.mon.status2, STATUS2_FLINCHED) && !state.processingExtraAttacks) {
     attacker.round.flinchImmobility = true
+    // :3308 -- `CancelMultiTurnMoves(gBattlerAttacker)`, the same call the recharge branch
+    // makes: a flinch also breaks a charge in progress (Fly's MULTIPLETURNS/SEMI_INVULNERABLE).
+    cancelMultiTurnMoves(attacker)
     attacker.round.attackCancelled = true
     return { cancelledBy: 'FLINCH', confusionSelfHitDamage: null }
   }
