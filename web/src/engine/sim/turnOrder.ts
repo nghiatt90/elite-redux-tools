@@ -79,10 +79,18 @@ import {
   STATUS1_BLEED,
   STATUS1_PARALYSIS,
   STATUS2_TRANSFORMED,
+  STATUS3_EMBARGO,
+  STATUS3_GASTRO_ACID,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   hasFlag,
 } from './constants'
+// IsUnsuppressableAbility's own population (battle_util.c:4788). aiAbilityHelpers
+// imports only ./state (type-only), ./constants and ../abilities/dispatch at
+// runtime, so this adds no runtime cycle.
+import { UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
+
+const UNSUPPRESSABLE_SET = new Set(UNSUPPRESSABLE_ABILITIES)
 
 /** `GetBattlerTotalSpeedStat`'s calcType argument -- include/battle_main.h:83-86.
  * QUASH is the interesting one: it skips ability speed modifiers, Tailwind,
@@ -392,6 +400,16 @@ export function getMovePriority(state: BattleState, battlerId: number, move: Tur
     holderMaxHp: battler.mon.maxHp,
     targetHp: targetId === null ? null : (state.battlers[targetId]?.mon.hp ?? null),
     targetMaxHp: targetId === null ? null : (state.battlers[targetId]?.mon.maxHp ?? null),
+    // IsSuppressed(holder, ability, checkMoldBreaker=FALSE), battle_util.c:9254-9261.
+    // FALSE only disables the Mold Breaker branch; the Gastro Acid /
+    // Neutralizing Gas branch still applies and returns `!DoesBattlerHaveAbilityShield`.
+    // No ability in the snapshot has `blocksAbilitySuppression`, so the shield is
+    // the item check alone (battle_util.c:6539-6544) -- Ability Shield is the only
+    // item whose resolved hold effect is HOLD_EFFECT_ABILITY_SHIELD.
+    isSuppressed: (id) =>
+      (state.field.timers.neutralizingGas || hasFlag(battler.statuses3, STATUS3_GASTRO_ACID)) &&
+      !UNSUPPRESSABLE_SET.has(id) &&
+      !(battler.mon.itemId === 'ITEM_ABILITY_SHIELD' && !hasFlag(battler.statuses3, STATUS3_EMBARGO)),
   })
 
   if (move.effect === 'EFFECT_GRASSY_GLIDE' && move.isGrassyTerrainAffected) priority++

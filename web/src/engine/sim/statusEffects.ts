@@ -60,6 +60,7 @@ import {
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext } from './dataContext'
+import { resolveEffectiveMoveType } from '../abilities/dispatchCalc'
 import { SOUNDPROOF_ABILITIES } from './ai/aiAbilityHelpers'
 // ON_ABILITY's reverse slot order (battle_util.h:269-275). accuracy.ts has no
 // dependency on statusEffects, so this import closes no runtime cycle.
@@ -717,9 +718,10 @@ export function isSoundMove(
 
 /**
  * IsKeenEdge, src/battle_util.c:9381:
- * DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_KEEN_EDGE).
+ * DoesMoveMatchFlag(battler, move, GetTypeBeforeUsingMove(move, battler), MOVE_FLAG_KEEN_EDGE).
  * Checks move's static sliceBased flag (mapped to keen_edge in codegen/proto),
- * and falls back to onModifyMoveFlags abilities (Chestnut Axe for Grass moves).
+ * and falls back to onModifyMoveFlags abilities (Chestnut Axe for Grass moves,
+ * tested against the RESOLVED type).
  * Gaps by name when attacker has an ability modifying move flags.
  */
 export function isKeenEdgeMove(
@@ -736,8 +738,15 @@ export function isKeenEdgeMove(
   const attacker = state.battlers[attackerId]
   if (!attacker) return false
 
+  // The C passes GetTypeBeforeUsingMove as DoesMoveMatchFlag's third argument
+  // (battle_util.c:9381), i.e. the RESOLVED type, not the declared one. Only
+  // Chestnut Axe's grant reads it (`moveType == TYPE_GRASS`, abilities.cc:11709),
+  // and an "-ate" ability such as Fertilize can turn a Normal move into Grass.
+  const resolvedType = moveData?.type
+    ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
+    : null
   if (
-    moveData?.type === 'GRASS' &&
+    resolvedType === 'GRASS' &&
     battlerHasSimAbility(state, attacker, 'ABILITY_CHESTNUT_AXE', false, attackerId, false, deps.dataContext)
   ) {
     return true

@@ -9,11 +9,12 @@
 //     every qualifying slot's delta is added, so a mon holding two priority
 //     abilities gets both. forEachAbility's callback returning nothing rather
 //     than 'break' is what preserves that.
-//   - checkMoldBreaker is FALSE, so NEVER_SUPPRESSED is the right predicate --
-//     the same choice dispatchCalc makes for every other FALSE call site. Gastro
-//     Acid and Neutralizing Gas suppression (IsSuppressed's other half,
-//     src/battle_util.c:9254-9258) is not modelled anywhere in this engine yet;
-//     this follows that existing gap rather than opening a new one.
+//   - checkMoldBreaker is FALSE, which turns off ONLY the Mold Breaker branch of
+//     IsSuppressed (src/battle_util.c:9254-9258). The Gastro Acid / Neutralizing
+//     Gas branch is not gated on that argument at all, so a suppressed holder's
+//     priority abilities must not fire. The caller supplies that predicate
+//     (`isSuppressed` below); the default is the neutral one for callers whose
+//     holder is known unsuppressed.
 //
 // This lives outside dispatchCalc.ts because it is not part of the damage path:
 // nothing here reaches a damage number, and dispatchCalc's module doc scopes it
@@ -32,9 +33,9 @@ import { isIronFistBoosted } from './dispatchCalc'
 import './impl/index'
 import type { OnPriorityContext } from './types'
 
-/** IsSuppressed(battler, ability, checkMoldBreaker=FALSE) -- battle_main.c:4264
- * passes FALSE, so the Mold Breaker half never applies. Declared locally rather
- * than imported because dispatchCalc keeps its own copy private. */
+/** IsSuppressed(battler, ability, checkMoldBreaker=FALSE): FALSE disables the
+ * Mold Breaker half, but Gastro Acid / Neutralizing Gas still suppress. Callers
+ * that know nothing suppresses the holder pass this neutral predicate. */
 const NEVER_SUPPRESSED = (): boolean => false
 
 /** Everything getMovePriority knows about the move and the two battlers, minus
@@ -55,6 +56,10 @@ export interface PriorityDispatchInputs {
   holderMaxHp: number
   targetHp: number | null
   targetMaxHp: number | null
+  /** IsSuppressed(holder, ability, checkMoldBreaker=FALSE) for the holder's own
+   * slots. Optional so pure callers can omit it; the sim supplies the real
+   * predicate (Gastro Acid / Neutralizing Gas / Ability Shield). */
+  isSuppressed?: (abilityId: string) => boolean
 }
 
 /** Sums every ability slot's onPriority delta. Returns 0 when the holder has no
@@ -78,7 +83,7 @@ export function computeAbilityPriorityBonus(inputs: PriorityDispatchInputs): num
   }
 
   let total = 0
-  forEachAbility(inputs.holderSlots, NEVER_SUPPRESSED, (impl) => {
+  forEachAbility(inputs.holderSlots, inputs.isSuppressed ?? NEVER_SUPPRESSED, (impl) => {
     if (!impl.onPriority) return
     total += impl.onPriority(ctx)
   })
