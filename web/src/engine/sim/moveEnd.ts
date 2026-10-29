@@ -164,6 +164,7 @@ import {
   isPowderImmune,
   isPreventableSecondaryEffect,
   isSoundMove,
+  isStrikerMove,
   setOnMoveEffectReactionFlags,
   testSheerForceFlag,
 } from './statusEffects'
@@ -980,6 +981,22 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   // Cycle 96: Soul Linker's onAttacker half (abilities.cc:4273-4285), Temporal Rupture (:10043-10067)
   'ABILITY_SOUL_LINKER',
   'ABILITY_TEMPORAL_RUPTURE',
+  // Cycle 106: on-hit attacker status/heal batch -- Arc Flash (:8082-8090), Hypnotic Trance (:12593-12601),
+  // Icicle Fist (:12500-12508), Laser Drill (:11007-11015), Piercing Solo (:8011-8019), Radio Jam (:7544-7552),
+  // Sharp Talons (:11345-11353), Shocking Jaws (:5716-5724), Shocking Maw (:8822-8823), Stun Shock (:8917-8933),
+  // Light Saber (:11021-11038), Hydro Circuit (:5368-5380).
+  'ABILITY_ARC_FLASH',
+  'ABILITY_HYPNOTIC_TRANCE',
+  'ABILITY_ICICLE_FIST',
+  'ABILITY_LASER_DRILL',
+  'ABILITY_PIERCING_SOLO',
+  'ABILITY_RADIO_JAM',
+  'ABILITY_SHARP_TALONS',
+  'ABILITY_SHOCKING_JAWS',
+  'ABILITY_SHOCKING_MAW',
+  'ABILITY_STUN_SHOCK',
+  'ABILITY_LIGHT_SABER',
+  'ABILITY_HYDRO_CIRCUIT',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -4019,6 +4036,189 @@ function handleAttackerMoveEndAbility(
       state.rng.random16() % 100 < 30
     ) {
       applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // ---- Cycle 106: on-hit attacker abilities. ShouldApplyOnHitEffect(target) == DidMoveHit() && IsBattlerAlive(target)
+  // (src/battle_util.c:4058-4062: WasMoveSuccessful() = !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) && attacker != target,
+  // DidMoveHit() = WasMoveSuccessful() && TARGET_TURN_DAMAGED), read with the same approximation the Impaler block uses
+  // (target alive, hpDealt > 0, attacker != target). The roll is always drawn last, after every earlier CHECK passes.
+
+  // Arc Flash (src/abilities.cc:8082-8090): CanBeParalyzed(battler, target), then the 50% roll, then AbilityStatusEffect(MOVE_EFFECT_PARALYSIS).
+  // Its onDefender half (:8091-8097) is separate and untouched.
+  if (abilityId === 'ABILITY_ARC_FLASH') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeParalyzed(state, attackerId, targetId, statusDeps) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_PARALYSIS, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Hypnotic Trance (src/abilities.cc:12593-12601): move == MOVE_HYPNOSIS, WasMoveSuccessful(), CanBeConfused(target), no roll.
+  // WasMoveSuccessful (src/battle_util.c:4058) = !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) && gBattlerAttacker != gBattlerTarget,
+  // which the dispatcher supplies as `noEffect` (MoveEndAbilitiesContext.noEffect). Undefined (test dispatch) is treated as success.
+  if (abilityId === 'ABILITY_HYPNOTIC_TRANCE') {
+    if (
+      moveId === 'MOVE_HYPNOSIS' &&
+      !noEffect &&
+      attackerId !== targetId &&
+      canBeConfused(state, targetId, attackerId, statusDeps)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_CONFUSION, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Icicle Fist (src/abilities.cc:12500-12508): IsIronFistBoosted(battler, move) (DoesMoveMatchFlag(... MOVE_FLAG_PUNCH),
+  // battle_util.c:9375), CanGetFrostbite(target), then the 30% roll, then AbilityStatusEffect(MOVE_EFFECT_FROSTBITE).
+  if (abilityId === 'ABILITY_ICICLE_FIST') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS') &&
+      canGetFrostbite(state, targetId, attackerId, statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_FROSTBITE, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Laser Drill (src/abilities.cc:11007-11015): CanBeBurned(target), gBattleMoves[move].hornBased, then the 50% roll,
+  // then AbilityStatusEffect(MOVE_EFFECT_BURN).
+  if (abilityId === 'ABILITY_LASER_DRILL') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.hornBased) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Piercing Solo (src/abilities.cc:8011-8019): CanBleed(target), IsSoundMove(battler, move), no roll,
+  // then AbilityStatusEffect(MOVE_EFFECT_BLEED).
+  if (abilityId === 'ABILITY_PIERCING_SOLO') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBleed(state, targetId, attackerId, statusDeps) &&
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Radio Jam (src/abilities.cc:7544-7552): CanBeDisabled(target), IsSoundMove(battler, move), then the 20% roll,
+  // then AbilityStatusEffect(MOVE_EFFECT_DISABLE). applyAbilityOnHitStatus's 'DISABLE' branch carries the script's own
+  // CanBeDisabled + DisableLastUsedMove writes (battle_script_commands.c:2955-2959, :10714-10737).
+  if (abilityId === 'ABILITY_RADIO_JAM') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeDisabled(state, targetId, attackerId, statusDeps) &&
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      state.rng.random16() % 100 < 20
+    ) {
+      applyAbilityOnHitStatus(state, 'DISABLE', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Sharp Talons (src/abilities.cc:11345-11353): DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_KICK) -- statusEffects.ts
+  // isStrikerMove, the same helper IsStrikerBoosted uses (:9377) -- then CanBleed(target), then the 50% roll,
+  // then AbilityStatusEffect(MOVE_EFFECT_BLEED).
+  if (abilityId === 'ABILITY_SHARP_TALONS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isStrikerMove(state, attackerId, moveId, statusDeps) &&
+      canBleed(state, targetId, attackerId, statusDeps) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Shocking Jaws (src/abilities.cc:5716-5724) / Shocking Maw (:8822-8823, `Impl<ABILITY_SHOCKING_JAWS>.onAttacker`):
+  // CanBeParalyzed(battler, target), FLAG_STRONG_JAW_BOOST (= flags.biteBased), then the 50% roll,
+  // then AbilityStatusEffect(MOVE_EFFECT_PARALYSIS).
+  if (abilityId === 'ABILITY_SHOCKING_JAWS' || abilityId === 'ABILITY_SHOCKING_MAW') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeParalyzed(state, attackerId, targetId, statusDeps) &&
+      Boolean(moveData?.flags?.biteBased) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_PARALYSIS, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Stun Shock (src/abilities.cc:8917-8933): the 60% roll, then switch (Random() % 2); both rolls are drawn after
+  // ShouldApplyOnHitEffect passes, and the %2 roll is consumed even when the branch's own CHECK fails.
+  // case 0: CanBePoisoned(battler, target, MOVE_NONE) then MOVE_EFFECT_POISON; case 1: CanBeParalyzed(battler, target)
+  // then MOVE_EFFECT_PARALYSIS.
+  if (abilityId === 'ABILITY_STUN_SHOCK') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      state.rng.random16() % 100 < 60
+    ) {
+      const branch = state.rng.random16() % 2
+      if (branch === 0 && canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_POISON, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      } else if (branch === 1 && canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_PARALYSIS, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Light Saber (src/abilities.cc:11021-11038): DoesMoveMatchFlag(... MOVE_FLAG_KEEN_EDGE) (isKeenEdgeMove), then the 50% roll,
+  // then switch (Random() % 4): case 0 CanBeBurned(target) -> MOVE_EFFECT_BURN; case 1 CanBeParalyzed(battler, target) ->
+  // MOVE_EFFECT_PARALYSIS; default nothing. Draw order is the %2 roll followed by the %4 roll.
+  if (abilityId === 'ABILITY_LIGHT_SABER') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      const branch = state.rng.random16() % 4
+      if (branch === 0 && canBeBurned(state, targetId, attackerId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      } else if (branch === 1 && canBeParalyzed(state, attackerId, targetId, statusDeps)) {
+        applyAbilityOnHitStatus(state, MOVE_EFFECT_PARALYSIS, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Hydro Circuit (src/abilities.cc:5368-5380): ShouldApplyOnHitEffect(battler) -- the ATTACKER, so attacker alive and the
+  // move hit -- then not at max HP, CanBattlerHeal(battler), moveType == TYPE_WATER. gBattleMoveDamage = -gHpDealt / 4
+  // (s32 division truncating toward zero), bumped to -1 when zero; BattleScript_HydroCircuitAbsorbEffectActivated
+  // (battle_scripts_1.s:11563-11570) runs manipulatedamage DMG_TO_HP_FROM_ABILITY (GetDrainedBigRootHp, battle_util.c:2369-2377)
+  // and heals BS_ATTACKER (healthbarupdate/datahpupdate BS_ATTACKER). moveType is GET_MOVE_TYPE's resolved type (battle_util.c:9019).
+  if (abilityId === 'ABILITY_HYDRO_CIRCUIT') {
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      attacker.mon.hp < attacker.mon.maxHp &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+      moveTypeName() === 'WATER'
+    ) {
+      healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 4)), deps)
     }
   }
 

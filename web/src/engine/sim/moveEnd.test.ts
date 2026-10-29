@@ -953,15 +953,15 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps an unported attacker ability (ABILITY_ARC_FLASH) on damaging hit', () => {
+  it('conditionally gaps an unported attacker ability (ABILITY_BLOOD_STAIN) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_ARC_FLASH'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_BLOOD_STAIN'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_ARC_FLASH is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_BLOOD_STAIN is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1152,13 +1152,14 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 112 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 124 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
       'ABILITY_AFTERSHOCK',
       'ABILITY_ANGELS_WRATH',
       'ABILITY_ARCHMAGE',
+      'ABILITY_ARC_FLASH',
       'ABILITY_ASSASSINS_TOOLS',
       'ABILITY_ATOMIC_BURST',
       'ABILITY_BACKFLIP',
@@ -1209,13 +1210,18 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_HAUNTING_FRENZY',
       'ABILITY_HIGH_TIDE',
       'ABILITY_HYDRATE',
+      'ABILITY_HYDRO_CIRCUIT',
       'ABILITY_HYPNOTIC_TOUCH',
+      'ABILITY_HYPNOTIC_TRANCE',
+      'ABILITY_ICICLE_FIST',
       'ABILITY_ILLUMINATE',
       'ABILITY_IMMOLATE',
       'ABILITY_IMPALER',
       'ABILITY_INTOXICATE',
       'ABILITY_KOMODO',
+      'ABILITY_LASER_DRILL',
       'ABILITY_LEAD_CLAWS',
+      'ABILITY_LIGHT_SABER',
       'ABILITY_LOUD_BANG',
       'ABILITY_LUNAR_WRATH',
       'ABILITY_MAGICAL_DUST',
@@ -1225,6 +1231,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_MOLTEN_BLADES',
       'ABILITY_MOLTEN_COAT',
       'ABILITY_PICKPOCKET',
+      'ABILITY_PIERCING_SOLO',
       'ABILITY_PINNACLE_BLADE',
       'ABILITY_PIXILATE',
       'ABILITY_POISON_POINT',
@@ -1234,10 +1241,14 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_PURE_LOVE',
       'ABILITY_PURPLE_HAZE',
       'ABILITY_PYRO_SHELLS',
+      'ABILITY_RADIO_JAM',
       'ABILITY_RAZOR_SHARP',
       'ABILITY_REFRIGERATE',
       'ABILITY_RESONANCE',
       'ABILITY_SERPENT_BIND',
+      'ABILITY_SHARP_TALONS',
+      'ABILITY_SHOCKING_JAWS',
+      'ABILITY_SHOCKING_MAW',
       'ABILITY_SLUDGE_SPIT',
       'ABILITY_SLUDGY_MIX',
       'ABILITY_SMOLDERING_WOOD',
@@ -1249,6 +1260,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_STATIC',
       'ABILITY_STENCH',
       'ABILITY_STRIKER_PIXILATE',
+      'ABILITY_STUN_SHOCK',
       'ABILITY_SUPER_HOT_GOO',
       'ABILITY_TEMPORAL_RUPTURE',
       'ABILITY_TENDER_AFFECTION',
