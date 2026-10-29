@@ -942,7 +942,8 @@ describe('State Bookkeeping & Clear Bits', () => {
 })
 
 describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
-  it('conditionally gaps defender contact ability (ABILITY_AFTERMATH) on damaged target', () => {
+  // Cycle 109 ported Aftermath's onDefender half; a surviving holder queues nothing (CHECK_NOT(IsBattlerAlive)).
+  it('no longer gaps (ABILITY_AFTERMATH) when the holder survives the hit', () => {
     const state = battle(
       [{ hp: 100, maxHp: 100 }, { hp: 100, maxHp: 100, abilities: { ability: ABILITY_AFTERMATH, innates: [null, null, null] } }],
       scriptedRng(),
@@ -950,12 +951,12 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
+    expect(act.unmodelled).not.toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
+    expect(state.queuedExtraAttacks).toHaveLength(0)
   })
 
-  // ABILITY_TALON_TRAP is the last ON_ATTACKER_ABILITIES entry that is still not ported (its wrap half needs
-  // wrapAbility / wrappedMove state and the isFirstTurn ability-state gate; see cycle 109's queue).
-  it('conditionally gaps an unported attacker ability (ABILITY_TALON_TRAP) on damaging hit', () => {
+  // Cycle 109 ported Talon Trap's on-either half (ON_EITHER_ABILITY): a contact hit wraps the target.
+  it('no longer gaps (ABILITY_TALON_TRAP) on a damaging contact hit', () => {
     const state = battle(
       [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_TALON_TRAP'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
@@ -963,7 +964,9 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_TALON_TRAP is not modelled yet')
+    expect(act.unmodelled).not.toContain('move-end attacker ability ABILITY_TALON_TRAP is not modelled yet')
+    expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
+    expect(state.wrappedBy[1]).toBe(0)
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1041,8 +1044,9 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 109 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 113 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
+      'ABILITY_AFTERMATH',
       'ABILITY_ANGER_POINT',
       'ABILITY_ANGER_SHELL',
       'ABILITY_APE_SHIFT',
@@ -1060,6 +1064,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_CRISPY_CREAM',
       'ABILITY_CROWNED_SHIELD',
       'ABILITY_CROWNED_SWORD',
+      'ABILITY_CRYO_ARCHITECT',
       'ABILITY_CRYO_PROFICIENCY',
       'ABILITY_CURSED_BODY',
       'ABILITY_CUTE_CHARM',
@@ -1082,6 +1087,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_GOING_BERSERK',
       'ABILITY_GOOEY',
       'ABILITY_GUILT_TRIP',
+      'ABILITY_GULP_MISSILE',
       'ABILITY_HAUNTED_SPIRIT',
       'ABILITY_HYPNOTIC_TOUCH',
       'ABILITY_ICE_DOWNFALL',
@@ -1132,6 +1138,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_STRIKEOUT',
       'ABILITY_SUPERSWEET_SYRUP',
       'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TALON_TRAP',
       'ABILITY_TANGLING_HAIR',
       'ABILITY_TENDER_AFFECTION',
       'ABILITY_THERMAL_ENTROPY',
@@ -1156,7 +1163,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 144 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 145 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1278,6 +1285,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_STRIKER_PIXILATE',
       'ABILITY_STUN_SHOCK',
       'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TALON_TRAP',
       'ABILITY_TANGLED_TAILS',
       'ABILITY_TEMPORAL_RUPTURE',
       'ABILITY_TENDER_AFFECTION',

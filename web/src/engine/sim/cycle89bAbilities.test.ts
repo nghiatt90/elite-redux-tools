@@ -730,11 +730,17 @@ describe('Cycle 89b - Color Spectrum (src/abilities.cc:8736-8754)', () => {
 })
 
 describe('Cycle 89b - still-unported hooks keep reporting themselves', () => {
-  for (const id of ['ABILITY_COOL_EXIT', 'ABILITY_CRYO_ARCHITECT']) {
-    it(`${id} is reported as an unrun end-turn hook`, () => {
-      const s = battle([{ abilities: hasAbility(id) }, {}], countingRng())
-      const { unmodelled } = endTurn(s)
-      expect(unmodelled).toContain(GAP(0, id))
-    })
-  }
+  it('ABILITY_COOL_EXIT is reported as an unrun end-turn hook', () => {
+    const s = battle([{ abilities: hasAbility('ABILITY_COOL_EXIT') }, {}], countingRng())
+    const { unmodelled } = endTurn(s)
+    expect(unmodelled).toContain(GAP(0, 'ABILITY_COOL_EXIT'))
+  })
+
+  // Cycle 109 added the real `case 'ABILITY_CRYO_ARCHITECT'` to endTurn.ts (:9592-9601), so the note
+  // disappears because the hook now runs -- not because the id was removed from a name list.
+  it('ABILITY_CRYO_ARCHITECT is handled, so its end-turn hook note is gone', () => {
+    const s = battle([{ abilities: hasAbility('ABILITY_CRYO_ARCHITECT') }, {}], countingRng())
+    const { unmodelled } = endTurn(s)
+    expect(unmodelled).not.toContain(GAP(0, 'ABILITY_CRYO_ARCHITECT'))
+  })
 })

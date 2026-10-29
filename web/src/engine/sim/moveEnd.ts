@@ -120,7 +120,7 @@ import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted, resolveEffectiveMov
 import { battlerHasAbility } from '../abilities/dispatch'
 import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
-import { canBattlerHeal, isMagicGuardProtected, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
+import { canBattlerHeal, getAbilityStateOf, isMagicGuardProtected, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import { syncPartyHp } from './outcome'
 import { resolveMultihitType } from './attackCanceller'
@@ -848,6 +848,11 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_CHUCKSTER', // Cycle 98b (:10438-10463, schedules the attacker's switch)
   'ABILITY_RESTRAINING_ORDER', // Cycle 98b (:8579-8597, drain sets the state and switches the attacker)
   'ABILITY_PETAL_SHIELD', // Cycle 108b (:12438-12446, own Defense -1 on every hit that passes the checks)
+  // Cycle 109 defender halves
+  'ABILITY_CRYO_ARCHITECT', // (:9602-9633, Water arms bit 1 / Ice raises Def, Atk +1 either way)
+  'ABILITY_AFTERMATH', // (:1663-1670, UseOutOfTurnAttack Explosion/Outburst after the holder faints)
+  'ABILITY_GULP_MISSILE', // (:3289-3301, revert form, attacker loses maxHP/4 + paralysis or Def -1)
+  'ABILITY_TALON_TRAP', // ON_EITHER (:4713-4730), wraps the attacker on contact
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -1035,6 +1040,8 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_WOODLAND_CURSE',
   'ABILITY_WRESTLE_SHOWMAN',
   'ABILITY_YUKI_ONNA',
+  // Cycle 109: Talon Trap, onAttacker half (ON_EITHER_ABILITY, abilities.cc:4713-4730, :54)
+  'ABILITY_TALON_TRAP',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -1337,6 +1344,68 @@ export interface MoveEndAbilitiesResult {
   attackerDamage: number
   statChanges: StatChangeOutcome[]
   statusApplied: StatusAppliedOutcome | null
+}
+
+/**
+ * ON_EITHER(TalonTrap), src/abilities.cc:4713-4730. ON_EITHER's signature is
+ * `(ability, battler, opponent, move, moveType)` (:53) and
+ * HandleAttackerAbility/HandleDefenderAbility (:9034 / :9075) pass
+ * `(battler = holder, opponent = target | attacker)`, so `battler`/`holderId` is
+ * always the Talon Trap holder and `opponentId` the battler it wraps:
+ *  - onAttacker: holder = attacker, opponent = target;
+ *  - onDefender: holder = defender, opponent = attacker.
+ * Body, as written: ShouldApplyOnHitEffect(opponent) (DidMoveHit && the opponent
+ * alive, battle_util.c:4062), IsBattlerAlive(holder), contact, opponent not
+ * already wrapped, then `isFirstTurn == 2 || GetAbilityState(holder) ||
+ * Random() % 100 < 50` (the Random draw is short-circuited away by the first two
+ * operands). The five writes are the Grip Pincer branch's (abilities.cc:4697-4704):
+ * SetOnMoveEffectReactionFlags(holder, opponent, MOVE_EFFECT_WRAP), STATUS2_WRAPPED,
+ * wrapTurns = WrapDuration(holder) (battle_script_commands.c:2300-2309),
+ * wrapAbility = the ability, wrappedMove/wrappedBy.
+ * Returns true when the wrap was applied.
+ */
+function tryTalonTrapWrap(
+  state: BattleState,
+  deps: TurnLoopDeps,
+  holderId: number,
+  opponentId: number,
+  attackerId: number,
+  moveData: SimMoveData | undefined,
+  targetDamage: number,
+  attackerHoldEffect: string | null,
+): boolean {
+  const holder = state.battlers[holderId]
+  const opponent = state.battlers[opponentId]
+  if (!holder || !opponent) return false
+  if (!(targetDamage > 0 && opponent.mon.hp > 0)) return false // ShouldApplyOnHitEffect(opponent)
+  if (holder.mon.hp === 0) return false // IsBattlerAlive(battler)
+  // IsMoveMakingContact(move, gBattlerAttacker): the MOVE USER's Long Reach /
+  // Protective Pads / Punching Glove, not the holder's -- they are the same
+  // battler only in the onAttacker half.
+  const moveUser = state.battlers[attackerId]
+  if (!moveUser || !isMoveMakingContact(moveData, moveUser, attackerHoldEffect)) return false
+  if (hasFlag(opponent.mon.status2, STATUS2_WRAPPED)) return false // CHECK_NOT(... STATUS2_WRAPPED)
+
+  // CHECK(isFirstTurn == 2 || GetAbilityState(battler, ability) || Random() % 100 < 50)
+  if (holder.volatiles.isFirstTurn !== 2 && !getAbilityStateOf(holder, 'ABILITY_TALON_TRAP')) {
+    if (state.rng.random16() % 100 >= 50) return false
+  }
+
+  // SetOnMoveEffectReactionFlags(battler, opponent, MOVE_EFFECT_WRAP) (:4722)
+  setOnMoveEffectReactionFlags(state, holderId, opponentId, MOVE_EFFECT_WRAP, { dataContext: deps.dataContext, grounding: deps.grounding })
+  // gBattleMons[opponent].status2 |= STATUS2_WRAPPED (:4723)
+  opponent.mon.status2 = setFlag(opponent.mon.status2, STATUS2_WRAPPED)
+  // gVolatileStructs[opponent].wrapTurns = WrapDuration(battler) (:4724, battle_script_commands.c:2300-2309)
+  const hasGrappler = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK'].some((ab) =>
+    battlerHasSimAbility(state, holder, ab, false, holderId, false, deps.dataContext),
+  )
+  const hasGripClaw = deps.grounding.holdEffectOf(holderId) === 'HOLD_EFFECT_GRIP_CLAW'
+  opponent.volatiles.wrapTurns =
+    hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
+  opponent.volatiles.wrapAbility = 'ABILITY_TALON_TRAP' // (:4725)
+  state.wrappedMove[opponentId] = 'MOVE_SNAP_TRAP' // (:4727)
+  state.wrappedBy[opponentId] = holderId // (:4728)
+  return true
 }
 
 function handleDefenderMoveEndAbility(
@@ -1875,8 +1944,15 @@ function handleDefenderMoveEndAbility(
     }
   }
 
-  if (abilityId === 'ABILITY_BALLOON_BOMBER' && target.mon.hp <= 0) {
-    unmodelled.push("Balloon Bomber's Aftermath half (UseOutOfTurnAttack Explosion/Outburst on faint, abilities.cc:7761) is not modelled")
+  // Balloon Bomber (src/abilities.cc:7759-7762) is Aftermath.onDefender || Inflatable.onDefender.
+  // Aftermath's body returns FALSE unconditionally, so `||` never short-circuits the Inflatable half
+  // below: both always run, in that order. This is the Aftermath half (use the Balloon Bomber id in
+  // the queued action, because that is the `ability` the C's hook was called with).
+  if (abilityId === 'ABILITY_BALLOON_BOMBER') {
+    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+      const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
+    }
   }
 
   // 12. Inflatable family (src/abilities.cc:3861-3868, 7761, 9282, data/battle_scripts_1.s:9075-9096)
@@ -2303,6 +2379,61 @@ function handleDefenderMoveEndAbility(
     }
   }
 
+  // Cryo Architect onDefender (src/abilities.cc:9602-9633). CHECK(ShouldApplyOnHitEffect(battler)) ->
+  // the holder is alive and the hit dealt damage (the neighbouring defender reading); CHECK(moveType
+  // == WATER || ICE). If Def can still rise (CanRaiseStat == CompareStat(..., CMP_LESS_THAN), :9610):
+  // a Water move only arms bit 1 of the ability state (`state |= 1 << 1`, :9612-9615) -- the raise
+  // happens two end turns later, see endTurn.ts -- while an Ice move raises Def by 1 at once (:9617-9620,
+  // BattleScript_TargetAbilityStatRaiseOnMoveEnd == Steam Engine's script, so the same ChangeStatBuffs).
+  // Independent of that branch, Atk rises by 1 whenever it can, for either type (:9624-9628).
+  // SetStatChanger + BattleScriptCall(TargetAbilityStatRaiseOnMoveEnd) is transcribed as the
+  // Steam Engine / Thermal Exchange changeStatBuffs calls just above.
+  if (abilityId === 'ABILITY_CRYO_ARCHITECT') {
+    if (target.mon.hp > 0 && targetDamage > 0 && moveTypeMatches(moveData, 'WATER', 'ICE')) {
+      const isWater = moveTypeMatches(moveData, 'WATER')
+      if (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
+        if (isWater) {
+          target.volatiles.abilityState[slotIndex] = (target.volatiles.abilityState[slotIndex] ?? 0) | (1 << 1)
+        } else {
+          const defRes = changeStatBuffs(
+            state,
+            targetId,
+            attackerId,
+            targetId,
+            1,
+            STAT_DEF,
+            STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+            false,
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          if (defRes.delta !== 0) {
+            result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
+          }
+        }
+      }
+      if (canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
+        const atkRes = changeStatBuffs(
+          state,
+          targetId,
+          attackerId,
+          targetId,
+          1,
+          STAT_ATK,
+          STAT_BUFF_NOT_PROTECT_AFFECTED | MOVE_EFFECT_CERTAIN,
+          false,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (atkRes.delta !== 0) {
+          result.statChanges.push({ battlerId: targetId, stat: STAT_ATK, change: atkRes.delta })
+        }
+      }
+    }
+  }
+
   // 28. Electromorphosis family (src/abilities.cc:5299-5308, 5313)
   if (abilityId === 'ABILITY_ELECTROMORPHOSIS' || abilityId === 'ABILITY_ATOMIC_BURST') {
     if (target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
@@ -2658,6 +2789,17 @@ function handleDefenderMoveEndAbility(
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
     }
   }
+  // Aftermath's own onDefender (src/abilities.cc:1663-1670): CHECK_NOT(IsBattlerAlive(battler)), then
+  // UseOutOfTurnAttack(battler, attacker, ability, highestStat == STAT_SPATK ? MOVE_OUTBURST :
+  // MOVE_EXPLOSION, 100) and return FALSE. Exactly the Unstable Core body above (:12525-12528 aliases
+  // this hook); both moves are EFFECT_EXPLOSION, so queueOutOfTurnAttack permits the fainted holder
+  // (battle_util.c:3764).
+  if (abilityId === 'ABILITY_AFTERMATH') {
+    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+      const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
+      queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
+    }
+  }
 
   // 50. Wandering Spirit (src/abilities.cc:3490-3515; BattleScript_WanderingSpiritActivates bs1:10242-10248, ..._Swap :10231-10240 is popups only): swap slot-0
   // abilities with a contact attacker. GetBattlerAbility(battler) == ability means only the holder's slot 0 counts (an innate Wandering Spirit does nothing).
@@ -2753,6 +2895,77 @@ function handleDefenderMoveEndAbility(
         sourceBattler: targetId,
       })
     }
+  }
+
+  // Gulp Missile onDefender (src/abilities.cc:3289-3301; Gorging script data/battle_scripts_1.s:7799-7836,
+  // Gulping :7837-7881). CHECK(ShouldApplyOnHitEffect(attacker)) -> the hit dealt damage and the attacker is
+  // alive. The holder must still be Cramorant-Gorging or -Gulping. gBattleMoveDamage = attacker.maxHP / 4,
+  // floored to a minimum of 1 (:3294-3295), dealt to the ATTACKER (healthbarupdate/datahpupdate BS_ATTACKER)
+  // unless the attacker is Magic Guard protected (`jumpifmagicguard BS_ATTACKER`, :7802 / :7842). If that
+  // damage faints the attacker, `getbattlerfainted BS_ATTACKER; jumpifbyte CMP_EQUAL, ..., NoSecondEffect...`
+  // (:7808-7810 / :7848-7850) skips the secondary effect. Either way the holder reverts to SPECIES_CRAMORANT
+  // (:3292-3293, the write after the script at :3296) and the script runs `switchinabilities BS_ATTACKER`
+  // after swapbattlerandtargetvia34 (:7819 / :7833 -- after the swap BS_ATTACKER is the holder), which is
+  // applySwitchInAbilities for the holder, exactly as the onAttacker half's BattleScript_AttackerFormChange.
+  if (abilityId === 'ABILITY_GULP_MISSILE') {
+    const species = target.mon.speciesId
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(attacker)
+      (species === 'SPECIES_CRAMORANT_GORGING' || species === 'SPECIES_CRAMORANT_GULPING')
+    ) {
+      const gorging = species === 'SPECIES_CRAMORANT_GORGING'
+      let attackerFainted = false
+      if (!isMagicGuardProtected(state, attacker)) {
+        const dmg = Math.max(1, Math.trunc(attacker.mon.maxHp / 4))
+        applyDamage(state, attackerId, dmg, fainted, deps)
+        result.attackerDamage += dmg
+        attackerFainted = attacker.mon.hp === 0
+      }
+      // UpdateAbilityStateIndicesForNewSpecies + the species write + the form-change animation is the
+      // same changeBattlerForm call the onAttacker half makes; `switchinabilities` is applySwitchInAbilities.
+      changeBattlerForm(state, targetId, 'SPECIES_CRAMORANT', deps.dataContext)
+      applySwitchInAbilities(state, targetId, deps, unmodelled)
+      if (!attackerFainted) {
+        if (gorging) {
+          // BattleScript_GulpMissileDoParalyze (data/battle_scripts_1.s:7821-7835): swapattackerwithtarget;
+          // setmoveeffect MOVE_EFFECT_PARALYSIS; seteffectprimary; swap back. After the swap gBattlerAttacker
+          // is the holder, so the holder is the effect's source and the attacker its recipient (Static's
+          // argument order), and seteffectprimary is the sim's primary=true path.
+          const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled)
+          if (res.applied && res.status) {
+            result.statusApplied = { battlerId: attackerId, status: res.status }
+          }
+        } else if (attackerHoldEffect !== 'HOLD_EFFECT_CLEAR_AMULET') {
+          // BattleScript_GulpMissileDoDefense (data/battle_scripts_1.s:7852-7869); the Clear Amulet jump is
+          // :7850. `statbuffchange STAT_BUFF_NOT_PROTECT_AFFECTED` targets gBattlerAttacker after the
+          // script's swapattackerwithtarget, i.e. the move's attacker, and its `changedStatsBattlerId` is
+          // also that same attacker, so no onStatLowered dispatch fires (battle_util.c:1222-1255).
+          const dropRes = changeStatBuffs(
+            state,
+            attackerId,
+            attackerId,
+            targetId,
+            -1,
+            STAT_DEF,
+            STAT_BUFF_NOT_PROTECT_AFFECTED,
+            true,
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          if (dropRes.delta !== 0) {
+            result.statChanges.push({ battlerId: attackerId, stat: STAT_DEF, change: dropRes.delta })
+          }
+        }
+      }
+    }
+  }
+
+  // Talon Trap, onDefender half (src/abilities.cc:4713-4730 via ON_EITHER_ABILITY, :54). Holder =
+  // target, opponent = attacker.
+  if (abilityId === 'ABILITY_TALON_TRAP') {
+    tryTalonTrapWrap(state, deps, targetId, attackerId, attackerId, moveData, targetDamage, attackerHoldEffect)
   }
 
   return result
@@ -4413,7 +4626,8 @@ function handleAttackerMoveEndAbility(
   // has no such field, so it is modelled as always-false -- which is what the C does at runtime.
   // `hp <= maxHP / 2` picks GORGING else GULPING; UpdateAbilityStateIndicesForNewSpecies + the species write +
   // BattleScript_AttackerFormChange are changeBattlerForm + applySwitchInAbilities, exactly as in Shields Down below.
-  // (This ability's onDefender half is a separate hook and is not touched here.)
+  // (This ability's onDefender half is a separate hook, ported in handleDefenderMoveEndAbility below;
+  //  it is not touched here.)
   if (abilityId === 'ABILITY_GULP_MISSILE') {
     if (
       !hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED) &&
@@ -4968,6 +5182,12 @@ function handleAttackerMoveEndAbility(
         unmodelled.push(`${name} set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled`)
       }
     }
+  }
+
+  // Talon Trap, onAttacker half (src/abilities.cc:4713-4730 via ON_EITHER_ABILITY, :54). Holder =
+  // attacker, opponent = target; see tryTalonTrapWrap.
+  if (abilityId === 'ABILITY_TALON_TRAP') {
+    tryTalonTrapWrap(state, deps, attackerId, targetId, attackerId, moveData, targetDamage, attackerHoldEffect)
   }
 
   // 13. Growing Tooth (src/abilities.cc:3848-3856)

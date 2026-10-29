@@ -2166,7 +2166,7 @@ export function applySwitchInAbilities(
     }
 
     if (abilityId === 'ABILITY_TALON_TRAP') {
-      // abilities.cc:4733-4737 (its on-either half, :4713-4730, is not ported)
+      // abilities.cc:4733-4737 (its on-either wrap half, :4713-4730, is ported in moveEnd.ts)
       if (battler.volatiles.isFirstTurn !== 2) battler.volatiles.abilityState[slotIndex] = 1
       continue
     }

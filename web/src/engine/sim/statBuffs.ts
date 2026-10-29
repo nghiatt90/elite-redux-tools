@@ -1135,6 +1135,9 @@ export function consumeHeldItem(state: BattleState, battler: BattlerState, unmod
  *    - ABILITY_RETRIBUTION_BLOW (abilities.cc:5145-5160): out-of-turn attack (gapped)
  *    - ABILITY_EGOIST (abilities.cc:7074-7092): copies opponent stat raises
  *    - ABILITY_SHARING_IS_CARING (abilities.cc:7368-7386): copies all stat changes
+ *    - ABILITY_ACID_REFLUX (abilities.cc:12260-12276): queues MOVE_ACID at power 20 when the
+ *      holder was damaged this turn and neither the ability state nor the once-per-turn
+ *      counter is set
  * 3. Copy execution passes:
  *    - Egoist pass (battle_script_commands.c:8206-8241)
  *    - Sharing is Caring pass (battle_script_commands.c:8243-8279)
@@ -1192,6 +1195,7 @@ export function runReactiveAbilityEffects(
   const egoistActive: boolean[] = new Array(state.battlersCount).fill(false)
   let sharingIsCaringActive = false
   let cloneFired = false
+  let acidRefluxActivated = false
 
   for (let i = 0; i < state.battlersCount; i++) {
     if (!isAlive(state, i)) continue
@@ -1199,7 +1203,7 @@ export function runReactiveAbilityEffects(
     if (!battler) continue
 
     const slots = getAbilitySlotsReverse(battler.mon.abilities)
-    for (const { abilityId } of slots) {
+    for (const { abilityId, slotIndex } of slots) {
       if (isSimAbilitySuppressed(state, battler, abilityId, false, i, false, deps.dataContext)) {
         continue
       }
@@ -1250,6 +1254,25 @@ export function runReactiveAbilityEffects(
             }
           }
         }
+      } else if (abilityId === 'ABILITY_ACID_REFLUX') {
+        // src/abilities.cc:12260-12276 (onReactive): CHECK(gRoundStructs[battler].damaged),
+        // CHECK_NOT(GetAbilityState(battler, ability)) and CHECK_NOT(GetOncePerTurnAbilityCounter)
+        // (battle_util.c:1701-1707 -> gTurnStructs[battler].turnAbilityTriggers[index]). On a pass:
+        // SetAbilityState(battler, ability, TRUE) and queue `{ MOVE_ACID, movePower 20, attacker =
+        // battler, target = BATTLE_OPPOSITE(battler) = battler ^ 1 }`. The once-per-turn counter is
+        // what keeps a hit later in the SAME end-turn phase (after the onEndTurn hook has moved the
+        // state into the counter, endTurn.ts) from queuing a second Acid.
+        if (battler.round.damaged && !battler.volatiles.abilityState[slotIndex] && !battler.turn.turnAbilityTriggers[slotIndex]) {
+          battler.volatiles.abilityState[slotIndex] = 1
+          state.queuedExtraAttacks.push({
+            ability: abilityId,
+            move: 'MOVE_ACID',
+            movePower: 20,
+            attacker: i,
+            target: (i & 1) ^ 1,
+          })
+          acidRefluxActivated = true
+        }
       }
     }
   }
@@ -1265,7 +1288,7 @@ export function runReactiveAbilityEffects(
         state.statChangesToCheck[b]?.fill(0)
       }
     }
-    return cloneFired
+    return cloneFired || acidRefluxActivated
   }
 
   // 3. Perform copy effects (battle_script_commands.c:8202-8309)
@@ -1402,7 +1425,7 @@ export function runReactiveAbilityEffects(
   }
   state.statStageCheckState = STAT_STAGE_CHECK_NOT_NEEDED
 
-  return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive || cloneFired
+  return anyCopied || mirrorHerbFound || egoistActive.some(Boolean) || sharingIsCaringActive || cloneFired || acidRefluxActivated
 }
 
 // The nine abilities whose `.setStateOnEffect` field (src/abilities.cc, data/v2.65beta/abilityHooks.json

@@ -354,7 +354,7 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239) and Drakelp Head (single-use counter, written by moveEnd.ts:2626); Chuckster now also writes abilityState (moveEnd.ts:2610-2623, Cycle 98b), but this closure does not read that slot' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239), Drakelp Head (single-use counter, written by moveEnd.ts:2626) and Soothsayer (abilityState, set to 4 by switchInAbility.ts onEntry and ticked down by endTurn.ts; Cycle 109); Chuckster now also writes abilityState (moveEnd.ts:2610-2623, Cycle 98b), but this closure does not read that slot' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -526,8 +526,11 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     // battle_util.c:3944-3954, set by moveEnd.ts's :2626 block). Both are
     // INVERTED reads in the calculator (flag set == discharged), matching
     // abilities.cc:12364-12368 / :12073-12075 -- so `abilityOn` is the raw flag.
-    // Chuckster's abilityState is written by moveEnd.ts:2610-2623 (Cycle 98b),
-    // but this closure deliberately leaves its slot out of the read set above.
+    // Soothsayer's read is the same shape: its onAfterTypeEffectiveness tests
+    // GetAbilityState(target, ability) != 0 (:9449-9453), which endTurn.ts ticks
+    // down from the 4 switchInAbility.ts arms. Chuckster's abilityState is
+    // written by moveEnd.ts:2610-2623 (Cycle 98b), but this closure deliberately
+    // leaves its slot out of the read set above.
     abilityOn: (() => {
       const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
       const hasSlowStart = (abilityIds.includes('ABILITY_SLOW_START') || abilityIds.includes('ABILITY_LETHARGY')) && battler.volatiles.slowStartTimer > 0
@@ -542,10 +545,16 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
       // ability slot"; that is C's own "not triggered" value (the modifier tests
       // `!counter`), so only a positive stored counter means discharged.
       const hasDrakelpHead = getSingleUseAbilityCounter(state, battlerId, 'ABILITY_DRAKELP_HEAD', deps.dataContext) > 0
+      // ABILITY_SOOTHSAYER: its onAfterTypeEffectiveness (abilities.cc:9449-9453) tests
+      // `GetAbilityState(target, ability)` directly -- 4 on switch-in (:9440), ticked down by
+      // endTurn.ts's onEndTurn case. The engine half (16-type-effectiveness.ts:134) reads it as
+      // ctx.defenderAbilityOn; the generic toggle carries the raw non-zero test.
+      const soothsayerSlot = findAbilitySlot(mon.abilities, 'ABILITY_SOOTHSAYER')
+      const hasSoothsayer = soothsayerSlot !== -1 && Boolean(battler.volatiles.abilityState[soothsayerSlot])
       const hasStakeout =
         (abilityIds.includes('ABILITY_STAKEOUT') || abilityIds.includes('ABILITY_OVERWATCH')) &&
         Boolean(state.battlers[opponentId]?.volatiles.isFirstTurn === 2)
-      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout || hasPowerOutage || hasDrakelpHead
+      return Boolean(battler.volatiles.flashFire) || hasSlowStart || hasAmbush || hasUnburden || hasSugarRush || hasStakeout || hasPowerOutage || hasDrakelpHead || hasSoothsayer
     })(),
     gender: mon.gender,
     boostedStat: paradoxBoostedStat(battler),

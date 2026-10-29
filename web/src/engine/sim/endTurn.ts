@@ -1271,7 +1271,9 @@ function runEndTurnAbilities(
 
       case 'ABILITY_ACID_REFLUX': {
         // src/abilities.cc:12253-12258: the once-per-turn counter takes over the live state so a second attack queued later in the
-        // end-turn phase is still suppressed. (The state is set by Acid Reflux's onReactive, which the sim does not run yet.)
+        // end-turn phase is still suppressed. The state was set by Acid Reflux's onReactive (statBuffs.ts, :12260-12276), and
+        // `turnAbilityTriggers` is rebuilt from scratch every turn by createTurnState (turn.ts), so the counter only lasts
+        // this turn -- exactly the C's `gTurnStructs[battler].turnAbilityTriggers[]` lifetime.
         setOncePerTurnTrigger(battler, slotAbility, getAbilityStateOf(battler, slotAbility))
         setAbilityStateOf(battler, slotAbility, 0)
         break
@@ -1550,16 +1552,52 @@ function runEndTurnAbilities(
         break
       }
 
+      case 'ABILITY_CRYO_ARCHITECT': {
+        // src/abilities.cc:9592-9601: `abilityState = GetAbilityState; CHECK(abilityState); activate =
+        // abilityState & 1; SetAbilityState(abilityState >> 1); CHECK(activate); CHECK(Def < MAX);
+        // SetStatChanger(STAT_DEF, 1); BattleScriptPushCursorAndCallback(AttackerAbilityStatRaiseEnd3)`.
+        // The shift is the point: a Water hit (moveEnd.ts, :9612-9615) arms bit 1 (value 2), so the FIRST
+        // end turn shifts 2 -> 1 (activate == 0, nothing happens) and the NEXT shifts 1 -> 0 and raises Def.
+        // The state is consumed before the Def check, so a maxed Def still spends the armed bit.
+        // As written the pushed script only animates (BattleScript_AttackerAbilityStatRaiseEnd3 ->
+        // BattleScript_AttackerAbilityStatRaiseNoPopup, data/battle_scripts_1.s:10346-10370, has no
+        // statbuffchange), so the raise is applied here the way every other End3 user applies it before
+        // pushing the script (Speed Boost, src/abilities.cc:517-523: ChangeStatBuffs(..., AFFECTS_USER)).
+        const abilityState = getAbilityStateOf(battler, slotAbility)
+        if (abilityState) {
+          const activate = abilityState & 1
+          setAbilityStateOf(battler, slotAbility, abilityState >> 1)
+          if (activate) {
+            changeStatBuffs(
+              state,
+              battlerId,
+              battlerId,
+              battlerId,
+              1,
+              STAT_DEF,
+              MOVE_EFFECT_AFFECTS_USER,
+              false,
+              { dataContext, grounding: deps?.grounding },
+              unmodelled,
+            )
+          }
+        }
+        break
+      }
+
       case 'ABILITY_SOOTHSAYER': {
-        // src/abilities.cc:9442-9448 (the counter is set to 4 by its onEntry, switchInAbility.ts; the type-effectiveness half reads it as
-        // `defenderAbilityOn`, which the sim's damage path does not derive from this state)
+        // src/abilities.cc:9442-9448 (the counter is set to 4 by its onEntry, switchInAbility.ts). The
+        // type-effectiveness half (:9449-9453) reads this same ability state: bridge.ts's abilityOn closure
+        // now feeds the raw `GetAbilityState(target, ability) != 0` into `defender.abilityOn`, which
+        // 16-type-effectiveness.ts reads as ctx.defenderAbilityOn.
         const counter = getAbilityStateOf(battler, slotAbility)
         if (counter) setAbilityStateOf(battler, slotAbility, counter - 1)
         break
       }
 
       case 'ABILITY_TALON_TRAP': {
-        // src/abilities.cc:4738-4741 (onEntry sets the state, the on-either half :4713-4730 is not ported)
+        // src/abilities.cc:4738-4741: onEndTurn unconditionally clears the state its onEntry may have set
+        // (the on-either wrap half is ported in moveEnd.ts, :4713-4730).
         setAbilityStateOf(battler, slotAbility, 0)
         break
       }
