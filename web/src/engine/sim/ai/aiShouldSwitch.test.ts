@@ -202,17 +202,19 @@ describe('shouldSwitch: ShouldSwitchIfPerishSong', () => {
 })
 
 describe('shouldSwitch: FindMonThatAbsorbsOpponentsMove\'s own RNG guard', () => {
-  it('a super-effective move in hand draws Random()%3; a hit (0) proceeds past the guard, and the lastLandedMoves gap fires', () => {
-    // MUDKIP (Water) vs an opponent with EMBER known -- Water resists Fire,
-    // not super effective FROM the AI's own moves though; use a real SE setup:
-    // AI's own MOVE_EMBER (Fire) is super effective against a Bug/Grass-ish
-    // target is unnecessary here -- simplest is to give the AI itself no SE
-    // move so the guard's own HasSuperEffectiveMoveAgainstOpponents(TRUE) is
-    // FALSE, skipping the Random()%3 draw entirely and reaching the gap
-    // directly with an EMPTY rng script.
-    const s = battle({}, { hp: 100, moves: ['MOVE_TACKLE', null, null, null] }, scripted(), [partyMon({ hp: 100 })])
-    const { unmodelled } = shouldSwitch(s, 1, deps)
-    expect(unmodelled.some((u) => u.includes('FindMonThatAbsorbsOpponentsMove') && u.includes('gLastLandedMoves'))).toBe(true)
+  it('no last landed move -> FALSE at the helper\'s early return, drawing no RNG and reporting no gap', () => {
+    // AI has no super-effective move, so HasSuperEffectiveMoveAgainstOpponents
+    // draws nothing and the `Random() % 3` guard is skipped. `lastLandedMove`
+    // defaults to null (the C's gLastLandedMoves == 0), which is the real
+    // early return at battle_ai_switch_items.c:154-157 -- no note.
+    let draws = 0
+    const counting: RandomSource = { random16: () => { draws++; return 0 } }
+    const s = battle({}, { hp: 100, moves: ['MOVE_TACKLE', null, null, null] }, counting, [partyMon({ hp: 100 })])
+    const { shouldSwitch: result, unmodelled } = shouldSwitch(s, 1, deps)
+    expect(result).toBe(false)
+    expect(draws).toBe(0)
+    expect(unmodelled.some((u) => u.includes('gLastLandedMoves'))).toBe(false)
+    expect(unmodelled.some((u) => u.includes('FindMonThatAbsorbsOpponentsMove'))).toBe(false)
   })
 })
 
@@ -271,7 +273,9 @@ describe('shouldSwitch: ShouldSwitchIfNaturalCure', () => {
     const { shouldSwitch: result, unmodelled } = shouldSwitch(s, 1, deps)
     expect(result).toBe(true)
     expect(s.battlers[1]!.aiMonToSwitchIntoId).toBe(PARTY_SIZE)
-    expect(unmodelled.some((u) => u.includes('ShouldSwitchIfNaturalCure'))).toBe(true)
+    // null lastLandedMove is the C's gLastLandedMoves == 0, a real branch now,
+    // so no gap note is reported (the old "reads as MOVE_NONE" note is gone).
+    expect(unmodelled.some((u) => u.includes('gLastLandedMoves'))).toBe(false)
   })
 
   it('asleep + Natural Cure: first draw even, second draw odd -- switches on the second attempt', () => {

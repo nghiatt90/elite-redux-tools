@@ -214,7 +214,7 @@ describe('end-to-end: chooseAiAction decides a switch (ShouldSwitch, not the sec
     )
     const { action: aiAction, unmodelled } = chooseAiAction(s, 1, deps)
     expect(aiAction).toEqual({ action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null })
-    expect(unmodelled.some((u) => u.includes('ShouldSwitchIfNaturalCure'))).toBe(true)
+    expect(unmodelled.some((u) => u.includes('ShouldSwitchIfNaturalCure') || u.includes('gLastLandedMoves'))).toBe(false) // fully ported -- the old gap note is gone
     // aiTrySwitchOrUseItem already resolved the target via
     // GetMostSuitableMonToSwitchInto (the only reserve, party slot 1) --
     // executeTurn needs no deps.replacement to carry this switch out.
