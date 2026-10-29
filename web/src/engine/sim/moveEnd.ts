@@ -51,9 +51,14 @@ import {
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   MOVE_UNSET,
+  SIDE_STATUS_CRAFTY_SHIELD,
+  SIDE_STATUS_MAT_BLOCK,
+  SIDE_STATUS_SCREEN_ANY,
+  SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_TOXIC_SPIKES,
+  SIDE_STATUS_WIDE_GUARD,
   STATUS1_BURN,
   STATUS1_FREEZE,
   STATUS1_FROSTBITE,
@@ -931,6 +936,13 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_THUNDERCALL',
   'ABILITY_THUNDER_CLOUDS',
   'ABILITY_TWO_STEP',
+  // Cycle 95: Impaler (:10222-10232), Molten Blades (:7510-7520), Toxic Chain (:7698-7706), Komodo (:10262-10267, = Toxic Chain),
+  // Pinnacle Blade (:8687-8720)
+  'ABILITY_IMPALER',
+  'ABILITY_MOLTEN_BLADES',
+  'ABILITY_TOXIC_CHAIN',
+  'ABILITY_KOMODO',
+  'ABILITY_PINNACLE_BLADE',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -3826,6 +3838,90 @@ function handleAttackerMoveEndAbility(
         const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
         if (res.applied && res.status) {
           result.statusApplied = { battlerId: targetId, status: res.status }
+        }
+      }
+    }
+  }
+
+  // Impaler (src/abilities.cc:10222-10232): ShouldApplyOnHitEffect(target), CanBleed(target), horn move, then the 30% roll (drawn last, after
+  // the three checks pass), then AbilityStatusEffect(MOVE_EFFECT_BLEED). Its onOffensiveMultiplier is Mighty Horn's (impl/10-aliases.ts).
+  if (abilityId === 'ABILITY_IMPALER') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBleed(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.hornBased) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Molten Blades (src/abilities.cc:7510-7520): CanBeBurned(target), Keen Edge move, then the 20% roll, then AbilityStatusEffect(MOVE_EFFECT_BURN).
+  if (abilityId === 'ABILITY_MOLTEN_BLADES') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      state.rng.random16() % 100 < 20
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Toxic Chain (src/abilities.cc:7698-7706): CanBePoisoned(battler, target, MOVE_NONE), 30% roll, AbilityStatusEffect(MOVE_EFFECT_TOXIC).
+  // Komodo's onAttacker is `Impl<ABILITY_TOXIC_CHAIN>.onAttacker` (:10262-10267).
+  if (abilityId === 'ABILITY_TOXIC_CHAIN' || abilityId === 'ABILITY_KOMODO') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Pinnacle Blade (src/abilities.cc:8687-8720; its onInfiltrate half is statusEffects.ts infiltratesSubstitute): DidMoveHit() only -- the
+  // target may already have fainted -- then a Keen Edge move. A keen-edge move always infiltrates Substitute, so the hit landed on the mon.
+  if (abilityId === 'ABILITY_PINNACLE_BLADE') {
+    if (hpDealt > 0 && attackerId !== targetId && isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled)) {
+      // BattleScript_AttackerDestroysSubstitute (data/battle_scripts_1.s:10706-10710) only prints a message and plays the fade animation; the
+      // state change is the C's `substituteHP = 0` (:8698-8700), which MOVEEND_SUBSTITUTE (case 16) turns into the cleared STATUS2_SUBSTITUTE.
+      if (target.volatiles.substituteHp) {
+        target.volatiles.substituteHp = 0
+      }
+
+      if (isBattlerAlive(state, targetId)) {
+        const targetSide = state.sides[targetId & 1]
+        // BattleScript_AttackerShattersScreens (data/battle_scripts_1.s:6374-6378) is `removelightscreenreflect`, i.e. Cmd_removelightscreenreflect
+        // (battle_script_commands.c:12384-12416, side = GetBattlerSide(gBattlerTarget)); same writes as Brick Break (turn.ts).
+        if (targetSide.timers.reflectTimer || targetSide.timers.lightscreenTimer || targetSide.timers.auroraVeilTimer) {
+          if (hasFlag(targetSide.statuses, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SMOKESCREEN)) {
+            targetSide.statuses = clearFlag(targetSide.statuses, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SMOKESCREEN)
+            targetSide.timers.reflectTimer = 0
+            targetSide.timers.lightscreenTimer = 0
+            targetSide.timers.auroraVeilTimer = 0
+            targetSide.timers.smokescreenTimer = 0
+          }
+        }
+
+        // AbilityStatusEffectDirect(MOVE_EFFECT_FEINT) (abilities.cc:270-275 -> SetMoveEffect -> battle_script_commands.c:2879-2891), gated by
+        // IS_BATTLER_PROTECTED (include/battle.h:762-764). SetMoveEffect's Sheer Force (:2361) and Substitute (:2388) gates still apply.
+        const isProtected =
+          Boolean(target.round.protectMove) ||
+          hasFlag(targetSide.statuses, SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK)
+        if (
+          isProtected &&
+          !testSheerForceFlag(state, attackerId, moveId, statusDeps) &&
+          !doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)
+        ) {
+          target.round.protectMove = null
+          targetSide.statuses = clearFlag(targetSide.statuses, SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK)
         }
       }
     }

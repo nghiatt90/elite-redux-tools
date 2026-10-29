@@ -1148,7 +1148,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 104 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 109 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1208,7 +1208,9 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_HYPNOTIC_TOUCH',
       'ABILITY_ILLUMINATE',
       'ABILITY_IMMOLATE',
+      'ABILITY_IMPALER',
       'ABILITY_INTOXICATE',
+      'ABILITY_KOMODO',
       'ABILITY_LEAD_CLAWS',
       'ABILITY_LOUD_BANG',
       'ABILITY_LUNAR_WRATH',
@@ -1216,8 +1218,10 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_MENACING_SITUATION',
       'ABILITY_MINERALIZE',
       'ABILITY_MOB_BOSS',
+      'ABILITY_MOLTEN_BLADES',
       'ABILITY_MOLTEN_COAT',
       'ABILITY_PICKPOCKET',
+      'ABILITY_PINNACLE_BLADE',
       'ABILITY_PIXILATE',
       'ABILITY_POISON_POINT',
       'ABILITY_POISON_QUILLS',
@@ -1244,6 +1248,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_TENTALOCK',
       'ABILITY_THUNDERCALL',
       'ABILITY_THUNDER_CLOUDS',
+      'ABILITY_TOXIC_CHAIN',
       'ABILITY_TOXIC_SHELL',
       'ABILITY_TO_THE_BONE',
       'ABILITY_TWO_STEP',
