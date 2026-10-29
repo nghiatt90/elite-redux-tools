@@ -1127,8 +1127,10 @@ export function isDanceMove(
 
 /**
  * GetBattlerBattleMoveTargetFlags (src/battle_util.c:128-149), read by AdjustFollowupMoveTarget.
+ * Exported for preempt.ts: the onPreemptAction hooks (UseTurnAttackAsPursuit,
+ * Surprise) call this same function to decide which target shapes they accept.
  */
-function getBattlerBattleMoveTargetFlags(
+export function getBattlerBattleMoveTargetFlags(
   state: BattleState,
   battlerId: number,
   moveId: string,

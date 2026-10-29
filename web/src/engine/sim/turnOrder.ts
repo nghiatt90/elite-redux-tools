@@ -570,11 +570,18 @@ export function getFastestBattler(
   return maxBattler
 }
 
+/** `gActionsByTurnOrder` entry. A choosable action, or the `B_ACTION_FINISHED`
+ * sentinel (include/battle.h:37) a slot carries once its action has been
+ * consumed mid-turn. UseTurnAttackAsPursuit (src/abilities.cc:414) writes it
+ * onto the ability holder's OWN slot so that, when that slot's turn comes, the
+ * holder does not act a second time. */
+export type TurnActionKind = ChosenAction['action'] | 'FINISHED'
+
 /** The mutable turn order: which battler acts in each slot, and what they do.
  * Mirrors `gBattlerByTurnOrder` / `gActionsByTurnOrder` (battle.h:960-961). */
 export interface TurnOrder {
   battlerByTurnOrder: number[]
-  actionsByTurnOrder: ChosenAction['action'][]
+  actionsByTurnOrder: TurnActionKind[]
 }
 
 /**

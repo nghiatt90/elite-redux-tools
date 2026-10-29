@@ -86,9 +86,10 @@
 //           battler.lastHitByType to null).
 //   Its other two statements are omitted:
 //     :859  ClearMiscTurnFlags()
-//     :860  TryPreemptiveActions() -- a whole mechanic, with its own
-//           onPreemptAction ability hook (battle_util.c:826) and the queued
-//           extra-attack machinery at :829-834. Its own batch.
+//     :860  TryPreemptiveActions() -- PORTED in preempt.ts (cycle 95b): the
+//           onPreemptAction hook of Tag, Dreamcatcher, Dreamscape, Super Sniper
+//           and Surprise (battle_util.c:826), plus the :829-834 pop-and-park
+//           that executeTurn now performs at the top of every slot.
 //
 //   HandleAction_NothingIsFainted (:837-846) is the SIBLING handler and is not
 //   ported at all. It is the same advance-and-re-sort, minus :849's sentinel
@@ -122,7 +123,7 @@
 //     buildTurnOrderContext below assembles a context whose isBattlerGrounded is
 //     the real port.
 
-import type { BattleOutcome, BattleState, BattlerState, SimPartyMon } from './state'
+import type { BattleOutcome, BattleState, BattlerState, ExtraAttackAction, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderContext, TurnOrder, TurnOrderMoveView } from './turnOrder'
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
@@ -153,6 +154,7 @@ import {
   runMoveEndBookkeeping,
 } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
+import { tryPreemptiveActions } from './preempt'
 import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
 import {
   BATTLE_TYPE_ARENA,
@@ -3435,31 +3437,56 @@ export function drainQueuedExtraAttacks(
   outcomes: ActionOutcome[],
 ): void {
   while (state.queuedExtraAttacks.length > 0) {
-    const extraAttack = state.queuedExtraAttacks.pop()!
-    const moveData = deps.dataContext.move(extraAttack.move)
-    const isExplosion = Boolean(extraAttack.ability) && moveData?.effect === 'EFFECT_EXPLOSION'
-
-    if (!isBattlerAlive(state, extraAttack.attacker) && !isExplosion) {
-      continue
-    }
-
-    state.processingExtraAttacks = true
-    state.currentExtraAttack = extraAttack
-
-    const moveView = buildMoveView(extraAttack.move, deps.dataContext)
-    const extraAction: ChosenAction = {
-      action: 'USE_MOVE',
-      chosenMove: moveView,
-      moveToBeUsed: moveView,
-      target: extraAttack.target,
-    }
-
-    const extraOutcome = executeAction(state, extraAttack.attacker, extraAction, 'USE_MOVE', index, order, deps)
-    outcomes.push(extraOutcome)
-    state.currentExtraAttack = null
+    runPoppedExtraAttack(state, state.queuedExtraAttacks.pop()!, index, order, deps, outcomes)
   }
   state.processingExtraAttacks = false
   state.currentExtraAttack = null
+}
+
+/**
+ * One already-popped ExtraAttackAction, as TryPerformExtraAction's loop body
+ * (src/battle_util.c:771-783) handles it after the pop. Shared by
+ * drainQueuedExtraAttacks and executeTurn's preempt path (TryPreemptiveActions
+ * pops one entry itself at battle_util.c:829-834, and that entry must run BEFORE
+ * the slot's parked action).
+ *
+ * Returns true when the entry executed, false when the FILTER dropped it
+ * (fainted attacker, not the EXPLOSION exception). The drop is unreachable from
+ * the preempt path -- TryPreemptiveActions only queues from a holder it just
+ * proved alive, and nothing runs in between -- but keeping the same filter
+ * means the preempt path cannot drift from the drain path.
+ */
+function runPoppedExtraAttack(
+  state: BattleState,
+  extraAttack: ExtraAttackAction,
+  index: number,
+  order: TurnOrder,
+  deps: TurnLoopDeps,
+  outcomes: ActionOutcome[],
+): boolean {
+  const moveData = deps.dataContext.move(extraAttack.move)
+  const isExplosion = Boolean(extraAttack.ability) && moveData?.effect === 'EFFECT_EXPLOSION'
+
+  if (!isBattlerAlive(state, extraAttack.attacker) && !isExplosion) {
+    return false
+  }
+
+  state.processingExtraAttacks = true
+  state.currentExtraAttack = extraAttack
+
+  const moveView = buildMoveView(extraAttack.move, deps.dataContext)
+  const extraAction: ChosenAction = {
+    action: 'USE_MOVE',
+    chosenMove: moveView,
+    moveToBeUsed: moveView,
+    target: extraAttack.target,
+  }
+
+  const extraOutcome = executeAction(state, extraAttack.attacker, extraAction, 'USE_MOVE', index, order, deps)
+  outcomes.push(extraOutcome)
+  state.currentExtraAttack = null
+  state.processingExtraAttacks = false
+  return true
 }
 
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
@@ -3539,6 +3566,27 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     const battlerId = order.battlerByTurnOrder[index]
     const action = actions[battlerId] ?? null
     const actionKind = order.actionsByTurnOrder[index]
+
+    // TryPreemptiveActions (src/battle_util.c:821-835), called before EVERY
+    // action slot including slot 0 (battle_main.c:4639; a preempt queued before
+    // slot 0 is drained by the pre-loop drain above, so this only adds the
+    // abilities' own queueing). If a hook queued anything, :829-834 parks the
+    // pending action in gDelayedTurnActionId and pops the LAST entry, and
+    // HandleAction_TryFinish (:751-769) restores the parked action only after
+    // TryPerformExtraAction (:771-783) has emptied the whole queue. So every
+    // entry queued here runs, LIFO, BEFORE the slot's own action -- which is
+    // what drainQueuedExtraAttacks does, its first pop being :831-833's.
+    tryPreemptiveActions(state, index, order, actions, deps)
+    if (state.queuedExtraAttacks.length > 0) {
+      drainQueuedExtraAttacks(state, index, order, deps, outcomes)
+    }
+
+    // B_ACTION_FINISHED (include/battle.h:37): UseTurnAttackAsPursuit overwrote
+    // this slot's entry (src/abilities.cc:414) because the holder's chosen move
+    // already ran as the preempt attack. The slot is still consumed; the C
+    // dispatches HandleAction_ActionFinished for it, which the top of this
+    // iteration already did, and no action body runs.
+    if (actionKind === 'FINISHED') continue
 
     const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps)
     outcomes.push(outcome)
