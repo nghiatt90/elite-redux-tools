@@ -17,7 +17,6 @@ import {
   STATUS1_BURN,
   STATUS1_POISON,
   STATUS2_ENRAGED,
-  STATUS2_TRANSFORMED,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_FOG_ANY,
@@ -37,7 +36,12 @@ import {
 import { isBattlerAlive } from './turn'
 import { weatherHasEffect } from './fieldEndTurn'
 import { disableSwitchInAbility } from './switchInAbility'
-import { tryTransformAttacker } from './formChange'
+import {
+  disguiseReformHandler,
+  drakelpHeadReformHandler,
+  iceFaceReformHandler,
+  tryTransformAttacker,
+} from './formChange'
 
 export interface OnWeatherDeps {
   dataContext: SimDataContext
@@ -211,24 +215,12 @@ export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps,
           tryTransformAttacker(state, battlerId, deps, unmodelled)
           break
         case 'ABILITY_DISGUISE':
-          // DisguiseReformHandler, src/abilities.cc:2846-2866.
-          if (
-            (battler.mon.speciesId === 'SPECIES_MIMIKYU_BUSTED' || battler.mon.speciesId === 'SPECIES_MIMIKYU_RAYQUAZA_BUSTED') &&
-            isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) &&
-            !hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)
-          ) {
-            unmodelled.push(`battler ${battlerId}: ABILITY_DISGUISE's fog reform (abilities.cc:2846-2866) is not applied -- species changes are not modelled`)
-          }
+          // DisguiseReformHandler with ABILITY_BS_CALL, src/abilities.cc:2846-2866, :2881.
+          disguiseReformHandler(state, battlerId, deps, unmodelled)
           break
         case 'ABILITY_ICE_FACE':
-          // IceFaceReformHandler, src/abilities.cc:3350-3360.
-          if (
-            battler.mon.speciesId === 'SPECIES_EISCUE_NOICE_FACE' &&
-            isBattlerWeatherAffected(state, battlerId, WEATHER_HAIL_ANY, deps) &&
-            !hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)
-          ) {
-            unmodelled.push(`battler ${battlerId}: ABILITY_ICE_FACE's hail reform (abilities.cc:3350-3360) is not applied -- species changes are not modelled`)
-          }
+          // IceFaceReformHandler with ABILITY_BS_CALL, src/abilities.cc:3350-3360, :3366.
+          iceFaceReformHandler(state, battlerId, deps, unmodelled)
           break
       }
     }
@@ -263,6 +255,10 @@ export function dispatchOnTerrainChange(state: BattleState, deps: OnWeatherDeps,
         case 'ABILITY_TOXIC_BOOST':
           // ToxicBoostHandler, src/abilities.cc:1981-1992.
           toxicBoostHandler(state, battlerId, deps)
+          break
+        case 'ABILITY_DRAKELP_HEAD':
+          // DrakelpHeadReformHandler with ABILITY_BS_CALL, src/abilities.cc:12044-12053, :12057.
+          drakelpHeadReformHandler(state, battlerId, deps, unmodelled)
           break
       }
     }

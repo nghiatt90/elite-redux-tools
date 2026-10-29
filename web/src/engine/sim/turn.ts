@@ -161,6 +161,7 @@ import {
 import { applyAbsorbEffect } from './absorb'
 import { tryPreemptiveActions } from './preempt'
 import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
+import { setSingleUseAbilityCounter } from './switchInAbility'
 import {
   BATTLE_TYPE_ARENA,
   B_SIDE_PLAYER,
@@ -1565,7 +1566,8 @@ export function dispatchSwitchOutAbilities(
         case 'ABILITY_ZERO_TO_HERO': {
           // Impl<ABILITY_ZERO_TO_HERO>.onExit (abilities.cc:7136-7139):
           //   SetSingleUseAbilityCounter(battler, ability, TRUE)
-          unmodelled.push(`battler ${battlerId}: switch-out Zero to Hero SetSingleUseAbilityCounter is not modelled`)
+          // arms the onEntry reform (formChange.ts zeroToHeroHandler).
+          setSingleUseAbilityCounter(state, battlerId, 'ABILITY_ZERO_TO_HERO', 1, deps.dataContext)
           break
         }
 

@@ -212,7 +212,7 @@ import {
   tryChangeBattleWeather,
 } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
-import { HP_TRANSFORMATIONS, changeBattlerForm } from './formChange'
+import { HP_TRANSFORMATIONS, apeShiftHandler, changeBattlerForm } from './formChange'
 import { TOTAL_SPEED_PRIMARY, getBattlerTotalSpeedStat } from './turnOrder'
 import { attackPreModify, calculateBattleStat, defensePreModify, spAttackPreModify, spDefensePreModify } from '../battleStat'
 import { TYPE_NAME_BY_ID } from './hazards'
@@ -775,6 +775,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_UNLOCKED_POTENTIAL',
   'ABILITY_GOING_BERSERK',
   'ABILITY_ANGER_SHELL',
+  'ABILITY_APE_SHIFT', // Cycle 108 (onDefender :9063; onEntry/onEndTurn are form-change hooks)
   'ABILITY_INFLATABLE',
   'ABILITY_BALLOON_BLITZ',
   'ABILITY_BALLOON_BOMBER',
@@ -1381,6 +1382,16 @@ function handleDefenderMoveEndAbility(
       applyDamage(state, attackerId, targetDamage, fainted, deps)
       result.attackerDamage += targetDamage
     }
+    return result
+  }
+
+  // Ape Shift onDefender (src/abilities.cc:9063 -> ApeShiftHandler :9047-9059). The hook itself
+  // does not gate on damage: ShouldChangeFormHpBased only needs the HP threshold and the ability,
+  // and HandleDefenderAbility (:9050-9084) calls onDefender on every move-end pass. During
+  // onDefender gBattlerAttacker is still the move's attacker, so BattleScript_ApeShift's
+  // status half targets the ATTACKER (see apeShiftHandler's scriptAttackerId).
+  if (abilityId === 'ABILITY_APE_SHIFT') {
+    apeShiftHandler(state, targetId, deps, unmodelled, attackerId)
     return result
   }
 
@@ -2653,10 +2664,9 @@ function handleDefenderMoveEndAbility(
   // battler, attacker) makes the HOLDER gBattlerAttacker and the attacker
   // gBattlerTarget (data/battle_scripts_1.s:10588-10594), so the attacker's
   // Attack is the stat that drops.
-  // The reform handler (DrakelpHeadReformHandler, :12044-12053) is not modelled:
-  // it clears this counter on re-entry / toxic terrain, and the sim's terrain
-  // dispatch (onWeather.ts's dispatchOnTerrainChange) cannot reach the counter
-  // helpers in switchInAbility.ts without a module cycle.
+  // The reform handler (DrakelpHeadReformHandler, :12044-12053) is ported: formChange.ts's
+  // drakelpHeadReformHandler runs from switchInAbility.ts's onEntry pass and onWeather.ts's
+  // dispatchOnTerrainChange, so a toxic terrain or a repeated switch-in clears the counter.
   if (abilityId === 'ABILITY_DRAKELP_HEAD') {
     if (targetDamage > 0 && getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0) {
       setSingleUseAbilityCounter(state, targetId, abilityId, 1, deps.dataContext)
@@ -2664,9 +2674,6 @@ function handleDefenderMoveEndAbility(
       if (canLowerStat) {
         applyAbilityStatDrop(state, targetId, attackerId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
       }
-      const reformNote =
-        "Drakelp Head's reform handler (abilities.cc:12044-12053, onEntry/onTerrain) is not modelled: the single-use counter is never cleared by a toxic terrain or a repeated switch-in, so the damage-reduction half cannot be re-armed in the sim"
-      if (!unmodelled.includes(reformNote)) unmodelled.push(reformNote)
     }
   }
 

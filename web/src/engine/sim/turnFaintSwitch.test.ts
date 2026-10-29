@@ -642,7 +642,7 @@ describe('executeTurn: a mid-turn CHOSEN switch (performSwitchAction)', () => {
     expect(state.sides[0].party[0]!.hp).toBe(50)
   })
 
-  it('gaps Generator when Charged Up is set, and Zero to Hero on exit', () => {
+  it('gaps Generator when Charged Up is set, and arms Zero to Hero on exit', () => {
     const stateGen = battle(
       [{ spe: 200, hp: 100, maxHp: 100, abilities: { ability: GENERATOR, innates: [null, null, null] } }, { spe: 50, hp: 100 }],
       scripted(),
@@ -663,6 +663,9 @@ describe('executeTurn: a mid-turn CHOSEN switch (performSwitchAction)', () => {
     )
     stateZth.battlers[0]!.monToSwitchIntoId = 1
     const outZth = executeTurn(stateZth, [switchAction, null], deps(lethalToTarget(0)))
-    expect(outZth.actions[0].unmodelled.some((m) => m.includes('switch-out Zero to Hero SetSingleUseAbilityCounter'))).toBe(true)
+    expect(outZth.actions[0].unmodelled.some((m) => m.includes('switch-out Zero to Hero SetSingleUseAbilityCounter'))).toBe(false)
+    // Impl<ABILITY_ZERO_TO_HERO>.onExit (abilities.cc:7136-7139): SetSingleUseAbilityCounter(TRUE),
+    // stored at singleUseAbility[partyIndex=0][ZERO_TO_HERO's slot index=0][side=0].
+    expect(stateZth.singleUseAbility[0]![0]![0]).toBe(1)
   })
 })

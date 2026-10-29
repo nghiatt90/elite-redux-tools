@@ -208,7 +208,12 @@ import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import type { StatChangeOutcome } from './turn'
-import { tryTransformAttacker } from './formChange'
+import {
+  apeShiftHandler,
+  hungerSwitchHandler,
+  powerConstructHandler,
+  tryTransformAttacker,
+} from './formChange'
 import { isHailImmune, weatherHasEffect } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -331,7 +336,6 @@ const ITEMS_1_2_HOLD_EFFECTS = new Set([
  * decide when ENDTURN_ABILITIES's gap line fires for unported hooks. */
 const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_ACID_REFLUX',
-  'ABILITY_APE_SHIFT',
   'ABILITY_BAD_DREAMS',
   'ABILITY_BIG_LEAVES',
   'ABILITY_BLOOD_PRICE',
@@ -342,7 +346,6 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_COLOR_SPECTRUM',
   'ABILITY_COOL_EXIT',
   'ABILITY_CRYO_ARCHITECT',
-  'ABILITY_DUAL_SHADOW',
   'ABILITY_ETERNAL_BLESSING',
   'ABILITY_FLAME_COAT',
   'ABILITY_FUNERAL_PYRE',
@@ -350,14 +353,12 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_HEALER',
   'ABILITY_HOME_RUN',
   'ABILITY_HONEY_GATHER',
-  'ABILITY_HUNGER_SWITCH',
   'ABILITY_LEAF_GUARD',
   'ABILITY_LIFE_STEAL',
   'ABILITY_LOCUST_SWARM',
   'ABILITY_MOODY',
   'ABILITY_PEACEFUL_REST',
   'ABILITY_PEACEFUL_SLUMBER',
-  'ABILITY_POWER_CONSTRUCT',
   'ABILITY_REVELATION',
   'ABILITY_SAP_TRAP',
   'ABILITY_SERPENT_BIND',
@@ -1436,6 +1437,28 @@ function runEndTurnAbilities(
         // Impl<ABILITY_SCHOOLING>.onEndTurn (:2839-2842) -> TryTransformAttacker (:245-252).
         if (slotAbility === 'ABILITY_SCHOOLING' && battler.mon.level < 20) break
         tryTransformAttacker(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
+        break
+      }
+
+      case 'ABILITY_APE_SHIFT': {
+        // Impl<ABILITY_APE_SHIFT>.onEndTurn (abilities.cc:9062) -> ApeShiftHandler (:9047-9059).
+        // On end turn gBattlerAttacker is the holder (HandleEndTurnAbility), so the status half
+        // of BattleScript_ApeShift targets the holder.
+        apeShiftHandler(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
+        break
+      }
+
+      case 'ABILITY_POWER_CONSTRUCT': {
+        // Impl<ABILITY_POWER_CONSTRUCT>.onEndTurn (abilities.cc:2924-2945).
+        powerConstructHandler(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
+        break
+      }
+
+      case 'ABILITY_HUNGER_SWITCH':
+      case 'ABILITY_DUAL_SHADOW': {
+        // Impl<ABILITY_HUNGER_SWITCH>.onEndTurn (abilities.cc:3546-3573); Dual Shadow aliases it
+        // at :9567. The handler toggles Morpeko forms and no-ops for other holders.
+        hungerSwitchHandler(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
         break
       }
 

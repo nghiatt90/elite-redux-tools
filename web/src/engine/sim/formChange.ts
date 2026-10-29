@@ -34,7 +34,15 @@ import { calcHp, calcStat, DEFAULT_NATURE_STAT_TABLE } from '../stats'
 import type { BattleStatKey, StatKey } from '../types'
 import {
   B_SIDE_PLAYER,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPATK,
+  STAT_SPDEF,
+  STAT_SPEED,
+  STATUS1_ANY,
+  STATUS1_SLEEP,
   STATUS2_TRANSFORMED,
+  STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_ANY,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
@@ -50,10 +58,21 @@ import type { ChosenAction, TurnOrder } from './turnOrder'
 import { recalculateMoveOrder } from './turnOrder'
 import type { BattleState, BattlerState } from './state'
 import { ABILITY_SLOT_COUNT, SWITCH_IN_ABILITY_DONE_COUNT } from './state'
-import { applySwitchInAbilities, type SwitchInAbilityDeps } from './switchInAbility'
+import {
+  applySwitchInAbilities,
+  getSingleUseAbilityCounter,
+  setSingleUseAbilityCounter,
+  type SwitchInAbilityDeps,
+} from './switchInAbility'
 import { isWeatherActive } from './onWeather'
-import { battlerHasSimAbility } from './statBuffs'
-import { findAbilitySlot } from './statusEffects'
+import {
+  MOVE_EFFECT_AFFECTS_USER,
+  STAT_BUFF_ALLOW_PTR,
+  battlerHasSimAbility,
+  changeStatBuffsImplicit,
+  isBattlerWeatherAffected,
+} from './statBuffs'
+import { findAbilitySlot, isTerrainActive } from './statusEffects'
 
 export interface FormChangeDeps extends SwitchInAbilityDeps {}
 
@@ -438,6 +457,267 @@ export function tryTransformAttacker(
   const battler = state.battlers[battlerId]
   if (!battler || hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
   applySwitchInAbilities(state, battlerId, deps, unmodelled)
+  return true
+}
+
+/**
+ * BattleScript_AttackerFormChange (data/battle_scripts_1.s:8454-8462): `handleformchange
+ * BS_ATTACKER, 0/1`, RecalcBattlerStats, `handleformchange ..., 2`, then `switchinabilities
+ * BS_ATTACKER`. `changeBattlerForm` performs the species/stat/ability swap and
+ * `applySwitchInAbilities` is the `switchinabilities` step -- the same pairing
+ * `tryTransformAttacker` uses. Returns FALSE (no-op) when the target species is missing
+ * from the data, like `changeBattlerForm` itself.
+ */
+export function reformSpecies(
+  state: BattleState,
+  battlerId: number,
+  newSpeciesId: string,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  if (!deps.dataContext.species(newSpeciesId)) return false
+  changeBattlerForm(state, battlerId, newSpeciesId, deps.dataContext)
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
+  return true
+}
+
+/**
+ * DisguiseReformHandler, src/abilities.cc:2846-2866, used by Impl<ABILITY_DISGUISE>.onEntry
+ * (:2868), .onWeather (:2881) and Patchwork's onEntry alias (:8637):
+ *   MIMIKYU_BUSTED -> MIMIKYU, MIMIKYU_RAYQUAZA_BUSTED -> MIMIKYU_RAYQUAZA, else FALSE;
+ *   CHECK(IsBattlerWeatherAffected(battler, WEATHER_FOG_ANY)); CHECK_NOT(STATUS2_TRANSFORMED);
+ *   species write + BattleScript_AttackerFormChange.
+ */
+export function disguiseReformHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  let newSpecies: string
+  switch (battler.mon.speciesId) {
+    case 'SPECIES_MIMIKYU_BUSTED':
+      newSpecies = 'SPECIES_MIMIKYU'
+      break
+    case 'SPECIES_MIMIKYU_RAYQUAZA_BUSTED':
+      newSpecies = 'SPECIES_MIMIKYU_RAYQUAZA'
+      break
+    default:
+      return false
+  }
+  if (!isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  return reformSpecies(state, battlerId, newSpecies, deps, unmodelled)
+}
+
+/**
+ * IceFaceReformHandler, src/abilities.cc:3350-3361, used by
+ * Impl<ABILITY_ICE_FACE>.onEntry (:3363) and .onWeather (:3366):
+ *   CHECK(species == EISCUE_NOICE_FACE); CHECK(IsBattlerWeatherAffected(battler, WEATHER_HAIL_ANY));
+ *   CHECK_NOT(STATUS2_TRANSFORMED); EISCUE + BattleScript_AttackerFormChange.
+ */
+export function iceFaceReformHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (battler.mon.speciesId !== 'SPECIES_EISCUE_NOICE_FACE') return false
+  if (!isBattlerWeatherAffected(state, battlerId, WEATHER_HAIL_ANY, deps)) return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  return reformSpecies(state, battlerId, 'SPECIES_EISCUE', deps, unmodelled)
+}
+
+/**
+ * ApeShiftHandler, src/abilities.cc:9047-9059 (Impl<ABILITY_APE_SHIFT>.onEntry :9061,
+ * onEndTurn :9062, onDefender :9063):
+ *   CHECK_NOT(STATUS2_TRANSFORMED)
+ *   CHECK(species == SLAKING_MEGA || species == SLAKING_MEGA_APE_SHIFT)
+ *   CHECK(ShouldChangeFormHpBased(battler))       -- performs the species swap
+ *   gStackBattler1 = battler
+ *   if (species is now SLAKING_MEGA_APE_SHIFT) BattleScriptCall(BattleScript_ApeShift)
+ *   BattleScriptCall(BattleScript_StackBattlerFormChange)
+ *
+ * BattleScript_ApeShift (data/battle_scripts_1.s:8472-8482) operates on gBattlerAttacker (the
+ * script's BS_ATTACKER): on entry/end-turn HandleSwitchInAbility/HandleEndTurnAbility set
+ * gBattlerAttacker to the holder, but HandleDefenderAbility (battle_util.c:9053-9075) leaves it
+ * as the move's attacker -- so the onDefender call cures the ATTACKER's status, as written.
+ * `scriptAttackerId` carries that distinction.
+ *
+ * checkrudeawakening (VARIOUS_RUDE_AWAKENING, battle_script_commands.c:8895-8904) only fires
+ * when the script attacker is asleep AND holds ABILITY_RUDE_AWAKENING; it sets the ability state
+ * and runs BattleScript_DoRudeAwakening (data/battle_scripts_1.s:8464-8470), which cures the
+ * status and then BattleScript_AllStatsUp (:7891-7925) raises the five stats by 1. On a failed
+ * REQUIRE the command just falls through to the normal `curestatus BS_ATTACKER`.
+ *
+ * BattleScript_StackBattlerFormChange (:8501-8506) calls BattleScript_AttackerFormChange, whose
+ * `switchinabilities BS_ATTACKER` is applySwitchInAbilities for the holder.
+ */
+export function apeShiftHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+  scriptAttackerId: number = battlerId,
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  if (battler.mon.speciesId !== 'SPECIES_SLAKING_MEGA' && battler.mon.speciesId !== 'SPECIES_SLAKING_MEGA_APE_SHIFT') {
+    return false
+  }
+  if (!shouldChangeFormHpBased(state, battlerId, deps)) return false
+
+  if (battler.mon.speciesId === 'SPECIES_SLAKING_MEGA_APE_SHIFT') {
+    const scriptAttacker = state.battlers[scriptAttackerId]
+    if (scriptAttacker && hasFlag(scriptAttacker.mon.status1, STATUS1_ANY)) {
+      // checkrudeawakening only diverts when asleep with Rude Awakening; otherwise the normal
+      // `curestatus BS_ATTACKER` below clears any status.
+      const rudeAwakening =
+        hasFlag(scriptAttacker.mon.status1, STATUS1_SLEEP) &&
+        battlerHasSimAbility(state, scriptAttacker, 'ABILITY_RUDE_AWAKENING', false, scriptAttackerId, false, deps.dataContext)
+      // curestatus BS_ATTACKER -> VARIOUS_CURE_STATUS (battle_script_commands.c:7685-7689): status1 = 0.
+      scriptAttacker.mon.status1 = 0
+      const partyMon = state.sides[scriptAttackerId & 1].party[scriptAttacker.partyIndex]
+      if (partyMon) partyMon.status1 = 0
+      if (rudeAwakening) {
+        // VARIOUS_RUDE_AWAKENING: SetAbilityState(battler, ABILITY_RUDE_AWAKENING, TRUE)
+        const slot = findAbilitySlot(scriptAttacker.mon.abilities, 'ABILITY_RUDE_AWAKENING')
+        if (slot !== -1) scriptAttacker.volatiles.abilityState[slot] = 1
+        // BattleScript_AllStatsUp (:7891-7925): ChangeStatBuffsImplicit(+1) for ATK, DEF, SPE, SPATK, SPDEF.
+        for (const statId of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
+          changeStatBuffsImplicit(
+            state,
+            scriptAttackerId,
+            scriptAttackerId,
+            1,
+            statId,
+            MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+            true,
+            deps,
+            unmodelled,
+          )
+        }
+      }
+    }
+  }
+
+  // BattleScript_StackBattlerFormChange -> BattleScript_AttackerFormChange -> switchinabilities.
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
+  return true
+}
+
+/**
+ * Impl<ABILITY_HUNGER_SWITCH>.onEndTurn, src/abilities.cc:3546-3573 (Dual Shadow aliases it at
+ * :9567): CHECK_NOT(STATUS2_TRANSFORMED); MORPEKO <-> MORPEKO_HANGRY and
+ * MORPEKYLL <-> MORPEKYLL_HANGRY toggle every end of turn; anything else returns FALSE.
+ * The change runs BattleScript_AttackerFormChangeEnd3 (:8508-8510) ->
+ * BattleScript_AttackerFormChange -> `switchinabilities`.
+ */
+export function hungerSwitchHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  let newSpecies: string
+  switch (battler.mon.speciesId) {
+    case 'SPECIES_MORPEKO':
+      newSpecies = 'SPECIES_MORPEKO_HANGRY'
+      break
+    case 'SPECIES_MORPEKO_HANGRY':
+      newSpecies = 'SPECIES_MORPEKO'
+      break
+    case 'SPECIES_MORPEKYLL':
+      newSpecies = 'SPECIES_MORPEKYLL_HANGRY'
+      break
+    case 'SPECIES_MORPEKYLL_HANGRY':
+      newSpecies = 'SPECIES_MORPEKYLL'
+      break
+    default:
+      return false
+  }
+  return reformSpecies(state, battlerId, newSpecies, deps, unmodelled)
+}
+
+/**
+ * Impl<ABILITY_POWER_CONSTRUCT>.onEndTurn, src/abilities.cc:2924-2945:
+ *   species in {ZYGARDE, ZYGARDE_10, ZYGARDE_10_POWER_CONSTRUCT, ZYGARDE_50_POWER_CONSTRUCT}
+ *   CHECK(hp <= maxHP / 2) (integer division); CHECK_NOT(STATUS2_TRANSFORMED);
+ *   gBattleStruct->changedSpecies[partyIndex] = species;
+ *   species = ZYGARDE_COMPLETE + BattleScript_AttackerFormChangeEnd3.
+ *
+ * The changedSpecies write is revert-on-switch bookkeeping (CleanUpBattlerBeforeSwitchOut); the
+ * sim has no equivalent for it outside megaEvolveBattler/undoMegaEvolution, so it is left as a
+ * reported gap rather than invented (see REPORT.md).
+ */
+export function powerConstructHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  switch (battler.mon.speciesId) {
+    case 'SPECIES_ZYGARDE':
+    case 'SPECIES_ZYGARDE_10':
+    case 'SPECIES_ZYGARDE_10_POWER_CONSTRUCT':
+    case 'SPECIES_ZYGARDE_50_POWER_CONSTRUCT':
+      break
+    default:
+      return false
+  }
+  if (!(battler.mon.hp <= Math.trunc(battler.mon.maxHp / 2))) return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  return reformSpecies(state, battlerId, 'SPECIES_ZYGARDE_COMPLETE', deps, unmodelled)
+}
+
+/**
+ * Impl<ABILITY_ZERO_TO_HERO>.onEntry, src/abilities.cc:7125-7135:
+ *   CHECK(species == PALAFIN); CHECK_NOT(STATUS2_TRANSFORMED);
+ *   CHECK(GetSingleUseAbilityCounter(battler, ability)) -> PALAFIN_HERO +
+ *   BattleScript_AttackerFormChangeEnd3. The counter is armed by onExit (:7136-7139).
+ */
+export function zeroToHeroHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (battler.mon.speciesId !== 'SPECIES_PALAFIN') return false
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  if (!getSingleUseAbilityCounter(state, battlerId, 'ABILITY_ZERO_TO_HERO', deps.dataContext)) return false
+  return reformSpecies(state, battlerId, 'SPECIES_PALAFIN_HERO', deps, unmodelled)
+}
+
+/**
+ * DrakelpHeadReformHandler, src/abilities.cc:12044-12053, used by
+ * Impl<ABILITY_DRAKELP_HEAD>.onEntry (:12056) and .onTerrain (:12057):
+ *   CHECK(GetSingleUseAbilityCounter(battler, ability)); CHECK(IsTerrainActive(STATUS_FIELD_TOXIC_TERRAIN));
+ *   SetSingleUseAbilityCounter(battler, ability, FALSE); BattleScript_DrakelpHeadReset
+ *   (data/battle_scripts_1.s:12572-12575) is message-only. No species change.
+ */
+export function drakelpHeadReformHandler(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  _unmodelled: string[],
+): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  if (!getSingleUseAbilityCounter(state, battlerId, 'ABILITY_DRAKELP_HEAD', deps.dataContext)) return false
+  if (!isTerrainActive(state, STATUS_FIELD_TOXIC_TERRAIN, deps)) return false
+  setSingleUseAbilityCounter(state, battlerId, 'ABILITY_DRAKELP_HEAD', 0, deps.dataContext)
   return true
 }
 

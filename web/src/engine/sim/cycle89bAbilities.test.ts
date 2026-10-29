@@ -730,7 +730,7 @@ describe('Cycle 89b - Color Spectrum (src/abilities.cc:8736-8754)', () => {
 })
 
 describe('Cycle 89b - still-unported hooks keep reporting themselves', () => {
-  for (const id of ['ABILITY_DUAL_SHADOW', 'ABILITY_CRYO_ARCHITECT']) {
+  for (const id of ['ABILITY_COOL_EXIT', 'ABILITY_CRYO_ARCHITECT']) {
     it(`${id} is reported as an unrun end-turn hook`, () => {
       const s = battle([{ abilities: hasAbility(id) }, {}], countingRng())
       const { unmodelled } = endTurn(s)

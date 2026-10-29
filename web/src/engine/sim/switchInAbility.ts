@@ -171,7 +171,15 @@ import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
 import { TYPE_ROCK_ID } from './hazards'
-import { tryPrimalReversion, tryTransformAttacker } from './formChange'
+import {
+  apeShiftHandler,
+  disguiseReformHandler,
+  drakelpHeadReformHandler,
+  iceFaceReformHandler,
+  tryPrimalReversion,
+  tryTransformAttacker,
+  zeroToHeroHandler,
+} from './formChange'
 
 /** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
  * `hooks.onEntry` is present. */
@@ -2168,6 +2176,41 @@ export function applySwitchInAbilities(
       // (data/battle_scripts_1.s:8454-8462) -- the recursive applySwitchInAbilities below.
       if (abilityId === 'ABILITY_SCHOOLING' && battler.mon.level < 20) continue
       tryTransformAttacker(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    // Form-change onEntry hooks. Each one's BattleScript_AttackerFormChange ends in
+    // `switchinabilities BS_ATTACKER` (data/battle_scripts_1.s:8454-8462), which is the recursive
+    // applySwitchInAbilities call inside the handlers; `continue` keeps the generic
+    // "onEntry hook was not run" note from firing for them.
+    if (abilityId === 'ABILITY_DISGUISE' || abilityId === 'ABILITY_PATCHWORK') {
+      // Impl<ABILITY_DISGUISE>.onEntry (abilities.cc:2868) and Patchwork's alias (:8637;
+      // Patchwork's onDefender curse half is not ported).
+      disguiseReformHandler(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ICE_FACE') {
+      // Impl<ABILITY_ICE_FACE>.onEntry (abilities.cc:3363).
+      iceFaceReformHandler(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_APE_SHIFT') {
+      // Impl<ABILITY_APE_SHIFT>.onEntry (abilities.cc:9061): ApeShiftHandler (:9047-9059).
+      apeShiftHandler(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_ZERO_TO_HERO') {
+      // Impl<ABILITY_ZERO_TO_HERO>.onEntry (abilities.cc:7125-7135).
+      zeroToHeroHandler(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_DRAKELP_HEAD') {
+      // Impl<ABILITY_DRAKELP_HEAD>.onEntry (abilities.cc:12056): DrakelpHeadReformHandler (:12044-12053).
+      drakelpHeadReformHandler(state, battlerId, deps, unmodelled)
       continue
     }
 
