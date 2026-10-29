@@ -44,6 +44,8 @@
 import type { MoveBehaviors } from '../basePower'
 import type { BattleState, BattlerState } from './state'
 import {
+  BATTLE_TYPE_ARENA,
+  BATTLE_TYPE_TRAINER,
   DEFAULT_STAT_STAGE,
   ENUM_WEATHER_FOG,
   ENUM_WEATHER_HAIL,
@@ -203,8 +205,15 @@ import {
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { changeBattlerForm } from './formChange'
 import { TYPE_NAME_BY_ID } from './hazards'
-import { doesBattlerHaveAbilityShield, hasAbilityIgnoringSuppression, updateAbilityStateForNewAbility } from './moveEffects'
+import {
+  canBattlerSwitch,
+  doesBattlerHaveAbilityShield,
+  hasAbilityIgnoringSuppression,
+  tryScheduleSwitch,
+  updateAbilityStateForNewAbility,
+} from './moveEffects'
 import { PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
+import { countUsablePartyMons } from './ai/aiPipeline'
 
 export { getBattlerBattleMoveTargetFlags, isMegaLauncherBoostedMove }
 
@@ -825,6 +834,8 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_HYPNOTIC_TOUCH',
   'ABILITY_STRIKEOUT', // Cycle 89b (:11143-11155)
   'ABILITY_SOUL_LINKER', // Cycle 96 onDefender half (abilities.cc:4273-4285)
+  'ABILITY_CHUCKSTER', // Cycle 98b (:10438-10463, schedules the attacker's switch)
+  'ABILITY_RESTRAINING_ORDER', // Cycle 98b (:8579-8597, drain sets the state and switches the attacker)
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -2593,6 +2604,54 @@ function handleDefenderMoveEndAbility(
       const reformNote =
         "Drakelp Head's reform handler (abilities.cc:12044-12053, onEntry/onTerrain) is not modelled: the single-use counter is never cleared by a toxic terrain or a repeated switch-in, so the damage-reduction half cannot be re-armed in the sim"
       if (!unmodelled.includes(reformNote)) unmodelled.push(reformNote)
+    }
+  }
+
+  // 53. Chuckster (src/abilities.cc:10438-10463): CHECK_NOT(GetAbilityState(battler, ability)),
+  // CHECK(DidMoveHit()) (read as "the move dealt damage", like the other defender ports),
+  // CHECK(IsMoveMakingContact(move, attacker)). The state is set HERE, at hook time, and the
+  // scheduled entry carries no setAbilityState, so a drain that is later filtered (the attacker
+  // cannot switch) still spends the ability. The 0.5x contact reduction (:10464-10469) reads the
+  // same state on the damage side, which the sim's damage path does not derive from abilityState.
+  if (abilityId === 'ABILITY_CHUCKSTER') {
+    if (
+      targetDamage > 0 &&
+      !target.volatiles.abilityState[slotIndex] &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      target.volatiles.abilityState[slotIndex] = 1
+      // battle_util.c:369-376, no `.setAbilityState`: this hook already spent it.
+      tryScheduleSwitch(state, {
+        ability: abilityId,
+        setAbilityState: false,
+        switchingBattler: attackerId,
+        sourceBattler: targetId,
+      })
+    }
+  }
+
+  // 54. Restraining Order (src/abilities.cc:8579-8597): CHECK_NOT(GetAbilityState(battler, ability)),
+  // CHECK(ShouldApplyOnHitEffect(attacker)) (DidMoveHit && IsBattlerAlive(attacker), battle_util.c:4062),
+  // CHECK(CanBattlerBeForceSwitched(attacker)) (battle_util.c:2608-2616): alive, CanBattlerSwitch,
+  // BATTLE_TYPE_TRAINER, not BATTLE_TYPE_ARENA, CountUsablePartyMons nonzero. Contact is NOT required.
+  // `.setAbilityState` is TRUE, so the DRAIN sets the state after re-checking the ability is still
+  // present; a schedule that the drain filters leaves the ability armed.
+  if (abilityId === 'ABILITY_RESTRAINING_ORDER') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      !target.volatiles.abilityState[slotIndex] &&
+      canBattlerSwitch(state, attackerId) &&
+      hasFlag(state.battleTypeFlags, BATTLE_TYPE_TRAINER) &&
+      !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) &&
+      countUsablePartyMons(state, attackerId) !== 0
+    ) {
+      tryScheduleSwitch(state, {
+        ability: abilityId,
+        setAbilityState: true,
+        switchingBattler: attackerId,
+        sourceBattler: targetId,
+      })
     }
   }
 

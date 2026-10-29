@@ -4,7 +4,7 @@
 // Status setup moves (e.g. Swords Dance, Belly Drum) do not roll accuracy in the C,
 // deduct PP after attackcanceler, and apply stat changes/HP modifications directly.
 
-import type { BattleState, BattlerState } from './state'
+import type { BattleState, BattlerState, QueuedSwitchAction } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
@@ -9959,7 +9959,7 @@ export function handleFollowMe(ctx: MoveEffectContext): ActionOutcome {
  * CanBattlerSwitch (src/battle_script_commands.c:5061-5172).
  * Returns true if the battler is not commanded and has at least one alive, non-egg reserve in party.
  */
-function canBattlerSwitch(state: BattleState, battlerId: number): boolean {
+export function canBattlerSwitch(state: BattleState, battlerId: number): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.statuses4, STATUS4_COMMANDED)) return false
@@ -10561,6 +10561,18 @@ export function handleRoar(ctx: MoveEffectContext): ActionOutcome {
   // 3-8. The phasing checks, the random pick and the switch.
   const phased = forceRandomSwitch(state, battlerId, targetId, deps, unmodelled)
   return outcome(ctx, { targetId, missed: phased === 'ARENA' })
+}
+
+/**
+ * TryScheduleSwitch (src/battle_util.c:369-376): append an entry to `gQueuedSwitchData`,
+ * refusing when an entry for the same `switchingBattler` is already queued. The drain is
+ * turn.ts's drainQueuedSwitches; live here rather than in turn.ts so moveEnd.ts, which
+ * turn.ts already imports, can schedule without adding a cycle.
+ */
+export function tryScheduleSwitch(state: BattleState, entry: QueuedSwitchAction): boolean {
+  if (state.queuedSwitches.some((queued) => queued.switchingBattler === entry.switchingBattler)) return false
+  state.queuedSwitches.push(entry)
+  return true
 }
 
 /**

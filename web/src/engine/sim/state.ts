@@ -685,6 +685,10 @@ export interface BattleState {
   wrappedBy: number[]
   /** `struct ExtraAttackActionStruct gQueuedExtraAttackData[MAX_BATTLERS_COUNT + 1]` (include/battle.h:1023, battle_main.c:182). */
   queuedExtraAttacks: ExtraAttackAction[]
+  /** `struct ExtraSwitchActionStruct gQueuedSwitchData[MAX_BATTLERS_COUNT + 1]` (include/battle.h:1025, battle_main.c:183),
+   * appended by TryScheduleSwitch (battle_util.c:369-376) and drained LIFO by TryPerformExtraAction (:787-816).
+   * C's index 0 is a scratch slot; this array holds entries 1..gQueuedSwitchCount only. */
+  queuedSwitches: QueuedSwitchAction[]
   /** `bool8 gProcessingExtraAttacks` (battle_main.c:177). */
   processingExtraAttacks: boolean
   /** Currently executing extra attack, mirroring `gQueuedExtraAttackData[0]` (include/battle.h:1023, battle_main.c:4242). */
@@ -771,6 +775,24 @@ export interface ExtraAttackAction {
   prankster?: boolean
   falseSwipe?: boolean
   noPpDeduct?: boolean
+}
+
+/**
+ * One entry of `gQueuedSwitchData` -- `struct ExtraSwitchActionStruct`, include/battle_util.h:229-244
+ * (battle_main.c:183). Only the SWITCH_ABILITY cause is modelled, so `script`/`item`/`move` are omitted;
+ * every entry the sim can queue carries an ability id and, optionally, the flag asking the DRAIN (rather
+ * than the hook) to spend the holder's ability state.
+ */
+export interface QueuedSwitchAction {
+  /** `ability.id` -- the ability whose hook queued the switch. */
+  ability: string
+  /** `ability.setAbilityState`: the drain tests `GetAbilityState` and sets it (Restraining Order),
+   * instead of the hook spending it at schedule time (Chuckster). */
+  setAbilityState: boolean
+  /** `switchingBattler` -- the battler that is switched out. */
+  switchingBattler: number
+  /** `sourceBattler` -- the holder whose ability queued it (gBattlerAttacker during the drain). */
+  sourceBattler: number
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

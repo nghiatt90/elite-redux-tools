@@ -465,6 +465,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     lockedMoves: new Array<string | null>(MAX_BATTLERS_COUNT).fill(null),
     wrappedBy: new Array<number>(MAX_BATTLERS_COUNT).fill(0),
     queuedExtraAttacks: [],
+    queuedSwitches: [],
     processingExtraAttacks: false,
     currentExtraAttack: null,
     mega: createMegaEvolutionState(),

@@ -310,6 +310,7 @@ export function stepTurn(
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)
   unmodelled.push(
     ...outcome.endTurnUnmodelled,
+    ...outcome.switchUnmodelled,
     ...outcome.fieldEndTurnUnmodelled,
     ...outcome.replacementUnmodelled,
     ...(outcome.battleEventsUnmodelled ?? []),

@@ -220,7 +220,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, canBattlerSwitch, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -247,6 +247,7 @@ import {
   applyPrimaryStatusEffect,
   cancelMultiTurnMoves,
   doesSubstituteBlockMove,
+  findAbilitySlot,
   isPowderImmune,
   isPreventableSecondaryEffect,
   MOVE_EFFECT_BLEED,
@@ -422,6 +423,11 @@ export interface TurnOutcome {
    * `unmodelled` because these gaps belong to the end-of-turn phase, not to
    * any one action. */
   endTurnUnmodelled: string[]
+  /** drainQueuedSwitches's own gap channel: gaps from the forced switch's own
+   * switch-in path (performSwitchAction) and the explicit arena skip. Kept apart
+   * from every ActionOutcome's `unmodelled` because a queued switch is not an
+   * action. Empty when no queued switch was drained this turn. */
+  switchUnmodelled: string[]
   /** DoFieldEndTurnEffects's residual HP effects (sandstorm/hail damage) --
    * see fieldEndTurn.ts. Runs BEFORE `endTurn` above, matching the real C's
    * DoFieldEndTurnEffects-before-DoBattlerEndTurnEffects order. */
@@ -3581,6 +3587,68 @@ export function drainQueuedExtraAttacks(
 }
 
 /**
+ * Drains gQueuedSwitchData -- the switch half of TryPerformExtraAction
+ * (src/battle_util.c:787-816), reached from HandleAction_TryFinish (:751-769)
+ * AFTER the extra-attack half has emptied (in C the two halves are one
+ * function that returns after scheduling a single switch; the drain loop here
+ * pops continuously because performSwitchAction is synchronous).
+ *
+ * Per entry, in C's order:
+ *   gQueuedSwitchData[0] = gQueuedSwitchData[gQueuedSwitchCount--]   LIFO (:788)
+ *   FILTER(IsBattlerAlive(switching) || (SWITCH_MOVE && HEALING_WISH))  -- the
+ *       exception does not apply: the sim only queues SWITCH_ABILITY entries.
+ *   SWITCH_ABILITY:
+ *       FILTER(BattlerHasAbility(source, ability, FALSE))            (:802)
+ *       if (setAbilityState) { if (GetAbilityState(source, ability)) continue;
+ *                              SetAbilityState(source, ability, TRUE); } (:803-809)
+ *   FILTER(CanBattlerSwitch(switching))                              (:812)
+ *   HandleAction_Switch (:383-391): gBattlerAttacker = sourceBattler,
+ *       gBattlerTarget = switchingBattler -- so forceRandomSwitch takes the
+ *       SOURCE first and the battler being switched second.
+ *
+ * `canProcessSwitches` (battle_util.c:785) is ported as always-true: the sim has
+ * no pre-first-turn phase, and TryDoEventsBeforeFirstTurn is the only writer of
+ * TRUE (battle_main.c:3392).
+ */
+export function drainQueuedSwitches(state: BattleState, deps: TurnLoopDeps, unmodelled: string[]): void {
+  while (state.queuedSwitches.length > 0) {
+    const entry = state.queuedSwitches.pop()!
+    const switchingBattler = entry.switchingBattler
+    const sourceBattler = entry.sourceBattler
+
+    // FILTER(IsBattlerAlive(switching)) (:790); the HEALING_WISH exception is SWITCH_MOVE-only.
+    if (!isBattlerAlive(state, switchingBattler)) continue
+
+    const source = state.battlers[sourceBattler]
+    // FILTER(BattlerHasAbility(source, ability, FALSE)) (:802). FALSE = no Mold Breaker bypass;
+    // Neutralizing Gas / Gastro Acid still suppress.
+    if (!source || !battlerHasSimAbility(state, source, entry.ability, false, sourceBattler, false, deps.dataContext)) continue
+
+    if (entry.setAbilityState) {
+      const slot = findAbilitySlot(source.mon.abilities, entry.ability)
+      // GetAbilityState returns 0 and SetAbilityState is a no-op when the ability slot is gone.
+      if (slot !== -1 && source.volatiles.abilityState[slot]) continue
+      if (slot !== -1) source.volatiles.abilityState[slot] = 1
+    }
+
+    // FILTER(CanBattlerSwitch(switching)) (:812).
+    if (!canBattlerSwitch(state, switchingBattler)) continue
+
+    // The Red Card script checks neither BATTLE_TYPE_ARENA nor BATTLE_TYPE_TRAINER, while
+    // forceRandomSwitch models Roar's arena gate by returning 'ARENA'. The sim only models
+    // queued switches in non-arena battles, so skip the call explicitly instead of letting it
+    // return 'ARENA' with no switch and no note.
+    if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) {
+      const note = `queued switch for battler ${switchingBattler} skipped: BATTLE_TYPE_ARENA is not modelled for Red Card-class switches`
+      if (!unmodelled.includes(note)) unmodelled.push(note)
+      continue
+    }
+
+    forceRandomSwitch(state, sourceBattler, switchingBattler, deps, unmodelled)
+  }
+}
+
+/**
  * One already-popped ExtraAttackAction, as TryPerformExtraAction's loop body
  * (src/battle_util.c:771-783) handles it after the pop. Shared by
  * drainQueuedExtraAttacks and executeTurn's preempt path (TryPreemptiveActions
@@ -3669,14 +3737,20 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     }
   }
   const outcomes: ActionOutcome[] = []
+  // drainQueuedSwitches's own channel: performSwitchAction's switch-in gaps plus the arena skip.
+  // Kept apart from every ActionOutcome's `unmodelled` because a queued switch is not an action.
+  const switchUnmodelled: string[] = []
 
   // CheckMegaEvolutionBeforeTurn (battle_main.c:4513-4541) and TryChangeTurnOrder (:4545-4549)
   const megaEvolved = checkMegaEvolutionBeforeTurn(state, actions, order, deps)
   const megaEvolutions = megaEvolved.length
 
-  // RunTurnActionsFunctions, battle_main.c:3320 -- drain any attacks queued before first action
-  if (state.queuedExtraAttacks.length > 0) {
+  // RunTurnActionsFunctions, battle_main.c:3320 -- drain any attacks queued before first action.
+  // TryDoEventsBeforeFirstTurn's `else if (gQueuedAttackCount) { ... = B_ACTION_TRY_FINISH; }` routes
+  // through TryPerformExtraAction, whose switch half then also runs before the first action.
+  if (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0) {
     drainQueuedExtraAttacks(state, 0, order, deps, outcomes)
+    drainQueuedSwitches(state, deps, switchUnmodelled)
   }
 
   for (let index = 0; index < order.battlerByTurnOrder.length; index++) {
@@ -3714,8 +3788,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // entry queued here runs, LIFO, BEFORE the slot's own action -- which is
     // what drainQueuedExtraAttacks does, its first pop being :831-833's.
     tryPreemptiveActions(state, index, order, actions, deps)
-    if (state.queuedExtraAttacks.length > 0) {
+    if (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0) {
       drainQueuedExtraAttacks(state, index, order, deps, outcomes)
+      drainQueuedSwitches(state, deps, switchUnmodelled)
     }
 
     // B_ACTION_FINISHED (include/battle.h:37): UseTurnAttackAsPursuit overwrote
@@ -3727,8 +3802,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
     const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps)
     outcomes.push(outcome)
-    // Drain queued extra attacks immediately after action finishes, matching HandleAction_TryFinish
+    // Drain queued extra attacks, then queued switches, immediately after the action finishes,
+    // matching HandleAction_TryFinish -> TryPerformExtraAction (battle_util.c:751-816).
     drainQueuedExtraAttacks(state, index, order, deps, outcomes)
+    drainQueuedSwitches(state, deps, switchUnmodelled)
   }
   turnStructsClear(state)
   const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
@@ -3790,9 +3867,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   }
 
   // BattleTurnPassed, battle_main.c:3483: if (gQueuedAttackCount || gQueuedSwitchCount) return;
-  // Extra attacks queued during end-turn run before replacements and wish/perish song
-  if (!state.battleOutcome && state.queuedExtraAttacks.length > 0) {
+  // Extra attacks and switches queued during end-turn run before replacements and wish/perish song.
+  if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
     drainQueuedExtraAttacks(state, order.battlerByTurnOrder.length - 1, order, deps, outcomes)
+    drainQueuedSwitches(state, deps, switchUnmodelled)
   }
 
   // HandleFaintedMonActions's state-3 gate is exactly "the whole turn (both
@@ -3831,8 +3909,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
   roundStructsClear(state)
 
-  // HandleEndTurn_ContinueBattle, battle_main.c:3446: gQueuedAttackCount = 0;
+  // HandleEndTurn_ContinueBattle, battle_main.c:3446-3447: gQueuedAttackCount = 0; gQueuedSwitchCount = 0;
   state.queuedExtraAttacks = []
+  state.queuedSwitches = []
   state.processingExtraAttacks = false
   state.currentExtraAttack = null
 
@@ -3855,6 +3934,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     order,
     endTurn,
     endTurnUnmodelled,
+    switchUnmodelled,
     fieldEndTurn,
     fieldEndTurnUnmodelled,
     endTurnOrder,

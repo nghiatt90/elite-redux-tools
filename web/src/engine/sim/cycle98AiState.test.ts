@@ -614,10 +614,14 @@ describe('Cycle 98 - Drakelp Head onDefender (abilities.cc:12055-12079)', () => 
   })
 })
 
-describe('Cycle 98 - Chuckster stays unmodelled', () => {
-  it('still reports itself as not modelled', () => {
+describe('Cycle 98 - Chuckster hook (queued-switch drain added in Cycle 98b)', () => {
+  it('arms abilityState and queues the attacker switch instead of reporting itself as not modelled', () => {
     const state = battle({}, { abilities: hasAbility(CHUCKSTER) })
     const { unmodelled } = dispatchDefender(state, 'MOVE_TACKLE')
-    expect(unmodelled).toContain('move-end defender ability ABILITY_CHUCKSTER is not modelled yet')
+    expect(unmodelled).not.toContain('move-end defender ability ABILITY_CHUCKSTER is not modelled yet')
+    expect(state.queuedSwitches).toEqual([
+      { ability: CHUCKSTER, setAbilityState: false, switchingBattler: 0, sourceBattler: 1 },
+    ])
+    expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(1)
   })
 })

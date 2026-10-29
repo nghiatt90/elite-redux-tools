@@ -717,10 +717,14 @@ describe('Cycle 88a - Flammable Coat (src/abilities.cc:8320-8344)', () => {
   })
 })
 
-describe('Cycle 88a - hooks left unmodelled', () => {
-  it('Chuckster still reports itself as not modelled: its TryScheduleSwitch has no queued-switch drain in the sim', () => {
+describe('Cycle 88a - Chuckster hook (drained as of Cycle 98b)', () => {
+  it('arms its abilityState and queues the attacker switch instead of reporting itself as not modelled', () => {
     const s = battle([{}, { abilities: hasAbility('ABILITY_CHUCKSTER') }], countingRng())
     const { unmodelled } = dispatch(s, 'MOVE_TACKLE')
-    expect(unmodelled).toContain('move-end defender ability ABILITY_CHUCKSTER is not modelled yet')
+    expect(unmodelled).not.toContain('move-end defender ability ABILITY_CHUCKSTER is not modelled yet')
+    expect(s.queuedSwitches).toEqual([
+      { ability: 'ABILITY_CHUCKSTER', setAbilityState: false, switchingBattler: 0, sourceBattler: 1 },
+    ])
+    expect(s.battlers[1]!.volatiles.abilityState[0]).toBe(1)
   })
 })

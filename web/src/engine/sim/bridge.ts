@@ -354,7 +354,7 @@ const BATCH1_GAPS: BridgeGap[] = [
   { field: 'condition.safePassage', reason: 'NEVER_UPDATED', detail: 'gRoundStructs.safePassage; written only on switch-in after MOVE_SAFE_PASSAGE (battle_main.c:2895), which is not in the 40 fights\' movesets' },
 
   // --- no honest source anywhere ------------------------------------------
-  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239) and Drakelp Head (single-use counter, written by moveEnd.ts:2626); Chuckster (onDefender switch) still has no writer in the sim' },
+  { field: 'abilityOn', reason: 'NO_SOURCE', detail: 'reads Flash Fire, Slow Start, Ambush, Unburden, Stakeout, Power Outage (abilityState, written by moveEnd.ts:4239) and Drakelp Head (single-use counter, written by moveEnd.ts:2626); Chuckster now also writes abilityState (moveEnd.ts:2610-2623, Cycle 98b), but this closure does not read that slot' },
 ]
 
 const bareType = (type: string): string => type.replace(/^TYPE_/, '')
@@ -526,7 +526,8 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
     // battle_util.c:3944-3954, set by moveEnd.ts's :2626 block). Both are
     // INVERTED reads in the calculator (flag set == discharged), matching
     // abilities.cc:12364-12368 / :12073-12075 -- so `abilityOn` is the raw flag.
-    // Chuckster (onDefender switch) still has no writer in the sim.
+    // Chuckster's abilityState is written by moveEnd.ts:2610-2623 (Cycle 98b),
+    // but this closure deliberately leaves its slot out of the read set above.
     abilityOn: (() => {
       const abilityIds = [mon.abilities.ability, ...mon.abilities.innates]
       const hasSlowStart = (abilityIds.includes('ABILITY_SLOW_START') || abilityIds.includes('ABILITY_LETHARGY')) && battler.volatiles.slowStartTimer > 0
