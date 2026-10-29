@@ -652,7 +652,7 @@ export function isSoundMove(
     return true
   }
   if (
-    moveData?.type === 'NORMAL' &&
+    moveData?.type === 'TYPE_NORMAL' &&
     battlerHasSimAbility(state, attacker, 'ABILITY_REVERBATE', false, attackerId, false, deps.dataContext)
   ) {
     return true

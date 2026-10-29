@@ -904,6 +904,16 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_DAREDEVIL',
   'ABILITY_ARCHMAGE',
   'ABILITY_ANGELS_WRATH',
+  'ABILITY_ENERGY_SIPHON',
+  'ABILITY_FIRE_ASPECT',
+  'ABILITY_FIRES_WRATH',
+  'ABILITY_FROM_THE_SHADOWS',
+  'ABILITY_FROSTMAW',
+  'ABILITY_FUNGAL_INFECTION',
+  'ABILITY_GHOST_PEPPER',
+  'ABILITY_GRASS_FLUTE',
+  'ABILITY_HARDENED_SHEATH',
+  'ABILITY_HAUNTING_FRENZY',
 ])
 
 /**
@@ -1051,6 +1061,9 @@ export interface MoveEndAbilitiesContext {
   targetDamage: number
   hpDealt?: number
   isCriticalHit?: boolean
+  /** The turn loop's "target's slot was already reached" (turn.ts targetHasActedThisTurn); the negation of
+   * `GetBattlerTurnOrderNum(target) >= gCurrentTurnActionNumber`, read by From the Shadows. Undefined = not supplied. */
+  targetHasActedThisTurn?: boolean
   deps: TurnLoopDeps
   unmodelled: string[]
   fainted: number[]
@@ -2506,6 +2519,43 @@ function applyAbilitySelfStatRaise(
   }
 }
 
+/**
+ * A negative gBattleMoveDamage run through DMG_TO_HP_FROM_ABILITY (battle_script_commands.c:9395-9397) = GetDrainedBigRootHp
+ * (battle_util.c:2369-2377: Big Root x3/2, then Absorbant x3/2, each truncating), then healed into the battler (capped at max HP).
+ * `amount` is the positive size of the heal before the multipliers; callers guarantee it is nonzero.
+ */
+function healFromAbilityDrain(state: BattleState, battlerId: number, amount: number, deps: TurnLoopDeps): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  let heal = amount
+  if (deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_BIG_ROOT') heal = Math.trunc((heal * 3) / 2)
+  if (battlerHasSimAbility(state, battler, 'ABILITY_ABSORBANT', false, battlerId, false, deps.dataContext)) heal = Math.trunc((heal * 3) / 2)
+  battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
+  syncPartyHp(state, battlerId)
+}
+
+/**
+ * AbilityStatusEffectDirect(MOVE_EFFECT_FLINCH) (abilities.cc:270-275): HITMARKER_IGNORE_SAFEGUARD is set BEFORE SetMoveEffect(FALSE, FALSE) runs, so
+ * the Shield Dust / Covert Cloak gate (battle_script_commands.c:2348-2350, which requires `!(gHitMarker & HITMARKER_IGNORE_SAFEGUARD)`) is skipped, unlike
+ * applyKingsRock's item path. What remains: the Sheer Force gate (:2361), the Substitute gate (:2388) and IsAbilityStatusProtected(CHECK_FLINCH) (:2665-2669).
+ */
+function applyAbilityDirectFlinch(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  statusDeps: StatusDeps,
+  unmodelled: string[],
+): void {
+  const target = state.battlers[targetId]
+  if (!target || target.mon.hp === 0) return
+  if (testSheerForceFlag(state, attackerId, moveId, statusDeps)) return
+  if (doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)) return
+  if (!isAbilityStatusProtected(state, targetId, CHECK_FLINCH, attackerId, statusDeps)) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_FLINCHED)
+  }
+}
+
 function handleAttackerMoveEndAbility(
   state: BattleState,
   abilityId: string,
@@ -2520,6 +2570,7 @@ function handleAttackerMoveEndAbility(
   statusDeps: StatusDeps,
   unmodelled: string[],
   isCriticalHit = false,
+  targetHasActedThisTurn?: boolean,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -3062,16 +3113,176 @@ function handleAttackerMoveEndAbility(
         attacker.mon.hp < attacker.mon.maxHp &&
         canBattlerHeal(state, attackerId, attacker, unmodelled)
       ) {
-        let heal = hpDealt
-        if (deps.grounding.holdEffectOf(attackerId) === 'HOLD_EFFECT_BIG_ROOT') heal = Math.trunc((heal * 3) / 2)
-        if (battlerHasSimAbility(state, attacker, 'ABILITY_ABSORBANT', false, attackerId, false, deps.dataContext)) heal = Math.trunc((heal * 3) / 2)
-        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
-        syncPartyHp(state, attackerId)
+        healFromAbilityDrain(state, attackerId, hpDealt, deps)
       }
     } else if (moveId === 'MOVE_STRING_SHOT' || moveId === 'MOVE_HARDEN' || moveId === 'MOVE_IRON_DEFENSE') {
       unmodelled.push(
         `Angel's Wrath's ${moveId} case (abilities.cc:5592-5642) is not modelled: it reads gMoveResultFlags / WasMoveSuccessful, which the move-end context does not carry`,
       )
+    }
+  }
+
+  // ---- Cycle 91b: third batch of onAttacker hooks. Shared conventions: ShouldApplyOnHitEffect(x) = DidMoveHit && IsBattlerAlive(x), read as
+  // `hpDealt > 0` + the live battler (the 86/88/91a convention); `moveType` is the effective (ate-adjusted) move type.
+  const moveTypeName = (): string | null => {
+    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+    return rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+  }
+
+  // Energy Siphon (src/abilities.cc:9207-9218): ShouldApplyOnHitEffect(battler), not at max HP, CanBattlerHeal; gBattleMoveDamage = -gHpDealt / 4 (s32, so
+  // truncating toward zero), -1 if that is 0; BattleScript_HydroCircuitAbsorbEffectActivated (battle_scripts_1.s:11563-11570) runs
+  // DMG_TO_HP_FROM_ABILITY (GetDrainedBigRootHp) and heals the attacker.
+  if (abilityId === 'ABILITY_ENERGY_SIPHON') {
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      attacker.mon.hp < attacker.mon.maxHp &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled)
+    ) {
+      healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 4)), deps)
+    }
+  }
+
+  // Fire Aspect (src/abilities.cc:10500-10514): Fire move burns the target, no roll. AbilityStatusEffectSafe(MOVE_EFFECT_BURN, battler, target) re-points
+  // gBattlerAttacker / gBattlerTarget at the holder and the hit target around the same BattleScript_AbilityStatusEffect, so the gates are the same.
+  if (abilityId === 'ABILITY_FIRE_ASPECT') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveTypeName() === 'FIRE' &&
+      canBeBurned(state, targetId, attackerId, statusDeps)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Fire's Wrath (src/abilities.cc:5186-5196): CanBeBurned, a NON-contact move, then a 10% roll. (Its onEntry, UseIntimidateClone, is a separate hook.)
+  if (abilityId === 'ABILITY_FIRES_WRATH') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      !isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      state.rng.random16() % 100 < 10
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // From the Shadows (src/abilities.cc:8766-8781): only while the target has not yet acted (GetBattlerTurnOrderNum(target) >= gCurrentTurnActionNumber,
+  // i.e. not turn.ts's targetHasActedThisTurn). CanMoveHaveExtraFlinchChance(move) && 20% roll -> AbilityStatusEffectDirect(MOVE_EFFECT_FLINCH); then,
+  // independent of the flinch, STATUS2_ESCAPE_PREVENTION + battlerPreventingEscape = holder unless the target is already trapped.
+  if (abilityId === 'ABILITY_FROM_THE_SHADOWS') {
+    if (target.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+      if (targetHasActedThisTurn === undefined) {
+        const msg = "From the Shadows' turn-order check (abilities.cc:8769) needs the target's turn-order slot, which this move-end call was not given"
+        if (!unmodelled.includes(msg)) unmodelled.push(msg)
+      } else if (!targetHasActedThisTurn) {
+        if (isKingsRockAffected(moveData, deps) && state.rng.random16() % 100 < 20) {
+          applyAbilityDirectFlinch(state, attackerId, targetId, moveId, statusDeps, unmodelled)
+        }
+        if (!hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+          target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+          target.volatiles.battlerPreventingEscape = attackerId
+          if (!result.statusApplied) result.statusApplied = { battlerId: targetId, status: 'ESCAPE_PREVENTION' }
+        }
+      }
+    }
+  }
+
+  // Frostmaw (src/abilities.cc:8624-8633): CanGetFrostbite, FLAG_STRONG_JAW_BOOST (= biteBased, as Solenoglyphs / Crushing Jaw), then a 50% roll.
+  if (abilityId === 'ABILITY_FROSTMAW') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canGetFrostbite(state, targetId, attackerId, statusDeps) &&
+      Boolean(moveData?.flags?.biteBased) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_FROSTBITE, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Fungal Infection (src/abilities.cc:5016-5028): contact hit seeds a non-Grass target that is not already seeded, no roll. The script
+  // (BattleScript_AbsorbantActivated, battle_scripts_1.s:11474-11477) only prints. Same bit layout as Absorbant: STATUS3_LEECHSEED_BY(battler) = battler << 0.
+  if (abilityId === 'ABILITY_FUNGAL_INFECTION') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !target.mon.types.includes('GRASS') &&
+      !hasFlag(target.statuses3, STATUS3_LEECHSEED) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      target.statuses3 |= attackerId | STATUS3_LEECHSEED
+    }
+  }
+
+  // Ghost Pepper (src/abilities.cc:12459-12468): Grass move, CanBeBurned, then a 30% roll.
+  if (abilityId === 'ABILITY_GHOST_PEPPER') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveTypeName() === 'GRASS' &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Grass Flute (src/abilities.cc:10070-10078): sound move inflicts Fear on a target without gVolatileStructs.fear, no roll.
+  if (abilityId === 'ABILITY_GRASS_FLUTE') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      !target.volatiles.fear
+    ) {
+      applyAbilityOnHitStatus(state, 'FEAR', attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Hardened Sheath (src/abilities.cc:4942-4952): ShouldApplyOnHitEffect(battler), horn move (gBattleMoves[move].hornBased), then a direct
+  // ChangeStatBuffs(battler, 1, STAT_ATK, MOVE_EFFECT_AFFECTS_USER, NULL) -- not via SetMoveEffect, so no Sheer Force / Substitute gate.
+  if (abilityId === 'ABILITY_HARDENED_SHEATH') {
+    if (attacker.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId && Boolean(moveData?.flags?.hornBased)) {
+      const res = changeStatBuffs(
+        state,
+        attackerId,
+        attackerId,
+        targetId,
+        1,
+        STAT_ATK,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_ATK, change: res.delta })
+      }
+    }
+  }
+
+  // Haunting Frenzy (src/abilities.cc:7523-7533): CanMoveHaveExtraFlinchChance(move), 20% roll, AbilityStatusEffectDirect(MOVE_EFFECT_FLINCH).
+  // (Its onBattlerFaints half is a separate hook.)
+  if (abilityId === 'ABILITY_HAUNTING_FRENZY') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isKingsRockAffected(moveData, deps) &&
+      state.rng.random16() % 100 < 20
+    ) {
+      applyAbilityDirectFlinch(state, attackerId, targetId, moveId, statusDeps, unmodelled)
     }
   }
 
@@ -3560,6 +3771,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         statusDeps,
         unmodelled,
         ctx.isCriticalHit ?? false,
+        ctx.targetHasActedThisTurn,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -4347,6 +4559,8 @@ export interface MoveEndContext {
   fainted: number[]
   /** gChosenMove (:4321) -- defaults to moveId when not a called move. */
   chosenMoveId?: string
+  /** turn.ts's targetHasActedThisTurn, forwarded to the attacker-ability dispatch (From the Shadows). */
+  targetHasActedThisTurn?: boolean
   /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
   noEffect?: boolean
   /**
@@ -4690,6 +4904,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       targetDamage,
       hpDealt,
       isCriticalHit: ctx.isCriticalHit ?? false,
+      targetHasActedThisTurn: ctx.targetHasActedThisTurn,
       deps,
       unmodelled,
       fainted,

@@ -1148,7 +1148,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 80 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 90 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1172,19 +1172,29 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_DEVIATE',
       'ABILITY_ELEMENTAL_CHARGE',
       'ABILITY_EMANATE',
+      'ABILITY_ENERGY_SIPHON',
       'ABILITY_ENERGY_TAP',
       'ABILITY_ENLIGHTENED',
       'ABILITY_ENVENOM',
       'ABILITY_FEARMONGER',
       'ABILITY_FERTILIZE',
+      'ABILITY_FIRES_WRATH',
+      'ABILITY_FIRE_ASPECT',
       'ABILITY_FLAME_BODY',
       'ABILITY_FLAMING_JAWS',
       'ABILITY_FLAMING_MAW',
       'ABILITY_FRAGRANT_DAZE',
       'ABILITY_FREEZING_POINT',
+      'ABILITY_FROM_THE_SHADOWS',
+      'ABILITY_FROSTMAW',
+      'ABILITY_FUNGAL_INFECTION',
       'ABILITY_GALVANIZE',
+      'ABILITY_GHOST_PEPPER',
+      'ABILITY_GRASS_FLUTE',
       'ABILITY_GRIP_PINCER',
       'ABILITY_GROWING_TOOTH',
+      'ABILITY_HARDENED_SHEATH',
+      'ABILITY_HAUNTING_FRENZY',
       'ABILITY_HIGH_TIDE',
       'ABILITY_HYDRATE',
       'ABILITY_HYPNOTIC_TOUCH',

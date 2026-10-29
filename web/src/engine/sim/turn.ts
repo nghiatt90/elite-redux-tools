@@ -3175,6 +3175,7 @@ export function executeAction(
       deps,
       unmodelled,
       fainted,
+      targetHasActedThisTurn,
       part: perHitResolution ? 'FIRST' : 'FULL',
     })
 
