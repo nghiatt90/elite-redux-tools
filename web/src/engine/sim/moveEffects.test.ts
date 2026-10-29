@@ -1272,7 +1272,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
     }
   })
 
-  it('Partner scan: pushed to unmodelled in doubles when partner exists and is alive, not in singles or when fainted', () => {
+  it('Partner scan: no unmodelled note in singles, doubles with a live partner, or doubles with a fainted partner', () => {
     // Singles: no partner exists (battler.id ^ 2 = 2 >= battlersCount = 2)
     {
       const state = battle([{}, {}], countingRng())
@@ -1316,7 +1316,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         testDeps(),
         unmodelled,
       )
-      expect(unmodelled).toContain('GetStatDropBlock partner scan (abilities.cc:447-458) is not modelled')
+      expect(unmodelled).toEqual([])
     }
 
     // Doubles: partner (id 2) is fainted (HP 0)
