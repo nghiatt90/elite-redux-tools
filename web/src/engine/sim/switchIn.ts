@@ -60,6 +60,8 @@ import { B_SIDE_PLAYER, clearFlag } from './constants'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
+import { getBattlerAbilitySlotsReverse } from './moveEnd'
+import { isSimAbilitySuppressed } from './statBuffs'
 import { tryPrimalReversion, undoMegaEvolution } from './formChange'
 import {
   applyBattleStartPass,
@@ -236,7 +238,46 @@ export function applyEndOfTurnReplacements(state: BattleState, deps: Replacement
   for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
     while (!state.battleOutcome && state.battlers[battlerId]?.mon.hp === 0 && hasLiveReserve(state, battlerId)) {
       const partyIndex = deps.chooseReplacement(state, battlerId, unmodelled)
+      tryRecurringNightmare(state, battlerId, switchDeps)
       switchIn(state, battlerId, partyIndex, switchDeps, unmodelled)
     }
+  }
+}
+
+/**
+ * VARIOUS_TRY_RECURRING_NIGHTMARE, src/battle_script_commands.c:8645-8655, run by
+ * BattleScript_HandleFaintedMon's `tryrecurringnightmare BS_FAINTED`
+ * (data/battle_scripts_1.s:6958) -- after `openpartyscreen`, before
+ * `switchhandleorder`/`switchindataupdate` for the incoming mon:
+ *
+ *   ON_ABILITY(gActiveBattler, FALSE,
+ *     gAbilities[ability].onRevive && GetSingleUseAbilityCountByIndex(gActiveBattler, idx) == 1,
+ *     gBattleMoveDamage = gBattleMons[gActiveBattler].maxHP / 4;
+ *     if (!gBattleMoveDamage) gBattleMoveDamage = 1;
+ *     SetSingleUseAbilityCountByIndex(gActiveBattler, idx, 2);
+ *     BtlController_EmitSetMonData(0, REQUEST_HP_BATTLE, gBitTable[gBattleStruct->battlerPartyIndexes[gActiveBattler]], 2, &gBattleMoveDamage);
+ *     ...)
+ *
+ * The counter was latched to 1 by Cmd_tryfaintmon's onRevive scan when the mon fainted (turn.ts's
+ * latchRecurringNightmareOnFaint); no weather test is repeated here. The controller request writes
+ * the PARTY mon's HP, not the fainted on-field battler's -- the revived mon stays in the party and
+ * can be sent out later. Only Recurring Nightmare is handled (the snapshot's other onRevive hook,
+ * BackUp Power, is unported -- REPORT.md); as in C, suppression still applies (ON_ABILITY's
+ * FILTER_NOT(IsSuppressed)), and the fill is by raw slot index.
+ */
+function tryRecurringNightmare(state: BattleState, battlerId: number, deps: HazardDeps): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+  if (!partySlot) return
+  const slots = getBattlerAbilitySlotsReverse(battler.mon.abilities)
+  for (const { abilityId, slotIndex } of slots) {
+    if (abilityId !== 'ABILITY_RECURRING_NIGHTMARE') continue
+    if ((state.singleUseAbility[battler.partyIndex]?.[slotIndex]?.[battlerId & 1] ?? 0) !== 1) continue
+    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+    partySlot.hp = Math.max(1, Math.trunc(battler.mon.maxHp / 4))
+    const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
+    if (slot) slot[battlerId & 1] = 2
+    break
   }
 }

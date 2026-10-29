@@ -213,12 +213,14 @@ import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
 import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
 import {
+  B_MSG_DEFENDER_STAT_FELL,
   battlerHasSimAbility,
   canLowerStat,
   canLowerStatOrMirrorArmor,
   canRaiseStat,
   changeStatBuffs,
   changeStatBuffsImplicit,
+  dispatchOnStatLowered,
   hasClearAmulet,
   isBattlerWeatherAffected,
   isSimAbilitySuppressed,
@@ -1251,7 +1253,7 @@ function runEndTurnAbilities(
             unmodelled,
             `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${i} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
           )
-          changeStatBuffsImplicit(
+          const res = changeStatBuffsImplicit(
             state,
             battlerId,
             i,
@@ -1262,6 +1264,15 @@ function runEndTurnAbilities(
             { dataContext, grounding: deps?.grounding },
             unmodelled,
           )
+          // BattleScript_StatDown prints gStatDownStringIds[B_MSG_DEFENDER_STAT_FELL] = STRINGID_DEFENDERSSTATFELL
+          // (data/battle_scripts_1.s:3717-3721, src/battle_message.c:2260-2266); PrepareStringBattle runs the
+          // onStatLowered dispatch for that string when changedStatsBattlerId is on the other side
+          // (src/battle_util.c:1222-1255). changedStatsBattlerId is gBattlerAttacker, which
+          // BattleScript_AbilityStatusEffectSafe copies from gStackBattler1 = the ability holder
+          // (abilities.cc:12004-12026, data/battle_scripts_1.s:10588-10594).
+          if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (i & 1)) {
+            dispatchOnStatLowered(state, i, battlerId, { dataContext, grounding: deps?.grounding }, unmodelled)
+          }
         }
         break
       }
@@ -1278,7 +1289,13 @@ function runEndTurnAbilities(
             unmodelled,
             `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${targetId} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
           )
-          changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_SPEED, 0, true, { dataContext, grounding: deps?.grounding }, unmodelled)
+          const res = changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_SPEED, 0, true, { dataContext, grounding: deps?.grounding }, unmodelled)
+          // Same DEFENDERSSTATFELL path as Serpent Bind above: AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1,
+          // battler, target) at abilities.cc:11390-11411 makes the holder gBattlerAttacker and the target
+          // gBattlerTarget (data/battle_scripts_1.s:10588-10594).
+          if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
+            dispatchOnStatLowered(state, targetId, battlerId, { dataContext, grounding: deps?.grounding }, unmodelled)
+          }
         }
         break
       }

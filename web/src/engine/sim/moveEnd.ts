@@ -1312,7 +1312,7 @@ function handleDefenderMoveEndAbility(
       moveId !== 'MOVE_PAIN_SPLIT' &&
       !battlerHasSimAbility(state, attacker, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
     ) {
-      applyDamage(state, attackerId, targetDamage, fainted)
+      applyDamage(state, attackerId, targetDamage, fainted, deps)
       result.attackerDamage += targetDamage
     }
     return result
@@ -1336,7 +1336,7 @@ function handleDefenderMoveEndAbility(
     if (attacker.mon.hp > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
       const denom = abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ? 6 : 8
       const dmg = Math.max(1, Math.floor(attacker.mon.maxHp / denom))
-      applyDamage(state, attackerId, dmg, fainted)
+      applyDamage(state, attackerId, dmg, fainted, deps)
       result.attackerDamage += dmg
     }
   }
@@ -1514,6 +1514,13 @@ function handleDefenderMoveEndAbility(
       if (defRes.delta !== 0) {
         result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
       }
+      // No onStatLowered dispatch for this drop: BattleScript_WeakArmorActivates' Defense half does
+      // not print from gStatDownStringIds when the drop succeeds. ChangeStatBuffs leaves the chooser
+      // at B_MSG_DEFENDER_STAT_FELL (:9736, 1), which is < B_MSG_STAT_WONT_DECREASE (2), so :10303
+      // jumps to BattleScript_WeakArmorDefAnim and that prints STRINGID_TARGETABILITYSTATLOWER
+      // (data/battle_scripts_1.s:10309-10313). PrepareStringBattle's onStatLowered block runs only
+      // for STRINGID_DEFENDERSSTATFELL (src/battle_util.c:1222-1255), so the holder's own Defiant
+      // does not react to Weak Armor.
       const speRes = changeStatBuffs(
         state,
         targetId,
@@ -2193,7 +2200,7 @@ function handleDefenderMoveEndAbility(
   // so the hit's own hp dealt stands in -- identical for a single-hit KO of a mon that was undamaged this turn.
   if (abilityId === 'ABILITY_INNARDS_OUT') {
     if (targetDamage > 0 && attacker.mon.hp > 0 && target.mon.hp <= 0 && !isMagicGuardProtected(state, attacker)) {
-      applyDamage(state, attackerId, hpDealt, fainted)
+      applyDamage(state, attackerId, hpDealt, fainted, deps)
       result.attackerDamage += hpDealt
     }
   }
@@ -2727,6 +2734,15 @@ function applyAbilityStatDrop(
   if (res.delta !== 0) {
     result.statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
   }
+  // BattleScript_AbilityStatusEffect -> seteffectsecondary -> SetMoveEffect's MOVE_EFFECT_*_MINUS_1 branch sets
+  // BattleScript_StatDown (battle_script_commands.c:2765-2779), whose printfromtable gStatDownStringIds selects
+  // STRINGID_DEFENDERSSTATFELL for B_MSG_DEFENDER_STAT_FELL (data/battle_scripts_1.s:3717-3721,
+  // src/battle_message.c:2260-2266). PrepareStringBattle dispatches onStatLowered for that string when the
+  // changed stat's source (gTurnStructs[gBattlerTarget].changedStatsBattlerId = gBattlerAttacker,
+  // :9736) is on the other side (src/battle_util.c:1222-1255).
+  if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (targetId & 1) !== (attackerId & 1)) {
+    dispatchOnStatLowered(state, targetId, attackerId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled, result.statChanges)
+  }
 }
 
 /**
@@ -2839,7 +2855,7 @@ function handleAttackerMoveEndAbility(
       moveId !== 'MOVE_PAIN_SPLIT' &&
       !battlerHasSimAbility(state, target, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
     ) {
-      applyDamage(state, attackerId, targetDamage, fainted)
+      applyDamage(state, attackerId, targetDamage, fainted, deps)
       result.attackerDamage += targetDamage
     }
     return result
@@ -3039,6 +3055,14 @@ function handleAttackerMoveEndAbility(
             )
             if (res.delta !== 0) {
               result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: res.delta })
+            }
+            // Impl<ABILITY_WHIPLASH>.onAttacker (src/abilities.cc:8942-8954) ends in AbilityStatusEffect(MOVE_EFFECT_DEF_MINUS_1)
+            // -> seteffectsecondary -> SetMoveEffect's minus-1 branch -> BattleScript_StatDown
+            // (battle_script_commands.c:2765-2779). Its printfromtable gStatDownStringIds picks
+            // STRINGID_DEFENDERSSTATFELL (data/battle_scripts_1.s:3717-3721), so PrepareStringBattle's onStatLowered
+            // block (src/battle_util.c:1222-1255) runs for the target -- changedStatsBattlerId is gBattlerAttacker.
+            if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (targetId & 1) !== (attackerId & 1)) {
+              dispatchOnStatLowered(state, targetId, attackerId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled, result.statChanges)
             }
           }
         }
@@ -5565,7 +5589,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
         if (isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
           const helmetDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 6))
-          applyDamage(state, attackerId, helmetDmg, fainted)
+          applyDamage(state, attackerId, helmetDmg, fainted, deps)
           totalAttackerDamage += helmetDmg
           hadAttackerDamage = true
         }
@@ -5778,7 +5802,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         if (battlerHasHalfRecoil(attacker)) {
           recoilDmg = Math.max(1, Math.floor(recoilDmg / 2))
         }
-        applyDamage(state, attackerId, recoilDmg, fainted)
+        applyDamage(state, attackerId, recoilDmg, fainted, deps)
         totalAttackerDamage += recoilDmg
         hadAttackerDamage = true
       }
@@ -5826,7 +5850,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         })
         if (!sheerForce && !isMagicGuardProtected(state, attacker)) {
           const loDmg = Math.max(1, Math.floor(attacker.mon.maxHp / 10))
-          applyDamage(state, attackerId, loDmg, fainted)
+          applyDamage(state, attackerId, loDmg, fainted, deps)
           totalAttackerDamage += loDmg
           hadAttackerDamage = true
         }

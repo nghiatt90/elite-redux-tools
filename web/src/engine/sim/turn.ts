@@ -1285,7 +1285,17 @@ export function deductPp(
  * unconditional call: a damage application that does NOT faint anyone cannot
  * change the outcome, but computing it fresh every time is cheaper than a
  * second conditional and cannot disagree with one. */
-export function applyDamage(state: BattleState, battlerId: number, damage: number | null, fainted: number[]): void {
+export function applyDamage(
+  state: BattleState,
+  battlerId: number,
+  damage: number | null,
+  fainted: number[],
+  /** What Cmd_tryfaintmon's onRevive scan needs (src/battle_script_commands.c:3184-3197):
+   * IsBattlerWeatherAffected's WEATHER_HAS_EFFECT (grounding) and IsSuppressed's item
+   * lookup (dataContext). Optional so callers that cannot reach one -- every pre-existing
+   * direct test call -- keep compiling; without it the onRevive latch is skipped. */
+  deps?: { dataContext: SimDataContext; grounding?: GroundingContext },
+): void {
   if (damage === null) return
   const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) return
@@ -1299,9 +1309,71 @@ export function applyDamage(state: BattleState, battlerId: number, damage: numbe
     // Cmd_tryfaintmon (src/battle_script_commands.c:3238, 3242): retaliateTimer set to 2 on faint
     state.sides[battlerId & 1].timers.retaliateTimer = 2
     clearBattlerLastTakenMove(state, battlerId)
+    if (deps) latchRecurringNightmareOnFaint(state, battlerId, deps)
   }
   syncPartyHp(state, battlerId)
   state.battleOutcome = computeBattleOutcome(state)
+}
+
+/** The onRevive scan at the top of Cmd_tryfaintmon (src/battle_script_commands.c:3184-3197):
+ *
+ *   if (!IsBattlerAlive(gActiveBattler))
+ *     ON_ABILITY(gActiveBattler, FALSE,
+ *       gAbilities[ability].onRevive && !GetSingleUseAbilityCountByIndex(gActiveBattler, idx),
+ *       reviveMsg = gAbilities[ability].onRevive(gActiveBattler);
+ *       if (reviveMsg) { reviveAbility = ability; SetSingleUseAbilityCountByIndex(gActiveBattler, idx, 1); break; })
+ *
+ * ON_ABILITY scans slots reverse (3 -> 0), tests the condition, then IsSuppressed
+ * (include/battle_util.h:269-275). Its `idx` is the raw slot index, so the counter is read and
+ * written BY INDEX -- GetSingleUseAbilityCountByIndex/SetSingleUseAbilityCountByIndex
+ * (src/battle_util.c:3943-3961) touch gBattleStruct->singleuseability[partyIndex][idx][side],
+ * which state.singleUseAbility mirrors.
+ *
+ * Only Recurring Nightmare has an `onRevive` hook whose body returns a message in the pinned
+ * snapshot (`CHECK(IsBattlerWeatherAffected(battler, WEATHER_FOG_ANY)); return B_MSG_FADE_OUT;`
+ * -- src/abilities.cc:7896-7902). Its counter value 1 is what VARIOUS_TRY_RECURRING_NIGHTMARE
+ * later revives the mon from (battle_script_commands.c:8645-8655). BackUp Power's onRevive
+ * (electric terrain) is a second hook in the same snapshot and is NOT ported -- see REPORT.md. */
+function latchRecurringNightmareOnFaint(
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  for (const { abilityId, slotIndex } of getBattlerAbilitySlotsReverse(battler.mon.abilities)) {
+    if (abilityId !== 'ABILITY_RECURRING_NIGHTMARE') continue
+    if ((state.singleUseAbility[battler.partyIndex]?.[slotIndex]?.[battlerId & 1] ?? 0) !== 0) continue
+    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+    if (!isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) continue
+    const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
+    if (slot) slot[battlerId & 1] = 1
+    break
+  }
+}
+
+/** Cmd_tryfaintmon's Destiny Bond block (src/battle_script_commands.c:3248-3250):
+ *
+ *   // Destiny Bond disables recurring nightmare
+ *   ON_ABILITY(gBattlerAttacker, FALSE, gAbilities[ability].onRevive, SetSingleUseAbilityCountByIndex(gBattlerAttacker, idx, 2))
+ *   ON_ABILITY(gBattlerTarget,   FALSE, gAbilities[ability].onRevive, SetSingleUseAbilityCountByIndex(gBattlerTarget, idx, 2))
+ *
+ * No counter test and no break: every unsuppressed slot whose ability has the onRevive hook is
+ * set to 2. As in the latch above, only Recurring Nightmare is handled here (BackUp Power is
+ * unported -- REPORT.md); 2 is the value VARIOUS_TRY_RECURRING_NIGHTMARE's `== 1` test rejects. */
+function clearRecurringNightmareRevive(
+  state: BattleState,
+  battlerId: number,
+  deps: { dataContext: SimDataContext; grounding?: GroundingContext },
+): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  for (const { abilityId, slotIndex } of getBattlerAbilitySlotsReverse(battler.mon.abilities)) {
+    if (abilityId !== 'ABILITY_RECURRING_NIGHTMARE') continue
+    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+    const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
+    if (slot) slot[battlerId & 1] = 2
+  }
 }
 
 /**
@@ -1995,7 +2067,7 @@ export function executeAction(
       if (selfHit && selfHit.damage !== null) {
         unmodelled.push(...selfHit.unmodelled)
         confusionSelfHitDamage = selfHit.damage
-        applyDamage(state, battlerId, selfHit.damage, cancelFainted)
+        applyDamage(state, battlerId, selfHit.damage, cancelFainted, deps)
       } else {
         unmodelled.push(
           "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
@@ -2601,12 +2673,12 @@ export function executeAction(
     if (moveEffect === 'EFFECT_EXPLOSION' && !state.processingExtraAttacks) {
       // Cmd_faintifabilitynotdamp / Cmd_setatkhptozero (battle_script_commands.c:9217-9238)
       preAttackerDamage = attackerBattler.mon.hp
-      applyDamage(state, battlerId, attackerBattler.mon.hp, preFainted)
+      applyDamage(state, battlerId, attackerBattler.mon.hp, preFainted, deps)
     } else if (moveEffect === 'EFFECT_MIND_BLOWN') {
       // jumpifabilityflag ROCK_HEAD / jumpifmagicguard skip dmg_1_2_attackerhp (maxHP / 2)
       if (!attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
         preAttackerDamage = Math.floor(attackerBattler.mon.maxHp / 2)
-        applyDamage(state, battlerId, preAttackerDamage, preFainted)
+        applyDamage(state, battlerId, preAttackerDamage, preFainted, deps)
       }
     } else if (moveEffect === 'EFFECT_HYPERSPACE_FURY') {
       // BattleScript_EffectHyperspaceFury (data/battle_scripts_1.s:364-386)
@@ -2862,14 +2934,14 @@ export function executeAction(
         if (!battlerHasSimAbility(state, attackerBattler, 'ABILITY_MAGIC_GUARD', false, battlerId, false, deps.dataContext)) {
           let crashDamage = Math.floor(attackerBattler.mon.maxHp / 2)
           if (hasHalfRecoilAbility(state, attackerBattler, battlerId, deps)) crashDamage = Math.floor(crashDamage / 2)
-          applyDamage(state, battlerId, crashDamage, missedFainted)
+          applyDamage(state, battlerId, crashDamage, missedFainted, deps)
           missedAttackerDamage = crashDamage
         }
       } else if (moveEffect === 'EFFECT_STEEL_BEAM') {
         // BattleScript_SteelBeamMiss (data/battle_scripts_1.s:99-106): Rock Head / Magic Guard skip dmg_1_2_attackerhp
         if (!attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
           const selfDmg = Math.floor(attackerBattler.mon.maxHp / 2)
-          applyDamage(state, battlerId, selfDmg, missedFainted)
+          applyDamage(state, battlerId, selfDmg, missedFainted, deps)
           missedAttackerDamage = selfDmg
         }
       }
@@ -3088,7 +3160,7 @@ export function executeAction(
     }
 
     const targetHpBefore = targetBattler?.mon.hp ?? 0
-    applyDamage(state, currentTargetId, targetDamage, fainted)
+    applyDamage(state, currentTargetId, targetDamage, fainted, deps)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
 
     // Cmd_datahpupdate damage tracking (src/battle_script_commands.c:1935-1959)
@@ -3123,7 +3195,12 @@ export function executeAction(
       attackerBattler.mon.hp > 0
     ) {
       const bondHp = attackerBattler.mon.hp
-      applyDamage(state, battlerId, bondHp, fainted)
+      // "Destiny Bond disables recurring nightmare" (battle_script_commands.c:3248-3250): both ON_ABILITY
+      // scans set that slot's single-use counter to 2 BEFORE the bond damage lands, so the attacker's own
+      // faint below cannot latch it back to 1 (the C's condition for the latch is !counter, and 2 is truthy).
+      clearRecurringNightmareRevive(state, battlerId, deps)
+      clearRecurringNightmareRevive(state, currentTargetId, deps)
+      applyDamage(state, battlerId, bondHp, fainted, deps)
       attackerDamage = (attackerDamage ?? 0) + bondHp
     }
 
@@ -3150,14 +3227,14 @@ export function executeAction(
       targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_GRUDGE)
     }
 
-    applyDamage(state, battlerId, attackerDamage, fainted)
+    applyDamage(state, battlerId, attackerDamage, fainted, deps)
     if (preAttackerDamage && hitIndex === 0) attackerDamage = (attackerDamage ?? 0) + preAttackerDamage
 
     // BattleScript_EffectFinalGambit (data/battle_scripts_1.s:4172-4194): dmgtocurrattackerhp; datahpupdate BS_ATTACKER, so the user
     // faints unless the hit had no effect.
     if (moveEffect === 'EFFECT_FINAL_GAMBIT' && targetDamage !== null && targetDamage > 0) {
       const gambitHp = attackerBattler.mon.hp
-      applyDamage(state, battlerId, gambitHp, fainted)
+      applyDamage(state, battlerId, gambitHp, fainted, deps)
       attackerDamage = (attackerDamage ?? 0) + gambitHp
     }
 
@@ -3171,7 +3248,7 @@ export function executeAction(
     // skipped by Rock Head / Magic Guard. Applied before the secondary effects here only because it has none.
     if (moveEffect === 'EFFECT_STEEL_BEAM' && !attackerIsRecoilImmune(state, attackerBattler, battlerId, deps)) {
       const selfDmg = Math.floor(attackerBattler.mon.maxHp / 2)
-      applyDamage(state, battlerId, selfDmg, fainted)
+      applyDamage(state, battlerId, selfDmg, fainted, deps)
       attackerDamage = (attackerDamage ?? 0) + selfDmg
     }
 
@@ -3188,7 +3265,7 @@ export function executeAction(
           drainHp = Math.floor((drainHp * 3) / 2)
         }
         if (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_LIQUID_OOZE', false, battlerId, false, deps.dataContext)) {
-          applyDamage(state, battlerId, drainHp, fainted)
+          applyDamage(state, battlerId, drainHp, fainted, deps)
           attackerDamage = (attackerDamage ?? 0) + drainHp
         } else {
           attackerBattler.mon.hp = Math.min(attackerBattler.mon.maxHp, attackerBattler.mon.hp + drainHp)
@@ -3229,7 +3306,7 @@ export function executeAction(
 
     // Passive damage an effect took from the user (Struggle's quarter-HP recoil, BattleScript_MoveEffectRecoil).
     if (secondaryResult?.attackerDamage) {
-      applyDamage(state, battlerId, secondaryResult.attackerDamage, fainted)
+      applyDamage(state, battlerId, secondaryResult.attackerDamage, fainted, deps)
       attackerDamage = (attackerDamage ?? 0) + secondaryResult.attackerDamage
     }
 
@@ -3742,7 +3819,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       if (b.volatiles.perishSongTimer === 0) {
         b.statuses3 = clearFlag(b.statuses3, STATUS3_PERISH_SONG)
         const faintedList: number[] = []
-        applyDamage(state, bId, b.mon.hp, faintedList)
+        applyDamage(state, bId, b.mon.hp, faintedList, deps)
         if (faintedList.length) perishFainted = true
       } else {
         b.volatiles.perishSongTimer--

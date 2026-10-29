@@ -166,7 +166,7 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
   if (isAlive(state, battlerId) && hasFlag(side.statuses, SIDE_STATUS_SPIKES) && !isMagicGuardProtected(state, state.battlers[battlerId]!) && grounded() && isBattlerAffectedByHazards(state, battlerId, false, true, deps)) {
     const spikesDmg = (5 - side.timers.spikesAmount) * 2
     const dmg = Math.max(1, Math.trunc(state.battlers[battlerId]!.mon.maxHp / spikesDmg))
-    applyDamage(state, battlerId, dmg, fainted)
+    applyDamage(state, battlerId, dmg, fainted, deps)
   }
 
   // HAZARD_MODE_ROCKS, :8744-8758.
@@ -177,7 +177,7 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
         unmodelled.push(`battler ${battlerId}: Stealth Rock damage (battle_script_commands.c:8751) is not applied -- no hazardTypes (type chart) was supplied in the deps`)
       } else {
         const dmg = getStealthHazardDamage(state, hazardTypeId, battlerId, deps.hazardTypes, grounding)
-        if (dmg) applyDamage(state, battlerId, dmg, fainted)
+        if (dmg) applyDamage(state, battlerId, dmg, fainted, deps)
       }
     }
   }

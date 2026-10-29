@@ -318,7 +318,16 @@ export interface MoveEffectContext {
   deps: TurnLoopDeps
   unmodelled: string[]
   deductPp: (state: BattleState, attackerId: number, moveId: string, moveEffect: string | null, unmodelled: string[]) => void
-  applyDamage: (state: BattleState, battlerId: number, damage: number | null, fainted: number[]) => void
+  /** turn.ts's applyDamage, including its optional 5th argument: Cmd_tryfaintmon's onRevive
+   * scan (battle_script_commands.c:3184-3197) needs a data context / grounding for
+   * IsSuppressed and IsBattlerWeatherAffected. */
+  applyDamage: (
+    state: BattleState,
+    battlerId: number,
+    damage: number | null,
+    fainted: number[],
+    deps?: TurnLoopDeps,
+  ) => void
   /**
    * Sets gChosenMove (src/battle_script_commands.c:10483, 10836) for the current action.
    * Transform and Sketch set gChosenMove = 0xFFFF (MOVE_UNSET).
@@ -1664,7 +1673,7 @@ function handleBellyDrum(ctx: MoveEffectContext): ActionOutcome {
     if (r.delta !== 0) {
       statChanges.push({ battlerId, stat: STAT_ATK, change: r.delta })
       attackerDamage = halfHp
-      applyDamage(state, battlerId, halfHp, fainted)
+      applyDamage(state, battlerId, halfHp, fainted, deps)
     }
   }
 
@@ -3657,7 +3666,7 @@ function handleCurse(ctx: MoveEffectContext): ActionOutcome {
     target.mon.status2 = setFlag(target.mon.status2, STATUS2_CURSED)
     const hpCost = Math.max(1, Math.floor(battler.mon.maxHp / 2))
     const fainted: number[] = []
-    applyDamage(state, battlerId, hpCost, fainted)
+    applyDamage(state, battlerId, hpCost, fainted, deps)
 
     return outcome(ctx, {
       targetId: actualTargetId,
@@ -4166,7 +4175,7 @@ function handleSubstitute(ctx: MoveEffectContext): ActionOutcome {
   battler.volatiles.substituteHp = hp
 
   const fainted: number[] = []
-  applyDamage(state, battlerId, damage, fainted)
+  applyDamage(state, battlerId, damage, fainted, ctx.deps)
 
   return outcome(ctx, { attackerDamage: damage, fainted })
 }
@@ -5468,7 +5477,7 @@ function handleClangorousSoul(ctx: MoveEffectContext): ActionOutcome {
   }
 
   const fainted: number[] = []
-  applyDamage(state, battlerId, hpFraction, fainted)
+  applyDamage(state, battlerId, hpFraction, fainted, deps)
 
   const statChanges: StatChangeOutcome[] = []
   for (const statId of statsToBoost) {
@@ -5521,7 +5530,7 @@ function handleFilletAway(ctx: MoveEffectContext): ActionOutcome {
   if (hpLost === 0) hpLost = 1
 
   const fainted: number[] = []
-  applyDamage(state, battlerId, hpLost, fainted)
+  applyDamage(state, battlerId, hpLost, fainted, deps)
 
   const statChanges: StatChangeOutcome[] = []
   for (const statId of statsToBoost) {
@@ -5954,7 +5963,7 @@ function handleMemento(ctx: MoveEffectContext): ActionOutcome {
     // BattleScript_MementoFailProtect (:6145-6156): setatkhptozero and tryfaintmon still run.
     const userHp = battler.mon.hp
     const faintedOnProtect: number[] = []
-    applyDamage(state, battlerId, userHp, faintedOnProtect)
+    applyDamage(state, battlerId, userHp, faintedOnProtect, deps)
     return outcome(ctx, { targetId, missed: true, attackerDamage: userHp, fainted: faintedOnProtect })
   }
   if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) {
@@ -5967,7 +5976,7 @@ function handleMemento(ctx: MoveEffectContext): ActionOutcome {
   // User faints first via setatkhptozero (:9229-9238) / tryfaintmon (:6139)
   const userHp = battler.mon.hp
   const fainted: number[] = []
-  applyDamage(state, battlerId, userHp, fainted)
+  applyDamage(state, battlerId, userHp, fainted, deps)
 
   // Target Atk -2, SpAtk -2
   const statChanges: StatChangeOutcome[] = []
@@ -10126,7 +10135,7 @@ export function handleShedTail(ctx: MoveEffectContext): ActionOutcome {
   battler.volatiles.substituteHp = hp
 
   const fainted: number[] = []
-  applyDamage(state, battlerId, damage, fainted)
+  applyDamage(state, battlerId, damage, fainted, deps)
 
   // 6. goto BattleScript_MoveSwitchOpenPartyScreen (:5369)
   const switchUnmodelled = performSwitchAction(state, battlerId, deps, {
@@ -10719,7 +10728,7 @@ export function handleHealingWish(ctx: MoveEffectContext): ActionOutcome {
   // 3. User faints: instanthpdrop + setatkhptozero + tryfaintmon (:2371-2373)
   const userHp = battler.mon.hp
   const fainted: number[] = []
-  applyDamage(state, battlerId, userHp, fainted)
+  applyDamage(state, battlerId, userHp, fainted, deps)
 
   // 4. scheduleswitch BS_ATTACKER, BattleScript_HealingWishSwitch (:2374)
   const isLunarDance = moveId === 'MOVE_LUNAR_DANCE'
