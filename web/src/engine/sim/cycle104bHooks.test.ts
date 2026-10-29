@@ -41,7 +41,9 @@ import {
   STAT_SPATK,
   STAT_SPEED,
   STATUS1_PARALYSIS,
+  STATUS2_FLINCHED,
   STATUS2_INFATUATION,
+  STATUS2_SUBSTITUTE,
   STATUS2_WRAPPED,
   STAT_STAGE_CHECK_NEEDED,
   STAT_STAGE_CHECK_NOT_NEEDED,
@@ -483,6 +485,22 @@ describe('cycle 104b - PoisonPuppeteerClone (abilities.cc:286-312)', () => {
     expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
   })
 
+  it('Chokehold skips a Substitute target (SetMoveEffect -> DoesSubstituteBlockMove)', () => {
+    // BattleScript_Chokehold -> setmoveeffect MOVE_EFFECT_PARALYSIS -> SetMoveEffect(FALSE, 0) reaches
+    // DoesSubstituteBlockMove (battle_script_commands.c:12252-12260), which ignores
+    // HITMARKER_IGNORE_SUBSTITUTE and blocks a non-sound arming move. The arming move is not threaded
+    // into the sim's clone, so the target is skipped and a note is left.
+    const state = battle([{ abilities: ability('ABILITY_CHOKEHOLD') }, { status2: STATUS2_SUBSTITUTE }], scripted())
+    state.battlers[0]!.volatiles.abilityState[0] = 1 << 1
+    const notes: string[] = []
+
+    expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, notes)).toBe(false)
+    expect(state.battlers[1]!.mon.status1 & STATUS1_PARALYSIS).toBe(0)
+    expect(notes.some((n) => n.includes('blocked by a Substitute'))).toBe(true)
+    // The armed byte is cleared before the target loop regardless (abilities.cc:291-293).
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+  })
+
   it('Entrance infatuates the foe with the holder', () => {
     // BattleScript_Entrance -> MOVE_EFFECT_ATTRACT (battle_scripts_1.s:10524) -> CanInfatuate (:2727-2732).
     const state = battle([{ abilities: ability('ABILITY_ENTRANCE') }, {}], scripted())
@@ -497,6 +515,22 @@ describe('cycle 104b - PoisonPuppeteerClone (abilities.cc:286-312)', () => {
     state.battlers[0]!.volatiles.abilityState[0] = 1 << 1
     expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, [])).toBe(false)
     expect(state.battlers[1]!.mon.status2 & STATUS2_INFATUATION).toBe(0)
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
+  })
+
+  it('Cryostasis flinches through a Substitute (its predicate has no callback)', () => {
+    // abilities.cc:11612-11620 -- the predicate itself does
+    // `gBattleMons[target].status2 |= STATUS2_FLINCHED; return FALSE;` with a nullptr callback, so it
+    // never reaches SetMoveEffect / DoesSubstituteBlockMove. A Substitute target must still flinch.
+    const state = battle([{ abilities: ability('ABILITY_CRYOSTASIS') }, { status2: STATUS2_SUBSTITUTE }], scripted())
+    state.battlers[0]!.volatiles.abilityState[0] = 1 << 1
+    const notes: string[] = []
+
+    expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, notes)).toBe(false)
+    expect(state.battlers[1]!.mon.status2 & STATUS2_FLINCHED).toBe(STATUS2_FLINCHED)
+    expect(notes.some((n) => n.includes('blocked by a Substitute'))).toBe(false)
+    // The predicate returns FALSE (:11618), so the clone never runs BattleScript_AbilityPopUpStack and
+    // the armed byte is still consumed before the target loop.
     expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
   })
 
@@ -540,6 +574,23 @@ describe('cycle 104b - PoisonPuppeteerClone (abilities.cc:286-312)', () => {
     expect(stageOf(state, 1, STAT_ATK)).toBe(MAX_STAT_STAGE - 1)
     expect(stageOf(state, 1, STAT_SPATK)).toBe(DEFAULT_STAT_STAGE - 1)
     expect(stageOf(state, 1, STAT_SPEED)).toBe(DEFAULT_STAT_STAGE - 1)
+  })
+
+  it('Neurotoxin still stat-drops a Substitute target (no DoesSubstituteBlockMove)', () => {
+    // BattleScript_Neurotoxin (data/battle_scripts_1.s:6842-6866) is setstatchanger / `statbuffchange 0`,
+    // i.e. Cmd_statbuffchange -> ChangeStatBuffs (battle_script_commands.c:9713-9946). That function has
+    // no STATUS2_SUBSTITUTE read (grep finds the flag only at :1777, :4716, :10547, :12207, :12253), so
+    // the drops land on the substituted battler.
+    const state = battle([{ abilities: ability('ABILITY_NEUROTOXIN') }, { status2: STATUS2_SUBSTITUTE }], scripted())
+    state.battlers[0]!.volatiles.abilityState[0] = 1 << 1
+    const notes: string[] = []
+
+    expect(runReactiveAbilityEffects(state, REACTIVE_DEPS, notes)).toBe(true)
+    expect(stageOf(state, 1, STAT_ATK)).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stageOf(state, 1, STAT_SPATK)).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(stageOf(state, 1, STAT_SPEED)).toBe(DEFAULT_STAT_STAGE - 1)
+    expect(notes.some((n) => n.includes('blocked by a Substitute'))).toBe(false)
+    expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
   })
 
   it('the fainted battler\'s armed bit is cleared from every other holder (abilities.cc:7722-7726)', () => {

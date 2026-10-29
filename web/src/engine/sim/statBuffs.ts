@@ -1439,6 +1439,9 @@ const POISON_PUPPETEER_CLONE_ABILITIES = new Set([
  * - CRYOSTASIS    predicate only: status2 |= STATUS2_FLINCHED and returns FALSE (callback nullptr)
  * FROSTBIND (BattleScript_Frostbind -> MOVE_EFFECT_DISABLE) and HEMOTOXIN (its predicate sets
  * STATUS3_GASTRO_ACID; the script is a message) are not modelled here: they keep one note.
+ *
+ * Substitute only blocks the five SetMoveEffect abilities; Cryostasis flinches from its predicate and
+ * Neurotoxin's stat drops go through ChangeStatBuffs, which never reads STATUS2_SUBSTITUTE.
  */
 function runPoisonPuppeteerClone(
   state: BattleState,
@@ -1481,10 +1484,20 @@ function runPoisonPuppeteerClone(
     const targetBattler = state.battlers[target]
     if (!targetBattler) continue
 
-    // The scripts reach SetMoveEffect(FALSE, 0) (:10543) with HITMARKER_IGNORE_SUBSTITUTE, but
-    // DoesSubstituteBlockMove (:12252-12260) does not read that flag and still blocks non-sound moves.
-    // The move that armed the bit is not threaded here, so a Substitute target is skipped with a note.
-    if (hasFlag(targetBattler.mon.status2, STATUS2_SUBSTITUTE)) {
+    // The scripts that go through SetMoveEffect(FALSE, 0) (:10543) -- Chokehold, Entrance, Poison
+    // Puppeteer, Blood Bath / Set Ablaze -- reach DoesSubstituteBlockMove (:12252-12260). It does not
+    // read HITMARKER_IGNORE_SUBSTITUTE, so it still blocks a non-sound move. The move that armed the bit
+    // is not threaded here, so those abilities skip a Substitute target with a note.
+    //
+    // Cryostasis and Neurotoxin never reach SetMoveEffect, so the skip does not apply:
+    // - Cryostasis's predicate itself sets STATUS2_FLINCHED and returns FALSE (abilities.cc:11612-11620);
+    //   there is no callback and no Substitute check, so a Substitute target is still flinched.
+    // - BattleScript_Neurotoxin (data/battle_scripts_1.s:6842-6866) uses setstatchanger /
+    //   `statbuffchange 0`, i.e. Cmd_statbuffchange -> ChangeStatBuffs (:9713-9946), which has no
+    //   STATUS2_SUBSTITUTE read at all. changeStatBuffs below decides.
+    const substituteBlocked =
+      abilityId !== 'ABILITY_CRYOSTASIS' && abilityId !== 'ABILITY_NEUROTOXIN'
+    if (substituteBlocked && hasFlag(targetBattler.mon.status2, STATUS2_SUBSTITUTE)) {
       const msg = `PoisonPuppeteerClone: ${abilityId} is blocked by a Substitute in the C unless the arming move is sound or FLAG_HIT_IN_SUBSTITUTE; the move id is not threaded here`
       if (!unmodelled.includes(msg)) unmodelled.push(msg)
       continue
