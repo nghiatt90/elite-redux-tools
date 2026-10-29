@@ -6442,15 +6442,24 @@ export function applyMoveEndItemEffectsAll(
       continue
     }
 
-    // Lum Berry / Status-curing items, battle_util.c:5925-6005
+    // Lum Berry / Status-curing items, battle_util.c:5925-6005. The C tests `status1 & STATUS1_ANY`
+    // (:5976) -- which deliberately excludes STATUS1_TOXIC_COUNTER (:119-120) -- and clears
+    // STATUS2_NIGHTMARE only inside its own `status1 & STATUS1_SLEEP` branch (:5981-5984), so a
+    // paralysis/burn cure leaves a stale Nightmare bit alone. It then emits SetMonData for the
+    // party mon's status1 (:6027-6028), so the party slot must be cleared too.
     if (holdEffect === 'HOLD_EFFECT_CURE_STATUS') {
       if (
-        (battler.mon.status1 !== 0 || hasFlag(battler.mon.status2, STATUS2_CONFUSION)) &&
+        (hasFlag(battler.mon.status1, STATUS1_ANY) || hasFlag(battler.mon.status2, STATUS2_CONFUSION)) &&
         !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext)
       ) {
+        if (hasFlag(battler.mon.status1, STATUS1_SLEEP)) {
+          battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+        }
         battler.mon.status1 = 0
-        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION | STATUS2_NIGHTMARE)
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
         battler.mon.itemId = null
+        const partySlot = state.sides[bId & 1].party[battler.partyIndex]
+        if (partySlot) partySlot.status1 = 0
       }
       continue
     }

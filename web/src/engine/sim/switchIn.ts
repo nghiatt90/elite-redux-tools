@@ -56,7 +56,8 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
-import { B_SIDE_PLAYER, clearFlag } from './constants'
+import { B_SIDE_PLAYER, clearFlag, hasFlag, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE } from './constants'
+import { isUnnerveAbilityOnOpposingSide } from './statBuffs'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
 import { syncPartyHp } from './outcome'
@@ -220,6 +221,29 @@ export function switchIn(
 
   if (!incoming.itemId) return
   const heldEffect = deps.dataContext.item(incoming.itemId)?.resolvedHoldEffect ?? null
+  // ITEMEFFECT_ON_SWITCH_IN's HOLD_EFFECT_CURE_STATUS case, battle_util.c:5520-5560:
+  // B_BERRIES_INSTANT is GEN_7 (include/constants/battle_config.h:100) so the `>= GEN_4` gate
+  // holds; `status1 & STATUS1_ANY` excludes STATUS1_TOXIC_COUNTER (:119-120), NIGHTMARE is
+  // cleared only in the SLEEP branch (:5529-5530), and the script's `removeitem`
+  // (BattleScript_BerryCureChosenStatusEnd2, data/battle_scripts_1.s:10821-10831) plus the
+  // EmitSetMonData at :5611-5612 consume the berry and write the party mon's status1.
+  if (heldEffect === 'HOLD_EFFECT_CURE_STATUS') {
+    const b = state.battlers[battlerId]!
+    if (
+      (hasFlag(b.mon.status1, STATUS1_ANY) || hasFlag(b.mon.status2, STATUS2_CONFUSION)) &&
+      !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
+    ) {
+      if (hasFlag(b.mon.status1, STATUS1_SLEEP)) {
+        b.mon.status2 = clearFlag(b.mon.status2, STATUS2_NIGHTMARE)
+      }
+      b.mon.status1 = 0
+      b.mon.status2 = clearFlag(b.mon.status2, STATUS2_CONFUSION)
+      b.mon.itemId = null
+      const slot = state.sides[side].party[partyIndex]
+      if (slot) slot.status1 = 0
+      return
+    }
+  }
   if (heldEffect !== null && SWITCH_IN_HOLD_EFFECTS.has(heldEffect)) {
     unmodelled.push(`battler ${battlerId}: ITEMEFFECT_ON_SWITCH_IN (battle_util.c:5418-5604) is not applied -- ${incoming.itemId}'s switch-in hold effect (${heldEffect}) was not run`)
   }

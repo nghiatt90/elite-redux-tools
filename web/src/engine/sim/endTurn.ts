@@ -1892,6 +1892,28 @@ export function runEndTurnEffects(
           results.push({ battlerId, effect: 'ITEM', hpChange: -dmg, fainted })
         }
       }
+    } else if (holdEffect === 'HOLD_EFFECT_CURE_STATUS') {
+      // ENDTURN_ITEMS1/ITEMS2's HOLD_EFFECT_CURE_STATUS case, battle_util.c:5802-5845. It is NOT
+      // gated on `!moveTurn`, so it runs on both passes (ITEMS1 :2461, ITEMS2 :2465); the first
+      // pass removes the berry so the second finds no hold effect. The C tests `status1 &
+      // STATUS1_ANY` (:5803, excluding STATUS1_TOXIC_COUNTER), clears STATUS2_NIGHTMARE only in
+      // its SLEEP branch (:5810-5812), then zeroes status1 and clears CONFUSION (:5839-5840) and
+      // writes the party mon's status1 (EmitSetMonData, :5861). The end-turn result channel only
+      // carries HP changes, so the cure is applied silently.
+      if (
+        battler.mon.hp > 0 &&
+        (hasFlag(battler.mon.status1, STATUS1_ANY) || hasFlag(battler.mon.status2, STATUS2_CONFUSION)) &&
+        !isUnnerveAbilityOnOpposingSide(state, battlerId, dataContext)
+      ) {
+        if (hasFlag(battler.mon.status1, STATUS1_SLEEP)) {
+          battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
+        }
+        battler.mon.status1 = 0
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
+        battler.mon.itemId = null
+        const partySlot = state.sides[battlerId & 1].party[battler.partyIndex]
+        if (partySlot) partySlot.status1 = 0
+      }
     } else {
       gapIf(
         holdEffect !== null && ITEMS_1_2_HOLD_EFFECTS.has(holdEffect),
