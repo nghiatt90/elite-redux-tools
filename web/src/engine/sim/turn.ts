@@ -508,6 +508,10 @@ export interface DamageResolution {
   isCriticalHit?: boolean
   berryReduced?: boolean
   isSuperEffective?: boolean
+  /** GetMoveTypeInternal's answer for this hit (after -ate abilities, Electrify/Ion Deluge, Plasma Fists), bare name
+   * (`'DRAGON'`). Cmd_adjustdamage's gem check (battle_script_commands.c:1687-1690) only knows gemBoost, which
+   * SetTypeBeforeUsingMove/ApplyTypeOverrideInformation (battle_main.c:5222-5233, :5246-5257) set from this type. */
+  resolvedMoveType?: string | null
 }
 
 export interface DamageResolveContext {
@@ -3054,7 +3058,7 @@ export function executeAction(
     let lastCritical: boolean | undefined
     let lastSuperEffective: boolean | undefined
     for (;;) {
-    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective } = deps.damage.resolve(
+    let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective, resolvedMoveType: damageMoveType } = deps.damage.resolve(
       state,
       battlerId,
       currentTargetId,
@@ -3144,7 +3148,16 @@ export function executeAction(
 
     // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673)
     const targetBattler = state.battlers[currentTargetId]
-    const isFalseSwipe = Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
+    // battle_script_commands.c:1689-1697: both the berry and the gem check below read
+    // `!(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)`, i.e. "the move connected", not the clipped damage.
+    // A 1 HP target saved by Endure/Focus Sash (damage clipped to 0) still eats its berry and still
+    // burns the attacker's gem, so record the pre-clip answer here.
+    const damageHadEffect = targetDamage !== null && targetDamage > 0
+    // battle_script_commands.c:1668-1674: the damage is clipped to hp-1 when the move is False Swipe (its own effect,
+    // or gBattleScripting.forceFalseSwipeEffect, which this sim does not model), the queued extra attack is a false
+    // swipe, the target endured, or Focus Band/Sash, Sturdy or Lucky Halo fired. Focus Band, Sturdy and Lucky Halo are
+    // not modelled here yet, so only the two false-swipe sources and Endure/Focus Sash remain.
+    const isFalseSwipe = moveEffect === 'EFFECT_FALSE_SWIPE' || Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
     const targetHoldEffect = deps.grounding.holdEffectOf(currentTargetId)
     const hasFocusSash =
       targetHoldEffect === 'HOLD_EFFECT_FOCUS_SASH' &&
@@ -3159,8 +3172,11 @@ export function executeAction(
       targetDamage >= targetBattler.mon.hp
     ) {
       targetDamage = Math.max(0, targetBattler.mon.hp - 1)
-      if (hasFocusSash && !targetBattler.round.endured && !isFalseSwipe) {
-        // BattleScript_HangedOnMsg (data/battle_scripts_1.s:10962-10963): removeitem BS_TARGET
+      // :1683-1688: FOE_ENDURED takes priority over FOE_HUNG_ON, so a target that both endured and holds a fresh
+      // Focus Sash does not consume the sash. BattleScript_HangedOnMsg (data/battle_scripts_1.s:10963-10964) then
+      // removes the item only `jumpifnoholdeffect BS_TARGET, HOLD_EFFECT_FOCUS_SASH` -- regardless of which of the
+      // three clipping reasons fired, False Swipe included.
+      if (hasFocusSash && !targetBattler.round.endured) {
         targetBattler.mon.itemId = null
       }
     }
@@ -3169,9 +3185,26 @@ export function executeAction(
     if (berryReduced && targetBattler) {
       targetBattler.turn.berryReduced = true
     }
-    if (targetBattler?.turn.berryReduced && targetDamage !== null && targetDamage > 0 && targetBattler.mon.itemId) {
+    if (targetBattler?.turn.berryReduced && damageHadEffect && targetBattler.mon.itemId) {
       // BattleScript_TargetAteItem (data/battle_scripts_1.s:10786-10793): removeitem BS_TARGET
       targetBattler.mon.itemId = null
+    }
+
+    // Cmd_adjustdamage's own gem check (battle_script_commands.c:1687-1690). gTurnStructs[attacker].gemBoost is set
+    // by SetTypeBeforeUsingMove / ApplyTypeOverrideInformation (battle_main.c:5222-5233, :5246-5257) only when the
+    // attacker's TRUE-mode hold effect is HOLD_EFFECT_GEMS, the item's secondary id (items.json holdEffectType) equals
+    // the resolved move type, and no opposing Unnerve blocks it; BattleScript_GemActivates (data/battle_scripts_1.s:
+    // 10777-10784) then removes the item. The `!(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)` gate is the pre-clip damage
+    // being positive, and because this runs from Cmd_adjustdamage a status move can never reach it.
+    if (
+      damageHadEffect &&
+      attackerBattler.mon.itemId &&
+      deps.grounding.holdEffectOf(battlerId) === 'HOLD_EFFECT_GEMS' &&
+      damageMoveType &&
+      deps.dataContext.item(attackerBattler.mon.itemId)?.holdEffectType?.replace(/^TYPE_/, '') === damageMoveType &&
+      !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
+    ) {
+      consumeHeldItem(state, attackerBattler, unmodelled)
     }
 
     const targetHpBefore = targetBattler?.mon.hp ?? 0

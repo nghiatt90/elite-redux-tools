@@ -73,13 +73,8 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
   if (holdEffect !== null && CHOICE_HOLD_EFFECTS.includes(holdEffect)) {
     note("CheckMoveLimitations' choice-item lock (battle_util.c:1646) is not modelled: gBattleStruct->choicedMove has no state in the sim, so a Choice item holder's previously-locked move is never flagged unusable")
   }
-  // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First.
-  if (
-    (holdEffect === 'HOLD_EFFECT_ASSAULT_VEST' || holdEffect === 'HOLD_EFFECT_TACTICAL_VEST') &&
-    moves.some((m) => m !== null && m !== 'MOVE_ME_FIRST' && moveData(m)?.split === 'STATUS')
-  ) {
-    note("CheckMoveLimitations' Assault Vest / Tactical Vest status-move lock (battle_util.c:1647-1648) is not modelled")
-  }
+  // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First
+  // (the per-slot bit is set in the loop below, where the move's split is known).
   // :1654-1655 -- Discipline reads the same choicedMove array.
   if (selfAbility(state, deps, battler, 'ABILITY_DISCIPLINE')) {
     note("CheckMoveLimitations' Discipline choicedMove lock (battle_util.c:1654-1655) is not modelled: gBattleStruct->choicedMove has no state in the sim")
@@ -157,7 +152,14 @@ export function computeMoveLimitations(state: BattleState, battlerId: number, de
     if (moveId !== null && getImprisonedMovesCount(state, battlerId, moveId) > 0 && MOVE_LIMITATION_CHECK_ALL & MOVE_LIMITATION_IMPRISON) continue
     // :1645 -- Encore locks every slot but the encored move.
     if (battler.volatiles.encoreTimer && battler.volatiles.encoredMove !== moveId) continue
-    // :1646 choice / :1647-1648 vest -- see their notes above.
+    // :1646 choice -- see the note above (no choicedMove state).
+    // :1647-1648 -- Assault/Tactical Vest, any status move other than Me First.
+    if (
+      (holdEffect === 'HOLD_EFFECT_ASSAULT_VEST' || holdEffect === 'HOLD_EFFECT_TACTICAL_VEST') &&
+      moveId !== 'MOVE_ME_FIRST' &&
+      moveData(moveId)?.split === 'STATUS'
+    )
+      continue
     // :1649 -- Gravity.
     if (moveId !== null && isGravityPreventingMove(state, moveId, deps.grounding)) continue
     // :1650 -- Heal Block (IsHealBlockPreventingMove, battle_util.c:1400-1404).

@@ -1018,7 +1018,10 @@ function calcInternal(
       holdEffectType: attacker.holdEffectType,
     },
     attackerIsLatiOrLatias: attacker.condition.baseSpeciesId === 'SPECIES_LATIAS' || attacker.condition.baseSpeciesId === 'SPECIES_LATIOS',
-    defenderHasUnnerve: battlerHasAbility(defender.abilitySlots, 'ABILITY_UNNERVE', () => false),
+    // IsUnnerveAbilityOnOpposingSide (battle_util.c:8387-8397) tests the `unnerve` flag, which
+    // abilities.cc:1897 (Unnerve), :3631 (As One Ice Rider), :3646 (As One Shadow Rider) and :6730
+    // (Crowned King) all set -- one ability ID would miss three of them.
+    defenderHasUnnerve: [...UNNERVE_ABILITY_IDS].some((id) => battlerHasAbility(defender.abilitySlots, id, () => false)),
     moveDoubleDamageVsMega: Boolean(move.flags.doubleDamageVsMega),
     moveEffect: move.effect,
     moveArgumentStatus: move.argumentStatus ?? null,
@@ -1326,13 +1329,21 @@ function attackerFinalItemMultiplier(
   return uq(1.0)
 }
 
+/** The abilities carrying the `unnerve` flag, which is what IsUnnerveAbilityOnOpposingSide
+ * (battle_util.c:8387-8397) actually tests: ABILITY_UNNERVE (abilities.cc:1897),
+ * ABILITY_AS_ONE_ICE_RIDER (:3631), ABILITY_AS_ONE_SHADOW_RIDER (:3646), ABILITY_CROWNED_KING (:6730). */
+const UNNERVE_ABILITY_IDS = ['ABILITY_UNNERVE', 'ABILITY_AS_ONE_ICE_RIDER', 'ABILITY_AS_ONE_SHADOW_RIDER', 'ABILITY_CROWNED_KING'] as const
+
+/** The abilities carrying the `ripen` flag, read by HasRipenEffect (battle_util.c:5162-5165):
+ * ABILITY_RIPEN (abilities.cc:12280), ABILITY_SUGAR_RUSH (:8163), ABILITY_APPLE_PIE (:8879). */
+const RIPEN_ABILITY_IDS = ['ABILITY_RIPEN', 'ABILITY_SUGAR_RUSH', 'ABILITY_APPLE_PIE'] as const
+
 /** The defender's hold effect (:7688-7700) -- currently just the resist berry, the
  * only one of this switch's cases that changes the damage NUMBER (the others in the
  * C's own switch are status/end-of-turn effects, out of scope here). Unnerve and
- * Ripen are both plain declarative bitfields with no other behavior (same shape as
- * Relic Stone's own stabInHalves check above) -- read directly by ability ID rather
- * than adding a pipeline-emitted flag + a whole registry entry for two abilities
- * whose only damage-relevant behavior is this exact hardcoded read. */
+ * Ripen are both checked through the ability flags the C reads (`unnerve` via
+ * IsUnnerveAbilityOnOpposingSide, `ripen` via HasRipenEffect), so every ability
+ * carrying them counts, not just the one that introduced the flag. */
 function resistBerryMultiplier(
   attackerSlots: AbilitySlots,
   defender: BattlerBattleState,
@@ -1342,8 +1353,8 @@ function resistBerryMultiplier(
   if (defender.condition.resolvedHoldEffect !== 'HOLD_EFFECT_RESIST_BERRY') return null
   if (defender.holdEffectType !== moveType) return null
   if (moveType !== 'NORMAL' && typeEffectiveness < uq(2.0)) return null
-  if (battlerHasAbility(attackerSlots, 'ABILITY_UNNERVE', () => false)) return null
-  return battlerHasAbility(defender.abilitySlots, 'ABILITY_RIPEN', () => false) ? 0.25 : 0.5
+  if (UNNERVE_ABILITY_IDS.some((id) => battlerHasAbility(attackerSlots, id, () => false))) return null
+  return RIPEN_ABILITY_IDS.some((id) => battlerHasAbility(defender.abilitySlots, id, () => false)) ? 0.25 : 0.5
 }
 
 /**

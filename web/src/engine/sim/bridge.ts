@@ -434,17 +434,23 @@ export function buildBattlerBattleState(state: BattleState, battlerId: number, r
   // this battler's role.
   const opponentId = battlerId === roles.attackerId ? roles.defenderId : roles.attackerId
 
+  // IsItemNegated (battle_util.c:6520-6524): Embargo or Klutz. Magic Room is not part of it in the C.
+  const itemNegated =
+    hasEmbargo(battler.statuses3) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+
   const condition: ConditionBattlerContext = {
     speciesId: mon.speciesId,
     baseSpeciesId: species?.formOf ?? mon.speciesId,
     heads: species?.heads ?? 1,
     isMegaEvolved: (species?.megas?.length ?? 0) > 0 || (species?.primals?.length ?? 0) > 0,
     itemId: mon.itemId,
-    resolvedHoldEffect: item?.resolvedHoldEffect ?? null,
-    // IsItemNegated (battle_util.c:6520-6524): Embargo or Klutz. Magic Room is not part of it in the C.
-    itemNegated:
-      hasEmbargo(battler.statuses3) ||
-      battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext),
+    // GetBattlerHoldEffect(battler, TRUE) (battle_util.c:6526-6537) returns HOLD_EFFECT_NONE under
+    // IsItemNegated, so every damage-stage read of this field (CalcAttackStat, CalcDefenseStat,
+    // CalcFinalDmg, CalcMoveBasePowerAfterModifiers) must see null under Embargo/Klutz -- those C
+    // sites all call GetBattlerHoldEffect(..., TRUE), and this field is their only source.
+    resolvedHoldEffect: itemNegated ? null : (item?.resolvedHoldEffect ?? null),
+    itemNegated,
     status1: status1ToSet(mon.status1),
     hasComatose,
     hasBloodStainEffect,

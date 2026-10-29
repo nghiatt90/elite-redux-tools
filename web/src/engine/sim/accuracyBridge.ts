@@ -44,6 +44,7 @@ import {
   STAT_EVASION,
   STATUS2_WRAPPED,
   STATUS3_ALWAYS_HITS,
+  STATUS3_EMBARGO,
   STATUS3_TELEKINESIS,
   STATUS4_FORESIGHT,
   WEATHER_FOG_ANY,
@@ -282,6 +283,11 @@ export function buildAccuracyInputs(
 
     defenderHoldEffect,
     defenderHoldEffectParam: defenderHoldEffect ? (defenderItem?.holdEffectStrength ?? 0) : 0,
+    // DoesBattlerHaveAbilityShield (battle_util.c:6538-6545): the abilities' blocksAbilitySuppression flag
+    // (set by no ability) or GetBattlerHoldEffect(battler, FALSE) == ABILITY_SHIELD, i.e. the raw item without
+    // the Klutz negation, still gated on Embargo.
+    defenderHasAbilityShield:
+      defenderItem?.resolvedHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD' && !hasFlag(defender.statuses3, STATUS3_EMBARGO),
     defenderEvasionStage: defender.mon.statStages[STAT_EVASION] ?? DEFAULT_STAT_STAGE,
     defenderHasForesight: hasFlag(defender.statuses4, STATUS4_FORESIGHT),
     defenderHasAlwaysHits: hasFlag(defender.statuses3, STATUS3_ALWAYS_HITS),

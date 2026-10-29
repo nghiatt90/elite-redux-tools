@@ -17,7 +17,7 @@ import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState } from '../state'
 import type { ChosenAction } from '../turnOrder'
-import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, stepTurn, type BattleSession } from './session'
+import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
 export interface ExpectimaxOptions {
@@ -84,9 +84,15 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   const battler = state.battlers[0]
   if (!battler || battler.mon.hp === 0) return []
   const choices: PlayerChoice[] = []
+  // An Assault/Tactical Vest holder cannot select a status move (battle_util.c:1571-1578, the player-selection
+  // check, and battle_util.c:1651-1653 for the shared filter); MOVE_ME_FIRST is exempt. Both read the hold effect
+  // with GetBattlerHoldEffect(battler, TRUE) (battle_util.c:1418), so Klutz/Embargo leave the menu untouched.
+  const vestHoldEffect = holdEffectOfBattler(state, 0, data.dataContext)
+  const vestBlocksStatus = vestHoldEffect === 'HOLD_EFFECT_ASSAULT_VEST' || vestHoldEffect === 'HOLD_EFFECT_TACTICAL_VEST'
   for (let i = 0; i < battler.mon.moves.length; i++) {
     const moveId = battler.mon.moves[i]
     if (moveId && battler.mon.pp[i] > 0) {
+      if (vestBlocksStatus && moveId !== 'MOVE_ME_FIRST' && data.dataContext.move(moveId)?.split === 'STATUS') continue
       const action = buildMoveAction(state, data, 0, moveId)
       choices.push({ action })
     }

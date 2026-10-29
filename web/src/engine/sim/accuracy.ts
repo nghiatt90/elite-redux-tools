@@ -241,6 +241,11 @@ export interface AccuracyInputs {
   /** GetBattlerHoldEffect(battlerDef, TRUE) (:1256). Only
    * HOLD_EFFECT_EVASION_UP matters here. */
   defenderHoldEffect: string | null
+  /** DoesBattlerHaveAbilityShield(battlerDef) (battle_util.c:6538-6545), which reads the hold effect with
+   * GetBattlerHoldEffect(battler, FALSE): Klutz does NOT negate the shield, only Embargo does. The TRUE-mode
+   * `defenderHoldEffect` above cannot answer this, so the caller supplies the FALSE-mode fact (accuracyBridge.ts).
+   * Undefined = fall back to `defenderHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD'` (hand-built fixtures). */
+  defenderHasAbilityShield?: boolean
   /** GetBattlerHoldEffectParam(battlerDef) (:1254) -- the evasion item's
    * percentage. */
   defenderHoldEffectParam: number
@@ -721,7 +726,7 @@ export function getTotalAccuracy(inputs: AccuracyInputs): AccuracyResult {
       inputs.moveSplit ?? 'PHYSICAL',
       inputs.moveType,
     )
-  const defenderHasAbilityShield = inputs.defenderHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD'
+  const defenderHasAbilityShield = inputs.defenderHasAbilityShield ?? inputs.defenderHoldEffect === 'HOLD_EFFECT_ABILITY_SHIELD'
 
   const runAttackerSide = () => {
     for (const abilityId of getSlotsInReverse(inputs.attackerAbilitySlots)) {

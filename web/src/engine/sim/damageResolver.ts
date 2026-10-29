@@ -225,6 +225,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         isCriticalHit: crit,
         berryReduced: Boolean(result.berryReduced),
         isSuperEffective: result.typeEffectiveness >= 8192,
+        resolvedMoveType: result.effectiveMoveType,
       }
     },
 
