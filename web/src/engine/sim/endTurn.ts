@@ -96,12 +96,13 @@
 //                           / HOLD_EFFECT_FLAME_ORB / HOLD_EFFECT_FROST_ORB /
 //                           HOLD_EFFECT_STICKY_BARB (battle_util.c:6252-6288).
 //   ENDTURN_LEECH_SEED      PORTED.
-//   ENDTURN_TOXIC_WASTE_DAMAGE Unreachable -- gated on getMonotypeChampType(),
-//                           which exists only as an external fact threaded
-//                           into TurnOrderContext/GroundingContext (grounding.
-//                           ts's own isCluelessOnField precedent), not as a
-//                           BattleState/BattlerState field this function's own
-//                           input surface can read.
+//   ENDTURN_TOXIC_WASTE_DAMAGE Unported -- the C runs Toxic Spill's onEndTurn
+//                           once with ability=ABILITY_NONE and battler=
+//                           MAX_BATTLERS_COUNT when getMonotypeChampType() is
+//                           TYPE_POISON (battle_util.c:2487-2491). The ability
+//                           hook itself is ported (the TOXIC_SPILL / TRASH_HEAP
+//                           case reads GroundingContext.monotypeChampType); only
+//                           this holder-less extra call is not run.
 //   ENDTURN_POISON          PORTED.
 //   ENDTURN_BAD_POISON      PORTED.
 //   ENDTURN_SEA_OF_FIRE_DAMAGE Ported (:2545-2562) -- maxHP/8 damage to non-Fire
@@ -206,6 +207,7 @@ import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
+import { tryTransformAttacker } from './formChange'
 import { isHailImmune, weatherHasEffect } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import { battlerHasAbility } from '../abilities/dispatch'
@@ -341,8 +343,6 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_DUAL_SHADOW',
   'ABILITY_ETERNAL_BLESSING',
   'ABILITY_FLAME_COAT',
-  'ABILITY_FLOWER_GIFT',
-  'ABILITY_FORECAST',
   'ABILITY_FUNERAL_PYRE',
   'ABILITY_HARVEST',
   'ABILITY_HEALER',
@@ -358,7 +358,6 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_POWER_CONSTRUCT',
   'ABILITY_REVELATION',
   'ABILITY_SAP_TRAP',
-  'ABILITY_SCHOOLING',
   'ABILITY_SERPENT_BIND',
   'ABILITY_SHIELDS_DOWN',
   'ABILITY_SOOTHSAYER',
@@ -369,8 +368,6 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_SWEET_DREAMS',
   'ABILITY_TALON_TRAP',
   'ABILITY_TENTALOCK',
-  'ABILITY_TOXIC_SPILL',
-  'ABILITY_TRASH_HEAP',
   'ABILITY_TRUANT',
   'ABILITY_WHITE_NOISE',
   'ABILITY_WINTER_THRONE',
@@ -1315,6 +1312,55 @@ function runEndTurnAbilities(
         break
       }
 
+      case 'ABILITY_TOXIC_SPILL':
+      case 'ABILITY_TRASH_HEAP': {
+        // src/abilities.cc:5199-5250 (Trash Heap aliases it at :8975-8982); the two scripts are
+        // BattleScript_ToxicWasteTurnDmg and BattleScript_ToxicWasteHeal (data/battle_scripts_1.s:8653-8665),
+        // both `hpfractiontodamage ..., 8`.
+        // `if (ability)`: this ladder always supplies the slot's ability, so the holder-selection
+        // block runs. (ABILITY_NONE comes only from ENDTURN_TOXIC_WASTE_DAMAGE's monotype-champ
+        // call, battle_util.c:2487-2491, which this module does not run -- see this file's header.)
+        if ((deps?.grounding?.monotypeChampType ?? null) === 'POISON') break // CHECK_NOT(getMonotypeChampType() == TYPE_POISON)
+        let holderActs = true
+        for (const sourceAbility of ['ABILITY_TOXIC_SPILL', 'ABILITY_TRASH_HEAP']) {
+          const source = firstFieldHolder(state, sourceAbility, dataContext) // IsAbilityOnField, battle_util.c:4803-4811
+          if (source === -1) continue // FILTER(source)
+          holderActs = sourceAbility === slotAbility && source === battlerId // CHECK(sourceAbility == ability); CHECK(source - 1 == battler)
+          break
+        }
+        if (!holderActs) break
+
+        for (let targetId = 0; targetId < state.battlersCount; targetId++) {
+          const target = state.battlers[targetId]
+          if (!target || target.mon.hp === 0) continue // FILTER(IsBattlerAlive(target))
+          if (battlerHasSimAbility(state, target, 'ABILITY_POISON_HEAL', true, targetId, false, dataContext)) {
+            // Poison Heal heals instead; its FILTERs also skip the damage below.
+            if (target.mon.hp === target.mon.maxHp) continue // FILTER_NOT(BATTLER_MAX_HP(target))
+            if (!canBattlerHeal(state, targetId, target, unmodelled)) continue // FILTER(CanBattlerHeal(target))
+            healEndTurn(state, targetId, target, hpFractionToDamage(target, 8), results)
+            continue
+          }
+          if (target.mon.types.includes('POISON')) continue // FILTER_NOT(IS_BATTLER_OF_TYPE(target, TYPE_POISON))
+          if (isMagicGuardProtected(state, target)) continue // FILTER_NOT(IsMagicGuardProtected(target))
+          // The C tests Toxic Boost on the hook's HOLDER (`battler`), not on the target (:5229).
+          if (battlerHasSimAbility(state, battler, 'ABILITY_TOXIC_BOOST', true, battlerId, false, dataContext)) continue
+          const dmg = hpFractionToDamage(target, 8)
+          const fainted = applyEndTurnHp(state, targetId, target, -dmg)
+          results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -dmg, fainted })
+        }
+        break
+      }
+
+      case 'ABILITY_FORECAST':
+      case 'ABILITY_FLOWER_GIFT':
+      case 'ABILITY_SCHOOLING': {
+        // Impl<ABILITY_FORECAST>.onEndTurn (abilities.cc:1250; Flower Gift aliases it at :1860) and
+        // Impl<ABILITY_SCHOOLING>.onEndTurn (:2839-2842) -> TryTransformAttacker (:245-252).
+        if (slotAbility === 'ABILITY_SCHOOLING' && battler.mon.level < 20) break
+        tryTransformAttacker(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
+        break
+      }
+
       case 'ABILITY_HOME_RUN': {
         // src/abilities.cc:11927-11931 (the onAttacker half, :11932-11984, needs CalculateStat for all five stats and is not ported)
         if (getAbilityStateOf(battler, slotAbility)) setAbilityStateOf(battler, slotAbility, 0)
@@ -1520,11 +1566,8 @@ function runEndTurnAbilities(
 
       default: {
         if (ENDTURN_ABILITY_IDS.has(slotAbility)) {
-          // Conditional gap for unmodelled abilities:
-          // Schooling requires level >= 20 in C (src/abilities.cc:2838)
-          const cond = slotAbility === 'ABILITY_SCHOOLING' ? battler.mon.level >= 20 : true
           gapIf(
-            cond,
+            true,
             unmodelled,
             `battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${slotAbility}'s onEndTurn hook was not run`,
           )

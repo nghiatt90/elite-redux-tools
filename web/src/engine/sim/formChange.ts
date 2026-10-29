@@ -32,7 +32,17 @@
 import type { AbilitySlots } from '../abilities/dispatch'
 import { calcHp, calcStat, DEFAULT_NATURE_STAT_TABLE } from '../stats'
 import type { BattleStatKey, StatKey } from '../types'
-import { B_SIDE_PLAYER } from './constants'
+import {
+  B_SIDE_PLAYER,
+  STATUS2_TRANSFORMED,
+  WEATHER_ANY,
+  WEATHER_FOG_ANY,
+  WEATHER_HAIL_ANY,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
+  WEATHER_SUN_ANY,
+  hasFlag,
+} from './constants'
 import type { SimDataContext } from './dataContext'
 import type { TurnLoopDeps } from './turn'
 import { buildTurnOrderContext, isBattlerAlive } from './turn'
@@ -41,6 +51,9 @@ import { recalculateMoveOrder } from './turnOrder'
 import type { BattleState, BattlerState } from './state'
 import { ABILITY_SLOT_COUNT, SWITCH_IN_ABILITY_DONE_COUNT } from './state'
 import { applySwitchInAbilities, type SwitchInAbilityDeps } from './switchInAbility'
+import { isWeatherActive } from './onWeather'
+import { battlerHasSimAbility } from './statBuffs'
+import { findAbilitySlot } from './statusEffects'
 
 export interface FormChangeDeps extends SwitchInAbilityDeps {}
 
@@ -289,6 +302,143 @@ export function changeBattlerForm(
     partyMon.maxHp = battler.mon.maxHp
     partyMon.hp = battler.mon.hp
   }
+}
+
+/** GetAbilityState, src/battle_util.c:3974-3980: `gVolatileStructs[battler].abilityState[GetAbilityIndex(battler, ability)]`
+ * (0 when the battler does not have the ability). */
+function getAbilityStateOf(battler: BattlerState, abilityId: string): number {
+  const slot = findAbilitySlot(battler.mon.abilities, abilityId)
+  return slot === -1 ? 0 : (battler.volatiles.abilityState[slot] ?? 0)
+}
+
+/** `const HpTransformation gHpTransformations[]`, src/battle_util.c:3791-3805 (struct at include/battle_util.h:160-165).
+ * `lowHpSpecies` is the form the mon takes while its HP is at or below `maxHP / hpFraction`;
+ * `highHpSpecies` the form above it. */
+const HP_TRANSFORMATIONS: readonly {
+  ability: string
+  lowHpSpecies: string
+  highHpSpecies: string
+  hpFraction: number
+}[] = [
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_RED', highHpSpecies: 'SPECIES_MINIOR', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_BLUE', highHpSpecies: 'SPECIES_MINIOR_METEOR_BLUE', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_GREEN', highHpSpecies: 'SPECIES_MINIOR_METEOR_GREEN', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_INDIGO', highHpSpecies: 'SPECIES_MINIOR_METEOR_INDIGO', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_ORANGE', highHpSpecies: 'SPECIES_MINIOR_METEOR_ORANGE', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_VIOLET', highHpSpecies: 'SPECIES_MINIOR_METEOR_VIOLET', hpFraction: 2 },
+  { ability: 'ABILITY_SHIELDS_DOWN', lowHpSpecies: 'SPECIES_MINIOR_CORE_YELLOW', highHpSpecies: 'SPECIES_MINIOR_METEOR_YELLOW', hpFraction: 2 },
+  { ability: 'ABILITY_SCHOOLING', lowHpSpecies: 'SPECIES_WISHIWASHI', highHpSpecies: 'SPECIES_WISHIWASHI_SCHOOL', hpFraction: 4 },
+  { ability: 'ABILITY_APE_SHIFT', lowHpSpecies: 'SPECIES_SLAKING_MEGA_APE_SHIFT', highHpSpecies: 'SPECIES_SLAKING_MEGA', hpFraction: 2 },
+  { ability: 'ABILITY_REVELATION', lowHpSpecies: 'SPECIES_UNOWN', highHpSpecies: 'SPECIES_UNOWN_REVELATION', hpFraction: 4 },
+  { ability: 'ABILITY_LOCUST_SWARM', lowHpSpecies: 'SPECIES_WISPYWASPY', highHpSpecies: 'SPECIES_WISPYWASPY_HIVEMIND', hpFraction: 4 },
+]
+
+/**
+ * ShouldChangeFormHpBased, src/battle_util.c:3812-3906. Changes `battler`'s species in place when an
+ * HP-threshold form ability says it should; returns TRUE when a change happened.
+ *
+ * The C writes `gBattleMons[battler].species` and calls UpdateAbilityStateIndicesForNewSpecies
+ * (:8822-8831); `changeBattlerForm` performs both here (plus the stat recalc the following
+ * `handleformchange` script command does). A species missing from the data is a no-op, like
+ * changeBattlerForm's other callers.
+ */
+export function shouldChangeFormHpBased(state: BattleState, battlerId: number, deps: FormChangeDeps): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  const species = battler.mon.speciesId
+
+  if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  if (!isBattlerAlive(state, battlerId)) return false
+
+  for (const transformation of HP_TRANSFORMATIONS) {
+    if (!battlerHasSimAbility(state, battler, transformation.ability, false, battlerId, false, deps.dataContext)) continue
+    // abilities.cc:2836-2842: Schooling's onEntry/onEndTurn only fire at level 20+, and
+    // ShouldChangeFormHpBased skips its table row below that.
+    if (transformation.ability === 'ABILITY_SCHOOLING' && battler.mon.level < 20) continue
+    if (
+      species === transformation.lowHpSpecies &&
+      battler.mon.hp > Math.trunc(battler.mon.maxHp / transformation.hpFraction)
+    ) {
+      // Shields Down reverts from core to Meteor only while its ability state is clear (:3824-3825).
+      if (transformation.ability === 'ABILITY_SHIELDS_DOWN' && getAbilityStateOf(battler, 'ABILITY_SHIELDS_DOWN')) return false
+      changeBattlerForm(state, battlerId, transformation.highHpSpecies, deps.dataContext)
+      return true
+    }
+    if (
+      species === transformation.highHpSpecies &&
+      battler.mon.hp <= Math.trunc(battler.mon.maxHp / transformation.hpFraction)
+    ) {
+      changeBattlerForm(state, battlerId, transformation.lowHpSpecies, deps.dataContext)
+      return true
+    }
+  }
+
+  // Darmanitan (:3840-3847)
+  if (species === 'SPECIES_DARMANITAN' && battlerHasSimAbility(state, battler, 'ABILITY_ZEN_MODE', false, battlerId, false, deps.dataContext) && battler.mon.hp !== 0) {
+    changeBattlerForm(state, battlerId, 'SPECIES_DARMANITAN_ZEN_MODE', deps.dataContext)
+    return true
+  }
+
+  // Darmanitan Galarian (:3849-3856)
+  if (species === 'SPECIES_DARMANITAN_GALARIAN' && battlerHasSimAbility(state, battler, 'ABILITY_ZEN_MODE', false, battlerId, false, deps.dataContext) && battler.mon.hp !== 0) {
+    changeBattlerForm(state, battlerId, 'SPECIES_DARMANITAN_ZEN_MODE_GALARIAN', deps.dataContext)
+    return true
+  }
+
+  // Castform (:3858-3883): only the IsWeatherActive(WEATHER_ANY) probe is weather-immunity aware;
+  // the per-weather selections below read the raw gBattleWeather bits, as the C does.
+  const baseSpecies = deps.dataContext.species(species)?.formOf ?? species
+  if (battlerHasSimAbility(state, battler, 'ABILITY_FORECAST', false, battlerId, false, deps.dataContext) && baseSpecies === 'SPECIES_CASTFORM') {
+    let newSpecies = 'SPECIES_CASTFORM'
+    if (isWeatherActive(state, WEATHER_ANY, deps.grounding)) {
+      if (hasFlag(state.field.weather, WEATHER_RAIN_ANY)) newSpecies = 'SPECIES_CASTFORM_RAINY'
+      else if (hasFlag(state.field.weather, WEATHER_SUN_ANY)) newSpecies = 'SPECIES_CASTFORM_SUNNY'
+      else if (hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY)) newSpecies = 'SPECIES_CASTFORM_SANDY'
+      else if (hasFlag(state.field.weather, WEATHER_FOG_ANY)) newSpecies = 'SPECIES_CASTFORM_FOGGY'
+      else if (hasFlag(state.field.weather, WEATHER_HAIL_ANY)) newSpecies = 'SPECIES_CASTFORM_SNOWY'
+    }
+    if (newSpecies !== species) {
+      changeBattlerForm(state, battlerId, newSpecies, deps.dataContext)
+      return true
+    }
+  }
+
+  // Cherrim (:3885-3903)
+  if (species === 'SPECIES_CHERRIM' && battlerHasSimAbility(state, battler, 'ABILITY_FLOWER_GIFT', false, battlerId, false, deps.dataContext) && battler.mon.hp !== 0) {
+    if (hasFlag(state.field.weather, WEATHER_SUN_ANY)) {
+      changeBattlerForm(state, battlerId, 'SPECIES_CHERRIM_SUNSHINE', deps.dataContext)
+      return true
+    }
+  } else if (
+    species === 'SPECIES_CHERRIM_SUNSHINE' &&
+    battlerHasSimAbility(state, battler, 'ABILITY_FLOWER_GIFT', false, battlerId, false, deps.dataContext) &&
+    battler.mon.hp !== 0
+  ) {
+    if (!hasFlag(state.field.weather, WEATHER_SUN_ANY)) {
+      changeBattlerForm(state, battlerId, 'SPECIES_CHERRIM', deps.dataContext)
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * TryTransformAttacker, src/abilities.cc:245-252. The form change's BattleScript_AttackerFormChange
+ * (data/battle_scripts_1.s:8454-8462) ends in `switchinabilities BS_ATTACKER`, reproduced by
+ * applySwitchInAbilities. The second, now redundant TRANSFORMED guard is kept as written.
+ */
+export function tryTransformAttacker(
+  state: BattleState,
+  battlerId: number,
+  deps: FormChangeDeps,
+  unmodelled: string[],
+): boolean {
+  if (!shouldChangeFormHpBased(state, battlerId, deps)) return false
+  const battler = state.battlers[battlerId]
+  if (!battler || hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) return false
+  applySwitchInAbilities(state, battlerId, deps, unmodelled)
+  return true
 }
 
 /**

@@ -171,7 +171,7 @@ import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
 import { TYPE_ROCK_ID } from './hazards'
-import { tryPrimalReversion } from './formChange'
+import { tryPrimalReversion, tryTransformAttacker } from './formChange'
 
 /** abilityHooks.json (data/v2.65beta, pinned SHA) -- every ability id whose
  * `hooks.onEntry` is present. */
@@ -2158,6 +2158,16 @@ export function applySwitchInAbilities(
     if (abilityId === 'ABILITY_TOXIC_SPILL' || abilityId === 'ABILITY_TRASH_HEAP') {
       // abilities.cc:5199-5250: onEntry pushes BattleScript_BattlerAnnouncedToxicSpill
       // (printstring only). State effect is onEndTurn (:5208-5242).
+      continue
+    }
+
+    if (abilityId === 'ABILITY_FORECAST' || abilityId === 'ABILITY_FLOWER_GIFT' || abilityId === 'ABILITY_SCHOOLING') {
+      // Impl<ABILITY_FORECAST>.onEntry (abilities.cc:1248; Flower Gift aliases it at :1858) and
+      // Impl<ABILITY_SCHOOLING>.onEntry (:2834-2837) -> TryTransformAttacker (:245-252), whose
+      // BattleScript_AttackerFormChange ends in `switchinabilities BS_ATTACKER`
+      // (data/battle_scripts_1.s:8454-8462) -- the recursive applySwitchInAbilities below.
+      if (abilityId === 'ABILITY_SCHOOLING' && battler.mon.level < 20) continue
+      tryTransformAttacker(state, battlerId, deps, unmodelled)
       continue
     }
 

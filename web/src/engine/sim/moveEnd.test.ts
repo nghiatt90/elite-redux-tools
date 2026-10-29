@@ -1039,7 +1039,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 103 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 104 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
       'ABILITY_ANGER_POINT',
       'ABILITY_ANGER_SHELL',
@@ -1116,6 +1116,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SLIME_MOLD',
       'ABILITY_SMOLDERING_WOOD',
       'ABILITY_SNAP_TRAP_WHEN_HIT',
+      'ABILITY_SOUL_LINKER',
       'ABILITY_SPIKE_ARMOR',
       'ABILITY_SPITEFUL',
       'ABILITY_STAMINA',
@@ -1148,7 +1149,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 109 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 111 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1238,12 +1239,14 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SMOLDERING_WOOD',
       'ABILITY_SOLAR_FLARE',
       'ABILITY_SOLENOGLYPHS',
+      'ABILITY_SOUL_LINKER',
       'ABILITY_SPECTRALIZE',
       'ABILITY_SPIKE_ARMOR',
       'ABILITY_STATIC',
       'ABILITY_STENCH',
       'ABILITY_STRIKER_PIXILATE',
       'ABILITY_SUPER_HOT_GOO',
+      'ABILITY_TEMPORAL_RUPTURE',
       'ABILITY_TENDER_AFFECTION',
       'ABILITY_TENTALOCK',
       'ABILITY_THUNDERCALL',

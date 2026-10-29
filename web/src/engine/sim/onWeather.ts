@@ -37,6 +37,7 @@ import {
 import { isBattlerAlive } from './turn'
 import { weatherHasEffect } from './fieldEndTurn'
 import { disableSwitchInAbility } from './switchInAbility'
+import { tryTransformAttacker } from './formChange'
 
 export interface OnWeatherDeps {
   dataContext: SimDataContext
@@ -49,8 +50,8 @@ export const PARADOX_BOOST_NOT_ACTIVE = 0
 export const PARADOX_BOOSTER_ENERGY = 1
 export const PARADOX_WEATHER_ACTIVE = 2
 
-/** IsWeatherActive, src/battle_util.c:8638-8641. */
-function isWeatherActive(state: BattleState, weather: number, grounding: GroundingContext): boolean {
+/** IsWeatherActive, src/battle_util.c:8638-8641. Exported for formChange.ts's ShouldChangeFormHpBased (:3861). */
+export function isWeatherActive(state: BattleState, weather: number, grounding: GroundingContext): boolean {
   return hasFlag(state.field.weather, weather) && weatherHasEffect(state, grounding)
 }
 
@@ -204,13 +205,10 @@ export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps,
         }
         case 'ABILITY_FORECAST':
         case 'ABILITY_FLOWER_GIFT':
-          // TryTransformAttacker (abilities.cc:245-252) -> ShouldChangeFormHpBased
-          // (battle_util.c:3812-3900), which returns FALSE for a transformed or fainted battler.
-          if (!hasFlag(battler.mon.status2, STATUS2_TRANSFORMED) && isBattlerAlive(state, battlerId)) {
-            unmodelled.push(
-              `battler ${battlerId}: ${abilityId}'s onWeather form check (ShouldChangeFormHpBased, battle_util.c:3812-3900) is not ported -- a form change may have been missed`,
-            )
-          }
+          // Impl<ABILITY_FORECAST>.onWeather (abilities.cc:1249) and Flower Gift's alias (:1859):
+          // TryTransformAttacker (:245-252) -> ShouldChangeFormHpBased (battle_util.c:3812-3906),
+          // whose own guards reject a transformed or fainted battler.
+          tryTransformAttacker(state, battlerId, deps, unmodelled)
           break
         case 'ABILITY_DISGUISE':
           // DisguiseReformHandler, src/abilities.cc:2846-2866.

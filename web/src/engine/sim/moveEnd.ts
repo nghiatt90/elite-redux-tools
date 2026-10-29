@@ -805,6 +805,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_FRAGRANT_DAZE',
   'ABILITY_HYPNOTIC_TOUCH',
   'ABILITY_STRIKEOUT', // Cycle 89b (:11143-11155)
+  'ABILITY_SOUL_LINKER', // Cycle 96 onDefender half (abilities.cc:4273-4285)
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -943,6 +944,9 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_TOXIC_CHAIN',
   'ABILITY_KOMODO',
   'ABILITY_PINNACLE_BLADE',
+  // Cycle 96: Soul Linker's onAttacker half (abilities.cc:4273-4285), Temporal Rupture (:10043-10067)
+  'ABILITY_SOUL_LINKER',
+  'ABILITY_TEMPORAL_RUPTURE',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -1340,6 +1344,26 @@ function handleDefenderMoveEndAbility(
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
   if (!attacker || !target) return result
+
+  // Soul Linker (src/abilities.cc:4273-4285, ON_EITHER_ABILITY at :4282-4285). This is the defender
+  // half: holder = target, opponent = attacker. BattleScript_AttackerSoulLinker
+  // (data/battle_scripts_1.s:11467-11472) runs `healthbarupdate BS_ATTACKER; datahpupdate BS_ATTACKER;
+  // tryfaintmon BS_ATTACKER` with gBattleMoveDamage, the move's own damage (positive) -- so the move's
+  // attacker takes the damage it dealt. DidMoveHit/ShouldApplyOnHitEffect (:4060-4062) are read as
+  // "the move dealt damage", the same reading as Strikeout below.
+  if (abilityId === 'ABILITY_SOUL_LINKER') {
+    if (
+      targetDamage > 0 &&
+      target.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      moveId !== 'MOVE_PAIN_SPLIT' &&
+      !battlerHasSimAbility(state, attacker, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
+    ) {
+      applyDamage(state, attackerId, targetDamage, fainted)
+      result.attackerDamage += targetDamage
+    }
+    return result
+  }
 
   // Strikeout (src/abilities.cc:11143-11155): CHECK(DidMoveHit()), CHECK(GetBattlerSide(attacker) != GetBattlerSide(battler)); DidMoveHit is
   // read as "the move dealt damage", like the other ports here. Unlike most defender hooks it does not require the holder to be alive.
@@ -2811,6 +2835,7 @@ function handleAttackerMoveEndAbility(
   isCriticalHit = false,
   targetHasActedThisTurn?: boolean,
   noEffect?: boolean,
+  fainted: number[] = [],
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -2821,6 +2846,42 @@ function handleAttackerMoveEndAbility(
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
   if (!attacker || !target) return result
+
+  // Soul Linker (src/abilities.cc:4273-4285, ON_EITHER_ABILITY at :4282-4285). This is the attacker
+  // half: holder = attacker, opponent = target. BattleScript_AttackerSoulLinker
+  // (data/battle_scripts_1.s:11467-11472) damages BS_ATTACKER -- the holder -- by the move's own
+  // damage, so a Soul Linker holder takes the same damage it inflicts.
+  if (abilityId === 'ABILITY_SOUL_LINKER') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
+      target.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      moveId !== 'MOVE_PAIN_SPLIT' &&
+      !battlerHasSimAbility(state, target, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
+    ) {
+      applyDamage(state, attackerId, targetDamage, fainted)
+      result.attackerDamage += targetDamage
+    }
+    return result
+  }
+
+  // Temporal Rupture (src/abilities.cc:10043-10067). ReplaceAbility (battle_util.c:9325) writes
+  // abilities[0]; IsPersistentOrUnsuppressableAbility (:4790) reads GetBattlerAbility (abilities[0]).
+  if (abilityId === 'ABILITY_TEMPORAL_RUPTURE') {
+    const targetPrimary = target.mon.abilities.ability ?? 'ABILITY_NONE'
+    if (
+      moveId === 'MOVE_ROAR_OF_TIME' &&
+      targetDamage > 0 && // ShouldApplyOnHitEffect(target)
+      target.mon.hp > 0 &&
+      !hasAbilityIgnoringSuppression(target, 'ABILITY_SLOW_START') &&
+      !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(targetPrimary) &&
+      !doesBattlerHaveAbilityShield(target, deps)
+    ) {
+      updateAbilityStateForNewAbility(target, 'ABILITY_SLOW_START')
+      target.mon.abilities.ability = 'ABILITY_SLOW_START'
+      target.volatiles.slowStartTimer = 5 // gVolatileStructs[target].slowStartTimer (:10056)
+    }
+  }
 
   // "-ate" abilities' 10% on-hit status (src/abilities.cc: Hydrate :4122, Pixilate :2468, Mineralize :5090, Galvanize :2811,
   // Refrigerate :2372, Intoxicate :4201, Emanate :6015, Immolate / Solar Flare :3742, :4638, Spectralize :4870, Deviate / Mob Boss :9760, :12453)
@@ -4249,6 +4310,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         ctx.isCriticalHit ?? false,
         ctx.targetHasActedThisTurn,
         ctx.noEffect,
+        ctx.fainted,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
