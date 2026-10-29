@@ -240,7 +240,15 @@ import {
   RESET_ALL_STATS,
   tryResetBattlerStatChanges,
 } from './statBuffs'
-import { canBattlerHeal, isHealingBlocked, isMagicGuardProtected } from './endTurn'
+import {
+  canBattlerHeal,
+  CUD_CHEW_ACTIVATING,
+  CUD_CHEW_SET_THIS_TURN,
+  getAbilityStateOf,
+  isHealingBlocked,
+  isMagicGuardProtected,
+  setAbilityStateOf,
+} from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
@@ -8837,45 +8845,81 @@ export function hasNonNegatedBerry(
 }
 
 /**
+ * SetCudChew (src/battle_script_commands.c:6028-6038), called from ItemBattleEffects at
+ * src/battle_util.c:6300-6301 right after `ateBerry[side] |= bit(partyIndex)`.
+ * Requires a berry-pocket item, ABILITY_CUD_CHEW, and the ateBerry bit; then:
+ *   activating -> clear the whole state; else if !itemId -> {itemId, setThisTurn}.
+ * (Else nothing: an already-armed state survives until its own end-turn pass.) */
+export function setCudChew(state: BattleState, battlerId: number, itemId: string, attackerId: number, deps: TurnLoopDeps): void {
+  const battler = state.battlers[battlerId]
+  if (!battler) return
+  if (deps.dataContext.item(itemId)?.grouping !== 'POCKET_BERRIES') return
+  if (!battler.ateBerry) return
+  const attacker = state.battlers[attackerId]
+  const attackerHasMB = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
+  if (!battlerHasSimAbility(state, battler, 'ABILITY_CUD_CHEW', true, attackerId, attackerHasMB, deps.dataContext)) return
+  if (getAbilityStateOf(battler, 'ABILITY_CUD_CHEW') & CUD_CHEW_ACTIVATING) {
+    // SetAbilityStateAs({.cudChewState = {0}}): this is why a temporary berry consumed BY
+    // Cud Chew never arms another one -- SetCudChew runs again inside that consume.
+    battler.cudChewItem = null
+    setAbilityStateOf(battler, 'ABILITY_CUD_CHEW', 0)
+  } else if (!battler.cudChewItem) {
+    battler.cudChewItem = itemId
+    setAbilityStateOf(battler, 'ABILITY_CUD_CHEW', CUD_CHEW_SET_THIS_TURN)
+  }
+}
+
+/**
  * Cmd_removeitem (src/battle_script_commands.c:6040-6053), SetCudChew (:6028-6038,
  * called at src/battle_util.c:6301), and TryCheekPouch (:6015-6026).
- */
+ * Returns true when the berry effect consumed the item (the "effect fired" answer
+ * VARIOUS_CONSUME_BERRY needs at :8035). */
 function finishBerryRemoval(
   state: BattleState,
   attackerId: number,
   battlerId: number,
   deps: TurnLoopDeps,
   unmodelled: string[],
-): void {
+): boolean {
   const battler = state.battlers[battlerId]!
-  const attacker = state.battlers[attackerId]
-  const attackerHasMB = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
 
-  // SetCudChew (:6028-6038)
-  if (battlerHasSimAbility(state, battler, 'ABILITY_CUD_CHEW', true, attackerId, attackerHasMB, deps.dataContext)) {
-    unmodelled.push("SetCudChew's Cud Chew ability state (battle_script_commands.c:6028-6038) is not modelled")
+  // battle_util.c:6299-6301: only a berry in the berry item-id range sets ateBerry (bit for
+  // this battler's party index) and then reaches SetCudChew. `grouping` is the sim's
+  // equivalent of ItemId_GetPocket(item) == POCKET_BERRIES, as hasNonNegatedBerry uses.
+  const eatenItem = battler.mon.itemId
+  if (eatenItem && deps.dataContext.item(eatenItem)?.grouping === 'POCKET_BERRIES') {
+    battler.ateBerry = true
+    // SetCudChew is called with gLastUsedItem, i.e. the berry still held at this point.
+    setCudChew(state, battlerId, eatenItem, attackerId, deps)
   }
 
   // Cmd_removeitem (:6040-6051): records usedHeldItem and clears itemId via UpdateBattlerItem
   consumeHeldItem(state, battler, unmodelled)
 
-  // TryCheekPouch (:6015-6026): in ER, Cheek Pouch is merged into ABILITY_GLUTTONY
+  // TryCheekPouch (:6015-6026): in ER, Cheek Pouch is merged into ABILITY_GLUTTONY.
+  // The C also requires the ateBerry bit (:6018), which is now set above.
   if (
     battlerHasSimAbility(state, battler, 'ABILITY_GLUTTONY', false, battlerId, false, deps.dataContext) &&
     canBattlerHeal(state, battlerId, battler, unmodelled) &&
+    battler.ateBerry === true &&
     battler.mon.hp < battler.mon.maxHp
   ) {
     let heal = Math.trunc(battler.mon.maxHp / 3)
     if (heal === 0) heal = 1
     healBattler(state, battlerId, battler, heal)
   }
+  return true
 }
 
 /**
- * VARIOUS_CONSUME_BERRY (src/battle_script_commands.c:8024-8041) with restoreItem = FALSE
- * and sBERRY_OVERRIDE = TRUE (gBattleScripting.overrideBerryRequirements = TRUE),
+ * VARIOUS_CONSUME_BERRY (src/battle_script_commands.c:8024-8041) with
+ * sBERRY_OVERRIDE = TRUE (gBattleScripting.overrideBerryRequirements = TRUE),
  * dispatching ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END, battlerId, FALSE)
- * (src/battle_util.c:5872-6033).
+ * (src/battle_util.c:5872-6033). `restoreItem` is the command's own operand: when FALSE
+ * (every move-effect caller) nothing is restored; when TRUE (BattleScript_CudChew, :1016-1021)
+ * the item parked in `changedItems` is handed back only if the berry effect did not fire
+ * (:8035-8040). The early returns below mirror the C's own `return` before the restore block
+ * (`HOLD_EFFECT_NONE` check at :8026-8028, and the fired-effect return at :8035).
  */
 export function consumeBerryWithOverride(
   state: BattleState,
@@ -8885,6 +8929,7 @@ export function consumeBerryWithOverride(
   deps: TurnLoopDeps,
   unmodelled: string[],
   statChanges: StatChangeOutcome[],
+  restoreItem = false,
 ): void {
   const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) return
@@ -8901,11 +8946,15 @@ export function consumeBerryWithOverride(
   if (!holdEffect || holdEffect === 'HOLD_EFFECT_NONE') return
   const param = itemData?.holdEffectStrength ?? 0
 
+  // Whether ItemBattleEffects returned nonzero: only finishBerryRemoval (Cmd_removeitem) paths
+  // consume the item, and those are exactly the "effect fired" cases.
+  let fired = false
+
   switch (holdEffect) {
     case 'HOLD_EFFECT_MICLE_BERRY': {
       // TrySetMicleBerry (battle_util.c:5257-5269), BattleScript_MicleBerryActivateRet (data/battle_scripts_1.s:11255-11265)
       battler.round.usedMicleBerry = true
-      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       break
     }
     case 'HOLD_EFFECT_RESTORE_HP':
@@ -8923,7 +8972,7 @@ export function consumeBerryWithOverride(
           : param
       if (hasRipenEffect(state, battlerId, deps)) heal *= 2
       healBattler(state, battlerId, battler, heal)
-      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       break
     }
     case 'HOLD_EFFECT_CONFUSE_SPICY':
@@ -8940,7 +8989,7 @@ export function consumeBerryWithOverride(
       if (heal === 0) heal = 1
       if (hasRipenEffect(state, battlerId, deps)) heal *= 2
       healBattler(state, battlerId, battler, heal)
-      finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+      fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       break
     }
     case 'HOLD_EFFECT_ATTACK_UP':
@@ -8975,7 +9024,7 @@ export function consumeBerryWithOverride(
       )
       if (res.delta !== 0) {
         statChanges.push({ battlerId, stat: statId, change: res.delta })
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9009,7 +9058,7 @@ export function consumeBerryWithOverride(
       )
       if (res.delta !== 0) {
         statChanges.push({ battlerId, stat: statId, change: res.delta })
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9017,7 +9066,7 @@ export function consumeBerryWithOverride(
       // battle_util.c:5925-5931
       if (hasFlag(battler.mon.status1, STATUS1_PARALYSIS) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_PARALYSIS)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9025,7 +9074,7 @@ export function consumeBerryWithOverride(
       // battle_util.c:5932-5938
       if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_POISON_ANY | STATUS1_TOXIC_COUNTER)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9033,7 +9082,7 @@ export function consumeBerryWithOverride(
       // battle_util.c:5939-5945
       if (hasFlag(battler.mon.status1, STATUS1_BURN) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_BURN)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9041,7 +9090,7 @@ export function consumeBerryWithOverride(
       // battle_util.c:5946-5952 (C checks STATUS1_FROSTBITE, not STATUS1_FREEZE)
       if (hasFlag(battler.mon.status1, STATUS1_FROSTBITE) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_FROSTBITE)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9050,7 +9099,7 @@ export function consumeBerryWithOverride(
       if (hasFlag(battler.mon.status1, STATUS1_SLEEP) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status1 = clearFlag(battler.mon.status1, STATUS1_SLEEP)
         battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_NIGHTMARE)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9058,7 +9107,7 @@ export function consumeBerryWithOverride(
       // battle_util.c:5961-5967
       if (hasFlag(battler.mon.status2, STATUS2_CONFUSION) && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
         battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
@@ -9070,10 +9119,18 @@ export function consumeBerryWithOverride(
         }
         battler.mon.status1 = 0
         battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_CONFUSION)
-        finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled)
+        fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       }
       break
     }
+  }
+
+  // VARIOUS_CONSUME_BERRY (:8037-8040): restoreItem && !ItemBattleEffects(...) ->
+  // UpdateBattlerItem(battler, changedItems[battler]); changedItems[battler] = ITEM_NONE.
+  // On a fired effect the C returns at :8035 and leaves changedItems for MOVEEND_CHANGED_ITEMS.
+  if (restoreItem && !fired) {
+    battler.mon.itemId = battler.changedItem ?? null
+    battler.changedItem = null
   }
 }
 

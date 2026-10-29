@@ -220,7 +220,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, canBattlerSwitch, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, canBattlerSwitch, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -3860,6 +3860,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
           const action = actions[id]
           return action?.action === 'USE_MOVE' && action.chosenMove ? action.chosenMove.id : null
         }),
+        // endTurn.ts cannot import moveEffects.ts back (moveEffects imports endTurn), so the
+        // Cud Chew / Craving consumeberry is injected here with the loop's own TurnLoopDeps.
+        consumeBerryWithOverride: (s, attackerId, battlerId, moveId, unmodelled, statChanges, restoreItem) =>
+          consumeBerryWithOverride(s, attackerId, battlerId, moveId, deps, unmodelled, statChanges, restoreItem),
       })
       endTurn = battlerResult.results
       endTurnUnmodelled = battlerResult.unmodelled

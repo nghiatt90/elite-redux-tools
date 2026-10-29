@@ -367,6 +367,22 @@ export interface BattlerState {
    * absent/null means ITEM_NONE, exactly what a fresh battle reads. Optional so
    * every existing BattlerState construction stays valid. */
   usedHeldItem?: string | null
+  /** `gBattleStruct->ateBerry[side] & gBitTable[partyIndex]` (battle_util.c:6300,
+   * set right before SetCudChew; read by SetCudChew :6028-6038, TryCheekPouch
+   * :6015-6026 and IsBelchPreventingMove :1409). The C key is party slot + side;
+   * carried per battler here, and the C never clears it mid-battle, so neither
+   * does this. Absent reads as "has not eaten a berry", exactly a fresh battle
+   * (AllocZeroed). Optional so every existing BattlerState construction stays valid. */
+  ateBerry?: boolean
+  /** `gBattleStruct->changedItems[battler]` (battle_script_commands.c:4656-4665
+   * MOVEEND_CHANGED_ITEMS, :2213-2218 UpdateBattlerItem) -- the item parked while
+   * a temporary item is held, handed back by the next MOVEEND_CHANGED_ITEMS.
+   * Absent/null means ITEM_NONE. Optional so existing constructions stay valid. */
+  changedItem?: string | null
+  /** The `itemId` half of `CudChewState` (include/battle_util.h:125-131); the
+   * `setThisTurn`/`activating` bits live in volatiles.abilityState[Cud Chew's slot]
+   * (see endTurn.ts's CUD_CHEW_* constants). Absent/null means that half is ITEM_NONE. */
+  cudChewItem?: string | null
   /** `RESOURCE_FLAG_ROOST` (include/battle.h:69) -- `gBattleResources->flags->flags[battler]`.
    * Bitmask of resource flags (e.g. RESOURCE_FLAG_ROOST = 0x2). */
   resourceFlags?: number

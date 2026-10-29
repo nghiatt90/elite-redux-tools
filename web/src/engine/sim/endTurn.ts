@@ -78,7 +78,7 @@
 //                           Life Steal, Soul Tap, Moody, Truant, Peaceful Slumber,
 //                           Sap Trap, Soothsayer, Talon Trap, Sumo Wrestler,
 //                           Strikeout, Winter Throne, Christmas Nightmare,
-//                           Color Spectrum. Unported
+//                           Color Spectrum, Cud Chew, Craving. Unported
 //                           hooks remain conditionally gapped (ENDTURN_ABILITY_IDS).
 //   ENDTURN_ITEMS1          Gapped -- gapped when the battler's item's
 //   ENDTURN_ITEMS2          resolvedHoldEffect is one of ITEMS_1_2_HOLD_EFFECTS
@@ -207,6 +207,7 @@ import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
+import type { StatChangeOutcome } from './turn'
 import { tryTransformAttacker } from './formChange'
 import { isHailImmune, weatherHasEffect } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
@@ -225,6 +226,7 @@ import {
   isBattlerWeatherAffected,
   isSimAbilitySuppressed,
   isStatDropBlocked,
+  isUnnerveAbilityOnOpposingSide,
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
   runReactiveAbilityEffects,
@@ -339,9 +341,7 @@ const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_CHRISTMAS_NIGHTMARE',
   'ABILITY_COLOR_SPECTRUM',
   'ABILITY_COOL_EXIT',
-  'ABILITY_CRAVING',
   'ABILITY_CRYO_ARCHITECT',
-  'ABILITY_CUD_CHEW',
   'ABILITY_DUAL_SHADOW',
   'ABILITY_ETERNAL_BLESSING',
   'ABILITY_FLAME_COAT',
@@ -775,6 +775,21 @@ export interface EndTurnDeps {
    * no move (a switch, or no action). The C clears it only after the end-turn phase (battle_main.c:3517-3520), so it is still set
    * here; the sim has no such field, so the turn loop supplies it. Absent means "no battler chose a move". */
   chosenMoveByBattler?: readonly (string | null)[]
+  /** moveEffects.ts's `consumeBerryWithOverride`, injected by the turn loop instead of
+   * imported: moveEffects already imports this module (canBattlerHeal), so importing it
+   * back would close an import cycle. Cud Chew and Craving both run BattleScript_CudChew,
+   * whose `consumeberry BS_ATTACKER, TRUE` is that function with restoreItem = TRUE.
+   * When absent, the two abilities still set their state and temporary item (as the C
+   * does before the script runs) but report the consumeberry itself as unapplied. */
+  consumeBerryWithOverride?: (
+    state: BattleState,
+    attackerId: number,
+    battlerId: number,
+    moveId: string,
+    unmodelled: string[],
+    statChanges: StatChangeOutcome[],
+    restoreItem: boolean,
+  ) => void
 }
 
 /** An ability heal at end of turn: the shared tail of the ported abilities below. */
@@ -798,16 +813,23 @@ function healMonStatus(state: BattleState, battlerId: number, battler: BattlerSt
 }
 
 /** GetAbilityState, battle_util.c:3974-3980: gVolatileStructs[battler].abilityState[GetAbilityIndex(battler, ability)] (0 when the battler lacks the ability). */
-function getAbilityStateOf(battler: BattlerState, abilityId: string): number {
+export function getAbilityStateOf(battler: BattlerState, abilityId: string): number {
   const slot = findAbilitySlot(battler.mon.abilities, abilityId)
   return slot === -1 ? 0 : (battler.volatiles.abilityState[slot] ?? 0)
 }
 
 /** SetAbilityState, battle_util.c:3984-3990. */
-function setAbilityStateOf(battler: BattlerState, abilityId: string, value: number): void {
+export function setAbilityStateOf(battler: BattlerState, abilityId: string, value: number): void {
   const slot = findAbilitySlot(battler.mon.abilities, abilityId)
   if (slot !== -1) battler.volatiles.abilityState[slot] = value
 }
+
+/** `CudChewState` (include/battle_util.h:125-131) is `{ itemId, setThisTurn:1, activating:1 }`.
+ * The sim keeps `itemId` in `battler.cudChewItem` (a stable item id, since abilityState is a
+ * number) and the two flags in the Cud Chew ability slot: bit0 setThisTurn, bit1 activating --
+ * exactly the C bit order. moveEffects.ts's setCudChew reads and writes these too. */
+export const CUD_CHEW_SET_THIS_TURN = 1 << 0
+export const CUD_CHEW_ACTIVATING = 1 << 1
 
 /** SetOncePerTurnAbilityCounter, battle_util.c:1709-1715 (switchInAbility.ts has the same write, but imports this module). */
 function setOncePerTurnTrigger(battler: BattlerState, abilityId: string, value: number): void {
@@ -819,6 +841,17 @@ function setOncePerTurnTrigger(battler: BattlerState, abilityId: string, value: 
 const TYPE_NAMES_BY_ID = [
   'NORMAL', 'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'MYSTERY',
   'FIRE', 'WATER', 'GRASS', 'ELECTRIC', 'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY', 'STELLAR',
+] as const
+
+/** `sCravingBerryTable` (src/abilities.cc:7213-7224), index = `Random() % 10`. */
+const CRAVING_BERRY_TABLE = [
+  'ITEM_LUM_BERRY', 'ITEM_SITRUS_BERRY', 'ITEM_FIGY_BERRY', 'ITEM_LIECHI_BERRY', 'ITEM_GANLON_BERRY',
+  'ITEM_SALAC_BERRY', 'ITEM_PETAYA_BERRY', 'ITEM_APICOT_BERRY', 'ITEM_LANSAT_BERRY', 'ITEM_STARF_BERRY',
+] as const
+
+/** `figyAlternatives` (src/abilities.cc:7226-7227), index = `Random() % 5`, drawn only for Figy. */
+const FIGY_ALTERNATIVES = [
+  'ITEM_FIGY_BERRY', 'ITEM_WIKI_BERRY', 'ITEM_MAGO_BERRY', 'ITEM_AGUAV_BERRY', 'ITEM_IAPAPA_BERRY',
 ] as const
 
 /** StrikeoutState (include/battle_util.h:139-144): four u8s, counter1 / counter2 / damagedBy1 / damagedBy2, packed low byte first into the slot's abilityState. */
@@ -930,6 +963,34 @@ function runEndTurnAbilities(
   unmodelled: string[],
 ): EndTurnEffectResult[] {
   const results: EndTurnEffectResult[] = []
+
+  /** BattleScript_CudChew (data/battle_scripts_1.s:1016-1021): sBERRY_OVERRIDE on,
+   * `consumeberry BS_ATTACKER, TRUE`, override off. VARIOUS_CONSUME_BERRY (:8024-8041)
+   * with restoreItem = TRUE hands the parked item back only when the berry effect did
+   * not fire, so a fired effect leaves changedItems set for the next MOVEEND_CHANGED_ITEMS
+   * (:4656-4665); the end-turn phase runs no MOVEEND, and the sim has no equivalent, so
+   * that deferred restore is reported rather than invented. */
+  const cudChewScript = (abilityId: string): void => {
+    const statChanges: StatChangeOutcome[] = []
+    const prevHp = battler.mon.hp
+    if (deps?.consumeBerryWithOverride) {
+      // gCurrentMove is not kept across the end-turn phase (same note as the Chokehold family
+      // below), so MOVE_UNSET -- the 0xFFFF "no move" sentinel -- is the only honest value.
+      deps.consumeBerryWithOverride(state, battlerId, battlerId, MOVE_UNSET, unmodelled, statChanges, true)
+    } else {
+      unmodelled.push(
+        `battler ${battlerId}: ${abilityId}'s consumeberry (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041) is not applied -- no consumeBerryWithOverride was injected`,
+      )
+    }
+    if (battler.mon.hp !== prevHp) {
+      results.push({ battlerId, effect: 'ABILITY', hpChange: battler.mon.hp - prevHp, fainted: battler.mon.hp === 0 })
+    }
+    gapIf(
+      battler.changedItem != null,
+      unmodelled,
+      `battler ${battlerId}: ${abilityId}'s consumeberry restore is deferred to MOVEEND_CHANGED_ITEMS (battle_script_commands.c:4656-4665), which the sim does not run at end of turn; changedItems stays set`,
+    )
+  }
 
   const { ability, innates } = battler.mon.abilities
   const slots: readonly (string | null)[] = [
@@ -1578,6 +1639,38 @@ function runEndTurnAbilities(
           newType = TYPE_NAMES_BY_ID[state.rng.random16() % TYPE_NAMES_BY_ID.length]!
         } while (newType === 'MYSTERY' || newType === 'STELLAR' || battler.mon.types.includes(newType))
         battler.mon.types = [newType, newType, 'MYSTERY']
+        break
+      }
+
+      case 'ABILITY_CUD_CHEW': {
+        // src/abilities.cc:7194-7210
+        const stateBits = getAbilityStateOf(battler, 'ABILITY_CUD_CHEW')
+        if (stateBits & CUD_CHEW_SET_THIS_TURN) {
+          // SetAbilityStateAs({.cudChewState = {.itemId = state.itemId}}): setThisTurn and
+          // activating cleared, itemId kept. The berry is NOT eaten on the turn it was set.
+          setAbilityStateOf(battler, 'ABILITY_CUD_CHEW', 0)
+        } else if (battler.cudChewItem) {
+          // "attacker temporarily gains their item": changedItems[battler] = current item; item = state.itemId;
+          // state = {.activating = TRUE} (itemId cleared); then BattleScript_CudChew (:7198-7206).
+          battler.changedItem = battler.mon.itemId
+          battler.mon.itemId = battler.cudChewItem
+          battler.cudChewItem = null
+          setAbilityStateOf(battler, 'ABILITY_CUD_CHEW', CUD_CHEW_ACTIVATING)
+          cudChewScript('ABILITY_CUD_CHEW')
+        }
+        break
+      }
+
+      case 'ABILITY_CRAVING': {
+        // src/abilities.cc:7238-7246, SetRandomTempBerry :7226-7236
+        if (battler.volatiles.isFirstTurn === 2) break // CHECK(gVolatileStructs[battler].isFirstTurn != 2)
+        if (isUnnerveAbilityOnOpposingSide(state, battlerId, dataContext)) break // CHECK(!IsUnnerveAbilityOnOpposingSide(battler))
+        // sCravingBerryTable[Random() % 10]; a second Random() % 5 draw ONLY when the first lands on Figy.
+        let berry: string = CRAVING_BERRY_TABLE[state.rng.random16() % CRAVING_BERRY_TABLE.length]!
+        if (berry === 'ITEM_FIGY_BERRY') berry = FIGY_ALTERNATIVES[state.rng.random16() % FIGY_ALTERNATIVES.length]!
+        battler.changedItem = battler.mon.itemId
+        battler.mon.itemId = berry
+        cudChewScript('ABILITY_CRAVING')
         break
       }
 

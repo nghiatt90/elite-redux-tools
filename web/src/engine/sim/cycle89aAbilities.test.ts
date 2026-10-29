@@ -688,11 +688,3 @@ describe('Cycle 89a - Truant (src/abilities.cc:1189-1195; CANCELLER_TRUANT battl
     expect(s.battlers[0]!.volatiles.abilityState[0]).toBe(0)
   })
 })
-
-describe('Cycle 89a - what is still skipped', () => {
-  it('Craving still reports its onEndTurn hook as not run', () => {
-    const s = battle([{ abilities: hasAbility('ABILITY_CRAVING') }, {}], countingRng())
-    const out = quietTurn(s)
-    expect(out.endTurnUnmodelled.join('\n')).toContain("ABILITY_CRAVING's onEndTurn hook was not run")
-  })
-})
