@@ -87,10 +87,12 @@ import {
   STATUS2_ESCAPE_PREVENTION,
   STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
+  STATUS2_TRANSFORMED,
   STATUS3_AQUA_RING,
   STATUS3_CHARGED_UP,
   STATUS3_EMBARGO,
   STATUS3_HEAL_BLOCK,
+  STATUS3_SEMI_INVULNERABLE,
   STATUS4_COILED,
   STATUS4_CUTTHROAT,
   STATUS_FIELD_ELECTRIC_TERRAIN,
@@ -142,6 +144,7 @@ import {
   dispatchOnTerrainChange,
   dispatchOnWeatherChange,
   flareBoostHandler,
+  handleMimicry,
   protosynthesisHandler,
   quarkDriveHandler,
   toxicBoostHandler,
@@ -171,6 +174,11 @@ import type { ChosenAction, TurnOrder, TurnOrderContext } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
 import { TYPE_ROCK_ID } from './hazards'
+import { isBattlerAlive } from './turn'
+import { applyTransformCopy, hasAbilityIgnoringSuppression } from './moveEffects'
+// IsRolePlayBannedAbility (battle_util.c:8428-8436) lives with the other role-play/resuppression
+// predicates already extracted for the AI; reuse it rather than duplicating the four-entry table.
+import { isRolePlayBannedAbility } from './ai/aiAbilityHelpers'
 import {
   apeShiftHandler,
   disguiseReformHandler,
@@ -2211,6 +2219,73 @@ export function applySwitchInAbilities(
     if (abilityId === 'ABILITY_DRAKELP_HEAD') {
       // Impl<ABILITY_DRAKELP_HEAD>.onEntry (abilities.cc:12056): DrakelpHeadReformHandler (:12044-12053).
       drakelpHeadReformHandler(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    // 5b. Copy-on-entry abilities (Cycle 108b): Trace, Imposter, Mimicry, Petal Shield.
+    if (abilityId === 'ABILITY_TRACE') {
+      // Impl<ABILITY_TRACE>.onEntry (src/abilities.cc:951-974); BattleScript_TraceActivatesEnd3
+      // (data/battle_scripts_1.s:9514-9527) runs switchinabilities BS_STACK_1, the recursive
+      // applySwitchInAbilities below, so the copied ability's own onEntry fires for the tracer.
+      const opposite = battlerId ^ 1 // BATTLE_OPPOSITE(battler)
+      let target = opposite
+      // GetBattlerAbility(target): the sim has no single effective-ability helper, so slot 0 is
+      // what "the battler's ability" means here (the same reading as moveEnd.ts's Mummy port).
+      let newAbility = state.battlers[opposite]?.mon.abilities.ability ?? null
+      if (!isBattlerAlive(state, target) || isRolePlayBannedAbility(newAbility)) {
+        target = opposite ^ 2 // BATTLE_PARTNER(target)
+        if (!isBattlerAlive(state, target)) continue // CHECK(IsBattlerAlive(target)) -- singles: partner empty
+        newAbility = state.battlers[target]?.mon.abilities.ability ?? null
+        if (isRolePlayBannedAbility(newAbility)) continue // CHECK_NOT(IsRolePlayBannedAbility(newAbility))
+      }
+      // CHECK_NOT(HasAbilityIgnoringSuppression(battler, newAbility))
+      if (hasAbilityIgnoringSuppression(battler, newAbility ?? 'ABILITY_NONE')) continue
+
+      // int index = GetAbilityIndex(battler, ability, FALSE); CHECK(index < TOTAL_ABILITY_COUNT)
+      const index = getAbilityIndex(state, battler, abilityId, deps.dataContext)
+      if (index >= 4) continue
+      // gBattleMons[battler].abilities[index] = newAbility; switchInAbilityDone[index] = FALSE
+      if (index === 0) battler.mon.abilities.ability = newAbility
+      else if (index <= 3) battler.mon.abilities.innates[index - 1] = newAbility
+      battler.volatiles.switchInAbilityDone[index] = false
+
+      applySwitchInAbilities(state, battlerId, deps, unmodelled)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_IMPOSTER') {
+      // Impl<ABILITY_IMPOSTER>.onEntry (src/abilities.cc:2161-2175). BattleScript_ImposterActivates
+      // (data/battle_scripts_1.s:10469-10477) runs transformdataexecution on gBattlerTarget (the
+      // copy extracted to moveEffects.ts), then switchinabilities BS_ATTACKER.
+      let target = battlerId ^ 1 // gBattlerTarget = BATTLE_OPPOSITE(battler)
+      if (!isBattlerAlive(state, target)) target = (battlerId ^ 1) ^ 2 // BATTLE_PARTNER(gBattlerTarget)
+      if (!isBattlerAlive(state, target)) continue // CHECK(IsBattlerAlive(gBattlerTarget))
+      const transformTarget = state.battlers[target]
+      if (!transformTarget) continue
+      if (hasFlag(transformTarget.mon.status2, STATUS2_TRANSFORMED | STATUS2_SUBSTITUTE)) continue
+      if (hasFlag(battler.mon.status2, STATUS2_TRANSFORMED)) continue
+      // CHECK_NOT(gBattleStruct->illusion[gBattlerTarget].on): Illusion is stubbed in this sim
+      // (state.ts:48, see also handleTransform's same note), so this check is a no-op here.
+      if (hasFlag(transformTarget.statuses3, STATUS3_SEMI_INVULNERABLE)) continue
+
+      applyTransformCopy(state, battlerId, target, deps)
+      applySwitchInAbilities(state, battlerId, deps, unmodelled) // switchinabilities BS_ATTACKER
+      continue
+    }
+
+    if (abilityId === 'ABILITY_MIMICRY') {
+      // Impl<ABILITY_MIMICRY>.onEntry (src/abilities.cc:3444-3448): CHECK(IsBattlerAlive(battler))
+      // then HandleMimicry (:3378-3440). State lives in battler.volatiles.mimicryState.
+      if (isBattlerAlive(state, battlerId)) handleMimicry(state, battlerId)
+      continue
+    }
+
+    if (abilityId === 'ABILITY_PETAL_SHIELD') {
+      // Impl<ABILITY_PETAL_SHIELD>.onEntry (src/abilities.cc:12432-12437): stage below MAX only
+      // (the CHECK fails at +6); SwitchInAnnounce is message-only, no state.
+      if ((battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE) {
+        battler.mon.statStages[STAT_DEF] = MAX_STAT_STAGE
+      }
       continue
     }
 

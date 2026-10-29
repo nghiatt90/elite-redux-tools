@@ -6741,44 +6741,24 @@ export function handleDoodle(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
- * EFFECT_TRANSFORM (Transform)
- * BattleScript_EffectTransform (data/battle_scripts_1.s:4276-4290),
- * Cmd_transformdataexecution (src/battle_script_commands.c:10482-10533).
+ * The state half of Cmd_transformdataexecution (src/battle_script_commands.c:10492-10532): the
+ * transformed flag, the cleared volatiles, and the full copy of species/stats/types/abilities/
+ * moves/statStages/PP. Callers have already run the C's own failure checks (:10485-10488).
+ *
+ * Shared by the Transform move (BattleScript_EffectTransform, data/battle_scripts_1.s:4276-4290)
+ * and Imposter's onEntry (src/abilities.cc:2161-2175, whose BattleScript_ImposterActivates,
+ * data/battle_scripts_1.s:10469-10477, runs transformdataexecution directly). The move-only
+ * pieces -- gChosenMove = 0xFFFF (:10484), ppreduce (:4279), trytoclearprimalweather (:4280),
+ * the animation/text, and the trailing `switchinabilities` -- stay with the callers.
  */
-export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, setChosenMove } = ctx
-  const moveId = action.chosenMove!.id
-  const moveEffect = action.chosenMove!.effect
+export function applyTransformCopy(
+  state: BattleState,
+  battlerId: number,
+  targetId: number,
+  deps: { dataContext: SimDataContext },
+): void {
   const attacker = state.battlers[battlerId]!
-
-  // Cmd_transformdataexecution (src/battle_script_commands.c:10483): gChosenMove = 0xFFFF;
-  setChosenMove?.(MOVE_UNSET)
-
-  // 1. ppreduce (:4279)
-  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
-
-  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
-    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
-  }
-
   const target = state.battlers[targetId]!
-
-  // 2. trytoclearprimalweather (:4280)
-  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
-    unmodelled.push('trytoclearprimalweather not modelled')
-  }
-
-  // 3. transformdataexecution (:10482-10533):
-  // if (gBattleMons[gBattlerTarget].status2 & STATUS2_TRANSFORMED || gBattleStruct->illusion[gBattlerTarget].on ||
-  //     gStatuses3[gBattlerTarget] & STATUS3_SEMI_INVULNERABLE) -> fail
-  // Note: gBattleStruct->illusion[target].on is absent from BattleState (Illusion mechanics
-  // are stubbed in this sim, see state.ts:48).
-  if (
-    hasFlag(target.mon.status2, STATUS2_TRANSFORMED) ||
-    hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)
-  ) {
-    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
-  }
 
   // Set transformed status2 & clear volatile states
   attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_TRANSFORMED)
@@ -6820,6 +6800,50 @@ export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
       attacker.mon.pp[i] = 0
     }
   }
+}
+
+/**
+ * EFFECT_TRANSFORM (Transform)
+ * BattleScript_EffectTransform (data/battle_scripts_1.s:4276-4290),
+ * Cmd_transformdataexecution (src/battle_script_commands.c:10482-10533).
+ */
+export function handleTransform(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp, setChosenMove } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  // Cmd_transformdataexecution (src/battle_script_commands.c:10483): gChosenMove = 0xFFFF;
+  setChosenMove?.(MOVE_UNSET)
+
+  // 1. ppreduce (:4279)
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  if (targetId === null || !state.battlers[targetId] || !isBattlerAlive(state, targetId)) {
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
+  }
+
+  const target = state.battlers[targetId]!
+
+  // 2. trytoclearprimalweather (:4280)
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    unmodelled.push('trytoclearprimalweather not modelled')
+  }
+
+  // 3. transformdataexecution (:10482-10533):
+  // if (gBattleMons[gBattlerTarget].status2 & STATUS2_TRANSFORMED || gBattleStruct->illusion[gBattlerTarget].on ||
+  //     gStatuses3[gBattlerTarget] & STATUS3_SEMI_INVULNERABLE) -> fail
+  // Note: gBattleStruct->illusion[target].on is absent from BattleState (Illusion mechanics
+  // are stubbed in this sim, see state.ts:48).
+  if (
+    hasFlag(target.mon.status2, STATUS2_TRANSFORMED) ||
+    hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)
+  ) {
+    return outcome(ctx, { targetId, missed: true, chosenMoveId: MOVE_UNSET })
+  }
+
+  // Set transformed status2, clear volatile states and copy the target's battle state
+  // (:10492-10532). Shared with Imposter's onEntry.
+  applyTransformCopy(state, battlerId, targetId, deps)
 
   // 4. switchinabilities BS_ATTACKER (:4289)
   applySwitchInAbilities(state, battlerId, deps, unmodelled)

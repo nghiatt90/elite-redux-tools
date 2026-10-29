@@ -122,6 +122,13 @@ export interface VolatileBeganThisTurn {
  * Cmd_handlerollout's own `< 3` gate makes 3 the ceiling in normal play). */
 export interface VolatileState {
   transformedMonPersonality: number
+  /** `AbilityStates.mimicryState` (include/battle_util.h:130-137, :150), the type1/type2 pair
+   * HandleMimicry (src/abilities.cc:3399-3429) saves before SET_BATTLER_TYPE (include/battle.h:
+   * 755-760) and restores when the terrain ends. The C keeps it in the per-slot AbilityStates
+   * union with an `active` bit; the sim keeps a single nullable pair, where non-null is
+   * `active`. It lives on the volatile struct, so a switch-in resets it -- the C never clears
+   * it anywhere else (only the restore path's SetAbilityState(battler, ability, 0)). */
+  mimicryState: { type1: string; type2: string } | null
   /** `u32 abilityState[NUM_INNATE_PER_SPECIES + 1]` -- one per ability slot,
    * same indexing as SimBattleMon.abilities. GetAbilityState's backing store. */
   abilityState: number[]

@@ -61,6 +61,7 @@ export function createVolatileBeganThisTurn(): VolatileBeganThisTurn {
 export function createVolatileState(): VolatileState {
   return {
     transformedMonPersonality: 0,
+    mimicryState: null,
     abilityState: new Array<number>(ABILITY_SLOT_COUNT).fill(0),
     started: createVolatileBeganThisTurn(),
     disabledMove: null,

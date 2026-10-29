@@ -18,6 +18,10 @@ import {
   STATUS1_POISON,
   STATUS2_ENRAGED,
   STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TERRAIN_ANY,
   STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
@@ -164,6 +168,64 @@ export function toxicBoostHandler(
   return false
 }
 
+/** HoldMimicry's terrain -> type map (src/abilities.cc:3381-3398), a straight transcription of
+ * the C's `switch (gFieldStatuses & STATUS_FIELD_TERRAIN_ANY)`. `null` is TYPE_NORMAL (0), the
+ * falsy default for every terrain other than the four below -- including Toxic Terrain and no
+ * terrain at all. Sim type names are bare (no TYPE_ prefix). */
+function mimicryTerrainType(state: BattleState): string | null {
+  switch (state.field.statuses & STATUS_FIELD_TERRAIN_ANY) {
+    case STATUS_FIELD_ELECTRIC_TERRAIN:
+      return 'ELECTRIC'
+    case STATUS_FIELD_MISTY_TERRAIN:
+      return 'FAIRY'
+    case STATUS_FIELD_GRASSY_TERRAIN:
+      return 'GRASS'
+    case STATUS_FIELD_PSYCHIC_TERRAIN:
+      return 'PSYCHIC'
+    default:
+      return null
+  }
+}
+
+/**
+ * HandleMimicry (src/abilities.cc:3378-3440), shared by Impl<ABILITY_MIMICRY>.onEntry
+ * (:3444-3448) and .onTerrain (:3444-3449); both callers add `CHECK(IsBattlerAlive(battler))`
+ * first. The return value is the C's TRUE/FALSE (a message ran / nothing happened).
+ *
+ * - `!moveType` (TYPE_NORMAL, falsy): restore the saved type1/type2 and deactivate the state.
+ *   This is BattleScript_MimicryEnds (data/battle_scripts_1.s:10203-10206), message only.
+ * - truthy `moveType`: if the battler is not already that type, save type1/type2 once (only
+ *   when inactive) and SET_BATTLER_TYPE (include/battle.h:755-760: type1 = type2 = type,
+ *   type3 = TYPE_MYSTERY). Already matching type -> FALSE, saving nothing.
+ */
+export function handleMimicry(state: BattleState, battlerId: number): boolean {
+  const battler = state.battlers[battlerId]
+  if (!battler) return false
+  // :3400 -- gStackBattler1 = battler; the message scripts read it, no state.
+  const moveType = mimicryTerrainType(state)
+
+  if (!moveType) {
+    // :3401-3410 -- the state is `active` in the C; non-null here.
+    const saved = battler.volatiles.mimicryState
+    if (saved) {
+      battler.volatiles.mimicryState = null // SetAbilityState(battler, ability, 0)
+      battler.mon.types = [saved.type1, saved.type2, battler.mon.types[2]]
+      return true // BattleScript_MimicryEnds (:10203-10206)
+    }
+    return false
+  }
+
+  // :3411-3430 -- IS_BATTLER_OF_TYPE checks type1/type2/type3 against every copy.
+  if (!battler.mon.types.includes(moveType)) {
+    if (!battler.volatiles.mimicryState) {
+      battler.volatiles.mimicryState = { type1: battler.mon.types[0], type2: battler.mon.types[1] }
+    }
+    battler.mon.types = [moveType, moveType, 'MYSTERY'] // SET_BATTLER_TYPE
+    return true // BattleScript_MimicryActivates (:10200-10202)
+  }
+  return false
+}
+
 export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps, unmodelled: string[]): void {
   for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
     const battler = state.battlers[battlerId]
@@ -259,6 +321,11 @@ export function dispatchOnTerrainChange(state: BattleState, deps: OnWeatherDeps,
         case 'ABILITY_DRAKELP_HEAD':
           // DrakelpHeadReformHandler with ABILITY_BS_CALL, src/abilities.cc:12044-12053, :12057.
           drakelpHeadReformHandler(state, battlerId, deps, unmodelled)
+          break
+        case 'ABILITY_MIMICRY':
+          // Impl<ABILITY_MIMICRY>.onTerrain (src/abilities.cc:3444-3449): CHECK(IsBattlerAlive)
+          // then HandleMimicry (:3378-3440) with ABILITY_BS_CALL.
+          if (isBattlerAlive(state, battlerId)) handleMimicry(state, battlerId)
           break
       }
     }

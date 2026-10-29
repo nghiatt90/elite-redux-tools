@@ -481,7 +481,8 @@ describe('switch-in ability dispatch and weather setters', () => {
       'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_FOREWARN\'s onEntry hook was not run',
     )
 
-    // Replacement switch-in with unported onEntry ability (Imposter: Transform on entry)
+    // Replacement switch-in with a still-unported onEntry ability (Locust Swarm has an onEntry
+    // hook in abilityHooks.json and no branch in applySwitchInAbilities).
     const stateReplacement = battle(
       [
         { hp: 0, spe: 100 },
@@ -491,7 +492,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     )
     stateReplacement.sides[0].party[1] = {
       ...mon({
-        abilities: { ability: requireAbility('ABILITY_IMPOSTER'), innates: [null, null, null] },
+        abilities: { ability: requireAbility('ABILITY_LOCUST_SWARM'), innates: [null, null, null] },
         hp: 100,
       }),
     }
@@ -499,7 +500,7 @@ describe('switch-in ability dispatch and weather setters', () => {
     switchIn(stateReplacement, 0, 1, makeTestDeps(), unmodelledRepl)
 
     expect(unmodelledRepl).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_IMPOSTER\'s onEntry hook was not run',
+      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_LOCUST_SWARM\'s onEntry hook was not run',
     )
   })
 

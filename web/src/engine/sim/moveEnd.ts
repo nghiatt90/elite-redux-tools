@@ -847,6 +847,7 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_SOUL_LINKER', // Cycle 96 onDefender half (abilities.cc:4273-4285)
   'ABILITY_CHUCKSTER', // Cycle 98b (:10438-10463, schedules the attacker's switch)
   'ABILITY_RESTRAINING_ORDER', // Cycle 98b (:8579-8597, drain sets the state and switches the attacker)
+  'ABILITY_PETAL_SHIELD', // Cycle 108b (:12438-12446, own Defense -1 on every hit that passes the checks)
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -1534,6 +1535,35 @@ function handleDefenderMoveEndAbility(
       }
       if (dropRes.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (targetId & 1) !== (attackerId & 1)) {
         dispatchOnStatLowered(state, attackerId, targetId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled, result.statChanges)
+      }
+    }
+  }
+
+  // 8b. Petal Shield (src/abilities.cc:12438-12446). AbilityStatusEffectSafe(MOVE_EFFECT_DEF_MINUS_1 |
+  // MOVE_EFFECT_AFFECTS_USER, battler, attacker) (data/battle_scripts_1.s:10588-10594) makes the
+  // holder gBattlerAttacker, so SetMoveEffect's stat-drop path (battle_script_commands.c:2765-2776)
+  // lowers the HOLDER's own Defense; ChangeStatBuffsImplicit gets `affectsUser | STAT_BUFF_UPDATE_
+  // MOVE_EFFECT`, i.e. MOVE_EFFECT_AFFECTS_USER here, with a non-null BS pointer. CHECK(ShouldApply
+  // OnHitEffect(battler)) is read as "the move dealt damage and the holder is alive", the same
+  // reading as Weak Armor above; CHECK(CanLowerStat(battler, STAT_DEF)) is the shared helper
+  // (Contrary-aware) so Clear Body/White Smoke reach the stat-drop block below.
+  if (abilityId === 'ABILITY_PETAL_SHIELD') {
+    if (targetDamage > 0 && target.mon.hp > 0 && canLowerStat(state, targetId, STAT_DEF, deps.dataContext)) {
+      target.round.disableEjectPack = true // gRoundStructs[battler].disableEjectPack = TRUE
+      const defRes = changeStatBuffsImplicit(
+        state,
+        targetId,
+        attackerId,
+        -1,
+        STAT_DEF,
+        MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_UPDATE_MOVE_EFFECT,
+        true,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (defRes.delta !== 0) {
+        result.statChanges.push({ battlerId: targetId, stat: STAT_DEF, change: defRes.delta })
       }
     }
   }
