@@ -1379,7 +1379,7 @@ function runEndTurnAbilities(
       }
 
       case 'ABILITY_HOME_RUN': {
-        // src/abilities.cc:11927-11931 (the onAttacker half, :11932-11984, needs CalculateStat for all five stats and is not ported)
+        // src/abilities.cc:11927-11931. The onAttacker half (:11932-11984) is ported in moveEnd.ts (Cycle 106b).
         if (getAbilityStateOf(battler, slotAbility)) setAbilityStateOf(battler, slotAbility, 0)
         break
       }

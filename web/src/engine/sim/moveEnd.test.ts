@@ -953,15 +953,15 @@ describe('Conditional Gaps (Out-of-scope abilities, items, moves)', () => {
     expect(act.unmodelled).toContain('move-end defender ability ABILITY_AFTERMATH is not modelled yet')
   })
 
-  it('conditionally gaps an unported attacker ability (ABILITY_BLOOD_STAIN) on damaging hit', () => {
+  it('conditionally gaps an unported attacker ability (ABILITY_VIRUS) on damaging hit', () => {
     const state = battle(
-      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_BLOOD_STAIN'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
+      [{ hp: 100, maxHp: 100, abilities: { ability: requireAbility('ABILITY_VIRUS'), innates: [null, null, null] } }, { hp: 100, maxHp: 100 }],
       scriptedRng(),
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(30)))
 
     const act = out.actions.find((a) => a.battlerId === 0)!
-    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_BLOOD_STAIN is not modelled yet')
+    expect(act.unmodelled).toContain('move-end attacker ability ABILITY_VIRUS is not modelled yet')
   })
 
   it('conditionally gaps an unported on-faint ability (ABILITY_RAMPAGE, APPLY_ON_ATTACKER) when its holder KOs', () => {
@@ -1152,7 +1152,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
 
-  it('PORTED_ATTACKER_ABILITIES pins all 124 attacker abilities and aliases', () => {
+  it('PORTED_ATTACKER_ABILITIES pins all 136 attacker abilities and aliases', () => {
     expect(Array.from(PORTED_ATTACKER_ABILITIES).sort()).toEqual([
       'ABILITY_ABSORBANT',
       'ABILITY_AFTERMATH',
@@ -1166,6 +1166,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_BEAUTIFUL_MUSIC',
       'ABILITY_BLADE_DANCE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_BLOOD_STAIN',
       'ABILITY_BREAK_IT_DOWN',
       'ABILITY_CHAINSAW',
       'ABILITY_CHUNKY_BASS_LINE',
@@ -1175,8 +1176,10 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
       'ABILITY_DAREDEVIL',
+      'ABILITY_DAYBREAK',
       'ABILITY_DEAD_POWER',
       'ABILITY_DEEP_CUTS',
+      'ABILITY_DEMOLITIONIST',
       'ABILITY_DENTING_BLOWS',
       'ABILITY_DEVIATE',
       'ABILITY_ELEMENTAL_CHARGE',
@@ -1206,9 +1209,12 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_GRASS_FLUTE',
       'ABILITY_GRIP_PINCER',
       'ABILITY_GROWING_TOOTH',
+      'ABILITY_GULP_MISSILE',
       'ABILITY_HARDENED_SHEATH',
       'ABILITY_HAUNTING_FRENZY',
       'ABILITY_HIGH_TIDE',
+      'ABILITY_HOLLOW_ICE_ZONE',
+      'ABILITY_HOME_RUN',
       'ABILITY_HYDRATE',
       'ABILITY_HYDRO_CIRCUIT',
       'ABILITY_HYPNOTIC_TOUCH',
@@ -1218,6 +1224,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_IMMOLATE',
       'ABILITY_IMPALER',
       'ABILITY_INTOXICATE',
+      'ABILITY_KNOW_YOUR_PLACE',
       'ABILITY_KOMODO',
       'ABILITY_LASER_DRILL',
       'ABILITY_LEAD_CLAWS',
@@ -1230,6 +1237,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_MOB_BOSS',
       'ABILITY_MOLTEN_BLADES',
       'ABILITY_MOLTEN_COAT',
+      'ABILITY_PAINT_SHOT',
       'ABILITY_PICKPOCKET',
       'ABILITY_PIERCING_SOLO',
       'ABILITY_PINNACLE_BLADE',
@@ -1247,8 +1255,10 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_RESONANCE',
       'ABILITY_SERPENT_BIND',
       'ABILITY_SHARP_TALONS',
+      'ABILITY_SHIELDS_DOWN',
       'ABILITY_SHOCKING_JAWS',
       'ABILITY_SHOCKING_MAW',
+      'ABILITY_SINISTER_CLAWS',
       'ABILITY_SLUDGE_SPIT',
       'ABILITY_SLUDGY_MIX',
       'ABILITY_SMOLDERING_WOOD',
@@ -1256,7 +1266,9 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_SOLENOGLYPHS',
       'ABILITY_SOUL_LINKER',
       'ABILITY_SPECTRALIZE',
+      'ABILITY_SPECTRAL_SHROUD',
       'ABILITY_SPIKE_ARMOR',
+      'ABILITY_SPINNING_TOP',
       'ABILITY_STATIC',
       'ABILITY_STENCH',
       'ABILITY_STRIKER_PIXILATE',

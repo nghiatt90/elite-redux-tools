@@ -314,7 +314,7 @@ function getAbilityStateOf(battler: BattlerState, abilityId: string): number {
 /** `const HpTransformation gHpTransformations[]`, src/battle_util.c:3791-3805 (struct at include/battle_util.h:160-165).
  * `lowHpSpecies` is the form the mon takes while its HP is at or below `maxHP / hpFraction`;
  * `highHpSpecies` the form above it. */
-const HP_TRANSFORMATIONS: readonly {
+export const HP_TRANSFORMATIONS: readonly {
   ability: string
   lowHpSpecies: string
   highHpSpecies: string

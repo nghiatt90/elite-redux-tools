@@ -55,10 +55,12 @@ import {
   MOVE_UNSET,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_MAT_BLOCK,
+  SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_SCREEN_ANY,
   SIDE_STATUS_SMOKESCREEN,
   SIDE_STATUS_SPIKES,
   SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
   SIDE_STATUS_TOXIC_SPIKES,
   SIDE_STATUS_WIDE_GUARD,
   STATUS1_BLEED,
@@ -90,6 +92,7 @@ import {
   STATUS3_PERISH_SONG,
   STATUS3_SMACKED_DOWN,
   STATUS3_TELEKINESIS,
+  STATUS3_UNDERWATER,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
@@ -193,12 +196,14 @@ import {
   isUnnerveAbilityOnOpposingSide,
   runReactiveAbilityEffects,
 } from './statBuffs'
+import { benefitsFromStatBuffs, isBattlerWeatherAffected } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { ProtectType, applyDamage, getMoveTarget, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive, isBattlerProtected } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import {
   applySwitchInAbilities,
   checkAndSetOncePerTurnAbility,
+  disableSwitchInAbility,
   getOncePerTurnAbilityCounter,
   getSingleUseAbilityCounter,
   setOncePerTurnAbilityCounter,
@@ -207,7 +212,9 @@ import {
   tryChangeBattleWeather,
 } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
-import { changeBattlerForm } from './formChange'
+import { HP_TRANSFORMATIONS, changeBattlerForm } from './formChange'
+import { TOTAL_SPEED_PRIMARY, getBattlerTotalSpeedStat } from './turnOrder'
+import { attackPreModify, calculateBattleStat, defensePreModify, spAttackPreModify, spDefensePreModify } from '../battleStat'
 import { TYPE_NAME_BY_ID } from './hazards'
 import {
   canBattlerSwitch,
@@ -997,6 +1004,23 @@ export const PORTED_ATTACKER_ABILITIES = new Set([
   'ABILITY_STUN_SHOCK',
   'ABILITY_LIGHT_SABER',
   'ABILITY_HYDRO_CIRCUIT',
+  // Cycle 106b: second on-hit attacker batch -- Blood Stain (:8372-8386), Daybreak (:9193-9205),
+  // Demolitionist (:7771-7785), Gulp Missile, onAttacker half (:3262-3288), Hollow Ice Zone (:12178-12198),
+  // Home Run, onAttacker half (:11926-11985), Know Your Place (:9074-9085), Paint Shot (:10711-10725),
+  // Shields Down, onAttacker half (:2680-2720), Sinister Claws (:12415-12429),
+  // Spectral Shroud (:4883-4901, Spectralize's own onAttacker at :4866-4879), Spinning Top (:5116-5142).
+  'ABILITY_BLOOD_STAIN',
+  'ABILITY_DAYBREAK',
+  'ABILITY_DEMOLITIONIST',
+  'ABILITY_GULP_MISSILE',
+  'ABILITY_HOLLOW_ICE_ZONE',
+  'ABILITY_HOME_RUN',
+  'ABILITY_KNOW_YOUR_PLACE',
+  'ABILITY_PAINT_SHOT',
+  'ABILITY_SHIELDS_DOWN',
+  'ABILITY_SINISTER_CLAWS',
+  'ABILITY_SPECTRAL_SHROUD',
+  'ABILITY_SPINNING_TOP',
 ])
 
 /** Cycle 92 attacker abilities whose onAttacker is AdjustFollowupMoveTarget + UseAttackerFollowUpMove. */
@@ -2967,7 +2991,11 @@ function handleAttackerMoveEndAbility(
 
   // "-ate" abilities' 10% on-hit status (src/abilities.cc: Hydrate :4122, Pixilate :2468, Mineralize :5090, Galvanize :2811,
   // Refrigerate :2372, Intoxicate :4201, Emanate :6015, Immolate / Solar Flare :3742, :4638, Spectralize :4870, Deviate / Mob Boss :9760, :12453)
-  const ateStatus = ATE_ON_HIT_STATUS[abilityId]
+  // Spectral Shroud's onAttacker is `Impl<ABILITY_SPECTRALIZE>.onAttacker(...) | SpectralShroud(...)`, so it runs
+  // Spectralize's own 10% Fear check too -- same table row, only the ability key differs.
+  const ateStatus =
+    ATE_ON_HIT_STATUS[abilityId] ??
+    (abilityId === 'ABILITY_SPECTRAL_SHROUD' ? ATE_ON_HIT_STATUS.ABILITY_SPECTRALIZE : undefined)
   if (ateStatus) {
     const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
     const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
@@ -4259,6 +4287,429 @@ function handleAttackerMoveEndAbility(
           target.round.protectMove = null
           targetSide.statuses = clearFlag(targetSide.statuses, SIDE_STATUS_WIDE_GUARD | SIDE_STATUS_CRAFTY_SHIELD | SIDE_STATUS_MAT_BLOCK)
         }
+      }
+    }
+  }
+
+  // ---- Cycle 106b: second batch of on-hit attacker abilities. Same ShouldApplyOnHitEffect(x) approximation as the
+  // Cycle 106 block above (target alive, hpDealt > 0, attacker != target); `moveType` is the effective (ate-adjusted)
+  // move type, via the `moveTypeName()` closure defined in Cycle 91b.
+
+  // Blood Stain (src/abilities.cc:8372-8386; ON_EITHER(BloodStain), assigned to BOTH hooks by ON_EITHER_ABILITY
+  // (:54) -- on the onAttacker path `battler` is the holder (the attacker) and `opponent` is gBattlerTarget, the mon
+  // whose ability is replaced). ReplaceAbility (battle_util.c:9325) writes abilities[0]; the same writes Mummy's port
+  // above makes, plus DisableSwitchInAbility (:3922-3927).
+  if (abilityId === 'ABILITY_BLOOD_STAIN') {
+    const targetPrimary = target.mon.abilities.ability ?? 'ABILITY_NONE'
+    if (
+      target.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(targetPrimary) &&
+      !hasAbilityIgnoringSuppression(target, abilityId) &&
+      !doesBattlerHaveAbilityShield(target, deps)
+    ) {
+      updateAbilityStateForNewAbility(target, abilityId)
+      target.mon.abilities.ability = abilityId
+      disableSwitchInAbility(state, targetId, abilityId, deps.dataContext)
+    }
+  }
+
+  // Daybreak (src/abilities.cc:9193-9205; ON_EITHER(Daybreak), :9206-9208): ShouldApplyOnHitEffect(opponent),
+  // CanBeBurned(opponent), IsMoveMakingContact, then AbilityStatusEffectSafe(MOVE_EFFECT_BURN, battler, opponent) --
+  // no roll. AbilityStatusEffectSafe (:277-283) only re-points gBattlerAttacker/gBattlerTarget at (attacker, target)
+  // around the same seteffectsecondary script, and on the onAttacker path those already ARE the holder and the hit
+  // target, so applyAbilityOnHitStatus is the same call here.
+  if (abilityId === 'ABILITY_DAYBREAK') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      canBeBurned(state, targetId, attackerId, statusDeps) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Demolitionist (src/abilities.cc:7771-7785): DidMoveHit() -- which does NOT require the target alive, so a
+  // lethal hit still shatters the screens -- then the holder's own readiedAction volatile, then the TARGET side's
+  // reflect / light screen / aurora veil timers (GetBattlerSide(target)). BattleScript_AttackerShattersScreens
+  // (data/battle_scripts_1.s:6374-6378) is `removelightscreenreflect`; the writes are the ones Pinnacle Blade
+  // already carries (battle_script_commands.c:12384-12416).
+  if (abilityId === 'ABILITY_DEMOLITIONIST') {
+    const targetSide = state.sides[targetId & 1]
+    if (
+      hpDealt > 0 && // DidMoveHit()
+      attackerId !== targetId &&
+      attacker.volatiles.readiedAction &&
+      targetSide &&
+      (targetSide.timers.reflectTimer || targetSide.timers.lightscreenTimer || targetSide.timers.auroraVeilTimer)
+    ) {
+      if (hasFlag(targetSide.statuses, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SMOKESCREEN)) {
+        targetSide.statuses = clearFlag(targetSide.statuses, SIDE_STATUS_SCREEN_ANY | SIDE_STATUS_SMOKESCREEN)
+        targetSide.timers.reflectTimer = 0
+        targetSide.timers.lightscreenTimer = 0
+        targetSide.timers.auroraVeilTimer = 0
+        targetSide.timers.smokescreenTimer = 0
+      }
+    }
+  }
+
+  // Gulp Missile, onAttacker (src/abilities.cc:3262-3288): not transformed, the holder IS SPECIES_CRAMORANT, then
+  // `(Surf / Triple Dive && TARGET_TURN_DAMAGED) || holder is STATUS3_UNDERWATER || (Dive && acceleratedTwoTurn)`.
+  // The third branch is dead code at this SHA: nothing anywhere in the tree ever writes
+  // gBattleScripting.acceleratedTwoTurn = TRUE (battle_util.c:745 and battle_main.c:2738 only clear it), and the sim
+  // has no such field, so it is modelled as always-false -- which is what the C does at runtime.
+  // `hp <= maxHP / 2` picks GORGING else GULPING; UpdateAbilityStateIndicesForNewSpecies + the species write +
+  // BattleScript_AttackerFormChange are changeBattlerForm + applySwitchInAbilities, exactly as in Shields Down below.
+  // (This ability's onDefender half is a separate hook and is not touched here.)
+  if (abilityId === 'ABILITY_GULP_MISSILE') {
+    if (
+      !hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED) &&
+      attacker.mon.speciesId === 'SPECIES_CRAMORANT' &&
+      (((moveId === 'MOVE_SURF' || moveId === 'MOVE_TRIPLE_DIVE') && hpDealt > 0) ||
+        hasFlag(attacker.statuses3, STATUS3_UNDERWATER))
+    ) {
+      const newSpecies =
+        attacker.mon.hp <= Math.trunc(attacker.mon.maxHp / 2) ? 'SPECIES_CRAMORANT_GORGING' : 'SPECIES_CRAMORANT_GULPING'
+      changeBattlerForm(state, attackerId, newSpecies, deps.dataContext)
+      applySwitchInAbilities(state, attackerId, deps, unmodelled)
+    }
+  }
+
+  // Hollow Ice Zone (src/abilities.cc:12178-12198): an Ice move, ShouldApplyOnHitEffect(target), the target is not
+  // already an ice statue, and the target does not itself have the ability (BattlerHasAbility(..., FALSE): no Mold
+  // Breaker, but Neutralizing Gas / Gastro Acid still suppress). BattleScript_IceStatue (data/battle_scripts_1.s:
+  // 12597-12600) is the message alone. SET_BATTLER_TYPE (include/battle.h:755-760) writes all three type slots.
+  // The scheduled entry is copied verbatim from the C's ExtraSwitchActionStruct: switchingBattler is `battler`, the
+  // HOLDER (so Hollow Ice Zone switches the attacker out, not the frozen target), and sourceBattler is the holder.
+  if (abilityId === 'ABILITY_HOLLOW_ICE_ZONE') {
+    if (
+      moveTypeName() === 'ICE' &&
+      target.mon.hp > 0 && // ShouldApplyOnHitEffect(target)
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !target.volatiles.iceStatue &&
+      !battlerHasSimAbility(state, target, abilityId, false, attackerId, false, deps.dataContext)
+    ) {
+      target.volatiles.iceStatue = true
+      target.mon.types = ['ICE', 'ICE', 'MYSTERY']
+      tryScheduleSwitch(state, {
+        ability: abilityId,
+        setAbilityState: false,
+        switchingBattler: attackerId,
+        sourceBattler: attackerId,
+      })
+    }
+  }
+
+  // Home Run (src/abilities.cc:11926-11985). gIsCriticalHit, ShouldApplyOnHitEffect(battler) -- the ATTACKER -- and the
+  // ability state still clear. The five CalculateStat(..., FALSE x4) calls are battle_util.c:7105-7217 with
+  // isAttack / isCrit / isUnaware all FALSE and a zeroed secondaryStat: the stat stage is left as it is (only
+  // BenefitsFromStatBuffs can clamp it) and the tail is the stage ratio then extraStatLevel. STAT_SPEED delegates to
+  // GetBattlerTotalSpeedStat(battler, TOTAL_SPEED_PRIMARY, move) (battle_main.c:4195-4210), i.e. the ability-adjusted
+  // raw stat before stages.
+  if (abilityId === 'ABILITY_HOME_RUN') {
+    const slot = findAbilitySlot(attacker.mon.abilities, abilityId)
+    if (
+      isCriticalHit === true &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(battler)
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      slot !== -1 &&
+      !attacker.volatiles.abilityState[slot] // CHECK_NOT(GetAbilityState(battler, ability))
+    ) {
+      // The same gaps Strength Sap's CalculateStat port carries (moveEffects.ts): no onStat ability hooks and no
+      // Wonder Room swap, plus the burn / frostbite halving's IgnoresBurnAtkDrop / IgnoresFrostbiteSpatkDrop checks
+      // (:7095-7103) when a relevant status is actually up.
+      unmodelled.push("Home Run's CalculateStat (battle_util.c:7105-7217) applies no onStat ability hooks and ignores Wonder Room")
+
+      const common = {
+        isUnaware: false,
+        isWonderRoomActive: false,
+        isOffensiveStatForWonderRoom: false,
+        isCrit: false,
+        isAttackRole: false,
+        benefitsFromStatBuffs: benefitsFromStatBuffs(state, attackerId),
+        applyOnStatHooks: (s: number) => s, // no onStat registry in the sim
+        secondaryStatPercent: 0,
+        statStageRatios: deps.statStageRatios,
+      }
+      const isFacade = moveData?.effect === 'EFFECT_FACADE'
+      const isBurned = hasFlag(attacker.mon.status1, STATUS1_BURN) && !isFacade
+      const isFrostbitten = hasFlag(attacker.mon.status1, STATUS1_FROSTBITE) && !isFacade
+      if (isBurned || isFrostbitten) {
+        unmodelled.push(
+          "Home Run's CalculateStat burn / frostbite halving does not check IgnoresBurnAtkDrop / IgnoresFrostbiteSpatkDrop (battle_util.c:7095-7103)",
+        )
+      }
+      const isIceInHail =
+        attacker.mon.types.includes('ICE') && isBattlerWeatherAffected(state, attackerId, WEATHER_HAIL_ANY, statusDeps)
+      const isRockInSandstorm =
+        attacker.mon.types.includes('ROCK') && isBattlerWeatherAffected(state, attackerId, WEATHER_SANDSTORM_ANY, statusDeps)
+      // CalculateStat's STAT_SPEED case (:7179) is GetBattlerTotalSpeedStat(battler, TOTAL_SPEED_PRIMARY, move); the
+      // stage and extra level are then applied by CalculateStat's own tail, which calculateBattleStat does below.
+      const speedPrimary = getBattlerTotalSpeedStat(
+        state,
+        attackerId,
+        TOTAL_SPEED_PRIMARY,
+        moveId,
+        { ...deps.turnOrder, isBattlerGrounded: (id: number) => isBattlerGrounded(state, id, deps.grounding) },
+        deps.statStageRatios,
+      )
+
+      const stats: [number, number][] = [
+        [
+          STAT_ATK,
+          calculateBattleStat({
+            ...common,
+            rawStat: attacker.mon.rawStats.atk,
+            extraStatLevel: attacker.volatiles.extraAttackLevel ?? 0,
+            statStage: attacker.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE,
+            preModify: attackPreModify({
+              violentRush: !!attacker.volatiles.violentRush,
+              showdownMode: !!attacker.volatiles.showdownMode,
+              readiedAction: !!attacker.volatiles.readiedAction,
+              isBurned,
+            }),
+          }),
+        ],
+        [
+          STAT_DEF,
+          calculateBattleStat({
+            ...common,
+            rawStat: attacker.mon.rawStats.def,
+            extraStatLevel: attacker.volatiles.extraDefenseLevel ?? 0,
+            statStage: attacker.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE,
+            preModify: defensePreModify({ isIceTypeInHail: isIceInHail }),
+          }),
+        ],
+        [
+          STAT_SPATK,
+          calculateBattleStat({
+            ...common,
+            rawStat: attacker.mon.rawStats.spatk,
+            extraStatLevel: attacker.volatiles.extraSpAttackLevel ?? 0,
+            statStage: attacker.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE,
+            preModify: spAttackPreModify({ rapidResponse: !!attacker.volatiles.rapidResponse, isFrostbitten }),
+          }),
+        ],
+        [
+          STAT_SPDEF,
+          calculateBattleStat({
+            ...common,
+            rawStat: attacker.mon.rawStats.spdef,
+            extraStatLevel: attacker.volatiles.extraSpDefenseLevel ?? 0,
+            statStage: attacker.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE,
+            preModify: spDefensePreModify({ isRockTypeInSandstorm: isRockInSandstorm }),
+          }),
+        ],
+        [
+          STAT_SPEED,
+          calculateBattleStat({
+            ...common,
+            rawStat: speedPrimary,
+            extraStatLevel: attacker.volatiles.extraSpeedLevel ?? 0,
+            statStage: attacker.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE,
+            preModify: (s: number) => s,
+          }),
+        ],
+      ]
+
+      // "This is just a partial bubble sort" (:11952-11960): the tie-break `Random() % 2` is drawn only on equal
+      // values, in loop order, and a nonzero result skips the swap.
+      for (const maxValueIndex of [4, 3]) {
+        for (let i = 0; i < maxValueIndex; i++) {
+          if (stats[i][1] < stats[maxValueIndex][1]) continue
+          if (stats[i][1] === stats[maxValueIndex][1] && state.rng.random16() % 2 !== 0) continue
+          const tmp = stats[i]
+          stats[i] = stats[maxValueIndex]
+          stats[maxValueIndex] = tmp
+        }
+      }
+
+      // "Sort stats by boost order. Read LIFO so in reverse order." (:11964-11974).
+      const statsToBoost: number[] = []
+      for (const statId of [STAT_SPEED, STAT_SPDEF, STAT_DEF, STAT_SPATK, STAT_ATK]) {
+        for (let i = 0; i < 3; i++) {
+          if (stats[i][0] === statId) {
+            statsToBoost.push(statId)
+            break
+          }
+        }
+        if (statsToBoost.length >= 3) break
+      }
+
+      for (const stat of statsToBoost) {
+        if (!canRaiseStat(state, attackerId, stat, deps.dataContext)) continue // FILTER(CanRaiseStat(battler, stat))
+        attacker.volatiles.abilityState[slot] = 1 // SetAbilityState(battler, ability, 1)
+        // SetStatChanger(stat, 1) + BattleScript_StackBattlerStatUp (data/battle_scripts_1.s:9028-9037), i.e.
+        // `statbuffchange MOVE_EFFECT_AFFECTS_USER` with gBattlerAttacker = the holder.
+        const res = changeStatBuffs(
+          state,
+          attackerId,
+          attackerId,
+          targetId,
+          1,
+          stat,
+          MOVE_EFFECT_AFFECTS_USER,
+          true,
+          { dataContext: deps.dataContext, grounding: deps.grounding },
+          unmodelled,
+          moveId,
+        )
+        if (res.delta !== 0) {
+          result.statChanges.push({ battlerId: attackerId, stat, change: res.delta })
+        }
+      }
+    }
+  }
+
+  // Know Your Place (src/abilities.cc:9074-9085): ShouldApplyOnHitEffect(target), the target is not already dazed,
+  // contact. Then `gVolatileStructs[target].dazed = 5` (a 3-bit field, `5` fits) and `started.dazed = TRUE`; the
+  // timer itself is decremented by ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979, SUBTRACT_VOLATILE_TIMER),
+  // which endTurn.ts still notes as unapplied. BattleScript_TargetDazed (data/battle_scripts_1.s:12469-12472) is the
+  // message alone. No roll.
+  if (abilityId === 'ABILITY_KNOW_YOUR_PLACE') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      !target.volatiles.dazed &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      target.volatiles.dazed = 5
+      target.volatiles.started.dazed = true
+    }
+  }
+
+  // Paint Shot (src/abilities.cc:10711-10725): ShouldApplyOnHitEffect(target), the target is not already of the
+  // move's type, IsMegaLauncherBoosted(battler, move) (battle_util.c:9373 -> DoesMoveMatchFlag(... MOVE_FLAG_MEGA_LAUNCHER),
+  // i.e. the bulletBased flag or Gunman). Then type1 = type2 = moveType and type3 = TYPE_MYSTERY (:10720-10722).
+  if (abilityId === 'ABILITY_PAINT_SHOT') {
+    const moveType = moveTypeName()
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveType !== null &&
+      !target.mon.types.includes(moveType) &&
+      isMegaLauncherBoostedMove(state, attackerId, moveData, deps)
+    ) {
+      target.mon.types = [moveType, moveType, 'MYSTERY']
+    }
+  }
+
+  // Shields Down, onAttacker (src/abilities.cc:2680-2720): alive, not MOVE_RESULT_NO_EFFECT, the move's effect is
+  // EFFECT_SHELL_SMASH, not transformed; then the gHpTransformations row (battle_util.c:3798-3810) whose ability is
+  // this one and whose highHpSpecies is the battler's species. The C then runs UpdateAbilityStateIndicesForNewSpecies,
+  // SetAbilityState(TRUE) and the species write before BattleScript_AttackerFormChange (data/battle_scripts_1.s:
+  // 8454-8462), whose handleformchange cases 0-2 are changeBattlerForm (species + ability-slot remap + RecalcBattlerStats).
+  if (abilityId === 'ABILITY_SHIELDS_DOWN') {
+    if (
+      attacker.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
+      !noEffect && // CHECK_NOT(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)
+      moveData?.effect === 'EFFECT_SHELL_SMASH' && // CHECK(gBattleMoves[move].effect == EFFECT_SHELL_SMASH)
+      !hasFlag(attacker.mon.status2, STATUS2_TRANSFORMED)
+    ) {
+      const row = HP_TRANSFORMATIONS.find((t) => t.ability === abilityId && t.highHpSpecies === attacker.mon.speciesId)
+      if (row) {
+        // UpdateAbilityStateIndicesForNewSpecies + the species write; BattleScript_AttackerFormChange's
+        // handleformchange cases 0-2 are changeBattlerForm and its tail `switchinabilities BS_ATTACKER` is
+        // applySwitchInAbilities (formChange.ts's tryTransformAttacker, same script).
+        changeBattlerForm(state, attackerId, row.lowHpSpecies, deps.dataContext)
+        // SetAbilityState(battler, ability, TRUE) after the remap, so the flag lands in the NEW slot for the ability.
+        const slot = findAbilitySlot(attacker.mon.abilities, abilityId)
+        if (slot !== -1) attacker.volatiles.abilityState[slot] = 1
+        applySwitchInAbilities(state, attackerId, deps, unmodelled)
+      }
+    }
+  }
+
+  // Sinister Claws (src/abilities.cc:12415-12429): ShouldApplyOnHitEffect(target), a Keen Edge move,
+  // StatLowerableOrMirrorArmor(target, STAT_SPDEF), then the once-per-turn-per-target counter (Get/Set once-per-turn
+  // ability counter, battle_util.c -- the same pattern Whiplash and Chainsaw use), then
+  // AbilityStatusEffect(MOVE_EFFECT_SP_DEF_MINUS_1).
+  if (abilityId === 'ABILITY_SINISTER_CLAWS') {
+    if (
+      target.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      canLowerStatOrMirrorArmor(state, targetId, STAT_SPDEF, deps.dataContext)
+    ) {
+      const affected = getOncePerTurnAbilityCounter(state, attackerId, abilityId, deps.dataContext)
+      if ((affected & (1 << targetId)) === 0) {
+        setOncePerTurnAbilityCounter(state, attackerId, abilityId, affected | (1 << targetId), deps.dataContext)
+        applyAbilityStatDrop(state, attackerId, targetId, STAT_SPDEF, moveId, deps, statusDeps, unmodelled, result)
+      }
+    }
+  }
+
+  // Spectral Shroud (src/abilities.cc:4883-4901). Its onAttacker is `Impl<ABILITY_SPECTRALIZE>.onAttacker(...) |
+  // SpectralShroud(...)` -- a bitwise OR, so BOTH halves run: the ATE half is handled by the ATE_ON_HIT_STATUS block
+  // above (SPECTRALIZE's entry, reached for this ability too), and this half is SpectralShroud (:4883-4894). Its
+  // onMoveType / onStab are SPECTRALIZE's (10-aliases.ts), already the damage side. Draw order: the ATE block's
+  // `Random() % 10` (only when its own CHECKs pass) precedes this half's `Random() % 100`.
+  // The status-move branch uses WasMoveSuccessful() + IsBattlerAlive(target) instead of ShouldApplyOnHitEffect; the
+  // dispatcher carries the MOVE_RESULT_NO_EFFECT bit as `noEffect`. It has NO attacker != target guard, which the
+  // C makes visible on a self-targeted status move (CanBePoisoned(battler, battler) then poisons the user) -- kept
+  // as written rather than quietly tightened.
+  if (abilityId === 'ABILITY_SPECTRAL_SHROUD') {
+    const applies =
+      moveData?.split === 'STATUS'
+        ? !noEffect && target.mon.hp > 0
+        : target.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId
+    if (
+      applies &&
+      canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, MOVE_EFFECT_TOXIC, attackerId, targetId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Spinning Top (src/abilities.cc:5116-5142): ShouldApplyOnHitEffect(battler) -- the ATTACKER -- then a Fighting
+  // move, then CheckAndSetOncePerTurnAbility (consumed even when neither part below happens). GetClearableHazardFlags
+  // (:424-428) is SIDE_STATUS_HAZARDS_ANY minus Sticky Web while the side's Foamy Web is up; the C clears only the
+  // flag bits and the two side timers (no spikesAmount / toxicSpikesAmount reset, unlike Pickup), which is why the
+  // sim's Pickup block's extra two writes are NOT copied here. Then ChangeStatBuffs(battler, +1, STAT_SPEED,
+  // MOVE_EFFECT_AFFECTS_USER, NULL) -- a direct call, not SetMoveEffect, so no Sheer Force / Substitute gate.
+  if (abilityId === 'ABILITY_SPINNING_TOP') {
+    if (
+      attacker.mon.hp > 0 &&
+      hpDealt > 0 &&
+      attackerId !== targetId &&
+      moveTypeName() === 'FIGHTING' &&
+      checkAndSetOncePerTurnAbility(state, attackerId, abilityId, deps.dataContext)
+    ) {
+      const holderSide = state.sides[attackerId & 1]
+      if (holderSide) {
+        let hazardBits = SIDE_STATUS_HAZARDS_ANY
+        if (holderSide.timers.foamyWeb) hazardBits &= ~SIDE_STATUS_STICKY_WEB
+        if (hasFlag(holderSide.statuses, hazardBits) || holderSide.timers.hotCoals || holderSide.timers.caltrops) {
+          holderSide.statuses = clearFlag(holderSide.statuses, hazardBits)
+          holderSide.timers.hotCoals = false
+          holderSide.timers.caltrops = false
+        }
+      }
+      const res = changeStatBuffs(
+        state,
+        attackerId,
+        attackerId,
+        targetId,
+        1,
+        STAT_SPEED,
+        MOVE_EFFECT_AFFECTS_USER,
+        false,
+        { dataContext: deps.dataContext, grounding: deps.grounding },
+        unmodelled,
+        moveId,
+      )
+      if (res.delta !== 0) {
+        result.statChanges.push({ battlerId: attackerId, stat: STAT_SPEED, change: res.delta })
       }
     }
   }
