@@ -3138,7 +3138,13 @@ export { WEATHER_DURATION, WEATHER_DURATION_EXTENDED } from './constants'
 
 /**
  * Common implementation for weather moves:
- * - Macro checkprimalweather (battle_script.inc:2511-2526): fails if gBattleWeather has WEATHER_PRIMAL_ANY.
+ * - Macro checkprimalweather (asm/macros/battle_script.inc:2511-2526): any primal weather
+ *   (WEATHER_SUN_PRIMAL / WEATHER_RAIN_PRIMAL / WEATHER_STRONG_WINDS) jumps straight to onFail.
+ *   The weather scripts pass BattleScript_MoveEnd, so the move ends without a change and without
+ *   failing -- PP is already spent by ppreduce. This is unconditional: the macro never inspects
+ *   the attacker's ability, so even a Desolate Land / Primordial Sea / Delta Stream user cannot
+ *   override primal weather with a weather move (the ability exception in TryChangeBattleWeather
+ *   only matters for ability-set weather, which never runs checkprimalweather).
  * - Cmd_various VARIOUS_SET_WEATHER (src/battle_script_commands.c:8634-8644).
  * - TryChangeBattleWeather (src/battle_util.c:3721-3743) via tryChangeBattleWeather.
  * - VARIOUS_ON_WEATHER_CHANGE (src/battle_script_commands.c:8183-8190) / BattleScript_OnWeatherChange
@@ -3152,6 +3158,12 @@ function applyWeatherMove(
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // checkprimalweather (asm/macros/battle_script.inc:2511-2526): unconditional, before
+  // setbattleweather. Ends the script at BattleScript_MoveEnd with no weather change.
+  if (hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)) {
+    return outcome(ctx, {})
+  }
 
   const changed = tryChangeBattleWeather(state, battlerId, weatherEnum, false, deps)
   if (changed) {
