@@ -6,6 +6,7 @@ const CYCLE117 = 'web/src/engine/sim/cycle117FieldEffects.test.ts'
 const CYCLE119 = 'web/src/engine/sim/cycle119StatusEffects.test.ts'
 const CYCLE120 = 'web/src/engine/sim/cycle120StatusEffects.test.ts'
 const CYCLE121 = 'web/src/engine/sim/cycle121StatusEffects.test.ts'
+const CYCLE122 = 'web/src/engine/sim/cycle122StatEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -126,6 +127,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_EMBARGO',
         'EFFECT_ROLE_PLAY',
       ].map((effect): [string, string] => [effect, CYCLE121]),
+    )
+    .concat(
+      [
+        'EFFECT_ATTACK_DOWN_2',
+        'EFFECT_ATTACK_SPATK_UP',
+        'EFFECT_ATTACK_DOWN',
+        'EFFECT_HAZE',
+        'EFFECT_SPECIAL_DEFENSE_DOWN_2',
+        'EFFECT_DEFENSE_UP',
+        'EFFECT_DEFENSE_CURL',
+        'EFFECT_DEFENSE_DOWN',
+        'EFFECT_SPECIAL_ATTACK_DOWN',
+        'EFFECT_GROWTH',
+        'EFFECT_ATTACK_ACCURACY_UP',
+        'EFFECT_SPEED_DOWN_2',
+      ].map((effect): [string, string] => [effect, CYCLE122]),
     ),
 )
 

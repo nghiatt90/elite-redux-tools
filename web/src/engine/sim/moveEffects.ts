@@ -992,11 +992,14 @@ function handleAttackAccuracyUp(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
   const statChanges: StatChangeOutcome[] = []
 
-  const battler = state.battlers[battlerId]!
-  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
-  const accStage = battler.mon.statStages[STAT_ACC] ?? DEFAULT_STAT_STAGE
-
-  if (atkStage < MAX_STAT_STAGE || accStage < MAX_STAT_STAGE) {
+  // `jumpifstat ... CMP_LESS_THAN, MAX_STAT_STAGE` (:2171) then `CMP_EQUAL, MAX_STAT_STAGE` (:2172)
+  // go through CompareStat (battle_util.c:8545-8561), which flips CMP_LESS_THAN/MAX to
+  // CMP_GREATER_THAN/MIN under Contrary -- exactly canRaiseStat. A raw `stage < MAX` test
+  // would refuse to lower a Contrary user's already-maxed stats.
+  if (
+    canRaiseStat(state, battlerId, STAT_ATK, deps.dataContext) ||
+    canRaiseStat(state, battlerId, STAT_ACC, deps.dataContext)
+  ) {
     const r1 = changeStatBuffsImplicit(
       state,
       battlerId,
@@ -1038,11 +1041,14 @@ function handleAttackSpAtkUp(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, action.chosenMove!.id, action.chosenMove!.effect, unmodelled)
   const statChanges: StatChangeOutcome[] = []
 
-  const battler = state.battlers[battlerId]!
-  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
-  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
-
-  if (atkStage < MAX_STAT_STAGE || spAtkStage < MAX_STAT_STAGE) {
+  // `jumpifstat ... CMP_LESS_THAN, MAX_STAT_STAGE` (:2146) then `CMP_EQUAL, MAX_STAT_STAGE` (:2147)
+  // go through CompareStat (battle_util.c:8545-8561), which flips both the comparison and the
+  // MAX bound under Contrary -- exactly canRaiseStat. A raw `stage < MAX` test would refuse to
+  // lower a Contrary user's already-maxed stats.
+  if (
+    canRaiseStat(state, battlerId, STAT_ATK, deps.dataContext) ||
+    canRaiseStat(state, battlerId, STAT_SPATK, deps.dataContext)
+  ) {
     const r1 = changeStatBuffsImplicit(
       state,
       battlerId,
@@ -1350,10 +1356,13 @@ function handleGrowth(ctx: MoveEffectContext): ActionOutcome {
   const statChanges: StatChangeOutcome[] = []
 
   const battler = state.battlers[battlerId]!
-  const atkStage = battler.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
-  const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
-
-  if (atkStage < MAX_STAT_STAGE || spAtkStage < MAX_STAT_STAGE) {
+  // `jumpifstat ... CMP_LESS_THAN, MAX_STAT_STAGE` (:1916) then `CMP_EQUAL, MAX_STAT_STAGE` (:1917)
+  // go through CompareStat (battle_util.c:8545-8561), which flips both the comparison and the
+  // MAX bound under Contrary -- exactly canRaiseStat.
+  if (
+    canRaiseStat(state, battlerId, STAT_ATK, deps.dataContext) ||
+    canRaiseStat(state, battlerId, STAT_SPATK, deps.dataContext)
+  ) {
     // Both checks run twice, once per stat, keeping that order (Finding 3):
     // 1. isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, deps)
     // 2. hasChloroplast (jumpifabilityflag BS_ATTACKER, ABILITY_CHLOROPLAST)
