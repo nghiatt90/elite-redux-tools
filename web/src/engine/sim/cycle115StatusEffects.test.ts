@@ -164,7 +164,7 @@ const effectOf = (moveId: string) => DATA_CONTEXT.move(moveId)?.effect
 
 /** The user (battler 0, Mudkip) knows only `moveId` with 10 PP. */
 const user = (moveId: string, overrides: Partial<SimBattleMon> = {}) =>
-  monFor('SPECIES_MUDKIP', { moves: [moveId, null, null, null], pp: [10, 0, 0, 0], ...overrides })
+  monFor('SPECIES_MUDKIP', { rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 150 }, moves: [moveId, null, null, null], pp: [10, 0, 0, 0], ...overrides })
 const foe = (overrides: Partial<SimBattleMon> = {}) => monFor('SPECIES_MUDKIP', overrides)
 
 /** One turn: the user (battler 0) uses `moveId` on battler 1, the foe does nothing. */
@@ -287,13 +287,13 @@ describe('cycle 115 - Will-O-Wisp', () => {
     expect(ppOf(state)).toBe(9)
   })
 
-  it("Safeguard on the target side blocks AFTER the accuracy roll (jumpifsafeguard :6097 after :6096): one draw consumed, status 0", () => {
+  it("Safeguard on the target side fails in requirecandoeffect (:6095, CanBeBurned -> IsStatusImmune battle_util.c:5028) BEFORE the accuracy roll: no draw, status 0", () => {
     const rng = countRng()
     const state = battle(user('MOVE_WILL_O_WISP'), foe(), rng)
     state.sides[1].statuses |= SIDE_STATUS_SAFEGUARD
     runVs(state, 'MOVE_WILL_O_WISP')
     expect(foeOf(state).mon.status1).toBe(0)
-    expect(rng.calls).toBe(1)
+    expect(rng.calls).toBe(0)
   })
 
   it('a miss (draw 99 >= 90) leaves status 0', () => {
