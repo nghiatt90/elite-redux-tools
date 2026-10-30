@@ -11,6 +11,7 @@ import type { StatKey } from '../../types'
 import { playExpectimaxBattle } from './expectimax'
 import { buildPlayerParty, type PlayerMonSpec } from './buildParty'
 import type { SimDataBundle } from './loadSimData'
+import { isEligibleMove } from './verifiedMoveEffects'
 
 export type Team = PlayerMonSpec[]
 
@@ -156,13 +157,20 @@ function dropDominatedSplits(
 }
 
 /** Moves worth considering for a species: its strongest damaging moves plus the utility whitelist. */
-export function candidateMoves(data: SimDataBundle, speciesId: string, level: number, damagingCount = 40): string[] {
+export function candidateMoves(
+  data: SimDataBundle,
+  speciesId: string,
+  level: number,
+  damagingCount = 40,
+  options: { wide: boolean } = { wide: false },
+): string[] {
   const species = data.speciesById.get(speciesId)
   const ownTypes = new Set(((species?.types ?? []) as string[]).map((t) => t.replace('TYPE_', '')))
   const learnable = learnableMoves(data, speciesId, level)
 
   const damaging: Array<{ id: string; rank: number }> = []
   const utility: string[] = []
+  const gatedOthers: string[] = []
   for (const id of learnable) {
     const move = data.dataContext.move(id)
     if (!move) continue
@@ -170,14 +178,19 @@ export function candidateMoves(data: SimDataBundle, speciesId: string, level: nu
       utility.push(id)
       continue
     }
-    if (!move.power || move.power <= 1) continue
+    if (!move.power || move.power <= 1) {
+      if (options.wide && isEligibleMove(move)) gatedOthers.push(id)
+      continue
+    }
     const stab = ownTypes.has((move.type ?? '').replace('TYPE_', '')) ? 1.5 : 1
     const accuracy = move.accuracy && move.accuracy > 0 ? move.accuracy / 100 : 1
     damaging.push({ id, rank: move.power * stab * accuracy })
   }
   damaging.sort((a, b) => b.rank - a.rank)
   const kept = dropDominatedSplits(data, speciesId, damaging)
-  return [...kept.slice(0, damagingCount).map((d) => d.id), ...utility]
+  const head = kept.slice(0, damagingCount).map((d) => d.id)
+  if (!options.wide) return [...head, ...utility]
+  return [...head, ...utility.filter((id) => isEligibleMove(data.dataContext.move(id)!)), ...gatedOthers]
 }
 
 /** A sensible starting set: the four best-ranked damaging moves, Life Orb, a stat-appropriate nature and EVs. */
@@ -186,12 +199,13 @@ export function defaultSet(
   requestedSpecies: string,
   level: number,
   allowedStones: ReadonlySet<string>,
+  wide = false,
 ): PlayerMonSpec {
   const speciesId = megaFormsFor(data, requestedSpecies, allowedStones)[0] ?? requestedSpecies
   const species = data.speciesById.get(speciesId)
   const stats = species?.baseStats as Record<StatKey, number>
   const physical = (stats?.atk ?? 0) >= (stats?.spatk ?? 0)
-  const pool = candidateMoves(data, speciesId, level, 24).filter((m) => !UTILITY_MOVES.has(m))
+  const pool = candidateMoves(data, speciesId, level, 24, { wide }).filter((m) => !UTILITY_MOVES.has(m))
   const moves: string[] = []
   const usedTypes = new Map<string, number>()
   while (moves.length < 4 && moves.length < pool.length) {
@@ -246,7 +260,13 @@ export function baseSpeciesOf(data: SimDataBundle, speciesId: string): string {
 }
 
 /** Every one-attribute change of one team member. */
-export function neighbours(data: SimDataBundle, team: Team, index: number, allowedStones: ReadonlySet<string>): Team[] {
+export function neighbours(
+  data: SimDataBundle,
+  team: Team,
+  index: number,
+  allowedStones: ReadonlySet<string>,
+  wide = false,
+): Team[] {
   const base = team[index]
   const out: Team[] = []
   const replace = (patch: Partial<PlayerMonSpec>): void => {
@@ -274,7 +294,7 @@ export function neighbours(data: SimDataBundle, team: Team, index: number, allow
     void name
     if (JSON.stringify(evs) !== JSON.stringify(base.evs)) replace({ evs })
   }
-  const pool = candidateMoves(data, base.species, base.level ?? 50)
+  const pool = candidateMoves(data, base.species, base.level ?? 50, 40, { wide })
   for (let slot = 0; slot < 4; slot++) {
     for (const move of pool) {
       if (base.moves.includes(move)) continue
@@ -301,6 +321,7 @@ export interface SearchOptions {
   maxNeighbours: number
   /** Mega stones the player owns at this point of the game; a Mega form needs its stone in the bag. */
   allowedStones: ReadonlySet<string>
+  widePool?: boolean
   onProgress?: (message: string) => void
 }
 
@@ -340,7 +361,7 @@ export async function improveTeam(
   for (let pass = 0; pass < options.passes; pass++) {
     let changed = false
     for (let index = 0; index < team.length; index++) {
-      const all = neighbours(data, team, index, options.allowedStones)
+      const all = neighbours(data, team, index, options.allowedStones, options.widePool ?? false)
       const candidates = all.length > options.maxNeighbours ? shuffled(all, pass * 131 + index).slice(0, options.maxNeighbours) : all
       const [incumbentScreen] = await evaluate([team], options.screenGames)
       const screened = await evaluate(candidates, options.screenGames)
