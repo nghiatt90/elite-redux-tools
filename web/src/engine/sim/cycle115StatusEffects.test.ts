@@ -356,7 +356,7 @@ describe('cycle 115 - Thunder Wave (EFFECT_PARALYZE)', () => {
 // BattleScript_EffectEncore :4678-4689, SetEncore battle_script_commands.c:10739-10758.
 describe('cycle 115 - Encore', () => {
   // Target knows Scratch (slot 0) and Tackle (slot 1); its last move is Tackle.
-  const encoreTarget = (lastMove: string | null, moves = ['MOVE_SCRATCH', 'MOVE_TACKLE', null, null], pp = [10, 15, 0, 0]) => {
+  const encoreTarget = (lastMove: string | null, moves: [string | null, string | null, string | null, string | null] = ['MOVE_SCRATCH', 'MOVE_TACKLE', null, null], pp: [number, number, number, number] = [10, 15, 0, 0]) => {
     const state = battle(user('MOVE_ENCORE'), foe({ moves, pp }), countRng())
     foeOf(state).lastMove = lastMove
     return state
