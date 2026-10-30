@@ -4011,9 +4011,9 @@ function handleEncore(ctx: MoveEffectContext): ActionOutcome {
   }
 
   const moveIdx = target.mon.moves.indexOf(lastMove)
+  // SetEncore (:10749) tests only encoredMove == 0, never encoreTimer.
   if (
     target.volatiles.encoredMove !== null ||
-    target.volatiles.encoreTimer !== 0 ||
     moveIdx === -1 ||
     (target.mon.pp[moveIdx] ?? 0) === 0
   ) {
