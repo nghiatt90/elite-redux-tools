@@ -354,14 +354,26 @@ describe('executeTurn: attack canceller -- Truant (CANCELLER_TRUANT, battle_util
 })
 
 describe('executeTurn: attack canceller -- gapped branches, only emitted when actually hit', () => {
-  it('gaps CANCELLER_POWDER_MOVE by name only when the move is powderAffected and targets someone else', () => {
-    const withPowder = battle([{ spe: 200, moves: ['MOVE_POISON_POWDER', null, null, null] }, { spe: 50 }], scripted(50))
-    const out = executeTurn(withPowder, [useMove(1, POISON_POWDER), null], deps(fixedDamage(10)))
-    expect(out.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(true)
+  it('cancels CANCELLER_POWDER_MOVE for a powder-immune target (Grass, IsPowderImmune battle_util.c:3190-3197)', () => {
+    // The C's entry condition is FLAG_POWDER plus a target that is not the attacker (:3455-3458);
+    // IsPowderImmune then checks Mycelium Might, Grass, Safety Goggles, powderImmune and Bug
+    // pollinateImmunities. The cancel jumps to BattleScript_PowderMoveNoEffect, which still runs
+    // attackstring/ppreduce (:8708-8709) but never the accuracy check.
+    const immune = battle(
+      [{ spe: 200, moves: ['MOVE_POISON_POWDER', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50, types: ['GRASS', 'MYSTERY', 'MYSTERY'] }],
+      scripted(50),
+    )
+    const out = executeTurn(immune, [useMove(1, POISON_POWDER), null], deps(fixedDamage(10)))
+    expect(out.actions[0].cancelledBy).toBe('POWDER')
+    expect(out.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(false)
+    expect(immune.battlers[0]!.mon.pp[0]).toBe(19) // BattleScript_PowderMoveNoEffect ppreduce :8709
 
-    const withoutPowder = battle([{ spe: 200 }, { spe: 50 }], scripted(50))
-    const out2 = executeTurn(withoutPowder, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    // A Water target is not powder-immune, so the move goes through and no gap note is emitted.
+    const normal = battle([{ spe: 200, moves: ['MOVE_POISON_POWDER', null, null, null], pp: [20, 0, 0, 0] }, { spe: 50 }], scripted(50))
+    const out2 = executeTurn(normal, [useMove(1, POISON_POWDER), null], deps(fixedDamage(10)))
+    expect(out2.actions[0].cancelledBy).toBeNull()
     expect(out2.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(false)
+    expect(normal.battlers[0]!.mon.pp[0]).toBe(19)
   })
 
   it('gaps CANCELLER_POWDER_STATUS by name only when the attacker carries STATUS2_POWDER and uses a Fire move', () => {

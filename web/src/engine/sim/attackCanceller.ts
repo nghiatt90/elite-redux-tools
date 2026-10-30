@@ -57,14 +57,15 @@
 //                          every paralysis draw applies to both sides equally.
 //   CANCELLER_BIDE        Unreachable -- status2's BIDE counter has no writer.
 //   CANCELLER_THAW        Ported.
-//   CANCELLER_POWDER_MOVE Gapped at runtime, only when the move is powderAffected
-//                          and the target differs from the attacker (the C's own
-//                          entry condition, :3455-3458) -- IsPowderImmune's own
-//                          chain (Mycelium Might, Grass typing, Safety Goggles,
-//                          the powderImmune/pollinateImmunities ability flags,
-//                          battle_util.c:3190-3196) is not evaluated, so a genuinely
-//                          immune target is not detected and this port always lets
-//                          the move through.
+//   CANCELLER_POWDER_MOVE Ported when the caller supplies a data context and grounding
+//                          (turn.ts always does): a powder move (FLAG_POWDER) aimed at
+//                          someone else is cancelled when IsPowderImmune
+//                          (battle_util.c:3190-3197 -- Mycelium Might bypass, Grass,
+//                          Safety Goggles, powderImmune, Bug pollinateImmunities)
+//                          returns true. This jumps to BattleScript_PowderMoveNoEffect
+//                          (data/battle_scripts_1.s:8707-8723), which still spends one
+//                          PP (:8709) and cancels multi-turn moves (:8721) but draws no
+//                          accuracy -- turn.ts does the PP deduction for this reason.
 //   CANCELLER_POWDER_STATUS Gapped at runtime, only when the attacker's own
 //                          status2 carries STATUS2_POWDER and the move's type is
 //                          Fire (the C's own entry condition, :3469-3473) -- the
@@ -158,7 +159,7 @@ import {
   hasFlag,
   setCounter,
 } from './constants'
-import { cancelMultiTurnMoves, isSoundMove, type StatusDeps } from './statusEffects'
+import { cancelMultiTurnMoves, isPowderImmune, isSoundMove, type StatusDeps } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import { isGravityActive, type GroundingContext } from './grounding'
 import { NO_GROUNDING } from './endTurn'
@@ -182,6 +183,7 @@ export const CANCEL_REASONS = [
   'IMPRISON',
   'QUICK_GUARD',
   'THROAT_CHOP',
+  'POWDER',
 ] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
@@ -539,13 +541,24 @@ export function runAttackCanceller(
     return NO_CANCEL
   }
 
-  // CANCELLER_POWDER_MOVE, :3455-3466 -- gapped, see header. Never stops the
-  // ladder here (the true C may cancel when genuinely immune; this port does
-  // not compute immunity, so it always lets the move through).
+  // CANCELLER_POWDER_MOVE, :3455-3466. The C's entry condition is the powder flag, a target that is
+  // not the attacker, and no Mycelium Might on the attacker (:3455-3458); IsPowderImmune
+  // (battle_util.c:3190-3197) then decides. Needs dataContext for the powderImmune /
+  // pollinateImmunities ability flags and grounding for Safety Goggles; without them the immune
+  // check cannot be evaluated, so keep the by-name gap.
   if (move?.flags.powderAffected && targetId !== null && targetId !== attackerId) {
-    unmodelled.push(
-      "CANCELLER_POWDER_MOVE (battle_util.c:3455-3466): IsPowderImmune's own chain (Mycelium Might, Grass typing, Safety Goggles, the powderImmune/pollinateImmunities ability flags, :3190-3196) is not evaluated; a target that would actually be immune is not detected here",
-    )
+    if (dataContext && grounding) {
+      const statusDeps: StatusDeps = { dataContext, grounding }
+      if (isPowderImmune(state, attackerId, targetId, statusDeps)) {
+        attacker.round.attackCancelled = true
+        cancelMultiTurnMoves(attacker)
+        return { cancelledBy: 'POWDER', confusionSelfHitDamage: null }
+      }
+    } else {
+      unmodelled.push(
+        'CANCELLER_POWDER_MOVE (battle_util.c:3455-3466): IsPowderImmune (battle_util.c:3190-3197) needs the data context and grounding, which this call did not supply',
+      )
+    }
   }
 
   // CANCELLER_POWDER_STATUS, :3468-3480 -- gapped, see header.

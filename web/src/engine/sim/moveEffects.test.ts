@@ -2188,13 +2188,14 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         expect(rng.calls).toBe(1)
       })
 
-      it('Poison Powder: CANCELLER_POWDER_MOVE is gapped on pure Grass, but Poison-type fails in script', () => {
-        // C check: BattleScript_EffectPoison has no Grass check; powder immunity is in
-        // CANCELLER_POWDER_MOVE (battle_util.c:3455) which attackCanceller.ts gaps by name.
+      it('Poison Powder: Grass is cancelled by CANCELLER_POWDER_MOVE before the effect script, Poison-type fails in script', () => {
+        // Powder immunity is IsPowderImmune (battle_util.c:3190-3197), reached from
+        // CANCELLER_POWDER_MOVE (battle_util.c:3455-3466). Its BattleScript_PowderMoveNoEffect still
+        // runs attackstring/ppreduce (:8708-8709), then cancelmultiturnmoves, but no accuracy.
         // CanBePoisoned checks Poison/Steel types via CanPoisonType (src/battle_script_commands.c:6465).
         const deps = testDeps()
 
-        // 1. Pure Grass: CANCELLER_POWDER_MOVE gap recorded, script runs
+        // 1. Pure Grass: cancelled before the effect script, so one PP and no status
         {
           const rng = countingRng()
           const state = battle(
@@ -2207,8 +2208,11 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
           const out = executeTurn(state, [useMove(1, MOVE_POISON_POWDER), null], deps)
           const act = out.actions.find((a) => a.battlerId === 0)!
 
-          expect(act.unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(true)
-          expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_POISON)).toBe(true)
+          expect(act.cancelledBy).toBe('POWDER')
+          expect(act.unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(false)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(19)
+          expect(state.battlers[1]!.mon.status1).toBe(0)
+          expect(rng.calls).toBe(0)
         }
 
         // 2. Poison type: CanBePoisoned fails before accuracy
@@ -5559,10 +5563,12 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         it('Magic Powder turns target into pure Psychic', () => {
           const deps = testDeps()
           const rng = countingRng()
+          // Not a Grass-type: Magic Powder carries FLAG_POWDER, so CANCELLER_POWDER_MOVE / IsPowderImmune
+          // (battle_util.c:3455-3466, :3190-3197) would cancel it against Grass.
           const state = battle(
             [
               { moves: ['MOVE_MAGIC_POWDER', null, null, null], pp: [20, 0, 0, 0] },
-              { spe: 50, types: ['GRASS', 'POISON', 'MYSTERY'] },
+              { spe: 50, types: ['FIRE', 'POISON', 'MYSTERY'] },
             ],
             rng,
           )

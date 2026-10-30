@@ -2076,6 +2076,11 @@ export function executeAction(
     deps.dataContext,
   )
   if (cancelResult.cancelledBy) {
+    // CANCELLER_POWDER_MOVE jumps to BattleScript_PowderMoveNoEffect (battle_util.c:3459-3461), the
+    // one canceller script that still runs attackstring and ppreduce (data/battle_scripts_1.s:
+    // 8708-8709) before cancelmultiturnmoves (:8721) and MoveEnd. Every other cancel script goes
+    // straight to MoveEnd, so this is the only cancelledBy that spends PP.
+    if (cancelResult.cancelledBy === 'POWDER') performPpDeduct()
     let confusionSelfHitDamage = cancelResult.confusionSelfHitDamage
     const cancelFainted: number[] = []
     if (cancelResult.cancelledBy === 'CONFUSION') {

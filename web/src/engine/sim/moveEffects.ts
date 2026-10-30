@@ -7,7 +7,7 @@
 import type { BattleState, BattlerState, QueuedSwitchAction } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
+import { blocksPrankster, buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
 import { gapsToUnmodelled } from './bridge'
 import { hasLiveReserve } from './switchIn'
 import {
@@ -4402,22 +4402,27 @@ function handleMeanLook(ctx: MoveEffectContext): ActionOutcome {
     }
   }
 
-  // 3. jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION (:4896)
+  // 3. jumpifstatus4 BS_TARGET, STATUS4_COMMANDED (:4895)
+  if (hasFlag(target.statuses4, STATUS4_COMMANDED)) {
+    return outcome(ctx, { targetId, missed: true })
+  }
+
+  // 4. jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION (:4896)
   if (hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // 4. jumpifsubstituteblocks (:4897)
+  // 5. jumpifsubstituteblocks (:4897)
   if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // 5. jumpiftype BS_TARGET, TYPE_GHOST (:4899)
+  // 6. jumpiftype BS_TARGET, TYPE_GHOST (:4899; B_GHOSTS_ESCAPE = GEN_7 >= GEN_6)
   if (target.mon.types.includes('GHOST')) {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // 6. setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE / seteffectprimary (:4903-4904)
+  // 7. setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE / seteffectprimary (:4902-4904)
   target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
   target.volatiles.battlerPreventingEscape = battlerId
 
@@ -4517,11 +4522,10 @@ function handlePerishSong(ctx: MoveEffectContext): ActionOutcome {
   // 2. trysetperishsong BattleScript_ButItFailed (:5087, Cmd_trysetperishsong :11132-11145): every
   // battler, alive or not. IsSoundproof (battle_util.c:8864-8871) is the isSoundproof bitfield
   // (Soundproof, Noise Cancel) on the battler itself -- both leave onImmuneFor at APPLY_ON_SELF,
-  // so the ally branch never fires -- with mold breaker checked.
+  // so the ally branch never fires -- with mold breaker checked. BlocksPrankster (:11137,
+  // battle_util.c:8622-8635) skips an opposing Dark-type whenever the attacker has Prankster and
+  // the move is a status move; turn.ts's shared port evaluates exactly those conditions.
   const attackerHasMB = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
-  if (battlerHasSimAbility(state, state.battlers[battlerId]!, 'ABILITY_PRANKSTER', false, battlerId, false, deps.dataContext)) {
-    unmodelled.push("Cmd_trysetperishsong's BlocksPrankster check (battle_script_commands.c:11138) is not applied")
-  }
   let affectedCount = 0
   for (let i = 0; i < state.battlersCount; i++) {
     const b = state.battlers[i]
@@ -4531,6 +4535,7 @@ function handlePerishSong(ctx: MoveEffectContext): ActionOutcome {
       battlerHasSimAbility(state, b, ab, true, battlerId, attackerHasMB, deps.dataContext),
     )
     if (isSoundproof) continue
+    if (blocksPrankster(state, moveId, battlerId, i, true, deps)) continue
 
     affectedCount++
     b.statuses3 = setFlag(b.statuses3, STATUS3_PERISH_SONG)

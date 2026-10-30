@@ -687,9 +687,10 @@ describe('Status move handlers (step 2 & 5, batch 2)', () => {
     }
   })
 
-  it('Sleep Powder vs a powder-immune target: CANCELLER_POWDER_MOVE is gapped, so the script still runs', () => {
-    // Powder immunity is CANCELLER_POWDER_MOVE (battle_util.c:3455-3466), before the script and before ppreduce.
-    // attackCanceller.ts gaps it by name; the sleep script itself has no powder check.
+  it('Sleep Powder vs a powder-immune target: CANCELLER_POWDER_MOVE cancels it before the sleep script', () => {
+    // Powder immunity is CANCELLER_POWDER_MOVE (battle_util.c:3455-3466); IsPowderImmune
+    // (battle_util.c:3190-3197) lets Overcoat (a powderImmune ability) block the move. The cancel
+    // jumps to BattleScript_PowderMoveNoEffect, which still ppreduces (:8709) but never runs CanSleep.
     const deps = testDeps()
     const rng = countingRng()
     const state = battle(
@@ -699,8 +700,11 @@ describe('Status move handlers (step 2 & 5, batch 2)', () => {
     const out = executeTurn(state, [useMove(1, MOVE_SLEEP_POWDER), null], deps)
     const act = out.actions.find((a) => a.battlerId === 0)!
 
-    expect(act.unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(true)
-    expect(state.battlers[0]!.mon.pp[0]).toBe(29)
+    expect(act.cancelledBy).toBe('POWDER')
+    expect(act.unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_MOVE'))).toBe(false)
+    expect(state.battlers[0]!.mon.pp[0]).toBe(29) // BattleScript_PowderMoveNoEffect ppreduce :8709
+    expect(state.battlers[1]!.mon.status1).toBe(0)
+    expect(rng.calls).toBe(0)
   })
 
   it('Sleep vs a Substitute: requirecandoeffect passes, so accuracy is drawn, then SetMoveEffect blocks the status', () => {
