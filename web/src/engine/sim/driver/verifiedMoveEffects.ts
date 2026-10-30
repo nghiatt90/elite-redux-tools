@@ -8,6 +8,7 @@ const CYCLE120 = 'web/src/engine/sim/cycle120StatusEffects.test.ts'
 const CYCLE121 = 'web/src/engine/sim/cycle121StatusEffects.test.ts'
 const CYCLE122 = 'web/src/engine/sim/cycle122StatEffects.test.ts'
 const CYCLE123 = 'web/src/engine/sim/cycle123StatEffects.test.ts'
+const CYCLE124 = 'web/src/engine/sim/cycle124StatEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -160,6 +161,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_BELLY_DRUM',
         'EFFECT_SHELL_SMASH',
       ].map((effect): [string, string] => [effect, CYCLE123]),
+    )
+    .concat(
+      [
+        'EFFECT_TICKLE',
+        'EFFECT_TOPSY_TURVY',
+        'EFFECT_QUIVER_DANCE',
+        'EFFECT_PSYCH_UP',
+        'EFFECT_KINESIS',
+        'EFFECT_VICTORY_DANCE',
+        'EFFECT_POWER_TRICK',
+        'EFFECT_COIL',
+        'EFFECT_NO_RETREAT',
+        'EFFECT_AUTOTOMIZE',
+        'EFFECT_DEFENSE_UP_3',
+        'EFFECT_SPEED_SWAP',
+      ].map((effect): [string, string] => [effect, CYCLE124]),
     ),
 )
 
