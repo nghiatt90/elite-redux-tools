@@ -1,6 +1,7 @@
 const CYCLE114 = 'web/src/engine/sim/cycle114StatusEffects.test.ts'
 const CYCLE115 = 'web/src/engine/sim/cycle115StatusEffects.test.ts'
 const CYCLE115B = 'web/src/engine/sim/cycle115bFieldEffects.test.ts'
+const CYCLE116 = 'web/src/engine/sim/cycle116FieldEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -49,6 +50,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_ELECTRIC_TERRAIN',
         'EFFECT_GRASSY_TERRAIN',
       ].map((effect): [string, string] => [effect, CYCLE115B]),
+    )
+    .concat(
+      [
+        'EFFECT_PSYCHIC_TERRAIN',
+        'EFFECT_MISTY_TERRAIN',
+        'EFFECT_WORRY_SEED',
+        'EFFECT_WONDER_ROOM',
+        'EFFECT_MAGIC_ROOM',
+        'EFFECT_LUCKY_CHANT',
+        'EFFECT_MAGNET_RISE',
+        'EFFECT_INGRAIN',
+        'EFFECT_GRAVITY',
+        'EFFECT_AURORA_VEIL',
+        'EFFECT_SMOKESCREEN',
+        'EFFECT_ENTRAINMENT',
+      ].map((effect): [string, string] => [effect, CYCLE116]),
     ),
 )
 
