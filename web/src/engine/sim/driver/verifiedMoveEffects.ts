@@ -3,6 +3,7 @@ const CYCLE115 = 'web/src/engine/sim/cycle115StatusEffects.test.ts'
 const CYCLE115B = 'web/src/engine/sim/cycle115bFieldEffects.test.ts'
 const CYCLE116 = 'web/src/engine/sim/cycle116FieldEffects.test.ts'
 const CYCLE117 = 'web/src/engine/sim/cycle117FieldEffects.test.ts'
+const CYCLE119 = 'web/src/engine/sim/cycle119StatusEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -80,6 +81,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_TOXIC_TERRAIN',
         'EFFECT_CLEAR_SKIES',
       ].map((effect): [string, string] => [effect, CYCLE117]),
+    )
+    .concat(
+      [
+        'EFFECT_SLEEP',
+        'EFFECT_YAWN',
+        'EFFECT_SWAGGER',
+        'EFFECT_CONFUSE',
+        'EFFECT_ATTRACT',
+        'EFFECT_CURSE',
+        'EFFECT_TORMENT',
+        'EFFECT_AQUA_RING',
+        'EFFECT_HEAL_BLOCK',
+        'EFFECT_SOAK',
+        'EFFECT_DISABLE',
+        'EFFECT_SLEEP_TALK',
+      ].map((effect): [string, string] => [effect, CYCLE119]),
     ),
 )
 
