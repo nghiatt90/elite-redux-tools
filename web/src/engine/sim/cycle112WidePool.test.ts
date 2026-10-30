@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
-import { describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { loadSimData } from './driver/loadSimData'
 import { candidateMoves, defaultSet, neighbours, UTILITY_MOVES } from './driver/solver'
@@ -34,9 +36,27 @@ async function withVerified<T>(effects: string[], fn: () => T): Promise<T> {
 const GARDEVOIR = 'SPECIES_GARDEVOIR'
 const CALM_MIND = 'MOVE_CALM_MIND'
 
+const SHIPPED = new Map(VERIFIED_MOVE_EFFECTS)
+const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..')
+const movesById = data.movesById as Map<string, { effect?: string | null }>
+let snapshot: Array<[string, string]> = []
+
 describe('cycle 112 wide pool gate', () => {
-  it('starts with nothing verified', () => {
-    expect(VERIFIED_MOVE_EFFECTS.size).toBe(0)
+  beforeEach(() => {
+    snapshot = [...VERIFIED_MOVE_EFFECTS]
+    VERIFIED_MOVE_EFFECTS.clear()
+  })
+  afterEach(() => {
+    VERIFIED_MOVE_EFFECTS.clear()
+    for (const [k, v] of snapshot) VERIFIED_MOVE_EFFECTS.set(k, v)
+  })
+
+  it('the shipped registry only names existing effects and test files', () => {
+    const effects = new Set([...movesById.values()].map((m) => m.effect))
+    for (const [effect, file] of SHIPPED) {
+      expect(effects.has(effect), effect).toBe(true)
+      expect(existsSync(join(REPO_ROOT, file)), file).toBe(true)
+    }
   })
 
   it('default pool is unchanged and keeps every learnable whitelist move', () => {
