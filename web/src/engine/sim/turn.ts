@@ -3761,9 +3761,8 @@ function runFutureSightCountdown(
   order: TurnOrder,
   deps: TurnLoopDeps,
   unmodelled: string[],
-): boolean {
-  let faintedAnyone = false
-
+  replaceFainted: () => void,
+): void {
   for (let holderId = 0; holderId < state.battlersCount; holderId++) {
     // gAbsentBattlerFlags check (:3003-3007): an absent slot is skipped WITHOUT a decrement.
     if (hasFlag(state.absentBattlerFlags, 1 << holderId)) continue
@@ -3841,14 +3840,15 @@ function runFutureSightCountdown(
     }
     unmodelled.push(...resolution.unmodelled)
 
-    // `tryfaintmon BS_TARGET` (:8035) -> applyDamage; replacements run after the loop,
-    // like the Perish Song block below.
+    // `tryfaintmon BS_TARGET` (:8035) -> applyDamage. Each holder's script runs on its own pass through
+    // BattleTurnPassed (HandleWishPerishSongOnTurnEnd returns TRUE after the first one, battle_util.c:3028),
+    // and HandleFaintedMonActions (battle_main.c:3485) replaces the fainted mon before the next holder is
+    // visited, so a later holder's attacker slot already holds the replacement.
     const fainted: number[] = []
     const targetHpBefore = holder.mon.hp
     applyDamage(state, holderId, resolution.targetDamage, fainted, deps)
     const hpDealt = targetHpBefore - holder.mon.hp
     const noEffect = !(hpDealt > 0 || (resolution.targetDamage ?? 0) > 0)
-    if (fainted.length > 0) faintedAnyone = true
 
     // MOVEEND tail (:8037-8042): `moveendcase MOVEEND_RAGE` (case 2) then
     // `moveendfromto MOVEEND_ITEM_EFFECTS_ALL, MOVEEND_UPDATE_LAST_MOVES` (cases 14-17).
@@ -3876,9 +3876,8 @@ function runFutureSightCountdown(
       fainted,
       clearBits: false,
     })
+    if (fainted.length > 0) replaceFainted()
   }
-
-  return faintedAnyone
 }
 
 export function executeTurn(state: BattleState, actions: (ChosenAction | null)[], deps: TurnLoopDeps): TurnOutcome {
@@ -4080,11 +4079,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // State 0 precedes state 1 (:3001 vs :3032), so the Future Sight countdown/hit runs first.
   if (!state.battleOutcome) {
     const futureSightUnmodelled: string[] = []
-    const futureSightFainted = runFutureSightCountdown(state, actions, order, deps, futureSightUnmodelled)
+    runFutureSightCountdown(state, actions, order, deps, futureSightUnmodelled, () => {
+      if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+    })
     endTurnUnmodelled.push(...futureSightUnmodelled)
-    if (futureSightFainted && deps.replacement) {
-      applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
-    }
   }
   // HandleWishPerishSongOnTurnEnd's perishSongTimer runs after HandleFaintedMonActions
   // (battle_main.c:3485-3489), over gBattlerByTurnOrder (endTurnOrder) skipping absent battlers.

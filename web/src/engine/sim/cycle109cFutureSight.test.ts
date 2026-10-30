@@ -535,3 +535,61 @@ describe('Cycle 109c - Forewarn (Impl<ABILITY_FOREWARN>.onEntry, abilities.cc:17
     expect(state.field.futureSightCounter[1]).toBe(3)
   })
 })
+
+describe('Cycle 109c - replacement between Future Sight holders (battle_main.c:3465-3489)', () => {
+  it('a holder KOed by the first delayed hit is replaced before the second holder is visited', () => {
+    // HandleWishPerishSongOnTurnEnd returns TRUE after the first scheduled hit (battle_util.c:3028), so
+    // BattleTurnPassed re-runs HandleFaintedMonActions before the next holder. Battler 1's hit on battler 0's
+    // side is the second pass: battler 0's slot already holds the replacement when its own delayed attack
+    // (recorded attacker = battler 0) is calculated for battler 1.
+    const reserve = {
+      speciesId: 'SPECIES_MUDKIP',
+      hp: 100,
+      maxHp: 100,
+      level: 50,
+      moves: ['MOVE_FUTURE_SIGHT', null, null, null],
+      pp: [5, 0, 0, 0],
+      itemId: null,
+      abilities: noAbility,
+      rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 100 },
+      nature: 'NATURE_HARDY',
+      hiddenPowerType: null,
+      speedDown: false,
+      gender: 'MALE',
+      status1: 0,
+      types: ['WATER', 'MYSTERY', 'MYSTERY'],
+    } as never
+    const lead = monFor('SPECIES_TORCHIC', { hp: 50, maxHp: 100 })
+    const state = createBattleState({
+      battlers: [createBattlerState(0, lead, 0), createBattlerState(1, monFor('SPECIES_MUDKIP', { rawStats: { atk: 100, def: 100, spatk: 100, spdef: 100, spe: 99 } }), 0)],
+      playerParty: [
+        { ...(reserve as object), speciesId: 'SPECIES_TORCHIC', hp: 50, types: ['FIRE', 'MYSTERY', 'MYSTERY'] } as never,
+        reserve,
+      ],
+      rng: { random16: () => 0 },
+    })
+    // Both attacks land this turn-end: holder 0 is hit by battler 1's, holder 1 by battler 0's.
+    for (const holder of [0, 1]) {
+      state.field.futureSightCounter[holder] = 1
+      state.field.futureSightMove[holder] = 'MOVE_FUTURE_SIGHT'
+      state.field.futureSightPower[holder] = 120
+      state.field.futureSightAttacker[holder] = holder ^ 1
+    }
+    const seen: Array<{ attackerId: number; species: string }> = []
+    const resolver: DamageResolver = {
+      resolve(s, attackerId): DamageResolution {
+        seen.push({ attackerId, species: s.battlers[attackerId]!.mon.speciesId })
+        return { targetDamage: 60, attackerDamage: null, unmodelled: [] }
+      },
+    }
+    const deps: TurnLoopDeps = { ...loopDeps(resolver), replacement: { chooseReplacement: () => 1 } }
+
+    executeTurn(state, [null, null], deps)
+
+    expect(seen).toEqual([
+      { attackerId: 1, species: 'SPECIES_MUDKIP' },
+      { attackerId: 0, species: 'SPECIES_MUDKIP' }, // the replacement, not the fainted SPECIES_TORCHIC
+    ])
+    expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MUDKIP')
+  })
+})
