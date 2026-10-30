@@ -9,6 +9,7 @@ import { it } from 'vitest'
 import { loadSimData } from './loadSimData'
 import { buildPlayerParty } from './buildParty'
 import { createRandomSource } from '../rng'
+import { splitRows } from './auditAllowlist'
 import { buildMoveAction, createSession, stepTurn } from './session'
 
 const NOTE = /not modelled|not applied|not run|no port|not supported|unmodelled/i
@@ -69,6 +70,9 @@ it.skipIf(process.env.SIM_AUDIT !== '1')('move effect audit', { timeout: 900_000
     .sort((a, b) => b.bossUses - a.bossUses)
 
   const out = process.env.SIM_AUDIT_OUT ?? resolve(process.cwd(), '../.omc/solver/unmodelled_effects.json')
-  writeFileSync(out, JSON.stringify(rows, null, 1))
-  console.log(`AUDIT ${rows.length} effects with their own unmodelled notes -> ${out}`)
+  const { counted, allowed } = splitRows(rows)
+  writeFileSync(out, JSON.stringify(counted, null, 1))
+  const allowedOut = out.endsWith('.json') ? out.replace(/\.json$/, '_allowed.json') : `${out}_allowed.json`
+  writeFileSync(allowedOut, JSON.stringify(allowed, null, 1))
+  console.log(`AUDIT ${counted.length} effects with their own unmodelled notes -> ${out}`)
 })
