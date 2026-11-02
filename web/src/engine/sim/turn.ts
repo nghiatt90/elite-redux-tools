@@ -3145,6 +3145,13 @@ export function executeAction(
         if (!targetDamage) targetDamage = 1
       }
       isCriticalHit = false
+      // Every fixed-damage script runs typecalc and then
+      // `bichalfword gMoveResultFlags, MOVE_RESULT_SUPER_EFFECTIVE | MOVE_RESULT_NOT_VERY_EFFECTIVE`
+      // (Counter :4668, Mirror Coat :5662, Metal Burst :2360, Endeavor :6444, Super Fang :4101,
+      // Level Damage :4645, Dragon Rage :4126, Psywave :4656, Final Gambit :1648): the chart never
+      // scales the fixed amount, and the move-end item pass (Weakness Policy, battle_util.c:6172)
+      // sees neutral effectiveness. MOVE_RESULT_DOESNT_AFFECT_FOE is NOT cleared, so immunity stays.
+      isSuperEffective = false
     }
     if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect)) {
       // The engine's own "EFFECT_X: not modelled" note (basePower.ts UNMODELLED_BASE_POWER_EFFECTS) is answered by this block.

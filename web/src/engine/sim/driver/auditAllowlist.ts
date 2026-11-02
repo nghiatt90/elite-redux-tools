@@ -7,7 +7,18 @@ export interface AuditAllowance {
   notes?: string[]
 }
 
-export const AUDIT_ALLOWLIST: AuditAllowance[] = []
+export const AUDIT_ALLOWLIST: AuditAllowance[] = [
+  {
+    effect: 'EFFECT_HELPING_HAND',
+    reason: 'doubles-only, D1',
+    citation: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:11700',
+  },
+  {
+    effect: 'EFFECT_FOLLOW_ME',
+    reason: 'doubles-only, D1',
+    citation: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:11612',
+  },
+]
 
 export function findAllowance(effect: string): AuditAllowance | undefined {
   return AUDIT_ALLOWLIST.find((a) => a.effect === effect)

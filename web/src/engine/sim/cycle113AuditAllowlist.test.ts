@@ -24,8 +24,7 @@ const allow = (effect: string, notes?: string[]): AuditAllowance => ({
 })
 
 describe('audit allowlist', () => {
-  it('ships empty and counts everything', () => {
-    expect(AUDIT_ALLOWLIST.length).toBe(0)
+  it('counts every note of an effect with no allowance', () => {
     const rows = [{ effect: 'E', notes: ['a'] }]
     const { counted, allowed } = splitRows(rows)
     expect(counted).toEqual(rows)
