@@ -10,6 +10,7 @@ const CYCLE122 = 'web/src/engine/sim/cycle122StatEffects.test.ts'
 const CYCLE123 = 'web/src/engine/sim/cycle123StatEffects.test.ts'
 const CYCLE124 = 'web/src/engine/sim/cycle124StatEffects.test.ts'
 const CYCLE125 = 'web/src/engine/sim/cycle125StatEffects.test.ts'
+const CYCLE126 = 'web/src/engine/sim/cycle126HealingEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -194,6 +195,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_ACCURACY_DOWN',
         'EFFECT_SUPER_FANG_HAZE',
       ].map((effect): [string, string] => [effect, CYCLE125]),
+    )
+    .concat(
+      [
+        'EFFECT_GEOMANCY',
+        'EFFECT_HEAL_BELL',
+        'EFFECT_JUNGLE_HEALING',
+        'EFFECT_REFRESH',
+        'EFFECT_SYNTHESIS',
+        'EFFECT_MOONLIGHT',
+        'EFFECT_WISH',
+        'EFFECT_HEAL_PULSE',
+        'EFFECT_SWALLOW',
+        'EFFECT_STRENGTH_SAP',
+        'EFFECT_REVIVAL_BLESSING',
+        'EFFECT_PURIFY',
+      ].map((effect): [string, string] => [effect, CYCLE126]),
     ),
 )
 

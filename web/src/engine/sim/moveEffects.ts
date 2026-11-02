@@ -223,6 +223,7 @@ import {
   MOVE_EFFECT_AFFECTS_USER,
   MOVE_EFFECT_CERTAIN,
   STAT_BUFF_ALLOW_PTR,
+  STAT_BUFF_DONT_SET_BUFFERS,
   STAT_BUFF_NOT_PROTECT_AFFECTED,
   STAT_BUFF_UPDATE_MOVE_EFFECT,
   attackerHasMoldBreakerActive,
@@ -2549,6 +2550,90 @@ function handleHealHalf(ctx: MoveEffectContext): ActionOutcome {
 }
 
 /**
+ * EFFECT_SWALLOW handler (Swallow).
+ * BattleScript_EffectSwallow (data/battle_scripts_1.s:6035-6048):
+ * attackcanceler, attackstring, ppreduce, stockpiletohpheal BattleScript_SwallowFail,
+ * goto BattleScript_PresentHealTarget (:5915-5930).
+ *
+ * Cmd_ppreduce (:1476-1483) spends Stockpile charges BEFORE the effect runs: each
+ * PP it would have deducted calls TryUseStockpile (:9521-9535), which decrements
+ * stockpileCounter and takes one stage back off Defense / Sp. Def for each stage
+ * that Stockpile raised. So Cmd_stockpiletohpheal (:9554-9593) observes the
+ * counter AFTER that spend: one charge less than the player stacked.
+ *
+ * Cmd_stockpiletohpheal then:
+ *  - counter 0: jump to BattleScript_SwallowFail (B_MSG_SWALLOW_FAILED), no heal,
+ *    no stat restore.
+ *  - STATUS1_BLEED: gBattleMoveDamage = 0 and the target becomes the user;
+ *    BattleScript_PresentHealTarget's jumpifstatus takes BattleScript_MoveUsedBleedHeal
+ *    (:156-161), i.e. curestatus instead of healing.
+ *  - full HP: counter = 0, jump to BattleScript_SwallowFail (B_MSG_SWALLOW_FULL_HP).
+ *  - otherwise: heal maxHp / (1 << (3 - counter)), min 1, then counter = 0.
+ * In every non-zero branch the saved Stockpile stages are handed back with
+ * ChangeStatBuffs(-stockpileDef, STAT_DEF) and ChangeStatBuffs(-stockpileDef,
+ * STAT_SPDEF) -- the Sp. Def restore also reads stockpileDef, as written
+ * (:9588-9591). Neither counter is zeroed here (only TryUseStockpile decrements).
+ * No branch sets MOVE_RESULT_FAILED; the failure is only the message.
+ */
+function handleSwallow(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  const volatiles = battler.volatiles
+
+  // attackstring + ppreduce (:6037-6038); this spends one Stockpile charge when the user has one.
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  // stockpiletohpheal :9557-9560 -- the charge ppreduce just spent is not a swallow.
+  if (volatiles.stockpileCounter === 0) {
+    return outcome(ctx, { targetId: battlerId, missed: true })
+  }
+
+  const statChanges: StatChangeOutcome[] = []
+  let heal = 0
+  if (hasFlag(battler.mon.status1, STATUS1_BLEED)) {
+    // :9563-9568 -- gBattleMoveDamage 0; PresentHealTarget cures the status instead.
+    volatiles.stockpileCounter = 0
+    battler.mon.status1 = 0
+    if (state.sides[battlerId & 1].party[battler.partyIndex]) {
+      state.sides[battlerId & 1].party[battler.partyIndex].status1 = 0
+    }
+  } else if (battler.mon.hp === battler.mon.maxHp) {
+    // :9569-9574 -- full HP: counter cleared, jump to SwallowFail, no heal.
+    volatiles.stockpileCounter = 0
+  } else {
+    // :9575-9582 -- maxHp / (1 << (3 - counter)), min 1.
+    heal = Math.trunc(battler.mon.maxHp / (1 << (3 - volatiles.stockpileCounter)))
+    if (heal === 0) heal = 1
+    volatiles.stockpileCounter = 0
+  }
+
+  // :9586-9591 -- restore the stages Stockpile raised; both calls read stockpileDef.
+  const restore = (amount: number, statId: number): void => {
+    if (amount === 0) return
+    const res = changeStatBuffsImplicit(
+      state,
+      battlerId,
+      battlerId,
+      -amount,
+      statId,
+      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_DONT_SET_BUFFERS,
+      false,
+      deps,
+      unmodelled,
+      moveId,
+    )
+    if (res.delta !== 0) statChanges.push({ battlerId, stat: statId, change: res.delta })
+  }
+  restore(volatiles.stockpileDef, STAT_DEF)
+  restore(volatiles.stockpileDef, STAT_SPDEF)
+
+  if (heal > 0) healBattler(state, battlerId, battler, heal)
+  return outcome(ctx, { targetId: battlerId, statChanges })
+}
+
+/**
  * BattleScript_EffectMorningSun / Synthesis / Moonlight / ShoreUp (data/
  * battle_scripts_1.s:5495-5503) -> Cmd_recoverbasedonsunlight (battle_script_
  * commands.c:11433-11460) -> BattleScript_PresentHealTarget (:5915-5924).
@@ -2604,7 +2689,8 @@ function handleJungleHealing(ctx: MoveEffectContext): ActionOutcome {
   deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
 
   if (battler.mon.hp === battler.mon.maxHp && !(battler.mon.status1 & STATUS1_ANY)) {
-    return outcome(ctx, { targetId: battlerId })
+    // jumpifteamhealthy -> BattleScript_ButItFailed, which sets MOVE_RESULT_FAILED.
+    return outcome(ctx, { targetId: battlerId, missed: true })
   }
 
   if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
@@ -2683,8 +2769,10 @@ function handleStrengthSap(ctx: MoveEffectContext): ActionOutcome {
   const moveEffect = action.chosenMove!.effect
 
   if (doesSubstituteBlockMove(state, battlerId, targetId, moveId, deps, unmodelled)) {
+    // :898 jumpifsubstituteblocks -> BattleScript_ButItFailedAtkStringPpReduce (ppreduce + a
+    // MOVE_RESULT_FAILED failure), so no accuracy draw and the move is spent.
     deductPp(state, battlerId, moveId, moveEffect, unmodelled)
-    return outcome(ctx, { targetId })
+    return outcome(ctx, { targetId, missed: true })
   }
   const missed = checkAccuracy(ctx, targetId, moveId)
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
@@ -11114,7 +11202,7 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_HEAL_PULSE: handleHealPulse,
   EFFECT_PSYCHO_SHIFT: handlePsychoShift,
   EFFECT_STOCKPILE: handleStockpile,
-  EFFECT_SWALLOW: handleHealHalf,
+  EFFECT_SWALLOW: handleSwallow,
 
   EFFECT_PSYCH_UP: handlePsychUp,
   EFFECT_POWER_SWAP: handlePowerSwap,

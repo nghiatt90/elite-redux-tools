@@ -4754,8 +4754,10 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
       })
 
       describe('EFFECT_SWALLOW', () => {
-        it('Swallow restores 50% max HP like Recover (mapped to handleHealHalf)', () => {
-          // MoveBehaviorConfigList.textproto:778-779
+        it('Swallow spends a Stockpile charge instead of PP and heals maxHP/(1 << (3 - counter))', () => {
+          // BattleScript_EffectSwallow data/battle_scripts_1.s:6035-6048. Cmd_ppreduce (:1476-1483)
+          // spends one charge through TryUseStockpile (:9521-9535) BEFORE Cmd_stockpiletohpheal
+          // (:9554-9593) reads the counter, so counter 2 heals maxHP/(1 << (3-1)) = 100/4 = 25.
           const deps = testDeps()
           const rng = countingRng()
           const state = battle(
@@ -4765,12 +4767,14 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             ],
             rng,
           )
+          state.battlers[0]!.volatiles.stockpileCounter = 2
           const out = executeTurn(state, [useMove(1, MOVE_SWALLOW), null], deps)
           const act = out.actions.find((a) => a.battlerId === 0)!
           expect(act.missed).toBe(false)
-          expect(state.battlers[0]!.mon.pp[0]).toBe(1)
-          // 40 + 50 = 90 HP
-          expect(state.battlers[0]!.mon.hp).toBe(90)
+          expect(state.battlers[0]!.mon.pp[0]).toBe(2) // a charge was spent, not PP
+          expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(0)
+          // 40 + 100/4 = 65 HP
+          expect(state.battlers[0]!.mon.hp).toBe(65)
         })
       })
     })

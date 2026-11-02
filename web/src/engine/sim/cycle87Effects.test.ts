@@ -828,13 +828,15 @@ describe('Rollout / Magnitude / Struggle / Fell Stinger / Spit Up and Swallow', 
     expect(empty.battlers[0]!.mon.pp[0]).toBe(19)
   })
 
-  it('Swallow does the same (and heals half: it is BattleScript_EffectRestoreHp in this build)', () => {
+  it('Swallow spends a charge and heals maxHP/(1 << (3 - counter)) (BattleScript_EffectSwallow :6035-6048)', () => {
     const state = battle([{ moves: slot('MOVE_SWALLOW'), pp: pps, hp: 40 }, {}], countingRng())
-    state.battlers[0]!.volatiles.stockpileCounter = 1
+    // ppreduce spends one charge first (:1476-1483), so counter 2 leaves 1:
+    // Cmd_stockpiletohpheal (:9575-9582) heals 100/(1 << (3-1)) = 25.
+    state.battlers[0]!.volatiles.stockpileCounter = 2
     executeTurn(state, [useMove(0, move('MOVE_SWALLOW')), null], testDeps(recordingDamage(10)))
     expect(state.battlers[0]!.mon.pp[0]).toBe(20)
     expect(state.battlers[0]!.volatiles.stockpileCounter).toBe(0)
-    expect(state.battlers[0]!.mon.hp).toBe(90) // 40 + 100 / 2
+    expect(state.battlers[0]!.mon.hp).toBe(65) // 40 + 100 / 4
   })
 })
 
