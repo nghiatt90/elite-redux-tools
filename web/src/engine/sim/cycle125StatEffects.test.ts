@@ -638,8 +638,8 @@ describe('cycle 125 - Minimize (EFFECT_MINIMIZE)', () => {
 })
 
 // BattleScript_EffectAcupressure data/battle_scripts_1.s:1243-1259: attackcanceler; if target !=
-// attacker and the target has a Substitute -> BattleScript_PrintMoveMissed (:1245-1246, which
-// includes attackstring and ppreduce, :10046-10047); else attackstring (:1249), ppreduce (:1250),
+// attacker and the target has a Substitute -> BattleScript_PrintMoveMissed (:1246-1247, whose label
+// at :3092-3094 runs attackstring + ppreduce, so PP is spent); else attackstring (:1249), ppreduce (:1250),
 // tryaccupressure (:1251 -> VARIOUS_ACUPRESSURE, src/battle_script_commands.c:6913-6928): bits =
 // every stat ATK..NUM_BATTLE_STATS-1 whose target stage < 12; none -> ButItFailed; else
 // do { statId = (Random() % (NUM_BATTLE_STATS - 1)) + 1 } while (!(bits & (1 << statId))), then +2.
@@ -680,7 +680,7 @@ describe('cycle 125 - Acupressure (EFFECT_ACUPRESSURE)', () => {
     expect(ppOf(state)).toBe(9) // ppreduce still runs at :1250
   })
 
-  it('a Substitute on the target jumps to PrintMoveMissed before ppreduce (:1246): no PP spent, no draw', () => {
+  it('a Substitute on the target jumps to PrintMoveMissed (:3092-3094), which runs ppreduce: PP 10 -> 9, no draw', () => {
     const rng = scriptedRng([0])
     const state = battle(user('MOVE_ACUPRESSURE'), foe({ status2: STATUS2_SUBSTITUTE }), rng)
     foeOf(state).volatiles.substituteHp = 25
@@ -689,7 +689,7 @@ describe('cycle 125 - Acupressure (EFFECT_ACUPRESSURE)', () => {
     expect(state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE)
     expect(out.actions[0]?.statChanges).toEqual([])
     expect(rng.calls).toBe(0)
-    expect(ppOf(state)).toBe(10) // attackstring/ppreduce (:1249-1250) are skipped
+    expect(ppOf(state)).toBe(9) // ppreduce runs in BattleScript_PrintMoveMissed (:3092-3094)
   })
 })
 
