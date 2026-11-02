@@ -5479,9 +5479,9 @@ function handleAcupressure(ctx: MoveEffectContext): ActionOutcome {
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
 
-  // jumpifstatus2 BS_TARGET, STATUS2_SUBSTITUTE, BattleScript_PrintMoveMissed (only if target != attacker)
+  // jumpifstatus2 BS_TARGET, STATUS2_SUBSTITUTE, BattleScript_PrintMoveMissed (only if target != attacker).
+  // The jump happens at :1247, before attackstring (:1249) and ppreduce (:1250), so this path spends no PP.
   if (actualTargetId !== battlerId && hasFlag(target.mon.status2, STATUS2_SUBSTITUTE)) {
-    deductPp(state, battlerId, moveId, moveEffect, unmodelled)
     return outcome(ctx, { targetId: actualTargetId, missed: true })
   }
 
