@@ -358,6 +358,154 @@ describe('EFFECT_BIDE (move Bide)', () => {
     expect(state.battlers[0]!.mon.hp).toBe(53)
     expect(state.battlers[0]!.takenDmg).toBe(25)
   })
+
+  it('typecalc: Bide unleashing into a Ghost target deals 0 damage', () => {
+    // BattleScript_BideAttack (data/battle_scripts_1.s:7516-7538):
+    // runs accuracycheck, then typecalc, then copyword gBattleMoveDamage sBIDE_DMG, then adjustdamage, datahpupdate.
+    // Bide is Normal type; Gastly is Ghost/Poison (immune to Normal).
+    // Typecalc sets MOVE_RESULT_DOESNT_AFFECT_FOE, so datahpupdate skips the HP update (damage = 0).
+    const userMon = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...FAST_STATS },
+      moves: ['MOVE_BIDE', null, null, null],
+      pp: [10, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    const ghostFoe = monFor('SPECIES_GASTLY', {
+      rawStats: { ...SLOW_STATS },
+      moves: ['MOVE_TACKLE', null, null, null],
+      pp: [35, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    // Draws per Tackle: accuracy (0, hits), crit (1, no crit), roll (0, max roll)
+    const rng = scriptedRng([0, 1, 0, 0, 1, 0])
+    const state = battle(userMon, ghostFoe, rng)
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    // Turn 1: user sets Bide, Gastly hits with Tackle (deals 19 damage)
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    expect(state.battlers[0]!.takenDmg).toBe(19)
+
+    // Turn 2: storing energy, Gastly hits with Tackle (deals 19 damage)
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    expect(state.battlers[0]!.takenDmg).toBe(38)
+
+    // Turn 3: Bide unleashes into Gastly (Ghost type)
+    const out3 = executeTurn(state, [useMove(1, 'MOVE_BIDE'), null], deps)
+    expect(out3.actions[0].cancelledBy).toBeNull()
+    expect(out3.actions[0].missed).toBe(false)
+    expect(out3.actions[0].targetDamage).toBe(0) // deals 0 damage due to type immunity
+    expect(state.battlers[1]!.mon.hp).toBe(100) // Gastly took no damage
+  })
+
+  it('adjustdamage: Bide unleashing into a Focus Sash target leaves it at 1 HP when doubled damage exceeds its HP', () => {
+    // Cmd_adjustdamage (battle_script_commands.c:1645-1673):
+    // Focus Sash clips damage to hp - 1 when hp == maxHp and damage >= hp.
+    const userMon = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...FAST_STATS },
+      moves: ['MOVE_BIDE', null, null, null],
+      pp: [10, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    const sashFoe = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...SLOW_STATS },
+      moves: ['MOVE_TACKLE', null, null, null],
+      pp: [35, 0, 0, 0],
+      hp: 50,
+      maxHp: 50,
+      itemId: 'ITEM_FOCUS_SASH',
+    })
+    // Draws per Tackle: accuracy (0, hits), crit (1, no crit), roll (0, max roll)
+    const rng = scriptedRng([0, 1, 0, 0, 1, 0])
+    const state = battle(userMon, sashFoe, rng)
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    // Turn 1: user sets Bide, Foe hits with Tackle (deals 19 damage)
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    // Turn 2: storing energy, Foe hits with Tackle (deals 19 damage)
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    expect(state.battlers[0]!.takenDmg).toBe(38) // doubled damage = 76 > 50 HP
+
+    // Turn 3: Bide unleashes 76 damage against 50 HP target holding Focus Sash
+    const out3 = executeTurn(state, [useMove(1, 'MOVE_BIDE'), null], deps)
+    expect(out3.actions[0].cancelledBy).toBeNull()
+    expect(out3.actions[0].targetDamage).toBe(49) // clipped to hp - 1 = 49
+    expect(state.battlers[1]!.mon.hp).toBe(1) // leaves target at 1 HP
+    expect(state.battlers[1]!.mon.itemId).toBeNull() // Focus Sash consumed
+  })
+
+  it('adjustdamage: Bide unleashing into an Endure target leaves it at 1 HP when doubled damage exceeds its HP', () => {
+    // Cmd_adjustdamage (battle_script_commands.c:1666-1676):
+    // round.endured clips damage to hp - 1 when damage >= hp.
+    const userMon = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...FAST_STATS },
+      moves: ['MOVE_BIDE', null, null, null],
+      pp: [10, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    const endureFoe = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...SLOW_STATS },
+      moves: ['MOVE_TACKLE', null, null, null],
+      pp: [35, 0, 0, 0],
+      hp: 50,
+      maxHp: 50,
+    })
+    // Draws per Tackle: accuracy (0, hits), crit (1, no crit), roll (0, max roll)
+    const rng = scriptedRng([0, 1, 0, 0, 1, 0])
+    const state = battle(userMon, endureFoe, rng)
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    // Turn 1: user sets Bide, Foe hits with Tackle
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    // Turn 2: storing energy, Foe hits with Tackle
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    expect(state.battlers[0]!.takenDmg).toBe(38)
+
+    // Turn 3: Foe endures (round.endured = true), user unleashes Bide (76 damage)
+    state.battlers[1]!.round.endured = true
+    const out3 = executeTurn(state, [useMove(1, 'MOVE_BIDE'), null], deps)
+    expect(out3.actions[0].cancelledBy).toBeNull()
+    expect(out3.actions[0].targetDamage).toBe(49) // clipped to hp - 1 = 49
+    expect(state.battlers[1]!.mon.hp).toBe(1) // leaves target at 1 HP
+  })
+
+  it('accuracycheck: Bide unleashing misses against semi-invulnerable target', () => {
+    // BattleScript_BideAttack (:7522): accuracycheck BattleScript_MoveMissed, ACC_CURR_MOVE.
+    // In GetTotalAccuracy (battle_script_commands.c:1267-1275), STATUS3_ON_AIR sets prio = ACCURACY_ALWAYS_MISSES (returns 0).
+    // Cmd_accuracycheck (:1433) (Random() % 100) >= 0 is true -> misses.
+    const userMon = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...FAST_STATS },
+      moves: ['MOVE_BIDE', null, null, null],
+      pp: [10, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    const flyingFoe = monFor('SPECIES_MUDKIP', {
+      rawStats: { ...SLOW_STATS },
+      moves: ['MOVE_TACKLE', null, null, null],
+      pp: [35, 0, 0, 0],
+      hp: 100,
+      maxHp: 100,
+    })
+    const rng = scriptedRng([0, 1, 0, 0, 1, 0, 0])
+    const state = battle(userMon, flyingFoe, rng)
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    // Turn 1 & 2: user stores energy from Tackle
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    executeTurn(state, [useMove(1, 'MOVE_BIDE'), useMove(0, 'MOVE_TACKLE')], deps)
+    expect(state.battlers[0]!.takenDmg).toBe(38)
+
+    // Turn 3: target is airborne (semi-invulnerable)
+    state.battlers[1]!.statuses3 |= STATUS3_ON_AIR
+    const out3 = executeTurn(state, [useMove(1, 'MOVE_BIDE'), null], deps)
+    expect(out3.actions[0].missed).toBe(true)
+    expect(out3.actions[0].targetDamage).toBeNull()
+    expect(state.battlers[1]!.mon.hp).toBe(100)
+  })
 })
 
 describe('EFFECT_SKY_DROP (moves Sky Drop and Seismic Toss)', () => {

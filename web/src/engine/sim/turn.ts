@@ -1960,6 +1960,38 @@ function fixedDamageFor(state: BattleState, battlerId: number, targetId: number,
   }
 }
 
+/**
+ * Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673).
+ * Focus Band, Sturdy and Lucky Halo are not modelled here yet.
+ */
+function adjustDamage(
+  state: BattleState,
+  targetId: number,
+  damage: number | null,
+  deps: TurnLoopDeps,
+  options: { isFalseSwipe?: boolean } = {},
+): number | null {
+  if (damage === null) return null
+  const targetBattler = state.battlers[targetId]
+  if (!targetBattler || targetBattler.mon.hp <= 0 || damage < targetBattler.mon.hp) {
+    return damage
+  }
+  const isFalseSwipe = Boolean(options.isFalseSwipe)
+  const targetHoldEffect = deps.grounding.holdEffectOf(targetId)
+  const hasFocusSash =
+    targetHoldEffect === 'HOLD_EFFECT_FOCUS_SASH' &&
+    !isUnnerveAbilityOnOpposingSide(state, targetId, deps.dataContext) &&
+    targetBattler.mon.hp === targetBattler.mon.maxHp
+  if (targetBattler.round.endured || isFalseSwipe || hasFocusSash) {
+    const clipped = Math.max(0, targetBattler.mon.hp - 1)
+    if (hasFocusSash && !targetBattler.round.endured) {
+      targetBattler.mon.itemId = null
+    }
+    return clipped
+  }
+  return damage
+}
+
 const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SEMI_INVULNERABLE',
   'EFFECT_SOLARBEAM',
@@ -2546,9 +2578,94 @@ export function executeAction(
           attackerBattler.takenDmgBy !== undefined && isBattlerAlive(state, attackerBattler.takenDmgBy)
             ? attackerBattler.takenDmgBy
             : (battlerId ^ 1)
-        const bideDamage = attackerBattler.takenDmg * 2
+        const bideTargetOrderIndex = order.battlerByTurnOrder.indexOf(bideTargetId)
+        const bideTargetHasActedThisTurn = bideTargetOrderIndex >= 0 && bideTargetOrderIndex < index
+
+        // accuracycheck BattleScript_MoveMissed, ACC_CURR_MOVE (:7522)
+        // Bide has accuracy 0 in moves.json (MoveList.textproto:1968-1982).
+        // In GetTotalAccuracy (src/battle_script_commands.c:1251-1371), accuracy 0 sets
+        // prio = ACCURACY_HITS_IF_POSSIBLE (returns 101), except against semi-invulnerable targets
+        // (STATUS3_ON_AIR, STATUS3_UNDERGROUND, STATUS3_UNDERWATER, STATUS3_PHANTOM_FORCE; :1267-1275)
+        // where prio is ACCURACY_ALWAYS_MISSES (returns 0).
+        const { inputs: accInputs, gaps: accGaps } = buildAccuracyInputs(
+          state,
+          battlerId,
+          bideTargetId,
+          currentMove.id,
+          bideTargetHasActedThisTurn,
+          deps,
+        )
+        unmodelled.push(...gapsToUnmodelled(accGaps))
+        const accResult = getTotalAccuracy(accInputs)
+        unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+        const missed = state.rng.random16() % 100 >= accResult.accuracy
+        if (missed) {
+          runMoveEndBookkeeping({
+            state,
+            attackerId: battlerId,
+            targetId: bideTargetId,
+            currentMoveId: currentMove.id,
+            chosenMoveId: currentChosenMoveId,
+            deps,
+            noEffect: true,
+            obeys: true,
+            fainted: [],
+          })
+          return {
+            turnOrderIndex: index,
+            battlerId,
+            action: actionKind,
+            skippedBecauseFainted: false,
+            battleOver: false,
+            missed: true,
+            targetId: bideTargetId,
+            targetDamage: null,
+            attackerDamage: null,
+            cancelledBy: null,
+            confusionSelfHitDamage: null,
+            statChanges: null,
+            statusApplied: null,
+            unmodelled,
+            fainted: [],
+          }
+        }
+
+        // typecalc (:7523): CalcTypeEffectivenessMultiplier.
+        // Type immunity (UQ_4_12(0.0), battle_util.c:7900-7902) sets MOVE_RESULT_DOESNT_AFFECT_FOE,
+        // causing Cmd_datahpupdate (:1871) to skip HP update (dealing 0 damage).
+        let bideDamage: number | null = attackerBattler.takenDmg * 2
+        let noEffect = false
+        if (deps.damage?.typeEffectiveness) {
+          const eff = deps.damage.typeEffectiveness(state, battlerId, bideTargetId, currentMove.id, {
+            targetHasActedThisTurn: bideTargetHasActedThisTurn,
+          })
+          unmodelled.push(...eff.unmodelled)
+          if (eff.effectiveness === 0) {
+            bideDamage = 0
+            noEffect = true
+          }
+        }
+
+        // adjustdamage (:7526): Cmd_adjustdamage (battle_script_commands.c:1626-1676)
+        if (bideDamage !== null && bideDamage > 0) {
+          bideDamage = adjustDamage(state, bideTargetId, bideDamage, deps) ?? 0
+        }
+
+        const targetBattler = state.battlers[bideTargetId]
+        const targetHpBefore = targetBattler?.mon.hp ?? 0
         const fainted: number[] = []
-        applyDamage(state, bideTargetId, bideDamage, fainted, deps, battlerId)
+        if (bideDamage !== null && bideDamage > 0) {
+          applyDamage(state, bideTargetId, bideDamage, fainted, deps, battlerId)
+        }
+        const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
+        if (targetBattler && hpDealt > 0) {
+          targetBattler.round.physicalDmg = hpDealt
+          targetBattler.turn.physicalDmg = hpDealt
+          targetBattler.round.physicalBattlerId = battlerId
+          targetBattler.turn.physicalBattlerId = battlerId
+          targetBattler.round.damaged = true
+        }
+
         runMoveEndBookkeeping({
           state,
           attackerId: battlerId,
@@ -2556,7 +2673,7 @@ export function executeAction(
           currentMoveId: currentMove.id,
           chosenMoveId: currentChosenMoveId,
           deps,
-          noEffect: false,
+          noEffect,
           obeys: true,
           fainted,
         })
@@ -3492,28 +3609,7 @@ export function executeAction(
     // swipe, the target endured, or Focus Band/Sash, Sturdy or Lucky Halo fired. Focus Band, Sturdy and Lucky Halo are
     // not modelled here yet, so only the two false-swipe sources and Endure/Focus Sash remain.
     const isFalseSwipe = moveEffect === 'EFFECT_FALSE_SWIPE' || Boolean(state.processingExtraAttacks && state.currentExtraAttack?.falseSwipe)
-    const targetHoldEffect = deps.grounding.holdEffectOf(currentTargetId)
-    const hasFocusSash =
-      targetHoldEffect === 'HOLD_EFFECT_FOCUS_SASH' &&
-      !isUnnerveAbilityOnOpposingSide(state, currentTargetId, deps.dataContext) &&
-      targetBattler &&
-      targetBattler.mon.hp === targetBattler.mon.maxHp
-    if (
-      targetDamage !== null &&
-      targetBattler &&
-      targetBattler.mon.hp > 0 &&
-      (targetBattler.round.endured || isFalseSwipe || hasFocusSash) &&
-      targetDamage >= targetBattler.mon.hp
-    ) {
-      targetDamage = Math.max(0, targetBattler.mon.hp - 1)
-      // :1683-1688: FOE_ENDURED takes priority over FOE_HUNG_ON, so a target that both endured and holds a fresh
-      // Focus Sash does not consume the sash. BattleScript_HangedOnMsg (data/battle_scripts_1.s:10963-10964) then
-      // removes the item only `jumpifnoholdeffect BS_TARGET, HOLD_EFFECT_FOCUS_SASH` -- regardless of which of the
-      // three clipping reasons fired, False Swipe included.
-      if (hasFocusSash && !targetBattler.round.endured) {
-        targetBattler.mon.itemId = null
-      }
-    }
+    targetDamage = adjustDamage(state, currentTargetId, targetDamage, deps, { isFalseSwipe })
 
     // Check damage reducing berries (battle_script_commands.c:1693-1697)
     if (berryReduced && targetBattler) {
