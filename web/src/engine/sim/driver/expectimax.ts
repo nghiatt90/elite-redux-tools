@@ -657,19 +657,32 @@ function activeMonGrounded(types: readonly string[]): boolean {
   return !types.includes('FLYING')
 }
 
-/** Heal/chip ticks left on a terrain. ENDTURN_GRASSY_TERRAIN, battle_util.c:
- * 2102-2113 (and ENDTURN_TOXIC_TERRAIN :2124-2146): `!permanent &&
- * !started.terrain && --terrainTimer == 0` ends it, but the heal/damage loop
- * runs afterwards, so the clearing tick still heals/chips. A temporary terrain
- * therefore ticks `terrainTimer` more times when not started, and
- * `terrainTimer + 1` when the just-set turn is included. `countdownBlocked`
- * is Toxic Terrain's `!IsAbilityOnField(ABILITY_STENCH)` gate (:2127), which
- * freezes the timer so the full horizon stays. MODEL CHOICE: capped by
- * STATUS_HORIZON_TURNS. */
-function terrainTicks(state: BattleState, countdownBlocked: boolean): number {
+/** Heal/chip ticks left on a terrain. This is GRASSY TERRAIN's timing only:
+ * ENDTURN_GRASSY_TERRAIN, battle_util.c:2102-2113, does `!permanent &&
+ * !started.terrain && --terrainTimer == 0` and clears the bit, but the heal
+ * loop that follows is BattleScript_GrassyTerrainHeals ->
+ * VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS (battle_script_commands.c:6876-6886)
+ * and never tests the field bit -- so Grassy still heals on the clearing tick.
+ * A temporary terrain therefore ticks `terrainTimer` more times when not
+ * started, and `terrainTimer + 1` when the just-set turn is included
+ * (`clearingTickActs = true`).
+ *
+ * TOXIC TERRAIN differs, ENDTURN_TOXIC_TERRAIN, battle_util.c:2124-2146: the
+ * countdown and the `gFieldStatuses &= ~STATUS_FIELD_TOXIC_TERRAIN` clear
+ * (:2128-2133) run FIRST, and the damage loop's
+ * `FILTER(IsBattlerTerrainAffected(i, STATUS_FIELD_TOXIC_TERRAIN))`
+ * (:2134-2139 -> IsTerrainActive, :4901-4903) tests the field bit -- already
+ * gone on the clearing tick. So Toxic chips `terrainTimer - 1` times when not
+ * started and `terrainTimer` times when started (`clearingTickActs = false`).
+ *
+ * `countdownBlocked` is Toxic Terrain's `!IsAbilityOnField(ABILITY_STENCH)`
+ * gate (:2127), which freezes the timer so the full horizon stays.
+ * MODEL CHOICE: capped by STATUS_HORIZON_TURNS. */
+function terrainTicks(state: BattleState, countdownBlocked: boolean, clearingTickActs: boolean): number {
   if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) || countdownBlocked) return STATUS_HORIZON_TURNS
   const timer = state.field.timers.terrainTimer
-  const ticks = state.field.timers.started.terrain ? timer + 1 : timer
+  const started = state.field.timers.started.terrain
+  const ticks = started ? timer + (clearingTickActs ? 1 : 0) : timer - (clearingTickActs ? 0 : 1)
   return Math.max(0, Math.min(ticks, STATUS_HORIZON_TURNS))
 }
 
@@ -729,7 +742,7 @@ function terrainMoveTypeBurden(state: BattleState, types: Set<string>): number {
   else if (terrain === STATUS_FIELD_MISTY_TERRAIN) terrainType = 'FAIRY'
   else if (terrain === STATUS_FIELD_TOXIC_TERRAIN) terrainType = 'POISON'
   if (!terrainType || !types.has(terrainType)) return 0
-  return -(TERRAIN_BOOST_VALUE * terrainTicks(state, false))
+  return -(TERRAIN_BOOST_VALUE * terrainTicks(state, false, true))
 }
 
 /** The per-side field-condition burden from weather, terrains and the weather/
@@ -775,7 +788,7 @@ function sideFieldConditionBurden(state: BattleState, side: 0 | 1, moveLookup?: 
   ) {
     const perTick = Math.max(1, Math.trunc(mon.maxHp / 16))
     const missing = mon.maxHp - mon.hp
-    burden -= Math.min(terrainTicks(state, false) * perTick, missing) / mon.maxHp
+    burden -= Math.min(terrainTicks(state, false, true) * perTick, missing) / mon.maxHp
   }
 
   // 3. Toxic Terrain chip. ENDTURN_TOXIC_TERRAIN, battle_util.c:2124-2146 and
@@ -799,7 +812,11 @@ function sideFieldConditionBurden(state: BattleState, side: 0 | 1, moveLookup?: 
       !mon.types.includes('POISON') &&
       !mon.types.includes('STEEL')
     ) {
-      const ticks = terrainTicks(state, isAbilityOnField(state, 'ABILITY_STENCH'))
+      // The clearing tick does NOT chip: the bit is already cleared when the
+      // damage loop's IsBattlerTerrainAffected filter runs (:2128-2133 vs
+      // :2134-2139), so Toxic uses `timer - 1` / `timer`, not Grassy's
+      // `timer` / `timer + 1`.
+      const ticks = terrainTicks(state, isAbilityOnField(state, 'ABILITY_STENCH'), false)
       const perTick = Math.max(1, Math.trunc(mon.maxHp / 16))
       burden += Math.min(ticks * perTick, mon.hp) / mon.maxHp
     }

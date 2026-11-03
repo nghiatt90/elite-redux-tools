@@ -333,19 +333,54 @@ describe('cycle 142 - toxic terrain chip', () => {
   // (`hpfractiontodamage BS_STACK_1, 16`). FILTER chain: alive, not Magic
   // Guard, IsBattlerTerrainAffected, not AbilityBlocksToxicTerrain, not
   // Poison, not Steel. maxHP/16, capped at the current HP.
+  //
+  // Unlike Grassy Terrain, the CLEARING tick does not chip: the countdown and
+  // the `gFieldStatuses &= ~STATUS_FIELD_TOXIC_TERRAIN` clear (:2128-2133) run
+  // first, and the damage loop's IsBattlerTerrainAffected filter (:2134-2139)
+  // tests the field bit, which is already gone. So a non-permanent terrain
+  // chips `terrainTimer - 1` times when not started (`terrainTimer` when the
+  // just-set turn is included), capped at STATUS_HORIZON_TURNS = 3.
   const isolatePlayer = (s: BattleState) => patchMon(s, 1, 0, { types: POISON }) // foe immune
 
-  it('chipping the player -> 20/320 = 0.0625 (one tick)', () => {
+  it('timer 2 not started -> 1 chip * 20/320 = 0.0625', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     isolatePlayer(s)
-    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 1, false)
+    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 2, false)
     expect(statusScore(s)).toBeCloseTo(-0.0625, 10)
   })
 
-  it('3 ticks -> 3 * 20/320 = 0.1875', () => {
+  it('timer 1 not started -> the clearing tick is the first tick -> 0', () => {
+    const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
+    isolatePlayer(s)
+    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 1, false)
+    expect(statusScore(s)).toBe(0)
+  })
+
+  it('timer 5 not started -> 4 chips capped to 3 -> 3 * 20/320 = 0.1875', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     isolatePlayer(s)
     setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 5, false)
+    expect(statusScore(s)).toBeCloseTo(-0.1875, 10)
+  })
+
+  it('timer 4 not started -> 3 chips -> 3 * 20/320 = 0.1875', () => {
+    const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
+    isolatePlayer(s)
+    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 4, false)
+    expect(statusScore(s)).toBeCloseTo(-0.1875, 10)
+  })
+
+  it('timer 3 not started -> 2 chips -> 2 * 20/320 = 0.125', () => {
+    const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
+    isolatePlayer(s)
+    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 3, false)
+    expect(statusScore(s)).toBeCloseTo(-0.125, 10)
+  })
+
+  it('timer 3 with started.terrain -> 3 chips -> 3 * 20/320 = 0.1875', () => {
+    const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
+    isolatePlayer(s)
+    setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 3, true)
     expect(statusScore(s)).toBeCloseTo(-0.1875, 10)
   })
 
@@ -369,8 +404,9 @@ describe('cycle 142 - toxic terrain chip', () => {
 
   // ENDTURN_TOXIC_TERRAIN's `!IsAbilityOnField(ABILITY_STENCH)` gate on the
   // timer's DECREMENT (:2127): with Stench on the field the timer never ticks,
-  // so the term uses the full model horizon. A one-turn timer would otherwise
-  // chip once (0.0625); with the foe holding Stench it chips 3 times.
+  // so the term uses the full model horizon. A one-turn timer not started would
+  // otherwise chip 0 times (the first tick clears the terrain before the damage
+  // loop); with the foe holding Stench it chips 3 times.
   it('Stench on the field freezes the countdown -> 3 ticks -> 0.1875', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     patchMon(s, 1, 0, { abilities: abilities('ABILITY_STENCH') })
