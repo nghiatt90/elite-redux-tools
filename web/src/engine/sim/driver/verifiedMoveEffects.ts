@@ -18,6 +18,7 @@ const CYCLE130 = 'web/src/engine/sim/cycle130CopyEffects.test.ts'
 const CYCLE131 = 'web/src/engine/sim/cycle131UncategorisedEffects.test.ts'
 const CYCLE132 = 'web/src/engine/sim/cycle132UncategorisedEffects.test.ts'
 const CYCLE133 = 'web/src/engine/sim/cycle133UncategorisedEffects.test.ts'
+const CYCLE134 = 'web/src/engine/sim/cycle134UncategorisedEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -322,6 +323,17 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_WATERLOG',
         'EFFECT_SHOWTIME',
       ].map((effect): [string, string] => [effect, CYCLE133]),
+    )
+    .concat(
+      [
+        'EFFECT_SPICY_EXTRACT',
+        'EFFECT_TAKE_HEART',
+        'EFFECT_CLANGOROUS_SOUL',
+        'EFFECT_FILLET_AWAY',
+        'EFFECT_TAR_SHOT',
+        'EFFECT_DOODLE',
+        'EFFECT_SPECTRAL_FLAME',
+      ].map((effect): [string, string] => [effect, CYCLE134]),
     ),
 )
 
