@@ -14,4 +14,5 @@
 - [isGrounded is a baseline, not an answer](project_isgrounded-is-a-baseline-not-an-answer.md) — calculate.ts re-applies Levitate/Gravity on top; check scenario fields against their doc, not their name.
 - [Gap versus value: the battle-start test](project_gap-versus-value-battle-start-test.md) — "can a real battle-start source set this?" is the project standard; statStages and moveSlotPp are gaps.
 - [Engine note leaks and scratch traces](project_engine-note-leaks-and-scratch-traces.md) — calculate.ts notes leak via typeEffectiveness/AI callers; trace audits from scratchpad with vitest --dir.
+- [Status1 tempo facts](project_status1-tempo-facts.md) — sleep counter N = N-1 lost actions; freeze thaw is absorbing; frostbite halves SpA (:7145).
 - [Derived authority is not authority](feedback_derived-authority-is-not-authority.md) — self-referential tests and copied citations: ask whether a check hit the source or something that had.
