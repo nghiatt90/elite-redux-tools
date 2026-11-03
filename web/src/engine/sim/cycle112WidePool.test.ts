@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { AUDIT_ALLOWLIST } from './driver/auditAllowlist'
 import { loadSimData } from './driver/loadSimData'
 import { candidateMoves, defaultSet, neighbours, UTILITY_MOVES } from './driver/solver'
 import { isEligibleMove, isGatedMove, VERIFIED_MOVE_EFFECTS } from './driver/verifiedMoveEffects'
@@ -174,16 +175,24 @@ describe('cycle 112 wide pool gate', () => {
     expect(neighbours(data, team, 0, stones, true).length).toBe(base.length - dropped * 4)
   })
 
-  // replaced by the auditAllowlist.ts import in cycle 136
-  const ALLOWLISTED_EFFECTS = new Set<string>()
-
-  it.skip('every gated move effect key is verified or allowlisted', () => {
+  // Reads SHIPPED, not the live map: the beforeEach above clears it. Known gap at the pinned data:
+  // the synthetic NONE key (MOVE_NONE, MOVE_TEMPEST_STORM -- the only gated moves with no `effect`,
+  // which the codegen emits as EFFECT_HIT, the proto3 default) is in neither registry, so this
+  // currently reports [ 'NONE' ].
+  it('every gated move effect key is verified or allowlisted', () => {
+    const allowed = new Set(AUDIT_ALLOWLIST.map((a) => a.effect))
     const missing = new Set<string>()
     for (const m of data.movesById.values()) {
       if (m.power && m.power > 1) continue
       const key: string = m.effect ?? 'NONE'
-      if (!VERIFIED_MOVE_EFFECTS.has(key) && !ALLOWLISTED_EFFECTS.has(key)) missing.add(key)
+      if (!SHIPPED.has(key) && !allowed.has(key)) missing.add(key)
     }
     expect([...missing]).toEqual([])
+  })
+
+  it('every allowlisted effect names a key that exists in the move data', () => {
+    const effects = new Set<string>(['NONE'])
+    for (const m of movesById.values()) if (m.effect) effects.add(m.effect)
+    for (const a of AUDIT_ALLOWLIST) expect(effects.has(a.effect), a.effect).toBe(true)
   })
 })
