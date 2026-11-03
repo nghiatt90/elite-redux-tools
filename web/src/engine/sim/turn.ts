@@ -1456,11 +1456,10 @@ function clearRecurringNightmareRevive(
  * and reporting gaps for abilities requiring unmodelled state (Toxic Spill, Trash Heap,
  * Generator, Energized, Zero to Hero, Retriever, Strikeout).
  *
- * NOT ported, gapped by name only when reached: Pursuit-style `jumpifnopursuitswitchdmg`
- * branch (an opposing Pursuit user damaging the switching mon before it leaves) --
- * Pursuit's own switch-detection needs `defenderIsSwitching`, which aiCalcDamage.ts's
- * own header already notes is hardcoded false. Hazards on entry stay unreachable, same
- * precedent as switchIn.ts's own header.
+ * Ported: `jumpifnopursuitswitchdmg` (an opposing Pursuit user's pre-switch hit) --
+ * see `findPursuitAttacker` / `runPursuitPreSwitchHit`. aiCalcDamage.ts still hardcodes
+ * `defenderIsSwitching: false`, which is the AI's damage estimate, not this branch.
+ * Hazards on entry stay unreachable, same precedent as switchIn.ts's own header.
  */
 export const SWITCH_OUT_HOOK_ABILITIES: ReadonlySet<string> = new Set([
   'ABILITY_REGENERATOR',
@@ -1704,6 +1703,10 @@ export function performSwitchAction(
     outgoingSlot.status1 = battler.mon.status1
     // Cmd_ppreduce emits REQUEST_PP_DATA_BATTLE, so the party mon carries the spent PP.
     outgoingSlot.pp = [...battler.mon.pp] as typeof outgoingSlot.pp
+    // UpdateBattlerItem ends with BtlController_EmitSetMonData(REQUEST_HELDITEM_BATTLE)
+    // (battle_script_commands.c:2203-2224), so any item the battler gained, lost or recycled
+    // (Fetch's tryrecycleitem, a consumed berry) is already on the party mon when it leaves.
+    outgoingSlot.itemId = battler.mon.itemId
   }
 
   // Cmd_switchoutabilities (battle_scripts_1.s:7211, battle_script_commands.c:12102)
@@ -1712,6 +1715,9 @@ export function performSwitchAction(
   if (outgoingSlot) {
     outgoingSlot.hp = battler.mon.hp
     outgoingSlot.status1 = battler.mon.status1
+    // Kept consistent with the block above: an exit hook that healed (Regenerator) must not
+    // resurrect a stale item write either.
+    outgoingSlot.itemId = battler.mon.itemId
   }
 
   // State carry-over capture for Baton Pass and Shed Tail
@@ -2001,6 +2007,109 @@ const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SKY_DROP',
 ])
 
+/** The Pursuit user a chosen switch has to survive before it leaves, resolved by
+ * `findPursuitAttacker` from the CHOSEN actions (the C reads `gChosenActionByBattler`, not
+ * `gActionsByTurnOrder`). */
+export interface PursuitSwitchHit {
+  attackerId: number
+  action: ChosenAction
+}
+
+/**
+ * Cmd_jumpifnopursuitswitchdmg (src/battle_script_commands.c:11294-11325), reached from
+ * BattleScript_ActionSwitch (data/battle_scripts_1.s:7196-7209) right after STRINGID_RETURNMON.
+ *
+ * Singles picks the one opposing battler (`multiHitCounter == 1` -> the left foe, :11295-11305).
+ * The hit fires only when ALL of these hold (:11310-11313):
+ *   - `gChosenActionByBattler[foe] == B_ACTION_USE_MOVE`            -> the foe chose a move
+ *   - `gBattlerAttacker == moveTarget[foe]`                        -> that move targets the switcher
+ *   - the foe has neither STATUS1_SLEEP nor STATUS1_FREEZE
+ *   - the switcher's hp is nonzero
+ *   - NOT (`GetAbilityState(foe, ABILITY_TRUANT)` and the move is not status)
+ *   - `gChosenMoveByBattler[foe] == MOVE_PURSUIT`
+ * The C compares `moveTarget`, which is the selection-time target, so this reads the chosen action
+ * rather than the slot's current action kind: a foe whose slot was already changed to
+ * B_ACTION_TRY_FINISH still satisfies it.
+ */
+export function findPursuitAttacker(
+  state: BattleState,
+  switcherId: number,
+  actions: (ChosenAction | null)[],
+): PursuitSwitchHit | null {
+  const foeId = switcherId ^ 1
+  const foe = state.battlers[foeId]
+  const switcher = state.battlers[switcherId]
+  const foeAction = actions[foeId]
+  if (!foe || !switcher || !foeAction || foeAction.action !== 'USE_MOVE' || !foeAction.chosenMove) return null
+  if (foeAction.target !== switcherId) return null
+  if (hasFlag(foe.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) return null
+  if (switcher.mon.hp === 0) return null
+  const truantSlot = findAbilitySlot(foe.mon.abilities, 'ABILITY_TRUANT')
+  if (truantSlot !== -1 && foe.volatiles.abilityState[truantSlot] !== 0 && foeAction.chosenMove.split !== 'STATUS') return null
+  if (foeAction.chosenMove.id !== 'MOVE_PURSUIT') return null
+  return { attackerId: foeId, action: foeAction }
+}
+
+/**
+ * BattleScript_PursuitDmgOnSwitchOut (data/battle_scripts_1.s:7235-7259), run with the Pursuit user
+ * as gBattlerAttacker and the switching mon as gBattlerTarget (`swapattackerwithtarget`, :7203-7205).
+ *
+ * There is NO attackcanceler and NO accuracycheck: the hit never misses and no canceller (sleep,
+ * paralysis, flinch, Protect) runs. `ppreduce` still spends one PP; `damagecalc` + `adjustdamage`
+ * run once, so the resolver draws exactly one crit roll and one damage roll. `tryfaintmon BS_TARGET`
+ * follows. `moveendfromto MOVEEND_ABILITIES, MOVEEND_CHOICE_MOVE` and the `getexp` tail are not
+ * run here -- see REPORT.md.
+ */
+function runPursuitPreSwitchHit(
+  state: BattleState,
+  switcherId: number,
+  pursuit: PursuitSwitchHit,
+  order: TurnOrder,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): { damage: number | null; fainted: number[] } {
+  const attackerId = pursuit.attackerId
+  const attacker = state.battlers[attackerId]
+  const chosenMove = pursuit.action.chosenMove
+  if (!attacker || !chosenMove) return { damage: null, fainted: [] }
+
+  // `gActionsByTurnOrder[i] = B_ACTION_TRY_FINISH` for the foe's slot (:11317-11319): its chosen
+  // move has now been used, so it must not act again later in the turn.
+  const attackerSlot = order.battlerByTurnOrder.indexOf(attackerId)
+  if (attackerSlot !== -1) order.actionsByTurnOrder[attackerSlot] = 'FINISHED'
+
+  // ppreduce (:7238). gCurrentMove is MOVE_PURSUIT, so the move and its effect are the chosen ones.
+  deductPp(state, attackerId, chosenMove.id, chosenMove.effect, unmodelled, deps)
+
+  // damagecalc + adjustdamage (:7239-7240). defenderIsSwitching is TRUE: the target's slot action is
+  // still SWITCH, which is what doubles Pursuit's power (battle_util.c:6860-6861).
+  const resolution = deps.damage.resolve(state, attackerId, switcherId, pursuit.action, {
+    targetHasActedThisTurn: false,
+    defenderIsSwitching: true,
+  })
+  unmodelled.push(...resolution.unmodelled)
+  const targetDamage = adjustDamage(state, switcherId, resolution.targetDamage, deps)
+
+  // tryfaintmon BS_TARGET, FALSE, NULL (:7249).
+  const fainted: number[] = []
+  applyDamage(state, switcherId, targetDamage, fainted, deps, attackerId)
+
+  // trysetdestinybondtohappen (:7204), TrySetDestinyBondToHappen (battle_script_commands.c:10948-10954):
+  // with gBattlerAttacker now the Pursuit user, a switching mon holding STATUS2_DESTINY_BOND takes the
+  // attacker with it when it faints (Cmd_tryfaintmon, :3244-3248). Mirrors the inline Destiny Bond block
+  // in the normal damage path below.
+  const switcher = state.battlers[switcherId]
+  const attackerAlive = state.battlers[attackerId]
+  if (fainted.includes(switcherId) && switcher && attackerAlive && attackerAlive.mon.hp > 0 && hasFlag(switcher.mon.status2, STATUS2_DESTINY_BOND)) {
+    const bondHp = attackerAlive.mon.hp
+    clearRecurringNightmareRevive(state, attackerId, deps)
+    clearRecurringNightmareRevive(state, switcherId, deps)
+    applyDamage(state, attackerId, bondHp, fainted, deps)
+  }
+
+  return { damage: targetDamage, fainted }
+}
+
 export function executeAction(
   state: BattleState,
   battlerId: number,
@@ -2009,6 +2118,9 @@ export function executeAction(
   index: number,
   order: TurnOrder,
   deps: TurnLoopDeps,
+  /** BattleScript_ActionSwitch's `jumpifnopursuitswitchdmg` (:7202), resolved by the caller from the
+   * foe's CHOSEN action -- executeAction only receives this battler's own action. */
+  pursuit?: PursuitSwitchHit | null,
 ): ActionOutcome {
   // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
   // does not act. Its slot is still consumed; the action is simply finished.
@@ -2062,8 +2174,26 @@ export function executeAction(
   // USE_MOVE slot (SWITCH actions are grouped first by
   // setActionsAndBattlersTurnOrder; see performSwitchAction's own header).
   if (actionKind === 'SWITCH') {
+    // BattleScript_ActionSwitch: `jumpifnopursuitswitchdmg` (:7202) runs BEFORE the switch-out. The C
+    // does not skip BattleScript_DoSwitchOut when the hit faints the switching mon, so the switch runs
+    // either way; the fainted mon's party slot is written with hp 0 and it is replaced by the incoming
+    // mon in the same action (see REPORT.md).
+    const pursuitUnmodelled: string[] = []
+    let pursuitDamage: number | null = null
+    let pursuitFainted: number[] = []
+    if (pursuit) {
+      const hit = runPursuitPreSwitchHit(state, battlerId, pursuit, order, deps, pursuitUnmodelled)
+      pursuitDamage = hit.damage
+      pursuitFainted = hit.fainted
+    }
     const switchUnmodelled = performSwitchAction(state, battlerId, deps)
-    return { ...blank, skippedBecauseFainted: false, battleOver: false, unmodelled: switchUnmodelled }
+    return {
+      ...blank,
+      skippedBecauseFainted: false,
+      battleOver: false,
+      ...(pursuit ? { targetId: battlerId, targetDamage: pursuitDamage, fainted: pursuitFainted } : {}),
+      unmodelled: [...pursuitUnmodelled, ...switchUnmodelled],
+    }
   }
 
   if (actionKind !== 'USE_MOVE' || !action || action.chosenMove === null) {
@@ -4416,7 +4546,10 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // iteration already did, and no action body runs.
     if (actionKind === 'FINISHED') continue
 
-    const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps)
+    // BattleScript_ActionSwitch's jumpifnopursuitswitchdmg reads the FOE's chosen action, which this
+    // battler's own `action` cannot supply, so resolve it here where the whole actions array is in scope.
+    const pursuit = actionKind === 'SWITCH' ? findPursuitAttacker(state, battlerId, actions) : null
+    const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps, pursuit)
     outcomes.push(outcome)
     // Drain queued extra attacks, then queued switches, immediately after the action finishes,
     // matching HandleAction_TryFinish -> TryPerformExtraAction (battle_util.c:751-816).

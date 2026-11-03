@@ -12185,7 +12185,8 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_SHELL_TRAP' ||
     // Pursuit, Grassy Glide and Revelation Dance are legacy_config "BattleScript_EffectHit" in er-config MoveBehaviorConfigList.textproto
     // (:614-617, :1694-1696, :1531-1533): a plain hit. Their rules live elsewhere (basePower.ts, turnOrder.ts:396, calculate.ts);
-    // Pursuit's switch interception keeps its own note (damageResolver.ts, battle_script_commands.c:11294-11325, s:7197-7209).
+    // Pursuit's pre-switch interception lives in turn.ts (findPursuitAttacker / runPursuitPreSwitchHit,
+    // battle_script_commands.c:11294-11325, s:7197-7209), not in this hit path.
     moveEffect === 'EFFECT_PURSUIT' ||
     moveEffect === 'EFFECT_GRASSY_GLIDE' ||
     moveEffect === 'EFFECT_REVELATION_DANCE' ||

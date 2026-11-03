@@ -7186,10 +7186,28 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 27: MOVEEND_CHANGED_ITEMS (:4656-4665)
-  for (const [battlerId, itemId] of changedItems) {
+  // C: for (i = 0; i < gBattlersCount; i++) if (gBattleStruct->changedItems[i] != 0) {
+  //      gBattleMons[i].item = gBattleStruct->changedItems[i]; gBattleStruct->changedItems[i] = 0;
+  //      gTurnStructs[i].shouldTriggerSwitchItem = FALSE; }
+  // One C array, many writers: SetRandomTempBerry parks the held item at script time
+  // (abilities.cc:7233-7234, Concoction / Craving), Cud Chew parks it in its end-turn hook
+  // (abilities.cc:7201), and Thief steals into it at Case 20. The move-end Map is applied
+  // AFTER the per-battler field so the later writer wins, as the single array does: Case 20's
+  // steal is always later than any script-time or end-turn park.
+  const restoreChangedItem = (battlerId: number, itemId: string): void => {
     const holder = state.battlers[battlerId]
-    if (holder) holder.mon.itemId = itemId
+    if (!holder) return
+    holder.mon.itemId = itemId
+    holder.turn.shouldTriggerSwitchItem = false
   }
+  for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+    const holder = state.battlers[battlerId]
+    const parked = holder?.changedItem
+    if (!holder || parked == null || parked === 'ITEM_NONE') continue
+    holder.changedItem = null
+    restoreChangedItem(battlerId, parked)
+  }
+  for (const [battlerId, itemId] of changedItems) restoreChangedItem(battlerId, itemId)
 
   // Case 28: MOVEEND_DEFROST (:4444-4456)
   // Frostbite thaw

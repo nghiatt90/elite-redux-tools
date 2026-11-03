@@ -181,7 +181,11 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
 
   if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
   if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
-  if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
+  // The sim does model the pre-switch Pursuit hit (turn.ts:findPursuitAttacker), but AI_CalcDamage has no
+  // knowledge of the target's chosen action, so this estimate still scores Pursuit at its 50 base power
+  // rather than the doubled 100 (battle_util.c:6860-6861).
+  if (move.effect === 'EFFECT_PURSUIT')
+    unmodelled.push("defenderIsSwitching is not modelled by the AI damage estimate, which cannot see the target's chosen action")
   if (move.effect === 'EFFECT_MAGNITUDE') {
     unmodelled.push('magnitudeTier is averaged across all magnitude tiers (calculateMoveDamage\'s own null-tier distribution) rather than drawn -- AI_CalcDamage has no real roll for this port to reuse')
   }
