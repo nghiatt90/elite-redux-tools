@@ -908,7 +908,9 @@ function handleHowl(ctx: MoveEffectContext): ActionOutcome {
 /**
  * BattleScript_EffectMeditate, data/battle_scripts_1.s:6714-6737.
  * Meditate raises user's Attack and Special Defense by 1 stage.
- * C lines 6718-6719 gate by spAtkStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE.
+ * C lines 6718-6719 gate by spAtkStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE;
+ * if both are at MAX_STAT_STAGE it branches to BattleScript_CantRaiseMultipleStats (:6765-6770)
+ * setting MOVE_RESULT_FAILED (missed).
  */
 function handleMeditate(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
@@ -919,35 +921,37 @@ function handleMeditate(ctx: MoveEffectContext): ActionOutcome {
   const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
   const spDefStage = battler.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
 
-  if (spAtkStage < MAX_STAT_STAGE || spDefStage < MAX_STAT_STAGE) {
-    const r1 = changeStatBuffsImplicit(
-      state,
-      battlerId,
-      battlerId,
-      1,
-      STAT_ATK,
-      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
-      true,
-      deps,
-      unmodelled,
-      action.chosenMove!.id,
-    )
-    if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
-
-    const r2 = changeStatBuffsImplicit(
-      state,
-      battlerId,
-      battlerId,
-      1,
-      STAT_SPDEF,
-      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
-      true,
-      deps,
-      unmodelled,
-      action.chosenMove!.id,
-    )
-    if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: r2.delta })
+  if (spAtkStage >= MAX_STAT_STAGE && spDefStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { missed: true, statChanges: [] })
   }
+
+  const r1 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_ATK,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (r1.delta !== 0) statChanges.push({ battlerId, stat: STAT_ATK, change: r1.delta })
+
+  const r2 = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    1,
+    STAT_SPDEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (r2.delta !== 0) statChanges.push({ battlerId, stat: STAT_SPDEF, change: r2.delta })
 
   return outcome(ctx, { statChanges })
 }

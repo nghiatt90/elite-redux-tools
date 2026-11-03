@@ -135,7 +135,8 @@ const CUSTOM_MOVE_DAMAGE: Record<string, (baseDamage: number, ctx: DamageContext
   // :190-193
   EFFECT_STORED_POWER: (baseDamage, ctx) => baseDamage + ctx.attacker.positiveStatStageCount * 20,
 
-  // :195-201. NOTE (real upstream bug, ported faithfully): when the speed ratio is
+  // src/script_conditions.cc:198-205 (CustomMoveDamage<EFFECT_ELECTRO_BALL>).
+  // NOTE (real upstream bug, ported faithfully): when the speed ratio is
   // out of the table's range, the C returns the table's *length* (4) directly rather
   // than indexing it (which would be 150) -- `return ARRAY_COUNT(...) - 1;` instead of
   // `return table[ARRAY_COUNT(...) - 1];`. A base power of 4, not 150.
@@ -146,7 +147,7 @@ const CUSTOM_MOVE_DAMAGE: Record<string, (baseDamage: number, ctx: DamageContext
     return table[ratio]
   },
 
-  // :203-207
+  // src/script_conditions.cc:208-212 (CustomMoveDamage<EFFECT_GYRO_BALL>)
   EFFECT_GYRO_BALL: (_baseDamage, ctx) => {
     const power = idiv(25 * ctx.defender.speed, ctx.attacker.speed) + 1
     return Math.min(power, 150)

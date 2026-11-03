@@ -16,6 +16,7 @@ const CYCLE128 = 'web/src/engine/sim/cycle128SwitchEffects.test.ts'
 const CYCLE129 = 'web/src/engine/sim/cycle129CopyEffects.test.ts'
 const CYCLE130 = 'web/src/engine/sim/cycle130CopyEffects.test.ts'
 const CYCLE131 = 'web/src/engine/sim/cycle131UncategorisedEffects.test.ts'
+const CYCLE132 = 'web/src/engine/sim/cycle132UncategorisedEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -288,6 +289,22 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_VENOM_DRENCH',
         'EFFECT_MYSTIC_DANCE',
       ].map((effect): [string, string] => [effect, CYCLE131]),
+    )
+    .concat(
+      [
+        'EFFECT_SWEET_KISS',
+        'EFFECT_COACHING',
+        'EFFECT_BARRIER',
+        'EFFECT_MUD_SPORT',
+        'EFFECT_KARMA',
+        'EFFECT_WATER_SPORT',
+        'EFFECT_GYRO_BALL',
+        'EFFECT_ELECTRO_BALL',
+        'EFFECT_MEDITATE',
+        'EFFECT_CALTROPS',
+        'EFFECT_HOWL',
+        'EFFECT_TEETER_DANCE',
+      ].map((effect): [string, string] => [effect, CYCLE132]),
     ),
 )
 
