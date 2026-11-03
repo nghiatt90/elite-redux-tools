@@ -131,7 +131,7 @@ import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrde
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext } from './dataContext'
-import { gapsToUnmodelled } from './bridge'
+import { gapsToUnmodelled, weatherFromBitfield } from './bridge'
 import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
@@ -1139,7 +1139,7 @@ export function handleProtectLikeMoveEnd(
     const dynamicWeatherBall =
       moveData.effect === 'EFFECT_WEATHER_BALL'
         ? weatherBallType(
-            state.field.weather,
+            weatherFromBitfield(state.field.weather).weather,
             battlerHasSimAbility(state, attacker, 'ABILITY_AURORA_BOREALIS', false, attackerId, false, deps.dataContext),
           )
         : null
