@@ -137,7 +137,7 @@ import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
 import { getParentalBondMultiplier, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
-import { weatherBallType } from '../basePower'
+import { isUnmodelledBasePowerNote, weatherBallType } from '../basePower'
 import type { ParentalBondTrigger } from '../abilities/types'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
@@ -554,7 +554,7 @@ export interface DamageResolver {
   confusionSelfHit?(state: BattleState, battlerId: number, power: number): { damage: number | null; unmodelled: string[] }
   /** GetMoveTypeInternal's answer for one move use -- the value
    * gBattleStruct->dynamicMoveType ends up holding, i.e. the move's type AFTER
-   * SetTypeBeforeUsingMove (battle_main.c:5215-5260) has applied the whole
+   * SetTypeBeforeUsingMove (battle_main.c:5231-5253) has applied the whole
    * resolution: Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Fling
    * gem, Revelation Dance/Spit Up, Synchronoise/Ivy Cudgel, Terrain Pulse, Ion
    * Deluge/Electrify/Plasma Fists and the onMoveType ("-ate") abilities -- in
@@ -1148,7 +1148,7 @@ export function handleProtectLikeMoveEnd(
     if (!moveData?.type) return none
     // GET_MOVE_TYPE(gCurrentMove, moveType) (include/battle.h:735-741) reads the
     // RESOLVED type gBattleStruct->dynamicMoveType holds, which SetTypeBeforeUsingMove
-    // (:5215-5260) wrote from GetMoveTypeInternal's full switch (battle_main.c:5040-5211)
+    // (battle_main.c:5231-5253) wrote from GetMoveTypeInternal's full switch (battle_main.c:5093-5204)
     // -- Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Fling gem, Revelation
     // Dance/Spit Up, Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma
     // Fists and the onMoveType ("-ate") abilities, in that order. The resolver's moveType
@@ -1181,6 +1181,9 @@ export function handleProtectLikeMoveEnd(
         dynamicWeatherBall ??
         resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
       ).replace(/^TYPE_/, '')
+      unmodelled.push(
+        "Camouflage applies GET_MOVE_TYPE's onMoveType (-ate) resolution only; the item/effect/field dynamic-type branches (Judgment/Plate, Natural Gift, Hidden Power, Fling gem, Revelation Dance/Spit Up/Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma Fists) are not applied",
+      )
     }
     if (target.mon.types.includes(moveType)) return none
     target.mon.types[2] = moveType
@@ -3753,15 +3756,13 @@ export function executeAction(
       isSuperEffective = false
     }
     if (isFixedDamage) {
-      // The engine's own "EFFECT_X: not modelled" note (basePower.ts UNMODELLED_BASE_POWER_EFFECTS) is answered by this block.
-      damageUnmodelled = damageUnmodelled.filter((note) => note !== `${moveEffect}: not modelled`)
-      // Move-ID-keyed twin of that note (basePower.ts UNMODELLED_BASE_POWER_MOVE_IDS, currently only
-      // MOVE_SEISMIC_TOSS). Seismic Toss's own script (battle_scripts_1.s:5822-5827) does
-      // `calculatesetdamage`, i.e. it sets gBattleMoveDamage itself, exactly like the effect-keyed
-      // fixed-damage scripts above -- fixedDamageFor (:1930) answers the user's level here, so the
-      // question the note asks is answered and the note must not survive. The variable is the same
-      // current-move id `currentMove.id` the isFixedDamage condition above already reads.
-      damageUnmodelled = damageUnmodelled.filter((note) => note !== `${currentMove.id}: not modelled`)
+      // The engine's own "not modelled" notes (basePower.ts UNMODELLED_BASE_POWER_EFFECTS /
+      // _MOVE_IDS) are answered by this block: an effect-keyed script whose fixed amount the
+      // block computes, and MOVE_SEISMIC_TOSS, whose own script (battle_scripts_1.s:5822-5827)
+      // does `calculatesetdamage`, i.e. it sets gBattleMoveDamage itself, exactly like those
+      // scripts -- fixedDamageFor (:1930) answers the user's level here. The shared predicate
+      // recognises both shapes and only for THIS move's effect/id.
+      damageUnmodelled = damageUnmodelled.filter((note) => !isUnmodelledBasePowerNote(note, currentMove.id, moveEffect))
     }
 
     // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673)
@@ -4455,7 +4456,7 @@ function runFutureSightCountdown(
     // Desire have no mirrorMoveAffected flag, and MOVEEND_CLEAR_BITS (case 30) is turned
     // off because it is outside the C's range. Cases 15 (KINGSROCK) and 16 (SUBSTITUTE)
     // are left -- see REPORT.md.
-    applyMoveEndItemEffectsAll(state, deps, unmodelled, { attackerId, moveId })
+    applyMoveEndItemEffectsAll(state, deps, unmodelled, { attackerId, targetId: holderId, moveId })
     const recordedAction = actions[attackerId]
     runMoveEndBookkeeping({
       state,

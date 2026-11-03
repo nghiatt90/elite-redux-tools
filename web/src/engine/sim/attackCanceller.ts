@@ -595,10 +595,13 @@ export function runAttackCanceller(
   //   }
   // GET_MOVE_TYPE (include/battle.h:735-740) reads dynamicMoveType when bit 7 is set, else the
   // declared type. The full resolution is calculate.ts's resolveMoveType (GetMoveTypeInternal,
-  // battle_main.c:5040-5211) and the damage bridge exposes it as DamageResolver.moveType, but
-  // this canceller stage runs before any resolver call and has no scenario to build, so it
-  // still answers with the -ate onMoveType subset only -- the item/effect/field branches
-  // (Hidden Power, Judgment/Plate, Weather Ball, ...) remain unmodelled at THIS check. The script that follows
+  // battle_main.c:5093-5204), and the damage bridge exposes it as DamageResolver.moveType, which
+  // is deterministic -- it builds its own scenario with drawRandom = false, so it draws no RNG.
+  // This canceller stage still answers with the -ate onMoveType subset only because
+  // runAttackCanceller's parameters do not include a DamageResolver (it receives the state, ids,
+  // move data, moveView, dataContext and grounding), so it cannot reach deps.damage.moveType;
+  // the item/effect/field branches (Hidden Power, Judgment/Plate, Weather Ball, ...) therefore
+  // remain unmodelled at THIS check. The script that follows
   // (BattleScript_MoveUsedPowder, data/battle_scripts_1.s:8769-8787) is one of the two cancel
   // scripts that still runs attackstring and ppreduce (:8772), so turn.ts spends the PP.
   if (hasFlag(attacker.mon.status2, STATUS2_POWDER)) {

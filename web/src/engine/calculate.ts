@@ -887,7 +887,7 @@ const TERRAIN_PULSE_TYPES: Record<string, string> = {
 }
 
 /**
- * GetMoveTypeInternal's type resolution (src/battle_main.c:5040-5211), split out of
+ * GetMoveTypeInternal's type resolution (src/battle_main.c:5093-5204), split out of
  * calcInternal so a consumer that is NOT computing damage -- the simulator's
  * Camouflage, which writes the move's resolved type into the target's type3 -- reads
  * the SAME answer the damage formula does, instead of a second, partial copy of this

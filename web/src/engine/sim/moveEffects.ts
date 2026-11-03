@@ -9213,7 +9213,7 @@ export function consumeBerryWithOverride(
         // `setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN` then
         // `seteffectprimary` (data/battle_scripts_1.s:11000-11001). `setmoveeffect` only
         // stores the value; Cmd_seteffectprimary then calls `SetMoveEffect(TRUE, 0)`
-        // (battle_script_commands.c:3124-3126), and SetMoveEffect's own entry clears the
+        // (battle_script_commands.c:3127-3130), and SetMoveEffect's own entry clears the
         // CERTAIN bit (:2346) without ever reading it -- that read belongs to
         // Cmd_seteffectwithchance (:3107), which this script never runs. So the volatile
         // is applied with primary = TRUE unconditionally: Shield Dust / Covert Cloak

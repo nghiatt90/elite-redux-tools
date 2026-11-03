@@ -6424,16 +6424,19 @@ function hasRipenEffect(state: BattleState, battlerId: number, deps: { dataConte
  *
  * `context` supplies what the confuse-berry scripts need but this loop cannot derive:
  * the move that just ended (gCurrentMove, for SetMoveEffect's Sheer Force / substitute /
- * Infiltrator checks) and that move's attacker (gBattlerAttacker, which the C never
- * rebinds in this loop -- only `gBattleScripting.battler`/`gActiveBattler` are set to
- * the eater at :6026-6027). runMoveEnd and turn.ts's future-attack site always pass it;
- * a direct call without it cannot answer the flavor-confusion branch and skips it.
+ * checks) and that move's attacker (gBattlerAttacker). It also supplies the move's
+ * target, because the C never rebinds gBattlerTarget in this loop (only
+ * `gBattleScripting.battler`/`gActiveBattler` are set to the eater at :6026-6027), so
+ * BattleScript_BerryConfuseHealRet's `seteffectprimary` and `removeitem BS_TARGET` act
+ * on the move's target, not on the eater. runMoveEnd and turn.ts's future-attack site
+ * always pass it; a direct call without it cannot answer the flavor-confusion branch
+ * and reports that instead.
  */
 export function applyMoveEndItemEffectsAll(
   state: BattleState,
   deps: TurnLoopDeps,
   unmodelled: string[],
-  context?: { attackerId: number; moveId: string },
+  context?: { attackerId: number; targetId: number; moveId: string },
 ): { statChanges: StatChangeOutcome[] } {
   const statChanges: StatChangeOutcome[] = []
   for (let bId = 0; bId < state.battlersCount; bId++) {
@@ -6570,40 +6573,53 @@ export function applyMoveEndItemEffectsAll(
         if (hasRipenEffect(state, bId, deps)) heal *= 2
         battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
         syncPartyHp(state, bId)
-        // HealConfuseBerry (battle_util.c:5167-5193) with end2=FALSE here (:5892-5906),
-        // i.e. BattleScript_BerryConfuseHealRet (data/battle_scripts_1.s:10986-11005):
-        // heal -> `setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN` +
-        // `seteffectprimary` when the eater's nature DISLIKES this flavor (:5181-5186,
-        // GetFlavorRelationByNature < 0) -> removeitem. The eater is the battler whose
-        // berry fired; in the C this loop never rebinds gBattlerTarget, and the
-        // script's own BS_TARGET is only well-defined for the caller that sets it to the
-        // eater (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8033-8034 -- the
-        // ITEMEFFECT_BATTLER_MOVE_END path moveEffects.ts ports). This loop's own
-        // battler is the one the flavor question is about, so it is the one confused.
+        // HealConfuseBerry (battle_util.c:5167-5193) with end2=FALSE here (:5892-5906).
+        // The heal itself stays on the eater: gBattleMoveDamage is set from
+        // gBattleMons[battlerId] (:5172-5174) and gBattleScripting.battler = battlerId
+        // (:5184), which is who the script's healthbarupdate/datahpupdate read.
+        // The script chosen by the flavor relation (:5187) then runs:
+        //  - disliked (:5181-5186, GetFlavorRelationByNature < 0):
+        //    BattleScript_BerryConfuseHealRet (data/battle_scripts_1.s:10986-11005) ends with
+        //    `setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN` (:11000),
+        //    `seteffectprimary` (:11001) and `removeitem BS_TARGET` (:11002). The move-effect
+        //    carries NO MOVE_EFFECT_AFFECTS_USER, so SetMoveEffect sets
+        //    gEffectBattler = gBattlerTarget (battle_script_commands.c:2341-2347), and
+        //    Cmd_seteffectprimary (:3127-3130) applies it with primary = TRUE; Cmd_removeitem
+        //    (:6040-6053) removes the item of GetBattlerForBattleScript(BS_TARGET). This loop
+        //    never rebinds gBattlerTarget -- it only sets gBattleScripting.battler /
+        //    gActiveBattler to the eater (:6026-6031) -- so both the confusion and the item
+        //    removal land on the MOVE'S TARGET, not the eater.
+        //  - liked/neutral: BattleScript_ItemHealHP_RemoveItemRet (s:10859-10873) removes
+        //    BS_SCRIPTING, i.e. the eater's own berry.
+        // (The ITEMEFFECT_BATTLER_MOVE_END caller behind VARIOUS_CONSUME_BERRY sets
+        // gBattlerTarget to the eater itself, battle_script_commands.c:8033-8034, which is the
+        // eaters-confuses-itself path moveEffects.ts ports and keeps.)
         const flavor = CONFUSE_BERRY_FLAVORS[holdEffect]!
         const relation = (deps.dataContext.natureFlavorRelation ?? flavorRelationByNature)(battler.mon.nature, flavor)
         if (relation < 0) {
           if (!context) {
-            // Without the triggering move / attacker (a direct call with no context) the
-            // script cannot be run at all: SetMoveEffect reads gCurrentMove and
-            // gBattlerAttacker. Report instead of silently dropping the confusion.
+            // Without the triggering move / attacker / target (a direct call with no context)
+            // the script cannot be run at all: SetMoveEffect reads gCurrentMove and
+            // gBattlerAttacker, and removeitem reads gBattlerTarget. Report instead of
+            // silently dropping the confusion; the eater's berry is still consumed below so
+            // this partial call does not leave a berry that already healed.
             unmodelled.push(
-              `battler ${bId}: HealConfuseBerry's confusion (BattleScript_BerryConfuseHealRet, data/battle_scripts_1.s:11000-11001) needs the triggering move, but applyMoveEndItemEffectsAll was called without a context`,
+              `battler ${bId}: HealConfuseBerry's confusion (BattleScript_BerryConfuseHealRet, data/battle_scripts_1.s:11000-11002) needs the triggering move and target, but applyMoveEndItemEffectsAll was called without a context`,
             )
+            battler.mon.itemId = null
           } else {
             // `setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN` + `seteffectprimary`
             // (s:11000-11001): setmoveeffect only STORES the value, and Cmd_seteffectprimary
-            // calls `SetMoveEffect(TRUE, 0)` (battle_script_commands.c:3124-3126). SetMoveEffect
+            // calls `SetMoveEffect(TRUE, 0)` (battle_script_commands.c:3127-3130). SetMoveEffect
             // clears CERTAIN on entry (:2346) without reading it -- the read lives in
             // Cmd_seteffectwithchance (:3107) -- so the volatile applies with primary = TRUE,
             // which is what makes Shield Dust / Covert Cloak (:2348-2350) and Safeguard
-            // (:2352-2354), both gated on `!primary`, skip it. gEffectBattler is gBattlerTarget;
-            // the ITEMEFFECT_MOVE_END loop never rebinds gBattlerTarget, so this loop's own
-            // battler is the one SetMoveEffect acts on, matching the sim's bId.
+            // (:2352-2354), both gated on `!primary`, skip it. gEffectBattler is gBattlerTarget
+            // (:2341-2347); this loop never rebinds it, so that is the move's target.
             applyPrimaryStatusEffect(
               state,
               context.attackerId,
-              bId,
+              context.targetId,
               MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN,
               context.moveId,
               { dataContext: deps.dataContext, grounding: deps.grounding },
@@ -6611,9 +6627,15 @@ export function applyMoveEndItemEffectsAll(
               true,
               true,
             )
+            // `removeitem BS_TARGET` (s:11002) -> Cmd_removeitem removes from gBattlerTarget
+            // (:6040-6053). The eater's berry is NOT removed on this path.
+            const targetBattler = state.battlers[context.targetId]
+            if (targetBattler) targetBattler.mon.itemId = null
           }
+        } else {
+          // BattleScript_ItemHealHP_RemoveItemRet's `removeitem BS_SCRIPTING` (s:10870).
+          battler.mon.itemId = null
         }
-        battler.mon.itemId = null
       }
       continue
     }
@@ -6988,7 +7010,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   // Case 14: MOVEEND_ITEM_EFFECTS_ALL (:4666-4671)
   // Item effects for all battlers: White Herb, Lum/status berries, Sitrus, Oran, pinch berries.
-  const itemOutcome = applyMoveEndItemEffectsAll(state, deps, unmodelled, { attackerId, moveId })
+  const itemOutcome = applyMoveEndItemEffectsAll(state, deps, unmodelled, { attackerId, targetId, moveId })
   if (itemOutcome.statChanges.length > 0) {
     statChanges.push(...itemOutcome.statChanges)
   }

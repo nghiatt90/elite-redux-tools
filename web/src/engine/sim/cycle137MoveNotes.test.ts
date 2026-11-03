@@ -417,7 +417,7 @@ describe('Cycle 137 (b) Concoction berry heal + flavor confusion', () => {
     // BattleScript_BerryConfuseHealRet order (s:10992-11002): healthbarupdate (:10996-10997),
     // setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN (:11000), seteffectprimary
     // (:11001), removeitem (:11002). Cmd_seteffectprimary is SetMoveEffect(TRUE, 0)
-    // (battle_script_commands.c:3124-3126) -- primary TRUE is why Shield Dust/Cover Cloak
+    // (battle_script_commands.c:3127-3130) -- primary TRUE is why Shield Dust/Cover Cloak
     // (:2348-2350) and Safeguard (:2352-2354), both gated on !primary, do not block it.
     const { deps, notes, rng, eater } = consume('NATURE_BOLD', [0])
     expect(eater.mon.hp).toBe(START_HP + HEAL)
@@ -520,8 +520,8 @@ describe('Cycle 137 (b) Concoction berry heal + flavor confusion', () => {
 // ---------------------------------------------------------------------------
 // (c) Camouflage's resolved type
 // battle_script_commands.c:4415-4427 (GET_MOVE_TYPE + IS_BATTLER_OF_TYPE + type3 write),
-// GetMoveTypeInternal (battle_main.c:5040-5211),
-// SetTypeBeforeUsingMove/ApplyTypeOverrideInformation (:5215-5260).
+// GetMoveTypeInternal (battle_main.c:5093-5204),
+// SetTypeBeforeUsingMove (:5231-5253).
 // ---------------------------------------------------------------------------
 describe('Cycle 137 (c) Camouflage adds the resolved dynamic type', () => {
   /** MOVEEND_PROTECT_LIKE_EFFECT (battle_script_commands.c:4342-4427) only runs after a blocked
@@ -604,7 +604,7 @@ describe('Cycle 137 (c) Camouflage adds the resolved dynamic type', () => {
     expect(protector.mon.types[2]).toBe('ELECTRIC')
   })
 
-  it('Terrain Pulse adds the terrain type only while a terrain is up (battle_main.c:5173-5190)', () => {
+  it('Terrain Pulse adds the terrain type only while a terrain is up (battle_main.c:5173-5191)', () => {
     // IsBattlerTerrainAffected (battle_util.c:4901-4928): terrain active, target not
     // semi-invulnerable, and grounded. Electricity first, then the no-terrain control below.
     const grassy = camouflage('MOVE_TERRAIN_PULSE', { fieldStatuses: STATUS_FIELD_GRASSY_TERRAIN })

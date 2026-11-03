@@ -25,7 +25,7 @@ import type { MoveData, DamageCalcScenario } from '../../calculate'
 import { calculateMoveDamage } from '../../calculate'
 import type { BattleConstants } from '../../types'
 import type { MoveBehaviors } from '../../basePower'
-import { UNMODELLED_BASE_POWER_EFFECTS } from '../../basePower'
+import { isUnmodelledBasePowerNote } from '../../basePower'
 import type { TypeChart } from '../../typeEffectiveness'
 import { applyModifier, idiv } from '../../fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from '../../abilities/dispatchCalc'
@@ -259,11 +259,14 @@ export function aiGetTypeEffectiveness(state: BattleState, moveId: string, attac
   const built = buildAiScenario(state, moveId, attackerId, defenderId, deps)
   if (!built) return { effectiveness: 0, unmodelled: [`move ${moveId}: move data is unavailable`] }
   const result = calculateMoveDamage(built.scenario)
-  // Only the type multiplier is read from this result, so the "this effect's damage bypasses the formula" note says nothing here.
-  const ownNote = built.move.effect ? `${built.move.effect}: not modelled` : null
+  // Only the type multiplier is read from this result, so the "this move's damage bypasses the
+  // formula" notes say nothing here.
   return {
     effectiveness: result.typeEffectiveness,
-    unmodelled: [...built.unmodelled, ...result.unmodelled.filter((note) => note !== ownNote || !UNMODELLED_BASE_POWER_EFFECTS.has(built.move.effect!))],
+    unmodelled: [
+      ...built.unmodelled,
+      ...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, built.move.id, built.move.effect)),
+    ],
   }
 }
 
@@ -281,13 +284,18 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
   let dmg = 0
   if (move.power) {
     const result = calculateMoveDamage(scenario)
-    // calculateMoveDamage warns `${effect}: not modelled` for the effects whose real battle damage bypasses CalculateMoveDamage
-    // (basePower.ts UNMODELLED_BASE_POWER_EFFECTS). AI_CalcDamage never models that damage either: Super Fang, Level Damage, Psywave,
-    // Dragon Rage, Endeavor and Final Gambit get their own dynamic-damage branches below (:684-703), and Counter, Mirror Coat,
-    // Metal Burst and Bide fall through to the ordinary formula exactly as this port does -- so for the AI's estimate the note is
-    // answered by the C itself, not a gap.
-    const ownNote = move.effect ? `${move.effect}: not modelled` : null
-    unmodelled.push(...result.unmodelled.filter((note) => note !== ownNote || !UNMODELLED_BASE_POWER_EFFECTS.has(move.effect!)))
+    // calculateMoveDamage warns "not modelled" for moves whose real battle damage bypasses
+    // CalculateMoveDamage (basePower.ts UNMODELLED_BASE_POWER_EFFECTS / _MOVE_IDS).
+    // AI_CalcDamage never models that damage either: Super Fang, Level Damage, Psywave,
+    // Dragon Rage, Endeavor and Final Gambit get their own dynamic-damage branches below
+    // (:684-703), and Counter, Mirror Coat, Metal Burst and Bide fall through to the ordinary
+    // formula exactly as this port does -- so the effect-keyed note is answered by the C itself.
+    // The move-id note is answered the same way: AI_CalcDamage (battle_ai_util.c:650-765) has no
+    // Seismic Toss branch, and the one at battle_ai_attack.c:1999-2005 is dead code -- its
+    // ScoreMoveDamage (:1930) is reached only from the phase table at battle_ai_new.c:68, whose
+    // driver IterateForPhase (battle_ai_new.c:73) has no caller. So the AI estimates the move
+    // with the ordinary formula, exactly like this port.
+    unmodelled.push(...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, move.id, move.effect)))
     if (!result.isImmune) {
       // DoMoveDamageCalcInternal's `if (typeEffectivenessModifier == UQ_4_12(0)) return -1;`
       // then DoMoveDamageCalc's `if (dmg < 0) return 0;` -- an immune hit is a

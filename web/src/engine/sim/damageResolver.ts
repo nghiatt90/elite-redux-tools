@@ -33,6 +33,7 @@ import type { MoveData, DamageCalcScenario } from '../calculate'
 import { calculateMoveDamage, resolveMoveType } from '../calculate'
 import type { BattleConstants } from '../types'
 import type { MoveBehaviors } from '../basePower'
+import { isUnmodelledBasePowerNote } from '../basePower'
 import type { TypeChart } from '../typeEffectiveness'
 import type { BattleState, RandomSource } from './state'
 import type { BridgeDeps } from './bridge'
@@ -248,7 +249,17 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       if (move.split === 'STATUS') return { effectiveness: null, unmodelled: [`move ${moveId}: type effectiveness is not computed for status moves`] }
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, false)
       const result = calculateMoveDamage(scenario)
-      return { effectiveness: result.typeEffectiveness, unmodelled: [...unmodelled, ...result.unmodelled] }
+      // Only the type multiplier is read here, so the "this move's real damage bypasses the
+      // formula" notes (basePower.ts UNMODELLED_BASE_POWER_EFFECTS / _MOVE_IDS) answer a
+      // question this call never asks: the chart's answer is complete regardless of whether
+      // the damage itself is. Every other note is still the caller's to see.
+      return {
+        effectiveness: result.typeEffectiveness,
+        unmodelled: [
+          ...unmodelled,
+          ...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, move.id, move.effect)),
+        ],
+      }
     },
 
     /** GetMoveTypeInternal's answer for one move use, with no damage, no RNG draw

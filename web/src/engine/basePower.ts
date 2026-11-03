@@ -619,6 +619,20 @@ export const UNMODELLED_BASE_POWER_EFFECTS = new Set<string>([
 //   discriminator that was missing.
 export const UNMODELLED_BASE_POWER_MOVE_IDS = new Set<string>(['MOVE_SEISMIC_TOSS'])
 
+/** The two "not modelled" notes calculate.ts emits for these sets (calculate.ts:1102,
+ * :1107), recognised by shape AND by the move the caller is asking about. A consumer
+ * that has answered the question -- the sim's fixed-damage block, or a caller that
+ * reads only the type multiplier -- drops exactly these notes; a note belonging to a
+ * different effect/move is never matched. */
+export function isUnmodelledBasePowerNote(
+  note: string,
+  moveId: string,
+  moveEffect: string | null | undefined,
+): boolean {
+  if (moveEffect && UNMODELLED_BASE_POWER_EFFECTS.has(moveEffect) && note === `${moveEffect}: not modelled`) return true
+  return UNMODELLED_BASE_POWER_MOVE_IDS.has(moveId) && note === `${moveId}: not modelled`
+}
+
 // A DIFFERENT class of gap from both sets above: not "a real nonzero number
 // exists and this engine can't produce it" (which is what "not modelled"
 // says), but "the real number IS zero, confirmed by reading the move's own
