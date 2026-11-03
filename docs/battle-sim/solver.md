@@ -25,6 +25,31 @@ Run it from the repository root (it reads `data/v2.65beta` relative to the worki
 - Search is coordinate ascent: screen a member's neighbours on a few battles, confirm the best
   three on more, keep a change only if it beats the incumbent.
 
+## Move pool
+
+`candidateMoves` (`driver/solver.ts`) offers, per species and level, its strongest damaging moves
+(power above 1, ranked by power times STAB times accuracy, dominated split twins dropped) plus the
+`UTILITY_MOVES` whitelist. That is the **default pool**, and it is the only one the solver uses
+today: `SearchOptions.widePool` and the `{ wide }` argument both default to `false`.
+
+The **wide pool** (`wide: true`) also offers every learnable non-damaging move (power 0 or 1) that
+passes the gate, ranked after the damaging ones. The whitelist is subject to the same gate in wide
+mode.
+
+The gate lives in `driver/verifiedMoveEffects.ts`. A move is *gated* when `!power || power <= 1`;
+damaging moves are never gated. A gated move is *eligible* only if its effect key (`effect ?? 'NONE'`)
+is in `VERIFIED_MOVE_EFFECTS`, which maps the key to the test file that proves the effect against the
+C. Nothing is grandfathered. Effects the C does not make worth modelling are listed in
+`driver/auditAllowlist.ts` with a reason and a C citation (doubles-only effects and no-ops); they are
+not eligible, only exempt from the audit. `cycle112WidePool.test.ts` fails if a learnable gated effect
+key is neither verified nor allowlisted. It is limited to learnable moves: `MOVE_NONE` and
+`MOVE_TEMPEST_STORM` (the only gated moves with no effect key) are not learned by any species, and
+Tempest Storm, which two trainer parties carry, is covered by `cycle138bMoveTypes.test.ts`.
+
+`widePool` stays off because the position score above sees HP, mons alive and stat stages only. A
+verified status, hazard or screen move would be modelled correctly in battle but not valued by the
+search. See `solver-evaluation.md` (when it exists) for the plan to value those effects.
+
 ## Limits
 
 - Win rate is against the sim's mechanics, which still have gaps (see `unmodelled` notes from the
