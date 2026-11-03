@@ -46,7 +46,7 @@ import {
   type MoveBehaviors,
 } from './basePower'
 import { calcFinalDamage, defaultFinalDamageStages } from './finalDamage'
-import { resolveHitPlan } from './multiHit'
+import { CHLOROPLAST_ABILITIES, resolveHitPlan } from './multiHit'
 import { calcCritStage, critChanceDenominator, NEVER_CRIT, type CritStageInputs } from './crit'
 import { distinctDefendingTypes, type TypeChart, type TypeModifierInputs } from './typeEffectiveness'
 import {
@@ -157,11 +157,19 @@ export interface DamageCalcScenario {
   /** See DamageContext.attackerTimesDamaged / miscDoubleDamage (MISC_EFFECT_TOOK_DAMAGE_BOOST / _DOUBLE_DAMAGE). */
   attackerTimesDamaged?: number
   miscDoubleDamage?: boolean
-  /** GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197): STATUS4_ELECTRIFIED on the attacker (any move),
+  /** GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5198): STATUS4_ELECTRIFIED on the attacker (any move),
    * STATUS_FIELD_ION_DELUGE and STATUS4_PLASMA_FISTS (Normal moves). Set by the simulator; the calculator leaves them unset. */
   attackerElectrified?: boolean
   ionDelugeActive?: boolean
   attackerPlasmaFists?: boolean
+  /** IsBattlerTerrainAffected(battlerAtk, STATUS_FIELD_TERRAIN_ANY), battle_util.c:4901-4928,
+   * the ATTACKER-side gate on GetMoveTypeInternal's EFFECT_TERRAIN_PULSE case (:5173-5191).
+   * Only the simulator can answer it completely: the sim carries semi-invulnerability,
+   * Iron Ball/Air Balloon, Gravity, Ingrain/Smacked Down/Magnet Rise/Telekinesis and the
+   * twelve allowTerrainIfAirborne abilities, none of which the static calculator's
+   * BattlerBattleState can represent. Left unset by the calculator, which falls back to
+   * the scenario fields it does have and raises a note for the airborne case. */
+  attackerTerrainAffected?: boolean
   /** See DamageContext.beatUpBaseAttack's own doc (EFFECT_BEAT_UP). */
   beatUpBaseAttack: number
   /** See DamageContext.beatUpHitCount's own doc (EFFECT_BEAT_UP). */
@@ -308,7 +316,11 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
  * USE_HIGHEST_DAMAGE are separate C branches that never reach ON_ABILITY at all, so
  * the ability census is only consulted for the `default` case here too. */
 function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spatk: number; def: number; spdef: number }): 'PHYSICAL' | 'SPECIAL' {
-  const base = scenario.move.split === 'SPECIAL' ? 'SPECIAL' : 'PHYSICAL'
+  // CalcAttackStat (:7219: IS_MOVE_PHYSICAL ? STAT_ATK : STAT_SPATK) and
+  // CalcDefenseStat (:7400-7405: HITS_DEF/IS_MOVE_PHYSICAL -> STAT_DEF, else
+  // STAT_SPDEF) read a STATUS split as SPATK/SPDEF. Only a null split -- which
+  // no moves.json entry has -- keeps the old PHYSICAL default.
+  const base = scenario.move.split === 'PHYSICAL' || scenario.move.split === null ? 'PHYSICAL' : 'SPECIAL'
   let split: 'PHYSICAL' | 'SPECIAL' = base
 
   if (scenario.move.splitFlag === 'USE_HIGHEST_OFFENSE') {
@@ -764,7 +776,7 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
  * onMoldBreaker ability) actually resolves to.
  *
  * Real bug found auditing this: CalcTypeEffectivenessMultiplier
- * (battle_util.c:8015-8021) skips the ENTIRE fold for MOVE_STRUGGLE
+ * (battle_util.c:7986-7994) skips the ENTIRE fold for MOVE_STRUGGLE
  * unconditionally (`if (move != MOVE_STRUGGLE && IsValidType(moveType))`),
  * leaving it flat at neutral (1.0) -- no resistance, no immunity, no
  * super-effectiveness, regardless of its own declared type. This engine's data
@@ -774,6 +786,27 @@ function scenarioCritDenominator(scenario: DamageCalcScenario): number | null {
  * IMMUNE against pure Ghost-type defenders -- a real, live bug for a move
  * every single Pokemon can use.
  */
+/** IsBattlerGrounded's scenario-representable part (battle_util.c:6679-6683):
+ * CheckGroundingEffects' Iron Ball / Gravity (:6647-6660) win outright, THEN a
+ * naturally airborne type (BattlerBattleState.isGrounded's species-only baseline)
+ * is ungrounded regardless of anything else, and only then do
+ * CheckLevitatingEffects' Air Balloon / Levitate (:6662-6672) decide. Magnet
+ * Rise/Telekinesis/Ingrain/Smacked Down and Monotype Champ are volatile/party
+ * state the scenario does not carry, so they stay unmodelled -- the same
+ * approximation this check has always documented for the defender.
+ *
+ * `moldBroken` passes IsSuppressed's HITMARKER_MOLD_BREAKER branch. Callers
+ * checking a battler OTHER than the move's user (the defender) pass the
+ * attacker's Mold Breaker; a caller checking the user itself must pass false,
+ * because IsSuppressed's own `battler != gBattlerAttacker` guard
+ * (battle_util.c:9257) never suppresses the user's own abilities. */
+function scenarioIsGrounded(battler: BattlerBattleState, field: FieldBattleState, moldBroken: boolean): boolean {
+  const isForcedGrounded = battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || field.gravityActive
+  const isForcedAirborne =
+    !isForcedGrounded && (battler.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(battler.abilitySlots, 'levitate', moldBroken))
+  return isForcedGrounded || (battler.isGrounded && !isForcedAirborne)
+}
+
 function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string, defenderTypes: string[], attackerHasMoldBreaker: boolean): number {
   if (scenario.move.id === 'MOVE_STRUGGLE') return uq(1.0)
   const { attacker, defender, move, field, typeChart } = scenario
@@ -797,10 +830,12 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   // isForcedGrounded below) distinct from this WHOLE-modifier isGrounded
   // override, which stays ability/item-only (IsBattlerGroundedIgnoreType,
   // genuinely type-blind) as originally described.
+  // The per-component Ground-immunity restore (dispatchCalc.ts's
+  // resolveTypeEffectivenessComponent) needs the Iron Ball/Gravity half on its
+  // own; the whole-modifier check below is the ability/item-only
+  // IsBattlerGroundedIgnoreType shape, which scenarioIsGrounded reproduces.
   const isForcedGrounded = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_IRON_BALL' || field.gravityActive
-  const isForcedAirborne =
-    !isForcedGrounded && (defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_AIR_BALLOON' || hasFlag(defender.abilitySlots, 'levitate', attackerHasMoldBreaker))
-  const isGrounded = isForcedGrounded || (defender.isGrounded && !isForcedAirborne)
+  const isGrounded = scenarioIsGrounded(defender, field, attackerHasMoldBreaker)
   const ringTargetHeld = defender.condition.resolvedHoldEffect === 'HOLD_EFFECT_RING_TARGET'
   // UpdateTypeModifier's own two fields (battle_util.c:7904), codegen'd from
   // moveBehaviors.json's attack.superEffectiveVs/attack.ignoreTypeImmunity --
@@ -857,7 +892,7 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   // reached, so modifier isn't 0 to begin with -- matching the C's own
   // (redundant-looking, but consistent) `!IsBattlerGrounded` guard.
   if (moveType === 'GROUND' && move.flags.ignoresLevitation && typeEffectivenessBeforeAfterHooks === 0) typeEffectivenessBeforeAfterHooks = uq(1.0)
-  return computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
+  const typeEffectivenessAfterHooks = computeAfterTypeEffectiveness(attacker.abilitySlots, defender.abilitySlots, attackerHasMoldBreaker, {
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: move.id,
@@ -871,9 +906,19 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
     defenderAtMaxHp: defender.condition.hp === defender.condition.maxHp,
     defenderAbilityOn: defender.abilityOn,
   })
+  // CalcTypeEffectivenessMultiplier's own post-Internal override (:7992): a
+  // STATUS-split move keeps a flat 1.0 once the (post-hook) fold is non-zero.
+  // This matters for the handful of moves whose codegen effect is EFFECT_HIT
+  // despite a STATUS split (MOVE_TEMPEST_STORM, moves.json effect null):
+  // Cmd_damagecalc still runs the full formula for them, and only the immunity
+  // (modifier 0) survives. Applied AFTER the onAfterTypeEffectiveness loop, as
+  // in the C: Internal (:7915-7982) runs those hooks, then the wrapper
+  // (:7992) flattens; CalculateAbilityMultipliers is a later, separate stage.
+  if (move.split === 'STATUS' && typeEffectivenessAfterHooks !== 0) return uq(1.0)
+  return typeEffectivenessAfterHooks
 }
 
-/** GetMoveTypeInternal's terrain-switch mapping (src/battle_main.c:5160-5179):
+/** GetMoveTypeInternal's terrain-switch mapping (src/battle_main.c:5173-5191):
  * STATUS_FIELD_* -> the type the pulse becomes. Only listed when GetCurrentTerrain()
  * can return that terrain; every other terrain is absent from the switch and the C
  * falls through to the move's declared type (`REQUIRE` only gates on there being
@@ -886,6 +931,14 @@ const TERRAIN_PULSE_TYPES: Record<string, string> = {
   TERRAIN_TOXIC: 'POISON',
 }
 
+/** GetMoveTypeInternal's MOVE_RAGING_BULL species switch, src/battle_main.c:5098-5107.
+ * The keys are the Paldean Tauros form species ids from species.json. */
+const PALDEAN_TAUROS_BULL_TYPES: Record<string, string> = {
+  SPECIES_TAUROS_PALDEAN_COMBAT_BREED: 'FIGHTING',
+  SPECIES_TAUROS_PALDEAN_BLAZE_BREED: 'FIRE',
+  SPECIES_TAUROS_PALDEAN_AQUA_BREED: 'WATER',
+}
+
 /**
  * GetMoveTypeInternal's type resolution (src/battle_main.c:5093-5204), split out of
  * calcInternal so a consumer that is NOT computing damage -- the simulator's
@@ -894,29 +947,30 @@ const TERRAIN_PULSE_TYPES: Record<string, string> = {
  * switch (see turn.ts's handleProtectLikeMoveEnd).
  *
  * Order, exactly as the C:
- *  1. the move-ID switch (:5044-5072): Struggle / Raging Bull / Tera Starstorm /
- *     Weather Ball / Present -- Weather Ball is the only one with scenario state,
- *     and it is checked first here for that reason;
- *  2. the effect switch (:5078-5167): Hidden Power, Fling+Gem, Judgment/Plate and
+ *  1. the move-ID switch (src/battle_main.c:5094-5127): Struggle / Raging Bull /
+ *     Tera Starstorm / Weather Ball / Present;
+ *  2. the effect switch (:5129-5192): Hidden Power, Fling+Gem, Judgment/Plate and
  *     Multi-Attack/Memory (EFFECT_CHANGE_TYPE_ON_ITEM), Revelation Dance / Spit Up,
  *     Synchronoise / Ivy Cudgel, Natural Gift, Terrain Pulse;
- *  3. Ion Deluge / Electrify / Plasma Fists (:5194-5197);
- *  4. the onMoveType ability hooks (:5199-5211, resolveEffectiveMoveType) --
+ *  3. Ion Deluge / Electrify / Plasma Fists (:5196-5198);
+ *  4. the onMoveType ability hooks (:5200-5201, resolveEffectiveMoveType) --
  *     "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
  *     move's type here;
  *  5. the move's declared type as the fallback.
- * Every switch case that matches RETURNS in the C, so none of them can reach stage 3
- * or 4 -- that is why `ateBoost` is false whenever stage 1/2 answered.
+ * Every switch case that RETURNS in the C does so before stages 3 and 4, so none
+ * of them can be retyped -- that is why `ateBoost` is false whenever stage 1/2
+ * answered. The cases that `break` (Raging Bull on a non-Tauros user, Tera
+ * Starstorm on a non-Stellar user, Weather Ball with no weather) DO reach stages
+ * 3-4, exactly like the C's own fall-through.
  *
  * Terrain Pulse's own `IsBattlerTerrainAffected(battlerAtk, STATUS_FIELD_TERRAIN_ANY)`
- * gate (:5162, battle_util.c:4901-4928) reads the ATTACKER's grounding, not the
- * defender's: an active terrain, no semi-invulnerability, and IsBattlerGrounded. The
- * engine's scenario carries `attacker.isGrounded` (the species-only baseline, see
- * types.ts) and `attacker.semiInvulnerable`; the C's own allowTerrainIfAirborne
- * exception (battle_util.c:4926, twelve abilities) is NOT represented in the engine
- * scenario, so an airborne pulse user with one of those abilities falls through to its
- * declared type here. That is the same grounding approximation the rest of the engine
- * already documents, not a new one.
+ * gate (:5173-5191, battle_util.c:4901-4928) reads the ATTACKER's grounding, not
+ * the defender's: an active terrain, no semi-invulnerability, and IsBattlerGrounded
+ * (Iron Ball/Gravity, then Flying-type, then Air Balloon/Levitate), or one of the
+ * twelve allowTerrainIfAirborne abilities (:4926). The simulator supplies that
+ * whole answer as `scenario.attackerTerrainAffected` (damageResolver.ts, through
+ * statusEffects.ts's isBattlerTerrainAffected); the static calculator cannot
+ * represent the ability exception and notes exactly that case.
  */
 export function resolveMoveType(
   scenario: DamageCalcScenario,
@@ -925,14 +979,74 @@ export function resolveMoveType(
   const { attacker, move, field } = scenario
   const unmodelled: string[] = []
   const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
+  const attackerHasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attacker.abilitySlots, id, () => false))
+
+  // GetMoveTypeInternal's move-ID switch, src/battle_main.c:5094-5127. Every arm
+  // that RETURNS below does so before the Ion Deluge/Electrify block (:5196-5198)
+  // and the onMoveType "-ate" loop (:5200-5201), so these moves are never retyped;
+  // the arms that do not match (or `break` in the C) fall through to the effect
+  // switch and those later blocks, exactly like the C.
+  if (move.id === 'MOVE_STRUGGLE') {
+    // :5095-5096 -- unconditional NORMAL, and CalcTypeEffectivenessMultiplier
+    // (:7990) skips Struggle's fold entirely (see resolveTypeEffectiveness).
+    return { moveType: 'NORMAL', ateBoost: false, unmodelled }
+  }
+  if (move.id === 'MOVE_RAGING_BULL') {
+    // :5098-5107 -- the user's actual form decides the type; any other species
+    // hits `break` and keeps the declared Normal type for stage 3/4.
+    const taurosType = PALDEAN_TAUROS_BULL_TYPES[attacker.condition.speciesId]
+    if (taurosType !== undefined) return { moveType: taurosType, ateBoost: false, unmodelled }
+  }
+  if (move.id === 'MOVE_TERA_STARSTORM' && attacker.types.includes('STELLAR')) {
+    // :5109-5111 -- REQUIRE(IS_BATTLER_OF_TYPE(battlerAtk, TYPE_STELLAR)); a
+    // non-Stellar user falls through to the declared Normal type and stages 3-4.
+    return { moveType: 'STELLAR', ateBoost: false, unmodelled }
+  }
+  if (move.id === 'MOVE_WEATHER_BALL') {
+    // :5113-5122 -- Chloroplast, then Aurora Borealis, then weather. With no
+    // weather the C's REQUIRE fails and the case breaks, so a Normal-type Weather
+    // Ball still reaches Electrify/Ion Deluge and the "-ate" loop.
+    const weatherType = weatherBallType(field.weather, attackerHasAuroraBorealis, attackerHasChloroplast)
+    if (weatherType !== null) return { moveType: weatherType, ateBoost: false, unmodelled }
+  }
+  if (move.id === 'MOVE_PRESENT') {
+    // :5124-5126 sets *realType = TYPE_MYSTERY and returns TYPE_NORMAL; its only
+    // caller with a real type (SetTypeBeforeUsingMove, :5237-5241) then replaces
+    // moveType with realType, so GET_MOVE_TYPE reads MYSTERY.
+    return { moveType: 'MYSTERY', ateBoost: false, unmodelled }
+  }
+
+  // IsBattlerTerrainAffected's ATTACKER gate (battle_util.c:4901-4928). The sim
+  // answers it in full (scenario.attackerTerrainAffected); this fallback carries
+  // the grounding the static scenario does have. IsSuppressed's
+  // `battler != gBattlerAttacker` guard (:9257) means the user's own Levitate is
+  // never Mold-Breaker-suppressed here, hence the literal false.
+  let terrainPulseType: string | null = null
+  if (move.effect === 'EFFECT_TERRAIN_PULSE') {
+    const terrainType = field.terrain !== null ? TERRAIN_PULSE_TYPES[field.terrain] : undefined
+    let terrainAffected: boolean
+    if (typeof scenario.attackerTerrainAffected === 'boolean') {
+      terrainAffected = scenario.attackerTerrainAffected
+    } else {
+      const notSemiInvulnerable = attacker.semiInvulnerable === 'NONE'
+      terrainAffected = field.terrain !== null && notSemiInvulnerable && scenarioIsGrounded(attacker, field, false)
+      if (field.terrain !== null && notSemiInvulnerable && !scenarioIsGrounded(attacker, field, false)) {
+        unmodelled.push(
+          `${move.id}: the attacker is airborne and allowTerrainIfAirborne (battle_util.c:4926) is not represented by this scenario -- the pulse keeps its declared type`,
+        )
+      }
+    }
+    if (terrainAffected && terrainType !== undefined) terrainPulseType = terrainType
+  }
 
   // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
-  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
-  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
-  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
-  // 5148-5150,5180-5182, each switch case in that function returns immediately on
-  // match). When none applies, this falls through exactly like the C's `break`
-  // does, leaving the move at its declared type for the ability loop below.
+  // EFFECT_NATURAL_GIFT, EFFECT_HIDDEN_POWER and EFFECT_TERRAIN_PULSE are
+  // checked FIRST and, when they apply, short-circuit the rest of
+  // GetMoveTypeInternal -- an -ate ability never gets a chance to run
+  // (:5130-5131, :5169-5171, :5173-5191, each switch case in that function
+  // returns immediately on match). When none applies, this falls
+  // through exactly like the C's `break` does, leaving the move at its declared
+  // type for the ability loop below.
   if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
     unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
   }
@@ -941,32 +1055,24 @@ export function resolveMoveType(
       ? (attacker.holdEffectType ?? inputMoveType)
       : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
         ? attacker.naturalGift.type
-        : move.effect === 'EFFECT_WEATHER_BALL'
-          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
-          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
-            ? attacker.hiddenPowerType
-            : // GetMoveTypeInternal's remaining attacker-keyed cases (src/battle_main.c:5133-5167): Fling with a Gem reads the gem's
-              // type; Spit Up and Revelation Dance take the user's first real type; Synchronoise (and Ivy Cudgel, which shares its
-              // effect) the user's second, else first, else third -- Ivy Cudgel first by Ogerpon's mask forms.
-              move.effect === 'EFFECT_FLING' && flingGemType(scenario) !== null
-              ? flingGemType(scenario)
-              : move.effect === 'EFFECT_SPIT_UP' || move.effect === 'EFFECT_REVELATION_DANCE'
-                ? attackerTypeOrder(attacker.types, [0, 1, 2])
-                : move.effect === 'EFFECT_SYNCHRONOISE'
-                  ? (move.id === 'MOVE_IVY_CUDGEL' ? ogerponMaskType(attacker.condition.speciesId) : null) ?? attackerTypeOrder(attacker.types, [1, 0, 2])
-                  : move.effect === 'EFFECT_TERRAIN_PULSE' &&
-                      field.terrain !== null &&
-                      TERRAIN_PULSE_TYPES[field.terrain] !== undefined &&
-                      attacker.semiInvulnerable === 'NONE' &&
-                      attacker.isGrounded
-                    ? TERRAIN_PULSE_TYPES[field.terrain]
-                    : null
+        : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
+          ? attacker.hiddenPowerType
+          : // GetMoveTypeInternal's remaining attacker-keyed cases (src/battle_main.c:5133-5167): Fling with a Gem reads the gem's
+            // type; Spit Up and Revelation Dance take the user's first real type; Synchronoise (and Ivy Cudgel, which shares its
+            // effect) the user's second, else first, else third -- Ivy Cudgel first by Ogerpon's mask forms.
+            move.effect === 'EFFECT_FLING' && flingGemType(scenario) !== null
+            ? flingGemType(scenario)
+            : move.effect === 'EFFECT_SPIT_UP' || move.effect === 'EFFECT_REVELATION_DANCE'
+              ? attackerTypeOrder(attacker.types, [0, 1, 2])
+              : move.effect === 'EFFECT_SYNCHRONOISE'
+                ? (move.id === 'MOVE_IVY_CUDGEL' ? ogerponMaskType(attacker.condition.speciesId) : null) ?? attackerTypeOrder(attacker.types, [1, 0, 2])
+                : terrainPulseType
 
   // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
   // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
   // terrain-boost base-power check all key off the resolved type, not the move's
-  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  // GetMoveTypeInternal, battle_main.c:5194-5197, between the effect switch and the onMoveType abilities: Ion Deluge turns Normal
+  // listed one (src/battle_main.c:5200-5201, GetMoveTypeInternal).
+  // GetMoveTypeInternal, battle_main.c:5196-5198, between the effect switch and the onMoveType abilities: Ion Deluge turns Normal
   // moves Electric, Electrify (STATUS4_ELECTRIFIED on the attacker) every move, Plasma Fists' status Normal moves again.
   const electrified =
     scenario.attackerElectrified === true ||
@@ -1017,6 +1123,7 @@ function calcInternal(
   const statStageRatios = battleConstants.statStageRatios
 
   const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
+  const attackerHasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attacker.abilitySlots, id, () => false))
 
   const { moveType, ateBoost, unmodelled: typeUnmodelled } = resolveMoveType(scenario, inputMoveType)
   unmodelled.push(...typeUnmodelled)
@@ -1122,6 +1229,7 @@ function calcInternal(
     attacker.naturalGift?.power ?? null,
     attackerHasAuroraBorealis,
     hitIndex,
+    attackerHasChloroplast,
   )
   unmodelled.push(...preModifierResult.unmodelled)
   // Victory Bomb (src/abilities.cc:8980-8988): the real C queues a SEPARATE,
@@ -1281,7 +1389,7 @@ function calcInternal(
  * wrong, this engine's own data gives Struggle a real declared type
  * (TYPE_NORMAL), so it's a genuine, necessary check (see resolveTypeEffectiveness's
  * own matching Struggle fix, and CalcTypeEffectivenessMultiplier's own
- * unconditional Struggle bypass, battle_util.c:8015-8021, which is why THIS
+ * unconditional Struggle bypass, battle_util.c:7986-7994, which is why THIS
  * check and that one both special-case the same move independently).
  * IsAbilityOnFieldExcept scans every battler OTHER than the one computing STAB
  * (`i == battlerId` is skipped, battle_util.c:4839-4848); in this 2-battler v1

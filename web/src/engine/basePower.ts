@@ -235,20 +235,23 @@ export function applyMoveBehaviorDamage(baseDamage: number, behaviorId: string |
  * doc) so it's a separate parameter here rather than widening that shared shape
  * for this one rarely-used case. */
 /**
- * GetMoveTypeInternal's MOVE_WEATHER_BALL case (src/battle_main.c:5124-5133) and
- * CalcMoveBasePower's EFFECT_WEATHER_BALL case (:6854-6858) resolve to the SAME
+ * GetMoveTypeInternal's MOVE_WEATHER_BALL case (src/battle_main.c:5113-5122) and
+ * CalcMoveBasePower's EFFECT_WEATHER_BALL case (:6829-6834) resolve to the SAME
  * "is some weather (or Aurora Borealis) active" fact, so both the type and the
  * power-doubling share this one function. `null` means no weather active, no
- * Aurora Borealis -- move stays Normal-type, base power unchanged.
+ * Chloroplast and no Aurora Borealis -- move stays Normal-type, base power
+ * unchanged (and, per the C's `break`, still reaches the Ion Deluge /
+ * Electrify / "-ate" blocks in GetMoveTypeInternal).
  *
- * Chloroplast (a 4-ability declarative bitfield, always-Fire regardless of
- * weather) is NOT checked here -- it isn't in this pipeline's emitted damage-
- * relevant bitfield set yet, and adding it means a data regeneration this
- * project's convention requires asking about first. A Chloroplast holder using
- * Weather Ball outside Sun therefore under-counts (stays Normal/no boost) rather
- * than over-counting -- the safe-side gap, not a silent wrong-direction one.
+ * Chloroplast wins outright and needs no weather: HasChloroplast
+ * (battle_util.c:9340) is `RETURN_ABILITY_IF_FLAG(battler, FALSE, chloroplast)`,
+ * the bitfield on ABILITY_CHLOROPLAST/ABILITY_SOLAR_FLARE/ABILITY_BIG_LEAVES
+ * (the caller supplies the fact; see calculate.ts's CHLOROPLAST_ABILITIES).
+ * Order matters: Chloroplast is checked BEFORE Aurora Borealis (:5114-5115),
+ * and both before the weather switch.
  */
-export function weatherBallType(weather: string, attackerHasAuroraBorealis: boolean): string | null {
+export function weatherBallType(weather: string, attackerHasAuroraBorealis: boolean, attackerHasChloroplast = false): string | null {
+  if (attackerHasChloroplast) return 'FIRE'
   if (attackerHasAuroraBorealis) return 'ICE'
   if (weather === 'RAIN_PERMANENT' || weather === 'RAIN_TEMPORARY' || weather === 'RAIN_PRIMAL') return 'WATER'
   if (weather === 'SUN_PERMANENT' || weather === 'SUN_TEMPORARY' || weather === 'SUN_PRIMAL') return 'FIRE'
@@ -285,9 +288,14 @@ export function applyPreModifierBasePower(
    * calculate.ts's per-hit loop already threads an index through, this just reads
    * it. 0 for every non-multi-hit move (the default, single-hit case). */
   hitIndex: number = 0,
+  /** HasChloroplast (battle_util.c:9340) -- GetMoveTypeInternal checks it before
+   * Aurora Borealis (:5114-5115); CalcMoveBasePower ORs the two into the same
+   * doubling (:6830). Trailing because callers that predate it already pass
+   * hitIndex positionally. */
+  attackerHasChloroplast = false,
 ): BasePowerResult {
   if (moveEffect === 'EFFECT_WEATHER_BALL') {
-    return { power: weatherBallType(ctx.field.weather, attackerHasAuroraBorealis) !== null ? basePower * 2 : basePower, unmodelled: [] }
+    return { power: weatherBallType(ctx.field.weather, attackerHasAuroraBorealis, attackerHasChloroplast) !== null ? basePower * 2 : basePower, unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_WAKE_UP_SLAP') {
     return { power: ctx.defender.status1.has('STATUS1_SLEEP') || ctx.defender.hasComatose ? basePower * 2 : basePower, unmodelled: [] }

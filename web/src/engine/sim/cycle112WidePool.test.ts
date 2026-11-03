@@ -186,6 +186,8 @@ describe('cycle 112 wide pool gate', () => {
   // the wide-pool gate. The only gated moves with no `effect` are MOVE_NONE and MOVE_TEMPEST_STORM
   // (power 0; the codegen emits EFFECT_HIT, the proto3 default -- pipeline/.upstream/er-config/
   // MoveBehavior.proto:19), and no species learns either, so the synthetic NONE key is out of scope.
+  // Tempest Storm is trainer-only (TrainerList.textproto:16763, :40557); its actual script behaviour
+  // is covered by cycle138bMoveTypes.test.ts.
   it('every gated move effect key is verified or allowlisted', () => {
     expect(LEARNABLE_MOVE_IDS.size).toBeGreaterThan(0)
     expect(LEARNABLE_MOVE_IDS.has('MOVE_NONE')).toBe(false)

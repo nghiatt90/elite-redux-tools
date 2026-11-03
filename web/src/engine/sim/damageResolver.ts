@@ -38,7 +38,8 @@ import type { TypeChart } from '../typeEffectiveness'
 import type { BattleState, RandomSource } from './state'
 import type { BridgeDeps } from './bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from './bridge'
-import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, hasFlag } from './constants'
+import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, STATUS_FIELD_TERRAIN_ANY, hasFlag } from './constants'
+import { isBattlerTerrainAffected } from './statusEffects'
 import type { DamageResolution, DamageResolveContext, DamageResolver } from './turn'
 import type { ChosenAction } from './turnOrder'
 
@@ -166,10 +167,19 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     singleHitIndex: context.hitIndex,
     // MISC_EFFECT_TOOK_DAMAGE_BOOST (battle_util.c:6869-6871) and MISC_EFFECT_DOUBLE_DAMAGE (:6872-6874): the latter's
     // Random() is drawn inside CalcMoveBasePower, i.e. before the damage roll below.
-    // GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5197)
+    // GetMoveTypeInternal's Normal-to-Electric overrides (battle_main.c:5196-5198)
     attackerElectrified: hasFlag(attackerBattlerState.statuses4, STATUS4_ELECTRIFIED),
     ionDelugeActive: hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE),
     attackerPlasmaFists: hasFlag(attackerBattlerState.statuses4, STATUS4_PLASMA_FISTS),
+    // IsBattlerTerrainAffected(battlerAtk, STATUS_FIELD_TERRAIN_ANY) for the
+    // Terrain Pulse type gate (battle_util.c:4901-4928, battle_main.c:5173-5191).
+    // The sim's grounding model carries everything the C's check reads for the
+    // user (including Ingrain/Smacked Down/Magnet Rise and allowTerrainIfAirborne),
+    // so resolveMoveType never has to guess. Only Terrain Pulse reads it.
+    attackerTerrainAffected:
+      move.effect === 'EFFECT_TERRAIN_PULSE'
+        ? isBattlerTerrainAffected(state, attackerId, STATUS_FIELD_TERRAIN_ANY, { dataContext: deps.dataContext, grounding: deps.grounding })
+        : undefined,
     attackerTimesDamaged: state.sides[attackerId & 1]?.timesDamaged[attackerBattlerState.partyIndex] ?? 0,
     miscDoubleDamage:
       drawRandom && move.miscEffect === 'MISC_EFFECT_DOUBLE_DAMAGE' ? deps.random.random16() % 100 < move.effectChance : undefined,
@@ -194,7 +204,17 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
           ? { ...declaredMove, power: extra.movePower }
           : declaredMove
       if (!move) return { targetDamage: null, attackerDamage: null, unmodelled: [`move ${action.chosenMove.id}: move data is unavailable`] }
-      if (move.split === 'STATUS') return { targetDamage: null, attackerDamage: null, unmodelled: ['status effects are not modelled yet'] }
+      // A STATUS split normally means a status effect, which this resolver does
+      // not model. The exception is a move the codegen gives NO behaviour: that
+      // lands on EFFECT_HIT (proto3 default, MoveBehavior.proto:19) and runs
+      // BattleScript_EffectHit's damagecalc like any damaging move -- Cmd_damagecalc
+      // never consults the split, CalcMoveBasePower floors the 0 power to 1
+      // (battle_util.c:6932), and CalcTypeEffectivenessMultiplier keeps only the
+      // immunity (modifier 0) while flattening everything else to 1.0 (:7992).
+      // MOVE_TEMPEST_STORM is the only such move in the data.
+      if (move.split === 'STATUS' && move.effect !== null) {
+        return { targetDamage: null, attackerDamage: null, unmodelled: ['status effects are not modelled yet'] }
+      }
 
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, true)
       const result = calculateMoveDamage(scenario)

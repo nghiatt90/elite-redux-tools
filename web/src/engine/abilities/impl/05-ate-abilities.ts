@@ -31,6 +31,11 @@ export function ateAbility(id: string, src: string, type: string): AbilityImpl {
     // (resolveEffectiveMoveType calls every onMoveType hook regardless of the
     // move's original type; see its own doc for why).
     onMoveType: (ctx) => {
+      // The C's move-ID switch returns TYPE_NORMAL for Struggle before its
+      // onMoveType loop is ever reached (src/battle_main.c:5095-5096), so no
+      // "-ate" ability can retype it. resolveMoveType already short-circuits
+      // Struggle; this guards the callers that reach the hook directly.
+      if (ctx.moveId === 'MOVE_STRUGGLE') return
       if (ctx.moveType !== 'NORMAL') return
       ctx.moveType = type
       ctx.ateBoost = true

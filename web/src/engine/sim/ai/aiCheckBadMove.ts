@@ -218,6 +218,7 @@ import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
 import { aiCalcDamage, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
 import { idiv } from '../../fixed'
+import { CHLOROPLAST_ABILITIES } from '../../multiHit'
 
 type Result = { score: number; unmodelled: string[] }
 
@@ -882,8 +883,10 @@ export function u8(value: number): number {
 /** Every ability whose abilityHooks.json marks `chloroplast` -- HasChloroplast,
  * battle_util.c:9340-9343 (`RETURN_ABILITY_IF_FLAG(battler, FALSE, chloroplast)`).
  * Extraction: same query as PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES with
- * `bitfields.chloroplast` -- 3 entries. */
-export const CHLOROPLAST_ABILITIES: readonly string[] = ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE']
+ * `bitfields.chloroplast` -- 3 entries. The list itself lives in multiHit.ts
+ * (one copy shared with the damage calculator and the sim's move handler); this
+ * re-export keeps aiCheckBadMove.test.ts's data check pointed at it. */
+export { CHLOROPLAST_ABILITIES }
 
 /**
  * AI_CheckBadMove, battle_ai_main.c:488-2164 (the full function, part 1 +

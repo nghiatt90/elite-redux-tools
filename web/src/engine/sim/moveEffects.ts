@@ -260,6 +260,7 @@ import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../batt
 import type { SimDataContext } from './dataContext'
 import { CONFUSE_BERRY_FLAVORS, flavorRelationByNature } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
+import { CHLOROPLAST_ABILITIES } from '../multiHit'
 import type { StatusCheck } from './statusEffects'
 import {
   CHECK_CONFUSION,
@@ -1342,11 +1343,11 @@ function handleMysticDance(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { statChanges })
 }
 
-export const CHLOROPLAST_ABILITIES = [
-  'ABILITY_BIG_LEAVES',
-  'ABILITY_CHLOROPLAST',
-  'ABILITY_SOLAR_FLARE',
-] as const
+// Re-exported for turn.ts. The one HasChloroplast list lives in multiHit.ts so
+// the calculator, the sim and the AI's audited list (aiCheckBadMove.ts, whose
+// test checks it against abilityHooks.json's `bitfields.chloroplast`) cannot
+// drift apart.
+export { CHLOROPLAST_ABILITIES }
 
 function hasChloroplast(
   state: BattleState,

@@ -79,9 +79,9 @@ const RAIN_WEATHERS: ReadonlySet<string> = new Set(['RAIN_PERMANENT', 'RAIN_TEMP
  * bitfield: ABILITY_CHLOROPLAST (src/abilities.cc:3651), ABILITY_SOLAR_FLARE (:4641)
  * and ABILITY_BIG_LEAVES (:4753), confirmed against abilityHooks.json's `bitfields`.
  * The pipeline does not emit a `chloroplast` bitfield into the calc (see
- * basePower.ts:243-248), so they are listed by id here.
+ * basePower.ts:246-250), so they are listed by id here.
  */
-const CHLOROPLAST_ABILITIES = ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE'] as const
+export const CHLOROPLAST_ABILITIES = ['ABILITY_BIG_LEAVES', 'ABILITY_CHLOROPLAST', 'ABILITY_SOLAR_FLARE'] as const
 
 function isTwoTurnEffect(effect: string | null): boolean {
   return effect !== null && TWO_TURN_EFFECTS.has(effect)

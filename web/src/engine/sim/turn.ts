@@ -229,7 +229,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, canBattlerSwitch, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -1175,6 +1175,7 @@ export function handleProtectLikeMoveEnd(
           ? weatherBallType(
               weatherFromBitfield(state.field.weather).weather,
               battlerHasSimAbility(state, attacker, 'ABILITY_AURORA_BOREALIS', false, attackerId, false, deps.dataContext),
+              CHLOROPLAST_ABILITIES.some((ab) => battlerHasSimAbility(state, attacker, ab, false, attackerId, false, deps.dataContext)),
             )
           : null
       moveType = (
