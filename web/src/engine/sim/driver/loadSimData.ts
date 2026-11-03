@@ -10,6 +10,7 @@ import type { MoveBehaviors } from '../../basePower'
 import type { BattleConstants } from '../../types'
 import type { TypeChart } from '../../typeEffectiveness'
 import type { SimDataContext, SimItemData, SimMegaEvolution, SimMoveData, SimPrimalReversion, SimSpeciesData } from '../dataContext'
+import { flavorRelationByNature } from '../dataContext'
 import type { GroundingContext } from '../grounding'
 import type { TurnOrderContext } from '../turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from '../turnOrder'
@@ -156,6 +157,12 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
 
     primalReversionSpecies(speciesId: string, itemId: string): string | undefined {
       return primalReversionMap.get(`${speciesId}|${itemId}`)
+    },
+
+    // GetFlavorRelationByNature (src/pokemon.c:4185-4188) -- dataContext.ts's own
+    // table, not another copy. Throws on an unknown nature (see that helper's doc).
+    natureFlavorRelation(nature: string, flavor: number): number {
+      return flavorRelationByNature(nature, flavor)
     },
 
     item(id: string): SimItemData | undefined {

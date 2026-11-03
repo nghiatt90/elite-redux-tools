@@ -181,11 +181,27 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
 
   if (move.effect === 'EFFECT_ROLLOUT') unmodelled.push('attackerRolloutCounter and attackerHasDefenseCurl are not tracked by the simulator')
   if (move.effect === 'EFFECT_BEAT_UP') unmodelled.push('beatUpBaseAttack and beatUpHitCount are not tracked by the simulator')
-  // The sim does model the pre-switch Pursuit hit (turn.ts:findPursuitAttacker), but AI_CalcDamage has no
-  // knowledge of the target's chosen action, so this estimate still scores Pursuit at its 50 base power
-  // rather than the doubled 100 (battle_util.c:6860-6861).
-  if (move.effect === 'EFFECT_PURSUIT')
-    unmodelled.push("defenderIsSwitching is not modelled by the AI damage estimate, which cannot see the target's chosen action")
+  // EFFECT_PURSUIT is NOT a gap here, and the earlier note claiming otherwise was wrong.
+  // CalcMoveBasePower's Pursuit case (battle_util.c:6835-6836) doubles the power only when
+  //   gActionsByTurnOrder[GetBattlerTurnOrderNum(gBattlerTarget)] == B_ACTION_SWITCH.
+  // That array is written in exactly one place -- SetActionsAndBattlersTurnOrder
+  // (battle_main.c:4400-4470, the switch/item/throw-ball slot writes at :4459-4462), which
+  // only runs once ACTIONS_CONFIRMED_COUNT == gBattlersCount (battle_main.c:4117-4122), i.e.
+  // AFTER every battler has chosen. All three AI_CalcDamage call sites
+  // (battle_ai_main.c:260, battle_ai_util.c:998, battle_ai_util.c:2438) are inside the AI's
+  // own ChooseMoveOrAction scoring, i.e. before that point, so the array still holds the
+  // PREVIOUS turn's actions -- or the initial all-B_ACTION_FINISHED value
+  // (battle_main.c:174) on turn 1. A switch turn also never leaves B_ACTION_SWITCH behind:
+  // SwitchInClearSetData rewrites the incoming battler's slot to B_ACTION_TRY_FINISH
+  // (battle_main.c:2803), and the turn-order slots are all rewritten at the start of the
+  // next turn anyway. So during AI selection the comparison can never see this turn's
+  // switch, and the AI legitimately estimates Pursuit at its undoubled base power 50.
+  // The sim already does exactly that; the pre-switch hit itself is
+  // turn.ts:findPursuitAttacker's job (Cmd_jumpifnopursuitswitchdmg,
+  // battle_script_commands.c:11293-11324, and BattleScript_PursuitDmgOnSwitchOut,
+  // data/battle_scripts_1.s:7235-7259), unrelated to this estimate. Do not re-add a note
+  // here. (The old note cited battle_util.c:6860-6861, which is the EFFECT_MISC_HIT
+  // electric-terrain case, not the Pursuit line; the real comparison is :6835-6836.)
   if (move.effect === 'EFFECT_MAGNITUDE') {
     unmodelled.push('magnitudeTier is averaged across all magnitude tiers (calculateMoveDamage\'s own null-tier distribution) rather than drawn -- AI_CalcDamage has no real roll for this port to reuse')
   }
@@ -210,6 +226,10 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
     attackerActsFirst: true,
     sameMoveTurnsInARow: maskedState.battlers[attackerId]?.sameMoveTurns ?? 0,
     hitCount: 0,
+    // CalcMoveBasePower's Pursuit doubling (battle_util.c:6835-6836) reads
+    // gActionsByTurnOrder, which during selection still holds the PREVIOUS turn's actions
+    // (see this function's Pursuit comment above) -- the AI can never see this turn's
+    // switch, so the undoubled estimate is the C's own answer, not an approximation.
     defenderIsSwitching: false,
     magnitudeTier: null,
     attackerRolloutCounter: 0,

@@ -594,8 +594,11 @@ export function runAttackCanceller(
   //       if (moveType == TYPE_FIRE) { powderSelfDmg = TRUE; gBattleMoveDamage = ...; effect = 1; }
   //   }
   // GET_MOVE_TYPE (include/battle.h:735-740) reads dynamicMoveType when bit 7 is set, else the
-  // declared type; the sim's only dynamic-type writers are the -ate onMoveType hooks, so
-  // resolveEffectiveMoveType is the model for that fallback. The script that follows
+  // declared type. The full resolution is calculate.ts's resolveMoveType (GetMoveTypeInternal,
+  // battle_main.c:5040-5211) and the damage bridge exposes it as DamageResolver.moveType, but
+  // this canceller stage runs before any resolver call and has no scenario to build, so it
+  // still answers with the -ate onMoveType subset only -- the item/effect/field branches
+  // (Hidden Power, Judgment/Plate, Weather Ball, ...) remain unmodelled at THIS check. The script that follows
   // (BattleScript_MoveUsedPowder, data/battle_scripts_1.s:8769-8787) is one of the two cancel
   // scripts that still runs attackstring and ppreduce (:8772), so turn.ts spends the PP.
   if (hasFlag(attacker.mon.status2, STATUS2_POWDER)) {

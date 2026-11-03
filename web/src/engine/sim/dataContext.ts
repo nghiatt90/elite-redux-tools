@@ -133,6 +133,109 @@ export interface SimMoveData {
 }
 
 /**
+ * gPokeblockFlavorCompatibilityTable's row order: the game's own nature enum
+ * (include/constants/pokemon.h:77-102, NATURE_HARDY=0 .. NATURE_QUIRKY=24), NOT
+ * natures.json's alphabetical key order. Index = nature id, value = bare NATURE_*
+ * name.
+ */
+export const NATURE_ORDER: readonly string[] = [
+  'NATURE_HARDY',
+  'NATURE_LONELY',
+  'NATURE_BRAVE',
+  'NATURE_ADAMANT',
+  'NATURE_NAUGHTY',
+  'NATURE_BOLD',
+  'NATURE_DOCILE',
+  'NATURE_RELAXED',
+  'NATURE_IMPISH',
+  'NATURE_LAX',
+  'NATURE_TIMID',
+  'NATURE_HASTY',
+  'NATURE_SERIOUS',
+  'NATURE_JOLLY',
+  'NATURE_NAIVE',
+  'NATURE_MODEST',
+  'NATURE_MILD',
+  'NATURE_QUIET',
+  'NATURE_BASHFUL',
+  'NATURE_RASH',
+  'NATURE_CALM',
+  'NATURE_GENTLE',
+  'NATURE_SASSY',
+  'NATURE_CAREFUL',
+  'NATURE_QUIRKY',
+]
+
+/** FLAVOR_COUNT (include/constants/berry.h:18): Spicy, Dry, Sweet, Bitter, Sour
+ * (:13-17, FLAVOR_SPICY=0 .. FLAVOR_SOUR=4). */
+export const FLAVOR_COUNT = 5
+
+/**
+ * gPokeblockFlavorCompatibilityTable (src/pokeblock.c:141-167), copied verbatim:
+ * 25 natures x 5 flavors, row-major by NATURE_ORDER. -1 = the nature dislikes the
+ * flavor, +1 = likes it, 0 = neutral. GetFlavorRelationByNature
+ * (src/pokemon.c:4185-4188) is a bare `gPokeblockFlavorCompatibilityTable[nature *
+ * FLAVOR_COUNT + flavor]`, so this table IS the answer; there is no formula.
+ */
+export const POKEBLOCK_FLAVOR_COMPATIBILITY_TABLE: readonly (readonly number[])[] = [
+  /* Hardy   */ [0, 0, 0, 0, 0],
+  /* Lonely  */ [1, 0, 0, 0, -1],
+  /* Brave   */ [1, 0, -1, 0, 0],
+  /* Adamant */ [1, -1, 0, 0, 0],
+  /* Naughty */ [1, 0, 0, -1, 0],
+  /* Bold    */ [-1, 0, 0, 0, 1],
+  /* Docile  */ [0, 0, 0, 0, 0],
+  /* Relaxed */ [0, 0, -1, 0, 1],
+  /* Impish  */ [0, -1, 0, 0, 1],
+  /* Lax     */ [0, 0, 0, -1, 1],
+  /* Timid   */ [-1, 0, 1, 0, 0],
+  /* Hasty   */ [0, 0, 1, 0, -1],
+  /* Serious */ [0, 0, 0, 0, 0],
+  /* Jolly   */ [0, -1, 1, 0, 0],
+  /* Naive   */ [0, 0, 1, -1, 0],
+  /* Modest  */ [-1, 1, 0, 0, 0],
+  /* Mild    */ [0, 1, 0, 0, -1],
+  /* Quiet   */ [0, 1, -1, 0, 0],
+  /* Bashful */ [0, 0, 0, 0, 0],
+  /* Rash    */ [0, 1, 0, -1, 0],
+  /* Calm    */ [-1, 0, 0, 1, 0],
+  /* Gentle  */ [0, 0, 0, 1, -1],
+  /* Sassy   */ [0, 0, -1, 1, 0],
+  /* Careful */ [0, -1, 0, 1, 0],
+  /* Quirky  */ [0, 0, 0, 0, 0],
+]
+
+/**
+ * GetFlavorRelationByNature (src/pokemon.c:4185-4188) over the table above.
+ * Deliberately THROWS on an unknown nature or flavor instead of returning a neutral
+ * 0: a silent 0 would hide the HealConfuseBerry confusion this exists to answer
+ * (battle_util.c:5181-5186) and turn a wrong answer into a plausible one -- the same
+ * failure mode SimDataContext's own doc refuses to allow for a missed lookup.
+ */
+export function flavorRelationByNature(nature: string, flavor: number): number {
+  const row = NATURE_ORDER.indexOf(nature)
+  if (row < 0) throw new Error(`flavorRelationByNature: unknown nature ${nature}`)
+  if (!Number.isInteger(flavor) || flavor < 0 || flavor >= FLAVOR_COUNT) {
+    throw new Error(`flavorRelationByNature: flavor ${flavor} is outside 0..${FLAVOR_COUNT - 1} (FLAVOR_* constants)`)
+  }
+  return POKEBLOCK_FLAVOR_COMPATIBILITY_TABLE[row]![flavor]!
+}
+
+/**
+ * HealConfuseBerry's flavorId argument per HOLD_EFFECT_CONFUSE_* case
+ * (src/battle_util.c:5442-5456 and :5717-5731, both pass the same ids; the move-end
+ * block at :5892-5906 is identical). No table lookup exists in the C -- the switch
+ * case hard-codes the flavor.
+ */
+export const CONFUSE_BERRY_FLAVORS: Readonly<Record<string, number>> = {
+  HOLD_EFFECT_CONFUSE_SPICY: 0,
+  HOLD_EFFECT_CONFUSE_DRY: 1,
+  HOLD_EFFECT_CONFUSE_SWEET: 2,
+  HOLD_EFFECT_CONFUSE_BITTER: 3,
+  HOLD_EFFECT_CONFUSE_SOUR: 4,
+}
+
+/**
  * Lookups the bridge performs. Every method may return undefined; the bridge
  * treats a miss as a GAP rather than substituting a default, so a context
  * missing an entry produces a visibly incomplete answer instead of a plausible
@@ -144,4 +247,14 @@ export interface SimDataContext {
   move(id: string): SimMoveData | undefined
   megaEvolutionSpecies?(speciesId: string, itemId: string): string | undefined
   primalReversionSpecies?(speciesId: string, itemId: string): string | undefined
+  /** GetFlavorRelationByNature (src/pokemon.c:4185-4188), for HealConfuseBerry's
+   * `relation < 0` confusion branch (src/battle_util.c:5181-5186). `flavor` is one
+   * of FLAVOR_SPICY..FLAVOR_SOUR (include/constants/berry.h:13-17); see
+   * CONFUSE_BERRY_FLAVORS for the HOLD_EFFECT_CONFUSE_* -> flavor mapping.
+   * MUST throw on an unknown nature rather than return 0 -- see
+   * flavorRelationByNature's own doc. Optional only because hand-built test
+   * fixtures predate it; the driver's context (driver/loadSimData.ts) always
+   * supplies it, and callers fall back to the exported flavorRelationByNature
+   * when it is absent, which throws the same way. */
+  natureFlavorRelation?(nature: string, flavor: number): number
 }

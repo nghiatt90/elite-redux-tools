@@ -383,8 +383,9 @@ describe('Cycle 109b - Camouflage uses GET_MOVE_TYPE', () => {
 
     handleProtectLikeMoveEnd(state, 0, 1, 'MOVE_TACKLE', LOOP_DEPS, notes)
     expect(target.mon.types[2]).toBe('FAIRY')
-    // The resolver covers only GetMoveTypeInternal's onMoveType branch; the note names the rest.
-    expect(notes.some((n) => n.includes('Natural Gift'))).toBe(true)
+    // Cycle 137: the fallback resolver this test's DUMMY_DAMAGE forces answers the whole
+    // onMoveType + Weather Ball subset and warns about nothing, so there is no note left to pin.
+    expect(notes).toEqual([])
 
     // IS_BATTLER_OF_TYPE(target, moveType) is true now, so the second application is a no-op.
     state.battlers[0]!.round.touchedProtectLike = true

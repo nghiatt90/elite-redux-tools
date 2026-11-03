@@ -552,6 +552,18 @@ export interface DamageResolver {
    * battle_util.c:3376-3378: a typeless physical hit on itself with no crit and no random roll. Optional: a resolver without
    * a damage engine behind it leaves the self-hit unmodelled. */
   confusionSelfHit?(state: BattleState, battlerId: number, power: number): { damage: number | null; unmodelled: string[] }
+  /** GetMoveTypeInternal's answer for one move use -- the value
+   * gBattleStruct->dynamicMoveType ends up holding, i.e. the move's type AFTER
+   * SetTypeBeforeUsingMove (battle_main.c:5215-5260) has applied the whole
+   * resolution: Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Fling
+   * gem, Revelation Dance/Spit Up, Synchronoise/Ivy Cudgel, Terrain Pulse, Ion
+   * Deluge/Electrify/Plasma Fists and the onMoveType ("-ate") abilities -- in
+   * that order. Deterministic and side-effect free (no RNG draw, no state
+   * mutation); `unmodelled` carries the same informational gaps the damage
+   * formula would report for the type (e.g. an unset Hidden Power type).
+   * Optional: a resolver without a type engine behind it leaves the Camouflage
+   * branch on its narrow fallback (see handleProtectLikeMoveEnd). */
+  moveType?(state: BattleState, attackerId: number, targetId: number, moveId: string): { moveType: string | null; unmodelled: string[] }
 }
 
 /** A resolver that THROWS rather than returning zero.
@@ -1130,30 +1142,48 @@ export function handleProtectLikeMoveEnd(
   const protectMove = target.round.protectMove
   if (!protectMove) return none
 
-  // :4415-4427
+  // battle_script_commands.c:4415-4427 (MOVEEND_PROTECT_LIKE_EFFECT's MOVE_CAMOUFLAGE case).
   if (protectMove === 'MOVE_CAMOUFLAGE') {
     const moveData = deps.dataContext.move(currentMoveId)
     if (!moveData?.type) return none
-    // GET_MOVE_TYPE(gCurrentMove, moveType) (include/battle.h:735-741) reads the RESOLVED
-    // type (gBattleStruct->dynamicMoveType, written by SetTypeBeforeUsingMove's
-    // GetMoveTypeInternal). resolveEffectiveMoveType is the sim's existing resolver for its
-    // onMoveType (-ate) branch; the branches below are NOT covered, so the note stays.
-    const dynamicWeatherBall =
-      moveData.effect === 'EFFECT_WEATHER_BALL'
-        ? weatherBallType(
-            weatherFromBitfield(state.field.weather).weather,
-            battlerHasSimAbility(state, attacker, 'ABILITY_AURORA_BOREALIS', false, attackerId, false, deps.dataContext),
-          )
-        : null
-    const moveType = (
-      dynamicWeatherBall ??
-      resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
-    ).replace(/^TYPE_/, '')
+    // GET_MOVE_TYPE(gCurrentMove, moveType) (include/battle.h:735-741) reads the
+    // RESOLVED type gBattleStruct->dynamicMoveType holds, which SetTypeBeforeUsingMove
+    // (:5215-5260) wrote from GetMoveTypeInternal's full switch (battle_main.c:5040-5211)
+    // -- Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Fling gem, Revelation
+    // Dance/Spit Up, Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma
+    // Fists and the onMoveType ("-ate") abilities, in that order. The resolver's moveType
+    // method is that same resolution (calculate.ts's resolveMoveType, the one the damage
+    // formula itself calls), not a second partial copy.
+    let moveType: string
+    if (deps.damage.moveType) {
+      const resolved = deps.damage.moveType(state, attackerId, targetId, currentMoveId)
+      unmodelled.push(...resolved.unmodelled)
+      // The move's data existed for the type check above; a resolver that
+      // nonetheless cannot name the type leaves the type3 untouched, same as the C's
+      // GET_MOVE_TYPE falling back to gBattleMoves[gCurrentMove].type (which is what
+      // moveData.type is) -- resolved.moveType is only null when the resolver has no
+      // move data at all.
+      if (resolved.moveType === null) return none
+      moveType = resolved.moveType.replace(/^TYPE_/, '')
+    } else {
+      // Narrow fallback for a resolver with no type engine behind it (test doubles and
+      // stubs): the onMoveType (-ate) branch plus Weather Ball, which is everything a
+      // stub resolver can be expected to answer. A real resolver (createBridgeDamageResolver)
+      // always supplies moveType, so this branch is never taken in the simulator proper.
+      const dynamicWeatherBall =
+        moveData.effect === 'EFFECT_WEATHER_BALL'
+          ? weatherBallType(
+              weatherFromBitfield(state.field.weather).weather,
+              battlerHasSimAbility(state, attacker, 'ABILITY_AURORA_BOREALIS', false, attackerId, false, deps.dataContext),
+            )
+          : null
+      moveType = (
+        dynamicWeatherBall ??
+        resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
+      ).replace(/^TYPE_/, '')
+    }
     if (target.mon.types.includes(moveType)) return none
     target.mon.types[2] = moveType
-    unmodelled.push(
-      "Camouflage applies GET_MOVE_TYPE's onMoveType (-ate) resolution only; the item/effect/field dynamic-type branches (Judgment/Plate, Natural Gift, Weather Ball, Hidden Power, Fling gem, Revelation Dance/Spit Up/Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma Fists) are not applied",
-    )
     return none
   }
 
@@ -3725,6 +3755,13 @@ export function executeAction(
     if (isFixedDamage) {
       // The engine's own "EFFECT_X: not modelled" note (basePower.ts UNMODELLED_BASE_POWER_EFFECTS) is answered by this block.
       damageUnmodelled = damageUnmodelled.filter((note) => note !== `${moveEffect}: not modelled`)
+      // Move-ID-keyed twin of that note (basePower.ts UNMODELLED_BASE_POWER_MOVE_IDS, currently only
+      // MOVE_SEISMIC_TOSS). Seismic Toss's own script (battle_scripts_1.s:5822-5827) does
+      // `calculatesetdamage`, i.e. it sets gBattleMoveDamage itself, exactly like the effect-keyed
+      // fixed-damage scripts above -- fixedDamageFor (:1930) answers the user's level here, so the
+      // question the note asks is answered and the note must not survive. The variable is the same
+      // current-move id `currentMove.id` the isFixedDamage condition above already reads.
+      damageUnmodelled = damageUnmodelled.filter((note) => note !== `${currentMove.id}: not modelled`)
     }
 
     // Cmd_adjustdamage (battle_script_commands.c:1626-1676) -- Endure / falseSwipe / Focus Sash stops HP at 1 (:1645-1673)
@@ -4418,7 +4455,7 @@ function runFutureSightCountdown(
     // Desire have no mirrorMoveAffected flag, and MOVEEND_CLEAR_BITS (case 30) is turned
     // off because it is outside the C's range. Cases 15 (KINGSROCK) and 16 (SUBSTITUTE)
     // are left -- see REPORT.md.
-    applyMoveEndItemEffectsAll(state, deps, unmodelled)
+    applyMoveEndItemEffectsAll(state, deps, unmodelled, { attackerId, moveId })
     const recordedAction = actions[attackerId]
     runMoveEndBookkeeping({
       state,

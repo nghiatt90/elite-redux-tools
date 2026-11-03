@@ -30,7 +30,7 @@
 // resolver to port; multiHit.ts's parentalBondHitCount returns hitCount 1 for
 // this trigger, matching the C's fall-through.
 import type { MoveData, DamageCalcScenario } from '../calculate'
-import { calculateMoveDamage } from '../calculate'
+import { calculateMoveDamage, resolveMoveType } from '../calculate'
 import type { BattleConstants } from '../types'
 import type { MoveBehaviors } from '../basePower'
 import type { TypeChart } from '../typeEffectiveness'
@@ -249,6 +249,24 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, false)
       const result = calculateMoveDamage(scenario)
       return { effectiveness: result.typeEffectiveness, unmodelled: [...unmodelled, ...result.unmodelled] }
+    },
+
+    /** GetMoveTypeInternal's answer for one move use, with no damage, no RNG draw
+     * and no state mutation -- see DamageResolver.moveType's own doc (turn.ts).
+     * Camouflage (battle_script_commands.c:4415-4427) writes this into the
+     * protector's type3, so it must be the SAME resolution CalcMoveBasePower and
+     * CalcTypeEffectivenessMultiplier read, not a second partial copy: both go
+     * through calculate.ts's resolveMoveType. */
+    moveType(state: BattleState, attackerId: number, targetId: number, moveId: string) {
+      const move = deps.moveData(moveId)
+      if (!move) return { moveType: null, unmodelled: [`move ${moveId}: move data is unavailable`] }
+      // drawRandom false, same reason as typeEffectiveness above: the type stage
+      // reads nothing that comes from a Random() draw, and this call may happen
+      // between two draws of the move's own script (MOVEEND_PROTECT_LIKE_EFFECT
+      // runs after damagecalc), so it must not shift the stream.
+      const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, { targetHasActedThisTurn: false }, false)
+      const resolved = resolveMoveType(scenario, move.type ?? 'NORMAL')
+      return { moveType: resolved.moveType, unmodelled: [...unmodelled, ...resolved.unmodelled] }
     },
 
     confusionSelfHit(state: BattleState, battlerId: number, power: number) {

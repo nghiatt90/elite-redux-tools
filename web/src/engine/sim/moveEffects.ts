@@ -258,6 +258,7 @@ import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
 import type { SimDataContext } from './dataContext'
+import { CONFUSE_BERRY_FLAVORS, flavorRelationByNature } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
 import type { StatusCheck } from './statusEffects'
 import {
@@ -9195,15 +9196,46 @@ export function consumeBerryWithOverride(
     case 'HOLD_EFFECT_CONFUSE_SWEET':
     case 'HOLD_EFFECT_CONFUSE_BITTER':
     case 'HOLD_EFFECT_CONFUSE_SOUR': {
-      // HealConfuseBerry (battle_util.c:5167-5193): HasEnoughHpToEatBerry returns TRUE under sBERRY_OVERRIDE even at full HP
-      unmodelled.push(
-        'HealConfuseBerry nature-flavor confusion check (battle_util.c:5181-5188) is not modelled (gPokeblockFlavorCompatibilityTable not in SimDataContext); treated as neutral flavor',
-      )
+      // HealConfuseBerry (battle_util.c:5167-5193): HasEnoughHpToEatBerry returns TRUE under sBERRY_OVERRIDE even at full HP.
       if (isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) break
       let heal = param > 0 ? Math.trunc(battler.mon.maxHp / param) : 1
       if (heal === 0) heal = 1
       if (hasRipenEffect(state, battlerId, deps)) heal *= 2
+      // Script order (BattleScript_BerryConfuseHealRet, data/battle_scripts_1.s:10986-11005):
+      // heal (:10991-10996) -> confusion (:10999-11000) -> removeitem (:11001). The flavor
+      // check (:5181-5186) was made BEFORE the script was chosen, on the same
+      // gBattleMons[battlerId].nature: GetFlavorRelationByNature(nature, flavorId) < 0
+      // selects BattleScript_BerryConfuseHealRet over BattleScript_ItemHealHP_RemoveItemRet.
+      const flavor = CONFUSE_BERRY_FLAVORS[holdEffect]!
+      const relation = (deps.dataContext.natureFlavorRelation ?? flavorRelationByNature)(battler.mon.nature, flavor)
       healBattler(state, battlerId, battler, heal)
+      if (relation < 0) {
+        // `setmoveeffect MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN` then
+        // `seteffectprimary` (data/battle_scripts_1.s:11000-11001). `setmoveeffect` only
+        // stores the value; Cmd_seteffectprimary then calls `SetMoveEffect(TRUE, 0)`
+        // (battle_script_commands.c:3124-3126), and SetMoveEffect's own entry clears the
+        // CERTAIN bit (:2346) without ever reading it -- that read belongs to
+        // Cmd_seteffectwithchance (:3107), which this script never runs. So the volatile
+        // is applied with primary = TRUE unconditionally: Shield Dust / Covert Cloak
+        // (:2348-2350) and Safeguard (:2352-2354) are gated on `!primary` and therefore do
+        // NOT block it. The CERTAIN bit is still passed through to mirror the script's
+        // stored moveEffect (it only widens the `primary || certain` tests, already true).
+        // gEffectBattler is gBattlerTarget, which VARIOUS_CONSUME_BERRY set to the eater
+        // (battle_script_commands.c:8033-8034) for this ITEMEFFECT_BATTLER_MOVE_END path;
+        // gBattlerAttacker stays the move's attacker, so its Sheer Force / substitute
+        // checks read the triggering move, as in the C.
+        applyPrimaryStatusEffect(
+          state,
+          attackerId,
+          battlerId,
+          MOVE_EFFECT_CONFUSION | MOVE_EFFECT_CERTAIN,
+          moveId,
+          deps,
+          unmodelled,
+          true,
+          true,
+        )
+      }
       fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       break
     }

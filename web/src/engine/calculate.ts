@@ -873,6 +873,114 @@ function resolveTypeEffectiveness(scenario: DamageCalcScenario, moveType: string
   })
 }
 
+/** GetMoveTypeInternal's terrain-switch mapping (src/battle_main.c:5160-5179):
+ * STATUS_FIELD_* -> the type the pulse becomes. Only listed when GetCurrentTerrain()
+ * can return that terrain; every other terrain is absent from the switch and the C
+ * falls through to the move's declared type (`REQUIRE` only gates on there being
+ * ANY terrain, global.h:54). */
+const TERRAIN_PULSE_TYPES: Record<string, string> = {
+  TERRAIN_ELECTRIC: 'ELECTRIC',
+  TERRAIN_GRASSY: 'GRASS',
+  TERRAIN_MISTY: 'FAIRY',
+  TERRAIN_PSYCHIC: 'PSYCHIC',
+  TERRAIN_TOXIC: 'POISON',
+}
+
+/**
+ * GetMoveTypeInternal's type resolution (src/battle_main.c:5040-5211), split out of
+ * calcInternal so a consumer that is NOT computing damage -- the simulator's
+ * Camouflage, which writes the move's resolved type into the target's type3 -- reads
+ * the SAME answer the damage formula does, instead of a second, partial copy of this
+ * switch (see turn.ts's handleProtectLikeMoveEnd).
+ *
+ * Order, exactly as the C:
+ *  1. the move-ID switch (:5044-5072): Struggle / Raging Bull / Tera Starstorm /
+ *     Weather Ball / Present -- Weather Ball is the only one with scenario state,
+ *     and it is checked first here for that reason;
+ *  2. the effect switch (:5078-5167): Hidden Power, Fling+Gem, Judgment/Plate and
+ *     Multi-Attack/Memory (EFFECT_CHANGE_TYPE_ON_ITEM), Revelation Dance / Spit Up,
+ *     Synchronoise / Ivy Cudgel, Natural Gift, Terrain Pulse;
+ *  3. Ion Deluge / Electrify / Plasma Fists (:5194-5197);
+ *  4. the onMoveType ability hooks (:5199-5211, resolveEffectiveMoveType) --
+ *     "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
+ *     move's type here;
+ *  5. the move's declared type as the fallback.
+ * Every switch case that matches RETURNS in the C, so none of them can reach stage 3
+ * or 4 -- that is why `ateBoost` is false whenever stage 1/2 answered.
+ *
+ * Terrain Pulse's own `IsBattlerTerrainAffected(battlerAtk, STATUS_FIELD_TERRAIN_ANY)`
+ * gate (:5162, battle_util.c:4901-4928) reads the ATTACKER's grounding, not the
+ * defender's: an active terrain, no semi-invulnerability, and IsBattlerGrounded. The
+ * engine's scenario carries `attacker.isGrounded` (the species-only baseline, see
+ * types.ts) and `attacker.semiInvulnerable`; the C's own allowTerrainIfAirborne
+ * exception (battle_util.c:4926, twelve abilities) is NOT represented in the engine
+ * scenario, so an airborne pulse user with one of those abilities falls through to its
+ * declared type here. That is the same grounding approximation the rest of the engine
+ * already documents, not a new one.
+ */
+export function resolveMoveType(
+  scenario: DamageCalcScenario,
+  inputMoveType: string,
+): { moveType: string; ateBoost: boolean; unmodelled: string[] } {
+  const { attacker, move, field } = scenario
+  const unmodelled: string[] = []
+  const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
+
+  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
+  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
+  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
+  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
+  // 5148-5150,5180-5182, each switch case in that function returns immediately on
+  // match). When none applies, this falls through exactly like the C's `break`
+  // does, leaving the move at its declared type for the ability loop below.
+  if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
+    unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
+  }
+  const itemMoveType =
+    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
+      ? (attacker.holdEffectType ?? inputMoveType)
+      : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
+        ? attacker.naturalGift.type
+        : move.effect === 'EFFECT_WEATHER_BALL'
+          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
+          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
+            ? attacker.hiddenPowerType
+            : // GetMoveTypeInternal's remaining attacker-keyed cases (src/battle_main.c:5133-5167): Fling with a Gem reads the gem's
+              // type; Spit Up and Revelation Dance take the user's first real type; Synchronoise (and Ivy Cudgel, which shares its
+              // effect) the user's second, else first, else third -- Ivy Cudgel first by Ogerpon's mask forms.
+              move.effect === 'EFFECT_FLING' && flingGemType(scenario) !== null
+              ? flingGemType(scenario)
+              : move.effect === 'EFFECT_SPIT_UP' || move.effect === 'EFFECT_REVELATION_DANCE'
+                ? attackerTypeOrder(attacker.types, [0, 1, 2])
+                : move.effect === 'EFFECT_SYNCHRONOISE'
+                  ? (move.id === 'MOVE_IVY_CUDGEL' ? ogerponMaskType(attacker.condition.speciesId) : null) ?? attackerTypeOrder(attacker.types, [1, 0, 2])
+                  : move.effect === 'EFFECT_TERRAIN_PULSE' &&
+                      field.terrain !== null &&
+                      TERRAIN_PULSE_TYPES[field.terrain] !== undefined &&
+                      attacker.semiInvulnerable === 'NONE' &&
+                      attacker.isGrounded
+                    ? TERRAIN_PULSE_TYPES[field.terrain]
+                    : null
+
+  // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
+  // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
+  // terrain-boost base-power check all key off the resolved type, not the move's
+  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
+  // GetMoveTypeInternal, battle_main.c:5194-5197, between the effect switch and the onMoveType abilities: Ion Deluge turns Normal
+  // moves Electric, Electrify (STATUS4_ELECTRIFIED on the attacker) every move, Plasma Fists' status Normal moves again.
+  const electrified =
+    scenario.attackerElectrified === true ||
+    (inputMoveType === 'NORMAL' && (scenario.ionDelugeActive === true || scenario.attackerPlasmaFists === true))
+  const { moveType, ateBoost } =
+    itemMoveType !== null
+      ? { moveType: itemMoveType, ateBoost: false }
+      : electrified
+        ? { moveType: 'ELECTRIC', ateBoost: false }
+        : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+
+  return { moveType, ateBoost, unmodelled }
+}
+
 /** DoMoveDamageCalcInternal's core equation for ONE evaluated type, up to (but not
  * including) the random factor -- src/battle_util.c:7722-7786. Returns -1 when the
  * type effectiveness is a flat immunity, matching the C's early return.
@@ -910,51 +1018,8 @@ function calcInternal(
 
   const attackerHasAuroraBorealis = battlerHasAbility(attacker.abilitySlots, 'ABILITY_AURORA_BOREALIS', () => false)
 
-  // EFFECT_CHANGE_TYPE_ON_ITEM (Judgment/Plate, Multi-Attack/Memory),
-  // EFFECT_NATURAL_GIFT, and EFFECT_WEATHER_BALL are all checked FIRST and, when
-  // they apply, short-circuit the whole rest of GetMoveTypeInternal -- an -ate
-  // ability never gets a chance to run (src/battle_main.c:5047-5049,5124-5133,
-  // 5148-5150,5180-5182, each switch case in that function returns immediately on
-  // match). When none applies, this falls through exactly like the C's `break`
-  // does, leaving the move at its declared type for the ability loop below.
-  if (move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType === null) {
-    unmodelled.push(`${move.id}: type depends on Hidden Power type, not set on the attacker -- defaulting to its declared (Normal) type`)
-  }
-  const itemMoveType =
-    move.changeTypeHoldEffect !== null && attacker.condition.resolvedHoldEffect === move.changeTypeHoldEffect
-      ? (attacker.holdEffectType ?? inputMoveType)
-      : move.effect === 'EFFECT_NATURAL_GIFT' && attacker.naturalGift !== null
-        ? attacker.naturalGift.type
-        : move.effect === 'EFFECT_WEATHER_BALL'
-          ? weatherBallType(field.weather, attackerHasAuroraBorealis)
-          : move.effect === 'EFFECT_HIDDEN_POWER' && attacker.hiddenPowerType !== null
-            ? attacker.hiddenPowerType
-            : // GetMoveTypeInternal's remaining attacker-keyed cases (src/battle_main.c:5133-5167): Fling with a Gem reads the gem's
-              // type; Spit Up and Revelation Dance take the user's first real type; Synchronoise (and Ivy Cudgel, which shares its
-              // effect) the user's second, else first, else third -- Ivy Cudgel first by Ogerpon's mask forms.
-              move.effect === 'EFFECT_FLING' && flingGemType(scenario) !== null
-              ? flingGemType(scenario)
-              : move.effect === 'EFFECT_SPIT_UP' || move.effect === 'EFFECT_REVELATION_DANCE'
-                ? attackerTypeOrder(attacker.types, [0, 1, 2])
-                : move.effect === 'EFFECT_SYNCHRONOISE'
-                  ? (move.id === 'MOVE_IVY_CUDGEL' ? ogerponMaskType(attacker.condition.speciesId) : null) ?? attackerTypeOrder(attacker.types, [1, 0, 2])
-                  : null
-
-  // "-ate" abilities (Pixilate, Aerilate, Refrigerate, ...) override a Normal-type
-  // move's type BEFORE anything else runs -- type effectiveness, STAB, and the
-  // terrain-boost base-power check all key off the resolved type, not the move's
-  // listed one (src/battle_main.c:5203-5211, GetMoveTypeInternal).
-  // GetMoveTypeInternal, battle_main.c:5194-5197, between the effect switch and the onMoveType abilities: Ion Deluge turns Normal
-  // moves Electric, Electrify (STATUS4_ELECTRIFIED on the attacker) every move, Plasma Fists' status Normal moves again.
-  const electrified =
-    scenario.attackerElectrified === true ||
-    (inputMoveType === 'NORMAL' && (scenario.ionDelugeActive === true || scenario.attackerPlasmaFists === true))
-  const { moveType, ateBoost } =
-    itemMoveType !== null
-      ? { moveType: itemMoveType, ateBoost: false }
-      : electrified
-        ? { moveType: 'ELECTRIC', ateBoost: false }
-        : resolveEffectiveMoveType(attacker.abilitySlots, move.id, inputMoveType, move.flags)
+  const { moveType, ateBoost, unmodelled: typeUnmodelled } = resolveMoveType(scenario, inputMoveType)
+  unmodelled.push(...typeUnmodelled)
 
   const defenderTypes = distinctDefendingTypes(defender.types)
 
