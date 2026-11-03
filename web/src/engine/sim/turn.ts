@@ -180,6 +180,8 @@ import {
   SIDE_STATUS_WIDE_GUARD,
   STAT_DEF,
   STAT_SPDEF,
+  STATUS2_BIDE,
+  STATUS2_BIDE_TURN,
   STATUS2_DEFENSE_CURL,
   STATUS1_ANY,
   STATUS1_FREEZE,
@@ -1328,10 +1330,19 @@ export function applyDamage(
    * lookup (dataContext). Optional so callers that cannot reach one -- every pre-existing
    * direct test call -- keep compiling; without it the onRevive latch is skipped. */
   deps?: { dataContext: SimDataContext; grounding?: GroundingContext },
+  sourceBattlerId?: number,
 ): void {
   if (damage === null) return
   const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) return
+
+  // Cmd_datahpupdate, src/battle_script_commands.c:1914-1923:
+  // Unless HITMARKER_SKIP_DMG_TRACK is set, accumulates gTakenDmg and tracks source battler.
+  if (damage > 0) {
+    battler.takenDmg += damage
+    battler.takenDmgBy = sourceBattlerId !== undefined ? sourceBattlerId : (battlerId ^ 1)
+  }
+
   // HP floors at 0; the C never stores a negative hp.
   battler.mon.hp = Math.max(0, battler.mon.hp - damage)
   if (battler.mon.hp === 0) {
@@ -1342,6 +1353,7 @@ export function applyDamage(
     // Cmd_tryfaintmon (src/battle_script_commands.c:3238, 3242): retaliateTimer set to 2 on faint
     state.sides[battlerId & 1].timers.retaliateTimer = 2
     clearBattlerLastTakenMove(state, battlerId)
+    cancelMultiTurnMoves(battler, state)
     if (deps) latchRecurringNightmareOnFaint(state, battlerId, deps)
   }
   syncPartyHp(state, battlerId)
@@ -1694,6 +1706,9 @@ export function performSwitchAction(
     outgoingSlot.pp = [...battler.mon.pp] as typeof outgoingSlot.pp
   }
 
+  // CancelMultiTurnMoves (battle_util.c:1164-1175): clears multi-turn status and flags shouldClearSkyDrop
+  cancelMultiTurnMoves(battler, state)
+
   // Cmd_switchoutabilities (battle_scripts_1.s:7211, battle_script_commands.c:12102)
   dispatchSwitchOutAbilities(state, battlerId, outgoingSlot, deps, unmodelled)
 
@@ -1900,6 +1915,7 @@ const PARENTAL_BOND_FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SUPER_FANG',
   'EFFECT_SUPER_FANG_HAZE',
   'EFFECT_LEVEL_DAMAGE',
+  'EFFECT_SKY_DROP',
 ])
 
 /**
@@ -1936,6 +1952,9 @@ function fixedDamageFor(state: BattleState, battlerId: number, targetId: number,
     case 'EFFECT_SUPER_FANG_HAZE':
       return { fail: false, damage: Math.max(1, Math.trunc(target.mon.hp / 2)) }
     case 'EFFECT_LEVEL_DAMAGE':
+    case 'EFFECT_SKY_DROP':
+      // Cmd_calculatesetdamage, battle_script_commands.c:10632-10635:
+      // EFFECT_SKY_DROP with MOVE_SEISMIC_TOSS inflicts attacker's level.
       return { fail: false, damage: Math.max(1, attacker.mon.level) }
     case 'EFFECT_FINAL_GAMBIT':
       return { fail: false, damage: Math.max(1, attacker.mon.hp) }
@@ -1950,6 +1969,7 @@ const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_TWO_TURN_SECONDARY',
   'EFFECT_TWO_TURN_RETALIATION',
   'EFFECT_ELECTRO_SHOT',
+  'EFFECT_SKY_DROP',
 ])
 
 export function executeAction(
@@ -2483,6 +2503,86 @@ export function executeAction(
       return effectOutcome
     }
 
+    // EFFECT_BIDE (data/battle_scripts_1.s:3734-3743, 7511-7546)
+    if (moveEffect === 'EFFECT_BIDE') {
+      const attackerBattler = state.battlers[battlerId]!
+      if (!hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
+        // Turn 1: Cmd_setbide (src/battle_script_commands.c:9997-10006)
+        performPpDeduct()
+        attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+        attackerBattler.mon.status2 = (attackerBattler.mon.status2 & ~STATUS2_BIDE) | STATUS2_BIDE_TURN(2)
+        state.lockedMoves[battlerId] = currentMove.id
+        attackerBattler.takenDmg = 0
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: false,
+          obeys: true,
+          fainted: [],
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: false,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted: [],
+        }
+      } else {
+        // Turn 3: BattleScript_BideAttack (data/battle_scripts_1.s:7516-7538)
+        // Unleashes 2 * takenDmg to takenDmgBy without crit or random roll.
+        attackerBattler.mon.status2 = clearFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+        const bideTargetId =
+          attackerBattler.takenDmgBy !== undefined && isBattlerAlive(state, attackerBattler.takenDmgBy)
+            ? attackerBattler.takenDmgBy
+            : (battlerId ^ 1)
+        const bideDamage = attackerBattler.takenDmg * 2
+        const fainted: number[] = []
+        applyDamage(state, bideTargetId, bideDamage, fainted, deps, battlerId)
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: bideTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: false,
+          obeys: true,
+          fainted,
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: false,
+          targetId: bideTargetId,
+          targetDamage: bideDamage,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted,
+        }
+      }
+    }
+
     // Two-turn moves: semi-invulnerable (Fly, Bounce, Dig, Dive, Phantom Force, etc.; BattleScript_EffectSemiInvulnerable,
     // data/battle_scripts_1.s:5848-5895), Solar Beam / Solar Blade (:5706-5722), Meteor Beam / Skull Bash / Sky Attack (:4399-4416)
     // and Freeze Shock / Ice Burn (:4424-4438). `isSecondTurnSemiInvuln` also marks "no PP on this pass".
@@ -2501,6 +2601,122 @@ export function executeAction(
         performPpDeduct()
         isSecondTurnSemiInvuln = true
       } else if (!hasFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)) {
+        if (moveEffect === 'EFFECT_SKY_DROP') {
+          // BattleScript_EffectSkyDrop (data/battle_scripts_1.s:5793-5811)
+          if (currentTargetId === null) {
+            performPpDeduct()
+            runMoveEndBookkeeping({
+              state,
+              attackerId: battlerId,
+              targetId: currentTargetId,
+              currentMoveId: currentMove.id,
+              chosenMoveId: currentChosenMoveId,
+              deps,
+              noEffect: true,
+              moveFailed: true,
+              obeys: true,
+              fainted: [],
+            })
+            return {
+              turnOrderIndex: index,
+              battlerId,
+              action: actionKind,
+              skippedBecauseFainted: false,
+              battleOver: false,
+              missed: false,
+              targetId: currentTargetId,
+              targetDamage: null,
+              attackerDamage: null,
+              cancelledBy: null,
+              confusionSelfHitDamage: null,
+              statChanges: null,
+              statusApplied: null,
+              unmodelled,
+              fainted: [],
+            }
+          }
+          const tIndex = order.battlerByTurnOrder.indexOf(currentTargetId)
+          const tActed = tIndex >= 0 && tIndex < index
+          const { inputs: accInputs, gaps: accGaps } = buildAccuracyInputs(state, battlerId, currentTargetId, currentMove.id, tActed, deps)
+          unmodelled.push(...gapsToUnmodelled(accGaps))
+          const accResult = getTotalAccuracy(accInputs)
+          unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+          const missed = state.rng.random16() % 100 >= accResult.accuracy
+          if (missed) {
+            performPpDeduct()
+            runMoveEndBookkeeping({
+              state,
+              attackerId: battlerId,
+              targetId: currentTargetId,
+              currentMoveId: currentMove.id,
+              chosenMoveId: currentChosenMoveId,
+              deps,
+              noEffect: false,
+              moveFailed: true,
+              obeys: true,
+              fainted: [],
+            })
+            return {
+              turnOrderIndex: index,
+              battlerId,
+              action: actionKind,
+              skippedBecauseFainted: false,
+              battleOver: false,
+              missed: true,
+              targetId: currentTargetId,
+              targetDamage: null,
+              attackerDamage: null,
+              cancelledBy: null,
+              confusionSelfHitDamage: null,
+              statChanges: null,
+              statusApplied: null,
+              unmodelled,
+              fainted: [],
+            }
+          }
+
+          const targetBattler = currentTargetId !== null ? state.battlers[currentTargetId] : null
+          if (!targetBattler || targetBattler.volatiles.skyDropped || currentTargetId === battlerId) {
+            // VARIOUS_SKY_DROP clear=0 fail branch -> BattleScript_ButItFailed
+            performPpDeduct()
+            runMoveEndBookkeeping({
+              state,
+              attackerId: battlerId,
+              targetId: currentTargetId,
+              currentMoveId: currentMove.id,
+              chosenMoveId: currentChosenMoveId,
+              deps,
+              noEffect: true,
+              moveFailed: true,
+              obeys: true,
+              fainted: [],
+            })
+            return {
+              turnOrderIndex: index,
+              battlerId,
+              action: actionKind,
+              skippedBecauseFainted: false,
+              battleOver: false,
+              missed: false,
+              targetId: currentTargetId,
+              targetDamage: null,
+              attackerDamage: null,
+              cancelledBy: null,
+              confusionSelfHitDamage: null,
+              statChanges: null,
+              statusApplied: null,
+              unmodelled,
+              fainted: [],
+            }
+          }
+
+          targetBattler.volatiles.skyDropped = true
+          targetBattler.volatiles.skyDroppedBy = battlerId
+          attackerBattler.volatiles.skyDroppedBy = battlerId
+          targetBattler.statuses3 = setFlag(targetBattler.statuses3, STATUS3_ON_AIR)
+          cancelMultiTurnMoves(targetBattler, state)
+        }
+
         // BattleScriptFirstChargingTurn (data/battle_scripts_1.s:4079-4093) + BattleScript_FirstTurnSemiInvulnerable (:5876-5879)
         performPpDeduct()
         attackerBattler.mon.status2 = setFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
@@ -2509,7 +2725,7 @@ export function executeAction(
         state.lockedMoves[battlerId] = currentMove.id
 
         // Cmd_setsemiinvulnerablebit (src/battle_script_commands.c:11541-11566)
-        if (moveEffect === 'EFFECT_SEMI_INVULNERABLE') setSemiInvulnerableBit(attackerBattler, currentMove.id)
+        if (moveEffect === 'EFFECT_SEMI_INVULNERABLE' || moveEffect === 'EFFECT_SKY_DROP') setSemiInvulnerableBit(attackerBattler, currentMove.id)
 
         // BattleScript_EffectTwoTurnSecondary (:4405-4408): argumenttomoveeffect; seteffectprimary on the charge turn
         // (Meteor Beam's Sp. Atk boost, Skull Bash's Defense boost), then setmoveeffect 0.
@@ -2661,7 +2877,11 @@ export function executeAction(
       ) {
         preFail = true
       }
-    } else if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect) && fixedDamageFor(state, battlerId, currentTargetId, moveEffect).fail) {
+    } else if (
+      moveEffect !== null &&
+      (FIXED_DAMAGE_EFFECTS.has(moveEffect) || (moveEffect === 'EFFECT_SKY_DROP' && currentMove.id === 'MOVE_SEISMIC_TOSS')) &&
+      fixedDamageFor(state, battlerId, currentTargetId, moveEffect).fail
+    ) {
       // counterdamagecalculator / mirrorcoatdamagecalculator / metalburstdamagecalculator / setdamagetohealthdifference jump to
       // BattleScript_ButItFailedAtkStringPpReduce (data/battle_scripts_1.s:3589-3590, 4143, 4154).
       preFail = true
@@ -2904,7 +3124,7 @@ export function executeAction(
     }
     if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) {
       cancelMultiTurnMoves(state.battlers[battlerId]!)
-      if (!isSecondTurnSemiInvuln && !rampageContinues) {
+      if (!isSecondTurnSemiInvuln && !rampageContinues && moveEffect !== 'EFFECT_BIDE') {
         performPpDeduct()
       }
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
@@ -2969,7 +3189,9 @@ export function executeAction(
     // BattleScript_EffectClearWeatherAndTerrainHit (s:685-715) and _EffectRemoveTerrainNoFail (s:717-744) have no accuracycheck at
     // all (attackcanceler, attackstring, ppreduce, damagecalc): they cannot miss and consume no draw.
     const scriptHasNoAccuracyCheck =
-      moveEffect === 'EFFECT_CLEAR_WEATHER_AND_TERRAIN_HIT' || moveEffect === 'EFFECT_REMOVE_TERRAIN_NO_FAIL'
+      moveEffect === 'EFFECT_CLEAR_WEATHER_AND_TERRAIN_HIT' ||
+      moveEffect === 'EFFECT_REMOVE_TERRAIN_NO_FAIL' ||
+      (moveEffect === 'EFFECT_SKY_DROP' && isSecondTurnSemiInvuln)
     const missed = scriptHasNoAccuracyCheck ? false : state.rng.random16() % 100 >= accResult.accuracy
 
     // Cmd_clearsemiinvulnerablebit (src/battle_script_commands.c:11568-11571)
@@ -2982,7 +3204,7 @@ export function executeAction(
     // the miss branch BattleScript_PrintMoveMissed (battle_scripts_1.s:3092-
     // 3094) runs ppreduce too, so a miss still costs PP.
     // HITMARKER_NO_PPDEDUCT on turn 2 skips second deduction.
-    if (!isSecondTurnSemiInvuln && !rampageContinues) {
+    if (!isSecondTurnSemiInvuln && !rampageContinues && moveEffect !== 'EFFECT_BIDE') {
       performPpDeduct()
     }
 
@@ -3037,6 +3259,45 @@ export function executeAction(
         unmodelled,
         fainted: missedFainted,
       }
+    }
+
+    if (moveEffect === 'EFFECT_SKY_DROP' && isSecondTurnSemiInvuln) {
+      const targetBattler = currentTargetId !== null ? state.battlers[currentTargetId] : null
+      if (!targetBattler || !targetBattler.volatiles.skyDropped) {
+        // clearskydrop fail branch (battle_script_commands.c:8669) -> jumps straight to MoveEnd, deals NO damage
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: false,
+          obeys: true,
+          fainted: [],
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: false,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted: [],
+        }
+      }
+      targetBattler.volatiles.skyDropped = false
+      targetBattler.volatiles.shouldClearSkyDrop = false
+      targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_ON_AIR)
+      attackerBattler.volatiles.skyDroppedBy = 0
     }
 
     const currentMoveAction: ChosenAction = {
@@ -3177,11 +3438,14 @@ export function executeAction(
 
     // Fixed-damage scripts (calculatesetdamage and friends) set gBattleMoveDamage themselves, with no crit and no random roll. The
     // resolver above still ran for the type-immunity answer (0), so the fixed amount only replaces a non-zero result.
-    if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect) && targetDamage !== null && targetDamage > 0) {
+    const isFixedDamage =
+      moveEffect !== null &&
+      (FIXED_DAMAGE_EFFECTS.has(moveEffect) || (moveEffect === 'EFFECT_SKY_DROP' && currentMove.id === 'MOVE_SEISMIC_TOSS'))
+    if (isFixedDamage && targetDamage !== null && targetDamage > 0) {
       targetDamage = fixedDamageFor(state, battlerId, currentTargetId, moveEffect).damage
       // AdjustFixedDamageForParentalBond, battle_script_commands.c:10615-10624, called from Cmd_calculatesetdamage
       // (:10653), Cmd_counterdamagecalculator (:10680), Cmd_mirrorcoatdamagecalculator (:10702) and
-      // Cmd_metalburstdamagecalculator (:13130). Dragon Rage / Psywave / Sky Drop are omitted because
+      // Cmd_metalburstdamagecalculator (:13130). Dragon Rage / Psywave are omitted because
       // fixedDamageFor does not model them. Endeavor and Final Gambit are NOT scaled (neither script calls it).
       // Order matters: the C scales first, then its `if (!damage) damage = 1` failsafe.
       if (PARENTAL_BOND_FIXED_DAMAGE_EFFECTS.has(moveEffect) && attackerBattler.turn.parentalBondOn > 0) {
@@ -3204,7 +3468,7 @@ export function executeAction(
       // sees neutral effectiveness. MOVE_RESULT_DOESNT_AFFECT_FOE is NOT cleared, so immunity stays.
       isSuperEffective = false
     }
-    if (moveEffect !== null && FIXED_DAMAGE_EFFECTS.has(moveEffect)) {
+    if (isFixedDamage) {
       // The engine's own "EFFECT_X: not modelled" note (basePower.ts UNMODELLED_BASE_POWER_EFFECTS) is answered by this block.
       damageUnmodelled = damageUnmodelled.filter((note) => note !== `${moveEffect}: not modelled`)
     }
@@ -3271,7 +3535,7 @@ export function executeAction(
     }
 
     const targetHpBefore = targetBattler?.mon.hp ?? 0
-    applyDamage(state, currentTargetId, targetDamage, fainted, deps)
+    applyDamage(state, currentTargetId, targetDamage, fainted, deps, battlerId)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
 
     // Cmd_datahpupdate damage tracking (src/battle_script_commands.c:1935-1959)

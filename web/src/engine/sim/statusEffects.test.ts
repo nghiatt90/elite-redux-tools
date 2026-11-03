@@ -1212,19 +1212,21 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
     expect(hasFlag(stateParalysis.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(true)
   })
 
-  it('unported legacy secondary effect produces named gap', () => {
+  it('EFFECT_SKY_DROP charges turn 1, lifts target into the air, and cancels target move', () => {
     // Derivation:
-    // Sky Drop has a legacy script and no handler in moveEffects.ts, no entry in the pure
-    // damaging-move list and no generated `behavior.attack.secondaryEffects`, so damaging move execution reaches
-    // applySecondaryMoveEffects' fallback and pushes the named gap. (Future Sight, used here until cycle 109c, is now
-    // ported; Eerie Spell was ported in cycle 87; Party Favors in cycle 135.)
+    // Sky Drop turn 1 takes the user and target into the air (STATUS3_ON_AIR, volatiles.skyDropped).
+    // Target's move on the same turn is cancelled by CANCELLER_SKY_DROP.
+    // Scripted roll: 0 for accuracy check (hits).
     const rng = scriptedRng([0])
     const state = battle([{}, {}], rng)
     const deps = testDeps(fixedDamage(20), rawBehaviors)
     const out = executeTurn(state, [useMove(1, requireMove('MOVE_SKY_DROP')), useMove(0, MOVE_SWORDS_DANCE)], deps)
 
     expect(out.actions[0].statusApplied).toBeNull()
-    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_SKY_DROP not modelled')
+    expect(out.actions[0].targetDamage).toBeNull()
+    expect(state.battlers[1]!.volatiles.skyDropped).toBe(true)
+    expect(state.battlers[1]!.volatiles.skyDroppedBy).toBe(0)
+    expect(out.actions[1].cancelledBy).toBe('SKY_DROP')
   })
 
   it('confusion secondary effect applies and draws duration', () => {

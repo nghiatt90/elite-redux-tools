@@ -54,8 +54,7 @@
 // unconditionally -- the same discipline attackCanceller.ts's own POWDER
 // gaps use.
 //
-//   ENDTURN_SKY_DROP        Unreachable -- volatiles.shouldClearSkyDrop has no
-//                           reader anywhere in web/src/engine/sim.
+//   ENDTURN_SKY_DROP        Ported (:2415-2425) -- clears skyDropped and shouldClearSkyDrop when shouldClearSkyDrop is true.
 //   ENDTURN_INGRAIN         Ported (:2426-2434) -- heals maxHP/8 at end of turn
 //                           with Big Root / Absorbant bonus.
 //   ENDTURN_AQUA_RING       Ported (:2435-2443) -- heals maxHP/16 at end of turn
@@ -1787,6 +1786,12 @@ export function runEndTurnEffects(
     if (hasFlag(state.absentBattlerFlags, 1 << battlerId)) continue // :2409-2412
     const battler = state.battlers[battlerId]
     if (!battler) continue
+
+    // ENDTURN_SKY_DROP, battle_util.c:2415-2425.
+    if (battler.volatiles.shouldClearSkyDrop) {
+      battler.volatiles.skyDropped = false
+      battler.volatiles.shouldClearSkyDrop = false
+    }
 
     // ENDTURN_INGRAIN, battle_util.c:2426-2434.
     if (

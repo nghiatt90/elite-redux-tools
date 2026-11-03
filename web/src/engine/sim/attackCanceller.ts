@@ -55,7 +55,7 @@
 //                          not modelled -- Hell mode is out of scope (CLAUDE.md,
 //                          plan decision 2) -- so it is always false here and
 //                          every paralysis draw applies to both sides equally.
-//   CANCELLER_BIDE        Unreachable -- status2's BIDE counter has no writer.
+//   CANCELLER_BIDE        Ported (:3414-3435) -- decrements status2 bide counter; stores energy or unleashes.
 //   CANCELLER_THAW        Ported.
 //   CANCELLER_POWDER_MOVE Ported when the caller supplies a data context and grounding
 //                          (turn.ts always does): a powder move (FLAG_POWDER) aimed at
@@ -76,7 +76,7 @@
 //                          (data/battle_scripts_1.s:8772). turn.ts applies the
 //                          self-damage and spends the PP.
 //   CANCELLER_THROAT_CHOP Ported (:3481-3490) -- sound moves blocked while throatChopTimer > 0.
-//   CANCELLER_SKY_DROP    Unreachable -- volatiles.skyDropped has no writer.
+//   CANCELLER_SKY_DROP    Ported (:3264-3271) -- cancels moves if attacker is skyDropped (no PP deducted).
 //   CANCELLER_QUICK_GUARD Ported (:3272-3280) -- gProcessingExtraAttacks is never
 //                          set in the sim. Priority comes from the action's own
 //                          TurnOrderMoveView; with none supplied the check is skipped.
@@ -144,9 +144,12 @@ import {
   STATUS1_FROSTBITE,
   STATUS1_PARALYSIS,
   STATUS1_SLEEP,
+  STATUS2_BIDE,
+  STATUS2_BIDE_TURN,
   STATUS2_CONFUSION,
   STATUS2_DESTINY_BOND,
   STATUS2_FLINCHED,
+  STATUS2_MULTIPLETURNS,
   STATUS2_NIGHTMARE,
   STATUS2_POWDER,
   STATUS2_RECHARGE,
@@ -181,6 +184,8 @@ export const CANCEL_REASONS = [
   'HEAL_BLOCK',
   'TAUNT',
   'IMPRISON',
+  'BIDE',
+  'SKY_DROP',
   'QUICK_GUARD',
   'THROAT_CHOP',
   'POWDER',
@@ -520,7 +525,28 @@ export function runAttackCanceller(
     }
   }
 
-  // CANCELLER_BIDE (:3414-3435) -- unreachable, see header.
+  // CANCELLER_BIDE, battle_util.c:3414-3435:
+  // Decrements STATUS2_BIDE counter when set. If counter remains nonzero, move is cancelled
+  // with "storing energy" (BattleScript_BideStoringEnergy, data/battle_scripts_1.s:7511-7514).
+  // When counter reaches 0: if no damage was taken, clears MULTIPLETURNS and fails
+  // (BattleScript_BideNoEnergyToAttack:7540-7546); if damage was taken, does not cancel, proceeding
+  // to BattleScript_BideAttack unleash.
+  if (!state.processingExtraAttacks && hasFlag(attacker.mon.status2, STATUS2_BIDE)) {
+    const bideTurns = (attacker.mon.status2 & STATUS2_BIDE) >> 8
+    attacker.mon.status2 = (attacker.mon.status2 & ~STATUS2_BIDE) | STATUS2_BIDE_TURN(bideTurns - 1)
+    if (bideTurns - 1 > 0) {
+      attacker.round.attackCancelled = true
+      return { cancelledBy: 'BIDE', confusionSelfHitDamage: null }
+    } else {
+      // Counter reached 0. C does not clear MULTIPLETURNS here (:3420), but the attack/fail scripts do (:7519, :7543).
+      if (attacker.takenDmg === 0) {
+        attacker.mon.status2 = clearFlag(attacker.mon.status2, STATUS2_MULTIPLETURNS)
+        attacker.round.attackCancelled = true
+        return { cancelledBy: 'BIDE', confusionSelfHitDamage: null }
+      }
+      // If attacker.takenDmg > 0, do not cancel: proceed to BattleScript_BideAttack unleash.
+    }
+  }
 
   // CANCELLER_THAW, :3436-3454. Reached with STATUS1_FREEZE still set only
   // when the move has FLAG_THAW_USER (otherwise CANCELLER_FROZEN above already
@@ -604,7 +630,14 @@ export function runAttackCanceller(
     }
   }
 
-  // CANCELLER_SKY_DROP (:3264-3271) -- unreachable, see header.
+  // CANCELLER_SKY_DROP, battle_util.c:3264-3271:
+  // If the attacker was carried into the air by Sky Drop, its move is cancelled.
+  // BattleScript_SkyDropInAir (data/battle_scripts_1.s:5782-5785) prints
+  // STRINGID_SKY_DROP_STUCK, no ppreduce, and jumps straight to MoveEnd.
+  if (attacker.volatiles.skyDropped) {
+    attacker.round.attackCancelled = true
+    return { cancelledBy: 'SKY_DROP', confusionSelfHitDamage: null }
+  }
 
   // CANCELLER_QUICK_GUARD, battle_util.c:3272-3280:
   // BattleScript_ButItFailed with HITMARKER_NO_ATTACKSTRING -- no ppreduce.

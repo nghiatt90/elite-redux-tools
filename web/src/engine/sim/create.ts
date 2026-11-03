@@ -390,6 +390,8 @@ export function createBattlerState(id: number, mon: SimBattleMon, partyIndex: nu
     choicedMove: null,
     lastHitByType: null,
     lastHitBy: BATTLER_NONE,
+    takenDmg: 0,
+    takenDmgBy: 0,
     lastPrintedMove: null,
     // PARTY_SIZE (6) is the game's "no pending switch" sentinel for BOTH arrays,
     // not 0 and not 0xFF: battle_main.c:3522 fills monToSwitchIntoId with

@@ -181,6 +181,7 @@ export const STATUS2_UPROAR = 0x70
 export const STATUS2_UNUSED = 1 << 7
 /** 2-bit counter at bit 8. */
 export const STATUS2_BIDE = 0x300
+export const STATUS2_BIDE_TURN = (num: number): number => ((num << 8) & STATUS2_BIDE)
 /** 2-bit counter at bit 10 -- Thrash/Outrage lock. */
 export const STATUS2_LOCK_CONFUSE = 0xc00
 export const STATUS2_MULTIPLETURNS = 1 << 12

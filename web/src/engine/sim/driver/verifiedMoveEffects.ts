@@ -20,6 +20,7 @@ const CYCLE132 = 'web/src/engine/sim/cycle132UncategorisedEffects.test.ts'
 const CYCLE133 = 'web/src/engine/sim/cycle133UncategorisedEffects.test.ts'
 const CYCLE134 = 'web/src/engine/sim/cycle134UncategorisedEffects.test.ts'
 const CYCLE135 = 'web/src/engine/sim/cycle135OddballEffects.test.ts'
+const CYCLE135B = 'web/src/engine/sim/cycle135bBideSkyDrop.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -343,6 +344,12 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_HEAT_CRASH',
         'EFFECT_METAL_BURST',
       ].map((effect): [string, string] => [effect, CYCLE135]),
+    )
+    .concat(
+      [
+        'EFFECT_BIDE',
+        'EFFECT_SKY_DROP',
+      ].map((effect): [string, string] => [effect, CYCLE135B]),
     ),
 )
 

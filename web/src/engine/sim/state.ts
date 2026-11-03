@@ -351,6 +351,10 @@ export interface BattlerState {
   lastHitByType: string | null
   /** `gLastHitBy[MAX_BATTLERS_COUNT]` (include/battle.h:994, battle_script_commands.c:4758). 0xFF when unset. */
   lastHitBy: number
+  /** `gTakenDmg[MAX_BATTLERS_COUNT]` (include/battle.h:974, battle_script_commands.c:1918, 10001). */
+  takenDmg: number
+  /** `gTakenDmgByBattler[MAX_BATTLERS_COUNT]` (include/battle.h:999, battle_script_commands.c:1920-1922). */
+  takenDmgBy: number
   /** `gLastPrintedMoves[MAX_BATTLERS_COUNT]` (include/battle.h:987, battle_script_commands.c:4742). */
   lastPrintedMove: string | null
   /** `gBattleStruct->choicedMove[battler]` (include/battle.h, written at battle_script_commands.c:4547-4568

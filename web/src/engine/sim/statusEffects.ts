@@ -654,8 +654,18 @@ export function canParalyzeType(
 /**
  * CancelMultiTurnMoves, src/battle_util.c:1164-1175.
  * Clears multi-turn volatile flags (MULTIPLETURNS, LOCK_CONFUSE, UPROAR, BIDE).
+ * Also flags shouldClearSkyDrop on any skyDropped battlers dropped by this battler (:1166-1169).
  */
-export function cancelMultiTurnMoves(battler: BattlerState): void {
+export function cancelMultiTurnMoves(battler: BattlerState, state?: BattleState): void {
+  if (state) {
+    for (let i = 0; i < state.battlers.length; i++) {
+      const other = state.battlers[i]
+      if (!other) continue
+      if (other.volatiles.skyDropped && (other.volatiles.skyDroppedBy === battler.id || battler.volatiles.skyDroppedBy === battler.id)) {
+        other.volatiles.shouldClearSkyDrop = true
+      }
+    }
+  }
   const clearMask2 = STATUS2_MULTIPLETURNS | STATUS2_LOCK_CONFUSE | STATUS2_UPROAR | STATUS2_BIDE
   battler.mon.status2 = clearFlag(battler.mon.status2, clearMask2)
   if (!battler.volatiles.skyDropped) {
