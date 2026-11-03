@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
-// Cycle 139: scenario harness for the opt-in status1 leaf term.
+// Cycle 139: scenario harness for the opt-in status1 leaf term; cycle 140
+// appends the same harness for the volatile terms (Leech Seed, Substitute,
+// confusion).
 //
 // Each seed gets a fresh session; the starting position is edited right after
 // createSession (before beginTurn), and the expectimax policy picks with
@@ -8,7 +10,7 @@
 // passes when it is chosen on <= 1 of 8.
 import { describe, expect, it } from 'vitest'
 
-import { STATUS1_BURN, STATUS1_SLEEP, hasFlag } from '../constants'
+import { STATUS1_BURN, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_SUBSTITUTE, STATUS3_LEECHSEED, hasFlag } from '../constants'
 import { createRandomSource } from '../rng'
 import { DEFAULT_EXPECTIMAX, chooseExpectimaxAction } from './expectimax'
 import { buildPlayerParty } from './buildParty'
@@ -71,6 +73,26 @@ function setStatus(s: BattleSession, side: 0 | 1, partyIndex: number, status1: n
     active.mon.hp = partyMon.hp
     active.mon.maxHp = partyMon.maxHp
   }
+}
+
+/** Writes HP on BOTH copies of a party slot. */
+function setHp(s: BattleSession, side: 0 | 1, partyIndex: number, hp: number): void {
+  s.state.sides[side].party[partyIndex]!.hp = hp
+  const active = s.state.battlers[side]
+  if (active && active.partyIndex === partyIndex) active.mon.hp = hp
+}
+
+/** Writes volatile fields on the ACTIVE battler only: status2/statuses3/
+ * volatiles have no party-mon copy (they are cleared on switch out). */
+function setVolatiles(
+  s: BattleSession,
+  side: 0 | 1,
+  patch: { status2?: number; statuses3?: number; substituteHp?: number },
+): void {
+  const battler = s.state.battlers[side]!
+  if (patch.status2 !== undefined) battler.mon.status2 = patch.status2
+  if (patch.statuses3 !== undefined) battler.statuses3 = patch.statuses3
+  if (patch.substituteHp !== undefined) battler.volatiles.substituteHp = patch.substituteHp
 }
 
 /** The move id the expectimax policy picks for one fresh seeded session. */
@@ -178,5 +200,156 @@ describe('cycle 139 - status1 scenarios', () => {
 
   it('anti-regression: the default options leave the status term off', () => {
     expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  })
+})
+
+// All three moves are in verifiedMoveEffects.ts's honoured set: EFFECT_LEECH_SEED
+// (cycle 115b), EFFECT_SUBSTITUTE (cycle 114) and EFFECT_CONFUSE (cycle 119).
+// Shuckle's innates (Shell Armor / Oblivious / Solid Rock) are defensive and
+// none of them blocks the opponent from being seeded, subbed against or confused.
+describe('cycle 140 - volatile scenarios', () => {
+  describe('Leech Seed into a non-Grass foe', () => {
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    // Pure Grass: the sim's EFFECT_LEECH_SEED handler (moveEffects.ts's
+    // handleLeechSeed) refuses a Grass-type target, so the seed cannot land.
+    const TANGELA = () => [foeMon('SPECIES_TANGELA', 'ABILITY_CHLOROPHYLL', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    const PLAYER_MOVES = ['MOVE_LEECH_SEED', ...WEAK_MOVES]
+
+    it('sanity: Leech Seed seeds a fresh non-Grass foe', () => {
+      // handleLeechSeed writes statuses3 and returns no statusApplied record, so
+      // the state flag is the observable.
+      const seeded = SEEDS.map((seed) => {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_LEECH_SEED')
+        return hasFlag(session.state.battlers[1]!.statuses3, STATUS3_LEECHSEED)
+      })
+      expect(seeded.filter(Boolean).length).toBeGreaterThan(0)
+    })
+
+    it('sanity: a Grass-type foe cannot be seeded', () => {
+      for (const seed of SEEDS) {
+        const { session, result } = forcedTurn(seed, PLAYER_MOVES, TANGELA(), 'MOVE_LEECH_SEED')
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBe(true)
+        expect(hasFlag(session.state.battlers[1]!.statuses3, STATUS3_LEECHSEED)).toBe(false)
+      }
+    })
+
+    it('sanity: an already-seeded foe cannot be re-seeded', () => {
+      for (const seed of SEEDS) {
+        const { session, result } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_LEECH_SEED', (s) =>
+          setVolatiles(s, 1, { statuses3: STATUS3_LEECHSEED | 0 }),
+        )
+        // handleLeechSeed bails with `missed` on the already-set flag; the flag
+        // itself is left in place.
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBe(true)
+        expect(hasFlag(session.state.battlers[1]!.statuses3, STATUS3_LEECHSEED)).toBe(true)
+      }
+    })
+
+    it('positive: Leech Seed is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_LEECH_SEED')).toBeGreaterThanOrEqual(6)
+    })
+
+    it('twin: against a Grass-type foe, Leech Seed is chosen on at most 1 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, TANGELA(), 'MOVE_LEECH_SEED')).toBeLessThanOrEqual(1)
+    })
+
+    it('twin: with the foe already seeded, Leech Seed is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_LEECH_SEED', (s) =>
+        setVolatiles(s, 1, { statuses3: STATUS3_LEECHSEED | 0 }),
+      )
+      expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Substitute at full HP', () => {
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    const PLAYER_MOVES = ['MOVE_SUBSTITUTE', ...WEAK_MOVES]
+
+    it('sanity: Substitute sets the flag and the buffer on a full-HP player', () => {
+      const up = SEEDS.map((seed) => {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE')
+        const battler = session.state.battlers[0]!
+        return hasFlag(battler.mon.status2, STATUS2_SUBSTITUTE) && battler.volatiles.substituteHp > 0
+      })
+      expect(up.filter(Boolean).length).toBeGreaterThan(0)
+    })
+
+    it('sanity: with a sub already up, Substitute fails', () => {
+      for (const seed of SEEDS) {
+        const { result } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE', (s) => {
+          setVolatiles(s, 0, { status2: STATUS2_SUBSTITUTE, substituteHp: 1 })
+        })
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBe(true)
+      }
+    })
+
+    // Cmd_setsubstitute, battle_script_commands.c:10537-10541: the cost is
+    // `max(hp / 4, 1)` and the sub fails when `hp <= damage`, so
+    // hp == floor(maxHP / 4) fails.
+    it('sanity: at hp <= maxHP / 4 Substitute fails', () => {
+      for (const seed of SEEDS) {
+        let maxHp = 0
+        const { result } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE', (s) => {
+          maxHp = s.state.battlers[0]!.mon.maxHp
+          setHp(s, 0, 0, Math.floor(maxHp / 4))
+        })
+        expect(maxHp).toBeGreaterThan(0)
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBe(true)
+      }
+    })
+
+    it('positive: Substitute is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE')).toBeGreaterThanOrEqual(6)
+    })
+
+    it('twin: already behind a sub, Substitute is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE', (s) => {
+        setVolatiles(s, 0, { status2: STATUS2_SUBSTITUTE, substituteHp: 1 })
+      })
+      expect(n).toBeLessThanOrEqual(1)
+    })
+
+    it('twin: at hp <= maxHP / 4, Substitute is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SUBSTITUTE', (s) => {
+        setHp(s, 0, 0, Math.floor(s.state.battlers[0]!.mon.maxHp / 4))
+      })
+      expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Confuse Ray into a fresh foe', () => {
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    const PLAYER_MOVES = ['MOVE_CONFUSE_RAY', ...WEAK_MOVES]
+    // Counter 4 is inside the C's `((Random()) % 2) + 3` range (3-4 turns,
+    // battle_script_commands.c:2660) and is what `canBeConfused` treats as
+    // already confused.
+    const CONFUSED = 4
+
+    it('sanity: Confuse Ray confuses a fresh foe', () => {
+      const confused = SEEDS.map((seed) => {
+        const { result } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_CONFUSE_RAY')
+        return result.outcome.actions.find((a) => a.battlerId === 0)?.statusApplied?.status ?? null
+      })
+      expect(confused.filter((s) => s === 'CONFUSION').length).toBeGreaterThan(0)
+    })
+
+    it('sanity: an already-confused foe cannot be re-confused', () => {
+      for (const seed of SEEDS) {
+        const { session, result } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_CONFUSE_RAY', (s) =>
+          setVolatiles(s, 1, { status2: CONFUSED }),
+        )
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.statusApplied ?? null).toBeNull()
+        expect(session.state.battlers[1]!.mon.status2 & STATUS2_CONFUSION).toBe(CONFUSED)
+      }
+    })
+
+    it('positive: Confuse Ray is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_CONFUSE_RAY')).toBeGreaterThanOrEqual(6)
+    })
+
+    it('twin: against an already-confused foe, Confuse Ray is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_CONFUSE_RAY', (s) => setVolatiles(s, 1, { status2: CONFUSED }))
+      expect(n).toBeLessThanOrEqual(1)
+    })
   })
 })

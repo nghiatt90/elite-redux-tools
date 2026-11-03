@@ -25,12 +25,19 @@ import {
   STATUS1_SLEEP,
   STATUS1_TOXIC_COUNTER,
   STATUS1_TOXIC_POISON,
+  STATUS2_CONFUSION,
+  STATUS2_NIGHTMARE,
+  STATUS2_SUBSTITUTE,
+  STATUS2_WRAPPED,
+  STATUS3_LEECHSEED,
+  STATUS3_LEECHSEED_BATTLER,
   getCounter,
   hasFlag,
 } from '../constants'
+import { isMagicGuardProtected } from '../endTurn'
 import { createRandomSource } from '../rng'
 import { battlerHasSimAbility } from '../statBuffs'
-import type { BattleState } from '../state'
+import type { BattleState, BattlerState } from '../state'
 import type { ChosenAction } from '../turnOrder'
 import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
@@ -92,17 +99,20 @@ export function evaluateState(state: BattleState, options?: ExpectimaxOptions): 
 }
 
 // ---------------------------------------------------------------------------
-// status1 term
+// status term (status1 + active volatiles)
 //
 // `positionScore` only knows HP, alive count and stat stages, so Spore,
 // Will-O-Wisp and Thunder Wave score as free actions. `statusScore` values the
 // residual damage and the actions/tempo a status costs, in the same
-// HP-fraction units as `positionScore`, so the two add.
+// HP-fraction units as `positionScore`, so the two add. Alongside the status1
+// terms it values the active battler's volatile statuses: confusion, nightmare,
+// wrap, Leech Seed and a standing Substitute.
 //
 // The weights are expected HP-fraction-equivalents lost over a short horizon.
-// STATUS_HORIZON_TURNS, ACTION_VALUE and PARALYSIS_SPEED_VALUE are MODEL
-// CHOICES, not constants in the C; each individual damage fraction and the
-// conditions below are transcribed from the cited C lines.
+// STATUS_HORIZON_TURNS, ACTION_VALUE, PARALYSIS_SPEED_VALUE and
+// SUBSTITUTE_BUFFER_WEIGHT are MODEL CHOICES, not constants in the C; each
+// individual damage fraction and the conditions below are transcribed from the
+// cited C lines.
 // ---------------------------------------------------------------------------
 
 /** Model horizon: how many end-of-turn ticks / actions the term looks ahead. MODEL CHOICE. */
@@ -121,6 +131,21 @@ const PARALYSIS_SPEED_VALUE = 0.25
 /** CANCELLER_FROZEN (battle_util.c:3249-3260): `if (Random() % 5)` keeps the mon
  * frozen, the else branch thaws it, so one attempt thaws with probability 1/5. */
 const FREEZE_THAW_CHANCE = 1 / 5
+/** CANCELLER_CONFUSED (battle_util.c:3377): `Random() % 3 == 0` makes the mon hit
+ * itself and lose the action. The 1/3 is the C's, not a model choice. */
+const CONFUSION_SELF_HIT_CHANCE = 1 / 3
+/** A standing Substitute is worth k times the HP it paid for (its HP fraction),
+ * because it absorbs hits AND blocks status for as long as it stands. 2 is a
+ * MODEL CHOICE: 1 would cancel the HP cost `positionScore` already charges and
+ * the sub would never be picked. */
+const SUBSTITUTE_BUFFER_WEIGHT = 2
+
+/** One end-of-turn fractional drain as an HP fraction, keeping the C's
+ * `if (gBattleMoveDamage == 0) gBattleMoveDamage = 1` floor. */
+function drainTickFraction(maxHp: number, divisor: number): number {
+  if (maxHp <= 0) return 0
+  return Math.max(1, Math.trunc(maxHp / divisor)) / maxHp
+}
 
 /** End-of-turn chip for one status, as an HP fraction over the horizon.
  * `divisor` is the C's `maxHP / 16` (burn/frostbite/bleed) or `/ 8` (poison);
@@ -203,9 +228,95 @@ export function statusMonValue(mon: { status1: number; hp: number; maxHp: number
   return value
 }
 
+/** The HP-fraction-equivalent burden of one ACTIVE battler's volatiles:
+ * confusion, nightmare, wrap and Leech Seed cost HP or actions; a standing
+ * Substitute is a buffer, i.e. a BENEFIT, and is subtracted.
+ *
+ * `status2`, `statuses3` and `volatiles` live on the battler and are cleared on
+ * switch out (`state.ts:92-94, :326`), unlike status1 which has a party-mon
+ * copy -- so this reads `state.battlers[side]`, never the party roster. A
+ * fainted battler contributes 0.
+ *
+ * Magic Guard: the nightmare, wrap and Leech Seed C branches below are gated by
+ * MAGIC_GUARD_CHECK (battle_util.c:2610, :2666, :2477). `isMagicGuardProtected`
+ * is the sim's own port of that check and needs only `state` + `battler` (the
+ * ability registry's `magicGuard` flag plus Magic Room), so it is used here
+ * directly instead of `battlerHasSimAbility`, whose `SimDataContext`
+ * `evaluateState(state, options)` does not carry. */
+function activeVolatileBurden(state: BattleState, battler: BattlerState): number {
+  const { mon } = battler
+  if (mon.hp <= 0 || mon.maxHp <= 0) return 0
+  const { status2 } = mon
+  let value = 0
+
+  // CANCELLER_CONFUSED, battle_util.c:3368-3399. Every move attempt runs
+  // `--status2 & STATUS2_CONFUSION` (:3374); if that reaches 0 the mon snaps out
+  // and still acts (:3374-3376), otherwise `Random() % 3 == 0` (:3377) makes it
+  // hit itself and lose the action. So with counter c only the c-1 attempts
+  // that still had a nonzero counter can be lost, each with probability 1/3.
+  // The horizon cap and ACTION_VALUE are model choices. The self-hit's damage
+  // (:3378-3393, 40 BP, 80 with Cosmic Daze at :3384) is NOT charged on top:
+  // the lost action already pays for it.
+  const confusionCounter = getCounter(status2, STATUS2_CONFUSION)
+  value += Math.min(Math.max(0, confusionCounter - 1), STATUS_HORIZON_TURNS) * CONFUSION_SELF_HIT_CHANCE * ACTION_VALUE
+
+  // ENDTURN_NIGHTMARES, battle_util.c:2608-2623. Requires STATUS2_NIGHTMARE and
+  // hp != 0 (:2609); MAGIC_GUARD_CHECK follows (:2610). With STATUS1_SLEEP it
+  // takes maxHP / 4, min 1, each end of turn (:2614-2615); without sleep the
+  // flag is silently cleared and nothing is charged (:2619). The nightmare ends
+  // when the mon wakes, so its ticks are the sleep counter, capped by the
+  // horizon (a model choice).
+  if (hasFlag(status2, STATUS2_NIGHTMARE) && !isMagicGuardProtected(state, battler)) {
+    if (hasFlag(mon.status1, STATUS1_SLEEP)) {
+      const sleepTurns = getCounter(mon.status1, STATUS1_SLEEP)
+      value += Math.min(sleepTurns, STATUS_HORIZON_TURNS) * drainTickFraction(mon.maxHp, 4)
+    }
+  }
+
+  // ENDTURN_WRAP, battle_util.c:2663-2687, the STATUS2_WRAPPED branch. The C
+  // pre-decrements wrapTurns (:2664); a zero result is the break-free tick and
+  // deals no damage (:2688-2690), so the damaging ticks are wrapTurns - 1,
+  // capped by the horizon. The rate is maxHP / 8 (:2685) unless the wrapper
+  // (`gBattleStruct->wrappedBy`) has Grappler or a Binding Band, which would
+  // make it /6 (:2680-2683). That wrapper lookup needs the hold-effect/ability
+  // read this leaf scorer does not carry, so the /8 rate is always used here --
+  // a MODEL CHOICE to leave the /6 case out. MAGIC_GUARD_CHECK is :2666.
+  if (hasFlag(status2, STATUS2_WRAPPED) && !isMagicGuardProtected(state, battler)) {
+    const damagingTicks = Math.min(Math.max(0, battler.volatiles.wrapTurns - 1), STATUS_HORIZON_TURNS)
+    value += damagingTicks * drainTickFraction(mon.maxHp, 8)
+  }
+
+  // ENDTURN_LEECH_SEED, battle_util.c:2472-2486. Requires STATUS3_LEECHSEED on
+  // the victim (:2474), the victim alive (:2475), the seeder -- the low bits
+  // `statuses3 & STATUS3_LEECHSEED_BATTLER` (constants.ts:218) -- alive (:2476),
+  // and the victim not Magic Guard protected (:2477). The drain is maxHP / 8,
+  // min 1, each end of turn (:2480-2481). The seeder's equal heal (:2479, the
+  // "HP receiver") is NOT added: that recovery raises the seeder's own HP and
+  // is already scored by positionScore.
+  if (hasFlag(battler.statuses3, STATUS3_LEECHSEED) && !isMagicGuardProtected(state, battler)) {
+    const seeder = state.battlers[battler.statuses3 & STATUS3_LEECHSEED_BATTLER]
+    if (seeder && seeder.mon.hp > 0) {
+      value += STATUS_HORIZON_TURNS * drainTickFraction(mon.maxHp, 8)
+    }
+  }
+
+  // Cmd_setsubstitute, battle_script_commands.c:10535-10555. Its own HP is
+  // maxHP / 4, min 1 (:10536, :10539) and the cost is maxHP / 4, min 1
+  // (:10537-10538), so a fresh sub's HP fraction equals the HP its holder paid
+  // -- and positionScore already charges that HP. Valuing the sub 1:1 would
+  // therefore score it as free; SUBSTITUTE_BUFFER_WEIGHT (>1) values what the
+  // buffer buys. The flag and the HP are separate fields, so both are required.
+  // This is a benefit, so it lowers the holder's burden.
+  if (hasFlag(status2, STATUS2_SUBSTITUTE) && battler.volatiles.substituteHp > 0) {
+    value -= SUBSTITUTE_BUFFER_WEIGHT * (battler.volatiles.substituteHp / mon.maxHp)
+  }
+  return value
+}
+
 /** Sum of `statusMonValue` over one side's living mons, reading the active
  * battler's copy for the active slot and the party copy for the rest -- the
- * same split `sideScore` uses, because status1 persists across switches. */
+ * same split `sideScore` uses, because status1 persists across switches -- plus
+ * the active battler's volatile burden, which does not persist across switches. */
 function sideStatusScore(state: BattleState, side: 0 | 1): number {
   const active = state.battlers[side]
   const party = state.sides[side].party
@@ -218,11 +329,13 @@ function sideStatusScore(state: BattleState, side: 0 | 1): number {
     if (cur.hp <= 0) continue
     total += statusMonValue({ status1: cur.status1, hp: cur.hp, maxHp: cur.maxHp }, isActive)
   }
+  if (active) total += activeVolatileBurden(state, active)
   return total
 }
 
 /** Status burden from the player's side: higher is better for the player (the
- * foe's burden minus the player's), the same orientation as `positionScore`. */
+ * foe's burden minus the player's), the same orientation as `positionScore`.
+ * Covers status1 (per party mon) and the active battler's volatiles. */
 export function statusScore(state: BattleState): number {
   return sideStatusScore(state, 1) - sideStatusScore(state, 0)
 }
