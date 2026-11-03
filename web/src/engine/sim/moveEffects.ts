@@ -1510,22 +1510,24 @@ function handleShelter(ctx: MoveEffectContext): ActionOutcome {
   const battler = state.battlers[battlerId]!
   const defStage = battler.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
 
-  // In singles, partner is absent, so if defStage == MAX_STAT_STAGE, it fails.
-  if (defStage < MAX_STAT_STAGE) {
-    const r = changeStatBuffsImplicit(
-      state,
-      battlerId,
-      battlerId,
-      2,
-      STAT_DEF,
-      MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
-      true,
-      deps,
-      unmodelled,
-      action.chosenMove!.id,
-    )
-    if (r.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: r.delta })
+  // In singles, partner is absent, so if defStage == MAX_STAT_STAGE, it fails (:11944-11945 -> BattleScript_ButItFailed).
+  if (defStage >= MAX_STAT_STAGE) {
+    return outcome(ctx, { missed: true })
   }
+
+  const r = changeStatBuffsImplicit(
+    state,
+    battlerId,
+    battlerId,
+    2,
+    STAT_DEF,
+    MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_ALLOW_PTR,
+    true,
+    deps,
+    unmodelled,
+    action.chosenMove!.id,
+  )
+  if (r.delta !== 0) statChanges.push({ battlerId, stat: STAT_DEF, change: r.delta })
 
   return outcome(ctx, { statChanges })
 }
