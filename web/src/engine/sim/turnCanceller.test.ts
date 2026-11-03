@@ -376,14 +376,28 @@ describe('executeTurn: attack canceller -- gapped branches, only emitted when ac
     expect(normal.battlers[0]!.mon.pp[0]).toBe(19)
   })
 
-  it('gaps CANCELLER_POWDER_STATUS by name only when the attacker carries STATUS2_POWDER and uses a Fire move', () => {
-    const withPowder = battle([{ spe: 200, status2: STATUS2_POWDER, moves: ['MOVE_EMBER', null, null, null] }, { spe: 50 }], scripted(50))
-    const out = executeTurn(withPowder, [useMove(1, EMBER), null], deps(fixedDamage(10)))
-    expect(out.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_STATUS'))).toBe(true)
+  it('cancels CANCELLER_POWDER_STATUS: maxHP/4 self-damage, PP spent, the Fire move never resolves', () => {
+    // battle_util.c:3468-3477 entry (STATUS2_POWDER + Fire type) -> BattleScript_MoveUsedPowder's
+    // ppreduce (:8772) and datahpupdate (:8780-8783): 100 / 4 = 25 damage.
+    const withPowder = battle([{ spe: 200, status2: STATUS2_POWDER, moves: ['MOVE_EMBER', null, null, null], pp: [25, 0, 0, 0] }, { spe: 50 }], scripted(50))
+    const dmg = fixedDamage(10)
+    const out = executeTurn(withPowder, [useMove(1, EMBER), null], deps(dmg))
+    expect(out.actions[0].cancelledBy).toBe('POWDER_STATUS')
+    expect(out.actions[0].missed).toBe(false)
+    expect(out.actions[0].targetDamage).toBeNull()
+    expect(out.actions[0].attackerDamage).toBe(25)
+    expect(dmg.calls).toBe(0) // the script never reaches the damage calc
+    expect(withPowder.battlers[0]!.mon.hp).toBe(75)
+    expect(withPowder.battlers[0]!.mon.pp[0]).toBe(24)
+    expect(withPowder.battlers[1]!.mon.hp).toBe(100)
 
+    // A non-Fire move is unaffected: Tackle resolves normally.
     const nonFireMove = battle([{ spe: 200, status2: STATUS2_POWDER }, { spe: 50 }], scripted(50))
     const out2 = executeTurn(nonFireMove, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    expect(out2.actions[0].unmodelled.some((u) => u.startsWith('CANCELLER_POWDER_STATUS'))).toBe(false)
+    expect(out2.actions[0].cancelledBy).toBeNull()
+    expect(out2.actions[0].targetDamage).toBe(10)
+    expect(nonFireMove.battlers[0]!.mon.hp).toBe(100)
+    expect(nonFireMove.battlers[0]!.mon.pp[0]).toBe(34)
   })
 })
 

@@ -6964,7 +6964,7 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
         })
 
         describe('EFFECT_POWDER', () => {
-          it('sets STATUS2_POWDER on the target: its Fire move that turn reaches CANCELLER_POWDER_STATUS', () => {
+          it('sets STATUS2_POWDER on the target: its Fire move that turn is cancelled for maxHP/4', () => {
             const state = battle(
               [
                 { moves: ['MOVE_POWDER', null, null, null], pp: [20, 0, 0, 0], spe: 100 },
@@ -6976,9 +6976,14 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             const out = executeTurn(state, [useMove(1, MOVE_POWDER), useMove(0, MOVE_EMBER)], testDeps())
             expect(out.actions.find((a) => a.battlerId === 0)!.missed).toBe(false)
             expect(state.battlers[0]!.mon.pp[0]).toBe(19)
-            expect(
-              out.actions.find((a) => a.battlerId === 1)!.unmodelled.some((m) => m.includes('CANCELLER_POWDER_STATUS')),
-            ).toBe(true)
+            // BattleScript_MoveUsedPowder (data/battle_scripts_1.s:8769-8787): ppreduce (:8772),
+            // datahpupdate (:8780-8783) with maxHP / 4 = 25, then MOVE_RESULT_FAILED.
+            const ember = out.actions.find((a) => a.battlerId === 1)!
+            expect(ember.cancelledBy).toBe('POWDER_STATUS')
+            expect(ember.targetDamage).toBeNull()
+            expect(ember.attackerDamage).toBe(25)
+            expect(state.battlers[1]!.mon.hp).toBe(75)
+            expect(state.battlers[1]!.mon.pp[0]).toBe(24)
           })
 
           it('fails when the target already has STATUS2_POWDER, and still costs PP', () => {

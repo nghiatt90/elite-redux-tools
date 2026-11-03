@@ -66,15 +66,15 @@
 //                          (data/battle_scripts_1.s:8707-8723), which still spends one
 //                          PP (:8709) and cancels multi-turn moves (:8721) but draws no
 //                          accuracy -- turn.ts does the PP deduction for this reason.
-//   CANCELLER_POWDER_STATUS Gapped at runtime, only when the attacker's own
-//                          status2 carries STATUS2_POWDER and the move's type is
-//                          Fire (the C's own entry condition, :3469-3473) -- the
-//                          self-damage (maxHP/4, Magic-Guard-gated, :3474) is not
-//                          applied, and BattleScript_MoveUsedPowder's OWN ppreduce
-//                          (data/battle_scripts_1.s:8771-8778 -- unlike every
-//                          other cancel script here, which goes straight to
-//                          BattleScript_MoveEnd, this one deducts PP itself) is
-//                          not modelled either.
+//   CANCELLER_POWDER_STATUS Ported (:3468-3477) -- a STATUS2_POWDER attacker whose
+//                          move type resolves to Fire (GET_MOVE_TYPE,
+//                          include/battle.h:735-740; the sim resolves the -ate
+//                          hooks through resolveEffectiveMoveType) is cancelled for
+//                          maxHP / 4 (0 under IsMagicGuardProtected,
+//                          battle_util.c:2384, :3474), after
+//                          BattleScript_MoveUsedPowder's own ppreduce
+//                          (data/battle_scripts_1.s:8772). turn.ts applies the
+//                          self-damage and spends the PP.
 //   CANCELLER_THROAT_CHOP Ported (:3481-3490) -- sound moves blocked while throatChopTimer > 0.
 //   CANCELLER_SKY_DROP    Unreachable -- volatiles.skyDropped has no writer.
 //   CANCELLER_QUICK_GUARD Ported (:3272-3280) -- gProcessingExtraAttacks is never
@@ -165,7 +165,7 @@ import { isGravityActive, type GroundingContext } from './grounding'
 import { NO_GROUNDING } from './endTurn'
 import { weatherFromBitfield } from './bridge'
 import { isMoveAffectedByParentalBond, parentalBondHitCount } from '../multiHit'
-import { computeParentalBondTrigger } from '../abilities/dispatchCalc'
+import { computeParentalBondTrigger, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
 import type { OnParentalBondContext } from '../abilities/types'
 
 export const CANCEL_REASONS = [
@@ -184,6 +184,7 @@ export const CANCEL_REASONS = [
   'QUICK_GUARD',
   'THROAT_CHOP',
   'POWDER',
+  'POWDER_STATUS',
 ] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
@@ -561,11 +562,26 @@ export function runAttackCanceller(
     }
   }
 
-  // CANCELLER_POWDER_STATUS, :3468-3480 -- gapped, see header.
-  if (hasFlag(attacker.mon.status2, STATUS2_POWDER) && bareType(move?.type) === 'FIRE') {
-    unmodelled.push(
-      "CANCELLER_POWDER_STATUS (battle_util.c:3468-3480): the self-damage (maxHP/4, Magic-Guard-gated) and BattleScript_MoveUsedPowder's own ppreduce (data/battle_scripts_1.s:8771-8778, unlike every other cancel script here) are not modelled",
-    )
+  // CANCELLER_POWDER_STATUS, battle_util.c:3468-3480:
+  //   if (gBattleMons[gBattlerAttacker].status2 & STATUS2_POWDER) {
+  //       GET_MOVE_TYPE(gCurrentMove, moveType);
+  //       if (moveType == TYPE_FIRE) { powderSelfDmg = TRUE; gBattleMoveDamage = ...; effect = 1; }
+  //   }
+  // GET_MOVE_TYPE (include/battle.h:735-740) reads dynamicMoveType when bit 7 is set, else the
+  // declared type; the sim's only dynamic-type writers are the -ate onMoveType hooks, so
+  // resolveEffectiveMoveType is the model for that fallback. The script that follows
+  // (BattleScript_MoveUsedPowder, data/battle_scripts_1.s:8769-8787) is one of the two cancel
+  // scripts that still runs attackstring and ppreduce (:8772), so turn.ts spends the PP.
+  if (hasFlag(attacker.mon.status2, STATUS2_POWDER)) {
+    const declaredType = bareType(moveView?.resolvedType ?? move?.type) || 'NORMAL'
+    const resolvedType = resolveEffectiveMoveType(attacker.mon.abilities, moveId, declaredType, move?.flags ?? {}).moveType
+    if (resolvedType === 'FIRE') {
+      attacker.round.powderSelfDmg = true
+      cancelMultiTurnMoves(attacker)
+      // AtkCanceller_UnableToUseMove (:3558-3560) sets attackCancelled for every effect == 1.
+      attacker.round.attackCancelled = true
+      return { cancelledBy: 'POWDER_STATUS', confusionSelfHitDamage: null }
+    }
   }
 
   // CANCELLER_THROAT_CHOP, battle_util.c:3481-3490:

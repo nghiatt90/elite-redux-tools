@@ -143,7 +143,7 @@ import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
 import { clearBattlerLastTakenMove, createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
 import type { EndTurnEffectResult } from './endTurn'
-import { canBattlerHeal, runEndTurnEffects, strikeoutClearFlags } from './endTurn'
+import { canBattlerHeal, isMagicGuardProtected, runEndTurnEffects, strikeoutClearFlags } from './endTurn'
 import { runFieldEndTurnEffects } from './fieldEndTurn'
 import { computeBattleOutcome, syncPartyHp } from './outcome'
 import type { ReplacementDeps } from './switchIn'
@@ -2077,12 +2077,14 @@ export function executeAction(
     deps.dataContext,
   )
   if (cancelResult.cancelledBy) {
-    // CANCELLER_POWDER_MOVE jumps to BattleScript_PowderMoveNoEffect (battle_util.c:3459-3461), the
-    // one canceller script that still runs attackstring and ppreduce (data/battle_scripts_1.s:
-    // 8708-8709) before cancelmultiturnmoves (:8721) and MoveEnd. Every other cancel script goes
-    // straight to MoveEnd, so this is the only cancelledBy that spends PP.
-    if (cancelResult.cancelledBy === 'POWDER') performPpDeduct()
+    // CANCELLER_POWDER_MOVE jumps to BattleScript_PowderMoveNoEffect (battle_util.c:3459-3461) and
+    // CANCELLER_POWDER_STATUS to BattleScript_MoveUsedPowder (battle_util.c:3474-3476). Those are
+    // the two canceller scripts that still run attackstring and ppreduce (data/battle_scripts_1.s:
+    // 8708-8709 and 8772). Every other cancel script goes straight to MoveEnd, so these are the
+    // only cancelledBy values that spend PP.
+    if (cancelResult.cancelledBy === 'POWDER' || cancelResult.cancelledBy === 'POWDER_STATUS') performPpDeduct()
     let confusionSelfHitDamage = cancelResult.confusionSelfHitDamage
+    let attackerDamage = confusionSelfHitDamage
     const cancelFainted: number[] = []
     if (cancelResult.cancelledBy === 'CONFUSION') {
       // BattleScript_MoveUsedIsConfused (data/battle_scripts_1.s): datahpupdate BS_ATTACKER, tryfaintmon BS_ATTACKER.
@@ -2092,12 +2094,20 @@ export function executeAction(
       if (selfHit && selfHit.damage !== null) {
         unmodelled.push(...selfHit.unmodelled)
         confusionSelfHitDamage = selfHit.damage
+        attackerDamage = selfHit.damage
         applyDamage(state, battlerId, selfHit.damage, cancelFainted, deps)
       } else {
         unmodelled.push(
           "CANCELLER_CONFUSED's self-hit damage (CalculateMoveDamage MOVE_NONE, battle_util.c:3376-3378, power 40 or 80 with an opposing Cosmic Daze) is not modelled; no HP was removed from the attacker",
         )
       }
+    } else if (cancelResult.cancelledBy === 'POWDER_STATUS') {
+      // battle_util.c:3473-3474: `gBattleMoveDamage = BATTLER_HAS_MAGIC_GUARD(attacker) ? 0 : maxHP / 4`,
+      // then BattleScript_MoveUsedPowder's healthbarupdate/datahpupdate (data/battle_scripts_1.s:8780-8783).
+      const attackerBattler = state.battlers[battlerId]!
+      const powderDamage = isMagicGuardProtected(state, attackerBattler) ? 0 : Math.trunc(attackerBattler.mon.maxHp / 4)
+      attackerDamage = powderDamage
+      applyDamage(state, battlerId, powderDamage, cancelFainted, deps)
     }
     return {
       turnOrderIndex: index,
@@ -2108,7 +2118,7 @@ export function executeAction(
       missed: false,
       targetId,
       targetDamage: null,
-      attackerDamage: confusionSelfHitDamage,
+      attackerDamage,
       cancelledBy: cancelResult.cancelledBy,
       confusionSelfHitDamage,
       statChanges: null,

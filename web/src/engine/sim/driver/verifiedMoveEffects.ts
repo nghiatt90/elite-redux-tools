@@ -14,6 +14,7 @@ const CYCLE126 = 'web/src/engine/sim/cycle126HealingEffects.test.ts'
 const CYCLE127 = 'web/src/engine/sim/cycle127ProtectionEffects.test.ts'
 const CYCLE128 = 'web/src/engine/sim/cycle128SwitchEffects.test.ts'
 const CYCLE129 = 'web/src/engine/sim/cycle129CopyEffects.test.ts'
+const CYCLE130 = 'web/src/engine/sim/cycle130CopyEffects.test.ts'
 
 export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string>(
   [
@@ -257,6 +258,19 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
         'EFFECT_MIRROR_MOVE',
         'EFFECT_ELECTRIFY',
       ].map((effect): [string, string] => [effect, CYCLE129]),
+    )
+    .concat(
+      [
+        'EFFECT_ASSIST',
+        'EFFECT_POWDER',
+        'EFFECT_SKETCH',
+        'EFFECT_BESTOW',
+        'EFFECT_ION_DELUGE',
+        'EFFECT_COURT_CHANGE',
+        'EFFECT_CONVERSION',
+        'EFFECT_CONVERSION_2',
+        'EFFECT_TRANSFORM',
+      ].map((effect): [string, string] => [effect, CYCLE130]),
     ),
 )
 
