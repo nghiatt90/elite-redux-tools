@@ -18,6 +18,24 @@ export const AUDIT_ALLOWLIST: AuditAllowance[] = [
     reason: 'doubles-only, D1',
     citation: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:11612',
   },
+  {
+    effect: 'EFFECT_ALLY_SWITCH',
+    reason: 'doubles-only, D1',
+    citation: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8855',
+  },
+  {
+    effect: 'EFFECT_DO_NOTHING',
+    reason: 'changes only post-battle prize money multiplier, no in-battle effect',
+    citation: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:2692',
+    notes: [
+      'MOVE_EFFECT_HAPPY_HOUR (battle_script_commands.c:2692-2697): gBattleStruct->moneyMultiplier / moneyMultiplierMove not modelled',
+    ],
+  },
+  {
+    effect: 'EFFECT_PLACEHOLDER',
+    reason: "the C prints 'not done yet' and does nothing in battle",
+    citation: 'pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2847',
+  },
 ]
 
 export function findAllowance(effect: string): AuditAllowance | undefined {

@@ -11030,6 +11030,75 @@ export function handleHealingWish(ctx: MoveEffectContext): ActionOutcome {
   return outcome(ctx, { fainted, attackerDamage: userHp, missed: false })
 }
 
+/**
+ * EFFECT_PLACEHOLDER (Airborne Slam).
+ * BattleScript_EffectPlaceholder (data/battle_scripts_1.s:2847-2854).
+ * attackcanceler ; attackstring ; ppreduce ; pause 5 ; printstring STRINGID_NOTDONEYET ; goto BattleScript_MoveEnd
+ * Prints "not done yet" and does nothing in battle.
+ */
+export function handlePlaceholder(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+  return outcome(ctx, { targetId, missed: false })
+}
+
+/**
+ * EFFECT_FETCH (Fetch).
+ * BattleScript_EffectFetch (data/battle_scripts_1.s:5316-5345).
+ * Cmd_tryrecycleitem (src/battle_script_commands.c:12296-12309).
+ * - attackcanceler ; printstring STRINGID_FETCH ; ppreduce (:5317-5321)
+ * - jumpifbattletype BATTLE_TYPE_ARENA, BattleScript_EffectFetch_NoEffectIfNoItem (:5322)
+ * - jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION | BS_ATTACKER, BattleScript_EffectFetch_NoEffectIfNoItem (:5323)
+ * If can switch:
+ *   tryrecycleitem BattleScript_EffectFetch_SwitchNoItem (:5325)
+ *   goto BattleScript_MoveSwitch (:5328, :5332)
+ * If cannot switch (arena or no available switch):
+ *   tryrecycleitem BattleScript_EffectFetch_NothingHappens (:5334)
+ *   NothingHappens: orhalfword gMoveResultFlags, MOVE_RESULT_FAILED; goto BattleScript_MoveEnd (:5339-5343)
+ */
+export function handleFetch(ctx: MoveEffectContext): ActionOutcome {
+  const { state, battlerId, targetId, action, deps, unmodelled, deductPp } = ctx
+  const battler = state.battlers[battlerId]!
+  const moveId = action.chosenMove!.id
+  const moveEffect = action.chosenMove!.effect
+  deductPp(state, battlerId, moveId, moveEffect, unmodelled)
+
+  const canSwitch =
+    !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) && canBattlerSwitch(state, battlerId)
+
+  const tryRecycle = (): boolean => {
+    const usedItem = battler.usedHeldItem
+    const currentItem = battler.mon.itemId
+    if (usedItem && usedItem !== 'ITEM_NONE' && (!currentItem || currentItem === 'ITEM_NONE')) {
+      battler.mon.itemId = usedItem
+      battler.usedHeldItem = null
+      const slotU = findAbilitySlot(battler.mon.abilities, 'ABILITY_UNBURDEN')
+      if (slotU !== -1) battler.volatiles.abilityState[slotU] = 0
+      const slotS = findAbilitySlot(battler.mon.abilities, 'ABILITY_SUGAR_RUSH')
+      if (slotS !== -1) battler.volatiles.abilityState[slotS] = 0
+      return true
+    }
+    return false
+  }
+
+  if (canSwitch) {
+    tryRecycle()
+    const switchUnmodelled = performSwitchAction(state, battlerId, deps, { ignoreEscapePrevention: true })
+    unmodelled.push(...switchUnmodelled)
+    return outcome(ctx, { targetId, missed: false })
+  }
+
+  // Cannot switch: NoEffectIfNoItem branch (:5333-5343)
+  const recycled = tryRecycle()
+  if (recycled) {
+    return outcome(ctx, { targetId, missed: false })
+  }
+  return outcome(ctx, { targetId, missed: true })
+}
+
 const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_BATON_PASS: handleBatonPass,
   EFFECT_SHED_TAIL: handleShedTail,
@@ -11287,6 +11356,8 @@ const HANDLERS: Record<string, MoveEffectHandler> = {
   EFFECT_MAGIC_COAT: handleMagicCoat,
   EFFECT_ALLY_SWITCH: handleAllySwitch,
   EFFECT_FOLLOW_ME: handleFollowMe,
+  EFFECT_PLACEHOLDER: handlePlaceholder,
+  EFFECT_FETCH: handleFetch,
 }
 
 export function getMoveEffectHandler(effect: string | null): MoveEffectHandler | null {
@@ -12135,7 +12206,9 @@ export function applySecondaryMoveEffects(
     moveEffect === 'EFFECT_SMELLINGSALT' ||
     moveEffect === 'EFFECT_PLASMA_FISTS' ||
     moveEffect === 'EFFECT_EERIE_SPELL' ||
-    moveEffect === 'EFFECT_GHASTLY_ECHO'
+    moveEffect === 'EFFECT_GHASTLY_ECHO' ||
+    moveEffect === 'EFFECT_CONCOCTION' ||
+    moveEffect === 'EFFECT_PARTY_FAVORS'
   ) {
     // Pure damaging move or handled elsewhere with no secondary effect
   } else {

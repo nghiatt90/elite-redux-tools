@@ -848,13 +848,13 @@ const TYPE_NAMES_BY_ID = [
 ] as const
 
 /** `sCravingBerryTable` (src/abilities.cc:7213-7224), index = `Random() % 10`. */
-const CRAVING_BERRY_TABLE = [
+export const CRAVING_BERRY_TABLE = [
   'ITEM_LUM_BERRY', 'ITEM_SITRUS_BERRY', 'ITEM_FIGY_BERRY', 'ITEM_LIECHI_BERRY', 'ITEM_GANLON_BERRY',
   'ITEM_SALAC_BERRY', 'ITEM_PETAYA_BERRY', 'ITEM_APICOT_BERRY', 'ITEM_LANSAT_BERRY', 'ITEM_STARF_BERRY',
 ] as const
 
 /** `figyAlternatives` (src/abilities.cc:7226-7227), index = `Random() % 5`, drawn only for Figy. */
-const FIGY_ALTERNATIVES = [
+export const FIGY_ALTERNATIVES = [
   'ITEM_FIGY_BERRY', 'ITEM_WIKI_BERRY', 'ITEM_MAGO_BERRY', 'ITEM_AGUAV_BERRY', 'ITEM_IAPAPA_BERRY',
 ] as const
 

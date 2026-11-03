@@ -423,11 +423,10 @@ describe('plain-hit scripts: Pursuit, Grassy Glide, Revelation Dance (er-config 
     return { state, act: out.actions.find((a) => a.battlerId === 0)! }
   }
 
-  it('Pursuit hits for its plain 50 power and keeps its own switch-interception note, without the generic secondary-effect note', () => {
+  it('Pursuit hits for its plain 50 power and keeps no generic secondary-effect note', () => {
     const { act } = hit('MOVE_PURSUIT')
     expect(baseDamage(50)).toBe(26)
     expect(act.targetDamage).toBe(26)
-    expect(act.unmodelled).toContain('defenderIsSwitching is false because switching is not modelled')
     expect(act.unmodelled).not.toContain('secondary effect of EFFECT_PURSUIT not modelled')
   })
 

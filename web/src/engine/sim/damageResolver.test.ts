@@ -295,9 +295,10 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
       else expect(after.targetDamage!).toBeGreaterThan(before.targetDamage!)
     }
   })
-  it('fires defenderIsSwitching only for EFFECT_PURSUIT', () => {
-    expect(resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT')).unmodelled.some((u) => u.includes('defenderIsSwitching'))).toBe(true)
-    expect(resolver().resolve(state(), 0, 1, action('MOVE_TACKLE')).unmodelled.some((u) => u.includes('defenderIsSwitching'))).toBe(false)
+  it('sets defenderIsSwitching when context specifies it', () => {
+    const resSwitch = resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT'), { targetHasActedThisTurn: false, defenderIsSwitching: true })
+    const resNoSwitch = resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT'), { targetHasActedThisTurn: false, defenderIsSwitching: false })
+    expect(resSwitch.targetDamage!).toBe(resNoSwitch.targetDamage! * 2)
   })
 })
 

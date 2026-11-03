@@ -137,6 +137,7 @@ import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
 import { getParentalBondMultiplier, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
+import { weatherBallType } from '../basePower'
 import type { ParentalBondTrigger } from '../abilities/types'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
@@ -526,6 +527,8 @@ export interface DamageResolveContext {
   /** gCritRoll for this hit (`MakeCritRoll()`, Random() % 24, battle_script_commands.c:1586), drawn by the turn loop at
    * MOVEEND_MULTIHIT_MOVE (:4885). Absent: the resolver draws the crit check itself, as it does for a first hit. */
   critRoll?: number
+  /** Whether the defender's chosen action for this turn is a switch (B_ACTION_SWITCH, battle_util.c:6835). */
+  defenderIsSwitching?: boolean
 }
 
 export interface DamageResolver {
@@ -1133,7 +1136,17 @@ export function handleProtectLikeMoveEnd(
     // type (gBattleStruct->dynamicMoveType, written by SetTypeBeforeUsingMove's
     // GetMoveTypeInternal). resolveEffectiveMoveType is the sim's existing resolver for its
     // onMoveType (-ate) branch; the branches below are NOT covered, so the note stays.
-    const moveType = resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType.replace(/^TYPE_/, '')
+    const dynamicWeatherBall =
+      moveData.effect === 'EFFECT_WEATHER_BALL'
+        ? weatherBallType(
+            state.field.weather,
+            battlerHasSimAbility(state, attacker, 'ABILITY_AURORA_BOREALIS', false, attackerId, false, deps.dataContext),
+          )
+        : null
+    const moveType = (
+      dynamicWeatherBall ??
+      resolveEffectiveMoveType(attacker.mon.abilities, currentMoveId, moveData.type, moveData.flags ?? {}).moveType
+    ).replace(/^TYPE_/, '')
     if (target.mon.types.includes(moveType)) return none
     target.mon.types[2] = moveType
     unmodelled.push(
@@ -3095,6 +3108,9 @@ export function executeAction(
     // `!(critRoll % critChance)`, and a roll of 0 satisfies every divisor while ALSO suppressing the
     // resolver's one crit draw -- exactly the C's no-draw ALWAYS_CRIT path. denominator === null
     // (Lucky Chant / a NEVER_CRIT ability) still wins, matching :1523-1525 running before :1540.
+    const targetTurnOrderNum = order.battlerByTurnOrder.indexOf(currentTargetId)
+    const defenderIsSwitching =
+      targetTurnOrderNum >= 0 && order.actionsByTurnOrder[targetTurnOrderNum] === 'SWITCH'
     const laserFocusCritRoll = hasFlag(attackerBattler.statuses3, STATUS3_LASER_FOCUS) ? 0 : undefined
     let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective, resolvedMoveType: damageMoveType } = deps.damage.resolve(
       state,
@@ -3102,8 +3118,8 @@ export function executeAction(
       currentTargetId,
       currentMoveAction,
       perHitResolution
-        ? { targetHasActedThisTurn, hitIndex, critRoll: laserFocusCritRoll ?? hitCritRoll }
-        : { targetHasActedThisTurn, critRoll: laserFocusCritRoll },
+        ? { targetHasActedThisTurn, hitIndex, critRoll: laserFocusCritRoll ?? hitCritRoll, defenderIsSwitching }
+        : { targetHasActedThisTurn, critRoll: laserFocusCritRoll, defenderIsSwitching },
     )
     if (moveEffect === 'EFFECT_ROLLOUT' && targetDamage === 0) attackerBattler.volatiles.rolloutCounter = 0
 

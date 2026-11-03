@@ -126,7 +126,6 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       beatUpBaseAttack = slotSpecies ? (deps.dataContext.species(slotSpecies)?.baseStats.atk ?? 0) : 0
     }
   }
-  if (move.effect === 'EFFECT_PURSUIT') unmodelled.push('defenderIsSwitching is false because switching is not modelled')
   const scenario: DamageCalcScenario = {
     move,
     attacker: attacker.battler,
@@ -146,7 +145,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     // every move this batch's own defects actually touch (see header for
     // the one pre-existing exception this value cannot fix).
     hitCount: state.battlers[attackerId]!.turn.multiHitCounter,
-    defenderIsSwitching: false,
+    defenderIsSwitching: Boolean(context.defenderIsSwitching),
     magnitudeTier: drawRandom && move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
     attackerRolloutCounter: Math.min(3, Math.max(0, attackerBattlerState.volatiles.rolloutCounter)) as 0 | 1 | 2 | 3,
     attackerHasDefenseCurl: hasFlag(attackerBattlerState.mon.status2, STATUS2_DEFENSE_CURL),

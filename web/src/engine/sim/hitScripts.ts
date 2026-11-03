@@ -46,6 +46,7 @@ import {
 import { tryChangeBattleWeather } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { cancelMultiTurnMoves } from './statusEffects'
+import { CRAVING_BERRY_TABLE, FIGY_ALTERNATIVES } from './endTurn'
 
 export interface LegacyPreHitArgs {
   state: BattleState
@@ -308,6 +309,26 @@ export function runLegacyPostHit(args: LegacyPostHitArgs): void {
       const cut = Math.min(argument, target.mon.pp[slot])
       target.mon.pp[slot] -= cut
       if (target.mon.pp[slot] === 0) cancelMultiTurnMoves(target)
+      return
+    }
+    case 'EFFECT_CONCOCTION': {
+      // s:2925-2929: setrandomtempberry BS_ATTACKER, sBERRY_OVERRIDE TRUE, consumeberry BS_ATTACKER TRUE, sBERRY_OVERRIDE FALSE
+      // SetRandomTempBerry (src/abilities.cc:7226-7236): sCravingBerryTable[Random() % 10]; if Figy, figyAlternatives[Random() % 5]
+      let berry: string = CRAVING_BERRY_TABLE[state.rng.random16() % CRAVING_BERRY_TABLE.length]!
+      if (berry === 'ITEM_FIGY_BERRY') berry = FIGY_ALTERNATIVES[state.rng.random16() % FIGY_ALTERNATIVES.length]!
+      attacker.changedItem = attacker.mon.itemId
+      attacker.mon.itemId = berry
+      const statChanges: StatChangeOutcome[] = []
+      consumeBerryWithOverride(state, attackerId, attackerId, args.moveId, deps, unmodelled, statChanges, true)
+      return
+    }
+    case 'EFFECT_PARTY_FAVORS': {
+      // s:2975-2989: tryhealpercenthealth BS_ATTACKER, 25; in singles partner is absent (:2984).
+      // VARIOUS_TRY_HEAL_PERCENT_HP (c:7899-7901): maxHP * 25 / 100, min 1; fails if already at full HP.
+      if (attacker.mon.hp < attacker.mon.maxHp) {
+        const heal = Math.max(1, Math.floor((attacker.mon.maxHp * 25) / 100))
+        attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
+      }
       return
     }
     default:
