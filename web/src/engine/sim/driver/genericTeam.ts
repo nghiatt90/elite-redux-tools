@@ -66,3 +66,74 @@ export const GENERIC_PLAYER_SPECS: PlayerMonSpec[] = [
   },
 ]
 
+/**
+ * Status-move bench team: the same six species and spreads as
+ * `GENERIC_PLAYER_SPECS`, but each mon carries at least two status moves so the
+ * `statusTerms` leaf terms have something to value. The attack slots reuse
+ * moves already listed in `GENERIC_PLAYER_SPECS` (so the ids are known-good and
+ * the mons already learn them). Used by `expectimax.bench.test.ts` under
+ * `EX_TEAM=status`; nothing in the app reads it.
+ */
+export const STATUS_PLAYER_SPECS: PlayerMonSpec[] = [
+  {
+    // Toxic + Substitute; Waterfall/Earthquake are the generic Swampert attacks.
+    species: 'SPECIES_SWAMPERT',
+    level: 50,
+    nature: 'NATURE_ADAMANT',
+    evs: { hp: 252, atk: 252, spe: 4 },
+    ability: 'ABILITY_TORRENT',
+    item: 'ITEM_LEFTOVERS',
+    moves: ['MOVE_WATERFALL', 'MOVE_EARTHQUAKE', 'MOVE_TOXIC', 'MOVE_SUBSTITUTE'],
+  },
+  {
+    // Swords Dance + Substitute; Dragon Claw/Earthquake are the generic attacks.
+    species: 'SPECIES_GARCHOMP',
+    level: 50,
+    nature: 'NATURE_JOLLY',
+    evs: { atk: 252, spe: 252, hp: 4 },
+    ability: 'ABILITY_ROUGH_SKIN',
+    item: 'ITEM_LIFE_ORB',
+    moves: ['MOVE_DRAGON_CLAW', 'MOVE_EARTHQUAKE', 'MOVE_SWORDS_DANCE', 'MOVE_SUBSTITUTE'],
+  },
+  {
+    // Swords Dance + Roost; Bullet Punch/Bug Bite are the generic attacks.
+    species: 'SPECIES_SCIZOR',
+    level: 50,
+    nature: 'NATURE_ADAMANT',
+    evs: { hp: 252, atk: 252, def: 4 },
+    ability: 'ABILITY_TECHNICIAN',
+    item: 'ITEM_METAL_COAT',
+    moves: ['MOVE_BULLET_PUNCH', 'MOVE_BUG_BITE', 'MOVE_SWORDS_DANCE', 'MOVE_ROOST'],
+  },
+  {
+    // Will-O-Wisp + Confuse Ray; Shadow Ball/Sludge Bomb are the generic attacks.
+    species: 'SPECIES_GENGAR',
+    level: 50,
+    nature: 'NATURE_TIMID',
+    evs: { spatk: 252, spe: 252, hp: 4 },
+    ability: 'ABILITY_LEVITATE',
+    item: 'ITEM_FOCUS_SASH',
+    moves: ['MOVE_SHADOW_BALL', 'MOVE_SLUDGE_BOMB', 'MOVE_WILL_O_WISP', 'MOVE_CONFUSE_RAY'],
+  },
+  {
+    // Stealth Rock + Substitute; Stone Edge/Crunch are the generic attacks.
+    species: 'SPECIES_TYRANITAR',
+    level: 50,
+    nature: 'NATURE_ADAMANT',
+    evs: { hp: 252, atk: 252, spdef: 4 },
+    ability: 'ABILITY_SAND_STREAM',
+    item: 'ITEM_SMOOTH_ROCK',
+    moves: ['MOVE_STONE_EDGE', 'MOVE_CRUNCH', 'MOVE_STEALTH_ROCK', 'MOVE_SUBSTITUTE'],
+  },
+  {
+    // Soft-Boiled + Thunder Wave; Seismic Toss/Thunderbolt are the generic attacks.
+    species: 'SPECIES_BLISSEY',
+    level: 50,
+    nature: 'NATURE_BOLD',
+    evs: { hp: 252, def: 252, spdef: 4 },
+    ability: 'ABILITY_NATURAL_CURE',
+    item: 'ITEM_HEAVY_DUTY_BOOTS',
+    moves: ['MOVE_SEISMIC_TOSS', 'MOVE_THUNDERBOLT', 'MOVE_SOFT_BOILED', 'MOVE_THUNDER_WAVE'],
+  },
+]
+
