@@ -5226,17 +5226,28 @@ function handleStockpile(ctx: MoveEffectContext): ActionOutcome {
 
 /**
  * Accuracy check helper for NO_ACC_CALC_CHECK_LOCK_ON (Cmd_accuracycheck, battle_script_commands.c:1403-1411).
- * Used by Pain Split, Power/Guard/Speed/Heart Swap, Power/Guard Split, Topsy-Turvy.
+ * Used by Power/Guard/Speed/Heart Swap, Power/Guard Split, Topsy-Turvy, Mimic, Role Play, Skill Swap,
+ * Telekinesis, Powder, Bestow.
+ * This operand skips GetTotalAccuracy entirely, so it draws no Random() -- unlike ACC_CURR_MOVE,
+ * whose accuracy check rolls `Random() % 100` at battle_script_commands.c:1443.
+ * `moveId` is the current move for the Protect gate (`JumpIfMoveAffectedByProtect(0)` reads
+ * gCurrentMove); the old callers passed MOVE_NONE.
  */
-function checkNoAccCalcLockOn(ctx: MoveEffectContext, targetId: number): { failed: boolean; missed: boolean } {
+function checkNoAccCalcLockOn(
+  ctx: MoveEffectContext,
+  targetId: number,
+  moveId = 'MOVE_NONE',
+): { failed: boolean; missed: boolean } {
   const { state, battlerId, deps, unmodelled, turnOrderIndex, order } = ctx
   const target = state.battlers[targetId]!
+  const commanderSlot = findAbilitySlot(target.mon.abilities, 'ABILITY_COMMANDER')
+  if (commanderSlot !== -1 && (target.volatiles.abilityState[commanderSlot] ?? 0) >= 1) return { failed: true, missed: true }
   const lockedOn = hasFlag(target.statuses3, STATUS3_ALWAYS_HITS) && target.volatiles.battlerWithSureHit === battlerId
   if (lockedOn) return { failed: false, missed: false }
   if (hasFlag(target.statuses3, STATUS3_SEMI_INVULNERABLE)) return { failed: true, missed: true }
   const targetIndex = order ? order.battlerByTurnOrder.indexOf(targetId) : -1
   const targetHasActedThisTurn = targetIndex >= 0 && targetIndex < turnOrderIndex
-  const protectType = isBattlerProtected(state, battlerId, targetId, 'MOVE_NONE', targetHasActedThisTurn, deps, unmodelled)
+  const protectType = isBattlerProtected(state, battlerId, targetId, moveId, targetHasActedThisTurn, deps, unmodelled)
   if ((protectType & ProtectType.PROTECT_BLOCK) !== 0) return { failed: true, missed: true }
   return { failed: false, missed: false }
 }
@@ -6654,8 +6665,10 @@ export function handleMimic(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId, missed: true })
   }
 
-  // 3. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:4560)
-  if (checkAccuracy(ctx, targetId, moveId)) {
+  // 3. accuracycheck BattleScript_ButItFailed, NO_ACC_CALC_CHECK_LOCK_ON (:4560). That operand has no
+  // GetTotalAccuracy call and so no Random() draw (battle_script_commands.c:1403-1411).
+  const acc = checkNoAccCalcLockOn(ctx, targetId, moveId)
+  if (acc.failed) {
     return outcome(ctx, { targetId, missed: true })
   }
 
@@ -6687,13 +6700,17 @@ export function handleMimic(ctx: MoveEffectContext): ActionOutcome {
   // Rewrite slot
   attacker.mon.moves[slot] = targetLastMove
 
-  // PP rule: if (gBattleMoves[gLastMoves[target]].pp < 5) pp = maxPP; else pp = 5;
+  // pp = min(5, maxPP): if (gBattleMoves[gLastMoves[target]].pp < 5) pp = maxPP; else pp = 5 (:10574-10577)
   const maxPp = targetMoveData?.pp ?? 5
   attacker.mon.pp[slot] = Math.min(5, maxPp)
 
   attacker.volatiles.mimickedMoves |= (1 << slot)
 
-  return outcome(ctx, { targetId, missed: false })
+  // Cmd_mimicattackcopy (:10570): gChosenMove = 0xFFFF. MOVEEND_UPDATE_LAST_MOVES (:4749-4752) then writes
+  // gLastMoves/gLastPrintedMoves = 0xFFFF while gLastResultingMoves stays MOVE_MIMIC, so a later reader of the
+  // attacker's "last move" must not see MOVE_MIMIC. ctx.setChosenMove mirrors the gChosenMove write.
+  ctx.setChosenMove?.(MOVE_UNSET)
+  return outcome(ctx, { targetId, missed: false, chosenMoveId: MOVE_UNSET })
 }
 
 /**

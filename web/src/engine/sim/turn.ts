@@ -150,6 +150,7 @@ import type { ReplacementDeps } from './switchIn'
 import { applyEndOfTurnReplacements, hasLiveReserve, switchIn } from './switchIn'
 import type { HazardTypeDeps } from './hazards'
 import {
+  applyMoveEndClearBits,
   applyMoveEndItemEffectsAll,
   ATTACKER_FOLLOWUP_ABILITIES,
   dispatchMoveEndAttackerAbilities,
@@ -2400,6 +2401,19 @@ export function executeAction(
           effectOutcome.statusApplied = protectMoveEnd.statusApplied
         }
       }
+      // BattleScript_EffectInstruct's SUCCESS tail is `moveendfrom MOVEEND_CLEAR_BITS; end`
+      // (data/battle_scripts_1.s:1614). The ladder therefore SKIPS every case before CLEAR_BITS: no
+      // MOVEEND_CHOICE_MOVE (:4547-4568, so a first-use Choice holder is not locked into Instruct), no
+      // MOVEEND_UPDATE_LAST_MOVES (:4723-4772, so the user's lastMove/lastResultingMove/lastPrintedMove and
+      // the global gLastUsedMove keep their previous values), no attacker ability hooks and no
+      // ABILITYEFFECT_REACTIVE. Only CLEAR_BITS (:4934-4957) runs. A FAILED tryinstruct jumps to
+      // BattleScript_ButItFailed, whose `goto BattleScript_MoveEnd` (:5945) walks the full ladder, so
+      // failures keep the normal path below.
+      if (currentMove.effect === 'EFFECT_INSTRUCT' && !effectOutcome.missed) {
+        applyMoveEndClearBits(state, battlerId, currentTargetId, currentMove.id, deps, false)
+        return effectOutcome
+      }
+
       // Nearest sim point for handled status moves (Swords Dance, Weather moves, etc.) to trigger
       // MOVEEND_ABILITIES_ATTACKER follow-up hooks (battle_script_commands.c:4532-4536, battle_util.c:4491-4495, 9011-9041)
       // and ABILITYEFFECT_REACTIVE (:4330). Restricted to ATTACKER_FOLLOWUP_ABILITIES via onlyFollowupAbilities so
