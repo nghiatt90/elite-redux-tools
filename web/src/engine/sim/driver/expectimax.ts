@@ -11,6 +11,7 @@
 // Leaves are scored by `evaluateState`. A player choice is a move (mega-evolving whenever the
 // game allows it) or a voluntary switch to a live party member.
 
+import { battlerHasAbility } from '../../abilities/dispatch'
 import { chooseAiAction } from '../ai/chooseAiAction'
 import { getMostSuitableMonToSwitchInto } from '../ai/aiSwitching'
 import {
@@ -140,6 +141,16 @@ const CONFUSION_SELF_HIT_CHANCE = 1 / 3
  * MODEL CHOICE: 1 would cancel the HP cost `positionScore` already charges and
  * the sub would never be picked. */
 const SUBSTITUTE_BUFFER_WEIGHT = 2
+
+/** HasGrappler, battle_util.c:9359-9362: `RETURN_ABILITY_IF_FLAG(battler, FALSE,
+ * grappler)` (include/battle_util.h:277), i.e. any of the battler's slots holding
+ * a `grappler`-flagged ability. Those are Grappler, Tangled Tails and Tentalock
+ * (abilityHooks.json), the same trio endTurn.ts:600 names for its own
+ * ENDTURN_WRAP port. */
+const GRAPPLER_ABILITIES = ['ABILITY_GRAPPLER', 'ABILITY_TANGLED_TAILS', 'ABILITY_TENTALOCK']
+/** The suppression predicate endTurn.ts:382 passes to `battlerHasAbility` for its
+ * HasGrappler port, mirrored here so this term reads the wrapper identically. */
+const NO_SUPPRESSION = () => false
 
 /** One end-of-turn fractional drain as an HP fraction, keeping the C's
  * `if (gBattleMoveDamage == 0) gBattleMoveDamage = 1` floor. */
@@ -277,36 +288,51 @@ function activeVolatileBurden(state: BattleState, battler: BattlerState): number
   // and still acts (:3374-3376), otherwise `Random() % 3 == 0` (:3377) makes it
   // hit itself and lose the action. So with counter c only the c-1 attempts
   // that still had a nonzero counter can be lost, each with probability 1/3.
-  // The horizon cap and ACTION_VALUE are model choices. The self-hit's damage
-  // (:3378-3393, 40 BP, 80 with Cosmic Daze at :3384) is NOT charged on top:
-  // the lost action already pays for it.
+  // The horizon cap and ACTION_VALUE are model choices. The self-hit is real HP
+  // lost as well as the action: CalculateMoveDamage (:3380-3387, 40 BP, 80 with
+  // Cosmic Daze at :3384) plus HITMARKER_UNABLE_TO_USE_MOVE (:3389). Its damage
+  // is left out here as a MODEL CHOICE, for consistency with the sim, which
+  // also gaps it (attackCanceller.ts:85, :198-205).
   const confusionCounter = getCounter(status2, STATUS2_CONFUSION)
   value += Math.min(Math.max(0, confusionCounter - 1), STATUS_HORIZON_TURNS) * CONFUSION_SELF_HIT_CHANCE * ACTION_VALUE
 
   // ENDTURN_NIGHTMARES, battle_util.c:2608-2623. Requires STATUS2_NIGHTMARE and
   // hp != 0 (:2609); MAGIC_GUARD_CHECK follows (:2610). With STATUS1_SLEEP it
-  // takes maxHP / 4, min 1, each end of turn (:2614-2615); without sleep the
-  // flag is silently cleared and nothing is charged (:2619). The nightmare ends
-  // when the mon wakes, so its ticks are the sleep counter, capped by the
-  // horizon (a model choice).
+  // takes maxHP / 4, min 1, each end of turn (:2613-2615); without sleep the
+  // flag is silently cleared and nothing is charged (:2618-2619). Each move
+  // attempt first spends one point of the sleep counter (CANCELLER_ASLEEP,
+  // :3218-3227) and is cancelled only while the counter is still nonzero
+  // (:3229-3237); the attempt that empties it wakes the mon, clears
+  // STATUS2_NIGHTMARE (:3238-3243) and lets it act. So a counter of N yields
+  // N - 1 end-of-turn ticks, capped by the horizon (a model choice), the same
+  // counter - 1 handling `statusMonValue`'s sleep term uses; Early Bird's
+  // toSub 2 is not modelled there either (see that function's header).
   if (hasFlag(status2, STATUS2_NIGHTMARE) && !isMagicGuardProtected(state, battler)) {
     if (hasFlag(mon.status1, STATUS1_SLEEP)) {
       const sleepTurns = getCounter(mon.status1, STATUS1_SLEEP)
-      value += Math.min(sleepTurns, STATUS_HORIZON_TURNS) * drainTickFraction(mon.maxHp, 4)
+      value += Math.min(Math.max(sleepTurns - 1, 0), STATUS_HORIZON_TURNS) * drainTickFraction(mon.maxHp, 4)
     }
   }
 
-  // ENDTURN_WRAP, battle_util.c:2663-2687, the STATUS2_WRAPPED branch. The C
-  // pre-decrements wrapTurns (:2664); a zero result is the break-free tick and
+  // ENDTURN_WRAP, battle_util.c:2648-2707, the STATUS2_WRAPPED branch (:2663-2705;
+  // the Bug monotype champion branch above it, :2649-2662, has no port here). The
+  // C pre-decrements wrapTurns (:2664); a zero result is the break-free tick and
   // deals no damage (:2688-2690), so the damaging ticks are wrapTurns - 1,
   // capped by the horizon. The rate is maxHP / 8 (:2685) unless the wrapper
-  // (`gBattleStruct->wrappedBy`) has Grappler or a Binding Band, which would
-  // make it /6 (:2680-2683). That wrapper lookup needs the hold-effect/ability
-  // read this leaf scorer does not carry, so the /8 rate is always used here --
-  // a MODEL CHOICE to leave the /6 case out. MAGIC_GUARD_CHECK is :2666.
+  // (`gBattleStruct->wrappedBy`, :2680) has a grappler-flagged ability
+  // (HasGrappler, :9359-9362) or a Binding Band (:2682-2683), which make it
+  // maxHP / 6. Grappler is read here exactly as endTurn.ts:630-633 does it:
+  // `state.wrappedBy[battlerId]` plus that wrapper's own ability slots. Only the
+  // Binding Band half needs the hold-effect read (`holdEffectOfBattler`, which
+  // wants a dataContext this leaf scorer does not carry), so the /6 for a
+  // Binding Band wrapper is a MODEL CHOICE to leave out. MAGIC_GUARD_CHECK is
+  // :2666.
   if (hasFlag(status2, STATUS2_WRAPPED) && !isMagicGuardProtected(state, battler)) {
+    const wrapper = state.battlers[state.wrappedBy[battler.id]]
+    const hasGrappler = !!wrapper && GRAPPLER_ABILITIES.some((ab) => battlerHasAbility(wrapper.mon.abilities, ab, NO_SUPPRESSION))
+    const divisor = hasGrappler ? 6 : 8
     const damagingTicks = Math.min(Math.max(0, battler.volatiles.wrapTurns - 1), STATUS_HORIZON_TURNS)
-    value += damagingTicks * drainTickFraction(mon.maxHp, 8)
+    value += damagingTicks * drainTickFraction(mon.maxHp, divisor)
   }
 
   // ENDTURN_LEECH_SEED, battle_util.c:2472-2486. Requires STATUS3_LEECHSEED on
@@ -314,8 +340,8 @@ function activeVolatileBurden(state: BattleState, battler: BattlerState): number
   // `statuses3 & STATUS3_LEECHSEED_BATTLER` (constants.ts:218) -- alive (:2476),
   // and the victim not Magic Guard protected (:2477). The drain is maxHP / 8,
   // min 1, each end of turn (:2480-2481). The seeder's equal heal (:2479, the
-  // "HP receiver") is NOT added: that recovery raises the seeder's own HP and
-  // is already scored by positionScore.
+  // "HP receiver") is left out as a MODEL CHOICE: positionScore only reads
+  // current HP, so it would not score that future recovery on its own.
   if (hasFlag(battler.statuses3, STATUS3_LEECHSEED) && !isMagicGuardProtected(state, battler)) {
     const seeder = state.battlers[battler.statuses3 & STATUS3_LEECHSEED_BATTLER]
     if (seeder && seeder.mon.hp > 0) {

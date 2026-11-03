@@ -8,13 +8,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   STATUS1_SLEEP,
-  STATUS2_CONFUSION,
   STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
   STATUS2_WRAPPED,
   STATUS3_LEECHSEED,
   setCounter,
 } from './constants'
+import type { AbilitySlots } from '../abilities/dispatch'
 import { DEFAULT_EXPECTIMAX, evaluateState, positionScore, statusScore } from './driver/expectimax'
 import { buildPlayerParty } from './driver/buildParty'
 import { createSession } from './driver/session'
@@ -60,7 +60,12 @@ function session(playerMons: string[], foeMons: TrainerMonData[]): BattleSession
 
 /** Writes a patch on BOTH copies of a party slot (active battler mon and the
  * party mon), as `sideStatusScore` reads the active copy for the active slot. */
-function patchMon(state: BattleState, side: 0 | 1, partyIndex: number, patch: { status1?: number; hp?: number; maxHp?: number }): void {
+function patchMon(
+  state: BattleState,
+  side: 0 | 1,
+  partyIndex: number,
+  patch: { status1?: number; hp?: number; maxHp?: number; abilities?: AbilitySlots },
+): void {
   Object.assign(state.sides[side].party[partyIndex]!, patch)
   const active = state.battlers[side]
   if (active && active.partyIndex === partyIndex) Object.assign(active.mon, patch)
@@ -95,7 +100,7 @@ describe('cycle 140 - confusion', () => {
   // 3 * (1/3) * ACTION_VALUE 0.25 = 0.25. Self-hit damage is not charged.
   it('counter 4 on the foe -> 0.25', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
-    setVolatiles(s, 1, { status2: STATUS2_CONFUSION })
+    setVolatiles(s, 1, { status2: 4 })
     expect(statusScore(s)).toBeCloseTo(0.25, 10)
   })
 
@@ -105,6 +110,14 @@ describe('cycle 140 - confusion', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     setVolatiles(s, 1, { status2: 1 })
     expect(statusScore(s)).toBe(0)
+  })
+
+  // Counter 3 is below the horizon cap, so both lost-able attempts count:
+  // 2 * (1/3) * 0.25 = 1/6.
+  it('counter 3, uncapped -> 1/6', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    setVolatiles(s, 1, { status2: 3 })
+    expect(statusScore(s)).toBeCloseTo(1 / 6, 10)
   })
 
   // Counter 5 would be 4 lost attempts; the horizon caps them at 3:
@@ -124,16 +137,37 @@ describe('cycle 140 - confusion', () => {
 
 describe('cycle 140 - nightmare', () => {
   // ENDTURN_NIGHTMARES, battle_util.c:2608-2623: with STATUS2_NIGHTMARE and
-  // STATUS1_SLEEP the mon takes maxHP / 4 each end of turn (:2613-2616); the
-  // nightmare ends when it wakes, so the ticks are the sleep counter. Sleep
-  // counter 2 loses 2 - 1 = 1 attempt (CANCELLER_ASLEEP, :3218-3242), i.e.
-  // 1 * ACTION_VALUE 0.25 = 0.25, and the nightmare is
-  // 2 * (320 / 4) / 320 = 2 * 0.25 = 0.5, total 0.75.
-  it('nightmare + sleep counter 2 on the foe -> 0.75', () => {
+  // STATUS1_SLEEP the mon takes maxHP / 4 each end of turn (:2613-2616). Each
+  // move attempt spends one point of the sleep counter first, and the attempt
+  // that empties it wakes the mon and clears STATUS2_NIGHTMARE before that
+  // turn's end step (CANCELLER_ASLEEP, :3229-3243), so a counter of N yields
+  // N - 1 ticks. Sleep counter 2 loses 2 - 1 = 1 attempt (1 * ACTION_VALUE
+  // 0.25 = 0.25) and takes 2 - 1 = 1 nightmare tick ((320 / 4) / 320 = 0.25),
+  // total 0.5.
+  it('nightmare + sleep counter 2 on the foe -> 0.5', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 2) })
     setVolatiles(s, 1, { status2: STATUS2_NIGHTMARE })
-    expect(statusScore(s)).toBeCloseTo(0.75, 10)
+    expect(statusScore(s)).toBeCloseTo(0.5, 10)
+  })
+
+  // Counter 4: sleep loses 4 - 1 = 3 attempts (3 * 0.25 = 0.75) and the
+  // nightmare ticks 4 - 1 = 3 times, exactly the horizon (3 * 0.25 = 0.75),
+  // total 1.5.
+  it('nightmare + sleep counter 4 (3 ticks, at the horizon) -> 1.5', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 4) })
+    setVolatiles(s, 1, { status2: STATUS2_NIGHTMARE })
+    expect(statusScore(s)).toBeCloseTo(1.5, 10)
+  })
+
+  // Counter 1: the first (and only) attempt already wakes the mon, so there is
+  // no lost action and no end-of-turn tick -> 0 + 0.
+  it('nightmare + sleep counter 1 -> 0', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 1) })
+    setVolatiles(s, 1, { status2: STATUS2_NIGHTMARE })
+    expect(statusScore(s)).toBe(0)
   })
 
   // :2609-2619: without STATUS1_SLEEP the flag is silently cleared and no damage
@@ -144,11 +178,11 @@ describe('cycle 140 - nightmare', () => {
     expect(statusScore(s)).toBe(0)
   })
 
-  it('the same nightmare on the player side -> -0.75', () => {
+  it('the same nightmare on the player side -> -0.5', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 0, 0, { status1: setCounter(0, STATUS1_SLEEP, 2) })
     setVolatiles(s, 0, { status2: STATUS2_NIGHTMARE })
-    expect(statusScore(s)).toBeCloseTo(-0.75, 10)
+    expect(statusScore(s)).toBeCloseTo(-0.5, 10)
   })
 })
 
@@ -182,6 +216,19 @@ describe('cycle 140 - wrap', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     setVolatiles(s, 0, { status2: STATUS2_WRAPPED, wrapTurns: 4 })
     expect(statusScore(s)).toBeCloseTo(-0.375, 10)
+  })
+
+  // The rate is maxHP / 8 unless the WRAPPER has a grappler-flagged ability or a
+  // Binding Band, which make it maxHP / 6 (battle_util.c:2680-2685; HasGrappler
+  // :9359-9362). `wrappedBy` defaults to battler 0 (create.ts:480), so giving the
+  // player's active mon Grappler makes the foe's ticks trunc(320 / 6) = 53, i.e.
+  // 53 / 320 = 0.165625 each; wrapTurns 4 -> 3 damaging ticks -> 0.496875. The
+  // Binding Band half stays unread (this leaf scorer has no hold effect).
+  it('wrapTurns 4 wrapped by a Grappler holder -> 3 * (320 / 6) / 320 = 0.496875', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    patchMon(s, 0, 0, { abilities: { ability: 'ABILITY_GRAPPLER', innates: [null, null, null] } })
+    setVolatiles(s, 1, { status2: STATUS2_WRAPPED, wrapTurns: 4 })
+    expect(statusScore(s)).toBeCloseTo(0.496875, 10)
   })
 })
 
