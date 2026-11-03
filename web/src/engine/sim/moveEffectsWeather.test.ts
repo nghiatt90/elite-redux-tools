@@ -384,13 +384,13 @@ describe('Weather-setting moves: failure when same weather is already active', (
     )
     state.field.weather = WEATHER_RAIN_TEMPORARY
     state.field.weatherDuration = 3
-    
+
     const out = executeTurn(state, [useMove(0, MOVE_RAIN_DANCE), null], testDeps())
 
     expect(state.field.weather).toBe(WEATHER_RAIN_TEMPORARY)
     expect(state.field.weatherDuration).toBe(2) // failed move left the timer alone; end-turn decremented it
     const act = out.actions.find((a) => a.battlerId === 0)
-    expect(act?.missed).toBeFalsy() // ButItFailed does not set MOVE_RESULT_MISSED
+    expect(act?.missed).toBe(true) // BattleScript_ButItFailed sets MOVE_RESULT_FAILED (battle_scripts_1.s:5944); the sim reports ButItFailed as missed
   })
 
   it('Rain Dance fails when WEATHER_RAIN_PERMANENT is already active', () => {
@@ -405,7 +405,7 @@ describe('Weather-setting moves: failure when same weather is already active', (
 
     expect(state.field.weather).toBe(WEATHER_RAIN_PERMANENT)
     const act = out.actions.find((a) => a.battlerId === 0)
-    expect(act?.missed).toBeFalsy()
+    expect(act?.missed).toBe(true)
   })
 
   it('Sunny Day fails when WEATHER_SUN_TEMPORARY is already active', () => {
