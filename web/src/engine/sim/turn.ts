@@ -1331,6 +1331,7 @@ export function applyDamage(
    * direct test call -- keep compiling; without it the onRevive latch is skipped. */
   deps?: { dataContext: SimDataContext; grounding?: GroundingContext },
   sourceBattlerId?: number,
+  skipDmgTrack?: boolean,
 ): void {
   if (damage === null) return
   const battler = state.battlers[battlerId]
@@ -1338,7 +1339,7 @@ export function applyDamage(
 
   // Cmd_datahpupdate, src/battle_script_commands.c:1914-1923:
   // Unless HITMARKER_SKIP_DMG_TRACK is set, accumulates gTakenDmg and tracks source battler.
-  if (damage > 0) {
+  if (damage > 0 && !skipDmgTrack) {
     battler.takenDmg += damage
     battler.takenDmgBy = sourceBattlerId !== undefined ? sourceBattlerId : (battlerId ^ 1)
   }
@@ -1353,7 +1354,6 @@ export function applyDamage(
     // Cmd_tryfaintmon (src/battle_script_commands.c:3238, 3242): retaliateTimer set to 2 on faint
     state.sides[battlerId & 1].timers.retaliateTimer = 2
     clearBattlerLastTakenMove(state, battlerId)
-    cancelMultiTurnMoves(battler, state)
     if (deps) latchRecurringNightmareOnFaint(state, battlerId, deps)
   }
   syncPartyHp(state, battlerId)
@@ -1705,9 +1705,6 @@ export function performSwitchAction(
     // Cmd_ppreduce emits REQUEST_PP_DATA_BATTLE, so the party mon carries the spent PP.
     outgoingSlot.pp = [...battler.mon.pp] as typeof outgoingSlot.pp
   }
-
-  // CancelMultiTurnMoves (battle_util.c:1164-1175): clears multi-turn status and flags shouldClearSkyDrop
-  cancelMultiTurnMoves(battler, state)
 
   // Cmd_switchoutabilities (battle_scripts_1.s:7211, battle_script_commands.c:12102)
   dispatchSwitchOutAbilities(state, battlerId, outgoingSlot, deps, unmodelled)
@@ -2641,7 +2638,19 @@ export function executeAction(
           unmodelled.push(...gapsToUnmodelled(accGaps))
           const accResult = getTotalAccuracy(accInputs)
           unmodelled.push(...gapsToUnmodelled(accResult.gaps))
-          const missed = state.rng.random16() % 100 >= accResult.accuracy
+          let missed = state.rng.random16() % 100 >= accResult.accuracy
+          // BattleScript_EffectSkyDrop (data/battle_scripts_1.s:5795-5798):
+          // runs typecalc then accuracycheck BattleScript_PrintMoveMissed.
+          // Type immunity (UQ_4_12(0.0), battle_util.c:7900-7902) sets MOVE_RESULT_DOESNT_AFFECT_FOE,
+          // which JumpIfMoveFailed (:1213-1218, :1446) detects in accuracycheck to branch to
+          // BattleScript_PrintMoveMissed (ppreduce, no charge, MoveEnd).
+          if (deps.damage?.typeEffectiveness) {
+            const eff = deps.damage.typeEffectiveness(state, battlerId, currentTargetId, currentMove.id, { targetHasActedThisTurn: tActed })
+            unmodelled.push(...eff.unmodelled)
+            if (eff.effectiveness === 0) {
+              missed = true
+            }
+          }
           if (missed) {
             performPpDeduct()
             runMoveEndBookkeeping({
@@ -2712,7 +2721,6 @@ export function executeAction(
 
           targetBattler.volatiles.skyDropped = true
           targetBattler.volatiles.skyDroppedBy = battlerId
-          attackerBattler.volatiles.skyDroppedBy = battlerId
           targetBattler.statuses3 = setFlag(targetBattler.statuses3, STATUS3_ON_AIR)
           cancelMultiTurnMoves(targetBattler, state)
         }
@@ -3297,7 +3305,6 @@ export function executeAction(
       targetBattler.volatiles.skyDropped = false
       targetBattler.volatiles.shouldClearSkyDrop = false
       targetBattler.statuses3 = clearFlag(targetBattler.statuses3, STATUS3_ON_AIR)
-      attackerBattler.volatiles.skyDroppedBy = 0
     }
 
     const currentMoveAction: ChosenAction = {

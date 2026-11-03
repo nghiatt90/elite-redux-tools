@@ -661,7 +661,9 @@ export function cancelMultiTurnMoves(battler: BattlerState, state?: BattleState)
     for (let i = 0; i < state.battlers.length; i++) {
       const other = state.battlers[i]
       if (!other) continue
-      if (other.volatiles.skyDropped && (other.volatiles.skyDroppedBy === battler.id || battler.volatiles.skyDroppedBy === battler.id)) {
+      // src/battle_util.c:1164-1170: FILTER(gVolatileStructs[i].skyDropped && gVolatileStructs[battler].skyDroppedBy == battler)
+      // C filter reads skyDroppedBy of the caller battler, not of other i.
+      if (other.volatiles.skyDropped && battler.volatiles.skyDroppedBy === battler.id) {
         other.volatiles.shouldClearSkyDrop = true
       }
     }

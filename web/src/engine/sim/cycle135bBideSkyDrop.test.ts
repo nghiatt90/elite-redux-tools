@@ -12,6 +12,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { BridgeDeps } from './bridge'
 import {
+  hasFlag,
+  SIDE_STATUS_SPIKES,
   STATUS1_PARALYSIS,
   STATUS2_BIDE,
   STATUS2_BIDE_TURN,
@@ -24,10 +26,12 @@ import { createBridgeDamageResolver } from './damageResolver'
 import { loadSimData } from './driver/loadSimData'
 import { groundingFor } from './driver/session'
 import { isEligibleMove, VERIFIED_MOVE_EFFECTS } from './driver/verifiedMoveEffects'
+import { applySwitchInHazards } from './hazards'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
+import { cancelMultiTurnMoves } from './statusEffects'
 import type { ReplacementDeps } from './switchIn'
 import type { DamageResolver, TurnLoopDeps } from './turn'
-import { applyDamage, executeTurn, performSwitchAction } from './turn'
+import { applyDamage, executeTurn } from './turn'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 
@@ -315,6 +319,45 @@ describe('EFFECT_BIDE (move Bide)', () => {
     // Counter must NOT decrement because paralysis cancelled before CANCELLER_BIDE
     expect(state.battlers[0]!.mon.status2 & STATUS2_BIDE).toBe(STATUS2_BIDE_TURN(2))
   })
+
+  it('hazard damage leaves takenDmg unchanged, a normal hit changes it', () => {
+    // C: battle_script_commands.c:1915-1922 skips gTakenDmg accumulation when HITMARKER_SKIP_DMG_TRACK is set;
+    // data/battle_scripts_1.s:250 sets it for Spikes and :7327 for Stealth Rock.
+    const userMon = monFor('SPECIES_MUDKIP', { rawStats: { ...FAST_STATS }, hp: 100, maxHp: 100 })
+    const foeMon = monFor('SPECIES_MUDKIP', { rawStats: { ...SLOW_STATS } })
+    const state = battle(userMon, foeMon, countRng())
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    // Set up 1 layer of Spikes on player side (side 0)
+    state.sides[0].statuses |= SIDE_STATUS_SPIKES
+    state.sides[0].timers.spikesAmount = 1
+
+    const hazardD = {
+      dataContext: DATA_CONTEXT,
+      grounding: groundingFor(SIM, state),
+      hazardTypes: {
+        typeChart: SIM.typeChart,
+        inverseTypeChart: SIM.inverseTypeChart,
+        inverseBattle: false,
+      },
+    }
+
+    // Battler 0 switches in / triggers hazard damage: maxHp 100 / 8 = 12 damage
+    applySwitchInHazards(state, 0, hazardD, [])
+    expect(state.battlers[0]!.mon.hp).toBe(88)
+    // Hazard damage must NOT feed takenDmg
+    expect(state.battlers[0]!.takenDmg).toBe(0)
+
+    // Direct applyDamage with skipDmgTrack also preserves takenDmg
+    applyDamage(state, 0, 10, [], deps, undefined, true)
+    expect(state.battlers[0]!.mon.hp).toBe(78)
+    expect(state.battlers[0]!.takenDmg).toBe(0)
+
+    // A normal hit without skipDmgTrack increments takenDmg
+    applyDamage(state, 0, 25, [], deps)
+    expect(state.battlers[0]!.mon.hp).toBe(53)
+    expect(state.battlers[0]!.takenDmg).toBe(25)
+  })
 })
 
 describe('EFFECT_SKY_DROP (moves Sky Drop and Seismic Toss)', () => {
@@ -385,7 +428,16 @@ describe('EFFECT_SKY_DROP (moves Sky Drop and Seismic Toss)', () => {
     expect(state.battlers[0]!.statuses3 & STATUS3_ON_AIR).toBe(0)
   })
 
-  it('negative: user faints or switches out before turn 2 -> shouldClearSkyDrop set and ENDTURN_SKY_DROP clears skyDropped', () => {
+  it('negative: cancelMultiTurnMoves sets shouldClearSkyDrop only when caller skyDroppedBy equals its id (C quirk)', () => {
+    // C: battle_util.c:1164-1170:
+    // for (i = 0; i < gBattlersCount; i++)
+    //   FILTER(gVolatileStructs[i].skyDropped && gVolatileStructs[battler].skyDroppedBy == battler)
+    //   gVolatileStructs[i].shouldClearSkyDrop = TRUE;
+    // The filter compares the CALLER's own skyDroppedBy (gVolatileStructs[battler].skyDroppedBy)
+    // to its id, rather than checking other i's skyDroppedBy.
+    // In C, VARIOUS_SKY_DROP (battle_script_commands.c:8674) writes skyDroppedBy only to the target.
+    // Neither faint nor switch-out calls CancelMultiTurnMoves in C. When cancelMultiTurnMoves is called,
+    // it flags shouldClearSkyDrop only when the caller's skyDroppedBy equals caller.id.
     const userMon = monFor('SPECIES_PIDGEOT', {
       rawStats: { ...FAST_STATS },
       moves: ['MOVE_SKY_DROP', null, null, null],
@@ -393,56 +445,20 @@ describe('EFFECT_SKY_DROP (moves Sky Drop and Seismic Toss)', () => {
     })
     const foeMon = monFor('SPECIES_MUDKIP', { rawStats: { ...SLOW_STATS } })
     const rng = scriptedRng([0])
-    const state = battle(userMon, foeMon, rng, {
-      playerParty: [
-        {
-          speciesId: 'SPECIES_PIDGEOT',
-          hp: 100,
-          maxHp: 100,
-          level: 50,
-          moves: ['MOVE_SKY_DROP', null, null, null],
-          pp: [10, 0, 0, 0],
-          itemId: null,
-          abilities: freshAbilities(),
-          rawStats: { ...FAST_STATS },
-          nature: 'NATURE_HARDY',
-          hiddenPowerType: null,
-          speedDown: false,
-          gender: 'MALE',
-          status1: 0,
-          types: ['NORMAL', 'FLYING', 'MYSTERY'],
-        },
-        {
-          speciesId: 'SPECIES_PIKACHU',
-          hp: 100,
-          maxHp: 100,
-          level: 50,
-          moves: ['MOVE_THUNDERBOLT', null, null, null],
-          pp: [15, 0, 0, 0],
-          itemId: null,
-          abilities: freshAbilities(),
-          rawStats: { ...FAST_STATS },
-          nature: 'NATURE_HARDY',
-          hiddenPowerType: null,
-          speedDown: false,
-          gender: 'MALE',
-          status1: 0,
-          types: ['ELECTRIC', 'MYSTERY', 'MYSTERY'],
-        },
-      ],
-    })
+    const state = battle(userMon, foeMon, rng)
     const deps = loopDeps(state, bridgeDamage(state, state.rng))
 
-    // Turn 1: user lifts target
+    // Turn 1: user (battler 0) lifts target (battler 1)
     executeTurn(state, [useMove(1, 'MOVE_SKY_DROP'), null], deps)
     expect(state.battlers[1]!.volatiles.skyDropped).toBe(true)
 
-    // User switches out -> cancelMultiTurnMoves sets shouldClearSkyDrop
-    performSwitchAction(state, 0, deps, { forcedPartyIndex: 1, ignoreEscapePrevention: true })
+    // Exercising the C quirk: caller is battler 0 whose skyDroppedBy equals its id (0 === 0).
+    // cancelMultiTurnMoves on battler 0 flags shouldClearSkyDrop on the target.
+    state.battlers[0]!.volatiles.skyDroppedBy = 0
+    cancelMultiTurnMoves(state.battlers[0]!, state)
     expect(state.battlers[1]!.volatiles.shouldClearSkyDrop).toBe(true)
 
     // End-of-turn runs ENDTURN_SKY_DROP, clearing skyDropped and shouldClearSkyDrop
-    // We execute a blank turn to let end-turn run
     executeTurn(state, [null, null], deps)
     expect(state.battlers[1]!.volatiles.skyDropped).toBe(false)
     expect(state.battlers[1]!.volatiles.shouldClearSkyDrop).toBe(false)
@@ -502,5 +518,30 @@ describe('EFFECT_SKY_DROP (moves Sky Drop and Seismic Toss)', () => {
     const outResist = executeTurn(state2, [useMove(1, 'MOVE_SEISMIC_TOSS'), null], deps2)
     expect(outResist.actions[0].targetDamage).toBe(50) // exactly level 50, resistance ignored
     expect(state2.battlers[1]!.mon.hp).toBe(50)
+  })
+
+  it('Seismic Toss: turn 1 fails against Ghost target due to type immunity, spends PP and does not charge', () => {
+    // BattleScript_EffectSkyDrop (data/battle_scripts_1.s:5795-5798):
+    // runs typecalc then accuracycheck BattleScript_PrintMoveMissed.
+    // Seismic Toss is Fighting; Gastly is Ghost/Poison (Ghost immune to Fighting).
+    // Typecalc sets MOVE_RESULT_DOESNT_AFFECT_FOE, accuracycheck takes the miss branch:
+    // spends PP, does not set MULTIPLETURNS, does not charge, target is not skyDropped.
+    const userMon = monFor('SPECIES_PIDGEOT', {
+      rawStats: { ...FAST_STATS },
+      moves: ['MOVE_SEISMIC_TOSS', null, null, null],
+      pp: [10, 0, 0, 0],
+      level: 50,
+    })
+    const ghostFoe = monFor('SPECIES_GASTLY', { rawStats: { ...SLOW_STATS }, hp: 100, maxHp: 100 })
+    const rng = scriptedRng([0])
+    const state = battle(userMon, ghostFoe, rng)
+    const deps = loopDeps(state, bridgeDamage(state, state.rng))
+
+    const out = executeTurn(state, [useMove(1, 'MOVE_SEISMIC_TOSS'), null], deps)
+    expect(out.actions[0].missed).toBe(true)
+    expect(state.battlers[0]!.mon.pp[0]).toBe(9) // PP spent
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_MULTIPLETURNS)).toBe(false) // no charge
+    expect(state.battlers[1]!.volatiles.skyDropped).toBe(false) // target not lifted
+    expect(state.battlers[1]!.mon.hp).toBe(100) // no damage
   })
 })
