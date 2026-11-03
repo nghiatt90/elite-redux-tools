@@ -126,13 +126,14 @@ describe('cycle 140 - nightmare', () => {
   // ENDTURN_NIGHTMARES, battle_util.c:2608-2623: with STATUS2_NIGHTMARE and
   // STATUS1_SLEEP the mon takes maxHP / 4 each end of turn (:2613-2616); the
   // nightmare ends when it wakes, so the ticks are the sleep counter. Sleep
-  // counter 2: the status1 sleep term is 2 * ACTION_VALUE 0.25 = 0.5 and the
-  // nightmare is 2 * (320 / 4) / 320 = 2 * 0.25 = 0.5, total 1.0.
-  it('nightmare + sleep counter 2 on the foe -> 1.0', () => {
+  // counter 2 loses 2 - 1 = 1 attempt (CANCELLER_ASLEEP, :3218-3242), i.e.
+  // 1 * ACTION_VALUE 0.25 = 0.25, and the nightmare is
+  // 2 * (320 / 4) / 320 = 2 * 0.25 = 0.5, total 0.75.
+  it('nightmare + sleep counter 2 on the foe -> 0.75', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 2) })
     setVolatiles(s, 1, { status2: STATUS2_NIGHTMARE })
-    expect(statusScore(s)).toBeCloseTo(1, 10)
+    expect(statusScore(s)).toBeCloseTo(0.75, 10)
   })
 
   // :2609-2619: without STATUS1_SLEEP the flag is silently cleared and no damage
@@ -143,11 +144,11 @@ describe('cycle 140 - nightmare', () => {
     expect(statusScore(s)).toBe(0)
   })
 
-  it('the same nightmare on the player side -> -1.0', () => {
+  it('the same nightmare on the player side -> -0.75', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 0, 0, { status1: setCounter(0, STATUS1_SLEEP, 2) })
     setVolatiles(s, 0, { status2: STATUS2_NIGHTMARE })
-    expect(statusScore(s)).toBeCloseTo(-1, 10)
+    expect(statusScore(s)).toBeCloseTo(-0.75, 10)
   })
 })
 

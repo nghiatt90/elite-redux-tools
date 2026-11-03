@@ -121,10 +121,13 @@ describe('cycle 139 - statusScore weights', () => {
   })
 
   // ENDTURN_FROSTBITE, battle_util.c:2584-2597: maxHP / 16 = 20; 3 turns = 0.1875.
-  it('frostbite: 0.1875', () => {
+  // The active mon also pays the Special Attack halving (battle_util.c:7145-7147,
+  // `statBase /= 2` unless EFFECT_FACADE / IgnoresFrostbiteSpatkDrop), modelled as
+  // ACTION_VALUE / 2 = 0.125. Total active = 0.1875 + 0.125 = 0.3125.
+  it('frostbite: active foe 0.3125', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: STATUS1_FROSTBITE })
-    expect(statusScore(s)).toBeCloseTo(0.1875, 10)
+    expect(statusScore(s)).toBeCloseTo(0.3125, 10)
   })
 
   // ENDTURN_BLEED, battle_util.c:2598-2606 and battle.h:142: BLEED_DAMAGE(hp) =
@@ -144,27 +147,47 @@ describe('cycle 139 - statusScore weights', () => {
     expect(statusScore(s)).toBeCloseTo(0.4375, 10)
   })
 
-  // CANCELLER_ASLEEP, battle_util.c:3209-3240: the 3-bit counter is the number
-  // of move attempts lost. Counter 2 -> 2 * ACTION_VALUE 0.25 = 0.5.
-  it('sleep: counter 2 -> 0.5', () => {
+  // CANCELLER_ASLEEP, battle_util.c:3218-3242: each attempt subtracts 1 from the
+  // 3-bit counter and is cancelled only while the counter stays nonzero; when it
+  // reaches 0 the mon wakes and acts that turn (:3238-3242). So counter N loses
+  // N-1 attempts, not N. Counter 2 -> (2-1) * ACTION_VALUE 0.25 = 0.25.
+  it('sleep: counter 2 loses one attempt -> 0.25', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 2) })
-    expect(statusScore(s)).toBeCloseTo(0.5, 10)
+    expect(statusScore(s)).toBeCloseTo(0.25, 10)
   })
 
-  it('sleep: counter 5 is capped by the horizon -> 3 * 0.25 = 0.75', () => {
+  // Counter 4 is the longest sleep Spore can roll: `(Random() % 3) + 2`
+  // (battle_script_commands.c:2555). (4-1) * 0.25 = 0.75.
+  it('sleep: counter 4 loses three attempts -> 0.75', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
-    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 5) })
+    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 4) })
     expect(statusScore(s)).toBeCloseTo(0.75, 10)
   })
 
-  // CANCELLER_FROZEN, battle_util.c:3248-3262: `if (Random() % 5)` keeps it
-  // frozen, so each attempt thaws 1/5 of the time:
-  // horizon 3 * ACTION_VALUE 0.25 * (1 - 1/5) = 0.6.
-  it('freeze (active): 0.6', () => {
+  // Counter 1: the next attempt subtracts 1, reaches 0 and the mon acts, so no
+  // action is lost.
+  it('sleep: counter 1 loses no attempt -> 0', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 1) })
+    expect(statusScore(s)).toBe(0)
+  })
+
+  // Counter 0 leaves the STATUS1_SLEEP bits clear, so hasFlag reports no sleep.
+  it('sleep: counter 0 is not asleep -> 0', () => {
+    const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
+    patchMon(s, 1, 0, { status1: setCounter(0, STATUS1_SLEEP, 0) })
+    expect(statusScore(s)).toBe(0)
+  })
+
+  // CANCELLER_FROZEN, battle_util.c:3248-3262: `Random() % 5` non-zero keeps the
+  // mon frozen and a zero roll clears STATUS1_FREEZE (:3255), so after a thaw
+  // later turns are not lost. Turn k is lost only if all k rolls kept it frozen
+  // (0.8^k): 0.25 * (0.8 + 0.64 + 0.512) = 0.488.
+  it('freeze (active): 0.488', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: STATUS1_FREEZE })
-    expect(statusScore(s)).toBeCloseTo(0.6, 10)
+    expect(statusScore(s)).toBeCloseTo(0.488, 10)
   })
 
   it('a fainted mon with a status contributes 0', () => {
@@ -182,6 +205,17 @@ describe('cycle 139 - statusScore weights', () => {
     )
     patchMon(s, 1, 0, { status1: 0 })
     patchMon(s, 1, 1, { status1: STATUS1_BURN, hp: 320, maxHp: 320 })
+    expect(statusScore(s)).toBeCloseTo(0.1875, 10)
+  })
+
+  // Same split for frostbite: the active-only Sp. Atk halving (battle_util.c:7145-7147)
+  // does not apply off the field, so only the 20 / 320 * 3 = 0.1875 chip remains.
+  it('benched frostbite counts only the chip term -> 0.1875', () => {
+    const s = fresh(
+      session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE']), mon('SPECIES_GOLEM', ['MOVE_TACKLE'])]),
+    )
+    patchMon(s, 1, 0, { status1: 0 })
+    patchMon(s, 1, 1, { status1: STATUS1_FROSTBITE, hp: 320, maxHp: 320 })
     expect(statusScore(s)).toBeCloseTo(0.1875, 10)
   })
 

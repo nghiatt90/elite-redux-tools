@@ -119,10 +119,11 @@ export function evaluateState(state: BattleState, options?: ExpectimaxOptions): 
 const STATUS_HORIZON_TURNS = 3
 /** HP-fraction-equivalent value of one lost action. MODEL CHOICE. */
 const ACTION_VALUE = 0.25
-/** Burn's Attack halving (`statBase /= 2`, battle_util.c:7135) is worth half of one
- * action's damage output. Only the active mon pays it: the halving applies to a
- * mon's own move, so charging a reserve mon would value damage it is not
- * dealing; it also vanishes when the mon switches out. MODEL CHOICE flat weight. */
+/** The `statBase /= 2` that burn applies to Attack (battle_util.c:7135) and
+ * frostbite applies to Special Attack (:7146) is worth half of one action's
+ * damage output. Only the active mon pays it: the halving applies to a mon's
+ * own move, so charging a reserve mon would value damage it is not dealing; it
+ * also vanishes when the mon switches out. MODEL CHOICE flat weight. */
 const BURN_ATTACK_HALF_VALUE = ACTION_VALUE / 2
 /** Paralysis halves Speed (battle_main.c:4185-4186, `speed /= 2` when
  * `B_PARALYSIS_SPEED >= GEN_7` and not Quick Feet). Value of that lost speed is
@@ -174,13 +175,25 @@ function statusToxicFraction(maxHp: number, status1: number): number {
 }
 
 /** The HP-fraction-equivalent cost of `mon`'s status1. `isActive` gates the
- * tempo terms (sleep/paralysis/freeze/burn's Attack drop): a benched mon only
+ * tempo terms (sleep/paralysis/freeze) and the stat-drop terms (burn's Attack
+ * halving, frostbite's Sp. Atk halving): a benched mon only
  * acts after a switch-in, so those terms are deliberately 0 for it (there is no
  * C rule charging a reserve mon for them). A fainted mon contributes 0.
  *
- * Not modelled here: Magic Guard / TakesNoBurnDamage (`IsMagicGuardProtected`,
- * `takesNoBurnDamage`) and Poison Heal. Both need the battler's ability slots,
- * which this function does not take; see REPORT.md. */
+ * Not modelled here, because this function takes only `{status1, hp, maxHp}` and
+ * so cannot see the battler's abilities:
+ *   - Magic Guard (`IsMagicGuardProtected` at battle_util.c:2507, :2535 and via
+ *     `MAGIC_GUARD_CHECK` at :2575, :2586, :2600) and TakesNoBurnDamage
+ *     (`takesNoBurnDamage`, :2574);
+ *   - Poison Heal (:2497, :2522) and Toxic Boost, whose
+ *     `REQUIRE_NOT(BattlerHasAbility(..., ABILITY_TOXIC_BOOST, FALSE))` skips the
+ *     poison damage at :2508 and the bad-poison damage at :2536;
+ *   - Flare Boost / Guts and any other `negatesBurnAtkDrop` ability, via
+ *     `IgnoresBurnAtkDrop` (:7095), which cancels burn's Attack halving at :7135,
+ *     and the analogous `IgnoresFrostbiteSpatkDrop` (`negatesFrzSpatkDrop`, :7100)
+ *     at :7146;
+ *   - Early Bird (battle_util.c:3218-3223), which makes sleep's counter drop by 2
+ *     instead of 1. */
 export function statusMonValue(mon: { status1: number; hp: number; maxHp: number }, isActive: boolean): number {
   if (mon.hp <= 0 || mon.maxHp <= 0) return 0
   const { status1 } = mon
@@ -202,6 +215,9 @@ export function statusMonValue(mon: { status1: number; hp: number; maxHp: number
   if (hasFlag(status1, STATUS1_FROSTBITE)) {
     // ENDTURN_FROSTBITE, battle_util.c:2584-2596: maxHP / 16 with B_BURN_DAMAGE >= GEN_7.
     value += statusChipFraction(mon.maxHp, 16)
+    // `statBase /= 2` for a frostbitten special attacker, battle_util.c:7146,
+    // mirroring the burn Attack drop above.
+    if (isActive) value += BURN_ATTACK_HALF_VALUE
   }
   if (hasFlag(status1, STATUS1_BLEED)) {
     // ENDTURN_BLEED, battle_util.c:2598-2606: BLEED_DAMAGE(maxHP) = maxHP / 16
@@ -214,16 +230,23 @@ export function statusMonValue(mon: { status1: number; hp: number; maxHp: number
     value += 0.25 * STATUS_HORIZON_TURNS * ACTION_VALUE + PARALYSIS_SPEED_VALUE
   }
   if (isActive && hasFlag(status1, STATUS1_SLEEP)) {
-    // CANCELLER_ASLEEP, battle_util.c:3209-3240: each move attempt subtracts 1
-    // (2 with Early Bird) and the mon wakes when the counter would drop below
-    // that, so `counter` action attempts are lost, capped by the horizon.
+    // CANCELLER_ASLEEP, battle_util.c:3218-3242: each move attempt subtracts
+    // toSub (1, or 2 with Early Bird, :3218-3222) from the counter (:3224-3227).
+    // The attempt is cancelled only if the counter is still nonzero afterwards
+    // (:3229-3236); otherwise the mon wakes and acts that turn (:3238-3242). So
+    // with toSub 1 a counter of N loses N-1 attempts, not N, capped by the horizon.
     const counter = getCounter(status1, STATUS1_SLEEP)
-    value += Math.min(counter, STATUS_HORIZON_TURNS) * ACTION_VALUE
+    value += Math.min(Math.max(counter - 1, 0), STATUS_HORIZON_TURNS) * ACTION_VALUE
   }
   if (isActive && hasFlag(status1, STATUS1_FREEZE)) {
-    // CANCELLER_FROZEN, battle_util.c:3249-3260: each attempt thaws 1/5 of the
-    // time, so each horizon turn is lost with probability 1 - 1/5.
-    value += STATUS_HORIZON_TURNS * ACTION_VALUE * (1 - FREEZE_THAW_CHANCE)
+    // CANCELLER_FROZEN, battle_util.c:3248-3262: `Random() % 5` non-zero keeps
+    // the mon frozen (:3250-3253); a zero roll clears STATUS1_FREEZE (:3255) and
+    // the mon acts that turn, so after a thaw later turns are not lost. The
+    // action on turn k is lost only if all k rolls kept it frozen, probability
+    // (1 - 1/5)^k; sum that over the horizon (0.8 + 0.64 + 0.512 = 1.952).
+    for (let k = 1; k <= STATUS_HORIZON_TURNS; k++) {
+      value += ACTION_VALUE * (1 - FREEZE_THAW_CHANCE) ** k
+    }
   }
   return value
 }
