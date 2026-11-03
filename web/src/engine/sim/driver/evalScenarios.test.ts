@@ -1,7 +1,8 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 // Cycle 139: scenario harness for the opt-in status1 leaf term; cycle 140
 // appends the same harness for the volatile terms (Leech Seed, Substitute,
-// confusion).
+// confusion); cycle 141 appends it for the per-side terms (entry hazards,
+// screens, Tailwind).
 //
 // Each seed gets a fresh session; the starting position is edited right after
 // createSession (before beginTurn), and the expectimax policy picks with
@@ -10,7 +11,17 @@
 // passes when it is chosen on <= 1 of 8.
 import { describe, expect, it } from 'vitest'
 
-import { STATUS1_BURN, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_SUBSTITUTE, STATUS3_LEECHSEED, hasFlag } from '../constants'
+import {
+  SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_TAILWIND,
+  STATUS1_BURN,
+  STATUS1_SLEEP,
+  STATUS2_CONFUSION,
+  STATUS2_SUBSTITUTE,
+  STATUS3_LEECHSEED,
+  hasFlag,
+} from '../constants'
 import { createRandomSource } from '../rng'
 import { DEFAULT_EXPECTIMAX, chooseExpectimaxAction } from './expectimax'
 import { buildPlayerParty } from './buildParty'
@@ -93,6 +104,19 @@ function setVolatiles(
   if (patch.status2 !== undefined) battler.mon.status2 = patch.status2
   if (patch.statuses3 !== undefined) battler.statuses3 = patch.statuses3
   if (patch.substituteHp !== undefined) battler.volatiles.substituteHp = patch.substituteHp
+}
+
+/** Writes the side status word and the per-side timers the leaf scorer reads.
+ * Hazards need both the bit and the layer count (hazards.ts:165-171). */
+function setSide(
+  s: BattleSession,
+  side: 0 | 1,
+  patch: { statuses?: number; spikesAmount?: number; reflectTimer?: number },
+): void {
+  const sideState = s.state.sides[side]
+  if (patch.statuses !== undefined) sideState.statuses = patch.statuses
+  if (patch.spikesAmount !== undefined) sideState.timers.spikesAmount = patch.spikesAmount
+  if (patch.reflectTimer !== undefined) sideState.timers.reflectTimer = patch.reflectTimer
 }
 
 /** The move id the expectimax policy picks for one fresh seeded session. */
@@ -350,6 +374,103 @@ describe('cycle 140 - volatile scenarios', () => {
     it('twin: against an already-confused foe, Confuse Ray is chosen on at most 1 of 8 seeds', () => {
       const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_CONFUSE_RAY', (s) => setVolatiles(s, 1, { status2: CONFUSED }))
       expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+})
+
+// Cycle 141: the same harness for the per-side terms (entry hazards, screens,
+// Tailwind). The player's attacks are the weak WEAK_MOVES set, so the setup move
+// has to win on the field term, not on damage.
+describe('cycle 141 - side scenarios', () => {
+  describe('Spikes into a six-mon foe bench', () => {
+    const SIX_FOE = () => Array.from({ length: 6 }, () => foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER']))
+    const ONE_FOE = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER'])]
+    const PLAYER_MOVES = ['MOVE_SPIKES', ...WEAK_MOVES]
+
+    it('sanity: Spikes sets the bit and one layer on the foe side', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, SIX_FOE(), 'MOVE_SPIKES')
+        expect(hasFlag(session.state.sides[1].statuses, SIDE_STATUS_SPIKES)).toBe(true)
+        expect(session.state.sides[1].timers.spikesAmount).toBe(1)
+      }
+    })
+
+    it('sanity: Spikes cannot add a fourth layer', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, SIX_FOE(), 'MOVE_SPIKES', (s) =>
+          setSide(s, 1, { statuses: SIDE_STATUS_SPIKES, spikesAmount: 3 }),
+        )
+        expect(session.state.sides[1].timers.spikesAmount).toBe(3)
+      }
+    })
+
+    it('positive: Spikes is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, SIX_FOE(), 'MOVE_SPIKES')).toBeGreaterThanOrEqual(6)
+    })
+
+    it('twin: with three layers already up, Spikes is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, SIX_FOE(), 'MOVE_SPIKES', (s) =>
+        setSide(s, 1, { statuses: SIDE_STATUS_SPIKES, spikesAmount: 3 }),
+      )
+      expect(n).toBeLessThanOrEqual(1)
+    })
+
+    it('twin: against a one-mon foe party (no bench), Spikes is chosen on at most 1 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, ONE_FOE(), 'MOVE_SPIKES')).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Reflect against a physical foe', () => {
+    const PHYSICAL = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    const PLAYER_MOVES = ['MOVE_REFLECT', ...WEAK_MOVES]
+
+    it('sanity: Reflect sets the bit and a five-turn timer on the player side', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT')
+        expect(hasFlag(session.state.sides[0].statuses, SIDE_STATUS_REFLECT)).toBe(true)
+        expect(session.state.sides[0].timers.reflectTimer).toBe(5)
+      }
+    })
+
+    it('sanity: Reflect with Reflect already up misses', () => {
+      for (const seed of SEEDS) {
+        const { result } = forcedTurn(seed, PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT', (s) =>
+          setSide(s, 0, { statuses: SIDE_STATUS_REFLECT, reflectTimer: 5 }),
+        )
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBe(true)
+      }
+    })
+
+    it('positive: Reflect is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT')).toBeGreaterThanOrEqual(6)
+    })
+
+    // The flat per-turn screen value in the leaf scorer does not read the foe's
+    // move category, so the "foe has only special moves" twin cannot be
+    // expressed without inventing a term. The re-use twin is used instead (see
+    // REPORT.md).
+    it('twin: with Reflect already up, Reflect is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT', (s) =>
+        setSide(s, 0, { statuses: SIDE_STATUS_REFLECT, reflectTimer: 5 }),
+      )
+      expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Tailwind', () => {
+    const FOE = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER'])]
+    const PLAYER_MOVES = ['MOVE_TAILWIND', ...WEAK_MOVES]
+
+    it('sanity: Tailwind sets the bit and a three-turn timer on the player side', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, FOE(), 'MOVE_TAILWIND')
+        expect(hasFlag(session.state.sides[0].statuses, SIDE_STATUS_TAILWIND)).toBe(true)
+        expect(session.state.sides[0].timers.tailwindTimer).toBe(3)
+      }
+    })
+
+    it('positive: Tailwind is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, FOE(), 'MOVE_TAILWIND')).toBeGreaterThanOrEqual(6)
     })
   })
 })

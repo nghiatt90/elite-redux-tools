@@ -17,6 +17,14 @@ import { getMostSuitableMonToSwitchInto } from '../ai/aiSwitching'
 import {
   CHOICE_HOLD_EFFECTS,
   PARTY_SIZE,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_REFLECT,
+  SIDE_STATUS_SPIKES,
+  SIDE_STATUS_STEALTH_ROCK,
+  SIDE_STATUS_STICKY_WEB,
+  SIDE_STATUS_TAILWIND,
+  SIDE_STATUS_TOXIC_SPIKES,
   STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_FREEZE,
@@ -52,7 +60,8 @@ export interface ExpectimaxOptions {
   innerSamples: number
   /** A switch must beat the best move by at least this much to be chosen. */
   switchMargin: number
-  /** Add the status1 residual/tempo term to the leaf score (see `statusScore`). Off by default. */
+  /** Add the status1 residual/tempo, volatile and per-side hazard/screen/Tailwind
+   * terms to the leaf score (see `statusScore`). Off by default. */
   statusTerms?: boolean
 }
 
@@ -91,8 +100,9 @@ function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number
 }
 
 /** Static score of a position from the player's side: higher is better for the player.
- * `options.statusTerms` opts into the status1 residual/tempo term; when falsy the
- * result is exactly `positionScore` (or the terminal +-100), as before. */
+ * `options.statusTerms` opts into the status1 residual/tempo, volatile and per-side
+ * field terms (`statusScore`); when falsy the result is exactly `positionScore` (or
+ * the terminal +-100), as before. */
 export function evaluateState(state: BattleState, options?: ExpectimaxOptions): number {
   if (state.battleOutcome === 'WON') return 100
   if (state.battleOutcome === 'LOST') return -100
@@ -100,7 +110,7 @@ export function evaluateState(state: BattleState, options?: ExpectimaxOptions): 
 }
 
 // ---------------------------------------------------------------------------
-// status term (status1 + active volatiles)
+// status term (status1 + active volatiles + per-side field)
 //
 // `positionScore` only knows HP, alive count and stat stages, so Spore,
 // Will-O-Wisp and Thunder Wave score as free actions. `statusScore` values the
@@ -141,6 +151,19 @@ const CONFUSION_SELF_HIT_CHANCE = 1 / 3
  * MODEL CHOICE: 1 would cancel the HP cost `positionScore` already charges and
  * the sub would never be picked. */
 const SUBSTITUTE_BUFFER_WEIGHT = 2
+/** HP-fraction-equivalent value of one turn of one damage-halving screen
+ * (Reflect or Light Screen). MODEL CHOICE flat weight; the `UQ_4_12(0.5)`
+ * halving in a singles battle is battle_util.c:7627-7628 (the 0.66 branch is
+ * the doubles value and is not used). Aurora Veil halves both categories and
+ * is therefore counted as two screens. */
+const SCREEN_VALUE = 0.1
+/** HP-fraction-equivalent value of one turn of Tailwind's doubled Speed.
+ * MODEL CHOICE flat weight; `speed *= 2` is battle_main.c:4203-4204. */
+const TAILWIND_SPEED_VALUE = 0.1
+/** HP-fraction-equivalent value of one benched mon entering at -1 Speed from
+ * Sticky Web. MODEL CHOICE flat weight; the `SetStatChanger(STAT_SPEED, -1)`
+ * itself is battle_script_commands.c:8796 (HAZARD_MODE_WEBS). */
+const STICKY_WEB_SPEED_VALUE = 0.05
 
 /** HasGrappler, battle_util.c:9359-9362: `RETURN_ABILITY_IF_FLAG(battler, FALSE,
  * grappler)` (include/battle_util.h:277), i.e. any of the battler's slots holding
@@ -362,10 +385,134 @@ function activeVolatileBurden(state: BattleState, battler: BattlerState): number
   return value
 }
 
+/** Grounding for a BENCHED mon in the leaf scorer. Only the party copy's
+ * `types` is readable here -- a reserve mon carries no abilities or items in
+ * this scorer's reach -- so a Flying type is the only thing treated as
+ * airborne. Left unmodelled, as a MODEL CHOICE: Levitate, Air Balloon and
+ * Iron Ball (IsBattlerGrounded, battle_util.c), and the ability/item paths of
+ * IsBattlerAffectedByHazards (battle_util.c:8522-8530: Heavy-Duty Boots, Shield
+ * Dust, Molten Core / Mountaineer for Stealth Rock, Tectonize for grounded
+ * types) and Magic Guard's hazard immunity. */
+function benchedMonGrounded(types: readonly string[]): boolean {
+  return !types.includes('FLYING')
+}
+
+/** One Spikes switch-in as an HP fraction: the C's
+ * `maxHP / ((5 - spikesAmount) * 2)` with its `if (gBattleMoveDamage == 0)
+ * gBattleMoveDamage = 1` floor (battle_script_commands.c:8737-8739, ported at
+ * hazards.ts:165-171). That is /8, /6 and /4 for 1, 2 and 3 layers. */
+function spikesEntryFraction(maxHp: number, layers: number): number {
+  if (maxHp <= 0) return 0
+  const divisor = (5 - layers) * 2
+  if (divisor <= 0) return 0
+  return Math.max(1, Math.trunc(maxHp / divisor)) / maxHp
+}
+
+/** End-turn ticks a side timer is still worth, capped by the model horizon.
+ * The end-turn countdowns are `!started.<field> && --<timer> == 0` --
+ * ENDTURN_REFLECT battle_util.c:1793-1803, Light Screen :1813-1823, Aurora Veil
+ * :1834-1844, Tailwind :1924-1934 -- so `started.*` only guards the turn the
+ * effect was set and a just-set screen still has its full timer. */
+function timerTurns(timer: number): number {
+  return Math.max(0, Math.min(timer, STATUS_HORIZON_TURNS))
+}
+
+/** The per-side field burden from entry hazards, screens and Tailwind, in the
+ * same HP-fraction units as `positionScore` and `statusMonValue`.
+ *
+ * Sign: hazards are a burden on the side that owns them, so they return
+ * positive; screens and Tailwind are a benefit, so they return negative.
+ * `statusScore` then computes `foe - player`, which makes a foe hazard positive
+ * for the player and a foe screen negative.
+ *
+ * Hazards bite only the BENCHED living mons: the active mon has already
+ * entered, and over the horizon each reserve is assumed to enter at most once
+ * (MODEL CHOICE: no multiplier for repeated switch-in cycles).
+ *
+ * Each hazard's C condition:
+ *   - Spikes (HAZARD_MODE_SPIKES, battle_script_commands.c:8729-8742) needs the
+ *     presence bit AND `spikesAmount`; grounded only.
+ *   - Stealth Rock (HAZARD_MODE_ROCKS, :8743-8757, GetStealthHazardDamage
+ *     battle_util.c:8040-8079) needs the bit. The type chart is not reachable
+ *     from this leaf scorer, so every benched mon is charged the neutral /8
+ *     (MODEL CHOICE); the /4, /2, /16 and /32 branches are not modelled.
+ *   - Toxic Spikes (HAZARD_MODE_POISON_SPIKES, :8758-8787) needs the bit AND
+ *     `toxicSpikesAmount`; a grounded mon that is not Poison/Steel (CanPoisonType,
+ *     battle_script_commands.c:6465-6471) and has no status1 is poisoned --
+ *     STATUS1_TOXIC_POISON at >= 2 layers, STATUS1_POISON at 1 -- and is valued
+ *     with `statusMonValue`, false (benched, so no tempo terms). The Poison
+ *     absorb branch is why a Poison-type is skipped. The onCanStatusType attacker
+ *     abilities that let CanPoisonType poison a Steel type are unmodelled.
+ *   - Sticky Web (HAZARD_MODE_WEBS, :8788-8798) needs the bit; grounded only.
+ */
+function sideFieldScore(state: BattleState, side: 0 | 1): number {
+  const active = state.battlers[side]
+  const party = state.sides[side].party
+  const timers = state.sides[side].timers
+  const statuses = state.sides[side].statuses
+  const benched = []
+  for (let i = 0; i < party.length; i++) {
+    const mon = party[i]
+    if (!mon || mon.speciesId === null) continue
+    const isActive = active !== null && active !== undefined && active.partyIndex === i
+    if (isActive) continue
+    if (mon.hp <= 0) continue
+    benched.push(mon)
+  }
+  const grounded = benched.filter((mon) => benchedMonGrounded(mon.types))
+  let burden = 0
+
+  // HAZARD_MODE_SPIKES, battle_script_commands.c:8729-8742. The sim never
+  // writes the bit without a layer count, so requiring both is a guard against
+  // an inconsistent state rather than a second mechanic.
+  if (hasFlag(statuses, SIDE_STATUS_SPIKES) && timers.spikesAmount >= 1) {
+    const layers = Math.min(timers.spikesAmount, 3)
+    for (const mon of grounded) burden += spikesEntryFraction(mon.maxHp, layers)
+  }
+
+  // HAZARD_MODE_ROCKS, battle_script_commands.c:8743-8757. Neutral /8 per mon
+  // (MODEL CHOICE, see this function's header); the C's min-1 floor is kept by
+  // `drainTickFraction`.
+  if (hasFlag(statuses, SIDE_STATUS_STEALTH_ROCK)) {
+    for (const mon of benched) burden += drainTickFraction(mon.maxHp, 8)
+  }
+
+  // HAZARD_MODE_POISON_SPIKES, battle_script_commands.c:8758-8787. The status
+  // is written onto the switching mon, so a benched mon with any status1 takes
+  // nothing (CanBePoisoned's first check, battle_util.c:5044).
+  if (hasFlag(statuses, SIDE_STATUS_TOXIC_SPIKES) && timers.toxicSpikesAmount >= 1) {
+    const status1 = timers.toxicSpikesAmount >= 2 ? STATUS1_TOXIC_POISON : STATUS1_POISON
+    for (const mon of grounded) {
+      if (mon.status1 !== 0) continue
+      if (mon.types.includes('POISON') || mon.types.includes('STEEL')) continue
+      burden += statusMonValue({ status1, hp: mon.hp, maxHp: mon.maxHp }, false)
+    }
+  }
+
+  // HAZARD_MODE_WEBS, battle_script_commands.c:8788-8798.
+  if (hasFlag(statuses, SIDE_STATUS_STICKY_WEB)) {
+    burden += STICKY_WEB_SPEED_VALUE * grounded.length
+  }
+
+  // Screens, battle_util.c:7622-7630: Reflect halves physical damage, Light
+  // Screen special, Aurora Veil both (two screens' worth). A timer is read only
+  // when its bit is set. Crits and Infiltrator (:7624) are not modelled, and
+  // neither is the doubles 0.66 multiplier (:7627).
+  if (hasFlag(statuses, SIDE_STATUS_REFLECT)) burden -= SCREEN_VALUE * timerTurns(timers.reflectTimer)
+  if (hasFlag(statuses, SIDE_STATUS_LIGHTSCREEN)) burden -= SCREEN_VALUE * timerTurns(timers.lightscreenTimer)
+  if (hasFlag(statuses, SIDE_STATUS_AURORA_VEIL)) burden -= 2 * SCREEN_VALUE * timerTurns(timers.auroraVeilTimer)
+
+  // Tailwind, battle_main.c:4203-4204: `speed *= 2` for the side that owns it.
+  if (hasFlag(statuses, SIDE_STATUS_TAILWIND)) burden -= TAILWIND_SPEED_VALUE * timerTurns(timers.tailwindTimer)
+
+  return burden
+}
+
 /** Sum of `statusMonValue` over one side's living mons, reading the active
  * battler's copy for the active slot and the party copy for the rest -- the
  * same split `sideScore` uses, because status1 persists across switches -- plus
- * the active battler's volatile burden, which does not persist across switches. */
+ * the active battler's volatile burden, which does not persist across switches,
+ * plus the side's hazards/screens/Tailwind burden (`sideFieldScore`). */
 function sideStatusScore(state: BattleState, side: 0 | 1): number {
   const active = state.battlers[side]
   const party = state.sides[side].party
@@ -379,12 +526,14 @@ function sideStatusScore(state: BattleState, side: 0 | 1): number {
     total += statusMonValue({ status1: cur.status1, hp: cur.hp, maxHp: cur.maxHp }, isActive)
   }
   if (active) total += activeVolatileBurden(state, active)
+  total += sideFieldScore(state, side)
   return total
 }
 
 /** Status burden from the player's side: higher is better for the player (the
  * foe's burden minus the player's), the same orientation as `positionScore`.
- * Covers status1 (per party mon) and the active battler's volatiles. */
+ * Covers status1 (per party mon), the active battler's volatiles, and the
+ * per-side entry hazards, screens and Tailwind (`sideFieldScore`). */
 export function statusScore(state: BattleState): number {
   return sideStatusScore(state, 1) - sideStatusScore(state, 0)
 }
