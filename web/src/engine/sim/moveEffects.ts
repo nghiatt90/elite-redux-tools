@@ -1298,7 +1298,13 @@ function handleMysticDance(ctx: MoveEffectContext): ActionOutcome {
   const spAtkStage = battler.mon.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
   const speStage = battler.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
 
-  if (spAtkStage < MAX_STAT_STAGE || speStage < MAX_STAT_STAGE) {
+  if (spAtkStage >= MAX_STAT_STAGE && speStage >= MAX_STAT_STAGE) {
+    // jumpifstat BS_ATTACKER, CMP_LESS_THAN, STAT_SPATK, MAX_STAT_STAGE, DoMoveAnim (:6777)
+    // jumpifstat BS_ATTACKER, CMP_EQUAL, STAT_SPEED, MAX_STAT_STAGE, CantRaiseMultipleStats (:6778)
+    return outcome(ctx, { missed: true, statChanges: [] })
+  }
+
+  {
     const r1 = changeStatBuffsImplicit(
       state,
       battlerId,
@@ -1476,13 +1482,15 @@ function handleSharpen(ctx: MoveEffectContext): ActionOutcome {
         battler.statuses4 |= STATUS4_CUTTHROAT
       }
     } else {
-      // BattleScript_EffectSharpen_CutthroatOnly
-      if (
-        !hasFlag(battler.statuses4, STATUS4_CUTTHROAT) &&
-        hasCutthroat(state, battler, deps)
-      ) {
-        battler.statuses4 |= STATUS4_CUTTHROAT
+      // BattleScript_EffectSharpen_CutthroatOnly (data/battle_scripts_1.s:12039-12046):
+      //   jumpifstatus4 BS_ATTACKER, STATUS4_CUTTHROAT, BattleScript_ButItFailed
+      //   jumpifabilityflag BS_ATTACKER, ABILITY_CUTTHROAT, BattleScript_EffectSharpen_CutthroatOnly_Anim
+      //   goto BattleScript_ButItFailed
+      // Both failure arms print "But it failed" and never reach the status write.
+      if (hasFlag(battler.statuses4, STATUS4_CUTTHROAT) || !hasCutthroat(state, battler, deps)) {
+        return outcome(ctx, { statChanges, missed: true })
       }
+      battler.statuses4 |= STATUS4_CUTTHROAT
     }
   }
 
@@ -3263,9 +3271,14 @@ function applyWeatherMove(
   }
 
   const changed = tryChangeBattleWeather(state, battlerId, weatherEnum, false, deps)
-  if (changed) {
-    dispatchOnWeatherChange(state, deps, unmodelled)
+  if (!changed) {
+    // VARIOUS_SET_WEATHER (src/battle_script_commands.c:8634-8644): `if (!TryChangeBattleWeather(...))`
+    // jumps to the script's fail pointer, which every weather script sets to BattleScript_ButItFailed
+    // (e.g. data/battle_scripts_1.s:12411). The primal-weather guard above is a separate macro jump
+    // to BattleScript_MoveEnd and never fails.
+    return outcome(ctx, { missed: true })
   }
+  dispatchOnWeatherChange(state, deps, unmodelled)
 
   return outcome(ctx, {})
 }

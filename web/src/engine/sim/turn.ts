@@ -201,6 +201,7 @@ import {
   STATUS3_GASTRO_ACID,
   STATUS3_GRUDGE,
   STATUS3_HEAL_BLOCK,
+  STATUS3_LASER_FOCUS,
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
   STATUS3_MAGNET_RISE,
@@ -3087,12 +3088,22 @@ export function executeAction(
     let lastCritical: boolean | undefined
     let lastSuperEffective: boolean | undefined
     for (;;) {
+    // Cmd_critcalc (src/battle_script_commands.c:1568-1585): CalcCritChanceStage returns ALWAYS_CRIT
+    // when the ATTACKER has STATUS3_LASER_FOCUS (:1540), and the `critChance >= ALWAYS_CRIT` arm sets
+    // gIsCriticalHit without drawing Random(). The damage engine's own crit inputs do not carry
+    // statuses3 (calculate.ts:734), so pass a forced roll instead: SetCritFlag (:1588-1594) tests
+    // `!(critRoll % critChance)`, and a roll of 0 satisfies every divisor while ALSO suppressing the
+    // resolver's one crit draw -- exactly the C's no-draw ALWAYS_CRIT path. denominator === null
+    // (Lucky Chant / a NEVER_CRIT ability) still wins, matching :1523-1525 running before :1540.
+    const laserFocusCritRoll = hasFlag(attackerBattler.statuses3, STATUS3_LASER_FOCUS) ? 0 : undefined
     let { targetDamage, attackerDamage, unmodelled: damageUnmodelled, absorbingAbility, isCriticalHit, berryReduced, isSuperEffective, resolvedMoveType: damageMoveType } = deps.damage.resolve(
       state,
       battlerId,
       currentTargetId,
       currentMoveAction,
-      perHitResolution ? { targetHasActedThisTurn, hitIndex, critRoll: hitCritRoll } : { targetHasActedThisTurn },
+      perHitResolution
+        ? { targetHasActedThisTurn, hitIndex, critRoll: laserFocusCritRoll ?? hitCritRoll }
+        : { targetHasActedThisTurn, critRoll: laserFocusCritRoll },
     )
     if (moveEffect === 'EFFECT_ROLLOUT' && targetDamage === 0) attackerBattler.volatiles.rolloutCounter = 0
 
