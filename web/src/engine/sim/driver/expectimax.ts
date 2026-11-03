@@ -25,6 +25,7 @@ import {
   SIDE_STATUS_STICKY_WEB,
   SIDE_STATUS_TAILWIND,
   SIDE_STATUS_TOXIC_SPIKES,
+  STAT_SPEED,
   STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_FREEZE,
@@ -40,16 +41,51 @@ import {
   STATUS2_WRAPPED,
   STATUS3_LEECHSEED,
   STATUS3_LEECHSEED_BATTLER,
+  STATUS3_SEMI_INVULNERABLE,
+  STATUS3_UNDERGROUND,
+  STATUS3_UNDERWATER,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TERRAIN_ANY,
+  STATUS_FIELD_TERRAIN_PERMANENT,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  WEATHER_HAIL_ANY,
+  WEATHER_PERMANENT,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
+  WEATHER_SUN_ANY,
   getCounter,
   hasFlag,
 } from '../constants'
 import { isMagicGuardProtected } from '../endTurn'
+import {
+  HAIL_IMMUNE_ABILITY_IDS,
+  SAND_IMMUNE_ABILITY_IDS,
+  TOXIC_TERRAIN_IMMUNE_ABILITY_IDS,
+  hasAnyAbility,
+  isAbilityOnField,
+} from '../fieldEndTurn'
 import { createRandomSource } from '../rng'
+import { applyStatStage } from '../../stats'
 import { battlerHasSimAbility } from '../statBuffs'
-import type { BattleState, BattlerState } from '../state'
+import type { BattleState, BattlerState, SimBattleMon } from '../state'
 import type { ChosenAction } from '../turnOrder'
 import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
+
+/** The only move metadata the cycle-142 field-condition terms need: whether a
+ * move slot damages and which type it is. `SimDataContext.move` satisfies this
+ * shape; the leaf scorer takes it as a parameter because `evaluateState(state,
+ * options)` has no `SimDataBundle`. */
+export interface MoveLookupEntry {
+  type?: string | null
+  power?: number
+  split?: string | null
+}
+export type MoveLookup = (moveId: string) => MoveLookupEntry | undefined
 
 export interface ExpectimaxOptions {
   /** Plies of lookahead. 1 = score the position after one turn. */
@@ -60,9 +96,14 @@ export interface ExpectimaxOptions {
   innerSamples: number
   /** A switch must beat the best move by at least this much to be chosen. */
   switchMargin: number
-  /** Add the status1 residual/tempo, volatile and per-side hazard/screen/Tailwind
-   * terms to the leaf score (see `statusScore`). Off by default. */
+  /** Add the status1 residual/tempo, volatile and per-side field terms
+   * (hazards/screens/Tailwind plus weather, terrain and Trick Room) to the leaf
+   * score (see `statusScore`). Off by default. */
   statusTerms?: boolean
+  /** Move-type lookup for the cycle-142 field move-type boosts. The driver
+   * supplies the session's data context automatically; when omitted those boost
+   * terms are 0 (all the data-free field terms still score). */
+  moveData?: MoveLookup
 }
 
 export const DEFAULT_EXPECTIMAX: ExpectimaxOptions = { depth: 1, samples: 6, innerSamples: 2, switchMargin: 0.05 }
@@ -106,7 +147,7 @@ function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number
 export function evaluateState(state: BattleState, options?: ExpectimaxOptions): number {
   if (state.battleOutcome === 'WON') return 100
   if (state.battleOutcome === 'LOST') return -100
-  return positionScore(state) + (options?.statusTerms ? statusScore(state) : 0)
+  return positionScore(state) + (options?.statusTerms ? statusScore(state, options.moveData) : 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -508,12 +549,309 @@ function sideFieldScore(state: BattleState, side: 0 | 1): number {
   return burden
 }
 
+// ---------------------------------------------------------------------------
+// cycle 142: field conditions -- weather chip, terrain heal/chip, weather and
+// terrain move-type boosts, and Trick Room.
+//
+// Same units and sign convention as the rest of `statusScore`: the per-side
+// parts below return a BURDEN (positive = bad for that side), heals and boosts
+// are negative burdens; the global Trick Room term is player-oriented (positive
+// = good for the player).
+//
+// `fieldEndTurn.ts`'s immunity predicates take a `SimDataContext` (and
+// `weatherHasEffect` a `GroundingContext`), neither of which
+// `evaluateState(state, options)` carries. The local equivalents below
+// transcribe every data-free clause and leave the rest to named MODEL CHOICEs.
+// ---------------------------------------------------------------------------
+
+/** Flat HP-fraction-equivalent value of one turn of a terrain's 1.3 move-type
+ * boost. MODEL CHOICE; the `MUL_MODIFIER(&modifier, 1.3)` itself is
+ * battle_util.c:7087. */
+const TERRAIN_BOOST_VALUE = 0.05
+/** Flat value of one turn of a rain/sun move-type boost or drop. MODEL CHOICE;
+ * the C's multipliers are battle_util.c:7562-7598 (1.5 temporary/primal, 1.2
+ * permanent, 0.5 for the disfavoured type). The flat weight deliberately does
+ * not scale with them. */
+const WEATHER_BOOST_VALUE = 0.05
+/** Flat value of one turn of Trick Room advantage (the slower active mon moves
+ * first). MODEL CHOICE; the effect itself is battle_main.c:4325. */
+const TRICK_ROOM_VALUE = 0.1
+
+/** `gStatStageRatios[MAX_STAT_STAGE + 1][2]`, src/pokemon.c:171-185 (stage
+ * -6..+6) -- the same table data/<version>/natures.json carries as
+ * `statStageRatios`. Duplicated only because the leaf scorer has no
+ * SimDataBundle. */
+const STAT_STAGE_RATIOS: [number, number][] = [
+  [10, 40],
+  [10, 35],
+  [10, 30],
+  [10, 25],
+  [10, 20],
+  [10, 15],
+  [10, 10],
+  [15, 10],
+  [20, 10],
+  [25, 10],
+  [30, 10],
+  [35, 10],
+  [40, 10],
+]
+
+function bareTypeName(type: string | null | undefined): string {
+  return (type ?? '').replace(/^TYPE_/, '')
+}
+
+/** WEATHER_HAS_EFFECT, include/battle_util.h:45-46. `grounding.isCluelessOnField`
+ * is exactly `IsAbilityOnField(ABILITY_CLUELESS)` (grounding.ts:20-24), so the
+ * exported fieldEndTurn scan replaces it. */
+function weatherHasEffectLocal(state: BattleState): boolean {
+  if (state.field.timers.clearSkiesTimer > 0) return false
+  if (isAbilityOnField(state, 'ABILITY_CLOUD_NINE')) return false
+  if (isAbilityOnField(state, 'ABILITY_AIR_LOCK')) return false
+  if (isAbilityOnField(state, 'ABILITY_CLUELESS')) return false
+  return true
+}
+
+/** Damaging end-turn ticks left. ENDTURN_SANDSTORM, battle_util.c:1982-1996 and
+ * ENDTURN_HAIL :2014-2028: a permanent weather never ticks down; a temporary
+ * one does `!started.weather && --weatherDuration == 0`, and the tick that
+ * reaches zero runs BattleScript_SandStormHailEnds (data/battle_scripts_1.s:
+ * 7340-7344), which deals no damage. So a temporary weather damages
+ * `weatherDuration` times when it was just set, and `weatherDuration - 1`
+ * otherwise. MODEL CHOICE: capped by STATUS_HORIZON_TURNS. */
+function weatherTicks(state: BattleState): number {
+  if (hasFlag(state.field.weather, WEATHER_PERMANENT)) return STATUS_HORIZON_TURNS
+  const duration = state.field.weatherDuration
+  const ticks = state.field.timers.started.weather ? duration : duration - 1
+  return Math.max(0, Math.min(ticks, STATUS_HORIZON_TURNS))
+}
+
+/** IsSandImmune, battle_script_commands.c:10376-10386, data-free half. Left
+ * out as MODEL CHOICE: Safety Goggles (held-item data) and the Desert Cloak
+ * living-partner check (:10385). Everything else -- the three types, the
+ * underground/underwater flags, Magic Guard and `sandImmune` abilities -- is
+ * transcribed. */
+function isSandImmuneLocal(state: BattleState, battler: BattlerState): boolean {
+  if (battler.mon.types.includes('ROCK')) return true
+  if (battler.mon.types.includes('GROUND')) return true
+  if (battler.mon.types.includes('STEEL')) return true
+  if (hasFlag(battler.statuses3, STATUS3_UNDERGROUND) || hasFlag(battler.statuses3, STATUS3_UNDERWATER)) return true
+  if (isMagicGuardProtected(state, battler)) return true
+  return hasAnyAbility(battler.mon.abilities, SAND_IMMUNE_ABILITY_IDS)
+}
+
+/** IsHailImmune, battle_script_commands.c:10388-10395, data-free half (same
+ * omissions as `isSandImmuneLocal`). */
+function isHailImmuneLocal(state: BattleState, battler: BattlerState): boolean {
+  if (battler.mon.types.includes('ICE')) return true
+  if (hasFlag(battler.statuses3, STATUS3_UNDERGROUND) || hasFlag(battler.statuses3, STATUS3_UNDERWATER)) return true
+  if (isMagicGuardProtected(state, battler)) return true
+  return hasAnyAbility(battler.mon.abilities, HAIL_IMMUNE_ABILITY_IDS)
+}
+
+/** IsBattlerGrounded, specialised to the one airborne marker this scorer can
+ * read. MODEL CHOICE (the same one `benchedMonGrounded` makes): only the
+ * Flying type; no Levitate, Air Balloon, Iron Ball, Ingrain, Gravity or Smack
+ * Down. */
+function activeMonGrounded(types: readonly string[]): boolean {
+  return !types.includes('FLYING')
+}
+
+/** Heal/chip ticks left on a terrain. ENDTURN_GRASSY_TERRAIN, battle_util.c:
+ * 2102-2113 (and ENDTURN_TOXIC_TERRAIN :2124-2146): `!permanent &&
+ * !started.terrain && --terrainTimer == 0` ends it, but the heal/damage loop
+ * runs afterwards, so the clearing tick still heals/chips. A temporary terrain
+ * therefore ticks `terrainTimer` more times when not started, and
+ * `terrainTimer + 1` when the just-set turn is included. `countdownBlocked`
+ * is Toxic Terrain's `!IsAbilityOnField(ABILITY_STENCH)` gate (:2127), which
+ * freezes the timer so the full horizon stays. MODEL CHOICE: capped by
+ * STATUS_HORIZON_TURNS. */
+function terrainTicks(state: BattleState, countdownBlocked: boolean): number {
+  if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) || countdownBlocked) return STATUS_HORIZON_TURNS
+  const timer = state.field.timers.terrainTimer
+  const ticks = state.field.timers.started.terrain ? timer + 1 : timer
+  return Math.max(0, Math.min(ticks, STATUS_HORIZON_TURNS))
+}
+
+/** The bare type names of `mon`'s DAMAGING moves. MODEL CHOICE: "damaging" is
+ * `split != STATUS` and `power > 0`; a fixed-damage move (power 0) is left out
+ * because the 1.3/weather modifiers apply to `actualPower`. */
+function damagingMoveTypes(mon: SimBattleMon, moveLookup: MoveLookup): Set<string> {
+  const types = new Set<string>()
+  for (const moveId of mon.moves) {
+    if (!moveId) continue
+    const move = moveLookup(moveId)
+    if (!move) continue
+    if (move.split === 'STATUS') continue
+    if (!move.power || move.power <= 0) continue
+    types.add(bareTypeName(move.type))
+  }
+  return types
+}
+
+/** Rain/sun Water/Fire multiplier site, battle_util.c:7562-7598: under rain
+ * Water is boosted and Fire halved, under sun the reverse. The multipliers are
+ * the C's (1.5 temporary/primal, 1.2 permanent, 0.5 for the disfavoured type);
+ * the flat WEATHER_BOOST_VALUE per turn is a MODEL CHOICE. Left out: the
+ * `EFFECT_WEATHER_BOOST` branch (:7565), Weather Double Boost (:7560), Nika and
+ * Steam Eruption's modifier floor (:7584-7588), and POWER_WEATHER_ANY's
+ * DOWNPOUR-only bit (the C has no branch for it). */
+function weatherMoveTypeBurden(state: BattleState, types: Set<string>): number {
+  if (!weatherHasEffectLocal(state)) return 0
+  const weather = state.field.weather
+  const ticks = weatherTicks(state)
+  if (ticks === 0) return 0
+  const rain = hasFlag(weather, WEATHER_RAIN_ANY)
+  const sun = hasFlag(weather, WEATHER_SUN_ANY)
+  let value = 0
+  if (rain && !sun) {
+    if (types.has('WATER')) value -= WEATHER_BOOST_VALUE * ticks
+    if (types.has('FIRE')) value += WEATHER_BOOST_VALUE * ticks
+  } else if (sun && !rain) {
+    if (types.has('FIRE')) value -= WEATHER_BOOST_VALUE * ticks
+    if (types.has('WATER')) value += WEATHER_BOOST_VALUE * ticks
+  }
+  return value
+}
+
+/** IsBattlerTerrainAffected's type switch, battle_util.c:7064-7090: the terrain
+ * bit maps to a move type and a matching move gets `MUL_MODIFIER(1.3)`. The
+ * caller has already gated the grounded clause; TERRAIN_HAS_EFFECT is the
+ * Clueless check. MODEL CHOICE: flat TERRAIN_BOOST_VALUE per turn. */
+function terrainMoveTypeBurden(state: BattleState, types: Set<string>): number {
+  const terrain = state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+  if (!terrain) return 0
+  if (isAbilityOnField(state, 'ABILITY_CLUELESS')) return 0
+  let terrainType: string | null = null
+  if (terrain === STATUS_FIELD_ELECTRIC_TERRAIN) terrainType = 'ELECTRIC'
+  else if (terrain === STATUS_FIELD_PSYCHIC_TERRAIN) terrainType = 'PSYCHIC'
+  else if (terrain === STATUS_FIELD_GRASSY_TERRAIN) terrainType = 'GRASS'
+  else if (terrain === STATUS_FIELD_MISTY_TERRAIN) terrainType = 'FAIRY'
+  else if (terrain === STATUS_FIELD_TOXIC_TERRAIN) terrainType = 'POISON'
+  if (!terrainType || !types.has(terrainType)) return 0
+  return -(TERRAIN_BOOST_VALUE * terrainTicks(state, false))
+}
+
+/** The per-side field-condition burden from weather, terrains and the weather/
+ * terrain move-type boosts. Positive = bad for `side`; a Grassy Terrain heal
+ * or a boost its active mon can use is a negative burden.
+ *
+ * Only the ACTIVE battler is on the field: reserves neither take weather chip
+ * nor heal from terrain nor attack with a boosted type. */
+function sideFieldConditionBurden(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup): number {
+  const battler = state.battlers[side]
+  if (!battler) return 0
+  const mon = battler.mon
+  if (mon.hp <= 0 || mon.maxHp <= 0) return 0
+  const weather = state.field.weather
+  let burden = 0
+
+  // 1. Sandstorm / Hail chip. Cmd_weatherdamage, battle_script_commands.c:
+  // 10397-10416: alive, WEATHER_HAS_EFFECT, not Magic Guard. The sandstorm
+  // branch ASSIGNS and the hail branch OVERWRITES the same gBattleMoveDamage,
+  // so with both bits set the surviving damage is hail's when the mon is not
+  // hail-immune, otherwise sandstorm's. maxHP/16 with the min-1 floor.
+  if (weatherHasEffectLocal(state)) {
+    const ticks = weatherTicks(state)
+    if (ticks > 0) {
+      let chip = 0
+      if (hasFlag(weather, WEATHER_SANDSTORM_ANY) && !isSandImmuneLocal(state, battler)) chip = drainTickFraction(mon.maxHp, 16)
+      if (hasFlag(weather, WEATHER_HAIL_ANY) && !isHailImmuneLocal(state, battler)) chip = drainTickFraction(mon.maxHp, 16)
+      burden += ticks * chip
+    }
+  }
+
+  // 2. Grassy Terrain heal. ENDTURN_GRASSY_TERRAIN, battle_util.c:2102-2113 and
+  // VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS, battle_script_commands.c:6876-6886:
+  // skip semi-invulnerable, full HP, fainted and non-grounded; heal maxHP/16
+  // (min 1). Capped by the missing HP over the horizon. NOTE: the heal script
+  // itself has no Clueless/TERRAIN_HAS_EFFECT gate -- it only asks
+  // IsBattlerGrounded -- so this term does not gate on Clueless either.
+  if (
+    hasFlag(state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN) &&
+    !hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE) &&
+    activeMonGrounded(mon.types) &&
+    mon.hp < mon.maxHp
+  ) {
+    const perTick = Math.max(1, Math.trunc(mon.maxHp / 16))
+    const missing = mon.maxHp - mon.hp
+    burden -= Math.min(terrainTicks(state, false) * perTick, missing) / mon.maxHp
+  }
+
+  // 3. Toxic Terrain chip. ENDTURN_TOXIC_TERRAIN, battle_util.c:2124-2146 and
+  // BattleScript_ToxicTerrainDamages, data/battle_scripts_1.s:10167-10175
+  // (`hpfractiontodamage BS_STACK_1, 16`). FILTER chain (:2134-2139): alive,
+  // not Magic Guard, IsBattlerTerrainAffected (TERRAIN_HAS_EFFECT + not
+  // semi-invulnerable + grounded), not AbilityBlocksToxicTerrain, not Poison,
+  // not Steel. The hit is maxHP/16 min 1, capped at the current HP
+  // (Cmd_various, battle_script_commands.c:9017-9022).
+  // MODEL CHOICE: IsBattlerTerrainAffected's `allowTerrainIfAirborne` ability
+  // clause (:4926) is not modelled, so an airborne mon with such an ability is
+  // treated as unaffected.
+  if (hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)) {
+    const terrainHasEffect = !isAbilityOnField(state, 'ABILITY_CLUELESS')
+    if (
+      terrainHasEffect &&
+      !hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE) &&
+      activeMonGrounded(mon.types) &&
+      !isMagicGuardProtected(state, battler) &&
+      !hasAnyAbility(mon.abilities, TOXIC_TERRAIN_IMMUNE_ABILITY_IDS) &&
+      !mon.types.includes('POISON') &&
+      !mon.types.includes('STEEL')
+    ) {
+      const ticks = terrainTicks(state, isAbilityOnField(state, 'ABILITY_STENCH'))
+      const perTick = Math.max(1, Math.trunc(mon.maxHp / 16))
+      burden += Math.min(ticks * perTick, mon.hp) / mon.maxHp
+    }
+  }
+
+  // 4/5. Move-type boosts for the active mon's own moves.
+  if (moveLookup) {
+    const types = damagingMoveTypes(mon, moveLookup)
+    burden += weatherMoveTypeBurden(state, types)
+    if (activeMonGrounded(mon.types)) burden += terrainMoveTypeBurden(state, types)
+  }
+
+  return burden
+}
+
+/** Battle main's effective Speed for the Trick Room comparison, from the raw
+ * Speed stat and its stat stage only. MODEL CHOICE: `getBattlerTotalSpeedStat`
+ * needs a `TurnOrderContext` and `statStageRatios` that a state alone cannot
+ * supply, so Tailwind, paralysis, Swamp, item and ability speed modifiers are
+ * omitted and the stage table is the transcribed `gStatStageRatios`. */
+function activeSpeed(mon: SimBattleMon): number {
+  const stage = Math.max(0, Math.min(12, mon.statStages[STAT_SPEED] ?? 6))
+  return applyStatStage(mon.rawStats.spe, stage, STAT_STAGE_RATIOS)
+}
+
+/** Player-oriented Trick Room value (positive = good for the player). The
+ * effect is battle_main.c:4325 `speedValue.effectiveSpeed = ~...`, i.e. the
+ * slower active mon moves first; IsTrickRoomActive (battle_util.c:8671-8680) is
+ * false with Clueless on the field. The monotype-champion branches (:8672
+ * FLYING, :8675 NORMAL) are not modelled -- the leaf scorer has no champion
+ * type. ENDTURN_TRICK_ROOM (:2051-2056) is `!started.trickRoom &&
+ * --trickRoomTimer == 0`, so a just-set room keeps its full 5 turns. */
+function trickRoomValue(state: BattleState): number {
+  if (!hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)) return 0
+  if (isAbilityOnField(state, 'ABILITY_CLUELESS')) return 0
+  const player = state.battlers[0]
+  const foe = state.battlers[1]
+  if (!player || !foe || player.mon.hp <= 0 || foe.mon.hp <= 0) return 0
+  const playerSpeed = activeSpeed(player.mon)
+  const foeSpeed = activeSpeed(foe.mon)
+  if (playerSpeed === foeSpeed) return 0
+  const magnitude = TRICK_ROOM_VALUE * timerTurns(state.field.timers.trickRoomTimer)
+  return playerSpeed < foeSpeed ? magnitude : -magnitude
+}
+
 /** Sum of `statusMonValue` over one side's living mons, reading the active
  * battler's copy for the active slot and the party copy for the rest -- the
  * same split `sideScore` uses, because status1 persists across switches -- plus
  * the active battler's volatile burden, which does not persist across switches,
- * plus the side's hazards/screens/Tailwind burden (`sideFieldScore`). */
-function sideStatusScore(state: BattleState, side: 0 | 1): number {
+ * plus the side's hazards/screens/Tailwind burden (`sideFieldScore`) and its
+ * active mon's field-condition burden (`sideFieldConditionBurden`). */
+function sideStatusScore(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup): number {
   const active = state.battlers[side]
   const party = state.sides[side].party
   let total = 0
@@ -527,15 +865,21 @@ function sideStatusScore(state: BattleState, side: 0 | 1): number {
   }
   if (active) total += activeVolatileBurden(state, active)
   total += sideFieldScore(state, side)
+  total += sideFieldConditionBurden(state, side, moveLookup)
   return total
 }
 
-/** Status burden from the player's side: higher is better for the player (the
- * foe's burden minus the player's), the same orientation as `positionScore`.
- * Covers status1 (per party mon), the active battler's volatiles, and the
- * per-side entry hazards, screens and Tailwind (`sideFieldScore`). */
-export function statusScore(state: BattleState): number {
-  return sideStatusScore(state, 1) - sideStatusScore(state, 0)
+/** Status and field burden from the player's side: higher is better for the
+ * player (the foe's burden minus the player's), the same orientation as
+ * `positionScore`. Covers status1 (per party mon), the active battler's
+ * volatiles, the per-side entry hazards, screens and Tailwind
+ * (`sideFieldScore`), the active mons' weather/terrain terms
+ * (`sideFieldConditionBurden`) and the global Trick Room value.
+ *
+ * `moveLookup` is only needed by the weather/terrain move-type boosts; without
+ * it those terms are 0 and every other term still scores. */
+export function statusScore(state: BattleState, moveLookup?: MoveLookup): number {
+  return sideStatusScore(state, 1, moveLookup) - sideStatusScore(state, 0, moveLookup) + trickRoomValue(state)
 }
 
 /** The material and boost balance, ignoring whether the battle is already decided. */
@@ -614,9 +958,13 @@ function sampleOpponent(session: BattleSession, count: number, seedBase: number)
 }
 
 function value(session: BattleSession, depth: number, options: ExpectimaxOptions, seedBase: number): number {
-  if (session.state.battleOutcome || depth === 0) return evaluateState(session.state, options)
+  // The leaf scorer has no data bundle of its own; supply the move metadata the
+  // weather/terrain move-type boosts need from this session's data context
+  // (unless the caller already provided a lookup, e.g. in a unit test).
+  const leafOptions = options.moveData ? options : { ...options, moveData: (moveId: string) => session.data.dataContext.move(moveId) }
+  if (session.state.battleOutcome || depth === 0) return evaluateState(session.state, leafOptions)
   const choices = legalChoices(session)
-  if (choices.length === 0) return evaluateState(session.state, options)
+  if (choices.length === 0) return evaluateState(session.state, leafOptions)
   const samples = sampleOpponent(session, options.innerSamples, seedBase)
   let best = -Infinity
   for (const choice of choices) {

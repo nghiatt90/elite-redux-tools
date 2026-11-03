@@ -301,7 +301,7 @@ function isAlive(state: BattleState, battlerId: number): boolean {
  * exception is not applied (no gap needed: this phase has no attacking
  * battler for Mold Breaker to belong to, so the exception can never actually
  * differ from the unsuppressed answer here). */
-function isAbilityOnField(state: BattleState, abilityId: string): boolean {
+export function isAbilityOnField(state: BattleState, abilityId: string): boolean {
   for (let i = 0; i < state.battlersCount; i++) {
     if (!isAlive(state, i)) continue
     const battler = state.battlers[i]
@@ -316,7 +316,7 @@ function isAbilityOnField(state: BattleState, abilityId: string): boolean {
  * / `bitfields.hailImmune` is TRUE, checked against ALL FOUR ability slots
  * (not just the chosen one), matching RETURN_ABILITY_IF_FLAG's own
  * BattlerHasAbilityFlag scan. */
-const SAND_IMMUNE_ABILITY_IDS = new Set([
+export const SAND_IMMUNE_ABILITY_IDS = new Set([
   'ABILITY_DESERT_CLOAK',
   'ABILITY_DESERT_SPIRIT',
   'ABILITY_DUNE_TERROR',
@@ -332,7 +332,7 @@ const SAND_IMMUNE_ABILITY_IDS = new Set([
   'ABILITY_SAND_VEIL',
   'ABILITY_SEPIA_LENS',
 ])
-const HAIL_IMMUNE_ABILITY_IDS = new Set([
+export const HAIL_IMMUNE_ABILITY_IDS = new Set([
   'ABILITY_AURORAS_GALE',
   'ABILITY_AURORA_BOREALIS',
   'ABILITY_CHRISTMAS_NIGHTMARE',
@@ -353,9 +353,9 @@ const HAIL_IMMUNE_ABILITY_IDS = new Set([
 ])
 /** AbilityBlocksToxicTerrain, battle_util.c:1723-1726 -- RETURN_ABILITY_IF_FLAG
  * (battler, FALSE, toxicTerrainImmune). */
-const TOXIC_TERRAIN_IMMUNE_ABILITY_IDS = new Set(['ABILITY_POISON_HEAL', 'ABILITY_STENCH'])
+export const TOXIC_TERRAIN_IMMUNE_ABILITY_IDS = new Set(['ABILITY_POISON_HEAL', 'ABILITY_STENCH'])
 
-function hasAnyAbility(slots: AbilitySlots, ids: Set<string>): boolean {
+export function hasAnyAbility(slots: AbilitySlots, ids: Set<string>): boolean {
   if (slots.ability && ids.has(slots.ability)) return true
   return slots.innates.some((id) => id !== null && ids.has(id))
 }

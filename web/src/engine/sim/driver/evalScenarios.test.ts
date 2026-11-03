@@ -2,7 +2,9 @@
 // Cycle 139: scenario harness for the opt-in status1 leaf term; cycle 140
 // appends the same harness for the volatile terms (Leech Seed, Substitute,
 // confusion); cycle 141 appends it for the per-side terms (entry hazards,
-// screens, Tailwind).
+// screens, Tailwind); cycle 142 appends it for the field terms (Sandstorm/Hail
+// chip, Grassy Terrain heal, Toxic Terrain chip, terrain/weather move boosts,
+// Trick Room).
 //
 // Each seed gets a fresh session; the starting position is edited right after
 // createSession (before beginTurn), and the expectimax policy picks with
@@ -20,6 +22,9 @@ import {
   STATUS2_CONFUSION,
   STATUS2_SUBSTITUTE,
   STATUS3_LEECHSEED,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  WEATHER_SANDSTORM_ANY,
   hasFlag,
 } from '../constants'
 import { createRandomSource } from '../rng'
@@ -471,6 +476,112 @@ describe('cycle 141 - side scenarios', () => {
 
     it('positive: Tailwind is chosen on at least 6 of 8 seeds', () => {
       expect(picks(PLAYER_MOVES, FOE(), 'MOVE_TAILWIND')).toBeGreaterThanOrEqual(6)
+    })
+  })
+})
+
+// Cycle 142: the same harness for the FIELD terms. The weather/Trick Room terms
+// are scored from the leaf state after the move resolves, so a positive has to
+// win on the field value against the weak attacks. Shuckle (Bug/Rock) is
+// Sandstorm-immune, which keeps the sand term one-sided in the player's favour;
+// Shuckle's base Speed 5 is below Machamp's 55, which makes Trick Room
+// favourable. `chosenMove` already threads `session.data.dataContext.move`
+// through the leaf scorer, so the terrain/weather move-type boosts also apply
+// when a matching damaging move is known.
+describe('cycle 142 - field scenarios', () => {
+  describe('Sandstorm against a non-immune foe', () => {
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER'])]
+    // Rock/Ground: IsSandImmune (battle_script_commands.c:10376-10386) refuses
+    // the chip, so the term goes to zero for both sides.
+    const GOLEM = () => [foeMon('SPECIES_GOLEM', 'ABILITY_ROCK_HEAD', ['MOVE_PECK', 'MOVE_EMBER'])]
+    const PLAYER_MOVES = ['MOVE_SANDSTORM', ...WEAK_MOVES]
+
+    it('sanity: Sandstorm sets the weather bit and started.weather', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM')
+        expect(session.state.field.weather & WEATHER_SANDSTORM_ANY).toBeTruthy()
+        expect(session.state.field.timers.started.weather).toBe(true)
+      }
+    })
+
+    it('positive: Sandstorm is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM')).toBeGreaterThanOrEqual(6)
+    })
+
+    it('twin: against a Sandstorm-immune foe, Sandstorm is chosen on at most 1 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, GOLEM(), 'MOVE_SANDSTORM')).toBeLessThanOrEqual(1)
+    })
+
+    it('twin: with a sandstorm already up, Sandstorm is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM', (s) => {
+        s.state.field.weather = WEATHER_SANDSTORM_ANY
+        s.state.field.weatherDuration = 5
+      })
+      expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Grassy Terrain over a damaged player', () => {
+    // ENDTURN_GRASSY_TERRAIN heals the grounded active mon maxHP/16 for the
+    // terrain's remaining turns (battle_util.c:2102-2113), so the player has to
+    // be below full HP for the term to exist.
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER'])]
+    const PLAYER_MOVES = ['MOVE_GRASSY_TERRAIN', ...WEAK_MOVES]
+    const HALF_HP = (s: BattleSession) => setHp(s, 0, 0, Math.floor(s.state.battlers[0]!.mon.maxHp / 2))
+
+    it('sanity: Grassy Terrain sets its bit and the eight-turn terrain timer', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', HALF_HP)
+        expect(hasFlag(session.state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(true)
+        // TERRAIN_DURATION == 8 (include/battle_util.h:52).
+        expect(session.state.field.timers.terrainTimer).toBe(8)
+      }
+    })
+
+    it('positive: Grassy Terrain is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', HALF_HP)).toBeGreaterThanOrEqual(6)
+    })
+
+    // IsBattlerTerrainAffected (battle_util.c:4901-4928) excludes a Flying
+    // active mon, so the damaged player stops healing and the terrain move goes
+    // to 0 while the weak attacks still chip the foe. (A full-HP player also
+    // scores the terrain 0, but so do the weak attacks, and the seed tie-break
+    // then picks the terrain move freely -- see REPORT.md.)
+    it('twin: a Flying (non-grounded) player heals nothing, so Grassy Terrain is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', (s) => {
+        HALF_HP(s)
+        s.state.battlers[0]!.mon.types = ['NORMAL', 'FLYING', 'MYSTERY']
+        s.state.sides[0].party[0]!.types = ['NORMAL', 'FLYING', 'MYSTERY']
+      })
+      expect(n).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('Trick Room with a slower player', () => {
+    const MACHAMP = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_PECK', 'MOVE_EMBER'])]
+    const PLAYER_MOVES = ['MOVE_TRICK_ROOM', ...WEAK_MOVES]
+
+    it('sanity: Trick Room sets the bit, timer 5 and started.trickRoom', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_TRICK_ROOM')
+        expect(hasFlag(session.state.field.statuses, STATUS_FIELD_TRICK_ROOM)).toBe(true)
+        expect(session.state.field.timers.trickRoomTimer).toBe(5)
+        expect(session.state.field.timers.started.trickRoom).toBe(true)
+      }
+    })
+
+    it('positive: Trick Room is chosen on at least 6 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_TRICK_ROOM')).toBeGreaterThanOrEqual(6)
+    })
+
+    // The room only pays when the player is the slower side (battle_main.c:4325
+    // reverses the order). Patching the active mon's speed before beginTurn
+    // makes the player the faster side, flipping the term negative.
+    it('twin: with a faster player, Trick Room is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_TRICK_ROOM', (s) => {
+        s.state.battlers[0]!.mon.rawStats.spe = 999
+      })
+      expect(n).toBeLessThanOrEqual(1)
     })
   })
 })
