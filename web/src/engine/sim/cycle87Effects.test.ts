@@ -320,7 +320,7 @@ describe('multi-hit loop: MOVEEND_MULTIHIT_MOVE (battle_script_commands.c:4880-4
     const state = battle([{ moves: slot('MOVE_TACKLE'), pp: pps }, {}], rng)
     executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(dmg))
     expect(rng.calls).toBe(1)
-    expect(dmg.contexts).toEqual([{ targetHasActedThisTurn: false }])
+    expect(dmg.contexts).toEqual([{ targetHasActedThisTurn: false, defenderIsSwitching: false }])
   })
 
   it('stops when the target is already immune on the first hit (JumpIfMoveFailed zeroes the counter, :1213-1215)', () => {

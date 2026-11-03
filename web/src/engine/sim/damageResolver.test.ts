@@ -298,7 +298,10 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
   it('sets defenderIsSwitching when context specifies it', () => {
     const resSwitch = resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT'), { targetHasActedThisTurn: false, defenderIsSwitching: true })
     const resNoSwitch = resolver().resolve(state(), 0, 1, action('MOVE_PURSUIT'), { targetHasActedThisTurn: false, defenderIsSwitching: false })
-    expect(resSwitch.targetDamage!).toBe(resNoSwitch.targetDamage! * 2)
+    // Pursuit doubles its power against a switching target (battle_util.c:6835-6837). The damage formula is
+    // floor(core * power) / 50 + 2, so doubling power doubles the core but not the +2: 2 * (25 - 2) + 2 = 48.
+    expect(resNoSwitch.targetDamage!).toBe(25)
+    expect(resSwitch.targetDamage!).toBe(2 * (resNoSwitch.targetDamage! - 2) + 2)
   })
 })
 

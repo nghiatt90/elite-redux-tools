@@ -1214,17 +1214,17 @@ describe('Secondary status effects after damage (cycle 25a, step 5, batch 3a)', 
 
   it('unported legacy secondary effect produces named gap', () => {
     // Derivation:
-    // Party Favors has legacyConfig: BattleScript_EffectPartyFavors and no handler in moveEffects.ts, no entry in the pure
+    // Sky Drop has a legacy script and no handler in moveEffects.ts, no entry in the pure
     // damaging-move list and no generated `behavior.attack.secondaryEffects`, so damaging move execution reaches
     // applySecondaryMoveEffects' fallback and pushes the named gap. (Future Sight, used here until cycle 109c, is now
-    // ported; Eerie Spell was ported in cycle 87.)
+    // ported; Eerie Spell was ported in cycle 87; Party Favors in cycle 135.)
     const rng = scriptedRng([0])
     const state = battle([{}, {}], rng)
     const deps = testDeps(fixedDamage(20), rawBehaviors)
-    const out = executeTurn(state, [useMove(1, requireMove('MOVE_PARTY_FAVORS')), useMove(0, MOVE_SWORDS_DANCE)], deps)
+    const out = executeTurn(state, [useMove(1, requireMove('MOVE_SKY_DROP')), useMove(0, MOVE_SWORDS_DANCE)], deps)
 
     expect(out.actions[0].statusApplied).toBeNull()
-    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_PARTY_FAVORS not modelled')
+    expect(out.actions[0].unmodelled).toContain('secondary effect of EFFECT_SKY_DROP not modelled')
   })
 
   it('confusion secondary effect applies and draws duration', () => {

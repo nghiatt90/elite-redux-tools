@@ -46,7 +46,7 @@ import {
 import { tryChangeBattleWeather } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { cancelMultiTurnMoves } from './statusEffects'
-import { CRAVING_BERRY_TABLE, FIGY_ALTERNATIVES } from './endTurn'
+import { CRAVING_BERRY_TABLE, FIGY_ALTERNATIVES, canBattlerHeal } from './endTurn'
 
 export interface LegacyPreHitArgs {
   state: BattleState
@@ -324,8 +324,8 @@ export function runLegacyPostHit(args: LegacyPostHitArgs): void {
     }
     case 'EFFECT_PARTY_FAVORS': {
       // s:2975-2989: tryhealpercenthealth BS_ATTACKER, 25; in singles partner is absent (:2984).
-      // VARIOUS_TRY_HEAL_PERCENT_HP (c:7899-7901): maxHP * 25 / 100, min 1; fails if already at full HP.
-      if (attacker.mon.hp < attacker.mon.maxHp) {
+      // VARIOUS_TRY_HEAL_PERCENT_HP (c:7894-7901): maxHP * 25 / 100, min 1; fails at full HP or when !CanBattlerHeal.
+      if (attacker.mon.hp < attacker.mon.maxHp && canBattlerHeal(state, attackerId, attacker, unmodelled)) {
         const heal = Math.max(1, Math.floor((attacker.mon.maxHp * 25) / 100))
         attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
       }

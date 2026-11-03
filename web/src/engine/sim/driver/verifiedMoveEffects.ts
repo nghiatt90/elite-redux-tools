@@ -338,10 +338,7 @@ export const VERIFIED_MOVE_EFFECTS: Map<string, string> = new Map<string, string
     )
     .concat(
       [
-        'EFFECT_FETCH',
-        'EFFECT_CONCOCTION',
         'EFFECT_PARTY_FAVORS',
-        'EFFECT_PURSUIT',
         'EFFECT_PROTECT',
         'EFFECT_HEAT_CRASH',
         'EFFECT_METAL_BURST',
