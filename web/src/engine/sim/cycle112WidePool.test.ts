@@ -40,6 +40,12 @@ const CALM_MIND = 'MOVE_CALM_MIND'
 const SHIPPED = new Map(VERIFIED_MOVE_EFFECTS)
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..')
 const movesById = data.movesById as Map<string, { effect?: string | null }>
+// Only moves some species can learn can ever be offered by candidateMoves, at any level.
+const LEARNABLE_MOVE_IDS: ReadonlySet<string> = (() => {
+  const ids = new Set<string>()
+  for (const speciesId of data.speciesById.keys()) for (const id of learnable(speciesId, 100)) ids.add(id)
+  return ids
+})()
 let snapshot: Array<[string, string]> = []
 
 describe('cycle 112 wide pool gate', () => {
@@ -175,14 +181,19 @@ describe('cycle 112 wide pool gate', () => {
     expect(neighbours(data, team, 0, stones, true).length).toBe(base.length - dropped * 4)
   })
 
-  // Reads SHIPPED, not the live map: the beforeEach above clears it. Known gap at the pinned data:
-  // the synthetic NONE key (MOVE_NONE, MOVE_TEMPEST_STORM -- the only gated moves with no `effect`,
-  // which the codegen emits as EFFECT_HIT, the proto3 default) is in neither registry, so this
-  // currently reports [ 'NONE' ].
+  // Reads SHIPPED, not the live map: the beforeEach above clears it. Sweeps only learnable moves:
+  // candidateMoves can only offer a move some species learns, so an unlearnable move never reaches
+  // the wide-pool gate. The only gated moves with no `effect` are MOVE_NONE and MOVE_TEMPEST_STORM
+  // (power 0; the codegen emits EFFECT_HIT, the proto3 default -- pipeline/.upstream/er-config/
+  // MoveBehavior.proto:19), and no species learns either, so the synthetic NONE key is out of scope.
   it('every gated move effect key is verified or allowlisted', () => {
+    expect(LEARNABLE_MOVE_IDS.size).toBeGreaterThan(0)
+    expect(LEARNABLE_MOVE_IDS.has('MOVE_NONE')).toBe(false)
+    expect(LEARNABLE_MOVE_IDS.has('MOVE_TEMPEST_STORM')).toBe(false)
     const allowed = new Set(AUDIT_ALLOWLIST.map((a) => a.effect))
     const missing = new Set<string>()
     for (const m of data.movesById.values()) {
+      if (!LEARNABLE_MOVE_IDS.has(m.id)) continue
       if (m.power && m.power > 1) continue
       const key: string = m.effect ?? 'NONE'
       if (!SHIPPED.has(key) && !allowed.has(key)) missing.add(key)
