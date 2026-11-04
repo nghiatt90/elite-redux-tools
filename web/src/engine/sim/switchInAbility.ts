@@ -2322,8 +2322,9 @@ export function applySwitchInAbilities(
     // applySwitchInAbilities call inside the handlers; `continue` keeps the generic
     // "onEntry hook was not run" note from firing for them.
     if (abilityId === 'ABILITY_DISGUISE' || abilityId === 'ABILITY_PATCHWORK') {
-      // Impl<ABILITY_DISGUISE>.onEntry (abilities.cc:2868) and Patchwork's alias (:8637;
-      // Patchwork's onDefender curse half is not ported).
+      // Impl<ABILITY_DISGUISE>.onEntry (abilities.cc:2868) and Patchwork's alias (:8637).
+      // Patchwork's onDefender curse half IS ported (moveEnd.ts:3275-3290); only the
+      // onDisguise counter write (abilities.cc:8638-8644) is missing.
       disguiseReformHandler(state, battlerId, deps, unmodelled)
       continue
     }

@@ -995,7 +995,7 @@ export function isBattlerProtected(
       unmodelled.push(...gapsToUnmodelled(gaps))
       if (defenderHasAnticipation) {
         unmodelled.push(
-          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
         )
       }
       const accResult = getTotalAccuracy(inputs)
@@ -1017,7 +1017,7 @@ export function isBattlerProtected(
       unmodelled.push(...gapsToUnmodelled(gaps))
       if (defenderHasAnticipation) {
         unmodelled.push(
-          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
         )
       }
       const accResult = getTotalAccuracy(inputs)
@@ -1309,7 +1309,7 @@ export function deductPp(
   if (!attackerHasPressure && opposingHasPressure) {
     ppToDeduct++
     unmodelled.push(
-      "Pressure's mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793) is not applied; an opposing Mold-Breaker-class attacker would bypass Pressure's extra PP cost here",
+      "Pressure's mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793; ABILITY_PRESSURE) is not applied; an opposing Mold-Breaker-class attacker would bypass Pressure's extra PP cost here",
     )
   }
 
@@ -1634,7 +1634,7 @@ export function dispatchSwitchOutAbilities(
           //   CHECK(gStatuses3[battler] & STATUS3_CHARGED_UP)
           //   SetSingleUseAbilityCounter(battler, ability, FALSE)
           if (hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) {
-            unmodelled.push(`battler ${battlerId}: switch-out Generator SetSingleUseAbilityCounter is not modelled`)
+            unmodelled.push(`battler ${battlerId}: switch-out Generator SetSingleUseAbilityCounter is not modelled (ABILITY_GENERATOR)`)
           }
           break
         }
@@ -1642,7 +1642,7 @@ export function dispatchSwitchOutAbilities(
         case 'ABILITY_ENERGIZED': {
           // Impl<ABILITY_ENERGIZED>.onExit (abilities.cc:8730): Impl<ABILITY_GENERATOR>.onExit
           if (hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) {
-            unmodelled.push(`battler ${battlerId}: switch-out Energized SetSingleUseAbilityCounter is not modelled`)
+            unmodelled.push(`battler ${battlerId}: switch-out Energized SetSingleUseAbilityCounter is not modelled (ABILITY_ENERGIZED)`)
           }
           break
         }
@@ -1661,7 +1661,7 @@ export function dispatchSwitchOutAbilities(
           //   CHECK_NOT(gBattleMons[battler].item)
           //   restores originalItem from itemStolen / opposingOriginalItems
           if (battler.mon.hp > 0 && battler.mon.itemId === null) {
-            unmodelled.push(`battler ${battlerId}: switch-out Retriever item restoration is not modelled`)
+            unmodelled.push(`battler ${battlerId}: switch-out Retriever item restoration is not modelled (ABILITY_RETRIEVER)`)
           }
           break
         }
@@ -3502,7 +3502,7 @@ export function executeAction(
     unmodelled.push(...gapsToUnmodelled(accGaps))
     if (defenderHasAnticipation) {
       unmodelled.push(
-        "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+        "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
       )
     }
     const accResult = getTotalAccuracy(accInputs)
@@ -3961,7 +3961,7 @@ export function executeAction(
           battlerHasSimAbility(state, attackerBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext) ||
           (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext))
         ) {
-          unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3306-3313) is not modelled')
+          unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3306-3313; ABILITY_SOUL_LINKER) is not modelled')
         }
       }
     }
@@ -4342,8 +4342,11 @@ export function drainQueuedSwitches(
 
     if (entry.script === 'EMERGENCY_EXIT') {
       // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) has NO forced-switch blocks:
-      // no Ingrain check (STATUS3_ROOTED), no Suction Cups check, and no arena check (the hook's
-      // CanBattlerBeForceSwitched gate already excluded arena at schedule time).
+      // no Ingrain check (STATUS3_ROOTED), no Suction Cups check, and no arena check. The arena
+      // exclusion is not from this script: Wimp Out / Emergency Exit gate at schedule time through
+      // CanBattlerBeForceSwitched (abilities.cc:2608-2615, called at :2622), while Hollow Ice Zone's
+      // schedule (abilities.cc:12178-12196) has no such gate and names the same
+      // BattleScript_EmergencyExitPopupNoPause (:12190). Nothing in the script tests BATTLE_TYPE_ARENA.
       // Replacement selection is NOT ported here: in the game the player picks the party member
       // (openpartyscreen) and the AI uses GetMostSuitableMonToSwitchInto (src/battle_controller_opponent.c:1652-1654);
       // the random pick is a placeholder left for the supervisor/user to decide.

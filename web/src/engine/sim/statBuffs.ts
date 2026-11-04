@@ -653,7 +653,7 @@ export function changeStatBuffs(
       // SPECIFIC-only check at :1336).
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
     } else if (hasMirrorArmor(state, battler, attackerId, attackerHasMoldBreaker, deps.dataContext) && !affectsUser && attackerId !== targetId && battlerId === targetId) {
-      unmodelled.push("Mirror Armor stat reflection (battle_script_commands.c:9811) is not modelled")
+      unmodelled.push("Mirror Armor stat reflection (battle_script_commands.c:9811; ABILITY_MIRROR_ARMOR) is not modelled")
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
     } else if (!certain && !affectsUser && hasClearAmulet(battler, deps.dataContext)) {
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
@@ -1119,10 +1119,10 @@ export function consumeHeldItem(state: BattleState, battler: BattlerState, unmod
 
   const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
-    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212; ABILITY_GREEDY) is not modelled")
   }
   if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
-    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207; ABILITY_POWER_OF_ALCHEMY) is not modelled")
   }
   battler.mon.itemId = null
 }
@@ -1251,7 +1251,7 @@ export function runReactiveAbilityEffects(
             if ((opp & 1) === (i & 1)) continue
             for (let stat = STAT_ATK; stat < NUM_BATTLE_STATS; stat++) {
               if ((state.statChangesToCheck?.[opp]?.[stat - 1] ?? 0) > 0) {
-                unmodelled.push("Retribution Blow out-of-turn attack (abilities.cc:5145-5160) is not modelled")
+                unmodelled.push("Retribution Blow out-of-turn attack (abilities.cc:5145-5160) is not modelled (ABILITY_RETRIBUTION_BLOW)")
                 break
               }
             }

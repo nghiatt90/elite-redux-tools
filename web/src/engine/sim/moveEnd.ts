@@ -2304,7 +2304,7 @@ function handleDefenderMoveEndAbility(
       attacker.volatiles.wrapTurns =
         hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
       attacker.volatiles.wrapAbility = abilityId
-      unmodelled.push('Itchy Defense set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+      unmodelled.push('Itchy Defense (ABILITY_ITCHY_DEFENSE) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
     }
   }
 
@@ -3273,7 +3273,7 @@ function handleDefenderMoveEndAbility(
   // Disguise busting has no damage-path hook in the sim, so the counter is never written, and the write is not invented
   // here. The status2 write is the one Haunted Spirit (:2165) and Wings of Pestilence (:3077) use.
   if (abilityId === 'ABILITY_PATCHWORK') {
-    const note = 'move-end Patchwork onDisguise hook (src/abilities.cc:8636-8643) is not modelled yet'
+    const note = 'move-end ABILITY_PATCHWORK onDisguise hook (pipeline/.upstream/eliteredux-source/src/abilities.cc:8638-8644) is not modelled yet'
     if (!unmodelled.includes(note)) {
       unmodelled.push(note)
     }
@@ -4126,7 +4126,7 @@ function handleAttackerMoveEndAbility(
       }
     } else if (moveId === 'MOVE_STRING_SHOT' || moveId === 'MOVE_HARDEN' || moveId === 'MOVE_IRON_DEFENSE') {
       unmodelled.push(
-        `Angel's Wrath's ${moveId} case (abilities.cc:5592-5642) is not modelled: it reads gMoveResultFlags / WasMoveSuccessful, which the move-end context does not carry`,
+        `Angel's Wrath's ${moveId} case (abilities.cc:5592-5642; ABILITY_ANGELS_WRATH) is not modelled: it reads gMoveResultFlags / WasMoveSuccessful, which the move-end context does not carry`,
       )
     }
   }
@@ -4512,7 +4512,7 @@ function handleAttackerMoveEndAbility(
       attackerId !== targetId &&
       Boolean(moveData && moveData.power > 0)
     ) {
-      unmodelled.push("Aftershock's followup move (UseAttackerFollowUpMove MOVE_MAGNITUDE, abilities.cc:6355) is not modelled")
+      unmodelled.push("Aftershock's followup move (UseAttackerFollowUpMove MOVE_MAGNITUDE, abilities.cc:6355; ABILITY_AFTERSHOCK) is not modelled")
     }
   }
 
@@ -4522,7 +4522,7 @@ function handleAttackerMoveEndAbility(
       isBattlerAlive(state, targetId) &&
       Boolean(moveData?.flags?.dance)
     ) {
-      unmodelled.push("Blade Dance's followup move (UseAttackerFollowUpMove MOVE_LEAF_BLADE, abilities.cc:9043) is not modelled")
+      unmodelled.push("Blade Dance's followup move (UseAttackerFollowUpMove MOVE_LEAF_BLADE, abilities.cc:9043; ABILITY_BLADE_DANCE) is not modelled")
     }
   }
 
@@ -5508,7 +5508,7 @@ function handleAttackerMoveEndAbility(
               : abilityId === 'ABILITY_SERPENT_BIND'
                 ? 'Serpent Bind'
                 : 'Grip Pincer'
-        unmodelled.push(`${name} set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled`)
+        unmodelled.push(`${name} (${abilityId}) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled`)
       }
     }
   }
@@ -5553,7 +5553,7 @@ function handleAttackerMoveEndAbility(
       attackerId !== targetId &&
       moveTypeMatches(moveData, 'WATER')
     ) {
-      unmodelled.push("High Tide's followup move (UseAttackerFollowUpMove MOVE_SURF, abilities.cc:6477) is not modelled")
+      unmodelled.push("High Tide's followup move (UseAttackerFollowUpMove MOVE_SURF, abilities.cc:6477; ABILITY_HIGH_TIDE) is not modelled")
     }
   }
 
@@ -5618,7 +5618,7 @@ function handleAttackerMoveEndAbility(
       targetDamage > 0 &&
       attackerId !== targetId
     ) {
-      unmodelled.push("Purple Haze's followup move (UseAttackerFollowUpMove MOVE_POISON_GAS, abilities.cc:10284) is not modelled")
+      unmodelled.push("Purple Haze's followup move (UseAttackerFollowUpMove MOVE_POISON_GAS, abilities.cc:10284; ABILITY_PURPLE_HAZE) is not modelled")
     }
   }
 
@@ -5651,7 +5651,7 @@ function handleAttackerMoveEndAbility(
       attackerId !== targetId &&
       moveTypeMatches(moveData, 'FIRE')
     ) {
-      unmodelled.push("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845) is not modelled")
+      unmodelled.push("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845; ABILITY_VOLCANO_RAGE) is not modelled")
     }
   }
 
@@ -5674,7 +5674,7 @@ function handleAttackerMoveEndAbility(
         !testSheerForceFlag(state, attackerId, moveId, statusDeps) &&
         !doesSubstituteBlockMove(state, attackerId, targetId, moveId, statusDeps, unmodelled)
       ) {
-        unmodelled.push("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848) is not modelled")
+        unmodelled.push("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848; ABILITY_PICKPOCKET) is not modelled")
       }
     }
   }
@@ -6234,10 +6234,10 @@ function clearBattlerItem(state: BattleState, battler: BattlerState, unmodelled:
 
   const hasAbility = (b: BattlerState, id: string) => battlerHasAbility(b.mon.abilities, id, () => false)
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
-    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212; ABILITY_GREEDY) is not modelled")
   }
   if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
-    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207; ABILITY_POWER_OF_ALCHEMY) is not modelled")
   }
   battler.mon.itemId = null
 }
@@ -7125,7 +7125,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // Case 3: MOVEEND_SYNCHRONIZE_TARGET (:4523-4526)
   if (target && target.mon.hp > 0 && statusApplied?.battlerId === targetId) {
     if (battlerHasAbility(target.mon.abilities, 'ABILITY_SYNCHRONIZE', () => false)) {
-      unmodelled.push('move-end Synchronize is not modelled yet')
+      unmodelled.push('move-end Synchronize (ABILITY_SYNCHRONIZE) is not modelled yet')
     }
   }
 
@@ -7133,7 +7133,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   if (moveData?.flags?.dance) {
     for (const b of state.battlers) {
       if (b && b.id !== attackerId && b.mon.hp > 0 && battlerHasAbility(b.mon.abilities, 'ABILITY_DANCER', () => false)) {
-        unmodelled.push('move-end Dancer is not modelled yet')
+        unmodelled.push('move-end Dancer (ABILITY_DANCER) is not modelled yet')
         break
       }
     }
@@ -7611,7 +7611,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   // Case 29: MOVEEND_PICKPOCKET (:4828-4853)
   if (target && targetDamage > 0 && battlerHasAbility(target.mon.abilities, 'ABILITY_PICKPOCKET', () => false)) {
-    unmodelled.push('move-end Pickpocket is not modelled yet')
+    unmodelled.push('move-end Pickpocket (ABILITY_PICKPOCKET) is not modelled yet')
   }
 
   // Case 30: MOVEEND_CLEAR_BITS (:4934-4957)

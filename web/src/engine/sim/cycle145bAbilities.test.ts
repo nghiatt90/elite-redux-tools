@@ -229,11 +229,11 @@ function crossedBattle(abilityId: string, rng: RandomSource, drops: Partial<SimB
 // ---------------------------------------------------------------------------
 // Item 1: Patchwork onDisguise unmodelled note & onDefender path
 // ---------------------------------------------------------------------------
-describe('Cycle 145b - Patchwork (src/abilities.cc:8634-8655)', () => {
-  const PATCHWORK_GAP_NOTE = 'move-end Patchwork onDisguise hook (src/abilities.cc:8636-8643) is not modelled yet'
+describe('Cycle 145b - Patchwork (src/abilities.cc:8636-8655)', () => {
+  const PATCHWORK_GAP_NOTE = 'move-end ABILITY_PATCHWORK onDisguise hook (pipeline/.upstream/eliteredux-source/src/abilities.cc:8638-8644) is not modelled yet'
 
   it('a Patchwork holder hit once by a damaging move pushes the unmodelled note and does not curse the attacker', () => {
-    // onDisguise (:8636-8643) is the only in-play writer of SetOncePerTurnAbilityCounter.
+    // onDisguise (:8638-8644) is the only in-play writer of SetOncePerTurnAbilityCounter.
     // Without the writer hooked, onDefender (:8646) reads counter 0 (triggeringBattler -1),
     // failing CHECK(triggeringBattler == attacker).
     const state = holderBattle('ABILITY_PATCHWORK')

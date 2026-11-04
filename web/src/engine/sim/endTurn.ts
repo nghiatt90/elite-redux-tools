@@ -944,7 +944,7 @@ function abilityDrainsHp(
       battlerHasAbility(holder.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION) ||
       battlerHasAbility(target.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION)
     ) {
-      unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3309-3317): the second hit on the drained battler is not modelled')
+      unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3309-3317; ABILITY_SOUL_LINKER): the second hit on the drained battler is not modelled')
     }
     if (holder.mon.hp > 0) healEndTurn(state, holderId, holder, damage, results)
   }

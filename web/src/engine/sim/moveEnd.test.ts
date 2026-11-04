@@ -3245,7 +3245,7 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
     // Grip Pincer wraps for 4; ENDTURN_WRAP (battle_util.c:2663) decrements it once in the same turn.
     expect(state.battlers[1]!.volatiles.wrapTurns).toBe(3)
-    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain('Grip Pincer set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain('Grip Pincer (ABILITY_GRIP_PINCER) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
   })
 
   it('Pickpocket logs unmodelled item theft when attacker has no item and defender has item', () => {
@@ -3258,7 +3258,7 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     )
     const out = executeTurn(state, [useMove(1, MOVE_TACKLE), null], testDepsWithDamage(fixedDamage(20)))
 
-    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848) is not modelled")
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Pickpocket's item theft (StealTargetItem, battle_script_commands.c:4848; ABILITY_PICKPOCKET) is not modelled")
   })
 
   it('Volcano Rage logs unmodelled followup move on Fire move', () => {
@@ -3271,7 +3271,7 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     )
     const out = executeTurn(state, [useMove(1, MOVE_FLAMETHROWER), null], testDepsWithDamage(fixedDamage(20)))
 
-    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845) is not modelled")
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845; ABILITY_VOLCANO_RAGE) is not modelled")
   })
 
   describe('Case 25: MOVEEND_ABILITIES_AFTER_RECOIL (Nosferatu)', () => {

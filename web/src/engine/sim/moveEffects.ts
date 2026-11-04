@@ -423,7 +423,7 @@ function checkAccuracy(
   unmodelled.push(...gapsToUnmodelled(gaps))
   if (defenderHasAnticipation) {
     unmodelled.push(
-      "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
+      "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
     )
   }
   const accResult = getTotalAccuracy(inputs)
@@ -9511,10 +9511,10 @@ export function clearBattlerItem(state: BattleState, battler: BattlerState, unmo
 
   const hasAbility = (b: BattlerState, id: string) => findAbilitySlot(b.mon.abilities, id) !== -1
   if (hasAbility(battler, 'ABILITY_GREEDY')) {
-    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212; ABILITY_GREEDY) is not modelled")
   }
   if (itemId !== 'ITEM_BIG_NUGGET' && state.battlers.some((b) => b && hasAbility(b, 'ABILITY_POWER_OF_ALCHEMY'))) {
-    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207) is not modelled")
+    unmodelled.push("UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207; ABILITY_POWER_OF_ALCHEMY) is not modelled")
   }
   battler.mon.itemId = null
 }
