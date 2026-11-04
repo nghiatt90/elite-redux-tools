@@ -5756,7 +5756,10 @@ function handleFilletAway(ctx: MoveEffectContext): ActionOutcome {
  */
 function handleNoRetreat(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
-  const targetId = ctx.targetId ?? battlerId
+  // BattleScript_EffectNoRetreat operates on BS_TARGET. For a regular move (target USER),
+  // GetMoveTarget returns attacker (battle_util.c:6403-6405). For an extra attack from
+  // UseEntryMove (I Am Steve), target is the opponent queued by UseEntryMove (:4014).
+  const targetId = state.processingExtraAttacks ? (ctx.targetId ?? battlerId) : battlerId
   const target = state.battlers[targetId]!
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect

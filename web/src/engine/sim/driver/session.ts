@@ -256,6 +256,10 @@ export function createSession(options: SessionOptions): BattleSession {
     battlerByTurnOrder: Array.from({ length: state.battlersCount }, (_, i) => i),
     actionsByTurnOrder: new Array<ChosenAction['action']>(state.battlersCount).fill('USE_MOVE'),
   }
+  // createBattleState pre-applies the :3406 decrement; the battle-start pass runs before it in C (isFirstTurn is still 2 there, Stakeout abilities.cc:2726).
+  for (const battler of state.battlers) {
+    if (battler) battler.volatiles.isFirstTurn = 2
+  }
   applyBattleStartPass(
     state,
     {

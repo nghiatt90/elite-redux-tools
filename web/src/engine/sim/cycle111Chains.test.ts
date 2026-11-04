@@ -36,7 +36,7 @@ import type { ReplacementDeps } from './switchIn'
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps, TurnOutcome } from './turn'
-import { executeTurn, roundStructsClear } from './turn'
+import { executeTurn } from './turn'
 
 const simData = loadSimData()
 const DATA_CONTEXT = simData.dataContext
@@ -769,7 +769,6 @@ describe('cycle 111 - Life Orb', () => {
 describe('cycle 111 - Speed Boost over two turns', () => {
   it('raises Speed by 1 at the end of each turn (+1 then +2)', () => {
     const state = battle(monFor('SPECIES_MUDKIP', { abilities: only('ABILITY_SPEED_BOOST') }), monFor('SPECIES_MUDKIP'), countRng())
-    roundStructsClear(state)
     executeTurn(state, [null, null], loopDeps(state, fixedDamage(0)))
     expect(state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(7)
     expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(0)

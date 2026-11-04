@@ -8,7 +8,7 @@ import type { MoveBehaviors } from '../basePower'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import { NEUTRAL_TURN_ORDER_CONTEXT, type ChosenAction } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps } from './turn'
-import { executeTurn, roundStructsClear } from './turn'
+import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData, SimSpeciesData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
@@ -520,7 +520,6 @@ describe('Defect 2: Cool Exit natural timeline through executeTurn', () => {
       ],
       scriptedRng(),
     )
-    roundStructsClear(state)
 
     // Pre-turn 1 checks
     expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(1)

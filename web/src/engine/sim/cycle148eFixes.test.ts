@@ -411,7 +411,9 @@ describe('Cycle 148e Fixes', () => {
         ],
         rng,
       )
-      // State is freshly created: isFirstTurn is 2 for both battlers
+      // State is freshly created; session sets isFirstTurn = 2 before the battle-start pass
+      state.battlers[0]!.volatiles.isFirstTurn = 2
+      state.battlers[1]!.volatiles.isFirstTurn = 2
       expect(state.battlers[1]!.volatiles.isFirstTurn).toBe(2)
 
       applySwitchInAbilities(state, 0, testDeps(), [])

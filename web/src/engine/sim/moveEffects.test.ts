@@ -17,7 +17,7 @@ import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './sta
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { ActionOutcome, DamageResolver, TurnLoopDeps } from './turn'
-import { drainQueuedExtraAttacks, executeTurn, roundStructsClear } from './turn'
+import { drainQueuedExtraAttacks, executeTurn } from './turn'
 import { getMoveEffectHandler } from './moveEffects'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
@@ -5954,7 +5954,6 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             ],
             rng,
           )
-          roundStructsClear(state)
           // Battle-start call (TurnValuesCleanUp, src/battle_main.c:3406) decremented isFirstTurn from 2 to 1
           expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(1)
 
