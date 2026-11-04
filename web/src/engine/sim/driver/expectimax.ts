@@ -193,10 +193,12 @@ const CONFUSION_SELF_HIT_CHANCE = 1 / 3
  * the sub would never be picked. */
 const SUBSTITUTE_BUFFER_WEIGHT = 2
 /** HP-fraction-equivalent value of one turn of one damage-halving screen
- * (Reflect or Light Screen). MODEL CHOICE flat weight; the `UQ_4_12(0.5)`
- * halving in a singles battle is battle_util.c:7627-7628 (the 0.66 branch is
- * the doubles value and is not used). Aurora Veil halves both categories and
- * is therefore counted as two screens. */
+ * (Reflect or Light Screen), per point of the attacker's move mix it covers.
+ * MODEL CHOICE flat weight; the `UQ_4_12(0.5)` halving in a singles battle is
+ * battle_util.c:7627-7628 (the 0.66 branch is the doubles value and is not
+ * used). Aurora Veil halves both categories, so it is worth this weight times
+ * the sum of the two shares (see `sideFieldScore`) -- Reflect plus Light
+ * Screen against any foe with a damaging move. */
 const SCREEN_VALUE = 0.1
 /** HP-fraction-equivalent value of one turn of Tailwind's doubled Speed.
  * MODEL CHOICE flat weight; `speed *= 2` is battle_main.c:4203-4204. */
@@ -433,7 +435,14 @@ function activeVolatileBurden(state: BattleState, battler: BattlerState): number
  * Iron Ball (IsBattlerGrounded, battle_util.c), and the ability/item paths of
  * IsBattlerAffectedByHazards (battle_util.c:8522-8530: Heavy-Duty Boots, Shield
  * Dust, Molten Core / Mountaineer for Stealth Rock, Tectonize for grounded
- * types) and Magic Guard's hazard immunity. */
+ * types) and Magic Guard's hazard immunity.
+ *
+ * Gravity is also unmodelled here. CheckGroundingEffects (battle_util.c:6647-6652)
+ * returns grounded on `IsGravityActive()`, so in the C Gravity grounds a Flying
+ * mon for Spikes / Toxic Spikes / Sticky Web. The sim's port of IsGravityActive
+ * (grounding.ts, battle_util.c:8689-8696) is NOT the bare field-status test --
+ * it is suppressed by Clueless anywhere on the field -- so this leaf scorer does
+ * not read it. MODEL CHOICE. */
 function benchedMonGrounded(types: readonly string[]): boolean {
   return !types.includes('FLYING')
 }
@@ -486,7 +495,7 @@ function timerTurns(timer: number): number {
  *     abilities that let CanPoisonType poison a Steel type are unmodelled.
  *   - Sticky Web (HAZARD_MODE_WEBS, :8788-8798) needs the bit; grounded only.
  */
-function sideFieldScore(state: BattleState, side: 0 | 1): number {
+function sideFieldScore(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup): number {
   const active = state.battlers[side]
   const party = state.sides[side].party
   const timers = state.sides[side].timers
@@ -520,7 +529,14 @@ function sideFieldScore(state: BattleState, side: 0 | 1): number {
 
   // HAZARD_MODE_POISON_SPIKES, battle_script_commands.c:8758-8787. The status
   // is written onto the switching mon, so a benched mon with any status1 takes
-  // nothing (CanBePoisoned's first check, battle_util.c:5044).
+  // nothing (CanBePoisoned's first check, battle_util.c:5044). In the C an
+  // Immunity holder ALSO absorbs the spikes and clears them
+  // (`IS_BATTLER_OF_TYPE(gActiveBattler, TYPE_POISON) || BattlerHasAbility(
+  // gActiveBattler, ABILITY_IMMUNITY, TRUE)`, :8763), and Heavy-Duty Boots /
+  // Shield Dust suppress the poison through `IsBattlerAffectedByHazards(
+  // gActiveBattler, FALSE, FALSE)` at :8770. MODEL CHOICE: neither ability nor
+  // item is readable from a benched party mon in this scorer, so only the
+  // Poison type and the layer count are read here; the numbers do not change.
   if (hasFlag(statuses, SIDE_STATUS_TOXIC_SPIKES) && timers.toxicSpikesAmount >= 1) {
     const status1 = timers.toxicSpikesAmount >= 2 ? STATUS1_TOXIC_POISON : STATUS1_POISON
     for (const mon of grounded) {
@@ -535,13 +551,29 @@ function sideFieldScore(state: BattleState, side: 0 | 1): number {
     burden += STICKY_WEB_SPEED_VALUE * grounded.length
   }
 
-  // Screens, battle_util.c:7622-7630: Reflect halves physical damage, Light
-  // Screen special, Aurora Veil both (two screens' worth). A timer is read only
-  // when its bit is set. Crits and Infiltrator (:7624) are not modelled, and
-  // neither is the doubles 0.66 multiplier (:7627).
-  if (hasFlag(statuses, SIDE_STATUS_REFLECT)) burden -= SCREEN_VALUE * timerTurns(timers.reflectTimer)
-  if (hasFlag(statuses, SIDE_STATUS_LIGHTSCREEN)) burden -= SCREEN_VALUE * timerTurns(timers.lightscreenTimer)
-  if (hasFlag(statuses, SIDE_STATUS_AURORA_VEIL)) burden -= 2 * SCREEN_VALUE * timerTurns(timers.auroraVeilTimer)
+  // Screens, battle_util.c:7622-7630: Reflect halves PHYSICAL damage
+  // (`SIDE_STATUS_REFLECT && IS_MOVE_PHYSICAL(move)`, :7622), Light Screen
+  // SPECIAL (:7623), and Aurora Veil both with no category test (:7623). A
+  // screen is therefore worth SCREEN_VALUE per remaining turn times the share
+  // of the ATTACKER's damaging moves it halves (`foeSplitShares`); the attacker
+  // is the other side's active battler. physShare + specShare is 1 whenever
+  // the foe has a damaging move, so Aurora Veil is worth
+  // `SCREEN_VALUE * timerTurns(auroraVeilTimer)` -- exactly Reflect plus Light
+  // Screen against any foe. When `moveLookup` is undefined (the data-free
+  // path) the flat weights are kept instead: factor 1 for each screen and 2
+  // for Aurora Veil. A timer is read only when its bit is set. Crits and
+  // Infiltrator (:7624) are not modelled, neither is the doubles 0.66
+  // multiplier (:7627).
+  const foeShares = moveLookup ? foeSplitShares(state.battlers[1 - side], moveLookup) : null
+  if (hasFlag(statuses, SIDE_STATUS_REFLECT)) {
+    burden -= SCREEN_VALUE * timerTurns(timers.reflectTimer) * (foeShares ? foeShares.phys : 1)
+  }
+  if (hasFlag(statuses, SIDE_STATUS_LIGHTSCREEN)) {
+    burden -= SCREEN_VALUE * timerTurns(timers.lightscreenTimer) * (foeShares ? foeShares.spec : 1)
+  }
+  if (hasFlag(statuses, SIDE_STATUS_AURORA_VEIL)) {
+    burden -= SCREEN_VALUE * timerTurns(timers.auroraVeilTimer) * (foeShares ? foeShares.phys + foeShares.spec : 2)
+  }
 
   // Tailwind, battle_main.c:4203-4204: `speed *= 2` for the side that owns it.
   if (hasFlag(statuses, SIDE_STATUS_TAILWIND)) burden -= TAILWIND_SPEED_VALUE * timerTurns(timers.tailwindTimer)
@@ -700,6 +732,35 @@ function damagingMoveTypes(mon: SimBattleMon, moveLookup: MoveLookup): Set<strin
     types.add(bareTypeName(move.type))
   }
   return types
+}
+
+/** What fraction of a battler's DAMAGING moves each screen halves, for the
+ * screen terms in `sideFieldScore`. Reflect multiplies only `IS_MOVE_PHYSICAL`
+ * hits and Light Screen only `IS_MOVE_SPECIAL` (battle_util.c:7622-7623), so a
+ * screen's worth is the share of the incoming moves it actually reduces.
+ * "Damaging" is the same MODEL CHOICE as `damagingMoveTypes`: `split != STATUS`
+ * and `power > 0`. An empty slot is skipped (the C's MOVE_NONE); a battler with
+ * no damaging move gets two zeros. */
+function foeSplitShares(
+  battler: BattlerState | null | undefined,
+  moveLookup: MoveLookup,
+): { phys: number; spec: number } {
+  let damaging = 0
+  let phys = 0
+  let spec = 0
+  if (!battler) return { phys: 0, spec: 0 }
+  for (const moveId of battler.mon.moves) {
+    if (!moveId) continue
+    const move = moveLookup(moveId)
+    if (!move) continue
+    if (move.split === 'STATUS') continue
+    if (!move.power || move.power <= 0) continue
+    damaging++
+    if (move.split === 'PHYSICAL') phys++
+    else if (move.split === 'SPECIAL') spec++
+  }
+  if (damaging === 0) return { phys: 0, spec: 0 }
+  return { phys: phys / damaging, spec: spec / damaging }
 }
 
 /** Rain/sun Water/Fire multiplier site, battle_util.c:7562-7598: under rain
@@ -881,7 +942,7 @@ function sideStatusScore(state: BattleState, side: 0 | 1, moveLookup?: MoveLooku
     total += statusMonValue({ status1: cur.status1, hp: cur.hp, maxHp: cur.maxHp }, isActive)
   }
   if (active) total += activeVolatileBurden(state, active)
-  total += sideFieldScore(state, side)
+  total += sideFieldScore(state, side, moveLookup)
   total += sideFieldConditionBurden(state, side, moveLookup)
   return total
 }

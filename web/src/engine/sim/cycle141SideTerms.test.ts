@@ -268,7 +268,7 @@ describe('cycle 141 - toxic spikes', () => {
   })
 
   // CanPoisonType (battle_script_commands.c:6465-6471): Poison and Steel types
-  // are not poisoned by Toxic Spikes (Steelix is Rock/Steel and grounded).
+  // are not poisoned by Toxic Spikes (Steelix is Steel/Ground and grounded).
   it('a Steel-type benched mon cannot be poisoned -> 0', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE']), mon('SPECIES_STEELIX', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 1, { hp: 320, maxHp: 320 })
@@ -388,9 +388,11 @@ describe('cycle 141 - screens', () => {
     expect(statusScore(s)).toBeCloseTo(-0.3, 10)
   })
 
-  // Aurora Veil halves both physical and special damage, so it is worth two
-  // screens: 2 * 0.1 * min(5, 3) = 0.6.
-  it('foe Aurora Veil timer 5 -> -0.6', () => {
+  // No move lookup is passed here, so the data-free flat weights apply: Aurora
+  // Veil halves both physical and special damage and is worth two screens:
+  // 2 * 0.1 * min(5, 3) = 0.6. (With a lookup it is one screen's weight times
+  // the foe's physShare + specShare; see cycle141bScreenTerms.test.ts.)
+  it('foe Aurora Veil timer 5 -> -0.6 (data-free path)', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     setSideField(s, 1, { statuses: SIDE_STATUS_AURORA_VEIL, auroraVeilTimer: 5 })
     expect(statusScore(s)).toBeCloseTo(-0.6, 10)

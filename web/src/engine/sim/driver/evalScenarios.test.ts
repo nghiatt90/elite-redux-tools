@@ -116,12 +116,13 @@ function setVolatiles(
 function setSide(
   s: BattleSession,
   side: 0 | 1,
-  patch: { statuses?: number; spikesAmount?: number; reflectTimer?: number },
+  patch: { statuses?: number; spikesAmount?: number; reflectTimer?: number; tailwindTimer?: number },
 ): void {
   const sideState = s.state.sides[side]
   if (patch.statuses !== undefined) sideState.statuses = patch.statuses
   if (patch.spikesAmount !== undefined) sideState.timers.spikesAmount = patch.spikesAmount
   if (patch.reflectTimer !== undefined) sideState.timers.reflectTimer = patch.reflectTimer
+  if (patch.tailwindTimer !== undefined) sideState.timers.tailwindTimer = patch.tailwindTimer
 }
 
 /** The move id the expectimax policy picks for one fresh seeded session. */
@@ -427,6 +428,8 @@ describe('cycle 141 - side scenarios', () => {
 
   describe('Reflect against a physical foe', () => {
     const PHYSICAL = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_BODY_SLAM', 'MOVE_ROCK_SLIDE'])]
+    // Both moves are SPECIAL in data/v2.65beta/moves.json.
+    const SPECIAL = () => [foeMon('SPECIES_MACHAMP', 'ABILITY_GUTS', ['MOVE_EMBER', 'MOVE_WATER_GUN'])]
     const PLAYER_MOVES = ['MOVE_REFLECT', ...WEAK_MOVES]
 
     it('sanity: Reflect sets the bit and a five-turn timer on the player side', () => {
@@ -450,15 +453,26 @@ describe('cycle 141 - side scenarios', () => {
       expect(picks(PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT')).toBeGreaterThanOrEqual(6)
     })
 
-    // The flat per-turn screen value in the leaf scorer does not read the foe's
-    // move category, so the "foe has only special moves" twin cannot be
-    // expressed without inventing a term. The re-use twin is used instead (see
-    // REPORT.md).
     it('twin: with Reflect already up, Reflect is chosen on at most 1 of 8 seeds', () => {
       const n = picks(PLAYER_MOVES, PHYSICAL(), 'MOVE_REFLECT', (s) =>
         setSide(s, 0, { statuses: SIDE_STATUS_REFLECT, reflectTimer: 5 }),
       )
       expect(n).toBeLessThanOrEqual(1)
+    })
+
+    // battle_util.c:7622: Reflect halves only IS_MOVE_PHYSICAL hits, and the
+    // leaf scorer now weights a screen by the foe's split mix. Against a foe
+    // whose moves are all special, Reflect is worth 0 and the weak attacks win.
+    it('sanity: Reflect still sets the bit and a five-turn timer against a special-only foe', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, SPECIAL(), 'MOVE_REFLECT')
+        expect(hasFlag(session.state.sides[0].statuses, SIDE_STATUS_REFLECT)).toBe(true)
+        expect(session.state.sides[0].timers.reflectTimer).toBe(5)
+      }
+    })
+
+    it('twin: against a special-only foe, Reflect is chosen on at most 1 of 8 seeds', () => {
+      expect(picks(PLAYER_MOVES, SPECIAL(), 'MOVE_REFLECT')).toBeLessThanOrEqual(1)
     })
   })
 
@@ -476,6 +490,29 @@ describe('cycle 141 - side scenarios', () => {
 
     it('positive: Tailwind is chosen on at least 6 of 8 seeds', () => {
       expect(picks(PLAYER_MOVES, FOE(), 'MOVE_TAILWIND')).toBeGreaterThanOrEqual(6)
+    })
+
+    // Cmd_settailwind, battle_script_commands.c:10961-10972: with
+    // SIDE_STATUS_TAILWIND already set, the command jumps to the fail pointer
+    // (:10971) instead of setting the bit and timer again. The sim reports
+    // that as a plain failure -- no `missed` flag, unlike Reflect -- and the
+    // standing timer then counts down to 2 at end of turn.
+    it('sanity: Tailwind with Tailwind already up fails and keeps the standing timer', () => {
+      for (const seed of SEEDS) {
+        const { result, session } = forcedTurn(seed, PLAYER_MOVES, FOE(), 'MOVE_TAILWIND', (s) =>
+          setSide(s, 0, { statuses: SIDE_STATUS_TAILWIND, tailwindTimer: 3 }),
+        )
+        expect(result.outcome.actions.find((a) => a.battlerId === 0)?.missed).toBeFalsy()
+        expect(hasFlag(session.state.sides[0].statuses, SIDE_STATUS_TAILWIND)).toBe(true)
+        expect(session.state.sides[0].timers.tailwindTimer).toBe(2)
+      }
+    })
+
+    it('twin: with Tailwind already up, Tailwind is chosen on at most 1 of 8 seeds', () => {
+      const n = picks(PLAYER_MOVES, FOE(), 'MOVE_TAILWIND', (s) =>
+        setSide(s, 0, { statuses: SIDE_STATUS_TAILWIND, tailwindTimer: 3 }),
+      )
+      expect(n).toBeLessThanOrEqual(1)
     })
   })
 })
@@ -545,8 +582,9 @@ describe('cycle 142 - field scenarios', () => {
     // IsBattlerTerrainAffected (battle_util.c:4901-4928) excludes a Flying
     // active mon, so the damaged player stops healing and the terrain move goes
     // to 0 while the weak attacks still chip the foe. (A full-HP player also
-    // scores the terrain 0, but so do the weak attacks, and the seed tie-break
-    // then picks the terrain move freely -- see REPORT.md.)
+    // scores the terrain 0 -- so do the weak attacks at full HP -- and the seed
+    // tie-break then picks the terrain move freely, which is why the twin
+    // damages the player first.)
     it('twin: a Flying (non-grounded) player heals nothing, so Grassy Terrain is chosen on at most 1 of 8 seeds', () => {
       const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', (s) => {
         HALF_HP(s)
