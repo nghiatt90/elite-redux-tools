@@ -13,16 +13,21 @@ import {
   KO_CRIT_BOOST_ABILITIES,
   ON_RECOIL_ABILITIES,
 } from '../moveEnd'
-import { PORTED_SWITCH_IN_ABILITIES } from '../switchInAbility'
+import {
+  WEATHER_SETTER_MAP,
+  TERRAIN_SETTER_MAP,
+  PORTED_ENTRY_MOVE_MAP,
+  INTIMIDATE_CLONE_MAP,
+  ADD_TYPE_ON_ENTRY,
+  ANNOUNCE_ONLY_ON_ENTRY,
+} from '../switchInAbility'
 import {
   OWN_STATUS_IMMUNE_CONDITIONS,
   CAN_STATUS_TYPE_ABILITIES,
   ON_MODIFY_EFFECT_CHANCE_ABILITIES,
   SET_STATE_ON_EFFECT_ABILITIES,
 } from '../statusEffects'
-import { PORTED_BLOCK_STAT_DROP_ABILITIES, ON_STAT_LOWERED_HOOKS } from '../statBuffs'
-import { PORTED_TRAP_ABILITIES } from '../escape'
-import { PORTED_SWITCH_OUT_ABILITIES } from '../turn'
+import { ON_STAT_LOWERED_HOOKS } from '../statBuffs'
 import { HEAL_ABSORB_ABILITIES, STAT_ABSORB_ABILITIES } from '../absorb'
 
 export const HOOK_KINDS = [
@@ -184,6 +189,8 @@ const STAT_BUFFS_PATH = join(ENGINE_DIR, 'sim/statBuffs.ts')
 const TURN_PATH = join(ENGINE_DIR, 'sim/turn.ts')
 const MOVE_END_PATH = join(ENGINE_DIR, 'sim/moveEnd.ts')
 const ABSORB_PATH = join(ENGINE_DIR, 'sim/absorb.ts')
+const ESCAPE_PATH = join(ENGINE_DIR, 'sim/escape.ts')
+const SWITCH_IN_PATH = join(ENGINE_DIR, 'sim/switchInAbility.ts')
 
 /**
  * Extracts the slice of code corresponding to a function declaration, up to the next top-level function or EOF.
@@ -322,6 +329,79 @@ export function extractSimAbsorbExtraAbilities(): Set<string> {
   return result
 }
 
+/** Quoted `'ABILITY_...'` literals inside a source slice (comparisons, case labels, map values). */
+function extractQuotedAbilityLiterals(slice: string): Set<string> {
+  const regex = /['"](ABILITY_[A-Z0-9_]+)['"]/g
+  const result = new Set<string>()
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    result.add(match[1])
+  }
+  return result
+}
+
+/** The declaration text for a top-level function in `content`, or null if it is imported. */
+function findFunctionDeclaration(content: string, name: string): string | null {
+  const match = new RegExp(`(?:export\\s+)?function\\s+${escapeRegExp(name)}\\s*\\(`).exec(content)
+  return match ? match[0] : null
+}
+
+export function extractTrapAbilities(): Set<string> {
+  const content = readFileSync(ESCAPE_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'function onTrap(')
+}
+
+export function extractBlockStatDropAbilities(): Set<string> {
+  const content = readFileSync(STAT_BUFFS_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'function statDropBlockForAbility(')
+}
+
+export function extractSwitchOutAbilities(): Set<string> {
+  const content = readFileSync(TURN_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'export function dispatchSwitchOutAbilities(')
+}
+
+/**
+ * Derives the onEntry handler set from the dispatcher itself: the map tables it
+ * consults plus every `'ABILITY_...'` literal in `applySwitchInAbilities` and the
+ * same-file helpers it calls (transitively).
+ */
+export function extractSwitchInAbilities(): Set<string> {
+  const content = readFileSync(SWITCH_IN_PATH, 'utf-8')
+  const result = new Set<string>([
+    ...Object.keys(WEATHER_SETTER_MAP),
+    ...Object.keys(TERRAIN_SETTER_MAP),
+    ...Object.keys(PORTED_ENTRY_MOVE_MAP),
+    ...Object.keys(INTIMIDATE_CLONE_MAP),
+    ...Object.keys(ADD_TYPE_ON_ENTRY),
+    ...ANNOUNCE_ONLY_ON_ENTRY,
+  ])
+
+  let literalCount = 0
+  const visitedDeclarations = new Set<string>()
+  const queue = ['export function applySwitchInAbilities(']
+  while (queue.length > 0) {
+    const declaration = queue.pop()!
+    if (visitedDeclarations.has(declaration)) continue
+    visitedDeclarations.add(declaration)
+    const slice = extractFunctionSlice(content, declaration)
+    const literals = extractQuotedAbilityLiterals(slice)
+    literalCount += literals.size
+    for (const id of literals) result.add(id)
+
+    const callRegex = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g
+    let call: RegExpExecArray | null
+    while ((call = callRegex.exec(slice)) !== null) {
+      const helperDeclaration = findFunctionDeclaration(content, call[1])
+      if (helperDeclaration) queue.push(helperDeclaration)
+    }
+  }
+  if (literalCount === 0) {
+    throw new Error('Zero labels extracted for declaration: export function applySwitchInAbilities(')
+  }
+  return result
+}
+
 // ---------------------------------------------------------------------------
 // Sim-side sets (extracted dynamically)
 // ---------------------------------------------------------------------------
@@ -352,10 +432,11 @@ export const PORTED_SIM_ABSORB_ABILITIES = new Set<string>([
 ])
 
 export const PORTED_STATUS_IMMUNE_ABILITIES = new Set(OWN_STATUS_IMMUNE_CONDITIONS.map((c) => c.ability))
-export const PORTED_BLOCK_STAT_DROP_ABILITIES_SET = new Set<string>(PORTED_BLOCK_STAT_DROP_ABILITIES)
+export const PORTED_BLOCK_STAT_DROP_ABILITIES_SET = extractBlockStatDropAbilities()
 export const PORTED_STAT_LOWERED_ABILITIES = new Set<string>(Object.keys(ON_STAT_LOWERED_HOOKS))
-export const PORTED_TRAP_ABILITIES_SET = new Set<string>(PORTED_TRAP_ABILITIES)
-export const PORTED_SWITCH_OUT_ABILITIES_SET = new Set<string>(PORTED_SWITCH_OUT_ABILITIES)
+export const PORTED_TRAP_ABILITIES_SET = extractTrapAbilities()
+export const PORTED_SWITCH_OUT_ABILITIES_SET = extractSwitchOutAbilities()
+export const PORTED_SWITCH_IN_ABILITIES = extractSwitchInAbilities()
 export const PORTED_RECOIL_ABILITIES_SET = new Set<string>(ON_RECOIL_ABILITIES)
 const CAN_STATUS_TYPE_SET = new Set<string>(CAN_STATUS_TYPE_ABILITIES)
 const ON_MODIFY_EFFECT_CHANCE_SET = new Set<string>(ON_MODIFY_EFFECT_CHANCE_ABILITIES)
@@ -690,16 +771,16 @@ export function generateInventoryDoc(
   lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).')
   lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.')
   lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
-  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`), catalogued by exported `PORTED_SWITCH_IN_ABILITIES`.')
+  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `ABILITY_*` literal in `applySwitchInAbilities` and the same-file helpers it calls.')
   lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.')
   lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.')
   lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.')
   lines.push('8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).')
-  lines.push('9. **onBlockStatDrops**: Cases in `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), catalogued by `PORTED_BLOCK_STAT_DROP_ABILITIES`.')
+  lines.push('9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.')
   lines.push('10. **onCanStatusType**: Handled in `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`).')
   lines.push('11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
-  lines.push('13. **onExit**: Handled in `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), catalogued by `PORTED_SWITCH_OUT_ABILITIES`; note-only branches are unported.')
+  lines.push('13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.')
   lines.push('14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
   lines.push('15. **onModifyMoveFlags**: Not ported (unwired in calc; gap notes in sim).')
   lines.push('16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
@@ -709,7 +790,7 @@ export function generateInventoryDoc(
   lines.push('20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
   lines.push('21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).')
   lines.push('22. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).')
-  lines.push('23. **onTrap**: Cases in `onTrap` (`web/src/engine/sim/escape.ts`), catalogued by `PORTED_TRAP_ABILITIES`.')
+  lines.push('23. **onTrap**: Case labels of `onTrap` (`web/src/engine/sim/escape.ts`), extracted from source text.')
   lines.push('24. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).')
   lines.push('')
 

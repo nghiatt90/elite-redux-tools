@@ -241,20 +241,6 @@ const PARTNER_STAT_DROP_BLOCK_ABILITIES = [
 ] as const
 const PARTNER_STAT_DROP_BLOCK_SET = new Set<string>(PARTNER_STAT_DROP_BLOCK_ABILITIES)
 
-export const PORTED_BLOCK_STAT_DROP_ABILITIES: readonly string[] = [
-  'ABILITY_CLEAR_BODY',
-  'ABILITY_FULL_METAL_BODY',
-  'ABILITY_LIMBER',
-  'ABILITY_LUCKY_HALO',
-  'ABILITY_KEEN_EYE',
-  'ABILITY_MINDS_EYE',
-  'ABILITY_HYPER_CUTTER',
-  'ABILITY_DESERT_CLOAK',
-  'ABILITY_DUNE_VEIL',
-  'ABILITY_FLOWER_VEIL',
-  'ABILITY_JUNGLES_GUARD',
-]
-
 /**
  * One ability's onBlockStatDrops hook body. `target` is always the battler the
  * drop lands on -- abilities.cc:445-458 passes `*battler` to the hook even when

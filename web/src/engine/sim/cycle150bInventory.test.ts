@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   classifyPair,
+  extractBlockStatDropAbilities,
+  extractSwitchInAbilities,
+  extractSwitchOutAbilities,
+  extractTrapAbilities,
   generateInventoryDoc,
   isDirectlyPorted,
   runInventory,
@@ -336,6 +340,49 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
       expect(classifyPair(fabricatedId, 'onStatLowered', customHooksData)).toBe('unported')
       expect(classifyPair(fabricatedId, 'onStatusImmune', customHooksData)).toBe('unported')
       expect(classifyPair(fabricatedId, 'onTrap', customHooksData)).toBe('unported')
+    })
+  })
+
+  describe('(7) Ported sets are derived from dispatcher source, not hand-typed lists', () => {
+    it('onTrap set comes from the onTrap switch and matches the classifier', () => {
+      const trap = extractTrapAbilities()
+      expect(trap.size).toBeGreaterThan(0)
+      expect(trap.has('ABILITY_SHADOW_TAG')).toBe(true)
+      expect(trap.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
+      expect(isDirectlyPorted('ABILITY_SHADOW_TAG', 'onTrap')).toBe(true)
+      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onTrap')).toBe(false)
+    })
+
+    it('onBlockStatDrops set comes from statDropBlockForAbility and matches the classifier', () => {
+      const block = extractBlockStatDropAbilities()
+      expect(block.size).toBeGreaterThan(0)
+      expect(block.has('ABILITY_CLEAR_BODY')).toBe(true)
+      expect(block.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
+      expect(isDirectlyPorted('ABILITY_CLEAR_BODY', 'onBlockStatDrops')).toBe(true)
+      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onBlockStatDrops')).toBe(false)
+    })
+
+    it('onExit set comes from dispatchSwitchOutAbilities, with note-only branches still unported', () => {
+      const exit = extractSwitchOutAbilities()
+      expect(exit.size).toBeGreaterThan(0)
+      expect(exit.has('ABILITY_REGENERATOR')).toBe(true)
+      expect(exit.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
+      expect(isDirectlyPorted('ABILITY_REGENERATOR', 'onExit')).toBe(true)
+      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onExit')).toBe(false)
+      // Generator is a real switch case, but its branch only pushes a note.
+      expect(exit.has('ABILITY_GENERATOR')).toBe(true)
+      expect(isDirectlyPorted('ABILITY_GENERATOR', 'onExit')).toBe(false)
+    })
+
+    it('onEntry set comes from applySwitchInAbilities maps and literals, not the census', () => {
+      const entry = extractSwitchInAbilities()
+      expect(entry.size).toBeGreaterThan(0)
+      expect(entry.has('ABILITY_INTIMIDATE')).toBe(true) // INTIMIDATE_CLONE_MAP
+      expect(entry.has('ABILITY_DRIZZLE')).toBe(true) // WEATHER_SETTER_MAP
+      expect(entry.has('ABILITY_SUPERCELL')).toBe(true) // literal branch in the dispatcher body
+      expect(entry.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
+      expect(isDirectlyPorted('ABILITY_INTIMIDATE', 'onEntry')).toBe(true)
+      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onEntry')).toBe(false)
     })
   })
 

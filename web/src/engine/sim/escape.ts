@@ -40,14 +40,6 @@ function rawHoldEffect(battler: BattlerState, deps: EscapeDeps): string | null {
   return battler.mon.itemId ? (deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null) : null
 }
 
-export const PORTED_TRAP_ABILITIES: readonly string[] = [
-  'ABILITY_ARENA_TRAP',
-  'ABILITY_MAGNET_PULL',
-  'ABILITY_SAP_TRAP',
-  'ABILITY_SHADOW_TAG',
-  'ABILITY_FRENZIED_PHANTOM',
-]
-
 /** The onTrap hook bodies (abilityHooks.json). */
 function onTrap(abilityId: string, state: BattleState, switching: BattlerState, deps: EscapeDeps): boolean {
   switch (abilityId) {

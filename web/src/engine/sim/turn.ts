@@ -1510,21 +1510,6 @@ export const SWITCH_OUT_HOOK_ABILITIES: ReadonlySet<string> = new Set([
   'ABILITY_STRIKEOUT',
 ])
 
-export const PORTED_SWITCH_OUT_ABILITIES: readonly string[] = [
-  'ABILITY_REGENERATOR',
-  'ABILITY_ETERNAL_BLESSING',
-  'ABILITY_NATURAL_CURE',
-  'ABILITY_SELF_REPAIR',
-  'ABILITY_NATURAL_RECOVERY',
-  'ABILITY_TOXIC_SPILL',
-  'ABILITY_TRASH_HEAP',
-  'ABILITY_GENERATOR',
-  'ABILITY_ENERGIZED',
-  'ABILITY_ZERO_TO_HERO',
-  'ABILITY_RETRIEVER',
-  'ABILITY_STRIKEOUT',
-]
-
 /**
  * Port of Cmd_switchoutabilities (src/battle_script_commands.c:12102-12120).
  *
