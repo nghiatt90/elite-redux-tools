@@ -275,8 +275,18 @@ export function createSession(options: SessionOptions): BattleSession {
   // applyBattleStartPass cannot do this itself: inside the lead loop the switch half
   // is still filtered out (battle_util.c:785).
   drainQueuedSwitches(state, turnDeps, startUnmodelled, { index: 0, order: startOrder, outcomes: startOutcomes })
-  // battle_main.c:3356 -- the re-entry after the switch drain repeats the reactive check.
-  runReactiveAbilityEffects(state, { dataContext: data.dataContext, grounding: groundingFor(data, state) }, startUnmodelled)
+  // battle_main.c:3325-3328 then :3356 -- each re-entry drained by a queued switch first
+  // dispatches B_ACTION_TRY_FINISH (drain gQueuedAttackCount) and then repeats
+  // ABILITYEFFECT_REACTIVE. That check can queue another attack itself (Acid Reflux), so the
+  // two queues are drained in that order until both are empty; only then does the function
+  // fall through to TurnValuesCleanUp (:3406). Leaving a queued attack behind would run it at
+  // turn 1's start, after the roundStructsClear that the C never crosses.
+  const startReactiveDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
+  runReactiveAbilityEffects(state, startReactiveDeps, startUnmodelled)
+  while (state.queuedExtraAttacks.length > 0) {
+    drainQueuedExtraAttacks(state, 0, startOrder, turnDeps, startOutcomes)
+    runReactiveAbilityEffects(state, startReactiveDeps, startUnmodelled)
+  }
   for (const outcome of startOutcomes) {
     startUnmodelled.push(...outcome.unmodelled)
   }

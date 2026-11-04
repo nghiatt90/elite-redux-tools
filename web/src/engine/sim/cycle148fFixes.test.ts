@@ -17,7 +17,7 @@ import { STATUS2_SUBSTITUTE, hasFlag, setFlag } from './constants'
 import { createBridgeDamageResolver, type BridgeDamageResolverDeps } from './damageResolver'
 import type { BridgeDeps } from './bridge'
 import type { MoveData } from '../calculate'
-import { createSession } from './driver/session'
+import { buildMoveAction, createSession, stepTurn } from './driver/session'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import { buildPlayerParty, type PlayerMonSpec } from './driver/buildParty'
 
@@ -344,6 +344,74 @@ describe('Cycle 148f Fixes', () => {
       expect(getSingleUseAbilityCounter(session.state, 0, 'ABILITY_COWARD', data.dataContext)).toBe(1)
       expect(session.state.battlers[0]!.round.protectMove).toBe('MOVE_PROTECT')
       expect(session.state.battlers[1]!.round.protectMove).toBeNull()
+    })
+
+    it('blocks the foe\'s turn-1 Tackle; the same setup without Coward takes damage', () => {
+      const data = loadSimData()
+      const run = (ability: string) => {
+        const party = buildPlayerParty([playerLead('SPECIES_WOBBUFFET', ability)], 50, data)
+        const session = createSession({
+          data,
+          playerParty: party,
+          opponentTrainer: trainerWith(foeMon()),
+          // Accuracy 0 -> hits, crit roll 1 -> no crit, damage roll 0 -> 100%.
+          rng: scriptedRng([0, 1, 0, 0, 1, 0]),
+        })
+        const before = session.state.battlers[0]!.mon.hp
+        stepTurn(
+          session,
+          buildMoveAction(session.state, data, 0, 'MOVE_TACKLE'),
+          buildMoveAction(session.state, data, 1, 'MOVE_TACKLE'),
+        )
+        return { before, after: session.state.battlers[0]!.mon.hp }
+      }
+
+      // The Mudkip (Speed 50) moves before Wobbuffet (Speed 33). IsBattlerProtected is
+      // checked before Cmd_accuracycheck (turn.ts:3447, battle_util.c:6571-6645), so the
+      // protected Tackle never reaches the damage path.
+      const coward = run('ABILITY_COWARD')
+      expect(coward.after).toBe(coward.before)
+      // Control: the identical turn without the :3407-3411 restore must land the Tackle,
+      // so this test fails if the protect is dropped.
+      const plain = run('ABILITY_SHADOW_TAG')
+      expect(plain.after).toBeLessThan(plain.before)
+    })
+
+    it('negative: a lead without Coward gets no protectMove', () => {
+      const data = loadSimData()
+      const party = buildPlayerParty([playerLead('SPECIES_WOBBUFFET', 'ABILITY_SHADOW_TAG')], 50, data)
+      const session = createSession({
+        data,
+        playerParty: party,
+        opponentTrainer: trainerWith(foeMon()),
+        rng: scriptedRng([0, 1, 0]),
+      })
+
+      // :3407-3411 only restores for a battler holding Coward; the counter is -1 here
+      // (GetSingleUseAbilityCounter, battle_util.c:3954-3958, returns -1 when the ability
+      // is not in any slot), so TurnValuesCleanUp's zeroing of gRoundStructs stands.
+      expect(session.state.battlers[0]!.round.protectMove).toBeNull()
+    })
+
+    it('negative: a fainted Coward lead gets no protectMove', () => {
+      const data = loadSimData()
+      const party = buildPlayerParty([playerLead('SPECIES_WOBBUFFET', 'ABILITY_COWARD')], 50, data)
+      // A lead already at 0 HP when turn 1 setup runs (the fainted-lead replacement case is
+      // Item 2(b)); with no reserve it is still there at :3407.
+      party[0]!.hp = 0
+      const session = createSession({
+        data,
+        playerParty: party,
+        opponentTrainer: trainerWith(foeMon()),
+        rng: scriptedRng([0, 1, 0]),
+      })
+
+      // `if (!IsBattlerAlive(i)) continue;` (:3408) skips it. Its Coward counter is also 0
+      // because HandleSwitchInAbility (:3354-3382) skips fainted leads, so this covers both
+      // halves of the guard -- a living Coward's counter is latched to 1 by onEntry
+      // (abilities.cc:5441-5451) well before :3407 and nothing in between decrements it.
+      expect(getSingleUseAbilityCounter(session.state, 0, 'ABILITY_COWARD', data.dataContext)).toBe(0)
+      expect(session.state.battlers[0]!.round.protectMove).toBeNull()
     })
   })
 
