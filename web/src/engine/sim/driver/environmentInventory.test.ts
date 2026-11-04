@@ -1,0 +1,299 @@
+/* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import {
+  DEFAULT_ALLOWLIST,
+  ENVIRONMENT_INVENTORY_DOC_PATH,
+  generateEnvironmentInventoryDoc,
+  isValidAllowlistCitation,
+  loadBattleEventRows,
+  loadMapScripts,
+  loadTrainers,
+  runInventory,
+  scanMapScripts,
+  validateAllowlist,
+  type EnvironmentAllowlistEntry,
+  type MapScript,
+  type MapSetupSpec,
+} from './environmentInventory'
+
+const scripts = loadMapScripts()
+const trainers = loadTrainers()
+const battleEvents = loadBattleEventRows()
+const result = runInventory()
+
+const MAP_SCRIPT_COUNT = 515
+const MAPS_WITH_SETUP = 22
+const TRAINER_COUNT = 932
+const BATTLE_EVENT_ROWS = 51
+const DISTINCT_BATTLE_EVENTS = 34
+
+const MAP_SETUP_UNITS = 22
+const BATTLE_TYPE_UNITS = 5
+const DIFFICULTY_FLAG_UNITS = 9
+const TRAINER_FLAG_UNITS = 14
+const BATTLE_EVENT_UNITS = 34
+const SCRIPT_EVENT_UNITS = 6
+
+/** Pinned today -- this number should only go DOWN. */
+export const UNPORTED_UNIT_COUNT = 35
+
+/** Pinned today -- this number should only go DOWN. */
+export const REGISTERED_UNTESTED_UNIT_COUNT = 2
+
+/** Pinned today -- this number should only go DOWN. */
+export const UNCLASSIFIED_UNIT_COUNT = 0
+
+const FABRICATED_TOKEN = 'FABRICATED_BATTLE_SETUP'
+const FABRICATED_SCRIPTS: MapScript[] = [
+  {
+    map: 'FabricatedTown',
+    file: 'pipeline/.upstream/eliteredux-source/data/maps/FabricatedTown/scripts.pory',
+    source: 'script FabricatedTown_EventScript_Setup {\n\tsetvar(FABRICATED_BATTLE_SETUP, 1)\n}\n',
+  },
+]
+const FABRICATED_SPEC: MapSetupSpec = {
+  key: FABRICATED_TOKEN,
+  token: FABRICATED_TOKEN,
+  site: 'FabricatedSetup',
+  citation: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:9144',
+}
+const SYNTHETIC_OPTIONS = {
+  mapScripts: FABRICATED_SCRIPTS,
+  trainers: [],
+  battleEventRows: [],
+  productionSource: '',
+  testSources: [],
+  allowlist: [] as EnvironmentAllowlistEntry[],
+  extraMapSetupSpecs: [FABRICATED_SPEC],
+}
+
+describe('environment and scripted-condition completeness inventory', () => {
+  it('scans the map scripts and anchors the 22 maps that contain a battle setup token', () => {
+    expect(scripts).toHaveLength(MAP_SCRIPT_COUNT)
+    const scan = scanMapScripts(scripts)
+    expect(scan.maps).toHaveLength(MAPS_WITH_SETUP)
+    expect(result.mapFileCount).toBe(MAP_SCRIPT_COUNT)
+    expect(result.mapsWithSetup).toBe(MAPS_WITH_SETUP)
+    expect(scan.maps).toEqual([
+      'AshenWoods',
+      'BirthIsland_Exterior',
+      'EverGrandeCity_ChampionsRoom',
+      'EvergrandeCity_MonoChampRoom_1',
+      'FarawayIsland_Entrance',
+      'JaggedPass',
+      'LilycoveCity',
+      'MeteorFalls_HaxorusRoom',
+      'MossdeepCity_Gym',
+      'MtPyre_Exterior',
+      'NavelRock_Top',
+      'PetalburgWoods_BreloomRoom',
+      'Route111',
+      'Route113',
+      'Route114',
+      'Route120',
+      'Route128',
+      'Route132',
+      'SeafloorCavern_Room9',
+      'Seaspray_Cave_B1F',
+      'SkyPillar_Outside',
+      'SootopolisCity',
+    ])
+  })
+
+  it('loads 932 trainers and the true battleEvents row count', () => {
+    expect(trainers).toHaveLength(TRAINER_COUNT)
+    expect(result.trainerCount).toBe(TRAINER_COUNT)
+    expect(battleEvents).toHaveLength(BATTLE_EVENT_ROWS)
+    expect(result.battleEventRowCount).toBe(BATTLE_EVENT_ROWS)
+    expect(new Set(battleEvents.map((row) => row.event)).size).toBe(DISTINCT_BATTLE_EVENTS)
+    expect(result.distinctBattleEventCount).toBe(DISTINCT_BATTLE_EVENTS)
+  })
+
+  it('enumerates every unit kind', () => {
+    const count = (kind: string) => result.units.filter((unit) => unit.kind === kind).length
+    expect(count('map-setup')).toBe(MAP_SETUP_UNITS)
+    expect(count('battle-type')).toBe(BATTLE_TYPE_UNITS)
+    expect(count('difficulty-flag')).toBe(DIFFICULTY_FLAG_UNITS)
+    expect(count('trainer-flag')).toBe(TRAINER_FLAG_UNITS)
+    expect(count('battle-event')).toBe(BATTLE_EVENT_UNITS)
+    expect(count('script-event')).toBe(SCRIPT_EVENT_UNITS)
+  })
+
+  it('classifies every unit exactly once as ported / unported / unclassified / allowlisted', () => {
+    expect(result.totalDefined).toBe(result.units.length)
+    expect(
+      result.totalPorted + result.totalUnported + result.totalUnclassified + result.totalAllowlisted,
+    ).toBe(result.totalDefined)
+    for (const unit of result.units) {
+      expect(['ported', 'unported', 'unclassified', 'allowlisted']).toContain(unit.status)
+      if (unit.status === 'unported') {
+        // registered-but-untested is a sub-count of unported, never a separate status.
+        expect(typeof unit.registeredUntested).toBe('boolean')
+      } else {
+        expect(unit.registeredUntested).toBe(false)
+      }
+    }
+    for (const summary of result.summaries) {
+      expect(summary.ported + summary.unported + summary.unclassified + summary.allowlisted).toBe(
+        summary.defined,
+      )
+      expect(summary.registeredUntested).toBeLessThanOrEqual(summary.unported)
+    }
+    // Every unit key is unique per kind, so no unit is counted twice.
+    expect(new Set(result.units.map((unit) => `${unit.kind}:${unit.key}`)).size).toBe(
+      result.totalDefined,
+    )
+  })
+
+  it('reports the current unported unit count -- this number should only go DOWN', () => {
+    expect(result.totalUnported).toBe(UNPORTED_UNIT_COUNT)
+  })
+
+  it('reports the current registered-but-untested unit count -- this number should only go DOWN', () => {
+    expect(result.totalRegisteredUntested).toBe(REGISTERED_UNTESTED_UNIT_COUNT)
+  })
+
+  it('reports the current unclassified unit count -- this number should only go DOWN', () => {
+    expect(result.totalUnclassified).toBe(UNCLASSIFIED_UNIT_COUNT)
+  })
+
+  it('validates every allowlist citation format', () => {
+    expect(DEFAULT_ALLOWLIST.length).toBe(7)
+    for (const entry of DEFAULT_ALLOWLIST) {
+      expect(isValidAllowlistCitation(entry.cite)).toBe(true)
+      expect(entry.reason.length).toBeGreaterThan(0)
+    }
+    expect(validateAllowlist(DEFAULT_ALLOWLIST)).toEqual([])
+    // Every allowlisted unit's committed citation is the allowlist cite.
+    for (const entry of DEFAULT_ALLOWLIST) {
+      const unit = result.units.find((candidate) => candidate.key === entry.key)
+      expect(unit?.status).toBe('allowlisted')
+      expect(unit?.citation).toBe(entry.cite)
+    }
+  })
+
+  it('negative (a): a fabricated map-setup unit with no sim token is unported', () => {
+    const baseline = runInventory(SYNTHETIC_OPTIONS)
+    const unit = baseline.units.find(
+      (candidate) => candidate.kind === 'map-setup' && candidate.key === FABRICATED_TOKEN,
+    )
+    expect(unit?.token).toBe(FABRICATED_TOKEN)
+    expect(unit?.status).toBe('unported')
+    expect(unit?.registeredUntested).toBe(false)
+    expect(unit?.testFile).toBeNull()
+  })
+
+  it('negative (b): a token in source but not in tests is unported + registeredUntested', () => {
+    const registered = runInventory({ ...SYNTHETIC_OPTIONS, productionSource: FABRICATED_TOKEN })
+    const unit = registered.units.find(
+      (candidate) => candidate.kind === 'map-setup' && candidate.key === FABRICATED_TOKEN,
+    )
+    expect(unit?.status).toBe('unported')
+    expect(unit?.registeredUntested).toBe(true)
+
+    // The same token named in a test becomes ported.
+    const both = runInventory({
+      ...SYNTHETIC_OPTIONS,
+      productionSource: FABRICATED_TOKEN,
+      testSources: [
+        { file: 'web/src/engine/sim/fabricated.test.ts', source: FABRICATED_TOKEN },
+      ],
+    })
+    const ported = both.units.find(
+      (candidate) => candidate.kind === 'map-setup' && candidate.key === FABRICATED_TOKEN,
+    )
+    expect(ported?.status).toBe('ported')
+    expect(ported?.testFile).toBe('web/src/engine/sim/fabricated.test.ts')
+  })
+
+  it('negative (c): features really handled and tested today are ported', () => {
+    // Verified by grep before writing: each token is in both a qualifying engine
+    // source file and a web/src/engine/**/*.test.ts file.
+    for (const key of ['BATTLE_TYPE_DOUBLE', 'BATTLE_TYPE_TRAINER']) {
+      const unit = result.units.find(
+        (candidate) => candidate.kind === 'battle-type' && candidate.key === key,
+      )
+      expect(unit?.status).toBe('ported')
+      expect(unit?.testFile).not.toBeNull()
+    }
+    const speedDown = result.units.find(
+      (candidate) => candidate.kind === 'difficulty-flag' && candidate.key === 'speedDown',
+    )
+    expect(speedDown?.status).toBe('ported')
+    expect(speedDown?.testFile).not.toBeNull()
+    const forcedDouble = result.units.find(
+      (candidate) => candidate.kind === 'trainer-flag' && candidate.key === 'forcedDouble',
+    )
+    expect(forcedDouble?.status).toBe('ported')
+    expect(forcedDouble?.testFile).not.toBeNull()
+  })
+
+  it('negative (d): an allowlist entry without an exact file:line cite is rejected', () => {
+    expect(
+      isValidAllowlistCitation('pipeline/.upstream/eliteredux-source/src/battle_util.c:9144'),
+    ).toBe(true)
+    expect(isValidAllowlistCitation('pipeline/.upstream/eliteredux-source/src/battle_util.c')).toBe(
+      false,
+    )
+    expect(isValidAllowlistCitation('battle_util.c:not-a-line')).toBe(false)
+
+    const bad: EnvironmentAllowlistEntry[] = [{ key: 'x', reason: 'because', cite: 'battle_util.c' }]
+    expect(validateAllowlist(bad).length).toBeGreaterThan(0)
+    expect(() => runInventory({ ...SYNTHETIC_OPTIONS, allowlist: bad })).toThrow()
+
+    const good: EnvironmentAllowlistEntry[] = [
+      {
+        key: FABRICATED_TOKEN,
+        reason: 'quoted C line is inert',
+        cite: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:9144',
+      },
+    ]
+    const allowlisted = runInventory({ ...SYNTHETIC_OPTIONS, allowlist: good })
+    const unit = allowlisted.units.find(
+      (candidate) => candidate.kind === 'map-setup' && candidate.key === FABRICATED_TOKEN,
+    )
+    expect(unit?.status).toBe('allowlisted')
+    expect(unit?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_util.c:9144')
+  })
+
+  it('anchors three hand-derived citations read in the C', () => {
+    const unitFor = (kind: string, key: string) =>
+      result.units.find((unit) => unit.kind === kind && unit.key === key)
+
+    expect(unitFor('map-setup', 'FLAG_TOTEM_BATTLE')?.citation).toBe(
+      'pipeline/.upstream/eliteredux-source/src/battle_util.c:9144',
+    )
+    expect(unitFor('difficulty-flag', 'HELL_MODE_EXTRA_LEVELS_FLAG')?.citation).toBe(
+      'pipeline/.upstream/eliteredux-source/src/battle_main.c:1805',
+    )
+    expect(unitFor('map-setup', 'VAR_TRAINER_PRIZE_BP')?.citation).toBe(
+      'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5809',
+    )
+  })
+
+  it('lists only trainer ids that exist in trainers.json for every map-setup unit', () => {
+    const known = new Set(trainers.map((trainer) => trainer.id))
+    for (const unit of result.units.filter((candidate) => candidate.kind === 'map-setup')) {
+      for (const id of unit.trainerIds) expect(known.has(id)).toBe(true)
+    }
+    // The monotype course is the densest map-setup scope; it must list real ids.
+    const fieldId = result.units.find(
+      (candidate) => candidate.kind === 'map-setup' && candidate.key === 'VAR_BATTLE_FIELD_ID',
+    )
+    expect(fieldId?.trainerIds.length).toBeGreaterThan(0)
+  })
+
+  it('generates deterministic markdown and compares it with the committed doc (or writes with SIM_INVENTORY_WRITE=1)', () => {
+    const generated = generateEnvironmentInventoryDoc(result)
+    expect(generateEnvironmentInventoryDoc(result)).toBe(generated)
+
+    if (process.env.SIM_INVENTORY_WRITE === '1') {
+      writeFileSync(ENVIRONMENT_INVENTORY_DOC_PATH, generated, 'utf-8')
+      console.log(`Wrote environment inventory doc to ${ENVIRONMENT_INVENTORY_DOC_PATH}`)
+    }
+
+    expect(existsSync(ENVIRONMENT_INVENTORY_DOC_PATH)).toBe(true)
+    expect(readFileSync(ENVIRONMENT_INVENTORY_DOC_PATH, 'utf-8')).toBe(generated)
+  })
+})
