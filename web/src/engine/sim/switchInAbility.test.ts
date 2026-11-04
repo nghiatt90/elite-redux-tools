@@ -1619,33 +1619,34 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
   // 5. Entry move abilities (UseEntryMove)
   // -------------------------------------------------------------------------
 
-  it('Entry move abilities queue unmodelled gap messages when opponent is alive', () => {
+  it('Entry move abilities: ported abilities queue extra attack, unported queue unmodelled gap messages', () => {
     const unmodelled: string[] = []
     const stateTactics = battle(
       [{ abilities: { ability: requireAbility('ABILITY_CHEAP_TACTICS'), innates: [null, null, null] } }, {}],
       scriptedRng(),
     )
     applySwitchInAbilities(stateTactics, 0, makeTestDeps(), unmodelled)
-    expect(unmodelled).toContain(
-      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHEAP_TACTICS queued MOVE_SCRATCH',
-    )
+    expect(stateTactics.queuedExtraAttacks).toEqual([
+      { ability: 'ABILITY_CHEAP_TACTICS', attacker: 0, move: 'MOVE_SCRATCH', movePower: 40, target: 1, falseSwipe: true },
+    ])
+    expect(unmodelled).toHaveLength(0)
 
-    unmodelled.length = 0
     const stateThief = battle(
       [{ abilities: { ability: requireAbility('ABILITY_PHANTOM_THIEF'), innates: [null, null, null] } }, {}],
       scriptedRng(),
     )
     applySwitchInAbilities(stateThief, 0, makeTestDeps(), unmodelled)
-    expect(unmodelled).toContain(
-      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_PHANTOM_THIEF queued MOVE_SPECTRAL_THIEF',
-    )
+    expect(stateThief.queuedExtraAttacks).toEqual([
+      { ability: 'ABILITY_PHANTOM_THIEF', attacker: 0, move: 'MOVE_SPECTRAL_THIEF', movePower: 40, target: 1, falseSwipe: true },
+    ])
+    expect(unmodelled).toHaveLength(0)
 
-    unmodelled.length = 0
     const stateHeart = battle(
       [{ abilities: { ability: requireAbility('ABILITY_CHANGE_OF_HEART'), innates: [null, null, null] } }, {}],
       scriptedRng(),
     )
     applySwitchInAbilities(stateHeart, 0, makeTestDeps(), unmodelled)
+    expect(stateHeart.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toContain(
       'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHANGE_OF_HEART queued MOVE_HEART_SWAP',
     )
@@ -1661,6 +1662,18 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
       scriptedRng(),
     )
     applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
+    expect(state.queuedExtraAttacks).toHaveLength(0)
+    expect(unmodelled).toHaveLength(0)
+
+    const stateHeart = battle(
+      [
+        { abilities: { ability: requireAbility('ABILITY_CHANGE_OF_HEART'), innates: [null, null, null] } },
+        { hp: 0 },
+      ],
+      scriptedRng(),
+    )
+    applySwitchInAbilities(stateHeart, 0, makeTestDeps(), unmodelled)
+    expect(stateHeart.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toHaveLength(0)
   })
 

@@ -52,8 +52,8 @@ function requireSpecies(id: string): string {
 const MUDKIP = requireSpecies('SPECIES_MUDKIP')
 // An onEntry ability whose effect is still unmodelled, so it reports a switch-in gap line.
 // (Locust Swarm was the sentinel until cycle 146 ported its onEntry hook; Low Blow's onEntry
-// UseEntryMove hook is still unmodelled.)
-const UNPORTED_ENTRY = requireAbility('ABILITY_LOW_BLOW')
+// UseEntryMove hook was ported in cycle 148; Change of Heart remains unmodelled.)
+const UNPORTED_ENTRY = requireAbility('ABILITY_CHANGE_OF_HEART')
 if (!abilityHooks[UNPORTED_ENTRY]?.hooks?.onEntry) throw new Error(`${UNPORTED_ENTRY} no longer has an onEntry hook in abilityHooks.json`)
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 if (abilityHooks[MAGIC_GUARD]?.hooks?.onEntry) throw new Error(`${MAGIC_GUARD} unexpectedly gained an onEntry hook -- pick a different "no gap" ability`)

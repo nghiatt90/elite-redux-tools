@@ -4691,6 +4691,12 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // exists once the battle is decided).
   const replacementUnmodelled: string[] = []
   if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+  // BattleTurnPassed, battle_main.c:3474-3477, 3485: extra attacks and switches queued by replacement
+  // switch-in abilities run before wish/perish song and continue-battle cleanup.
+  if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
+    drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
+    drainQueuedSwitches(state, deps, switchUnmodelled)
+  }
 
   // HandleWishPerishSongOnTurnEnd (battle_util.c:2997-3078) in C has state 0: futureSightCounter (:2998-3031),
   // state 1: perishSongTimer (:3032-3053), state 2: arenaTurnCounter (:3060-3072). Wish itself is not
@@ -4700,7 +4706,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   if (!state.battleOutcome) {
     const futureSightUnmodelled: string[] = []
     runFutureSightCountdown(state, actions, order, deps, futureSightUnmodelled, () => {
-      if (deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+      if (deps.replacement) {
+        applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+        if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
+          drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
+          drainQueuedSwitches(state, deps, switchUnmodelled)
+        }
+      }
     })
     endTurnUnmodelled.push(...futureSightUnmodelled)
   }
@@ -4721,7 +4733,13 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         b.volatiles.perishSongTimer--
       }
     }
-    if (perishFainted && deps.replacement) applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+    if (perishFainted && deps.replacement) {
+      applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
+      if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
+        drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
+        drainQueuedSwitches(state, deps, switchUnmodelled)
+      }
+    }
   }
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])

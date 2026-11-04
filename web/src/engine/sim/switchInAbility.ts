@@ -294,23 +294,32 @@ export const TERRAIN_SETTER_MAP: Readonly<Record<string, number>> = {
 }
 
 /**
- * Abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
- * Queues an out-of-turn full move attack via gQueuedExtraAttackData.
+ * Cycle 148: First 12 UseEntryMove abilities (battle_util.c:3994-4019, abilities.cc).
+ * Queues an out-of-turn attack via gQueuedExtraAttackData with falseSwipe: true.
+ */
+export const PORTED_ENTRY_MOVE_MAP: Readonly<Record<string, { move: string; movePower: number }>> = {
+  ABILITY_LOW_BLOW: { move: 'MOVE_FEINT_ATTACK', movePower: 40 },
+  ABILITY_CHEAP_TACTICS: { move: 'MOVE_SCRATCH', movePower: 40 },
+  ABILITY_MONKEY_BUSINESS: { move: 'MOVE_TICKLE', movePower: 0 },
+  ABILITY_DUST_CLOUD: { move: 'MOVE_SAND_ATTACK', movePower: 0 },
+  ABILITY_TRICKSTER: { move: 'MOVE_DISABLE', movePower: 0 },
+  ABILITY_SUPPRESS: { move: 'MOVE_TORMENT', movePower: 0 },
+  ABILITY_TELEKINETIC: { move: 'MOVE_TELEKINESIS', movePower: 0 },
+  ABILITY_POWDER_BURST: { move: 'MOVE_POWDER', movePower: 0 },
+  ABILITY_MONSTER_MASH: { move: 'MOVE_TRICK_OR_TREAT', movePower: 0 },
+  ABILITY_PHANTOM_THIEF: { move: 'MOVE_SPECTRAL_THIEF', movePower: 40 },
+  ABILITY_SAND_PIT: { move: 'MOVE_SAND_TOMB', movePower: 20 },
+  ABILITY_CHILLING_PRESENCE: { move: 'MOVE_ICY_WIND', movePower: 10 },
+}
+
+/**
+ * Remaining 19 unported abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
+ * Cycle 148b. Queues an out-of-turn full move attack via gQueuedExtraAttackData.
  */
 export const USE_ENTRY_MOVE_MAP: Readonly<Record<string, string>> = {
-  ABILITY_LOW_BLOW: 'MOVE_FEINT_ATTACK',
-  ABILITY_CHEAP_TACTICS: 'MOVE_SCRATCH',
-  ABILITY_MONKEY_BUSINESS: 'MOVE_TICKLE',
-  ABILITY_DUST_CLOUD: 'MOVE_SAND_ATTACK',
-  ABILITY_TRICKSTER: 'MOVE_DISABLE',
   ABILITY_DOOMBRINGER: 'MOVE_DOOM_DESIRE',
   ABILITY_WISHMAKER: 'MOVE_WISH',
-  ABILITY_SUPPRESS: 'MOVE_TORMENT',
   ABILITY_CHANGE_OF_HEART: 'MOVE_HEART_SWAP',
-  ABILITY_TELEKINETIC: 'MOVE_TELEKINESIS',
-  ABILITY_POWDER_BURST: 'MOVE_POWDER',
-  ABILITY_MONSTER_MASH: 'MOVE_TRICK_OR_TREAT',
-  ABILITY_PHANTOM_THIEF: 'MOVE_SPECTRAL_THIEF',
   ABILITY_WEB_SPINNER: 'MOVE_STRING_SHOT',
   ABILITY_DRACO_MORALE: 'MOVE_DRAGON_CHEER',
   ABILITY_DREAM_WHIMSY: 'MOVE_YAWN',
@@ -318,10 +327,8 @@ export const USE_ENTRY_MOVE_MAP: Readonly<Record<string, string>> = {
   ABILITY_JUMP_SCARE: 'MOVE_ASTONISH',
   ABILITY_TAR_TOSS: 'MOVE_TAR_SHOT',
   ABILITY_WIND_RAGE: 'MOVE_DEFOG',
-  ABILITY_SAND_PIT: 'MOVE_SAND_TOMB',
   ABILITY_POSEIDONS_DOMINION: 'MOVE_WHIRLPOOL',
   ABILITY_WOODLAND_CURSE: 'MOVE_FORESTS_CURSE',
-  ABILITY_CHILLING_PRESENCE: 'MOVE_ICY_WIND',
   ABILITY_NEUTRALIZING_FOG: 'MOVE_DEFOG',
   ABILITY_ROYAL_DECREE: 'MOVE_GLARE',
   ABILITY_FROSTY_PRESCENCE: 'MOVE_MIST',
@@ -1307,6 +1314,20 @@ const ANNOUNCE_ONLY_ON_ENTRY: ReadonlySet<string> = new Set([
  *   i = 3 -> slot 1 (innates[0])
  *   i = 4 -> slot 0 (ability)
  */
+/**
+ * CanUseExtraMove (src/battle_util.c:8716-8722).
+ */
+function canUseExtraMove(state: BattleState, attackerId: number, targetId: number): boolean {
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return false
+  return (
+    attackerId !== targetId &&
+    isBattlerAlive(state, attackerId) &&
+    isBattlerAlive(state, targetId) &&
+    !attacker.round.attackCancelled
+  )
+}
+
 export function applySwitchInAbilities(
   state: BattleState,
   battlerId: number,
@@ -1541,7 +1562,31 @@ export function applySwitchInAbilities(
       continue
     }
 
-    // 4. Entry moves via UseEntryMove (Cycle 45)
+    // 4. Entry moves via UseEntryMove (battle_util.c:3994-4019, abilities.cc)
+    const portedEntry = PORTED_ENTRY_MOVE_MAP[abilityId]
+    if (portedEntry !== undefined) {
+      let target = state.battlersCount
+      let opposingBattler = battlerId ^ 1
+      for (let i = 0; i < 2; i++) {
+        if (isBattlerAlive(state, opposingBattler)) {
+          target = opposingBattler
+          break
+        }
+        opposingBattler ^= 2
+      }
+      if (target < state.battlersCount && canUseExtraMove(state, battlerId, target)) {
+        state.queuedExtraAttacks.push({
+          ability: abilityId,
+          attacker: battlerId,
+          move: portedEntry.move,
+          movePower: portedEntry.movePower,
+          target,
+          falseSwipe: true,
+        })
+      }
+      continue
+    }
+
     const entryMoveId = USE_ENTRY_MOVE_MAP[abilityId]
     if (entryMoveId !== undefined) {
       const oppSide = (battlerId & 1) ^ 1
