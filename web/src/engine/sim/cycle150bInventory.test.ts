@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
+  ABILITY_HOOK_ALLOWLIST,
   classifyPair,
   extractBlockStatDropAbilities,
   extractSwitchInAbilities,
@@ -12,7 +13,14 @@ import {
   extractTrapAbilities,
   generateInventoryDoc,
   isDirectlyPorted,
+  loadTestMentionedAbilities,
   runInventory,
+  PORTED_BLOCK_STAT_DROP_ABILITIES_SET,
+  PORTED_STAT_LOWERED_ABILITIES,
+  PORTED_STATUS_IMMUNE_ABILITIES,
+  PORTED_SWITCH_IN_ABILITIES,
+  PORTED_SWITCH_OUT_ABILITIES_SET,
+  PORTED_TRAP_ABILITIES_SET,
   NOTE_ONLY_PAIRS,
   type AbilityHookRecord,
   type AllowlistEntry,
@@ -130,63 +138,8 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
       expect(status).toBe('ported')
     })
 
-    it('source-text check: every NOTE_ONLY_PAIR cites a real not-modelled note site', () => {
-      const moveEndContent = readFileSync(join(ENGINE_DIR, 'sim/moveEnd.ts'), 'utf-8')
-      const turnContent = readFileSync(join(ENGINE_DIR, 'sim/turn.ts'), 'utf-8')
-      const statBuffsContent = readFileSync(join(ENGINE_DIR, 'sim/statBuffs.ts'), 'utf-8')
-
-      const contentByFile: Record<string, string> = {
-        'web/src/engine/sim/moveEnd.ts': moveEndContent,
-        'web/src/engine/sim/turn.ts': turnContent,
-        'web/src/engine/sim/statBuffs.ts': statBuffsContent,
-      }
-
-      for (const entry of NOTE_ONLY_PAIRS) {
-        const [filePath] = entry.site.split(':')
-        const content = contentByFile[filePath]
-        expect(content, `File not found for site: ${entry.site}`).toBeDefined()
-        expect(
-          content.includes(entry.ability),
-          `${entry.ability} must be mentioned in ${filePath}`,
-        ).toBe(true)
-      }
-    })
-
-    it('source-text check: no other UseAttackerFollowUpMove or switch-out not-modelled note exists without a table entry', () => {
-      const moveEndContent = readFileSync(join(ENGINE_DIR, 'sim/moveEnd.ts'), 'utf-8')
-      const turnContent = readFileSync(join(ENGINE_DIR, 'sim/turn.ts'), 'utf-8')
-
-      // Check moveEnd.ts for UseAttackerFollowUpMove notes
-      const followupRegex = /"([^"]*UseAttackerFollowUpMove[^"]*is not modelled)"/g
-      let match: RegExpExecArray | null
-      const followupNotes: string[] = []
-      while ((match = followupRegex.exec(moveEndContent)) !== null) {
-        followupNotes.push(match[1])
-      }
-
-      // Expected followups: Aftershock, Blade Dance, High Tide, Purple Haze, Volcano Rage
-      const tableAbilities = new Set(NOTE_ONLY_PAIRS.map((p) => p.ability))
-      for (const note of followupNotes) {
-        const found = [
-          'ABILITY_AFTERSHOCK',
-          'ABILITY_BLADE_DANCE',
-          'ABILITY_HIGH_TIDE',
-          'ABILITY_PURPLE_HAZE',
-          'ABILITY_VOLCANO_RAGE',
-        ].some((ab) => tableAbilities.has(ab))
-        expect(found, `Note '${note}' must belong to an ability in NOTE_ONLY_PAIRS`).toBe(true)
-      }
-
-      // Check turn.ts for switch-out notes
-      const switchOutRegex = /`([^`]*switch-out\s+([^`\s]+)[^`]*is not modelled)`/g
-      while ((match = switchOutRegex.exec(turnContent)) !== null) {
-        const abilityName = `ABILITY_${match[2].toUpperCase()}`
-        expect(
-          tableAbilities.has(abilityName),
-          `Switch-out note '${match[1]}' for ${abilityName} must be in NOTE_ONLY_PAIRS`,
-        ).toBe(true)
-      }
-    })
+    // The site lines and the "no unlisted note-only branch" direction are asserted in
+    // cycle150dInventory.test.ts by re-discovering every raise site from the sim source text.
 
     it('minimal scenario tests: attacker followup note-only abilities raise their not-modelled note', () => {
       const cases: Array<{ ability: string; move: string; expectedSnippet: string }> = [
@@ -312,7 +265,7 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
   })
 
   describe('(1) Dispatcher branch evidence instead of census list membership', () => {
-    it('fabricated ID in census lists does not make a pair ported', () => {
+    it('fabricated ID flips the classifier only while it is inside a real ported set', () => {
       const fabricatedId = 'ABILITY_SYNTHETIC_CENSUS_ONLY'
       const customHooksData: Record<string, AbilityHookRecord> = {
         [fabricatedId]: {
@@ -328,61 +281,75 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
         },
       }
 
-      // Assert that synthetic id alone is NOT directly ported for any of these
-      expect(isDirectlyPorted(fabricatedId, 'onEntry')).toBe(false)
-      expect(isDirectlyPorted(fabricatedId, 'onBlockStatDrops')).toBe(false)
-      expect(isDirectlyPorted(fabricatedId, 'onStatLowered')).toBe(false)
-      expect(isDirectlyPorted(fabricatedId, 'onStatusImmune')).toBe(false)
-      expect(isDirectlyPorted(fabricatedId, 'onTrap')).toBe(false)
+      // The classifier must actually consult these sets. A fabricated id that exists only in test
+      // data (the old test) proves nothing; inserting it into the exported set must flip the answer.
+      const cases = [
+        { hook: 'onEntry' as const, set: PORTED_SWITCH_IN_ABILITIES },
+        { hook: 'onBlockStatDrops' as const, set: PORTED_BLOCK_STAT_DROP_ABILITIES_SET },
+        { hook: 'onStatLowered' as const, set: PORTED_STAT_LOWERED_ABILITIES },
+        { hook: 'onStatusImmune' as const, set: PORTED_STATUS_IMMUNE_ABILITIES },
+        { hook: 'onTrap' as const, set: PORTED_TRAP_ABILITIES_SET },
+      ]
 
-      expect(classifyPair(fabricatedId, 'onEntry', customHooksData)).toBe('unported')
-      expect(classifyPair(fabricatedId, 'onBlockStatDrops', customHooksData)).toBe('unported')
-      expect(classifyPair(fabricatedId, 'onStatLowered', customHooksData)).toBe('unported')
-      expect(classifyPair(fabricatedId, 'onStatusImmune', customHooksData)).toBe('unported')
-      expect(classifyPair(fabricatedId, 'onTrap', customHooksData)).toBe('unported')
+      for (const { hook, set } of cases) {
+        expect(isDirectlyPorted(fabricatedId, hook), `${fabricatedId}:${hook} before insertion`).toBe(false)
+        set.add(fabricatedId)
+        try {
+          expect(isDirectlyPorted(fabricatedId, hook), `${fabricatedId}:${hook} in the ported set`).toBe(true)
+          expect(classifyPair(fabricatedId, hook, customHooksData)).toBe('ported')
+        } finally {
+          set.delete(fabricatedId)
+        }
+        expect(isDirectlyPorted(fabricatedId, hook), `${fabricatedId}:${hook} after removal`).toBe(false)
+        expect(classifyPair(fabricatedId, hook, customHooksData)).toBe('unported')
+      }
     })
   })
 
   describe('(7) Ported sets are derived from dispatcher source, not hand-typed lists', () => {
-    it('onTrap set comes from the onTrap switch and matches the classifier', () => {
-      const trap = extractTrapAbilities()
-      expect(trap.size).toBeGreaterThan(0)
-      expect(trap.has('ABILITY_SHADOW_TAG')).toBe(true)
-      expect(trap.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
-      expect(isDirectlyPorted('ABILITY_SHADOW_TAG', 'onTrap')).toBe(true)
-      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onTrap')).toBe(false)
+    /** Deletes exactly one source line, so the mutated text is not a valid program but is still parseable by the extractor. */
+    const dropLineContaining = (source: string, needle: string): string => {
+      const lines = source.split('\n')
+      const kept = lines.filter((line) => !line.includes(needle))
+      expect(kept.length, `expected exactly one line containing ${needle}`).toBe(lines.length - 1)
+      return kept.join('\n')
+    }
+
+    it('onTrap: deleting the Shadow Tag case label removes it from a fresh extraction', () => {
+      const source = readFileSync(join(ENGINE_DIR, 'sim/escape.ts'), 'utf-8')
+      expect(extractTrapAbilities(source)).toEqual(PORTED_TRAP_ABILITIES_SET)
+      expect(PORTED_TRAP_ABILITIES_SET.has('ABILITY_SHADOW_TAG')).toBe(true)
+      const mutated = dropLineContaining(source, "case 'ABILITY_SHADOW_TAG':")
+      expect(extractTrapAbilities(mutated).has('ABILITY_SHADOW_TAG')).toBe(false)
     })
 
-    it('onBlockStatDrops set comes from statDropBlockForAbility and matches the classifier', () => {
-      const block = extractBlockStatDropAbilities()
-      expect(block.size).toBeGreaterThan(0)
-      expect(block.has('ABILITY_CLEAR_BODY')).toBe(true)
-      expect(block.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
-      expect(isDirectlyPorted('ABILITY_CLEAR_BODY', 'onBlockStatDrops')).toBe(true)
-      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onBlockStatDrops')).toBe(false)
+    it('onBlockStatDrops: deleting the Clear Body case label removes it from a fresh extraction', () => {
+      const source = readFileSync(join(ENGINE_DIR, 'sim/statBuffs.ts'), 'utf-8')
+      expect(extractBlockStatDropAbilities(source)).toEqual(PORTED_BLOCK_STAT_DROP_ABILITIES_SET)
+      expect(PORTED_BLOCK_STAT_DROP_ABILITIES_SET.has('ABILITY_CLEAR_BODY')).toBe(true)
+      const mutated = dropLineContaining(source, "case 'ABILITY_CLEAR_BODY':")
+      expect(extractBlockStatDropAbilities(mutated).has('ABILITY_CLEAR_BODY')).toBe(false)
     })
 
-    it('onExit set comes from dispatchSwitchOutAbilities, with note-only branches still unported', () => {
-      const exit = extractSwitchOutAbilities()
-      expect(exit.size).toBeGreaterThan(0)
-      expect(exit.has('ABILITY_REGENERATOR')).toBe(true)
-      expect(exit.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
-      expect(isDirectlyPorted('ABILITY_REGENERATOR', 'onExit')).toBe(true)
-      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onExit')).toBe(false)
+    it('onExit: deleting the Regenerator case label removes it, while note-only branches stay unported', () => {
+      const source = readFileSync(join(ENGINE_DIR, 'sim/turn.ts'), 'utf-8')
+      expect(extractSwitchOutAbilities(source)).toEqual(PORTED_SWITCH_OUT_ABILITIES_SET)
+      expect(PORTED_SWITCH_OUT_ABILITIES_SET.has('ABILITY_REGENERATOR')).toBe(true)
       // Generator is a real switch case, but its branch only pushes a note.
-      expect(exit.has('ABILITY_GENERATOR')).toBe(true)
+      expect(PORTED_SWITCH_OUT_ABILITIES_SET.has('ABILITY_GENERATOR')).toBe(true)
       expect(isDirectlyPorted('ABILITY_GENERATOR', 'onExit')).toBe(false)
+      const mutated = dropLineContaining(source, "case 'ABILITY_REGENERATOR':")
+      expect(extractSwitchOutAbilities(mutated).has('ABILITY_REGENERATOR')).toBe(false)
     })
 
-    it('onEntry set comes from applySwitchInAbilities maps and literals, not the census', () => {
-      const entry = extractSwitchInAbilities()
-      expect(entry.size).toBeGreaterThan(0)
-      expect(entry.has('ABILITY_INTIMIDATE')).toBe(true) // INTIMIDATE_CLONE_MAP
-      expect(entry.has('ABILITY_DRIZZLE')).toBe(true) // WEATHER_SETTER_MAP
-      expect(entry.has('ABILITY_SUPERCELL')).toBe(true) // literal branch in the dispatcher body
-      expect(entry.has('ABILITY_FABRICATED_DISPATCH')).toBe(false)
-      expect(isDirectlyPorted('ABILITY_INTIMIDATE', 'onEntry')).toBe(true)
-      expect(isDirectlyPorted('ABILITY_FABRICATED_DISPATCH', 'onEntry')).toBe(false)
+    it('onEntry: deleting the Wind Rider branch head removes it from a fresh extraction', () => {
+      const source = readFileSync(join(ENGINE_DIR, 'sim/switchInAbility.ts'), 'utf-8')
+      expect(extractSwitchInAbilities(source)).toEqual(PORTED_SWITCH_IN_ABILITIES)
+      expect(PORTED_SWITCH_IN_ABILITIES.has('ABILITY_WIND_RIDER')).toBe(true)
+      // The Air Blower Tailwind call still passes the id as an argument; that literal is not evidence.
+      const mutated = dropLineContaining(source, "if (abilityId === 'ABILITY_WIND_RIDER') {")
+      expect(mutated).toContain("disableSwitchInAbility(state, battlerId, 'ABILITY_WIND_RIDER', deps.dataContext)")
+      expect(extractSwitchInAbilities(mutated).has('ABILITY_WIND_RIDER')).toBe(false)
     })
   })
 
@@ -410,7 +377,7 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
       expect(result.classifications[0]?.status).toBe('allowlisted')
     })
 
-    it('stale allowlist test: detects entries not in data or already ported', () => {
+    it('stale allowlist: an entry that grants nothing is reported by runInventory', () => {
       const staleAllowlist: AllowlistEntry[] = [
         {
           ability: 'ABILITY_NOT_IN_DATA',
@@ -418,19 +385,23 @@ describe('Cycle 150b ability hook inventory classifier fixes', () => {
           citation: 'src/abilities.cc:1',
         },
         {
-          // Already ported ability
+          // Already ported: allowlisting it hides nothing, so it is stale too.
           ability: 'ABILITY_THUNDERCALL',
           hook: 'onAttacker',
           citation: 'src/abilities.cc:2',
         },
       ]
 
-      for (const entry of staleAllowlist) {
-        const inData = Boolean(abilityHooks[entry.ability]?.hooks?.[entry.hook])
-        const alreadyPorted = inData && isDirectlyPorted(entry.ability, entry.hook as any)
-        const isStale = !inData || alreadyPorted
-        expect(isStale).toBe(true)
-      }
+      const mentioned = loadTestMentionedAbilities(ENGINE_DIR)
+      expect(runInventory(abilityHooks, mentioned, ABILITY_HOOK_ALLOWLIST).staleAllowlist).toEqual([])
+      const result = runInventory(abilityHooks, mentioned, staleAllowlist)
+      expect(result.staleAllowlist.map((e) => `${e.ability}:${e.hook}`).sort()).toEqual([
+        'ABILITY_NOT_IN_DATA:onStat',
+        'ABILITY_THUNDERCALL:onAttacker',
+      ])
+      // Neither entry hides a real gap: the ported pair stays ported, the absent one never existed.
+      expect(result.totalAllowlisted).toBe(0)
+      expect(classifyPair('ABILITY_THUNDERCALL', 'onAttacker', abilityHooks)).toBe('ported')
     })
 
     it('generateInventoryDoc throws when sources.lock.json is unreadable', () => {

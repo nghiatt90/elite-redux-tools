@@ -1236,9 +1236,12 @@ function runEndTurnAbilities(
       case 'ABILITY_HARVEST':
       case 'ABILITY_SUNS_BOUNTY':
       case 'ABILITY_BIG_LEAVES': {
-        // Impl<HARVEST>.onEndTurn (Sun's Bounty / Big Leaves are Harvest | Leaf Guard): restore the last consumed berry
+        // Impl<HARVEST>.onEndTurn (abilities.cc:2029-2036) (Sun's Bounty / Big Leaves are Harvest | Leaf Guard):
+        // CHECK_NOT(item), CHECK_NOT(changedItems[battler]), CHECK(berry), CHECK(sun || Random() % 2).
+        // A parked changedItem means the berry effect is still waiting on MOVEEND_CHANGED_ITEMS, so no restore
+        // and no 50% draw.
         const used = battler.usedHeldItem
-        if (!battler.mon.itemId && used && dataContext.item(used)?.grouping === 'POCKET_BERRIES') {
+        if (!battler.mon.itemId && !battler.changedItem && used && dataContext.item(used)?.grouping === 'POCKET_BERRIES') {
           if (isBattlerWeatherAffected(state, battlerId, WEATHER_SUN_ANY, { dataContext, grounding: deps?.grounding }) || state.rng.random16() % 2) {
             battler.mon.itemId = used
             battler.usedHeldItem = null

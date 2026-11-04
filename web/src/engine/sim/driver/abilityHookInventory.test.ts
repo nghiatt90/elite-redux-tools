@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  ABILITY_HOOK_ALLOWLIST,
   HOOK_KINDS,
   classifyPair,
   extractAccuracyAbilities,
@@ -39,9 +40,9 @@ export const UNCLASSIFIED_PAIR_COUNT = 0
 
 /**
  * Allowlist for pairs that are deliberately permanently unmodelled / out of scope.
- * Empty today. Every entry must cite its upstream source location.
+ * Lives in the module (not this test) so other tests can assert it is not stale.
  */
-export const ALLOWLIST: ReadonlyArray<AllowlistEntry> = []
+export const ALLOWLIST: ReadonlyArray<AllowlistEntry> = ABILITY_HOOK_ALLOWLIST
 
 describe('ability hook completeness inventory', () => {
   it('loads abilityHooks.json and asserts the hook key set equals the 41-kind list', () => {
@@ -71,10 +72,12 @@ describe('ability hook completeness inventory', () => {
 
     expect(result.classifications).toHaveLength(totalPairsInData)
     expect(result.totalDefined).toBe(totalPairsInData)
-    expect(result.totalPorted + result.totalUnported + result.totalUnclassified).toBe(totalPairsInData)
+    expect(result.totalPorted + result.totalUnported + result.totalUnclassified + result.totalAllowlisted).toBe(
+      totalPairsInData,
+    )
 
     for (const c of result.classifications) {
-      expect(['ported', 'unported', 'unclassified']).toContain(c.status)
+      expect(['ported', 'unported', 'unclassified', 'allowlisted']).toContain(c.status)
     }
   })
 

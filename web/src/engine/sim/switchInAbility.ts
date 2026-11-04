@@ -1453,6 +1453,12 @@ export function applySwitchInAbilities(
       abilityId === 'ABILITY_AIR_LOCK' ||
       abilityId === 'ABILITY_BLISTERING_SUN'
     ) {
+      // Air Lock delegates Cloud Nine's onEntry and then Air Blower's (abilities.cc:1405-1407), so the
+      // weather is cleared before Tailwind goes up. Air Blower and Blistering Sun do not clear weather.
+      if (abilityId === 'ABILITY_AIR_LOCK') {
+        removeBattleWeather(state)
+        dispatchOnWeatherChange(state, deps, unmodelled)
+      }
       const side = battlerId & 1
       if (trySetTailwind(state, side, battlerId, TAILWIND_DURATION_SHORT)) {
         disableSwitchInAbility(state, battlerId, 'ABILITY_WIND_RIDER', deps.dataContext)

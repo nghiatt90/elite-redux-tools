@@ -14,7 +14,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
    - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).
 2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.
 3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).
-4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `ABILITY_*` literal in `applySwitchInAbilities` and the same-file helpers it calls.
+4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `case` label or ability-variable comparison (`abilityId === ...`) in `applySwitchInAbilities` and the same-file helpers it calls. Bare literals passed as arguments, array elements or map values are not evidence.
 5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.
 6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.
 7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.
@@ -44,7 +44,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onAccuracy | 50 | 50 | 0 | 0 | 0 | 50 |
 | onAfterTypeEffectiveness | 13 | 13 | 0 | 0 | 0 | 13 |
 | onAttacker | 144 | 139 | 0 | 5 | 0 | 144 |
-| onBattlerFaints | 55 | 38 | 0 | 17 | 0 | 34 |
+| onBattlerFaints | 55 | 38 | 0 | 17 | 0 | 35 |
 | onBeforeAttack | 9 | 0 | 0 | 9 | 0 | 3 |
 | onBlockStatDrops | 11 | 11 | 0 | 0 | 0 | 9 |
 | onCanStatusType | 8 | 8 | 0 | 0 | 0 | 6 |
@@ -55,7 +55,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onDefender | 122 | 122 | 0 | 0 | 0 | 122 |
 | onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 83 |
 | onDisguise | 3 | 0 | 0 | 3 | 0 | 2 |
-| onEndTurn | 67 | 67 | 0 | 0 | 0 | 64 |
+| onEndTurn | 67 | 67 | 0 | 0 | 0 | 65 |
 | onEntry | 225 | 225 | 0 | 0 | 0 | 207 |
 | onExit | 12 | 9 | 0 | 3 | 0 | 12 |
 | onImmune | 19 | 19 | 0 | 0 | 0 | 19 |
@@ -69,7 +69,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onParentalBond | 23 | 23 | 0 | 0 | 0 | 23 |
 | onPreemptAction | 5 | 5 | 0 | 0 | 0 | 5 |
 | onPriority | 19 | 11 | 0 | 8 | 0 | 14 |
-| onReactive | 18 | 10 | 0 | 8 | 0 | 12 |
+| onReactive | 18 | 10 | 0 | 8 | 0 | 13 |
 | onRecoil | 5 | 5 | 0 | 0 | 0 | 5 |
 | onRevive | 2 | 1 | 0 | 1 | 0 | 1 |
 | onStab | 44 | 44 | 0 | 0 | 0 | 43 |
@@ -81,7 +81,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 17 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1426** | **0** | **72** | **0** | **1361** |
+| **Total** | **1498** | **1426** | **0** | **72** | **0** | **1364** |
 
 ## Unported Ability Hook Pairs
 
@@ -173,7 +173,7 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 ### onReactive (8)
 
 - `ABILITY_BLOODLUST` (src/abilities.cc:7995) *(ability mentioned in test)*
-- `ABILITY_FROSTBIND` (src/abilities.cc:9998)
+- `ABILITY_FROSTBIND` (src/abilities.cc:9998) *(ability mentioned in test)*
 - `ABILITY_GREEDY` (src/abilities.cc:11066)
 - `ABILITY_HARUKAZE` (src/abilities.cc:10100)
 - `ABILITY_HEMOTOXIN` (src/abilities.cc:10081) *(ability mentioned in test)*

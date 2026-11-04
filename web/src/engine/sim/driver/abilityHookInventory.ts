@@ -127,6 +127,9 @@ export interface InventoryResult {
   totalTested: number
   totalAbilityMentionedInTests: number
   unportedPairs: PairClassification[]
+  /** Allowlist entries whose (ability, hook) is not defined in the hook data, or is already ported.
+   * Such an entry grants nothing and hides nothing: it is stale and must be removed. */
+  staleAllowlist: AllowlistEntry[]
 }
 
 export interface AllowlistEntry {
@@ -134,6 +137,14 @@ export interface AllowlistEntry {
   hook: string
   citation: string
 }
+
+/**
+ * Allowlist for (ability, hook) pairs that are deliberately permanently unmodelled / out of scope.
+ * Empty today: every pair the hook data defines is either ported or counted as unported. Every entry
+ * must cite its upstream source location. `runInventory` reports entries that no longer match a
+ * defined, unported pair in `staleAllowlist`, so a stale entry cannot silently swallow a gap.
+ */
+export const ABILITY_HOOK_ALLOWLIST: ReadonlyArray<AllowlistEntry> = []
 
 export interface NoteOnlyPair {
   ability: string
@@ -146,15 +157,15 @@ export interface NoteOnlyPair {
  * Classified as unported until real simulation behavior is ported.
  */
 export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
-  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4414' },
-  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4424' },
-  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5455' },
-  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5520' },
-  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5553' },
-  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1624' },
-  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1632' },
-  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1651' },
-  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1490' },
+  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4515' },
+  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4525' },
+  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5556' },
+  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5621' },
+  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5654' },
+  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1637' },
+  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1645' },
+  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1664' },
+  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1492' },
   { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1492' },
   { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1254' },
 ]
@@ -193,7 +204,13 @@ const ESCAPE_PATH = join(ENGINE_DIR, 'sim/escape.ts')
 const SWITCH_IN_PATH = join(ENGINE_DIR, 'sim/switchInAbility.ts')
 
 /**
- * Extracts the slice of code corresponding to a function declaration, up to the next top-level function or EOF.
+ * Extracts the slice of code corresponding to a function declaration, up to the next top-level
+ * declaration at column 0 (another `function`/`export function` or a `const`/`export const`), or EOF.
+ *
+ * Ending only at the next function used to sweep whole top-level tables that sit between two
+ * functions into the caller's slice: `applyFrisk`'s slice ran through `ADD_TYPE_ON_ENTRY` and
+ * `ANNOUNCE_ONLY_ON_ENTRY`, and `runReactiveAbilityEffects`'s through
+ * `POISON_PUPPETEER_CLONE_ABILITIES`. Column-0 `const` tables are now boundaries too.
  */
 export function extractFunctionSlice(source: string, functionDeclaration: string): string {
   const start = source.indexOf(functionDeclaration)
@@ -201,8 +218,8 @@ export function extractFunctionSlice(source: string, functionDeclaration: string
     throw new Error(`Function declaration not found: ${functionDeclaration}`)
   }
   const afterStart = source.slice(start + functionDeclaration.length)
-  const nextFuncMatch = afterStart.match(/\n(?:export\s+)?function\s+/)
-  const end = nextFuncMatch ? start + functionDeclaration.length + nextFuncMatch.index! : source.length
+  const nextDeclarationMatch = afterStart.match(/\n(?:export\s+)?(?:function|const)\s+/)
+  const end = nextDeclarationMatch ? start + functionDeclaration.length + nextDeclarationMatch.index! : source.length
   return source.slice(start, end)
 }
 
@@ -329,9 +346,15 @@ export function extractSimAbsorbExtraAbilities(): Set<string> {
   return result
 }
 
-/** Quoted `'ABILITY_...'` literals inside a source slice (comparisons, case labels, map values). */
-function extractQuotedAbilityLiterals(slice: string): Set<string> {
-  const regex = /['"](ABILITY_[A-Z0-9_]+)['"]/g
+/**
+ * `'ABILITY_...'` literals that the code *branches* on: `case 'ABILITY_X':` labels and equality /
+ * inequality comparisons against an ability variable (`abilityId === 'X'`, `slotAbility !== 'X'`, ...).
+ * Bare literals that are arguments, array elements or map values are deliberately not evidence: the
+ * Wind Rider branch passes `'ABILITY_WIND_RIDER'` to `disableSwitchInAbility` from the Air Blower
+ * branch, so accepting argument literals kept Wind Rider "ported" after its own branch was deleted.
+ */
+function extractComparedAbilityLiterals(slice: string): Set<string> {
+  const regex = /(?:case\s+|(?:abilityId|slotAbility|currentAbility)\s*(?:===|!==|==|!=)\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
   const result = new Set<string>()
   let match: RegExpExecArray | null
   while ((match = regex.exec(slice)) !== null) {
@@ -346,28 +369,30 @@ function findFunctionDeclaration(content: string, name: string): string | null {
   return match ? match[0] : null
 }
 
-export function extractTrapAbilities(): Set<string> {
-  const content = readFileSync(ESCAPE_PATH, 'utf-8')
+export function extractTrapAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(ESCAPE_PATH, 'utf-8')
   return extractCaseLabelsFromFunction(content, 'function onTrap(')
 }
 
-export function extractBlockStatDropAbilities(): Set<string> {
-  const content = readFileSync(STAT_BUFFS_PATH, 'utf-8')
+export function extractBlockStatDropAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(STAT_BUFFS_PATH, 'utf-8')
   return extractCaseLabelsFromFunction(content, 'function statDropBlockForAbility(')
 }
 
-export function extractSwitchOutAbilities(): Set<string> {
-  const content = readFileSync(TURN_PATH, 'utf-8')
+export function extractSwitchOutAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(TURN_PATH, 'utf-8')
   return extractCaseLabelsFromFunction(content, 'export function dispatchSwitchOutAbilities(')
 }
 
 /**
  * Derives the onEntry handler set from the dispatcher itself: the map tables it
- * consults plus every `'ABILITY_...'` literal in `applySwitchInAbilities` and the
- * same-file helpers it calls (transitively).
+ * consults plus every ability *comparison* or `case` label in `applySwitchInAbilities`
+ * and the same-file helpers it calls (transitively).
+ *
+ * `source` defaults to the live `switchInAbility.ts`; tests pass a mutated copy.
  */
-export function extractSwitchInAbilities(): Set<string> {
-  const content = readFileSync(SWITCH_IN_PATH, 'utf-8')
+export function extractSwitchInAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(SWITCH_IN_PATH, 'utf-8')
   const result = new Set<string>([
     ...Object.keys(WEATHER_SETTER_MAP),
     ...Object.keys(TERRAIN_SETTER_MAP),
@@ -377,7 +402,7 @@ export function extractSwitchInAbilities(): Set<string> {
     ...ANNOUNCE_ONLY_ON_ENTRY,
   ])
 
-  let literalCount = 0
+  let comparisonCount = 0
   const visitedDeclarations = new Set<string>()
   const queue = ['export function applySwitchInAbilities(']
   while (queue.length > 0) {
@@ -385,9 +410,9 @@ export function extractSwitchInAbilities(): Set<string> {
     if (visitedDeclarations.has(declaration)) continue
     visitedDeclarations.add(declaration)
     const slice = extractFunctionSlice(content, declaration)
-    const literals = extractQuotedAbilityLiterals(slice)
-    literalCount += literals.size
-    for (const id of literals) result.add(id)
+    const compared = extractComparedAbilityLiterals(slice)
+    comparisonCount += compared.size
+    for (const id of compared) result.add(id)
 
     const callRegex = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g
     let call: RegExpExecArray | null
@@ -396,10 +421,253 @@ export function extractSwitchInAbilities(): Set<string> {
       if (helperDeclaration) queue.push(helperDeclaration)
     }
   }
-  if (literalCount === 0) {
+  if (comparisonCount === 0) {
     throw new Error('Zero labels extracted for declaration: export function applySwitchInAbilities(')
   }
   return result
+}
+
+// ---------------------------------------------------------------------------
+// Note-only raise sites (discovered from the sim source text)
+// ---------------------------------------------------------------------------
+
+export interface NoteOnlyRaiseSite {
+  ability: string
+  /** Repo-relative path, matching the `site` field of NOTE_ONLY_PAIRS. */
+  file: string
+  /** 1-based line of the note text. */
+  line: number
+  note: string
+}
+
+/** The three files whose note-only ability branches NOTE_ONLY_PAIRS covers. */
+export const NOTE_ONLY_SCANNED_FILES: ReadonlyArray<{ file: string; path: string }> = [
+  { file: 'web/src/engine/sim/moveEnd.ts', path: MOVE_END_PATH },
+  { file: 'web/src/engine/sim/turn.ts', path: TURN_PATH },
+  { file: 'web/src/engine/sim/statBuffs.ts', path: STAT_BUFFS_PATH },
+]
+
+const ABILITY_TEST_PATTERNS: readonly RegExp[] = [
+  /case\s+['"](ABILITY_[A-Z0-9_]+)['"]/g,
+  /(?:abilityId|slotAbility|currentAbility)\s*(?:===|!==|==|!=)\s*['"](ABILITY_[A-Z0-9_]+)['"]/g,
+]
+
+/** Every ability id a single line tests or labels (`case 'X':`, `abilityId === 'X'`, `||` chains). */
+function abilityTestsOnLine(line: string): string[] {
+  const ids = new Set<string>()
+  for (const regex of ABILITY_TEST_PATTERNS) {
+    regex.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(line)) !== null) ids.add(match[1])
+  }
+  return [...ids]
+}
+
+const indentOf = (line: string): number => line.length - line.trimStart().length
+
+/** Replaces string and template literals with `''` so their contents cannot look like code. */
+function stripStringLiterals(text: string): string {
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch
+      i++
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === '\\') i++
+        i++
+      }
+      i++ // closing quote
+      out += "''"
+    } else {
+      out += ch
+      i++
+    }
+  }
+  return out
+}
+
+/** Removes `name( ... )` calls with balanced parentheses. */
+function removeBalancedCalls(text: string, name: string): string {
+  let out = text
+  let from = 0
+  for (;;) {
+    const start = out.indexOf(`${name}(`, from)
+    if (start === -1) return out
+    let depth = 0
+    let end = -1
+    for (let i = start + name.length; i < out.length; i++) {
+      if (out[i] === '(') depth++
+      else if (out[i] === ')') {
+        depth--
+        if (depth === 0) {
+          end = i + 1
+          break
+        }
+      }
+    }
+    if (end === -1) return out
+    out = out.slice(0, start) + out.slice(end)
+    from = start
+  }
+}
+
+/** Removes local `const NAME = ...` declarations (semicolon-free style: the statement ends at a
+ * newline once brackets balance and the line does not end in a continuation operator). */
+function removeConstDeclarations(text: string): string {
+  let out = text
+  let from = 0
+  const keyword = /\bconst\s+/g
+  for (;;) {
+    keyword.lastIndex = from
+    const match = keyword.exec(out)
+    if (!match) return out
+    const start = match.index
+    let i = match.index + match[0].length
+    while (i < out.length && /[\w$]/.test(out[i])) i++ // declaration name
+    while (i < out.length && /\s/.test(out[i])) i++
+    if (out[i] === ':') {
+      while (i < out.length && out[i] !== '=' && out[i] !== '\n') i++ // type annotation
+      while (i < out.length && /\s/.test(out[i])) i++
+    }
+    if (out[i] !== '=') {
+      from = start + match[0].length // `for (const x of ...)` and the like: leave it alone
+      continue
+    }
+    let depth = 0
+    let end = out.length
+    for (i++; i < out.length; i++) {
+      const ch = out[i]
+      if (ch === '(' || ch === '[' || ch === '{') depth++
+      else if (ch === ')' || ch === ']' || ch === '}') depth--
+      else if (depth === 0 && ch === ';') {
+        end = i + 1
+        break
+      } else if (depth === 0 && ch === '\n') {
+        const before = out.slice(start, i).trimEnd()
+        if (!/[=(,[{?:&|+\-*/]$/.test(before)) {
+          end = i
+          break
+        }
+      }
+    }
+    out = out.slice(0, start) + out.slice(end)
+    from = start
+  }
+}
+
+/** Removes the parenthesised condition of every `if`/`for`/`while`/`switch`. */
+function removeControlFlowConditions(text: string): string {
+  let out = text
+  let from = 0
+  const keyword = /\b(?:if|for|while|switch)\s*\(/g
+  for (;;) {
+    keyword.lastIndex = from
+    const match = keyword.exec(out)
+    if (!match) return out
+    const open = match.index + match[0].length - 1
+    let depth = 0
+    let end = -1
+    for (let i = open; i < out.length; i++) {
+      if (out[i] === '(') depth++
+      else if (out[i] === ')') {
+        depth--
+        if (depth === 0) {
+          end = i + 1
+          break
+        }
+      }
+    }
+    if (end === -1) return out
+    out = out.slice(0, open) + out.slice(end)
+    from = match.index
+  }
+}
+
+/**
+ * True when a branch body does nothing but raise an unmodelled note and control its own flow:
+ * after removing comments, strings, note pushes, local `const` declarations and `if`/`for`
+ * conditions, only `break`/`continue`/`return true|false`/punctuation may remain.
+ *
+ * This is what separates a note-only branch (Generator's switch-out counter) from a real port
+ * that also happens to raise a note (Patchwork's onDefender, Angel's Wrath's move cases).
+ */
+export function isNoteOnlyBranchBody(body: string): boolean {
+  let rest = body
+    .split('\n')
+    .map((line) => {
+      const commentAt = line.indexOf('//')
+      return commentAt === -1 ? line : line.slice(0, commentAt)
+    })
+    .join('\n')
+  rest = stripStringLiterals(rest)
+  rest = removeBalancedCalls(rest, 'unmodelled.push')
+  rest = removeBalancedCalls(rest, 'unmodelled.includes')
+  rest = removeConstDeclarations(rest)
+  rest = removeControlFlowConditions(rest)
+  rest = rest
+    .replace(/\b(?:if|for|while|switch|else|break|continue)\b/g, '')
+    .replace(/\breturn\s+(?:true|false)\b/g, '')
+    .replace(/[{}\[\]();]/g, '')
+    .replace(/\s+/g, '')
+  return rest.length === 0
+}
+
+/**
+ * Every raise site of a `... is not modelled` note that sits inside a note-only, ability-keyed
+ * branch (nearest enclosing `case 'ABILITY_X':` / `abilityId === 'ABILITY_X'` test, `||` chains
+ * returning every id on it). Comment lines are skipped; branches with real effects are not
+ * reported. `sources` defaults to the live sim files; tests pass mutated copies.
+ */
+export function discoverNoteOnlyRaiseSites(
+  sources: ReadonlyArray<{ file: string; content: string }> = NOTE_ONLY_SCANNED_FILES.map((f) => ({
+    file: f.file,
+    content: readFileSync(f.path, 'utf-8'),
+  })),
+): NoteOnlyRaiseSite[] {
+  const sites: NoteOnlyRaiseSite[] = []
+  for (const { file, content } of sources) {
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue
+      if (!trimmed.includes('is not modelled')) continue
+
+      const noteIndent = indentOf(line)
+      for (let j = i - 1; j >= 0; j--) {
+        const candidate = lines[j]
+        if (!candidate.trim()) continue
+        const candidateIndent = indentOf(candidate)
+        if (candidateIndent >= noteIndent) continue
+        const abilities = abilityTestsOnLine(candidate)
+        if (abilities.length === 0) continue
+        // The candidate's block must still be open at the note: every line between them is deeper.
+        let encloses = true
+        for (let k = j + 1; k < i; k++) {
+          if (lines[k].trim() && indentOf(lines[k]) <= candidateIndent) {
+            encloses = false
+            break
+          }
+        }
+        if (!encloses) continue
+
+        const bodyLines: string[] = []
+        for (let k = j + 1; k < lines.length; k++) {
+          if (lines[k].trim() && indentOf(lines[k]) <= candidateIndent) break
+          bodyLines.push(lines[k])
+        }
+        if (!isNoteOnlyBranchBody(bodyLines.join('\n'))) break
+
+        for (const ability of abilities) {
+          sites.push({ ability, file, line: i + 1, note: trimmed })
+        }
+        break
+      }
+    }
+  }
+  return sites
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +964,13 @@ export function runInventory(
   const totalTested = summaries.reduce((acc, s) => acc + s.tested, 0)
   const totalAbilityMentionedInTests = summaries.reduce((acc, s) => acc + s.abilityMentionedInTests, 0)
   const unportedPairs = classifications.filter((c) => c.status === 'unported')
+  // An allowlist entry only means anything if it covers a real, still-unported pair: a pair the
+  // hook data does not define, or one the classifier already calls ported, grants nothing.
+  const statusByPair = new Map(classifications.map((c) => [`${c.ability}:${c.hook}`, c.status]))
+  const staleAllowlist = allowlist.filter((entry) => {
+    const status = statusByPair.get(`${entry.ability}:${entry.hook}`)
+    return status === undefined || status === 'ported'
+  })
 
   return {
     classifications,
@@ -708,6 +983,7 @@ export function runInventory(
     totalTested,
     totalAbilityMentionedInTests,
     unportedPairs,
+    staleAllowlist,
   }
 }
 
@@ -771,7 +1047,7 @@ export function generateInventoryDoc(
   lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).')
   lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.')
   lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
-  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `ABILITY_*` literal in `applySwitchInAbilities` and the same-file helpers it calls.')
+  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `case` label or ability-variable comparison (`abilityId === ...`) in `applySwitchInAbilities` and the same-file helpers it calls. Bare literals passed as arguments, array elements or map values are not evidence.')
   lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.')
   lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.')
   lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.')

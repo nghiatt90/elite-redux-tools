@@ -3610,7 +3610,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
-      Boolean(moveData?.flags?.sound) &&
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
       state.rng.random16() % 100 < 50
     ) {
       applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
@@ -5600,7 +5600,7 @@ function handleAttackerMoveEndAbility(
       target.mon.hp > 0 &&
       targetDamage > 0 &&
       canBeConfused(state, targetId, attackerId, statusDeps) &&
-      Boolean(moveData?.flags?.sound)
+      isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
     ) {
       if (state.rng.random16() % 2 !== 0) {
         const res = applyPrimaryStatusEffect(state, attackerId, targetId, MOVE_EFFECT_CONFUSION, moveId, statusDeps, unmodelled, false, false, true)
