@@ -218,6 +218,7 @@ import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
 import { aiCalcDamage, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
 import { idiv } from '../../fixed'
+import type { MoveBehaviorEntry } from '../../basePower'
 import { CHLOROPLAST_ABILITIES } from '../../multiHit'
 
 type Result = { score: number; unmodelled: string[] }
@@ -2384,7 +2385,10 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
   // :2151-2158 -- recoil discouragement, applies regardless of which case
   // above fired (every branch either falls through to here via `break` or
   // `return`s earlier, matching the C's own control flow into this shared tail).
-  const recoilFraction = getRecoilFraction(effect, deps.moveBehaviors)
+  // GetRecoilFraction reads gBattleMoves[move].effect, which the codegen sets to
+  // CUSTOM_BEHAVIORS[move.customBehavior] when the move has one (BattleMovesGenerator.kt:44);
+  // the sim's getRecoilFraction applies the custom behavior first for that reason.
+  const recoilFraction = getRecoilFraction(effect, deps.moveBehaviors, move?.customBehavior as MoveBehaviorEntry | null | undefined)
   if (recoilFraction) {
     if (!isMagicGuardProtected(state, attacker) && !blocksRecoil(state, deps, attacker)) {
       let frac = recoilFraction

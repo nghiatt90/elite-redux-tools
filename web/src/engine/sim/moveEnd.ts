@@ -617,6 +617,16 @@ const ON_RECOIL_TYPES: Record<string, readonly string[] | null> = {
   ABILITY_SUPER_STRAIN: null,
 }
 
+// Each ON_RECOIL ability's damage divisor: the hook returns max(floor(damage / divisor), 1).
+// Same C lines as ON_RECOIL_TYPES (Doom Blast :9297, Dual Shadow :9569, Electric Burst :4337, Infernal Rage :5474, Super Strain :6317).
+const ON_RECOIL_DIVISORS: Record<string, number> = {
+  ABILITY_DOOM_BLAST: 20,
+  ABILITY_DUAL_SHADOW: 10,
+  ABILITY_ELECTRIC_BURST: 20,
+  ABILITY_INFERNAL_RAGE: 20,
+  ABILITY_SUPER_STRAIN: 4,
+}
+
 // Target items in ITEMEFFECT_TARGET (battle_util.c:6126-6250) other than Rocky Helmet
 const TARGET_ITEM_EFFECTS = new Set([
   'HOLD_EFFECT_RED_CARD',
@@ -686,6 +696,37 @@ export function getRecoilFraction(
     return fromBehavior
   }
   return RECOIL_FRACTIONS[effect] ?? 0
+}
+
+/**
+ * GET_MOVE_TYPE(gCurrentMove, moveType) as Cmd_moveend reads it
+ * (src/battle_script_commands.c:4328): include/battle.h:735-741 returns the RESOLVED
+ * type held in gBattleStruct->dynamicMoveType, which SetTypeBeforeUsingMove wrote from
+ * GetMoveTypeInternal's full switch (src/battle_main.c:5093-5204, :5231-5253) --
+ * Weather Ball, Hidden Power, Terrain Pulse, Judgment/Plate, Natural Gift, Fling gem,
+ * Revelation Dance/Spit Up, Synchronoise/Ivy Cudgel, Ion Deluge/Electrify/Plasma Fists
+ * and the onMoveType ("-ate") abilities. The damage resolver's `moveType` is that same
+ * resolution; `resolveEffectiveMoveType` (onMoveType only) is the fallback for a
+ * resolver with no type engine behind it (test doubles and stubs).
+ */
+function resolveMoveEndEffectiveType(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): string | null {
+  if (deps.damage.moveType) {
+    const resolved = deps.damage.moveType(state, attackerId, targetId, moveId)
+    unmodelled.push(...resolved.unmodelled)
+    return resolved.moveType === null ? null : resolved.moveType.replace(/^TYPE_/, '')
+  }
+  const attacker = state.battlers[attackerId]
+  const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+  if (!attacker || !rawType) return null
+  return resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType
 }
 
 function battlerHasNoRecoil(battler: BattlerState): boolean {
@@ -3897,8 +3938,7 @@ function handleAttackerMoveEndAbility(
   // AbilityStatusEffect(MOVE_EFFECT_ATK_PLUS_1 | MOVE_EFFECT_AFFECTS_USER) -- SetMoveEffect still runs the Sheer Force gate (battle_script_commands.c:2361)
   // but skips the Substitute gate for an affects-user effect (:2388).
   if (abilityId === 'ABILITY_DAREDEVIL') {
-    const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
-    const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+    const effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled)
     const recklessBoosted =
       Boolean(moveData?.flags?.reckless) ||
       hasFlag(attacker.mon.status2, STATUS2_ENRAGED) ||
@@ -7408,16 +7448,16 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 23: MOVEEND_RECOIL (:4457-4517) -- recoil is a fraction of savedDmg (HP actually dealt).
-  // Struggle's Magic Guard / noRecoil bypass (:4467) only matters for the gapped hooks below:
-  // EFFECT_RECOIL_HP_25 has no GetRecoilFraction entry.
+  // Struggle's Magic Guard / noRecoil bypass (:4467) covers both the GetRecoilFraction recoil
+  // (:4471-4475) and the onRecoil hooks below (:4483-4490), both of which apply to Struggle.
   if (moveData?.split !== 'STATUS' && hpDealt > 0 && attacker && attacker.mon.hp > 0) {
     const struggle = moveId === 'MOVE_STRUGGLE'
     if (struggle || (!isMagicGuardProtected(state, attacker) && !battlerHasNoRecoil(attacker))) {
       const fraction = getRecoilFraction(moveData?.effect, deps.moveBehaviors, moveData?.customBehavior)
       const fractionDmg = fraction > 0 ? Math.max(1, Math.floor(hpDealt / fraction)) : 0
 
-      const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
-      const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+      // GET_MOVE_TYPE (:4328) reads the RESOLVED type, not the declared one.
+      const effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled)
 
       let onRecoilDmg = 0
       for (const { abilityId } of getBattlerAbilitySlotsReverse(attacker.mon.abilities)) {
@@ -7425,31 +7465,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         if (isSimAbilitySuppressed(state, attacker, abilityId, false, attackerId, false, deps.dataContext)) {
           continue
         }
-        switch (abilityId) {
-          case 'ABILITY_DOOM_BLAST':
-            if (effectiveType === 'DARK') {
-              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
-            }
-            break
-          case 'ABILITY_DUAL_SHADOW':
-            if (effectiveType === 'ELECTRIC' || effectiveType === 'DARK') {
-              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 10))
-            }
-            break
-          case 'ABILITY_ELECTRIC_BURST':
-            if (effectiveType === 'ELECTRIC') {
-              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
-            }
-            break
-          case 'ABILITY_INFERNAL_RAGE':
-            if (effectiveType === 'FIRE') {
-              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
-            }
-            break
-          case 'ABILITY_SUPER_STRAIN':
-            onRecoilDmg += Math.max(1, Math.floor(hpDealt / 4))
-            break
-        }
+        // ON_ABILITY's onRecoil hook returns 0 when its type check fails; the C's
+        // gBattleMoveDamage += damage (:4483-4490) accumulates every hook that answers.
+        const types = ON_RECOIL_TYPES[abilityId]
+        if (types !== null && (effectiveType === null || !types.includes(effectiveType))) continue
+        onRecoilDmg += Math.max(1, Math.floor(hpDealt / ON_RECOIL_DIVISORS[abilityId]))
       }
 
       let recoilDmg = fractionDmg + onRecoilDmg
