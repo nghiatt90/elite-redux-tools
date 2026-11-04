@@ -1437,7 +1437,7 @@ export function runReactiveAbilityEffects(
 // bitfields.setStateOnEffect) arms a PoisonPuppeteerClone bit; see SET_STATE_ON_EFFECT_ABILITIES in
 // statusEffects.ts for the same list (kept local so this module does not read a const from
 // statusEffects at init time -- statusEffects imports this module, so the cycle would hit a TDZ).
-const POISON_PUPPETEER_CLONE_ABILITIES = new Set([
+export const POISON_PUPPETEER_CLONE_ABILITIES = new Set([
   'ABILITY_BLOOD_BATH',
   'ABILITY_CHOKEHOLD',
   'ABILITY_CRYOSTASIS',

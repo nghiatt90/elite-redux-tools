@@ -21,13 +21,8 @@ import {
   ADD_TYPE_ON_ENTRY,
   ANNOUNCE_ONLY_ON_ENTRY,
 } from '../switchInAbility'
-import {
-  OWN_STATUS_IMMUNE_CONDITIONS,
-  CAN_STATUS_TYPE_ABILITIES,
-  ON_MODIFY_EFFECT_CHANCE_ABILITIES,
-  SET_STATE_ON_EFFECT_ABILITIES,
-} from '../statusEffects'
-import { ON_STAT_LOWERED_HOOKS } from '../statBuffs'
+import { OWN_STATUS_IMMUNE_CONDITIONS, SET_STATE_ON_EFFECT_ABILITIES } from '../statusEffects'
+import { ON_STAT_LOWERED_HOOKS, POISON_PUPPETEER_CLONE_ABILITIES } from '../statBuffs'
 import { HEAL_ABSORB_ABILITIES, STAT_ABSORB_ABILITIES } from '../absorb'
 
 export const HOOK_KINDS = [
@@ -197,6 +192,7 @@ const PREEMPT_PATH = join(ENGINE_DIR, 'sim/preempt.ts')
 const ON_WEATHER_PATH = join(ENGINE_DIR, 'sim/onWeather.ts')
 const MOVE_TARGET_FLAGS_PATH = join(ENGINE_DIR, 'sim/moveTargetFlags.ts')
 const STAT_BUFFS_PATH = join(ENGINE_DIR, 'sim/statBuffs.ts')
+const STATUS_EFFECTS_PATH = join(ENGINE_DIR, 'sim/statusEffects.ts')
 const TURN_PATH = join(ENGINE_DIR, 'sim/turn.ts')
 const MOVE_END_PATH = join(ENGINE_DIR, 'sim/moveEnd.ts')
 const ABSORB_PATH = join(ENGINE_DIR, 'sim/absorb.ts')
@@ -286,8 +282,8 @@ export function extractTargetFlagAbilities(): Set<string> {
   return result
 }
 
-export function extractReactiveExtraAbilities(): Set<string> {
-  const content = readFileSync(STAT_BUFFS_PATH, 'utf-8')
+export function extractReactiveExtraAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(STAT_BUFFS_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function runReactiveAbilityEffects(')
   const result = new Set<string>()
   const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
@@ -342,6 +338,275 @@ export function extractSimAbsorbExtraAbilities(): Set<string> {
   }
   if (result.size === 0) {
     throw new Error('Zero labels extracted for declaration: export function applyAbsorbEffect(')
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Source-text evidence for the hook kinds whose handlers are not `case` switches
+// ---------------------------------------------------------------------------
+
+/**
+ * Keys of a top-level object literal declaration (`const NAME: T = { ... }`), read from source
+ * text. The move-end handlers reach some abilities only through a table indexed by `abilityId`
+ * (`ATE_ON_HIT_STATUS[abilityId]`, `CONTACT_COUNTERATTACKS[abilityId]`, ...), so the table's keys
+ * are branch evidence just as much as an `if (abilityId === 'X')` comparison.
+ */
+function extractObjectLiteralKeys(source: string, name: string): Set<string> {
+  const declaration = new RegExp(`(?:export\\s+)?const\\s+${escapeRegExp(name)}\\b`).exec(source)
+  if (!declaration) throw new Error(`Table declaration not found: ${name}`)
+  const equals = source.indexOf('=', declaration.index + declaration[0].length)
+  if (equals === -1) throw new Error(`Table initialiser not found: ${name}`)
+  const open = source.indexOf('{', equals)
+  if (open === -1) throw new Error(`Table body not found: ${name}`)
+  let depth = 0
+  let end = -1
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++
+    else if (source[i] === '}') {
+      depth--
+      if (depth === 0) {
+        end = i + 1
+        break
+      }
+    }
+  }
+  if (end === -1) throw new Error(`Unbalanced table body: ${name}`)
+  const body = source.slice(open, end)
+  const result = new Set<string>()
+  const regex = /^\s*(ABILITY_[A-Z0-9_]+)\s*:/gm
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(body)) !== null) {
+    result.add(match[1])
+  }
+  return result
+}
+
+/**
+ * The logical statement that contains `index`: walks back over continuation lines (a line ending
+ * in an operator, or a comment/blank line) so a multi-line `if (` condition and a `return`
+ * expression are not mistaken for each other. Semicolon-free code makes a plain "last `;`/`{`"
+ * boundary wrong.
+ */
+function statementTextBefore(slice: string, index: number): string {
+  let start = slice.lastIndexOf('\n', index) + 1
+  while (start > 0) {
+    const previousEnd = start - 1 // the newline character
+    const previousStart = slice.lastIndexOf('\n', previousEnd - 1) + 1
+    const previousLine = slice.slice(previousStart, previousEnd).trim()
+    const isComment = previousLine.startsWith('//') || previousLine.startsWith('*') || previousLine.startsWith('/*')
+    if (previousLine === '' || isComment || /[&|(,?:=+\-*/]$/.test(previousLine)) {
+      start = previousStart
+      continue
+    }
+    break
+  }
+  return slice.slice(start, index)
+}
+
+/**
+ * Ability ids passed to `battlerHasSimAbility(...)` in a branch that makes the enclosing flag
+ * predicate answer true: `if (... battlerHasSimAbility(...)) { return true }` or
+ * `return <condition> && battlerHasSimAbility(...)`. Calls that are only used to raise a gap note
+ * do neither, so a generic "this holder has a move-flag ability" loop is not evidence.
+ */
+function extractReturnedAbilityIds(slice: string): Set<string> {
+  const result = new Set<string>()
+  const callRegex = /battlerHasSimAbility\(([^()]*)\)/g
+  let call: RegExpExecArray | null
+  while ((call = callRegex.exec(slice)) !== null) {
+    const literal = /['"](ABILITY_[A-Z0-9_]+)['"]/.exec(call[1])
+    if (!literal) continue
+    const start = call.index
+    const end = call.index + call[0].length
+    // `return moveData.split === 'STATUS' && battlerHasSimAbility(...)`
+    if (/^\s*return\b/.test(statementTextBefore(slice, start))) {
+      result.add(literal[1])
+      continue
+    }
+    // `if (... battlerHasSimAbility(...)) { return true }`
+    const tail = slice.slice(end, end + 200)
+    if (/^[^;{}]*\)\s*\{\s*return true\b/.test(tail)) result.add(literal[1])
+  }
+  return result
+}
+
+/**
+ * The ability ids the sim really branches on inside `canPoisonType` and `canParalyzeType`
+ * (`web/src/engine/sim/statusEffects.ts`): every quoted `ABILITY_...` literal in those two
+ * functions, including the array literal in the CanPoisonType bypass loop and the Angel's Wrath
+ * `MOVE_POISON_STING` branch.
+ */
+export function extractCanStatusTypeAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(STATUS_EFFECTS_PATH, 'utf-8')
+  const result = new Set<string>()
+  for (const declaration of ['export function canPoisonType(', 'export function canParalyzeType(']) {
+    const slice = extractFunctionSlice(content, declaration)
+    const regex = /['"](ABILITY_[A-Z0-9_]+)['"]/g
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(slice)) !== null) {
+      result.add(match[1])
+    }
+  }
+  if (result.size === 0) {
+    throw new Error('Zero ability ids extracted from canPoisonType/canParalyzeType')
+  }
+  return result
+}
+
+/** The ability ids `getMoveEffectChance` compares with `abilityId === ...` in its dispatch body. */
+export function extractModifyEffectChanceAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(STATUS_EFFECTS_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'export function getMoveEffectChance(')
+  const result = extractComparedAbilityLiterals(slice)
+  if (result.size === 0) {
+    throw new Error('Zero ability comparisons extracted from getMoveEffectChance')
+  }
+  return result
+}
+
+/**
+ * The onReactive ported set: the abilities the reactive dispatcher really handles. That is the
+ * PoisonPuppeteerClone set `runReactiveAbilityEffects` branches on (its own source of truth, not
+ * the data census in statusEffects.ts) plus every ability compared in `runReactiveAbilityEffects`.
+ * The two clone-set members whose handler only raises a "not modelled" note (Frostbind, Hemotoxin)
+ * are still removed by NOTE_ONLY_SET during classification.
+ */
+export function extractReactiveAbilities(source?: string): Set<string> {
+  return new Set<string>([...POISON_PUPPETEER_CLONE_ABILITIES, ...extractReactiveExtraAbilities(source)])
+}
+
+/**
+ * Ability ids the attacker move-end handler actually branches on:
+ * `abilityId === 'ABILITY_X'` comparisons in `handleAttackerMoveEndAbility`, the keys of the
+ * ability-keyed tables it indexes with `[abilityId]` (`ATE_ON_HIT_STATUS`,
+ * `ON_EITHER_CONTACT_STATUS`; both carry the aliases the handler dispatches to, e.g. Spectral
+ * Shroud's row is `ABILITY_SPECTRALIZE`), and the compared `ABILITY_SPECTRAL_SHROUD` id itself.
+ */
+export function extractAttackerBranchAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(MOVE_END_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function handleAttackerMoveEndAbility(')
+  const result = extractComparedAbilityLiterals(slice)
+  for (const id of extractObjectLiteralKeys(content, 'ATE_ON_HIT_STATUS')) result.add(id)
+  for (const id of extractObjectLiteralKeys(content, 'ON_EITHER_CONTACT_STATUS')) result.add(id)
+  if (result.size === 0) {
+    throw new Error('Zero ability branches extracted from handleAttackerMoveEndAbility')
+  }
+  return result
+}
+
+/**
+ * Ability ids the defender move-end handler actually branches on: `abilityId === 'ABILITY_X'`
+ * comparisons in `handleDefenderMoveEndAbility` plus the keys of the two tables it indexes with
+ * `[abilityId]` (`CONTACT_COUNTERATTACKS`, `ON_EITHER_CONTACT_STATUS`).
+ */
+export function extractDefenderBranchAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(MOVE_END_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function handleDefenderMoveEndAbility(')
+  const result = extractComparedAbilityLiterals(slice)
+  for (const id of extractObjectLiteralKeys(content, 'CONTACT_COUNTERATTACKS')) result.add(id)
+  for (const id of extractObjectLiteralKeys(content, 'ON_EITHER_CONTACT_STATUS')) result.add(id)
+  if (result.size === 0) {
+    throw new Error('Zero ability branches extracted from handleDefenderMoveEndAbility')
+  }
+  return result
+}
+
+/**
+ * The onRecoil abilities the MOVEEND_RECOIL loop really computes a recoil amount for: the ids
+ * that are keys of both `ON_RECOIL_TYPES` (the type gate) and `ON_RECOIL_DIVISORS` (the damage
+ * divisor), intersected with the loop's gate list `ON_RECOIL_ABILITIES`. A key present in only one
+ * table either skips every type or divides by `undefined`, so it is not ported.
+ */
+export function extractRecoilAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(MOVE_END_PATH, 'utf-8')
+  const types = extractObjectLiteralKeys(content, 'ON_RECOIL_TYPES')
+  const divisors = extractObjectLiteralKeys(content, 'ON_RECOIL_DIVISORS')
+  const result = new Set<string>([...types].filter((id) => divisors.has(id) && ON_RECOIL_ABILITIES.includes(id)))
+  if (result.size === 0) {
+    throw new Error('Zero onRecoil abilities present in both ON_RECOIL_TYPES and ON_RECOIL_DIVISORS')
+  }
+  return result
+}
+
+export type MoveFlagFamily = 'punch' | 'kick' | 'sound' | 'dance' | 'keenEdge' | 'megaLauncher'
+
+/**
+ * The MOVE_FLAG_* families each `onModifyMoveFlags` hook grants, transcribed from
+ * `pipeline/.upstream/eliteredux-source/src/abilities.cc` at the pinned SHA. One hook can grant
+ * more than one family (Junshi Sanda swaps PUNCH and KICK, Festivities swaps DANCE and SOUND,
+ * Backstreet Boy swaps KICK and DANCE), which is why the classifier checks every family.
+ *
+ * C lines: Brawling Wyvern :7603-7610, Junshi Sanda :7613-7622, Mixed Martial Arts :9898-9905,
+ * Gunman :9535-9540, Festivities :10194-10203, Reverbate :10657-10662, Taekkyeon :10666-10671,
+ * Backstreet Boy :11570-11583, Chestnut Axe :11709-11712, Musical Notes :11988-11992.
+ */
+export const MODIFY_MOVE_FLAGS_GRANTS: Record<string, readonly MoveFlagFamily[]> = {
+  ABILITY_BRAWLING_WYVERN: ['punch'], // PUNCH on Dragon moves
+  ABILITY_JUNSHI_SANDA: ['punch', 'kick'], // PUNCH on kick moves, KICK on punch moves
+  ABILITY_MIXED_MARTIAL_ARTS: ['punch', 'kick'], // both on Normal-type moves
+  ABILITY_GUNMAN: ['megaLauncher'], // MEGA_LAUNCHER on status moves
+  ABILITY_FESTIVITIES: ['dance', 'sound'], // DANCE on sound moves, SOUND on dance moves
+  ABILITY_REVERBATE: ['sound'], // SOUND on Normal-type moves
+  ABILITY_TAEKKYEON: ['dance'], // DANCE on non-status moves
+  ABILITY_BACKSTREET_BOY: ['kick', 'dance'], // KICK on dance moves, DANCE on kick moves
+  ABILITY_CHESTNUT_AXE: ['keenEdge'], // KEEN_EDGE on Grass moves
+  ABILITY_MUSICAL_NOTES: ['sound'], // SOUND on status moves
+}
+
+/**
+ * The sim predicate that answers `DoesMoveMatchFlag(... family)` and the file it lives in.
+ * `null` means the sim has no predicate for that family at all: PUNCH is only reachable through
+ * the damage engine's registry hooks (`isIronFistBoosted` in abilities/dispatchCalc.ts), which is
+ * not a returning-true sim branch, so a hook that grants PUNCH cannot be counted as ported.
+ */
+const MOVE_FLAG_PREDICATES: Record<
+  MoveFlagFamily,
+  { file: 'statusEffects' | 'moveEnd' | 'moveTargetFlags'; declaration: string } | null
+> = {
+  punch: null,
+  kick: { file: 'statusEffects', declaration: 'export function isStrikerMove(' },
+  sound: { file: 'statusEffects', declaration: 'export function isSoundMove(' },
+  dance: { file: 'moveEnd', declaration: 'export function isDanceMove(' },
+  keenEdge: { file: 'statusEffects', declaration: 'export function isKeenEdgeMove(' },
+  megaLauncher: { file: 'moveTargetFlags', declaration: 'export function isMegaLauncherBoostedMove(' },
+}
+
+export interface ModifyMoveFlagsSources {
+  statusEffects?: string
+  moveEnd?: string
+  moveTargetFlags?: string
+}
+
+export function extractMoveFlagPredicateAbilities(source: string, declaration: string): Set<string> {
+  const slice = extractFunctionSlice(source, declaration)
+  const result = extractReturnedAbilityIds(slice)
+  if (result.size === 0) {
+    throw new Error(`Zero returning-true ability branches for declaration: ${declaration}`)
+  }
+  return result
+}
+
+/**
+ * The onModifyMoveFlags abilities whose every C-granted flag family has a returning-true sim
+ * branch in the matching predicate. An ability whose hook grants a family the sim has no predicate
+ * for (PUNCH today) is not ported, and neither is one whose branch condition differs from the C.
+ */
+export function extractModifyMoveFlagsAbilities(sources: ModifyMoveFlagsSources = {}): Set<string> {
+  const contents: Record<'statusEffects' | 'moveEnd' | 'moveTargetFlags', string> = {
+    statusEffects: sources.statusEffects ?? readFileSync(STATUS_EFFECTS_PATH, 'utf-8'),
+    moveEnd: sources.moveEnd ?? readFileSync(MOVE_END_PATH, 'utf-8'),
+    moveTargetFlags: sources.moveTargetFlags ?? readFileSync(MOVE_TARGET_FLAGS_PATH, 'utf-8'),
+  }
+  const perFamily = new Map<MoveFlagFamily, Set<string>>()
+  for (const family of Object.keys(MOVE_FLAG_PREDICATES) as MoveFlagFamily[]) {
+    const predicate = MOVE_FLAG_PREDICATES[family]
+    if (!predicate) continue
+    perFamily.set(family, extractMoveFlagPredicateAbilities(contents[predicate.file], predicate.declaration))
+  }
+  const result = new Set<string>()
+  for (const [id, flags] of Object.entries(MODIFY_MOVE_FLAGS_GRANTS)) {
+    if (flags.every((family) => perFamily.get(family)?.has(id) === true)) result.add(id)
   }
   return result
 }
@@ -688,10 +953,7 @@ export const PORTED_PREEMPT_ACTION_ABILITIES = extractPreemptActionAbilities()
 export const PORTED_WEATHER_ABILITIES = extractWeatherAbilities()
 export const PORTED_TERRAIN_ABILITIES = extractTerrainAbilities()
 export const PORTED_TARGET_FLAG_ABILITIES = extractTargetFlagAbilities()
-export const PORTED_REACTIVE_ABILITIES = new Set<string>([
-  ...SET_STATE_ON_EFFECT_ABILITIES,
-  ...extractReactiveExtraAbilities(),
-])
+export const PORTED_REACTIVE_ABILITIES = extractReactiveAbilities()
 export const PORTED_REVIVE_ABILITIES = extractReviveAbilities()
 export const PORTED_SIM_ABSORB_ABILITIES = new Set<string>([
   ...HEAL_ABSORB_ABILITIES,
@@ -705,9 +967,13 @@ export const PORTED_STAT_LOWERED_ABILITIES = new Set<string>(Object.keys(ON_STAT
 export const PORTED_TRAP_ABILITIES_SET = extractTrapAbilities()
 export const PORTED_SWITCH_OUT_ABILITIES_SET = extractSwitchOutAbilities()
 export const PORTED_SWITCH_IN_ABILITIES = extractSwitchInAbilities()
-export const PORTED_RECOIL_ABILITIES_SET = new Set<string>(ON_RECOIL_ABILITIES)
-const CAN_STATUS_TYPE_SET = new Set<string>(CAN_STATUS_TYPE_ABILITIES)
-const ON_MODIFY_EFFECT_CHANCE_SET = new Set<string>(ON_MODIFY_EFFECT_CHANCE_ABILITIES)
+export const PORTED_RECOIL_ABILITIES_SET = extractRecoilAbilities()
+/** Branch evidence on each side of the move-end handlers (see the extractors above). */
+export const PORTED_ATTACKER_BRANCH_ABILITIES = extractAttackerBranchAbilities()
+export const PORTED_DEFENDER_BRANCH_ABILITIES = extractDefenderBranchAbilities()
+export const PORTED_CAN_STATUS_TYPE_ABILITIES = extractCanStatusTypeAbilities()
+export const PORTED_MODIFY_EFFECT_CHANCE_ABILITIES = extractModifyEffectChanceAbilities()
+export const PORTED_MODIFY_MOVE_FLAGS_ABILITIES = extractModifyMoveFlagsAbilities()
 
 const CALC_HOOKS = new Set<HookKind>([
   'onOffensiveMultiplier',
@@ -767,9 +1033,9 @@ export function isDirectlyPorted(
 
   switch (hookKind) {
     case 'onAttacker':
-      return PORTED_ATTACKER_ABILITIES.has(abilityId)
+      return PORTED_ATTACKER_ABILITIES.has(abilityId) && PORTED_ATTACKER_BRANCH_ABILITIES.has(abilityId)
     case 'onDefender':
-      return PORTED_DEFENDER_ABILITIES.has(abilityId)
+      return PORTED_DEFENDER_ABILITIES.has(abilityId) && PORTED_DEFENDER_BRANCH_ABILITIES.has(abilityId)
     case 'onEntry':
       return PORTED_SWITCH_IN_ABILITIES.has(abilityId)
     case 'onEndTurn':
@@ -783,7 +1049,7 @@ export function isDirectlyPorted(
     case 'onBlockStatDrops':
       return PORTED_BLOCK_STAT_DROP_ABILITIES_SET.has(abilityId)
     case 'onCanStatusType':
-      return CAN_STATUS_TYPE_SET.has(abilityId)
+      return PORTED_CAN_STATUS_TYPE_ABILITIES.has(abilityId)
     case 'onCopyMove':
       return false
     case 'onDisguise':
@@ -791,9 +1057,9 @@ export function isDirectlyPorted(
     case 'onExit':
       return PORTED_SWITCH_OUT_ABILITIES_SET.has(abilityId)
     case 'onModifyEffectChance':
-      return ON_MODIFY_EFFECT_CHANCE_SET.has(abilityId)
+      return PORTED_MODIFY_EFFECT_CHANCE_ABILITIES.has(abilityId)
     case 'onModifyMoveFlags':
-      return false
+      return PORTED_MODIFY_MOVE_FLAGS_ABILITIES.has(abilityId)
     case 'onModifyTargetFlag':
       return PORTED_TARGET_FLAG_ABILITIES.has(abilityId)
     case 'onPreemptAction':
@@ -1045,29 +1311,42 @@ export function generateInventoryDoc(
   lines.push('')
   lines.push('1. **Calc-side hooks (18 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.')
   lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).')
-  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.')
-  lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
+  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`) **and** branch evidence in `handleAttackerMoveEndAbility`: an `abilityId === \'ABILITY_X\'` comparison, a key of a table the handler indexes with `[abilityId]` (`ATE_ON_HIT_STATUS`, `ON_EITHER_CONTACT_STATUS`), or the alias comparison it resolves (`ABILITY_SPECTRAL_SHROUD` -> the `ABILITY_SPECTRALIZE` row).')
+  lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`) **and** branch evidence in `handleDefenderMoveEndAbility`: an `abilityId === \'ABILITY_X\'` comparison or a key of `CONTACT_COUNTERATTACKS` / `ON_EITHER_CONTACT_STATUS`.')
   lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `case` label or ability-variable comparison (`abilityId === ...`) in `applySwitchInAbilities` and the same-file helpers it calls. Bare literals passed as arguments, array elements or map values are not evidence.')
   lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.')
   lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.')
   lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.')
   lines.push('8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).')
   lines.push('9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.')
-  lines.push('10. **onCanStatusType**: Handled in `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('10. **onCanStatusType**: Quoted `ABILITY_...` ids inside `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`), extracted from source text: the CanPoisonType bypass array, the Angel\'s Wrath `MOVE_POISON_STING` comparison, and the CanParalyzeType bypass array.')
   lines.push('11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.')
-  lines.push('14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
-  lines.push('15. **onModifyMoveFlags**: Not ported (unwired in calc; gap notes in sim).')
+  lines.push('14. **onModifyEffectChance**: `abilityId === \'ABILITY_X\'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.')
+  lines.push('15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when every granted family has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). PUNCH has no sim predicate (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported.')
   lines.push('16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
   lines.push('17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
-  lines.push('18. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`); note-only branches are unported.')
+  lines.push('18. **onReactive**: `abilityId === \'ABILITY_X\'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the abilities the same dispatcher routes into `runPoisonPuppeteerClone` through its exported `POISON_PUPPETEER_CLONE_ABILITIES` set; note-only branches are unported.')
   lines.push('19. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).')
   lines.push('20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
   lines.push('21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).')
   lines.push('22. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).')
   lines.push('23. **onTrap**: Case labels of `onTrap` (`web/src/engine/sim/escape.ts`), extracted from source text.')
   lines.push('24. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).')
+  lines.push('')
+  const attackerListed = Object.keys(abilityHooksData).filter((id) => Boolean(abilityHooksData[id]?.hooks?.onAttacker))
+  const attackerNoBranch = attackerListed
+    .filter((id) => PORTED_ATTACKER_ABILITIES.has(id) && !PORTED_ATTACKER_BRANCH_ABILITIES.has(id))
+    .sort()
+  const defenderListed = Object.keys(abilityHooksData).filter((id) => Boolean(abilityHooksData[id]?.hooks?.onDefender))
+  const defenderNoBranch = defenderListed
+    .filter((id) => PORTED_DEFENDER_ABILITIES.has(id) && !PORTED_DEFENDER_BRANCH_ABILITIES.has(id))
+    .sort()
+  const noBranchText = (ids: string[]): string => (ids.length === 0 ? 'none' : ids.map((id) => `\`${id}\``).join(', '))
+  lines.push(
+    `Move-end branch evidence: ${attackerNoBranch.length} of the ${attackerListed.length} defined \`onAttacker\` pairs are listed in \`PORTED_ATTACKER_ABILITIES\` with no branch in \`handleAttackerMoveEndAbility\` (${noBranchText(attackerNoBranch)}). ${defenderNoBranch.length} of the ${defenderListed.length} defined \`onDefender\` pairs are listed in \`PORTED_DEFENDER_ABILITIES\` with no branch in \`handleDefenderMoveEndAbility\` (${noBranchText(defenderNoBranch)}). A listed pair with no branch is unported, not an error.`,
+  )
   lines.push('')
 
   // Section 3: Summary Table

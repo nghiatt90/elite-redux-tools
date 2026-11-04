@@ -12,29 +12,31 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 
 1. **Calc-side hooks (18 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.
    - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).
-2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.
-3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).
+2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`) **and** branch evidence in `handleAttackerMoveEndAbility`: an `abilityId === 'ABILITY_X'` comparison, a key of a table the handler indexes with `[abilityId]` (`ATE_ON_HIT_STATUS`, `ON_EITHER_CONTACT_STATUS`), or the alias comparison it resolves (`ABILITY_SPECTRAL_SHROUD` -> the `ABILITY_SPECTRALIZE` row).
+3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`) **and** branch evidence in `handleDefenderMoveEndAbility`: an `abilityId === 'ABILITY_X'` comparison or a key of `CONTACT_COUNTERATTACKS` / `ON_EITHER_CONTACT_STATUS`.
 4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`). The ported set is derived from that dispatcher: the keys of `WEATHER_SETTER_MAP`, `TERRAIN_SETTER_MAP`, `PORTED_ENTRY_MOVE_MAP`, `INTIMIDATE_CLONE_MAP`, `ADD_TYPE_ON_ENTRY` and `ANNOUNCE_ONLY_ON_ENTRY`, plus every `case` label or ability-variable comparison (`abilityId === ...`) in `applySwitchInAbilities` and the same-file helpers it calls. Bare literals passed as arguments, array elements or map values are not evidence.
 5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.
 6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.
 7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.
 8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).
 9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.
-10. **onCanStatusType**: Handled in `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`).
+10. **onCanStatusType**: Quoted `ABILITY_...` ids inside `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`), extracted from source text: the CanPoisonType bypass array, the Angel's Wrath `MOVE_POISON_STING` comparison, and the CanParalyzeType bypass array.
 11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).
 12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).
 13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.
-14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).
-15. **onModifyMoveFlags**: Not ported (unwired in calc; gap notes in sim).
+14. **onModifyEffectChance**: `abilityId === 'ABILITY_X'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.
+15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when every granted family has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). PUNCH has no sim predicate (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported.
 16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).
 17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).
-18. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`); note-only branches are unported.
+18. **onReactive**: `abilityId === 'ABILITY_X'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the abilities the same dispatcher routes into `runPoisonPuppeteerClone` through its exported `POISON_PUPPETEER_CLONE_ABILITIES` set; note-only branches are unported.
 19. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).
 20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).
 21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).
 22. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).
 23. **onTrap**: Case labels of `onTrap` (`web/src/engine/sim/escape.ts`), extracted from source text.
 24. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).
+
+Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in `PORTED_ATTACKER_ABILITIES` with no branch in `handleAttackerMoveEndAbility` (none). 0 of the 122 defined `onDefender` pairs are listed in `PORTED_DEFENDER_ABILITIES` with no branch in `handleDefenderMoveEndAbility` (none). A listed pair with no branch is unported, not an error.
 
 ## Hook Completeness Summary
 
@@ -47,13 +49,13 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onBattlerFaints | 55 | 38 | 0 | 17 | 0 | 35 |
 | onBeforeAttack | 9 | 0 | 0 | 9 | 0 | 3 |
 | onBlockStatDrops | 11 | 11 | 0 | 0 | 0 | 9 |
-| onCanStatusType | 8 | 8 | 0 | 0 | 0 | 6 |
+| onCanStatusType | 8 | 8 | 0 | 0 | 0 | 8 |
 | onChooseDefensiveStat | 11 | 11 | 0 | 0 | 0 | 10 |
 | onChooseOffensiveStat | 20 | 20 | 0 | 0 | 0 | 19 |
 | onCopyMove | 4 | 0 | 0 | 4 | 0 | 1 |
-| onCrit | 31 | 31 | 0 | 0 | 0 | 26 |
+| onCrit | 31 | 31 | 0 | 0 | 0 | 27 |
 | onDefender | 122 | 122 | 0 | 0 | 0 | 122 |
-| onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 83 |
+| onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 84 |
 | onDisguise | 3 | 0 | 0 | 3 | 0 | 2 |
 | onEndTurn | 67 | 67 | 0 | 0 | 0 | 65 |
 | onEntry | 225 | 225 | 0 | 0 | 0 | 207 |
@@ -61,7 +63,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onImmune | 19 | 19 | 0 | 0 | 0 | 19 |
 | onInfiltrate | 10 | 10 | 0 | 0 | 0 | 10 |
 | onModifyEffectChance | 13 | 13 | 0 | 0 | 0 | 12 |
-| onModifyMoveFlags | 10 | 0 | 0 | 10 | 0 | 10 |
+| onModifyMoveFlags | 10 | 7 | 0 | 3 | 0 | 10 |
 | onModifyTargetFlag | 7 | 7 | 0 | 0 | 0 | 7 |
 | onMoldBreaker | 10 | 10 | 0 | 0 | 0 | 10 |
 | onMoveType | 42 | 42 | 0 | 0 | 0 | 42 |
@@ -79,9 +81,9 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 | onSwapSplit | 7 | 7 | 0 | 0 | 0 | 7 |
 | onTerrain | 7 | 4 | 0 | 3 | 0 | 6 |
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
-| onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 17 |
+| onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1426** | **0** | **72** | **0** | **1364** |
+| **Total** | **1498** | **1433** | **0** | **65** | **0** | **1370** |
 
 ## Unported Ability Hook Pairs
 
@@ -146,18 +148,11 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 - `ABILITY_GENERATOR` (src/abilities.cc:6174) *(ability mentioned in test)*
 - `ABILITY_RETRIEVER` (src/abilities.cc:6574) *(ability mentioned in test)*
 
-### onModifyMoveFlags (10)
+### onModifyMoveFlags (3)
 
-- `ABILITY_BACKSTREET_BOY` (src/abilities.cc:11568) *(ability mentioned in test)*
 - `ABILITY_BRAWLING_WYVERN` (src/abilities.cc:7601) *(ability mentioned in test)*
-- `ABILITY_CHESTNUT_AXE` (src/abilities.cc:11707) *(ability mentioned in test)*
-- `ABILITY_FESTIVITIES` (src/abilities.cc:10193) *(ability mentioned in test)*
-- `ABILITY_GUNMAN` (src/abilities.cc:9533) *(ability mentioned in test)*
 - `ABILITY_JUNSHI_SANDA` (src/abilities.cc:7612) *(ability mentioned in test)*
 - `ABILITY_MIXED_MARTIAL_ARTS` (src/abilities.cc:9898) *(ability mentioned in test)*
-- `ABILITY_MUSICAL_NOTES` (src/abilities.cc:11988) *(ability mentioned in test)*
-- `ABILITY_REVERBATE` (src/abilities.cc:10656) *(ability mentioned in test)*
-- `ABILITY_TAEKKYEON` (src/abilities.cc:10665) *(ability mentioned in test)*
 
 ### onPriority (8)
 

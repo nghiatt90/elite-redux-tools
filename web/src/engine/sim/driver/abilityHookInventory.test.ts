@@ -32,8 +32,12 @@ const ENGINE_DIR = fileURLToPath(new URL('../../', import.meta.url))
 
 const abilityHooks: Record<string, AbilityHookRecord> = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8'))
 
-/** Pinned today at 72 -- this number should only go DOWN. */
-export const UNPORTED_PAIR_COUNT = 72
+/**
+ * Pinned today at 65 -- this number should only go DOWN.
+ * Cycle 150g moved onModifyMoveFlags from 10 unported to 3 (7 gained returning-true flag-predicate
+ * branches); every other hook kind kept its previous count, so 72 - 7 = 65.
+ */
+export const UNPORTED_PAIR_COUNT = 65
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
