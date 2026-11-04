@@ -409,16 +409,16 @@ describe('Cycle 148 - UseEntryMove abilities (first 12)', () => {
       expect(unmodelled).toEqual([])
     })
 
-    it('unported ability from the other 19 raises the note and queues nothing', () => {
+    it('unported ability from the other 7 raises the note and queues nothing', () => {
       const unmodelled: string[] = []
       const state = battle(
-        [{ abilities: { ability: 'ABILITY_CHANGE_OF_HEART', innates: [null, null, null] } }, {}],
+        [{ abilities: { ability: 'ABILITY_ELECTRO_BOOSTER', innates: [null, null, null] } }, {}],
         scriptedRng(),
       )
       applySwitchInAbilities(state, 0, testDeps(), unmodelled)
       expect(state.queuedExtraAttacks).toEqual([])
       expect(unmodelled).toContain(
-        'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHANGE_OF_HEART queued MOVE_HEART_SWAP',
+        'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_ELECTRO_BOOSTER queued MOVE_MAGNET_RISE',
       )
     })
   })

@@ -294,7 +294,7 @@ export const TERRAIN_SETTER_MAP: Readonly<Record<string, number>> = {
 }
 
 /**
- * Cycle 148: First 12 UseEntryMove abilities (battle_util.c:3994-4019, abilities.cc).
+ * Cycle 148 / 148b: 24 UseEntryMove abilities (battle_util.c:3994-4019, abilities.cc).
  * Queues an out-of-turn attack via gQueuedExtraAttackData with falseSwipe: true.
  */
 export const PORTED_ENTRY_MOVE_MAP: Readonly<Record<string, { move: string; movePower: number }>> = {
@@ -310,25 +310,25 @@ export const PORTED_ENTRY_MOVE_MAP: Readonly<Record<string, { move: string; move
   ABILITY_PHANTOM_THIEF: { move: 'MOVE_SPECTRAL_THIEF', movePower: 40 },
   ABILITY_SAND_PIT: { move: 'MOVE_SAND_TOMB', movePower: 20 },
   ABILITY_CHILLING_PRESENCE: { move: 'MOVE_ICY_WIND', movePower: 10 },
+  ABILITY_DOOMBRINGER: { move: 'MOVE_DOOM_DESIRE', movePower: 0 },
+  ABILITY_WISHMAKER: { move: 'MOVE_WISH', movePower: 0 },
+  ABILITY_CHANGE_OF_HEART: { move: 'MOVE_HEART_SWAP', movePower: 0 },
+  ABILITY_WEB_SPINNER: { move: 'MOVE_STRING_SHOT', movePower: 0 },
+  ABILITY_DRACO_MORALE: { move: 'MOVE_DRAGON_CHEER', movePower: 0 },
+  ABILITY_DREAM_WHIMSY: { move: 'MOVE_YAWN', movePower: 0 },
+  ABILITY_WILDFIRE: { move: 'MOVE_FIRE_SPIN', movePower: 0 },
+  ABILITY_JUMP_SCARE: { move: 'MOVE_ASTONISH', movePower: 0 },
+  ABILITY_TAR_TOSS: { move: 'MOVE_TAR_SHOT', movePower: 0 },
+  ABILITY_WIND_RAGE: { move: 'MOVE_DEFOG', movePower: 0 },
+  ABILITY_POSEIDONS_DOMINION: { move: 'MOVE_WHIRLPOOL', movePower: 0 },
+  ABILITY_WOODLAND_CURSE: { move: 'MOVE_FORESTS_CURSE', movePower: 0 },
 }
 
 /**
- * Remaining 19 unported abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
- * Cycle 148b. Queues an out-of-turn full move attack via gQueuedExtraAttackData.
+ * Remaining 7 unported abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
+ * Cycle 148c. Queues an out-of-turn full move attack via gQueuedExtraAttackData.
  */
 export const USE_ENTRY_MOVE_MAP: Readonly<Record<string, string>> = {
-  ABILITY_DOOMBRINGER: 'MOVE_DOOM_DESIRE',
-  ABILITY_WISHMAKER: 'MOVE_WISH',
-  ABILITY_CHANGE_OF_HEART: 'MOVE_HEART_SWAP',
-  ABILITY_WEB_SPINNER: 'MOVE_STRING_SHOT',
-  ABILITY_DRACO_MORALE: 'MOVE_DRAGON_CHEER',
-  ABILITY_DREAM_WHIMSY: 'MOVE_YAWN',
-  ABILITY_WILDFIRE: 'MOVE_FIRE_SPIN',
-  ABILITY_JUMP_SCARE: 'MOVE_ASTONISH',
-  ABILITY_TAR_TOSS: 'MOVE_TAR_SHOT',
-  ABILITY_WIND_RAGE: 'MOVE_DEFOG',
-  ABILITY_POSEIDONS_DOMINION: 'MOVE_WHIRLPOOL',
-  ABILITY_WOODLAND_CURSE: 'MOVE_FORESTS_CURSE',
   ABILITY_NEUTRALIZING_FOG: 'MOVE_DEFOG',
   ABILITY_ROYAL_DECREE: 'MOVE_GLARE',
   ABILITY_FROSTY_PRESCENCE: 'MOVE_MIST',
@@ -1328,6 +1328,40 @@ function canUseExtraMove(state: BattleState, attackerId: number, targetId: numbe
   )
 }
 
+/**
+ * UseEntryMove (src/battle_util.c:3994-4019).
+ * Targets BATTLE_OPPOSITE(battler) then its flank partner (^ 2), first alive.
+ * If CanUseExtraMove passes, pushes to state.queuedExtraAttacks with falseSwipe: true.
+ * Always returns false in C.
+ */
+function applyUseEntryMove(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  move: string,
+  movePower: number,
+): void {
+  let target = state.battlersCount
+  let opposingBattler = battlerId ^ 1
+  for (let i = 0; i < 2; i++) {
+    if (isBattlerAlive(state, opposingBattler)) {
+      target = opposingBattler
+      break
+    }
+    opposingBattler ^= 2
+  }
+  if (target < state.battlersCount && canUseExtraMove(state, battlerId, target)) {
+    state.queuedExtraAttacks.push({
+      ability: abilityId,
+      attacker: battlerId,
+      move,
+      movePower,
+      target,
+      falseSwipe: true,
+    })
+  }
+}
+
 export function applySwitchInAbilities(
   state: BattleState,
   battlerId: number,
@@ -1565,25 +1599,27 @@ export function applySwitchInAbilities(
     // 4. Entry moves via UseEntryMove (battle_util.c:3994-4019, abilities.cc)
     const portedEntry = PORTED_ENTRY_MOVE_MAP[abilityId]
     if (portedEntry !== undefined) {
-      let target = state.battlersCount
-      let opposingBattler = battlerId ^ 1
-      for (let i = 0; i < 2; i++) {
-        if (isBattlerAlive(state, opposingBattler)) {
-          target = opposingBattler
-          break
+      if (abilityId === 'ABILITY_JUMP_SCARE') {
+        // abilities.cc:8905-8908: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability))
+        // SetSingleUseAbilityCounter(battler, ability, TRUE); return UseEntryMove(battler, ability, MOVE_ASTONISH, 0);
+        // Counter is set to 1 on first entry even if no valid target exists.
+        if (getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext) > 0) {
+          continue
         }
-        opposingBattler ^= 2
+        setSingleUseAbilityCounter(state, battlerId, abilityId, 1, deps.dataContext)
+      } else if (abilityId === 'ABILITY_WISHMAKER') {
+        // abilities.cc:6411-6417: int counter = GetSingleUseAbilityCounter(battler, ability);
+        // CHECK(counter < 3); CHECK(UseEntryMove(battler, ability, MOVE_WISH, 0));
+        // SetSingleUseAbilityCounter(battler, ability, counter + 1); return TRUE;
+        // In C, UseEntryMove (battle_util.c:4018) always returns FALSE, so the counter increment
+        // line is unreachable. Wish is queued whenever counter < 3, but the counter is never incremented.
+        const counter = getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext)
+        if (counter >= 3) {
+          continue
+        }
       }
-      if (target < state.battlersCount && canUseExtraMove(state, battlerId, target)) {
-        state.queuedExtraAttacks.push({
-          ability: abilityId,
-          attacker: battlerId,
-          move: portedEntry.move,
-          movePower: portedEntry.movePower,
-          target,
-          falseSwipe: true,
-        })
-      }
+
+      applyUseEntryMove(state, battlerId, abilityId, portedEntry.move, portedEntry.movePower)
       continue
     }
 

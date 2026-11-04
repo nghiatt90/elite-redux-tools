@@ -1641,14 +1641,14 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
     ])
     expect(unmodelled).toHaveLength(0)
 
-    const stateHeart = battle(
-      [{ abilities: { ability: requireAbility('ABILITY_CHANGE_OF_HEART'), innates: [null, null, null] } }, {}],
+    const stateElectro = battle(
+      [{ abilities: { ability: requireAbility('ABILITY_ELECTRO_BOOSTER'), innates: [null, null, null] } }, {}],
       scriptedRng(),
     )
-    applySwitchInAbilities(stateHeart, 0, makeTestDeps(), unmodelled)
-    expect(stateHeart.queuedExtraAttacks).toHaveLength(0)
+    applySwitchInAbilities(stateElectro, 0, makeTestDeps(), unmodelled)
+    expect(stateElectro.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toContain(
-      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_CHANGE_OF_HEART queued MOVE_HEART_SWAP',
+      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_ELECTRO_BOOSTER queued MOVE_MAGNET_RISE',
     )
   })
 
@@ -1665,15 +1665,15 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
     expect(state.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toHaveLength(0)
 
-    const stateHeart = battle(
+    const stateElectro = battle(
       [
-        { abilities: { ability: requireAbility('ABILITY_CHANGE_OF_HEART'), innates: [null, null, null] } },
+        { abilities: { ability: requireAbility('ABILITY_ELECTRO_BOOSTER'), innates: [null, null, null] } },
         { hp: 0 },
       ],
       scriptedRng(),
     )
-    applySwitchInAbilities(stateHeart, 0, makeTestDeps(), unmodelled)
-    expect(stateHeart.queuedExtraAttacks).toHaveLength(0)
+    applySwitchInAbilities(stateElectro, 0, makeTestDeps(), unmodelled)
+    expect(stateElectro.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toHaveLength(0)
   })
 
