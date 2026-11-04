@@ -1531,11 +1531,12 @@ function handleDefenderMoveEndAbility(
     return result
   }
 
-  // Ape Shift onDefender (src/abilities.cc:9065 -> ApeShiftHandler :9047-9067). The hook itself
-  // does not gate on damage: ShouldChangeFormHpBased only needs the HP threshold and the ability,
-  // and HandleDefenderAbility (:9050-9084) calls onDefender on every move-end pass. During
-  // onDefender gBattlerAttacker is still the move's attacker, so BattleScript_ApeShift's
-  // status half targets the ATTACKER (see apeShiftHandler's scriptAttackerId).
+  // Ape Shift onDefender (src/abilities.cc:9065 -> ApeShiftHandler :9047-9060). The hook itself
+  // does not gate on damage: ShouldChangeFormHpBased (battle_util.c:3812-3906; the Ape Shift row is
+  // :3807) only needs the HP threshold and the ability, and HandleDefenderAbility
+  // (battle_util.c:9050-9084) calls onDefender
+  // on every move-end pass. During onDefender gBattlerAttacker is still the move's attacker, so
+  // BattleScript_ApeShift's status half targets the ATTACKER (see apeShiftHandler's scriptAttackerId).
   if (abilityId === 'ABILITY_APE_SHIFT') {
     apeShiftHandler(state, targetId, deps, unmodelled, attackerId)
     return result
@@ -2044,9 +2045,11 @@ function handleDefenderMoveEndAbility(
   // Balloon Bomber (src/abilities.cc:7759-7762) is Aftermath.onDefender || Inflatable.onDefender.
   // Aftermath's body returns FALSE unconditionally, so `||` never short-circuits the Inflatable half
   // below: both always run, in that order. This is the Aftermath half (use the Balloon Bomber id in
-  // the queued action, because that is the `ability` the C's hook was called with).
+  // the queued action, because that is the `ability` the C's hook was called with). Aftermath's own
+  // onDefender (:1662-1669) is CHECK_NOT(IsBattlerAlive(battler)) and nothing else: no damage gate,
+  // exactly like the plain ABILITY_AFTERMATH branch below (:1662-1669 aliased by :12524-12528).
   if (abilityId === 'ABILITY_BALLOON_BOMBER') {
-    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+    if (!isBattlerAlive(state, targetId)) {
       const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
     }
@@ -2397,8 +2400,9 @@ function handleDefenderMoveEndAbility(
     ) {
       if (state.rng.random16() % 100 < 30) {
         attacker.volatiles.disabledMove = chosenMoveId
+        // abilities.cc:1919-1920 sets only `gVolatileStructs[attacker].disabledMove = gChosenMove;` and
+        // `disableTimer = 4`; there is no start-value write in the C.
         attacker.volatiles.disableTimer = 4
-        attacker.volatiles.disableTimerStartValue = 4
       }
     }
   }

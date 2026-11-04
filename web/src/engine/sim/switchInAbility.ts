@@ -1382,8 +1382,11 @@ export function applySwitchInAbilities(
     }
     // CheckAndSetSwitchInAbility runs for every entry ability except Trace (battle_util.c:9189-9194:
     // `switch (ability) { case ABILITY_TRACE: break; default: if (!CheckAndSetSwitchInAbility(...)) return FALSE; }`).
-    // Trace's own hook clears switchInAbilityDone on the slot it overwrites (abilities.cc:968), so a
-    // Trace mon traces again on a later entry instead of being blocked by the once-per-switch flag.
+    // Trace therefore sets no switchInAbilityDone flag on entry: a Trace that fails (nothing to copy, or the
+    // `CHECK_NOT(HasAbilityIgnoringSuppression(battler, newAbility))` at abilities.cc:962) simply stays Trace and
+    // is retried on a later switch-in pass. Only a SUCCESSFUL Trace writes
+    // `gVolatileStructs[battler].switchInAbilityDone[index] = FALSE` (abilities.cc:968), and that clears the flag
+    // of the slot the new ability was written into, so the copied ability can run its own onEntry pass.
     if (abilityId !== 'ABILITY_TRACE' && !checkAndSetSwitchInAbility(state, battler, abilityId, deps.dataContext)) {
       continue
     }

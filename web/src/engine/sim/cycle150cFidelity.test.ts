@@ -336,7 +336,7 @@ describe('Cycle 150c 1 - defender move-end abilities run on a zero-damage move',
 // ---------------------------------------------------------------------------
 
 describe('Cycle 150c 2 - Trace is exempt from the once-per-switch-in flag', () => {
-  it('Trace still traces when switchInAbilityDone is already set, and clears that flag (abilities.cc:963)', () => {
+  it('Trace still traces when switchInAbilityDone is already set, and clears that flag (abilities.cc:968)', () => {
     const state = battle([
       { abilities: hasAbility('ABILITY_TRACE') },
       { abilities: hasAbility('ABILITY_LIMBER') },
@@ -346,7 +346,7 @@ describe('Cycle 150c 2 - Trace is exempt from the once-per-switch-in flag', () =
     state.battlers[0]!.volatiles.switchInAbilityDone[0] = true
     applySwitchInAbilities(state, 0, testDeps(), [])
     expect(state.battlers[0]!.mon.abilities.ability).toBe('ABILITY_LIMBER')
-    // Trace's own hook writes gVolatileStructs[battler].switchInAbilityDone[index] = FALSE (:963).
+    // Trace's own hook writes gVolatileStructs[battler].switchInAbilityDone[index] = FALSE (:968).
     expect(state.battlers[0]!.volatiles.switchInAbilityDone[0]).toBe(false)
   })
 
@@ -372,7 +372,7 @@ describe('Cycle 150c 2 - Trace is exempt from the once-per-switch-in flag', () =
 
 // ---------------------------------------------------------------------------
 // Suspicion 3: Cursed Body disables gChosenMove and reads pp[gChosenMovePos]
-// (abilities.cc:1910-1924; gChosenMovePos is set at battle_util.c:195-197).
+// (abilities.cc:1910-1924; gChosenMovePos is set at battle_util.c:200).
 // ---------------------------------------------------------------------------
 
 describe('Cycle 150c 3 - Cursed Body uses the chosen move and the chosen slot', () => {

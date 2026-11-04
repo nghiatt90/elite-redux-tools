@@ -2754,12 +2754,19 @@ function handlePainSplit(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId })
   }
   const hpDiff = Math.trunc((battler.mon.hp + target.mon.hp) / 2)
+  // Cmd_datahpupdate, battle_script_commands.c:1928-1935: the target's `datahpupdate BS_TARGET` runs
+  // with gBattleMoveDamage = painSplitHp = targetHp - hpDiff (copied by `copyword gBattleMoveDamage,
+  // sPAINSPLIT_HP`, data/battle_scripts_1.s:4701), so gHpDealt (and therefore
+  // TARGET_TURN_DAMAGED/DidMoveHit) is that loss when positive. When the target gains HP the value
+  // is negative and gHpDealt is not a loss -- carry 0 then.
+  const targetHpBefore = target.mon.hp
+  const targetDamage = Math.max(0, targetHpBefore - hpDiff)
   battler.mon.hp = Math.min(battler.mon.maxHp, hpDiff)
   target.mon.hp = Math.min(target.mon.maxHp, hpDiff)
   syncPartyHp(state, battlerId)
   syncPartyHp(state, targetId)
 
-  return outcome(ctx, { targetId })
+  return outcome(ctx, { targetId, targetDamage })
 }
 
 /**

@@ -130,7 +130,7 @@ import type { ChosenAction, TurnOrderContext, TurnOrder, TurnOrderMoveView } fro
 import { recalculateMoveOrder, setActionsAndBattlersTurnOrder } from './turnOrder'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
-import type { SimDataContext } from './dataContext'
+import type { SimDataContext, SimMoveData } from './dataContext'
 import { gapsToUnmodelled, weatherFromBitfield } from './bridge'
 import { buildAccuracyInputs } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
@@ -2251,6 +2251,42 @@ export function executeAction(
   let targetId = action.target
   const unmodelled: string[] = []
 
+  // One MOVEEND_ABILITIES (case 5) defender pass shared by every move-end exit below that never
+  // reaches runMoveEnd's own case 5 (accuracy miss, Protect block, no living target, an attacker
+  // that could not act, Sky Drop failure, preFail). In the C every one of those scripts ends in
+  // `goto BattleScript_MoveEnd` (data/battle_scripts_1.s:2883-2885 `moveendall`), which runs case 5
+  // (battle_script_commands.c:4527-4531; AbilityBattleEffects(ABILITYEFFECT_MOVE_END),
+  // battle_util.c:4485-4489) with no damage gate, BEFORE the case 9/17 bookkeeping that
+  // runMoveEndBookkeeping performs. Callers dispatch first, then bookkeep, and merge the result
+  // into their ActionOutcome exactly as the status-move site (turn.ts:2673-2692) does.
+  // `targetIdForDispatch === null` means the sim has no target at all; otherwise the C's
+  // gBattlerTarget is the originally selected target (`targetId` above), which is what callers
+  // pass when their own `currentTargetId` is null.
+  const dispatchDefenderMoveEnd = (
+    targetIdForDispatch: number | null,
+    moveId: string,
+    chosenMoveId: string,
+    moveDataForDispatch: SimMoveData | undefined,
+    fainted: number[],
+  ): { statChanges: StatChangeOutcome[]; statusApplied: StatusAppliedOutcome | null } => {
+    if (targetIdForDispatch === null) return { statChanges: [], statusApplied: null }
+    const res = dispatchMoveEndDefenderAbilities({
+      state,
+      attackerId: battlerId,
+      targetId: targetIdForDispatch,
+      moveId,
+      chosenMoveId,
+      moveData: moveDataForDispatch,
+      targetDamage: 0,
+      hpDealt: 0,
+      noEffect: true,
+      deps,
+      unmodelled,
+      fainted,
+    })
+    return { statChanges: res.statChanges, statusApplied: res.statusApplied }
+  }
+
   // battle_util.c:205-207, data/battle_scripts_1.s:4776: PP is not deducted for extra attacks
   // without movePos (Metronome) or under sleepTalk (Sleep Talk), or when noPpDeduct is set.
   const shouldDeductPp =
@@ -2349,6 +2385,23 @@ export function executeAction(
       attackerDamage = powderDamage
       applyDamage(state, battlerId, powderDamage, cancelFainted, deps)
     }
+    // Every canceller script reaches BattleScript_MoveEnd: MoveUsedIsAsleep (:8594-8598), IsFrozen
+    // (:8682-8687), MustRecharge (:4538-4541), Flinched (:8725-8731), IsDisabled (:7651-7655),
+    // HealBlockPrevents (:8178-8182), GravityPrevents (:8165-8169), IsTaunted (:8083-8087),
+    // IsImprisoned (:8294-8298), IsParalyzed (:8700-8706), IsThroatChopPrevented (:8096-8100),
+    // PsychicTerrainPrevents (:10143-10147), PowderMoveNoEffect (:8707-8737), MoveUsedPowder
+    // (:8771-8785), SkyDropInAir (:5782-5785), ButItFailed for Quick Guard (:5942-5946), and the
+    // Truant loafing script's `moveendto MOVEEND_NEXT_TARGET` (:10678-10688, which includes case 5).
+    // CANCELLER_CONFUSED sets `gBattlerTarget = gBattlerAttacker` before MoveUsedIsConfused
+    // (battle_util.c:3380, :3386), so its MoveEnd pass runs on the ATTACKER; every other canceller
+    // leaves gBattlerTarget at the selected target.
+    const cancelDispatch = dispatchDefenderMoveEnd(
+      cancelResult.cancelledBy === 'CONFUSION' ? battlerId : targetId,
+      action.chosenMove.id,
+      action.chosenMove.id,
+      deps.dataContext.move(action.chosenMove.id),
+      cancelFainted,
+    )
     return {
       turnOrderIndex: index,
       battlerId,
@@ -2361,8 +2414,8 @@ export function executeAction(
       attackerDamage,
       cancelledBy: cancelResult.cancelledBy,
       confusionSelfHitDamage,
-      statChanges: null,
-      statusApplied: null,
+      statChanges: cancelDispatch.statChanges.length > 0 ? cancelDispatch.statChanges : null,
+      statusApplied: cancelDispatch.statusApplied,
       unmodelled,
       fainted: cancelFainted,
     }
@@ -2667,9 +2720,14 @@ export function executeAction(
       // MOVEEND_ABILITIES (case 5, :4527-4531) also runs after a status move: its script ends in
       // `goto BattleScript_MoveEnd` (e.g. BattleScript_EffectConfuse, data/battle_scripts_1.s:4219-4231),
       // and AbilityBattleEffects(ABILITYEFFECT_MOVE_END) (battle_util.c:4485-4489) has no damage gate. The
-      // hooks carry their own ShouldApplyOnHitEffect checks, so a 0-damage move (targetDamage 0 here)
-      // only reaches the ungated ones: Ape Shift's onDefender and the fainted-holder Aftermath family.
+      // hooks carry their own ShouldApplyOnHitEffect checks, so a status move that dealt nothing
+      // (targetDamage 0 here) only reaches the ungated ones: Ape Shift's onDefender and the
+      // fainted-holder Aftermath family. Pain Split is the one handled status move that DOES deal
+      // "damage": its target `datahpupdate BS_TARGET` sets gHpDealt to the target's HP loss
+      // (battle_script_commands.c:1928-1935, data/battle_scripts_1.s:4698-4704), so
+      // handlePainSplit carries that in `targetDamage` and it is used here.
       const statusTargetId = currentTargetId ?? getMoveTarget(state, battlerId, currentMove.id, deps)
+      const statusDamage = effectOutcome.targetDamage ?? 0
       const statusDefenderAbilities = dispatchMoveEndDefenderAbilities({
         state,
         attackerId: battlerId,
@@ -2677,8 +2735,8 @@ export function executeAction(
         moveId: currentMove.id,
         chosenMoveId: currentChosenMoveId,
         moveData,
-        targetDamage: 0,
-        hpDealt: 0,
+        targetDamage: statusDamage,
+        hpDealt: statusDamage,
         noEffect: Boolean(effectOutcome.missed),
         deps,
         unmodelled,
@@ -3162,10 +3220,27 @@ export function executeAction(
       if (isSecondTurnSemiInvuln) {
         state.battlers[battlerId]!.statuses3 = clearFlag(state.battlers[battlerId]!.statuses3, STATUS3_SEMI_INVULNERABLE)
       }
-      // No living target: the move resolves to nothing here. The real game runs
-      // a fail branch with messages and effect-specific behaviour; this batch
-      // models only that no damage is dealt.
-      return { ...blank, skippedBecauseFainted: false, battleOver: false, targetId: currentTargetId, unmodelled }
+      // Cmd_attackcanceler's no-living-target branch sends the script to
+      // BattleScript_ButItFailedAtkStringPpReduce (battle_script_commands.c:1145-1149), whose failure
+      // tail is `goto BattleScript_MoveEnd` (data/battle_scripts_1.s:5938-5945): MOVEEND_ABILITIES
+      // (case 5) runs on the still-selected gBattlerTarget. The sim does not model the fail messages
+      // or the ppreduce this branch also performs; it models the move-end pass.
+      const noTargetDispatch = dispatchDefenderMoveEnd(
+        currentTargetId ?? targetId,
+        currentMove.id,
+        currentChosenMoveId,
+        moveData,
+        [],
+      )
+      return {
+        ...blank,
+        skippedBecauseFainted: false,
+        battleOver: false,
+        targetId: currentTargetId,
+        statChanges: noTargetDispatch.statChanges.length > 0 ? noTargetDispatch.statChanges : null,
+        statusApplied: noTargetDispatch.statusApplied,
+        unmodelled,
+      }
     }
 
     const targetIndex = order.battlerByTurnOrder.indexOf(currentTargetId)
@@ -3245,6 +3320,11 @@ export function executeAction(
       if (!isSecondTurnSemiInvuln && !rampageContinues && preFailDeductsPp) {
         performPpDeduct()
       }
+      // BattleScript_EffectFakeOut (:5932-5934) and the rest of the preFail gates jump to
+      // BattleScript_ButItFailedAtkStringPpReduce / BattleScript_ButItFailed, whose `goto
+      // BattleScript_MoveEnd` (:5938-5945) runs MOVEEND_ABILITIES (case 5) before the case 9/17
+      // bookkeeping.
+      const preFailDispatch = dispatchDefenderMoveEnd(currentTargetId, currentMove.id, currentChosenMoveId, moveData, [])
       runMoveEndBookkeeping({
         state,
         attackerId: battlerId,
@@ -3269,8 +3349,11 @@ export function executeAction(
         attackerDamage: null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
-        statChanges: preHitStatChanges.length > 0 ? preHitStatChanges : null,
-        statusApplied: null,
+        statChanges:
+          preHitStatChanges.length > 0 || preFailDispatch.statChanges.length > 0
+            ? [...preHitStatChanges, ...preFailDispatch.statChanges]
+            : null,
+        statusApplied: preFailDispatch.statusApplied,
         unmodelled,
         fainted: [],
       }
@@ -3456,6 +3539,10 @@ export function executeAction(
         performPpDeduct()
       }
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
+      // A blocked move's script reaches BattleScript_MoveEnd (e.g. BattleScript_EffectHit's
+      // JumpIfMoveAffectedByProtect target, data/battle_scripts_1.s:2861-2885), so MOVEEND_ABILITIES
+      // (case 5, battle_script_commands.c:4527-4531) runs before the case 9/17 bookkeeping.
+      const protectDispatch = dispatchDefenderMoveEnd(currentTargetId, currentMove.id, currentChosenMoveId, moveData, preFainted)
       runMoveEndBookkeeping({
         state,
         attackerId: battlerId,
@@ -3479,8 +3566,11 @@ export function executeAction(
         attackerDamage: preAttackerDamage || null,
         cancelledBy: null,
         confusionSelfHitDamage: null,
-        statChanges: protectMoveEnd.statChanges,
-        statusApplied: protectMoveEnd.statusApplied,
+        statChanges:
+          (protectMoveEnd.statChanges?.length ?? 0) > 0 || protectDispatch.statChanges.length > 0
+            ? [...(protectMoveEnd.statChanges ?? []), ...protectDispatch.statChanges]
+            : null,
+        statusApplied: protectMoveEnd.statusApplied ?? protectDispatch.statusApplied,
         unmodelled,
         fainted: preFainted,
       }
@@ -3559,6 +3649,11 @@ export function executeAction(
       }
 
       const protectMoveEnd = handleProtectLikeMoveEnd(state, battlerId, currentTargetId, currentMove.id, deps, unmodelled)
+      // BattleScript_PrintMoveMissed -> BattleScript_MoveMissed -> `goto BattleScript_MoveEnd`
+      // (data/battle_scripts_1.s:3092-3101), so MOVEEND_ABILITIES (case 5,
+      // battle_script_commands.c:4527-4531) runs on the selected gBattlerTarget before the case 9/17
+      // bookkeeping -- for a fainted holder that is enough for the ungated Aftermath family.
+      const missDispatch = dispatchDefenderMoveEnd(currentTargetId, currentMove.id, currentChosenMoveId, moveData, missedFainted)
       runMoveEndBookkeeping({
         state,
         attackerId: battlerId,
@@ -3582,8 +3677,11 @@ export function executeAction(
         attackerDamage: missedAttackerDamage,
         cancelledBy: null,
         confusionSelfHitDamage: null,
-        statChanges: protectMoveEnd.statChanges,
-        statusApplied: protectMoveEnd.statusApplied,
+        statChanges:
+          (protectMoveEnd.statChanges?.length ?? 0) > 0 || missDispatch.statChanges.length > 0
+            ? [...(protectMoveEnd.statChanges ?? []), ...missDispatch.statChanges]
+            : null,
+        statusApplied: protectMoveEnd.statusApplied ?? missDispatch.statusApplied,
         unmodelled,
         fainted: missedFainted,
       }
@@ -3593,6 +3691,7 @@ export function executeAction(
       const targetBattler = currentTargetId !== null ? state.battlers[currentTargetId] : null
       if (!targetBattler || !targetBattler.volatiles.skyDropped) {
         // clearskydrop fail branch (battle_script_commands.c:8669) -> jumps straight to MoveEnd, deals NO damage
+        const skyDropDispatch = dispatchDefenderMoveEnd(currentTargetId ?? targetId, currentMove.id, currentChosenMoveId, moveData, [])
         runMoveEndBookkeeping({
           state,
           attackerId: battlerId,
@@ -3616,8 +3715,8 @@ export function executeAction(
           attackerDamage: null,
           cancelledBy: null,
           confusionSelfHitDamage: null,
-          statChanges: null,
-          statusApplied: null,
+          statChanges: skyDropDispatch.statChanges.length > 0 ? skyDropDispatch.statChanges : null,
+          statusApplied: skyDropDispatch.statusApplied,
           unmodelled,
           fainted: [],
         }
