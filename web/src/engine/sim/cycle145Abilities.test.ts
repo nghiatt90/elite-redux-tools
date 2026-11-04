@@ -626,5 +626,13 @@ describe('Cycle 145 - Patchwork onDefender (abilities.cc:8645-8655)', () => {
     expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_CURSED)).toBe(false)
     expect(state.battlers[1]!.turn.turnAbilityTriggers[0]).toBe(0)
   })
+
+  it('an attacker with Sheer Force on a boosted move is not cursed and the counter resets', () => {
+    const state = holderBattle('ABILITY_PATCHWORK', { abilities: ability('ABILITY_SHEER_FORCE') })
+    state.battlers[1]!.turn.turnAbilityTriggers[0] = 1
+    defenderHit(state, 'MOVE_BODY_SLAM', 10)
+    expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_CURSED)).toBe(false)
+    expect(state.battlers[1]!.turn.turnAbilityTriggers[0]).toBe(0)
+  })
 })
 

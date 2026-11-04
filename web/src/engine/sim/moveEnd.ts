@@ -3161,6 +3161,7 @@ function handleDefenderMoveEndAbility(
   // after it pass; CHECK(IsBattlerAlive(attacker)); CHECK_NOT(gBattleMons[attacker].status2 &
   // STATUS2_CURSED); then AbilityStatusEffect(MOVE_EFFECT_CURSE | MOVE_EFFECT_AFFECTS_USER), which flips
   // SetMoveEffect's gEffectBattler to the move's attacker (battle_script_commands.c:2330-2343, :2721-2726).
+  // SetMoveEffect returns early when TestSheerForceFlag(gBattlerAttacker, gCurrentMove) (:2358-2362).
   // The counter is written by onDisguise (:8638-8644, write at :8641, `gBattlerAttacker + 1`) when Disguise busts -- the
   // sim has no onDisguise damage-path hook, so in play the counter is never set; the write is NOT invented
   // here (see REPORT.md). The status2 write is the one Haunted Spirit (:2165) and Wings of Pestilence
@@ -3169,7 +3170,11 @@ function handleDefenderMoveEndAbility(
     const triggeringBattler = getOncePerTurnAbilityCounter(state, targetId, abilityId, deps.dataContext) - 1
     if (triggeringBattler === attackerId) {
       setOncePerTurnAbilityCounter(state, targetId, abilityId, 0, deps.dataContext)
-      if (attacker.mon.hp > 0 && !hasFlag(attacker.mon.status2, STATUS2_CURSED)) {
+      if (
+        attacker.mon.hp > 0 &&
+        !hasFlag(attacker.mon.status2, STATUS2_CURSED) &&
+        !testSheerForceFlag(state, attackerId, moveId, statusDeps)
+      ) {
         attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_CURSED)
         if (!result.statusApplied) result.statusApplied = { battlerId: attackerId, status: 'CURSE' }
       }
