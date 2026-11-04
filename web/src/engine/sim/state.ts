@@ -44,13 +44,16 @@ export type StatStages = number[]
  * Omitted from the C struct, with reasons: `experience`, `otId`, `personality`,
  * `nickname`, `otName`, `friendship`, `ppBonuses` (no effect on any AI score or
  * damage path), `wasalreadytotemboosted` (totem boosts are a wild-battle
- * mechanic, and the 40 fights are all trainer battles), `abilityNum` (superseded
- * by the resolved `abilities` slots below). `personality` is also not needed by
+ * mechanic, and the 40 fights are all trainer battles). `personality` is also not needed by
  * the Illusion state the sim does carry -- that lives in `BattlerState.illusion`
  * (GetIllusionMonPtr/SetIllusionMon, battle_util.c:8281-8330) and its only AI
  * reader, ShouldFailForIllusion, is `return FALSE` at battle_ai_util.c:518. */
 export interface SimBattleMon {
   speciesId: string // SpeciesEnum species (:164) -- exact SPECIES_* id
+  /** `u8 abilityNum` (include/pokemon.h:193): 0, 1 or 2 -- the mon's chosen ability slot.
+   * Carried across form changes so UpdateAbilityStateIndicesForNewSpecies
+   * (battle_util.c:8810) reads GetAbilityBySpecies(newSpecies, abilityNum). */
+  abilityNum?: number
   /** `u16 stats[5]` / the attack..spDefense union (:165-174). Out-of-battle
    * stats with nature and EVs already applied; CalculateStat's in-battle
    * modifiers are applied on top by the damage engine, not stored here. */
@@ -443,6 +446,8 @@ export interface SimPartyMon {
   pp: Slot4<number>
   itemId: string | null
   abilities: AbilitySlots
+  /** See SimBattleMon.abilityNum. Preserved across switches and Mega reverts. */
+  abilityNum?: number
   /** Only ATK and SPATK are read from a reserve mon (ShouldSwitchIfAllBadMoves'
    * stat comparison), but the full spread is carried: the mon has to be sent out
    * eventually, at which point it becomes a SimBattleMon. */

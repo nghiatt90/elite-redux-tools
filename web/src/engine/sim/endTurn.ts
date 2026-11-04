@@ -336,7 +336,7 @@ const ITEMS_1_2_HOLD_EFFECTS = new Set([
  * `hooks.onEndTurn` is present, read once during porting rather than looked up
  * at runtime (same precedent as HIT_COUNT_OVERRIDE_MOVES above). Used only to
  * decide when ENDTURN_ABILITIES's gap line fires for unported hooks. */
-const ENDTURN_ABILITY_IDS = new Set([
+export const ENDTURN_ABILITY_IDS = new Set([
   'ABILITY_ACID_REFLUX',
   'ABILITY_BAD_DREAMS',
   'ABILITY_BIG_LEAVES',

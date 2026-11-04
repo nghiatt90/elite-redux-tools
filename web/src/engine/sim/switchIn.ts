@@ -163,6 +163,7 @@ function buildSwitchedInMon(incoming: SimPartyMon): SimBattleMon {
     hiddenPowerType: incoming.hiddenPowerType,
     speedDown: incoming.speedDown,
     abilities: incoming.abilities,
+    abilityNum: incoming.abilityNum,
     gender: incoming.gender,
     status1: incoming.status1,
     status2: 0,

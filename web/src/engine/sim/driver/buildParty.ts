@@ -124,6 +124,8 @@ export function buildOpponentParty(
       ability: mon.ability ?? null,
       innates: [innates[0] ?? null, innates[1] ?? null, innates[2] ?? null],
     }
+    const abilityIndex = mon.ability ? (species.abilities ?? []).indexOf(mon.ability) : -1
+    const abilityNum = abilityIndex >= 0 ? abilityIndex : 0
 
     const types = resolveTypes(species)
     const { moves, pp } = resolveMovesAndPp(mon.moves ?? [], bundle)
@@ -141,6 +143,7 @@ export function buildOpponentParty(
       pp,
       itemId,
       abilities,
+      abilityNum,
       rawStats,
       nature,
       hiddenPowerType,
@@ -194,10 +197,13 @@ export function buildPlayerParty(
     }
 
     const innates = (species.innates ?? []) as (string | null)[]
+    const chosenAbility = spec.ability ?? species.abilities?.[0] ?? null
     const abilities: AbilitySlots = {
-      ability: spec.ability ?? species.abilities?.[0] ?? null,
+      ability: chosenAbility,
       innates: [innates[0] ?? null, innates[1] ?? null, innates[2] ?? null],
     }
+    const abilityIndex = chosenAbility ? (species.abilities ?? []).indexOf(chosenAbility) : -1
+    const abilityNum = abilityIndex >= 0 ? abilityIndex : 0
 
     const types = resolveTypes(species)
     const { moves, pp } = resolveMovesAndPp(spec.moves ?? [], bundle)
@@ -215,6 +221,7 @@ export function buildPlayerParty(
       pp,
       itemId,
       abilities,
+      abilityNum,
       rawStats,
       nature,
       hiddenPowerType,

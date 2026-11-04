@@ -268,6 +268,24 @@ function formStats(
  *   - moves, pp
  *   - status1, status2, statStages, gender, hiddenPowerType
  */
+/**
+ * GetAbilityBySpecies (src/pokemon.c:2147-2157):
+ * abilityNum < NUM_ABILITY_SLOTS -> abilities[abilityNum], else abilities[0];
+ * if ability == ABILITY_NONE -> abilities[0].
+ */
+export function abilityForSpeciesSlot(
+  speciesData: { abilities?: (string | null)[] },
+  abilityNum: number = 0,
+): string | null {
+  const abilities = speciesData.abilities ?? []
+  const slot = abilityNum >= 0 && abilityNum < 3 ? abilityNum : 0
+  let ability = abilities[slot] ?? null
+  if (!ability || ability === 'ABILITY_NONE') {
+    ability = abilities[0] ?? null
+  }
+  return !ability || ability === 'ABILITY_NONE' ? null : ability
+}
+
 export function changeBattlerForm(
   state: BattleState,
   battlerId: number,
@@ -286,9 +304,10 @@ export function changeBattlerForm(
     speciesData.types[2] ?? 'MYSTERY',
   ]
 
-  // UpdateAbilityStateIndicesForNewSpecies (src/battle_util.c:8805-8815) re-fetches
-  // the new species' innate slots through GetInnateInSlot for the PLAYER only and
-  // with the mon's own level; slot 0 (the chosen ability) is never gated.
+  // UpdateAbilityStateIndicesForNewSpecies (battle_util.c:8805-8815): slot 0 is
+  // GetAbilityBySpecies(newSpecies, gBattleMons[battler].abilityNum); RandomizeAbility
+  // for player is not modelled. The three innates come from GetInnateInSlot, passing
+  // through gateInnates for the player side.
   const isPlayer = (battlerId & 1) === B_SIDE_PLAYER
   const rawInnates: [string | null, string | null, string | null] = [
     speciesData.innates[0] ?? null,
@@ -296,7 +315,7 @@ export function changeBattlerForm(
     speciesData.innates[2] ?? null,
   ]
   const newAbilities: AbilitySlots = {
-    ability: speciesData.abilities[0] ?? null,
+    ability: abilityForSpeciesSlot(speciesData, battler.mon.abilityNum),
     innates: isPlayer ? gateInnates(rawInnates, battler.mon.level, state.tier) : rawInnates,
   }
 
@@ -844,8 +863,9 @@ export function undoMegaEvolution(
         ]
         // The revert re-fetches the base species' innates; the player-side gate
         // applies with the party mon's own level (GetInnateInSlot, :8799-8802).
+        // Slot 0 is GetAbilityBySpecies(baseSpecies, partyMon.abilityNum).
         partyMon.abilities = {
-          ability: baseData.abilities[0] ?? null,
+          ability: abilityForSpeciesSlot(baseData, partyMon.abilityNum),
           innates: gateInnates(
             [baseData.innates[0] ?? null, baseData.innates[1] ?? null, baseData.innates[2] ?? null],
             partyMon.level,
