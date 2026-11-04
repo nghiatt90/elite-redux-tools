@@ -31,8 +31,8 @@ const ENGINE_DIR = fileURLToPath(new URL('../../', import.meta.url))
 
 const abilityHooks: Record<string, AbilityHookRecord> = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8'))
 
-/** Pinned today at 54 -- this number should only go DOWN. */
-export const UNPORTED_PAIR_COUNT = 54
+/** Pinned today at 72 -- this number should only go DOWN. */
+export const UNPORTED_PAIR_COUNT = 72
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -97,21 +97,33 @@ describe('ability hook completeness inventory', () => {
     }
   })
 
-  it('synthetic allowlist test: an allowlisted pair is excluded from the unported count', () => {
+  it('synthetic allowlist test: an allowlisted pair is excluded from the unported count and counted as allowlisted', () => {
     const syntheticAllowlist: AllowlistEntry[] = [
       {
-        ability: 'ABILITY_AERILATE',
+        ability: 'ABILITY_FABRICATED_ALLOWLIST',
         hook: 'onStat',
-        citation: 'src/abilities.cc:2502',
+        citation: 'src/abilities.cc:9999',
       },
     ]
 
-    const baseResult = runInventory(abilityHooks, new Set(), [])
-    expect(baseResult.totalUnported).toBe(UNPORTED_PAIR_COUNT)
+    const fabricatedData: Record<string, AbilityHookRecord> = {
+      ABILITY_FABRICATED_ALLOWLIST: {
+        id: 'ABILITY_FABRICATED_ALLOWLIST',
+        sourceLine: 9999,
+        hooks: {
+          onStat: { form: 'lambda' },
+        },
+      },
+    }
 
-    const allowlistedResult = runInventory(abilityHooks, new Set(), syntheticAllowlist)
-    expect(allowlistedResult.totalUnported).toBe(UNPORTED_PAIR_COUNT - 1)
-    expect(allowlistedResult.totalPorted).toBe(baseResult.totalPorted + 1)
+    const baseResult = runInventory(fabricatedData, new Set(), [])
+    expect(baseResult.totalUnported).toBe(1)
+    expect(baseResult.totalAllowlisted).toBe(0)
+
+    const allowlistedResult = runInventory(fabricatedData, new Set(), syntheticAllowlist)
+    expect(allowlistedResult.totalUnported).toBe(0)
+    expect(allowlistedResult.totalAllowlisted).toBe(1)
+    expect(allowlistedResult.totalPorted).toBe(baseResult.totalPorted)
   })
 
   it('negative cases: classifies UnmodelledAbility, unlisted ability, and unported alias target as unported', () => {

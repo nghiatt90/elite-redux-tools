@@ -599,7 +599,7 @@ export const RECOIL_FRACTIONS: Record<string, number> = {
 }
 
 // grep onRecoil hooks in data/v2.65beta/abilityHooks.json (MOVEEND_RECOIL's ON_ABILITY onRecoil, :4483-4490)
-const ON_RECOIL_ABILITIES = [
+export const ON_RECOIL_ABILITIES = [
   'ABILITY_DOOM_BLAST',
   'ABILITY_DUAL_SHADOW',
   'ABILITY_ELECTRIC_BURST',

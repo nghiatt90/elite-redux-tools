@@ -1007,7 +1007,7 @@ type StatusImmuneCondition = {
 /** Every own-slot onStatusImmune ability, in isAbilityStatusProtected's order.
  * Order is load-bearing: the first match is the ability the C's ON_ABILITY
  * loop (battle_util.h:269-275, reverse slot order) would name. */
-const OWN_STATUS_IMMUNE_CONDITIONS: readonly StatusImmuneCondition[] = [
+export const OWN_STATUS_IMMUNE_CONDITIONS: readonly StatusImmuneCondition[] = [
   // CHECK_SLEEP
   { ability: 'ABILITY_INSOMNIA', statusMask: CHECK_SLEEP },
   { ability: 'ABILITY_VITAL_SPIRIT', statusMask: CHECK_SLEEP },

@@ -11,20 +11,18 @@ import {
   KO_SOUL_EATER_ABILITIES,
   KO_JAWS_OF_CARNAGE_ABILITIES,
   KO_CRIT_BOOST_ABILITIES,
+  ON_RECOIL_ABILITIES,
 } from '../moveEnd'
-import { SWITCH_IN_ABILITY_IDS } from '../switchInAbility'
+import { PORTED_SWITCH_IN_ABILITIES } from '../switchInAbility'
 import {
-  STATUS_IMMUNE_ABILITIES,
+  OWN_STATUS_IMMUNE_CONDITIONS,
   CAN_STATUS_TYPE_ABILITIES,
-  MODIFY_MOVE_FLAGS_ABILITIES,
-  INFILTRATE_ABILITIES,
   ON_MODIFY_EFFECT_CHANCE_ABILITIES,
   SET_STATE_ON_EFFECT_ABILITIES,
 } from '../statusEffects'
-import { STAT_DROP_BLOCK_ABILITIES } from '../statBuffs'
-import { TRAPPING_ABILITIES } from '../escape'
-import { SWITCH_OUT_HOOK_ABILITIES } from '../turn'
-import { ON_STAT_LOWERED_ABILITIES } from '../ai/aiCheckBadMove'
+import { PORTED_BLOCK_STAT_DROP_ABILITIES, ON_STAT_LOWERED_HOOKS } from '../statBuffs'
+import { PORTED_TRAP_ABILITIES } from '../escape'
+import { PORTED_SWITCH_OUT_ABILITIES } from '../turn'
 import { HEAL_ABSORB_ABILITIES, STAT_ABSORB_ABILITIES } from '../absorb'
 
 export const HOOK_KINDS = [
@@ -91,7 +89,7 @@ export interface AbilityHookRecord {
   damageRelevantReasons?: string[]
 }
 
-export type ClassificationStatus = 'ported' | 'unported' | 'unclassified'
+export type ClassificationStatus = 'ported' | 'unported' | 'unclassified' | 'allowlisted'
 
 export interface PairClassification {
   ability: string
@@ -99,15 +97,18 @@ export interface PairClassification {
   status: ClassificationStatus
   sourceLine: number
   tested: boolean
+  abilityMentionedInTest: boolean
 }
 
 export interface HookKindSummary {
   hook: HookKind
   defined: number
   ported: number
+  allowlisted: number
   unported: number
   unclassified: number
   tested: number
+  abilityMentionedInTests: number
 }
 
 export interface InventoryResult {
@@ -115,9 +116,11 @@ export interface InventoryResult {
   summaries: HookKindSummary[]
   totalDefined: number
   totalPorted: number
+  totalAllowlisted: number
   totalUnported: number
   totalUnclassified: number
   totalTested: number
+  totalAbilityMentionedInTests: number
   unportedPairs: PairClassification[]
 }
 
@@ -126,6 +129,43 @@ export interface AllowlistEntry {
   hook: string
   citation: string
 }
+
+export interface NoteOnlyPair {
+  ability: string
+  hook: HookKind
+  site: string
+}
+
+/**
+ * Branches whose only effect is pushing an unmodelled note.
+ * Classified as unported until real simulation behavior is ported.
+ */
+export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
+  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4414' },
+  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4424' },
+  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5455' },
+  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5520' },
+  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5553' },
+  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1624' },
+  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1632' },
+  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1651' },
+  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1490' },
+  { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1492' },
+  { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1254' },
+]
+
+export const NOTE_ONLY_SET: ReadonlySet<string> = new Set(NOTE_ONLY_PAIRS.map((p) => `${p.ability}:${p.hook}`))
+
+export interface HookAliasResolverAllowance {
+  hook: HookKind
+  citation: string
+}
+
+/**
+ * Dispatchers that actually resolve aliases dynamically at runtime.
+ * Empty today: dispatchers switch/lookup on the holder's own ID.
+ */
+export const HOOK_ALIAS_RESOLVER_ALLOWANCES: ReadonlyArray<HookAliasResolverAllowance> = []
 
 // ---------------------------------------------------------------------------
 // Dynamic sim-side extraction helpers
@@ -210,6 +250,8 @@ export function extractTargetFlagAbilities(): Set<string> {
   const regex = /(?:case\s+|battlerHasSimAbility\([^,]+,\s*[^,]+,\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = regex.exec(slice)) !== null) {
+    // Forecast is checked in getBattlerBattleMoveTargetFlags only as a weather-move user condition (:78),
+    // not as an onModifyTargetFlag hook (Forecast has no onModifyTargetFlag hook).
     if (match[1] !== 'ABILITY_FORECAST') {
       result.add(match[1])
     }
@@ -227,9 +269,7 @@ export function extractReactiveExtraAbilities(): Set<string> {
   const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = regex.exec(slice)) !== null) {
-    if (match[1] !== 'ABILITY_RETRIBUTION_BLOW') {
-      result.add(match[1])
-    }
+    result.add(match[1])
   }
   if (result.size === 0) {
     throw new Error('Zero labels extracted for declaration: function runReactiveAbilityEffects(')
@@ -311,12 +351,13 @@ export const PORTED_SIM_ABSORB_ABILITIES = new Set<string>([
   ...extractSimAbsorbExtraAbilities(),
 ])
 
-const STAT_DROP_BLOCK_SET = new Set<string>(STAT_DROP_BLOCK_ABILITIES)
+export const PORTED_STATUS_IMMUNE_ABILITIES = new Set(OWN_STATUS_IMMUNE_CONDITIONS.map((c) => c.ability))
+export const PORTED_BLOCK_STAT_DROP_ABILITIES_SET = new Set<string>(PORTED_BLOCK_STAT_DROP_ABILITIES)
+export const PORTED_STAT_LOWERED_ABILITIES = new Set<string>(Object.keys(ON_STAT_LOWERED_HOOKS))
+export const PORTED_TRAP_ABILITIES_SET = new Set<string>(PORTED_TRAP_ABILITIES)
+export const PORTED_SWITCH_OUT_ABILITIES_SET = new Set<string>(PORTED_SWITCH_OUT_ABILITIES)
+export const PORTED_RECOIL_ABILITIES_SET = new Set<string>(ON_RECOIL_ABILITIES)
 const CAN_STATUS_TYPE_SET = new Set<string>(CAN_STATUS_TYPE_ABILITIES)
-const STATUS_IMMUNE_SET = new Set<string>(STATUS_IMMUNE_ABILITIES)
-const ON_STAT_LOWERED_SET = new Set<string>(ON_STAT_LOWERED_ABILITIES)
-const MODIFY_MOVE_FLAGS_SET = new Set<string>(MODIFY_MOVE_FLAGS_ABILITIES)
-const INFILTRATE_SET = new Set<string>(INFILTRATE_ABILITIES)
 const ON_MODIFY_EFFECT_CHANCE_SET = new Set<string>(ON_MODIFY_EFFECT_CHANCE_ABILITIES)
 
 const CALC_HOOKS = new Set<HookKind>([
@@ -338,7 +379,6 @@ const CALC_HOOKS = new Set<HookKind>([
   'onAbsorb',
   'onImmune',
   'onInfiltrate',
-  'onModifyMoveFlags',
 ])
 
 // ---------------------------------------------------------------------------
@@ -361,6 +401,10 @@ export function isDirectlyPorted(
   hookKind: HookKind,
   ctx: ClassificationContext = { lookup: defaultLookup },
 ): boolean {
+  if (NOTE_ONLY_SET.has(`${abilityId}:${hookKind}`)) {
+    return false
+  }
+
   if (CALC_HOOKS.has(hookKind)) {
     const entry = ctx.lookup(abilityId)
     if (entry && !isUnmodelled(entry) && typeof (entry as unknown as Record<string, unknown>)[hookKind] === 'function') {
@@ -368,8 +412,7 @@ export function isDirectlyPorted(
     }
     // Sibling sim checks for hooks that also have sim-side lists
     if (hookKind === 'onAbsorb' && PORTED_SIM_ABSORB_ABILITIES.has(abilityId)) return true
-    if (hookKind === 'onInfiltrate' && INFILTRATE_SET.has(abilityId)) return true
-    if (hookKind === 'onModifyMoveFlags' && MODIFY_MOVE_FLAGS_SET.has(abilityId)) return true
+    if (hookKind === 'onRecoil' && PORTED_RECOIL_ABILITIES_SET.has(abilityId)) return true
     return false
   }
 
@@ -379,7 +422,7 @@ export function isDirectlyPorted(
     case 'onDefender':
       return PORTED_DEFENDER_ABILITIES.has(abilityId)
     case 'onEntry':
-      return SWITCH_IN_ABILITY_IDS.has(abilityId)
+      return PORTED_SWITCH_IN_ABILITIES.has(abilityId)
     case 'onEndTurn':
       return PORTED_END_TURN_ABILITIES.has(abilityId)
     case 'onAccuracy':
@@ -389,7 +432,7 @@ export function isDirectlyPorted(
     case 'onBeforeAttack':
       return false
     case 'onBlockStatDrops':
-      return STAT_DROP_BLOCK_SET.has(abilityId)
+      return PORTED_BLOCK_STAT_DROP_ABILITIES_SET.has(abilityId)
     case 'onCanStatusType':
       return CAN_STATUS_TYPE_SET.has(abilityId)
     case 'onCopyMove':
@@ -397,9 +440,11 @@ export function isDirectlyPorted(
     case 'onDisguise':
       return false
     case 'onExit':
-      return SWITCH_OUT_HOOK_ABILITIES.has(abilityId)
+      return PORTED_SWITCH_OUT_ABILITIES_SET.has(abilityId)
     case 'onModifyEffectChance':
       return ON_MODIFY_EFFECT_CHANCE_SET.has(abilityId)
+    case 'onModifyMoveFlags':
+      return false
     case 'onModifyTargetFlag':
       return PORTED_TARGET_FLAG_ABILITIES.has(abilityId)
     case 'onPreemptAction':
@@ -409,13 +454,13 @@ export function isDirectlyPorted(
     case 'onRevive':
       return PORTED_REVIVE_ABILITIES.has(abilityId)
     case 'onStatLowered':
-      return ON_STAT_LOWERED_SET.has(abilityId)
+      return PORTED_STAT_LOWERED_ABILITIES.has(abilityId)
     case 'onStatusImmune':
-      return STATUS_IMMUNE_SET.has(abilityId)
+      return PORTED_STATUS_IMMUNE_ABILITIES.has(abilityId)
     case 'onTerrain':
       return PORTED_TERRAIN_ABILITIES.has(abilityId)
     case 'onTrap':
-      return TRAPPING_ABILITIES.has(abilityId)
+      return PORTED_TRAP_ABILITIES_SET.has(abilityId)
     case 'onWeather':
       return PORTED_WEATHER_ABILITIES.has(abilityId)
     default:
@@ -434,6 +479,12 @@ export function classifyPair(
 ): ClassificationStatus {
   if (isDirectlyPorted(abilityId, hookKind, ctx)) {
     return 'ported'
+  }
+
+  // Follow alias only if a dispatcher allowance permits it for this hook kind
+  const allowance = HOOK_ALIAS_RESOLVER_ALLOWANCES.find((a) => a.hook === hookKind)
+  if (!allowance) {
+    return 'unported'
   }
 
   // Follow alias chain transitively
@@ -510,9 +561,11 @@ export function runInventory(
       hook,
       defined: 0,
       ported: 0,
+      allowlisted: 0,
       unported: 0,
       unclassified: 0,
       tested: 0,
+      abilityMentionedInTests: 0,
     })
   }
 
@@ -527,16 +580,20 @@ export function runInventory(
       const isAllowed = allowlistMap.has(`${id}:${hook}`)
       let status = classifyPair(id, hook, abilityHooksData, ctx)
       if (isAllowed && status === 'unported') {
-        status = 'ported' // allowlisted pair excluded from unported count
+        status = 'allowlisted' // allowlisted pair shown separately
       }
 
       const tested = testMentionedAbilities.has(id)
       const summary = summaryByHook.get(hook)!
       summary.defined++
       if (status === 'ported') summary.ported++
+      else if (status === 'allowlisted') summary.allowlisted++
       else if (status === 'unported') summary.unported++
       else summary.unclassified++
-      if (tested) summary.tested++
+      if (tested) {
+        summary.tested++
+        summary.abilityMentionedInTests++
+      }
 
       classifications.push({
         ability: id,
@@ -544,6 +601,7 @@ export function runInventory(
         status,
         sourceLine: rec.sourceLine,
         tested,
+        abilityMentionedInTest: tested,
       })
     }
   }
@@ -551,9 +609,11 @@ export function runInventory(
   const summaries = HOOK_KINDS.map((h) => summaryByHook.get(h)!)
   const totalDefined = summaries.reduce((acc, s) => acc + s.defined, 0)
   const totalPorted = summaries.reduce((acc, s) => acc + s.ported, 0)
+  const totalAllowlisted = summaries.reduce((acc, s) => acc + s.allowlisted, 0)
   const totalUnported = summaries.reduce((acc, s) => acc + s.unported, 0)
   const totalUnclassified = summaries.reduce((acc, s) => acc + s.unclassified, 0)
   const totalTested = summaries.reduce((acc, s) => acc + s.tested, 0)
+  const totalAbilityMentionedInTests = summaries.reduce((acc, s) => acc + s.abilityMentionedInTests, 0)
   const unportedPairs = classifications.filter((c) => c.status === 'unported')
 
   return {
@@ -561,9 +621,11 @@ export function runInventory(
     summaries,
     totalDefined,
     totalPorted,
+    totalAllowlisted,
     totalUnported,
     totalUnclassified,
     totalTested,
+    totalAbilityMentionedInTests,
     unportedPairs,
   }
 }
@@ -597,19 +659,16 @@ function escapeRegExp(s: string): string {
 export function generateInventoryDoc(
   inventory: InventoryResult,
   abilityHooksData: Record<string, AbilityHookRecord>,
+  sourcesLockPath: string = SOURCES_LOCK_PATH,
 ): string {
   const lines: string[] = []
 
-  let elitereduxSourceSha = 'bdebcbbff9760cdd41a02c425bea4857fa0eee26'
-  let erConfigSha = '1b8e2cc4a8096d7ec90616f87fbf771bfa732447'
-  let gameVersion = 'v2.65beta'
-  try {
-    const sourcesLock = JSON.parse(readFileSync(SOURCES_LOCK_PATH, 'utf-8'))
-    elitereduxSourceSha = sourcesLock.sources?.['eliteredux-source']?.sha ?? elitereduxSourceSha
-    erConfigSha = sourcesLock.sources?.['er-config']?.sha ?? erConfigSha
-    gameVersion = sourcesLock.game_version ?? gameVersion
-  } catch {
-    // Fallback if not readable
+  const sourcesLock = JSON.parse(readFileSync(sourcesLockPath, 'utf-8'))
+  const elitereduxSourceSha = sourcesLock.sources?.['eliteredux-source']?.sha
+  const erConfigSha = sourcesLock.sources?.['er-config']?.sha
+  const gameVersion = sourcesLock.game_version
+  if (!elitereduxSourceSha || !erConfigSha || !gameVersion) {
+    throw new Error(`sources.lock.json at ${sourcesLockPath} is missing required fields`)
   }
 
   // Section 1: Header
@@ -625,44 +684,47 @@ export function generateInventoryDoc(
   // Section 2: Classification Method per Hook Kind
   lines.push('## Classification Method per Hook Kind')
   lines.push('')
-  lines.push('A `(ability, hook)` pair is classified as **ported** only when an explicit registry entry or case branch handles that exact ability and hook (or transitively through its `form: "alias"` target). Below are the detection mechanisms per hook kind:')
+  lines.push('A `(ability, hook)` pair is classified as **ported** only when an explicit registry entry or case branch handles that exact ability and hook. Below are the detection mechanisms per hook kind:')
   lines.push('')
-  lines.push('1. **Calc-side hooks (19 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.')
-  lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`, `onModifyMoveFlags`.')
-  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
+  lines.push('1. **Calc-side hooks (18 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.')
+  lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`. (`onRecoil` and `onAbsorb` also consult their sim-side handler tables).')
+  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`), excluding note-only followup branches.')
   lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
-  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`), catalogued by exported `SWITCH_IN_ABILITY_IDS`.')
+  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`), catalogued by exported `PORTED_SWITCH_IN_ABILITIES`.')
   lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.')
   lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.')
   lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.')
   lines.push('8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).')
-  lines.push('9. **onBlockStatDrops**: Membership in exported `STAT_DROP_BLOCK_ABILITIES` (`web/src/engine/sim/statBuffs.ts`).')
-  lines.push('10. **onCanStatusType**: Membership in exported `CAN_STATUS_TYPE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('9. **onBlockStatDrops**: Cases in `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), catalogued by `PORTED_BLOCK_STAT_DROP_ABILITIES`.')
+  lines.push('10. **onCanStatusType**: Handled in `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`).')
   lines.push('11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
-  lines.push('13. **onExit**: Membership in exported `SWITCH_OUT_HOOK_ABILITIES` (`web/src/engine/sim/turn.ts`).')
+  lines.push('13. **onExit**: Handled in `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), catalogued by `PORTED_SWITCH_OUT_ABILITIES`; note-only branches are unported.')
   lines.push('14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
-  lines.push('15. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
-  lines.push('16. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
-  lines.push('17. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`): `POISON_PUPPETEER_CLONE_ABILITIES` (`SET_STATE_ON_EFFECT_ABILITIES`), `ABILITY_EGOIST`, `ABILITY_SHARING_IS_CARING`, `ABILITY_ACID_REFLUX`.')
-  lines.push('18. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).')
-  lines.push('19. **onStatLowered**: Membership in exported `ON_STAT_LOWERED_ABILITIES` (`web/src/engine/sim/ai/aiCheckBadMove.ts`), implemented in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
-  lines.push('20. **onStatusImmune**: Membership in exported `STATUS_IMMUNE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
-  lines.push('21. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).')
-  lines.push('22. **onTrap**: Membership in exported `TRAPPING_ABILITIES` (`web/src/engine/sim/escape.ts`).')
-  lines.push('23. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).')
+  lines.push('15. **onModifyMoveFlags**: Not ported (unwired in calc; gap notes in sim).')
+  lines.push('16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
+  lines.push('17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
+  lines.push('18. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`); note-only branches are unported.')
+  lines.push('19. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).')
+  lines.push('20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
+  lines.push('21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('22. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).')
+  lines.push('23. **onTrap**: Cases in `onTrap` (`web/src/engine/sim/escape.ts`), catalogued by `PORTED_TRAP_ABILITIES`.')
+  lines.push('24. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).')
   lines.push('')
 
   // Section 3: Summary Table
   lines.push('## Hook Completeness Summary')
   lines.push('')
-  lines.push('| Hook Kind | Defined | Ported | Unported | Unclassified | Mentioned in Tests |')
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- |')
+  lines.push('| Hook Kind | Defined | Ported | Allowlisted | Unported | Unclassified | Ability Mentioned in Tests |')
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- |')
   for (const s of inventory.summaries) {
-    lines.push(`| ${s.hook} | ${s.defined} | ${s.ported} | ${s.unported} | ${s.unclassified} | ${s.tested} |`)
+    lines.push(
+      `| ${s.hook} | ${s.defined} | ${s.ported} | ${s.allowlisted} | ${s.unported} | ${s.unclassified} | ${s.abilityMentionedInTests} |`,
+    )
   }
   lines.push(
-    `| **Total** | **${inventory.totalDefined}** | **${inventory.totalPorted}** | **${inventory.totalUnported}** | **${inventory.totalUnclassified}** | **${inventory.totalTested}** |`,
+    `| **Total** | **${inventory.totalDefined}** | **${inventory.totalPorted}** | **${inventory.totalAllowlisted}** | **${inventory.totalUnported}** | **${inventory.totalUnclassified}** | **${inventory.totalAbilityMentionedInTests}** |`,
   )
   lines.push('')
 
@@ -684,7 +746,7 @@ export function generateInventoryDoc(
     lines.push(`### ${hook} (${pairs.length})`)
     lines.push('')
     for (const p of pairs) {
-      const testTag = p.tested ? ' *(mentioned in test)*' : ''
+      const testTag = p.abilityMentionedInTest ? ' *(ability mentioned in test)*' : ''
       lines.push(`- \`${p.ability}\` (src/abilities.cc:${p.sourceLine})${testTag}`)
     }
     lines.push('')
