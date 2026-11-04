@@ -250,6 +250,24 @@ function formStats(
 }
 
 /**
+ * GetAbilityBySpecies (src/pokemon.c:2147-2157):
+ * abilityNum < NUM_ABILITY_SLOTS -> abilities[abilityNum], else abilities[0];
+ * if ability == ABILITY_NONE -> abilities[0].
+ */
+export function abilityForSpeciesSlot(
+  speciesData: { abilities?: (string | null)[] },
+  abilityNum: number = 0,
+): string | null {
+  const abilities = speciesData.abilities ?? []
+  const slot = abilityNum >= 0 && abilityNum < 3 ? abilityNum : 0
+  let ability = abilities[slot] ?? null
+  if (!ability || ability === 'ABILITY_NONE') {
+    ability = abilities[0] ?? null
+  }
+  return !ability || ability === 'ABILITY_NONE' ? null : ability
+}
+
+/**
  * Form change primitive:
  * Ports VARIOUS_HANDLE_FORM_CHANGE & RecalcBattlerStats (src/battle_script_commands.c:7374-7514, 6618-6638).
  *
@@ -268,24 +286,6 @@ function formStats(
  *   - moves, pp
  *   - status1, status2, statStages, gender, hiddenPowerType
  */
-/**
- * GetAbilityBySpecies (src/pokemon.c:2147-2157):
- * abilityNum < NUM_ABILITY_SLOTS -> abilities[abilityNum], else abilities[0];
- * if ability == ABILITY_NONE -> abilities[0].
- */
-export function abilityForSpeciesSlot(
-  speciesData: { abilities?: (string | null)[] },
-  abilityNum: number = 0,
-): string | null {
-  const abilities = speciesData.abilities ?? []
-  const slot = abilityNum >= 0 && abilityNum < 3 ? abilityNum : 0
-  let ability = abilities[slot] ?? null
-  if (!ability || ability === 'ABILITY_NONE') {
-    ability = abilities[0] ?? null
-  }
-  return !ability || ability === 'ABILITY_NONE' ? null : ability
-}
-
 export function changeBattlerForm(
   state: BattleState,
   battlerId: number,
