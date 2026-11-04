@@ -126,6 +126,9 @@ function setSide(
   if (patch.tailwindTimer !== undefined) sideState.timers.tailwindTimer = patch.tailwindTimer
 }
 
+// EX_TERMS=0 re-measures the positives with the status terms off (doc "Gate result")
+const SCENARIO_TERMS = process.env.EX_TERMS !== '0'
+
 /** The move id the expectimax policy picks for one fresh seeded session. */
 function chosenMove(
   seed: number,
@@ -136,7 +139,7 @@ function chosenMove(
   const s = freshSession(seed, playerMoves, foeMons)
   setup?.(s)
   beginTurn(s)
-  const choice = chooseExpectimaxAction(s, { ...DEFAULT_EXPECTIMAX, statusTerms: true }, seed)
+  const choice = chooseExpectimaxAction(s, { ...DEFAULT_EXPECTIMAX, statusTerms: SCENARIO_TERMS }, seed)
   const action = choice?.action
   if (!action || action.action !== 'USE_MOVE') return null
   return action.chosenMove?.id ?? null
@@ -229,8 +232,8 @@ describe('cycle 139 - status1 scenarios', () => {
     })
   })
 
-  it('anti-regression: the default options leave the status term off', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('anti-regression: the default options turn the status term on', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })
 

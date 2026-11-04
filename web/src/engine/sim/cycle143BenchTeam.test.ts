@@ -1,8 +1,8 @@
 // Cycle 143: the status-move bench team (`STATUS_PLAYER_SPECS`) and the
 // `statusTerms` default. No behaviour is derived here: the test checks that the
 // bench team's ids resolve through `buildPlayerParty`, that each mon carries at
-// least two status moves, that `GENERIC_PLAYER_SPECS` is untouched, and (before
-// the bench gate can flip it) that the status term stays off by default.
+// least two status moves, that `GENERIC_PLAYER_SPECS` is untouched, and (after
+// the bench gate flipped it) that the status term is on by default.
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_EXPECTIMAX } from './driver/expectimax'
@@ -73,7 +73,7 @@ describe('cycle 143 - status-move bench team', () => {
     expect(GENERIC_PLAYER_SPECS[1]!.moves).toContain('MOVE_SWORDS_DANCE')
   })
 
-  it('anti-regression: the status term is off by default', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('anti-regression: the status term is on by default', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })

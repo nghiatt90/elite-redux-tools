@@ -98,7 +98,8 @@ export interface ExpectimaxOptions {
   switchMargin: number
   /** Add the status1 residual/tempo, volatile and per-side field terms
    * (hazards/screens/Tailwind plus weather, terrain and Trick Room) to the leaf
-   * score (see `statusScore`). Off by default. */
+   * score (see `statusScore`). On by default; set to false to score
+   * positionScore alone. */
   statusTerms?: boolean
   /** Move-type lookup for the cycle-142 field move-type boosts. The driver
    * supplies the session's data context automatically; when omitted those boost
@@ -106,7 +107,7 @@ export interface ExpectimaxOptions {
   moveData?: MoveLookup
 }
 
-export const DEFAULT_EXPECTIMAX: ExpectimaxOptions = { depth: 1, samples: 6, innerSamples: 2, switchMargin: 0.05 }
+export const DEFAULT_EXPECTIMAX: ExpectimaxOptions = { depth: 1, samples: 6, innerSamples: 2, switchMargin: 0.05, statusTerms: true }
 
 export interface PlayerChoice {
   action: ChosenAction
@@ -141,13 +142,13 @@ function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number
 }
 
 /** Static score of a position from the player's side: higher is better for the player.
- * `options.statusTerms` opts into the status1 residual/tempo, volatile and per-side
- * field terms (`statusScore`); when falsy the result is exactly `positionScore` (or
- * the terminal +-100), as before. */
+ * By default adds the status1 residual/tempo, volatile and per-side field terms
+ * (`statusScore`); set `options.statusTerms: false` to score `positionScore` alone
+ * (or the terminal +-100). */
 export function evaluateState(state: BattleState, options?: ExpectimaxOptions): number {
   if (state.battleOutcome === 'WON') return 100
   if (state.battleOutcome === 'LOST') return -100
-  return positionScore(state) + (options?.statusTerms ? statusScore(state, options.moveData) : 0)
+  return positionScore(state) + ((options?.statusTerms ?? true) ? statusScore(state, options?.moveData) : 0)
 }
 
 // ---------------------------------------------------------------------------

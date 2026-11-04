@@ -9,9 +9,9 @@ import { DEFAULT_EXPECTIMAX, playExpectimaxBattle } from './expectimax'
 describe.skipIf(process.env.SIM_BENCH !== '1')('expectimax vs default policy', () => {
   it('compares win counts and time', { timeout: 900_000 }, () => {
     const data = loadSimData()
-    // Cycle-143 gate switches: `EX_STATUS_TERMS=1` opts into the status terms;
+    // Cycle-143 gate switches: `EX_STATUS_TERMS=0` disables the status terms;
     // `EX_TEAM=status` swaps the generic team for the status-move bench team.
-    const statusTerms = process.env.EX_STATUS_TERMS === '1'
+    const statusTerms = process.env.EX_STATUS_TERMS !== '0'
     const team = process.env.EX_TEAM === 'status' ? 'status' : 'generic'
     const party = buildPlayerParty(team === 'status' ? STATUS_PLAYER_SPECS : GENERIC_PLAYER_SPECS, 50, data)
     const ids = [...data.trainersById.keys()].filter((id) => id.startsWith('TRAINER_')).slice(0, 12)

@@ -313,6 +313,7 @@ describe('cycle 140 - substitute', () => {
 
 describe('cycle 140 - evaluateState gating', () => {
   const withTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: true }
+  const withoutTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: false }
 
   it('with a volatile, the opt-in term differs from positionScore by exactly statusScore', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
@@ -324,10 +325,10 @@ describe('cycle 140 - evaluateState gating', () => {
   it('with the option off, a volatile changes nothing', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     setVolatiles(s, 1, { status2: STATUS2_WRAPPED, wrapTurns: 4 })
-    expect(evaluateState(s)).toBe(positionScore(s))
+    expect(evaluateState(s, withoutTerms)).toBe(positionScore(s))
   })
 
-  it('DEFAULT_EXPECTIMAX leaves statusTerms unset', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('DEFAULT_EXPECTIMAX turns statusTerms on', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })

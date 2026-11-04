@@ -437,6 +437,7 @@ describe('cycle 141 - tailwind', () => {
 
 describe('cycle 141 - evaluateState gating', () => {
   const withTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: true }
+  const withoutTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: false }
 
   // One Spikes layer on a 320 HP foe bench is 0.125; a foe confusion counter of
   // 4 adds the existing 3 * (1/3) * 0.25 = 0.25 (CANCELLER_CONFUSED,
@@ -459,11 +460,11 @@ describe('cycle 141 - evaluateState gating', () => {
       reflectTimer: 5,
       tailwindTimer: 4,
     })
-    expect(evaluateState(s)).toBe(positionScore(s))
+    expect(evaluateState(s, withoutTerms)).toBe(positionScore(s))
   })
 
-  it('DEFAULT_EXPECTIMAX leaves statusTerms unset', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('DEFAULT_EXPECTIMAX turns statusTerms on', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })
 

@@ -554,6 +554,7 @@ describe('cycle 142 - rain/sun move-type boost', () => {
 
 describe('cycle 142 - evaluateState gating', () => {
   const withTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: true }
+  const withoutTerms = { ...DEFAULT_EXPECTIMAX, statusTerms: false }
 
   // Combined case, all hand-derived:
   //   player Rock (sand-immune) at 160/320; foe Machamp full HP
@@ -584,10 +585,10 @@ describe('cycle 142 - evaluateState gating', () => {
     setSpeed(s, 1, 150)
     s.field.statuses |= STATUS_FIELD_TRICK_ROOM
     s.field.timers.trickRoomTimer = 5
-    expect(evaluateState(s)).toBe(positionScore(s))
+    expect(evaluateState(s, withoutTerms)).toBe(positionScore(s))
   })
 
-  it('DEFAULT_EXPECTIMAX leaves statusTerms unset', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('DEFAULT_EXPECTIMAX turns statusTerms on', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })

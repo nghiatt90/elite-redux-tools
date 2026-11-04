@@ -267,15 +267,16 @@ describe('cycle 139 - evaluateState gating', () => {
   it('with a status, the term differs from positionScore by exactly statusScore', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: STATUS1_BURN })
-    expect(evaluateState(s, withTerms) - evaluateState(s)).toBeCloseTo(statusScore(s), 10)
+    expect(evaluateState(s) - evaluateState(s, withoutTerms)).toBeCloseTo(statusScore(s), 10)
     expect(evaluateState(s, withTerms) - positionScore(s)).toBeCloseTo(0.3125, 10)
   })
 
-  it('statusTerms: false and undefined are identical', () => {
+  it('statusTerms: undefined and true are identical; false equals positionScore alone', () => {
     const s = fresh(session(['SPECIES_GOLEM'], [mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])]))
     patchMon(s, 1, 0, { status1: STATUS1_BURN })
-    expect(evaluateState(s, withoutTerms)).toBe(evaluateState(s))
-    expect(evaluateState(s, { ...DEFAULT_EXPECTIMAX, statusTerms: undefined })).toBe(evaluateState(s))
+    expect(evaluateState(s)).toBe(evaluateState(s, withTerms))
+    expect(evaluateState(s, { ...DEFAULT_EXPECTIMAX, statusTerms: undefined })).toBe(evaluateState(s, withTerms))
+    expect(evaluateState(s, withoutTerms)).toBe(positionScore(s))
   })
 
   it('terminal outcomes stay +100 / -100 regardless of the flag', () => {
@@ -289,7 +290,7 @@ describe('cycle 139 - evaluateState gating', () => {
     expect(evaluateState(s, withTerms)).toBe(-100)
   })
 
-  it('DEFAULT_EXPECTIMAX leaves statusTerms unset', () => {
-    expect(DEFAULT_EXPECTIMAX.statusTerms).toBeFalsy()
+  it('DEFAULT_EXPECTIMAX turns statusTerms on', () => {
+    expect(DEFAULT_EXPECTIMAX.statusTerms).toBe(true)
   })
 })
