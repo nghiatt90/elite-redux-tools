@@ -510,14 +510,16 @@ describe('Cycle 88c - Victory Bomb and Unstable Core (src/abilities.cc:9006-9018
     expect(s.queuedExtraAttacks).toEqual([queueEntry('ABILITY_VICTORY_BOMB', 'MOVE_EXPLOSION')])
   })
 
-  it('Victory Bomb does nothing while the holder survives, without damage, from a sleeping or frozen holder, or after an out-of-turn move already ran', () => {
+  it('Victory Bomb does nothing while the holder survives, from a sleeping or frozen holder, or after an out-of-turn move already ran; a dead holder still queues with zero damage', () => {
     const alive = battle([{}, { hp: 5, abilities: hasAbility('ABILITY_VICTORY_BOMB') }], countingRng())
     dispatch(alive, 'MOVE_TACKLE')
     expect(alive.queuedExtraAttacks).toEqual([])
 
+    // battle_util.c:9050-9085 has no damage gate; abilities.cc:9006-9012 only checks
+    // IsBattlerAlive(battler), so zero damage still queues on a dead holder.
     const noDamage = battle([{}, { hp: 0, abilities: hasAbility('ABILITY_VICTORY_BOMB') }], countingRng())
     dispatch(noDamage, 'MOVE_TACKLE', 0)
-    expect(noDamage.queuedExtraAttacks).toEqual([])
+    expect(noDamage.queuedExtraAttacks).toEqual([queueEntry('ABILITY_VICTORY_BOMB', 'MOVE_EXPLOSION')])
 
     for (const status1 of [STATUS1_SLEEP, STATUS1_FREEZE]) {
       const s = battle([{}, { hp: 0, abilities: hasAbility('ABILITY_VICTORY_BOMB'), status1 }], countingRng())
@@ -555,14 +557,16 @@ describe('Cycle 88c - Victory Bomb and Unstable Core (src/abilities.cc:9006-9018
     expect(staged.queuedExtraAttacks).toEqual([queueEntry('ABILITY_UNSTABLE_CORE', 'MOVE_OUTBURST')])
   })
 
-  it('Unstable Core does nothing while the holder survives or without damage', () => {
+  it('Unstable Core does nothing while the holder survives, but a dead holder queues even with zero damage', () => {
     const alive = battle([{}, { hp: 5, abilities: hasAbility('ABILITY_UNSTABLE_CORE') }], countingRng())
     dispatch(alive, 'MOVE_TACKLE')
     expect(alive.queuedExtraAttacks).toEqual([])
 
+    // battle_util.c:9050-9085 has no damage gate; abilities.cc:12525-12528 only checks
+    // IsBattlerAlive(battler), so zero damage still queues on a dead holder.
     const noDamage = battle([{}, { hp: 0, abilities: hasAbility('ABILITY_UNSTABLE_CORE') }], countingRng())
     dispatch(noDamage, 'MOVE_TACKLE', 0)
-    expect(noDamage.queuedExtraAttacks).toEqual([])
+    expect(noDamage.queuedExtraAttacks).toEqual([queueEntry('ABILITY_UNSTABLE_CORE', 'MOVE_EXPLOSION')])
   })
 
   it('end to end: Tackle faints a Victory Bomb holder and the fainted holder\'s Explosion still reaches the damage resolver at power 100', () => {

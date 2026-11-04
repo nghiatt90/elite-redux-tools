@@ -298,15 +298,19 @@ describe('Cycle 109 - Aftermath (abilities.cc:1663-1670)', () => {
     expect(state.queuedExtraAttacks[0]!.move).toBe('MOVE_OUTBURST')
   })
 
-  it('does nothing while the holder is alive or the move dealt no damage', () => {
+  it('does nothing while the holder is alive, but a dead holder queues even with zero damage', () => {
     const alive = aftermathBattle()
     defenderHit(alive, 'MOVE_TACKLE', 10)
     expect(alive.queuedExtraAttacks).toHaveLength(0)
 
+    // HandleDefenderAbility (battle_util.c:9050-9085) has no damage check, and Aftermath's
+    // onDefender (abilities.cc:1663-1670) only gates on IsBattlerAlive(battler), so a dead
+    // holder queues its out-of-turn attack regardless of the damage dealt on this pass.
     const noDamage = aftermathBattle()
     noDamage.battlers[1]!.mon.hp = 0
     defenderHit(noDamage, 'MOVE_TACKLE', 0)
-    expect(noDamage.queuedExtraAttacks).toHaveLength(0)
+    expect(noDamage.queuedExtraAttacks).toHaveLength(1)
+    expect(noDamage.queuedExtraAttacks[0]!.move).toBe('MOVE_EXPLOSION')
   })
 
   it("Balloon Bomber's `||` runs the same Aftermath body, tagged with its own id", () => {
