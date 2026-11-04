@@ -11520,7 +11520,7 @@ const MOVE_EFFECT_STORED_FOR_MOVEEND = -1
 const MOVE_EFFECT_DOUBLESLAP = -2
 // MOVE_EFFECT_RECOIL_HP_25 (Struggle, BattleScript_EffectRecoilHP25 data/battle_scripts_1.s:6538-6542), generated like the two above.
 const MOVE_EFFECT_RECOIL_HP_25 = -3
-const GENERATED_MOVE_EFFECT_NUMBERS: Record<string, number> = {
+export const GENERATED_MOVE_EFFECT_NUMBERS: Record<string, number> = {
   MOVE_EFFECT_DOUBLESLAP,
   MOVE_EFFECT_RECOIL_HP_25,
 }
@@ -11528,7 +11528,7 @@ const GENERATED_MOVE_EFFECT_NUMBERS: Record<string, number> = {
 // SetMoveEffect's first switch (battle_script_commands.c:2321-2334) stores these in gBattleStruct->moveEffect2 and
 // returns; MOVEEND_MOVE_EFFECTS2_ON_EACH / MOVEEND_MOVE_EFFECTS2 (moveEnd.ts) apply them. MAKE_IT_RAIN is in the C switch too,
 // but no move in moves.json carries it (Make It Rain's argument is MOVE_EFFECT_SP_ATK_MINUS_1), so it is not listed.
-const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
+export const MOVE_EFFECTS_STORED_FOR_MOVEEND = new Set([
   'MOVE_EFFECT_KNOCK_OFF',
   'MOVE_EFFECT_STEAL_ITEM',
   'MOVE_EFFECT_BUG_BITE',
