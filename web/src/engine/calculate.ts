@@ -1301,7 +1301,7 @@ function calcInternal(
       attackerHasStab: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker, move.id) > 2,
       // CalcFinalDmg (battle_util.c:7503-7505) passes CalcMoveBasePower -- declared,
       // pre-modifier power and, for a fixed-power queued attack, not the override.
-      basePower: scenario.fixedBasePower !== undefined ? declaredBasePower : power,
+      basePower: declaredBasePower,
       typeEffectiveness,
       isCrit,
       attackerHasAnyStatus: attacker.condition.status1.size > 0 || attacker.condition.hasComatose || attacker.condition.hasBloodStainEffect,

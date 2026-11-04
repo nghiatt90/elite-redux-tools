@@ -5756,22 +5756,24 @@ function handleFilletAway(ctx: MoveEffectContext): ActionOutcome {
  */
 function handleNoRetreat(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, deps, unmodelled, deductPp } = ctx
-  const battler = state.battlers[battlerId]!
+  const targetId = ctx.targetId ?? battlerId
+  const target = state.battlers[targetId]!
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
 
   // accuracycheck BattleScript_PrintMoveMissed, ACC_CURR_MOVE (:340); PrintMoveMissed runs ppreduce too.
-  const missed = checkAccuracy(ctx, ctx.targetId ?? battlerId, moveId)
+  const missed = checkAccuracy(ctx, targetId, moveId)
   deductPp(state, battlerId, moveId, moveEffect, unmodelled)
   if (missed) return outcome(ctx, { missed: true })
 
-  // VARIOUS_TRY_NO_RETREAT: fails if already noRetreat or STATUS2_ESCAPE_PREVENTION
-  if (battler.volatiles.noRetreat || hasFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+  // VARIOUS_TRY_NO_RETREAT: operates on BS_TARGET battler (battle_script_commands.c:8126-8133);
+  // fails if target already has noRetreat or STATUS2_ESCAPE_PREVENTION
+  if (target.volatiles.noRetreat || hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
     return outcome(ctx, { missed: true })
   }
-  battler.volatiles.noRetreat = true
+  target.volatiles.noRetreat = true
 
-  // BattleScript_AllStatsUp
+  // BattleScript_AllStatsUp (BS_ATTACKER, data/battle_scripts_1.s:7891-7925)
   const statsToBoost = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]
   const statChanges: StatChangeOutcome[] = []
   for (const statId of statsToBoost) {
@@ -5794,10 +5796,11 @@ function handleNoRetreat(ctx: MoveEffectContext): ActionOutcome {
 
   // jumpifstatus4 BS_TARGET, STATUS4_COMMANDED, BattleScript_MoveEnd
   // jumpifstatus2 BS_TARGET, STATUS2_ESCAPE_PREVENTION, BattleScript_MoveEnd
-  // setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE -> STATUS2_ESCAPE_PREVENTION
-  if (!hasFlag(battler.statuses4, STATUS4_COMMANDED) && !hasFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
-    battler.mon.status2 = setFlag(battler.mon.status2, STATUS2_ESCAPE_PREVENTION)
-    battler.volatiles.battlerPreventingEscape = battlerId
+  // setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE -> STATUS2_ESCAPE_PREVENTION on TARGET,
+  // recording holder (battlerId) as trapper (battle_script_commands.c:2823-2825)
+  if (!hasFlag(target.statuses4, STATUS4_COMMANDED) && !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)) {
+    target.mon.status2 = setFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION)
+    target.volatiles.battlerPreventingEscape = battlerId
   }
 
   return outcome(ctx, { statChanges })

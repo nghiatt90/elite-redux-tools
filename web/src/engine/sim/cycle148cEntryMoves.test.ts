@@ -493,9 +493,9 @@ describe('Cycle 148c - the last 7 UseEntryMove abilities', () => {
       expect(rng.calls).toBe(2)
     })
 
-    it('I Am Steve / No Retreat: HOLDER +1 in all five stats and trapped; foe untouched', () => {
-      // BattleScript_EffectNoRetreat (:338-354) -> BattleScript_AllStatsUp (:7891-7925): ATK, DEF,
-      // SPEED, SPATK, SPDEF +1; then setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE.
+    it('I Am Steve / No Retreat: HOLDER +1 in all five stats; FOE trapped and noRetreat true', () => {
+      // BattleScript_EffectNoRetreat (:338-354): trynoretreat BS_TARGET, call BattleScript_AllStatsUp
+      // (BS_ATTACKER: ATK, DEF, SPEED, SPATK, SPDEF +1), setmoveeffect MOVE_EFFECT_PREVENT_ESCAPE (BS_TARGET).
       const rng = scriptedRng([])
       const state = battle([{ abilities: holderAbility('ABILITY_I_AM_STEVE') }, { hp: 100, maxHp: 100 }], rng)
       applySwitchInAbilities(state, 0, testDeps(), [])
@@ -504,12 +504,45 @@ describe('Cycle 148c - the last 7 UseEntryMove abilities', () => {
       for (const stat of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
         expect(state.battlers[0]!.mon.statStages[stat]).toBe(DEFAULT_STAT_STAGE + 1)
       }
-      expect(state.battlers[0]!.volatiles.noRetreat).toBe(true)
-      expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(true)
+      expect(state.battlers[0]!.volatiles.noRetreat).toBe(false)
+      expect(hasFlag(state.battlers[0]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(false)
+
       for (const stat of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
         expect(state.battlers[1]!.mon.statStages[stat] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE)
       }
+      expect(state.battlers[1]!.volatiles.noRetreat).toBe(true)
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(true)
+      expect(state.battlers[1]!.volatiles.battlerPreventingEscape).toBe(0)
+    })
+
+    it('I Am Steve / No Retreat negative: foe already trapped (ESCAPE_PREVENTION set) causes move failure and holder gets no raises', () => {
+      const rng = scriptedRng([])
+      const state = battle(
+        [{ abilities: holderAbility('ABILITY_I_AM_STEVE') }, { hp: 100, maxHp: 100, status2: STATUS2_ESCAPE_PREVENTION }],
+        rng,
+      )
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      executeTurn(state, [null, null], realTestDeps(rng))
+
+      for (const stat of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
+        expect(state.battlers[0]!.mon.statStages[stat]).toBe(DEFAULT_STAT_STAGE)
+      }
+      expect(state.battlers[0]!.volatiles.noRetreat).toBe(false)
       expect(state.battlers[1]!.volatiles.noRetreat).toBe(false)
+    })
+
+    it('I Am Steve / No Retreat negative: foe with noRetreat already true causes move failure and holder gets no raises', () => {
+      const rng = scriptedRng([])
+      const state = battle([{ abilities: holderAbility('ABILITY_I_AM_STEVE') }, { hp: 100, maxHp: 100 }], rng)
+      state.battlers[1]!.volatiles.noRetreat = true
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      executeTurn(state, [null, null], realTestDeps(rng))
+
+      for (const stat of [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]) {
+        expect(state.battlers[0]!.mon.statStages[stat]).toBe(DEFAULT_STAT_STAGE)
+      }
+      expect(state.battlers[0]!.volatiles.noRetreat).toBe(false)
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_ESCAPE_PREVENTION)).toBe(false)
     })
 
     it('Mashed Potato / Syrup Bomb: 60-power special damage and the syrup timer on the foe', () => {

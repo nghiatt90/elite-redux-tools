@@ -813,13 +813,13 @@ describe('Cycle 148b - UseEntryMove abilities (next 12)', () => {
       expect(state.battlers[1]!.mon.hp).toBe(1)
     })
 
-    it('no PP deducted from any holder real moves by queued entry move (HITMARKER_NO_PPDEDUCT)', () => {
+    it('no PP deducted from the holder slot the queued move would otherwise match (HITMARKER_NO_PPDEDUCT)', () => {
       const rng = scriptedRng([0, 0, 15, 0, 0])
       const state = battle(
         [
           {
-            moves: ['MOVE_TACKLE', null, null, null],
-            pp: [35, 0, 0, 0],
+            moves: ['MOVE_FIRE_SPIN', null, null, null],
+            pp: [15, 0, 0, 0],
             abilities: { ability: 'ABILITY_WILDFIRE', innates: [null, null, null] },
           },
           { hp: 100, maxHp: 100 },
@@ -830,7 +830,7 @@ describe('Cycle 148b - UseEntryMove abilities (next 12)', () => {
       const deps = realTestDeps(rng)
       executeTurn(state, [null, null], deps)
 
-      expect(state.battlers[0]!.mon.pp[0]).toBe(35)
+      expect(state.battlers[0]!.mon.pp[0]).toBe(15)
     })
   })
 })

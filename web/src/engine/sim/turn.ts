@@ -692,7 +692,7 @@ export function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: numb
 }
 
 /** TurnStructsClear, battle_main.c:4511 -- ZERO(gTurnStructs) for every battler. */
-function turnStructsClear(state: BattleState): void {
+export function turnStructsClear(state: BattleState): void {
   for (const battler of state.battlers) {
     if (battler) battler.turn = createTurnState()
   }
@@ -4227,6 +4227,12 @@ export function drainQueuedExtraAttacks(
   state.currentExtraAttack = null
 }
 
+export interface QueuedAttackDrainContext {
+  index: number
+  order: TurnOrder
+  outcomes: ActionOutcome[]
+}
+
 /**
  * Drains gQueuedSwitchData -- the switch half of TryPerformExtraAction
  * (src/battle_util.c:787-816), reached from HandleAction_TryFinish (:751-769)
@@ -4259,12 +4265,6 @@ export function drainQueuedExtraAttacks(
  * on -- instead of sitting in the queue until the next drain site. Callers that
  * don't have a turn position to report omit it, which keeps the old behaviour.
  */
-export interface QueuedAttackDrainContext {
-  index: number
-  order: TurnOrder
-  outcomes: ActionOutcome[]
-}
-
 export function drainQueuedSwitches(
   state: BattleState,
   deps: TurnLoopDeps,

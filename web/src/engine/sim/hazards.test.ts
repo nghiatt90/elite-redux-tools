@@ -34,6 +34,7 @@ import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
+import { SWITCH_IN_ABILITY_IDS } from './switchInAbility'
 import type { TypeChart } from '../typeEffectiveness'
 import { MIRROR_ARMOR_ABILITIES, STEALTH_ROCK_IMMUNE_ABILITIES, TECTONIZE_IMMUNITIES_ABILITIES } from './hazards'
 
@@ -477,24 +478,29 @@ describe('order, fainting and the second pass', () => {
 
   it('a mon that faints to Spikes takes no later hazard, has no switch-in gaps, and is replaced again', () => {
     // 10 HP: Spikes (1 layer) deals 80/8 = 10 -> faints before Stealth Rock, Toxic Spikes and the web.
-    // LIMBER has no onEntry hook and no hazard interaction (never pick Magic Guard here: it blocks
-    // the indirect Spikes damage the test depends on).
-    const weak = partyMon({ hp: 10, abilities: { ability: 'ABILITY_LIMBER', innates: [null, null, null] } })
-    const strong = partyMon({ hp: 80, abilities: { ability: 'ABILITY_LIMBER', innates: [null, null, null] } })
-    const state = battle([partyMon({ hp: 5 }), weak, strong])
-    setHazards(state, 0, { spikes: 1, rockType: TYPE_ROCK, toxic: 1, web: true })
-    const rep = chooser(1, 2)
-    const out = executeTurn(state, [null, moveAction(0)], deps(fixedDamage(999), { replacement: rep }))
+    // Use a synthetic unhandled onEntry ability so only the surviving mon reaches HandleSwitchInAbility.
+    const SYNTHETIC_ENTRY = 'ABILITY_SYNTHETIC_ENTRY'
+    ;(SWITCH_IN_ABILITY_IDS as Set<string>).add(SYNTHETIC_ENTRY)
+    try {
+      const weak = partyMon({ hp: 10, abilities: { ability: SYNTHETIC_ENTRY, innates: [null, null, null] } })
+      const strong = partyMon({ hp: 80, abilities: { ability: SYNTHETIC_ENTRY, innates: [null, null, null] } })
+      const state = battle([partyMon({ hp: 5 }), weak, strong])
+      setHazards(state, 0, { spikes: 1, rockType: TYPE_ROCK, toxic: 1, web: true })
+      const rep = chooser(1, 2)
+      const out = executeTurn(state, [null, moveAction(0)], deps(fixedDamage(999), { replacement: rep }))
 
-    expect(rep.calls).toEqual([0, 0])
-    expect(state.sides[0].party[1]!.hp).toBe(0)
-    expect(state.sides[0].party[1]!.status1).toBe(STATUS1_NONE)
-    expect(state.sides[0].faintedCount).toBe(2) // the original KO + the hazard faint
-    expect(state.battlers[0]!.partyIndex).toBe(2)
-    expect(state.battlers[0]!.mon.hp).toBe(60)
-    expect(state.battleOutcome).toBeNull()
-    // The ability (Limber) has no onEntry hook, so neither switch-in reports an ability gap.
-    expect(out.replacementUnmodelled.filter((g) => g.includes('UseEntryMove'))).toHaveLength(0)
+      expect(rep.calls).toEqual([0, 0])
+      expect(state.sides[0].party[1]!.hp).toBe(0)
+      expect(state.sides[0].party[1]!.status1).toBe(STATUS1_NONE)
+      expect(state.sides[0].faintedCount).toBe(2) // the original KO + the hazard faint
+      expect(state.battlers[0]!.partyIndex).toBe(2)
+      expect(state.battlers[0]!.mon.hp).toBe(60)
+      expect(state.battleOutcome).toBeNull()
+      // Only the survivor reports a switch-in ability gap.
+      expect(out.replacementUnmodelled.filter((g) => g.includes('HandleSwitchInAbility'))).toHaveLength(1)
+    } finally {
+      ;(SWITCH_IN_ABILITY_IDS as Set<string>).delete(SYNTHETIC_ENTRY)
+    }
   })
 
   it('the last reserve fainting to its own entry hazards decides the battle', () => {

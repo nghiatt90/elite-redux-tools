@@ -9,14 +9,14 @@
 
 import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
-import { executeTurn, drainQueuedExtraAttacks, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
+import { executeTurn, drainQueuedExtraAttacks, roundStructsClear, turnStructsClear, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
 import { applyBattleStartPass } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { battleAiSetupFlags } from '../ai/aiFlags'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { PARTY_SIZE } from '../constants'
+import { clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
@@ -263,10 +263,25 @@ export function createSession(options: SessionOptions): BattleSession {
       dataContext: data.dataContext,
       turnOrder: data.turnOrder,
       statStageRatios: data.statStageRatios,
-      drainQueuedExtraAttacks: () => drainQueuedExtraAttacks(state, 0, startOrder, turnDeps, startOutcomes),
+      drainQueuedExtraAttacks: (battlerOrderIndex = 0) =>
+        drainQueuedExtraAttacks(state, battlerOrderIndex, startOrder, turnDeps, startOutcomes),
     },
     startUnmodelled,
   )
+  for (const outcome of startOutcomes) {
+    startUnmodelled.push(...outcome.unmodelled)
+  }
+  // TryDoEventsBeforeFirstTurn cleanup (battle_main.c:3406-3422):
+  // TurnValuesCleanUp(FALSE) zeroes gRoundStructs and decrements isFirstTurn (2 -> 1)
+  roundStructsClear(state)
+  // TurnStructsClear() zeroes gTurnStructs
+  turnStructsClear(state)
+  // Clear STATUS2_FLINCHED on every battler (:3422)
+  for (const battler of state.battlers) {
+    if (battler) {
+      battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_FLINCHED)
+    }
+  }
   runBattleEvents(
     state,
     {

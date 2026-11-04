@@ -31,7 +31,7 @@ import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './sta
 import type { ChosenAction, TurnOrderMoveView } from './turnOrder'
 import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { DamageResolver, TurnLoopDeps, TurnOutcome } from './turn'
-import { buildAccuracyInputs, executeTurn, getTotalAccuracy } from './turn'
+import { buildAccuracyInputs, executeTurn, getTotalAccuracy, roundStructsClear } from './turn'
 
 const simData = loadSimData()
 const DATA_CONTEXT = simData.dataContext
@@ -268,6 +268,7 @@ describe('cycle 121 - Mat Block', () => {
     const rng = countRng()
     const damage = recordingDamage()
     const state = battle(user('MOVE_MAT_BLOCK'), foe(), rng)
+    roundStructsClear(state)
     expect(state.battlers[0]!.volatiles.isFirstTurn).toBe(1) // battle-start TurnValuesCleanUp, :4491
     // A prior use of a protection move keeps protectUses from being reset (ProtectSucceeds :6650), so
     // a value of 2 is preserved on success -- which proves Mat Block does not increment it.
