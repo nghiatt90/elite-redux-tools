@@ -1,6 +1,6 @@
 # Plan: position evaluation that sees non-damaging effects
 
-Status: APPROVED by the cold reviewer in round 4 (round 1: 5 blocking, round 2: 1 blocking, round 3: 2 blocking, all verified and fixed; round 4: none). Not yet shown to the user; to be copied to docs/battle-sim/solver-evaluation.md after the driver stops. Design only; nothing is implemented. Final home: `docs/battle-sim/solver-evaluation.md` (copy it there after the cycle driver has stopped; the driver's guard blocks on tracked changes in the main checkout, `.omc/team-pilot/drive.sh:32-39`).
+Status: IMPLEMENTED in driver cycles 139-147 (E1-E5 plus review fixes 139b, 140b, 141b, 142b, 142c); `statusTerms` is on by default since cycle 147. See "Gate result" at the end. The plan below is kept as written (approved by the cold reviewer in round 4: round 1: 5 blocking, round 2: 1 blocking, round 3: 2 blocking, all verified and fixed; round 4: none).
 
 ## Goal
 
@@ -59,3 +59,28 @@ Queue lines (numbers assigned at enqueue time, consecutive from the then-current
 - The AI samples (6 per choice) are drawn before the player's choice, so a term that depends on the opponent's response (a foe that will switch out of a sleep) is not modelled.
 - Depth-2 plus the wide pool multiplies cost: pool size is not bounded by this plan.
 - Not decided here: D3 chains, D1 doubles; evaluation in doubles.
+
+## Gate result (cycle 147, measured 2026-11-04)
+
+Command: `SIM_BENCH=1 EX_DEPTH=1 EX_TEAM=status EX_STATUS_TERMS=<0|1> npm --prefix web test -- --run src/engine/sim/driver/expectimax.bench.test.ts`, 12 trainers x 2 seeds (24 battles), elite tier, expectimax depth 1, the status-move bench team (`genericTeam.ts`). Measured at commits 9b26c19/9ce20aa.
+
+| Policy | Wins (of 24) | ms/game |
+|---|---|---|
+| default heuristic policy | 5 | |
+| expectimax, `statusTerms` off | 19 | 1309 |
+| expectimax, `statusTerms` on | 19 | 1421 (+8.5%) |
+
+The gate (no fewer wins, ms/game rise under 25%) passes, and `statusTerms` therefore defaults to on. Caveats: the cycle driver and other processes ran concurrently, so the timings are noisy, and 24 battles carry about +-2 wins of noise. This is a regression check, not proof; the scenarios in `evalScenarios.test.ts` and the C-derived unit tests are the evidence the terms do what they should.
+
+Positive scenarios, intended move chosen out of 8 seeds, terms off versus on (re-measured by the cycle 147 reviewer with the `evalScenarios.test.ts` harness; Shuckle with Peck/Ember/Mud-Slap against Sawyer 1, no switching):
+
+| Scenario | Off | On |
+|---|---|---|
+| Spore vs Machamp | 0/8 (picks Peck) | 8/8 |
+| Substitute at full HP | 0/8 (picks Peck) | 8/8 |
+| Spikes into a six-mon bench | 0/8 (picks Peck) | 8/8 |
+| Leech Seed vs Machamp | 8/8 | 8/8 (regression guard only: the first drain tick lands the same turn, so the terms are not what makes it pass) |
+
+Other positives (Will-O-Wisp, Confuse Ray, Reflect vs a physical foe, Tailwind, Rain Dance and the field terms) were reported 0/8 off and at least 6/8 on in the per-cycle reviews; they were not re-measured for this table.
+
+`widePool` still defaults to off; turning it on is a decision of the D4 design session (step 4.1 of the driver plan, `.omc/plans/driver-d6-d5-audits-d4.md`).

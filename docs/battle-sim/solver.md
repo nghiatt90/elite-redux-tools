@@ -18,7 +18,9 @@ Run it from the repository root (it reads `data/v2.65beta` relative to the worki
 
 - The player side is played by a depth-1 expectimax (`driver/expectimax.ts`): every move and every
   voluntary switch is simulated against six sampled opponent actions from the ported trainer AI,
-  and the resulting positions are scored on HP, mons alive and stat stages. On a 24-battle check
+  and the resulting positions are scored on HP, mons alive and stat stages plus, since cycle 147
+  (`statusTerms`, default on), status, volatile, side-condition and field terms
+  (`solver-evaluation.md`). On a 24-battle check
   it won 19 against 2 for the old "highest base power" policy. Depth 2 won 21 at about 4x the cost.
 - Fitness is the win rate over seeded battles (same seeds for every candidate) plus a small
   tie-breaker from the end-of-battle position.
@@ -46,9 +48,11 @@ key is neither verified nor allowlisted. It is limited to learnable moves: `MOVE
 `MOVE_TEMPEST_STORM` (the only gated moves with no effect key) are not learned by any species, and
 Tempest Storm, which two trainer parties carry, is covered by `cycle138bMoveTypes.test.ts`.
 
-`widePool` stays off because the position score above sees HP, mons alive and stat stages only. A
-verified status, hazard or screen move would be modelled correctly in battle but not valued by the
-search. See `solver-evaluation.md` (when it exists) for the plan to value those effects.
+`widePool` stays off. The position score now values status, volatile, hazard, screen, tailwind,
+weather, terrain and Trick Room effects (`statusTerms`; see `solver-evaluation.md` for the terms,
+the scenarios that check them and the bench result), so the earlier reason, that such a move would
+be modelled in battle but not valued by the search, no longer holds. Turning the wide pool on is
+left to the solver design session (D4).
 
 ## Limits
 
