@@ -1436,9 +1436,15 @@ function runEndTurnAbilities(
 
       case 'ABILITY_FORECAST':
       case 'ABILITY_FLOWER_GIFT':
-      case 'ABILITY_SCHOOLING': {
-        // Impl<ABILITY_FORECAST>.onEndTurn (abilities.cc:1250; Flower Gift aliases it at :1860) and
-        // Impl<ABILITY_SCHOOLING>.onEndTurn (:2839-2842) -> TryTransformAttacker (:245-252).
+      case 'ABILITY_SCHOOLING':
+      case 'ABILITY_REVELATION':
+      case 'ABILITY_LOCUST_SWARM':
+      case 'ABILITY_SHIELDS_DOWN':
+      case 'ABILITY_ZEN_MODE': {
+        // Impl<ABILITY_FORECAST>.onEndTurn (abilities.cc:1250; Flower Gift aliases it at :1860;
+        // Shields Down aliases it at :2682; Zen Mode aliases it at :2269),
+        // Impl<ABILITY_LOCUST_SWARM>.onEndTurn (:10772-10773), Impl<ABILITY_REVELATION>.onEndTurn (:10780-10781),
+        // and Impl<ABILITY_SCHOOLING>.onEndTurn (:2839-2842) -> TryTransformAttacker (:245-252).
         if (slotAbility === 'ABILITY_SCHOOLING' && battler.mon.level < 20) break
         tryTransformAttacker(state, battlerId, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING }, unmodelled)
         break
@@ -1619,6 +1625,28 @@ function runEndTurnAbilities(
           setAbilityStateOf(battler, slotAbility, 0)
         } else {
           setAbilityStateOf(battler, slotAbility, 1)
+        }
+        break
+      }
+
+      case 'ABILITY_COOL_EXIT': {
+        // src/abilities.cc:526-549: CHECK(gVolatileStructs[battler].isFirstTurn != 2);
+        // switch (GetAbilityState(battler, ability)):
+        //   case 0: SetAbilityState(battler, ability, 1); break;
+        //   case 1: queue MOVE_CHILLY_RECEPTION (attacker = battler, target = battler, no movePower); SetAbilityState(battler, ability, 2); break;
+        //   default: does nothing.
+        if (battler.volatiles.isFirstTurn === 2) break
+        const coolExitState = getAbilityStateOf(battler, slotAbility)
+        if (coolExitState === 0) {
+          setAbilityStateOf(battler, slotAbility, 1)
+        } else if (coolExitState === 1) {
+          state.queuedExtraAttacks.push({
+            ability: slotAbility,
+            move: 'MOVE_CHILLY_RECEPTION',
+            attacker: battlerId,
+            target: battlerId,
+          })
+          setAbilityStateOf(battler, slotAbility, 2)
         }
         break
       }

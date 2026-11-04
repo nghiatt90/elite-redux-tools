@@ -2233,9 +2233,19 @@ export function applySwitchInAbilities(
       continue
     }
 
-    if (abilityId === 'ABILITY_FORECAST' || abilityId === 'ABILITY_FLOWER_GIFT' || abilityId === 'ABILITY_SCHOOLING') {
-      // Impl<ABILITY_FORECAST>.onEntry (abilities.cc:1248; Flower Gift aliases it at :1858) and
-      // Impl<ABILITY_SCHOOLING>.onEntry (:2834-2837) -> TryTransformAttacker (:245-252), whose
+    if (
+      abilityId === 'ABILITY_FORECAST' ||
+      abilityId === 'ABILITY_FLOWER_GIFT' ||
+      abilityId === 'ABILITY_SCHOOLING' ||
+      abilityId === 'ABILITY_REVELATION' ||
+      abilityId === 'ABILITY_LOCUST_SWARM' ||
+      abilityId === 'ABILITY_SHIELDS_DOWN' ||
+      abilityId === 'ABILITY_ZEN_MODE'
+    ) {
+      // Impl<ABILITY_FORECAST>.onEntry (abilities.cc:1248; Flower Gift aliases it at :1858;
+      // Shields Down aliases it at :2681; Zen Mode aliases it at :2268),
+      // Impl<ABILITY_LOCUST_SWARM>.onEntry (:10770-10772), Impl<ABILITY_REVELATION>.onEntry (:10778-10780),
+      // and Impl<ABILITY_SCHOOLING>.onEntry (:2834-2837) -> TryTransformAttacker (:245-252), whose
       // BattleScript_AttackerFormChange ends in `switchinabilities BS_ATTACKER`
       // (data/battle_scripts_1.s:8454-8462) -- the recursive applySwitchInAbilities below.
       if (abilityId === 'ABILITY_SCHOOLING' && battler.mon.level < 20) continue

@@ -85,7 +85,6 @@ const SELF_SUFFICIENT = requireAbility('ABILITY_SELF_SUFFICIENT')
 const SELF_REPAIR = requireAbility('ABILITY_SELF_REPAIR')
 const DUNE_VEIL = requireAbility('ABILITY_DUNE_VEIL')
 const POISON_ABSORB = requireAbility('ABILITY_POISON_ABSORB')
-const GAPPED_END_TURN_ABILITY = requireAbility('ABILITY_COOL_EXIT') // onEndTurn hook still unported (Cryo Architect, Bad Dreams, Life Steal, Color Spectrum and Cud Chew all used to stand here, but every one of them is ported now)
 const LEFTOVERS = requireItem('ITEM_LEFTOVERS')
 if (LEFTOVERS.resolvedHoldEffect !== 'HOLD_EFFECT_LEFTOVERS') throw new Error('ITEM_LEFTOVERS no longer resolves to HOLD_EFFECT_LEFTOVERS')
 const TOXIC_ORB = requireItem('ITEM_TOXIC_ORB')
@@ -405,28 +404,6 @@ describe('executeTurn: end-turn ladder -- fainting and battler order', () => {
 })
 
 describe('executeTurn: end-turn ladder -- runtime gap lines (endTurn.ts header table)', () => {
-  it('gaps ENDTURN_ABILITIES exactly when the battler\'s own ability has an unmodelled onEndTurn hook, and not otherwise', () => {
-    const withHook = battle([{ spe: 100, maxHp: 100, abilities: { ability: GAPPED_END_TURN_ABILITY, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }], scripted())
-    const out1 = executeTurn(withHook, [null, null], deps())
-    expect(out1.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${GAPPED_END_TURN_ABILITY}'s onEndTurn hook was not run`)
-
-    const withoutHook = battle(
-      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, null, null] } }, { spe: 50, maxHp: 100 }],
-      scripted(),
-    )
-    const out2 = executeTurn(withoutHook, [null, null], deps())
-    expect(out2.endTurnUnmodelled.some((m) => m.includes('ENDTURN_ABILITIES'))).toBe(false)
-  })
-
-  it('gaps ENDTURN_ABILITIES for an innate slot too (ABILITYEFFECT_ENDTURN loops every slot, battle_util.c:4397-4399)', () => {
-    const state = battle(
-      [{ spe: 100, maxHp: 100, abilities: { ability: MAGIC_GUARD, innates: [null, GAPPED_END_TURN_ABILITY, null] } }, { spe: 50, maxHp: 100 }],
-      scripted(),
-    )
-    const out = executeTurn(state, [null, null], deps())
-    expect(out.endTurnUnmodelled).toContain(`battler 0: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${GAPPED_END_TURN_ABILITY}'s onEndTurn hook was not run`)
-  })
-
   it('restores HP with Leftovers at end of turn and does not emit ENDTURN_ITEMS1 gap', () => {
     const withItem = battle([{ spe: 100, hp: 80, maxHp: 100, itemId: 'ITEM_LEFTOVERS' }, { spe: 50, maxHp: 100 }], scripted())
     const out1 = executeTurn(withItem, [null, null], deps(undefined, withItem))

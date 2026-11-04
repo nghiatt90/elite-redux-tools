@@ -82,10 +82,10 @@ const CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
 const MIRROR_ARMOR = requireAbility('ABILITY_MIRROR_ARMOR')
 const SHIELD_DUST = requireAbility('ABILITY_SHIELD_DUST')
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
-// An onEntry ability that is still unported, so it reports the HandleSwitchInAbility gap.
-// (Forewarn was the sentinel until cycle 109c ported its onEntry hook; Locust Swarm's onEntry
-// is still unported -- its ported half is onEndTurn/form change only.)
-const UNPORTED_ENTRY = requireAbility('ABILITY_LOCUST_SWARM')
+// An onEntry ability whose effect is still unmodelled, so it reports a switch-in gap line.
+// (Locust Swarm was the sentinel until cycle 146 ported its onEntry hook; Low Blow's onEntry
+// UseEntryMove hook is still unmodelled.)
+const UNPORTED_ENTRY = requireAbility('ABILITY_LOW_BLOW')
 const CORROSION = requireAbility('ABILITY_CORROSION')
 const HEMOTOXIN = requireAbility('ABILITY_HEMOTOXIN')
 const SUBDUE = requireAbility('ABILITY_SUBDUE')
@@ -496,7 +496,7 @@ describe('order, fainting and the second pass', () => {
     expect(state.battlers[0]!.mon.hp).toBe(60)
     expect(state.battleOutcome).toBeNull()
     // Only the survivor reports a switch-in ability gap.
-    expect(out.replacementUnmodelled.filter((g) => g.includes('HandleSwitchInAbility'))).toHaveLength(1)
+    expect(out.replacementUnmodelled.filter((g) => g.includes('UseEntryMove'))).toHaveLength(1)
   })
 
   it('the last reserve fainting to its own entry hazards decides the battle', () => {

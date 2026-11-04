@@ -465,47 +465,6 @@ describe('switch-in ability dispatch and weather setters', () => {
     expect(stateInnate2.field.weatherDuration).toBe(8)
   })
 
-  it('a non-ported onEntry ability still produces its gap line, for leads too', () => {
-    // Lead with unported onEntry ability (Locust Swarm: only its onEndTurn/form-change half is
-    // ported, so applySwitchInAbilities has no onEntry branch for it. Forewarn, the sentinel
-    // until cycle 109c, is now ported.)
-    const stateLead = battle(
-      [
-        { abilities: { ability: requireAbility('ABILITY_LOCUST_SWARM'), innates: [null, null, null] }, spe: 100 },
-        { spe: 50 },
-      ],
-      scriptedRng(),
-    )
-    const unmodelledLead: string[] = []
-    applyBattleStartPass(stateLead, makeTestDeps(), unmodelledLead)
-
-    expect(unmodelledLead).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_LOCUST_SWARM\'s onEntry hook was not run',
-    )
-
-    // Replacement switch-in with a still-unported onEntry ability (Locust Swarm has an onEntry
-    // hook in abilityHooks.json and no branch in applySwitchInAbilities).
-    const stateReplacement = battle(
-      [
-        { hp: 0, spe: 100 },
-        { spe: 50 },
-      ],
-      scriptedRng(),
-    )
-    stateReplacement.sides[0].party[1] = {
-      ...mon({
-        abilities: { ability: requireAbility('ABILITY_LOCUST_SWARM'), innates: [null, null, null] },
-        hp: 100,
-      }),
-    }
-    const unmodelledRepl: string[] = []
-    switchIn(stateReplacement, 0, 1, makeTestDeps(), unmodelledRepl)
-
-    expect(unmodelledRepl).toContain(
-      'battler 0: HandleSwitchInAbility (battle_util.c:9103-9204) is not applied -- ABILITY_LOCUST_SWARM\'s onEntry hook was not run',
-    )
-  })
-
   it('all ported weather setter aliases set their respective weather and hold rocks', () => {
     // Seaborne (Drizzle alias)
     const stateSeaborne = battle(

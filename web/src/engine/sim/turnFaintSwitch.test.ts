@@ -50,10 +50,10 @@ function requireSpecies(id: string): string {
 // ever renamed or removed -- and pin the exact onEntry/switch-in classification
 // this batch's gap lines depend on, per the brief's "verify every id" rule.
 const MUDKIP = requireSpecies('SPECIES_MUDKIP')
-// An onEntry ability that is still unported, so it reports the HandleSwitchInAbility gap.
-// (Forewarn was the sentinel until cycle 109c ported its onEntry hook; Locust Swarm's onEntry
-// is still unported -- its ported half is onEndTurn/form change only.)
-const UNPORTED_ENTRY = requireAbility('ABILITY_LOCUST_SWARM')
+// An onEntry ability whose effect is still unmodelled, so it reports a switch-in gap line.
+// (Locust Swarm was the sentinel until cycle 146 ported its onEntry hook; Low Blow's onEntry
+// UseEntryMove hook is still unmodelled.)
+const UNPORTED_ENTRY = requireAbility('ABILITY_LOW_BLOW')
 if (!abilityHooks[UNPORTED_ENTRY]?.hooks?.onEntry) throw new Error(`${UNPORTED_ENTRY} no longer has an onEntry hook in abilityHooks.json`)
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
 if (abilityHooks[MAGIC_GUARD]?.hooks?.onEntry) throw new Error(`${MAGIC_GUARD} unexpectedly gained an onEntry hook -- pick a different "no gap" ability`)
@@ -385,7 +385,7 @@ describe('applyEndOfTurnReplacements', () => {
     const state = battle([{ spe: 50, hp: 5 }, { spe: 200, hp: 100 }], scripted(), [partyMon({ hp: 5 }), withAbility], [partyMon({ hp: 100 })])
     const rep = replacementDeps(1)
     const out = executeTurn(state, [null, useMove(0)], deps(lethalToTarget(999), rep))
-    expect(out.replacementUnmodelled.some((g) => g.includes('HandleSwitchInAbility') && g.includes(UNPORTED_ENTRY))).toBe(true)
+    expect(out.replacementUnmodelled.some((g) => g.includes('UseEntryMove') && g.includes(UNPORTED_ENTRY))).toBe(true)
   })
 
   it('emits no switch-in ability gap when the incoming mon\'s ability has no onEntry hook', () => {
@@ -393,7 +393,7 @@ describe('applyEndOfTurnReplacements', () => {
     const state = battle([{ spe: 50, hp: 5 }, { spe: 200, hp: 100 }], scripted(), [partyMon({ hp: 5 }), withoutAbility], [partyMon({ hp: 100 })])
     const rep = replacementDeps(1)
     const out = executeTurn(state, [null, useMove(0)], deps(lethalToTarget(999), rep))
-    expect(out.replacementUnmodelled.some((g) => g.includes('HandleSwitchInAbility'))).toBe(false)
+    expect(out.replacementUnmodelled.some((g) => g.includes('UseEntryMove'))).toBe(false)
   })
 
   it('gaps a switch-in item by name only when the incoming mon holds one', () => {
