@@ -119,6 +119,14 @@ export interface MoveData {
 
 export interface DamageCalcScenario {
   move: MoveData
+  /** Cmd_damagecalc's fixedBasePower (battle_script_commands.c:1598-1611), non-zero
+   * only for a UseEntryMove-queued extra attack. CalcMoveBasePowerAfterModifiers
+   * starts from `fixedPower ? fixedPower : basePower` (battle_util.c:6969), but
+   * CalcFinalDmg hands CalculateAbilityMultipliers CalcMoveBasePower's own result
+   * (:7503-7505) -- the DECLARED pre-modifier power -- so this override must not
+   * replace `move.power` (Technician tests that declared power, abilities.cc:1626).
+   * The simulator sets it; the standalone calculator leaves it unset. */
+  fixedBasePower?: number
   attacker: BattlerBattleState
   defender: BattlerBattleState
   field: FieldBattleState
@@ -1255,7 +1263,12 @@ function calcInternal(
     scenario.attackerWasHitThisTurn,
   )
   const angelsWrathPower = applyAngelsWrathBasePower(moveSpecificPower, move.id, battlerHasAbility(attacker.abilitySlots, 'ABILITY_ANGELS_WRATH', () => false))
-  const power = calcMoveBasePowerAfterModifiers(Math.max(angelsWrathPower, 1), basePowerCtx)
+  const declaredBasePower = Math.max(angelsWrathPower, 1)
+  // CalcMoveBasePowerAfterModifiers (battle_util.c:6966-6969) clamps CalcMoveBasePower's
+  // result to 1 and then substitutes the fixed power when one is set; the modifier chain
+  // below operates on that substitution.
+  const actualBasePower = scenario.fixedBasePower ?? declaredBasePower
+  const power = calcMoveBasePowerAfterModifiers(actualBasePower, basePowerCtx)
 
   for (const id of [attacker.abilitySlots.ability, ...attacker.abilitySlots.innates, defender.abilitySlots.ability, ...defender.abilitySlots.innates]) {
     const note = abilityCoverageNote(id)
@@ -1286,7 +1299,9 @@ function calcInternal(
       moveEffectChance: move.effectChance,
       ateBoost,
       attackerHasStab: stabInHalves(attacker.types, attacker.abilitySlots, defender.abilitySlots, moveType, attackerHasMoldBreaker, move.id) > 2,
-      basePower: power,
+      // CalcFinalDmg (battle_util.c:7503-7505) passes CalcMoveBasePower -- declared,
+      // pre-modifier power and, for a fixed-power queued attack, not the override.
+      basePower: scenario.fixedBasePower !== undefined ? declaredBasePower : power,
       typeEffectiveness,
       isCrit,
       attackerHasAnyStatus: attacker.condition.status1.size > 0 || attacker.condition.hasComatose || attacker.condition.hasBloodStainEffect,

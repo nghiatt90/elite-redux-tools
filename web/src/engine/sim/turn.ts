@@ -4250,9 +4250,31 @@ export function drainQueuedExtraAttacks(
  * `canProcessSwitches` (battle_util.c:785) is ported as always-true: the sim has
  * no pre-first-turn phase, and TryDoEventsBeforeFirstTurn is the only writer of
  * TRUE (battle_main.c:3392).
+ *
+ * `redrain` re-empties the ATTACK queue after each switch completes: a switch-in
+ * ability may queue an entry move (UseEntryMove, battle_util.c:3994-4019), and
+ * TryPerformExtraAction checks `gQueuedAttackCount` on every re-entry BEFORE it
+ * looks at the switch half (:775-783 before :787-816), so that move must run
+ * before the next queued switch -- or, after the last one, before the turn moves
+ * on -- instead of sitting in the queue until the next drain site. Callers that
+ * don't have a turn position to report omit it, which keeps the old behaviour.
  */
-export function drainQueuedSwitches(state: BattleState, deps: TurnLoopDeps, unmodelled: string[]): void {
+export interface QueuedAttackDrainContext {
+  index: number
+  order: TurnOrder
+  outcomes: ActionOutcome[]
+}
+
+export function drainQueuedSwitches(
+  state: BattleState,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+  redrain?: QueuedAttackDrainContext,
+): void {
   while (state.queuedSwitches.length > 0) {
+    if (redrain && state.queuedExtraAttacks.length > 0) {
+      drainQueuedExtraAttacks(state, redrain.index, redrain.order, deps, redrain.outcomes)
+    }
     const entry = state.queuedSwitches.pop()!
     const switchingBattler = entry.switchingBattler
     const sourceBattler = entry.sourceBattler
@@ -4304,6 +4326,12 @@ export function drainQueuedSwitches(state: BattleState, deps: TurnLoopDeps, unmo
     }
 
     forceRandomSwitch(state, sourceBattler, switchingBattler, deps, unmodelled)
+  }
+  // The last switch's own switch-in abilities may have queued an entry move; the C
+  // checks the attack queue on the next HandleAction_TryFinish re-entry before
+  // anything else (battle_util.c:775-783).
+  if (redrain && state.queuedExtraAttacks.length > 0) {
+    drainQueuedExtraAttacks(state, redrain.index, redrain.order, deps, redrain.outcomes)
   }
 }
 
@@ -4553,7 +4581,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // through TryPerformExtraAction, whose switch half then also runs before the first action.
   if (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0) {
     drainQueuedExtraAttacks(state, 0, order, deps, outcomes)
-    drainQueuedSwitches(state, deps, switchUnmodelled)
+    drainQueuedSwitches(state, deps, switchUnmodelled, { index: 0, order, outcomes })
   }
 
   for (let index = 0; index < order.battlerByTurnOrder.length; index++) {
@@ -4593,7 +4621,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     tryPreemptiveActions(state, index, order, actions, deps)
     if (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0) {
       drainQueuedExtraAttacks(state, index, order, deps, outcomes)
-      drainQueuedSwitches(state, deps, switchUnmodelled)
+      drainQueuedSwitches(state, deps, switchUnmodelled, { index, order, outcomes })
     }
 
     // B_ACTION_FINISHED (include/battle.h:37): UseTurnAttackAsPursuit overwrote
@@ -4611,7 +4639,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // Drain queued extra attacks, then queued switches, immediately after the action finishes,
     // matching HandleAction_TryFinish -> TryPerformExtraAction (battle_util.c:751-816).
     drainQueuedExtraAttacks(state, index, order, deps, outcomes)
-    drainQueuedSwitches(state, deps, switchUnmodelled)
+    drainQueuedSwitches(state, deps, switchUnmodelled, { index, order, outcomes })
   }
   turnStructsClear(state)
   const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
@@ -4680,7 +4708,7 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // Extra attacks and switches queued during end-turn run before replacements and wish/perish song.
   if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
     drainQueuedExtraAttacks(state, order.battlerByTurnOrder.length - 1, order, deps, outcomes)
-    drainQueuedSwitches(state, deps, switchUnmodelled)
+    drainQueuedSwitches(state, deps, switchUnmodelled, { index: order.battlerByTurnOrder.length - 1, order, outcomes })
   }
 
   // HandleFaintedMonActions's state-3 gate is exactly "the whole turn (both
@@ -4695,7 +4723,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   // switch-in abilities run before wish/perish song and continue-battle cleanup.
   if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
     drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
-    drainQueuedSwitches(state, deps, switchUnmodelled)
+    drainQueuedSwitches(state, deps, switchUnmodelled, {
+      index: Math.max(0, order.battlerByTurnOrder.length - 1),
+      order,
+      outcomes,
+    })
   }
 
   // HandleWishPerishSongOnTurnEnd (battle_util.c:2997-3078) in C has state 0: futureSightCounter (:2998-3031),
@@ -4710,7 +4742,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
         applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
         if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
           drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
-          drainQueuedSwitches(state, deps, switchUnmodelled)
+          drainQueuedSwitches(state, deps, switchUnmodelled, {
+            index: Math.max(0, order.battlerByTurnOrder.length - 1),
+            order,
+            outcomes,
+          })
         }
       }
     })
@@ -4737,7 +4773,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       applyEndOfTurnReplacements(state, deps.replacement, deps, replacementUnmodelled)
       if (!state.battleOutcome && (state.queuedExtraAttacks.length > 0 || state.queuedSwitches.length > 0)) {
         drainQueuedExtraAttacks(state, Math.max(0, order.battlerByTurnOrder.length - 1), order, deps, outcomes)
-        drainQueuedSwitches(state, deps, switchUnmodelled)
+        drainQueuedSwitches(state, deps, switchUnmodelled, {
+          index: Math.max(0, order.battlerByTurnOrder.length - 1),
+          order,
+          outcomes,
+        })
       }
     }
   }

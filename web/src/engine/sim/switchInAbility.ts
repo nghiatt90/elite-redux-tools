@@ -1296,19 +1296,6 @@ const ANNOUNCE_ONLY_ON_ENTRY: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Dispatches switch-in abilities for a single battler.
- * Ported from HandleSwitchInAbility (battle_util.c:9103-9204) and
- * Cmd_switchineffects (battle_script_commands.c:5520-5525).
- *
- * Walks the battler's slots in the C's order:
- *   numPossibleAbilities = 4 (GetNumPossibleAbilitiesForBattler, pokemon.c:6423)
- *   i = 0 -> slot 4 (Extra switch-in effects: Commander / Dragon Monotype / Totem, battle_util.c:9113-9176)
- *   i = 1 -> slot 3 (innates[2], battle_util.c:9108, :9183)
- *   i = 2 -> slot 2 (innates[1])
- *   i = 3 -> slot 1 (innates[0])
- *   i = 4 -> slot 0 (ability)
- */
-/**
  * CanUseExtraMove (src/battle_util.c:8716-8722).
  */
 function canUseExtraMove(state: BattleState, attackerId: number, targetId: number): boolean {
@@ -1356,6 +1343,19 @@ function applyUseEntryMove(
   }
 }
 
+/**
+ * Dispatches switch-in abilities for a single battler.
+ * Ported from HandleSwitchInAbility (battle_util.c:9103-9204) and
+ * Cmd_switchineffects (battle_script_commands.c:5520-5525).
+ *
+ * Walks the battler's slots in the C's order:
+ *   numPossibleAbilities = 4 (GetNumPossibleAbilitiesForBattler, pokemon.c:6423)
+ *   i = 0 -> slot 4 (Extra switch-in effects: Commander / Dragon Monotype / Totem, battle_util.c:9113-9176)
+ *   i = 1 -> slot 3 (innates[2], battle_util.c:9108, :9183)
+ *   i = 2 -> slot 2 (innates[1])
+ *   i = 3 -> slot 1 (innates[0])
+ *   i = 4 -> slot 0 (ability)
+ */
 export function applySwitchInAbilities(
   state: BattleState,
   battlerId: number,
@@ -2494,12 +2494,25 @@ export interface BattleStartDeps {
   dataContext: SimDataContext
   turnOrder?: Omit<TurnOrderContext, 'isBattlerGrounded'>
   statStageRatios?: [number, number][]
+  /** Empties the queued out-of-turn ATTACKS for the lead at this turn-order index.
+   *
+   * TryDoEventsBeforeFirstTurn returns after each lead's abilities whenever
+   * gQueuedAttackCount is non-zero (battle_main.c:3380); the next re-entry
+   * dispatches B_ACTION_TRY_FINISH (:3320-3322), which runs TryPerformExtraAction's
+   * attack half (battle_util.c:771-783) before the next lead's abilities -- and all
+   * of it before turn 1's action setup (:3399-3417). Queued SWITCHES are NOT part of
+   * this: canProcessSwitches stays FALSE until :3392, so battle_util.c:785 filters
+   * them out. Callers that don't model the queue omit the callback. */
+  drainQueuedExtraAttacks?: (battlerOrderIndex: number) => void
 }
 
 /**
  * TryDoEventsBeforeFirstTurn switch-in abilities pass (battle_main.c:3354-3382).
  * Resolves switch-in abilities for all live leads in speed order (gBattlerByTurnOrder)
- * before the first turn actions begin.
+ * before the first turn actions begin. When a lead queues an entry move (UseEntryMove)
+ * and the caller supplied `deps.drainQueuedExtraAttacks`, that move runs before the
+ * NEXT lead's switch-in abilities, as the C's repeated TryDoEventsBeforeFirstTurn
+ * re-entries do (:3380, :3320-3322).
  */
 export function applyBattleStartPass(
   state: BattleState,
@@ -2528,6 +2541,11 @@ export function applyBattleStartPass(
     tryPrimalReversion(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
 
     applySwitchInAbilities(state, battlerId, deps as SwitchInAbilityDeps, unmodelled)
+
+    // battle_main.c:3380 -- return once this lead queued an attack; the next
+    // re-entry runs it (:3320-3322) before the next lead's abilities. Attacks only:
+    // queued switches wait for canProcessSwitches (:3392).
+    if (state.queuedExtraAttacks.length > 0) deps.drainQueuedExtraAttacks?.(i)
   }
 
   // battle_main.c:3356 -- ABILITYEFFECT_REACTIVE in TryDoEventsBeforeFirstTurn

@@ -9,7 +9,7 @@
 
 import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
-import { executeTurn, type TurnLoopDeps, type TurnOutcome } from '../turn'
+import { executeTurn, drainQueuedExtraAttacks, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
 import { applyBattleStartPass } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
@@ -25,7 +25,7 @@ import type { GroundingContext } from '../grounding'
 import { battlerHasSimAbility } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
-import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import type { ChosenAction, TurnOrder, TurnOrderMoveView } from '../turnOrder'
 import type { ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -248,6 +248,14 @@ export function createSession(options: SessionOptions): BattleSession {
   const { turnDeps, chooseAiDeps } = buildDeps(state, data, options.opponentTrainer, playerReplacement)
 
   const startUnmodelled: string[] = []
+  const startOutcomes: ActionOutcome[] = []
+  // The battle-start pass drains a lead's queued entry move before the next lead's
+  // abilities (battle_main.c:3380, :3320-3322). Nothing has acted yet, so the
+  // slot index is 0 -- every battler reads as "has not acted this turn".
+  const startOrder: TurnOrder = {
+    battlerByTurnOrder: Array.from({ length: state.battlersCount }, (_, i) => i),
+    actionsByTurnOrder: new Array<ChosenAction['action']>(state.battlersCount).fill('USE_MOVE'),
+  }
   applyBattleStartPass(
     state,
     {
@@ -255,6 +263,7 @@ export function createSession(options: SessionOptions): BattleSession {
       dataContext: data.dataContext,
       turnOrder: data.turnOrder,
       statStageRatios: data.statStageRatios,
+      drainQueuedExtraAttacks: () => drainQueuedExtraAttacks(state, 0, startOrder, turnDeps, startOutcomes),
     },
     startUnmodelled,
   )

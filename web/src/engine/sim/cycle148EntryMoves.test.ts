@@ -411,18 +411,21 @@ describe('Cycle 148 - UseEntryMove abilities (first 12)', () => {
   })
 
   describe('execution through executeTurn', () => {
-    it('Cheap Tactics / Low Blow: damage calculation uses power override 40, not move base power 80', () => {
+    it('Low Blow: damage calculation uses power override 40, not move base power 80', () => {
       // Attacker level 50, atk 100. Defender def 100.
       // MOVE_FEINT_ATTACK declared base power is 80 (in moves.json). Low Blow overrides to 40.
       // Formula: floor(2 * 50 / 5 + 2) = 22.
       // With power 40: floor(22 * 40 * 100 / 100 / 50) + 2 = 17 + 2 = 19 base damage.
-      // With roll index 15 (100% roll): 19 * 100 / 100 = 19 damage.
+      // With roll 0 (100% roll, battle_util.c:7790-7795 dmg *= 100 - roll): 19 damage.
       // If base power 80 were used: floor(22 * 80 * 100 / 100 / 50) + 2 = 35 + 2 = 37 base damage.
-      // Roll 15 at 80 power would deal 37 damage.
-      // RNG draw: accuracy (Feint Attack accuracy 0 -> 0 draws), crit roll (24), damage roll (16 -> draw 15 for 100%).
+      // Draws, in order: 1) the accuracy check (always drawn, battle_script_commands.c:1433 --
+      // Feint Attack's accuracy 0 resolves to 101, HITS_IF_POSSIBLE, so the value can never miss);
+      // 2) the crit roll (24 divides only multiples of 24; 1 is not one, so no crit);
+      // 3) the damage roll (0 -> 100%).
       const rng = scriptedRng([
-        0, // hitCritRoll (0 != 0 -> no crit)
-        15, // damage roll index (15 = 100% max roll)
+        0, // 1: accuracy
+        1, // 2: crit roll -- not divisible by 24, so no crit
+        0, // 3: damage roll -- 0 = 100%
       ])
       const state = battle(
         [
@@ -560,13 +563,17 @@ describe('Cycle 148 - UseEntryMove abilities (first 12)', () => {
       expect(state.battlers[1]!.mon.types[2]).toBe('GHOST')
     })
 
-    it('no PP deducted from any of the holder real moves by queued move (HITMARKER_NO_PPDEDUCT)', () => {
-      const rng = scriptedRng([0, 15])
+    it('no PP deducted from the holder slot the queued move would otherwise match (HITMARKER_NO_PPDEDUCT)', () => {
+      // The queued Feint Attack exists as the holder's own slot 0, so a missing no-deduct
+      // guard would visibly take a PP from that slot. HandleAction_UseMove sets
+      // HITMARKER_NO_PPDEDUCT for the injected move (battle_util.c:206-208) and Cmd_ppreduce
+      // returns before touching the PP array when it is set (battle_script_commands.c:1467-1470).
+      const rng = scriptedRng([0, 1, 0])
       const state = battle(
         [
           {
-            moves: ['MOVE_TACKLE', null, null, null],
-            pp: [35, 0, 0, 0],
+            moves: ['MOVE_FEINT_ATTACK', null, null, null],
+            pp: [10, 0, 0, 0],
             abilities: { ability: 'ABILITY_LOW_BLOW', innates: [null, null, null] },
           },
           { hp: 100, maxHp: 100 },
@@ -574,29 +581,13 @@ describe('Cycle 148 - UseEntryMove abilities (first 12)', () => {
         rng,
       )
       applySwitchInAbilities(state, 0, testDeps(), [])
-      const deps = realTestDeps(rng)
-      executeTurn(state, [null, null], deps)
-
-      expect(state.battlers[0]!.mon.pp[0]).toBe(35)
-    })
-
-    it('case (a) lead-start drain: queued attack from lead drains before turn 1 action', () => {
-      const rng = scriptedRng([0, 15, 0, 0])
-      const state = battle(
-        [
-          { atk: 100, spe: 100, abilities: { ability: 'ABILITY_LOW_BLOW', innates: [null, null, null] } },
-          { def: 100, spe: 50, hp: 100, maxHp: 100 },
-        ],
-        rng,
-      )
-      applySwitchInAbilities(state, 0, testDeps(), [])
       expect(state.queuedExtraAttacks).toHaveLength(1)
+      expect(state.queuedExtraAttacks[0]!.move).toBe('MOVE_FEINT_ATTACK')
 
       const deps = realTestDeps(rng)
       executeTurn(state, [null, null], deps)
 
-      expect(state.battlers[1]!.mon.hp).toBe(81)
-      expect(state.queuedExtraAttacks).toEqual([])
+      expect(state.battlers[0]!.mon.pp[0]).toBe(10)
     })
 
     it('case (b) post-faint replacement drain: replacement entry move drains at end of turn', () => {

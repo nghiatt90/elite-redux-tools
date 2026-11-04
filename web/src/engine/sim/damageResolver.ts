@@ -82,6 +82,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     move: MoveData,
     context: DamageResolveContext,
     drawRandom: boolean,
+    fixedBasePower?: number,
   ): { scenario: DamageCalcScenario; unmodelled: string[] } {
   const roles = { attackerId, defenderId: targetId }
   const attacker = buildBattlerBattleState(state, attackerId, roles, deps)
@@ -130,6 +131,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
   }
   const scenario: DamageCalcScenario = {
     move,
+    fixedBasePower,
     attacker: attacker.battler,
     defender: defender.battler,
     field: field.field,
@@ -194,15 +196,17 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     resolve(state: BattleState, attackerId: number, targetId: number, action: ChosenAction, context: DamageResolveContext = { targetHasActedThisTurn: false }): DamageResolution {
       if (action.action !== 'USE_MOVE' || !action.chosenMove) return { targetDamage: null, attackerDamage: null, unmodelled: [] }
       const declaredMove = deps.moveData(action.chosenMove.id)
-      // Cmd_damagecalc (battle_script_commands.c:1598-1611) passes gQueuedExtraAttackData[0].movePower as CalculateMoveDamage's
-      // fixedBasePower, and CalcMoveBasePowerAfterModifiers takes `fixedPower ? fixedPower : basePower` (battle_util.c:6969).
-      // Every move queued with a power today (Ice Downfall's Icicle Crash 60, Snap Trap 50) is a plain-power effect, so
-      // overriding the declared power is equivalent to replacing CalcMoveBasePower's result.
+      // Cmd_damagecalc (battle_script_commands.c:1598-1611) passes gQueuedExtraAttackData[0].movePower as
+      // CalculateMoveDamage's fixedBasePower, and CalcMoveBasePowerAfterModifiers substitutes it for the base
+      // power only (battle_util.c:6969). Carried as its own scenario field, not as a replacement for move.power:
+      // CalcFinalDmg (:7503-7505) still hands the DECLARED power to CalculateAbilityMultipliers, so Technician
+      // (abilities.cc:1626-1630) must keep reading the move's own power, not this override.
       const extra = state.processingExtraAttacks ? state.currentExtraAttack : null
-      const move =
+      const fixedBasePower =
         declaredMove && extra?.movePower && extra.attacker === attackerId && extra.move === declaredMove.id
-          ? { ...declaredMove, power: extra.movePower }
-          : declaredMove
+          ? extra.movePower
+          : undefined
+      const move = declaredMove
       if (!move) return { targetDamage: null, attackerDamage: null, unmodelled: [`move ${action.chosenMove.id}: move data is unavailable`] }
       // A STATUS split normally means a status effect, which this resolver does
       // not model. The exception is a move the codegen gives NO behaviour: that
@@ -216,7 +220,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
         return { targetDamage: null, attackerDamage: null, unmodelled: ['status effects are not modelled yet'] }
       }
 
-      const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, true)
+      const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, true, fixedBasePower)
       const result = calculateMoveDamage(scenario)
       unmodelled.push(...result.unmodelled)
       if (result.isImmune) return { targetDamage: 0, attackerDamage: null, unmodelled, absorbingAbility: result.absorbingAbility ?? null }
