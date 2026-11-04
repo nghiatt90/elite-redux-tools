@@ -705,10 +705,16 @@ function resetPendingSwitch(state: BattleState, battlerId: number): void {
   if (battler) battler.monToSwitchIntoId = PARTY_SIZE
 }
 
-/** TurnValuesCleanUp(FALSE), battle_main.c:4490-4497, 4505-4508 -- ZERO(gRoundStructs[i]) for every battler,
+/** TurnValuesCleanUp(FALSE), battle_main.c:4490-4510 -- ZERO(gRoundStructs[i]) for every battler,
  * decrement isFirstTurn, decrement rechargeTimer and clear STATUS2_RECHARGE when 0,
+ * clear STATUS2_SUBSTITUTE when there is no live substitute, zero parentalBondOn,
  * clear the one-turn side shields (Wide Guard, Crafty Shield, Mat Block),
- * and clear followmeTimer. */
+ * and clear followmeTimer.
+ *
+ * The sim only models the turnPassOnly==FALSE call (the battle-start and end-of-turn
+ * sites). The substitute/status2 and parentalBondOn lines are outside C's
+ * `if (!turnPassOnly)` block, so they run on both shapes; both live here rather
+ * than in turnStructsClear because this is where TurnValuesCleanUp is modelled. */
 export function roundStructsClear(state: BattleState): void {
   for (const battler of state.battlers) {
     if (battler) {
@@ -722,6 +728,12 @@ export function roundStructsClear(state: BattleState): void {
           battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_RECHARGE)
         }
       }
+      // battle_main.c:4500
+      if (!battler.volatiles.substituteHp) {
+        battler.mon.status2 = clearFlag(battler.mon.status2, STATUS2_SUBSTITUTE)
+      }
+      // battle_main.c:4502
+      battler.turn.parentalBondOn = 0
     }
   }
   for (const side of state.sides) {
@@ -4280,9 +4292,13 @@ export interface QueuedAttackDrainContext {
  *       gBattlerTarget = switchingBattler -- so forceRandomSwitch takes the
  *       SOURCE first and the battler being switched second.
  *
- * `canProcessSwitches` (battle_util.c:785) is ported as always-true: the sim has
- * no pre-first-turn phase, and TryDoEventsBeforeFirstTurn is the only writer of
- * TRUE (battle_main.c:3392).
+ * `canProcessSwitches` (battle_util.c:785) is ported as always-true. The C gates the
+ * switch half on it, and TryDoEventsBeforeFirstTurn is the one site that sets it
+ * (battle_main.c:3392) before re-entering B_ACTION_TRY_FINISH (:3394-3397). That
+ * battle-start drain is `createSession`'s own call to this function, made after
+ * `applyBattleStartPass` returns: inside the lead loop the switch half is still
+ * filtered out, so the pass must not drain switches itself. Every in-turn call
+ * site runs with the flag TRUE.
  *
  * `redrain` re-empties the ATTACK queue after each switch completes: a switch-in
  * ability may queue an entry move (UseEntryMove, battle_util.c:3994-4019), and

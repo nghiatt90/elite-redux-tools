@@ -2498,7 +2498,7 @@ export interface BattleStartDeps {
   dataContext: SimDataContext
   turnOrder?: Omit<TurnOrderContext, 'isBattlerGrounded'>
   statStageRatios?: [number, number][]
-  /** Empties the queued out-of-turn ATTACKS for the lead at this turn-order index.
+  /** Empties the queued out-of-turn ATTACKS after a lead's abilities.
    *
    * TryDoEventsBeforeFirstTurn returns after each lead's abilities whenever
    * gQueuedAttackCount is non-zero (battle_main.c:3380); the next re-entry
@@ -2506,8 +2506,13 @@ export interface BattleStartDeps {
    * attack half (battle_util.c:771-783) before the next lead's abilities -- and all
    * of it before turn 1's action setup (:3399-3417). Queued SWITCHES are NOT part of
    * this: canProcessSwitches stays FALSE until :3392, so battle_util.c:785 filters
-   * them out. Callers that don't model the queue omit the callback. */
-  drainQueuedExtraAttacks?: (battlerOrderIndex: number) => void
+   * them out. Callers that don't model the queue omit the callback.
+   *
+   * The callback receives the live `order`, whose prefix has been speed-sorted so
+   * far. During battle start gCurrentTurnActionNumber is still 0 -- it is first
+   * written at battle_main.c:3413 (`= gBattlersCount`) and reset to 0 for turn 1
+   * at :4637 -- so the drain must use index 0: nothing has acted this turn. */
+  drainQueuedExtraAttacks?: (order: TurnOrder) => void
 }
 
 /**
@@ -2517,12 +2522,16 @@ export interface BattleStartDeps {
  * and the caller supplied `deps.drainQueuedExtraAttacks`, that move runs before the
  * NEXT lead's switch-in abilities, as the C's repeated TryDoEventsBeforeFirstTurn
  * re-entries do (:3380, :3320-3322).
+ *
+ * Returns the shared `order`, speed-sorted through the last lead, so the caller can
+ * pass it to the queued-switch drain that the C only unblocks after this loop
+ * (battle_main.c:3392-3397).
  */
 export function applyBattleStartPass(
   state: BattleState,
   deps: BattleStartDeps,
   unmodelled: string[],
-): void {
+): TurnOrder {
   const statStageRatios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
   const turnOrderCtx: TurnOrderContext = {
     isBattlerGrounded: (battlerId) => isBattlerGrounded(state, battlerId, deps.grounding),
@@ -2533,6 +2542,23 @@ export function applyBattleStartPass(
     battlerByTurnOrder: Array.from({ length: state.battlersCount }, (_, i) => i),
     actionsByTurnOrder: new Array<ChosenAction['action']>(state.battlersCount).fill('USE_MOVE'),
   }
+
+  // A TryDoEventsBeforeFirstTurn re-entry first drains the attack queue (the
+  // gQueuedAttackCount branch at battle_main.c:3325-3328, which runs before :3356)
+  // and only then runs ABILITYEFFECT_REACTIVE. The check may itself queue another
+  // attack (e.g. Acid Reflux), which the next re-entry drains the same way.
+  const reenter = () => {
+    while (state.queuedExtraAttacks.length > 0 && deps.drainQueuedExtraAttacks) {
+      deps.drainQueuedExtraAttacks(order)
+      runReactiveAbilityEffects(state, deps, unmodelled)
+    }
+  }
+
+  // battle_main.c:3356 -- ABILITYEFFECT_REACTIVE at the top of the function body,
+  // so it runs on the first entry and on every empty-queue re-entry (before the
+  // switch-in ability loop, and again after each queued-attack drain).
+  runReactiveAbilityEffects(state, deps, unmodelled)
+  reenter()
 
   for (let i = 0; i < state.battlersCount; i++) {
     recalculateMoveOrder(order, state, [], i, true, turnOrderCtx, statStageRatios)
@@ -2549,9 +2575,8 @@ export function applyBattleStartPass(
     // battle_main.c:3380 -- return once this lead queued an attack; the next
     // re-entry runs it (:3320-3322) before the next lead's abilities. Attacks only:
     // queued switches wait for canProcessSwitches (:3392).
-    if (state.queuedExtraAttacks.length > 0) deps.drainQueuedExtraAttacks?.(i)
+    reenter()
   }
 
-  // battle_main.c:3356 -- ABILITYEFFECT_REACTIVE in TryDoEventsBeforeFirstTurn
-  runReactiveAbilityEffects(state, deps, unmodelled)
+  return order
 }

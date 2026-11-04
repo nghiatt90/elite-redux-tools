@@ -7,12 +7,12 @@ import { createBattleState, createBattlerState } from './create'
 import type { MoveBehaviors } from '../basePower'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon } from './state'
 import { NEUTRAL_TURN_ORDER_CONTEXT, type ChosenAction, type TurnOrderMoveView } from './turnOrder'
-import type { DamageResolver, TurnLoopDeps } from './turn'
-import { executeTurn } from './turn'
+import type { DamageResolver, TurnLoopDeps, ActionOutcome } from './turn'
+import { drainQueuedExtraAttacks, executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData, SimSpeciesData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
-import { applySwitchInAbilities } from './switchInAbility'
+import { applyBattleStartPass, applySwitchInAbilities } from './switchInAbility'
 import {
   DEFAULT_STAT_STAGE,
   STAT_SPEED,
@@ -28,6 +28,7 @@ import type { MoveData, DamageCalcScenario } from '../calculate'
 import { calculateMoveDamage } from '../calculate'
 import { createSession, stepTurn, buildMoveAction } from './driver/session'
 import { loadSimData } from './driver/loadSimData'
+import type { TrainerData, TrainerMonData } from './driver/loadSimData'
 import { buildPlayerParty } from './driver/buildParty'
 import type { BattlerBattleState, ConditionBattlerContext, FieldBattleState } from '../types'
 import { calcStat } from '../stats'
@@ -139,6 +140,38 @@ const DATA_CONTEXT: SimDataContext = {
   species: (id) => (speciesById.has(id) ? requireSpecies(id) : undefined),
   item: (id) => (itemsById.has(id) ? requireItem(id) : undefined),
   move: (id) => (movesById.has(id) ? requireMove(id) : undefined),
+}
+
+const { isBattlerGrounded: _grounded, ...ORDER_CONTEXT } = NEUTRAL_TURN_ORDER_CONTEXT
+
+function foeMon(overrides: Partial<TrainerMonData> = {}): TrainerMonData {
+  return {
+    species: 'SPECIES_MUDKIP',
+    item: 'ITEM_NONE',
+    nature: 'NATURE_HARDY',
+    ability: 'ABILITY_SWIFT_SWIM',
+    evs: { hp: 0, atk: 0, def: 0, spatk: 0, spdef: 0, spe: 0 },
+    moves: ['MOVE_TACKLE'],
+    ironPill: false,
+    hiddenPowerType: 'TYPE_NORMAL',
+    ...overrides,
+  }
+}
+
+function trainerWith(lead: TrainerMonData): TrainerData {
+  return {
+    id: 'TRAINER_CYCLE148E',
+    trainerNum: 9998,
+    name: 'CYCLE',
+    class: 'TRAINER_CLASS_HIKER',
+    gender: 'MALE',
+    forcedDouble: false,
+    risky: false,
+    preferStatus: false,
+    preferStall: false,
+    noSwitching: false,
+    parties: { ace: [lead], elite: [lead], hell: [lead] },
+  }
 }
 
 function mon(overrides: Partial<SimBattleMon> = {}): SimBattleMon {
@@ -323,6 +356,33 @@ function useMove(target: number, moveId: string): ChosenAction {
 describe('Cycle 148e Fixes', () => {
   describe('Item 2: Clean-up after the battle-start pass', () => {
     it('Jump Scare lead Astonish flinch is cleared so foe turn-1 Tackle is not cancelled', () => {
+      // First show the dirty state: the battle-start drain really flinches the foe,
+      // and only the post-pass cleanup clears it. Raw battle() state, same draws as
+      // the session below (accuracy, crit, damage, flinch chance).
+      const rawRng = scriptedRng([0, 1, 0, 0])
+      const rawState = battle(
+        [
+          { atk: 100, abilities: { ability: 'ABILITY_JUMP_SCARE', innates: [null, null, null] } },
+          { def: 100, hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+        ],
+        rawRng,
+      )
+      const rawOutcomes: ActionOutcome[] = []
+      applyBattleStartPass(
+        rawState,
+        {
+          grounding: GROUNDING,
+          dataContext: DATA_CONTEXT,
+          turnOrder: ORDER_CONTEXT,
+          statStageRatios: RATIOS,
+          drainQueuedExtraAttacks: (order) =>
+            drainQueuedExtraAttacks(rawState, 0, order, realTestDeps(rawRng), rawOutcomes),
+        },
+        [],
+      )
+      expect(rawOutcomes).toHaveLength(1)
+      expect(hasFlag(rawState.battlers[1]!.mon.status2, STATUS2_FLINCHED)).toBe(true)
+
       const data = loadSimData()
       const trainer = data.trainersById.get('TRAINER_SAWYER_1')!
       const party = buildPlayerParty(
@@ -361,8 +421,35 @@ describe('Cycle 148e Fixes', () => {
     })
 
     it('after Low Blow lead the foe round.physicalDmg is 0 at turn 1 so Counter does not reflect stale 19', () => {
+      // First show the stale value before the cleanup: the entry move lands for 19
+      // on a raw battle() state (Atk 100 vs Def 100, Feint Attack power override 40).
+      const rawRng = scriptedRng([0, 1, 0])
+      const rawState = battle(
+        [
+          { atk: 100, abilities: { ability: 'ABILITY_LOW_BLOW', innates: [null, null, null] } },
+          { def: 100, hp: 100, maxHp: 100 },
+        ],
+        rawRng,
+      )
+      const rawOutcomes: ActionOutcome[] = []
+      applyBattleStartPass(
+        rawState,
+        {
+          grounding: GROUNDING,
+          dataContext: DATA_CONTEXT,
+          turnOrder: ORDER_CONTEXT,
+          statStageRatios: RATIOS,
+          drainQueuedExtraAttacks: (order) =>
+            drainQueuedExtraAttacks(rawState, 0, order, realTestDeps(rawRng), rawOutcomes),
+        },
+        [],
+      )
+      expect(rawOutcomes[0]?.targetDamage).toBe(19)
+      expect(rawState.battlers[1]!.round.physicalDmg).toBe(19)
+      expect(rawState.battlers[1]!.round.physicalBattlerId).toBe(0)
+
       const data = loadSimData()
-      const trainer = data.trainersById.get('TRAINER_SAWYER_1')!
+      const trainer = data.trainersById.get('TRAINER_LUCAS_1')!
       const party = buildPlayerParty(
         [
           {
@@ -378,72 +465,62 @@ describe('Cycle 148e Fixes', () => {
         50,
         data,
       )
-      // Accuracy 0 -> 101 hits, crit roll 1 -> no crit, damage roll 0 -> 100%
+      // Accuracy 0 -> 101 hits, crit roll 1 -> no crit, damage roll 0 -> 100%.
+      // Lucas's ace lead is Shuckle, whose third move is Counter.
       const rng = scriptedRng([0, 1, 0, 0, 1, 0])
       const session = createSession({
         data,
         playerParty: party,
         opponentTrainer: trainer,
+        tier: 'ace',
         rng,
       })
 
       // TurnValuesCleanUp(FALSE) zeroes gRoundStructs (:3406 / :4490), so physicalDmg is 0 at turn 1
       expect(session.state.battlers[1]!.round.physicalDmg).toBe(0)
+
+      // The actual Counter run: Cmd_counterdamagecalculator (:10663-10682) fails
+      // without a qualifying hit, so the move is marked missed and the player is unharmed.
+      const playerHp = session.state.battlers[0]!.mon.hp
+      const step = stepTurn(session, null, useMove(0, 'MOVE_COUNTER'))
+      const foeAction = step.outcome.actions.find((a) => a.battlerId === 1)!
+      expect(foeAction.missed).toBe(true)
+      expect(session.state.battlers[0]!.mon.hp).toBe(playerHp)
     })
 
-    it('Stakeout with a Low Blow entry attack doubles (damage 19 -> 38)', () => {
-      // Attacker Level 50, Atk 100, Defender Level 50, Def 100, Max HP 100.
-      // MOVE_FEINT_ATTACK power override 40 from Low Blow:
-      // floor(2 * 50 / 5 + 2) = 22; floor(22 * 40 * 100 / 100 / 50) + 2 = 17 + 2 = 19.
-      // During battle start, isFirstTurn is 2 (battle_main.c:2899, not decremented yet).
-      // Stakeout (abilities.cc:2726, bridge.ts:566-568) checks isFirstTurn === 2 and doubles: 19 * 2 = 38.
-      // Roll 0 (100% roll, no crit) deals 38 damage -> 100 - 38 = 62 HP.
-      const rng = scriptedRng([0, 1, 0])
-      const state = battle(
+    it('Stakeout lead: createSession restores isFirstTurn = 2 before the entry move doubles', () => {
+      const data = loadSimData()
+      // Thievul's second ability slot is Stakeout and its second innate is Low Blow,
+      // so its entry move doubles only while isFirstTurn is still 2.
+      const party = buildPlayerParty(
         [
           {
-            atk: 100,
-            spe: 100,
-            abilities: { ability: 'ABILITY_LOW_BLOW', innates: ['ABILITY_STAKEOUT', null, null] },
-            types: ['WATER', 'MYSTERY', 'MYSTERY'],
+            species: 'SPECIES_THIEVUL',
+            level: 50,
+            ability: 'ABILITY_STAKEOUT',
+            item: null,
+            moves: ['MOVE_TACKLE', null, null, null],
           },
-          { def: 100, spe: 50, hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
         ],
-        rng,
+        50,
+        data,
       )
-      // State is freshly created; session sets isFirstTurn = 2 before the battle-start pass
-      state.battlers[0]!.volatiles.isFirstTurn = 2
-      state.battlers[1]!.volatiles.isFirstTurn = 2
-      expect(state.battlers[1]!.volatiles.isFirstTurn).toBe(2)
-
-      applySwitchInAbilities(state, 0, testDeps(), [])
-      executeTurn(state, [null, null], realTestDeps(rng))
-
-      expect(state.battlers[1]!.mon.hp).toBe(62)
-    })
-
-    it('Stakeout negative: with a non-first-turn battler (isFirstTurn != 2) the 2x is absent (deals 19)', () => {
+      // Accuracy 0, crit roll 1 (no crit), damage roll 0 (100%), then no further draws.
       const rng = scriptedRng([0, 1, 0])
-      const state = battle(
-        [
-          {
-            atk: 100,
-            spe: 100,
-            abilities: { ability: 'ABILITY_LOW_BLOW', innates: ['ABILITY_STAKEOUT', null, null] },
-            types: ['WATER', 'MYSTERY', 'MYSTERY'],
-          },
-          { def: 100, spe: 50, hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
-        ],
+      const session = createSession({
+        data,
+        playerParty: party,
+        opponentTrainer: trainerWith(foeMon()),
         rng,
-      )
-      // Manually set isFirstTurn to 1 (simulating post-cleanup or non-first-turn)
-      state.battlers[1]!.volatiles.isFirstTurn = 1
+      })
 
-      applySwitchInAbilities(state, 0, testDeps(), [])
-      executeTurn(state, [null, null], realTestDeps(rng))
-
-      // Without Stakeout 2x: deals 19 damage -> 100 - 19 = 81 HP
-      expect(state.battlers[1]!.mon.hp).toBe(81)
+      // Thievul Atk 108 vs Mudkip Def 70: Feint Attack at the entry move's power 40
+      // is a base of 29; Dark STAB 1.5 makes 43.5, and Stakeout doubles it to 87,
+      // so 130 - 87 = 43. createBattleState already applied the :3406 decrement;
+      // without the isFirstTurn = 2 reset in createSession, Stakeout
+      // (abilities.cc:2726, bridge.ts:566-568) would see 1, deal only 44 and leave 86.
+      expect(session.state.battlers[1]!.mon.maxHp).toBe(130)
+      expect(session.state.battlers[1]!.mon.hp).toBe(43)
     })
   })
 
@@ -691,40 +768,72 @@ describe('Cycle 148e Fixes', () => {
   })
 
   describe('Item 6: Per-ability failure and edge tests', () => {
-    it('Doom Desire with future-sight counter already set fails', () => {
-      const rng = scriptedRng([])
+    it('Doombringer: the queued Doom Desire schedules a future attack, and fails if one is pending', () => {
+      // Success: the entry move is queued by the ability (abilities.cc:6404-6406)
+      // and drained by the turn loop's first re-entry.
+      const rng = scriptedRng([0, 0])
       const state = battle(
         [
-          { moves: ['MOVE_DOOM_DESIRE', null, null, null], pp: [5, 0, 0, 0] },
-          { hp: 100, maxHp: 100 },
+          { spatk: 100, abilities: { ability: 'ABILITY_DOOMBRINGER', innates: [null, null, null] } },
+          { spdef: 100, hp: 100, maxHp: 100 },
         ],
         rng,
       )
-      // Pre-set target futureSightCounter
-      state.field.futureSightCounter[1] = 2
-
-      const out = executeTurn(state, [useMove(1, 'MOVE_DOOM_DESIRE'), null], testDeps())
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      expect(state.queuedExtraAttacks).toHaveLength(1)
+      const out = executeTurn(state, [null, null], realTestDeps(rng))
       const action = out.actions.find((a) => a.battlerId === 0)!
-      expect(action.missed).toBe(true)
-      expect(state.battlers[0]!.mon.pp[0]).toBe(4) // ppreduce still runs
+      expect(action.missed).toBe(false)
+      expect(state.field.futureSightCounter[1]).toBe(2) // 3 set, end-turn decrement
+      expect(state.field.futureSightMove[1]).toBe('MOVE_DOOM_DESIRE')
+
+      // Failure: with a future attack already pending the queued Doom Desire
+      // cannot start another (BattleScript_EffectFutureSight's cantdoomdesirewithfuturesight).
+      const failRng = scriptedRng([])
+      const failState = battle(
+        [
+          { spatk: 100, abilities: { ability: 'ABILITY_DOOMBRINGER', innates: [null, null, null] } },
+          { spdef: 100, hp: 100, maxHp: 100 },
+        ],
+        failRng,
+      )
+      failState.field.futureSightCounter[1] = 2
+      applySwitchInAbilities(failState, 0, testDeps(), [])
+      const failOut = executeTurn(failState, [null, null], realTestDeps(failRng))
+      const failAction = failOut.actions.find((a) => a.battlerId === 0)!
+      expect(failAction.missed).toBe(true)
+      expect(failState.field.futureSightMove[1]).toBeNull()
     })
 
-    it('Wish with wish pending fails', () => {
+    it('Wishmaker: the queued Wish sets a wish, and fails if one is pending', () => {
       const rng = scriptedRng([])
       const state = battle(
         [
-          { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0] },
+          { hp: 40, maxHp: 100, abilities: { ability: 'ABILITY_WISHMAKER', innates: [null, null, null] } },
           { hp: 100, maxHp: 100 },
         ],
         rng,
       )
-      // Pre-set wishCounter
-      state.field.wishCounter[0] = 2
-
-      const out = executeTurn(state, [useMove(1, 'MOVE_WISH'), null], testDeps())
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      expect(state.queuedExtraAttacks).toHaveLength(1)
+      const out = executeTurn(state, [null, null], realTestDeps(rng))
       const action = out.actions.find((a) => a.battlerId === 0)!
-      expect(action.missed).toBe(true)
-      expect(state.battlers[0]!.mon.pp[0]).toBe(9) // ppreduce still runs
+      expect(action.missed).toBe(false)
+      expect(state.field.wishCounter[0]).toBe(1) // 2 set, end-turn decrement
+
+      const failRng = scriptedRng([])
+      const failState = battle(
+        [
+          { hp: 40, maxHp: 100, abilities: { ability: 'ABILITY_WISHMAKER', innates: [null, null, null] } },
+          { hp: 100, maxHp: 100 },
+        ],
+        failRng,
+      )
+      failState.field.wishCounter[0] = 2
+      applySwitchInAbilities(failState, 0, testDeps(), [])
+      const failOut = executeTurn(failState, [null, null], realTestDeps(failRng))
+      const failAction = failOut.actions.find((a) => a.battlerId === 0)!
+      expect(failAction.missed).toBe(true)
     })
 
     it('Woodland Curse / Forest Curse on a Grass foe fails', () => {
@@ -745,27 +854,38 @@ describe('Cycle 148e Fixes', () => {
       expect(state.battlers[1]!.mon.types[2]).toBe('MYSTERY')
     })
 
-    it('Tar Shot used twice: second use fails', () => {
-      const rng = scriptedRng([0, 0])
+    it('Tar Toss: the queued Tar Shot coats the foe, and fails if it is already coated', () => {
+      const rng = scriptedRng([0])
       const state = battle(
         [
-          { moves: ['MOVE_TAR_SHOT', null, null, null], pp: [15, 0, 0, 0] },
+          { abilities: { ability: 'ABILITY_TAR_TOSS', innates: [null, null, null] } },
           { hp: 100, maxHp: 100 },
         ],
         rng,
       )
-
-      // First use succeeds
-      const out1 = executeTurn(state, [useMove(1, 'MOVE_TAR_SHOT'), null], testDeps())
-      const act1 = out1.actions.find((a) => a.battlerId === 0)!
-      expect(act1.missed).toBe(false)
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      expect(state.queuedExtraAttacks).toHaveLength(1)
+      const out = executeTurn(state, [null, null], realTestDeps(rng))
+      const action = out.actions.find((a) => a.battlerId === 0)!
+      expect(action.missed).toBe(false)
       expect(state.battlers[1]!.volatiles.tarShot).toBe(true)
+      expect(state.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE - 1)
 
-      // Second use fails (cantarshotwork fails because target.volatiles.tarShot is true)
-      const out2 = executeTurn(state, [useMove(1, 'MOVE_TAR_SHOT'), null], testDeps())
-      const act2 = out2.actions.find((a) => a.battlerId === 0)!
-      expect(act2.missed).toBe(true)
-      expect(state.battlers[0]!.mon.pp[0]).toBe(13) // PP was deducted both times
+      // Failure: cantarshotwork rejects a target already coated.
+      const failRng = scriptedRng([])
+      const failState = battle(
+        [
+          { abilities: { ability: 'ABILITY_TAR_TOSS', innates: [null, null, null] } },
+          { hp: 100, maxHp: 100 },
+        ],
+        failRng,
+      )
+      failState.battlers[1]!.volatiles.tarShot = true
+      applySwitchInAbilities(failState, 0, testDeps(), [])
+      const failOut = executeTurn(failState, [null, null], realTestDeps(failRng))
+      const failAction = failOut.actions.find((a) => a.battlerId === 0)!
+      expect(failAction.missed).toBe(true)
+      expect(failState.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
     })
 
     it('Magic Bounce reflecting Yawn onto the user', () => {
@@ -824,24 +944,31 @@ describe('Cycle 148e Fixes', () => {
       expect(hasFlag(state.battlers[1]!.mon.status1, STATUS1_PARALYSIS)).toBe(false)
     })
 
-    it('Draco Morale on a non-Dragon target gives +1 crit stage, not +2', () => {
-      const rng = scriptedRng([])
-      const state = battle(
-        [
-          {
-            abilities: { ability: 'ABILITY_DRACO_MORALE', innates: [null, null, null] },
-            types: ['NORMAL', 'MYSTERY', 'MYSTERY'],
-          },
-          { hp: 100, maxHp: 100 },
-        ],
-        rng,
-      )
-      applySwitchInAbilities(state, 0, testDeps(), [])
-      executeTurn(state, [null, null], realTestDeps(rng))
+    it('Draco Morale checks the ATTACKER type: Dragon user +2, non-Dragon user +1', () => {
+      const critBoostFor = (userTypes: [string, string, string]) => {
+        const rng = scriptedRng([])
+        const state = battle(
+          [
+            {
+              abilities: { ability: 'ABILITY_DRACO_MORALE', innates: [null, null, null] },
+              types: userTypes,
+            },
+            // The target stays non-Dragon in both runs, so a differing result can
+            // only come from the attacker's own type.
+            { hp: 100, maxHp: 100 },
+          ],
+          rng,
+        )
+        applySwitchInAbilities(state, 0, testDeps(), [])
+        executeTurn(state, [null, null], realTestDeps(rng))
+        expect(state.battlers[1]!.volatiles.critBoost).toBe(0)
+        return state.battlers[0]!.volatiles.critBoost
+      }
 
-      // Non-Dragon user gets +1 critBoost (Dragon user gets +2)
-      expect(state.battlers[0]!.volatiles.critBoost).toBe(1)
-      expect(state.battlers[1]!.volatiles.critBoost).toBe(0)
+      // BattleScript_EffectDragonCheer (data/battle_scripts_1.s:11903-11907):
+      // jumpiftype BS_ATTACKER, TYPE_DRAGON -> increasecrit 2, else increasecrit 1.
+      expect(critBoostFor(['DRAGON', 'MYSTERY', 'MYSTERY'])).toBe(2)
+      expect(critBoostFor(['NORMAL', 'MYSTERY', 'MYSTERY'])).toBe(1)
     })
   })
 })

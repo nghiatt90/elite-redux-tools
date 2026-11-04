@@ -9,24 +9,24 @@
 
 import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
-import { executeTurn, drainQueuedExtraAttacks, roundStructsClear, turnStructsClear, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
-import { applyBattleStartPass } from '../switchInAbility'
+import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructsClear, turnStructsClear, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
+import { applyBattleStartPass, getSingleUseAbilityCounter } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { battleAiSetupFlags } from '../ai/aiFlags'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
+import { BATTLE_TYPE_TRAINER, clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
 import { gateInnates } from '../innateGate'
 import type { GroundingContext } from '../grounding'
-import { battlerHasSimAbility } from '../statBuffs'
+import { battlerHasSimAbility, runReactiveAbilityEffects } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
-import type { ChosenAction, TurnOrder, TurnOrderMoveView } from '../turnOrder'
-import type { ReplacementDeps } from '../switchIn'
+import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
@@ -232,7 +232,10 @@ export function createSession(options: SessionOptions): BattleSession {
     ],
     playerParty,
     opponentParty,
-    battleTypeFlags: 0,
+    // A session is always a trainer battle. CanBattlerBeForceSwitched needs this
+    // bit for Emergency Exit / Wimp Out (abilities.cc:2608-2647), and Red Card /
+    // Restraining Order read it too (moveEnd.ts:2980, :3210).
+    battleTypeFlags: BATTLE_TYPE_TRAINER,
     aiFlags: battleAiSetupFlags(options.opponentTrainer, 0),
     tier,
     rng: options.rng,
@@ -249,37 +252,54 @@ export function createSession(options: SessionOptions): BattleSession {
 
   const startUnmodelled: string[] = []
   const startOutcomes: ActionOutcome[] = []
-  // The battle-start pass drains a lead's queued entry move before the next lead's
-  // abilities (battle_main.c:3380, :3320-3322). Nothing has acted yet, so the
-  // slot index is 0 -- every battler reads as "has not acted this turn".
-  const startOrder: TurnOrder = {
-    battlerByTurnOrder: Array.from({ length: state.battlersCount }, (_, i) => i),
-    actionsByTurnOrder: new Array<ChosenAction['action']>(state.battlersCount).fill('USE_MOVE'),
-  }
   // createBattleState pre-applies the :3406 decrement; the battle-start pass runs before it in C (isFirstTurn is still 2 there, Stakeout abilities.cc:2726).
   for (const battler of state.battlers) {
     if (battler) battler.volatiles.isFirstTurn = 2
   }
-  applyBattleStartPass(
+  // The battle-start pass drains a lead's queued entry move before the next lead's
+  // abilities (battle_main.c:3380, :3320-3322). gCurrentTurnActionNumber is still 0
+  // there (:3413 is its first write), so the drain index is 0: nothing has acted.
+  const startOrder = applyBattleStartPass(
     state,
     {
       grounding: groundingFor(data, state),
       dataContext: data.dataContext,
       turnOrder: data.turnOrder,
       statStageRatios: data.statStageRatios,
-      drainQueuedExtraAttacks: (battlerOrderIndex = 0) =>
-        drainQueuedExtraAttacks(state, battlerOrderIndex, startOrder, turnDeps, startOutcomes),
+      drainQueuedExtraAttacks: (order) => drainQueuedExtraAttacks(state, 0, order, turnDeps, startOutcomes),
     },
     startUnmodelled,
   )
+  // battle_main.c:3392-3397 -- only after the lead loop is canProcessSwitches set,
+  // and the re-entry that drains gQueuedSwitchData comes BEFORE the :3406 cleanup.
+  // applyBattleStartPass cannot do this itself: inside the lead loop the switch half
+  // is still filtered out (battle_util.c:785).
+  drainQueuedSwitches(state, turnDeps, startUnmodelled, { index: 0, order: startOrder, outcomes: startOutcomes })
+  // battle_main.c:3356 -- the re-entry after the switch drain repeats the reactive check.
+  runReactiveAbilityEffects(state, { dataContext: data.dataContext, grounding: groundingFor(data, state) }, startUnmodelled)
   for (const outcome of startOutcomes) {
     startUnmodelled.push(...outcome.unmodelled)
   }
   // TryDoEventsBeforeFirstTurn cleanup (battle_main.c:3406-3422):
   // TurnValuesCleanUp(FALSE) zeroes gRoundStructs and decrements isFirstTurn (2 -> 1)
   roundStructsClear(state)
+  // battle_main.c:3407-3411 -- TurnValuesCleanUp just zeroed gRoundStructs, so
+  // restore the protect a Coward lead armed on entry (abilities.cc:5441-5451).
+  for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+    const battler = state.battlers[battlerId]
+    if (!battler || battler.mon.hp === 0) continue
+    if (getSingleUseAbilityCounter(state, battlerId, 'ABILITY_COWARD', data.dataContext) > 0) {
+      battler.round.protectMove = 'MOVE_PROTECT'
+    }
+  }
   // TurnStructsClear() zeroes gTurnStructs
   turnStructsClear(state)
+  // battle_main.c:3413-3414 -- gCurrentTurnActionNumber = gBattlersCount makes
+  // HandleFaintedMonActions' "everyone acted" gates pass, so a lead that fainted
+  // during battle start is replaced before turn 1's actions.
+  if (!state.battleOutcome && turnDeps.replacement) {
+    applyEndOfTurnReplacements(state, turnDeps.replacement, turnDeps, startUnmodelled)
+  }
   // Clear STATUS2_FLINCHED on every battler (:3422)
   for (const battler of state.battlers) {
     if (battler) {

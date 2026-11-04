@@ -831,6 +831,10 @@ describe('Cycle 148b - UseEntryMove abilities (next 12)', () => {
       executeTurn(state, [null, null], deps)
 
       expect(state.battlers[0]!.mon.pp[0]).toBe(15)
+      // The queued Fire Spin actually ran: EFFECT_TRAP set the wrap on the foe
+      // (battle_script_commands.c:2733-2750) and the hit took HP.
+      expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
+      expect(state.battlers[1]!.mon.hp).toBeLessThan(100)
     })
   })
 })
