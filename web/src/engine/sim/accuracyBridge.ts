@@ -59,6 +59,7 @@ import { isPhantomForce, semiInvulnerableState } from './unpack'
 import { battlerHasSimAbility, getStatDropBlockType, isBattlerWeatherAffected, isSimAbilitySuppressed } from './statBuffs'
 import { isKeenEdgeMove, isStrikerMove } from './statusEffects'
 import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
+import { getAbilityStateOf } from './endTurn'
 
 const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/, '')
 
@@ -304,6 +305,7 @@ export function buildAccuracyInputs(
     defenderSmokescreenActive: (state.sides[targetId & 1]?.timers.smokescreenTimer ?? 0) > 0,
     defenderAbilitySlots: defender.mon.abilities,
     defenderIsWrapped: hasFlag(defender.mon.status2, STATUS2_WRAPPED),
+    defenderCommanderActive: getAbilityStateOf(defender, 'ABILITY_COMMANDER') !== 0,
     isAbilitySuppressed: (side, abilityId) =>
       isSimAbilitySuppressed(state, side === 'attacker' ? attacker : defender, abilityId, false, attackerId, false, deps.dataContext),
     attackerIndexFirst: attackerId < targetId,

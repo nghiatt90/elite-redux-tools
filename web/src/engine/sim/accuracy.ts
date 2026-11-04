@@ -39,10 +39,7 @@
 //     data/v2.65beta/abilityHooks.json's `hooks.onAccuracy` and against a grep
 //     of every `constexpr Ability Impl<ABILITY_X>` block in src/abilities.cc
 //     (aliases count: `Impl<ABILITY_RADIANCE>.onAccuracy =
-//     Impl<ABILITY_ILLUMINATE>.onAccuracy` is a live hook, not a gap). The one
-//     remaining hole is ABILITY_COMMANDER, which needs GetAbilityState state
-//     the sim does not carry; it is named in UNPORTED_ACCURACY_ABILITIES and
-//     gapped by ability id when a slot holds it.
+//     Impl<ABILITY_ILLUMINATE>.onAccuracy` is a live hook, not a gap).
 //
 // One ability check outside the hook loop IS ported for real, because its flag
 // already exists in the registry: IsUnaware (:9006) is exactly
@@ -100,11 +97,8 @@ export const ACCURACY_STAGE_RATIOS: [number, number][] = [
 
 /** The abilities in the pinned checkout whose `.onAccuracy` hook
  * GetTotalAccuracy's ability loop (:1354-1362) would run, which have no port.
- * Only ABILITY_COMMANDER remains unported because its `GetAbilityState(target, ability)`
- * condition has no state in the sim. */
-export const UNPORTED_ACCURACY_ABILITIES = [
-  'ABILITY_COMMANDER',
-] as const
+ * Empty: every onAccuracy hook is ported. */
+export const UNPORTED_ACCURACY_ABILITIES = [] as const
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -291,6 +285,9 @@ export interface AccuracyInputs {
   /** STATUS2_WRAPPED (constants.ts, gBattleMons[target].status2 & STATUS2_WRAPPED).
    * Grip Pincer (:4708), World Serpent (:10252). */
   defenderIsWrapped?: boolean
+  /** ABILITY_COMMANDER (abilities.cc:7173-7174).
+   * GetAbilityState(target, ability) == COMMANDER_ACTIVE (battle_util.c:9117-9122 / include/battle_util.h:99-100). */
+  defenderCommanderActive?: boolean
 
   // -- field -------------------------------------------------------------
   /** ConditionFieldContext's own WeatherKind (engine/types.ts), used for the
@@ -523,6 +520,12 @@ export function runDefenderAbilityHook(
   let prio: number = ACCURACY_PRIORITY.NO_RESULT
 
   switch (abilityId) {
+    case 'ABILITY_COMMANDER':
+      if (inputs.defenderCommanderActive) {
+        prio = ACCURACY_PRIORITY.ALWAYS_MISSES
+      }
+      break
+
     case 'ABILITY_NO_GUARD':
     case 'ABILITY_BRAWLING_WYVERN':
       prio = ACCURACY_PRIORITY.ALWAYS_HITS

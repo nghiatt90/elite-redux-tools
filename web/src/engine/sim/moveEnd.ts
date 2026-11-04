@@ -41,7 +41,7 @@
 // 30   | MOVEEND_CLEAR_BITS              | 4934-4957  | Ported         | Clears rolloutCounter (if not Rollout), targetAffected, gemBoost, berryReduced.
 // --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-import type { MoveBehaviors } from '../basePower'
+import type { MoveBehaviorEntry, MoveBehaviors } from '../basePower'
 import type { BattleState, BattlerState } from './state'
 import {
   BATTLE_TYPE_ARENA,
@@ -675,7 +675,11 @@ export function isMoveMakingContact(
 export function getRecoilFraction(
   effect: string | null | undefined,
   moveBehaviors?: MoveBehaviors,
+  customBehavior?: MoveBehaviorEntry | null,
 ): number {
+  if (typeof customBehavior?.attack?.recoilFraction === 'number' && customBehavior.attack.recoilFraction > 0) {
+    return customBehavior.attack.recoilFraction
+  }
   if (!effect) return 0
   const fromBehavior = moveBehaviors?.[effect]?.attack?.recoilFraction
   if (typeof fromBehavior === 'number' && fromBehavior > 0) {
@@ -7339,10 +7343,46 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   if (moveData?.split !== 'STATUS' && hpDealt > 0 && attacker && attacker.mon.hp > 0) {
     const struggle = moveId === 'MOVE_STRUGGLE'
     if (struggle || (!isMagicGuardProtected(state, attacker) && !battlerHasNoRecoil(attacker))) {
-      const fraction = getRecoilFraction(moveData?.effect, deps.moveBehaviors)
-      let recoilDmg = fraction > 0 ? Math.max(1, Math.floor(hpDealt / fraction)) : 0
-      const onRecoil = ON_RECOIL_ABILITIES.find((ab) => battlerHasAbility(attacker.mon.abilities, ab, () => false))
-      if (onRecoil) unmodelled.push(`MOVEEND_RECOIL's onRecoil hook (${onRecoil}, battle_script_commands.c:4483-4490) is not modelled`)
+      const fraction = getRecoilFraction(moveData?.effect, deps.moveBehaviors, moveData?.customBehavior)
+      const fractionDmg = fraction > 0 ? Math.max(1, Math.floor(hpDealt / fraction)) : 0
+
+      const rawType = moveData?.type ? (moveData.type.startsWith('TYPE_') ? moveData.type.slice(5) : moveData.type) : null
+      const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
+
+      let onRecoilDmg = 0
+      for (const { abilityId } of getBattlerAbilitySlotsReverse(attacker.mon.abilities)) {
+        if (!ON_RECOIL_ABILITIES.includes(abilityId)) continue
+        if (isSimAbilitySuppressed(state, attacker, abilityId, false, attackerId, false, deps.dataContext)) {
+          continue
+        }
+        switch (abilityId) {
+          case 'ABILITY_DOOM_BLAST':
+            if (effectiveType === 'DARK') {
+              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
+            }
+            break
+          case 'ABILITY_DUAL_SHADOW':
+            if (effectiveType === 'ELECTRIC' || effectiveType === 'DARK') {
+              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 10))
+            }
+            break
+          case 'ABILITY_ELECTRIC_BURST':
+            if (effectiveType === 'ELECTRIC') {
+              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
+            }
+            break
+          case 'ABILITY_INFERNAL_RAGE':
+            if (effectiveType === 'FIRE') {
+              onRecoilDmg += Math.max(1, Math.floor(hpDealt / 20))
+            }
+            break
+          case 'ABILITY_SUPER_STRAIN':
+            onRecoilDmg += Math.max(1, Math.floor(hpDealt / 4))
+            break
+        }
+      }
+
+      let recoilDmg = fractionDmg + onRecoilDmg
       if (hasFlag(attacker.mon.status2, STATUS2_ENRAGED)) {
         unmodelled.push('MOVEEND_RECOIL\'s enraged recoil (savedDmg / 3, battle_script_commands.c:4492-4505) is not modelled')
       }

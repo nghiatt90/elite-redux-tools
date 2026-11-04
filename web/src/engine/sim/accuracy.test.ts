@@ -443,24 +443,16 @@ describe('gap cases -- IsStatDropBlocked is an input now', () => {
 })
 
 describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
-  it('an unported ability on defender (Commander) is named in a gap', () => {
+  it('ported ability on defender (Commander) produces no ability gap', () => {
     const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMMANDER'), innates: [null, null, null] }
     const result = getTotalAccuracy(baseInputs({ defenderAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({
-      field: 'defenderAbilitySlots',
-      reason: 'NO_SOURCE',
-      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
-    })
+    expect(otherGaps(result.gaps)).toEqual([])
   })
 
-  it('an unported ability on attacker (Commander) is named in a gap', () => {
+  it('ported ability on attacker (Commander) produces no ability gap', () => {
     const slots: AbilitySlots = { ability: requireAbility('ABILITY_COMMANDER'), innates: [null, null, null] }
     const result = getTotalAccuracy(baseInputs({ attackerAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({
-      field: 'attackerAbilitySlots',
-      reason: 'NO_SOURCE',
-      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
-    })
+    expect(otherGaps(result.gaps)).toEqual([])
   })
 
   it('an ability with NO onAccuracy hook (Torrent) produces no ability gap', () => {
@@ -470,14 +462,10 @@ describe('gap cases -- unported onAccuracy abilities, :1354-1362', () => {
     expect(otherGaps(result.gaps)).toEqual([])
   })
 
-  it('an innate slot (not just the chosen ability) is scanned for unported abilities', () => {
+  it('an innate slot (not just the chosen ability) produces no unported ability gap', () => {
     const slots: AbilitySlots = { ability: null, innates: [requireAbility('ABILITY_COMMANDER'), null, null] }
     const result = getTotalAccuracy(baseInputs({ defenderAbilitySlots: slots }))
-    expect(otherGaps(result.gaps)).toContainEqual({
-      field: 'defenderAbilitySlots',
-      reason: 'NO_SOURCE',
-      detail: "ABILITY_COMMANDER's onAccuracy hook has no port",
-    })
+    expect(otherGaps(result.gaps)).toEqual([])
   })
 
   it('UNPORTED_ACCURACY_ABILITIES has no duplicate ids', () => {
@@ -497,6 +485,7 @@ describe('UNPORTED_ACCURACY_ABILITIES oracle -- data/v2.65beta/abilityHooks.json
     'ABILITY_BAD_LUCK',
     'ABILITY_BRAWLING_WYVERN',
     'ABILITY_CHANDELIER',
+    'ABILITY_COMMANDER',
     'ABILITY_COMPOUND_EYES',
     'ABILITY_DEADEYE',
     'ABILITY_DEADLY_PRECISION',
