@@ -2951,8 +2951,8 @@ function handleDefenderMoveEndAbility(
       // HOLD_EFFECT_CLEAR_AMULET` line (:7850), landing on BattleScript_GulpMissileNoDmgGulping
       // (:7851), which falls through into BattleScript_GulpMissileDoDefense. So the amulet check is
       // reached only when the damage path ran: a Magic Guard attacker holding Clear Amulet still
-      // reaches `statbuffchange` (ChangeStatBuffs itself is a separate question -- it re-checks the
-      // amulet at battle_script_commands.c:9827 and blocks the stage drop, see REPORT.md).
+      // reaches `statbuffchange` (ChangeStatBuffs itself re-checks HOLD_EFFECT_CLEAR_AMULET at
+      // battle_script_commands.c:9827 and blocks the stage drop when !certain && !affectsUser).
       const magicGuardProtected = isMagicGuardProtected(state, attacker)
       if (!magicGuardProtected) {
         const dmg = Math.max(1, Math.trunc(attacker.mon.maxHp / 4))
@@ -3134,8 +3134,8 @@ function handleDefenderMoveEndAbility(
   // switchingBattler and sourceBattler, with no .setAbilityState (the hook itself spends nothing), and the
   // C returns FALSE. The wild/trainer script choice at :2626-2630 only picks a message; the trainer flag is
   // already required by CanBattlerBeForceSwitched, so the hook is unreachable in a wild battle. The drain
-  // (turn.ts:4254 drainQueuedSwitches) runs a self-switch entry through the same SWITCH_ABILITY filters as
-  // battle_util.c:787-816; see REPORT.md.
+  // (turn.ts:4254 drainQueuedSwitches) runs a self-switch entry through the SWITCH_ABILITY filters
+  // (battle_util.c:787-816) and then the Emergency Exit script's switch (no forced-switch blocks).
   if (abilityId === 'ABILITY_WIMP_OUT' || abilityId === 'ABILITY_EMERGENCY_EXIT') {
     if (
       checkHalfHpAbility(target, hpDealt) &&
@@ -3151,6 +3151,7 @@ function handleDefenderMoveEndAbility(
         setAbilityState: false,
         switchingBattler: targetId,
         sourceBattler: targetId,
+        script: 'EMERGENCY_EXIT',
       })
     }
   }
@@ -3162,11 +3163,14 @@ function handleDefenderMoveEndAbility(
   // STATUS2_CURSED); then AbilityStatusEffect(MOVE_EFFECT_CURSE | MOVE_EFFECT_AFFECTS_USER), which flips
   // SetMoveEffect's gEffectBattler to the move's attacker (battle_script_commands.c:2330-2343, :2721-2726).
   // SetMoveEffect returns early when TestSheerForceFlag(gBattlerAttacker, gCurrentMove) (:2358-2362).
-  // The counter is written by onDisguise (:8638-8644, write at :8641, `gBattlerAttacker + 1`) when Disguise busts -- the
-  // sim has no onDisguise damage-path hook, so in play the counter is never set; the write is NOT invented
-  // here (see REPORT.md). The status2 write is the one Haunted Spirit (:2165) and Wings of Pestilence
-  // (:3077) use.
+  // The counter is written by onDisguise (:8638-8644, write at :8641, `gBattlerAttacker + 1`) when Disguise busts;
+  // Disguise busting has no damage-path hook in the sim, so the counter is never written, and the write is not invented
+  // here. The status2 write is the one Haunted Spirit (:2165) and Wings of Pestilence (:3077) use.
   if (abilityId === 'ABILITY_PATCHWORK') {
+    const note = 'move-end Patchwork onDisguise hook (src/abilities.cc:8636-8643) is not modelled yet'
+    if (!unmodelled.includes(note)) {
+      unmodelled.push(note)
+    }
     const triggeringBattler = getOncePerTurnAbilityCounter(state, targetId, abilityId, deps.dataContext) - 1
     if (triggeringBattler === attackerId) {
       setOncePerTurnAbilityCounter(state, targetId, abilityId, 0, deps.dataContext)
@@ -4883,6 +4887,7 @@ function handleAttackerMoveEndAbility(
         setAbilityState: false,
         switchingBattler: attackerId,
         sourceBattler: attackerId,
+        script: 'EMERGENCY_EXIT',
       })
     }
   }

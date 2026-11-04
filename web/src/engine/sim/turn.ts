@@ -229,7 +229,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, chooseRandomSwitchReplacement, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -4274,6 +4274,24 @@ export function drainQueuedSwitches(state: BattleState, deps: TurnLoopDeps, unmo
 
     // FILTER(CanBattlerSwitch(switching)) (:812).
     if (!canBattlerSwitch(state, switchingBattler)) continue
+
+    if (entry.script === 'EMERGENCY_EXIT') {
+      // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) has NO forced-switch blocks:
+      // no Ingrain check (STATUS3_ROOTED), no Suction Cups check, and no arena check (the hook's
+      // CanBattlerBeForceSwitched gate already excluded arena at schedule time).
+      // Replacement selection is NOT ported here: in the game the player picks the party member
+      // (openpartyscreen) and the AI uses GetMostSuitableMonToSwitchInto (src/battle_controller_opponent.c:1652-1654);
+      // the random pick is a placeholder left for the supervisor/user to decide.
+      // ignoreEscapePrevention is true because BattleScript_EmergencyExit reaches switchoutabilities /
+      // switchhandleorder without a CanBattlerEscape check.
+      const chosenIndex = chooseRandomSwitchReplacement(state, switchingBattler)
+      const switchUnmodelled = performSwitchAction(state, switchingBattler, deps, {
+        ignoreEscapePrevention: true,
+        forcedPartyIndex: chosenIndex,
+      })
+      unmodelled.push(...switchUnmodelled)
+      continue
+    }
 
     // The Red Card script checks neither BATTLE_TYPE_ARENA nor BATTLE_TYPE_TRAINER, while
     // forceRandomSwitch models Roar's arena gate by returning 'ARENA'. The sim only models

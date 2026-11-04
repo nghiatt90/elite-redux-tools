@@ -10943,16 +10943,7 @@ export function forceRandomSwitch(
   }
 
   // 8. Random selection loop (:10176-10180)
-  let chosenIndex: number
-  do {
-    const roll = state.rng.random16()
-    chosenIndex = roll % PARTY_SIZE
-  } while (
-    chosenIndex === target.partyIndex ||
-    !targetParty[chosenIndex] ||
-    targetParty[chosenIndex]!.speciesId === null ||
-    targetParty[chosenIndex]!.hp <= 0
-  )
+  const chosenIndex = chooseRandomSwitchReplacement(state, targetId)
 
   const switchUnmodelled = performSwitchAction(state, targetId, deps, {
     ignoreEscapePrevention: true,
@@ -10960,6 +10951,27 @@ export function forceRandomSwitch(
   })
   unmodelled.push(...switchUnmodelled)
   return 'SWITCHED'
+}
+
+/**
+ * Replacement selection loop (battle_script_commands.c:10176-10180): draws one random16()
+ * per pass until a non-fainted reserve slot is chosen. Used by forceRandomSwitch and
+ * drainQueuedSwitches's EMERGENCY_EXIT path.
+ */
+export function chooseRandomSwitchReplacement(state: BattleState, battlerId: number): number {
+  const party = state.sides[battlerId & 1].party
+  const battler = state.battlers[battlerId]!
+  let chosenIndex: number
+  do {
+    const roll = state.rng.random16()
+    chosenIndex = roll % PARTY_SIZE
+  } while (
+    chosenIndex === battler.partyIndex ||
+    !party[chosenIndex] ||
+    party[chosenIndex]!.speciesId === null ||
+    party[chosenIndex]!.hp <= 0
+  )
+  return chosenIndex
 }
 
 /**

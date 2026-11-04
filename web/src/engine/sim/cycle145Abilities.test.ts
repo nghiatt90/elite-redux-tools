@@ -30,7 +30,7 @@
 //   must equal the attacker, the counter is reset, then IsBattlerAlive(attacker) / not STATUS2_CURSED,
 //   then AbilityStatusEffect(MOVE_EFFECT_CURSE | MOVE_EFFECT_AFFECTS_USER) -- the curse lands on the
 //   move's attacker (battle_script_commands.c:2330-2343, :2721-2726). The counter's only in-play writer
-//   is onDisguise (:8638-8644), which the sim does not model (see REPORT.md), so tests set it directly.
+//   is onDisguise (:8638-8644); the sim has no Disguise bust hook, so the counter is never written in play and tests set it directly.
 // The driver's import order initialises the stat MOVE_EFFECT_* constants before moveEffects.ts
 // builds SECONDARY_MOVE_EFFECT_MAP; without it every secondary effect's number is undefined and
 // Body Slam's 30% does not draw (driver/secondaryMap.test.ts pins the same requirement).
@@ -492,8 +492,8 @@ describe('Cycle 145 - Wimp Out / Emergency Exit onDefender (abilities.cc:2616-26
   }
 
   it('Wimp Out schedules a self-switch with sourceBattler = switchingBattler = the holder', () => {
-    // Pick 0 is the current party slot and is rejected by Cmd_forcerandomswitch's loop
-    // (battle_script_commands.c:10176-10180); pick 1 is taken. The hook itself draws nothing.
+    // Pick 0 is the current party slot and is rejected by the shared placeholder replacement selection loop;
+    // pick 1 is taken. The hook itself draws nothing.
     const rng = scriptedRng([0 /* rejected */, 1 /* accepted */])
     const state = crossedBattle('ABILITY_WIMP_OUT', rng)
     const unmodelled: string[] = []
@@ -501,7 +501,7 @@ describe('Cycle 145 - Wimp Out / Emergency Exit onDefender (abilities.cc:2616-26
     expect(rng.calls).toBe(0)
 
     expect(state.queuedSwitches).toEqual([
-      { ability: 'ABILITY_WIMP_OUT', setAbilityState: false, switchingBattler: 1, sourceBattler: 1 },
+      { ability: 'ABILITY_WIMP_OUT', setAbilityState: false, switchingBattler: 1, sourceBattler: 1, script: 'EMERGENCY_EXIT' },
     ])
     // The hook itself burns no ability state (unlike Restraining Order).
     expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(0)
@@ -519,7 +519,7 @@ describe('Cycle 145 - Wimp Out / Emergency Exit onDefender (abilities.cc:2616-26
     const unmodelled: string[] = []
     defenderHit(state, 'MOVE_TACKLE', 60, LOOP_DEPS, unmodelled, [], 60)
     expect(state.queuedSwitches).toEqual([
-      { ability: 'ABILITY_EMERGENCY_EXIT', setAbilityState: false, switchingBattler: 1, sourceBattler: 1 },
+      { ability: 'ABILITY_EMERGENCY_EXIT', setAbilityState: false, switchingBattler: 1, sourceBattler: 1, script: 'EMERGENCY_EXIT' },
     ])
     expectNoDefenderGaps(unmodelled)
   })

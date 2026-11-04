@@ -473,7 +473,7 @@ describe('Cycle 106b - Hollow Ice Zone (abilities.cc:12178-12198)', () => {
     expect(state.battlers[1]!.volatiles.iceStatue).toBe(true)
     expect(state.battlers[1]!.mon.types).toEqual(['ICE', 'ICE', 'MYSTERY'])
     expect(state.queuedSwitches).toEqual([
-      { ability: HIZ, setAbilityState: false, switchingBattler: 0, sourceBattler: 0 },
+      { ability: HIZ, setAbilityState: false, switchingBattler: 0, sourceBattler: 0, script: 'EMERGENCY_EXIT' },
     ])
   })
 

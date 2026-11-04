@@ -853,6 +853,8 @@ export interface QueuedSwitchAction {
   switchingBattler: number
   /** `sourceBattler` -- the holder whose ability queued it (gBattlerAttacker during the drain). */
   sourceBattler: number
+  /** ExtraSwitchActionStruct.script (battle_util.c:369-376, :393); missing means 'RED_CARD'. */
+  script?: 'RED_CARD' | 'EMERGENCY_EXIT'
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so
