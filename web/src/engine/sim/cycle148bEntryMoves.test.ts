@@ -417,19 +417,6 @@ describe('Cycle 148b - UseEntryMove abilities (next 12)', () => {
       expect(state.queuedExtraAttacks).toEqual([])
       expect(unmodelled).toEqual([])
     })
-
-    it('unported ability from the other 7 raises the note and queues nothing', () => {
-      const unmodelled: string[] = []
-      const state = battle(
-        [{ abilities: { ability: 'ABILITY_ELECTRO_BOOSTER', innates: [null, null, null] } }, {}],
-        scriptedRng(),
-      )
-      applySwitchInAbilities(state, 0, testDeps(), unmodelled)
-      expect(state.queuedExtraAttacks).toEqual([])
-      expect(unmodelled).toContain(
-        'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_ELECTRO_BOOSTER queued MOVE_MAGNET_RISE',
-      )
-    })
   })
 
   describe('counter rules: Jump Scare and Wishmaker', () => {

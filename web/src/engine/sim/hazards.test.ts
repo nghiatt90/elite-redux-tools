@@ -82,11 +82,6 @@ const CLEAR_BODY = requireAbility('ABILITY_CLEAR_BODY')
 const MIRROR_ARMOR = requireAbility('ABILITY_MIRROR_ARMOR')
 const SHIELD_DUST = requireAbility('ABILITY_SHIELD_DUST')
 const MAGIC_GUARD = requireAbility('ABILITY_MAGIC_GUARD')
-// An onEntry ability whose effect is still unmodelled, so it reports a switch-in gap line.
-// (Locust Swarm was the sentinel until cycle 146 ported its onEntry hook; Low Blow's onEntry
-// UseEntryMove hook was ported in cycle 148; Change of Heart was ported in cycle 148b;
-// Electro Booster remains unmodelled.)
-const UNPORTED_ENTRY = requireAbility('ABILITY_ELECTRO_BOOSTER')
 const CORROSION = requireAbility('ABILITY_CORROSION')
 const HEMOTOXIN = requireAbility('ABILITY_HEMOTOXIN')
 const SUBDUE = requireAbility('ABILITY_SUBDUE')
@@ -482,8 +477,10 @@ describe('order, fainting and the second pass', () => {
 
   it('a mon that faints to Spikes takes no later hazard, has no switch-in gaps, and is replaced again', () => {
     // 10 HP: Spikes (1 layer) deals 80/8 = 10 -> faints before Stealth Rock, Toxic Spikes and the web.
-    const weak = partyMon({ hp: 10, abilities: { ability: UNPORTED_ENTRY, innates: [null, null, null] } })
-    const strong = partyMon({ hp: 80, abilities: { ability: UNPORTED_ENTRY, innates: [null, null, null] } })
+    // LIMBER has no onEntry hook and no hazard interaction (never pick Magic Guard here: it blocks
+    // the indirect Spikes damage the test depends on).
+    const weak = partyMon({ hp: 10, abilities: { ability: 'ABILITY_LIMBER', innates: [null, null, null] } })
+    const strong = partyMon({ hp: 80, abilities: { ability: 'ABILITY_LIMBER', innates: [null, null, null] } })
     const state = battle([partyMon({ hp: 5 }), weak, strong])
     setHazards(state, 0, { spikes: 1, rockType: TYPE_ROCK, toxic: 1, web: true })
     const rep = chooser(1, 2)
@@ -496,8 +493,8 @@ describe('order, fainting and the second pass', () => {
     expect(state.battlers[0]!.partyIndex).toBe(2)
     expect(state.battlers[0]!.mon.hp).toBe(60)
     expect(state.battleOutcome).toBeNull()
-    // Only the survivor reports a switch-in ability gap.
-    expect(out.replacementUnmodelled.filter((g) => g.includes('UseEntryMove'))).toHaveLength(1)
+    // The ability (Limber) has no onEntry hook, so neither switch-in reports an ability gap.
+    expect(out.replacementUnmodelled.filter((g) => g.includes('UseEntryMove'))).toHaveLength(0)
   })
 
   it('the last reserve fainting to its own entry hazards decides the battle', () => {

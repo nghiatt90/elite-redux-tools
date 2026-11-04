@@ -1619,7 +1619,7 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
   // 5. Entry move abilities (UseEntryMove)
   // -------------------------------------------------------------------------
 
-  it('Entry move abilities: ported abilities queue extra attack, unported queue unmodelled gap messages', () => {
+  it('Entry move abilities: ported abilities queue extra attacks', () => {
     const unmodelled: string[] = []
     const stateTactics = battle(
       [{ abilities: { ability: requireAbility('ABILITY_CHEAP_TACTICS'), innates: [null, null, null] } }, {}],
@@ -1640,19 +1640,9 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
       { ability: 'ABILITY_PHANTOM_THIEF', attacker: 0, move: 'MOVE_SPECTRAL_THIEF', movePower: 40, target: 1, falseSwipe: true },
     ])
     expect(unmodelled).toHaveLength(0)
-
-    const stateElectro = battle(
-      [{ abilities: { ability: requireAbility('ABILITY_ELECTRO_BOOSTER'), innates: [null, null, null] } }, {}],
-      scriptedRng(),
-    )
-    applySwitchInAbilities(stateElectro, 0, makeTestDeps(), unmodelled)
-    expect(stateElectro.queuedExtraAttacks).toHaveLength(0)
-    expect(unmodelled).toContain(
-      'battler 0: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ABILITY_ELECTRO_BOOSTER queued MOVE_MAGNET_RISE',
-    )
   })
 
-  it('Entry move abilities do NOT queue unmodelled gap when opposing battler is fainted', () => {
+  it('Entry move abilities do NOT queue an extra attack when the opposing battler is fainted', () => {
     const unmodelled: string[] = []
     const state = battle(
       [
@@ -1663,17 +1653,6 @@ describe('cycle 45: switch-in terrain, side/field setters and entry moves', () =
     )
     applySwitchInAbilities(state, 0, makeTestDeps(), unmodelled)
     expect(state.queuedExtraAttacks).toHaveLength(0)
-    expect(unmodelled).toHaveLength(0)
-
-    const stateElectro = battle(
-      [
-        { abilities: { ability: requireAbility('ABILITY_ELECTRO_BOOSTER'), innates: [null, null, null] } },
-        { hp: 0 },
-      ],
-      scriptedRng(),
-    )
-    applySwitchInAbilities(stateElectro, 0, makeTestDeps(), unmodelled)
-    expect(stateElectro.queuedExtraAttacks).toHaveLength(0)
     expect(unmodelled).toHaveLength(0)
   })
 

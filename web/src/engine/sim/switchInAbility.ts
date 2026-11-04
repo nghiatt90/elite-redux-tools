@@ -294,7 +294,7 @@ export const TERRAIN_SETTER_MAP: Readonly<Record<string, number>> = {
 }
 
 /**
- * Cycle 148 / 148b: 24 UseEntryMove abilities (battle_util.c:3994-4019, abilities.cc).
+ * Cycles 148 / 148b / 148c: 31 UseEntryMove abilities (battle_util.c:3994-4019, abilities.cc).
  * Queues an out-of-turn attack via gQueuedExtraAttackData with falseSwipe: true.
  */
 export const PORTED_ENTRY_MOVE_MAP: Readonly<Record<string, { move: string; movePower: number }>> = {
@@ -322,20 +322,14 @@ export const PORTED_ENTRY_MOVE_MAP: Readonly<Record<string, { move: string; move
   ABILITY_WIND_RAGE: { move: 'MOVE_DEFOG', movePower: 0 },
   ABILITY_POSEIDONS_DOMINION: { move: 'MOVE_WHIRLPOOL', movePower: 0 },
   ABILITY_WOODLAND_CURSE: { move: 'MOVE_FORESTS_CURSE', movePower: 0 },
-}
-
-/**
- * Remaining 7 unported abilities that invoke UseEntryMove (battle_util.c:3994-4019, abilities.cc).
- * Cycle 148c. Queues an out-of-turn full move attack via gQueuedExtraAttackData.
- */
-export const USE_ENTRY_MOVE_MAP: Readonly<Record<string, string>> = {
-  ABILITY_NEUTRALIZING_FOG: 'MOVE_DEFOG',
-  ABILITY_ROYAL_DECREE: 'MOVE_GLARE',
-  ABILITY_FROSTY_PRESCENCE: 'MOVE_MIST',
-  ABILITY_LETS_DANCE: 'MOVE_TEETER_DANCE',
-  ABILITY_I_AM_STEVE: 'MOVE_NO_RETREAT',
-  ABILITY_MASHED_POTATO: 'MOVE_SYRUP_BOMB',
-  ABILITY_ELECTRO_BOOSTER: 'MOVE_MAGNET_RISE',
+  // Cycle 148c -- the last 7.
+  ABILITY_NEUTRALIZING_FOG: { move: 'MOVE_DEFOG', movePower: 0 },
+  ABILITY_ROYAL_DECREE: { move: 'MOVE_GLARE', movePower: 0 },
+  ABILITY_FROSTY_PRESCENCE: { move: 'MOVE_MIST', movePower: 0 },
+  ABILITY_LETS_DANCE: { move: 'MOVE_TEETER_DANCE', movePower: 0 },
+  ABILITY_I_AM_STEVE: { move: 'MOVE_NO_RETREAT', movePower: 0 },
+  ABILITY_MASHED_POTATO: { move: 'MOVE_SYRUP_BOMB', movePower: 0 },
+  ABILITY_ELECTRO_BOOSTER: { move: 'MOVE_MAGNET_RISE', movePower: 0 },
 }
 
 interface WeatherFlagInfo {
@@ -1599,9 +1593,11 @@ export function applySwitchInAbilities(
     // 4. Entry moves via UseEntryMove (battle_util.c:3994-4019, abilities.cc)
     const portedEntry = PORTED_ENTRY_MOVE_MAP[abilityId]
     if (portedEntry !== undefined) {
-      if (abilityId === 'ABILITY_JUMP_SCARE') {
-        // abilities.cc:8905-8908: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability))
+      if (abilityId === 'ABILITY_JUMP_SCARE' || abilityId === 'ABILITY_ROYAL_DECREE') {
+        // Jump Scare, abilities.cc:8905-8908: CHECK_NOT(GetSingleUseAbilityCounter(battler, ability))
         // SetSingleUseAbilityCounter(battler, ability, TRUE); return UseEntryMove(battler, ability, MOVE_ASTONISH, 0);
+        // Royal Decree, abilities.cc:10327-10332: same guard, then
+        // return UseEntryMove(battler, ability, MOVE_GLARE, 0);
         // Counter is set to 1 on first entry even if no valid target exists.
         if (getSingleUseAbilityCounter(state, battlerId, abilityId, deps.dataContext) > 0) {
           continue
@@ -1620,23 +1616,6 @@ export function applySwitchInAbilities(
       }
 
       applyUseEntryMove(state, battlerId, abilityId, portedEntry.move, portedEntry.movePower)
-      continue
-    }
-
-    const entryMoveId = USE_ENTRY_MOVE_MAP[abilityId]
-    if (entryMoveId !== undefined) {
-      const oppSide = (battlerId & 1) ^ 1
-      const oppTarget1 = oppSide
-      const oppTarget2 = oppSide ^ 2
-      const hasAliveOpponent =
-        (state.battlers[oppTarget1]?.mon.hp ?? 0) > 0 ||
-        (state.battlers[oppTarget2]?.mon.hp ?? 0) > 0
-
-      if (hasAliveOpponent) {
-        unmodelled.push(
-          `battler ${battlerId}: UseEntryMove (battle_util.c:3994-4019) is not modelled -- ${abilityId} queued ${entryMoveId}`,
-        )
-      }
       continue
     }
 
