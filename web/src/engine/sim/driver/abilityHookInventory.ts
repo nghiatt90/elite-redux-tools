@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { lookupAbility } from '../../abilities/registry'
 import { isUnmodelled, type AbilityEntry } from '../../abilities/types'
 import '../../abilities/impl/index' // side-effect registration populates registry
@@ -127,202 +128,187 @@ export interface AllowlistEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Sim-side sets and cases
+// Dynamic sim-side extraction helpers
 // ---------------------------------------------------------------------------
 
-/** web/src/engine/sim/accuracy.ts:350-595 (runAttackerAbilityHook & runDefenderAbilityHook) */
-export const PORTED_ACCURACY_ABILITIES = new Set<string>([
-  'ABILITY_ANGELS_WRATH',
-  'ABILITY_ARTILLERY',
-  'ABILITY_BAD_LUCK',
-  'ABILITY_BRAWLING_WYVERN',
-  'ABILITY_CHANDELIER',
-  'ABILITY_COMMANDER',
-  'ABILITY_COMPOUND_EYES',
-  'ABILITY_DEADEYE',
-  'ABILITY_DEADLY_PRECISION',
-  'ABILITY_DEPTH_EXPLORER',
-  'ABILITY_ECHOLOCATION',
-  'ABILITY_ENLIGHTENED',
-  'ABILITY_FATAL_PRECISION',
-  'ABILITY_FINAL_BLOW',
-  'ABILITY_FLAWLESS_PRECISION',
-  'ABILITY_GIFTED_MIND',
-  'ABILITY_GLACIAL_GHOST',
-  'ABILITY_GRIP_PINCER',
-  'ABILITY_HUNTERS_MARK',
-  'ABILITY_HUSTLE',
-  'ABILITY_HYPNOTIC_TRANCE',
-  'ABILITY_HYPNOTIST',
-  'ABILITY_ILLUMINATE',
-  'ABILITY_INNER_FOCUS',
-  'ABILITY_IRON_BARRAGE',
-  'ABILITY_KEEN_EYE',
-  'ABILITY_LULLABY',
-  'ABILITY_LUNAR_ECLIPSE',
-  'ABILITY_MACH_3',
-  'ABILITY_NO_GUARD',
-  'ABILITY_OLE',
-  'ABILITY_PIXIE_POWER',
-  'ABILITY_PLASMA_LAMP',
-  'ABILITY_QIGONG',
-  'ABILITY_RADIANCE',
-  'ABILITY_RAIN_SHROUD',
-  'ABILITY_REFRIGERATOR',
-  'ABILITY_ROUNDHOUSE',
-  'ABILITY_SAND_VEIL',
-  'ABILITY_SHINY_LIGHTNING',
-  'ABILITY_SIGHTING_SYSTEM',
-  'ABILITY_SMOKEY_MANEUVERS',
-  'ABILITY_SNOW_CLOAK',
-  'ABILITY_SUPER_SCOPE',
-  'ABILITY_SWEEPING_EDGE',
-  'ABILITY_SWEEPING_EDGE_PLUS',
-  'ABILITY_UNLOCKED_POTENTIAL',
-  'ABILITY_VICTORY_STAR',
-  'ABILITY_WAY_OF_PRECISION',
-  'ABILITY_WORLD_SERPENT',
-])
+const ENGINE_DIR = fileURLToPath(new URL('../../', import.meta.url))
+const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url))
+const SOURCES_LOCK_PATH = join(REPO_ROOT, 'sources.lock.json')
 
-/** web/src/engine/sim/endTurn.ts:960-1782 (runEndTurnAbilities cases) */
-export const PORTED_END_TURN_ABILITIES = new Set<string>([
-  'ABILITY_ACID_REFLUX',
-  'ABILITY_APE_SHIFT',
-  'ABILITY_APPLE_PIE',
-  'ABILITY_BAD_DREAMS',
-  'ABILITY_BIG_LEAVES',
-  'ABILITY_BLOOD_PRICE',
-  'ABILITY_CARETAKER',
-  'ABILITY_CELESTIAL_BLESSING',
-  'ABILITY_CHOKEHOLD',
-  'ABILITY_CHRISTMAS_NIGHTMARE',
-  'ABILITY_COLOR_SPECTRUM',
-  'ABILITY_COOL_EXIT',
-  'ABILITY_CRAVING',
-  'ABILITY_CRYO_ARCHITECT',
-  'ABILITY_CUD_CHEW',
-  'ABILITY_DRY_SKIN',
-  'ABILITY_DUAL_SHADOW',
-  'ABILITY_DUNE_VEIL',
-  'ABILITY_ETERNAL_BLESSING',
-  'ABILITY_FLAME_COAT',
-  'ABILITY_FLOWER_GIFT',
-  'ABILITY_FORECAST',
-  'ABILITY_FUNERAL_PYRE',
-  'ABILITY_HARVEST',
-  'ABILITY_HEALER',
-  'ABILITY_HOME_RUN',
-  'ABILITY_HONEY_GATHER',
-  'ABILITY_HUNGER_SWITCH',
-  'ABILITY_HYDRATION',
-  'ABILITY_ICE_BODY',
-  'ABILITY_LEAF_GUARD',
-  'ABILITY_LIFE_STEAL',
-  'ABILITY_LOCUST_SWARM',
-  'ABILITY_MAXIMUM_ACCELERATION',
-  'ABILITY_MOODY',
-  'ABILITY_PATTERN_CHANGE',
-  'ABILITY_PEACEFUL_REST',
-  'ABILITY_PEACEFUL_SLUMBER',
-  'ABILITY_POISON_ABSORB',
-  'ABILITY_POWER_CONSTRUCT',
-  'ABILITY_PURIFYING_WATERS',
-  'ABILITY_RAIN_DISH',
-  'ABILITY_REVELATION',
-  'ABILITY_SAP_TRAP',
-  'ABILITY_SCHOOLING',
-  'ABILITY_SELF_REPAIR',
-  'ABILITY_SELF_SUFFICIENT',
-  'ABILITY_SERPENT_BIND',
-  'ABILITY_SHED_SKIN',
-  'ABILITY_SHIELDS_DOWN',
-  'ABILITY_SOOTHSAYER',
-  'ABILITY_SOUL_TAP',
-  'ABILITY_SPEED_BOOST',
-  'ABILITY_STRIKEOUT',
-  'ABILITY_SUNDAE',
-  'ABILITY_SUMO_WRESTLER',
-  'ABILITY_SUNS_BOUNTY',
-  'ABILITY_SWEET_DREAMS',
-  'ABILITY_TALON_TRAP',
-  'ABILITY_TENTALOCK',
-  'ABILITY_TOXIC_SPILL',
-  'ABILITY_TRASH_HEAP',
-  'ABILITY_TRUANT',
-  'ABILITY_WHITE_NOISE',
-  'ABILITY_WINTER_THRONE',
-  'ABILITY_WONDER_SCALE',
-  'ABILITY_ZEN_MODE',
-])
+const ACCURACY_PATH = join(ENGINE_DIR, 'sim/accuracy.ts')
+const END_TURN_PATH = join(ENGINE_DIR, 'sim/endTurn.ts')
+const PREEMPT_PATH = join(ENGINE_DIR, 'sim/preempt.ts')
+const ON_WEATHER_PATH = join(ENGINE_DIR, 'sim/onWeather.ts')
+const MOVE_TARGET_FLAGS_PATH = join(ENGINE_DIR, 'sim/moveTargetFlags.ts')
+const STAT_BUFFS_PATH = join(ENGINE_DIR, 'sim/statBuffs.ts')
+const TURN_PATH = join(ENGINE_DIR, 'sim/turn.ts')
+const MOVE_END_PATH = join(ENGINE_DIR, 'sim/moveEnd.ts')
+const ABSORB_PATH = join(ENGINE_DIR, 'sim/absorb.ts')
 
-/** web/src/engine/sim/moveEnd.ts:5980-6065 (dispatchOnBattlerFaints) */
+/**
+ * Extracts the slice of code corresponding to a function declaration, up to the next top-level function or EOF.
+ */
+export function extractFunctionSlice(source: string, functionDeclaration: string): string {
+  const start = source.indexOf(functionDeclaration)
+  if (start === -1) {
+    throw new Error(`Function declaration not found: ${functionDeclaration}`)
+  }
+  const afterStart = source.slice(start + functionDeclaration.length)
+  const nextFuncMatch = afterStart.match(/\n(?:export\s+)?function\s+/)
+  const end = nextFuncMatch ? start + functionDeclaration.length + nextFuncMatch.index! : source.length
+  return source.slice(start, end)
+}
+
+/**
+ * Extracts case 'ABILITY_...' labels from the specified function declaration in source text.
+ */
+export function extractCaseLabelsFromFunction(source: string, functionDeclaration: string): Set<string> {
+  const slice = extractFunctionSlice(source, functionDeclaration)
+  const regex = /case\s+['"](ABILITY_[A-Z0-9_]+)['"]/g
+  const result = new Set<string>()
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    result.add(match[1])
+  }
+  if (result.size === 0) {
+    throw new Error(`Zero labels extracted for declaration: ${functionDeclaration}`)
+  }
+  return result
+}
+
+export function extractAccuracyAbilities(): Set<string> {
+  const content = readFileSync(ACCURACY_PATH, 'utf-8')
+  const atk = extractCaseLabelsFromFunction(content, 'export function runAttackerAbilityHook(')
+  const def = extractCaseLabelsFromFunction(content, 'export function runDefenderAbilityHook(')
+  return new Set([...atk, ...def])
+}
+
+export function extractEndTurnAbilities(): Set<string> {
+  const content = readFileSync(END_TURN_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'function runEndTurnAbilities(')
+}
+
+export function extractPreemptActionAbilities(): Set<string> {
+  const content = readFileSync(PREEMPT_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'export function tryPreemptiveActions(')
+}
+
+export function extractWeatherAbilities(): Set<string> {
+  const content = readFileSync(ON_WEATHER_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'export function dispatchOnWeatherChange(')
+}
+
+export function extractTerrainAbilities(): Set<string> {
+  const content = readFileSync(ON_WEATHER_PATH, 'utf-8')
+  return extractCaseLabelsFromFunction(content, 'export function dispatchOnTerrainChange(')
+}
+
+export function extractTargetFlagAbilities(): Set<string> {
+  const content = readFileSync(MOVE_TARGET_FLAGS_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'export function getBattlerBattleMoveTargetFlags(')
+  const result = new Set<string>()
+  const regex = /(?:case\s+|battlerHasSimAbility\([^,]+,\s*[^,]+,\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    if (match[1] !== 'ABILITY_FORECAST') {
+      result.add(match[1])
+    }
+  }
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: export function getBattlerBattleMoveTargetFlags(')
+  }
+  return result
+}
+
+export function extractReactiveExtraAbilities(): Set<string> {
+  const content = readFileSync(STAT_BUFFS_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function runReactiveAbilityEffects(')
+  const result = new Set<string>()
+  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    if (match[1] !== 'ABILITY_RETRIBUTION_BLOW') {
+      result.add(match[1])
+    }
+  }
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: function runReactiveAbilityEffects(')
+  }
+  return result
+}
+
+export function extractReviveAbilities(): Set<string> {
+  const content = readFileSync(TURN_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function latchRecurringNightmareOnFaint(')
+  const result = new Set<string>()
+  const regex = /(?:case\s+|abilityId\s*!==\s*|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    result.add(match[1])
+  }
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: function latchRecurringNightmareOnFaint(')
+  }
+  return result
+}
+
+export function extractBattlerFaintsExtraAbilities(): Set<string> {
+  const content = readFileSync(MOVE_END_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function dispatchOnBattlerFaints(')
+  const result = new Set<string>()
+  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    result.add(match[1])
+  }
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: function dispatchOnBattlerFaints(')
+  }
+  return result
+}
+
+export function extractSimAbsorbExtraAbilities(): Set<string> {
+  const content = readFileSync(ABSORB_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'export function applyAbsorbEffect(')
+  const result = new Set<string>()
+  const regex = /(?:case\s+|absorbingAbility\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(slice)) !== null) {
+    result.add(match[1])
+  }
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: export function applyAbsorbEffect(')
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Sim-side sets (extracted dynamically)
+// ---------------------------------------------------------------------------
+
+export const PORTED_ACCURACY_ABILITIES = extractAccuracyAbilities()
+export const PORTED_END_TURN_ABILITIES = extractEndTurnAbilities()
 export const PORTED_BATTLER_FAINTS_ABILITIES = new Set<string>([
-  'ABILITY_STRIKEOUT',
+  ...extractBattlerFaintsExtraAbilities(),
   ...SET_STATE_ON_EFFECT_ABILITIES,
   ...Object.keys(KO_STAT_RAISES),
   ...KO_SOUL_EATER_ABILITIES,
   ...KO_JAWS_OF_CARNAGE_ABILITIES,
   ...KO_CRIT_BOOST_ABILITIES,
 ])
-
-/** web/src/engine/sim/preempt.ts:68-84 (tryPreemptiveActions) */
-export const PORTED_PREEMPT_ACTION_ABILITIES = new Set<string>([
-  'ABILITY_TAG',
-  'ABILITY_DREAMCATCHER',
-  'ABILITY_DREAMSCAPE',
-  'ABILITY_SUPER_SNIPER',
-  'ABILITY_SURPRISE',
-])
-
-/** web/src/engine/sim/onWeather.ts:117-154 (dispatchOnWeatherChange) */
-export const PORTED_WEATHER_ABILITIES = new Set<string>([
-  'ABILITY_CHRISTMAS_NIGHTMARE',
-  'ABILITY_DISGUISE',
-  'ABILITY_FLARE_BOOST',
-  'ABILITY_FLOWER_GIFT',
-  'ABILITY_FORECAST',
-  'ABILITY_ICE_FACE',
-  'ABILITY_MADNESS_ENHANCEMENT',
-  'ABILITY_PROTOSYNTHESIS',
-])
-
-/** web/src/engine/sim/onWeather.ts:182-198 (dispatchOnTerrainChange) */
-export const PORTED_TERRAIN_ABILITIES = new Set<string>([
-  'ABILITY_DRAKELP_HEAD',
-  'ABILITY_MIMICRY',
-  'ABILITY_QUARK_DRIVE',
-  'ABILITY_TOXIC_BOOST',
-])
-
-/** web/src/engine/sim/moveTargetFlags.ts:77-94 (getBattlerBattleMoveTargetFlags) */
-export const PORTED_TARGET_FLAG_ABILITIES = new Set<string>([
-  'ABILITY_AMPLIFIER',
-  'ABILITY_ARTILLERY',
-  'ABILITY_BASS_BOOSTED',
-  'ABILITY_SUPER_SCOPE',
-  'ABILITY_SWEEPING_EDGE',
-  'ABILITY_SWEEPING_EDGE_PLUS',
-  'ABILITY_WIND_CHIMES',
-])
-
-/** web/src/engine/sim/statBuffs.ts:1214-1275 (runReactiveAbilityEffects) */
+export const PORTED_PREEMPT_ACTION_ABILITIES = extractPreemptActionAbilities()
+export const PORTED_WEATHER_ABILITIES = extractWeatherAbilities()
+export const PORTED_TERRAIN_ABILITIES = extractTerrainAbilities()
+export const PORTED_TARGET_FLAG_ABILITIES = extractTargetFlagAbilities()
 export const PORTED_REACTIVE_ABILITIES = new Set<string>([
   ...SET_STATE_ON_EFFECT_ABILITIES,
-  'ABILITY_ACID_REFLUX',
-  'ABILITY_EGOIST',
-  'ABILITY_SHARING_IS_CARING',
+  ...extractReactiveExtraAbilities(),
 ])
-
-/** web/src/engine/sim/turn.ts:1411-1430 (latchRecurringNightmareOnFaint) */
-export const PORTED_REVIVE_ABILITIES = new Set<string>(['ABILITY_RECURRING_NIGHTMARE'])
-
-/** web/src/engine/sim/absorb.ts:41-110 (HEAL_ABSORB_ABILITIES, STAT_ABSORB_ABILITIES, Flash Fire/Evaporate) */
+export const PORTED_REVIVE_ABILITIES = extractReviveAbilities()
 export const PORTED_SIM_ABSORB_ABILITIES = new Set<string>([
   ...HEAL_ABSORB_ABILITIES,
   ...STAT_ABSORB_ABILITIES,
-  'ABILITY_FLASH_FIRE',
-  'ABILITY_EVAPORATE',
-  'ABILITY_ELEMENTAL_VORTEX',
+  ...extractSimAbsorbExtraAbilities(),
 ])
 
 const STAT_DROP_BLOCK_SET = new Set<string>(STAT_DROP_BLOCK_ABILITIES)
@@ -582,6 +568,29 @@ export function runInventory(
   }
 }
 
+function collectEngineSourceFiles(dir: string): string[] {
+  const result: string[] = []
+  const entries = readdirSync(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      result.push(...collectEngineSourceFiles(fullPath))
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith('.ts') &&
+      !entry.name.endsWith('.test.ts') &&
+      !entry.name.includes('abilityHookInventory')
+    ) {
+      result.push(fullPath)
+    }
+  }
+  return result
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /**
  * Generates the deterministic markdown content for docs/battle-sim/ability-hook-inventory.md.
  */
@@ -591,13 +600,25 @@ export function generateInventoryDoc(
 ): string {
   const lines: string[] = []
 
+  let elitereduxSourceSha = 'bdebcbbff9760cdd41a02c425bea4857fa0eee26'
+  let erConfigSha = '1b8e2cc4a8096d7ec90616f87fbf771bfa732447'
+  let gameVersion = 'v2.65beta'
+  try {
+    const sourcesLock = JSON.parse(readFileSync(SOURCES_LOCK_PATH, 'utf-8'))
+    elitereduxSourceSha = sourcesLock.sources?.['eliteredux-source']?.sha ?? elitereduxSourceSha
+    erConfigSha = sourcesLock.sources?.['er-config']?.sha ?? erConfigSha
+    gameVersion = sourcesLock.game_version ?? gameVersion
+  } catch {
+    // Fallback if not readable
+  }
+
   // Section 1: Header
   lines.push('# Ability Hook Completeness Inventory')
   lines.push('')
   lines.push('Static completeness audit of all ability hooks defined in `data/v2.65beta/abilityHooks.json` against the battle simulator and damage engine implementations.')
   lines.push('')
-  lines.push('- **Source Commit (eliteredux-source)**: `bdebcbbff9760cdd41a02c425bea4857fa0eee26` (game version `v2.65beta`)')
-  lines.push('- **Source Commit (er-config)**: `1b8e2cc4a8096d7ec90616f87fbf771bfa732447`')
+  lines.push(`- **Source Commit (eliteredux-source)**: \`${elitereduxSourceSha}\` (game version \`${gameVersion}\`)`)
+  lines.push(`- **Source Commit (er-config)**: \`${erConfigSha}\``)
   lines.push('- **Regeneration Command**: `SIM_INVENTORY_WRITE=1 npm --prefix web test -- --run src/engine/sim/driver/abilityHookInventory.test.ts`')
   lines.push('')
 
@@ -608,28 +629,28 @@ export function generateInventoryDoc(
   lines.push('')
   lines.push('1. **Calc-side hooks (19 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.')
   lines.push('   - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`, `onModifyMoveFlags`.')
-  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts:899`).')
-  lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts:748`).')
-  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts:1365-2486`), catalogued by exported `SWITCH_IN_ABILITY_IDS` (`:196`).')
-  lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts:960-1782`.')
-  lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` (lines 350-513) and `runDefenderAbilityHook` (lines 514-595) in `web/src/engine/sim/accuracy.ts`.')
-  lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts:5980-6065`: `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts:285`), keys of `KO_STAT_RAISES` (`moveEnd.ts:5846`), `KO_SOUL_EATER_ABILITIES` (`:5874`), `KO_JAWS_OF_CARNAGE_ABILITIES` (`:5890`), and `KO_CRIT_BOOST_ABILITIES` (`:5897`). All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note at line 6062.')
+  lines.push('2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
+  lines.push('3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).')
+  lines.push('4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`), catalogued by exported `SWITCH_IN_ABILITY_IDS`.')
+  lines.push('5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.')
+  lines.push('6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.')
+  lines.push('7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.')
   lines.push('8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).')
-  lines.push('9. **onBlockStatDrops**: Membership in exported `STAT_DROP_BLOCK_ABILITIES` (`web/src/engine/sim/statBuffs.ts:211`).')
-  lines.push('10. **onCanStatusType**: Membership in exported `CAN_STATUS_TYPE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:230`).')
-  lines.push('11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts:15`).')
-  lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts:3174`).')
-  lines.push('13. **onExit**: Membership in exported `SWITCH_OUT_HOOK_ABILITIES` (`web/src/engine/sim/turn.ts:1498`).')
-  lines.push('14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:1848`).')
-  lines.push('15. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts:58-96`).')
-  lines.push('16. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts:68-84`).')
-  lines.push('17. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts:1214-1275`): `POISON_PUPPETEER_CLONE_ABILITIES` (`SET_STATE_ON_EFFECT_ABILITIES`), `ABILITY_EGOIST`, `ABILITY_SHARING_IS_CARING`, `ABILITY_ACID_REFLUX`.')
-  lines.push('18. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts:1411-1430`, `ABILITY_RECURRING_NIGHTMARE`).')
-  lines.push('19. **onStatLowered**: Membership in exported `ON_STAT_LOWERED_ABILITIES` (`web/src/engine/sim/ai/aiCheckBadMove.ts:368`), implemented in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts:930-1030`).')
-  lines.push('20. **onStatusImmune**: Membership in exported `STATUS_IMMUNE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:181`).')
-  lines.push('21. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts:182-198`).')
-  lines.push('22. **onTrap**: Membership in exported `TRAPPING_ABILITIES` (`web/src/engine/sim/escape.ts:22`).')
-  lines.push('23. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts:117-154`).')
+  lines.push('9. **onBlockStatDrops**: Membership in exported `STAT_DROP_BLOCK_ABILITIES` (`web/src/engine/sim/statBuffs.ts`).')
+  lines.push('10. **onCanStatusType**: Membership in exported `CAN_STATUS_TYPE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).')
+  lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
+  lines.push('13. **onExit**: Membership in exported `SWITCH_OUT_HOOK_ABILITIES` (`web/src/engine/sim/turn.ts`).')
+  lines.push('14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('15. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
+  lines.push('16. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
+  lines.push('17. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`): `POISON_PUPPETEER_CLONE_ABILITIES` (`SET_STATE_ON_EFFECT_ABILITIES`), `ABILITY_EGOIST`, `ABILITY_SHARING_IS_CARING`, `ABILITY_ACID_REFLUX`.')
+  lines.push('18. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).')
+  lines.push('19. **onStatLowered**: Membership in exported `ON_STAT_LOWERED_ABILITIES` (`web/src/engine/sim/ai/aiCheckBadMove.ts`), implemented in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
+  lines.push('20. **onStatusImmune**: Membership in exported `STATUS_IMMUNE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).')
+  lines.push('21. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).')
+  lines.push('22. **onTrap**: Membership in exported `TRAPPING_ABILITIES` (`web/src/engine/sim/escape.ts`).')
+  lines.push('23. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).')
   lines.push('')
 
   // Section 3: Summary Table
@@ -670,45 +691,59 @@ export function generateInventoryDoc(
   }
 
   // Section 5: Bitfield-only abilities
-  lines.push('## Bitfield-Only Abilities')
-  lines.push('')
-  lines.push('Abilities that define no hook lambdas in `abilityHooks.json`, only flags/bitfields. Total: **36 abilities**.')
-  lines.push('')
-  lines.push('### Bitfield Implementation Status in Engine & Sim Code')
-  lines.push('')
-  lines.push('| Bitfield | Read by Code? | Citing Files |')
-  lines.push('| :--- | :--- | :--- |')
-  lines.push('| `adaptability` | Yes | `web/src/engine/calculate.ts` |')
-  lines.push('| `breakable` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/statusEffects.ts`, `web/src/engine/sim/accuracy.ts` |')
-  lines.push('| `chloroplast` | Yes | `web/src/engine/basePower.ts`, `web/src/engine/multiHit.ts`, `web/src/engine/sim/moveEffects.ts` |')
-  lines.push('| `fortKnox` | Yes | `web/src/engine/abilities/dispatchCalc.ts` |')
-  lines.push('| `grappler` | Yes | `web/src/engine/sim/endTurn.ts`, `web/src/engine/sim/moveEnd.ts` |')
-  lines.push('| `magicBounce` | No | *(not read by sim or engine code)* |')
-  lines.push('| `magicGuard` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/sim/endTurn.ts` |')
-  lines.push('| `mirrorArmor` | Yes | `web/src/engine/sim/hazards.ts` |')
-  lines.push('| `noRecoil` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/turn.ts` |')
-  lines.push('| `persistent` | Yes | `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/sim/ai/aiPipeline.ts` |')
-  lines.push('| `powderImmune` | Yes | `web/src/engine/sim/attackCanceller.ts`, `web/src/engine/sim/statusEffects.ts` |')
-  lines.push('| `randomizerBanned` | No | *(pipeline/randomizer metadata only)* |')
-  lines.push('| `removesStatusOnImmunity` | Yes | `web/src/engine/sim/statusEffects.ts`, `web/src/engine/sim/moveEnd.ts` |')
-  lines.push('| `ripen` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/moveEffects.ts` |')
-  lines.push('| `skillLink` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/abilities/dispatchCalc.ts` |')
-  lines.push('| `steadfast` | No | *(not read by sim or engine code)* |')
-  lines.push('| `stickyHold` | No | *(not read by sim or engine code)* |')
-  lines.push('| `suctionCups` | Yes | `web/src/engine/sim/moveEffects.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts` |')
-  lines.push('| `toxicTerrainImmune` | Yes | `web/src/engine/sim/fieldEndTurn.ts` |')
-  lines.push('| `unaware` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/moveEffects.ts` |')
-  lines.push('| `unsuppressable` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts` |')
-  lines.push('')
-  lines.push('### Complete List of 36 Bitfield-Only Abilities')
-  lines.push('')
-
   const bitfieldOnlyIds = Object.keys(abilityHooksData)
     .filter((id) => {
       const rec = abilityHooksData[id]
       return !rec.hooks || Object.keys(rec.hooks).length === 0
     })
     .sort()
+
+  lines.push('## Bitfield-Only Abilities')
+  lines.push('')
+  lines.push(
+    `Abilities that define no hook lambdas in \`abilityHooks.json\`, only flags/bitfields. Total: **${bitfieldOnlyIds.length} abilities**.`,
+  )
+  lines.push('')
+  lines.push('### Bitfield Implementation Status in Engine & Sim Code')
+  lines.push('')
+  lines.push(
+    'Static detection of bitfield names across production TypeScript source files under `web/src/engine/` (excluding tests and inventory files). Note that matching on `\\bname\\b` is a name match and is a weak signal, not proof of full mechanical fidelity.',
+  )
+  lines.push('')
+  lines.push('| Bitfield | Read by Code? | Citing Files |')
+  lines.push('| :--- | :--- | :--- |')
+
+  const allBitfields = new Set<string>()
+  for (const rec of Object.values(abilityHooksData)) {
+    if (rec.bitfields) {
+      for (const name of Object.keys(rec.bitfields)) {
+        allBitfields.add(name)
+      }
+    }
+  }
+  const sortedBitfields = Array.from(allBitfields).sort()
+  const engineFiles = collectEngineSourceFiles(ENGINE_DIR)
+  const fileContents = engineFiles.map((file) => ({
+    relPath: relative(REPO_ROOT, file).replace(/\\/g, '/'),
+    content: readFileSync(file, 'utf-8'),
+  }))
+
+  for (const bf of sortedBitfields) {
+    const regex = new RegExp(`\\b${escapeRegExp(bf)}\\b`)
+    const citingFiles = fileContents
+      .filter((fc) => regex.test(fc.content))
+      .map((fc) => fc.relPath)
+      .sort()
+
+    const readByCode = citingFiles.length > 0 ? 'Yes' : 'No'
+    const citingText =
+      citingFiles.length > 0 ? citingFiles.map((p) => `\`${p}\``).join(', ') : '*(not read by sim or engine code)*'
+    lines.push(`| \`${bf}\` | ${readByCode} | ${citingText} |`)
+  }
+
+  lines.push('')
+  lines.push(`### Complete List of ${bitfieldOnlyIds.length} Bitfield-Only Abilities`)
+  lines.push('')
 
   for (const id of bitfieldOnlyIds) {
     const rec = abilityHooksData[id]

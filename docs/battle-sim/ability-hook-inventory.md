@@ -12,28 +12,28 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 
 1. **Calc-side hooks (19 kinds)**: Checked via `lookupAbility(id)` in `web/src/engine/abilities/registry.ts` (populated by `web/src/engine/abilities/impl/index.ts`). Ported iff `!isUnmodelled(entry)` and `typeof entry[hook] === "function"`.
    - `onOffensiveMultiplier`, `onDefensiveMultiplier`, `onStat`, `onStab`, `onCrit`, `onTypeEffectiveness`, `onAfterTypeEffectiveness`, `onChooseOffensiveStat`, `onChooseDefensiveStat`, `onSwapSplit`, `onMoveType`, `onRecoil`, `onPriority`, `onMoldBreaker`, `onParentalBond`, `onAbsorb`, `onImmune`, `onInfiltrate`, `onModifyMoveFlags`.
-2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts:899`).
-3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts:748`).
-4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts:1365-2486`), catalogued by exported `SWITCH_IN_ABILITY_IDS` (`:196`).
-5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts:960-1782`.
-6. **onAccuracy**: Cases in `runAttackerAbilityHook` (lines 350-513) and `runDefenderAbilityHook` (lines 514-595) in `web/src/engine/sim/accuracy.ts`.
-7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts:5980-6065`: `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts:285`), keys of `KO_STAT_RAISES` (`moveEnd.ts:5846`), `KO_SOUL_EATER_ABILITIES` (`:5874`), `KO_JAWS_OF_CARNAGE_ABILITIES` (`:5890`), and `KO_CRIT_BOOST_ABILITIES` (`:5897`). All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note at line 6062.
+2. **onAttacker**: Membership in exported `PORTED_ATTACKER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).
+3. **onDefender**: Membership in exported `PORTED_DEFENDER_ABILITIES` (`web/src/engine/sim/moveEnd.ts`).
+4. **onEntry**: Handled across weather/terrain/entry-move/intimidate/announce dispatch in `applySwitchInAbilities` (`web/src/engine/sim/switchInAbility.ts`), catalogued by exported `SWITCH_IN_ABILITY_IDS`.
+5. **onEndTurn**: `runEndTurnAbilities` switch cases in `web/src/engine/sim/endTurn.ts`.
+6. **onAccuracy**: Cases in `runAttackerAbilityHook` and `runDefenderAbilityHook` in `web/src/engine/sim/accuracy.ts`.
+7. **onBattlerFaints**: Dispatched in `web/src/engine/sim/moveEnd.ts` (`dispatchOnBattlerFaints`): `ABILITY_STRIKEOUT`, `SET_STATE_ON_EFFECT_ABILITIES` (`web/src/engine/sim/statusEffects.ts`), keys of `KO_STAT_RAISES`, `KO_SOUL_EATER_ABILITIES`, `KO_JAWS_OF_CARNAGE_ABILITIES`, and `KO_CRIT_BOOST_ABILITIES`. All other `ON_BATTLER_FAINTS_ABILITIES` hit the unmodelled note.
 8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).
-9. **onBlockStatDrops**: Membership in exported `STAT_DROP_BLOCK_ABILITIES` (`web/src/engine/sim/statBuffs.ts:211`).
-10. **onCanStatusType**: Membership in exported `CAN_STATUS_TYPE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:230`).
-11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts:15`).
-12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts:3174`).
-13. **onExit**: Membership in exported `SWITCH_OUT_HOOK_ABILITIES` (`web/src/engine/sim/turn.ts:1498`).
-14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:1848`).
-15. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts:58-96`).
-16. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts:68-84`).
-17. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts:1214-1275`): `POISON_PUPPETEER_CLONE_ABILITIES` (`SET_STATE_ON_EFFECT_ABILITIES`), `ABILITY_EGOIST`, `ABILITY_SHARING_IS_CARING`, `ABILITY_ACID_REFLUX`.
-18. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts:1411-1430`, `ABILITY_RECURRING_NIGHTMARE`).
-19. **onStatLowered**: Membership in exported `ON_STAT_LOWERED_ABILITIES` (`web/src/engine/sim/ai/aiCheckBadMove.ts:368`), implemented in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts:930-1030`).
-20. **onStatusImmune**: Membership in exported `STATUS_IMMUNE_ABILITIES` (`web/src/engine/sim/statusEffects.ts:181`).
-21. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts:182-198`).
-22. **onTrap**: Membership in exported `TRAPPING_ABILITIES` (`web/src/engine/sim/escape.ts:22`).
-23. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts:117-154`).
+9. **onBlockStatDrops**: Membership in exported `STAT_DROP_BLOCK_ABILITIES` (`web/src/engine/sim/statBuffs.ts`).
+10. **onCanStatusType**: Membership in exported `CAN_STATUS_TYPE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).
+11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).
+12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).
+13. **onExit**: Membership in exported `SWITCH_OUT_HOOK_ABILITIES` (`web/src/engine/sim/turn.ts`).
+14. **onModifyEffectChance**: Membership in exported `ON_MODIFY_EFFECT_CHANCE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).
+15. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).
+16. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).
+17. **onReactive**: Handled in `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`): `POISON_PUPPETEER_CLONE_ABILITIES` (`SET_STATE_ON_EFFECT_ABILITIES`), `ABILITY_EGOIST`, `ABILITY_SHARING_IS_CARING`, `ABILITY_ACID_REFLUX`.
+18. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).
+19. **onStatLowered**: Membership in exported `ON_STAT_LOWERED_ABILITIES` (`web/src/engine/sim/ai/aiCheckBadMove.ts`), implemented in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).
+20. **onStatusImmune**: Membership in exported `STATUS_IMMUNE_ABILITIES` (`web/src/engine/sim/statusEffects.ts`).
+21. **onTerrain**: Cases in `dispatchOnTerrainChange` (`web/src/engine/sim/onWeather.ts`).
+22. **onTrap**: Membership in exported `TRAPPING_ABILITIES` (`web/src/engine/sim/escape.ts`).
+23. **onWeather**: Cases in `dispatchOnWeatherChange` (`web/src/engine/sim/onWeather.ts`).
 
 ## Hook Completeness Summary
 
@@ -176,28 +176,59 @@ Abilities that define no hook lambdas in `abilityHooks.json`, only flags/bitfiel
 
 ### Bitfield Implementation Status in Engine & Sim Code
 
+Static detection of bitfield names across production TypeScript source files under `web/src/engine/` (excluding tests and inventory files). Note that matching on `\bname\b` is a name match and is a weak signal, not proof of full mechanical fidelity.
+
 | Bitfield | Read by Code? | Citing Files |
 | :--- | :--- | :--- |
-| `adaptability` | Yes | `web/src/engine/calculate.ts` |
-| `breakable` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/statusEffects.ts`, `web/src/engine/sim/accuracy.ts` |
-| `chloroplast` | Yes | `web/src/engine/basePower.ts`, `web/src/engine/multiHit.ts`, `web/src/engine/sim/moveEffects.ts` |
-| `fortKnox` | Yes | `web/src/engine/abilities/dispatchCalc.ts` |
-| `grappler` | Yes | `web/src/engine/sim/endTurn.ts`, `web/src/engine/sim/moveEnd.ts` |
+| `absorbUp2` | Yes | `web/src/engine/sim/absorb.ts` |
+| `adaptability` | Yes | `web/src/engine/abilities/dispatch.ts`, `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/12-adds-type.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts` |
+| `addsType` | Yes | `web/src/engine/abilities/impl/12-adds-type.ts`, `web/src/engine/abilities/impl/13-defensive-multiplier-c.ts`, `web/src/engine/abilities/impl/15-ate-family-and-onstab.ts`, `web/src/engine/abilities/types.ts` |
+| `allowTerrainIfAirborne` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/damageResolver.ts`, `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/sim/endTurn.ts`, `web/src/engine/sim/fieldEndTurn.ts`, `web/src/engine/sim/statusEffects.ts` |
+| `alwaysSleeping` | Yes | `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/preempt.ts`, `web/src/engine/sim/switchInAbility.ts` |
+| `auraBreak` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/impl/31-aura.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts` |
+| `breakable` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/01-offensive-multiplier-a.ts`, `web/src/engine/abilities/impl/02-defensive-multiplier-a.ts`, `web/src/engine/abilities/impl/05-ate-abilities.ts`, `web/src/engine/abilities/impl/06-offensive-multiplier-c.ts`, `web/src/engine/abilities/impl/07-defensive-multiplier-b.ts`, `web/src/engine/abilities/impl/09-hub-abilities.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/impl/11-offensive-multiplier-d.ts`, `web/src/engine/abilities/impl/12-adds-type.ts`, `web/src/engine/abilities/impl/13-defensive-multiplier-c.ts`, `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/abilities/impl/15-ate-family-and-onstab.ts`, `web/src/engine/abilities/impl/16-type-effectiveness.ts`, `web/src/engine/abilities/impl/17-crit-swapsplit-misc.ts`, `web/src/engine/abilities/impl/18-offensive-multiplier-e.ts`, `web/src/engine/abilities/impl/25-absorb.ts`, `web/src/engine/abilities/impl/26-immune.ts`, `web/src/engine/abilities/impl/30-secondary-stat-blend.ts`, `web/src/engine/abilities/impl/32-rivalry.ts`, `web/src/engine/abilities/impl/34-fainted-count.ts`, `web/src/engine/abilities/impl/37-pretty-princess.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/ai/aiAbilityHelpers.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/statusEffects.ts` |
+| `chloroplast` | Yes | `web/src/engine/basePower.ts`, `web/src/engine/multiHit.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/moveEffects.ts` |
+| `coilUp` | Yes | `web/src/engine/sim/moveEffects.ts` |
+| `cutthroat` | No | *(not read by sim or engine code)* |
+| `foesMinRoll` | Yes | `web/src/engine/abilities/impl/17-crit-swapsplit-misc.ts`, `web/src/engine/abilities/impl/39-normalize-superconductor.ts`, `web/src/engine/abilities/types.ts` |
+| `fortKnox` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/15-ate-family-and-onstab.ts`, `web/src/engine/abilities/types.ts` |
+| `grappler` | Yes | `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/sim/endTurn.ts`, `web/src/engine/sim/moveEnd.ts` |
+| `hailImmune` | Yes | `web/src/engine/abilities/impl/05-ate-abilities.ts`, `web/src/engine/sim/fieldEndTurn.ts` |
+| `halfRecoil` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/turn.ts` |
+| `isSoundproof` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/moveEffects.ts`, `web/src/engine/sim/turn.ts` |
+| `levitate` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/01-offensive-multiplier-a.ts`, `web/src/engine/abilities/impl/06-offensive-multiplier-c.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/impl/12-adds-type.ts`, `web/src/engine/abilities/impl/18-offensive-multiplier-e.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts`, `web/src/engine/sim/grounding.ts` |
 | `magicBounce` | No | *(not read by sim or engine code)* |
-| `magicGuard` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/sim/endTurn.ts` |
+| `magicGuard` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/26-immune.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/sim/endTurn.ts` |
+| `megaLauncherBoost` | Yes | `web/src/engine/abilities/types.ts`, `web/src/engine/sim/moveEffects.ts` |
 | `mirrorArmor` | Yes | `web/src/engine/sim/hazards.ts` |
-| `noRecoil` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/turn.ts` |
-| `persistent` | Yes | `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/sim/ai/aiPipeline.ts` |
+| `negatesBurnAtkDrop` | Yes | `web/src/engine/abilities/types.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/stats.ts` |
+| `negatesFrzSpatkDrop` | Yes | `web/src/engine/abilities/types.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/driver/expectimax.ts` |
+| `noBurnDamage` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/02-defensive-multiplier-a.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/impl/13-defensive-multiplier-c.ts`, `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/endTurn.ts` |
+| `noDamageHits` | Yes | `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/switchInAbility.ts` |
+| `noRecoil` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/turn.ts` |
+| `omniStab` | Yes | `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/05-ate-abilities.ts`, `web/src/engine/abilities/impl/11-offensive-multiplier-d.ts`, `web/src/engine/abilities/impl/15-ate-family-and-onstab.ts`, `web/src/engine/abilities/types.ts` |
+| `persistent` | Yes | `web/src/engine/abilities/impl/13-defensive-multiplier-c.ts`, `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/abilities/impl/17-crit-swapsplit-misc.ts`, `web/src/engine/abilities/impl/29-ability-activation.ts`, `web/src/engine/abilities/impl/36-avenger-blood-stigma.ts`, `web/src/engine/sim/ai/aiAbilityHelpers.ts`, `web/src/engine/sim/ai/aiPipeline.ts` |
+| `pollinateImmunities` | Yes | `web/src/engine/sim/attackCanceller.ts`, `web/src/engine/sim/statusEffects.ts` |
 | `powderImmune` | Yes | `web/src/engine/sim/attackCanceller.ts`, `web/src/engine/sim/statusEffects.ts` |
-| `randomizerBanned` | No | *(pipeline/randomizer metadata only)* |
-| `removesStatusOnImmunity` | Yes | `web/src/engine/sim/statusEffects.ts`, `web/src/engine/sim/moveEnd.ts` |
-| `ripen` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/moveEffects.ts` |
-| `skillLink` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/abilities/dispatchCalc.ts` |
+| `randomizerBanned` | No | *(not read by sim or engine code)* |
+| `redirectType` | No | *(not read by sim or engine code)* |
+| `removesStatusOnImmunity` | Yes | `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/statusEffects.ts` |
+| `resistsFortKnox` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/08-swarm-family.ts`, `web/src/engine/abilities/impl/15-ate-family-and-onstab.ts`, `web/src/engine/abilities/impl/24-parental-bond.ts`, `web/src/engine/abilities/types.ts` |
+| `ripen` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/moveEffects.ts` |
+| `ruinStat` | Yes | `web/src/engine/abilities/impl/14-on-stat-a.ts`, `web/src/engine/abilities/types.ts` |
+| `sandImmune` | Yes | `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/sim/fieldEndTurn.ts` |
+| `setStateOnEffect` | Yes | `web/src/engine/sim/statBuffs.ts`, `web/src/engine/sim/statusEffects.ts` |
+| `shadowTag` | Yes | `web/src/engine/sim/escape.ts` |
+| `skillLink` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts` |
 | `steadfast` | No | *(not read by sim or engine code)* |
+| `stealthRockImmune` | Yes | `web/src/engine/sim/hazards.ts` |
 | `stickyHold` | No | *(not read by sim or engine code)* |
-| `suctionCups` | Yes | `web/src/engine/sim/moveEffects.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts` |
+| `suctionCups` | Yes | `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/moveEffects.ts` |
+| `tauntImmune` | Yes | `web/src/engine/sim/switchInAbility.ts` |
+| `tectonizeImmunities` | Yes | `web/src/engine/sim/hazards.ts` |
 | `toxicTerrainImmune` | Yes | `web/src/engine/sim/fieldEndTurn.ts` |
-| `unaware` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/moveEffects.ts` |
+| `unaware` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/battleStat.ts`, `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/moveEffects.ts` |
+| `unnerve` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/statBuffs.ts` |
 | `unsuppressable` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts` |
 
 ### Complete List of 36 Bitfield-Only Abilities

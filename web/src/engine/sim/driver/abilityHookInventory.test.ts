@@ -5,6 +5,18 @@ import { describe, expect, it } from 'vitest'
 import {
   HOOK_KINDS,
   classifyPair,
+  extractAccuracyAbilities,
+  extractBattlerFaintsExtraAbilities,
+  extractCaseLabelsFromFunction,
+  extractEndTurnAbilities,
+  extractFunctionSlice,
+  extractPreemptActionAbilities,
+  extractReactiveExtraAbilities,
+  extractReviveAbilities,
+  extractSimAbsorbExtraAbilities,
+  extractTargetFlagAbilities,
+  extractTerrainAbilities,
+  extractWeatherAbilities,
   generateInventoryDoc,
   loadTestMentionedAbilities,
   runInventory,
@@ -154,6 +166,57 @@ describe('ability hook completeness inventory', () => {
     // 3. Alias whose target is unported
     const status3 = classifyPair('ABILITY_UNPORTED_ALIAS', 'onAttacker', testData, { lookup: customLookup })
     expect(status3).toBe('unported')
+  })
+
+  it('each extractor returns a non-empty set and includes one known id', () => {
+    const accuracy = extractAccuracyAbilities()
+    expect(accuracy.size).toBeGreaterThan(0)
+    expect(accuracy.has('ABILITY_COMPOUND_EYES')).toBe(true)
+
+    const endTurn = extractEndTurnAbilities()
+    expect(endTurn.size).toBeGreaterThan(0)
+    expect(endTurn.has('ABILITY_SPEED_BOOST')).toBe(true)
+
+    const preempt = extractPreemptActionAbilities()
+    expect(preempt.size).toBeGreaterThan(0)
+    expect(preempt.has('ABILITY_TAG')).toBe(true)
+
+    const weather = extractWeatherAbilities()
+    expect(weather.size).toBeGreaterThan(0)
+    expect(weather.has('ABILITY_PROTOSYNTHESIS')).toBe(true)
+
+    const terrain = extractTerrainAbilities()
+    expect(terrain.size).toBeGreaterThan(0)
+    expect(terrain.has('ABILITY_QUARK_DRIVE')).toBe(true)
+
+    const targetFlags = extractTargetFlagAbilities()
+    expect(targetFlags.size).toBeGreaterThan(0)
+    expect(targetFlags.has('ABILITY_ARTILLERY')).toBe(true)
+
+    const reactive = extractReactiveExtraAbilities()
+    expect(reactive.size).toBeGreaterThan(0)
+    expect(reactive.has('ABILITY_ACID_REFLUX')).toBe(true)
+
+    const revive = extractReviveAbilities()
+    expect(revive.size).toBeGreaterThan(0)
+    expect(revive.has('ABILITY_RECURRING_NIGHTMARE')).toBe(true)
+
+    const battlerFaints = extractBattlerFaintsExtraAbilities()
+    expect(battlerFaints.size).toBeGreaterThan(0)
+    expect(battlerFaints.has('ABILITY_STRIKEOUT')).toBe(true)
+
+    const absorb = extractSimAbsorbExtraAbilities()
+    expect(absorb.size).toBeGreaterThan(0)
+    expect(absorb.has('ABILITY_FLASH_FIRE')).toBe(true)
+  })
+
+  it('extractFunctionSlice throws if function declaration not found, and extractCaseLabelsFromFunction throws on 0 labels', () => {
+    expect(() => extractFunctionSlice('function foo() {}', 'function bar(')).toThrow(
+      'Function declaration not found: function bar(',
+    )
+    expect(() => extractCaseLabelsFromFunction('function foo() { return 1 }', 'function foo(')).toThrow(
+      'Zero labels extracted for declaration: function foo(',
+    )
   })
 
   it('inventory doc matches generated text (or writes doc when SIM_INVENTORY_WRITE=1)', () => {
