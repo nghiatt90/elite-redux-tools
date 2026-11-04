@@ -1341,6 +1341,8 @@ export interface MoveEndAbilitiesContext {
   attackerId: number
   targetId: number
   moveId: string
+  /** gChosenMove (:4321) -- defaults to moveId when not a called move. */
+  chosenMoveId?: string
   moveData: SimMoveData | undefined
   targetDamage: number
   hpDealt?: number
@@ -1433,6 +1435,7 @@ function handleDefenderMoveEndAbility(
   attackerId: number,
   moveData: SimMoveData | undefined,
   moveId: string,
+  chosenMoveId: string,
   targetDamage: number,
   hpDealt: number,
   isCriticalHit: boolean,
@@ -1487,7 +1490,7 @@ function handleDefenderMoveEndAbility(
     return result
   }
 
-  // Ape Shift onDefender (src/abilities.cc:9063 -> ApeShiftHandler :9047-9059). The hook itself
+  // Ape Shift onDefender (src/abilities.cc:9065 -> ApeShiftHandler :9047-9067). The hook itself
   // does not gate on damage: ShouldChangeFormHpBased only needs the HP threshold and the ability,
   // and HandleDefenderAbility (:9050-9084) calls onDefender on every move-end pass. During
   // onDefender gBattlerAttacker is still the move's attacker, so BattleScript_ApeShift's
@@ -1512,7 +1515,13 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ||
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
-    if (attacker.mon.hp > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect) && !isMagicGuardProtected(state, attacker)) {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) -- the hit dealt damage and the attacker is alive.
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !isMagicGuardProtected(state, attacker)
+    ) {
       const denom = abilityId === 'ABILITY_DOUBLE_IRON_BARBS' ? 6 : 8
       const dmg = Math.max(1, Math.floor(attacker.mon.maxHp / denom))
       applyDamage(state, attackerId, dmg, fainted, deps)
@@ -1529,7 +1538,8 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_BLIGHT_SCALE' ||
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
-    if (attacker.mon.hp > 0 && canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
+    // ON_EITHER(PoisonPoint) (src/abilities.cc:987-995): CHECK(ShouldApplyOnHitEffect(opponent)).
+    if (targetDamage > 0 && attacker.mon.hp > 0 && canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
       if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
         if (state.rng.random16() % 100 < 30) {
           const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
@@ -1543,7 +1553,8 @@ function handleDefenderMoveEndAbility(
 
   // 3. Static on defender (src/abilities.cc:610-618, 8183)
   if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
-    if (attacker.mon.hp > 0 && canBeParalyzed(state, targetId, attackerId, statusDeps)) {
+    // ON_EITHER(Static) (src/abilities.cc:610-618): CHECK(ShouldApplyOnHitEffect(opponent)).
+    if (targetDamage > 0 && attacker.mon.hp > 0 && canBeParalyzed(state, targetId, attackerId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
@@ -1556,7 +1567,8 @@ function handleDefenderMoveEndAbility(
 
   // 4. Flame Body on defender (src/abilities.cc:1126-1134, 4364, 6106)
   if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
-    if (attacker.mon.hp > 0 && canBeBurned(state, attackerId, targetId, statusDeps)) {
+    // ON_EITHER(FlameBody) (src/abilities.cc:1126-1134): CHECK(ShouldApplyOnHitEffect(opponent)).
+    if (targetDamage > 0 && attacker.mon.hp > 0 && canBeBurned(state, attackerId, targetId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
@@ -1569,7 +1581,9 @@ function handleDefenderMoveEndAbility(
 
   // 5. Effect Spore on defender (src/abilities.cc:818-845)
   if (abilityId === 'ABILITY_EFFECT_SPORE') {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:818-819).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !isPowderImmune(state, targetId, attackerId, statusDeps)
@@ -1612,7 +1626,9 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_SUPER_HOT_GOO' ||
     abilityId === 'ABILITY_MOUSTACHE'
   ) {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:2482-2484).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       canLowerStatOrMirrorArmor(state, attackerId, STAT_SPEED, deps.dataContext) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -1675,7 +1691,8 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_CROWNED_SHIELD' ||
     abilityId === 'ABILITY_MOUSTACHE'
   ) {
-    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:2592-2594).
+    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1698,7 +1715,9 @@ function handleDefenderMoveEndAbility(
 
   // 8. Weak Armor (src/abilities.cc:1950-1961, data/battle_scripts_1.s:10300-10324)
   if (abilityId === 'ABILITY_WEAK_ARMOR') {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:1950-1952).
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveData?.split === 'PHYSICAL' &&
       (canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext) || canLowerStat(state, targetId, STAT_DEF, deps.dataContext))
@@ -1750,7 +1769,8 @@ function handleDefenderMoveEndAbility(
 
   // 9. Anger Point family (src/abilities.cc:1461-1473, 6220-6232, 6237, 6624-6636, 6695, 8785-8792)
   if (abilityId === 'ABILITY_ANGER_POINT' || abilityId === 'ABILITY_CROWNED_SWORD') {
-    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:1461-1463).
+    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1771,7 +1791,8 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_TIPPING_POINT' || abilityId === 'ABILITY_BERSERKER_RAGE') {
-    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6219-6221).
+    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1792,7 +1813,8 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_FORTITUDE') {
-    if (target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6623-6625).
+    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1813,7 +1835,9 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_RAGE_POINT') {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:8784-8786).
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       isCriticalHit &&
       (canRaiseStat(state, targetId, STAT_ATK, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext))
@@ -1993,7 +2017,9 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_BALLOON_BLITZ' ||
     abilityId === 'ABILITY_BALLOON_BOMBER'
   ) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3860-3862).
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE', 'FLYING') &&
       (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext))
@@ -2078,7 +2104,9 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_PRIM_AND_PROPER' ||
     abilityId === 'ABILITY_PURE_LOVE'
   ) {
+    // ON_EITHER(CuteCharm) (src/abilities.cc:1207-1209): CHECK(ShouldApplyOnHitEffect(opponent)).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       canInfatuate(state, targetId, attackerId, statusDeps)
@@ -2091,7 +2119,9 @@ function handleDefenderMoveEndAbility(
 
   // 16. Damp (src/abilities.cc:564-576)
   if (abilityId === 'ABILITY_DAMP') {
+    // ON_EITHER(Damp) (src/abilities.cc:564-566): CHECK(ShouldApplyOnHitEffect(opponent)).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !attacker.mon.types.includes('WATER')
@@ -2102,7 +2132,9 @@ function handleDefenderMoveEndAbility(
 
   // 17. Furnace (src/abilities.cc:5798-5805)
   if (abilityId === 'ABILITY_FURNACE') {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:5787-5789).
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'ROCK') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2128,7 +2160,9 @@ function handleDefenderMoveEndAbility(
 
   // 18. Guilt Trip (src/abilities.cc:7109-7116, data/battle_scripts_1.s:6158-6175)
   if (abilityId === 'ABILITY_GUILT_TRIP') {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:7109-7111).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       (canLowerStat(state, attackerId, STAT_ATK, deps.dataContext) || canLowerStat(state, attackerId, STAT_SPATK, deps.dataContext))
@@ -2170,7 +2204,9 @@ function handleDefenderMoveEndAbility(
 
   // 19. Haunted Spirit family (src/abilities.cc:4321-4332, 7189)
   if (abilityId === 'ABILITY_HAUNTED_SPIRIT' || abilityId === 'ABILITY_VENGEFUL_SPIRIT') {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:4321-4323).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -2183,7 +2219,9 @@ function handleDefenderMoveEndAbility(
 
   // 20. Ill Will (src/abilities.cc:7278-7292)
   if (abilityId === 'ABILITY_ILL_WILL') {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:7278-7280).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       moveId !== 'MOVE_STRUGGLE' &&
@@ -2201,7 +2239,9 @@ function handleDefenderMoveEndAbility(
 
   // 21. Itchy Defense (src/abilities.cc:6154-6170, battle_script_commands.c:2300-2309)
   if (abilityId === 'ABILITY_ITCHY_DEFENSE') {
+    // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:6154-6156).
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(attacker.mon.status2, STATUS2_WRAPPED)
@@ -2229,7 +2269,9 @@ function handleDefenderMoveEndAbility(
 
   // 22. Sand Spit (src/abilities.cc:3317-3337)
   if (abilityId === 'ABILITY_SAND_SPIT') {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3317-3319).
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       !hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY) &&
       !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)
@@ -2247,7 +2289,8 @@ function handleDefenderMoveEndAbility(
 
   // 23. Seed Sower (src/abilities.cc:6859-6866, battle_util.c:3778-3795)
   if (abilityId === 'ABILITY_SEED_SOWER') {
-    if (target.mon.hp > 0) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6859-6861).
+    if (targetDamage > 0 && target.mon.hp > 0) {
       if (tryChangeBattleTerrain(state, targetId, STATUS_FIELD_GRASSY_TERRAIN, deps)) {
         dispatchOnTerrainChange(state, deps, unmodelled)
       }
@@ -2256,7 +2299,8 @@ function handleDefenderMoveEndAbility(
 
   // 24. Wind Power (src/abilities.cc:7032-7041)
   if (abilityId === 'ABILITY_WIND_POWER') {
-    if (target.mon.hp > 0 && !!moveData?.flags?.airBased && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:7032-7034).
+    if (targetDamage > 0 && target.mon.hp > 0 && !!moveData?.flags?.airBased && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
       target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
     }
   }
@@ -2294,15 +2338,24 @@ function handleDefenderMoveEndAbility(
   }
 
   // 26. Cursed Body (src/abilities.cc:1910-1924)
+  // CHECK(ShouldApplyOnHitEffect(attacker)) :1912; CHECK(gBattleMons[attacker].pp[gChosenMovePos])
+  // :1916. gChosenMovePos comes from gBattleStruct->chosenMovePositions[gBattlerAttacker]
+  // (battle_util.c:200) -- the SELECTED slot, not the slot of a called move (a queued extra attack
+  // only moves gCurrMovePos, :205-209). The disabled move itself is gChosenMove (:1919), which stays
+  // the selected move for `jumptocalledmove TRUE` (Cmd_jumptocalledmove :5908-5909; Copycat, Assist,
+  // Dancer -- data/battle_scripts_1.s:1601, :6324, :10634) but is overwritten with the extra move when
+  // a move is queued (`gCurrentMove = gChosenMove = gQueuedExtraAttackData[0].move`, battle_util.c:204),
+  // e.g. Sleep Talk.
   if (abilityId === 'ABILITY_CURSED_BODY') {
     if (
+      targetDamage > 0 &&
       attacker.mon.hp > 0 &&
       !attacker.volatiles.disabledMove &&
       !isAbilityStatusProtected(state, attackerId, CHECK_RESTRICTING, targetId, statusDeps) &&
-      (attacker.mon.pp[attacker.mon.moves.indexOf(moveId)] ?? 0) > 0
+      (attacker.mon.pp[state.chosenMovePositions[attackerId] ?? 0] ?? 0) > 0
     ) {
       if (state.rng.random16() % 100 < 30) {
-        attacker.volatiles.disabledMove = moveId
+        attacker.volatiles.disabledMove = chosenMoveId
         attacker.volatiles.disableTimer = 4
         attacker.volatiles.disableTimerStartValue = 4
       }
@@ -2311,8 +2364,9 @@ function handleDefenderMoveEndAbility(
 
   // 27. Justified-style defender stat raises
   if (abilityId === 'ABILITY_RATTLED') {
-    // src/abilities.cc:2213-2224
+    // src/abilities.cc:2213-2224; CHECK(ShouldApplyOnHitEffect(battler)) at :2213.
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'DARK', 'BUG', 'GHOST') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2336,8 +2390,9 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_WATER_COMPACTION') {
-    // src/abilities.cc:2650-2659
+    // src/abilities.cc:2650-2659; CHECK(ShouldApplyOnHitEffect(battler)) at :2650.
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'WATER') &&
       canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)
@@ -2361,8 +2416,9 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_STEAM_ENGINE') {
-    // src/abilities.cc:3291-3300
+    // src/abilities.cc:3291-3300; CHECK(ShouldApplyOnHitEffect(battler)) at :3291.
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE', 'WATER') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2386,8 +2442,9 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_THERMAL_EXCHANGE' || abilityId === 'ABILITY_THERMAL_ENTROPY') {
-    // src/abilities.cc:7339-7348, 12405
+    // src/abilities.cc:7339-7348, 12405; CHECK(ShouldApplyOnHitEffect(battler)) at :7339.
     if (
+      targetDamage > 0 &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE') &&
       canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)
@@ -2468,7 +2525,8 @@ function handleDefenderMoveEndAbility(
 
   // 28. Electromorphosis family (src/abilities.cc:5299-5308, 5313)
   if (abilityId === 'ABILITY_ELECTROMORPHOSIS' || abilityId === 'ABILITY_ATOMIC_BURST') {
-    if (target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:5299-5301).
+    if (targetDamage > 0 && target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
       target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
     }
   }
@@ -2590,8 +2648,8 @@ function handleDefenderMoveEndAbility(
 
   // 37. Flammable Coat (src/abilities.cc:8320-8344; BattleScript_TargetFormChange, data/battle_scripts_1.s:8532-8540)
   // Handle-form-change cases 0-2 (battle_script_commands.c:7491-7512) are changeBattlerForm; `switchinabilities BS_ATTACKER` runs after
-  // swapbattlerandtargetvia34, i.e. for the holder. This hook is reached only for a damaging hit (the call site's targetDamage gate),
-  // so the RESOURCE_FLAG_FLASH_FIRE half of the CHECK matters only for a hit that damaged an already-Flash-Fire-boosted holder.
+  // swapbattlerandtargetvia34, i.e. for the holder. CHECK(ShouldApplyOnHitEffect(battler) || (gBattleResources->flags->flags[battler] &
+  // RESOURCE_FLAG_FLASH_FIRE)) (:8321-8322): a damaging hit on a live holder, or a Fire hit while already Flash-Fire-boosted.
   if (abilityId === 'ABILITY_FLAMMABLE_COAT') {
     if (
       ((targetDamage > 0 && target.mon.hp > 0) || target.volatiles.flashFire) &&
@@ -2807,27 +2865,30 @@ function handleDefenderMoveEndAbility(
     }
   }
 
-  // 49. Victory Bomb (src/abilities.cc:9006-9018) and Unstable Core (:12525-12528 = `Impl<ABILITY_AFTERMATH>.onDefender`, :1663-1670): CHECK_NOT(IsBattlerAlive(battler)),
+  // 49. Victory Bomb (src/abilities.cc:9005-9012; the onDefender is :9007-9012) and Unstable Core (:12524-12528 = `Impl<ABILITY_AFTERMATH>.onDefender`, :1662-1669): CHECK_NOT(IsBattlerAlive(battler)),
   // then UseOutOfTurnAttack(battler, attacker, ability, move, 100). The fainted holder is allowed because the move is EFFECT_EXPLOSION (battle_util.c:3764).
   // Aftermath/Unstable Core pick Outburst over Explosion when GetHighestAttackingStatId(battler, TRUE) is Sp. Atk (ties go to Attack).
   if (abilityId === 'ABILITY_VICTORY_BOMB') {
-    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+    // CHECK_NOT(IsBattlerAlive(battler)) is the hook's only gate (:9008).
+    if (!isBattlerAlive(state, targetId)) {
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_EXPLOSION', 100)
     }
   }
   if (abilityId === 'ABILITY_UNSTABLE_CORE') {
-    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+    // CHECK_NOT(IsBattlerAlive(battler)) is the hook's only gate (:1663, aliased at :12526).
+    if (!isBattlerAlive(state, targetId)) {
       const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
     }
   }
-  // Aftermath's own onDefender (src/abilities.cc:1663-1670): CHECK_NOT(IsBattlerAlive(battler)), then
+  // Aftermath's own onDefender (src/abilities.cc:1662-1669): CHECK_NOT(IsBattlerAlive(battler)), then
   // UseOutOfTurnAttack(battler, attacker, ability, highestStat == STAT_SPATK ? MOVE_OUTBURST :
   // MOVE_EXPLOSION, 100) and return FALSE. Exactly the Unstable Core body above (:12525-12528 aliases
   // this hook); both moves are EFFECT_EXPLOSION, so queueOutOfTurnAttack permits the fainted holder
   // (battle_util.c:3764).
   if (abilityId === 'ABILITY_AFTERMATH') {
-    if (targetDamage > 0 && !isBattlerAlive(state, targetId)) {
+    // CHECK_NOT(IsBattlerAlive(battler)) is the hook's only gate (:1663).
+    if (!isBattlerAlive(state, targetId)) {
       const highestStat = getHighestAttackingStatId(state, targetId, deps.statStageRatios)
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, highestStat === STAT_SPATK ? 'MOVE_OUTBURST' : 'MOVE_EXPLOSION', 100)
     }
@@ -5604,6 +5665,7 @@ function handleAttackerMoveEndAbility(
  */
 export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): MoveEndAbilitiesResult {
   const { state, attackerId, targetId, moveId, moveData, targetDamage, deps, unmodelled, fainted } = ctx
+  const chosenMoveId = ctx.chosenMoveId ?? moveId
   const hpDealt = ctx.hpDealt ?? targetDamage
   const isCriticalHit = ctx.isCriticalHit ?? false
   const target = state.battlers[targetId]
@@ -5631,6 +5693,7 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
         attackerId,
         moveData,
         moveId,
+        chosenMoveId,
         targetDamage,
         hpDealt,
         isCriticalHit,
@@ -7037,13 +7100,20 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 5: MOVEEND_ABILITIES (:4527-4531)
-  // Target contact/move-end abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey)
-  if (target && targetDamage > 0) {
+  // Target contact/move-end abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey).
+  // The C call site gates only on confusion self-damage (REQUIRE_NOT(!gProcessingExtraAttacks &&
+  // gRoundStructs[gBattlerAttacker].confusionSelfDmg), :4529) -- AbilityBattleEffects(ABILITYEFFECT_MOVE_END)
+  // (:4485-4489) then runs HandleDefenderAbility (:9050-9084) for every slot with no damage gate, so each
+  // hook below carries its own ShouldApplyOnHitEffect / DidMoveHit check. The confusionSelfDmg half is
+  // structural here (CANCELLER_CONFUSED returns before the ladder, turn.ts:2316-2351) but kept, like the
+  // identical guard in applyMoveEndChoiceMove.
+  if (target && !(!state.processingExtraAttacks && attacker?.round.confusionSelfDmg)) {
     const defAbResult = dispatchMoveEndDefenderAbilities({
       state,
       attackerId,
       targetId,
       moveId,
+      chosenMoveId,
       moveData,
       targetDamage,
       hpDealt,

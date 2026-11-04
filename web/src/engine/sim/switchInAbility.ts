@@ -1380,7 +1380,11 @@ export function applySwitchInAbilities(
     if (isSimAbilitySuppressed(state, battler, abilityId, false, battler.id, false, deps.dataContext)) {
       continue
     }
-    if (!checkAndSetSwitchInAbility(state, battler, abilityId, deps.dataContext)) {
+    // CheckAndSetSwitchInAbility runs for every entry ability except Trace (battle_util.c:9189-9194:
+    // `switch (ability) { case ABILITY_TRACE: break; default: if (!CheckAndSetSwitchInAbility(...)) return FALSE; }`).
+    // Trace's own hook clears switchInAbilityDone on the slot it overwrites (abilities.cc:968), so a
+    // Trace mon traces again on a later entry instead of being blocked by the once-per-switch flag.
+    if (abilityId !== 'ABILITY_TRACE' && !checkAndSetSwitchInAbility(state, battler, abilityId, deps.dataContext)) {
       continue
     }
 

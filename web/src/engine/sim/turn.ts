@@ -155,6 +155,7 @@ import {
   applyMoveEndItemEffectsAll,
   ATTACKER_FOLLOWUP_ABILITIES,
   dispatchMoveEndAttackerAbilities,
+  dispatchMoveEndDefenderAbilities,
   getBattlerAbilitySlotsReverse,
   HALF_RECOIL_ABILITIES,
   NO_RECOIL_ABILITIES,
@@ -2651,6 +2652,32 @@ export function executeAction(
         return effectOutcome
       }
 
+      // MOVEEND_ABILITIES (case 5, :4527-4531) also runs after a status move: its script ends in
+      // `goto BattleScript_MoveEnd` (e.g. BattleScript_EffectConfuse, data/battle_scripts_1.s:4219-4231),
+      // and AbilityBattleEffects(ABILITYEFFECT_MOVE_END) (battle_util.c:4485-4489) has no damage gate. The
+      // hooks carry their own ShouldApplyOnHitEffect checks, so a 0-damage move (targetDamage 0 here)
+      // only reaches the ungated ones: Ape Shift's onDefender and the fainted-holder Aftermath family.
+      const statusTargetId = currentTargetId ?? getMoveTarget(state, battlerId, currentMove.id, deps)
+      const statusDefenderAbilities = dispatchMoveEndDefenderAbilities({
+        state,
+        attackerId: battlerId,
+        targetId: statusTargetId,
+        moveId: currentMove.id,
+        chosenMoveId: currentChosenMoveId,
+        moveData,
+        targetDamage: 0,
+        hpDealt: 0,
+        noEffect: Boolean(effectOutcome.missed),
+        deps,
+        unmodelled,
+        fainted: effectOutcome.fainted ?? [],
+      })
+      if (statusDefenderAbilities.statChanges.length > 0) {
+        effectOutcome.statChanges = [...(effectOutcome.statChanges ?? []), ...statusDefenderAbilities.statChanges]
+      }
+      if (statusDefenderAbilities.statusApplied && !effectOutcome.statusApplied) {
+        effectOutcome.statusApplied = statusDefenderAbilities.statusApplied
+      }
       // Nearest sim point for handled status moves (Swords Dance, Weather moves, etc.) to trigger
       // MOVEEND_ABILITIES_ATTACKER follow-up hooks (battle_script_commands.c:4532-4536, battle_util.c:4491-4495, 9011-9041)
       // and ABILITYEFFECT_REACTIVE (:4330). Restricted to ATTACKER_FOLLOWUP_ABILITIES via onlyFollowupAbilities so
