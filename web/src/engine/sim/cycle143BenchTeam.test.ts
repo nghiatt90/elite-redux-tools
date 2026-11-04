@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 // Cycle 143: the status-move bench team (`STATUS_PLAYER_SPECS`) and the
 // `statusTerms` default. No behaviour is derived here: the test checks that the
 // bench team's ids resolve through `buildPlayerParty`, that each mon carries at

@@ -136,24 +136,27 @@ describe('cycle 142 - sandstorm chip', () => {
   // IsSandImmune. ENDTURN_SANDSTORM, battle_util.c:1982-1996: a temporary
   // weather does `!started.weather && --weatherDuration == 0`; the tick that
   // reaches zero runs BattleScript_SandStormHailEnds (data/battle_scripts_1.s:
-  // 7340-7344), which deals no damage. So duration 4 not started -> 3 damaging
-  // ticks; started -> 4, capped by the model horizon 3.
+  // 7340-7344), which deals no damage. So duration 4 -> 3 damaging ticks,
+  // whatever `started.weather` says: the leaf is scored after `stepTurn` and
+  // every `started` flag is zeroed at the start of the next turn
+  // (battle_main.c:4589-4595), so it never holds back a future tick.
   // 320 maxHP -> 320 / 16 = 20 -> 20 / 320 = 0.0625 per tick.
-  it('temporary duration 4, not started -> 3 ticks -> 3 * 20/320 = 0.1875', () => {
+  it('temporary duration 4 -> 3 ticks -> 3 * 20/320 = 0.1875', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     patchMon(s, 0, 0, { types: ROCK }) // player immune, so only the foe pays
     setWeather(s, WEATHER_SANDSTORM_TEMPORARY, 4, false)
     expect(statusScore(s)).toBeCloseTo(0.1875, 10)
   })
 
-  it('started.weather true -> 4 ticks capped to 3 -> 0.1875', () => {
+  it('started.weather true does not add a turn -> still 3 ticks -> 0.1875', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     patchMon(s, 0, 0, { types: ROCK })
     setWeather(s, WEATHER_SANDSTORM_TEMPORARY, 4, true)
     expect(statusScore(s)).toBeCloseTo(0.1875, 10)
   })
 
-  // duration 2: not started -> 1 tick (0.0625); started -> 2 ticks (0.125).
+  // duration 2 -> 1 damaging tick (the second tick reaches 0 and deals none),
+  // with or without `started.weather`.
   it('duration 2 not started -> 1 tick -> 0.0625', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     patchMon(s, 0, 0, { types: ROCK })
@@ -161,11 +164,11 @@ describe('cycle 142 - sandstorm chip', () => {
     expect(statusScore(s)).toBeCloseTo(0.0625, 10)
   })
 
-  it('duration 2 started -> 2 ticks -> 0.125', () => {
+  it('duration 2 started -> 1 tick -> 0.0625', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     patchMon(s, 0, 0, { types: ROCK })
     setWeather(s, WEATHER_SANDSTORM_TEMPORARY, 2, true)
-    expect(statusScore(s)).toBeCloseTo(0.125, 10)
+    expect(statusScore(s)).toBeCloseTo(0.0625, 10)
   })
 
   it('duration 1 not started -> the ending tick deals no damage -> 0', () => {
@@ -338,8 +341,9 @@ describe('cycle 142 - toxic terrain chip', () => {
   // the `gFieldStatuses &= ~STATUS_FIELD_TOXIC_TERRAIN` clear (:2128-2133) run
   // first, and the damage loop's IsBattlerTerrainAffected filter (:2134-2139)
   // tests the field bit, which is already gone. So a non-permanent terrain
-  // chips `terrainTimer - 1` times when not started (`terrainTimer` when the
-  // just-set turn is included), capped at STATUS_HORIZON_TURNS = 3.
+  // chips `terrainTimer - 1` times, `started.terrain` or not (it is zeroed at
+  // the start of every turn, battle_main.c:4589-4595), capped at
+  // STATUS_HORIZON_TURNS = 3.
   const isolatePlayer = (s: BattleState) => patchMon(s, 1, 0, { types: POISON }) // foe immune
 
   it('timer 2 not started -> 1 chip * 20/320 = 0.0625', () => {
@@ -377,11 +381,11 @@ describe('cycle 142 - toxic terrain chip', () => {
     expect(statusScore(s)).toBeCloseTo(-0.125, 10)
   })
 
-  it('timer 3 with started.terrain -> 3 chips -> 3 * 20/320 = 0.1875', () => {
+  it('timer 3 with started.terrain -> still 2 chips -> 2 * 20/320 = 0.125', () => {
     const s = fresh(session(['MOVE_TACKLE'], ONE_FOE()))
     isolatePlayer(s)
     setTerrain(s, STATUS_FIELD_TOXIC_TERRAIN, 3, true)
-    expect(statusScore(s)).toBeCloseTo(-0.1875, 10)
+    expect(statusScore(s)).toBeCloseTo(-0.125, 10)
   })
 
   it('Poison / Steel / Flying active mons are immune -> 0', () => {
@@ -511,7 +515,7 @@ describe('cycle 142 - terrain move-type boost', () => {
 })
 
 describe('cycle 142 - rain/sun move-type boost', () => {
-  // battle_util.c:7562-7598: rain boosts Water and halves Fire; sun the
+  // battle_util.c:7562-7607: rain boosts Water and halves Fire; sun the
   // reverse. The multipliers are the C's; WEATHER_BOOST_VALUE = 0.05 per turn
   // is a MODEL CHOICE. Only the active mon's known damaging moves count.
   const lookup = data.dataContext.move

@@ -25,10 +25,11 @@ import {
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_SANDSTORM_ANY,
+  WEATHER_SANDSTORM_TEMPORARY,
   hasFlag,
 } from '../constants'
 import { createRandomSource } from '../rng'
-import { DEFAULT_EXPECTIMAX, chooseExpectimaxAction } from './expectimax'
+import { DEFAULT_EXPECTIMAX, chooseExpectimaxAction, statusScore } from './expectimax'
 import { buildPlayerParty } from './buildParty'
 import { beginTurn, buildMoveAction, createSession, stepTurn, type BattleSession } from './session'
 import { loadSimData, type TrainerData, type TrainerMonData } from './loadSimData'
@@ -541,6 +542,46 @@ describe('cycle 142 - field scenarios', () => {
       }
     })
 
+    // IsSandImmune's type clause (battle_script_commands.c:10376-10386):
+    // Cmd_weatherdamage (:10397-10416) deals nothing to a Rock or Ground foe,
+    // while the same turn chips Machamp for maxHP/16 (min 1). The foe takes no
+    // other damage here -- the forced player move is Sandstorm and the foe
+    // passes no action -- so its HP shows the chip alone. This fails if Golem
+    // were chipped.
+    it('sanity: a Rock/Ground foe takes no sand chip, a Machamp foe does', () => {
+      for (const seed of SEEDS) {
+        const machamp = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM').session
+        const machampMax = machamp.state.battlers[1]!.mon.maxHp
+        expect(machamp.state.battlers[1]!.mon.hp).toBe(machampMax - Math.max(1, Math.trunc(machampMax / 16)))
+
+        const golem = forcedTurn(seed, PLAYER_MOVES, GOLEM(), 'MOVE_SANDSTORM').session
+        expect(golem.state.battlers[1]!.mon.hp).toBe(golem.state.battlers[1]!.mon.maxHp)
+      }
+    })
+
+    it('sanity: Sandstorm with a sandstorm already up does not reset the countdown', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM', (s) => {
+          // WEATHER_SANDSTORM_TEMPORARY with started.weather false is what a
+          // real sandstorm leaves at the start of the next turn. "ANY"
+          // (temporary | permanent together) is not producible:
+          // TryChangeBattleWeather assigns exactly one flag (battle_util.c:
+          // 3732), as does SetPermanentWeather (:3749).
+          s.state.field.weather = WEATHER_SANDSTORM_TEMPORARY
+          s.state.field.weatherDuration = 5
+          s.state.field.timers.started.weather = false
+        })
+        // TryChangeBattleWeather returns FALSE when the matching flag is
+        // already set (battle_util.c:3731), so the bit survives and
+        // `started.weather` stays false. The end-of-turn countdown still runs
+        // (ENDTURN_SANDSTORM, :1982-1996, gated on `!started.weather`), so the
+        // duration drops 5 -> 4 rather than being reset to WEATHER_DURATION.
+        expect(hasFlag(session.state.field.weather, WEATHER_SANDSTORM_TEMPORARY)).toBe(true)
+        expect(session.state.field.timers.started.weather).toBe(false)
+        expect(session.state.field.weatherDuration).toBe(4)
+      }
+    })
+
     it('positive: Sandstorm is chosen on at least 6 of 8 seeds', () => {
       expect(picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM')).toBeGreaterThanOrEqual(6)
     })
@@ -551,8 +592,9 @@ describe('cycle 142 - field scenarios', () => {
 
     it('twin: with a sandstorm already up, Sandstorm is chosen on at most 1 of 8 seeds', () => {
       const n = picks(PLAYER_MOVES, MACHAMP(), 'MOVE_SANDSTORM', (s) => {
-        s.state.field.weather = WEATHER_SANDSTORM_ANY
+        s.state.field.weather = WEATHER_SANDSTORM_TEMPORARY
         s.state.field.weatherDuration = 5
+        s.state.field.timers.started.weather = false
       })
       expect(n).toBeLessThanOrEqual(1)
     })
@@ -572,6 +614,28 @@ describe('cycle 142 - field scenarios', () => {
         expect(hasFlag(session.state.field.statuses, STATUS_FIELD_GRASSY_TERRAIN)).toBe(true)
         // TERRAIN_DURATION == 8 (include/battle_util.h:52).
         expect(session.state.field.timers.terrainTimer).toBe(8)
+      }
+    })
+
+    // VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS (battle_script_commands.c:
+    // 6876-6886) skips a non-grounded battler and never consults the terrain
+    // bit, while IsBattlerTerrainAffected (battle_util.c:4901-4928) is what the
+    // REST of the terrain machinery gates on. The foe passes no action, so the
+    // player takes no damage; the only HP change is the end-of-turn heal, and
+    // the grounded control heals exactly maxHP/16 (min 1) while the Flying
+    // player heals nothing.
+    it('sanity: a Flying player is not healed by Grassy Terrain', () => {
+      for (const seed of SEEDS) {
+        const grounded = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', HALF_HP).session
+        const flying = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_GRASSY_TERRAIN', (s) => {
+          HALF_HP(s)
+          s.state.battlers[0]!.mon.types = ['NORMAL', 'FLYING', 'MYSTERY']
+          s.state.sides[0].party[0]!.types = ['NORMAL', 'FLYING', 'MYSTERY']
+        }).session
+        const maxHp = grounded.state.battlers[0]!.mon.maxHp
+        const startHp = Math.floor(maxHp / 2)
+        expect(grounded.state.battlers[0]!.mon.hp).toBe(startHp + Math.max(1, Math.trunc(maxHp / 16)))
+        expect(flying.state.battlers[0]!.mon.hp).toBe(startHp)
       }
     })
 
@@ -605,6 +669,20 @@ describe('cycle 142 - field scenarios', () => {
         expect(hasFlag(session.state.field.statuses, STATUS_FIELD_TRICK_ROOM)).toBe(true)
         expect(session.state.field.timers.trickRoomTimer).toBe(5)
         expect(session.state.field.timers.started.trickRoom).toBe(true)
+      }
+    })
+
+    // battle_main.c:4325 reverses the order, so a 999-Speed player is the
+    // FASTER side and the room is worth MINUS its per-turn value. The leaf
+    // reads Trick Room's 0.1 * min(timer 5, horizon 3) = 0.3 with the sign of
+    // the effective-Speed comparison (expectimax.ts `trickRoomValue`), and no
+    // other term is live here: no status, hazard, weather or terrain.
+    it('sanity: a 999-Speed player is faster, so Trick Room scores negative', () => {
+      for (const seed of SEEDS) {
+        const { session } = forcedTurn(seed, PLAYER_MOVES, MACHAMP(), 'MOVE_TRICK_ROOM', (s) => {
+          s.state.battlers[0]!.mon.rawStats.spe = 999
+        })
+        expect(statusScore(session.state)).toBeCloseTo(-0.3, 10)
       }
     })
 

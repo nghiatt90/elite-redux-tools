@@ -601,7 +601,7 @@ function sideFieldScore(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup
  * battle_util.c:7087. */
 const TERRAIN_BOOST_VALUE = 0.05
 /** Flat value of one turn of a rain/sun move-type boost or drop. MODEL CHOICE;
- * the C's multipliers are battle_util.c:7562-7598 (1.5 temporary/primal, 1.2
+ * the C's multipliers are battle_util.c:7562-7607 (1.5 temporary/primal, 1.2
  * permanent, 0.5 for the disfavoured type). The flat weight deliberately does
  * not scale with them. */
 const WEATHER_BOOST_VALUE = 0.05
@@ -649,13 +649,36 @@ function weatherHasEffectLocal(state: BattleState): boolean {
  * one does `!started.weather && --weatherDuration == 0`, and the tick that
  * reaches zero runs BattleScript_SandStormHailEnds (data/battle_scripts_1.s:
  * 7340-7344), which deals no damage. So a temporary weather damages
- * `weatherDuration` times when it was just set, and `weatherDuration - 1`
- * otherwise. MODEL CHOICE: capped by STATUS_HORIZON_TURNS. */
+ * `weatherDuration - 1` times.
+ *
+ * `started.weather` does NOT hold back any of those FUTURE ticks: the leaf is
+ * scored after `stepTurn`, and every `started` flag is zeroed at the start of
+ * the next turn (battle_main.c:4589-4595 `ZERO(gFieldTimers.started)`, sim
+ * turn.ts:4495 `clearStartedFlags`), so every future end-of-turn countdown runs
+ * with `started` false -- which is why `timerTurns` ignores it too.
+ * MODEL CHOICE: capped by STATUS_HORIZON_TURNS. */
 function weatherTicks(state: BattleState): number {
   if (hasFlag(state.field.weather, WEATHER_PERMANENT)) return STATUS_HORIZON_TURNS
-  const duration = state.field.weatherDuration
-  const ticks = state.field.timers.started.weather ? duration : duration - 1
-  return Math.max(0, Math.min(ticks, STATUS_HORIZON_TURNS))
+  return timerTurns(state.field.weatherDuration - 1)
+}
+
+/** Turns left on the rain/sun Water/Fire multiplier. The multiplier is applied
+ * in damage calculation for every move while the weather bit is set
+ * (battle_util.c:7562-7607) and the bit is cleared only by the end-of-turn
+ * decrement that reaches 0 (ENDTURN_RAIN :1959-1981, ENDTURN_SUN :1998-2013),
+ * so a temporary weather boosts on each of its `weatherDuration` remaining
+ * turns -- unlike the chip, the clearing turn still counts, because the
+ * decrement runs at the END of the turn and that turn's moves are already
+ * boosted. For the same reason as `weatherTicks`, `started.weather` is not
+ * read: it never holds back a future decrement.
+ *
+ * Permanent weather never ticks down (the `WEATHER_*_PERMANENT` guards plus
+ * `!(WEATHER_RAIN_PRIMAL)` / `!(WEATHER_SUN_PRIMAL)` at :1963 / :2002), so it
+ * keeps the full horizon. WEATHER_PERMANENT (constants.ts:359-361) already
+ * includes WEATHER_PRIMAL_ANY, so the primal bits need no separate clause. */
+function weatherBoostTurns(state: BattleState): number {
+  if (hasFlag(state.field.weather, WEATHER_PERMANENT)) return STATUS_HORIZON_TURNS
+  return timerTurns(state.field.weatherDuration)
 }
 
 /** IsSandImmune, battle_script_commands.c:10376-10386, data-free half. Left
@@ -695,17 +718,23 @@ function activeMonGrounded(types: readonly string[]): boolean {
  * loop that follows is BattleScript_GrassyTerrainHeals ->
  * VARIOUS_CHECK_IF_GRASSY_TERRAIN_HEALS (battle_script_commands.c:6876-6886)
  * and never tests the field bit -- so Grassy still heals on the clearing tick.
- * A temporary terrain therefore ticks `terrainTimer` more times when not
- * started, and `terrainTimer + 1` when the just-set turn is included
+ * A temporary terrain therefore heals `terrainTimer` times
  * (`clearingTickActs = true`).
  *
  * TOXIC TERRAIN differs, ENDTURN_TOXIC_TERRAIN, battle_util.c:2124-2146: the
  * countdown and the `gFieldStatuses &= ~STATUS_FIELD_TOXIC_TERRAIN` clear
  * (:2128-2133) run FIRST, and the damage loop's
  * `FILTER(IsBattlerTerrainAffected(i, STATUS_FIELD_TOXIC_TERRAIN))`
- * (:2134-2139 -> IsTerrainActive, :4901-4903) tests the field bit -- already
- * gone on the clearing tick. So Toxic chips `terrainTimer - 1` times when not
- * started and `terrainTimer` times when started (`clearingTickActs = false`).
+ * (:2134-2139 -> IsTerrainActive, :4886-4889) tests the field bit -- already
+ * gone on the clearing tick. So Toxic chips `terrainTimer - 1` times
+ * (`clearingTickActs = false`).
+ *
+ * `started.terrain` is not read. The leaf is scored after `stepTurn`, and every
+ * `started` flag is zeroed at the start of the next turn (battle_main.c:
+ * 4589-4595 `ZERO(gFieldTimers.started)`, sim turn.ts:4495
+ * `clearStartedFlags`), so it never holds back any FUTURE decrement; every
+ * future end-of-turn countdown runs with `started` false, exactly as
+ * `timerTurns` assumes.
  *
  * `countdownBlocked` is Toxic Terrain's `!IsAbilityOnField(ABILITY_STENCH)`
  * gate (:2127), which freezes the timer so the full horizon stays.
@@ -713,9 +742,7 @@ function activeMonGrounded(types: readonly string[]): boolean {
 function terrainTicks(state: BattleState, countdownBlocked: boolean, clearingTickActs: boolean): number {
   if (hasFlag(state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) || countdownBlocked) return STATUS_HORIZON_TURNS
   const timer = state.field.timers.terrainTimer
-  const started = state.field.timers.started.terrain
-  const ticks = started ? timer + (clearingTickActs ? 1 : 0) : timer - (clearingTickActs ? 0 : 1)
-  return Math.max(0, Math.min(ticks, STATUS_HORIZON_TURNS))
+  return timerTurns(clearingTickActs ? timer : timer - 1)
 }
 
 /** The bare type names of `mon`'s DAMAGING moves. MODEL CHOICE: "damaging" is
@@ -763,17 +790,25 @@ function foeSplitShares(
   return { phys: phys / damaging, spec: spec / damaging }
 }
 
-/** Rain/sun Water/Fire multiplier site, battle_util.c:7562-7598: under rain
+/** Rain/sun Water/Fire multiplier site, battle_util.c:7562-7607: under rain
  * Water is boosted and Fire halved, under sun the reverse. The multipliers are
  * the C's (1.5 temporary/primal, 1.2 permanent, 0.5 for the disfavoured type);
- * the flat WEATHER_BOOST_VALUE per turn is a MODEL CHOICE. Left out: the
- * `EFFECT_WEATHER_BOOST` branch (:7565), Weather Double Boost (:7560), Nika and
- * Steam Eruption's modifier floor (:7584-7588), and POWER_WEATHER_ANY's
- * DOWNPOUR-only bit (the C has no branch for it). */
+ * the flat WEATHER_BOOST_VALUE per turn is a MODEL CHOICE, and the turn count
+ * is `weatherBoostTurns`. Left out: the `EFFECT_WEATHER_BOOST` branch (:7565),
+ * Weather Double Boost (:7560), Nika and Steam Eruption's modifier floor
+ * (:7584-7588), and POWER_WEATHER_ANY's DOWNPOUR-only bit (the C has no branch
+ * for it).
+ *
+ * MODEL CHOICE: the multiplier is gated by IsBattlerWeatherAffected, which
+ * rejects sun/rain when the battler holds HOLD_EFFECT_UTILITY_UMBRELLA
+ * (:8644-8648: `if (gBattleWeather & (WEATHER_SUN_ANY | WEATHER_RAIN_ANY) &&
+ * GetBattlerHoldEffect(battlerId, TRUE) == HOLD_EFFECT_UTILITY_UMBRELLA)
+ * return FALSE;`). A held item is not readable from this leaf scorer, so an
+ * Umbrella holder still gets the boost. */
 function weatherMoveTypeBurden(state: BattleState, types: Set<string>): number {
   if (!weatherHasEffectLocal(state)) return 0
   const weather = state.field.weather
-  const ticks = weatherTicks(state)
+  const ticks = weatherBoostTurns(state)
   if (ticks === 0) return 0
   const rain = hasFlag(weather, WEATHER_RAIN_ANY)
   const sun = hasFlag(weather, WEATHER_SUN_ANY)
@@ -791,7 +826,16 @@ function weatherMoveTypeBurden(state: BattleState, types: Set<string>): number {
 /** IsBattlerTerrainAffected's type switch, battle_util.c:7064-7090: the terrain
  * bit maps to a move type and a matching move gets `MUL_MODIFIER(1.3)`. The
  * caller has already gated the grounded clause; TERRAIN_HAS_EFFECT is the
- * Clueless check. MODEL CHOICE: flat TERRAIN_BOOST_VALUE per turn. */
+ * Clueless check. The boost lasts `terrainTicks(..., true)` turns: it applies
+ * during the moves of every turn the bit is set, and the bit clears at the
+ * end-of-turn decrement that reaches 0. MODEL CHOICE: flat
+ * TERRAIN_BOOST_VALUE per turn.
+ *
+ * MODEL CHOICE: IsBattlerTerrainAffected also rejects a semi-invulnerable
+ * battler (:4903 `if (gStatuses3[battlerId] & STATUS3_SEMI_INVULNERABLE)
+ * return FALSE;`). This scorer reads only the type and ignores that flag, so
+ * an attacker in a semi-invulnerable turn still counts as boosted -- in the C
+ * it would not be attacking that turn at all. */
 function terrainMoveTypeBurden(state: BattleState, types: Set<string>): number {
   const terrain = state.field.statuses & STATUS_FIELD_TERRAIN_ANY
   if (!terrain) return 0
@@ -875,8 +919,7 @@ function sideFieldConditionBurden(state: BattleState, side: 0 | 1, moveLookup?: 
     ) {
       // The clearing tick does NOT chip: the bit is already cleared when the
       // damage loop's IsBattlerTerrainAffected filter runs (:2128-2133 vs
-      // :2134-2139), so Toxic uses `timer - 1` / `timer`, not Grassy's
-      // `timer` / `timer + 1`.
+      // :2134-2139), so Toxic uses `timer - 1`, not Grassy's `timer`.
       const ticks = terrainTicks(state, isAbilityOnField(state, 'ABILITY_STENCH'), false)
       const perTick = Math.max(1, Math.trunc(mon.maxHp / 16))
       burden += Math.min(ticks * perTick, mon.hp) / mon.maxHp
