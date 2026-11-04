@@ -136,6 +136,7 @@ describe('cycle 147 - statusTerms default flip', () => {
     })
   })
 
+  // Case 2 is the check not redundant with driver/evalScenarios.test.ts: it passes DEFAULT_EXPECTIMAX straight through chooseExpectimaxAction, whereas that file always builds its options with an explicit statusTerms: SCENARIO_TERMS.
   describe('Case 2: chooseExpectimaxAction default options carry statusTerms through entry point', () => {
     it('picks Spore on at least 6 of 8 seeds with default options', () => {
       const picks = SEEDS.filter((seed) => chosenMoveWith(seed, PLAYER_MOVES, MACHAMP(), DEFAULT_EXPECTIMAX) === 'MOVE_SPORE').length

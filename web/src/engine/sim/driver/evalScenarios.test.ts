@@ -8,9 +8,10 @@
 //
 // Each seed gets a fresh session; the starting position is edited right after
 // createSession (before beginTurn), and the expectimax policy picks with
-// `statusTerms: true`. A positive passes when the intended status move is chosen
-// on >= 6 of 8 seeds; a twin (the same position where the status cannot land)
-// passes when it is chosen on <= 1 of 8.
+// `statusTerms: SCENARIO_TERMS` (on by default, off when `EX_TERMS=0`). A
+// positive passes when the intended status move is chosen on >= 6 of 8 seeds;
+// a twin (the same position where the status cannot land) passes when it is
+// chosen on <= 1 of 8.
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -126,7 +127,7 @@ function setSide(
   if (patch.tailwindTimer !== undefined) sideState.timers.tailwindTimer = patch.tailwindTimer
 }
 
-// EX_TERMS=0 re-measures the positives with the status terms off (doc "Gate result")
+// EX_TERMS=0 re-measures the positives with the status terms off (docs/battle-sim/solver-evaluation.md, section "Gate result")
 const SCENARIO_TERMS = process.env.EX_TERMS !== '0'
 
 /** The move id the expectimax policy picks for one fresh seeded session. */
