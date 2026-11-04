@@ -73,6 +73,7 @@ import {
   isBattlerWeatherAffected,
 } from './statBuffs'
 import { findAbilitySlot, isTerrainActive } from './statusEffects'
+import { gateInnates } from './innateGate'
 
 export interface FormChangeDeps extends SwitchInAbilityDeps {}
 
@@ -285,13 +286,18 @@ export function changeBattlerForm(
     speciesData.types[2] ?? 'MYSTERY',
   ]
 
+  // UpdateAbilityStateIndicesForNewSpecies (src/battle_util.c:8805-8815) re-fetches
+  // the new species' innate slots through GetInnateInSlot for the PLAYER only and
+  // with the mon's own level; slot 0 (the chosen ability) is never gated.
+  const isPlayer = (battlerId & 1) === B_SIDE_PLAYER
+  const rawInnates: [string | null, string | null, string | null] = [
+    speciesData.innates[0] ?? null,
+    speciesData.innates[1] ?? null,
+    speciesData.innates[2] ?? null,
+  ]
   const newAbilities: AbilitySlots = {
     ability: speciesData.abilities[0] ?? null,
-    innates: [
-      speciesData.innates[0] ?? null,
-      speciesData.innates[1] ?? null,
-      speciesData.innates[2] ?? null,
-    ],
+    innates: isPlayer ? gateInnates(rawInnates, battler.mon.level, state.tier) : rawInnates,
   }
 
   updateAbilityStateIndices(battler, newAbilities)
@@ -836,13 +842,15 @@ export function undoMegaEvolution(
           baseData.types[1] ?? 'MYSTERY',
           baseData.types[2] ?? 'MYSTERY',
         ]
+        // The revert re-fetches the base species' innates; the player-side gate
+        // applies with the party mon's own level (GetInnateInSlot, :8799-8802).
         partyMon.abilities = {
           ability: baseData.abilities[0] ?? null,
-          innates: [
-            baseData.innates[0] ?? null,
-            baseData.innates[1] ?? null,
-            baseData.innates[2] ?? null,
-          ],
+          innates: gateInnates(
+            [baseData.innates[0] ?? null, baseData.innates[1] ?? null, baseData.innates[2] ?? null],
+            partyMon.level,
+            state.tier,
+          ),
         }
         const stats = formStats(partyMon, baseData.baseStats, baseSpecies)
         partyMon.rawStats = stats.rawStats

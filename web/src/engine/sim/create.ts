@@ -35,6 +35,7 @@ import type {
 } from './state'
 import { ABILITY_SLOT_COUNT, MOVE_HISTORY_COUNT, SWITCH_IN_ABILITY_DONE_COUNT, defaultStatStages } from './state'
 import { BATTLER_NONE, MAX_BATTLERS_COUNT, NUM_BATTLE_STATS, PARTY_SIZE, STAT_STAGE_CHECK_NOT_NEEDED, WEATHER_NONE } from './constants'
+import type { InnateTier } from './innateGate'
 
 function nullSlot4(): Slot4<string | null> {
   return [null, null, null, null]
@@ -419,6 +420,8 @@ export interface CreateBattleStateOptions {
   /** `AI_THINKING_STRUCT->aiFlags` -- from the trainer, so the caller supplies
    * it. See state.ts for why there is only one value for the whole battle. */
   aiFlags?: number
+  /** Difficulty tier; the player's innate gate reads it (state.ts). */
+  tier?: InnateTier
   rng: RandomSource
 }
 
@@ -466,6 +469,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     battleHistory: createBattleHistoryState(),
     battleTypeFlags: options.battleTypeFlags ?? 0,
     aiFlags: options.aiFlags ?? 0,
+    tier: options.tier ?? 'ace',
     aiSwitchMon: false,
     turnCount: 0,
     rng: options.rng,

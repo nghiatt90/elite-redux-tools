@@ -17,6 +17,7 @@
 import type { BattleStatKey, StatKey } from '../types'
 import type { AbilitySlots } from '../abilities/dispatch'
 import { NUM_BATTLE_STATS, DEFAULT_STAT_STAGE, MAX_MON_MOVES, AI_MOVE_HISTORY_COUNT, NUM_INNATE_PER_SPECIES, TOTAL_ABILITY_COUNT, HELL_MODE_EXTRA_ABILITIES } from './constants'
+import type { InnateTier } from './innateGate'
 
 /** A per-move-slot tuple. The C stores `moves[4]`, `pp[4]`,
  * `BattleHistory.usedMoves[battler][4]` and `AI_ThinkingStruct.score[4]` as
@@ -703,6 +704,10 @@ export interface BattleState {
    * opponent B's own flags are never read. AI_FLAG_DOUBLE_BATTLE is OR'd in at
    * :154. */
   aiFlags: number
+  /** The save's difficulty. `CanDisableInnates` (src/pokemon.c:6235) is false
+   * below DIFFICULTY_ELITE, so tier 'ace' never gates the player's innates;
+   * 'elite' and 'hell' do, with their own thresholds (innateGate.ts). */
+  tier: InnateTier
   /** `AI_THINKING_STRUCT->switchMon` (include/battle.h:373) -- set TRUE by
    * ChooseMoveOrAction_Singles' second switch check (battle_ai_main.c:313-315)
    * and consumed (read then cleared) by ShouldSwitchIfAllBadMoves

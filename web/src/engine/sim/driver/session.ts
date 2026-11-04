@@ -20,6 +20,7 @@ import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
+import { gateInnates } from '../innateGate'
 import type { GroundingContext } from '../grounding'
 import { battlerHasSimAbility } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
@@ -211,6 +212,11 @@ export function createSession(options: SessionOptions): BattleSession {
   const data = options.data
   const playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
+  // GetInnateInSlot (src/battle_util.c:8799-8802) gates the PLAYER's innates by
+  // level and difficulty; the AI keeps all three (buildOpponentParty is untouched).
+  for (const mon of playerParty) {
+    mon.abilities.innates = gateInnates(mon.abilities.innates, mon.level, tier)
+  }
 
   const playerMaxLevel = Math.max(...playerParty.map((m) => m.level))
   const opponentParty = buildOpponentParty(options.opponentTrainer, tier, playerMaxLevel, data)
@@ -227,6 +233,7 @@ export function createSession(options: SessionOptions): BattleSession {
     opponentParty,
     battleTypeFlags: 0,
     aiFlags: battleAiSetupFlags(options.opponentTrainer, 0),
+    tier,
     rng: options.rng,
   })
 
