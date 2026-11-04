@@ -4,14 +4,20 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ALLOWLIST,
   MOVE_INVENTORY_DOC_PATH,
+  buildEliteTrainerIndex,
+  buildUnportedGroups,
+  formatUnportedGroup,
   generateMoveInventoryDoc,
+  flagHasTestEvidence,
   loadFlagMetadata,
   loadMoveBehaviors,
   loadMoves,
   parseScripts,
   runInventory,
+  stripComments,
   type InventoryAllowlistEntry,
   type MoveRecord,
+  type TrainerRecord,
 } from './moveInventory'
 
 const moves = loadMoves()
@@ -27,10 +33,10 @@ const DISTINCT_SCRIPTS = 322
 const DISTINCT_FLAG_KEYS = 42
 
 /** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_PAIR_COUNT = 2155
+export const UNPORTED_PAIR_COUNT = 2296
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 2066
+export const REGISTERED_UNTESTED_PAIR_COUNT = 2016
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -158,6 +164,156 @@ describe('move completeness inventory', () => {
       expect(unit?.status).toBe('unported')
     }
     expect(fabricatedResult.totalUnclassified).toBe(0)
+  })
+
+  it('negative cases: registered-but-untested, ported, comment-only and unread flags (D3)', () => {
+    const move: MoveRecord = {
+      id: 'MOVE_D3_REGISTERED',
+      effect: 'EFFECT_D3_REGISTERED',
+      customBehavior: { legacyConfig: 'BattleScript_EffectHit' },
+    }
+    const registeredSource = "switch (effect) { case 'EFFECT_D3_REGISTERED': break }"
+
+    // 1. Registered in production source, named in no test -> unported + registeredUntested.
+    const untested = runInventory([move], {}, {
+      productionSource: registeredSource,
+      testSource: '',
+      scripts,
+      allowlist: [],
+    })
+    const untestedEffect = untested.units.find((unit) => unit.kind === 'move-effect')
+    expect(untestedEffect?.status).toBe('unported')
+    expect(untestedEffect?.registeredUntested).toBe(true)
+    expect(untested.totalRegisteredUntested).toBeGreaterThan(0)
+    expect(untested.totalUnported).toBeGreaterThan(0)
+
+    // 2. Named in both -> ported.
+    const both = runInventory([move], {}, {
+      productionSource: registeredSource,
+      testSource: 'calculateMoveDamage(EFFECT_D3_REGISTERED)',
+      scripts,
+      allowlist: [],
+    })
+    expect(both.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
+
+    // 3. Named only inside a comment -> not ported. `runInventory` receives the already
+    // stripped text; `stripComments` is the pure helper that removes the mention.
+    const commented = stripComments(
+      "// case 'EFFECT_D3_REGISTERED':\n/* === 'EFFECT_D3_REGISTERED' */\nconst unrelated = 1",
+    )
+    expect(commented).not.toContain('EFFECT_D3_REGISTERED')
+    const commentOnly = runInventory([move], {}, {
+      productionSource: commented,
+      testSource: '',
+      scripts,
+      allowlist: [],
+    })
+    const commentOnlyEffect = commentOnly.units.find((unit) => unit.kind === 'move-effect')
+    expect(commentOnlyEffect?.status).toBe('unported')
+    expect(commentOnlyEffect?.registeredUntested).toBe(false)
+
+    // 4. A flag read in production but never named in a test -> registeredUntested;
+    // a flag never read -> unported with no production path.
+    const flagMove: MoveRecord = {
+      id: 'MOVE_D3_FLAG',
+      effect: 'EFFECT_D3_FLAG',
+      flags: { d3SyntheticFlag: true },
+    }
+    const readFlag = runInventory([flagMove], {}, {
+      productionSource: 'if (move.flags.d3SyntheticFlag) return true',
+      testSource: '',
+      scripts,
+      allowlist: [],
+    })
+    const readUnit = readFlag.units.find((unit) => unit.kind === 'flag')
+    expect(readUnit?.status).toBe('unported')
+    expect(readUnit?.registeredUntested).toBe(true)
+
+    const unreadFlag = runInventory([flagMove], {}, {
+      productionSource: 'const unrelated = 1',
+      testSource: '',
+      scripts,
+      allowlist: [],
+    })
+    const unreadUnit = unreadFlag.units.find((unit) => unit.kind === 'flag')
+    expect(unreadUnit?.status).toBe('unported')
+    expect(unreadUnit?.registeredUntested).toBe(false)
+  })
+
+  it('flags need property/helper test evidence, not a bare quoted mention (D5)', () => {
+    expect(flagHasTestEvidence('sound', 'const move = { flags: { sound: true } }')).toBe(true)
+    expect(flagHasTestEvidence('sound', 'if (move.flags.sound) {')).toBe(true)
+    expect(flagHasTestEvidence('sound', "hasMoveFlag(mon, 'sound')")).toBe(true)
+    expect(flagHasTestEvidence('sound', "a description that says 'sound' in prose")).toBe(false)
+  })
+
+  it('anchors the four hand-derived move behaviors (D2)', () => {
+    // 1. EFFECT_SLEEP's legacy script.
+    expect(behaviors.EFFECT_SLEEP?.legacyConfig).toBe('BattleScript_EffectSleep')
+
+    // 2. EFFECT_BURN_HIT: one attack block whose only secondary is MOVE_EFFECT_BURN,
+    // generated as `setmoveeffect MOVE_EFFECT_BURN; goto BattleScript_EffectHit`
+    // (MoveScriptGenerator.kt:76-82).
+    const burnHitSecondaries = behaviors.EFFECT_BURN_HIT?.attack?.secondaryEffects ?? []
+    expect(burnHitSecondaries.map((secondary) => secondary.effect)).toEqual(['MOVE_EFFECT_BURN'])
+
+    // 3. EFFECT_HIT is plain damage: no attack secondaryEffects, BattleScript_EffectHit,
+    // and no move with EFFECT_HIT produces a secondary-effect unit.
+    expect(behaviors.EFFECT_HIT?.attack?.secondaryEffects).toBeUndefined()
+    expect(behaviors.EFFECT_HIT?.legacyConfig).toBe('BattleScript_EffectHit')
+    const hitMoves = moves.filter((move) => move.effect === 'EFFECT_HIT')
+    expect(hitMoves.length).toBeGreaterThan(0)
+    for (const move of hitMoves) {
+      expect(
+        result.units.some((unit) => unit.kind === 'secondary-effect' && unit.moveId === move.id),
+      ).toBe(false)
+    }
+
+    // 4. MOVE_ACID's inline customBehavior overrides its effect's behavior; the only
+    // secondary-effect unit is MOVE_EFFECT_SP_DEF_MINUS_1.
+    const acid = moves.find((move) => move.id === 'MOVE_ACID')
+    expect(acid?.effect ?? null).toBeNull()
+    expect(acid?.customBehavior?.attack?.secondaryEffects?.map((secondary) => secondary.effect)).toEqual([
+      'MOVE_EFFECT_SP_DEF_MINUS_1',
+    ])
+    const acidSecondaries = result.units.filter(
+      (unit) => unit.kind === 'secondary-effect' && unit.moveId === 'MOVE_ACID',
+    )
+    expect(acidSecondaries.map((unit) => unit.unit)).toEqual(['MOVE_EFFECT_SP_DEF_MINUS_1'])
+  })
+
+  it('groups unported units and reports elite-tier trainers, collapsing lists (D1)', () => {
+    const syntheticMoves: MoveRecord[] = Array.from({ length: 20 }, (_, index) => ({
+      id: `MOVE_SYNTH_${String(index).padStart(2, '0')}`,
+      effect: 'EFFECT_SYNTH_GROUP',
+      customBehavior: { legacyConfig: 'BattleScript_EffectHit' },
+    }))
+    const syntheticResult = runInventory(syntheticMoves, {}, {
+      productionSource: '',
+      testSource: '',
+      scripts,
+      allowlist: [],
+    })
+    const trainers: TrainerRecord[] = [
+      {
+        id: 'TRAINER_SYNTH_B',
+        parties: { elite: [{ moves: ['MOVE_SYNTH_00', 'MOVE_SYNTH_01'] }], ace: [{ moves: ['MOVE_SYNTH_00'] }] },
+      },
+      { id: 'TRAINER_SYNTH_A', parties: { elite: [{ moves: ['MOVE_SYNTH_19'] }] } },
+      { id: 'TRAINER_SYNTH_ACE_ONLY', parties: { ace: [{ moves: ['MOVE_SYNTH_02'] }] } },
+    ]
+    const groups = buildUnportedGroups(syntheticResult, buildEliteTrainerIndex(trainers))
+    const group = groups.find((candidate) => candidate.kind === 'move-effect' && candidate.unit === 'EFFECT_SYNTH_GROUP')
+    expect(group?.moveIds).toHaveLength(20)
+    expect(group?.trainerIds).toEqual(['TRAINER_SYNTH_A', 'TRAINER_SYNTH_B'])
+    expect(group?.trainerIds).not.toContain('TRAINER_SYNTH_ACE_ONLY')
+
+    const line = formatUnportedGroup(group!)
+    expect(line).toContain('20 moves (first 15)')
+    expect(line).toContain('MOVE_SYNTH_14')
+    expect(line).not.toContain('MOVE_SYNTH_15')
+    expect(line).toContain('2 elite-tier trainers')
+    expect(line).toContain('TRAINER_SYNTH_A')
   })
 
   it('script parser detects direct and delegated damage steps', () => {

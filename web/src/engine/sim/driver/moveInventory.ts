@@ -124,6 +124,29 @@ const MOVE_EFFECT_PROTO_PATH = 'pipeline/.upstream/er-config/MoveEffect.proto'
 const MOVE_LIST_PROTO_PATH = 'pipeline/.upstream/er-config/MoveList.proto'
 const POKEMON_HEADER_PATH = 'pipeline/.upstream/eliteredux-source/include/constants/pokemon.h'
 const EMIT_PY_PATH = 'pipeline/src/erdata/emit.py'
+const TRAINERS_PATH = join(REPO_ROOT, 'data/v2.65beta/trainers.json')
+
+/**
+ * Files whose consuming-position references count as production move-effect handling.
+ * A name in any other file -- or as a bare string in an array/Set/Record key, import
+ * list or data table -- does not count, even if the file is under `web/src/engine/`.
+ * See the D4 rule in REPORT.md / the generated doc.
+ */
+const MOVE_EFFECT_CONSUMER_FILES = [
+  'web/src/engine/basePower.ts',
+  'web/src/engine/multiHit.ts',
+  'web/src/engine/calculate.ts',
+  'web/src/engine/sim/hitScripts.ts',
+  'web/src/engine/sim/damageResolver.ts',
+  'web/src/engine/sim/attackCanceller.ts',
+  'web/src/engine/sim/accuracy.ts',
+  'web/src/engine/sim/moveTargetFlags.ts',
+  'web/src/engine/sim/moveEnd.ts',
+  'web/src/engine/sim/turn.ts',
+  'web/src/engine/sim/turnOrder.ts',
+  'web/src/engine/sim/moveEffects.ts',
+  'web/src/engine/sim/statusEffects.ts',
+]
 
 const QUALIFYING_TEST_RE = /createSession|executeTurn|stepTurn|useMove|buildMoveAction|calculateMoveDamage/
 const DAMAGE_STEP_COMMANDS = new Set(['damagecalc', 'typecalc', 'adjustdamage', 'healthbarupdate', 'datahpupdate'])
@@ -162,7 +185,7 @@ function productionTypeScriptFiles(): string[] {
 }
 
 /** Removes comments so identifier mentions inside prose do not count as implementations. */
-function stripComments(source: string): string {
+export function stripComments(source: string): string {
   const withoutBlocks = source.replace(/\/\*[\s\S]*?\*\//g, '')
   return withoutBlocks
     .split('\n')
@@ -209,6 +232,95 @@ export function loadProductionSource(): string {
     parts.push(stripNoteOnlyBlocks(repoRelative, stripComments(source)))
   }
   return parts.join('\n')
+}
+
+/**
+ * Comment-stripped text of the files whose consuming-position references count as a
+ * move-effect (and secondary-effect) production path.
+ */
+export function loadMoveEffectConsumerSource(): string {
+  return MOVE_EFFECT_CONSUMER_FILES.map((repoRelative) =>
+    stripComments(readFileSync(join(REPO_ROOT, repoRelative), 'utf-8')),
+  ).join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Consumption extraction (cycle 151 D4)
+// ---------------------------------------------------------------------------
+//
+// A unit is handled only when its identifier appears in a *consuming* position:
+//   - a `case 'X':` / `case X:` label, or
+//   - an equality/inequality comparison `=== 'X'` / `!== 'X'` / `=== X` / `!== X`.
+// Bare membership in an array, Set, Record key, import list or data table is not a port.
+
+/** Identifiers referenced by `case` labels or `===`/`!==` comparisons in `source`. */function extractConsumedNames(source: string, prefix: 'EFFECT_' | 'MOVE_EFFECT_'): Set<string> {
+  const names = new Set<string>()
+  const caseRe = new RegExp(`case\\s+['"]?(${prefix}[A-Z0-9_]+)['"]?\\s*:`, 'g')
+  const compareRe = new RegExp(`(?:===|!==)\\s*['"]?(${prefix}[A-Z0-9_]+)['"]?`, 'g')
+  for (const re of [caseRe, compareRe]) {
+    let match: RegExpExecArray | null
+    while ((match = re.exec(source)) !== null) names.add(match[1])
+  }
+  return names
+}
+
+function tryExtractFunctionSlice(source: string, declaration: string): string {
+  try {
+    return extractFunctionSlice(source, declaration)
+  } catch {
+    return ''
+  }
+}
+
+interface ConsumptionIndex {
+  moveEffects: Set<string>
+  secondaryEffects: Set<string>
+  /** Inclusive numeric ranges guarded by `baseEffectNum >= A` ... `baseEffectNum <= B`. */
+  secondaryRanges: Array<[number, number]>
+}
+
+function resolveMoveEffectNumber(name: string): number | undefined {
+  if (Object.prototype.hasOwnProperty.call(SECONDARY_MOVE_EFFECT_MAP, name)) return SECONDARY_MOVE_EFFECT_MAP[name]
+  if (Object.prototype.hasOwnProperty.call(GENERATED_MOVE_EFFECT_NUMBERS, name)) return GENERATED_MOVE_EFFECT_NUMBERS[name]
+  return undefined
+}
+
+/**
+ * Builds the consumption index from comment-stripped consumer source. Move effects use
+ * `case 'EFFECT_X':` / `=== 'EFFECT_X'` on the whole consumer text; secondary effects
+ * additionally resolve the stat-change guard ranges inside `applySecondaryMoveEffects`.
+ */
+export function buildConsumptionIndex(source: string): ConsumptionIndex {
+  const moveEffects = extractConsumedNames(source, 'EFFECT_')
+
+  const applySecondary = tryExtractFunctionSlice(source, 'export function applySecondaryMoveEffects(')
+  const applyPrimary = tryExtractFunctionSlice(source, 'export function applyPrimaryStatusEffect(')
+  const secondaryEffects = new Set<string>()
+  for (const name of extractConsumedNames(applySecondary, 'MOVE_EFFECT_')) secondaryEffects.add(name)
+  for (const name of extractConsumedNames(applyPrimary, 'MOVE_EFFECT_')) secondaryEffects.add(name)
+  // Stored-for-move-end effects are consumed by moveEnd.ts's `case 'MOVE_EFFECT_X':` switch,
+  // which lives outside the two functions above; the whole consumer text is still a
+  // consuming-position match (no bare-word fallback).
+  for (const name of extractConsumedNames(source, 'MOVE_EFFECT_')) secondaryEffects.add(name)
+
+  const secondaryRanges: Array<[number, number]> = []
+  const rangeRe =
+    /baseEffectNum\s*>=\s*(MOVE_EFFECT_[A-Z0-9_]+)[\s\S]{0,80}?baseEffectNum\s*<=\s*(MOVE_EFFECT_[A-Z0-9_]+)/g
+  let match: RegExpExecArray | null
+  while ((match = rangeRe.exec(applySecondary)) !== null) {
+    const low = resolveMoveEffectNumber(match[1])
+    const high = resolveMoveEffectNumber(match[2])
+    if (low !== undefined && high !== undefined) secondaryRanges.push([low, high])
+  }
+
+  return { moveEffects, secondaryEffects, secondaryRanges }
+}
+
+function secondaryIsConsumed(name: string, index: ConsumptionIndex): boolean {
+  if (index.secondaryEffects.has(name)) return true
+  const value = resolveMoveEffectNumber(name)
+  if (value === undefined) return false
+  return index.secondaryRanges.some(([low, high]) => value >= low && value <= high)
 }
 
 /** Concatenated text of sim test files that exercise the action/damage entry points. */
@@ -399,12 +511,17 @@ export function flagHasProductionRead(key: string, productionSource: string): bo
   )
 }
 
-/** Test evidence for a flag: the exact key is used as a property or quoted flag name. */
+/**
+ * Test evidence for a flag: the exact key is used as a move-flag property or read
+ * through a flag helper. A bare quoted occurrence (a description string, an unrelated
+ * field) is not evidence (cycle 151 D5).
+ */
 export function flagHasTestEvidence(key: string, testSource: string): boolean {
   const escaped = escapeRegExp(key)
   return (
     new RegExp(`\\b${escaped}\\s*:\\s*(?:true|false)`).test(testSource) ||
-    new RegExp(`['"]${escaped}['"]`).test(testSource)
+    new RegExp(`\\bflags\\??\\.${escaped}\\b`).test(testSource) ||
+    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(testSource)
   )
 }
 
@@ -431,7 +548,11 @@ function allowlistFor(
 interface ClassifyContext {
   allowlist: ReadonlyArray<InventoryAllowlistEntry>
   productionSource: string
+  /** Consuming-position identifiers from the restricted engine files. */
+  consumption: ConsumptionIndex
   testSource: string
+  /** Test source with comments removed; a comment is not flag test evidence (D5). */
+  flagTestSource: string
   effectStatus: Map<string, MoveUnitStatus>
   effectRegisteredUntested: Map<string, boolean>
   effectCitations: Map<string, string>
@@ -446,7 +567,9 @@ function classifyEffect(
 ): { status: MoveUnitStatus; registeredUntested: boolean } {
   const allow = allowlistFor('move-effect', effect, ctx.allowlist)
   if (allow) return { status: 'allowlisted', registeredUntested: false }
-  const production = isHandledMoveEffect(effect) || hasExactWord(ctx.productionSource, effect)
+  // Registry entry OR an occurrence in a consuming position. A bare identifier in an
+  // array/Set/Record key, import list or data table does not count (D4).
+  const production = isHandledMoveEffect(effect) || ctx.consumption.moveEffects.has(effect)
   const tested = VERIFIED_MOVE_EFFECTS.has(effect) || hasExactWord(ctx.testSource, effect)
   if (production && tested) return { status: 'ported', registeredUntested: false }
   if (production) return { status: 'unported', registeredUntested: true }
@@ -456,7 +579,9 @@ function classifyEffect(
 function classifySecondary(name: string, ctx: ClassifyContext): { status: MoveUnitStatus; registeredUntested: boolean } {
   const allow = allowlistFor('secondary-effect', name, ctx.allowlist)
   if (allow) return { status: 'allowlisted', registeredUntested: false }
-  const production = secondaryHasProductionPath(name) || hasExactWord(ctx.productionSource, name)
+  // Registry membership is necessary; the number (or its guard range / switch case) must
+  // also be consumed. A name that resolves to a number with no case is unported (D4).
+  const production = secondaryHasProductionPath(name) && secondaryIsConsumed(name, ctx.consumption)
   const tested = hasExactWord(ctx.testSource, name)
   if (production && tested) return { status: 'ported', registeredUntested: false }
   if (production) return { status: 'unported', registeredUntested: true }
@@ -467,7 +592,7 @@ function classifyFlag(key: string, ctx: ClassifyContext): { status: MoveUnitStat
   const allow = allowlistFor('flag', key, ctx.allowlist)
   if (allow) return { status: 'allowlisted', registeredUntested: false }
   const production = flagHasProductionRead(key, ctx.productionSource)
-  const tested = flagHasTestEvidence(key, ctx.testSource)
+  const tested = flagHasTestEvidence(key, ctx.flagTestSource)
   if (production && tested) return { status: 'ported', registeredUntested: false }
   if (production) return { status: 'unported', registeredUntested: true }
   return { status: 'unported', registeredUntested: false }
@@ -482,6 +607,8 @@ export function runInventory(
   behaviors: MoveBehaviors,
   options: {
     productionSource?: string
+    /** Overrides the consuming-position source used for move/secondary effects. */
+    consumerSource?: string
     testSource?: string
     scripts?: Map<string, ScriptRecord>
     allowlist?: ReadonlyArray<InventoryAllowlistEntry>
@@ -489,7 +616,14 @@ export function runInventory(
 ): MoveInventoryResult {
   const allowlist = options.allowlist ?? DEFAULT_ALLOWLIST
   const productionSource = options.productionSource ?? loadProductionSource()
+  // Synthetic callers that already pass a production source get the same text here;
+  // real runs read only the restricted consumer files.
+  const consumerSource =
+    options.consumerSource ??
+    (options.productionSource !== undefined ? options.productionSource : loadMoveEffectConsumerSource())
+  const consumption = buildConsumptionIndex(consumerSource)
   const testSource = options.testSource ?? loadQualifyingTestSource()
+  const flagTestSource = stripComments(testSource)
   const scripts = options.scripts ?? parseScripts()
   const effectProtoLines = loadMoveEffectProtoLines()
   const flagMetadata = loadFlagMetadata()
@@ -502,7 +636,9 @@ export function runInventory(
     const classified = classifyEffect(move.effect, {
       allowlist,
       productionSource,
+      consumption,
       testSource,
+      flagTestSource,
       effectStatus,
       effectRegisteredUntested,
       effectCitations,
@@ -548,7 +684,9 @@ export function runInventory(
       const classified = classifySecondary(name, {
         allowlist,
         productionSource,
+        consumption,
         testSource,
+        flagTestSource,
         effectStatus,
         effectRegisteredUntested,
         effectCitations,
@@ -573,7 +711,9 @@ export function runInventory(
       const classified = classifyFlag(key, {
         allowlist,
         productionSource,
+        consumption,
         testSource,
+        flagTestSource,
         effectStatus,
         effectRegisteredUntested,
         effectCitations,
@@ -671,17 +811,146 @@ export function runInventory(
 }
 
 // ---------------------------------------------------------------------------
-// Doc generation
+// Trainer grouping (cycle 151 D1)
 // ---------------------------------------------------------------------------
 
-function statusLabel(unit: MoveUnit): string {
-  if (unit.status === 'unported' && unit.registeredUntested) return 'registered, untested'
-  return unit.status
+export interface TrainerPartyMon {
+  moves?: string[]
 }
+
+export interface TrainerRecord {
+  id: string
+  parties?: {
+    ace?: TrainerPartyMon[]
+    elite?: TrainerPartyMon[]
+    hell?: TrainerPartyMon[]
+  }
+}
+
+export function loadTrainers(path: string = TRAINERS_PATH): TrainerRecord[] {
+  return JSON.parse(readFileSync(path, 'utf-8')) as TrainerRecord[]
+}
+
+/** move id -> sorted ids of the elite-tier trainers carrying it. Counted on the elite tier only. */
+export function buildEliteTrainerIndex(trainers: TrainerRecord[]): Map<string, string[]> {
+  const index = new Map<string, Set<string>>()
+  for (const trainer of trainers) {
+    for (const mon of trainer.parties?.elite ?? []) {
+      for (const moveId of mon.moves ?? []) {
+        let set = index.get(moveId)
+        if (!set) {
+          set = new Set()
+          index.set(moveId, set)
+        }
+        set.add(trainer.id)
+      }
+    }
+  }
+  const result = new Map<string, string[]>()
+  for (const [moveId, set] of index) result.set(moveId, [...set].sort())
+  return result
+}
+
+export interface UnportedGroup {
+  kind: MoveUnitKind
+  unit: string
+  statusLabel: string
+  moveIds: string[]
+  citations: string[]
+  trainerIds: string[]
+}
+
+function statusLabelOf(status: MoveUnitStatus, registeredUntested: boolean): string {
+  if (status === 'unported' && registeredUntested) return 'registered, untested'
+  return status
+}
+
+/**
+ * Groups unported (move, unit) pairs by unit, deterministically. Every group carries its
+ * distinct move ids, its distinct citations and the elite-tier trainers whose party has
+ * at least one of those moves.
+ */
+export function buildUnportedGroups(
+  result: MoveInventoryResult,
+  trainerIndex: Map<string, string[]>,
+): UnportedGroup[] {
+  const groups = new Map<string, { kind: MoveUnitKind; unit: string; units: MoveUnit[] }>()
+  for (const unit of result.units) {
+    if (unit.status !== 'unported') continue
+    const key = `${unit.kind}\u0000${unit.unit}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { kind: unit.kind, unit: unit.unit, units: [] }
+      groups.set(key, group)
+    }
+    group.units.push(unit)
+  }
+
+  const built: UnportedGroup[] = []
+  for (const group of groups.values()) {
+    const first = group.units[0]
+    const trainers = new Set<string>()
+    for (const moveId of new Set(group.units.map((unit) => unit.moveId))) {
+      for (const trainerId of trainerIndex.get(moveId) ?? []) trainers.add(trainerId)
+    }
+    built.push({
+      kind: group.kind,
+      unit: group.unit,
+      statusLabel: statusLabelOf(first.status, first.registeredUntested),
+      moveIds: [...new Set(group.units.map((unit) => unit.moveId))].sort(),
+      citations: [...new Set(group.units.map((unit) => unit.citation).filter(Boolean))].sort(),
+      trainerIds: [...trainers].sort(),
+    })
+  }
+
+  const kindOrder: MoveUnitKind[] = ['move-effect', 'secondary-effect', 'flag', 'legacy-script']
+  return built.sort((a, b) =>
+    a.kind !== b.kind
+      ? kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind)
+      : a.unit < b.unit
+        ? -1
+        : a.unit > b.unit
+          ? 1
+          : 0,
+  )
+}
+
+const GROUP_MOVE_LIST_LIMIT = 15
+const GROUP_TRAINER_LIST_LIMIT = 8
+
+/** One deterministic markdown line per group; move ids collapse to the first 15, trainers to the first 8. */
+export function formatUnportedGroup(group: UnportedGroup): string {
+  const quote = (id: string) => `\`${id}\``
+  const movePart =
+    group.moveIds.length > GROUP_MOVE_LIST_LIMIT
+      ? `${group.moveIds.length} moves (first ${GROUP_MOVE_LIST_LIMIT}): ${group.moveIds
+          .slice(0, GROUP_MOVE_LIST_LIMIT)
+          .map(quote)
+          .join(', ')}`
+      : `${group.moveIds.length} move${group.moveIds.length === 1 ? '' : 's'}: ${group.moveIds.map(quote).join(', ')}`
+  const citationPart = group.citations.length > 0 ? `; ${group.citations.join('; ')}` : ''
+  const trainerPart =
+    group.trainerIds.length === 0
+      ? 'no elite-tier trainer carries them'
+      : group.trainerIds.length > GROUP_TRAINER_LIST_LIMIT
+        ? `${group.trainerIds.length} elite-tier trainers (first ${GROUP_TRAINER_LIST_LIMIT}): ${group.trainerIds
+            .slice(0, GROUP_TRAINER_LIST_LIMIT)
+            .map(quote)
+            .join(', ')}`
+        : `${group.trainerIds.length} elite-tier trainer${group.trainerIds.length === 1 ? '' : 's'}: ${group.trainerIds
+            .map(quote)
+            .join(', ')}`
+  return `- \`${group.unit}\` (${group.statusLabel}): ${movePart}${citationPart}; ${trainerPart}`
+}
+
+// ---------------------------------------------------------------------------
+// Doc generation
+// ---------------------------------------------------------------------------
 
 export function generateMoveInventoryDoc(
   result: MoveInventoryResult,
   sourcesLockPath: string = SOURCES_LOCK_PATH,
+  trainersPath: string = TRAINERS_PATH,
 ): string {
   const sourcesLock = JSON.parse(readFileSync(sourcesLockPath, 'utf-8')) as {
     game_version?: string
@@ -693,6 +962,9 @@ export function generateMoveInventoryDoc(
   if (!elitereduxSourceSha || !erConfigSha || !gameVersion) {
     throw new Error(`sources.lock.json at ${sourcesLockPath} is missing required fields`)
   }
+  const trainerIndex = buildEliteTrainerIndex(loadTrainers(trainersPath))
+  const groups = buildUnportedGroups(result, trainerIndex)
+  const groupsOfKind = (kind: MoveUnitKind) => groups.filter((group) => group.kind === kind)
 
   const lines: string[] = []
   lines.push('# Move Completeness Inventory')
@@ -715,33 +987,49 @@ export function generateMoveInventoryDoc(
   lines.push('as unported. A pair is **unclassified** when the unit id is missing/empty. Allowlisted pairs cite upstream C.')
   lines.push('')
   lines.push(
-    '1. **move-effect**: the move\'s `effect` (`EFFECT_*`). Production = `isHandledMoveEffect` or an exact',
+    '1. **move-effect**: the move\'s `effect` (`EFFECT_*`). Production = `isHandledMoveEffect` or the id in a',
   )
   lines.push(
-    '   identifier in non-test `web/src/engine/**` source (comments and the `UNMODELLED_BASE_POWER_EFFECTS`/',
+    '   consuming position (`case \'EFFECT_X\':`, `=== \'EFFECT_X\'`, `!== \'EFFECT_X\'`) in the restricted engine',
   )
   lines.push(
-    '   `applySecondaryMoveEffects` plain-hit allowlists removed). Test evidence = exact id in a sim test using',
+    '   files `basePower.ts`, `multiHit.ts`, `calculate.ts` and `sim/{hitScripts,damageResolver,attackCanceller,',
   )
+  lines.push(
+    '   accuracy,moveTargetFlags,moveEnd,turn,turnOrder,moveEffects,statusEffects}.ts`. A bare string in an',
+  )
+  lines.push(
+    '   array/Set/Record key, import list or data table anywhere (including `web/src/engine/`) does not count.',
+  )
+  lines.push('   Test evidence = exact id in a sim test using')
   lines.push('   `createSession`/`executeTurn`/`stepTurn`/`useMove`/`buildMoveAction`/`calculateMoveDamage`,')
   lines.push('   or membership in `VERIFIED_MOVE_EFFECTS`.')
   lines.push(
     '2. **secondary-effect**: every `MOVE_EFFECT_*` in the behavior in force',
   )
   lines.push(
-    '   (`customBehavior ?? moveBehaviors[effect]`) plus `move.argument.effect`. Production =',
+    '   (`customBehavior ?? moveBehaviors[effect]`) plus `move.argument.effect`. Production = registry',
   )
   lines.push(
-    '   `SECONDARY_MOVE_EFFECT_MAP` / `GENERATED_MOVE_EFFECT_NUMBERS` / `MOVE_EFFECTS_STORED_FOR_MOVEEND`',
+    '   membership (`SECONDARY_MOVE_EFFECT_MAP` / `GENERATED_MOVE_EFFECT_NUMBERS` / `MOVE_EFFECTS_STORED_FOR_MOVEEND`)',
   )
-  lines.push('   or an exact identifier in production source.')
+  lines.push(
+    '   **and** consumption: a `case` label in `applyPrimaryStatusEffect`, a `===`/`!==` comparison in the named',
+  )
+  lines.push(
+    '   functions, or an inclusive `baseEffectNum >= A ... <= B` stat-change guard range. A registered name whose',
+  )
+  lines.push('   number has no case is unported.')
   lines.push(
     '3. **flag**: every true key in `move.flags`. Production = a move-flag read in engine source',
   )
   lines.push(
     '   (`flags.<key>`, `moveFlags.<key>`, `hasMoveFlag(..., \'<key>\')`, `flag === \'<key>\'`). Test evidence =',
   )
-  lines.push('   the exact key used as a property or quoted flag name in a qualifying sim test.')
+  lines.push(
+    '   `\\b<key>: true|false`, `flags.<key>` or `hasMoveFlag(..., \'<key>\')` in a qualifying sim test; a bare',
+  )
+  lines.push('   quoted occurrence is not evidence.')
   lines.push(
     '4. **legacy-script**: the behavior in force\'s `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`.',
   )
@@ -749,6 +1037,11 @@ export function generateMoveInventoryDoc(
     '   Its status mirrors the owning move effect\'s status: the script is the effect\'s implementation, so it has a',
   )
   lines.push('   port exactly when that effect does. The script section lists every script once with its commands.')
+  lines.push('')
+  lines.push(
+    '`EFFECT_HIT` is plain damage: it has no `attack.secondaryEffects`, its script is `BattleScript_EffectHit`, and a',
+  )
+  lines.push('move whose effect is `EFFECT_HIT` therefore produces **no** secondary-effect unit.')
   lines.push('')
 
   lines.push('## Summary')
@@ -782,50 +1075,27 @@ export function generateMoveInventoryDoc(
   }
   lines.push('')
 
-  lines.push('## Unported Move-Effect Pairs')
-  lines.push('')
-  const unportedEffects = result.units.filter((unit) => unit.kind === 'move-effect' && unit.status === 'unported')
-  if (unportedEffects.length === 0) lines.push('None.')
-  for (const unit of unportedEffects) {
-    lines.push(`- \`${unit.moveId}\` -> \`${unit.unit}\` (${statusLabel(unit)})${unit.citation ? `; ${unit.citation}` : ''}`)
+  const pushGroupSection = (title: string, kind: MoveUnitKind): void => {
+    lines.push(`## ${title}`)
+    lines.push('')
+    lines.push(
+      'One line per unit. Move count is the number of distinct moves carrying the unit (all move ids listed up to',
+    )
+    lines.push(
+      '15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party',
+    )
+    lines.push('has at least one of the group\'s moves (first 8 ids listed). Trainer ids are sorted.')
+    lines.push('')
+    const kindGroups = groupsOfKind(kind)
+    if (kindGroups.length === 0) lines.push('None.')
+    for (const group of kindGroups) lines.push(formatUnportedGroup(group))
+    lines.push('')
   }
-  lines.push('')
 
-  lines.push('## Unported Secondary-Effect Pairs')
-  lines.push('')
-  const unportedSecondaries = result.units.filter(
-    (unit) => unit.kind === 'secondary-effect' && unit.status === 'unported',
-  )
-  if (unportedSecondaries.length === 0) lines.push('None.')
-  for (const unit of unportedSecondaries) {
-    lines.push(`- \`${unit.moveId}\` -> \`${unit.unit}\` (${statusLabel(unit)})${unit.citation ? `; ${unit.citation}` : ''}`)
-  }
-  lines.push('')
-
-  lines.push('## Unported Flag Keys')
-  lines.push('')
-  const flagPairs = result.units.filter((unit) => unit.kind === 'flag')
-  const flagKeys = [...new Set(flagPairs.map((unit) => unit.unit))].sort()
-  for (const key of flagKeys) {
-    const pairs = flagPairs.filter((unit) => unit.unit === key)
-    const unported = pairs.filter((unit) => unit.status === 'unported')
-    if (unported.length === 0) continue
-    const statuses = [...new Set(unported.map((unit) => statusLabel(unit)))].join(', ')
-    const citation = result.flagCitations.get(key) ?? ''
-    lines.push(`- \`${key}\`: ${unported.length} unported pair(s) of ${pairs.length} (${statuses})${citation ? `; ${citation}` : ''}`)
-  }
-  lines.push('')
-
-  lines.push('## Unported Legacy-Script Pairs')
-  lines.push('')
-  const unportedScripts = result.units.filter(
-    (unit) => unit.kind === 'legacy-script' && unit.status === 'unported',
-  )
-  if (unportedScripts.length === 0) lines.push('None.')
-  for (const unit of unportedScripts) {
-    lines.push(`- \`${unit.moveId}\` -> \`${unit.unit}\` (${statusLabel(unit)})${unit.citation ? `; ${unit.citation}` : ''}`)
-  }
-  lines.push('')
+  pushGroupSection('Unported Move-Effect Groups', 'move-effect')
+  pushGroupSection('Unported Secondary-Effect Groups', 'secondary-effect')
+  pushGroupSection('Unported Flag Groups', 'flag')
+  pushGroupSection('Unported Legacy-Script Groups', 'legacy-script')
 
   lines.push('## Allowlisted Pairs')
   lines.push('')

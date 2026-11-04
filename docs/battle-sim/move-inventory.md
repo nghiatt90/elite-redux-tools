@@ -12,31 +12,40 @@ A pair is **ported** only when a production code path handles it **and** at leas
 names the exact unit. `registered, untested` means production handles it but no test names it; it is counted
 as unported. A pair is **unclassified** when the unit id is missing/empty. Allowlisted pairs cite upstream C.
 
-1. **move-effect**: the move's `effect` (`EFFECT_*`). Production = `isHandledMoveEffect` or an exact
-   identifier in non-test `web/src/engine/**` source (comments and the `UNMODELLED_BASE_POWER_EFFECTS`/
-   `applySecondaryMoveEffects` plain-hit allowlists removed). Test evidence = exact id in a sim test using
+1. **move-effect**: the move's `effect` (`EFFECT_*`). Production = `isHandledMoveEffect` or the id in a
+   consuming position (`case 'EFFECT_X':`, `=== 'EFFECT_X'`, `!== 'EFFECT_X'`) in the restricted engine
+   files `basePower.ts`, `multiHit.ts`, `calculate.ts` and `sim/{hitScripts,damageResolver,attackCanceller,
+   accuracy,moveTargetFlags,moveEnd,turn,turnOrder,moveEffects,statusEffects}.ts`. A bare string in an
+   array/Set/Record key, import list or data table anywhere (including `web/src/engine/`) does not count.
+   Test evidence = exact id in a sim test using
    `createSession`/`executeTurn`/`stepTurn`/`useMove`/`buildMoveAction`/`calculateMoveDamage`,
    or membership in `VERIFIED_MOVE_EFFECTS`.
 2. **secondary-effect**: every `MOVE_EFFECT_*` in the behavior in force
-   (`customBehavior ?? moveBehaviors[effect]`) plus `move.argument.effect`. Production =
-   `SECONDARY_MOVE_EFFECT_MAP` / `GENERATED_MOVE_EFFECT_NUMBERS` / `MOVE_EFFECTS_STORED_FOR_MOVEEND`
-   or an exact identifier in production source.
+   (`customBehavior ?? moveBehaviors[effect]`) plus `move.argument.effect`. Production = registry
+   membership (`SECONDARY_MOVE_EFFECT_MAP` / `GENERATED_MOVE_EFFECT_NUMBERS` / `MOVE_EFFECTS_STORED_FOR_MOVEEND`)
+   **and** consumption: a `case` label in `applyPrimaryStatusEffect`, a `===`/`!==` comparison in the named
+   functions, or an inclusive `baseEffectNum >= A ... <= B` stat-change guard range. A registered name whose
+   number has no case is unported.
 3. **flag**: every true key in `move.flags`. Production = a move-flag read in engine source
    (`flags.<key>`, `moveFlags.<key>`, `hasMoveFlag(..., '<key>')`, `flag === '<key>'`). Test evidence =
-   the exact key used as a property or quoted flag name in a qualifying sim test.
+   `\b<key>: true|false`, `flags.<key>` or `hasMoveFlag(..., '<key>')` in a qualifying sim test; a bare
+   quoted occurrence is not evidence.
 4. **legacy-script**: the behavior in force's `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`.
    Its status mirrors the owning move effect's status: the script is the effect's implementation, so it has a
    port exactly when that effect does. The script section lists every script once with its commands.
+
+`EFFECT_HIT` is plain damage: it has no `attack.secondaryEffects`, its script is `BattleScript_EffectHit`, and a
+move whose effect is `EFFECT_HIT` therefore produces **no** secondary-effect unit.
 
 ## Summary
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `move-effect` | 888 | 704 | 96 | 175 | 0 | 9 |
-| `secondary-effect` | 314 | 267 | 47 | 47 | 0 | 0 |
+| `move-effect` | 888 | 562 | 46 | 317 | 0 | 9 |
+| `secondary-effect` | 314 | 266 | 47 | 48 | 0 | 0 |
 | `flag` | 2099 | 207 | 1884 | 1892 | 0 | 0 |
-| `legacy-script` | 600 | 550 | 39 | 41 | 0 | 9 |
-| **total** | **3901** | **1728** | **2066** | **2155** | **0** | **18** |
+| `legacy-script` | 600 | 552 | 39 | 39 | 0 | 9 |
+| **total** | **3901** | **1587** | **2016** | **2296** | **0** | **18** |
 
 Unported includes registered-but-untested. C/script locations cited: 445.
 
@@ -46,317 +55,181 @@ Unported includes registered-but-untested. C/script locations cited: 445.
 - `MOVE_FUTURE_SIGHT` (power 120, `EFFECT_FUTURE_SIGHT`) -> `BattleScript_EffectFutureSight` (pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5692)
 - `MOVE_SQUALL_HAMMER` (power 95, `EFFECT_DEFOG`) -> `BattleScript_EffectDefog` (pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1560)
 
-## Unported Move-Effect Pairs
+## Unported Move-Effect Groups
 
-- `MOVE_ACID_SPRAY` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT_2` (unported)
-- `MOVE_ACROBATICS` -> `EFFECT_ACROBATICS` (registered, untested)
-- `MOVE_ANCHOR_SHOT` -> `EFFECT_HIT_PREVENT_ESCAPE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_APPLE_ACID` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_AQUA_CUTTER` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_ARMOR_CANNON` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_ASSURANCE` -> `EFFECT_ASSURANCE` (unported)
-- `MOVE_AVALANCHE` -> `EFFECT_REVENGE` (registered, untested)
-- `MOVE_BARB_BARRAGE` -> `EFFECT_INFERNAL_PARADE` (unported)
-- `MOVE_BATTERING_RAM` -> `EFFECT_BRICK_BREAK` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_BEHEMOTH_BASH` -> `EFFECT_BODY_PRESS` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857
-- `MOVE_BERSERKER_HORN` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_BITTER_MALICE` -> `EFFECT_INFERNAL_PARADE` (unported)
-- `MOVE_BLACK_MAGIC` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_BLIZZARD` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_BODY_PRESS` -> `EFFECT_BODY_PRESS` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857
-- `MOVE_BOLT_BEAK` -> `EFFECT_BOLT_BEAK` (unported)
-- `MOVE_BRAMBLE_BLAST` -> `EFFECT_LEECH_SEED_HIT` (unported)
-- `MOVE_BRICK_BREAK` -> `EFFECT_BRICK_BREAK` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_BUG_BITE` -> `EFFECT_BUG_BITE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992
-- `MOVE_BUG_BUZZ` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_CEASELESS_EDGE` -> `EFFECT_SPIKE_HIT` (unported)
-- `MOVE_CHARGE_BEAM` -> `EFFECT_SP_ATTACK_UP_HIT` (unported)
-- `MOVE_CHILLER` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_CHILLING_WATER` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_CHLOROBLAST` -> `EFFECT_STEEL_BEAM` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71
-- `MOVE_CLOSE_COMBAT` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_CRABHAMMER` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_CROSS_POISON` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_CUPID_SHOT` -> `EFFECT_ATTRACT_HIT` (unported)
-- `MOVE_CUT` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_CUTSIE_SLAP` -> `EFFECT_ATTRACT_HIT` (unported)
-- `MOVE_DECORATE` -> `EFFECT_DECORATE` (unported); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:582
-- `MOVE_DEVIOUS_SHOT` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_DIAMOND_BLADE` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_DRACO_METEOR` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_DRAGON_ASCENT` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_DRAGON_CLAW` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_DRAGON_JAB` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_DRAGON_RAGE` -> `EFFECT_IGNORE_TYPE_IMMUNITY` (registered, untested)
-- `MOVE_DRILL_PECK` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_DRILL_RUN` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_EARTH_POWER` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_EGG_BOMB` -> `EFFECT_GRAV_APPLE` (unported)
-- `MOVE_ENERGY_BALL` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_ESPER_WALTZ` -> `EFFECT_SP_ATTACK_UP_HIT` (unported)
-- `MOVE_EXPANDING_FORCE` -> `EFFECT_EXPANDING_FORCE` (registered, untested)
-- `MOVE_FERTILE_FANGS` -> `EFFECT_LEECH_SEED_HIT` (unported)
-- `MOVE_FIERY_DANCE` -> `EFFECT_SP_ATTACK_UP_HIT` (unported)
-- `MOVE_FISHIOUS_REND` -> `EFFECT_BOLT_BEAK` (unported)
-- `MOVE_FLASH_CANNON` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_FLEUR_CANNON` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_FOCUS_BLAST` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_FREEZE_SHOCK` -> `EFFECT_TWO_TURN_RETALIATION` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424
-- `MOVE_FREEZING_GLARE` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_FREEZY_FROST` -> `EFFECT_FREEZY_FROST` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:447
-- `MOVE_FROST_BOLT` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_FROST_BRAND` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_FROST_BREATH` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_FUSION_BOLT` -> `EFFECT_FUSION_COMBO` (registered, untested)
-- `MOVE_FUSION_FLARE` -> `EFFECT_FUSION_COMBO` (registered, untested)
-- `MOVE_GLITZY_GLOW` -> `EFFECT_GLITZY_GLOW` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:526
-- `MOVE_GRAV_APPLE` -> `EFFECT_GRAV_APPLE` (unported)
-- `MOVE_GUILLOTINE` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_GUNK_SHOT` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_GUST` -> `EFFECT_GUST` (unported); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5703
-- `MOVE_HAMMER_ARM` -> `EFFECT_HAMMER_ARM` (unported)
-- `MOVE_HEADLONG_RUSH` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_HORN_ATTACK` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_HORN_DRILL` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_HURRICANE` -> `EFFECT_HURRICANE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5738
-- `MOVE_HYDRO_PUMP` -> `EFFECT_DRENCH_HIT` (unported)
-- `MOVE_ICE_BEAM` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_ICE_BURN` -> `EFFECT_TWO_TURN_RETALIATION` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424
-- `MOVE_ICE_PUNCH` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_INFERNAL_PARADE` -> `EFFECT_INFERNAL_PARADE` (unported)
-- `MOVE_IRON_FANGS` -> `EFFECT_BRICK_BREAK` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_JAGGED_FANGS` -> `EFFECT_ATTACK_UP_HIT` (registered, untested)
-- `MOVE_JAGGED_PUNCH` -> `EFFECT_STEALTH_ROCK_HIT` (unported)
-- `MOVE_LASH_OUT` -> `EFFECT_LASH_OUT` (registered, untested)
-- `MOVE_LEAF_BLADE` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_LEAF_STORM` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_LOTUS_SHOWER` -> `EFFECT_SLEEP_HIT` (unported)
-- `MOVE_LOVELY_BITE` -> `EFFECT_ATTRACT_HIT` (unported)
-- `MOVE_LUMINA_CRASH` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT_2` (unported)
-- `MOVE_LUSTER_PURGE` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_MEGAHORN` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_METAL_CLAW` -> `EFFECT_ATTACK_UP_HIT` (registered, untested)
-- `MOVE_METEOR_BEAM` -> `EFFECT_TWO_TURN_SECONDARY` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_METEOR_MASH` -> `EFFECT_ATTACK_UP_HIT` (registered, untested)
-- `MOVE_MIND_BLOWN` -> `EFFECT_MIND_BLOWN` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3538
-- `MOVE_MIRROR_SHOT` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_MIST_BALL` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_MOONBLAST` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_MUDDY_WATER` -> `EFFECT_ACCURACY_DOWN_HIT` (registered, untested)
-- `MOVE_MUD_BOMB` -> `EFFECT_SMACK_DOWN` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_MYSTICAL_FIRE` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_NEEDLE_ARM` -> `EFFECT_CREEPING_THORNS_HIT` (unported)
-- `MOVE_NIGHT_SLASH` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_NOXIOUS_TORQUE` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_OCTAZOOKA` -> `EFFECT_ACCURACY_DOWN_HIT` (registered, untested)
-- `MOVE_OVERHEAT` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_PAYBACK` -> `EFFECT_PAYBACK` (unported)
-- `MOVE_PAY_DAY` -> `EFFECT_PAY_DAY` (unported)
-- `MOVE_PIXIE_BEAM` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_PLUCK` -> `EFFECT_BUG_BITE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992
-- `MOVE_POCKET_SAND` -> `EFFECT_ACCURACY_DOWN_HIT` (registered, untested)
-- `MOVE_POISON_FANG` -> `EFFECT_POISON_FANG` (unported)
-- `MOVE_POISON_JAB` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_POISON_STING` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_POWDER_SNOW` -> `EFFECT_FROSTBITE_HIT` (unported)
-- `MOVE_POWER_TRIP` -> `EFFECT_STORED_POWER` (registered, untested)
-- `MOVE_POWER_UP_PUNCH` -> `EFFECT_ATTACK_UP_HIT` (registered, untested)
-- `MOVE_PRIMAL_BEAM` -> `EFFECT_ATTACK_UP_HIT` (registered, untested)
-- `MOVE_PSYBEAM` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_PSYCHIC` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_PSYCHIC_FANGS` -> `EFFECT_BRICK_BREAK` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_PSYCHO_BOOST` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_PSYCHO_CUT` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_PSYSHIELD_BASH` -> `EFFECT_DEFENSE_UP_HIT` (unported)
-- `MOVE_PUNISHMENT` -> `EFFECT_PUNISHMENT` (registered, untested)
-- `MOVE_RAGING_BULL` -> `EFFECT_BRICK_BREAK` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_RAGING_SOULS` -> `EFFECT_OVERHEAT` (registered, untested)
-- `MOVE_RAIN_FLUSH` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_RAPID_RIVER` -> `EFFECT_DRENCH_HIT` (unported)
-- `MOVE_RAZOR_LEAF` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_RELIC_SONG` -> `EFFECT_SLEEP_HIT` (unported)
-- `MOVE_REQUIEM` -> `EFFECT_CURSE_HIT` (unported)
-- `MOVE_RETALIATE` -> `EFFECT_RETALIATE` (registered, untested)
-- `MOVE_REVENGE` -> `EFFECT_REVENGE` (registered, untested)
-- `MOVE_RISING_VOLTAGE` -> `EFFECT_RISING_VOLTAGE` (unported)
-- `MOVE_ROUND` -> `EFFECT_ROUND` (registered, untested)
-- `MOVE_SANDSEAR_STORM` -> `EFFECT_SANDSTORM_HIT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3426
-- `MOVE_SCATTER_BLAST` -> `EFFECT_STEALTH_ROCK_HIT` (unported)
-- `MOVE_SEED_FLARE` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT_2` (unported)
-- `MOVE_SHADOW_BALL` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_SHADOW_CLAW` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_SHADOW_FANGS` -> `EFFECT_CURSE_HIT` (unported)
-- `MOVE_SHELL_SIDE_ARM` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_SKITTER_SMACK` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_SKULL_BASH` -> `EFFECT_TWO_TURN_SECONDARY` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_SKY_ATTACK` -> `EFFECT_TWO_TURN_SECONDARY` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_SLASH` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_SLUDGE_BOMB` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_SLUDGE_WAVE` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_SMACK_DOWN` -> `EFFECT_SMACK_DOWN` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_SMITE` -> `EFFECT_SMACK_DOWN` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_SMOG` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_SNARL` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_SPIRIT_BREAK` -> `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (registered, untested)
-- `MOVE_SPIRIT_SHACKLE` -> `EFFECT_HIT_PREVENT_ESCAPE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_SPRINGTIDE_STORM` -> `EFFECT_FAIRY_TERRAIN_HIT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3454
-- `MOVE_SQUEAKY_HAMMER` -> `EFFECT_ATTRACT_HIT` (unported)
-- `MOVE_STEEL_BEAM` -> `EFFECT_STEEL_BEAM` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71
-- `MOVE_STEEL_WING` -> `EFFECT_DEFENSE_UP_HIT` (unported)
-- `MOVE_STONE_AXE` -> `EFFECT_STEALTH_ROCK_HIT` (unported)
-- `MOVE_STONE_EDGE` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_STORED_POWER` -> `EFFECT_STORED_POWER` (registered, untested)
-- `MOVE_STRENGTH` -> `EFFECT_CLOSE_COMBAT` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_SUPERPOWER` -> `EFFECT_SUPERPOWER` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337
-- `MOVE_SURF` -> `EFFECT_DRENCH_HIT` (unported)
-- `MOVE_THOUSAND_ARROWS` -> `EFFECT_SMACK_DOWN` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_THOUSAND_WAVES` -> `EFFECT_HIT_PREVENT_ESCAPE` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_THUNDER` -> `EFFECT_THUNDER` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5734
-- `MOVE_TORCH_SONG` -> `EFFECT_SPECIAL_ATTACK_UP_HIT` (unported)
-- `MOVE_TREPIDATION` -> `EFFECT_TREPIDATION` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:12502
-- `MOVE_TRI_ATTACK` -> `EFFECT_TRI_ATTACK` (unported)
-- `MOVE_TWINEEDLE` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_VENOM_BOLT` -> `EFFECT_POISON_HIT` (registered, untested)
-- `MOVE_VEXING_VOID` -> `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (registered, untested)
-- `MOVE_WATER_GUN` -> `EFFECT_DRENCH_HIT` (unported)
-- `MOVE_WEB_SHOT` -> `EFFECT_STICKY_WEB_HIT` (unported)
-- `MOVE_WICKED_TORQUE` -> `EFFECT_SLEEP_HIT` (unported)
-- `MOVE_X_SCISSOR` -> `EFFECT_BLEED_HIT` (unported)
-- `MOVE_YGGDRASIL_FORCE` -> `EFFECT_SUPERPOWER` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337
+One line per unit. Move count is the number of distinct moves carrying the unit (all move ids listed up to
+15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
+has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
 
-## Unported Secondary-Effect Pairs
+- `EFFECT_ACCURACY_DOWN_HIT` (unported): 3 moves: `MOVE_MUDDY_WATER`, `MOVE_OCTAZOOKA`, `MOVE_POCKET_SAND`; 33 elite-tier trainers (first 8): `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ANDREA`, `TRAINER_BRAWLY_5`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`, `TRAINER_BRENDAN_LILYCOVE_TREECKO`
+- `EFFECT_ACROBATICS` (registered, untested): 1 move: `MOVE_ACROBATICS`; 41 elite-tier trainers (first 8): `TRAINER_ANDRES_1`, `TRAINER_ANGELICA`, `TRAINER_ANNA_AND_MEG_1`, `TRAINER_BEAU`, `TRAINER_BENJAMIN_2`, `TRAINER_BIANCA`, `TRAINER_BRAWLY_4`, `TRAINER_BRENDAN_ROUTE_103_MUDKIP`
+- `EFFECT_ALL_STATS_UP_HIT` (unported): 2 moves: `MOVE_ANCIENT_POWER`, `MOVE_SILVER_WIND`; 17 elite-tier trainers (first 8): `TRAINER_ABIGAIL_4`, `TRAINER_AURON`, `TRAINER_DAISY`, `TRAINER_DEANDRE`, `TRAINER_EDWARDO`, `TRAINER_GABRIELLE_2`, `TRAINER_JOHNSON`, `TRAINER_KYLA`
+- `EFFECT_ASSURANCE` (unported): 1 move: `MOVE_ASSURANCE`; 4 elite-tier trainers: `TRAINER_DIANA_1`, `TRAINER_MARIA_1`, `TRAINER_PARKER`, `TRAINER_TORI_AND_TIA`
+- `EFFECT_ATTACK_DOWN_HIT` (unported): 8 moves: `MOVE_AURORA_BEAM`, `MOVE_BREAKING_SWIPE`, `MOVE_FLASH`, `MOVE_GROWL`, `MOVE_LUNGE`, `MOVE_PLAY_ROUGH`, `MOVE_RUMBLE_KICK`, `MOVE_TROP_KICK`; 140 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_AMANDA`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`
+- `EFFECT_ATTACK_UP_HIT` (unported): 5 moves: `MOVE_JAGGED_FANGS`, `MOVE_METAL_CLAW`, `MOVE_METEOR_MASH`, `MOVE_POWER_UP_PUNCH`, `MOVE_PRIMAL_BEAM`; 100 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_AISHA`, `TRAINER_ALLEN`, `TRAINER_ANDRES_1`, `TRAINER_ANGELINA`, `TRAINER_AURON`, `TRAINER_AXLE`, `TRAINER_BEAU`
+- `EFFECT_ATTRACT_HIT` (unported): 4 moves: `MOVE_CUPID_SHOT`, `MOVE_CUTSIE_SLAP`, `MOVE_LOVELY_BITE`, `MOVE_SQUEAKY_HAMMER`; 38 elite-tier trainers (first 8): `TRAINER_ALANNAH`, `TRAINER_ALEXIA`, `TRAINER_ALYSSA`, `TRAINER_BEVERLY`, `TRAINER_BRANDEN`, `TRAINER_BRENDAN_ROUTE_110_MUDKIP`, `TRAINER_BRENDAN_ROUTE_119_MUDKIP`, `TRAINER_CALLIE`
+- `EFFECT_BLEED_HIT` (unported): 23 moves (first 15): `MOVE_AQUA_CUTTER`, `MOVE_BERSERKER_HORN`, `MOVE_BLACK_MAGIC`, `MOVE_CRABHAMMER`, `MOVE_CUT`, `MOVE_DEVIOUS_SHOT`, `MOVE_DIAMOND_BLADE`, `MOVE_DRAGON_CLAW`, `MOVE_DRAGON_JAB`, `MOVE_DRILL_PECK`, `MOVE_DRILL_RUN`, `MOVE_GUILLOTINE`, `MOVE_HORN_ATTACK`, `MOVE_HORN_DRILL`, `MOVE_LEAF_BLADE`; 372 elite-tier trainers (first 8): `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_LEELA`
+- `EFFECT_BODY_PRESS` (registered, untested): 2 moves: `MOVE_BEHEMOTH_BASH`, `MOVE_BODY_PRESS`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857; 86 elite-tier trainers (first 8): `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALEXIA`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`
+- `EFFECT_BOLT_BEAK` (unported): 2 moves: `MOVE_BOLT_BEAK`, `MOVE_FISHIOUS_REND`; 20 elite-tier trainers (first 8): `TRAINER_BRYAN`, `TRAINER_CARTER`, `TRAINER_CHIP`, `TRAINER_CLAUDE`, `TRAINER_GRUNT_AQUA_HIDEOUT_2`, `TRAINER_GRUNT_MT_PYRE_1`, `TRAINER_GRUNT_MT_PYRE_3`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_4`
+- `EFFECT_BRICK_BREAK` (registered, untested): 5 moves: `MOVE_BATTERING_RAM`, `MOVE_BRICK_BREAK`, `MOVE_IRON_FANGS`, `MOVE_PSYCHIC_FANGS`, `MOVE_RAGING_BULL`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380; 65 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALVARO`, `TRAINER_BLUNDER`, `TRAINER_BRENDAN_RUSTBORO_MUDKIP`, `TRAINER_BRENDAN_RUSTBORO_TORCHIC`, `TRAINER_BRENDAN_RUSTBORO_TREECKO`, `TRAINER_CALVIN_E4`, `TRAINER_CHRIS`
+- `EFFECT_BUG_BITE` (registered, untested): 2 moves: `MOVE_BUG_BITE`, `MOVE_PLUCK`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992; 17 elite-tier trainers (first 8): `TRAINER_BANEFUL_PETALBURG_WOODS`, `TRAINER_DALTON_3`, `TRAINER_DALTON_4`, `TRAINER_HAYDEN`, `TRAINER_JAMES_1`, `TRAINER_JAZMYN`, `TRAINER_JEFFREY_2`, `TRAINER_JEFFREY_3`
+- `EFFECT_BURN_HIT` (unported): 25 moves (first 15): `MOVE_BEAK_BLAST`, `MOVE_BIG_BLAST`, `MOVE_BLAZE_KICK`, `MOVE_BLAZING_ARROW`, `MOVE_BLAZING_TORQUE`, `MOVE_BLUE_FLARE`, `MOVE_DRAGON_BREATH`, `MOVE_EMBER`, `MOVE_FIRE_BLAST`, `MOVE_FIRE_PUNCH`, `MOVE_FLAMETHROWER`, `MOVE_FLAME_TONGUE`, `MOVE_HEAT_WAVE`, `MOVE_INFERNO`, `MOVE_LAVA_PLUME`; 417 elite-tier trainers (first 8): `BRENDAN_TORCHIC_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_MIKE`
+- `EFFECT_CAPTIVATE` (unported): 1 move: `MOVE_CAPTIVATE`; 3 elite-tier trainers: `TRAINER_CELINA`, `TRAINER_GEORGE`, `TRAINER_GRUNT_MAGMA_HIDEOUT_14`
+- `EFFECT_CLOSE_COMBAT` (registered, untested): 6 moves: `MOVE_ARMOR_CANNON`, `MOVE_CLOSE_COMBAT`, `MOVE_DRAGON_ASCENT`, `MOVE_HEADLONG_RUSH`, `MOVE_RAIN_FLUSH`, `MOVE_STRENGTH`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341; 169 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AISHA`, `TRAINER_ALFREDO`, `TRAINER_ATHENA`, `TRAINER_ATSUSHI`, `TRAINER_BARRY`
+- `EFFECT_CONFUSE_HIT` (unported): 13 moves: `MOVE_BEETLE_BASH`, `MOVE_CHATTER`, `MOVE_CONFUSION`, `MOVE_DEATHROLL`, `MOVE_DIZZY_PUNCH`, `MOVE_DYNAMIC_PUNCH`, `MOVE_KINETIC_BARRAGE`, `MOVE_MAGICAL_TORQUE`, `MOVE_MIND_BREAK`, `MOVE_PSYWAVE`, `MOVE_SIGNAL_BEAM`, `MOVE_STRANGE_STEAM`, `MOVE_WATER_PULSE`; 111 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALEXIA`, `TRAINER_ARCHIE`
+- `EFFECT_CREEPING_THORNS_HIT` (unported): 1 move: `MOVE_NEEDLE_ARM`; 7 elite-tier trainers: `TRAINER_ACE_TRAINER_DICK`, `TRAINER_BRANDEN`, `TRAINER_DIANNE`, `TRAINER_DREW`, `TRAINER_GRUNT_MT_PYRE_2`, `TRAINER_ROXANNE_1`, `TRAINER_SIDNEY_2`
+- `EFFECT_CURSE_HIT` (unported): 2 moves: `MOVE_REQUIEM`, `MOVE_SHADOW_FANGS`; 17 elite-tier trainers (first 8): `TRAINER_ALFREDO`, `TRAINER_ARCHIE_SLATEPORT`, `TRAINER_CREW_MTPYRE`, `TRAINER_DALTON_1`, `TRAINER_DARIUS`, `TRAINER_GRUNT_AQUA_HIDEOUT_1`, `TRAINER_GRUNT_JAGGED_PASS`, `TRAINER_GRUNT_MAGMA_HIDEOUT_1`
+- `EFFECT_DEFENSE_DOWN_HIT` (unported): 13 moves: `MOVE_CRUNCH`, `MOVE_CRUSH_CLAW`, `MOVE_EARTHSPLITTER`, `MOVE_FIRE_LASH`, `MOVE_ICICLE_IMPALE`, `MOVE_INSECT_IMPACT`, `MOVE_IRON_TAIL`, `MOVE_LIQUIDATION`, `MOVE_RAZOR_SHELL`, `MOVE_ROCK_SMASH`, `MOVE_SEISMIC_FIST`, `MOVE_SHADOW_BONE`, `MOVE_THUNDEROUS_KICK`; 241 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_AISHA`, `TRAINER_ALBERT`, `TRAINER_ALEXA`
+- `EFFECT_DEFENSE_UP_HIT` (unported): 2 moves: `MOVE_PSYSHIELD_BASH`, `MOVE_STEEL_WING`; 17 elite-tier trainers (first 8): `TRAINER_AIDAN`, `TRAINER_ALANNAH`, `TRAINER_CHASE`, `TRAINER_CLIFFORD`, `TRAINER_DYLAN_1`, `TRAINER_ISOBEL`, `TRAINER_KAYLA`, `TRAINER_MAURA`
+- `EFFECT_DRENCH_HIT` (unported): 4 moves: `MOVE_HYDRO_PUMP`, `MOVE_RAPID_RIVER`, `MOVE_SURF`, `MOVE_WATER_GUN`; 192 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ANGELICA`, `TRAINER_BARRY`, `TRAINER_BENJAMIN_1`, `TRAINER_BENJAMIN_4`, `TRAINER_BERNIE_2`, `TRAINER_BERNIE_3`
+- `EFFECT_ELECTRO_BALL` (unported): 1 move: `MOVE_ELECTRO_BALL`; 17 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ALYSSA`, `TRAINER_ANDREA`, `TRAINER_BEN`, `TRAINER_BENJAMIN_2`, `TRAINER_CHESTER`, `TRAINER_DRAGONITENITE_SAGE_1`, `TRAINER_DYLAN_1`
+- `EFFECT_ERUPTION` (unported): 3 moves: `MOVE_DRAGON_ENERGY`, `MOVE_ERUPTION`, `MOVE_WATER_SPOUT`; 42 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ANTHONY`, `TRAINER_ARCHIE`, `TRAINER_BERNIE_1`, `TRAINER_BRANDEN`, `TRAINER_BRYANT`, `TRAINER_CHAD`, `TRAINER_COLE`
+- `EFFECT_EXPANDING_FORCE` (registered, untested): 1 move: `MOVE_EXPANDING_FORCE`; 14 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_BLAKE`, `TRAINER_BRANDI`, `TRAINER_BROOKE_1`, `TRAINER_KAYLA`, `TRAINER_MACEY`, `TRAINER_MARCEL`, `TRAINER_MITCHELL`
+- `EFFECT_FAIRY_TERRAIN_HIT` (registered, untested): 1 move: `MOVE_SPRINGTIDE_STORM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3454; no elite-tier trainer carries them
+- `EFFECT_FLINCH_HIT` (unported): 30 moves (first 15): `MOVE_AIR_SLASH`, `MOVE_AQUA_BASH`, `MOVE_AQUA_FANG`, `MOVE_BALL_TOSS`, `MOVE_BITE`, `MOVE_BLITZ_ARROW`, `MOVE_BONE_CLUB`, `MOVE_DARK_PULSE`, `MOVE_DOUBLE_IRON_BASH`, `MOVE_DRACONIC_FANGS`, `MOVE_EXTRASENSORY`, `MOVE_FIERY_WRATH`, `MOVE_FLOATY_FALL`, `MOVE_HEADBUTT`, `MOVE_HEART_STAMP`; 408 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ACE_TRAINER_PAGANI`
+- `EFFECT_FLINCH_RECOIL_33` (unported): 1 move: `MOVE_DRAGON_RUSH`; 39 elite-tier trainers (first 8): `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_BETHANY`, `TRAINER_BRAXTON`, `TRAINER_CELINA`, `TRAINER_CHIP`, `TRAINER_CHRIS`, `TRAINER_CLAUDE`
+- `EFFECT_FREEZE_DRY` (unported): 2 moves: `MOVE_FREEZE_DRY`, `MOVE_SHEER_COLD`; 72 elite-tier trainers (first 8): `TRAINER_ALIX`, `TRAINER_ANDRES_3`, `TRAINER_ANDRES_4`, `TRAINER_ANNIKA`, `TRAINER_ARCHIE`, `TRAINER_AUSTINA`, `TRAINER_BLAKE`, `TRAINER_BRENDAN_ROUTE_110_TORCHIC`
+- `EFFECT_FREEZY_FROST` (registered, untested): 1 move: `MOVE_FREEZY_FROST`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:447; 6 elite-tier trainers: `TRAINER_ANGELINA`, `TRAINER_EDWIN_1`, `TRAINER_JANICE`, `TRAINER_SHELLY_SEAFLOOR_CAVERN`, `TRAINER_SHELLY_WEATHER_INSTITUTE`, `TRAINER_SKIER_JANET`
+- `EFFECT_FROSTBITE_HIT` (unported): 10 moves: `MOVE_BLIZZARD`, `MOVE_CHILLER`, `MOVE_CHILLING_WATER`, `MOVE_FREEZING_GLARE`, `MOVE_FROST_BOLT`, `MOVE_FROST_BRAND`, `MOVE_FROST_BREATH`, `MOVE_ICE_BEAM`, `MOVE_ICE_PUNCH`, `MOVE_POWDER_SNOW`; 331 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALBERT`, `TRAINER_ALEXIA`, `TRAINER_ALFREDO`, `TRAINER_ALYSSA`
+- `EFFECT_FUSION_COMBO` (registered, untested): 2 moves: `MOVE_FUSION_BOLT`, `MOVE_FUSION_FLARE`; 4 elite-tier trainers: `TRAINER_FLANNERY_3`, `TRAINER_FLANNERY_4`, `TRAINER_GLACIA_3`, `TRAINER_GLACIA_4`
+- `EFFECT_GLITZY_GLOW` (registered, untested): 1 move: `MOVE_GLITZY_GLOW`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:526; 5 elite-tier trainers: `TRAINER_CAMRON`, `TRAINER_ELI`, `TRAINER_HAYDEN`, `TRAINER_ISAAC_1`, `TRAINER_TATE_AND_LIZA_1`
+- `EFFECT_GRAV_APPLE` (unported): 2 moves: `MOVE_EGG_BOMB`, `MOVE_GRAV_APPLE`; 5 elite-tier trainers: `TRAINER_CRISTIN_1`, `TRAINER_GRUNT_MT_PYRE_1`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_3`, `TRAINER_IRENE`, `TRAINER_SINNOH_MEGAS_MAUVILLE_GAME_CORNER`
+- `EFFECT_GYRO_BALL` (unported): 1 move: `MOVE_GYRO_BALL`; 17 elite-tier trainers (first 8): `TRAINER_ALEXIA`, `TRAINER_BERNIE_1`, `TRAINER_BRENDAN_RUSTBORO_MUDKIP`, `TRAINER_BRENDAN_RUSTBORO_TORCHIC`, `TRAINER_BRENDAN_RUSTBORO_TREECKO`, `TRAINER_DUSTY_1`, `TRAINER_DUSTY_4`, `TRAINER_EVERETT`
+- `EFFECT_HAMMER_ARM` (unported): 1 move: `MOVE_HAMMER_ARM`; 27 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ALICE`, `TRAINER_BRAWLY_2`, `TRAINER_BRAWLY_3`, `TRAINER_CLARK`, `TRAINER_DUSTY_3`, `TRAINER_GRUNT_AQUA_HIDEOUT_5`, `TRAINER_GRUNT_SPACE_CENTER_4`
+- `EFFECT_HEX` (unported): 2 moves: `MOVE_HEX`, `MOVE_PLASMA_PULSE`; 18 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALYSSA`, `TRAINER_AXLE`, `TRAINER_BRYAN`, `TRAINER_CAROLINE`, `TRAINER_CEDRIC`, `TRAINER_DARIUS`
+- `EFFECT_HIT_PREVENT_ESCAPE` (registered, untested): 3 moves: `MOVE_ANCHOR_SHOT`, `MOVE_SPIRIT_SHACKLE`, `MOVE_THOUSAND_WAVES`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886; 14 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`, `TRAINER_BRAWLY_1`, `TRAINER_DARIUS`, `TRAINER_DRAKE_4`, `TRAINER_DUNCAN`, `TRAINER_EDDIE`
+- `EFFECT_HURRICANE` (registered, untested): 1 move: `MOVE_HURRICANE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5738; 141 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AIDAN`, `TRAINER_ALBERTO`, `TRAINER_ANDREA`, `TRAINER_ANDREW`
+- `EFFECT_IGNORE_TYPE_IMMUNITY` (unported): 1 move: `MOVE_DRAGON_RAGE`; 13 elite-tier trainers (first 8): `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`, `TRAINER_BRENDAN_LILYCOVE_TREECKO`, `TRAINER_ELI`, `TRAINER_GRUNT_MAGMA_HIDEOUT_14`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_2`, `TRAINER_LOLA_1`, `TRAINER_MAY_LILYCOVE_MUDKIP`
+- `EFFECT_INFERNAL_PARADE` (unported): 3 moves: `MOVE_BARB_BARRAGE`, `MOVE_BITTER_MALICE`, `MOVE_INFERNAL_PARADE`; 24 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_BLUNDER`, `TRAINER_BRICE`, `TRAINER_COLE`, `TRAINER_COURTNEY_METEOR_FALLS`, `TRAINER_DRAGONITENITE_SAGE_3`, `TRAINER_ELI`, `TRAINER_GERALD`
+- `EFFECT_LASH_OUT` (registered, untested): 1 move: `MOVE_LASH_OUT`; 7 elite-tier trainers: `TRAINER_ANDRES_1`, `TRAINER_COLIN`, `TRAINER_DARRIN`, `TRAINER_LAWRENCE`, `TRAINER_LEONEL`, `TRAINER_NIDO_MEGAS_ROUTE116_RUSTURF`, `TRAINER_RANDALL`
+- `EFFECT_LEECH_SEED_HIT` (unported): 2 moves: `MOVE_BRAMBLE_BLAST`, `MOVE_FERTILE_FANGS`; 20 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ANGELINA`, `TRAINER_DAISY`, `TRAINER_DARIUS`, `TRAINER_ELMER`, `TRAINER_GEORGE`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_1`, `TRAINER_GRUNT_WEATHER_INST_1`
+- `EFFECT_LOW_KICK` (unported): 2 moves: `MOVE_GRASS_KNOT`, `MOVE_LOW_KICK`; 41 elite-tier trainers (first 8): `TRAINER_ABIGAIL_3`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_BERNIE_2`, `TRAINER_BERNIE_3`, `TRAINER_BROOKE_2`, `TRAINER_BROOKE_3`, `TRAINER_CAMERON_2`, `TRAINER_COLTON`
+- `EFFECT_MIND_BLOWN` (registered, untested): 1 move: `MOVE_MIND_BLOWN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3538; 3 elite-tier trainers: `TRAINER_BLUNDER`, `TRAINER_DRAGONITENITE_SAGE_3`, `TRAINER_SALSA`
+- `EFFECT_OVERHEAT` (unported): 6 moves: `MOVE_DRACO_METEOR`, `MOVE_FLEUR_CANNON`, `MOVE_LEAF_STORM`, `MOVE_OVERHEAT`, `MOVE_PSYCHO_BOOST`, `MOVE_RAGING_SOULS`; 100 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ALBERT`, `TRAINER_ANDREA`, `TRAINER_ATSUSHI`, `TRAINER_BRIANNA`, `TRAINER_CALVIN_2`, `TRAINER_CALVIN_3`
+- `EFFECT_PAYBACK` (unported): 1 move: `MOVE_PAYBACK`; 2 elite-tier trainers: `TRAINER_HERMAN`, `TRAINER_KIYO`
+- `EFFECT_PAY_DAY` (unported): 1 move: `MOVE_PAY_DAY`; no elite-tier trainer carries them
+- `EFFECT_POISON_FANG` (unported): 1 move: `MOVE_POISON_FANG`; 21 elite-tier trainers (first 8): `TRAINER_BRAXTON`, `TRAINER_CROBATITE_DEWFORD_MANOR`, `TRAINER_DAVIS`, `TRAINER_ED`, `TRAINER_EDWIN_3`, `TRAINER_GRUNT_MAGMA_HIDEOUT_15`, `TRAINER_GRUNT_MAGMA_HIDEOUT_4`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_3`
+- `EFFECT_POISON_HIT` (unported): 11 moves: `MOVE_CROSS_POISON`, `MOVE_GUNK_SHOT`, `MOVE_NOXIOUS_TORQUE`, `MOVE_POISON_JAB`, `MOVE_POISON_STING`, `MOVE_SHELL_SIDE_ARM`, `MOVE_SLUDGE_BOMB`, `MOVE_SLUDGE_WAVE`, `MOVE_SMOG`, `MOVE_TWINEEDLE`, `MOVE_VENOM_BOLT`; 242 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALBERT`, `TRAINER_ALFREDO`, `TRAINER_ALLISON`, `TRAINER_ALYSSA`
+- `EFFECT_PUNISHMENT` (unported): 1 move: `MOVE_PUNISHMENT`; no elite-tier trainer carries them
+- `EFFECT_RECOIL_25` (unported): 1 move: `MOVE_HEAD_CHARGE`; 7 elite-tier trainers: `TRAINER_ALEXIA`, `TRAINER_DEREK`, `TRAINER_MARY`, `TRAINER_MIGUEL_3`, `TRAINER_SKIER_JANET`, `TRAINER_STEVE_1`, `TRAINER_TIMOTHY_2`
+- `EFFECT_RECOIL_33` (unported): 10 moves: `MOVE_ATOMIC_FIRE`, `MOVE_BRAVE_BIRD`, `MOVE_DOUBLE_EDGE`, `MOVE_PSYCHOKINETIC_SLAM`, `MOVE_SEISMIC_SLAM`, `MOVE_SHADOW_HAMMER`, `MOVE_STAR_CRASH`, `MOVE_SUBMISSION`, `MOVE_WAVE_CRASH`, `MOVE_WOOD_HAMMER`; 205 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_AIDAN`, `TRAINER_ALEX`, `TRAINER_ALEXIA`, `TRAINER_ANNIKA`
+- `EFFECT_RECOIL_50` (unported): 4 moves: `MOVE_BOOMBURST`, `MOVE_HEAD_SMASH`, `MOVE_LIGHT_OF_RUIN`, `MOVE_PSYCHO_WAVE`; 177 elite-tier trainers (first 8): `TRAINER_AARON`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALAN`, `TRAINER_ALEXIA`
+- `EFFECT_RETALIATE` (registered, untested): 1 move: `MOVE_RETALIATE`; 1 elite-tier trainer: `TRAINER_DEMETRIUS`
+- `EFFECT_REVENGE` (unported): 2 moves: `MOVE_AVALANCHE`, `MOVE_REVENGE`; 9 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ANDREW`, `TRAINER_BARRY`, `TRAINER_BEAU`, `TRAINER_BETHANY`, `TRAINER_CREW_MTPYRE`, `TRAINER_DAPHNE`, `TRAINER_HAYDEN`
+- `EFFECT_RISING_VOLTAGE` (unported): 1 move: `MOVE_RISING_VOLTAGE`; 11 elite-tier trainers (first 8): `TRAINER_ANGELO`, `TRAINER_ARCHIE`, `TRAINER_CHARLOTTE`, `TRAINER_GRUNT_SEAFLOOR_CAVERN_5`, `TRAINER_ISAIAH_3`, `TRAINER_ISAIAH_4`, `TRAINER_LEONEL`, `TRAINER_TIFFANY`
+- `EFFECT_ROUND` (registered, untested): 1 move: `MOVE_ROUND`; no elite-tier trainer carries them
+- `EFFECT_SANDSTORM_HIT` (registered, untested): 1 move: `MOVE_SANDSEAR_STORM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3426; 2 elite-tier trainers: `TRAINER_ANGELINA`, `TRAINER_SAMUEL`
+- `EFFECT_SLEEP_HIT` (unported): 3 moves: `MOVE_LOTUS_SHOWER`, `MOVE_RELIC_SONG`, `MOVE_WICKED_TORQUE`; 4 elite-tier trainers: `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_BECKY`, `TRAINER_PHIL`, `TRAINER_VICTORIA`
+- `EFFECT_SMACK_DOWN` (registered, untested): 4 moves: `MOVE_MUD_BOMB`, `MOVE_SMACK_DOWN`, `MOVE_SMITE`, `MOVE_THOUSAND_ARROWS`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520; 18 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_BARNY`, `TRAINER_BEAU`, `TRAINER_BEN`, `TRAINER_BIANCA`, `TRAINER_CONNIE`, `TRAINER_DAPHNE`, `TRAINER_DRAKE_3`
+- `EFFECT_SPECIAL_ATTACK_DOWN_HIT` (unported): 8 moves: `MOVE_MIST_BALL`, `MOVE_MOONBLAST`, `MOVE_MYSTICAL_FIRE`, `MOVE_PIXIE_BEAM`, `MOVE_PSYBEAM`, `MOVE_SKITTER_SMACK`, `MOVE_SNARL`, `MOVE_SPIRIT_BREAK`; 173 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALEXIA`, `TRAINER_ALIX`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`, `TRAINER_AMY_AND_LIV_4`
+- `EFFECT_SPECIAL_ATTACK_UP_HIT` (unported): 1 move: `MOVE_TORCH_SONG`; 7 elite-tier trainers: `TRAINER_DALTON_1`, `TRAINER_DANIELLE`, `TRAINER_DIANNE`, `TRAINER_DRAGONITENITE_SAGE_3`, `TRAINER_ETHAN_1`, `TRAINER_ISABEL_1`, `TRAINER_PAT`
+- `EFFECT_SPECIAL_DEFENSE_DOWN_HIT` (unported): 11 moves: `MOVE_APPLE_ACID`, `MOVE_BUG_BUZZ`, `MOVE_EARTH_POWER`, `MOVE_ENERGY_BALL`, `MOVE_FLASH_CANNON`, `MOVE_FOCUS_BLAST`, `MOVE_LUSTER_PURGE`, `MOVE_MIRROR_SHOT`, `MOVE_PSYCHIC`, `MOVE_SHADOW_BALL`, `MOVE_VEXING_VOID`; 454 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_MIKE`
+- `EFFECT_SPECIAL_DEFENSE_DOWN_HIT_2` (unported): 3 moves: `MOVE_ACID_SPRAY`, `MOVE_LUMINA_CRASH`, `MOVE_SEED_FLARE`; 21 elite-tier trainers (first 8): `TRAINER_ANGELINA`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`, `TRAINER_BRENDAN_LILYCOVE_TREECKO`, `TRAINER_CHESTER`, `TRAINER_GRUNT_AQUA_HIDEOUT_3`, `TRAINER_GRUNT_MAGMA_HIDEOUT_3`, `TRAINER_GRUNT_MUSEUM_1`
+- `EFFECT_SPEED_DOWN_HIT` (unported): 14 moves: `MOVE_BUBBLE`, `MOVE_CONSTRICT`, `MOVE_DRUM_BEATING`, `MOVE_ELECTROWEB`, `MOVE_GLACIATE`, `MOVE_ICY_WIND`, `MOVE_LOW_SWEEP`, `MOVE_MUD_SHOT`, `MOVE_PHANTOM_GLOVES`, `MOVE_POUNCE`, `MOVE_ROCK_TOMB`, `MOVE_SHOT_PUT`, `MOVE_TAKE_DOWN`, `MOVE_TORRENT_FIST`; 83 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALANNAH`, `TRAINER_AMY_AND_LIV_1`, `TRAINER_ANGELICA`
+- `EFFECT_SPIKE_HIT` (unported): 1 move: `MOVE_CEASELESS_EDGE`; 5 elite-tier trainers: `TRAINER_ALBERT`, `TRAINER_DEMETRIUS`, `TRAINER_GRUNT_AQUA_HIDEOUT_7`, `TRAINER_HIDEO`, `TRAINER_WYATT`
+- `EFFECT_SP_ATTACK_UP_HIT` (unported): 3 moves: `MOVE_CHARGE_BEAM`, `MOVE_ESPER_WALTZ`, `MOVE_FIERY_DANCE`; 24 elite-tier trainers (first 8): `TRAINER_AXLE`, `TRAINER_BENJAMIN_1`, `TRAINER_BRENT`, `TRAINER_BROOKE_1`, `TRAINER_CAROL`, `TRAINER_DARIUS`, `TRAINER_DAYTON`, `TRAINER_EDWARDO`
+- `EFFECT_STEALTH_ROCK_HIT` (unported): 3 moves: `MOVE_JAGGED_PUNCH`, `MOVE_SCATTER_BLAST`, `MOVE_STONE_AXE`; 18 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ANGELINA`, `TRAINER_ATSUSHI`, `TRAINER_BLUNDER`, `TRAINER_BRAWLY_1`, `TRAINER_CELIA`, `TRAINER_CLARK`
+- `EFFECT_STEEL_BEAM` (registered, untested): 2 moves: `MOVE_CHLOROBLAST`, `MOVE_STEEL_BEAM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71; 50 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ALFREDO`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`, `TRAINER_BEN`, `TRAINER_BERKE`, `TRAINER_BRENDAN_ROUTE_110_MUDKIP`
+- `EFFECT_STICKY_WEB_HIT` (unported): 1 move: `MOVE_WEB_SHOT`; 6 elite-tier trainers: `TRAINER_ALBERT`, `TRAINER_GRUNT_AQUA_HIDEOUT_5`, `TRAINER_HEIDI`, `TRAINER_JEFFREY_1`, `TRAINER_JENNA`, `TRAINER_LAO_1`
+- `EFFECT_STORED_POWER` (unported): 2 moves: `MOVE_POWER_TRIP`, `MOVE_STORED_POWER`; 14 elite-tier trainers (first 8): `TRAINER_CAROL`, `TRAINER_CEDRIC`, `TRAINER_CHIP`, `TRAINER_COBY`, `TRAINER_DUSTY_3`, `TRAINER_EDWARD`, `TRAINER_GEORGIA`, `TRAINER_GRUNT_AQUA_HIDEOUT_2`
+- `EFFECT_SUPERPOWER` (registered, untested): 2 moves: `MOVE_SUPERPOWER`, `MOVE_YGGDRASIL_FORCE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337; 37 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AMANDA`, `TRAINER_BROOKE_2`, `TRAINER_BROOKE_3`, `TRAINER_BUFFEL`, `TRAINER_CALVIN_2`, `TRAINER_CAROLINE`, `TRAINER_DANA`
+- `EFFECT_THUNDER` (registered, untested): 1 move: `MOVE_THUNDER`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5734; 77 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ANDREW`, `TRAINER_AUSTINA`, `TRAINER_BENJAMIN_4`, `TRAINER_BLAKE`
+- `EFFECT_TRAP` (unported): 11 moves: `MOVE_BIND`, `MOVE_CLAMP`, `MOVE_FIRE_SPIN`, `MOVE_INFESTATION`, `MOVE_LEAF_TORNADO`, `MOVE_MAGMA_STORM`, `MOVE_SAND_TOMB`, `MOVE_SNAP_TRAP`, `MOVE_THUNDER_CAGE`, `MOVE_TWISTER`, `MOVE_WRAP`; 35 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ALBERT`, `TRAINER_BERNIE_1`, `TRAINER_CAROLINE`, `TRAINER_COURTNEY_MAGMA_HIDEOUT`, `TRAINER_COURTNEY_MOSSDEEP`, `TRAINER_COURTNEY_SUNHOLLOW`, `TRAINER_CREW_MTPYRE`
+- `EFFECT_TREPIDATION` (registered, untested): 1 move: `MOVE_TREPIDATION`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:12502; 2 elite-tier trainers: `TRAINER_GREG`, `TRAINER_GRUNT_MAGMA_HIDEOUT_6`
+- `EFFECT_TRI_ATTACK` (unported): 1 move: `MOVE_TRI_ATTACK`; 12 elite-tier trainers (first 8): `TRAINER_ALANNAH`, `TRAINER_ALEXIA`, `TRAINER_ALFREDO`, `TRAINER_BENJAMIN_1`, `TRAINER_DARIUS`, `TRAINER_SHAWN`, `TRAINER_TIFFANY`, `TRAINER_TIMMY`
+- `EFFECT_TWO_TURN_RETALIATION` (registered, untested): 2 moves: `MOVE_FREEZE_SHOCK`, `MOVE_ICE_BURN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424; 2 elite-tier trainers: `TRAINER_DRAKE`, `TRAINER_SKIER_JANET`
+- `EFFECT_TWO_TURN_SECONDARY` (registered, untested): 3 moves: `MOVE_METEOR_BEAM`, `MOVE_SKULL_BASH`, `MOVE_SKY_ATTACK`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399; 17 elite-tier trainers (first 8): `TRAINER_ALBERT`, `TRAINER_BENJAMIN_3`, `TRAINER_COLIN`, `TRAINER_CRISSY`, `TRAINER_CRISTIN_1`, `TRAINER_GABRIELLE_1`, `TRAINER_GREG`, `TRAINER_GRUNT_MT_CHIMNEY_2`
 
-- `MOVE_ACID_SPRAY` -> `MOVE_EFFECT_SP_DEF_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:63
-- `MOVE_AURORA_BEAM` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_BANISHED_POWER` -> `MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:101
-- `MOVE_BREAKING_SWIPE` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_CHARGE_BEAM` -> `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:31
-- `MOVE_CHIP_AWAY` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_DRACO_METEOR` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_ESPER_WALTZ` -> `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:31
-- `MOVE_FIERY_DANCE` -> `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:31
-- `MOVE_FIRE_PLEDGE` -> `MOVE_EFFECT_FIRE_PLEDGE` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:90
-- `MOVE_FLASH` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_FLEUR_CANNON` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_GRASS_PLEDGE` -> `MOVE_EFFECT_GRASS_PLEDGE` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:91
-- `MOVE_GROWL` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_LEAF_STORM` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_LUMINA_CRASH` -> `MOVE_EFFECT_SP_DEF_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:63
-- `MOVE_LUNGE` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_MAKE_IT_RAIN` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_METEOR_BEAM` -> `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:31
-- `MOVE_MIST_BALL` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_MOONBLAST` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_MUDDY_WATER` -> `MOVE_EFFECT_ACC_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:40
-- `MOVE_MYSTICAL_FIRE` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_MYSTICAL_POWER` -> `MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:101
-- `MOVE_OCTAZOOKA` -> `MOVE_EFFECT_ACC_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:40
-- `MOVE_OVERHEAT` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_PHANTOM_FORCE` -> `MOVE_EFFECT_FEINT` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:74
-- `MOVE_PIXIE_BEAM` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_PLAY_ROUGH` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_POCKET_SAND` -> `MOVE_EFFECT_ACC_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:40
-- `MOVE_PRISM_BLAST` -> `MOVE_EFFECT_ACC_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:40
-- `MOVE_PSYBEAM` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_PSYCHO_BOOST` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_PSYSHIELD_BASH` -> `MOVE_EFFECT_DEF_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:29
-- `MOVE_RAGING_SOULS` -> `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:62
-- `MOVE_RUMBLE_KICK` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_SCALE_SHOT` -> `MOVE_EFFECT_SCALE_SHOT` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:104
-- `MOVE_SEED_FLARE` -> `MOVE_EFFECT_SP_DEF_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:63
-- `MOVE_SHADOW_FORCE` -> `MOVE_EFFECT_FEINT` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:74
-- `MOVE_SKITTER_SMACK` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_SNARL` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_SPIN_OUT` -> `MOVE_EFFECT_SPD_MINUS_2` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:61
-- `MOVE_SPIRIT_BREAK` -> `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:38
-- `MOVE_STEEL_WING` -> `MOVE_EFFECT_DEF_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:29
-- `MOVE_TORCH_SONG` -> `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:31
-- `MOVE_TROP_KICK` -> `MOVE_EFFECT_ATK_MINUS_1` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:35
-- `MOVE_WYRM_WIND` -> `MOVE_EFFECT_WYRM_WIND` (registered, untested); pipeline/.upstream/er-config/MoveEffect.proto:103
+## Unported Secondary-Effect Groups
 
-## Unported Flag Keys
+One line per unit. Move count is the number of distinct moves carrying the unit (all move ids listed up to
+15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
+has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
 
-- `airBased`: 35 unported pair(s) of 35 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:181
-- `arrowBased`: 19 unported pair(s) of 19 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:179
-- `ballistic`: 40 unported pair(s) of 40 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:173; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:348
-- `boneBased`: 5 unported pair(s) of 5 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:176; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:360
-- `contact`: 369 unported pair(s) of 369 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:143
-- `copycatBanned`: 28 unported pair(s) of 28 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:189
-- `dance`: 15 unported pair(s) of 15 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:174; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:352
-- `doubleDamageVsMega`: 3 unported pair(s) of 3 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:148
-- `drillBased`: 5 unported pair(s) of 5 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:185
-- `everyOtherTurn`: 13 unported pair(s) of 13 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:149
-- `fieldBased`: 17 unported pair(s) of 17 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:178; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:362
-- `hammerBased`: 32 unported pair(s) of 32 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:182
-- `hitsUnderground`: 3 unported pair(s) of 3 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:159; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:345
-- `hitsUnderwater`: 2 unported pair(s) of 2 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:160; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:346
-- `hornBased`: 22 unported pair(s) of 22 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:180
-- `ignoresAbility`: 8 unported pair(s) of 8 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:151; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:351
-- `ignoresLevitation`: 3 unported pair(s) of 3 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:163; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:355
-- `ignoresProtect`: 43 unported pair(s) of 43 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:146
-- `ignoresStatStages`: 12 unported pair(s) of 12 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:147; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:343
-- `ignoresSubstitute`: 1 unported pair(s) of 1 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:165; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:357
-- `isProtection`: 15 unported pair(s) of 15 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:150; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:349
-- `kickBased`: 20 unported pair(s) of 20 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:171; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:344
-- `lunarBased`: 7 unported pair(s) of 7 (unported); pipeline/.upstream/er-config/MoveList.proto:184
-- `magicCoatAffected`: 88 unported pair(s) of 88 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:155; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:333
-- `metronomeBanned`: 28 unported pair(s) of 28 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:188
-- `mimicBanned`: 4 unported pair(s) of 4 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:191
-- `mirrorMoveAffected`: 835 unported pair(s) of 835 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:156; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:335
-- `noKingsRock`: 1 unported pair(s) of 1 (unported); pipeline/.upstream/er-config/MoveList.proto:157
-- `noSheerForce`: 5 unported pair(s) of 5 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:158
-- `powderAffected`: 8 unported pair(s) of 8 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:161; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:350
-- `punchBased`: 36 unported pair(s) of 36 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:168; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:339
-- `reckless`: 23 unported pair(s) of 23 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:167; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:338
-- `sleepTalkBanned`: 14 unported pair(s) of 14 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:190
-- `snatchAffected`: 86 unported pair(s) of 86 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:154; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:334
-- `thawUser`: 7 unported pair(s) of 7 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:164; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:356
-- `throwingBased`: 22 unported pair(s) of 22 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:183
-- `weatherBased`: 18 unported pair(s) of 18 (registered, untested); pipeline/.upstream/er-config/MoveList.proto:177; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:361
+- `MOVE_EFFECT_ACC_MINUS_1` (registered, untested): 4 moves: `MOVE_MUDDY_WATER`, `MOVE_OCTAZOOKA`, `MOVE_POCKET_SAND`, `MOVE_PRISM_BLAST`; pipeline/.upstream/er-config/MoveEffect.proto:40; 35 elite-tier trainers (first 8): `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ANDREA`, `TRAINER_BRAWLY_5`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`
+- `MOVE_EFFECT_ATK_MINUS_1` (registered, untested): 9 moves: `MOVE_AURORA_BEAM`, `MOVE_BREAKING_SWIPE`, `MOVE_CHIP_AWAY`, `MOVE_FLASH`, `MOVE_GROWL`, `MOVE_LUNGE`, `MOVE_PLAY_ROUGH`, `MOVE_RUMBLE_KICK`, `MOVE_TROP_KICK`; pipeline/.upstream/er-config/MoveEffect.proto:35; 140 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_AMANDA`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`
+- `MOVE_EFFECT_DEF_PLUS_1` (registered, untested): 2 moves: `MOVE_PSYSHIELD_BASH`, `MOVE_STEEL_WING`; pipeline/.upstream/er-config/MoveEffect.proto:29; 17 elite-tier trainers (first 8): `TRAINER_AIDAN`, `TRAINER_ALANNAH`, `TRAINER_CHASE`, `TRAINER_CLIFFORD`, `TRAINER_DYLAN_1`, `TRAINER_ISOBEL`, `TRAINER_KAYLA`, `TRAINER_MAURA`
+- `MOVE_EFFECT_ENRAGE` (unported): 1 move: `MOVE_INCITE`; pipeline/.upstream/er-config/MoveEffect.proto:108; no elite-tier trainer carries them
+- `MOVE_EFFECT_FEINT` (registered, untested): 2 moves: `MOVE_PHANTOM_FORCE`, `MOVE_SHADOW_FORCE`; pipeline/.upstream/er-config/MoveEffect.proto:74; 7 elite-tier trainers: `TRAINER_BETHANY`, `TRAINER_DUNCAN`, `TRAINER_DUSTY_3`, `TRAINER_DUSTY_4`, `TRAINER_JACKSON_4`, `TRAINER_PATRICIA`, `TRAINER_TIMOTHY_4`
+- `MOVE_EFFECT_FIRE_PLEDGE` (registered, untested): 1 move: `MOVE_FIRE_PLEDGE`; pipeline/.upstream/er-config/MoveEffect.proto:90; 2 elite-tier trainers: `TRAINER_DAWSON`, `TRAINER_SHAYLA`
+- `MOVE_EFFECT_GRASS_PLEDGE` (registered, untested): 1 move: `MOVE_GRASS_PLEDGE`; pipeline/.upstream/er-config/MoveEffect.proto:91; no elite-tier trainer carries them
+- `MOVE_EFFECT_HIGHEST_STAT_EXCEPT_SPEED_PLUS_1` (registered, untested): 2 moves: `MOVE_BANISHED_POWER`, `MOVE_MYSTICAL_POWER`; pipeline/.upstream/er-config/MoveEffect.proto:101; 2 elite-tier trainers: `TRAINER_GRUNT_MT_PYRE_2`, `TRAINER_GRUNT_WEATHER_INST_3`
+- `MOVE_EFFECT_SCALE_SHOT` (registered, untested): 1 move: `MOVE_SCALE_SHOT`; pipeline/.upstream/er-config/MoveEffect.proto:104; 25 elite-tier trainers (first 8): `TRAINER_ANGELICA`, `TRAINER_BETHANY`, `TRAINER_BRENDA`, `TRAINER_CARLEE`, `TRAINER_CYNTHIA_2`, `TRAINER_DARCY`, `TRAINER_DRAGONITENITE_SAGE_1`, `TRAINER_DRAGONITENITE_SAGE_2`
+- `MOVE_EFFECT_SPD_MINUS_2` (registered, untested): 1 move: `MOVE_SPIN_OUT`; pipeline/.upstream/er-config/MoveEffect.proto:61; 4 elite-tier trainers: `TRAINER_CARTER`, `TRAINER_DAISUKE`, `TRAINER_DUSTY_1`, `TRAINER_JENNA`
+- `MOVE_EFFECT_SP_ATK_MINUS_1` (registered, untested): 9 moves: `MOVE_MAKE_IT_RAIN`, `MOVE_MIST_BALL`, `MOVE_MOONBLAST`, `MOVE_MYSTICAL_FIRE`, `MOVE_PIXIE_BEAM`, `MOVE_PSYBEAM`, `MOVE_SKITTER_SMACK`, `MOVE_SNARL`, `MOVE_SPIRIT_BREAK`; pipeline/.upstream/er-config/MoveEffect.proto:38; 178 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALEXIA`, `TRAINER_ALIX`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`, `TRAINER_AMY_AND_LIV_4`
+- `MOVE_EFFECT_SP_ATK_MINUS_2` (registered, untested): 6 moves: `MOVE_DRACO_METEOR`, `MOVE_FLEUR_CANNON`, `MOVE_LEAF_STORM`, `MOVE_OVERHEAT`, `MOVE_PSYCHO_BOOST`, `MOVE_RAGING_SOULS`; pipeline/.upstream/er-config/MoveEffect.proto:62; 100 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ALBERT`, `TRAINER_ANDREA`, `TRAINER_ATSUSHI`, `TRAINER_BRIANNA`, `TRAINER_CALVIN_2`, `TRAINER_CALVIN_3`
+- `MOVE_EFFECT_SP_ATK_PLUS_1` (registered, untested): 5 moves: `MOVE_CHARGE_BEAM`, `MOVE_ESPER_WALTZ`, `MOVE_FIERY_DANCE`, `MOVE_METEOR_BEAM`, `MOVE_TORCH_SONG`; pipeline/.upstream/er-config/MoveEffect.proto:31; 42 elite-tier trainers (first 8): `TRAINER_ALBERT`, `TRAINER_AXLE`, `TRAINER_BENJAMIN_1`, `TRAINER_BRENT`, `TRAINER_BROOKE_1`, `TRAINER_CAROL`, `TRAINER_CRISSY`, `TRAINER_CRISTIN_1`
+- `MOVE_EFFECT_SP_DEF_MINUS_2` (registered, untested): 3 moves: `MOVE_ACID_SPRAY`, `MOVE_LUMINA_CRASH`, `MOVE_SEED_FLARE`; pipeline/.upstream/er-config/MoveEffect.proto:63; 21 elite-tier trainers (first 8): `TRAINER_ANGELINA`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`, `TRAINER_BRENDAN_LILYCOVE_TREECKO`, `TRAINER_CHESTER`, `TRAINER_GRUNT_AQUA_HIDEOUT_3`, `TRAINER_GRUNT_MAGMA_HIDEOUT_3`, `TRAINER_GRUNT_MUSEUM_1`
+- `MOVE_EFFECT_WYRM_WIND` (registered, untested): 1 move: `MOVE_WYRM_WIND`; pipeline/.upstream/er-config/MoveEffect.proto:103; 10 elite-tier trainers (first 8): `TRAINER_CRISTIN_1`, `TRAINER_FLANNERY_1`, `TRAINER_GRUNT_MAGMA_HIDEOUT_16`, `TRAINER_JACKSON_1`, `TRAINER_JOSUE`, `TRAINER_MAXIE_MAGMA_HIDEOUT`, `TRAINER_MAXIE_MT_CHIMNEY`, `TRAINER_MONOCHAMP_DRAGON`
 
-## Unported Legacy-Script Pairs
+## Unported Flag Groups
 
-- `MOVE_ANCHOR_SHOT` -> `BattleScript_EffectHitPreventEscape` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_ARMOR_CANNON` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_BATTERING_RAM` -> `BattleScript_EffectBrickBreak` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_BEHEMOTH_BASH` -> `BattleScript_EffectHit` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857
-- `MOVE_BODY_PRESS` -> `BattleScript_EffectHit` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857
-- `MOVE_BRICK_BREAK` -> `BattleScript_EffectBrickBreak` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_BUG_BITE` -> `BattleScript_EffectBugBite` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992
-- `MOVE_CHLOROBLAST` -> `BattleScript_EffectSteelBeam` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71
-- `MOVE_CLOSE_COMBAT` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_DECORATE` -> `BattleScript_EffectDecorate` (unported); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:582
-- `MOVE_DRAGON_ASCENT` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_FREEZE_SHOCK` -> `BattleScript_EffectTwoTurnRetaliation` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424
-- `MOVE_FREEZY_FROST` -> `BattleScript_EffectFreezyFrost` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:447
-- `MOVE_GLITZY_GLOW` -> `BattleScript_EffectGlitzyGlow` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:526
-- `MOVE_GUST` -> `BattleScript_EffectGust` (unported); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5703
-- `MOVE_HEADLONG_RUSH` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_HURRICANE` -> `BattleScript_EffectHurricane` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5738
-- `MOVE_ICE_BURN` -> `BattleScript_EffectTwoTurnRetaliation` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424
-- `MOVE_IRON_FANGS` -> `BattleScript_EffectBrickBreak` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_METEOR_BEAM` -> `BattleScript_EffectTwoTurnSecondary` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_MIND_BLOWN` -> `BattleScript_EffectMindBlown` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3538
-- `MOVE_MUD_BOMB` -> `BattleScript_EffectSmackDown` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_PLUCK` -> `BattleScript_EffectBugBite` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992
-- `MOVE_PSYCHIC_FANGS` -> `BattleScript_EffectBrickBreak` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_RAGING_BULL` -> `BattleScript_EffectBrickBreak` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380
-- `MOVE_RAIN_FLUSH` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_SANDSEAR_STORM` -> `BattleScript_EffectSandstormHit` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3426
-- `MOVE_SKULL_BASH` -> `BattleScript_EffectTwoTurnSecondary` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_SKY_ATTACK` -> `BattleScript_EffectTwoTurnSecondary` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399
-- `MOVE_SMACK_DOWN` -> `BattleScript_EffectSmackDown` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_SMITE` -> `BattleScript_EffectSmackDown` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_SPIRIT_SHACKLE` -> `BattleScript_EffectHitPreventEscape` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_SPRINGTIDE_STORM` -> `BattleScript_EffectFairyTerrainHit` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3454
-- `MOVE_STEEL_BEAM` -> `BattleScript_EffectSteelBeam` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71
-- `MOVE_STRENGTH` -> `BattleScript_EffectCloseCombat` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341
-- `MOVE_SUPERPOWER` -> `BattleScript_EffectSuperpower` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337
-- `MOVE_THOUSAND_ARROWS` -> `BattleScript_EffectSmackDown` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520
-- `MOVE_THOUSAND_WAVES` -> `BattleScript_EffectHitPreventEscape` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886
-- `MOVE_THUNDER` -> `BattleScript_EffectThunder` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5734
-- `MOVE_TREPIDATION` -> `BattleScript_EffectTrepidation` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:12502
-- `MOVE_YGGDRASIL_FORCE` -> `BattleScript_EffectSuperpower` (registered, untested); pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337
+One line per unit. Move count is the number of distinct moves carrying the unit (all move ids listed up to
+15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
+has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
+
+- `airBased` (registered, untested): 35 moves (first 15): `MOVE_AEROBLAST`, `MOVE_AIR_CUTTER`, `MOVE_AIR_SLASH`, `MOVE_BLEAKWIND_STORM`, `MOVE_BLIZZARD`, `MOVE_BRAVE_BIRD`, `MOVE_DUAL_WINGBEAT`, `MOVE_ESPER_WING`, `MOVE_FAIRY_WIND`, `MOVE_GIANT_GALE`, `MOVE_GODSPEED`, `MOVE_GUST`, `MOVE_HEAT_WAVE`, `MOVE_HURRICANE`, `MOVE_ICY_WIND`; pipeline/.upstream/er-config/MoveList.proto:181; 425 elite-tier trainers (first 8): `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AIDAN`
+- `arrowBased` (registered, untested): 19 moves (first 15): `MOVE_ARCHER_SHOT`, `MOVE_BLAZING_ARROW`, `MOVE_BLITZ_ARROW`, `MOVE_BRAMBLE_BLAST`, `MOVE_CLAY_DART`, `MOVE_CUPID_SHOT`, `MOVE_DEVIOUS_SHOT`, `MOVE_DIAMOND_ARROW`, `MOVE_DRAKE_MISSILE`, `MOVE_FROST_BOLT`, `MOVE_HOMING_FLETCH`, `MOVE_LIGHTNING_STRIKE`, `MOVE_SPARKLING_BARRAGE`, `MOVE_SPIRIT_SHACKLE`, `MOVE_SUPERSONIC_SHOT`; pipeline/.upstream/er-config/MoveList.proto:179; 26 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ALBERT`, `TRAINER_ANGELINA`, `TRAINER_BRAWLY_1`, `TRAINER_CLAUDE`, `TRAINER_COLIN`, `TRAINER_CONNIE`
+- `ballistic` (registered, untested): 40 moves (first 15): `MOVE_ACID_SPRAY`, `MOVE_ANCHOR_SHOT`, `MOVE_AURA_SPHERE`, `MOVE_BARRAGE`, `MOVE_BEAK_BLAST`, `MOVE_BULLET_SEED`, `MOVE_EGG_BOMB`, `MOVE_ELECTRO_BALL`, `MOVE_ELECTRO_SHOT`, `MOVE_ENERGY_BALL`, `MOVE_FLASH_CANNON`, `MOVE_FOCUS_BLAST`, `MOVE_GUNK_SHOT`, `MOVE_GYRO_BALL`, `MOVE_ICE_BALL`; pipeline/.upstream/er-config/MoveList.proto:173; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:348; 553 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_LEELA`
+- `boneBased` (registered, untested): 5 moves: `MOVE_BLAZING_BONE`, `MOVE_BONEMERANG`, `MOVE_BONE_CLUB`, `MOVE_BONE_RUSH`, `MOVE_SHADOW_BONE`; pipeline/.upstream/er-config/MoveList.proto:176; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:360; 14 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ALAN`, `TRAINER_ALEXA`, `TRAINER_COLE`, `TRAINER_CREW_MTPYRE`, `TRAINER_DAYTON`, `TRAINER_KINDRA`, `TRAINER_MARK`
+- `contact` (registered, untested): 369 moves (first 15): `MOVE_ACCELEROCK`, `MOVE_ACROBATICS`, `MOVE_AERIAL_ACE`, `MOVE_ANCHOR_SHOT`, `MOVE_AQUA_BASH`, `MOVE_AQUA_FANG`, `MOVE_AQUA_JET`, `MOVE_AQUA_STEP`, `MOVE_AQUA_TAIL`, `MOVE_ARM_THRUST`, `MOVE_ASSURANCE`, `MOVE_ASTONISH`, `MOVE_ASTRAL_HAND`, `MOVE_AURA_WHEEL`, `MOVE_AVALANCHE`; pipeline/.upstream/er-config/MoveList.proto:143; 848 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`
+- `copycatBanned` (registered, untested): 28 moves (first 15): `MOVE_ASSIST`, `MOVE_BESTOW`, `MOVE_BLAZING_TORQUE`, `MOVE_CHATTER`, `MOVE_COMBAT_TORQUE`, `MOVE_COPYCAT`, `MOVE_COUNTER`, `MOVE_DESTINY_BOND`, `MOVE_DYNAMAX_CANNON`, `MOVE_ENDURE`, `MOVE_FEINT_ATTACK`, `MOVE_FOCUS_PUNCH`, `MOVE_HELPING_HAND`, `MOVE_MAGICAL_TORQUE`, `MOVE_METRONOME`; pipeline/.upstream/er-config/MoveList.proto:189; 99 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `TRAINER_ALYSSA`, `TRAINER_AMY_AND_LIV_1`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`, `TRAINER_ANDREW`
+- `dance` (registered, untested): 15 moves: `MOVE_AQUA_STEP`, `MOVE_DRAGON_DANCE`, `MOVE_ESPER_WALTZ`, `MOVE_FEATHER_DANCE`, `MOVE_FIERY_DANCE`, `MOVE_HEX_TROT`, `MOVE_LUNAR_DANCE`, `MOVE_MYSTIC_DANCE`, `MOVE_PETAL_DANCE`, `MOVE_QUIVER_DANCE`, `MOVE_REVELATION_DANCE`, `MOVE_SWORDS_DANCE`, `MOVE_TEETER_DANCE`, `MOVE_VICTORY_DANCE`, `MOVE_ZAP_JIVE`; pipeline/.upstream/er-config/MoveList.proto:174; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:352; 296 elite-tier trainers (first 8): `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_AIDAN`, `TRAINER_ALAN`
+- `doubleDamageVsMega` (registered, untested): 3 moves: `MOVE_BEHEMOTH_BASH`, `MOVE_BEHEMOTH_BLADE`, `MOVE_DYNAMAX_CANNON`; pipeline/.upstream/er-config/MoveList.proto:148; 3 elite-tier trainers: `TRAINER_MONOCHAMP_POISON`, `TRAINER_MONOCHAMP_STEEL`, `TRAINER_STEVEN`
+- `drillBased` (registered, untested): 5 moves: `MOVE_BERSERKER_HORN`, `MOVE_DRILL_PECK`, `MOVE_DRILL_RUN`, `MOVE_HORN_DRILL`, `MOVE_HYPER_DRILL`; pipeline/.upstream/er-config/MoveList.proto:185; 90 elite-tier trainers (first 8): `TRAINER_ALAN`, `TRAINER_ALANNAH`, `TRAINER_ALLISON`, `TRAINER_ANNA_AND_MEG_4`, `TRAINER_ANTHONY`, `TRAINER_AUTUMN`, `TRAINER_BECK`, `TRAINER_CAMRON`
+- `everyOtherTurn` (registered, untested): 13 moves: `MOVE_BLAST_BURN`, `MOVE_BLOOD_MOON`, `MOVE_BLUE_MOON`, `MOVE_ETERNABEAM`, `MOVE_FRENZY_PLANT`, `MOVE_GIGATON_HAMMER`, `MOVE_HYDRO_CANNON`, `MOVE_METEOR_ASSAULT`, `MOVE_PRISMATIC_LASER`, `MOVE_RIP_AND_TEAR`, `MOVE_ROCK_WRECKER`, `MOVE_SPECTRAL_SERENADE`, `MOVE_TSUNAMI_HAMMER`; pipeline/.upstream/er-config/MoveList.proto:149; 63 elite-tier trainers (first 8): `TRAINER_ALANNAH`, `TRAINER_ALEXIA`, `TRAINER_ANGELINA`, `TRAINER_BRAXTON`, `TRAINER_BRICE`, `TRAINER_BRYANT`, `TRAINER_CALVIN_E4`, `TRAINER_CAMERON_4`
+- `fieldBased` (registered, untested): 17 moves (first 15): `MOVE_CUT`, `MOVE_DIG`, `MOVE_DIVE`, `MOVE_FLASH`, `MOVE_FLY`, `MOVE_HEADBUTT`, `MOVE_HIDDEN_POWER`, `MOVE_ICE_SPINNER`, `MOVE_ROCK_CLIMB`, `MOVE_SECRET_POWER`, `MOVE_STEEL_ROLLER`, `MOVE_STRENGTH`, `MOVE_SURF`, `MOVE_TRIPLE_DIVE`, `MOVE_WATERFALL`; pipeline/.upstream/er-config/MoveList.proto:178; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:362; 348 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ALANNAH`
+- `hammerBased` (registered, untested): 32 moves (first 15): `MOVE_AIRBORNE_SLAM`, `MOVE_BATTERING_RAM`, `MOVE_BEETLE_BASH`, `MOVE_BERRY_SMASH`, `MOVE_BONK`, `MOVE_BRUTAL_SWING`, `MOVE_CRABHAMMER`, `MOVE_CRACKLE_SLAM`, `MOVE_DRAGON_HAMMER`, `MOVE_EARTHSPLITTER`, `MOVE_FEMUR_BREAKER`, `MOVE_GIGATON_HAMMER`, `MOVE_HAMMER_ARM`, `MOVE_ICE_HAMMER`, `MOVE_IVY_CUDGEL`; pipeline/.upstream/er-config/MoveList.proto:182; 104 elite-tier trainers (first 8): `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALANNAH`, `TRAINER_ALEXIA`, `TRAINER_ALICE`
+- `hitsUnderground` (registered, untested): 3 moves: `MOVE_EARTHQUAKE`, `MOVE_FISSURE`, `MOVE_MAGNITUDE`; pipeline/.upstream/er-config/MoveList.proto:159; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:345; 182 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ALAN`, `TRAINER_ALVARO`, `TRAINER_AMANDA`, `TRAINER_ANDREW`, `TRAINER_AXLE`, `TRAINER_BARNY`
+- `hitsUnderwater` (registered, untested): 2 moves: `MOVE_SURF`, `MOVE_WHIRLPOOL`; pipeline/.upstream/er-config/MoveList.proto:160; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:346; 91 elite-tier trainers (first 8): `TRAINER_BARRY`, `TRAINER_BENJAMIN_1`, `TRAINER_BENJAMIN_4`, `TRAINER_BIANCA`, `TRAINER_BRENDA`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENDAN_LILYCOVE_TORCHIC`, `TRAINER_BRENDAN_LILYCOVE_TREECKO`
+- `hornBased` (registered, untested): 22 moves (first 15): `MOVE_AQUA_BASH`, `MOVE_BERSERKER_HORN`, `MOVE_DRAGON_JAB`, `MOVE_DRILL_PECK`, `MOVE_DRILL_RUN`, `MOVE_FIRE_GLAIVE`, `MOVE_FURY_ATTACK`, `MOVE_HORN_ATTACK`, `MOVE_HORN_DRILL`, `MOVE_HORN_LEECH`, `MOVE_HYPER_DRILL`, `MOVE_ICICLE_IMPALE`, `MOVE_JAGGED_HORNS`, `MOVE_MEGAHORN`, `MOVE_PECK`; pipeline/.upstream/er-config/MoveList.proto:180; 200 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ALAN`, `TRAINER_ALANNAH`, `TRAINER_ALFREDO`, `TRAINER_ALLISON`, `TRAINER_ALVARO`, `TRAINER_AMANDA`, `TRAINER_ANNA_AND_MEG_1`
+- `ignoresAbility` (registered, untested): 8 moves: `MOVE_CRUSH_CLAW`, `MOVE_HORN_DRILL`, `MOVE_MOONGEIST_BEAM`, `MOVE_PHOTON_GEYSER`, `MOVE_RIDER_KICK`, `MOVE_SMART_STRIKE`, `MOVE_SUNSTEEL_STRIKE`, `MOVE_WRING_OUT`; pipeline/.upstream/er-config/MoveList.proto:151; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:351; 51 elite-tier trainers (first 8): `TRAINER_ALAN`, `TRAINER_ALANNAH`, `TRAINER_ALEXIA`, `TRAINER_ALYSSA`, `TRAINER_ANNA_AND_MEG_1`, `TRAINER_BRENDAN_RUSTBORO_TREECKO`, `TRAINER_CALE`, `TRAINER_CAROLINE`
+- `ignoresLevitation` (registered, untested): 3 moves: `MOVE_BONEMERANG`, `MOVE_MUD_BOMB`, `MOVE_THOUSAND_ARROWS`; pipeline/.upstream/er-config/MoveList.proto:163; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:355; 20 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ALAN`, `TRAINER_ALEXA`, `TRAINER_BIANCA`, `TRAINER_COLE`, `TRAINER_CONNIE`, `TRAINER_CREW_MTPYRE`, `TRAINER_DRAKE_3`
+- `ignoresProtect` (registered, untested): 43 moves (first 15): `MOVE_ACUPRESSURE`, `MOVE_AFTER_YOU`, `MOVE_AIRBORNE_SLAM`, `MOVE_ALLY_SWITCH`, `MOVE_ASSIST`, `MOVE_BESTOW`, `MOVE_BLOCK`, `MOVE_COACHING`, `MOVE_CONFIDE`, `MOVE_COPYCAT`, `MOVE_CURSE`, `MOVE_DOOM_DESIRE`, `MOVE_EERIE_FOG`, `MOVE_ELECTRIFY`, `MOVE_FEINT`; pipeline/.upstream/er-config/MoveList.proto:146; 135 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `TRAINER_ABIGAIL_4`, `TRAINER_AMY_AND_LIV_1`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`
+- `ignoresStatStages` (registered, untested): 12 moves: `MOVE_ASTRAL_HAND`, `MOVE_CHIP_AWAY`, `MOVE_CRUSH_CLAW`, `MOVE_DARKEST_LARIAT`, `MOVE_DEATHROLL`, `MOVE_DIAMOND_ARROW`, `MOVE_FIRE_GLAIVE`, `MOVE_HORN_DRILL`, `MOVE_HORN_LEECH`, `MOVE_MEGAHORN`, `MOVE_PUNISHMENT`, `MOVE_SACRED_SWORD`; pipeline/.upstream/er-config/MoveList.proto:147; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:343; 155 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_AISHA`, `TRAINER_ALAN`, `TRAINER_ALANNAH`, `TRAINER_ALVARO`
+- `ignoresSubstitute` (registered, untested): 1 move: `MOVE_HYPERSPACE_FURY`; pipeline/.upstream/er-config/MoveList.proto:165; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:357; 3 elite-tier trainers: `TRAINER_MONOCHAMP_DARK`, `TRAINER_SIDNEY_3`, `TRAINER_SIDNEY_4`
+- `isProtection` (registered, untested): 15 moves: `MOVE_BANEFUL_BUNKER`, `MOVE_BURNING_BULWARK`, `MOVE_CAMOUFLAGE`, `MOVE_DETECT`, `MOVE_ELECTRIFY`, `MOVE_ENDURE`, `MOVE_KINGS_SHIELD`, `MOVE_MERCULIGHT`, `MOVE_MIND_READER`, `MOVE_OBSTRUCT`, `MOVE_PROTECT`, `MOVE_SILK_TRAP`, `MOVE_SPIKY_SHIELD`, `MOVE_TANGLING_HUSK`, `MOVE_WIDE_GUARD`; pipeline/.upstream/er-config/MoveList.proto:150; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:349; 240 elite-tier trainers (first 8): `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_4`
+- `kickBased` (registered, untested): 20 moves (first 15): `MOVE_AXE_KICK`, `MOVE_BLAZE_KICK`, `MOVE_DOUBLE_KICK`, `MOVE_HIGH_HORSEPOWER`, `MOVE_HIGH_JUMP_KICK`, `MOVE_JUMP_KICK`, `MOVE_LOW_KICK`, `MOVE_MEGA_KICK`, `MOVE_PYRO_BALL`, `MOVE_RIDER_KICK`, `MOVE_ROLLING_KICK`, `MOVE_RUMBLE_KICK`, `MOVE_STOMP`, `MOVE_THUNDEROUS_KICK`, `MOVE_TRIPLE_ARROWS`; pipeline/.upstream/er-config/MoveList.proto:171; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:344; 229 elite-tier trainers (first 8): `BRENDAN_TORCHIC_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_DICK`
+- `lunarBased` (unported): 7 moves: `MOVE_BLOOD_MOON`, `MOVE_BLUE_MOON`, `MOVE_LUNAR_BLESSING`, `MOVE_LUNAR_DANCE`, `MOVE_MOONBLAST`, `MOVE_MOONGEIST_BEAM`, `MOVE_MOONLIGHT`; pipeline/.upstream/er-config/MoveList.proto:184; 128 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ALEXIA`, `TRAINER_ALIX`, `TRAINER_AMY_AND_LIV_2`, `TRAINER_AMY_AND_LIV_3`, `TRAINER_AMY_AND_LIV_4`, `TRAINER_ANDREW`
+- `magicCoatAffected` (registered, untested): 88 moves (first 15): `MOVE_ATTRACT`, `MOVE_BABY_DOLL_EYES`, `MOVE_BLOCK`, `MOVE_CALTROPS`, `MOVE_CAPTIVATE`, `MOVE_CHARM`, `MOVE_CONFIDE`, `MOVE_CONFUSE_RAY`, `MOVE_COTTON_SPORE`, `MOVE_CREEPING_THORNS`, `MOVE_DARK_VOID`, `MOVE_DEFOG`, `MOVE_DISABLE`, `MOVE_DRAIN_BRAIN`, `MOVE_EERIE_IMPULSE`; pipeline/.upstream/er-config/MoveList.proto:155; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:333; 421 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_DICK`
+- `metronomeBanned` (registered, untested): 28 moves (first 15): `MOVE_AFTER_YOU`, `MOVE_ASSIST`, `MOVE_BESTOW`, `MOVE_COPYCAT`, `MOVE_COUNTER`, `MOVE_DECORATE`, `MOVE_DESTINY_BOND`, `MOVE_ENDURE`, `MOVE_FOCUS_PUNCH`, `MOVE_FOLLOW_ME`, `MOVE_HELPING_HAND`, `MOVE_INSTRUCT`, `MOVE_METRONOME`, `MOVE_ME_FIRST`, `MOVE_MIMIC`; pipeline/.upstream/er-config/MoveList.proto:188; 101 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ALEX`, `TRAINER_AMY_AND_LIV_1`
+- `mimicBanned` (registered, untested): 4 moves: `MOVE_CHATTER`, `MOVE_MIMIC`, `MOVE_SKETCH`, `MOVE_TRANSFORM`; pipeline/.upstream/er-config/MoveList.proto:191; 18 elite-tier trainers (first 8): `TRAINER_ANNA_AND_MEG_2`, `TRAINER_ANNA_AND_MEG_3`, `TRAINER_ANNA_AND_MEG_4`, `TRAINER_CHESTER`, `TRAINER_DARRIN`, `TRAINER_DAVID`, `TRAINER_DEZ_AND_LUKE`, `TRAINER_FABIAN`
+- `mirrorMoveAffected` (registered, untested): 835 moves (first 15): `MOVE_ABSORB`, `MOVE_ACCELEROCK`, `MOVE_ACID`, `MOVE_ACID_SPRAY`, `MOVE_ACROBATICS`, `MOVE_AERIAL_ACE`, `MOVE_AEROBLAST`, `MOVE_AIR_CUTTER`, `MOVE_AIR_SLASH`, `MOVE_ALLURING_VOICE`, `MOVE_ANCHOR_SHOT`, `MOVE_ANCIENT_POWER`, `MOVE_APPLE_ACID`, `MOVE_AQUA_BASH`, `MOVE_AQUA_CUTTER`; pipeline/.upstream/er-config/MoveList.proto:156; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:335; 891 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`
+- `noKingsRock` (unported): 1 move: `MOVE_CIRCLE_THROW`; pipeline/.upstream/er-config/MoveList.proto:157; 3 elite-tier trainers: `TRAINER_CORY_4`, `TRAINER_JAMES_1`, `TRAINER_PARKER`
+- `noSheerForce` (registered, untested): 5 moves: `MOVE_CORROSIVE_GAS`, `MOVE_GIANT_GALE`, `MOVE_MAKE_IT_RAIN`, `MOVE_SPIN_OUT`, `MOVE_SQUALL_HAMMER`; pipeline/.upstream/er-config/MoveList.proto:158; 14 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_CARTER`, `TRAINER_DAISUKE`, `TRAINER_DUSTY_1`, `TRAINER_FOSTER`, `TRAINER_HUMBERTO`, `TRAINER_ISAAC_1`, `TRAINER_JENNA`
+- `powderAffected` (registered, untested): 8 moves: `MOVE_COTTON_SPORE`, `MOVE_MAGIC_POWDER`, `MOVE_POISON_POWDER`, `MOVE_POWDER`, `MOVE_RAGE_POWDER`, `MOVE_SLEEP_POWDER`, `MOVE_SPORE`, `MOVE_STUN_SPORE`; pipeline/.upstream/er-config/MoveList.proto:161; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:350; 67 elite-tier trainers (first 8): `TRAINER_ANGELICA`, `TRAINER_ANNA_AND_MEG_1`, `TRAINER_ANNA_AND_MEG_2`, `TRAINER_ANNA_AND_MEG_3`, `TRAINER_ANNA_AND_MEG_4`, `TRAINER_ATHENA`, `TRAINER_BRAXTON`, `TRAINER_CATHERINE_2`
+- `punchBased` (registered, untested): 36 moves (first 15): `MOVE_ASTRAL_HAND`, `MOVE_BRICK_BREAK`, `MOVE_BULLET_PUNCH`, `MOVE_COMET_PUNCH`, `MOVE_CUTSIE_SLAP`, `MOVE_DARKEST_LARIAT`, `MOVE_DIZZY_PUNCH`, `MOVE_DOUBLE_IRON_BASH`, `MOVE_DRAIN_PUNCH`, `MOVE_DYNAMIC_PUNCH`, `MOVE_FIRE_PUNCH`, `MOVE_FIVE_STAR_FURY`, `MOVE_FOCUS_PUNCH`, `MOVE_HAMMER_ARM`, `MOVE_ICE_HAMMER`; pipeline/.upstream/er-config/MoveList.proto:168; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:339; 369 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_LEELA`
+- `reckless` (registered, untested): 23 moves (first 15): `MOVE_ATOMIC_FIRE`, `MOVE_AXE_KICK`, `MOVE_BOOMBURST`, `MOVE_BRAVE_BIRD`, `MOVE_DOUBLE_EDGE`, `MOVE_DRAGON_RUSH`, `MOVE_FLARE_BLITZ`, `MOVE_HEAD_CHARGE`, `MOVE_HEAD_SMASH`, `MOVE_HIGH_JUMP_KICK`, `MOVE_JUMP_KICK`, `MOVE_LIGHT_OF_RUIN`, `MOVE_PSYCHOKINETIC_SLAM`, `MOVE_PSYCHO_WAVE`, `MOVE_SEISMIC_SLAM`; pipeline/.upstream/er-config/MoveList.proto:167; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:338; 415 elite-tier trainers (first 8): `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_GOAT`
+- `sleepTalkBanned` (registered, untested): 14 moves: `MOVE_ASSIST`, `MOVE_BIDE`, `MOVE_CHATTER`, `MOVE_COPYCAT`, `MOVE_DYNAMAX_CANNON`, `MOVE_FOCUS_PUNCH`, `MOVE_METRONOME`, `MOVE_ME_FIRST`, `MOVE_MIMIC`, `MOVE_MIRROR_MOVE`, `MOVE_SHELL_TRAP`, `MOVE_SKETCH`, `MOVE_SLEEP_TALK`, `MOVE_STRUGGLE`; pipeline/.upstream/er-config/MoveList.proto:190; 37 elite-tier trainers (first 8): `TRAINER_BRAWLY_5`, `TRAINER_CALVIN_E4`, `TRAINER_CHESTER`, `TRAINER_CORY_4`, `TRAINER_CRISTIAN`, `TRAINER_DAISY`, `TRAINER_DARRIN`, `TRAINER_DAVID`
+- `snatchAffected` (registered, untested): 86 moves (first 15): `MOVE_ACID_ARMOR`, `MOVE_AGILITY`, `MOVE_AMNESIA`, `MOVE_AQUA_RING`, `MOVE_AROMATHERAPY`, `MOVE_AURORA_VEIL`, `MOVE_AUTOTOMIZE`, `MOVE_BARRIER`, `MOVE_BELLY_DRUM`, `MOVE_BULK_UP`, `MOVE_CALM_MIND`, `MOVE_CHARGE`, `MOVE_CLANGOROUS_SOUL`, `MOVE_COIL`, `MOVE_CONVERSION`; pipeline/.upstream/er-config/MoveList.proto:154; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:334; 678 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_3`
+- `thawUser` (registered, untested): 7 moves: `MOVE_BURN_UP`, `MOVE_FUSION_FLARE`, `MOVE_PYRO_BALL`, `MOVE_SACRED_FIRE`, `MOVE_SCALD`, `MOVE_SIZZLY_SLIDE`, `MOVE_STEAM_ERUPTION`; pipeline/.upstream/er-config/MoveList.proto:164; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:356; 132 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALBERTO`, `TRAINER_ALFREDO`, `TRAINER_ANDREW`, `TRAINER_ANGELICA`, `TRAINER_ANNIKA`, `TRAINER_BEAU`
+- `throwingBased` (registered, untested): 22 moves (first 15): `MOVE_ASTRAL_BARRAGE`, `MOVE_BALL_TOSS`, `MOVE_BARRAGE`, `MOVE_BLOCK_DROPPER`, `MOVE_BONEMERANG`, `MOVE_CHILLER`, `MOVE_EGG_BOMB`, `MOVE_ELECTRO_BALL`, `MOVE_FLING`, `MOVE_GRAV_APPLE`, `MOVE_MAKE_IT_RAIN`, `MOVE_PARTY_FAVORS`, `MOVE_POCKET_SAND`, `MOVE_ROCK_SLIDE`, `MOVE_ROCK_THROW`; pipeline/.upstream/er-config/MoveList.proto:183; 150 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `TRAINER_AARON`, `TRAINER_ACE_TRAINER_DICK`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALAN`, `TRAINER_ALEXA`
+- `weatherBased` (registered, untested): 18 moves (first 15): `MOVE_BLEAKWIND_STORM`, `MOVE_BLIZZARD`, `MOVE_DEPLETION_BEAM`, `MOVE_EERIE_SPELL`, `MOVE_FIRE_PLEDGE`, `MOVE_GRASS_PLEDGE`, `MOVE_HURRICANE`, `MOVE_OMINOUS_WIND`, `MOVE_REVIVAL_BLESSING`, `MOVE_SANDSEAR_STORM`, `MOVE_SHEER_COLD`, `MOVE_SOLAR_BEAM`, `MOVE_SOLAR_BLADE`, `MOVE_SPRINGTIDE_STORM`, `MOVE_THUNDER`; pipeline/.upstream/er-config/MoveList.proto:177; pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:361; 324 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`
+
+## Unported Legacy-Script Groups
+
+One line per unit. Move count is the number of distinct moves carrying the unit (all move ids listed up to
+15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
+has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
+
+- `BattleScript_EffectBrickBreak` (registered, untested): 5 moves: `MOVE_BATTERING_RAM`, `MOVE_BRICK_BREAK`, `MOVE_IRON_FANGS`, `MOVE_PSYCHIC_FANGS`, `MOVE_RAGING_BULL`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6380; 65 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALVARO`, `TRAINER_BLUNDER`, `TRAINER_BRENDAN_RUSTBORO_MUDKIP`, `TRAINER_BRENDAN_RUSTBORO_TORCHIC`, `TRAINER_BRENDAN_RUSTBORO_TREECKO`, `TRAINER_CALVIN_E4`, `TRAINER_CHRIS`
+- `BattleScript_EffectBugBite` (registered, untested): 2 moves: `MOVE_BUG_BITE`, `MOVE_PLUCK`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:992; 17 elite-tier trainers (first 8): `TRAINER_BANEFUL_PETALBURG_WOODS`, `TRAINER_DALTON_3`, `TRAINER_DALTON_4`, `TRAINER_HAYDEN`, `TRAINER_JAMES_1`, `TRAINER_JAZMYN`, `TRAINER_JEFFREY_2`, `TRAINER_JEFFREY_3`
+- `BattleScript_EffectCloseCombat` (registered, untested): 6 moves: `MOVE_ARMOR_CANNON`, `MOVE_CLOSE_COMBAT`, `MOVE_DRAGON_ASCENT`, `MOVE_HEADLONG_RUSH`, `MOVE_RAIN_FLUSH`, `MOVE_STRENGTH`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6341; 169 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AISHA`, `TRAINER_ALFREDO`, `TRAINER_ATHENA`, `TRAINER_ATSUSHI`, `TRAINER_BARRY`
+- `BattleScript_EffectFairyTerrainHit` (registered, untested): 1 move: `MOVE_SPRINGTIDE_STORM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3454; no elite-tier trainer carries them
+- `BattleScript_EffectFreezyFrost` (registered, untested): 1 move: `MOVE_FREEZY_FROST`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:447; 6 elite-tier trainers: `TRAINER_ANGELINA`, `TRAINER_EDWIN_1`, `TRAINER_JANICE`, `TRAINER_SHELLY_SEAFLOOR_CAVERN`, `TRAINER_SHELLY_WEATHER_INSTITUTE`, `TRAINER_SKIER_JANET`
+- `BattleScript_EffectGlitzyGlow` (registered, untested): 1 move: `MOVE_GLITZY_GLOW`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:526; 5 elite-tier trainers: `TRAINER_CAMRON`, `TRAINER_ELI`, `TRAINER_HAYDEN`, `TRAINER_ISAAC_1`, `TRAINER_TATE_AND_LIZA_1`
+- `BattleScript_EffectHit` (registered, untested): 2 moves: `MOVE_BEHEMOTH_BASH`, `MOVE_BODY_PRESS`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2857; 86 elite-tier trainers (first 8): `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`, `TRAINER_ALEXIA`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`
+- `BattleScript_EffectHitPreventEscape` (registered, untested): 3 moves: `MOVE_ANCHOR_SHOT`, `MOVE_SPIRIT_SHACKLE`, `MOVE_THOUSAND_WAVES`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4886; 14 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_NEO`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`, `TRAINER_BRAWLY_1`, `TRAINER_DARIUS`, `TRAINER_DRAKE_4`, `TRAINER_DUNCAN`, `TRAINER_EDDIE`
+- `BattleScript_EffectHurricane` (registered, untested): 1 move: `MOVE_HURRICANE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5738; 141 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AIDAN`, `TRAINER_ALBERTO`, `TRAINER_ANDREA`, `TRAINER_ANDREW`
+- `BattleScript_EffectMindBlown` (registered, untested): 1 move: `MOVE_MIND_BLOWN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3538; 3 elite-tier trainers: `TRAINER_BLUNDER`, `TRAINER_DRAGONITENITE_SAGE_3`, `TRAINER_SALSA`
+- `BattleScript_EffectSandstormHit` (registered, untested): 1 move: `MOVE_SANDSEAR_STORM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3426; 2 elite-tier trainers: `TRAINER_ANGELINA`, `TRAINER_SAMUEL`
+- `BattleScript_EffectSmackDown` (registered, untested): 4 moves: `MOVE_MUD_BOMB`, `MOVE_SMACK_DOWN`, `MOVE_SMITE`, `MOVE_THOUSAND_ARROWS`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1520; 18 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_BARNY`, `TRAINER_BEAU`, `TRAINER_BEN`, `TRAINER_BIANCA`, `TRAINER_CONNIE`, `TRAINER_DAPHNE`, `TRAINER_DRAKE_3`
+- `BattleScript_EffectSteelBeam` (registered, untested): 2 moves: `MOVE_CHLOROBLAST`, `MOVE_STEEL_BEAM`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:71; 50 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ALFREDO`, `TRAINER_ARCHIE_MT_PYRE`, `TRAINER_ARCHIE_SLATEPORT`, `TRAINER_BEN`, `TRAINER_BERKE`, `TRAINER_BRENDAN_ROUTE_110_MUDKIP`
+- `BattleScript_EffectSuperpower` (registered, untested): 2 moves: `MOVE_SUPERPOWER`, `MOVE_YGGDRASIL_FORCE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6337; 37 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_AMANDA`, `TRAINER_BROOKE_2`, `TRAINER_BROOKE_3`, `TRAINER_BUFFEL`, `TRAINER_CALVIN_2`, `TRAINER_CAROLINE`, `TRAINER_DANA`
+- `BattleScript_EffectThunder` (registered, untested): 1 move: `MOVE_THUNDER`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5734; 77 elite-tier trainers (first 8): `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_ANABELLE`, `TRAINER_ANDREW`, `TRAINER_AUSTINA`, `TRAINER_BENJAMIN_4`, `TRAINER_BLAKE`
+- `BattleScript_EffectTrepidation` (registered, untested): 1 move: `MOVE_TREPIDATION`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:12502; 2 elite-tier trainers: `TRAINER_GREG`, `TRAINER_GRUNT_MAGMA_HIDEOUT_6`
+- `BattleScript_EffectTwoTurnRetaliation` (registered, untested): 2 moves: `MOVE_FREEZE_SHOCK`, `MOVE_ICE_BURN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4424; 2 elite-tier trainers: `TRAINER_DRAKE`, `TRAINER_SKIER_JANET`
+- `BattleScript_EffectTwoTurnSecondary` (registered, untested): 3 moves: `MOVE_METEOR_BEAM`, `MOVE_SKULL_BASH`, `MOVE_SKY_ATTACK`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4399; 17 elite-tier trainers (first 8): `TRAINER_ALBERT`, `TRAINER_BENJAMIN_3`, `TRAINER_COLIN`, `TRAINER_CRISSY`, `TRAINER_CRISTIN_1`, `TRAINER_GABRIELLE_1`, `TRAINER_GREG`, `TRAINER_GRUNT_MT_CHIMNEY_2`
 
 ## Allowlisted Pairs
 
