@@ -857,6 +857,15 @@ export const PORTED_DEFENDER_ABILITIES = new Set([
   'ABILITY_AFTERMATH', // (:1663-1670, UseOutOfTurnAttack Explosion/Outburst after the holder faints)
   'ABILITY_GULP_MISSILE', // (:3289-3301, revert form, attacker loses maxHP/4 + paralysis or Def -1)
   'ABILITY_TALON_TRAP', // ON_EITHER (:4713-4730), wraps the attacker on contact
+  // Cycle 145 defender halves
+  'ABILITY_ARC_FLASH', // (:8090-8098, 50% burn on the move's attacker via MOVE_EFFECT_AFFECTS_USER)
+  'ABILITY_BLOOD_STAIN', // ON_EITHER (:8372-8385), replaces the contact attacker's ability
+  'ABILITY_DAYBREAK', // ON_EITHER (:9193-9200), AbilityStatusEffectSafe burn on the attacker
+  'ABILITY_EMERGENCY_EXIT', // (:2645-2647, reuses Wimp Out's onDefender)
+  'ABILITY_MENACING_SITUATION', // ON_EITHER (:7904-7919), 30% Fear on the contact attacker
+  'ABILITY_PATCHWORK', // (:8645-8655, curses the attacker the once-per-turn counter names)
+  'ABILITY_WIMP_OUT', // (:2616-2643, schedules a self-switch once the holder crosses half HP)
+  'ABILITY_WOODLAND_CURSE', // ON_EITHER (:9835-9846), adds TYPE_GRASS as the attacker's type3
 ])
 
 // Quoted grep: ON_EITHER_ABILITY in pipeline/.upstream/eliteredux-source/src/abilities.cc
@@ -2989,6 +2998,180 @@ function handleDefenderMoveEndAbility(
             result.statChanges.push({ battlerId: attackerId, stat: STAT_DEF, change: dropRes.delta })
           }
         }
+      }
+    }
+  }
+
+  // ---- Cycle 145: the defender halves of eight ON_EITHER / onDefender abilities. On every path below
+  // holder = target / targetId and the C's `opponent` / `attacker` = attacker / attackerId (the mon that
+  // used the move). ShouldApplyOnHitEffect(x) is DidMoveHit() && IsBattlerAlive(x) (battle_util.c:4062),
+  // read as `targetDamage > 0 && x alive` exactly as Soul Linker above (:1447-1449) and Talon Trap do.
+
+  // Arc Flash onDefender (src/abilities.cc:8091-8098): CHECK(ShouldApplyOnHitEffect(attacker)),
+  // CHECK(CanBeBurned(attacker)), CHECK(Random() % 2) -- the draw is taken only after the first two
+  // checks, and the burn lands when it is non-zero -- then AbilityStatusEffect(MOVE_EFFECT_BURN |
+  // MOVE_EFFECT_AFFECTS_USER) (:263-268). AFFECTS_USER flips SetMoveEffect's gEffectBattler to
+  // gBattlerAttacker (battle_script_commands.c:2330-2343), i.e. the move's attacker. AbilityStatusEffect
+  // sets HITMARKER_IGNORE_SAFEGUARD before seteffectsecondary, so pass ignoreSafeguard = true; the
+  // AFFECTS_USER arm skips the Substitute gate itself, and the Sheer Force gate is still applied against
+  // gBattlerAttacker by applyPrimaryStatusEffect :1633. The attacker half at :4370 is the same lambda's
+  // ON_EITHER sibling (paralysis on the target).
+  if (abilityId === 'ABILITY_ARC_FLASH') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(attacker)
+      canBeBurned(state, attackerId, targetId, statusDeps) &&
+      state.rng.random16() % 2 !== 0
+    ) {
+      const res = applyPrimaryStatusEffect(
+        state,
+        attackerId,
+        targetId,
+        MOVE_EFFECT_BURN | MOVE_EFFECT_AFFECTS_USER,
+        moveId,
+        statusDeps,
+        unmodelled,
+        false,
+        false,
+        true,
+      )
+      if (res.applied && res.status) {
+        result.statusApplied = { battlerId: attackerId, status: res.status }
+      }
+    }
+  }
+
+  // Blood Stain onDefender (src/abilities.cc:8372-8385; ON_EITHER(BloodStain) assigned to both hooks by
+  // ON_EITHER_ABILITY at :54). Holder = target, opponent = attacker, so the ATTACKER's ability is the one
+  // replaced. Checks in C order: ShouldApplyOnHitEffect(opponent), IsMoveMakingContact(move, gBattlerAttacker),
+  // !IsPersistentOrUnsuppressableAbility(GetBattlerAbility(opponent)), !HasAbilityIgnoringSuppression(opponent,
+  // ability), !DoesBattlerHaveAbilityShield(opponent). Writes (:8382-8385): UpdateAbilityStateIndicesForNewAbility,
+  // ReplaceAbility (abilities[0], battle_util.c:9325), then DisableSwitchInAbility (:3922-3927). No rng.
+  // This is the attacker-half block at :4591-4610 with the roles swapped.
+  if (abilityId === 'ABILITY_BLOOD_STAIN') {
+    const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(attackerPrimary) &&
+      !hasAbilityIgnoringSuppression(attacker, abilityId) &&
+      !doesBattlerHaveAbilityShield(attacker, deps)
+    ) {
+      updateAbilityStateForNewAbility(attacker, abilityId)
+      attacker.mon.abilities.ability = abilityId
+      disableSwitchInAbility(state, attackerId, abilityId, deps.dataContext)
+    }
+  }
+
+  // Daybreak onDefender (src/abilities.cc:9193-9200; ON_EITHER(Daybreak) at :9201-9203). Checks in C
+  // order: ShouldApplyOnHitEffect(opponent), CanBeBurned(opponent), IsMoveMakingContact(move,
+  // gBattlerAttacker). Then AbilityStatusEffectSafe(MOVE_EFFECT_BURN, battler, opponent) (:277-283):
+  // the Safe variant re-points gBattlerAttacker/gBattlerTarget at (battler = holder, opponent = attacker)
+  // around seteffectsecondary, so the holder is the source and the move's attacker the recipient -- the
+  // Flame Body argument order above (:1549-1556). No roll.
+  if (abilityId === 'ABILITY_DAYBREAK') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      canBeBurned(state, attackerId, targetId, statusDeps) &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
+      const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
+      if (res.applied && res.status) {
+        result.statusApplied = { battlerId: attackerId, status: res.status }
+      }
+    }
+  }
+
+  // Menacing Situation onDefender (src/abilities.cc:7904-7919 via ON_EITHER_ABILITY :54). Checks in C
+  // order: ShouldApplyOnHitEffect(opponent), IsMoveMakingContact(move, gBattlerAttacker),
+  // CHECK_NOT(gVolatileStructs[opponent].fear), CHECK(Random() % 100 < 30). Then
+  // BattleScript_AbilitySetFear (data/battle_scripts_1.s:10600-10605) copies gStackBattler1 = battler
+  // (the holder) into gBattlerAttacker and gStackBattler2 = opponent (the attacker) into gBattlerTarget,
+  // then `setmoveeffect MOVE_EFFECT_FEAR; seteffectprimary`. So the Fear lands on the move's attacker
+  // while the Sheer Force and Substitute gates inside SetMoveEffect are asked about the HOLDER as the
+  // effect's source. applyAbilityOnHitStatus (the attacker-half helper at :3364-3377) is exactly that
+  // shape when called with the two ids swapped: its first id is the effect's source and its second is
+  // the recipient. HITMARKER_IGNORE_SAFEGUARD is already baked into that helper.
+  if (abilityId === 'ABILITY_MENACING_SITUATION') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !attacker.volatiles.fear &&
+      !hasFlag(attacker.statuses4, STATUS4_FEAR) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      applyAbilityOnHitStatus(state, 'FEAR', targetId, attackerId, moveId, statusDeps, unmodelled, result)
+    }
+  }
+
+  // Woodland Curse onDefender (src/abilities.cc:9835-9846 via ON_EITHER_ABILITY :54). Checks:
+  // ShouldApplyOnHitEffect(opponent), IsMoveMakingContact, CHECK_NOT(IS_BATTLER_OF_TYPE(opponent,
+  // TYPE_GRASS)) -- IS_BATTLER_OF_TYPE reads type1/type2/type3, include/battle.h:753-754 -- then the single
+  // write `gBattleMons[opponent].type3 = TYPE_GRASS` (:9842). type1/type2 are untouched. BattleScript_
+  // StackAddedTheTypeRet (data/battle_scripts_1.s:9162) is the message alone. The attacker half at
+  // :5098-5108 is the same lambda with the roles swapped.
+  if (abilityId === 'ABILITY_WOODLAND_CURSE') {
+    if (
+      targetDamage > 0 &&
+      attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
+      !attacker.mon.types.includes('GRASS')
+    ) {
+      attacker.mon.types = [attacker.mon.types[0], attacker.mon.types[1], 'GRASS']
+    }
+  }
+
+  // Wimp Out / Emergency Exit onDefender (src/abilities.cc:2616-2643; Emergency Exit is
+  // `Impl<ABILITY_WIMP_OUT>.onDefender` at :2645-2647, so both ids share this branch). Checks in C order:
+  // CheckHalfHpAbility(battler, attacker) (battle_util.c:9043-9048 -- above half before the hit, at or
+  // below half after, still alive; sim helper checkHalfHpAbility at :1140), CHECK_NOT(TestSheerForceFlag(
+  // attacker, gCurrentMove)), CanBattlerBeForceSwitched(battler) (abilities.cc:2608-2616: alive,
+  // CanBattlerSwitch, BATTLE_TYPE_TRAINER, not BATTLE_TYPE_ARENA, CountUsablePartyMons nonzero -- the
+  // Restraining Order shape at :2893-2917). TryScheduleSwitch (:2632-2638) names the HOLDER as both
+  // switchingBattler and sourceBattler, with no .setAbilityState (the hook itself spends nothing), and the
+  // C returns FALSE. The wild/trainer script choice at :2626-2630 only picks a message; the trainer flag is
+  // already required by CanBattlerBeForceSwitched, so the hook is unreachable in a wild battle. The drain
+  // (turn.ts:4254 drainQueuedSwitches) runs a self-switch entry through the same SWITCH_ABILITY filters as
+  // battle_util.c:787-816; see REPORT.md.
+  if (abilityId === 'ABILITY_WIMP_OUT' || abilityId === 'ABILITY_EMERGENCY_EXIT') {
+    if (
+      checkHalfHpAbility(target, hpDealt) &&
+      !testSheerForceFlag(state, attackerId, moveId, statusDeps) &&
+      isBattlerAlive(state, targetId) &&
+      canBattlerSwitch(state, targetId) &&
+      hasFlag(state.battleTypeFlags, BATTLE_TYPE_TRAINER) &&
+      !hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA) &&
+      countUsablePartyMons(state, targetId) !== 0
+    ) {
+      tryScheduleSwitch(state, {
+        ability: abilityId,
+        setAbilityState: false,
+        switchingBattler: targetId,
+        sourceBattler: targetId,
+      })
+    }
+  }
+
+  // Patchwork onDefender (src/abilities.cc:8645-8655). `triggeringBattler =
+  // GetOncePerTurnAbilityCounter(battler, ability) - 1`; CHECK(triggeringBattler == attacker); then
+  // SetOncePerTurnAbilityCounter(battler, ability, 0) -- the reset happens whether or not the two checks
+  // after it pass; CHECK(IsBattlerAlive(attacker)); CHECK_NOT(gBattleMons[attacker].status2 &
+  // STATUS2_CURSED); then AbilityStatusEffect(MOVE_EFFECT_CURSE | MOVE_EFFECT_AFFECTS_USER), which flips
+  // SetMoveEffect's gEffectBattler to the move's attacker (battle_script_commands.c:2330-2343, :2721-2726).
+  // The counter is written by onDisguise (:8638-8644, write at :8641, `gBattlerAttacker + 1`) when Disguise busts -- the
+  // sim has no onDisguise damage-path hook, so in play the counter is never set; the write is NOT invented
+  // here (see REPORT.md). The status2 write is the one Haunted Spirit (:2165) and Wings of Pestilence
+  // (:3077) use.
+  if (abilityId === 'ABILITY_PATCHWORK') {
+    const triggeringBattler = getOncePerTurnAbilityCounter(state, targetId, abilityId, deps.dataContext) - 1
+    if (triggeringBattler === attackerId) {
+      setOncePerTurnAbilityCounter(state, targetId, abilityId, 0, deps.dataContext)
+      if (attacker.mon.hp > 0 && !hasFlag(attacker.mon.status2, STATUS2_CURSED)) {
+        attacker.mon.status2 = setFlag(attacker.mon.status2, STATUS2_CURSED)
+        if (!result.statusApplied) result.statusApplied = { battlerId: attackerId, status: 'CURSE' }
       }
     }
   }

@@ -1044,18 +1044,20 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
     })
   })
 
-  it('PORTED_DEFENDER_ABILITIES pins all 114 ported onDefender abilities, each with an onDefender hook', () => {
+  it('PORTED_DEFENDER_ABILITIES pins all 122 ported onDefender abilities, each with an onDefender hook', () => {
     expect(Array.from(PORTED_DEFENDER_ABILITIES).sort()).toEqual([
       'ABILITY_AFTERMATH',
       'ABILITY_ANGER_POINT',
       'ABILITY_ANGER_SHELL',
       'ABILITY_APE_SHIFT',
+      'ABILITY_ARC_FLASH',
       'ABILITY_ATOMIC_BURST',
       'ABILITY_BALLOON_BLITZ',
       'ABILITY_BALLOON_BOMBER',
       'ABILITY_BERSERK',
       'ABILITY_BERSERKER_RAGE',
       'ABILITY_BLIGHT_SCALE',
+      'ABILITY_BLOOD_STAIN',
       'ABILITY_BRAIN_OVERLOAD',
       'ABILITY_CHILLING_PELLETS',
       'ABILITY_CHUCKSTER',
@@ -1069,6 +1071,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_CURSED_BODY',
       'ABILITY_CUTE_CHARM',
       'ABILITY_DAMP',
+      'ABILITY_DAYBREAK',
       'ABILITY_DEFLECT',
       'ABILITY_DOUBLE_IRON_BARBS',
       'ABILITY_DRAGONFRUIT',
@@ -1076,6 +1079,7 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_DROP_BLOCKS',
       'ABILITY_EFFECT_SPORE',
       'ABILITY_ELECTROMORPHOSIS',
+      'ABILITY_EMERGENCY_EXIT',
       'ABILITY_FARADAY_CAGE',
       'ABILITY_FLAME_BODY',
       'ABILITY_FLAMMABLE_COAT',
@@ -1104,11 +1108,13 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_MAGICAL_DUST',
       'ABILITY_MALODOR',
       'ABILITY_MASSIVE_PELT',
+      'ABILITY_MENACING_SITUATION',
       'ABILITY_MOUSTACHE',
       'ABILITY_MUCUS_MEMBRANE',
       'ABILITY_MUMMY',
       'ABILITY_NO_TURNING_BACK',
       'ABILITY_PARRY',
+      'ABILITY_PATCHWORK',
       'ABILITY_PERISH_BODY',
       'ABILITY_PETAL_SHIELD',
       'ABILITY_POISON_POINT',
@@ -1158,8 +1164,10 @@ describe('Oracle Tests: Pinned Ability Sets & Recoil Fractions', () => {
       'ABILITY_WATER_COMPACTION',
       'ABILITY_WEAK_ARMOR',
       'ABILITY_WHITE_NOISE',
+      'ABILITY_WIMP_OUT',
       'ABILITY_WIND_CHIMES',
       'ABILITY_WIND_POWER',
+      'ABILITY_WOODLAND_CURSE',
     ])
     for (const id of PORTED_DEFENDER_ABILITIES) expect(ON_DEFENDER_ABILITIES.has(id)).toBe(true)
   })
