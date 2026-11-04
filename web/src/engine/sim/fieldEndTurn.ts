@@ -416,11 +416,24 @@ function applyFogStatDrops(battler: BattlerState, grounding: GroundingContext, s
 
 /** IsBattlerTerrainAffected, battle_util.c:4901-4925, specialised to the one
  * terrain flag this module ever calls it with (STATUS_FIELD_TOXIC_TERRAIN) --
- * the fallback switch over "which terrain is active" is moot when the caller
- * already knows that terrain's own bit is set. `attackerHasMoldBreaker: false`
- * -- no attacker exists in this phase (same reasoning as isAbilityOnField). */
+ * the fallback switch over "which terrain is active" (:4908-4924) is moot when
+ * the caller's terrain bit is set, but the entry test that produces that
+ * state, `IsTerrainActive` (:4902 -> :4886-4889), is NOT: the ENDTURN_TOXIC_TERRAIN
+ * countdown clears the bit before the damage loop runs (:2128-2133 vs
+ * :2134-2139), so the clearing tick affects nobody.
+ * `attackerHasMoldBreaker: false` -- no attacker exists in this phase (same
+ * reasoning as isAbilityOnField). */
 function isBattlerTerrainAffectedByToxicTerrain(state: BattleState, battlerId: number, battler: BattlerState, grounding: GroundingContext): boolean {
+  // :4902 `if (!IsTerrainActive(terrainFlag)) return FALSE;` -> :4886-4889
+  // `if (!TERRAIN_HAS_EFFECT) return FALSE; return (gFieldStatuses &
+  // terrainFlag) != 0;`. The Clueless half is `grounding.isCluelessOnField`
+  // (TERRAIN_HAS_EFFECT, include/battle_util.h:47); the field-bit half must be
+  // read HERE, not assumed from the caller: ENDTURN_TOXIC_TERRAIN clears
+  // STATUS_FIELD_TOXIC_TERRAIN (:2128-2133) BEFORE the damage loop's FILTER
+  // chain runs (:2134-2139), so on the clearing tick this returns false for
+  // every battler and nobody is chipped.
   if (grounding.isCluelessOnField) return false // TERRAIN_HAS_EFFECT
+  if (!hasFlag(state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN)) return false // IsTerrainActive, :4886-4889
   if (hasFlag(battler.statuses3, STATUS3_SEMI_INVULNERABLE)) return false
   if (isBattlerGrounded(state, battlerId, { ...grounding, attackerHasMoldBreaker: false })) return true
   // :4926 -- ON_ABILITY(..., allowTerrainIfAirborne & type, return TRUE): an
