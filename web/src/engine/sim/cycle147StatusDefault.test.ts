@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 // Cycle 147: statusTerms defaults to true in DEFAULT_EXPECTIMAX and evaluateState.
 import { describe, expect, it } from 'vitest'
 
