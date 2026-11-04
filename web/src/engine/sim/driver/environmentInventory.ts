@@ -24,8 +24,20 @@ import { stripComments } from './moveInventory'
  *
  * A unit is `ported` only when its token appears in BOTH a qualifying engine
  * source file (non-test, outside `sim/driver/` except the four loader files) and
- * an engine test file, after comments are stripped. `registeredUntested` is a
- * sub-count of `unported`: production names the token but no test does.
+ * an engine test file, after comments are stripped. A name alone can be a false
+ * positive, so a unit may attach `UnitEvidence` that narrows what counts:
+ *
+ *   - `testPattern`: the test must also match a behaviour pattern, not merely
+ *     name the token (`speedDown` needs `speedDown: true`, not a `false` fixture).
+ *   - `productionFiles`: production evidence must come from the files that can
+ *     actually run this unit (battle types are set in the driver's battle-start
+ *     path, not in a unit-level helper).
+ *   - `productionLinePattern`: the token must be named on a line that performs
+ *     the behaviour (e.g. changes the number of active battlers).
+ *   - `productionExcludeFiles`: files whose mention of the token proves nothing.
+ *
+ * `registeredUntested` is a sub-count of `unported`: production names the token
+ * but no qualifying test does.
  *
  * `allowlisted` requires an exact pinned C `file:line` and a reason quoting that
  * line. The default list is NOT empty: seven units are provably inert for battle
@@ -54,6 +66,36 @@ export interface EnvironmentAllowlistEntry {
 export interface SourceFile {
   file: string
   source: string
+}
+
+/**
+ * Extra proof a unit needs before a name match counts as a port. All fields are
+ * optional; a unit with no evidence keeps the plain token rule.
+ *
+ * Patterns are evaluated against comment-stripped sources. Do not pass a `g`
+ * regex: its `lastIndex` would leak between files.
+ */
+export interface UnitEvidence {
+  /**
+   * Test evidence must name the token AND match this pattern. A bare token is
+   * not enough: a `speedDown: false` fixture does not test the iron pill.
+   */
+  testPattern?: RegExp
+  /**
+   * Production evidence must come from one of these repo-relative files. Used
+   * by battle-type units: the driver only starts battles from `session.ts`,
+   * `runBattle.ts` or `buildParty.ts`, so a constant declared in a unit-level
+   * helper is not proof that a battle of that type is ever run.
+   */
+  productionFiles?: readonly string[]
+  /**
+   * Production evidence must name the token on a line that also matches this
+   * pattern, i.e. the line must perform the behaviour. Used by `forcedDouble`:
+   * only `aiFlags.ts` ORs an AI bit; nothing changes the battler count.
+   */
+  productionLinePattern?: RegExp
+  /** Production files that never count as evidence for this unit. */
+  productionExcludeFiles?: readonly string[]
 }
 
 export interface MapScript {
@@ -240,6 +282,25 @@ export const LOADER_FILES = [
   'web/src/engine/sim/driver/loadSimData.ts',
 ] as const
 
+/**
+ * The driver's battle-start path. `loadSimData.ts` is a data loader, so it is
+ * deliberately absent: declaring a type field there does not start a battle.
+ * `BATTLE_TYPE_TRAINER` is set in `session.ts:238`; `BATTLE_TYPE_DOUBLE` is not
+ * set anywhere in these files, so the driver never runs a double battle.
+ */
+export const BATTLE_TYPE_DRIVER_FILES = [
+  'web/src/engine/sim/driver/session.ts',
+  'web/src/engine/sim/driver/runBattle.ts',
+  'web/src/engine/sim/driver/buildParty.ts',
+] as const
+
+const BATTLE_TYPE_DRIVER_EVIDENCE: UnitEvidence = {
+  productionFiles: BATTLE_TYPE_DRIVER_FILES,
+  // The flag must be assigned, not merely imported or named: `session.ts:238`
+  // has `battleTypeFlags: BATTLE_TYPE_TRAINER,`.
+  productionLinePattern: /\bbattleTypeFlags\s*(?:\|=|:|=)/,
+}
+
 const OWN_TEST_FILE = 'web/src/engine/sim/driver/environmentInventory.test.ts'
 
 function escapeRegExp(value: string): string {
@@ -425,21 +486,82 @@ interface TokenClassification {
   testFile: string | null
 }
 
+const JOINED_PRODUCTION_FILE = '<joined-production>'
+
+function asProductionFiles(
+  production: ReadonlyArray<SourceFile> | string,
+): SourceFile[] {
+  return typeof production === 'string'
+    ? [{ file: JOINED_PRODUCTION_FILE, source: production }]
+    : [...production]
+}
+
+function patternMatches(pattern: RegExp, source: string): boolean {
+  pattern.lastIndex = 0
+  return pattern.test(source)
+}
+
+/** The token and the behaviour pattern must co-occur on one production line. */
+function lineMatches(source: string, token: string, pattern: RegExp): boolean {
+  for (const line of source.split('\n')) {
+    if (tokenAppears(line, token) && patternMatches(pattern, line)) return true
+  }
+  return false
+}
+
+/**
+ * Classify one unit. `production` may be the per-file corpus (the normal case,
+ * so `productionFiles` scoping is possible) or a single joined string used by
+ * synthetic callers.
+ */
 export function classifyToken(
   token: string,
-  productionSource: string,
+  production: ReadonlyArray<SourceFile> | string,
   testSources: ReadonlyArray<SourceFile>,
+  evidence: UnitEvidence = {},
 ): TokenClassification {
-  const production = tokenAppears(productionSource, token)
+  const productionFiles = asProductionFiles(production).map((file) => ({
+    file: file.file,
+    source: stripComments(file.source),
+  }))
+  const productionSource = productionFiles.map((file) => file.source).join('\n')
+  // Raw name presence, unscoped by evidence: it decides `registeredUntested`.
+  const productionNamesToken = tokenAppears(productionSource, token)
+
+  const requiredFiles = evidence.productionFiles
+    ? new Set(evidence.productionFiles)
+    : null
+  const excludedFiles = new Set(evidence.productionExcludeFiles ?? [])
+  let productionQualifies = false
+  for (const file of productionFiles) {
+    if (requiredFiles && !requiredFiles.has(file.file)) continue
+    if (excludedFiles.has(file.file)) continue
+    if (evidence.productionLinePattern) {
+      if (lineMatches(file.source, token, evidence.productionLinePattern)) {
+        productionQualifies = true
+        break
+      }
+    } else if (tokenAppears(file.source, token)) {
+      productionQualifies = true
+      break
+    }
+  }
+
   const matchingFiles = testSources
-    .filter((file) => tokenAppears(stripComments(file.source), token))
+    .filter((file) => {
+      const source = stripComments(file.source)
+      if (!tokenAppears(source, token)) return false
+      return evidence.testPattern ? patternMatches(evidence.testPattern, source) : true
+    })
     .map((file) => file.file)
     .sort()
   const tested = matchingFiles.length > 0
-  if (production && tested) {
+  if (productionQualifies && tested) {
     return { status: 'ported', registeredUntested: false, testFile: matchingFiles[0] }
   }
-  if (production) return { status: 'unported', registeredUntested: true, testFile: null }
+  if (productionNamesToken && !tested) {
+    return { status: 'unported', registeredUntested: true, testFile: null }
+  }
   return { status: 'unported', registeredUntested: false, testFile: matchingFiles[0] ?? null }
 }
 
@@ -472,6 +594,7 @@ export interface MapSetupSpec {
   token: string
   site: string
   citation: string
+  evidence?: UnitEvidence
 }
 
 /** Every map-setup unit this inventory defines. Citations were read in the C. */
@@ -616,6 +739,7 @@ export interface StaticUnitSpec {
   site: string
   scope: string
   citation: string
+  evidence?: UnitEvidence
 }
 
 export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
@@ -625,13 +749,18 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'BattleSetup_StartTrainerBattle',
     scope: 'all 932 trainer battles',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1242),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
   {
     key: 'BATTLE_TYPE_DOUBLE',
     token: 'BATTLE_TYPE_DOUBLE',
     site: 'BattleSetup_StartTrainerBattle',
-    scope: 'double battles (two approaching trainers, forcedDouble, doubleBattleMode)',
+    // battle_setup.c:1240 sets this only when two trainers approach; the driver's
+    // session.ts:238 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
+    // records that battleTypeFlags never carries the double bit in this build.
+    scope: 'not started by the driver: session.ts:238 sets BATTLE_TYPE_TRAINER only',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
   {
     key: 'BATTLE_TYPE_TWO_OPPONENTS',
@@ -639,6 +768,7 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'BattleSetup_StartTrainerBattle',
     scope: 'two approaching trainers',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
   {
     key: 'BATTLE_TYPE_INGAME_PARTNER',
@@ -646,6 +776,7 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'BattleTower multi partner',
     scope: 'Battle Tower multi with an in-game partner',
     citation: cite(`${UPSTREAM_SRC}/battle_tower.c`, 1526),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
   {
     key: 'FLAG_TAG_BATTLE',
@@ -653,6 +784,7 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'GetTrainerALoseText / GetTrainerBLoseText',
     scope: '26 starttagbattle calls in 6 maps',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1470),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
 ]
 
@@ -698,6 +830,10 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'CalculateMonStatsMaster',
     scope: 'iron-pill zero Speed IV',
     citation: cite(`${UPSTREAM_SRC}/pokemon.c`, 994),
+    // C: `if (speedDown) speedIV = 0;` (pokemon.c:994). Every engine test only
+    // builds fixtures with `speedDown: false` / `ironPill: false`, so the name is
+    // registered (stats.ts:93, buildParty.ts:99) but no test asserts the effect.
+    evidence: { testPattern: /(?:speedDown|ironPill)\s*:\s*true\b/ },
   },
   {
     key: 'GetHighestLevelInPlayerParty',
@@ -757,6 +893,16 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'trainers.json forcedDouble -> doubleBattle = TRUE',
     scope: '78 trainers',
     citation: cite(CODEGEN_PATH, 207),
+    // TrainerPartyGenerator.kt:207 emits `doubleBattle = TRUE`, which would make
+    // the fight a double. In the engine the field is only read by `aiFlags.ts`
+    // to OR AI_FLAG_DOUBLE_BATTLE; nothing outside it changes the number of
+    // active battlers (session.ts builds exactly two battlers), so the C effect
+    // is unmodelled and the fight stays singles.
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern:
+        /\b(?:battlers\s*=|battlers\.push\(|battlerCount\s*[=+]|numActiveBattlers)/,
+    },
   },
   {
     key: 'trainerClass',
@@ -829,6 +975,7 @@ export interface ScriptEventSpec {
   site: string
   scope: string
   citation: string
+  evidence?: UnitEvidence
 }
 
 export const SCRIPT_EVENT_SPECS: ReadonlyArray<ScriptEventSpec> = [
@@ -929,7 +1076,10 @@ export interface EnvironmentInventoryOptions {
   battleEventRows?: ReadonlyArray<EncounterBattleEventRow>
   eventSource?: string
   eventHeaderSource?: string
+  /** Joined production corpus; used by synthetic tests instead of `productionFiles`. */
   productionSource?: string
+  /** Per-file production corpus, so `productionFiles` evidence can scope a match. */
+  productionFiles?: ReadonlyArray<SourceFile>
   testSources?: ReadonlyArray<SourceFile>
   allowlist?: ReadonlyArray<EnvironmentAllowlistEntry>
   extraMapSetupSpecs?: ReadonlyArray<MapSetupSpec>
@@ -951,9 +1101,11 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
   const eventSource = options.eventSource ?? readFileSync(join(REPO_ROOT, BATTLE_EVENTS_C), 'utf-8')
   const eventHeaderSource =
     options.eventHeaderSource ?? readFileSync(join(REPO_ROOT, BATTLE_EVENTS_H), 'utf-8')
-  const productionSource = stripComments(
-    options.productionSource ?? loadEngineProductionFiles().map((file) => file.source).join('\n'),
-  )
+  const productionFiles: ReadonlyArray<SourceFile> =
+    options.productionFiles ??
+    (options.productionSource !== undefined
+      ? [{ file: JOINED_PRODUCTION_FILE, source: options.productionSource }]
+      : loadEngineProductionFiles())
   const testSources = options.testSources ?? loadEngineTestFiles()
   const mapSetupSpecs = [...MAP_SETUP_SPECS, ...(options.extraMapSetupSpecs ?? [])]
   const scriptEventSpecs = [...SCRIPT_EVENT_SPECS, ...(options.extraScriptEventSpecs ?? [])]
@@ -963,11 +1115,23 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
 
   const pushUnit = (
     kind: EnvironmentUnitKind,
-    spec: { key: string; token: string; site: string; scope: string; citation: string },
+    spec: {
+      key: string
+      token: string
+      site: string
+      scope: string
+      citation: string
+      evidence?: UnitEvidence
+    },
     trainerIds: string[] = [],
   ): void => {
     const allow = allowlistByKey.get(spec.key)
-    const classification = classifyToken(spec.token, productionSource, testSources)
+    const classification = classifyToken(
+      spec.token,
+      productionFiles,
+      testSources,
+      spec.evidence,
+    )
     units.push({
       kind,
       key: spec.key,
@@ -997,6 +1161,7 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
             ? `${maps.length} map(s), ${occurrences.length} line(s): ${maps.join(', ')}`
             : '0 maps',
         citation: spec.citation,
+        evidence: spec.evidence,
       },
       scanTrainerIds(scripts, maps),
     )
@@ -1128,9 +1293,30 @@ export function generateEnvironmentInventoryDoc(
     'except `sim/driver/`, plus the four loader files `session.ts`, `runBattle.ts`, `buildParty.ts` and `loadSimData.ts`.',
   )
   lines.push(
-    '`registered, untested` means production names the token but no test does; it is counted as unported. A mention in a',
+    '`registered, untested` means production names the token but no qualifying test does; it is counted as unported. A',
   )
-  lines.push('comment is not evidence.')
+  lines.push('mention in a comment is not evidence, and neither is a name alone:')
+  lines.push('')
+  lines.push(
+    '- `speedDown` requires a test that sets `speedDown: true` or `ironPill: true`. Every current fixture sets the flag to',
+  )
+  lines.push(
+    '  `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.',
+  )
+  lines.push(
+    '- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,',
+  )
+  lines.push(
+    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:238`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
+  )
+  lines.push('  never runs a double battle regardless of a constant or a hand-built test state.')
+  lines.push(
+    '- `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active',
+  )
+  lines.push(
+    '  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen\'s `doubleBattle = TRUE`',
+  )
+  lines.push('  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.')
   lines.push('')
   lines.push(
     'Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not',

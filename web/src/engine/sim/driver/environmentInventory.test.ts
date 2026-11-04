@@ -36,10 +36,10 @@ const BATTLE_EVENT_UNITS = 34
 const SCRIPT_EVENT_UNITS = 6
 
 /** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_UNIT_COUNT = 35
+export const UNPORTED_UNIT_COUNT = 38
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 2
+export const REGISTERED_UNTESTED_UNIT_COUNT = 3
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -207,26 +207,47 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(ported?.testFile).toBe('web/src/engine/sim/fabricated.test.ts')
   })
 
-  it('negative (c): features really handled and tested today are ported', () => {
-    // Verified by grep before writing: each token is in both a qualifying engine
-    // source file and a web/src/engine/**/*.test.ts file.
-    for (const key of ['BATTLE_TYPE_DOUBLE', 'BATTLE_TYPE_TRAINER']) {
-      const unit = result.units.find(
-        (candidate) => candidate.kind === 'battle-type' && candidate.key === key,
-      )
-      expect(unit?.status).toBe('ported')
-      expect(unit?.testFile).not.toBeNull()
-    }
+  it('negative (c): features really handled and tested today are ported; name-only matches are not', () => {
+    // `BATTLE_TYPE_TRAINER` is a real port: the driver starts every session as a
+    // trainer battle (`session.ts:238`, matching `battle_setup.c:1242`), and the
+    // AI tests build states with that flag.
+    const trainerBattle = result.units.find(
+      (candidate) => candidate.kind === 'battle-type' && candidate.key === 'BATTLE_TYPE_TRAINER',
+    )
+    expect(trainerBattle?.status).toBe('ported')
+    expect(trainerBattle?.testFile).not.toBeNull()
+
+    // `speedDown` is only named: C zeroes the Speed IV with `if (speedDown)
+    // speedIV = 0;` (`src/pokemon.c:994`), and production does implement it
+    // (`stats.ts:93`, `buildParty.ts:99`), but every engine test fixture sets
+    // `speedDown: false` / `ironPill: false` and asserts nothing about Speed.
+    // Registered, untested -- not ported.
     const speedDown = result.units.find(
       (candidate) => candidate.kind === 'difficulty-flag' && candidate.key === 'speedDown',
     )
-    expect(speedDown?.status).toBe('ported')
-    expect(speedDown?.testFile).not.toBeNull()
+    expect(speedDown?.status).toBe('unported')
+    expect(speedDown?.registeredUntested).toBe(true)
+
+    // `BATTLE_TYPE_DOUBLE` is only named: C sets it when two trainers approach
+    // (`src/battle_setup.c:1240`), but the driver's `session.ts:238` sets
+    // `BATTLE_TYPE_TRAINER` alone and `aiCheckBadMove.ts:28` records that
+    // `battleTypeFlags` never carries the double bit in this build. A test that
+    // pokes the constant on a hand-built state does not port double battles.
+    const doubleBattle = result.units.find(
+      (candidate) => candidate.kind === 'battle-type' && candidate.key === 'BATTLE_TYPE_DOUBLE',
+    )
+    expect(doubleBattle?.status).toBe('unported')
+    expect(doubleBattle?.registeredUntested).toBe(false)
+
+    // `forcedDouble` is only named: the codegen emits `doubleBattle = TRUE`
+    // (`TrainerPartyGenerator.kt:207`), but the engine only ORs
+    // `AI_FLAG_DOUBLE_BATTLE` in `aiFlags.ts`. Nothing outside it changes the
+    // number of active battlers, so the fight is still singles -- unmodelled.
     const forcedDouble = result.units.find(
       (candidate) => candidate.kind === 'trainer-flag' && candidate.key === 'forcedDouble',
     )
-    expect(forcedDouble?.status).toBe('ported')
-    expect(forcedDouble?.testFile).not.toBeNull()
+    expect(forcedDouble?.status).toBe('unported')
+    expect(forcedDouble?.registeredUntested).toBe(false)
   })
 
   it('negative (d): an allowlist entry without an exact file:line cite is rejected', () => {
@@ -255,6 +276,64 @@ describe('environment and scripted-condition completeness inventory', () => {
     )
     expect(unit?.status).toBe('allowlisted')
     expect(unit?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_util.c:9144')
+  })
+
+  it('negative (e): evidence requirements make a name-only match insufficient', () => {
+    const patternedSpec: MapSetupSpec = {
+      ...FABRICATED_SPEC,
+      evidence: { testPattern: /FABRICATED_BATTLE_SETUP\s*:\s*true/ },
+    }
+    const runWith = (options: Parameters<typeof runInventory>[0]) =>
+      runInventory(options).units.find((unit) => unit.key === FABRICATED_TOKEN)
+
+    // The token is in production and in a test, but the test sets it false --
+    // the same shape as `speedDown: false` in every current engine fixture.
+    const nameOnly = runWith({
+      ...SYNTHETIC_OPTIONS,
+      productionSource: FABRICATED_TOKEN,
+      extraMapSetupSpecs: [patternedSpec],
+      testSources: [
+        { file: 'web/src/engine/sim/fabricated.test.ts', source: `${FABRICATED_TOKEN}: false` },
+      ],
+    })
+    expect(nameOnly?.status).toBe('unported')
+    expect(nameOnly?.registeredUntested).toBe(true)
+
+    const behaviour = runWith({
+      ...SYNTHETIC_OPTIONS,
+      productionSource: FABRICATED_TOKEN,
+      extraMapSetupSpecs: [patternedSpec],
+      testSources: [
+        { file: 'web/src/engine/sim/fabricated.test.ts', source: `${FABRICATED_TOKEN}: true` },
+      ],
+    })
+    expect(behaviour?.status).toBe('ported')
+
+    // Production can be scoped to the files that actually run the unit. A
+    // mention in a unit-level helper (the `aiFlags.ts` case) is not evidence.
+    const scopedSpec: MapSetupSpec = {
+      ...FABRICATED_SPEC,
+      evidence: { productionFiles: ['web/src/engine/sim/driver/session.ts'] },
+    }
+    const helperOnly = runWith({
+      ...SYNTHETIC_OPTIONS,
+      productionFiles: [
+        { file: 'web/src/engine/sim/ai/aiFlags.ts', source: FABRICATED_TOKEN },
+      ],
+      extraMapSetupSpecs: [scopedSpec],
+      testSources: [{ file: 'web/src/engine/sim/fabricated.test.ts', source: FABRICATED_TOKEN }],
+    })
+    expect(helperOnly?.status).toBe('unported')
+
+    const driverPath = runWith({
+      ...SYNTHETIC_OPTIONS,
+      productionFiles: [
+        { file: 'web/src/engine/sim/driver/session.ts', source: FABRICATED_TOKEN },
+      ],
+      extraMapSetupSpecs: [scopedSpec],
+      testSources: [{ file: 'web/src/engine/sim/fabricated.test.ts', source: FABRICATED_TOKEN }],
+    })
+    expect(driverPath?.status).toBe('ported')
   })
 
   it('anchors three hand-derived citations read in the C', () => {

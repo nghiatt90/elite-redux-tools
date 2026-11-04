@@ -12,8 +12,17 @@ against the battle simulator. It covers no species, move, ability or item data.
 A unit is **ported** only when its token appears in both a qualifying non-test engine source file and an engine
 test file, after comments are stripped. Qualifying production files are all non-test files under `web/src/engine/`
 except `sim/driver/`, plus the four loader files `session.ts`, `runBattle.ts`, `buildParty.ts` and `loadSimData.ts`.
-`registered, untested` means production names the token but no test does; it is counted as unported. A mention in a
-comment is not evidence.
+`registered, untested` means production names the token but no qualifying test does; it is counted as unported. A
+mention in a comment is not evidence, and neither is a name alone:
+
+- `speedDown` requires a test that sets `speedDown: true` or `ironPill: true`. Every current fixture sets the flag to
+  `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.
+- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,
+  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:238`); `BATTLE_TYPE_DOUBLE` does not, so the driver
+  never runs a double battle regardless of a constant or a hand-built test state.
+- `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active
+  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
+  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
 
 Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not
 empty: seven units are provably battle-inert (cosmetics, overworld weather, field-effect arguments, prizes).
@@ -36,12 +45,12 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 22 | 0 | 0 | 16 | 0 | 6 |
-| `battle-type` | 5 | 2 | 2 | 3 | 0 | 0 |
-| `difficulty-flag` | 9 | 1 | 0 | 8 | 0 | 0 |
-| `trainer-flag` | 14 | 12 | 0 | 1 | 0 | 1 |
+| `battle-type` | 5 | 1 | 2 | 4 | 0 | 0 |
+| `difficulty-flag` | 9 | 0 | 1 | 9 | 0 | 0 |
+| `trainer-flag` | 14 | 11 | 0 | 2 | 0 | 1 |
 | `battle-event` | 34 | 33 | 0 | 1 | 0 | 0 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **90** | **48** | **2** | **35** | **0** | **7** |
+| **total** | **90** | **45** | **3** | **38** | **0** | **7** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -50,9 +59,9 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
 | `map-setup` | 16 | 0 |
-| `battle-type` | 3 | 2 |
-| `difficulty-flag` | 8 | 0 |
-| `trainer-flag` | 1 | 0 |
+| `battle-type` | 4 | 2 |
+| `difficulty-flag` | 9 | 1 |
+| `trainer-flag` | 2 | 0 |
 | `battle-event` | 1 | 0 |
 | `script-event` | 6 | 0 |
 
@@ -87,7 +96,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit key | Fights / maps | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `BATTLE_TYPE_DOUBLE` | double battles (two approaching trainers, forcedDouble, doubleBattleMode) | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` |
+| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:238 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none |
 | `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle145Abilities.test.ts` |
 | `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none |
@@ -105,7 +114,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `doubleBattleMode` | save-block double-battle mode toggle | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1759` | unported | none |
 | `enableEvs` | save-block EV toggle | `pipeline/.upstream/eliteredux-source/src/pokemon.c:996` | unported | none |
 | `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | unported | none |
-| `speedDown` | iron-pill zero Speed IV | `pipeline/.upstream/eliteredux-source/src/pokemon.c:994` | ported | `web/src/engine/sim/absorb.test.ts` |
+| `speedDown` | iron-pill zero Speed IV | `pipeline/.upstream/eliteredux-source/src/pokemon.c:994` | unported (registered, untested) | none |
 
 ## Trainer-Flag Units
 
@@ -119,7 +128,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `AI_FLAG_TRY_TO_FAINT` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:189` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `AI_FLAG_WILL_SUICIDE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:194` | ported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
 | `encounterMusic_gender` | trainer-mon gender bias | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1794` | unported | none |
-| `forcedDouble` | 78 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:207` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` |
+| `forcedDouble` | 78 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:207` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `noSwitching` | 5 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:184` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `preferStall` | 1 trainer | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:182` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `preferStatus` | 6 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:183` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
