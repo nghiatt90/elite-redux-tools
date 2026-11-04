@@ -253,14 +253,27 @@ function formStats(
  * GetAbilityBySpecies (src/pokemon.c:2147-2157):
  * abilityNum < NUM_ABILITY_SLOTS -> abilities[abilityNum], else abilities[0];
  * if ability == ABILITY_NONE -> abilities[0].
+ *
+ * The C reads `gBaseStats[species].abilities[]`, and BaseStatsGenerator.kt:48-51 pads that
+ * fixed-size array to three slots by repeating `species.abilityList.last()` whenever the
+ * declared list is non-empty. The pipeline's snapshot keeps the declared list only
+ * (resolve.py:resolve_abilities drops the padding), so a slot past the end reads the last
+ * declared ability -- exactly what the padded C array holds. Empty lists keep returning null.
  */
 export function abilityForSpeciesSlot(
   speciesData: { abilities?: (string | null)[] },
   abilityNum: number = 0,
 ): string | null {
   const abilities = speciesData.abilities ?? []
-  const slot = abilityNum >= 0 && abilityNum < 3 ? abilityNum : 0
-  let ability = abilities[slot] ?? null
+  let ability: string | null
+  if (abilityNum >= 0 && abilityNum < 3) {
+    // GetAbilityBySpecies (:2149-2150) indexes the padded array; beyond the declared list
+    // the pad repeats the last ability (BaseStatsGenerator.kt:50).
+    ability = abilities[Math.min(abilityNum, abilities.length - 1)] ?? null
+  } else {
+    // GetAbilityBySpecies (:2151-2152): out-of-range slot falls back to abilities[0].
+    ability = abilities[0] ?? null
+  }
   if (!ability || ability === 'ABILITY_NONE') {
     ability = abilities[0] ?? null
   }

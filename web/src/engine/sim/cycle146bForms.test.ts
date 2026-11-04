@@ -311,6 +311,12 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
       expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_CORE_BLUE')
       expect(state.battlers[0]!.mon.abilities.ability).toBe(c.coreAbility)
       expect(state.battlers[0]!.mon.abilityNum).toBe(c.abilityNum)
+      // UpdateAbilityStateIndices (battle_util.c:8833-8862) remaps per-slot state by ability
+      // identity: Shields Down is innate slot 0 (ability index 1) in both forms, and its state
+      // stays clear -- ShouldChangeFormHpBased's reversion guard reads it (:3824-3825). The
+      // newly gained core ability's slot starts fresh.
+      expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(0)
+      expect(getAbilityStateOf(state.battlers[0]!, c.coreAbility)).toBe(0)
 
       // 2. Heal above 50% HP -> reverts back to Meteor form on end-turn
       state.battlers[0]!.mon.hp = 68
@@ -318,6 +324,8 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
       expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_METEOR_BLUE')
       expect(state.battlers[0]!.mon.abilities.ability).toBe(c.meteorAbility)
       expect(state.battlers[0]!.mon.abilityNum).toBe(c.abilityNum)
+      expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(0)
+      expect(getAbilityStateOf(state.battlers[0]!, c.meteorAbility)).toBe(0)
 
       // 3. Entry reversion from a fresh Core form entry above 50% HP
       const stateCoreEntry = battle(
@@ -340,6 +348,8 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
       expect(stateCoreEntry.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_METEOR_BLUE')
       expect(stateCoreEntry.battlers[0]!.mon.abilities.ability).toBe(c.meteorAbility)
       expect(stateCoreEntry.battlers[0]!.mon.abilityNum).toBe(c.abilityNum)
+      expect(getAbilityStateOf(stateCoreEntry.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(0)
+      expect(getAbilityStateOf(stateCoreEntry.battlers[0]!, c.meteorAbility)).toBe(0)
     }
   })
 
@@ -479,6 +489,12 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
     // Slot 0 ('ABILITY_SHIELDS_DOWN') active (10 >= 1); slots 1 ('ABILITY_EQUINOX') and 2 ('ABILITY_FRISK') blanked
     expect(state.battlers[0]!.mon.abilities.innates).toEqual(['ABILITY_SHIELDS_DOWN', null, null])
 
+    // Reverting to Meteor re-runs gateInnates for the new form, so the innate gate returns to
+    // its pre-change state: Meteor's own innates at elite L10 keep only slot 0.
+    changeBattlerForm(state, 0, 'SPECIES_MINIOR_METEOR_BLUE', DATA_CONTEXT)
+    expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_METEOR_BLUE')
+    expect(state.battlers[0]!.mon.abilities.innates).toEqual(['ABILITY_SHIELDS_DOWN', null, null])
+
     // In 'hell' tier: thresholds are [10, 17, 24]. Level 5 is below all thresholds -> all innates blanked
     const stateHell = battle(
       [
@@ -499,6 +515,11 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
       'hell',
     )
     changeBattlerForm(stateHell, 0, 'SPECIES_MINIOR_CORE_BLUE', DATA_CONTEXT)
+    expect(stateHell.battlers[0]!.mon.abilities.innates).toEqual([null, null, null])
+
+    // Revert at hell L5: still below every threshold, so the gate keeps all three slots blank.
+    changeBattlerForm(stateHell, 0, 'SPECIES_MINIOR_METEOR_BLUE', DATA_CONTEXT)
+    expect(stateHell.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_METEOR_BLUE')
     expect(stateHell.battlers[0]!.mon.abilities.innates).toEqual([null, null, null])
   })
 })
@@ -592,10 +613,26 @@ describe('Defect 2: Cool Exit natural timeline through executeTurn', () => {
 
     // Turn 3:
     // End of turn 3: isFirstTurn is 0 (0 != 2) -> state 1 -> 2, queues MOVE_CHILLY_RECEPTION.
-    // MOVE_CHILLY_RECEPTION executes, setting hail weather.
-    executeTurn(state, [null, null], testDeps())
-    expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_COOL_EXIT')).toBe(2)
+    // MOVE_CHILLY_RECEPTION executes, setting hail weather and then running
+    // BattleScript_MoveSwitch (battle_scripts_1.s:5371-5390): `scheduleswitch BS_ATTACKER`.
+    // The lead (party[0]) is the only live reserve for battler 0, so the replacement must
+    // really switch -- without it the SWITCH action is dropped (turn.ts:1731-1734) and this
+    // test would pass on a failed switch.
+    let replacementCalls = 0
+    const replacement: ReplacementDeps = {
+      chooseReplacement: (switchState) => {
+        replacementCalls++
+        // The end-turn pass reached ability state 2 before BattleScript_MoveSwitch ran.
+        expect(getAbilityStateOf(switchState.battlers[0]!, 'ABILITY_COOL_EXIT')).toBe(2)
+        return 0
+      },
+    }
+    executeTurn(state, [null, null], testDeps(fixedDamage(20), GROUNDING, replacement))
+    expect(replacementCalls).toBe(1)
     expect((state.field.weather & WEATHER_HAIL_ANY) !== 0).toBe(true)
+    // The user was switched out to the benched lead, which has no Cool Exit.
+    expect(state.battlers[0]!.partyIndex).toBe(0)
+    expect(state.battlers[0]!.mon.abilities.ability).toBeNull()
   })
 
   it('negative: mon without Cool Exit produces no hail across 3 turns', () => {

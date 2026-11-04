@@ -50,7 +50,7 @@ export type StatStages = number[]
  * reader, ShouldFailForIllusion, is `return FALSE` at battle_ai_util.c:518. */
 export interface SimBattleMon {
   speciesId: string // SpeciesEnum species (:164) -- exact SPECIES_* id
-  /** `u8 abilityNum` (include/pokemon.h:193): 0, 1 or 2 -- the mon's chosen ability slot.
+  /** `u8 abilityNum` (include/pokemon.h:195): 0, 1 or 2 -- the mon's chosen ability slot.
    * Carried across form changes so UpdateAbilityStateIndicesForNewSpecies
    * (battle_util.c:8810) reads GetAbilityBySpecies(newSpecies, abilityNum). */
   abilityNum?: number

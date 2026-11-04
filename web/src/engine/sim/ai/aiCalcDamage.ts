@@ -423,7 +423,7 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
  * maintain for a live battler, so that one field is carried over explicitly
  * rather than reset.
  *
- * `SimPartyMon` fields used to build the substitute: speciesId, rawStats,
+ * `SimPartyMon` fields used to build the substitute: speciesId, abilityNum, rawStats,
  * moves, pp, hp, maxHp, itemId, types, level, nature, hiddenPowerType,
  * speedDown, abilities, gender, status1 (persists across switches, matching
  * SimPartyMon's own doc). `status2` has no party-mon counterpart (cleared on
@@ -433,6 +433,7 @@ export function aiCalcPartyMonDamage(state: BattleState, moveId: string, attacke
   const existing = state.battlers[attackerId]
   const substitute: SimBattleMon = {
     speciesId: partyMon.speciesId as string, // validated non-null by the caller
+    abilityNum: partyMon.abilityNum,
     rawStats: partyMon.rawStats,
     moves: partyMon.moves,
     pp: partyMon.pp,

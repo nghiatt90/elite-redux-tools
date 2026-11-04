@@ -6983,6 +6983,11 @@ export function applyTransformCopy(
     ability: target.mon.abilities.ability,
     innates: [...target.mon.abilities.innates],
   }
+  // Cmd_transformdataexecution (src/battle_script_commands.c:10513):
+  // `battleMonAttacker->abilityNum = battleMonTarget->abilityNum;` -- the slot itself is part
+  // of the copy alongside the abilities array, so the attacker's future GetAbilityBySpecies
+  // lookups read the target's slot.
+  attacker.mon.abilityNum = target.mon.abilityNum
   attacker.mon.moves = [...target.mon.moves]
   attacker.mon.statStages = [...target.mon.statStages]
 
