@@ -152,14 +152,14 @@ export interface NoteOnlyPair {
  * Classified as unported until real simulation behavior is ported.
  */
 export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
-  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4519' },
-  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4529' },
-  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5560' },
-  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5625' },
-  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5658' },
-  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1637' },
-  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1645' },
-  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1664' },
+  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4538' },
+  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4548' },
+  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5579' },
+  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5644' },
+  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5677' },
+  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1653' },
+  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1661' },
+  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1680' },
   { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1492' },
   { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1492' },
   { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1254' },
