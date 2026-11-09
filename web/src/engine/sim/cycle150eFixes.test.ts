@@ -45,7 +45,10 @@ import {
   STAT_SPEED,
   STATUS1_BURN,
   STATUS1_FROSTBITE,
+  STATUS1_PARALYSIS,
   STATUS1_SLEEP,
+  STATUS2_CONFUSION,
+  setCounter,
 } from './constants'
 
 // ---------------------------------------------------------------------------
@@ -828,6 +831,62 @@ describe('Cycle 150e 5 - chosen move and PP slot through the turn loop', () => {
     expect(secondaryMisses.calls).toBe(3)
     expect(misses.battlers[1]!.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE).toBe(DEFAULT_STAT_STAGE) // 50 >= 10
     expect(misses.battlers[0]!.volatiles.disabledMove).toBe('MOVE_MUD_SHOT') // 29 < 30
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 6 -- a confusion self-hit skips MOVEEND_ABILITIES.
+// ---------------------------------------------------------------------------
+
+describe('Cycle 150e 6 - confusion self-hit skips the defender dispatch', () => {
+  // battle_util.c:3388 sets `gRoundStructs[gBattlerAttacker].confusionSelfDmg = TRUE`, and the
+  // MOVEEND_ABILITIES case (battle_script_commands.c:4529) carries
+  // `REQUIRE_NOT(!gProcessingExtraAttacks && ...confusionSelfDmg)` -- `if (...) break;`
+  // (include/global.h:56-57). So a self-hit runs no defender ability at all: not the selected
+  // target's, and not the attacker's, even though :3386 points gBattlerTarget at the attacker.
+  // Crispy Cream (abilities.cc:10837-10842) spends its `Random() % 2` before either delegated
+  // hook's ShouldApplyOnHitEffect check, so a stale dispatch is visible as one extra draw.
+  it('a self-hit spends only the confusion roll, even with Crispy Cream on the attacker', () => {
+    const baselineRng = scriptedRng([0])
+    const baseline = battle([
+      { moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], status2: setCounter(0, STATUS2_CONFUSION, 2) },
+      { hp: 300 },
+    ], baselineRng)
+    const baselineOut = executeTurn(baseline, [useMove(1, move('MOVE_TACKLE')), null], testDeps(fixedDamage(20)))
+    expect(baselineOut.actions[0]!.cancelledBy).toBe('CONFUSION')
+    expect(baselineRng.calls).toBe(1) // the `Random() % 3`, battle_util.c:3376
+
+    const rng = scriptedRng([0])
+    const state = battle([
+      {
+        moves: ['MOVE_TACKLE', null, null, null],
+        pp: [35, 0, 0, 0],
+        status2: setCounter(0, STATUS2_CONFUSION, 2),
+        abilities: hasAbility('ABILITY_CRISPY_CREAM'),
+      },
+      { hp: 300 },
+    ], rng)
+    const out = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(fixedDamage(20)))
+    expect(out.actions[0]!.cancelledBy).toBe('CONFUSION')
+    expect(rng.calls).toBe(baselineRng.calls) // no extra %2 draw
+    expect(out.actions[0]!.statChanges).toBeNull()
+    expect(out.actions[0]!.statusApplied).toBeNull()
+    expect(state.battlers[0]!.mon.status1 & (STATUS1_BURN | STATUS1_FROSTBITE)).toBe(0)
+  })
+
+  // Negative control: every other canceller leaves gBattlerTarget at the selected target and does
+  // not set confusionSelfDmg, so MOVEEND_ABILITIES still runs. Full paralysis is one such cancel
+  // (battle_util.c:3400-3413): one draw for `Random() % 4`, then the target's Crispy Cream %2.
+  // Spe 200 keeps the attacker first even after B_PARALYSIS_SPEED halves it (turnOrder.ts:291).
+  it('negative: full paralysis still dispatches the target\'s Crispy Cream', () => {
+    const rng = scriptedRng([0])
+    const state = battle([
+      { spe: 200, moves: ['MOVE_TACKLE', null, null, null], pp: [35, 0, 0, 0], status1: STATUS1_PARALYSIS },
+      { hp: 300, abilities: hasAbility('ABILITY_CRISPY_CREAM') },
+    ], rng)
+    const out = executeTurn(state, [useMove(1, move('MOVE_TACKLE')), null], testDeps(fixedDamage(20)))
+    expect(out.actions[0]!.cancelledBy).toBe('PARALYSIS')
+    expect(rng.calls).toBe(2)
   })
 })
 

@@ -2392,16 +2392,24 @@ export function executeAction(
     // PsychicTerrainPrevents (:10143-10147), PowderMoveNoEffect (:8707-8737), MoveUsedPowder
     // (:8771-8785), SkyDropInAir (:5782-5785), ButItFailed for Quick Guard (:5942-5946), and the
     // Truant loafing script's `moveendto MOVEEND_NEXT_TARGET` (:10678-10688, which includes case 5).
-    // CANCELLER_CONFUSED sets `gBattlerTarget = gBattlerAttacker` before MoveUsedIsConfused
-    // (battle_util.c:3380, :3386), so its MoveEnd pass runs on the ATTACKER; every other canceller
-    // leaves gBattlerTarget at the selected target.
-    const cancelDispatch = dispatchDefenderMoveEnd(
-      cancelResult.cancelledBy === 'CONFUSION' ? battlerId : targetId,
-      action.chosenMove.id,
-      action.chosenMove.id,
-      deps.dataContext.move(action.chosenMove.id),
-      cancelFainted,
-    )
+    // That pass runs on the selected target, except for a confusion self-hit: battle_util.c:3388
+    // sets `gRoundStructs[gBattlerAttacker].confusionSelfDmg = TRUE`, and the MOVEEND_ABILITIES
+    // case (battle_script_commands.c:4529) is guarded by
+    // `REQUIRE_NOT(!gProcessingExtraAttacks && ...confusionSelfDmg)`, i.e. `if (...) break;`
+    // (include/global.h:56-57). A self-hit therefore skips MOVEEND_ABILITIES entirely -- no
+    // defender ability runs, on the attacker or on the target. 'CONFUSION' here is only the
+    // self-hit: the "confused no more" and "acted through" branches return NO_CANCEL
+    // (attackCanceller.ts:674 and :685).
+    const cancelDispatch =
+      cancelResult.cancelledBy === 'CONFUSION'
+        ? { statChanges: [] as StatChangeOutcome[], statusApplied: null as StatusAppliedOutcome | null }
+        : dispatchDefenderMoveEnd(
+            targetId,
+            action.chosenMove.id,
+            action.chosenMove.id,
+            deps.dataContext.move(action.chosenMove.id),
+            cancelFainted,
+          )
     return {
       turnOrderIndex: index,
       battlerId,
