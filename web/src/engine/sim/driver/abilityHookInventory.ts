@@ -152,11 +152,11 @@ export interface NoteOnlyPair {
  * Classified as unported until real simulation behavior is ported.
  */
 export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
-  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4515' },
-  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4525' },
-  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5556' },
-  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5621' },
-  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5654' },
+  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4519' },
+  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4529' },
+  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5560' },
+  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5625' },
+  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5658' },
   { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1637' },
   { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1645' },
   { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1664' },
