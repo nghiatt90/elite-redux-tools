@@ -132,7 +132,7 @@ describe('cycle 149b - the AI recoil lookup takes customBehavior first', () => {
     const plain = state(moves, { hp: 5, maxHp: 100 }, scripted(1))
     expect(getMoveDamageResult(plain, 0, 1, 'MOVE_FLARE_BLITZ', 0, deps).result).toBe(MOVE_POWER_WEAK)
 
-    // Rock Head (battle_ai_util.c:775: `!BattlerHasAbility(sBattler_AI, ABILITY_ROCK_HEAD, FALSE)`)
+    // Rock Head (battle_ai_util.c:777: `!BattlerHasAbility(sBattler_AI, ABILITY_ROCK_HEAD, FALSE)`)
     // skips the recoil comparison entirely, so WhichMoveBetter returns 2 and slot 0 wins the tie.
     const rockHead = state(
       { ...moves, abilities: { ability: 'ABILITY_ROCK_HEAD', innates: [null, null, null] } },

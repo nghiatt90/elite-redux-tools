@@ -347,9 +347,9 @@ describe('cycle 149b - the remaining MOVEEND_RECOIL cases', () => {
 
   // 12. The audit/inventory is a SIM_AUDIT-gated driver run, not callable from a unit
   //     test; `classifyPair` is the exported classification the inventory uses, and
-  //     cycle150bInventory.test.ts already pins it. All five onRecoil pairs are ported,
-  //     so no "onRecoil is not modelled" note is raised for them.
-  it('12. all five ON_RECOIL_ABILITIES classify as ported', () => {
+  //     cycle150bInventory.test.ts already pins it. This checks only that classification,
+  //     not the audit's rows: the audit raises no onRecoil rows at all.
+  it('12. classifyPair reports all five ON_RECOIL_ABILITIES onRecoil pairs as ported', () => {
     expect(ON_RECOIL_ABILITIES).toHaveLength(5)
     for (const id of ON_RECOIL_ABILITIES) {
       expect(classifyPair(id, 'onRecoil', abilityHooks)).toBe('ported')

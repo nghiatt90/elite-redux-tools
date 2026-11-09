@@ -608,7 +608,8 @@ export const ON_RECOIL_ABILITIES = [
 ]
 
 // The move types each ON_RECOIL ability's onRecoil(100, battler, moveType) answers non-zero for; null = every type.
-// Read for IsRecklessBoosted (src/abilities.cc:463-470). Doom Blast :9297, Dual Shadow :9569, Electric Burst :4337, Infernal Rage :5474, Super Strain :6317.
+// Read by IsRecklessBoosted (src/abilities.cc:463-470) and by MOVEEND_RECOIL's onRecoil block
+// (battle_script_commands.c:4482-4490). Doom Blast :9297, Dual Shadow :9569, Electric Burst :4337, Infernal Rage :5474, Super Strain :6317.
 const ON_RECOIL_TYPES: Record<string, readonly string[] | null> = {
   ABILITY_DOOM_BLAST: ['DARK'],
   ABILITY_DUAL_SHADOW: ['ELECTRIC', 'DARK'],
@@ -717,7 +718,18 @@ function resolveMoveEndEffectiveType(
   moveData: SimMoveData | undefined,
   deps: TurnLoopDeps,
   unmodelled: string[],
+  capturedType?: string | null,
 ): string | null {
+  // The damage step already reported the type Cmd_damagecalc wrote into
+  // gBattleStruct->dynamicMoveType (battle_script_commands.c:1606-1612); that stored value is
+  // what Cmd_moveend's GET_MOVE_TYPE (:4328) reads. Use it rather than resolving again from
+  // post-hit state (the berry is spent, an on-hit ability may have changed the weather or the
+  // ability slots, and a type2 move's pick is not what resolveMoveType alone returns).
+  if (capturedType != null && capturedType !== '') {
+    return capturedType.replace(/^TYPE_/, '')
+  }
+  // No damage step reported a type (an absorb or miss skips Cmd_damagecalc): the C leaves
+  // dynamicMoveType at its pre-move value, which deps.damage.moveType approximates.
   if (deps.damage.moveType) {
     const resolved = deps.damage.moveType(state, attackerId, targetId, moveId)
     unmodelled.push(...resolved.unmodelled)
@@ -1393,6 +1405,9 @@ export interface MoveEndAbilitiesContext {
   targetHasActedThisTurn?: boolean
   /** `Boolean(gMoveResultFlags & MOVE_RESULT_NO_EFFECT)` (include/constants/battle.h:389), read by AdjustFollowupMoveTarget. */
   noEffect?: boolean
+  /** The type the damage step reported (MoveEndContext.resolvedMoveType); Daredevil's
+   * IsRecklessBoosted reads the stored dynamicMoveType through GET_MOVE_TYPE (:4328). */
+  resolvedMoveType?: string | null
   /** When true, only evaluate abilities in `ATTACKER_FOLLOWUP_ABILITIES` (used by the status-move path in `turn.ts`). */
   onlyFollowupAbilities?: boolean
   deps: TurnLoopDeps
@@ -3537,6 +3552,7 @@ function handleAttackerMoveEndAbility(
   targetHasActedThisTurn?: boolean,
   noEffect?: boolean,
   fainted: number[] = [],
+  resolvedMoveType?: string | null,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -3942,23 +3958,26 @@ function handleAttackerMoveEndAbility(
   // AbilityStatusEffect(MOVE_EFFECT_ATK_PLUS_1 | MOVE_EFFECT_AFFECTS_USER) -- SetMoveEffect still runs the Sheer Force gate (battle_script_commands.c:2361)
   // but skips the Substitute gate for an affects-user effect (:2388).
   if (abilityId === 'ABILITY_DAREDEVIL') {
-    const effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled)
-    const recklessBoosted =
-      Boolean(moveData?.flags?.reckless) ||
-      hasFlag(attacker.mon.status2, STATUS2_ENRAGED) ||
-      (Boolean(moveData && moveData.power > 0) &&
-        Object.entries(ON_RECOIL_TYPES).some(
-          ([ab, types]) =>
-            battlerHasAbility(attacker.mon.abilities, ab, () => false) && (types === null || (effectiveType !== null && types.includes(effectiveType))),
-        ))
-    if (
-      attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
-      attackerId !== targetId &&
-      recklessBoosted &&
-      canRaiseStat(state, attackerId, STAT_ATK, deps.dataContext)
-    ) {
-      applyAbilitySelfStatRaise(state, attackerId, targetId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
+    // CHECK(ShouldApplyOnHitEffect(battler)) precedes CHECK(IsRecklessBoosted(...))
+    // (abilities.cc:12384-12385), so the type is only resolved once the hit gates pass.
+    if (attacker.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+      // IsRecklessBoosted (abilities.cc:463-470) short-circuits on the flag and STATUS2_ENRAGED;
+      // only the third arm calls onRecoil(100, battler, moveType), so only that arm needs the type.
+      let recklessBoosted = Boolean(moveData?.flags?.reckless) || hasFlag(attacker.mon.status2, STATUS2_ENRAGED)
+      if (!recklessBoosted && moveData && moveData.power > 0) {
+        const onRecoilHolders = Object.entries(ON_RECOIL_TYPES).filter(([ab]) =>
+          battlerHasAbility(attacker.mon.abilities, ab, () => false),
+        )
+        if (onRecoilHolders.length > 0) {
+          const effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled, resolvedMoveType)
+          recklessBoosted = onRecoilHolders.some(
+            ([, types]) => types === null || (effectiveType !== null && types.includes(effectiveType)),
+          )
+        }
+      }
+      if (recklessBoosted && canRaiseStat(state, attackerId, STAT_ATK, deps.dataContext)) {
+        applyAbilitySelfStatRaise(state, attackerId, targetId, STAT_ATK, moveId, deps, statusDeps, unmodelled, result)
+      }
     }
   }
 
@@ -5811,6 +5830,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         ctx.targetHasActedThisTurn,
         ctx.noEffect,
         ctx.fainted,
+        ctx.resolvedMoveType,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -6696,6 +6716,13 @@ export interface MoveEndContext {
   fainted: number[]
   /** gChosenMove (:4321) -- defaults to moveId when not a called move. */
   chosenMoveId?: string
+  /** The type the damage step reported, i.e. the value Cmd_damagecalc wrote into
+   * gBattleStruct->dynamicMoveType on that hit (battle_script_commands.c:1606-1612, bare name
+   * like 'ELECTRIC' or 'TYPE_ELECTRIC'): GetMoveTypeInternal's answer plus the type2 pick
+   * (battle_util.c:7775-7785). Cmd_moveend's GET_MOVE_TYPE (:4328) reads that stored value.
+   * Absent/null when no damage step ran (absorb/miss): the move-end type consumers then fall
+   * back to deps.damage.moveType, which approximates the pre-move dynamicMoveType. */
+  resolvedMoveType?: string | null
   /** turn.ts's targetHasActedThisTurn, forwarded to the attacker-ability dispatch (From the Shadows). */
   targetHasActedThisTurn?: boolean
   /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
@@ -7192,6 +7219,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       isCriticalHit: ctx.isCriticalHit ?? false,
       targetHasActedThisTurn: ctx.targetHasActedThisTurn,
       noEffect: isNoEffect,
+      resolvedMoveType: ctx.resolvedMoveType,
       deps,
       unmodelled,
       fainted,
@@ -7452,25 +7480,38 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 23: MOVEEND_RECOIL (:4457-4517) -- recoil is a fraction of savedDmg (HP actually dealt).
-  // Struggle's Magic Guard / noRecoil bypass (:4467) covers both the GetRecoilFraction recoil
-  // (:4471-4475) and the onRecoil hooks below (:4483-4490), both of which apply to Struggle.
+  // Struggle's Magic Guard / noRecoil bypass (:4467) covers the GetRecoilFraction recoil
+  // (:4474-4475) and the onRecoil hooks below (:4482-4490); for Struggle the former is zero
+  // because EFFECT_RECOIL_HP_25 has no recoilFraction in moveBehaviors (its quarter-HP cost is
+  // the move's own script effect), so only the onRecoil half applies.
   if (moveData?.split !== 'STATUS' && hpDealt > 0 && attacker && attacker.mon.hp > 0) {
     const struggle = moveId === 'MOVE_STRUGGLE'
     if (struggle || (!isMagicGuardProtected(state, attacker) && !battlerHasNoRecoil(attacker))) {
       const fraction = getRecoilFraction(moveData?.effect, deps.moveBehaviors, moveData?.customBehavior)
       const fractionDmg = fraction > 0 ? Math.max(1, Math.floor(hpDealt / fraction)) : 0
 
-      // GET_MOVE_TYPE (:4328) reads the RESOLVED type, not the declared one.
-      const effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled)
-
-      let onRecoilDmg = 0
+      // ON_ABILITY's onRecoil (:4482-4490) runs for each unsuppressed holder; a hook returns
+      // 0 when its type check fails, and the C's `gBattleMoveDamage += damage` accumulates
+      // every hook that answers.
+      const onRecoilHolders: string[] = []
       for (const { abilityId } of getBattlerAbilitySlotsReverse(attacker.mon.abilities)) {
         if (!ON_RECOIL_ABILITIES.includes(abilityId)) continue
         if (isSimAbilitySuppressed(state, attacker, abilityId, false, attackerId, false, deps.dataContext)) {
           continue
         }
-        // ON_ABILITY's onRecoil hook returns 0 when its type check fails; the C's
-        // gBattleMoveDamage += damage (:4483-4490) accumulates every hook that answers.
+        onRecoilHolders.push(abilityId)
+      }
+
+      // GET_MOVE_TYPE (:4328) reads the stored dynamicMoveType, not the declared type. Use the
+      // type the damage step reported; resolve again only for a hook that type-checks when no
+      // damage step reported one (absorb/miss), so a plain hit builds no scenario here.
+      let effectiveType: string | null = null
+      if (onRecoilHolders.some((abilityId) => ON_RECOIL_TYPES[abilityId] !== null)) {
+        effectiveType = resolveMoveEndEffectiveType(state, attackerId, targetId, moveId, moveData, deps, unmodelled, ctx.resolvedMoveType)
+      }
+
+      let onRecoilDmg = 0
+      for (const abilityId of onRecoilHolders) {
         const types = ON_RECOIL_TYPES[abilityId]
         if (types !== null && (effectiveType === null || !types.includes(effectiveType))) continue
         onRecoilDmg += Math.max(1, Math.floor(hpDealt / ON_RECOIL_DIVISORS[abilityId]))

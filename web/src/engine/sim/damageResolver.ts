@@ -263,22 +263,31 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
      * Deterministic and side-effect free: buildScenarioFor with drawRandom
      * false draws nothing, and calculateMoveDamage draws nothing (it reports
      * all 16 rolls). Calling this before the accuracy roll therefore leaves the
-     * random stream exactly where Cmd_accuracycheck expects it. */
+     * random stream exactly where Cmd_accuracycheck expects it.
+     *
+     * `effectiveMoveType` is calculateMoveDamage's chosen type. For a move with
+     * a `type2` it is the type2 pick of battle_util.c:7775-7785 (`type2` wins
+     * only when its damage is strictly higher), which is exactly what
+     * Cmd_attackcanceler stores into gBattleStruct->dynamicMoveType for a type2
+     * move before the protect check (:1048-1056). Camouflage reads it; the
+     * accuracy check ignores it. */
     typeEffectiveness(state: BattleState, attackerId: number, targetId: number, moveId: string, context: DamageResolveContext = { targetHasActedThisTurn: false }) {
       const move = deps.moveData(moveId)
       if (!move) return { effectiveness: null, unmodelled: [`move ${moveId}: move data is unavailable`] }
-      // CalcTypeEffectivenessMultiplier forces SPLIT_STATUS back to UQ_4_12(1.0) (:7992), and
-      // every caller of this method is the accuracy check, whose own gate already excludes
-      // status moves (abilities.cc:4399's CHECK_NOT(IS_MOVE_STATUS(move))). Not a number to guess.
+      // CalcTypeEffectivenessMultiplier forces SPLIT_STATUS back to UQ_4_12(1.0) (:7992); the
+      // accuracy check's own gate already excludes status moves (abilities.cc:4399's
+      // CHECK_NOT(IS_MOVE_STATUS(move))) and Camouflage only needs this for a type2 move. Not a
+      // number to guess.
       if (move.split === 'STATUS') return { effectiveness: null, unmodelled: [`move ${moveId}: type effectiveness is not computed for status moves`] }
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, context, false)
       const result = calculateMoveDamage(scenario)
-      // Only the type multiplier is read here, so the "this move's real damage bypasses the
-      // formula" notes (basePower.ts UNMODELLED_BASE_POWER_EFFECTS / _MOVE_IDS) answer a
-      // question this call never asks: the chart's answer is complete regardless of whether
-      // the damage itself is. Every other note is still the caller's to see.
+      // Only the type multiplier and the chosen type are read here, so the "this move's real
+      // damage bypasses the formula" notes (basePower.ts UNMODELLED_BASE_POWER_EFFECTS /
+      // _MOVE_IDS) answer a question this call never asks: the chart's answer is complete
+      // regardless of whether the damage itself is. Every other note is still the caller's to see.
       return {
         effectiveness: result.typeEffectiveness,
+        effectiveMoveType: result.effectiveMoveType,
         unmodelled: [
           ...unmodelled,
           ...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, move.id, move.effect)),
@@ -301,16 +310,7 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // runs after damagecalc), so it must not shift the stream.
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, { targetHasActedThisTurn: false }, false)
       const resolved = resolveMoveType(scenario, move.type ?? 'NORMAL')
-      // Type resolution never reads Beat Up's per-hit base Attack (its type comes from
-      // GetMoveTypeInternal alone, battle_main.c:5093-5204), so that note answers a
-      // question this call does not ask.
-      return {
-        moveType: resolved.moveType,
-        unmodelled: [
-          ...unmodelled.filter((note) => !note.startsWith('beatUpBaseAttack and beatUpHitCount')),
-          ...resolved.unmodelled,
-        ],
-      }
+      return { moveType: resolved.moveType, unmodelled: [...unmodelled, ...resolved.unmodelled] }
     },
 
     confusionSelfHit(state: BattleState, battlerId: number, power: number) {

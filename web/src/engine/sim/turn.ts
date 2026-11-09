@@ -541,14 +541,19 @@ export interface DamageResolver {
    * loop (:1354-1362) runs BEFORE the damage step, so Fatal Precision and its
    * aliases (abilities.cc:4397-4407) need this number before the accuracy
    * roll. Optional: a resolver without it leaves AccuracyInputs.isSuperEffective
-   * undefined, which accuracy.ts reports as a gap. */
+   * undefined, which accuracy.ts reports as a gap.
+   *
+   * `effectiveMoveType` is calculateMoveDamage's chosen type -- for a `type2`
+   * move the pick of battle_util.c:7775-7785 that Cmd_attackcanceler stores
+   * into dynamicMoveType before the protect check (:1048-1056). Camouflage
+   * reads it; the accuracy check ignores it. */
   typeEffectiveness?(
     state: BattleState,
     attackerId: number,
     targetId: number,
     moveId: string,
     context?: DamageResolveContext,
-  ): { effectiveness: number | null; unmodelled: string[] }
+  ): { effectiveness: number | null; effectiveMoveType?: string | null; unmodelled: string[] }
   /** CANCELLER_CONFUSED's CalculateMoveDamage(MOVE_NONE, battler, battler, &TYPE_MYSTERY, power, FALSE, 0, TRUE),
    * battle_util.c:3376-3378: a typeless physical hit on itself with no crit and no random roll. Optional: a resolver without
    * a damage engine behind it leaves the self-hit unmodelled. */
@@ -1160,15 +1165,26 @@ export function handleProtectLikeMoveEnd(
     const moveData = deps.dataContext.move(currentMoveId)
     if (!moveData?.type) return none
     // GET_MOVE_TYPE(gCurrentMove, moveType) (include/battle.h:735-741) reads the
-    // RESOLVED type gBattleStruct->dynamicMoveType holds, which SetTypeBeforeUsingMove
-    // (battle_main.c:5231-5253) wrote from GetMoveTypeInternal's full switch (battle_main.c:5093-5204)
-    // -- Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Fling gem, Revelation
-    // Dance/Spit Up, Synchronoise/Ivy Cudgel, Terrain Pulse, Ion Deluge/Electrify/Plasma
-    // Fists and the onMoveType ("-ate") abilities, in that order. The resolver's moveType
-    // method is that same resolution (calculate.ts's resolveMoveType, the one the damage
-    // formula itself calls), not a second partial copy.
+    // RESOLVED type gBattleStruct->dynamicMoveType holds. SetTypeBeforeUsingMove
+    // (battle_main.c:5231-5253) writes it from GetMoveTypeInternal's full switch
+    // (battle_main.c:5093-5204) -- Weather Ball, Hidden Power, Judgment/Plate,
+    // Natural Gift, Fling gem, Revelation Dance/Spit Up, Synchronoise/Ivy Cudgel,
+    // Terrain Pulse, Ion Deluge/Electrify/Plasma Fists and the onMoveType ("-ate")
+    // abilities, in that order. After that, and BEFORE the protect check,
+    // Cmd_attackcanceler (:1048-1056) runs CalculateMoveDamageAndEffectiveness for a
+    // move with a `type2` and no dynamicMoveType, and stores the type2 pick into
+    // dynamicMoveType when its damage is strictly higher (battle_util.c:7775-7785).
+    // Camouflage therefore stacks the type2 pick for such a move, not the declared or
+    // -ate type. calculateMoveDamage's `effectiveMoveType` is exactly that pick; the
+    // resolver's `moveType` method is the GetMoveTypeInternal answer.
     let moveType: string
-    if (deps.damage.moveType) {
+    const type2 = moveData.type2 ?? null
+    const type2Pick =
+      type2 && deps.damage.typeEffectiveness ? deps.damage.typeEffectiveness(state, attackerId, targetId, currentMoveId) : null
+    if (type2Pick) unmodelled.push(...type2Pick.unmodelled)
+    if (type2Pick?.effectiveMoveType) {
+      moveType = type2Pick.effectiveMoveType.replace(/^TYPE_/, '')
+    } else if (deps.damage.moveType) {
       const resolved = deps.damage.moveType(state, attackerId, targetId, currentMoveId)
       unmodelled.push(...resolved.unmodelled)
       // The move's data existed for the type check above; a resolver that
@@ -3795,6 +3811,10 @@ export function executeAction(
     let lastHitNoEffect = false
     let lastCritical: boolean | undefined
     let lastSuperEffective: boolean | undefined
+    // Cmd_damagecalc rewrites gBattleStruct->dynamicMoveType on EVERY damagecalc
+    // (battle_script_commands.c:1606-1612), so the last landed hit's type is what Cmd_moveend's
+    // GET_MOVE_TYPE (:4328) reads. Updated per hit, carried into the SECOND-part tail call.
+    let lastResolvedMoveType: string | null | undefined
     for (;;) {
     // Cmd_critcalc (src/battle_script_commands.c:1568-1585): CalcCritChanceStage returns ALWAYS_CRIT
     // when the ATTACKER has STATUS3_LASER_FOCUS (:1540), and the `critChance >= ALWAYS_CRIT` arm sets
@@ -3817,6 +3837,7 @@ export function executeAction(
         : { targetHasActedThisTurn, critRoll: laserFocusCritRoll, defenderIsSwitching },
     )
     if (moveEffect === 'EFFECT_ROLLOUT' && targetDamage === 0) attackerBattler.volatiles.rolloutCounter = 0
+    lastResolvedMoveType = damageMoveType
 
     if (absorbingAbility) {
       const absorbOutcome = applyAbsorbEffect({
@@ -3842,6 +3863,7 @@ export function executeAction(
         hpDealt: 0,
         noEffect: true,
         moveEffect2: null,
+        resolvedMoveType: damageMoveType,
         deps,
         unmodelled,
         fainted: preFainted,
@@ -4130,6 +4152,7 @@ export function executeAction(
       isCriticalHit,
       isSuperEffective,
       moveEffect2: secondaryResult?.moveEffect2 ?? null,
+      resolvedMoveType: damageMoveType,
       deps,
       unmodelled,
       fainted,
@@ -4216,6 +4239,9 @@ export function executeAction(
           hpDealt: 0,
           noEffect: true,
           moveEffect2: null,
+          // A miss skips Cmd_damagecalc, so dynamicMoveType keeps the last landed hit's write
+          // (:1606-1612); that is `lastResolvedMoveType`, the hit that just resolved above.
+          resolvedMoveType: lastResolvedMoveType,
           deps,
           unmodelled,
           fainted,
@@ -4250,6 +4276,8 @@ export function executeAction(
         isCriticalHit: lastCritical,
         isSuperEffective: lastSuperEffective,
         moveEffect2: sumMoveEffect2,
+        // Last hit wins: Cmd_damagecalc writes dynamicMoveType on every damagecalc (:1606-1612).
+        resolvedMoveType: lastResolvedMoveType,
         deps,
         unmodelled,
         fainted,
