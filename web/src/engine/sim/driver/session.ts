@@ -233,8 +233,12 @@ export function createSession(options: SessionOptions): BattleSession {
     playerParty,
     opponentParty,
     // A session is always a trainer battle. CanBattlerBeForceSwitched needs this
-    // bit for Emergency Exit / Wimp Out (abilities.cc:2608-2647), and Red Card /
-    // Restraining Order read it too (moveEnd.ts:2980, :3210).
+    // bit for Emergency Exit / Wimp Out (abilities.cc:2608-2615, called at :2622)
+    // and Restraining Order (:8579-8597); the sim ports those gates in moveEnd.ts
+    // (:3249-3267 and :3019-3036). Red Card does NOT read it: its hold effect
+    // schedules unconditionally (battle_util.c:6130-6141) and its script tests only
+    // Rooted / Suction Cups / Commander (data/battle_scripts_1.s:11320-11335).
+    // See docs/battle-sim/session-battle-type-flags.md.
     battleTypeFlags: BATTLE_TYPE_TRAINER,
     aiFlags: battleAiSetupFlags(options.opponentTrainer, 0),
     tier,
@@ -257,8 +261,10 @@ export function createSession(options: SessionOptions): BattleSession {
     if (battler) battler.volatiles.isFirstTurn = 2
   }
   // The battle-start pass drains a lead's queued entry move before the next lead's
-  // abilities (battle_main.c:3380, :3320-3322). gCurrentTurnActionNumber is still 0
-  // there (:3413 is its first write), so the drain index is 0: nothing has acted.
+  // abilities (battle_main.c:3380, :3320-3322). gCurrentTurnActionNumber is 0 there
+  // only on the first battle since power-on; the steady-state value is gBattlersCount,
+  // which is not modelled. Either way nothing has acted in *this* battle yet, so the
+  // drain index is 0. See docs/battle-sim/battle-start-turn-action-number.md.
   const startOrder = applyBattleStartPass(
     state,
     {
@@ -282,33 +288,67 @@ export function createSession(options: SessionOptions): BattleSession {
   // fall through to TurnValuesCleanUp (:3406). Leaving a queued attack behind would run it at
   // turn 1's start, after the roundStructsClear that the C never crosses.
   const startReactiveDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
-  runReactiveAbilityEffects(state, startReactiveDeps, startUnmodelled)
-  while (state.queuedExtraAttacks.length > 0) {
-    drainQueuedExtraAttacks(state, 0, startOrder, turnDeps, startOutcomes)
+  const drainAttacksAndReact = () => {
     runReactiveAbilityEffects(state, startReactiveDeps, startUnmodelled)
-  }
-  for (const outcome of startOutcomes) {
-    startUnmodelled.push(...outcome.unmodelled)
-  }
-  // TryDoEventsBeforeFirstTurn cleanup (battle_main.c:3406-3422):
-  // TurnValuesCleanUp(FALSE) zeroes gRoundStructs and decrements isFirstTurn (2 -> 1)
-  roundStructsClear(state)
-  // battle_main.c:3407-3411 -- TurnValuesCleanUp just zeroed gRoundStructs, so
-  // restore the protect a Coward lead armed on entry (abilities.cc:5441-5451).
-  for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
-    const battler = state.battlers[battlerId]
-    if (!battler || battler.mon.hp === 0) continue
-    if (getSingleUseAbilityCounter(state, battlerId, 'ABILITY_COWARD', data.dataContext) > 0) {
-      battler.round.protectMove = 'MOVE_PROTECT'
+    while (state.queuedExtraAttacks.length > 0) {
+      drainQueuedExtraAttacks(state, 0, startOrder, turnDeps, startOutcomes)
+      runReactiveAbilityEffects(state, startReactiveDeps, startUnmodelled)
     }
   }
-  // TurnStructsClear() zeroes gTurnStructs
-  turnStructsClear(state)
+  // Fold each ActionOutcome's notes into startUnmodelled exactly once. A later re-entry
+  // pass appends more outcomes, so remember how many have been pushed instead of looping
+  // over the whole array again (:286-289 shape).
+  let pushedOutcomeNotes = 0
+  const pushOutcomeNotes = () => {
+    for (; pushedOutcomeNotes < startOutcomes.length; pushedOutcomeNotes++) {
+      startUnmodelled.push(...startOutcomes[pushedOutcomeNotes]!.unmodelled)
+    }
+  }
+  // TryDoEventsBeforeFirstTurn cleanup (battle_main.c:3406-3412), shared by the first pass
+  // and by every replacement re-entry:
+  // TurnValuesCleanUp(FALSE) zeroes gRoundStructs and decrements isFirstTurn (2 -> 1),
+  // then :3407-3411 restores the protect a Coward lead armed on entry (abilities.cc:5441-5451)
+  // because TurnValuesCleanUp just zeroed gRoundStructs, then TurnStructsClear() zeroes gTurnStructs.
+  const cleanupTurnValues = () => {
+    roundStructsClear(state)
+    for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+      const battler = state.battlers[battlerId]
+      if (!battler || battler.mon.hp === 0) continue
+      if (getSingleUseAbilityCounter(state, battlerId, 'ABILITY_COWARD', data.dataContext) > 0) {
+        battler.round.protectMove = 'MOVE_PROTECT'
+      }
+    }
+    turnStructsClear(state)
+  }
+  drainAttacksAndReact()
+  pushOutcomeNotes()
+  cleanupTurnValues()
   // battle_main.c:3413-3414 -- gCurrentTurnActionNumber = gBattlersCount makes
   // HandleFaintedMonActions' "everyone acted" gates pass, so a lead that fainted
-  // during battle start is replaced before turn 1's actions.
+  // during battle start is replaced before turn 1's actions. The function returns
+  // WITHOUT changing gBattleMainFunc (that is :3417), so after
+  // BattleScript_HandleFaintedMon the C re-enters TryDoEventsBeforeFirstTurn and runs
+  // it again: :3320-3322 (drain the replacement's queued entry attack) then :3356
+  // (ABILITYEFFECT_REACTIVE), the lead loop is skipped because switchInAbilitiesCounter
+  // already equals gBattlersCount, :3383 ClearMiscTurnFlags, :3392-3397 drain
+  // gQueuedSwitchCount, a SECOND TurnValuesCleanUp(FALSE) (:3406), the Coward restore
+  // (:3407-3411), TurnStructsClear (:3412) and another replacement attempt (:3413-3414).
+  // Skipping that re-entry leaves the replacement's entry move queued for turn 1, keeps
+  // isFirstTurn one too high for every battler, and leaves the round structs uncleaned.
   if (!state.battleOutcome && turnDeps.replacement) {
+    const battlerKey = () =>
+      state.battlers.map((b) => (b ? `${b.partyIndex}:${b.mon.speciesId}` : 'none')).join('|')
+    let before = battlerKey()
     applyEndOfTurnReplacements(state, turnDeps.replacement, turnDeps, startUnmodelled)
+    while (!state.battleOutcome && battlerKey() !== before) {
+      drainAttacksAndReact()
+      drainQueuedSwitches(state, turnDeps, startUnmodelled, { index: 0, order: startOrder, outcomes: startOutcomes })
+      drainAttacksAndReact()
+      pushOutcomeNotes()
+      cleanupTurnValues()
+      before = battlerKey()
+      applyEndOfTurnReplacements(state, turnDeps.replacement, turnDeps, startUnmodelled)
+    }
   }
   // Clear STATUS2_FLINCHED on every battler (:3422)
   for (const battler of state.battlers) {

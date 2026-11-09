@@ -547,12 +547,15 @@ describe('Cycle 148f Fixes', () => {
       // RecalculateMoveOrder (:3361) put battler 1 first, so the callback sees the
       // live gBattlerByTurnOrder, not an identity array.
       expect(seenOrder!.battlerByTurnOrder).toEqual([1, 0])
-      // gCurrentTurnActionNumber is still 0 during battle start (:3413 is its first
-      // write), so the extra attack runs in slot 0 rather than the lead's loop index.
+      // gCurrentTurnActionNumber is 0 during battle start only on the first battle
+      // since power-on (:3413 is its first write; the steady-state value is
+      // gBattlersCount, which is not modelled), so the extra attack runs in slot 0
+      // rather than the lead's loop index.
+      // See docs/battle-sim/battle-start-turn-action-number.md.
       expect(outcomes[0]!.turnOrderIndex).toBe(0)
     })
 
-    it('session: the slower lead\'s entry move does not read the faster lead as having acted (Analytic)', () => {
+    it('session: assuming gCurrentTurnActionNumber is 0 (first battle since power-on), the slower lead\'s entry move does not read the faster lead as having acted (Analytic)', () => {
       const data = loadSimData()
       const party = buildPlayerParty([playerLead('SPECIES_TYRANITAR', 'ABILITY_LOW_BLOW')], 50, data)
       party[0]!.abilities.innates = ['ABILITY_ANALYTIC', null, null]

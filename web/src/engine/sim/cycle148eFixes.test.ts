@@ -413,11 +413,14 @@ describe('Cycle 148e Fixes', () => {
       // but post-pass cleanup cleared STATUS2_FLINCHED (:3422)
       expect(hasFlag(session.state.battlers[1]!.mon.status2, STATUS2_FLINCHED)).toBe(false)
 
-      // Turn 1: foe acts and is not cancelled by flinch
-      const step = stepTurn(session, buildMoveAction(session.state, data, 0, 'MOVE_TACKLE'))
-      const foeAction = step.outcome.actions.find((a) => a.battlerId === 1)
-      expect(foeAction).toBeDefined()
-      expect(foeAction!.cancelledBy).not.toBe('FLINCH')
+      // Turn 1: give the foe an explicit damaging move. Letting the AI choose made this
+      // half vacuous: Sawyer's turn-1 action is a SWITCH, which is never flinch-cancelled,
+      // so the assertion held whether or not the flag was cleared. Mirror the Counter test
+      // below and override the foe action directly.
+      const step = stepTurn(session, buildMoveAction(session.state, data, 0, 'MOVE_TACKLE'), useMove(0, 'MOVE_TACKLE'))
+      const foeAction = step.outcome.actions.find((a) => a.battlerId === 1)!
+      expect(foeAction.action).toBe('USE_MOVE')
+      expect(foeAction.cancelledBy).toBeNull()
     })
 
     it('after Low Blow lead the foe round.physicalDmg is 0 at turn 1 so Counter does not reflect stale 19', () => {
@@ -521,6 +524,64 @@ describe('Cycle 148e Fixes', () => {
       // (abilities.cc:2726, bridge.ts:566-568) would see 1, deal only 44 and leave 86.
       expect(session.state.battlers[1]!.mon.maxHp).toBe(130)
       expect(session.state.battlers[1]!.mon.hp).toBe(43)
+    })
+
+    // Restored from 2b8c8b9^ -- that commit replaced these two with the queued-path
+    // variant above and dropped them without replacement. They exercise the raw
+    // applySwitchInAbilities + executeTurn path rather than createSession.
+    it('Stakeout with a Low Blow entry attack doubles (damage 19 -> 38)', () => {
+      // Attacker Level 50, Atk 100, Defender Level 50, Def 100, Max HP 100.
+      // MOVE_FEINT_ATTACK power override 40 from Low Blow:
+      // floor(2 * 50 / 5 + 2) = 22; floor(22 * 40 * 100 / 100 / 50) + 2 = 17 + 2 = 19.
+      // During battle start, isFirstTurn is 2 (battle_main.c:2899, not decremented yet).
+      // Stakeout (abilities.cc:2726, bridge.ts:566-568) checks isFirstTurn === 2 and doubles: 19 * 2 = 38.
+      // Roll 0 (100% roll, no crit) deals 38 damage -> 100 - 38 = 62 HP.
+      const rng = scriptedRng([0, 1, 0])
+      const state = battle(
+        [
+          {
+            atk: 100,
+            spe: 100,
+            abilities: { ability: 'ABILITY_LOW_BLOW', innates: ['ABILITY_STAKEOUT', null, null] },
+            types: ['WATER', 'MYSTERY', 'MYSTERY'],
+          },
+          { def: 100, spe: 50, hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+        ],
+        rng,
+      )
+      // State is freshly created; session sets isFirstTurn = 2 before the battle-start pass
+      state.battlers[0]!.volatiles.isFirstTurn = 2
+      state.battlers[1]!.volatiles.isFirstTurn = 2
+      expect(state.battlers[1]!.volatiles.isFirstTurn).toBe(2)
+
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      executeTurn(state, [null, null], realTestDeps(rng))
+
+      expect(state.battlers[1]!.mon.hp).toBe(62)
+    })
+
+    it('Stakeout negative: with a non-first-turn battler (isFirstTurn != 2) the 2x is absent (deals 19)', () => {
+      const rng = scriptedRng([0, 1, 0])
+      const state = battle(
+        [
+          {
+            atk: 100,
+            spe: 100,
+            abilities: { ability: 'ABILITY_LOW_BLOW', innates: ['ABILITY_STAKEOUT', null, null] },
+            types: ['WATER', 'MYSTERY', 'MYSTERY'],
+          },
+          { def: 100, spe: 50, hp: 100, maxHp: 100, types: ['WATER', 'MYSTERY', 'MYSTERY'] },
+        ],
+        rng,
+      )
+      // Manually set isFirstTurn to 1 (simulating post-cleanup or non-first-turn)
+      state.battlers[1]!.volatiles.isFirstTurn = 1
+
+      applySwitchInAbilities(state, 0, testDeps(), [])
+      executeTurn(state, [null, null], realTestDeps(rng))
+
+      // Without Stakeout 2x: deals 19 damage -> 100 - 19 = 81 HP
+      expect(state.battlers[1]!.mon.hp).toBe(81)
     })
   })
 
@@ -805,6 +866,27 @@ describe('Cycle 148e Fixes', () => {
       expect(failState.field.futureSightMove[1]).toBeNull()
     })
 
+    // Restored from 2b8c8b9^ -- the queued-path variants above replaced these without
+    // saying so. BattleScript_EffectFutureSight (data/battle_scripts_1.s:5692-5703) runs
+    // ppreduce BEFORE trysetfutureattack, so the PP is spent on the failure.
+    it('Doom Desire with future-sight counter already set fails', () => {
+      const rng = scriptedRng([])
+      const state = battle(
+        [
+          { moves: ['MOVE_DOOM_DESIRE', null, null, null], pp: [5, 0, 0, 0] },
+          { hp: 100, maxHp: 100 },
+        ],
+        rng,
+      )
+      // Pre-set target futureSightCounter
+      state.field.futureSightCounter[1] = 2
+
+      const out = executeTurn(state, [useMove(1, 'MOVE_DOOM_DESIRE'), null], testDeps())
+      const action = out.actions.find((a) => a.battlerId === 0)!
+      expect(action.missed).toBe(true)
+      expect(state.battlers[0]!.mon.pp[0]).toBe(4) // ppreduce still runs
+    })
+
     it('Wishmaker: the queued Wish sets a wish, and fails if one is pending', () => {
       const rng = scriptedRng([])
       const state = battle(
@@ -834,6 +916,26 @@ describe('Cycle 148e Fixes', () => {
       const failOut = executeTurn(failState, [null, null], realTestDeps(failRng))
       const failAction = failOut.actions.find((a) => a.battlerId === 0)!
       expect(failAction.missed).toBe(true)
+    })
+
+    // Restored from 2b8c8b9^. BattleScript_EffectWish (data/battle_scripts_1.s:6306-6312)
+    // runs ppreduce BEFORE trywish, so the PP is spent on the failure.
+    it('Wish with wish pending fails', () => {
+      const rng = scriptedRng([])
+      const state = battle(
+        [
+          { moves: ['MOVE_WISH', null, null, null], pp: [10, 0, 0, 0] },
+          { hp: 100, maxHp: 100 },
+        ],
+        rng,
+      )
+      // Pre-set wishCounter
+      state.field.wishCounter[0] = 2
+
+      const out = executeTurn(state, [useMove(1, 'MOVE_WISH'), null], testDeps())
+      const action = out.actions.find((a) => a.battlerId === 0)!
+      expect(action.missed).toBe(true)
+      expect(state.battlers[0]!.mon.pp[0]).toBe(9) // ppreduce still runs
     })
 
     it('Woodland Curse / Forest Curse on a Grass foe fails', () => {
@@ -886,6 +988,32 @@ describe('Cycle 148e Fixes', () => {
       const failAction = failOut.actions.find((a) => a.battlerId === 0)!
       expect(failAction.missed).toBe(true)
       expect(failState.battlers[1]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE)
+    })
+
+    // Restored from 2b8c8b9^. BattleScript_EffectTarShot (data/battle_scripts_1.s:317-330)
+    // sends cantarshotwork's failure to BattleScript_ButItFailedAtkStringPpReduce (:5938),
+    // which runs ppreduce before BattleScript_ButItFailed, so both uses spend PP.
+    it('Tar Shot used twice: second use fails', () => {
+      const rng = scriptedRng([0, 0])
+      const state = battle(
+        [
+          { moves: ['MOVE_TAR_SHOT', null, null, null], pp: [15, 0, 0, 0] },
+          { hp: 100, maxHp: 100 },
+        ],
+        rng,
+      )
+
+      // First use succeeds
+      const out1 = executeTurn(state, [useMove(1, 'MOVE_TAR_SHOT'), null], testDeps())
+      const act1 = out1.actions.find((a) => a.battlerId === 0)!
+      expect(act1.missed).toBe(false)
+      expect(state.battlers[1]!.volatiles.tarShot).toBe(true)
+
+      // Second use fails (cantarshotwork fails because target.volatiles.tarShot is true)
+      const out2 = executeTurn(state, [useMove(1, 'MOVE_TAR_SHOT'), null], testDeps())
+      const act2 = out2.actions.find((a) => a.battlerId === 0)!
+      expect(act2.missed).toBe(true)
+      expect(state.battlers[0]!.mon.pp[0]).toBe(13) // PP was deducted both times
     })
 
     it('Magic Bounce reflecting Yawn onto the user', () => {

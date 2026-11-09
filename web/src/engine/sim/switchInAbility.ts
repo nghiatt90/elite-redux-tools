@@ -2519,9 +2519,11 @@ export interface BattleStartDeps {
    * them out. Callers that don't model the queue omit the callback.
    *
    * The callback receives the live `order`, whose prefix has been speed-sorted so
-   * far. During battle start gCurrentTurnActionNumber is still 0 -- it is first
-   * written at battle_main.c:3413 (`= gBattlersCount`) and reset to 0 for turn 1
-   * at :4637 -- so the drain must use index 0: nothing has acted this turn. */
+   * far. gCurrentTurnActionNumber is 0 during battle start only on the first battle
+   * since power-on (EWRAM_DATA, battle_main.c:176: it is first written at :3413 and
+   * reset to 0 for turn 1 at :4637); the steady-state value is gBattlersCount, which
+   * is not modelled. Either way the drain uses index 0: nothing has acted in this
+   * battle. See docs/battle-sim/battle-start-turn-action-number.md. */
   drainQueuedExtraAttacks?: (order: TurnOrder) => void
 }
 
