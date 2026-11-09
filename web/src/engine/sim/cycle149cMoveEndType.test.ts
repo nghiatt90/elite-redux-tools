@@ -392,3 +392,42 @@ describe('cycle 149c - Camouflage stacks the type2 pick (battle_script_commands.
     expect(target.mon.types[2]).toBe('FIRE')
   })
 })
+
+describe('cycle 149c review - the moveType seam drops the Beat Up note', () => {
+  // `moveType` is the seam Camouflage (turn.ts's handleProtectLikeMoveEnd,
+  // battle_script_commands.c:4415-4427) and moveEnd.ts's fallback type read call. Type
+  // resolution never reads Beat Up's per-hit base Attack -- GetMoveTypeInternal
+  // (battle_main.c:5093-5204) picks the type from the move ID, weather, item and the
+  // -ate flags alone -- so buildScenarioFor's "beatUpBaseAttack and beatUpHitCount are
+  // not tracked" note (raised when context.hitIndex is undefined) answers a question
+  // this call does not ask and would otherwise surface as a false move_notes gap.
+  function countingRng(): RandomSource & { calls: number } {
+    const rng = {
+      calls: 0,
+      random16: () => {
+        rng.calls += 1
+        return 0
+      },
+    }
+    return rng
+  }
+
+  it('11. Beat Up resolves to DARK with no beatUpBaseAttack note and no RNG draw', () => {
+    expect(DATA_CONTEXT.move('MOVE_BEAT_UP')?.type).toBe('DARK')
+    const rng = countingRng()
+    const state = battle(monFor('SPECIES_MUDKIP'), defender())
+    const resolved = bridgeDamage(state, rng).moveType!(state, 0, 1, 'MOVE_BEAT_UP')
+    expect(resolved.moveType).toBe('DARK')
+    expect(resolved.unmodelled.some((note) => note.startsWith('beatUpBaseAttack and beatUpHitCount'))).toBe(false)
+    // drawRandom false: the type stage reads nothing that comes from a Random() draw, and
+    // this call may happen between two draws of the move's own script.
+    expect(rng.calls).toBe(0)
+  })
+
+  it('12. the damage path still raises the note -- the filter is scoped to moveType', () => {
+    const rng = countingRng()
+    const state = battle(monFor('SPECIES_MUDKIP', moves('MOVE_BEAT_UP')), defender())
+    const resolution = bridgeDamage(state, rng).resolve(state, 0, 1, useMove(1, 'MOVE_BEAT_UP'))
+    expect(resolution.unmodelled.some((note) => note.startsWith('beatUpBaseAttack and beatUpHitCount'))).toBe(true)
+  })
+})

@@ -310,7 +310,16 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // runs after damagecalc), so it must not shift the stream.
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, { targetHasActedThisTurn: false }, false)
       const resolved = resolveMoveType(scenario, move.type ?? 'NORMAL')
-      return { moveType: resolved.moveType, unmodelled: [...unmodelled, ...resolved.unmodelled] }
+      // Type resolution never reads Beat Up's per-hit base Attack (its type comes from
+      // GetMoveTypeInternal alone, battle_main.c:5093-5204), so that note answers a
+      // question this call does not ask.
+      return {
+        moveType: resolved.moveType,
+        unmodelled: [
+          ...unmodelled.filter((note) => !note.startsWith('beatUpBaseAttack and beatUpHitCount')),
+          ...resolved.unmodelled,
+        ],
+      }
     },
 
     confusionSelfHit(state: BattleState, battlerId: number, power: number) {
