@@ -8,10 +8,13 @@ import { stripComments } from './moveInventory'
  *
  * Unit kinds:
  *   1. `hold-trigger` -- one unit per (resolved hold effect, C trigger site) in
- *      `battle_util.c`, `battle_script_commands.c`, `battle_main.c`, `pokemon.c`
- *      and `abilities.cc`.
+ *      `battle_util.c`, `battle_script_commands.c`, `battle_main.c`, `pokemon.c`,
+ *      `abilities.cc`, `battle_ai_ability.c`, `script_conditions.cc`, plus
+ *      `jumpifholdeffect` / `jumpifnoholdeffect` lines in the battle script
+ *      `data/battle_scripts_1.s` (site = enclosing script label).
  *   2. `ai-trigger`  -- one unit per (resolved hold effect, C trigger site) in the
- *      AI files `battle_ai_util.c` / `battle_ai_main.c`.
+ *      AI files `battle_ai_util.c`, `battle_ai_main.c`, `battle_controller_opponent.c`
+ *      and `battle_ai_switch_items.c`.
  *   3. `item-data`   -- one unit per item whose hold effect has NO `hold-trigger`
  *      unit (data-only effects such as mega stones read through other tables).
  *   4. `natural-gift`-- one unit per berry carrying a `naturalGift` block.
@@ -197,6 +200,38 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   CanMegaEvolve: {
     files: ['web/src/engine/sim/formChange.ts'],
     functionName: 'canMegaEvolve',
+  },
+  // Battle-script labels (data/battle_scripts_1.s). The C caller of the target
+  // path is BattleScript_CuteCharmActivates (:10578); no sim function infatuates
+  // the Cute Charm holder from the attacker's knot, so the target site is a real gap.
+  BattleScript_TryDestinyKnotTarget: { files: [] },
+  BattleScript_TryDestinyKnotAttacker: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+    functionName: 'handleAttract',
+  },
+  BattleScript_GulpMissileGulping: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'handleDefenderMoveEndAbility',
+  },
+  BattleScript_TryAdrenalineOrb: { files: [] },
+  BattleScript_HangedOnMsg: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'adjustDamage',
+  },
+  // Unscanned C sites added in cycle 152d.
+  OpponentHandleChooseMove: {
+    files: ['web/src/engine/sim/ai/chooseAiAction.ts'],
+    functionName: 'chooseAiAction',
+  },
+  CalculateHazardDamage: {
+    files: ['web/src/engine/sim/ai/aiShouldSwitch.ts'],
+    functionName: 'isMonHealthyEnoughToSwitch',
+  },
+  'ScoreSwitchInAbility:1070': { files: [] },
+  'ScoreSwitchInAbility:1076': { files: [] },
+  'CustomMoveCondition<EFFECT_ACROBATICS>': {
+    files: ['web/src/engine/basePower.ts'],
+    functionName: 'evaluateCustomCondition',
   },
   Cmd_various: {
     files: [],
@@ -432,6 +467,7 @@ const ITEMS_PATH = join(REPO_ROOT, 'data/v2.65beta/items.json')
 const HOLD_EFFECT_IDS_PATH = join(REPO_ROOT, 'data/v2.65beta/holdEffectIds.json')
 const SOURCES_LOCK_PATH = join(REPO_ROOT, 'sources.lock.json')
 const UPSTREAM_SRC = 'pipeline/.upstream/eliteredux-source/src'
+const UPSTREAM_DATA = 'pipeline/.upstream/eliteredux-source/data'
 const ITEMS_REPO_REL = 'data/v2.65beta/items.json'
 
 export const HOLD_TRIGGER_FILES = [
@@ -440,9 +476,19 @@ export const HOLD_TRIGGER_FILES = [
   'battle_main.c',
   'pokemon.c',
   'abilities.cc',
+  'battle_ai_ability.c',
+  'script_conditions.cc',
 ] as const
 
-export const AI_TRIGGER_FILES = ['battle_ai_util.c', 'battle_ai_main.c'] as const
+/** Battle-script sources, read from `data/` rather than `src/`. */
+export const HOLD_TRIGGER_SCRIPT_FILES = ['battle_scripts_1.s'] as const
+
+export const AI_TRIGGER_FILES = [
+  'battle_ai_util.c',
+  'battle_ai_main.c',
+  'battle_controller_opponent.c',
+  'battle_ai_switch_items.c',
+] as const
 
 export const FLING_FILE = 'battle_script_commands.c'
 
@@ -464,6 +510,30 @@ const TOP_LEVEL_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_ \t*]*?\b([A-Za-z_][A-Za-z0-
 const TEMPLATE_IMPL_RE = /^constexpr\s+Ability\s+(Impl<[A-Za-z0-9_]+>)\s*=/
 const HOOK_MEMBER_RE = /^\s*\.([A-Za-z0-9_]+)\s*=/
 const MACRO_RE = /^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)/
+const SCRIPT_LABEL_RE = /^[A-Za-z_][A-Za-z0-9_]*::?$/
+const SCRIPT_HOLD_JUMP_RE = /^\s*(?:jumpifholdeffect|jumpifnoholdeffect)\b/
+
+/**
+ * `<file>:<line>` -> site. `nearestEnclosingDefinition` cannot name a C++ template
+ * specialisation (`int CustomMoveCondition<EFFECT_ACROBATICS>(...)` has no `(` after
+ * its identifier), and the two Booster Energy lines share `ScoreSwitchInAbility`, so
+ * their keys would collapse. The line number keeps both visible.
+ */
+export const C_SITE_OVERRIDES: Record<string, string> = {
+  'battle_ai_ability.c:1070': 'ScoreSwitchInAbility:1070',
+  'battle_ai_ability.c:1076': 'ScoreSwitchInAbility:1076',
+  'script_conditions.cc:150': 'CustomMoveCondition<EFFECT_ACROBATICS>',
+}
+
+/** True for battle-script sources, which live under `data/` instead of `src/`. */
+export function isScriptTriggerFile(file: string): boolean {
+  return (HOLD_TRIGGER_SCRIPT_FILES as readonly string[]).includes(file)
+}
+
+/** Repo-relative upstream directory holding `file` (`src/` or `data/`). */
+export function upstreamDirFor(file: string): string {
+  return isScriptTriggerFile(file) ? UPSTREAM_DATA : UPSTREAM_SRC
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -792,10 +862,20 @@ export function distinctResolvedHoldEffects(items: ItemRecord[]): string[] {
   return [...effects].sort()
 }
 
+/** Every hold-trigger source (C/C++ under `src/` and battle scripts under `data/`). */
 export function loadHoldTriggerSources(): Record<string, string> {
   const sources: Record<string, string> = {}
-  for (const file of HOLD_TRIGGER_FILES) {
-    sources[file] = readFileSync(join(REPO_ROOT, UPSTREAM_SRC, file), 'utf-8')
+  for (const file of [...HOLD_TRIGGER_FILES, ...HOLD_TRIGGER_SCRIPT_FILES]) {
+    sources[file] = readFileSync(join(REPO_ROOT, upstreamDirFor(file), file), 'utf-8')
+  }
+  return sources
+}
+
+/** Battle-script hold-trigger sources only. */
+export function loadHoldTriggerScriptSources(): Record<string, string> {
+  const sources: Record<string, string> = {}
+  for (const file of HOLD_TRIGGER_SCRIPT_FILES) {
+    sources[file] = readFileSync(join(REPO_ROOT, UPSTREAM_DATA, file), 'utf-8')
   }
   return sources
 }
@@ -1071,7 +1151,48 @@ export function scanHoldEffectHits(
     } else {
       site = nearestEnclosingDefinition(lines, line)
     }
+    site = C_SITE_OVERRIDES[`${file}:${line}`] ?? site
     for (const effect of unique) hits.push({ effect, file, site, line })
+  }
+  return hits
+}
+
+/** Nearest column-0 `.s` label above `lineNumber`: a line ending in `:` or `::`. */
+export function nearestScriptLabel(lines: string[], lineNumber: number): string {
+  for (let index = lineNumber - 2; index >= 0; index -= 1) {
+    const text = lines[index].replace(/\s+$/, '')
+    if (SCRIPT_LABEL_RE.test(text)) return text.replace(/:+$/, '')
+  }
+  return '?'
+}
+
+/**
+ * Scans a battle script for hold-effect triggers. Only `jumpifholdeffect` /
+ * `jumpifnoholdeffect` instructions count: a bare `HOLD_EFFECT_*` mention (even on
+ * a label or in a `;` / `@` comment) is not a trigger. The site is the enclosing
+ * script label, e.g. `BattleScript_TryDestinyKnotTarget`.
+ */
+export function scanBattleScriptHoldHits(
+  file: string,
+  source: string,
+  effects: ReadonlySet<string>,
+): HoldEffectHit[] {
+  const lines = source.split('\n')
+  const hits: HoldEffectHit[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index]
+    const trimmed = text.trimStart()
+    // `;` and `@` both start a comment in this assembler.
+    if (trimmed.startsWith(';') || trimmed.startsWith('@')) continue
+    if (!SCRIPT_HOLD_JUMP_RE.test(text)) continue
+    // Drop a trailing comment before looking for effect names.
+    const code = text.replace(/[;@].*$/, '')
+    const tokens = code.match(HOLD_EFFECT_TOKEN_RE)
+    if (!tokens) continue
+    const unique = [...new Set(tokens)].filter((token) => effects.has(token))
+    if (unique.length === 0) continue
+    const site = nearestScriptLabel(lines, index + 1)
+    for (const effect of unique) hits.push({ effect, file, site, line: index + 1 })
   }
   return hits
 }
@@ -1227,6 +1348,8 @@ function unitKey(effect: string, file: string, site: string): string {
 
 export interface ItemInventoryOptions {
   holdTriggerSources?: Record<string, string>
+  /** Battle-script sources; overrides `HOLD_TRIGGER_SCRIPT_FILES` entries only. */
+  holdTriggerScriptSources?: Record<string, string>
   aiTriggerSources?: Record<string, string>
   flingSource?: string
   productionFiles?: ReadonlyArray<SourceFile>
@@ -1243,6 +1366,11 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
   if (allowlistProblems.length > 0) throw new Error(allowlistProblems.join('\n'))
 
   const holdSources = options.holdTriggerSources ?? loadHoldTriggerSources()
+  // A synthetic `holdTriggerSources` is a fully synthetic C scan; only load the
+  // real battle scripts when the caller did not replace the C sources, unless the
+  // caller supplies script sources explicitly.
+  const scriptSources = options.holdTriggerScriptSources
+    ?? (options.holdTriggerSources ? {} : loadHoldTriggerScriptSources())
   const aiSources = options.aiTriggerSources ?? loadAiTriggerSources()
   const flingSource = options.flingSource ?? loadFlingSource()
 
@@ -1296,6 +1424,14 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     const source = holdSources[file]
     if (source === undefined) continue
     for (const hit of scanHoldEffectHits(file, source, effects, { itemBattleEffects: file === 'battle_util.c' })) {
+      const key = unitKey(hit.effect, hit.file, hit.site)
+      if (!holdHits.has(key)) holdHits.set(key, hit)
+    }
+  }
+  for (const file of HOLD_TRIGGER_SCRIPT_FILES) {
+    const source = scriptSources[file]
+    if (source === undefined) continue
+    for (const hit of scanBattleScriptHoldHits(file, source, effects)) {
       const key = unitKey(hit.effect, hit.file, hit.site)
       if (!holdHits.has(key)) holdHits.set(key, hit)
     }
@@ -1363,8 +1499,8 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       unit: hit.effect,
       effect: hit.effect,
       site,
-      file: `${UPSTREAM_SRC}/${hit.file}`,
-      citation: allow?.cite ?? `${UPSTREAM_SRC}/${hit.file}:${hit.line}`,
+      file: `${upstreamDirFor(hit.file)}/${hit.file}`,
+      citation: allow?.cite ?? `${upstreamDirFor(hit.file)}/${hit.file}:${hit.line}`,
       status,
       registeredUntested,
       testFile: matchingTests[0] ?? null,
@@ -1820,7 +1956,16 @@ export function generateItemInventoryDoc(
     '1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,',
   )
   lines.push(
-    '   `battle_script_commands.c`, `battle_main.c`, `pokemon.c` and `abilities.cc`. The site is the enclosing',
+    '   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`, `battle_ai_ability.c`,',
+  )
+  lines.push(
+    '   `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle',
+  )
+  lines.push(
+    '   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`).',
+  )
+  lines.push(
+    '   The site is the enclosing',
   )
   lines.push(
     '   `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),',
@@ -1830,7 +1975,10 @@ export function generateItemInventoryDoc(
   )
   lines.push('   The token is the `HOLD_EFFECT_*` name. Several hits of one effect in one site collapse to one unit.')
   lines.push(
-    '2. **ai-trigger**: the same rule for `battle_ai_util.c` and `battle_ai_main.c`; production evidence must come',
+    '2. **ai-trigger**: the same rule for `battle_ai_util.c`, `battle_ai_main.c`,',
+  )
+  lines.push(
+    '   `battle_controller_opponent.c` and `battle_ai_switch_items.c`; production evidence must come',
   )
   lines.push('   from a source file under `web/src/engine/sim/ai/`.')
   lines.push(

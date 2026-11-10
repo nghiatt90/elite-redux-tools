@@ -19,17 +19,19 @@ const result = runInventory(items)
 
 const ITEM_COUNT = 929
 const DISTINCT_HOLD_EFFECTS = 133
-// Re-pinned after cycle 152b: numeric case 1 gives ENDTURN_ITEMS1/2 its own site (+22), #ifdef removes HOLD_EFFECT_Z_CRYSTAL (-1)
-const HOLD_TRIGGER_UNITS = 216
-const AI_TRIGGER_UNITS = 57
-// Re-pinned after cycle 152b: 34 Z-crystals become item-data units now that their #ifdef trigger is compiled out (+34)
-const ITEM_DATA_UNITS = 43
+// Re-pinned after cycle 152d: +5 battle-script sites, +2 Booster Energy lines, +1 Acrobatics gem site
+const HOLD_TRIGGER_UNITS = 224
+// Re-pinned after cycle 152d: battle_controller_opponent.c:1608 (AI mega choice) and battle_ai_switch_items.c:528
+const AI_TRIGGER_UNITS = 59
+// Re-pinned after cycle 152d: DESTINY_KNOT and ADRENALINE_ORB gain hold-trigger units, so their item-data units (-2)
+const ITEM_DATA_UNITS = 41
 // Re-pinned after cycle 152c: per-site natural-gift units (5) and fling units (11)
 const NATURAL_GIFT_UNITS = 5
 const FLING_UNITS = 11
 
-// Re-pinned after cycle 152c: per-site natural-gift and fling units
-export const UNPORTED_UNIT_COUNT = 216
+// Re-pinned after cycle 152d: +7 unported (Destiny Knot target path, Adrenaline Orb, Booster Energy x2,
+// Acrobatics gem, AI primal-orb mega choice, AI Heavy-Duty Boots switch) and -2 item-data units removed
+export const UNPORTED_UNIT_COUNT = 221
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
 export const REGISTERED_UNTESTED_UNIT_COUNT = 28

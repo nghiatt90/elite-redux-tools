@@ -18,11 +18,15 @@ Sites without an explicit mapping fall back to any non-AI production file and ar
 Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowlisted units require an exact pinned C `file:line`.
 
 1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,
-   `battle_script_commands.c`, `battle_main.c`, `pokemon.c` and `abilities.cc`. The site is the enclosing
+   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`, `battle_ai_ability.c`,
+   `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle
+   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`).
+   The site is the enclosing
    `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),
    top-level `constexpr Ability Impl<ABILITY_X> =` declaration in `abilities.cc`, or the nearest enclosing function/macro elsewhere.
    The token is the `HOLD_EFFECT_*` name. Several hits of one effect in one site collapse to one unit.
-2. **ai-trigger**: the same rule for `battle_ai_util.c` and `battle_ai_main.c`; production evidence must come
+2. **ai-trigger**: the same rule for `battle_ai_util.c`, `battle_ai_main.c`,
+   `battle_controller_opponent.c` and `battle_ai_switch_items.c`; production evidence must come
    from a source file under `web/src/engine/sim/ai/`.
 3. **item-data**: one unit per item whose hold effect has no hold-trigger unit. The token is the item id.
 4. **natural-gift**: one unit per Natural Gift handling site (`CalcMoveBasePower`, `GetMoveType`, `SetMoveEffect`,
@@ -37,12 +41,12 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 216 | 93 | 20 | 123 | 0 | 0 |
-| `ai-trigger` | 57 | 17 | 0 | 40 | 0 | 0 |
-| `item-data` | 43 | 0 | 0 | 43 | 0 | 0 |
+| `hold-trigger` | 224 | 96 | 20 | 128 | 0 | 0 |
+| `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
+| `item-data` | 41 | 0 | 0 | 41 | 0 | 0 |
 | `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
-| **total** | **332** | **116** | **28** | **216** | **0** | **0** |
+| **total** | **340** | **119** | **28** | **221** | **0** | **0** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -67,6 +71,8 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `AbilityBattleEffects` | 1 |
 | `hold-trigger` | `AdjustFriendship` | 1 |
 | `hold-trigger` | `BENEFITS_FROM_LEEK` | 1 |
+| `hold-trigger` | `BattleScript_TryAdrenalineOrb` | 1 |
+| `hold-trigger` | `BattleScript_TryDestinyKnotTarget` | 1 |
 | `hold-trigger` | `CalcAttackStat` | 2 |
 | `hold-trigger` | `CalcCritChanceStage` | 2 |
 | `hold-trigger` | `CalcDefenseStat` | 2 |
@@ -80,6 +86,7 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `Cmd_getexp` | 3 |
 | `hold-trigger` | `Cmd_setmultihitcounter` | 1 |
 | `hold-trigger` | `Cmd_various` | 5 |
+| `hold-trigger` | `CustomMoveCondition<EFFECT_ACROBATICS>` | 1 |
 | `hold-trigger` | `DoBattlerEndTurnEffects` | 2 |
 | `hold-trigger` | `DoesBattlerHaveAbilityShield` | 1 |
 | `hold-trigger` | `ENDTURN_ITEMS1/2` | 25 |
@@ -95,6 +102,8 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `IsBattlerWeatherAffected` | 1 |
 | `hold-trigger` | `IsRunningFromBattleImpossible` | 1 |
 | `hold-trigger` | `PlayStatChangeAnimation` | 1 |
+| `hold-trigger` | `ScoreSwitchInAbility:1070` | 1 |
+| `hold-trigger` | `ScoreSwitchInAbility:1076` | 1 |
 | `hold-trigger` | `SetActionsAndBattlersTurnOrder` | 2 |
 | `hold-trigger` | `SetMoveEffect` | 1 |
 | `hold-trigger` | `SetSwapDamageCategory` | 1 |
@@ -103,13 +112,13 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `UPDATE_FRIENDSHIP_FROM_ITEM` | 1 |
 | `ai-trigger` | `AI_CheckViability` | 28 |
 | `ai-trigger` | `AI_DoubleBattle` | 3 |
+| `ai-trigger` | `CalculateHazardDamage` | 1 |
 | `ai-trigger` | `GetTrapDamage` | 1 |
 | `ai-trigger` | `HasHealingItem` | 3 |
 | `ai-trigger` | `IsBattlerTrapped` | 1 |
+| `ai-trigger` | `OpponentHandleChooseMove` | 1 |
 | `ai-trigger` | `PartyBattlerShouldAvoidHazards` | 3 |
 | `ai-trigger` | `ShouldPivot` | 1 |
-| `item-data` | `HOLD_EFFECT_ADRENALINE_ORB` | 1 |
-| `item-data` | `HOLD_EFFECT_DESTINY_KNOT` | 1 |
 | `item-data` | `HOLD_EFFECT_DRAGON_SCALE` | 1 |
 | `item-data` | `HOLD_EFFECT_GRACIDEA` | 1 |
 | `item-data` | `HOLD_EFFECT_POWER_HERB` | 1 |
@@ -131,6 +140,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | --- | --- | --- | --- | --- |
 | `HOLD_EFFECT_ABILITY_SHIELD@battle_util.c:DoesBattlerHaveAbilityShield` | Ability Shield | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6543` | unported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_ABSORB_BULB@battle_util.c:ITEMEFFECT_TARGET` | Absorb Bulb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6198` | unported | none |
+| `HOLD_EFFECT_ADRENALINE_ORB@battle_scripts_1.s:BattleScript_TryAdrenalineOrb` | Adrenaline Orb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:9858` | unported | none |
 | `HOLD_EFFECT_AIR_BALLOON@battle_script_commands.c:Cmd_removeitem` | Air Balloon | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:6047` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_AIR_BALLOON@battle_util.c:CheckLevitatingEffects` | Air Balloon | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6667` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_AIR_BALLOON@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Air Balloon | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5573` | unported | `web/src/engine/calculate.test.ts` |
@@ -150,12 +160,15 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_BLUNDER_POLICY@battle_util.c:ITEMEFFECT_KINGSROCK` | Blunder Policy | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6055` | unported | none |
 | `HOLD_EFFECT_BOOSTER_ENERGY@abilities.cc:ProtosynthesisHandler` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/abilities.cc:6942` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_BOOSTER_ENERGY@abilities.cc:QuarkDriveHandler` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/abilities.cc:6998` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
+| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1070` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1070` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
+| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1076` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1076` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_CELL_BATTERY@battle_util.c:ITEMEFFECT_TARGET` | Cell Battery | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6191` | unported | none |
 | `HOLD_EFFECT_CHOICE_BAND@battle_util.c:CalcAttackStat` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7288` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_CHOICE_SCARF@battle_main.c:GetBattlerTotalSpeedStat` | Choice Scarf | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4220` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_CHOICE_SPECS@battle_util.c:CalcAttackStat` | Choice Specs | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7291` | ported | `web/src/engine/sim/cycle110bHeldItems.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_script_commands.c:ChangeStatBuffs` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9827` | ported (site-unmapped) | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_script_commands.c:PlayStatChangeAnimation` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4207` | unported | `web/src/engine/sim/cycle104Hooks.test.ts` |
+| `HOLD_EFFECT_CLEAR_AMULET@battle_scripts_1.s:BattleScript_GulpMissileGulping` | Clear Amulet | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:7850` | ported | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_util.c:DoBattlerEndTurnEffects` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_util.c:2711` | unported | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CONFUSE_BITTER@battle_util.c:ENDTURN_ITEMS1/2` | Aguav Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5726` | unported | `web/src/engine/sim/bridge.test.ts` |
 | `HOLD_EFFECT_CONFUSE_BITTER@battle_util.c:ITEMEFFECT_MOVE_END` | Aguav Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5901` | ported | `web/src/engine/sim/bridge.test.ts` |
@@ -203,6 +216,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_DEFENSE_UP@battle_util.c:ENDTURN_ITEMS1/2` | Ganlon Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5735` | unported | none |
 | `HOLD_EFFECT_DEFENSE_UP@battle_util.c:ITEMEFFECT_MOVE_END` | Ganlon Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5910` | unported (registered, untested) | none |
 | `HOLD_EFFECT_DEFENSE_UP@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Ganlon Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5460` | unported | none |
+| `HOLD_EFFECT_DESTINY_KNOT@battle_scripts_1.s:BattleScript_TryDestinyKnotAttacker` | Destiny Knot | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5213` | ported | `web/src/engine/sim/moveEffects.test.ts` |
+| `HOLD_EFFECT_DESTINY_KNOT@battle_scripts_1.s:BattleScript_TryDestinyKnotTarget` | Destiny Knot | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5201` | unported | `web/src/engine/sim/moveEffects.test.ts` |
 | `HOLD_EFFECT_DOUBLE_PRIZE@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Luck Incense | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5421` | unported | none |
 | `HOLD_EFFECT_DRIVE@battle_util.c:CanBattlerGetOrLoseItem` | Burn Drive, Chill Drive, Douse Drive, Shock Drive | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8261` | unported (registered, untested) | none |
 | `HOLD_EFFECT_EJECT_BUTTON@battle_util.c:ITEMEFFECT_TARGET` | Eject Button | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6142` | unported | none |
@@ -216,6 +231,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_FLOAT_STONE@battle_util.c:GetBattlerWeight` | Float Stone | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6720` | unported (registered, untested) | none |
 | `HOLD_EFFECT_FOCUS_BAND@battle_script_commands.c:Cmd_adjustdamage` | Focus Band | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1642` | unported | none |
 | `HOLD_EFFECT_FOCUS_SASH@battle_script_commands.c:Cmd_adjustdamage` | Focus Sash | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1645` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
+| `HOLD_EFFECT_FOCUS_SASH@battle_scripts_1.s:BattleScript_HangedOnMsg` | Focus Sash | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:10962` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_FRIENDSHIP_UP@pokemon.c:AdjustFriendship` | Soothe Bell | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3546` | unported | none |
 | `HOLD_EFFECT_FRIENDSHIP_UP@pokemon.c:UPDATE_FRIENDSHIP_FROM_ITEM` | Soothe Bell | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2333` | unported | none |
 | `HOLD_EFFECT_FROST_ORB@battle_util.c:ITEMEFFECT_ORBS` | Frost Orb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6270` | ported | `web/src/engine/sim/heldItems.test.ts` |
@@ -225,6 +241,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_GEMS@battle_main.c:SetTypeBeforeUsingMove` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5246` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_script_commands.c:SetMoveEffect` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:2935` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_util.c:CalcMoveBasePowerAfterModifiers` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7003` | ported | `web/src/engine/basePower.test.ts` |
+| `HOLD_EFFECT_GEMS@script_conditions.cc:CustomMoveCondition<EFFECT_ACROBATICS>` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/script_conditions.cc:150` | unported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GRIP_CLAW@battle_script_commands.c:WrapDuration` | Grip Claw | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:2302` | ported | `web/src/engine/sim/cycle109Abilities.test.ts` |
 | `HOLD_EFFECT_HEAT_ROCK@battle_util.c:sWeatherFlagsInfo` | Heat Rock | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3713` | ported | `web/src/engine/sim/cycle115bFieldEffects.test.ts` |
 | `HOLD_EFFECT_HEAVY_DUTY_BOOTS@battle_util.c:IsBattlerAffectedByHazards` | Heavy-Duty Boots | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8523` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
@@ -379,6 +396,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_FROST_ORB@battle_ai_main.c:AI_CheckViability` | Frost Orb | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3110` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_ai_main.c:AI_CheckViability` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3724` | unported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_HEAT_ROCK@battle_ai_main.c:AI_CheckViability` | Heat Rock | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3256` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
+| `HOLD_EFFECT_HEAVY_DUTY_BOOTS@battle_ai_switch_items.c:CalculateHazardDamage` | Heavy-Duty Boots | `pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:528` | unported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
 | `HOLD_EFFECT_HEAVY_DUTY_BOOTS@battle_ai_util.c:PartyBattlerShouldAvoidHazards` | Heavy-Duty Boots | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1854` | unported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
 | `HOLD_EFFECT_ICY_ROCK@battle_ai_main.c:AI_CheckViability` | Icy Rock | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3239` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_IRON_BALL@battle_ai_main.c:AI_CheckBadMove` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:1961` | ported | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
@@ -393,6 +411,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_MENTAL_HERB@battle_ai_main.c:AI_CheckViability` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3024` | unported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_ai_main.c:AI_CheckBadMove` | Power Herb | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:1551` | ported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_ai_main.c:AI_CheckViability` | Power Herb | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3638` | unported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
+| `HOLD_EFFECT_PRIMAL_ORB@battle_controller_opponent.c:OpponentHandleChooseMove` | Adamant Orb, Blue Orb, Dynamax Orb, Galactic Orb, Griseous Orb +12 | `pipeline/.upstream/eliteredux-source/src/battle_controller_opponent.c:1608` | unported | `web/src/engine/sim/formChange.test.ts` |
 | `HOLD_EFFECT_PROTECTIVE_PADS@battle_ai_util.c:AI_MoveMakesContact` | Protective Pads | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:2773` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_PROTECTIVE_PADS@battle_ai_util.c:WhichMoveBetter` | Protective Pads | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:770` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_RESTORE_HP@battle_ai_util.c:HasHealingItem` | Berry Juice, Oran Berry | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1483` | unported | `web/src/engine/sim/ai/aiAbilitySuppression.test.ts` |
@@ -418,13 +437,11 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 
 | Unit key | Items | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `ITEM_ADRENALINE_ORB` | Adrenaline Orb | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_ALORAICHIUM_Z` | Aloraichium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_BUGINIUM_Z` | Buginium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_CLEANSE_TAG` | Cleanse Tag | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DARKINIUM_Z` | Darkinium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DECIDIUM_Z` | Decidium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_DESTINY_KNOT` | Destiny Knot | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DRAGONIUM_Z` | Dragonium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DRAGON_SCALE` | Dragon Scale | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_EEVIUM_Z` | Eevium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
