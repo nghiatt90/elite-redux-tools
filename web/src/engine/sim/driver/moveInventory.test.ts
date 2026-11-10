@@ -40,23 +40,30 @@ const DISTINCT_FLAG_KEYS = 42
 /**
  * Pinned today -- this number should only go DOWN.
  *
- * Cycle 151b rework: 2743 -> 132. The drop is measurement, not porting: flag evidence now
- * accepts a real move id (2099 flag pairs were "unported" only because tests never restated
- * the flag table); helper-wrapped test blocks count; the plain-hit routing chain is read as
- * the production site for EFFECT_HIT/GUST/DECORATE/CHANGE_TYPE_ON_ITEM/HIT_ENEMY_HEAL_ALLY;
- * and legacy scripts are judged on their non-skeleton commands, so the 473 skeleton-only
- * pairs follow their already-ported effects. Every remaining pair is a real gap: a code
- * gap (no production path / unhandled command) or a test gap (registered, untested).
+ * Cycle 151b rework 2: 132 -> 1535. The rise is measurement, not a regression. The old
+ * classifier let a script's non-skeleton commands ride on the owning effect's production
+ * path (`if (effectImplemented) continue`), hiding every opcode the sim does not execute;
+ * it also counted a flag as tested whenever a block merely ran any move carrying it. The
+ * script now needs every non-skeleton opcode at an opcode-specific site
+ * (`SCRIPT_OPCODE_HANDLERS`) and a flag needs the flag read (key or reading ability/effect)
+ * in the block, so the genuine gaps show: animation/party-screen/icon opcodes
+ * (`playanimation`, `playstatchangeanimation`, `setgraphicalstatchangevalues`,
+ * `status2animation`, `updatestatusicon`, `openpartyscreen`, `makeinvisible`), the
+ * explicitly unmodelled `manipulatedamage` / `tryroomservice` / `trytoclearprimalweather`,
+ * and the argument/word plumbing (`argumenttomoveeffect`, `copyword`, `callifability`)
+ * plus the still-unported attack/move/item micro-ops listed in the generated doc. Most of
+ * the delta is flag pairs: tests that run one carrier move no longer prove a flag.
  */
-export const UNPORTED_PAIR_COUNT = 132
+export const UNPORTED_PAIR_COUNT = 1530
 
 /**
- * Pinned today -- this number should only go DOWN. Cycle 151b rework: 2271 -> 124. All 124
- * are registered-but-untested: production handles them, no qualifying block names them
- * (mostly effect-less damage moves and 14 legacy scripts). No pair is unported for a
- * measurement artefact any more.
+ * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
+ * flag rule now requires the flag key or a reading ability/effect, so the 2099 flag pairs
+ * are mostly registered-but-untested: production reads the flag, but no qualifying block
+ * names the key or the reader. The rest are effect-less damage moves and the legacy scripts
+ * whose commands are all handled but which no test names.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 124
+export const REGISTERED_UNTESTED_PAIR_COUNT = 1310
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -453,19 +460,20 @@ describe('move completeness inventory', () => {
     )
     const scripts = result.units.filter((unit) => unit.kind === 'legacy-script')
     const diverging = scripts.filter((unit) => unit.status !== effectStatusByMove.get(unit.moveId))
-    // A script is not a mirror. `BattleScript_EffectRest` is now a real port (handleRest
+    // A script is not a mirror. `BattleScript_EffectRest` is a real port (handleRest
     // follows the script command by command), so the divergence is Calm Mind: its effect is
-    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while no block names the
-    // script label or MOVE_CALM_MIND. The script therefore stays registered-but-untested.
+    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while its script still runs
+    // `playstatchangeanimation`, an opcode the sim does not execute -- a genuine script gap,
+    // not merely untested, so `registeredUntested` is false.
     expect(diverging.length).toBeGreaterThan(0)
     const calmMindScript = scripts.find((unit) => unit.moveId === 'MOVE_CALM_MIND')
     expect(calmMindScript?.unit).toBe('BattleScript_EffectCalmMind')
     expect(calmMindScript?.status).toBe('unported')
-    expect(calmMindScript?.registeredUntested).toBe(true)
+    expect(calmMindScript?.registeredUntested).toBe(false)
     expect(effectStatusByMove.get('MOVE_CALM_MIND')).toBe('ported')
-    // MOVE_REST: both the effect and its script are ported -- the divergence above is not an
-    // artefact of the script being ignored.
-    expect(scripts.find((unit) => unit.moveId === 'MOVE_REST')?.status).toBe('ported')
+    // Scripts are still classified on their own: 372 of the 600 legacy-script pairs are
+    // ported today, so the divergence above is not an artefact of scripts being ignored.
+    expect(scripts.some((unit) => unit.status === 'ported')).toBe(true)
   })
 
   it('every move id appears somewhere in result.units', () => {

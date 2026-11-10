@@ -389,6 +389,8 @@ interface ConsumptionIndex {
   postHitEffects: Set<string>
   /** Plain-hit effects the routing chain sends to the shared damage path (no secondary step). */
   plainHitEffects: Set<string>
+  /** Non-skeleton script opcodes whose opcode-specific production site is present. */
+  handledOpcodes: Set<string>
   /** True when the damage path reads `.effect` for effect-null moves. */
   effectLessProduction: boolean
 }
@@ -648,6 +650,12 @@ export function buildConsumptionIndex(
   moves: MoveRecord[] = [],
   behaviors: MoveBehaviors = {},
   scripts: Map<string, ScriptRecord> = new Map(),
+  /**
+   * Comment-stripped source the `SCRIPT_OPCODE_HANDLERS` probes run against. Defaults to the
+   * whole engine production tree; synthetic callers pass their own text so a deleted
+   * production site can be mutation-tested.
+   */
+  handlerSource: string = loadProductionSource(),
 ): ConsumptionIndex {
   const live = stripDeadCode(stripPlainHitRoutingChain(source))
   const moveEffectText = [
@@ -692,6 +700,7 @@ export function buildConsumptionIndex(
     preHitEffects: extractCaseLabels(preHit, 'EFFECT_'),
     postHitEffects: extractCaseLabels(postHit, 'EFFECT_'),
     plainHitEffects: new Set(),
+    handledOpcodes: handledScriptOpcodes(handlerSource),
     effectLessProduction: /\.effect\s*(?:===|!==)\s*null/.test(live),
   }
   // Read from the un-stripped source: `live` deliberately removes the plain-hit routing
@@ -706,6 +715,914 @@ function secondaryIsConsumed(name: string, index: ConsumptionIndex): boolean {
   if (value === undefined) return false
   return index.secondaryRanges.some(([low, high]) => value >= low && value <= high)
 }
+
+// ---------------------------------------------------------------------------
+// Script opcode handlers (cycle 151b rework 2, defect A)
+// ---------------------------------------------------------------------------
+//
+// A non-skeleton script command is handled only at an opcode-specific site. The owning
+// effect having some production path (`HANDLERS`, `CUSTOM_MOVE_DAMAGE`, a declarative
+// field, the plain-hit chain) is not that: it says nothing about whether the engine
+// executes `setsprite` or `playanimation`.
+//
+// Each entry below names:
+//   - `opcode`: the script command's first token;
+//   - `cSite`: the `Cmd_<opcode>` / `VARIOUS_<opcode>` handler in
+//     `battle_script_commands.c` (the upstream definition of the opcode's behaviour);
+//   - `simSite`: the production file:line in `web/src/engine/sim/` that implements it;
+//   - `probes`: regexes that must ALL match the comment-stripped consumer source. They are
+//     the code itself, not the opcode name, so deleting the implementation makes the
+//     opcode unhandled again (mutation-tested in cycle151bInventory.test.ts).
+export interface ScriptOpcodeHandler {
+  opcode: string
+  cSite: string
+  simSite: string
+  probes: RegExp[]
+}
+
+export const SCRIPT_OPCODE_HANDLERS: ReadonlyArray<ScriptOpcodeHandler> = [
+  // Stat stages.
+  {
+    opcode: 'statbuffchange',
+    cSite: 'battle_script_commands.c:258',
+    simSite: 'web/src/engine/sim/statBuffs.ts:589',
+    probes: [/export function changeStatBuffs\(/],
+  },
+  {
+    opcode: 'setstatchanger',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/statBuffs.ts:742',
+    probes: [/export function changeStatBuffsImplicit\(/],
+  },
+  {
+    opcode: 'averagestats',
+    cSite: 'battle_script_commands.c:372',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5492',
+    probes: [/function handlePowerSplit\(/, /function handleGuardSplit\(/],
+  },
+  {
+    opcode: 'swapstatstages',
+    cSite: 'battle_script_commands.c:371',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5320',
+    probes: [/function handlePowerSwap\(/, /function handleGuardSwap\(/, /function handleHeartSwap\(/],
+  },
+  {
+    opcode: 'swapstat',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5414',
+    probes: [/function handleSpeedSwap\(/],
+  },
+  {
+    opcode: 'invertstatstages',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5554',
+    probes: [/function handleTopsyTurvy\(/],
+  },
+  {
+    opcode: 'normalisebuffs',
+    cSite: 'battle_script_commands.c:259',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3517',
+    probes: [/function handleHaze\(/],
+  },
+  {
+    opcode: 'powertrick',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8204',
+    probes: [/export function handlePowerTrick\(/],
+  },
+  {
+    opcode: 'raisehighestattackingstat',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3148',
+    probes: [/getHighestAttackingStatId\(state, bId, deps\.statStageRatios\)/],
+  },
+  {
+    opcode: 'cutonethirdhpraisestats',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5670',
+    probes: [/const hpFraction = Math\.max\(1, Math\.trunc\(battler\.mon\.maxHp \/ 3\)\)/],
+  },
+  {
+    opcode: 'maxattackhalvehp',
+    cSite: 'battle_script_commands.c:309',
+    simSite: 'web/src/engine/sim/moveEffects.ts:1693',
+    probes: [/const halfHp = Math\.max\(1, Math\.floor\(battler\.mon\.maxHp \/ 2\)\)/],
+  },
+  {
+    opcode: 'increasecrit',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:1464',
+    probes: [/battler\.volatiles\.critBoost \+= increase/],
+  },
+
+  // Status and volatile setters.
+  {
+    opcode: 'setdefensecurlbit',
+    cSite: 'battle_script_commands.c:312',
+    simSite: 'web/src/engine/sim/moveEffects.ts:972',
+    probes: [/setFlag\(battler\.mon\.status2, STATUS2_DEFENSE_CURL\)/],
+  },
+  {
+    opcode: 'setminimize',
+    cSite: 'battle_script_commands.c:320',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4751',
+    probes: [/setFlag\(battler\.statuses3, STATUS3_MINIMIZED\)/],
+  },
+  {
+    opcode: 'setcharge',
+    cSite: 'battle_script_commands.c:324',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4415',
+    probes: [/setFlag\(battler\.statuses3, STATUS3_CHARGED_UP\)/],
+  },
+  {
+    opcode: 'setbide',
+    cSite: 'battle_script_commands.c:260',
+    simSite: 'web/src/engine/sim/turn.ts:2827',
+    probes: [/STATUS2_BIDE_TURN\(2\)/],
+  },
+  {
+    opcode: 'setdestinybond',
+    cSite: 'battle_script_commands.c:291',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3892',
+    probes: [/setFlag\(battler\.mon\.status2, STATUS2_DESTINY_BOND\)/],
+  },
+  {
+    opcode: 'setseeded',
+    cSite: 'battle_script_commands.c:248',
+    simSite: 'web/src/engine/sim/moveEffects.ts:12742',
+    probes: [/STATUS3_LEECHSEED \| \(attackerId & STATUS3_LEECHSEED_BATTLER\)/],
+  },
+  {
+    opcode: 'setforesight',
+    cSite: 'battle_script_commands.c:298',
+    simSite: 'web/src/engine/sim/battleEvents.ts:504',
+    probes: [/target\.statuses4 = setFlag\(target\.statuses4, STATUS4_FORESIGHT\)/],
+  },
+  {
+    opcode: 'setmiracleeye',
+    cSite: 'battle_script_commands.c:252',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4630',
+    probes: [/setFlag\(target\.statuses3, STATUS3_MIRACLE_EYED\)/],
+  },
+  {
+    opcode: 'setgastroacid',
+    cSite: 'battle_script_commands.c:335',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7653',
+    probes: [/setFlag\(target\.statuses3, STATUS3_GASTRO_ACID\)/],
+  },
+  {
+    opcode: 'setyawn',
+    cSite: 'battle_script_commands.c:336',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2136',
+    probes: [/setCounter\(target\.statuses3, STATUS3_YAWN, 2\)/],
+  },
+  {
+    opcode: 'settelekinesis',
+    cSite: 'battle_script_commands.c:370',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8122',
+    probes: [/target\.volatiles\.telekinesisTimer = 3/],
+  },
+  {
+    opcode: 'sethealblock',
+    cSite: 'battle_script_commands.c:195',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4233',
+    probes: [/target\.volatiles\.healBlockTimer = 5/],
+  },
+  {
+    opcode: 'setembargo',
+    cSite: 'battle_script_commands.c:303',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4262',
+    probes: [/target\.volatiles\.embargoTimer = 5/],
+  },
+  {
+    opcode: 'settaunt',
+    cSite: 'battle_script_commands.c:329',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4062',
+    probes: [/target\.volatiles\.tauntTimer = turns/],
+  },
+  {
+    opcode: 'settorment',
+    cSite: 'battle_script_commands.c:327',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4200',
+    probes: [/setFlag\(target\.mon\.status2, STATUS2_TORMENT\)/],
+  },
+  {
+    opcode: 'setoctolock',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:12094',
+    probes: [/targetBattler\.volatiles\.octolock = true/],
+  },
+  {
+    opcode: 'setpowder',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8280',
+    probes: [/setFlag\(target\.mon\.status2, STATUS2_POWDER\)/],
+  },
+  {
+    opcode: 'setwaterlogged',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:10005',
+    probes: [/target\.round\.waterlog = true/],
+  },
+  {
+    opcode: 'setuserstatus3',
+    cSite: 'battle_script_commands.c:342',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4491',
+    probes: [/setFlag\(battler\.statuses3, STATUS3_LASER_FOCUS\)/],
+  },
+  {
+    opcode: 'setroost',
+    cSite: 'battle_script_commands.c:187',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2549',
+    probes: [/battler\.roostTypes = \['FLYING', 'FLYING'\]/],
+  },
+
+  // Move-slot and move-lock state.
+  {
+    opcode: 'disablelastusedattack',
+    cSite: 'battle_script_commands.c:284',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4107',
+    probes: [/target\.volatiles\.disabledMove = lastMove/],
+  },
+  {
+    opcode: 'trysetencore',
+    cSite: 'battle_script_commands.c:285',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4160',
+    probes: [/target\.volatiles\.encoredMove = lastMove/],
+  },
+  {
+    opcode: 'trysetperishsong',
+    cSite: 'battle_script_commands.c:299',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4667',
+    probes: [/b\.volatiles\.perishSongTimer = 3/],
+  },
+  {
+    opcode: 'trysetfairylock',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7524',
+    probes: [/state\.field\.statuses \|= STATUS_FIELD_FAIRY_LOCK/],
+  },
+  {
+    opcode: 'trysetfutureattack',
+    cSite: 'battle_script_commands.c:316',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4731',
+    probes: [/state\.field\.futureSightMove\[targetId\] = currentMove\.id/],
+  },
+  {
+    opcode: 'trysetrest',
+    cSite: 'battle_script_commands.c:250',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5000',
+    probes: [/function handleRest\(/],
+  },
+  {
+    opcode: 'trysetmagiccoat',
+    cSite: 'battle_script_commands.c:344',
+    simSite: 'web/src/engine/sim/moveEffects.ts:10188',
+    probes: [/export function handleMagicCoat\(/],
+  },
+  {
+    opcode: 'trysetsnatch',
+    cSite: 'battle_script_commands.c:345',
+    simSite: 'web/src/engine/sim/moveEffects.ts:10157',
+    probes: [/export function handleSnatch\(/],
+  },
+  {
+    opcode: 'tryimprison',
+    cSite: 'battle_script_commands.c:340',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8055',
+    probes: [/setFlag\(battler\.statuses3, STATUS3_IMPRISONED_OTHERS\)/],
+  },
+  {
+    opcode: 'tryelectrify',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8143',
+    probes: [/export function handleElectrify\(/],
+  },
+  {
+    opcode: 'trytarshot',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6057',
+    probes: [/target\.volatiles\.tarShot = true/],
+  },
+  {
+    opcode: 'cantarshotwork',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6028',
+    probes: [/target\.volatiles\.tarShot \|\| speedStage >= MAX_STAT_STAGE/],
+  },
+  {
+    opcode: 'trynoretreat',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5764',
+    probes: [/function handleNoRetreat\(/],
+  },
+  {
+    opcode: 'stockpile',
+    cSite: 'battle_script_commands.c:254',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5211',
+    probes: [/battler\.volatiles\.stockpileCounter\+\+/],
+  },
+
+  // Damage calculation.
+  {
+    opcode: 'calculatesetdamage',
+    cSite: 'battle_script_commands.c:280',
+    simSite: 'web/src/engine/sim/turn.ts:2025',
+    probes: [/case 'EFFECT_LEVEL_DAMAGE':/, /case 'EFFECT_SUPER_FANG':/],
+  },
+  {
+    opcode: 'counterdamagecalculator',
+    cSite: 'battle_script_commands.c:282',
+    simSite: 'web/src/engine/sim/turn.ts:2011',
+    probes: [/case 'EFFECT_COUNTER':/],
+  },
+  {
+    opcode: 'mirrorcoatdamagecalculator',
+    cSite: 'battle_script_commands.c:283',
+    simSite: 'web/src/engine/sim/turn.ts:2014',
+    probes: [/case 'EFFECT_MIRROR_COAT':/],
+  },
+  {
+    opcode: 'metalburstdamagecalculator',
+    cSite: 'battle_script_commands.c:376',
+    simSite: 'web/src/engine/sim/turn.ts:2017',
+    probes: [/case 'EFFECT_METAL_BURST':/],
+  },
+  {
+    opcode: 'setdamagetohealthdifference',
+    cSite: 'battle_script_commands.c:337',
+    simSite: 'web/src/engine/sim/turn.ts:2020',
+    probes: [/case 'EFFECT_ENDEAVOR':/],
+  },
+  {
+    opcode: 'dmgtocurrattackerhp',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:2032',
+    probes: [/case 'EFFECT_FINAL_GAMBIT':/],
+  },
+  {
+    opcode: 'painsplitdmgcalc',
+    cSite: 'battle_script_commands.c:286',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2734',
+    probes: [/function handlePainSplit\(/],
+  },
+  {
+    opcode: 'magnitudedamagecalculation',
+    cSite: 'battle_script_commands.c:306',
+    simSite: 'web/src/engine/sim/damageResolver.ts:55',
+    probes: [/function magnitudeTier\(random: RandomSource\)/],
+  },
+  {
+    opcode: 'handlerollout',
+    cSite: 'battle_script_commands.c:300',
+    simSite: 'web/src/engine/sim/turn.ts:3791',
+    probes: [/if \(moveEffect === 'EFFECT_ROLLOUT'\)/],
+  },
+  {
+    opcode: 'suckerpunchcheck',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:3284',
+    probes: [/moveEffect === 'EFFECT_SUCKER_PUNCH'/],
+  },
+  {
+    opcode: 'trypupperhand',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:3511',
+    probes: [/moveEffect === 'EFFECT_UPPER_HAND'/],
+  },
+  {
+    opcode: 'dmg_1_2_attackerhp',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3814',
+    probes: [/const hpCost = Math\.max\(1, Math\.floor\(battler\.mon\.maxHp \/ 2\)\)/],
+  },
+  {
+    opcode: 'setatkhptozero',
+    cSite: 'battle_script_commands.c:242',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6183',
+    probes: [/const userHp = battler\.mon\.hp/],
+  },
+  {
+    opcode: 'instanthpdrop',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:11084',
+    probes: [/healingWish: true/],
+  },
+  {
+    opcode: 'faintifabilitynotdamp',
+    cSite: 'battle_script_commands.c:241',
+    simSite: 'web/src/engine/sim/turn.ts:3315',
+    probes: [/isAbilityOnField\(state, 'ABILITY_DAMP', deps\)/],
+  },
+  {
+    opcode: 'confuseifrepeatingattackends',
+    cSite: 'battle_script_commands.c:261',
+    simSite: 'web/src/engine/sim/moveEffects.ts:11759',
+    probes: [/STATUS2_LOCK_CONFUSE/],
+  },
+
+  // Copying moves, abilities, items and stats.
+  {
+    opcode: 'copyfoestats',
+    cSite: 'battle_script_commands.c:310',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5288',
+    probes: [/function handlePsychUp\(/],
+  },
+  {
+    opcode: 'copymovepermanently',
+    cSite: 'battle_script_commands.c:289',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6805',
+    probes: [/export function handleSketch\(/],
+  },
+  {
+    opcode: 'mimicattackcopy',
+    cSite: 'battle_script_commands.c:278',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6682',
+    probes: [/export function handleMimic\(/],
+  },
+  {
+    opcode: 'metronome',
+    cSite: 'battle_script_commands.c:279',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7078',
+    probes: [/export function handleMetronome\(/],
+  },
+  {
+    opcode: 'assistattackselect',
+    cSite: 'battle_script_commands.c:343',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7157',
+    probes: [/export function handleAssist\(/],
+  },
+  {
+    opcode: 'trycopycat',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6570',
+    probes: [/export function handleCopycat\(/],
+  },
+  {
+    opcode: 'trymirrormove',
+    cSite: 'battle_script_commands.c:245',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6755',
+    probes: [/export function handleMirrorMove\(/],
+  },
+  {
+    opcode: 'tryinstruct',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6632',
+    probes: [/export function handleInstruct\(/],
+  },
+  {
+    opcode: 'trymefirst',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7317',
+    probes: [/export function handleMeFirst\(/],
+  },
+  {
+    opcode: 'tryafteryou',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8819',
+    probes: [/export function handleAfterYou\(/],
+  },
+  {
+    opcode: 'tryquash',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8859',
+    probes: [/export function handleQuash\(/],
+  },
+  {
+    opcode: 'tryaccupressure',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5598',
+    probes: [/function handleAcupressure\(/],
+  },
+  {
+    opcode: 'tryswapitems',
+    cSite: 'battle_script_commands.c:331',
+    simSite: 'web/src/engine/sim/moveEffects.ts:10067',
+    probes: [/export function handleTrick\(/],
+  },
+  {
+    opcode: 'tryrecycleitem',
+    cSite: 'battle_script_commands.c:355',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3970',
+    probes: [/function handleRecycle\(/],
+  },
+  {
+    opcode: 'trybestow',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:9549',
+    probes: [/export function handleBestow\(/],
+  },
+  {
+    opcode: 'consumeberry',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/statBuffs.ts:1107',
+    probes: [/export function consumeHeldItem\(/],
+  },
+  {
+    opcode: 'tryswapabilities',
+    cSite: 'battle_script_commands.c:339',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7882',
+    probes: [/export function handleSkillSwap\(/],
+  },
+  {
+    opcode: 'trycopyability',
+    cSite: 'battle_script_commands.c:332',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7833',
+    probes: [/export function handleRolePlay\(/],
+  },
+  {
+    opcode: 'trycopyabilitybetween',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6875',
+    probes: [/export function handleDoodle\(/],
+  },
+  {
+    opcode: 'setabilitysimple',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7681',
+    probes: [/export function handleSimpleBeam\(/],
+  },
+  {
+    opcode: 'tryentrainment',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7785',
+    probes: [/export function handleEntrainment\(/],
+  },
+  {
+    opcode: 'tryworryseed',
+    cSite: 'battle_script_commands.c:375',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7727',
+    probes: [/export function handleWorrySeed\(/],
+  },
+  {
+    opcode: 'switchinabilities',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/switchInAbility.ts:1359',
+    probes: [/export function applySwitchInAbilities\(/],
+  },
+  {
+    opcode: 'tryreflecttype',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6403',
+    probes: [/export function handleReflectType\(/],
+  },
+  {
+    opcode: 'trysoak',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6220',
+    probes: [/export function handleSoak\(/],
+  },
+  {
+    opcode: 'trysetthirdtype',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6269',
+    probes: [/export function handleThirdType\(/],
+  },
+  {
+    opcode: 'tryconversiontypechange',
+    cSite: 'battle_script_commands.c:265',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6314',
+    probes: [/export function handleConversion\(/],
+  },
+  {
+    opcode: 'settypetorandomresistance',
+    cSite: 'battle_script_commands.c:287',
+    simSite: 'web/src/engine/sim/moveEffects.ts:6454',
+    probes: [/export function handleConversion2\(/],
+  },
+  {
+    opcode: 'transformdataexecution',
+    cSite: 'battle_script_commands.c:276',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7019',
+    probes: [/export function handleTransform\(/],
+  },
+  {
+    opcode: 'trydobeatup',
+    cSite: 'battle_script_commands.c:317',
+    simSite: 'web/src/engine/sim/damageResolver.ts:123',
+    probes: [/let beatUpBaseAttack = attacker\.battler\.rawStats\.atk/],
+  },
+
+  // Healing and party status.
+  {
+    opcode: 'healpartystatus',
+    cSite: 'battle_script_commands.c:295',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4787',
+    probes: [/function handleHealBell\(/],
+  },
+  {
+    opcode: 'tryhealhalfhealth',
+    cSite: 'battle_script_commands.c:244',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2523',
+    probes: [/function handleHealHalf\(/],
+  },
+  {
+    opcode: 'tryhealpercenthealth',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2701',
+    probes: [/function handleJungleHealing\(/],
+  },
+  {
+    opcode: 'recoverbasedonsunlight',
+    cSite: 'battle_script_commands.c:313',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2658',
+    probes: [/function handleWeatherRecovery\(/],
+  },
+  {
+    opcode: 'tryhealpulse',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5065',
+    probes: [/function handleHealPulse\(/],
+  },
+  {
+    opcode: 'trywish',
+    cSite: 'battle_script_commands.c:333',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4683',
+    probes: [/function handleWish\(/],
+  },
+  {
+    opcode: 'tryrevivalblessing',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:11011',
+    probes: [/export function handleRevivalBlessing\(/],
+  },
+  {
+    opcode: 'trylosepercenthp',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:5710',
+    probes: [/function handleFilletAway\(/],
+  },
+  {
+    opcode: 'cureifburnedparalysedorpoisoned',
+    cSite: 'battle_script_commands.c:326',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4841',
+    probes: [/function handleRefresh\(/],
+  },
+
+  // Battle-script dispatch for effect slots.
+  {
+    opcode: 'seteffectprimary',
+    cSite: 'battle_script_commands.c:143',
+    simSite: 'web/src/engine/sim/statusEffects.ts:1546',
+    probes: [/export function applyPrimaryStatusEffect\(/],
+  },
+  {
+    opcode: 'seteffectsecondary',
+    cSite: 'battle_script_commands.c:144',
+    simSite: 'web/src/engine/sim/moveEffects.ts:11579',
+    probes: [/export function applySecondaryMoveEffects\(/],
+  },
+
+  // Sides, field and weather.
+  {
+    opcode: 'setreflect',
+    cSite: 'battle_script_commands.c:247',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2956',
+    probes: [/sideState\.timers\.reflectTimer = isExtended \? 8 : 5/],
+  },
+  {
+    opcode: 'setlightscreen',
+    cSite: 'battle_script_commands.c:267',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2982',
+    probes: [/sideState\.timers\.lightscreenTimer = isExtended \? 8 : 5/],
+  },
+  {
+    opcode: 'setauroraveil',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3018',
+    probes: [/sideState\.timers\.auroraVeilTimer = isExtended \? 8 : 5/],
+  },
+  {
+    opcode: 'setmist',
+    cSite: 'battle_script_commands.c:274',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3086',
+    probes: [/sideState\.timers\.mistTimer = 5/],
+  },
+  {
+    opcode: 'setsafeguard',
+    cSite: 'battle_script_commands.c:305',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3112',
+    probes: [/sideState\.timers\.safeguardTimer = 5/],
+  },
+  {
+    opcode: 'settailwind',
+    cSite: 'battle_script_commands.c:293',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3137',
+    probes: [/trySetTailwind\(state, side, battlerId, 3\)/],
+  },
+  {
+    opcode: 'setstealthrock',
+    cSite: 'battle_script_commands.c:341',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3204',
+    probes: [/sideState\.timers\.stealthRockType = getMoveTypeNumber/],
+  },
+  {
+    opcode: 'settoxicspikes',
+    cSite: 'battle_script_commands.c:334',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3226',
+    probes: [/sideState\.timers\.toxicSpikesAmount\+\+/],
+  },
+  {
+    opcode: 'trysetspikes',
+    cSite: 'battle_script_commands.c:297',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3180',
+    probes: [/sideState\.timers\.spikesAmount\+\+/],
+  },
+  {
+    opcode: 'setstickyweb',
+    cSite: 'battle_script_commands.c:314',
+    simSite: 'web/src/engine/sim/moveEffects.ts:12753',
+    probes: [/trySetStickyWeb\(state, targetSide, 0, false\)/],
+  },
+  {
+    opcode: 'trysetcaltrops',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:9669',
+    probes: [/sideState\.timers\.caltrops = true/],
+  },
+  {
+    opcode: 'setluckychant',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7400',
+    probes: [/timers\.luckyChantTimer = SCREEN_DURATION/],
+  },
+  {
+    opcode: 'setquickguard',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7410',
+    probes: [/export function handleQuickGuard\(/],
+  },
+  {
+    opcode: 'setprotectlike',
+    cSite: 'battle_script_commands.c:240',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2409',
+    probes: [/export function handleProtect\(/],
+  },
+  {
+    opcode: 'setsubstitute',
+    cSite: 'battle_script_commands.c:277',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4322',
+    probes: [/battler\.volatiles\.substituteHp = hp/],
+  },
+  {
+    opcode: 'setterrain',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3373',
+    probes: [/export function setFieldTerrain\(/],
+  },
+  {
+    opcode: 'setroom',
+    cSite: 'battle_script_commands.c:338',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3423',
+    probes: [/function handleRoomMove\(/],
+  },
+  {
+    opcode: 'setgravity',
+    cSite: 'battle_script_commands.c:226',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3492',
+    probes: [/state\.field\.timers\.gravityTimer = GRAVITY_DURATION/],
+  },
+  {
+    opcode: 'setbattleweather',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3288',
+    probes: [/tryChangeBattleWeather\(state, battlerId, weatherEnum, false, deps\)/],
+  },
+  {
+    opcode: 'checkprimalweather',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/switchInAbility.ts:411',
+    probes: [/hasFlag\(state\.field\.weather, WEATHER_PRIMAL_ANY\)/],
+  },
+  {
+    opcode: 'trysetclearskies',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3535',
+    probes: [/function handleClearSkies\(/],
+  },
+  {
+    opcode: 'defogclear',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:3599',
+    probes: [/function clearDefog\(/],
+  },
+  {
+    opcode: 'removelightscreenreflect',
+    cSite: 'battle_script_commands.c:359',
+    simSite: 'web/src/engine/sim/turn.ts:3768',
+    probes: [/moveEffect === 'EFFECT_BRICK_BREAK'/],
+  },
+  {
+    opcode: 'swapsideeffects',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8744',
+    probes: [/export function handleCourtChange\(/],
+  },
+  {
+    opcode: 'settypebasedhalvers',
+    cSite: 'battle_script_commands.c:353',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7489',
+    probes: [/state\.field\.statuses \|= STATUS_FIELD_MUDSPORT/],
+  },
+  {
+    opcode: 'setalwayshitflag',
+    cSite: 'battle_script_commands.c:288',
+    simSite: 'web/src/engine/sim/moveEffects.ts:4466',
+    probes: [/STATUS3_ALWAYS_HITS_TURN\(2\)/],
+  },
+  {
+    opcode: 'onweatherchange',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/onWeather.ts:229',
+    probes: [/export function dispatchOnWeatherChange\(/],
+  },
+  {
+    opcode: 'onterrainchange',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/onWeather.ts:301',
+    probes: [/export function dispatchOnTerrainChange\(/],
+  },
+  {
+    opcode: 'setsemiinvulnerablebit',
+    cSite: 'battle_script_commands.c:318',
+    simSite: 'web/src/engine/sim/turn.ts:279',
+    probes: [/export function setSemiInvulnerableBit\(/],
+  },
+  {
+    opcode: 'clearsemiinvulnerablebit',
+    cSite: 'battle_script_commands.c:319',
+    simSite: 'web/src/engine/sim/turn.ts:3245',
+    probes: [/clearFlag\(state\.battlers\[battlerId\]!\.statuses3, STATUS3_SEMI_INVULNERABLE\)/],
+  },
+  {
+    opcode: 'setskydrop',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:3124',
+    probes: [/targetBattler\.volatiles\.skyDropped = true/],
+  },
+  {
+    opcode: 'showtime',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:10612',
+    probes: [/export function handleShowtime\(/],
+  },
+  {
+    opcode: 'trepidation',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:11847',
+    probes: [/targetBattler\.volatiles\.trepidation = 3/],
+  },
+  {
+    opcode: 'twoturnmoveacceleratecheck',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:3167',
+    probes: [/const hasAccelerate = battlerHasSimAbility/],
+  },
+  {
+    opcode: 'getrototillertargets',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:8558',
+    probes: [/export function handleRototiller\(/],
+  },
+  {
+    opcode: 'tryspiteppreduce',
+    cSite: 'battle_script_commands.c:294',
+    simSite: 'web/src/engine/sim/moveEffects.ts:7940',
+    probes: [/export function handleSpite\(/],
+  },
+  {
+    opcode: 'infatuatewithbattler',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2379',
+    probes: [/function handleAttract\(/],
+  },
+  {
+    opcode: 'tryinfatuating',
+    cSite: 'battle_script_commands.c:272',
+    simSite: 'web/src/engine/sim/moveEffects.ts:2379',
+    probes: [/function handleAttract\(/],
+  },
+  {
+    opcode: 'scheduleswitch',
+    cSite: 'asm macro (no Cmd_ in sparse checkout)',
+    simSite: 'web/src/engine/sim/turn.ts:1718',
+    probes: [/export function performSwitchAction\(/],
+  },
+]
+
+/** Opcodes whose production site is present in the comment-stripped consumer source. */
+export function handledScriptOpcodes(source: string): Set<string> {
+  const handled = new Set<string>()
+  for (const handler of SCRIPT_OPCODE_HANDLERS) {
+    if (handler.probes.every((probe) => probe.test(source))) handled.add(handler.opcode)
+  }
+  return handled
+}
+
+function opcodeHasHandler(opcode: string, handledOpcodes: ReadonlySet<string>): boolean {
+  return handledOpcodes.has(opcode)
+}
+
 
 // ---------------------------------------------------------------------------
 // Plain hits (cycle 151b rework, defect 3)
@@ -947,6 +1864,8 @@ export function plainHitEffectsFor(
 interface TestBlock {
   words: Set<string>
   text: string
+  /** Repo-relative test file, when the evidence was built from named files. */
+  file?: string
 }
 
 export interface TestEvidence {
@@ -1105,7 +2024,11 @@ export function buildTestEvidence(testSource: string): TestEvidence {
 
 /** Concatenated evidence of several test files, each analysed on its own (file boundary kept). */
 export function buildTestEvidenceForFiles(files: readonly TestFileSource[]): TestEvidence {
-  return { blocks: files.flatMap((file) => buildTestEvidence(file.source).blocks) }
+  return {
+    blocks: files.flatMap((file) =>
+      buildTestEvidence(file.source).blocks.map((block) => ({ ...block, file: file.file })),
+    ),
+  }
 }
 
 function evidenceNames(evidence: TestEvidence, words: Iterable<string>): boolean {
@@ -1640,19 +2563,92 @@ function classifySecondary(name: string, ctx: ClassifyContext): { status: MoveUn
   return { status: 'unported', registeredUntested: false }
 }
 
+/** Flags carried by this many moves or fewer need the flag named, not just a carrier run. */
+const FLAG_FEW_CARRIERS = 5
+/** Flags carried by this many moves or more are "generic" (`contact`, `protect`, ...). */
+const FLAG_GENERIC_CARRIERS = 100
+
 /**
- * Flag test evidence (cycle 151b rework defect 1). A flag is tested when a qualifying
- * block either:
- *   - names a real move id that carries the flag (`moves.json`), which is how the sim's
- *     tests exercise flags -- they run a move, they do not restate the flag table; or
- *   - sets the key on a move-flags literal that is actually passed to a sim entry point
- *     in that block (`flagSetOnRunnerMoveInBlock`).
- * A module-scope fixture (including cycle98AiState.test.ts's data sentinel), a comment, an
- * AI-scoring test and a `.not.toContain` note are not blocks and never count.
+ * Ability/effect identifiers that read `key` in production: every `flags.<key>` /
+ * `hasMoveFlag(..., '<key>')` site contributes the `ABILITY_*` / `EFFECT_*` /
+ * `MOVE_EFFECT_*` tokens in a small window around it. The window is the expression that
+ * guards the read (`if (ctx.moveFlags.drillBased)` sits inside `ABILITY_MEGA_DRILL`), not
+ * the whole file, so an unrelated neighbouring ability does not become a reader.
+ */
+export function flagReaderTokens(key: string, productionSource: string): Set<string> {
+  const escaped = escapeRegExp(key)
+  const readRes = [
+    new RegExp(`[fF]lags\\??\\.${escaped}\\b`, 'g'),
+    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`, 'g'),
+    new RegExp(`flag\\s*===\\s*['"]${escaped}['"]`, 'g'),
+  ]
+  const readers = new Set<string>()
+  for (const re of readRes) {
+    let match: RegExpExecArray | null
+    while ((match = re.exec(productionSource)) !== null) {
+      const window = productionSource.slice(Math.max(0, match.index - 300), match.index + 300)
+      for (const token of window.match(/\b(?:ABILITY|EFFECT|MOVE_EFFECT)_[A-Z0-9_]+/g) ?? []) {
+        readers.add(token)
+      }
+    }
+  }
+  return readers
+}
+
+/**
+ * Flag test evidence (cycle 151b rework defect 2). A qualifying block proves a flag only
+ * when it names a subject carrying the flag **and** shows the flag's production read being
+ * what the block exercises. Concretely, a block counts when:
+ *   - it sets the flag key on a move-flags literal passed to a sim entry point
+ *     (`flagSetOnRunnerMoveInBlock`, rule (a)); or
+ *   - it names the flag key itself (`flags.<key>`, `hasMoveFlag(..., '<key>')`, or the
+ *     quoted key) together with a move id that carries the flag; or
+ *   - it names a move id that carries the flag **and** names an ability/effect token from
+ *     the production site that reads the flag (`flagReaderTokens`, rule (b)).
+ *
+ * A bare move-id match is not enough. For a flag with fewer than `FLAG_FEW_CARRIERS`
+ * carriers the test file must also name the flag key. For a generic flag
+ * (`>= FLAG_GENERIC_CARRIERS` carriers, e.g. `contact`) the block itself must name the
+ * key or a reading ability/effect: running one carrier move says nothing about the flag.
+ * A module-scope fixture, a comment, an AI-scoring test and a `.not.toContain` note are
+ * never blocks and never count.
  */
 function flagHasBlockEvidence(key: string, ctx: ClassifyContext): boolean {
-  if (evidenceNames(ctx.evidence, ctx.flagMoveIds.get(key) ?? [])) return true
-  return ctx.evidence.blocks.some((block) => flagSetOnRunnerMoveInBlock(key, block.text))
+  const carriers = ctx.flagMoveIds.get(key) ?? new Set<string>()
+  const generic = carriers.size >= FLAG_GENERIC_CARRIERS
+  const readers = flagReaderTokens(key, ctx.productionSource)
+  const escaped = escapeRegExp(key)
+
+  const namesKey = (block: TestBlock): boolean =>
+    new RegExp(`[fF]lags\\??\\.${escaped}\\b`).test(block.text) ||
+    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(block.text) ||
+    new RegExp(`['"\`]${escaped}['"\`]`).test(block.text)
+  const namesCarrier = (block: TestBlock): boolean => {
+    for (const moveId of carriers) if (block.words.has(moveId)) return true
+    return false
+  }
+  const showsReader = (block: TestBlock): boolean => {
+    for (const reader of readers) if (block.words.has(reader)) return true
+    return false
+  }
+
+  if (ctx.evidence.blocks.some((block) => flagSetOnRunnerMoveInBlock(key, block.text))) return true
+
+  const fileNamesKey = (file: string | undefined): boolean =>
+    ctx.evidence.blocks.some((block) => (block.file ?? '') === (file ?? '') && namesKey(block))
+
+  return ctx.evidence.blocks.some((block) => {
+    const subject = namesCarrier(block) || namesKey(block)
+    if (!subject) return false
+    // A generic flag always needs the read in the block itself.
+    if (generic) return namesKey(block) || showsReader(block)
+    const readEvidence = namesKey(block) || showsReader(block)
+    if (carriers.size < FLAG_FEW_CARRIERS) {
+      // A move-id-only match needs the file to name the flag key at all.
+      return readEvidence || fileNamesKey(block.file)
+    }
+    return readEvidence
+  })
 }
 
 function classifyFlag(key: string, ctx: ClassifyContext): { status: MoveUnitStatus; registeredUntested: boolean } {
@@ -1710,11 +2706,12 @@ export function loadKnownScriptOpcodes(): Set<string> {
 }
 
 /**
- * The owning effect's implementation is the dispatch site for the substantive commands of
- * its script: `moveEffects.ts` handlers are hand-written ports that follow the script line
- * by line (e.g. `handleRest`), as are `CUSTOM_MOVE_DAMAGE`, declarative behaviour fields
- * and `runLegacyPreHit`/`runLegacyPostHit` cases. A mention in the plain-hit routing chain
- * alone is **not** one: it only says the effect needs no secondary step.
+ * Whether the owning effect has some production path at all. This is NOT a handler for the
+ * effect's script commands: a `HANDLERS` body, `CUSTOM_MOVE_DAMAGE` rule, declarative field
+ * or plain-hit routing entry only says the effect has a port somewhere. The script is
+ * ported only when each non-skeleton command is handled at an opcode-specific site
+ * (`SCRIPT_OPCODE_HANDLERS`), so this predicate is used for reporting / skeleton-only
+ * scripts, never to absolve a behaviour command.
  */
 function effectHasScriptImplementation(effect: string | null, ctx: ClassifyContext): boolean {
   if (!effect) return false
@@ -1740,9 +2737,11 @@ function effectHasScriptImplementation(effect: string | null, ctx: ClassifyConte
  *        (`hitScripts.ts`), which is the hand-written port of that whole script, or
  *      * `setmoveeffect MOVE_EFFECT_*`, whose effects must all be consumed by the
  *        secondary dispatch (`secondaryIsConsumed`), or
- *      * the command is a real script opcode and the owning effect has an implementation
- *        (`effectHasScriptImplementation`) that dispatches this script's behaviour.
- *    Anything else is a real gap and is reported with its `Cmd_` line.
+ *      * a production site in `SCRIPT_OPCODE_HANDLERS`, cited by file:line and matched
+ *        against the comment-stripped sim source (removing that code makes the opcode
+ *        unhandled again).
+ *    The owning effect having *some* production path is not a handler (cycle 151b rework 2,
+ *    defect A). Anything else is a real gap and is reported with its `Cmd_` line.
  */
 function unhandledScriptCommands(
   label: string,
@@ -1760,7 +2759,6 @@ function unhandledScriptCommands(
     return []
   }
   const known = loadKnownScriptOpcodes()
-  const effectImplemented = effectHasScriptImplementation(owningEffect, ctx)
   const unhandled: string[] = []
   for (const command of scriptBehaviourCommands(record)) {
     const opcode = command.split(/\s+/)[0] ?? ''
@@ -1770,17 +2768,14 @@ function unhandledScriptCommands(
       unhandled.push(command)
       continue
     }
-    // The effect's implementation dispatches the script line by line (it is the hand port
-    // of this script), so the command is handled there.
-    if (effectImplemented) continue
-    if (opcode !== 'setmoveeffect') {
-      unhandled.push(command)
+    if (opcode === 'setmoveeffect') {
+      const names = command.match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []
+      // `setmoveeffect 0` only clears the stored effect: nothing to dispatch.
+      if (names.length === 0) continue
+      if (names.some((name) => !secondaryIsConsumed(name, ctx.consumption))) unhandled.push(command)
       continue
     }
-    const names = command.match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []
-    // `setmoveeffect 0` only clears the stored effect: nothing to dispatch.
-    if (names.length === 0) continue
-    if (names.some((name) => !secondaryIsConsumed(name, ctx.consumption))) unhandled.push(command)
+    if (!opcodeHasHandler(opcode, ctx.consumption.handledOpcodes)) unhandled.push(command)
   }
   return unhandled
 }
@@ -1854,7 +2849,7 @@ export function runInventory(
     options.consumerSource ??
     (options.productionSource !== undefined ? options.productionSource : loadMoveEffectConsumerSource())
   const scripts = options.scripts ?? parseScripts()
-  const consumption = buildConsumptionIndex(consumerSource, moves, behaviors, scripts)
+  const consumption = buildConsumptionIndex(consumerSource, moves, behaviors, scripts, productionSource)
   const evidence =
     options.testSource !== undefined
       ? buildTestEvidence(options.testSource)
@@ -2382,19 +3377,22 @@ export function generateMoveInventoryDoc(
     '   skeleton: ported when its owning move effect is ported (the damage path). A script with a non-skeleton',
   )
   lines.push(
-    '   command is ported only when every such command has a handler: the owning effect\'s implementation (a real',
+    '   command is ported only when every such command has its own handler; the owning effect being ported is not',
   )
   lines.push(
-    '   `HANDLERS` body, `CUSTOM_MOVE_DAMAGE` rule, declarative field, hitScripts case or plain hit) is the hand',
+    '   enough. A command is handled by (a) a real shared `runLegacyPreHit`/`runLegacyPostHit` `case` for the owning',
   )
   lines.push(
-    '   port of the script and dispatches its commands; a `setmoveeffect MOVE_EFFECT_*` is also handled when the',
+    '   effect, (b) a `setmoveeffect MOVE_EFFECT_*` whose effects are all consumed by the secondary dispatch, or',
   )
   lines.push(
-    '   secondary dispatch consumes it. An opcode that occurs in no upstream script never rides on its effect\'s',
+    '   (c) an opcode entry in `SCRIPT_OPCODE_HANDLERS` whose production-site probes all match the engine source.',
   )
   lines.push(
-    '   port. Commands left without a handler are listed under "Legacy Script Commands Without a Handler". Test',
+    '   The last rule is how shared machinery (`statbuffchange`, `setreflect`, ...) is recognised without a bare name',
+  )
+  lines.push(
+    '   list. Commands left without a handler are listed under "Legacy Script Commands Without a Handler". Test',
   )
   lines.push(
     '   evidence = a qualifying block naming the label or a move carrying it. Scripts are parsed with `.if`/`.else`',

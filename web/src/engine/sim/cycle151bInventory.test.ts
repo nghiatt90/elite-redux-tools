@@ -8,7 +8,9 @@ import {
   loadMoveBehaviors,
   loadMoves,
   buildTestEvidence,
+  handledScriptOpcodes,
   loadMoveEffectConsumerSource,
+  loadProductionSource,
   loadQualifyingTestSource,
   parseScripts,
   runInventory,
@@ -324,21 +326,105 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     expect(gapResult.unhandledScriptCommands.map((command) => command.opcode)).toContain('frobnicate')
   })
 
-  it('a qualifying block that names a real move id is flag evidence; fixtures and forged literals are not', () => {
+  it('a non-skeleton opcode the sim does not execute keeps a ported effect script unported', () => {
+    const gap = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: [
+          'BattleScript_TestAnimationGap::',
+          '\tattackcanceler',
+          '\tplayanimation BS_ATTACKER, B_ANIM_STATS_CHANGE, sB_ANIM_ARG1',
+          '\tend',
+        ],
+      },
+    ])
+    const move: MoveRecord = {
+      id: 'MOVE_TEST_ANIMATION_GAP',
+      effect: 'EFFECT_ERUPTION',
+      customBehavior: { legacyConfig: 'BattleScript_TestAnimationGap' },
+    }
+    const result = runInventory([move], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      testSource: block('MOVE_TEST_ANIMATION_GAP'),
+      scripts: gap,
+      allowlist: [],
+    })
+    // The owning effect is ported, but that says nothing about playanimation.
+    expect(result.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
+    const script = result.units.find((unit) => unit.kind === 'legacy-script')
+    expect(script?.status).toBe('unported')
+    expect(script?.registeredUntested).toBe(false)
+    expect(result.unhandledScriptCommands.map((command) => command.opcode)).toContain('playanimation')
+  })
+
+  it('an opcode-specific handler is required: deleting its production site makes the opcode unhandled', () => {
+    const handledScripts = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: ['BattleScript_TestHandledOpcode::', '\tattackcanceler', '\tsetoctolock BS_TARGET, BattleScript_MoveEndTryFaintTarget', '\tend'],
+      },
+    ])
+    const move: MoveRecord = {
+      id: 'MOVE_TEST_HANDLED_OPCODE',
+      effect: 'EFFECT_ERUPTION',
+      customBehavior: { legacyConfig: 'BattleScript_TestHandledOpcode' },
+    }
+    const realSource = loadProductionSource()
+    expect(handledScriptOpcodes(realSource).has('setoctolock')).toBe(true)
+    const handled = runInventory([move], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      productionSource: realSource,
+      testSource: block('MOVE_TEST_HANDLED_OPCODE'),
+      scripts: handledScripts,
+      allowlist: [],
+    })
+    expect(handled.units.find((unit) => unit.kind === 'legacy-script')?.status).toBe('ported')
+
+    // Remove the only `settaunt` setter from the comment-stripped production text.
+    const withoutSite = realSource.replace('targetBattler.volatiles.octolock = true', '')
+    expect(handledScriptOpcodes(withoutSite).has('setoctolock')).toBe(false)
+    const mutated = runInventory([move], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      productionSource: withoutSite,
+      testSource: block('MOVE_TEST_HANDLED_OPCODE'),
+      scripts: handledScripts,
+      allowlist: [],
+    })
+    expect(mutated.units.find((unit) => unit.kind === 'legacy-script')?.status).toBe('unported')
+    expect(mutated.unhandledScriptCommands.map((command) => command.opcode)).toContain('setoctolock')
+  })
+
+  it('a qualifying block needs the flag read, not just a carrier move (cycle 151b rework 2)', () => {
     const bite = moveById('MOVE_BITE')
-    const flagSource = 'if (move.flags.biteBased) return true'
-    const flagUnit = (testSource: string) => {
+    // Production read of biteBased inside an ability object: the reader token is what a
+    // block must name when it does not name the flag key itself.
+    const flagSource = [
+      'const READER = {',
+      "  id: 'ABILITY_STRONG_JAW',",
+      '  onOffensiveMultiplier: (ctx) => {',
+      '    if (ctx.moveFlags.biteBased) return 1.5',
+      '  },',
+      '}',
+    ].join('\n')
+    const flagUnit = (testSource: string, productionSource = flagSource) => {
       const result = runInventory([bite], behaviors, {
         consumerSource: REAL_CONSUMER,
-        productionSource: flagSource,
+        productionSource,
         testSource,
         scripts,
         allowlist: [],
       })
       return result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'biteBased')
     }
-    // `block('MOVE_BITE')` calls executeTurn in the same it() whose text names the move.
-    expect(flagUnit(block('MOVE_BITE'))?.status).toBe('ported')
+    // A carrier move id alone is no longer evidence: the flag's read is not under test.
+    const moveIdOnly = flagUnit(block('MOVE_BITE'))
+    expect(moveIdOnly?.status).toBe('unported')
+    expect(moveIdOnly?.registeredUntested).toBe(true)
+
+    // Rule (b): the block names the reading ability and runs a carrier.
+    expect(flagUnit(block('MOVE_BITE', 'ABILITY_STRONG_JAW'))?.status).toBe('ported')
+    // The flag key itself in the block is enough.
+    expect(flagUnit(block('MOVE_BITE', 'hasMoveFlag(move, "biteBased")'))?.status).toBe('ported')
 
     // A module-scope fixture (the cycle98 sentinel pattern) is not inside any it() block.
     const moduleScope = [
@@ -360,6 +446,27 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     const forgedUnit = flagUnit(forged)
     expect(forgedUnit?.status).toBe('unported')
     expect(forgedUnit?.registeredUntested).toBe(true)
+  })
+
+  it('a carrier-only block does not prove drillBased; the key or the reading ability does', () => {
+    const drill = moveById('MOVE_DRILL_RUN')
+    const flagUnit = (testSource: string) => {
+      const result = runInventory([drill], behaviors, {
+        consumerSource: REAL_CONSUMER,
+        testSource,
+        scripts,
+        allowlist: [],
+      })
+      return result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'drillBased')
+    }
+    // Production reads it under ABILITY_MEGA_DRILL, and five moves carry it -- nothing
+    // in a Tackle-only block exercises the flag.
+    expect(flagUnit(block('MOVE_TACKLE'))?.status).toBe('unported')
+    expect(flagUnit(block('MOVE_DRILL_RUN'))?.status).toBe('unported')
+    // Naming the flag key is evidence.
+    expect(flagUnit(block('MOVE_DRILL_RUN', 'hasMoveFlag(move, "drillBased")'))?.status).toBe('ported')
+    // So is running the drill move together with the ability that reads the flag.
+    expect(flagUnit(block('MOVE_DRILL_RUN', 'ABILITY_MEGA_DRILL'))?.status).toBe('ported')
   })
 
   it('the cycle98 module-scope flag sentinel is outside every qualifying block', () => {
