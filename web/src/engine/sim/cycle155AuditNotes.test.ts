@@ -57,7 +57,13 @@ describe('partitionAuditNotes', () => {
 })
 
 describe('pressure note integration', () => {
-  it('keeps the Pressure note attributed, with no baseline needed', () => {
+  // Cycle 156 removed the "Pressure's mold-breaker suppression ... is not applied"
+  // note: deductPp now reads Pressure through the suppression-aware
+  // battlerHasSimAbility / isAbilityAliveOnOpposingSide pair, whose IsSuppressed
+  // port (battle_util.c:9255-9260) implements the Neutralizing Gas / Gastro Acid /
+  // ability-shield clause, and Pressure has no `.breakable` (abilities.cc:1090-
+  // 1106) so Mold Breaker never bypassed it. The note was false.
+  it('no longer emits the false Pressure mold-breaker note', () => {
     const data = loadSimData()
     const trainer = data.trainersById.get('TRAINER_SAWYER_1')!
     const party = buildPlayerParty(
@@ -74,9 +80,7 @@ describe('pressure note integration', () => {
       for (const n of step.unmodelled) notes.add(n)
     }
     const { attributed, unattributed } = partitionAuditNotes([...notes], 'ABILITY_PRESSURE', EMPTY_BASELINE)
-    const pressureNote = attributed.find((n) => n.includes("Pressure's mold-breaker suppression"))
-    expect(pressureNote).toBeDefined()
-    expect(pressureNote).toContain('ABILITY_PRESSURE')
+    expect(attributed.some((n) => n.includes("Pressure's mold-breaker suppression"))).toBe(false)
     expect(unattributed.some((n) => n.includes("Pressure's mold-breaker suppression"))).toBe(false)
   })
 })

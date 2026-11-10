@@ -2322,7 +2322,11 @@ function handleDefenderMoveEndAbility(
       attacker.volatiles.wrapTurns =
         hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
       attacker.volatiles.wrapAbility = abilityId
-      unmodelled.push('Itchy Defense (ABILITY_ITCHY_DEFENSE) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+      // gBattleStruct->wrappedMove[attacker] = MOVE_INFESTATION; wrappedBy[attacker] = battler
+      // (src/abilities.cc:6165-6166) -- `battler` is the holder (this sim's defender/target),
+      // `attacker` is the mon that gets wrapped.
+      state.wrappedMove[attackerId] = 'MOVE_INFESTATION'
+      state.wrappedBy[attackerId] = targetId
     }
   }
 
@@ -5523,15 +5527,11 @@ function handleAttackerMoveEndAbility(
         target.volatiles.wrapTurns =
           hasGrappler || hasGripClaw ? 5 + (hasGrappler ? 1 : 0) + (hasGripClaw ? 2 : 0) : (state.rng.random16() % 2) + 4
         target.volatiles.wrapAbility = abilityId
-        const name =
-          abilityId === 'ABILITY_WORLD_SERPENT'
-            ? 'World Serpent'
-            : abilityId === 'ABILITY_TENTALOCK'
-              ? 'Tentalock'
-              : abilityId === 'ABILITY_SERPENT_BIND'
-                ? 'Serpent Bind'
-                : 'Grip Pincer'
-        unmodelled.push(`${name} (${abilityId}) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled`)
+        // gBattleStruct->wrappedMove[target] = move; wrappedBy[target] = battler
+        // (src/abilities.cc:4702-4703, second copy :12037-12038) -- `battler` is the
+        // holder (this sim's attacker), `target` the mon that gets wrapped.
+        state.wrappedMove[targetId] = moveId
+        state.wrappedBy[targetId] = attackerId
       }
     }
   }

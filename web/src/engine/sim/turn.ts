@@ -683,16 +683,39 @@ function hasHalfRecoilAbility(state: BattleState, attacker: BattlerState, battle
  */
 /** Every battler, alive, on the SIDE OPPOSITE `battlerId` -- IsAbilityOnSide's
  * own scan (battle_util.c:4792-4799), generalised past singles' one opponent
- * since nothing here assumes battlersCount === 2. Does not apply the C's
- * mold-breaker exception (BATTLER_HAS_ABILITY_AND_ALIVE's checkMoldBreaker=
- * TRUE, :4793/4795); see deductPp's own gap note for why. */
-export function isAbilityAliveOnOpposingSide(state: BattleState, battlerId: number, abilityId: string): boolean {
+ * since nothing here assumes battlersCount === 2.
+ *
+ * `BATTLER_HAS_ABILITY_AND_ALIVE(battlerId, ability, TRUE)` (include/
+ * battle_util.h:74) routes the holder through `BattlerHasAbility` -> `IsSuppressed`
+ * (battle_util.c:9255-9260), so Neutralizing Gas, Gastro Acid and the ability
+ * shield all apply, and the C's mold-breaker clause (gated on
+ * `gAbilities[ability].breakable`, :9255) applies when `dataContext` is supplied.
+ * With no `dataContext` the old raw lookup is kept: callers that have no data
+ * bundle in scope (endTurn.ts / attackCanceller.ts / moveEnd.ts's existing call
+ * sites) cannot evaluate the suppression clause. deductPp always supplies it.
+ * `attackerHasMoldBreaker` is the switching/pressuring move's mold-breaker
+ * state (gHitMarker & HITMARKER_MOLD_BREAKER, :9255); Pressure is not breakable,
+ * so it never changes Pressure's result. */
+export function isAbilityAliveOnOpposingSide(
+  state: BattleState,
+  battlerId: number,
+  abilityId: string,
+  dataContext?: SimDataContext,
+  attackerHasMoldBreaker = false,
+): boolean {
   const side = battlerId & 1
   for (let id = 0; id < state.battlersCount; id++) {
     if ((id & 1) === side) continue
     if (!isBattlerAlive(state, id)) continue
     const battler = state.battlers[id]
-    if (battler && battlerHasAbility(battler.mon.abilities, abilityId, () => false)) return true
+    if (!battler) continue
+    if (dataContext) {
+      // checkMoldBreaker = TRUE (:4793/4795); gBattlerAttacker is `battlerId`
+      // at every call site that supplies a dataContext.
+      if (battlerHasSimAbility(state, battler, abilityId, true, battlerId, attackerHasMoldBreaker, dataContext)) return true
+    } else if (battlerHasAbility(battler.mon.abilities, abilityId, () => false)) {
+      return true
+    }
   }
   return false
 }
@@ -1314,19 +1337,26 @@ export function deductPp(
   if (slot === -1) return
 
   let ppToDeduct = 1
-  // Pressure, :1474. The attacker's OWN ability check needs no mold-breaker
-  // exception (a battler cannot Mold-Break itself); the OPPOSING side's check
-  // does (IsAbilityOnSide's BATTLER_HAS_ABILITY_AND_ALIVE, checkMoldBreaker=
-  // TRUE at :4793/4795), which isAbilityAliveOnOpposingSide does not apply --
-  // gapped by name only when Pressure was actually found, so an ordinary
-  // battle without Mold Breaker never sees the note.
-  const attackerHasPressure = battlerHasAbility(attacker.mon.abilities, 'ABILITY_PRESSURE', () => false)
-  const opposingHasPressure = isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PRESSURE')
+  // Pressure, :1474: `!BATTLER_HAS_ABILITY(gBattlerAttacker, ABILITY_PRESSURE)
+  // && IsAbilityOnOpposingSide(gBattlerAttacker, ABILITY_PRESSURE)`.
+  // BATTLER_HAS_ABILITY uses checkMoldBreaker=TRUE (include/battle_util.h:73),
+  // but a battler cannot Mold-Break itself, so only Neutralizing Gas / Gastro
+  // Acid matter for the attacker's own check. The opposing check goes through
+  // BATTLER_HAS_ABILITY_AND_ALIVE(..., TRUE) (:4793/4795) -> IsSuppressed
+  // (battle_util.c:9255-9260). Pressure has no `.breakable` (abilities.cc:1090-
+  // 1106), so Mold Breaker does not bypass it; what DOES bypass it is
+  // Neutralizing Gas / Gastro Acid unless the holder has an ability shield.
+  // With no `deps` (a direct caller that supplies none; every turn-loop call
+  // goes through performPpDeduct below, which always passes them) there is no
+  // dataContext to read the item/suppression state from, so the raw lookup is
+  // kept for that case (REPORT.md).
+  const moldBreaker = deps ? attackerHasMoldBreakerActive(attacker, deps) : false
+  const attackerHasPressure = deps
+    ? battlerHasSimAbility(state, attacker, 'ABILITY_PRESSURE', true, attackerId, false, deps.dataContext)
+    : battlerHasAbility(attacker.mon.abilities, 'ABILITY_PRESSURE', () => false)
+  const opposingHasPressure = isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PRESSURE', deps?.dataContext, moldBreaker)
   if (!attackerHasPressure && opposingHasPressure) {
     ppToDeduct++
-    unmodelled.push(
-      "Pressure's mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793; ABILITY_PRESSURE) is not applied; an opposing Mold-Breaker-class attacker would bypass Pressure's extra PP cost here",
-    )
   }
 
   if (moveEffect === 'EFFECT_SPIT_UP' || moveEffect === 'EFFECT_SWALLOW') {

@@ -3231,7 +3231,7 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     expect(act2.statusApplied).toBeNull()
   })
 
-  it('Grip Pincer wraps target on contact hit and logs unmodelled wrap message', () => {
+  it('Grip Pincer wraps target on contact hit and records wrappedMove/wrappedBy', () => {
     // roll 0 for accuracy, roll 1 for Grip Pincer (< 50% chance), roll 0 for wrap turns
     const state = battle(
       [
@@ -3245,7 +3245,14 @@ describe('MOVEEND_ABILITIES onAttacker batch (cycle 43)', () => {
     expect(hasFlag(state.battlers[1]!.mon.status2, STATUS2_WRAPPED)).toBe(true)
     // Grip Pincer wraps for 4; ENDTURN_WRAP (battle_util.c:2663) decrements it once in the same turn.
     expect(state.battlers[1]!.volatiles.wrapTurns).toBe(3)
-    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).toContain('Grip Pincer (ABILITY_GRIP_PINCER) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
+    // gBattleStruct->wrappedMove[target] = move; wrappedBy[target] = battler (abilities.cc:4700-4701):
+    // the holder (battler 0) wrapped the target (battler 1) with the move that hit.
+    expect(state.wrappedMove[1]).toBe('MOVE_TACKLE')
+    expect(state.wrappedBy[1]).toBe(0)
+    // The old "ENDTURN_WRAP damage and the trap are not modelled" note was false:
+    // wrap damage is endTurn.ts runWrap (battle_util.c:2646-2711) and the trap is escape.ts (:101).
+    // Neither is emitted here any more (cycle 156 brief).
+    expect(out.actions.find((a) => a.battlerId === 0)!.unmodelled).not.toContain('Grip Pincer (ABILITY_GRIP_PINCER) set STATUS2_WRAPPED; ENDTURN_WRAP damage and the trap are not modelled')
   })
 
   it('Pickpocket logs unmodelled item theft when attacker has no item and defender has item', () => {

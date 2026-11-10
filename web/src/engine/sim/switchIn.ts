@@ -56,7 +56,7 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
-import { B_SIDE_PLAYER, clearFlag, hasFlag, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE } from './constants'
+import { B_SIDE_PLAYER, clearFlag, hasFlag, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE, STATUS2_WRAPPED } from './constants'
 import { isUnnerveAbilityOnOpposingSide } from './statBuffs'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
@@ -136,16 +136,24 @@ export function hasLiveReserve(state: BattleState, battlerId: number): boolean {
  * | monToSwitchIntoId / aiMonToSwitchIntoId | PARTY_SIZE sentinel (createBattlerState, matching battle_main.c:3522/:2710) |
  * | lastMove/sameMoveTurns | reset to null/0 (battle_main.c's gLastMoves[gActiveBattler]=0 at :2905, gBattleStruct->sameMoveTurns[gActiveBattler]=0 at :2919 -- via createBattlerState) |
  *
- * NOT ported: SwitchInClearSetData's cross-battler cleanup (escape-prevention/
- * always-hits/infatuation/wrap bits belonging to OTHER battlers that reference
- * the outgoing one, :2810-2818, :2840-2843) -- every one of those fields
- * (STATUS2_INFATUATED_WITH, wrappedBy, STATUS3_ALWAYS_HITS'
- * battlerWithSureHit) has no writer anywhere in web/src/engine/sim (grep-
- * verified), so the cleanup has nothing to clean up; same "no gap needed, no
- * real condition exists" reasoning as fieldEndTurn.ts's ENDTURN_WISH. Also not
- * ported: the queued-extra-attack requeue (:2846-2864, multi-hit sequencing
- * is not modelled anywhere in this sim) and the mid-air Sky Drop release
- * (:2921-2933, skyDropped has no writer either).
+ * PORTED (wrap half only): SwitchInClearSetData's cross-battler cleanup at
+ * battle_main.c:2844-2847 releases STATUS2_WRAPPED on every battler `i` whose
+ * `gBattleStruct->wrappedBy[i]` is the switching-in battler. The C clears only
+ * the status2 bit (the loop's infatuation half, STATUS2_INFATUATED_WITH, is
+ * NOT ported), and this port does exactly that -- wrapTurns/wrapAbility on the
+ * wrapped battler are left alone, as in C.
+ *
+ * NOT ported: the rest of that cleanup -- escape-prevention (:2810-2814) and
+ * always-hits (:2815-2818, STATUS3_ALWAYS_HITS' battlerWithSureHit) -- and the
+ * infatuation half of :2844-2847; those fields have no writer anywhere in
+ * web/src/engine/sim, so the cleanup has nothing to clean up; same "no gap
+ * needed, no real condition exists" reasoning as fieldEndTurn.ts's ENDTURN_WISH.
+ * wrappedBy DOES have writers now (moveEffects.ts:12660-12661 for the move's
+ * own wrap effect, moveEnd.ts's Talon Trap at :1481-1482, and cycle 156's Grip
+ * Pincer / World Serpent / Serpent Bind / Tentalock and Itchy Defense blocks).
+ * Also not ported: the queued-extra-attack requeue (:2849-2864, multi-hit
+ * sequencing is not modelled anywhere in this sim) and the mid-air Sky Drop
+ * release (:2921-2933, skyDropped has no writer either).
  */
 function buildSwitchedInMon(incoming: SimPartyMon): SimBattleMon {
   return {
@@ -203,6 +211,16 @@ export function switchIn(
   const newBattler = createBattlerState(battlerId, mon, partyIndex)
   state.battlers[battlerId] = newBattler
   clearBattlerLastTakenMove(state, battlerId)
+  // SwitchInClearSetData's cross-battler loop, battle_main.c:2844-2847: a wrapped
+  // battler whose wrapper is the one now switching out loses STATUS2_WRAPPED. The
+  // C clears ONLY that bit; wrapTurns/wrapAbility are left on the wrapped battler.
+  for (let i = 0; i < state.battlersCount; i++) {
+    const wrapped = state.battlers[i]
+    if (!wrapped) continue
+    if (hasFlag(wrapped.mon.status2, STATUS2_WRAPPED) && state.wrappedBy[i] === battlerId) {
+      wrapped.mon.status2 = clearFlag(wrapped.mon.status2, STATUS2_WRAPPED)
+    }
+  }
   // SwitchInClearSetData, battle_main.c:2914: gBattleStruct->lastMoveFailed &= ~(gBitTable[gActiveBattler])
   state.lastMoveFailed = clearFlag(state.lastMoveFailed, 1 << battlerId)
   // battle_main.c:2917: switching into the Sticky Web user's slot resets it
