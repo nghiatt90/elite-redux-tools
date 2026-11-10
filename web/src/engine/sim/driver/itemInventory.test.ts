@@ -36,10 +36,12 @@ const MEGA_STONE_UNITS = 270
 // Unchanged by cycle 152d3: its 14 Enigma units are 3 ported + 11 allowlisted, so no
 // new unported unit. (Cycle 152d2: -5 item-data units allowlisted, -1 Power Herb
 // item-data unit replaced by script units, +1 gapped consumeberry.)
-export const UNPORTED_UNIT_COUNT = 216
+// Cycle 156: -1, Binding Band (`battle_util.c:2682`) gained a test.
+export const UNPORTED_UNIT_COUNT = 215
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
-export const REGISTERED_UNTESTED_UNIT_COUNT = 28
+// Cycle 156: -1, Binding Band (`battle_util.c:2682`) gained a test.
+export const REGISTERED_UNTESTED_UNIT_COUNT = 27
 
 /**
  * Re-pinned after cycle 152d4: 5 cycle-152d2 item-data units + 11 Enigma Berry

@@ -52,13 +52,13 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 251 | 111 | 20 | 129 | 0 | 11 |
+| `hold-trigger` | 251 | 112 | 19 | 128 | 0 | 11 |
 | `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
 | `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
-| **total** | **636** | **400** | **28** | **216** | **0** | **20** |
+| **total** | **636** | **401** | **27** | **215** | **0** | **20** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -100,7 +100,7 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `Cmd_setmultihitcounter` | 1 |
 | `hold-trigger` | `Cmd_various` | 5 |
 | `hold-trigger` | `CustomMoveCondition<EFFECT_ACROBATICS>` | 1 |
-| `hold-trigger` | `DoBattlerEndTurnEffects` | 2 |
+| `hold-trigger` | `DoBattlerEndTurnEffects` | 1 |
 | `hold-trigger` | `DoesBattlerHaveAbilityShield` | 1 |
 | `hold-trigger` | `ENDTURN_ITEMS1/2` | 25 |
 | `hold-trigger` | `GetBattlerTotalSpeedStat` | 3 |
@@ -162,7 +162,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_ATTACK_UP@battle_util.c:ITEMEFFECT_MOVE_END` | Liechi Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5907` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
 | `HOLD_EFFECT_ATTACK_UP@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Liechi Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5457` | unported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
 | `HOLD_EFFECT_BIG_ROOT@battle_util.c:GetDrainedBigRootHp` | Big Root | `pipeline/.upstream/eliteredux-source/src/battle_util.c:2372` | ported | `web/src/engine/sim/cycle111Chains.test.ts` |
-| `HOLD_EFFECT_BINDING_BAND@battle_util.c:DoBattlerEndTurnEffects` | Binding Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:2682` | unported (registered, untested) | none |
+| `HOLD_EFFECT_BINDING_BAND@battle_util.c:DoBattlerEndTurnEffects` | Binding Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:2682` | ported | `web/src/engine/sim/cycle156WrapPressure.test.ts` |
 | `HOLD_EFFECT_BLACK_SLUDGE@battle_util.c:ENDTURN_ITEMS1/2` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5694` | ported | `web/src/engine/sim/cycle90aAbilities.test.ts` |
 | `HOLD_EFFECT_BLUNDER_POLICY@battle_script_commands.c:Cmd_accuracycheck` | Blunder Policy | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1435` | unported | none |
 | `HOLD_EFFECT_BLUNDER_POLICY@battle_util.c:ITEMEFFECT_KINGSROCK` | Blunder Policy | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6055` | unported | none |
@@ -409,7 +409,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_AIR_BALLOON@battle_ai_util.c:PartyBattlerShouldAvoidHazards` | Air Balloon | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1858` | unported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_BIG_ROOT@battle_ai_main.c:AI_CheckViability` | Big Root | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:2639` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_BIG_ROOT@battle_ai_util.c:HasHealingItem` | Big Root | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1478` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
-| `HOLD_EFFECT_BINDING_BAND@battle_ai_util.c:GetTrapDamage` | Binding Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1728` | unported | none |
+| `HOLD_EFFECT_BINDING_BAND@battle_ai_util.c:GetTrapDamage` | Binding Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1728` | unported | `web/src/engine/sim/cycle156WrapPressure.test.ts` |
 | `HOLD_EFFECT_BLACK_SLUDGE@battle_ai_main.c:AI_CheckViability` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3113` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_BLACK_SLUDGE@battle_ai_util.c:HasHealingItem` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1479` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_CHOICE_BAND@battle_ai_main.c:AI_CheckBadMove` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:1366` | ported | `web/src/engine/battleStat.test.ts` |

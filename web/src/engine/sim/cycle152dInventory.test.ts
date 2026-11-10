@@ -252,7 +252,8 @@ describe('cycle 152d - pinned counts', () => {
 
     expect(result.totalUnclassified).toBe(0)
     // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).
-    expect(result.totalUnported).toBe(216)
-    expect(result.totalRegisteredUntested).toBe(28)
+    // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test (215 unported, 27 untested).
+    expect(result.totalUnported).toBe(215)
+    expect(result.totalRegisteredUntested).toBe(27)
   })
 })
