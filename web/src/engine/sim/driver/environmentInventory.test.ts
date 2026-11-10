@@ -74,11 +74,22 @@ const SCRIPT_EVENT_UNITS = 6
  * cycle 154b: 27 Monotype Champion rule-site units were made visible; the
  * driver cannot feed `monotypeChampType`, so all 27 are unported. They are not
  * `registeredUntested` because the cycle 154b test names the token.
+ *
+ * Moves 118 -> 113 in cycle 153g: five trainer-flag units gain a `testPattern`
+ * naming a real with/without pipeline test (`AI_FLAG_CHECK_BAD_MOVE`,
+ * `AI_FLAG_CHECK_VIABILITY`, `AI_FLAG_HP_AWARE`, `AI_FLAG_WILL_SUICIDE` and
+ * `risky`/`AI_FLAG_RISKY`). All five were `registeredUntested` and become
+ * `ported`. `AI_FLAG_CHECK_FOE` stays unported, but its new with/without test
+ * (which asserts the flag changes nothing because the sim hard-codes the C's
+ * TRUE branch) makes it tested, so it leaves `registeredUntested` without
+ * leaving `unported`. Both counts therefore fall: unported 118 -> 113,
+ * registered-untested 9 -> 3. The remaining three are unrelated
+ * battle-type/`speedDown` units. No count rose.
  */
-export const UNPORTED_UNIT_COUNT = 118
+export const UNPORTED_UNIT_COUNT = 113
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 9
+export const REGISTERED_UNTESTED_UNIT_COUNT = 3
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -641,10 +652,15 @@ describe('trainer-flag evidence', () => {
   const testFiles = loadEngineTestFiles()
 
   const PORTED_TRAINER_FLAG_KEYS = [
+    'risky',
     'preferStall',
     'preferStatus',
+    'AI_FLAG_CHECK_BAD_MOVE',
     'AI_FLAG_TRY_TO_FAINT',
+    'AI_FLAG_CHECK_VIABILITY',
     'AI_FLAG_SMART_SWITCHING',
+    'AI_FLAG_HP_AWARE',
+    'AI_FLAG_WILL_SUICIDE',
   ] as const
 
   for (const key of PORTED_TRAINER_FLAG_KEYS) {
@@ -672,6 +688,84 @@ describe('trainer-flag evidence', () => {
       expect(mutated.status).not.toBe('ported')
     })
   }
+
+  // Cycle 153g: deleting the mint line in aiFlags.ts must break the port even
+  // though the read site stays intact. `productionLinePattern` alone cannot
+  // test this because aiFlags.ts is in `productionExcludeFiles`.
+  const MINT_LINE_BY_KEY: ReadonlyArray<{ key: string; mint: RegExp; initiallyPorted: boolean }> = [
+    { key: 'risky', mint: /if \(trainer\.risky\) flags \|= AI_FLAG_RISKY/, initiallyPorted: true },
+    { key: 'preferStall', mint: /if \(trainer\.preferStall\) flags \|= AI_FLAG_STALL/, initiallyPorted: true },
+    { key: 'preferStatus', mint: /if \(trainer\.preferStatus\) flags \|= AI_FLAG_PREFER_STATUS_MOVES/, initiallyPorted: true },
+    { key: 'AI_FLAG_CHECK_BAD_MOVE', mint: /^\s*AI_FLAG_CHECK_BAD_MOVE\s*\|$/, initiallyPorted: true },
+    { key: 'AI_FLAG_TRY_TO_FAINT', mint: /^\s*AI_FLAG_TRY_TO_FAINT\s*\|$/, initiallyPorted: true },
+    { key: 'AI_FLAG_CHECK_VIABILITY', mint: /^\s*AI_FLAG_CHECK_VIABILITY\s*\|$/, initiallyPorted: true },
+    // CHECK_FOE is deliberately unported (no sim read); its mint line is still
+    // required so a future port cannot land with only half the evidence.
+    { key: 'AI_FLAG_CHECK_FOE', mint: /^\s*AI_FLAG_CHECK_FOE\s*\|$/, initiallyPorted: false },
+    { key: 'AI_FLAG_SMART_SWITCHING', mint: /^\s*AI_FLAG_SMART_SWITCHING\s*\|$/, initiallyPorted: true },
+    { key: 'AI_FLAG_HP_AWARE', mint: /^\s*AI_FLAG_HP_AWARE\s*\|$/, initiallyPorted: true },
+    { key: 'AI_FLAG_WILL_SUICIDE', mint: /^\s*AI_FLAG_WILL_SUICIDE\s*$/, initiallyPorted: true },
+  ]
+
+  for (const { key, mint, initiallyPorted } of MINT_LINE_BY_KEY) {
+    it(`${key}: removing the aiFlags.ts mint line breaks the port while the read site stays intact`, () => {
+      const spec = TRAINER_FLAG_SPECS.find((s) => s.key === key)
+      expect(spec).toBeDefined()
+      if (!spec) return
+      expect(spec.evidence?.alsoRequires?.length ?? 0).toBeGreaterThan(0)
+
+      // Negative control: the unmutated corpus keeps the unit ported (or, for
+      // CHECK_FOE, unported because production never reads the bit).
+      const initial = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+      expect(initial.status).toBe(initiallyPorted ? 'ported' : 'unported')
+
+      // Remove exactly the minting line from aiFlags.ts; the read site in the
+      // rest of the corpus stays untouched, so only `alsoRequires` can fail.
+      let removed = 0
+      const mutatedFiles: SourceFile[] = productionFiles.map((file) => {
+        if (file.file !== 'web/src/engine/sim/ai/aiFlags.ts') return file
+        const lines = file.source.split('\n').filter((line) => {
+          if (!mint.test(line)) return true
+          removed += 1
+          return false
+        })
+        return { file: file.file, source: lines.join('\n') }
+      })
+      expect(removed).toBe(1)
+
+      const mutated = classifyToken(spec.token, mutatedFiles, testFiles, spec.evidence)
+      expect(mutated.status).not.toBe('ported')
+    })
+  }
+
+  it('files AI_FLAG_CHECK_FOE as unported but tested, and flips it once a production hasFlag read appears', () => {
+    const spec = TRAINER_FLAG_SPECS.find((s) => s.key === 'AI_FLAG_CHECK_FOE')!
+    const realClassification = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+    expect(realClassification.status).toBe('unported')
+    // It is NOT `registeredUntested`: the sim's with/without test names it and
+    // asserts the flag changes nothing (the C's TRUE branch is hard-coded).
+    expect(realClassification.registeredUntested).toBe(false)
+    expect(spec.evidence?.productionLinePattern).toBeDefined()
+
+    const syntheticFiles: SourceFile[] = [
+      ...productionFiles,
+      {
+        file: 'web/src/engine/sim/ai/syntheticCheckFoe.ts',
+        source: 'const useRealMoveset = hasFlag(state.aiFlags, AI_FLAG_CHECK_FOE)\n',
+      },
+    ]
+    const fabricatedTest: SourceFile = {
+      file: 'web/src/engine/sim/ai/syntheticCheckFoe.test.ts',
+      source: "it('with and without AI_FLAG_CHECK_FOE the score is unchanged', () => {})\n",
+    }
+    const syntheticClassification = classifyToken(
+      spec.token,
+      syntheticFiles,
+      [...testFiles, fabricatedTest],
+      spec.evidence,
+    )
+    expect(syntheticClassification.status).toBe('ported')
+  })
 
   it('rejects aiFlags.ts alone as insufficient production evidence for trainer flags', () => {
     for (const key of PORTED_TRAINER_FLAG_KEYS) {

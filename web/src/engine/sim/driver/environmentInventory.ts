@@ -1535,6 +1535,16 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_RISKY',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b4:\s*\(.*=>\s*aiRisky\(/,
+      testPattern: /with and without AI_FLAG_RISKY/,
+      // The read site alone is not a port: aiFlags.ts mints the bit from the
+      // trainers.json field (TrainerPartyGenerator.kt:181), so the mint line
+      // must exist too.
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /if \(trainer\.risky\) flags \|= AI_FLAG_RISKY/,
+        },
+      ],
     },
   },
   {
@@ -1547,6 +1557,12 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bif\s*\(hasFlag\(state\.aiFlags,\s*AI_FLAG_STALL\)\)\s*\{/,
       testPattern: /without AI_FLAG_STALL/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /if \(trainer\.preferStall\) flags \|= AI_FLAG_STALL/,
+        },
+      ],
     },
   },
   {
@@ -1559,6 +1575,12 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bhasFlag\(state\.aiFlags,\s*AI_FLAG_PREFER_STATUS_MOVES\)/,
       testPattern: /AI_FLAG_PREFER_STATUS_MOVES rewards a status move/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /if \(trainer\.preferStatus\) flags \|= AI_FLAG_PREFER_STATUS_MOVES/,
+        },
+      ],
     },
   },
   {
@@ -1608,6 +1630,13 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_CHECK_BAD_MOVE',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b0:\s*\(.*=>\s*aiCheckBadMove\(/,
+      testPattern: /with and without AI_FLAG_CHECK_BAD_MOVE/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_CHECK_BAD_MOVE\s*\|/m,
+        },
+      ],
     },
   },
   {
@@ -1621,6 +1650,12 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b1:\s*\(.*=>\s*aiTryToFaint\(/,
       testPattern: /AI_FLAG_TRY_TO_FAINT and the attacker already KOs/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_TRY_TO_FAINT\s*\|/m,
+        },
+      ],
     },
   },
   {
@@ -1633,16 +1668,40 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_CHECK_VIABILITY',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b2:\s*\(.*=>\s*aiCheckViability\(/,
+      testPattern: /with and without AI_FLAG_CHECK_VIABILITY/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_CHECK_VIABILITY\s*\|/m,
+        },
+      ],
     },
   },
   {
     key: 'AI_FLAG_CHECK_FOE',
     token: 'AI_FLAG_CHECK_FOE',
     site: 'always-on AI flags',
-    scope: 'all 932 trainers',
+    // C reads AI_FLAG_CHECK_FOE only inside GetMovesArray
+    // (battle_ai_util.c:1353), choosing the real moveset vs the revealed-move
+    // history. Every trainer carries the bit, so the sim hard-codes the TRUE
+    // branch and reads the real moveset unconditionally.
+    scope: 'all 932 trainers (sim hard-codes the flag-on moveset branch)',
     citation: cite(CODEGEN_PATH, 190),
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      // No sim line reads the bit today; this is the read a future port would
+      // have to add before the unit can become ported.
+      productionLinePattern: /\bhasFlag\([^)]*AI_FLAG_CHECK_FOE\)/,
+      // A real with/without test exists (it asserts the score is identical
+      // because the flag changes nothing), so this unit is unported but NOT
+      // `registeredUntested`: production deliberately does not qualify.
+      testPattern: /with and without AI_FLAG_CHECK_FOE/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_CHECK_FOE\s*\|/m,
+        },
+      ],
     },
   },
   {
@@ -1656,6 +1715,12 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionLinePattern:
         /\bhasFlag\(state\.aiFlags,\s*AI_FLAG_SMART_SWITCHING\)\s*&&\s*onlyPhysicalMoves\b/,
       testPattern: /Smart Switching, and only physical moves/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_SMART_SWITCHING\s*\|/m,
+        },
+      ],
     },
   },
   {
@@ -1668,6 +1733,13 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_HP_AWARE',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b8:\s*\(.*=>\s*aiHPAware\(/,
+      testPattern: /with and without AI_FLAG_HP_AWARE/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          pattern: /^\s*AI_FLAG_HP_AWARE\s*\|/m,
+        },
+      ],
     },
   },
   {
@@ -1680,6 +1752,15 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern:
         /\bconst willSuicide = hasFlag\(state\.aiFlags,\s*AI_FLAG_WILL_SUICIDE\)/,
+      testPattern: /no -2 when AI_FLAG_WILL_SUICIDE is set/,
+      alsoRequires: [
+        {
+          file: 'web/src/engine/sim/ai/aiFlags.ts',
+          // WILL_SUICIDE is the LAST operand of the OR list, so it carries no
+          // trailing `|`; anchor on the next line's RISKY mint instead.
+          pattern: /\|\s*\n\s*AI_FLAG_WILL_SUICIDE\s*\n\s*if \(trainer\.risky\)/,
+        },
+      ],
     },
   },
 ]
@@ -2396,6 +2477,28 @@ export function generateEnvironmentInventoryDoc(
     '  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen\'s `doubleBattle = TRUE`',
   )
   lines.push('  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.')
+  lines.push(
+    '- `AI_FLAG_CHECK_FOE` is unported: the C reads it in `GetMovesArray` (`src/battle_ai_util.c:1353`) to choose the',
+  )
+  lines.push(
+    '  real moveset versus `battleHistory->usedMoves`. Every trainer carries the bit, so the sim hard-codes the',
+  )
+  lines.push(
+    '  `IsBattlerAIControlled(battler) || ... aiFlags & AI_FLAG_CHECK_FOE` TRUE branch and reads the real moveset',
+  )
+  lines.push(
+    '  unconditionally (`aiScorers.ts:136-138`, `aiCheckBadMove.ts:424-426`); there is no `hasFlag(..., AI_FLAG_CHECK_FOE)`',
+  )
+  lines.push('  read for a future port to replace.')
+  lines.push(
+    '- Per-trainer and always-on trainer-flag units also require the codegen\'s mint line in `aiFlags.ts`',
+  )
+  lines.push(
+    '  (`TrainerPartyGenerator.kt:180-194`, e.g. `if (trainer.risky) flags |= AI_FLAG_RISKY`). `aiFlags.ts` is excluded',
+  )
+  lines.push(
+    '  from qualifying production evidence, so deleting the mint line must break the port; a read site alone is not proof.',
+  )
   lines.push(
     '- `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.',
   )

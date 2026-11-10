@@ -23,6 +23,14 @@ mention in a comment is not evidence, and neither is a name alone:
 - `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active
   battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
   (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
+- `AI_FLAG_CHECK_FOE` is unported: the C reads it in `GetMovesArray` (`src/battle_ai_util.c:1353`) to choose the
+  real moveset versus `battleHistory->usedMoves`. Every trainer carries the bit, so the sim hard-codes the
+  `IsBattlerAIControlled(battler) || ... aiFlags & AI_FLAG_CHECK_FOE` TRUE branch and reads the real moveset
+  unconditionally (`aiScorers.ts:136-138`, `aiCheckBadMove.ts:424-426`); there is no `hasFlag(..., AI_FLAG_CHECK_FOE)`
+  read for a future port to replace.
+- Per-trainer and always-on trainer-flag units also require the codegen's mint line in `aiFlags.ts`
+  (`TrainerPartyGenerator.kt:180-194`, e.g. `if (trainer.risky) flags |= AI_FLAG_RISKY`). `aiFlags.ts` is excluded
+  from qualifying production evidence, so deleting the mint line must break the port; a read site alone is not proof.
 - `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.
   The sim currently hardcodes `inverseBattle: false`, so it is unported.
 - Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts` (`registerBattleEvent`).
@@ -52,11 +60,11 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | `map-setup` | 57 | 0 | 0 | 52 | 0 | 5 |
 | `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
 | `difficulty-flag` | 16 | 1 | 1 | 15 | 0 | 0 |
-| `trainer-flag` | 14 | 4 | 6 | 8 | 0 | 2 |
+| `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **165** | **39** | **9** | **118** | **0** | **8** |
+| **total** | **165** | **44** | **3** | **113** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -67,7 +75,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `map-setup` | 52 | 0 |
 | `battle-type` | 8 | 2 |
 | `difficulty-flag` | 15 | 1 |
-| `trainer-flag` | 8 | 6 |
+| `trainer-flag` | 3 | 0 |
 | `hell-trainer-skill` | 29 | 0 |
 | `battle-event` | 0 | 0 |
 | `script-event` | 6 | 0 |
@@ -173,19 +181,19 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit key | Fights / maps | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `AI_FLAG_CHECK_BAD_MOVE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:187` | unported (registered, untested) | none |
-| `AI_FLAG_CHECK_FOE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:190` | unported (registered, untested) | none |
-| `AI_FLAG_CHECK_VIABILITY` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:189` | unported (registered, untested) | none |
-| `AI_FLAG_HP_AWARE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:192` | unported (registered, untested) | none |
+| `AI_FLAG_CHECK_BAD_MOVE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:187` | ported | `web/src/engine/sim/cycle153gTrainerFlags.test.ts` |
+| `AI_FLAG_CHECK_FOE` | all 932 trainers (sim hard-codes the flag-on moveset branch) | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:190` | unported | `web/src/engine/sim/cycle153gTrainerFlags.test.ts` |
+| `AI_FLAG_CHECK_VIABILITY` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:189` | ported | `web/src/engine/sim/cycle153gTrainerFlags.test.ts` |
+| `AI_FLAG_HP_AWARE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:192` | ported | `web/src/engine/sim/cycle153gTrainerFlags.test.ts` |
 | `AI_FLAG_SMART_SWITCHING` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:191` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `AI_FLAG_TRY_TO_FAINT` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:188` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
-| `AI_FLAG_WILL_SUICIDE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:193` | unported (registered, untested) | none |
+| `AI_FLAG_WILL_SUICIDE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:193` | ported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
 | `encounterMusic_gender` | trainer-mon gender bias | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1794` | unported | none |
 | `forcedDouble` | 78 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:207` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `noSwitching` | 5 trainers | `pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:611` | allowlisted | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `preferStall` | 1 trainer | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:182` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `preferStatus` | 6 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:183` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
-| `risky` | 4 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:181` | unported (registered, untested) | none |
+| `risky` | 4 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:181` | ported | `web/src/engine/sim/cycle153gTrainerFlags.test.ts` |
 | `trainerClass` | 72 trainer classes | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5794` | allowlisted | none |
 
 ## Hell-Trainer-Skill Units
