@@ -271,6 +271,33 @@ const SWITCH_IN_PATH = join(ENGINE_DIR, 'sim/switchInAbility.ts')
  * `runReactiveAbilityEffects`'s).
  */
 export function extractFunctionSlice(source: string, functionDeclaration: string): string {
+  const { start, end, stripped } = locateFunctionSlice(source, functionDeclaration)
+  return stripped.slice(start, end)
+}
+
+/**
+ * The same slice as `extractFunctionSlice`, but cut out of the *raw* source. Comments are only
+ * blanked to compute the offsets, and `stripCommentsPreservingLayout` keeps the length, so `start`
+ * and `end` index the raw text too. Callers that need the text to remain an exact substring of
+ * `source` -- `source.replace(slice, '')`, `source.indexOf(slice)` -- must use this variant;
+ * a comment-blanked slice is no longer a substring whenever the function contains a comment.
+ */
+export function extractRawFunctionSlice(source: string, functionDeclaration: string): string {
+  const { start, end } = locateFunctionSlice(source, functionDeclaration)
+  return source.slice(start, end)
+}
+
+interface FunctionSliceLocation {
+  /** Index of the declaration in both `source` and `stripped`. */
+  start: number
+  /** Exclusive end: one past the `}` that closes the function body. */
+  end: number
+  /** `source` with comments blanked, same length as `source`. */
+  stripped: string
+}
+
+/** Shared offset computation for `extractFunctionSlice` and `extractRawFunctionSlice`. */
+function locateFunctionSlice(source: string, functionDeclaration: string): FunctionSliceLocation {
   const stripped = stripCommentsPreservingLayout(source)
   const start = stripped.indexOf(functionDeclaration)
   if (start === -1) {
@@ -281,7 +308,7 @@ export function extractFunctionSlice(source: string, functionDeclaration: string
   if (bodyClose === -1) {
     throw new Error(`Unbalanced braces for function declaration: ${functionDeclaration}`)
   }
-  return stripped.slice(start, bodyClose + 1)
+  return { start, end: bodyClose + 1, stripped }
 }
 
 /** Index just past the quoted string literal that starts at `start`. */

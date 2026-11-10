@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { extractFunctionSlice } from './abilityHookInventory'
+import { extractRawFunctionSlice } from './abilityHookInventory'
 import { AUDIT_ALLOWLIST, type AuditAllowance } from './auditAllowlist'
 import { VERIFIED_MOVE_EFFECTS } from './verifiedMoveEffects'
 import {
@@ -318,9 +318,29 @@ function extractCaseLabels(source: string, prefix: 'EFFECT_' | 'MOVE_EFFECT_'): 
   return names
 }
 
+/**
+ * Raw source slice from `declaration` to the next top-level `function`/`const`, or EOF.
+ *
+ * Two constraints meet here. First, callers index the slice back into `source`
+ * (`source.replace(slice, '')` in `removeFunctionSlice`, `source.indexOf(slice)` in the plain-hit
+ * routing readers), so it must be an exact substring -- hence `extractRawFunctionSlice`, not the
+ * comment-blanked `extractFunctionSlice`.
+ *
+ * Second, the *extent* is deliberately the pre-cycle one: the slice runs on to the next top-level
+ * declaration instead of stopping at the function's closing brace. This inventory's pinned pair
+ * counts were measured with that extent (the trailing whitespace, and for the last function in a
+ * concatenated consumer file the next file's import header, reach the name scans and
+ * `analyzeHandlerBody`), and the counts may not move in a test-infrastructure-only cycle.
+ */
 function tryExtractFunctionSlice(source: string, declaration: string): string {
   try {
-    return extractFunctionSlice(source, declaration)
+    const slice = extractRawFunctionSlice(source, declaration)
+    const start = source.indexOf(slice)
+    if (start < 0) return ''
+    const rest = source.slice(start + slice.length)
+    const nextDeclaration = rest.match(/\n(?:export\s+)?(?:function|const)\s+/)
+    const end = nextDeclaration ? start + slice.length + nextDeclaration.index! : source.length
+    return source.slice(start, end)
   } catch {
     return ''
   }

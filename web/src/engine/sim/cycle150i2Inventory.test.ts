@@ -7,6 +7,7 @@ import {
   extractAttackerBranchAbilities,
   extractCanStatusTypeAbilities,
   extractFunctionSlice,
+  extractRawFunctionSlice,
   extractModifyMoveFlagsAbilities,
   extractRecoilAbilities,
   extractReviveAbilities,
@@ -87,6 +88,34 @@ describe('Cycle 150i2 (4b) - the next function JSDoc is not canParalyzeType bran
     )
     expect(mutated).not.toBe(withoutDepravity)
     expect(extractCanStatusTypeAbilities(mutated).has('ABILITY_DEPRAVITY')).toBe(false)
+  })
+})
+
+/**
+ * `extractRawFunctionSlice` exists for callers that index the slice back into the source
+ * (`source.replace(slice, '')`, `source.indexOf(slice)`): a comment-blanked slice stops being a
+ * substring of the raw text as soon as the function contains a comment.
+ */
+describe('Cycle 150i2 - extractRawFunctionSlice is an exact substring of the source', () => {
+  it('keeps comments (so source.includes(slice)) while extractFunctionSlice blanks them', () => {
+    const src = [
+      'function foo() {',
+      '  // keep this comment',
+      "  const kind = 'ABILITY_X'",
+      '  return kind',
+      '}',
+    ].join('\n')
+    const raw = extractRawFunctionSlice(src, 'function foo(')
+    expect(src.includes(raw)).toBe(true)
+    expect(raw).toContain('// keep this comment')
+    expect(src.replace(raw, '')).not.toContain('ABILITY_X')
+    expect(src.indexOf(raw)).toBe(0)
+
+    const stripped = extractFunctionSlice(src, 'function foo(')
+    expect(stripped).not.toContain('// keep this comment')
+    expect(stripped).toContain("'ABILITY_X'")
+    // Same offsets: the two slices differ only where comments were blanked.
+    expect(stripped.length).toBe(raw.length)
   })
 })
 
