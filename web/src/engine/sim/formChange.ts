@@ -254,9 +254,11 @@ function formStats(
  * abilityNum < NUM_ABILITY_SLOTS -> abilities[abilityNum], else abilities[0];
  * if ability == ABILITY_NONE -> abilities[0].
  *
- * The C reads `gBaseStats[species].abilities[]`, and BaseStatsGenerator.kt:48-51 pads that
- * fixed-size array to three slots by repeating `species.abilityList.last()` whenever the
- * declared list is non-empty. The pipeline's snapshot keeps the declared list only
+ * The C reads `gBaseStats[species].abilities[]`, and
+ * tools/codegen/src/er/data/BaseStatsGenerator.kt:46-48 pads that fixed-size array to three
+ * slots by repeating `species.abilityList.last()` whenever the declared list is non-empty
+ * (`if (species.abilityList.isNotEmpty())` at :46, the size `require` at :47, the padded
+ * `.abilities = {...}` line at :48). The pipeline's snapshot keeps the declared list only
  * (resolve.py:resolve_abilities drops the padding), so a slot past the end reads the last
  * declared ability -- exactly what the padded C array holds. Empty lists keep returning null.
  */
@@ -268,7 +270,7 @@ export function abilityForSpeciesSlot(
   let ability: string | null
   if (abilityNum >= 0 && abilityNum < 3) {
     // GetAbilityBySpecies (:2149-2150) indexes the padded array; beyond the declared list
-    // the pad repeats the last ability (BaseStatsGenerator.kt:50).
+    // the pad repeats the last ability (BaseStatsGenerator.kt:48).
     ability = abilities[Math.min(abilityNum, abilities.length - 1)] ?? null
   } else {
     // GetAbilityBySpecies (:2151-2152): out-of-range slot falls back to abilities[0].
@@ -394,8 +396,14 @@ export const HP_TRANSFORMATIONS: readonly {
  * ShouldChangeFormHpBased, src/battle_util.c:3812-3906. Changes `battler`'s species in place when an
  * HP-threshold form ability says it should; returns TRUE when a change happened.
  *
- * The C writes `gBattleMons[battler].species` and calls UpdateAbilityStateIndicesForNewSpecies
- * (:8822-8831); `changeBattlerForm` performs both here (plus the stat recalc the following
+ * The C writes `gBattleMons[battler].species` but calls UpdateAbilityStateIndicesForNewSpecies
+ * with `gActiveBattler` (:3827, :3833, :3844, :3853, :3879, :3890, :3899), and its only callers --
+ * TryTransformAttacker (abilities.cc:245-252, the call at :246) and ApeShiftHandler
+ * (abilities.cc:9047-9060, the call at :9050); the battle_util.c:4611 mention is commented out --
+ * pass `battler` without first setting `gActiveBattler`. The C therefore remaps the ability-state
+ * indices of whichever battler `gActiveBattler` last pointed at. The sim deliberately uses
+ * `battlerId` (the intended target): a known divergence from the C's stale-global read.
+ * `changeBattlerForm` performs both writes here (plus the stat recalc the following
  * `handleformchange` script command does). A species missing from the data is a no-op, like
  * changeBattlerForm's other callers.
  */

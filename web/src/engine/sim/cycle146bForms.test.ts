@@ -13,7 +13,7 @@ import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData, SimSpeciesData } from './dataContext'
 import type { ReplacementDeps } from './switchIn'
 import { applySwitchInAbilities } from './switchInAbility'
-import { getAbilityStateOf, runEndTurnEffects, ENDTURN_ABILITY_IDS } from './endTurn'
+import { getAbilityStateOf, runEndTurnEffects, setAbilityStateOf, ENDTURN_ABILITY_IDS } from './endTurn'
 import { WEATHER_HAIL_ANY } from './constants'
 import { abilityForSpeciesSlot, changeBattlerForm } from './formChange'
 import { buildOpponentParty, buildPlayerParty, type PlayerMonSpec } from './driver/buildParty'
@@ -261,6 +261,9 @@ function endTurn(state: BattleState) {
 
 describe('Defect 1: Form change keeps the ability slot across transformations', () => {
   const MINIOR_L50_MAX_HP = 135
+  // Distinct nonzero seeds so a copy-by-index remap is distinguishable from a copy-by-identity one.
+  const SEEDED_METEOR_STATE = 5
+  const SEEDED_SHIELDS_DOWN_STATE = 3
 
   it('Shields Down Meteor <-> Core preserves abilityNum 0, 1, and 2', () => {
     // SPECIES_MINIOR_METEOR_BLUE abilities: [ABILITY_REGENERATOR, ABILITY_WEAK_ARMOR, ABILITY_LOOSE_ROCKS]
@@ -307,19 +310,37 @@ describe('Defect 1: Form change keeps the ability slot across transformations', 
         scriptedRng(),
       )
 
+      // Seed nonzero state by identity before the form change. In battler.mon.abilities order
+      // (ability, innates[0..2]) slot 0 is the Meteor ability and slot 1 is Shields Down
+      // (innates[0] on both forms). UpdateAbilityStateIndices (battle_util.c:8833-8862) copies
+      // old slot j's abilityState when newAbilities[i] == oldAbilities[j]; with zeroed state
+      // every assertion below would pass even if the remap were a plain index copy.
+      state.battlers[0]!.volatiles.abilityState[0] = SEEDED_METEOR_STATE
+      state.battlers[0]!.volatiles.abilityState[1] = SEEDED_SHIELDS_DOWN_STATE
+
       applySwitchInAbilities(state, 0, testDeps(), [])
       expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_CORE_BLUE')
       expect(state.battlers[0]!.mon.abilities.ability).toBe(c.coreAbility)
       expect(state.battlers[0]!.mon.abilityNum).toBe(c.abilityNum)
-      // UpdateAbilityStateIndices (battle_util.c:8833-8862) remaps per-slot state by ability
-      // identity: Shields Down is innate slot 0 (ability index 1) in both forms, and its state
-      // stays clear -- ShouldChangeFormHpBased's reversion guard reads it (:3824-3825). The
-      // newly gained core ability's slot starts fresh.
-      expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(0)
+      // UpdateAbilityStateIndices remaps per-slot state by ability identity: Shields Down is
+      // innate slot 0 (ability index 1) in both forms, so its seeded state follows it. The
+      // newly gained core ability matches nothing in the old list, so its slot starts fresh;
+      // a copy-by-index remap would instead leave the outgoing Meteor state in abilityState[0].
+      expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(SEEDED_SHIELDS_DOWN_STATE)
+      expect(getAbilityStateOf(state.battlers[0]!, c.meteorAbility)).toBe(0)
       expect(getAbilityStateOf(state.battlers[0]!, c.coreAbility)).toBe(0)
+      expect(state.battlers[0]!.volatiles.abilityState[0]).toBe(0)
 
-      // 2. Heal above 50% HP -> reverts back to Meteor form on end-turn
+      // 2. Heal above 50% HP while Shields Down's state is still set: ShouldChangeFormHpBased's
+      // Core -> Meteor reversion is blocked at battle_util.c:3824-3826 (GetAbilityState != 0).
       state.battlers[0]!.mon.hp = 68
+      endTurn(state)
+      expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_CORE_BLUE')
+      expect(state.battlers[0]!.mon.abilities.ability).toBe(c.coreAbility)
+      expect(getAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN')).toBe(SEEDED_SHIELDS_DOWN_STATE)
+
+      // Clearing the state lets the end-turn reversion run again.
+      setAbilityStateOf(state.battlers[0]!, 'ABILITY_SHIELDS_DOWN', 0)
       endTurn(state)
       expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_MINIOR_METEOR_BLUE')
       expect(state.battlers[0]!.mon.abilities.ability).toBe(c.meteorAbility)
