@@ -4,7 +4,7 @@ import { registerAbilities, _resetRegistryForTests } from './abilities/registry'
 import { PARENTAL_BOND_ABILITIES } from './abilities/impl/24-parental-bond'
 import { uq } from './fixed'
 import type { AbilitySlots } from './abilities/dispatch'
-import type { OnParentalBondContext } from './abilities/types'
+import type { OnParentalBondInputs } from './abilities/types'
 
 function slots(ability: string | null): AbilitySlots {
   return { ability, innates: [null, null, null] }
@@ -14,8 +14,8 @@ function move(overrides: Partial<MultiHitMoveData> = {}): MultiHitMoveData {
   return { effect: null, multiHitArgument: null, split: 'PHYSICAL', flags: {}, ...overrides }
 }
 
-function pbCtx(overrides: Partial<OnParentalBondContext> = {}): OnParentalBondContext {
-  return { moveType: 'NORMAL', moveFlags: {}, weather: 'NONE', attackerHeads: 1, ...overrides }
+function pbCtx(overrides: Partial<OnParentalBondInputs> = {}): OnParentalBondInputs {
+  return { moveType: 'NORMAL', moveFlags: {}, moveSplit: 'PHYSICAL', weather: 'NONE', attackerHeads: 1, ...overrides }
 }
 
 describe('resolveHitPlan -- a move\'s own multi-hit effect', () => {

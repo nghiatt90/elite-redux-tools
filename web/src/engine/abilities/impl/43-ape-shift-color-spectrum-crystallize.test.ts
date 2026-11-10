@@ -11,12 +11,12 @@ function findAbility(id: string): AbilityImpl {
 }
 
 function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
-  return {
+  const base = {
     battlerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
     typeEffectiveness: uq(1.0),
-    defenderStatus1: new Set(),
+    defenderStatus1: new Set<string>(),
     defenderSpeedStageNegative: false,
     defenderResolvedHoldEffect: null,
     moveFlags: {},
@@ -25,6 +25,11 @@ function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     abilityOn: false,
     speciesId: 'SPECIES_SLAKING',
     ...overrides,
+  }
+  return {
+    ...base,
+    // Static-flag answer only (no grants); grant plumbing is a calc-level concern.
+    matchesMoveFlag: (flag) => Boolean(base.moveFlags[flag]),
   }
 }
 
@@ -62,7 +67,7 @@ function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveM
     defenderGender: 'MALE',
     defenderIsConfused: false,
     defenderIsEnraged: false,
-    defenderStatus1: new Set(),
+    defenderStatus1: new Set<string>(),
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,

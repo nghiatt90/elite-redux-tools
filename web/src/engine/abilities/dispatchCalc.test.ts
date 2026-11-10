@@ -87,6 +87,7 @@ describe('computeAbilityCritBonus', () => {
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},
+      moveSplit: 'PHYSICAL',
       basePower: 40,
       attackerActsFirst: true,
     })
@@ -109,6 +110,7 @@ describe('computeAbilityCritBonus', () => {
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},
+      moveSplit: 'PHYSICAL' as const,
       basePower: 40,
       attackerActsFirst: true,
     }
@@ -132,6 +134,7 @@ describe('computeAbilityCritBonus', () => {
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},
+      moveSplit: 'PHYSICAL',
       basePower: 40,
       attackerActsFirst: true,
     })

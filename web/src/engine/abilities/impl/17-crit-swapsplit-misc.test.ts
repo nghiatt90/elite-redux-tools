@@ -19,7 +19,7 @@ function findAbility(id: string): AbilityImpl {
 }
 
 function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
-  return {
+  const base = {
     battlerId: 'x',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
@@ -33,6 +33,13 @@ function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     abilityOn: false,
     speciesId: 'SPECIES_NONE',
     ...overrides,
+  }
+  return {
+    ...base,
+    // Direct-hook tests exercise the static flag bit only; reproduce
+    // DoesMoveMatchFlag's static-first answer with no grants. Grant plumbing is
+    // covered at the calc level in sim/cycle150ibcFlagConsumers.test.ts.
+    matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag']) => Boolean(base.moveFlags[flag]),
   }
 }
 

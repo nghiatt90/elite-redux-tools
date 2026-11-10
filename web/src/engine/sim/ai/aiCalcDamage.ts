@@ -332,6 +332,7 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
     parentalBondTrigger = computeParentalBondTrigger(scenario.attacker.abilitySlots, scenario.defender.abilitySlots, {
       moveType: scenario.move.type ?? 'NORMAL',
       moveFlags: move.flags,
+      moveSplit: scenario.move.split ?? 'STATUS',
       weather: scenario.field.weather,
       attackerHeads: scenario.attacker.condition.heads,
     })

@@ -117,6 +117,7 @@ describe('mold breaker batch W', () => {
       defenderSpeedStageNegative: false,
       defenderResolvedHoldEffect: null,
       moveFlags: {},
+      moveSplit: 'PHYSICAL' as const,
       basePower: 40,
       attackerActsFirst: true,
     }

@@ -26,7 +26,7 @@ import { PARENTAL_BOND_ABILITIES } from '../abilities/impl/24-parental-bond'
 import { applyModifier, uq } from '../fixed'
 import { calcStat } from '../stats'
 import type { AbilitySlots } from '../abilities/dispatch'
-import type { OnParentalBondContext } from '../abilities/types'
+import type { OnParentalBondInputs } from '../abilities/types'
 import type { BattleConstants, BattlerBattleState, ConditionBattlerContext, FieldBattleState } from '../types'
 import type { TypeChart } from '../typeEffectiveness'
 import type { MoveBehaviors } from '../basePower'
@@ -39,8 +39,8 @@ function move(overrides: Partial<MultiHitMoveData> = {}): MultiHitMoveData {
   return { effect: null, multiHitArgument: null, split: 'PHYSICAL', flags: {}, ...overrides }
 }
 
-function pbCtx(overrides: Partial<OnParentalBondContext> = {}): OnParentalBondContext {
-  return { moveType: 'NORMAL', moveFlags: {}, weather: 'NONE', attackerHeads: 1, ...overrides }
+function pbCtx(overrides: Partial<OnParentalBondInputs> = {}): OnParentalBondInputs {
+  return { moveType: 'NORMAL', moveFlags: {}, moveSplit: 'PHYSICAL', weather: 'NONE', attackerHeads: 1, ...overrides }
 }
 
 function plan(result: ReturnType<typeof resolveHitPlan>) {

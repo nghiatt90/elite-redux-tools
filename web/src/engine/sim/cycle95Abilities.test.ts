@@ -547,17 +547,24 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
       matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag']) => Boolean(ctx.moveFlags[flag]),
     }
   }
-  const chooseStat = (secondaryStat: OnChooseOffensiveStatContext['secondaryStat']): OnChooseOffensiveStatContext => ({
-    battlerId: 'x',
-    moveId: 'MOVE_SACRED_SWORD',
-    isCrit: false,
-    isUnaware: false,
-    moveSplit: 'PHYSICAL',
-    moveFlags: { sliceBased: true },
-    isHighestAttackingStat: true,
-    statToUse: 'atk',
-    secondaryStat,
-  })
+  const chooseStat = (secondaryStat: OnChooseOffensiveStatContext['secondaryStat']): OnChooseOffensiveStatContext => {
+    const base = {
+      battlerId: 'x',
+      moveId: 'MOVE_SACRED_SWORD',
+      isCrit: false,
+      isUnaware: false,
+      moveSplit: 'PHYSICAL' as const,
+      moveFlags: { sliceBased: true } as Record<string, true>,
+      isHighestAttackingStat: true,
+      statToUse: 'atk' as const,
+      secondaryStat,
+    }
+    return {
+      ...base,
+      // Static-flag answer only; grant plumbing is covered at the calc level.
+      matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag']) => Boolean(base.moveFlags[flag]),
+    }
+  }
 
   for (const id of ['ABILITY_BEST_OFFENSE', 'ABILITY_MAGUS_BLADES']) {
     it(`${id}: Keen Edge offensive multiplier, Mystic Blades swap-split, +20 SpDef secondary stat`, () => {
@@ -586,7 +593,7 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
   it('Magus Blades resolves to the Dual Wield parental-bond trigger on a slice move only; Best Offense has none', () => {
     const slots = (ability: string) => ({ ability, innates: [null, null, null] as [null, null, null] })
     const none = { ability: null, innates: [null, null, null] as [null, null, null] }
-    const ctx = (moveFlags: Record<string, true>) => ({ moveType: 'FIGHTING', moveFlags, weather: 'NONE', attackerHeads: 1 })
+    const ctx = (moveFlags: Record<string, true>) => ({ moveType: 'FIGHTING', moveFlags, moveSplit: 'PHYSICAL' as const, weather: 'NONE', attackerHeads: 1 })
     expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), none, ctx({ sliceBased: true }))).toBe('DUAL_WIELD')
     expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), none, ctx({}))).toBeNull()
     expect(computeParentalBondTrigger(slots('ABILITY_BEST_OFFENSE'), none, ctx({ sliceBased: true }))).toBeNull()

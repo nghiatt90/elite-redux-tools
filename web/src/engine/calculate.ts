@@ -663,6 +663,7 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     noPositiveStatStages: noPositive,
     isUnaware: hasFlag(attacker.abilitySlots, 'unaware'),
     isCrit,
+    moveSplit: split,
     moveFlags: move.flags,
     defenderHasAnyStatus: defender.condition.status1.size > 0 || defender.condition.hasComatose || defender.condition.hasBloodStainEffect,
     defenderDefComparison: defRaw.def < defRaw.spdef ? 'def' : defRaw.spdef < defRaw.def ? 'spdef' : 'equal',
@@ -737,6 +738,10 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
       // check would otherwise see it.
       basePower: move.power,
       attackerActsFirst: scenario.attackerActsFirst,
+      // DoesMoveMatchFlag's grant scan gets the move's real split (Precise Fist is the
+      // only onCrit consumer today; its IsIronFistBoosted wrapper does not read split,
+      // but other onModifyMoveFlags grants such as Musical Notes do).
+      moveSplit: move.split ?? 'STATUS',
     },
     attackerHasMoldBreaker,
     attacker.abilityOn,
@@ -1178,6 +1183,7 @@ function calcInternal(
   if (
     computeIsImmune(
       defender.abilitySlots,
+      attacker.abilitySlots,
       { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, movePriority: move.priority ?? 0 },
       attackerHasMoldBreaker,
     )
@@ -1661,7 +1667,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     hasFlag(attacker.abilitySlots, 'skillLink'),
     attacker.condition.resolvedHoldEffect,
     scenario.hitCount,
-    { moveType, moveFlags: move.flags, weather: field.weather, attackerHeads: attacker.condition.heads },
+    { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, attackerHeads: attacker.condition.heads },
     scenario.beatUpHitCount,
     scenario.minionControlCount,
   )

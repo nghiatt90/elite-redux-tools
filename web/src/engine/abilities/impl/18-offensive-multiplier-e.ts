@@ -29,23 +29,25 @@ export const OFFENSIVE_MULTIPLIER_BATCH_E: AbilityImpl[] = [
   soundAteAbility('ABILITY_SNOW_SONG', 'src/abilities.cc:7823', 'ICE'),
 
   {
-    // Real gap fix: the C's onChooseOffensiveStat half (:9133-9136, IsIronFistBoosted
-    // == moveFlags.punchBased -> SPATK) was missing from this port entirely.
+    // Real gap fix: the C's onChooseOffensiveStat half (:9158-9162, IsIronFistBoosted
+    // == DoesMoveMatchFlag(battlerAtk, move, TYPE_NORMAL, MOVE_FLAG_PUNCH) -> SPATK)
+    // was missing from this port entirely.
     id: 'ABILITY_MAGICAL_FISTS',
     src: 'src/abilities.cc:9131',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
     onChooseOffensiveStat: (ctx) => {
-      if (ctx.moveFlags.punchBased) ctx.statToUse = 'spatk'
+      if (ctx.matchesMoveFlag('punchBased', 'NORMAL')) ctx.statToUse = 'spatk'
     },
   },
   {
-    // Real gap fix: the C's onChooseDefensiveStat half (:3667-3670, IsIronFistBoosted
-    // == moveFlags.punchBased -> SPDEF) was missing from this port entirely.
+    // Real gap fix: the C's onChooseDefensiveStat half (:3691-3695, IsIronFistBoosted
+    // == DoesMoveMatchFlag(battlerAtk, move, TYPE_NORMAL, MOVE_FLAG_PUNCH) -> SPDEF)
+    // was missing from this port entirely.
     id: 'ABILITY_POWER_FISTS',
     src: 'src/abilities.cc:3663',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_IRON_FIST'),
     onChooseDefensiveStat: (ctx) => {
-      if (ctx.moveFlags.punchBased) ctx.statToUse = 'spdef'
+      if (ctx.matchesMoveFlag('punchBased', 'NORMAL')) ctx.statToUse = 'spdef'
     },
   },
   {

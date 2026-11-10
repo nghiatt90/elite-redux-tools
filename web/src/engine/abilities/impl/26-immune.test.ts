@@ -32,66 +32,66 @@ describe('immune batch Z', () => {
 
   it('Queenly Majesty (and its aliases Armor Tail, Royal Decree, Dazzling, Lucha Libre) block priority moves only', () => {
     for (const id of ['ABILITY_QUEENLY_MAJESTY', 'ABILITY_ARMOR_TAIL', 'ABILITY_ROYAL_DECREE', 'ABILITY_DAZZLING', 'ABILITY_LUCHA_LIBRE']) {
-      expect(computeIsImmune(slots(id), ctx({ movePriority: 1 }), false)).toBe(true)
-      expect(computeIsImmune(slots(id), ctx({ movePriority: 0 }), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ movePriority: 1 }), false)).toBe(true)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ movePriority: 0 }), false)).toBe(false)
     }
   })
 
   it('Bulletproof (and Chestnut Shield) block ballistic moves only', () => {
     for (const id of ['ABILITY_BULLETPROOF', 'ABILITY_CHESTNUT_SHIELD']) {
-      expect(computeIsImmune(slots(id), ctx({ moveFlags: { ballistic: true } }), false)).toBe(true)
-      expect(computeIsImmune(slots(id), ctx(), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ moveFlags: { ballistic: true } }), false)).toBe(true)
+      expect(computeIsImmune(slots(id), slots(null), ctx(), false)).toBe(false)
     }
   })
 
   it('Soundproof (and Noise Cancel, Parroting) block sound moves only', () => {
     for (const id of ['ABILITY_SOUNDPROOF', 'ABILITY_NOISE_CANCEL', 'ABILITY_PARROTING']) {
-      expect(computeIsImmune(slots(id), ctx({ moveFlags: { sound: true } }), false)).toBe(true)
-      expect(computeIsImmune(slots(id), ctx(), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ moveFlags: { sound: true } }), false)).toBe(true)
+      expect(computeIsImmune(slots(id), slots(null), ctx(), false)).toBe(false)
     }
   })
 
   it('Delta Stream (and Weather Control) block weather-based moves only', () => {
     for (const id of ['ABILITY_DELTA_STREAM', 'ABILITY_WEATHER_CONTROL']) {
-      expect(computeIsImmune(slots(id), ctx({ moveFlags: { weatherBased: true } }), false)).toBe(true)
-      expect(computeIsImmune(slots(id), ctx(), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ moveFlags: { weatherBased: true } }), false)).toBe(true)
+      expect(computeIsImmune(slots(id), slots(null), ctx(), false)).toBe(false)
     }
   })
 
   it('Good As Gold blocks status moves only', () => {
-    expect(computeIsImmune(slots('ABILITY_GOOD_AS_GOLD'), ctx({ moveSplit: 'STATUS' }), false)).toBe(true)
-    expect(computeIsImmune(slots('ABILITY_GOOD_AS_GOLD'), ctx({ moveSplit: 'PHYSICAL' }), false)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_GOOD_AS_GOLD'), slots(null), ctx({ moveSplit: 'STATUS' }), false)).toBe(true)
+    expect(computeIsImmune(slots('ABILITY_GOOD_AS_GOLD'), slots(null), ctx({ moveSplit: 'PHYSICAL' }), false)).toBe(false)
   })
 
   it('Radiance blocks Dark-type moves only', () => {
-    expect(computeIsImmune(slots('ABILITY_RADIANCE'), ctx({ moveType: 'DARK' }), false)).toBe(true)
-    expect(computeIsImmune(slots('ABILITY_RADIANCE'), ctx({ moveType: 'FIGHTING' }), false)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_RADIANCE'), slots(null), ctx({ moveType: 'DARK' }), false)).toBe(true)
+    expect(computeIsImmune(slots('ABILITY_RADIANCE'), slots(null), ctx({ moveType: 'FIGHTING' }), false)).toBe(false)
   })
 
   it('Sand Guard/Sand Fiend/Sepia Lens block priority moves ONLY during sandstorm', () => {
     for (const id of ['ABILITY_SAND_GUARD', 'ABILITY_SAND_FIEND', 'ABILITY_SEPIA_LENS']) {
-      expect(computeIsImmune(slots(id), ctx({ weather: 'SANDSTORM', movePriority: 1 }), false)).toBe(true)
-      expect(computeIsImmune(slots(id), ctx({ weather: 'NONE', movePriority: 1 }), false)).toBe(false)
-      expect(computeIsImmune(slots(id), ctx({ weather: 'SANDSTORM', movePriority: 0 }), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ weather: 'SANDSTORM', movePriority: 1 }), false)).toBe(true)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ weather: 'NONE', movePriority: 1 }), false)).toBe(false)
+      expect(computeIsImmune(slots(id), slots(null), ctx({ weather: 'SANDSTORM', movePriority: 0 }), false)).toBe(false)
     }
   })
 
   it('Sun Basking (and Empress via a different chain -- see below) blocks priority moves ONLY during sun', () => {
     for (const weather of ['SUN_PERMANENT', 'SUN_TEMPORARY', 'SUN_PRIMAL']) {
-      expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), ctx({ weather, movePriority: 1 }), false)).toBe(true)
+      expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), slots(null), ctx({ weather, movePriority: 1 }), false)).toBe(true)
     }
-    expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), ctx({ weather: 'NONE', movePriority: 1 }), false)).toBe(false)
-    expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), ctx({ weather: 'SUN_PERMANENT', movePriority: 0 }), false)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), slots(null), ctx({ weather: 'NONE', movePriority: 1 }), false)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_SUN_BASKING'), slots(null), ctx({ weather: 'SUN_PERMANENT', movePriority: 0 }), false)).toBe(false)
   })
 
   it('Empress aliases Queenly Majesty directly (no weather gate)', () => {
-    expect(computeIsImmune(slots('ABILITY_EMPRESS'), ctx({ movePriority: 1 }), false)).toBe(true)
-    expect(computeIsImmune(slots('ABILITY_EMPRESS'), ctx({ movePriority: 0 }), false)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_EMPRESS'), slots(null), ctx({ movePriority: 1 }), false)).toBe(true)
+    expect(computeIsImmune(slots('ABILITY_EMPRESS'), slots(null), ctx({ movePriority: 0 }), false)).toBe(false)
   })
 
   it('Mold Breaker suppresses every breakable blocker but not Delta Stream', () => {
-    expect(computeIsImmune(slots('ABILITY_SOUNDPROOF'), ctx({ moveFlags: { sound: true } }), true)).toBe(false)
-    expect(computeIsImmune(slots('ABILITY_DELTA_STREAM'), ctx({ moveFlags: { weatherBased: true } }), true)).toBe(true)
+    expect(computeIsImmune(slots('ABILITY_SOUNDPROOF'), slots(null), ctx({ moveFlags: { sound: true } }), true)).toBe(false)
+    expect(computeIsImmune(slots('ABILITY_DELTA_STREAM'), slots(null), ctx({ moveFlags: { weatherBased: true } }), true)).toBe(true)
   })
 
   it('every entry cites a src line', () => {

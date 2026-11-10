@@ -73,13 +73,14 @@ export const PARENTAL_BOND_ABILITIES: AbilityImpl[] = [
     onParentalBond: (ctx) => (ctx.moveFlags.hammerBased ? 'DUAL_WIELD' : null),
   },
   {
-    // IsMegaLauncherBoosted (bulletBased) or IsKeenEdge (sliceBased). Unlike the
-    // damage multipliers, OnParentalBondContext carries no matchesMoveFlag, so this
-    // still reads the move's own flags only -- DoesMoveMatchFlag's grant fallback is
-    // not threaded here (see OnModifyMoveFlags's doc, types.ts).
+    // IsMegaLauncherBoosted (bulletBased, TYPE_NORMAL dummy) OR IsKeenEdge (sliceBased,
+    // the REAL move type) -- DoesMoveMatchFlag(battler, move, moveType, ...) at
+    // src/abilities.cc:5487-5488. computeParentalBondTrigger builds matchesMoveFlag
+    // from the attacker's slots, and passes each caller's own moveType through.
     id: 'ABILITY_DUAL_WIELD',
     src: 'src/abilities.cc:5459',
-    onParentalBond: (ctx) => (ctx.moveFlags.bulletBased || ctx.moveFlags.sliceBased ? 'DUAL_WIELD' : null),
+    onParentalBond: (ctx) =>
+      ctx.matchesMoveFlag('bulletBased', 'NORMAL') || ctx.matchesMoveFlag('sliceBased', ctx.moveType) ? 'DUAL_WIELD' : null,
   },
   {
     id: 'ABILITY_ICE_COLD_HUNTER',
@@ -109,11 +110,13 @@ export const PARENTAL_BOND_ABILITIES: AbilityImpl[] = [
     onParentalBond: (ctx) => (ctx.moveFlags.biteBased ? 'PRIMAL_MAW' : null),
   },
   {
-    // IsIronFistBoosted (punchBased) -- reuses PRIMAL_MAW's own trigger/multiplier
-    // (0.4x), confirmed directly from the C body, not a copy-paste mistake here.
+    // IsIronFistBoosted(battler, move) == DoesMoveMatchFlag(battler, move, TYPE_NORMAL,
+    // MOVE_FLAG_PUNCH), src/abilities.cc:4160-4164 -- reuses PRIMAL_MAW's own
+    // trigger/multiplier (0.4x), confirmed directly from the C body, not a copy-paste
+    // mistake here.
     id: 'ABILITY_RAGING_BOXER',
     src: 'src/abilities.cc:4133',
-    onParentalBond: (ctx) => (ctx.moveFlags.punchBased ? 'PRIMAL_MAW' : null),
+    onParentalBond: (ctx) => (ctx.matchesMoveFlag('punchBased', 'NORMAL') ? 'PRIMAL_MAW' : null),
   },
   {
     id: 'ABILITY_RAGING_MOTH',

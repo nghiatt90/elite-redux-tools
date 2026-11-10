@@ -216,6 +216,12 @@ export interface OnCritContext {
    * check (SPECIES_SLAKING_MEGA_APE_SHIFT), not the general baseSpeciesId used
    * for form-agnostic matching elsewhere. */
   speciesId: string
+  /** DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_PUNCH), src/abilities.cc:358-386.
+   * `battler` is the ABILITY HOLDER here (battle_script_commands.c:1529-1536 runs the
+   * onCrit loop across both battlers), so computeAbilityCritBonus builds this inside its
+   * per-side `run` closure from THAT run's slots. The wrapper passes the literal
+   * TYPE_NORMAL dummy (IsIronFistBoosted, src/battle_util.c:9375). */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 export interface OnTypeEffectivenessContext {
@@ -258,6 +264,11 @@ export interface OnChooseOffensiveStatContext {
   isHighestAttackingStat: boolean
   statToUse: BattleStatKey // read/write
   secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- folded in by calculate.ts's applySecondaryStatBlend
+  /** DoesMoveMatchFlag(battlerAtk, move, TYPE_NORMAL, flag), src/abilities.cc:358-386 --
+   * the hook runs on every battler in turn but the C passes `battlerAtk` as the flag
+   * owner (battle_util.c:7243-7244), so computeChooseOffensiveStat always scans the
+   * ATTACKER's slots. The IsIronFistBoosted wrapper passes TYPE_NORMAL. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 export interface OnChooseDefensiveStatContext {
@@ -268,6 +279,7 @@ export interface OnChooseDefensiveStatContext {
   isUnaware: boolean
   isCrit: boolean
   moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   defenderHasAnyStatus: boolean
   /** Approximates Deadeye/Exploit Weakness/Roundhouse's own fully-computed
    * Def-vs-SpDef comparison using RAW stats (same simplification as
@@ -285,6 +297,12 @@ export interface OnChooseDefensiveStatContext {
   attackerIsConfused: boolean
   statToUse: BattleStatKey // read/write
   secondaryStat: Partial<Record<BattleStatKey, number>> // read/write -- folded in by calculate.ts's applySecondaryStatBlend
+  /** DoesMoveMatchFlag(battlerAtk, move, TYPE_NORMAL, flag), src/abilities.cc:358-386 --
+   * the C passes `battlerAtk` as the flag owner for BOTH the attacker's and the
+   * defender's runs (battle_util.c:7392-7394), so computeChooseDefensiveStat always
+   * scans the ATTACKER's slots even when the hook itself is held by the defender.
+   * Roundhouse's IsStrikerBoosted wrapper passes TYPE_NORMAL. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 export interface OnSwapSplitContext {
@@ -470,9 +488,23 @@ export type OnMoldBreaker = (ctx: OnMoldBreakerContext) => boolean
 export interface OnParentalBondContext {
   moveType: string
   moveFlags: Record<string, true>
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   weather: string // FieldBattleState's bare weather kind, e.g. 'HAIL'
   attackerHeads: number // species.json's `heads` (F_TWO_HEADED/F_THREE_HEADED), default 1
+  /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 --
+   * `battler` is the ATTACKER (GetParentalBondType's own argument,
+   * battle_script_commands.c:990-1004), so computeParentalBondTrigger builds this
+   * from the attacker's slots. Dual Wield passes the REAL move type for its keen-edge
+   * check (:5488) and TYPE_NORMAL for its mega-launcher check (:5487, via
+   * IsMegaLauncherBoosted). */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
+
+/** The caller-supplied half of OnParentalBondContext -- everything except the
+ * `matchesMoveFlag` closure, which computeParentalBondTrigger derives from the
+ * attacker's slots. Used by resolveHitPlan/isMoveAffectedByParentalBond, whose
+ * callers never hold the slots in a shape that could build the closure themselves. */
+export type OnParentalBondInputs = Omit<OnParentalBondContext, 'matchesMoveFlag'>
 
 /**
  * ParentalBondTrigger names mirror the C's `MultihitType` enum values consulted by
@@ -522,6 +554,11 @@ export interface OnImmuneContext {
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   weather: string
   movePriority: number
+  /** DoesMoveMatchFlag(attacker, move, TYPE_NORMAL, flag), src/abilities.cc:358-386 --
+   * Soundproof's C hook calls IsSoundMove(attacker, move) (:1054), i.e. the ATTACKER's
+   * own slots (onImmune's second argument, battle_util.c:8962), never the defending
+   * holder's. computeIsImmune builds this from its attackerSlots parameter. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 /**
@@ -576,7 +613,7 @@ export interface OnModifyMoveFlagsContext {
 
 /**
  * onModifyMoveFlags returns whether this ability GRANTS the given move flag to the
- * current move (for this hit only) -- DoesMoveMatchFlag, src/abilities.cc:331-361:
+ * current move (for this hit only) -- DoesMoveMatchFlag, src/abilities.cc:358-386:
  * every IsXBoosted-style helper (IsIronFistBoosted/IsStrikerBoosted/
  * IsMegaLauncherBoosted/IsSoundMove/IsDance/IsKeenEdge) first checks the move's own
  * flag bit, and ONLY IF THAT'S UNSET falls back to asking every ability on the
@@ -597,13 +634,23 @@ export interface OnModifyMoveFlagsContext {
  * :6488-6495); and Pinnacle Blade's onInfiltrate (real type, :8686-8689).
  * Amplifier/Bass Boosted/Sludgy Mix delegate to Punk Rock through the unchanged ctx.
  *
+ * Also wired (cycle 150ibc), all reading the ATTACKER's slots unless noted:
+ * Magical Fists' onChooseOffensiveStat and Power Fists' onChooseDefensiveStat
+ * (IsIronFistBoosted, TYPE_NORMAL dummy, src/abilities.cc:9158/3691 -- the
+ * dispatchers set `battler` to battlerAtk for both runs, battle_util.c:7243/7392);
+ * Roundhouse's onChooseDefensiveStat (IsStrikerBoosted, dummy, :5074); Precise
+ * Fist's onCrit (IsIronFistBoosted on the ability HOLDER, :4757,
+ * battle_script_commands.c:1529-1536); Soundproof's onImmune (IsSoundMove on the
+ * ATTACKER, :1054); and Dual Wield's / Raging Boxer's onParentalBond (Mega Launcher
+ * dummy + Keen Edge with the REAL move type, :5488; Iron Fist dummy, :4162;
+ * GetParentalBondType, battle_script_commands.c:990-1004).
+ *
  * Still static (`ctx.moveFlags.*` only, so grants do not yet change the result):
- * Soundproof's onImmune (26-immune.ts:53), the onChooseOffensiveStat/
- * onChooseDefensiveStat hooks (18-offensive-multiplier-e.ts:38,48), onCrit
- * (17-crit-swapsplit-misc.ts:51), onParentalBond (24-parental-bond.ts:81,115), and
- * the accuracy/sim consumers. Each must be checked against its own call site's
- * moveType argument before wiring; each port below is complete and correct for when
- * that plumbing exists.
+ * Cutthroat's priority through `TurnOrderMoveView.isKeenEdge`, which both action
+ * builders hard-code to false; Blade Dance's onAttacker (`moveFlags.dance`) and the
+ * move-end Dancer path; the effect-chance PUNCH read (sim/statusEffects.ts:1866,
+ * there is no sim PUNCH predicate yet); and the accuracy/sim consumers. Each must be
+ * checked against its own call site's moveType argument before wiring.
  */
 export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean
 

@@ -973,6 +973,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         if (
           computeIsImmune(
             defender.mon.abilities,
+            attacker.mon.abilities,
             { moveType: built.moveType, moveFlags: built.moveFlags, moveSplit: (move?.split ?? 'STATUS') as 'PHYSICAL' | 'SPECIAL' | 'STATUS', weather, movePriority: move?.priority ?? 0 },
             atkMoldBreaker,
           )

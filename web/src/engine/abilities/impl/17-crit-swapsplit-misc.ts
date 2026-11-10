@@ -44,11 +44,13 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
   },
   {
     // IsIronFistBoosted(battler, move) -- the same punch flag Iron Fist's multiplier
-    // tests, but OnCritContext has no matchesMoveFlag, so only the move's static
-    // punchBased bit is checked here (no onModifyMoveFlags grant fallback).
+    // tests, i.e. DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_PUNCH)
+    // (src/abilities.cc:4755-4759). `battler` is the ability HOLDER: the onCrit loop
+    // (battle_script_commands.c:1529-1536) runs once per battler, so computeAbilityCritBonus
+    // builds the closure from that run's own slots.
     id: 'ABILITY_PRECISE_FIST',
     src: 'src/abilities.cc:4730',
-    onCrit: (ctx) => (ctx.moveFlags.punchBased ? 1 : 0),
+    onCrit: (ctx) => (ctx.matchesMoveFlag('punchBased', 'NORMAL') ? 1 : 0),
   },
   {
     id: 'ABILITY_STALWART',

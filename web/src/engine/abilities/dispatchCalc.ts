@@ -39,6 +39,7 @@ import type {
   OnModifyMoveFlagsContext,
   OnMoveTypeContext,
   OnParentalBondContext,
+  OnParentalBondInputs,
   OnStatContext,
   OnSwapSplitContext,
   OnTypeEffectivenessContext,
@@ -121,8 +122,14 @@ export function hasFortKnox(defenderSlots: AbilitySlots): boolean {
  * Not suppressible by Mold Breaker -- SetMoldBreaker's HITMARKER never gates this
  * call site in the C.
  */
-export function computeParentalBondTrigger(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, ctx: OnParentalBondContext): ParentalBondTrigger | null {
+export function computeParentalBondTrigger(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, inputs: OnParentalBondInputs): ParentalBondTrigger | null {
   const defenderHasFortKnox = hasFortKnox(defenderSlots)
+  // GetParentalBondType's `battler` is the ATTACKER (:990-1004), so DoesMoveMatchFlag
+  // scans the attacker's own slots, exactly as computeSwapSplit's closure does.
+  const ctx: OnParentalBondContext = {
+    ...inputs,
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+  }
   let trigger: ParentalBondTrigger | null = null
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (!impl.onParentalBond) return
@@ -194,8 +201,16 @@ export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbCont
  * Majesty/Dazzling's `onImmuneFor = APPLY_ON_ALLY` protects the whole side) -- this
  * v1 singles engine has no ally battler, so only the defender's own slots are
  * checked, which is exactly equivalent for a 2-battler field.
+ *
+ * `attackerSlots` exists because Soundproof's C hook reads IsSoundMove on the ATTACKER
+ * (:1052-1058), i.e. the move's own user -- not the defender whose ability is being
+ * tested -- so the DoesMoveMatchFlag grant scan must run over the attacker's slots.
  */
-export function computeIsImmune(defenderSlots: AbilitySlots, ctx: OnImmuneContext, attackerHasMoldBreaker: boolean): boolean {
+export function computeIsImmune(defenderSlots: AbilitySlots, attackerSlots: AbilitySlots, inputs: Omit<OnImmuneContext, 'matchesMoveFlag'>, attackerHasMoldBreaker: boolean): boolean {
+  const ctx: OnImmuneContext = {
+    ...inputs,
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+  }
   let blocked = false
   forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
     if (impl.onImmune?.(ctx)) {
@@ -629,7 +644,11 @@ export function hasStabOverride(attackerSlots: AbilitySlots, moveType: string): 
   return granted
 }
 
-type OnCritInputs = Omit<OnCritContext, 'battlerId' | 'abilityOn' | 'speciesId'>
+type OnCritInputs = Omit<OnCritContext, 'battlerId' | 'abilityOn' | 'speciesId' | 'matchesMoveFlag'> & {
+  /** Supplied by the caller: DoesMoveMatchFlag is built per battler run inside this
+   * module, but the move split it forwards to the grant scan comes from the caller. */
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
+}
 
 /**
  * CalcCritChanceStage's onCrit loop (src/battle_script_commands.c:1529-1536) -- runs
@@ -666,10 +685,16 @@ export function computeAbilityCritBonus(
     speciesId: string,
     suppressed: (id: string, entry: AbilityEntry) => boolean,
   ) => {
+    // DoesMoveMatchFlag's owner is the ability HOLDER (the loop's `battler`), so the
+    // closure is rebuilt per run from that run's own slots -- an attacker grant cannot
+    // reach the defender's hook and vice versa.
+    const { moveSplit, ...hookInputs } = inputs
+    const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
+      doesMoveMatchFlag(slots, flag, moveType, inputs.moveFlags, moveSplit)
     forEachAbility(slots, suppressed, (impl) => {
       if (blocked || !impl.onCrit) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
-      const result = impl.onCrit({ battlerId, abilityOn, speciesId, ...inputs })
+      const result = impl.onCrit({ battlerId, abilityOn, speciesId, matchesMoveFlag, ...hookInputs })
       if (result === NEVER_CRIT) {
         blocked = true
         return 'break'
@@ -682,7 +707,7 @@ export function computeAbilityCritBonus(
   return blocked ? NEVER_CRIT : bonus
 }
 
-type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse' | 'secondaryStat'>
+type OnChooseOffensiveStatInputs = Omit<OnChooseOffensiveStatContext, 'statToUse' | 'secondaryStat' | 'matchesMoveFlag'>
 
 /** CalculateStat's cross-stat blend result: the primary stat to use, plus a
  * percentage-of-another-stat bonus keyed by which OTHER stat contributes (e.g.
@@ -701,14 +726,21 @@ export interface ChosenStat {
  * ability slots, unconditionally.
  */
 export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseOffensiveStatInputs): ChosenStat {
-  const ctx: OnChooseOffensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
+  // The C passes `battlerAtk` as DoesMoveMatchFlag's owner (:7243-7244), so the grant
+  // scan always runs over the attacker's slots.
+  const ctx: OnChooseOffensiveStatContext = {
+    ...inputs,
+    statToUse: defaultStat,
+    secondaryStat: {},
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+  }
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     impl.onChooseOffensiveStat?.(ctx)
   })
   return { statToUse: ctx.statToUse, secondaryStat: ctx.secondaryStat }
 }
 
-type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse' | 'secondaryStat'>
+type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse' | 'secondaryStat' | 'matchesMoveFlag'>
 
 /**
  * CalcDefenseStat's onChooseDefensiveStat loop (:7410-7419) -- iterates battlers
@@ -732,7 +764,15 @@ type OnChooseDefensiveStatInputs = Omit<OnChooseDefensiveStatContext, 'statToUse
 export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defenderSlots: AbilitySlots, defaultStat: BattleStatKey, inputs: OnChooseDefensiveStatInputs): ChosenStat {
   const secondaryStat: Partial<Record<BattleStatKey, number>> = {}
   const run = (slots: AbilitySlots, sourceIsAttacker: boolean, sourceIsTarget: boolean): BattleStatKey | null => {
-    const ctx: OnChooseDefensiveStatContext = { ...inputs, statToUse: defaultStat, secondaryStat: {} }
+    const ctx: OnChooseDefensiveStatContext = {
+      ...inputs,
+      statToUse: defaultStat,
+      secondaryStat: {},
+      // The C passes `battlerAtk` as DoesMoveMatchFlag's owner for BOTH runs
+      // (:7392-7394), so this closure is the same over the attacker's slots even when
+      // `slots` is the defender's.
+      matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+    }
     forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onChooseDefensiveStat) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onChooseDefensiveStatFor)) return

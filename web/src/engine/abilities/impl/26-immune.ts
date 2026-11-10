@@ -47,10 +47,13 @@ export const IMMUNE_ABILITIES: AbilityImpl[] = [
   },
   { id: 'ABILITY_CHESTNUT_SHIELD', src: 'src/abilities.cc:11458', flags: { breakable: true, magicGuard: true }, onImmune: aliasImmune('ABILITY_BULLETPROOF') },
   {
+    // IsSoundMove(attacker, move) (src/abilities.cc:1052-1056) ==
+    // DoesMoveMatchFlag(attacker, move, TYPE_NORMAL, MOVE_FLAG_SOUND) -- the ATTACKER's
+    // own slots, not the holder's; computeIsImmune closes over attackerSlots.
     id: 'ABILITY_SOUNDPROOF',
     src: 'src/abilities.cc:1025',
     flags: { breakable: true },
-    onImmune: (ctx) => Boolean(ctx.moveFlags.sound),
+    onImmune: (ctx) => ctx.matchesMoveFlag('sound', 'NORMAL'),
   },
   { id: 'ABILITY_NOISE_CANCEL', src: 'src/abilities.cc:7510', flags: { breakable: true }, onImmune: aliasImmune('ABILITY_SOUNDPROOF') },
   { id: 'ABILITY_PARROTING', src: 'src/abilities.cc:6854', flags: { breakable: true }, onImmune: aliasImmune('ABILITY_SOUNDPROOF') },

@@ -72,11 +72,12 @@ export const CHOOSE_STAT_ABILITIES: AbilityImpl[] = [
     },
   },
   {
-    // IsStrikerBoosted(battler, move) -- Striker's own condition, moveFlags.kickBased.
+    // IsStrikerBoosted(battlerAtk, move) -- Striker's own condition, i.e.
+    // DoesMoveMatchFlag(battlerAtk, move, TYPE_NORMAL, MOVE_FLAG_KICK) (src/abilities.cc:5072-5074).
     id: 'ABILITY_ROUNDHOUSE',
     src: 'src/abilities.cc:5045',
     onChooseDefensiveStat: (ctx) => {
-      if (!ctx.moveFlags.kickBased) return
+      if (!ctx.matchesMoveFlag('kickBased', 'NORMAL')) return
       if (ctx.defenderDefComparison !== 'equal') ctx.statToUse = ctx.defenderDefComparison
     },
   },

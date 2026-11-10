@@ -21,7 +21,7 @@ function offInputs(overrides: Partial<{ moveFlags: Record<string, true>; moveSpl
   }
 }
 
-function defInputs(overrides: Partial<{ moveFlags: Record<string, true> }> = {}) {
+function defInputs(overrides: Partial<{ moveFlags: Record<string, true>; moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' }> = {}) {
   return {
     attackerId: 'attacker',
     defenderId: 'defender',
@@ -30,6 +30,7 @@ function defInputs(overrides: Partial<{ moveFlags: Record<string, true> }> = {})
     isUnaware: false,
     isCrit: false,
     moveFlags: {},
+    moveSplit: 'PHYSICAL' as const,
     defenderHasAnyStatus: false,
     defenderDefComparison: 'equal' as const,
     attackerIsConfused: false,

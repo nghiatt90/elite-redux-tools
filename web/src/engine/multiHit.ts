@@ -26,7 +26,7 @@ import { uq } from './fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from './abilities/dispatchCalc'
 import { battlerHasAbility } from './abilities/dispatch'
 import type { AbilitySlots } from './abilities/dispatch'
-import type { OnParentalBondContext, ParentalBondTrigger } from './abilities/types'
+import type { OnParentalBondInputs, ParentalBondTrigger } from './abilities/types'
 
 export interface HitPlan {
   hitCount: number
@@ -155,7 +155,7 @@ export interface ParentalBondMoveData {
  *   6. the BATTLE_TYPE_DOUBLE target-count block (:13170-13181) is doubles-only;
  *      this engine is singles, so it has no singles-relevant effect to port.
  */
-export function isMoveAffectedByParentalBond(move: ParentalBondMoveData, attackerSlots: AbilitySlots, ctx: OnParentalBondContext): boolean {
+export function isMoveAffectedByParentalBond(move: ParentalBondMoveData, attackerSlots: AbilitySlots, ctx: OnParentalBondInputs): boolean {
   if (move.split === 'STATUS' || move.flags.noParentalBond) return false
   const hasChloroplast = CHLOROPLAST_ABILITIES.some((id) => battlerHasAbility(attackerSlots, id, () => false))
   const twoTurnExempt =
@@ -174,7 +174,7 @@ export function resolveHitPlan(
   attackerHasSkillLink: boolean,
   attackerResolvedHoldEffect: string | null,
   scenarioHitCount: number,
-  parentalBondCtx: OnParentalBondContext,
+  parentalBondCtx: OnParentalBondInputs,
   scenarioBeatUpHitCount: number,
   /** GetParentalBondCount's MINION_CONTROL branch (:1023-1040): the live party
    * count the simulator can supply. Absent for the standalone calculator, which

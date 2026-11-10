@@ -80,19 +80,25 @@ function defCtx(defenderIsEnraged: boolean): DefensiveMultiplierContext {
 }
 
 function chooseDefCtx(attackerIsConfused: boolean): OnChooseDefensiveStatContext {
-  return {
+  const base = {
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
     noPositiveStatStages: false,
     isUnaware: false,
     isCrit: false,
-    moveFlags: {},
+    moveFlags: {} as Record<string, true>,
+    moveSplit: 'PHYSICAL' as const,
     defenderHasAnyStatus: false,
-    defenderDefComparison: 'equal',
+    defenderDefComparison: 'equal' as const,
     attackerIsConfused,
-    statToUse: 'def',
+    statToUse: 'def' as const,
     secondaryStat: {},
+  }
+  return {
+    ...base,
+    // Static-flag answer only (no grants); grant plumbing is a calc-level concern.
+    matchesMoveFlag: (flag) => Boolean(base.moveFlags[flag]),
   }
 }
 

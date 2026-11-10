@@ -9,22 +9,27 @@ function findAbility(id: string): AbilityImpl {
 }
 
 function offCtx(overrides: Partial<OnChooseOffensiveStatContext> = {}): OnChooseOffensiveStatContext {
-  return {
+  const base = {
     battlerId: 'attacker',
     moveId: 'MOVE_TACKLE',
     isCrit: false,
     isUnaware: false,
-    moveSplit: 'PHYSICAL',
+    moveSplit: 'PHYSICAL' as const,
     moveFlags: {},
     isHighestAttackingStat: true,
-    statToUse: 'atk',
+    statToUse: 'atk' as const,
     secondaryStat: {},
     ...overrides,
+  }
+  return {
+    ...base,
+    // Static-flag answer only (no grants); grant plumbing is a calc-level concern.
+    matchesMoveFlag: (flag) => Boolean(base.moveFlags[flag]),
   }
 }
 
 function defCtx(overrides: Partial<OnChooseDefensiveStatContext> = {}): OnChooseDefensiveStatContext {
-  return {
+  const base = {
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
@@ -32,12 +37,18 @@ function defCtx(overrides: Partial<OnChooseDefensiveStatContext> = {}): OnChoose
     isUnaware: false,
     isCrit: false,
     moveFlags: {},
+    moveSplit: 'PHYSICAL' as const,
     defenderHasAnyStatus: false,
-    defenderDefComparison: 'equal',
+    defenderDefComparison: 'equal' as const,
     attackerIsConfused: false,
-    statToUse: 'def',
+    statToUse: 'def' as const,
     secondaryStat: {},
     ...overrides,
+  }
+  return {
+    ...base,
+    // Static-flag answer only (no grants); grant plumbing is a calc-level concern.
+    matchesMoveFlag: (flag) => Boolean(base.moveFlags[flag]),
   }
 }
 

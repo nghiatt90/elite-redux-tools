@@ -12,10 +12,11 @@ function slots(ability: string | null): { ability: string | null; innates: [stri
   return { ability, innates: [null, null, null] }
 }
 
-function ctx(overrides: Partial<{ moveType: string; moveFlags: Record<string, true>; weather: string; attackerHeads: number }> = {}) {
+function ctx(overrides: Partial<{ moveType: string; moveFlags: Record<string, true>; moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'; weather: string; attackerHeads: number }> = {}) {
   return {
     moveType: 'NORMAL',
     moveFlags: {},
+    moveSplit: 'PHYSICAL' as const,
     weather: 'NONE',
     attackerHeads: 1,
     ...overrides,

@@ -10,7 +10,7 @@ function findAbility(id: string): AbilityImpl {
 }
 
 function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
-  return {
+  const base = {
     battlerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
@@ -24,6 +24,11 @@ function ctx(overrides: Partial<OnCritContext> = {}): OnCritContext {
     abilityOn: false,
     speciesId: 'SPECIES_NONE',
     ...overrides,
+  }
+  return {
+    ...base,
+    // Static-flag answer only (no grants); grant plumbing is a calc-level concern.
+    matchesMoveFlag: (flag) => Boolean(base.moveFlags[flag]),
   }
 }
 

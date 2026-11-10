@@ -169,7 +169,7 @@ import { NO_GROUNDING } from './endTurn'
 import { weatherFromBitfield } from './bridge'
 import { isMoveAffectedByParentalBond, parentalBondHitCount } from '../multiHit'
 import { computeParentalBondTrigger, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
-import type { OnParentalBondContext } from '../abilities/types'
+import type { OnParentalBondInputs } from '../abilities/types'
 
 export const CANCEL_REASONS = [
   'SLEEP',
@@ -757,9 +757,10 @@ export function runAttackCanceller(
     // OnParentalBondContext: the scenario's moveType is `move.type ?? 'NORMAL'`
     // (bare spelling) and its weather is weatherFromBitfield(state.field.weather)
     // via buildFieldBattleState/buildFieldFacts.
-    const parentalBondCtx: OnParentalBondContext = {
+    const parentalBondCtx: OnParentalBondInputs = {
       moveType: bareType(move?.type) || 'NORMAL',
       moveFlags: move?.flags ?? {},
+      moveSplit: move?.split ?? 'STATUS',
       weather: weatherFromBitfield(state.field.weather).weather,
       attackerHeads: dataContext?.species(attacker.mon.speciesId)?.heads ?? 1,
     }
