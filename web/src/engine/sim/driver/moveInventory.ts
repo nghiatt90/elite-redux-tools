@@ -793,8 +793,8 @@ export const SCRIPT_OPCODE_HANDLERS: ReadonlyArray<ScriptOpcodeHandler> = [
   {
     opcode: 'raisehighestattackingstat',
     cSite: 'asm macro (no Cmd_ in sparse checkout)',
-    simSite: 'web/src/engine/sim/moveEffects.ts:3148',
-    probes: [/getHighestAttackingStatId\(state, bId, deps\.statStageRatios\)/],
+    simSite: 'web/src/engine/sim/moveEffects.ts:3183',
+    probes: [/getHighestAttackingStatId\(state, bId, statStageRatios\)/],
   },
   {
     opcode: 'cutonethirdhpraisestats',
