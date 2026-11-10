@@ -561,8 +561,12 @@ describe('cycle 160 - Minion Control in the AI (battle_script_commands.c:1020-10
     const multiplier = [0, 1, 2].reduce<number>((sum, i) => sum + getParentalBondMultiplier('MINION_CONTROL', i), 0)
     expect(six.dmg).toBe(applyModifier(multiplier, lone.dmg))
     expect(six.dmg).toBeGreaterThan(lone.dmg)
-    expect(six.unmodelled.some((u) => u.includes('MINION_CONTROL') && u.includes('not modelled'))).toBe(false)
-    expect(lone.unmodelled.some((u) => u.includes('MINION_CONTROL') && u.includes('not modelled'))).toBe(false)
+    // The count itself is still applied, but the AI path cannot prove its scan used the same
+    // battler the C's gBattlerAttacker pointed at, so the port now reports that as unmodelled:
+    // the C reads the global (battle_script_commands.c:1026-1040) that AI_CalcDamage never
+    // assigns (battle_ai_util.c:740).
+    expect(six.unmodelled.some((u) => u.includes('MINION_CONTROL') && u.includes('gBattlerAttacker'))).toBe(true)
+    expect(lone.unmodelled.some((u) => u.includes('MINION_CONTROL') && u.includes('gBattlerAttacker'))).toBe(true)
   })
 
   it('a lone mon gives count 1 (negative)', () => {
@@ -571,7 +575,9 @@ describe('cycle 160 - Minion Control in the AI (battle_script_commands.c:1020-10
     const state = minionBattle([partyMon('SPECIES_MUDKIP', 100)])
     const res = aiCalcDamage(state, MEGA_PUNCH.id, 0, 1, aiDeps)
     expect(res.dmg).toBe(applyModifier(getParentalBondMultiplier('MINION_CONTROL', 0), res.dmg))
-    expect(res.unmodelled.some((u) => u.includes('MINION_CONTROL'))).toBe(false)
+    // Even at count 1 the trigger itself is MINION_CONTROL, so the gBattlerAttacker caveat
+    // (battle_script_commands.c:1026-1040, battle_ai_util.c:740) is reported.
+    expect(res.unmodelled.some((u) => u.includes('MINION_CONTROL') && u.includes('gBattlerAttacker'))).toBe(true)
   })
 })
 

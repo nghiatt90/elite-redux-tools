@@ -137,6 +137,16 @@ function withAiMasking(state: BattleState, battlerIds: number[]): BattleState {
  * `state` must be a state whose `sides[].party` is the real roster: AI callers pass the
  * masked clone from buildAiScenario, which copies only `battlers`, so `sides` and each
  * copied battler's `partyIndex` are the live ones.
+ *
+ * MINION_CONTROL is a known approximation here: the C's own branch (battle_script_commands.c:
+ * 1026-1040) picks the party side and the excluded slot from the global `gBattlerAttacker`,
+ * not from its `battler` argument, and AI_CalcDamage calls it with `battlerAtk`
+ * (battle_ai_util.c:740) without ever assigning `gBattlerAttacker`. Nothing in the AI files
+ * writes it, so its value during scoring is whatever the last non-AI path left. This sim
+ * keeps no such field (state.ts), so the scan uses `attackerId` as the best available
+ * estimate and the caller reports it as unmodelled rather than silently pretending the two
+ * are the same battler. The attackCanceller.ts caller (:774) is NOT affected: in-battle
+ * `gBattlerAttacker` really is the acting battler there.
  */
 function parentalBondCount(trigger: ParentalBondTrigger, state: BattleState, attackerId: number): number | { unmodelled: string } {
   switch (trigger) {
@@ -377,6 +387,17 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
         // Must be Parental Bond (multihitType was MULTIHIT_SINGLE and
         // GetParentalBondType supplied a real trigger).
         if (parentalBondTrigger) {
+          // GetParentalBondCount's MINION_CONTROL branch reads the global gBattlerAttacker
+          // (battle_script_commands.c:1026-1040), which AI_CalcDamage never assigns
+          // (battle_ai_util.c:740 passes battlerAtk and nothing in battle_ai_main.c /
+          // battle_ai_util.c writes gBattlerAttacker). The sim tracks no such global, so the
+          // count below uses the scored attacker instead. Still apply the multiplier with that
+          // estimate -- the damage is better modelled than dropped -- but say so.
+          if (parentalBondTrigger === 'MINION_CONTROL') {
+            unmodelled.push(
+              'MINION_CONTROL: GetParentalBondCount reads gBattlerAttacker (battle_script_commands.c:1026-1040), which AI_CalcDamage never sets (battle_ai_util.c:740); the simulator does not track it, so the party scan uses the scored attacker',
+            )
+          }
           const count = parentalBondCount(parentalBondTrigger, maskedState, attackerId)
           if (typeof count === 'number') {
             let multiplier = 0
