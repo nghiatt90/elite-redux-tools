@@ -1,9 +1,13 @@
 // Batch AB: onModifyMoveFlags family -- the last of the 6 census hooks added in the
-// field-report audit. DoesMoveMatchFlag (src/abilities.cc:331-361): each port below
-// is a complete, correct answer to "does this ability grant the move this flag,"
-// but is NOT wired into calculate.ts -- see OnModifyMoveFlags's own doc (types.ts)
-// for why the fallback would need new plumbing across 22 existing call sites rather
-// than fitting into this batch.
+// field-report audit. DoesMoveMatchFlag (src/abilities.cc:358-386): each port below
+// is a complete, correct answer to "does this ability grant the move this flag."
+//
+// These hooks are now wired for the consumers whose call-site moveType convention
+// has been checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for
+// Punching Glove), plus the Keen Edge and Striker offensive multipliers. The other
+// consumers -- Mega Launcher and the sound family (Soundproof/Punk Rock/Amplifier/
+// Liquid Voice) -- still test the static `ctx.moveFlags.*` flag, so grants for those
+// families do not yet change damage; see OnModifyMoveFlags's own doc (types.ts).
 //
 // 7 of this batch's 10 census abilities get a fresh entry here; Backstreet Boy,
 // Chestnut Axe, and Gunman already had a real entry for a different hook elsewhere

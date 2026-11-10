@@ -43,6 +43,15 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   moveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // post-swap split (IS_MOVE_PHYSICAL/IS_MOVE_SPECIAL)
   moveFlags: Record<string, true> // gBattleMoves[move].flags -- moves.json's own `flags` shape
+  /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 -- the
+   * move's own static flag bit first, then (only if unset) a scan of the ATTACKER's
+   * own ability slots for an `onModifyMoveFlags` grant. `moveType` is the CALLER's
+   * own argument, and each consumer passes its own convention: the real move type
+   * for Keen Edge (:3676), a literal TYPE_NORMAL dummy for Striker/Iron
+   * Fist/Mega Launcher/sound (IsStrikerBoosted etc., src/battle_util.c:9374-9379).
+   * Built by dispatchCalc.computeAbilityMultiplier closing over the attacker's
+   * slots/moveFlags/moveSplit, so a consumer never needs the slots itself. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
   /** gBattleMoves[move].secondaryEffectChance -- Sheer Force's own trigger condition
    * (BattleMovesGenerator.kt's `sheerForce` local) is `split != STATUS && effectChance
    * != 0 && !noSheerForce`, all three pieces already emitted; no separate
@@ -553,17 +562,17 @@ export interface OnModifyMoveFlagsContext {
  * same names as MoveData.flags' own keys (see emit.py's _MOVE_FLAGS) so a future
  * `flag`-keyed fallback reads as `moveFlags[flag] || ability grants it`.
  *
- * Wired into calculate.ts for exactly ONE of DoesMoveMatchFlag's call sites so far
- * (dispatchCalc.isIronFistBoosted, for Punching Glove) -- the C passes a literal
- * TYPE_NORMAL dummy there rather than the move's real type, which is why that one
- * generalizes safely. The other 21 call sites (Iron Fist itself, Mega Launcher,
- * sound-based abilities, ...) each pass their OWN moveType argument (real in some
- * cases, a different dummy in others) and reach every existing
- * `ctx.moveFlags.sound`/`.punchBased`/`.kickBased`/`.bulletBased`/`.sliceBased`/
- * `.dance` check across the registry (several already carrying a comment flagging
- * this gap -- Liquid Voice, Punk Rock, Dual Wield, Magus Blades, Primal Maw,
- * Raging Boxer) -- NOT safe to fold into one shared helper without checking each
- * site's own convention individually, so those stay unwired. Each port below is
+ * Wired through dispatchCalc.doesMoveMatchFlag / OffensiveMultiplierContext.matchesMoveFlag
+ * for the consumers whose call site's own moveType convention has been checked:
+ * Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for Punching Glove -- the C
+ * passes a literal TYPE_NORMAL dummy there), and the Keen Edge and Striker offensive
+ * multipliers (the former passes the REAL move type, src/abilities.cc:3676; the latter
+ * a TYPE_NORMAL dummy, src/battle_util.c:9377). The remaining consumers -- Iron Fist
+ * itself, Mega Launcher and the sound family (Soundproof/Punk Rock/Amplifier/Liquid
+ * Voice) -- still read the static `ctx.moveFlags.*` flag directly, so their grants do
+ * not yet change damage. Each must be checked against its own call site's moveType
+ * argument before wiring (several carry a comment flagging this gap -- Liquid Voice,
+ * Punk Rock, Dual Wield, Magus Blades, Primal Maw, Raging Boxer). Each port below is
  * complete and correct for when that plumbing exists.
  */
 export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean

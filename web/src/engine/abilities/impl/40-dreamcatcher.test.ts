@@ -47,6 +47,9 @@ function ctx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMult
     attackerHasStab: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    // Stand-in for the static-flag half of dispatchCalc.doesMoveMatchFlag; these
+    // tests drive one hook directly and have no attacker slots to scan.
+    matchesMoveFlag: (flag) => Boolean(overrides.moveFlags?.[flag]),
     ...overrides,
   }
 }

@@ -1,6 +1,6 @@
 // Batch A2: more onOffensiveMultiplier abilities -- move-flag checks via the
-// DoesMoveMatchFlag helper (src/abilities.cc:331-355, which just tests the
-// underlying gBattleMoves[move].flags bit -- already available as moveFlags here),
+// DoesMoveMatchFlag helper (src/abilities.cc:358-386: the move's own static flag
+// bit, falling back to an onModifyMoveFlags scan of the attacker's abilities),
 // a super-effective check, and HasAnyStatusOrAbility-gated boosts.
 
 import { uq } from '../../fixed'
@@ -19,11 +19,12 @@ export const OFFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
     },
   },
   {
-    // DoesMoveMatchFlag(..., MOVE_FLAG_KEEN_EDGE) === moveFlags.sliceBased
+    // DoesMoveMatchFlag(..., moveType, MOVE_FLAG_KEEN_EDGE) -- the REAL move type,
+    // src/abilities.cc:3676 (Chestnut Axe's grant is `moveType == TYPE_GRASS`).
     id: 'ABILITY_KEEN_EDGE',
-    src: 'src/abilities.cc:3646',
+    src: 'src/abilities.cc:3676',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.sliceBased) MUL(ctx, 1.3)
+      if (ctx.matchesMoveFlag('sliceBased', ctx.moveType)) MUL(ctx, 1.3)
     },
   },
   {
@@ -35,11 +36,13 @@ export const OFFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
     },
   },
   {
-    // IsStrikerBoosted -> DoesMoveMatchFlag(..., MOVE_FLAG_KICK) === moveFlags.kickBased
+    // IsStrikerBoosted -> DoesMoveMatchFlag(..., TYPE_NORMAL, MOVE_FLAG_KICK),
+    // src/battle_util.c:9377 -- the C passes a literal TYPE_NORMAL dummy, NOT the
+    // move's type (Backstreet Boy's grant reads only the move's Dance flag).
     id: 'ABILITY_STRIKER',
-    src: 'src/abilities.cc:4579',
+    src: 'src/abilities.cc:4609',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.kickBased) MUL(ctx, 1.3)
+      if (ctx.matchesMoveFlag('kickBased', 'NORMAL')) MUL(ctx, 1.3)
     },
   },
   {

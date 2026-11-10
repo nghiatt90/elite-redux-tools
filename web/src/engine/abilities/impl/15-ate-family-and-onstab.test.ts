@@ -75,6 +75,8 @@ describe('ate family + onStab batch', () => {
       defenderHasBloodStainEffect: false,
       attackerIsUnaware: false,
       defenderHasAnyLoweredStat: false,
+      // These aliases read static moveFlags directly, not DoesMoveMatchFlag.
+      matchesMoveFlag: () => false,
     }
     // Butterfly Wings -> Giant Wings: 1.3x on airBased moves
     findAbility('ABILITY_BUTTERFLY_WINGS').onOffensiveMultiplier!({ ...ctx, moveFlags: { airBased: true as const } })

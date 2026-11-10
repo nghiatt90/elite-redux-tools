@@ -47,6 +47,9 @@ function offCtx(defenderIsConfused: boolean, defenderIsEnraged: boolean): Offens
     defenderHasBloodStainEffect: false,
     attackerIsUnaware: false,
     defenderHasAnyLoweredStat: false,
+    // No attacker slot scan in a direct-hook test; DoesMoveMatchFlag's static
+    // half is irrelevant to these abilities.
+    matchesMoveFlag: () => false,
   }
 }
 

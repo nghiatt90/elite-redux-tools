@@ -36,6 +36,7 @@ import type {
   OnInfiltrateContext,
   OnAfterTypeEffectivenessContext,
   OnMoldBreakerContext,
+  OnModifyMoveFlagsContext,
   OnMoveTypeContext,
   OnParentalBondContext,
   OnStatContext,
@@ -206,40 +207,44 @@ export function computeIsImmune(defenderSlots: AbilitySlots, ctx: OnImmuneContex
 }
 
 /**
- * Infiltrates, src/battle_script_commands.c:12271-12275 -- true if any of the
- * ATTACKER's abilities bypasses screens for this hit. checkMoldBreaker=FALSE (an
- * attacker's own trait, never suppressed by its own Mold Breaker), so this uses
- * NEVER_SUPPRESSED like the offensive-multiplier loop's self-checks.
- */
-/**
- * IsIronFistBoosted, src/battle_util.c:9409 -- `DoesMoveMatchFlag(battler, move,
- * TYPE_NORMAL, MOVE_FLAG_PUNCH)`. The move's own static punchBased flag wins
- * outright; only when that's unset does it fall back to asking every ability on
- * the move's OWN USER (never the other battler, never mold-breaker-suppressed --
- * this is the attacker checking its own move) whether it grants punch anyway
- * (e.g. some hand-based-move-boosting ability's onModifyMoveFlags).
+ * DoesMoveMatchFlag, src/abilities.cc:358-386 -- the move's own static flag bit
+ * wins outright; only when it is unset does the function fall back to asking every
+ * ability on the move's OWN USER (never the other battler, never mold-breaker
+ * suppressed -- this is the attacker checking its own move) whether its
+ * `onModifyMoveFlags` grants the flag anyway. Break on the first grant.
  *
- * `TYPE_NORMAL` here is a literal dummy the C itself passes -- NOT the move's real
- * (possibly ability-converted) type -- so an onModifyMoveFlags block that's itself
- * conditioned on moveType only grants punch through this specific check when the
- * dummy happens to match. This is deliberately narrower than a general "does the
- * move have this flag" helper: DoesMoveMatchFlag's other 21 call sites across the
- * registry (Iron Fist itself, Mega Launcher, sound-based abilities, ...) each pass
- * their OWN moveType argument -- real in some cases, a different dummy in others --
- * so a single shared helper can't safely stand in for all of them without checking
- * each call site's own convention individually; only Punching Glove's is
- * implemented here (see OnModifyMoveFlagsContext's own doc for the full backstory
- * and why the rest are still NOT wired in). */
-export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record<string, true>, moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'): boolean {
-  if (moveFlags.punchBased) return true
+ * The `moveType` argument is the CALLER's, not the move's: Keen Edge passes the real
+ * type (:3676), while Striker/Iron Fist/Mega Launcher/sound pass the literal
+ * TYPE_NORMAL dummy from their IsXBoosted wrapper (src/battle_util.c:9374-9379).
+ * An onModifyMoveFlags block that is itself conditioned on moveType therefore only
+ * grants through the dummy callers when that dummy happens to match.
+ */
+export function doesMoveMatchFlag(
+  slots: AbilitySlots,
+  flag: OnModifyMoveFlagsContext['flag'],
+  moveType: string,
+  moveFlags: Record<string, true>,
+  moveSplit: OnModifyMoveFlagsContext['moveSplit'],
+): boolean {
+  if (moveFlags[flag]) return true
   let granted = false
-  forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
-    if (impl.onModifyMoveFlags?.({ flag: 'punchBased', moveType: 'NORMAL', moveFlags, moveSplit })) {
+  forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
+    if (impl.onModifyMoveFlags?.({ flag, moveType, moveFlags, moveSplit })) {
       granted = true
       return 'break'
     }
   })
   return granted
+}
+
+/**
+ * IsIronFistBoosted, src/battle_util.c:9409 -- `DoesMoveMatchFlag(battler, move,
+ * TYPE_NORMAL, MOVE_FLAG_PUNCH)`, i.e. the shared helper with the C's own literal
+ * TYPE_NORMAL dummy. Owner-side only (the move's own user, never the other battler),
+ * so it uses NEVER_SUPPRESSED like every other self-check.
+ */
+export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record<string, true>, moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'): boolean {
+  return doesMoveMatchFlag(attackerSlots, 'punchBased', 'NORMAL', moveFlags, moveSplit)
 }
 
 /** SetSwapDamageCategory's default-splitFlag branch (src/battle_util.c:7341-7348):
@@ -261,6 +266,12 @@ export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: OnSwapSplitCo
   return swap
 }
 
+/**
+ * Infiltrates, src/battle_script_commands.c:12271-12275 -- true if any of the
+ * ATTACKER's abilities bypasses screens for this hit. checkMoldBreaker=FALSE (an
+ * attacker's own trait, never suppressed by its own Mold Breaker), so this uses
+ * NEVER_SUPPRESSED like the offensive-multiplier loop's self-checks.
+ */
 export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnInfiltrateContext): boolean {
   let infiltrates = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
@@ -451,7 +462,7 @@ export function hasFlag(
   return found
 }
 
-type OffensiveCtxInputs = Omit<OffensiveMultiplierContext, 'modifier' | 'resistance'>
+type OffensiveCtxInputs = Omit<OffensiveMultiplierContext, 'modifier' | 'resistance' | 'matchesMoveFlag'>
 type DefensiveCtxInputs = Omit<DefensiveMultiplierContext, 'modifier' | 'resistance'>
 
 /**
@@ -483,7 +494,14 @@ export function computeAbilityMultiplier(
   // `modifier`/`resistance`) -- this is what makes the accumulator genuinely shared
   // across the offensive and defensive phases, rather than two independent objects
   // that happen to start from the same uq(1.0).
-  const shared = { ...offensive, ...defensive, modifier: uq(1.0), resistance: uq(1.0) }
+  //
+  // `matchesMoveFlag` is built here (not handed in) because DoesMoveMatchFlag scans
+  // the ATTACKER's own ability slots, which only this level has; a consumer like
+  // Keen Edge/Striker sees a plain closure over the same moveFlags/moveSplit it
+  // already reads.
+  const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
+    doesMoveMatchFlag(attackerSlots, flag, moveType, offensive.moveFlags, offensive.moveSplit)
+  const shared = { ...offensive, ...defensive, modifier: uq(1.0), resistance: uq(1.0), matchesMoveFlag }
 
   if (!hasFortKnox(defenderSlots)) {
     forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
