@@ -371,7 +371,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_TERRAIN_EXTENDER@battle_script_commands.c:HandleTerrainMove` | Terrain Extender | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:6458` | ported | `web/src/engine/sim/cycle115bFieldEffects.test.ts` |
 | `HOLD_EFFECT_TERRAIN_EXTENDER@battle_util.c:TryChangeBattleTerrain` | Terrain Extender | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3785` | ported | `web/src/engine/sim/cycle115bFieldEffects.test.ts` |
 | `HOLD_EFFECT_THICK_CLUB@battle_util.c:CalcAttackStat` | Thick Club | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7262` | ported | `web/src/engine/battleStat.test.ts` |
-| `HOLD_EFFECT_THROAT_SPRAY@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | Throat Spray | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6111` | ported | `web/src/engine/sim/heldItems.test.ts` |
+| `HOLD_EFFECT_THROAT_SPRAY@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | Throat Spray | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6111` | ported | `web/src/engine/sim/cycle150ibbdMoveFlagConsumers.test.ts` |
 | `HOLD_EFFECT_TOXIC_ORB@battle_util.c:ITEMEFFECT_ORBS` | Toxic Orb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6254` | ported | `web/src/engine/sim/heldItems.test.ts` |
 | `HOLD_EFFECT_TRAINING_BAND@battle_script_commands.c:Cmd_getexp` | Training Band | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3537` | unported | none |
 | `HOLD_EFFECT_TYPE_POWER@battle_util.c:CalcMoveBasePowerAfterModifiers` | Black Belt, Black Glasses, Charcoal, Dragon Fang, Fairy Feather +18 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7008` | ported | `web/src/engine/basePower.test.ts` |
