@@ -2715,7 +2715,8 @@ let commandHandlerLines: Map<string, number> | null = null
  * next one when the line carries a comment (`static void Cmd_playanimation2(void)  // ...`,
  * :4107-4108). Commands implemented as `VARIOUS_*` subcommands (there is no
  * `Cmd_checkpoltergeist`) or macros are simply absent from the map. Pass `fresh` to bypass
- * the module cache when reading a different source.
+ * the module cache when reading a different source; a fresh read is deliberately **not**
+ * written back, so it cannot poison later cached lookups with a different file's lines.
  */
 export function loadCommandHandlerLines(
   path: string = join(REPO_ROOT, BATTLE_SCRIPT_COMMANDS_PATH),
@@ -2736,7 +2737,7 @@ export function loadCommandHandlerLines(
       map.set(match[1], index + 1)
     }
   }
-  commandHandlerLines = map
+  if (!fresh) commandHandlerLines = map
   return map
 }
 

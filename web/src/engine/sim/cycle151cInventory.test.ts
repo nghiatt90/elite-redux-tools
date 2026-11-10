@@ -188,6 +188,8 @@ describe('cycle 151c item 4: loadCommandHandlerLines matches definitions', () =>
       // Commented definitions keep the `Cmd_` line, not the brace line.
       expect(map.get('spannedcommand')).toBe(2)
       expect(map.has('onlyprototype')).toBe(false)
+      // A fresh read must not poison the module cache for later callers.
+      expect(loadCommandHandlerLines().get('attackcanceler')).toBe(1046)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
