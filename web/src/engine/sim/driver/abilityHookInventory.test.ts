@@ -33,13 +33,14 @@ const ENGINE_DIR = fileURLToPath(new URL('../../', import.meta.url))
 const abilityHooks: Record<string, AbilityHookRecord> = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8'))
 
 /**
- * Pinned today at 72 -- this number should only go DOWN.
+ * Pinned today at 69 -- this number should only go DOWN.
  * Cycle 150g had moved onModifyMoveFlags from 10 unported to 3, because seven hooks gained a
  * returning-true flag-predicate branch. Cycle 150i reverts it to 10: a predicate branch is not a
  * port when the damage/immunity consumers still read the static move flags, and
- * MOVE_FLAG_CONSUMERS_WIRED is empty. 72 is therefore the 150b/150f value (65 + the 7 reverted).
+ * MOVE_FLAG_CONSUMERS_WIRED is empty. That left 72 (the 150b/150f value 65 + the 7 reverted).
+ * Cycle 162b ports Harukaze's, Generator's and Energized's onTerrain cases, which drops it to 69.
  */
-export const UNPORTED_PAIR_COUNT = 72
+export const UNPORTED_PAIR_COUNT = 69
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0

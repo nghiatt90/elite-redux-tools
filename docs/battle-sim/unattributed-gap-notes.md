@@ -25,9 +25,9 @@ grep -rnE "is not modelled|has no port|not applied|hook was not run|are not mode
   `unmodelled: [...]` string.
 - **(B) not a note** -- a comment, doc comment, trailing comment, inventory/doc text.
 
-**103 raised (A) sites. 59 of them do not contain an ability id in the raised text**
-(44 do: literal `ABILITY_X`, or an interpolated `${abilityId}` / `${slotAbility}` /
-`${held}` that is an ability id at runtime). 38 of the 103 are AI raise sites, and
+**102 raised (A) sites. 59 of them do not contain an ability id in the raised text**
+(43 do: literal `ABILITY_X`, or an interpolated `${abilityId}` / `${slotAbility}` /
+`${held}` that is an ability id at runtime). 38 of the 102 are AI raise sites, and
 36 of those carry no id. "reachable via: unknown" means the surrounding code does not
 make the triggering ability clear; it is not a claim that no ability can reach it.
 
@@ -172,7 +172,6 @@ Comments, doc comments, trailing comments and inventory text. None is raised.
 | line | note (abridged) | `ABILITY_` id in text? | raised by / reachable via |
 |---:|---|---|---|
 | 426 | Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCou... | yes | ABILITY_ANTICIPATION |
-| 3387 | if (held) unmodelled.push(`battler ${i}: ${held}'s onTerrain reaction (BattleScript_OnTerrainChanged, battle_scripts_1.s:9947-9955) is not applied | yes | `ON_TERRAIN_UNMODELLED_ABILITIES` -- the note interpolates `${held}`, so the raised text DOES name the ability |
 | 3456 | battler ${i}: Room Service (tryroomservice, battle_scripts_1.s:2647-2652) is not applied | **no** | reachable via: unknown |
 | 6473 | battler ${battlerId}: Conversion 2 (battle_script_commands.c:10798-10806) is not applied -- no hazardTypes (type chart) was supplied in deps | **no** | reachable via: unknown |
 | 9521 | UpdateBattlerItem's Greedy ability state (battle_script_commands.c:2209-2212; ABILITY_GREEDY) is not modelled | yes | ABILITY_GREEDY |

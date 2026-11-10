@@ -17,12 +17,14 @@ import {
   STATUS1_BURN,
   STATUS1_POISON,
   STATUS2_ENRAGED,
+  STATUS3_CHARGED_UP,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
   STATUS_FIELD_MISTY_TERRAIN,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TERRAIN_ANY,
   STATUS_FIELD_TOXIC_TERRAIN,
+  TAILWIND_DURATION_SHORT,
   WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_SUN_ANY,
@@ -39,7 +41,8 @@ import {
 } from './statBuffs'
 import { isBattlerAlive } from './turn'
 import { weatherHasEffect } from './fieldEndTurn'
-import { disableSwitchInAbility } from './switchInAbility'
+import { disableSwitchInAbility, trySetTailwind } from './switchInAbility'
+import { runOnTailwindStart } from './moveEffects'
 import {
   disguiseReformHandler,
   drakelpHeadReformHandler,
@@ -290,6 +293,50 @@ export function dispatchOnWeatherChange(state: BattleState, deps: OnWeatherDeps,
 }
 
 /**
+ * Impl<ABILITY_HARUKAZE>.onTerrain, src/abilities.cc:10101-10118: only the holder that set the
+ * Grassy Terrain (gFieldTimers.terrainBattlerId == battler, :10104) and only when that side has no
+ * Tailwind yet (:10105) sets Tailwind for TAILWIND_DURATION_SHORT (:10107-10110), disables Wind
+ * Rider's switch-in on the holder and its partner (:10112-10113, BATTLE_PARTNER is `battler ^ 2`,
+ * include/constants/battle.h:37), then pushes BattleScript_HarukazeTailwind
+ * (data/battle_scripts_1.s:9261-9265), whose `call BattleScript_OnTailwindStart` (:9264) is the
+ * Wind Rider / Wind Power loop.
+ */
+function harukazeTerrainHandler(state: BattleState, battlerId: number, deps: OnWeatherDeps, unmodelled: string[]): void {
+  // CHECK(IsTerrainActive(STATUS_FIELD_GRASSY_TERRAIN))
+  if (!isTerrainActive(state, STATUS_FIELD_GRASSY_TERRAIN, deps)) return
+  // CHECK(gFieldTimers.started.terrain)
+  if (!state.field.timers.started.terrain) return
+  // CHECK(gFieldTimers.terrainBattlerId == battler)
+  if (state.field.timers.terrainBattlerId !== battlerId) return
+
+  const side = battlerId & 1
+  // CHECK_NOT(gSideStatuses[side] & SIDE_STATUS_TAILWIND) plus the four side writes (:10107-10110).
+  // trySetTailwind returns false when Tailwind is already up, which is that CHECK_NOT.
+  if (!trySetTailwind(state, side, battlerId, TAILWIND_DURATION_SHORT)) return
+
+  disableSwitchInAbility(state, battlerId, 'ABILITY_WIND_RIDER', deps.dataContext)
+  disableSwitchInAbility(state, battlerId ^ 2, 'ABILITY_WIND_RIDER', deps.dataContext)
+  // BattleScript_HarukazeTailwind -> BattleScript_OnTailwindStart; BS_ATTACKER is the walked
+  // battler (BattleScript_OnTerrainChanged's onterrainchange), so the holder and its partner are
+  // the two BS_ATTACKER slots.
+  runOnTailwindStart(state, battlerId, undefined, deps, unmodelled)
+}
+
+/**
+ * Impl<ABILITY_GENERATOR>.onTerrain, src/abilities.cc:6192-6199 (ABILITY_ENERGIZED aliases it,
+ * :8723). CHECK_NOT(STATUS3_CHARGED_UP) then CHECK(IsTerrainActive(STATUS_FIELD_ELECTRIC_TERRAIN)),
+ * then BattleScript_GeneratorActivatesRet (data/battle_scripts_1.s:6245-6253), whose setcharge
+ * (src/battle_script_commands.c:11620-11623) sets STATUS3_CHARGED_UP. Unlike onEntry it does not
+ * touch the single-use ability counter.
+ */
+function generatorTerrainHandler(state: BattleState, battlerId: number, deps: OnWeatherDeps): void {
+  const battler = state.battlers[battlerId]!
+  if (hasFlag(battler.statuses3, STATUS3_CHARGED_UP)) return
+  if (!isTerrainActive(state, STATUS_FIELD_ELECTRIC_TERRAIN, deps)) return
+  battler.statuses3 = setFlag(battler.statuses3, STATUS3_CHARGED_UP)
+}
+
+/**
  * BattleScript_OnTerrainChanged (data/battle_scripts_1.s:9947-9955) and
  * VARIOUS_ON_TERRAIN_CHANGE (src/battle_script_commands.c:8191-8198).
  *
@@ -326,6 +373,15 @@ export function dispatchOnTerrainChange(state: BattleState, deps: OnWeatherDeps,
           // Impl<ABILITY_MIMICRY>.onTerrain (src/abilities.cc:3444-3449): CHECK(IsBattlerAlive)
           // then HandleMimicry (:3378-3440) with ABILITY_BS_CALL.
           if (isBattlerAlive(state, battlerId)) handleMimicry(state, battlerId)
+          break
+        case 'ABILITY_HARUKAZE':
+          // Impl<ABILITY_HARUKAZE>.onTerrain, src/abilities.cc:10101-10118.
+          harukazeTerrainHandler(state, battlerId, deps, unmodelled)
+          break
+        case 'ABILITY_ENERGIZED':
+        case 'ABILITY_GENERATOR':
+          // Impl<ABILITY_GENERATOR>.onTerrain (src/abilities.cc:6192-6199); Energized aliases it (:8723).
+          generatorTerrainHandler(state, battlerId, deps)
           break
       }
     }

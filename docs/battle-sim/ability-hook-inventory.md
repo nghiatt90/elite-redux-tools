@@ -71,7 +71,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onParentalBond | 23 | 23 | 0 | 0 | 0 | 23 |
 | onPreemptAction | 5 | 5 | 0 | 0 | 0 | 5 |
 | onPriority | 19 | 11 | 0 | 8 | 0 | 14 |
-| onReactive | 18 | 10 | 0 | 8 | 0 | 15 |
+| onReactive | 18 | 10 | 0 | 8 | 0 | 16 |
 | onRecoil | 5 | 5 | 0 | 0 | 0 | 5 |
 | onRevive | 2 | 1 | 0 | 1 | 0 | 1 |
 | onStab | 44 | 44 | 0 | 0 | 0 | 43 |
@@ -79,11 +79,11 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onStatLowered | 11 | 11 | 0 | 0 | 0 | 8 |
 | onStatusImmune | 40 | 40 | 0 | 0 | 0 | 39 |
 | onSwapSplit | 7 | 7 | 0 | 0 | 0 | 7 |
-| onTerrain | 7 | 4 | 0 | 3 | 0 | 6 |
+| onTerrain | 7 | 7 | 0 | 0 | 0 | 7 |
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1426** | **0** | **72** | **0** | **1375** |
+| **Total** | **1498** | **1429** | **0** | **69** | **0** | **1377** |
 
 ## Unported Ability Hook Pairs
 
@@ -177,7 +177,7 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 - `ABILITY_BLOODLUST` (src/abilities.cc:7995) *(ability mentioned in test)*
 - `ABILITY_FROSTBIND` (src/abilities.cc:9998) *(ability mentioned in test)*
 - `ABILITY_GREEDY` (src/abilities.cc:11066)
-- `ABILITY_HARUKAZE` (src/abilities.cc:10100)
+- `ABILITY_HARUKAZE` (src/abilities.cc:10100) *(ability mentioned in test)*
 - `ABILITY_HEMOTOXIN` (src/abilities.cc:10081) *(ability mentioned in test)*
 - `ABILITY_MENTAL_POLLUTION` (src/abilities.cc:12118)
 - `ABILITY_POWER_OF_ALCHEMY` (src/abilities.cc:3077) *(ability mentioned in test)*
@@ -190,12 +190,6 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 ### onStat (1)
 
 - `ABILITY_AERILATE` (src/abilities.cc:2502) *(ability mentioned in test)*
-
-### onTerrain (3)
-
-- `ABILITY_ENERGIZED` (src/abilities.cc:8721) *(ability mentioned in test)*
-- `ABILITY_GENERATOR` (src/abilities.cc:6174) *(ability mentioned in test)*
-- `ABILITY_HARUKAZE` (src/abilities.cc:10100)
 
 ## Bitfield-Only Abilities
 

@@ -3155,9 +3155,11 @@ export interface OnTailwindStartDeps {
  * BattleScript_OnTailwindStart (data/battle_scripts_1.s:9267-9272), the four
  * `callifability` calls run whenever Tailwind goes up: by the Tailwind move itself
  * (BattleScript_EffectTailwind -> Cmd_settailwind), by Bleakwind Storm's
- * EFFECT_TAILWIND_HIT, and by Air Blower / Air Lock / Blistering Sun's onEntry
+ * EFFECT_TAILWIND_HIT, by Air Blower / Air Lock / Blistering Sun's onEntry
  * (abilities.cc:1388-1407, :10517-10519, whose pushed BattleScript_AirBlowerActivated
- * calls `BattleScript_OnTailwindStart` at :9258). Callers reach it only once Tailwind is
+ * calls `BattleScript_OnTailwindStart` at :9258), and by Harukaze's onTerrain
+ * (abilities.cc:10101-10118, whose pushed BattleScript_HarukazeTailwind calls it at
+ * battle_scripts_1.s:9264). Callers reach it only once Tailwind is
  * actually up: the C's CHECK_NOT(gSideStatuses & SIDE_STATUS_TAILWIND) returns before the
  * script is pushed.
  *
@@ -3381,13 +3383,6 @@ function handleEerieFog(ctx: MoveEffectContext): ActionOutcome {
   return applyWeatherMove(ctx, ENUM_WEATHER_FOG)
 }
 
-/** Abilities with an onTerrain hook (abilityHooks.json), run by BattleScript_OnTerrainChanged
- * (data/battle_scripts_1.s:9947-9955, VARIOUS_ON_TERRAIN_CHANGE) -- Quark Drive is ported; others unmodelled. */
-const ON_TERRAIN_UNMODELLED_ABILITIES = [
-  'ABILITY_DRAKELP_HEAD', 'ABILITY_ENERGIZED', 'ABILITY_GENERATOR', 'ABILITY_HARUKAZE',
-  'ABILITY_MIMICRY', 'ABILITY_TOXIC_BOOST',
-]
-
 /**
  * Terrain moves: BattleScript_EffectElectricTerrain and its aliases (data/battle_scripts_1.s:2192-2206)
  * -> setterrain -> HandleTerrainMove (src/battle_script_commands.c:6404-6463). Unlike
@@ -3414,11 +3409,6 @@ export function setFieldTerrain(state: BattleState, battlerId: number, terrainFl
 
   dispatchOnTerrainChange(state, deps, unmodelled)
 
-  for (let i = 0; i < state.battlersCount; i++) {
-    const b = state.battlers[i]
-    const held = b && ON_TERRAIN_UNMODELLED_ABILITIES.find((id) => battlerHasSimAbility(state, b, id, false, i, false, deps.dataContext))
-    if (held) unmodelled.push(`battler ${i}: ${held}'s onTerrain reaction (BattleScript_OnTerrainChanged, battle_scripts_1.s:9947-9955) is not applied`)
-  }
   return true
 }
 
