@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   BATTLE_TYPE_SPECS,
@@ -11,12 +13,14 @@ import {
   classifyToken,
   generateEnvironmentInventoryDoc,
   hasLiveCaseBody,
+  hellTrainerSkillEvidence,
   isValidAllowlistCitation,
   loadBattleEventRows,
   loadEngineProductionFiles,
   loadEngineTestFiles,
   loadMapScripts,
   loadTrainers,
+  parseHellTrainerSkills,
   runInventory,
   scanMapScripts,
   testFileAssertsToken,
@@ -38,15 +42,21 @@ const TRAINER_COUNT = 932
 const BATTLE_EVENT_ROWS = 51
 const DISTINCT_BATTLE_EVENTS = 34
 
-const MAP_SETUP_UNITS = 22
+const MAP_SETUP_UNITS = 30
 const BATTLE_TYPE_UNITS = 5
 const DIFFICULTY_FLAG_UNITS = 9
 const TRAINER_FLAG_UNITS = 14
+const HELL_TRAINER_SKILL_UNITS = 29
 const BATTLE_EVENT_UNITS = 34
 const SCRIPT_EVENT_UNITS = 6
 
-/** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_UNIT_COUNT = 44
+/**
+ * Pinned count of unported units. Rises from 44 to 82 in cycle 153d because
+ * false allowlist (setweather) and false absence claims (hell_trainer_skills.h)
+ * were removed, adding 1 (setweather) + 4 (map headers) + 4 (script setweathers)
+ * + 29 (hell skills) = 38 unported units.
+ */
+export const UNPORTED_UNIT_COUNT = 82
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 9
@@ -126,6 +136,7 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(count('battle-type')).toBe(BATTLE_TYPE_UNITS)
     expect(count('difficulty-flag')).toBe(DIFFICULTY_FLAG_UNITS)
     expect(count('trainer-flag')).toBe(TRAINER_FLAG_UNITS)
+    expect(count('hell-trainer-skill')).toBe(HELL_TRAINER_SKILL_UNITS)
     expect(count('battle-event')).toBe(BATTLE_EVENT_UNITS)
     expect(count('script-event')).toBe(SCRIPT_EVENT_UNITS)
   })
@@ -169,7 +180,7 @@ describe('environment and scripted-condition completeness inventory', () => {
   })
 
   it('validates every allowlist citation format', () => {
-    expect(DEFAULT_ALLOWLIST.length).toBe(8)
+    expect(DEFAULT_ALLOWLIST.length).toBe(7)
     for (const entry of DEFAULT_ALLOWLIST) {
       expect(isValidAllowlistCitation(entry.cite)).toBe(true)
       expect(entry.reason.length).toBeGreaterThan(0)
@@ -723,5 +734,233 @@ describe('step 1: non-trainer-flag evidence', () => {
     )
     const inverse = inventory.units.find((u) => u.key === 'FLAG_SYS_INVERSE_BATTLE')
     expect(inverse?.productionEvidence).toBeNull()
+  })
+})
+
+const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url))
+
+describe('step 2-3: hell skills and map weather', () => {
+  const productionFiles = loadEngineProductionFiles()
+  const testFiles = loadEngineTestFiles()
+
+  it('parses hell trainer skills from synthetic source and real header (24 trainers, 29 rows)', () => {
+    const synthetic = `
+// Comment line
+const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE_EVENT_ARGUMENTS] = {
+    [TRAINER_SYNTHETIC_1] = {
+        [HELL_MODE_TRAINER_SKILL_1] = {BATTLE_EVENT_EVIOLITE, 0, 0}, // inline comment
+        [HELL_MODE_TRAINER_SKILL_2] = {BATTLE_EVENT_EXTRA_ABILITIES_1, ABILITY_UNNERVE, 0},
+    },
+    [TRAINER_SYNTHETIC_2] = {
+        [HELL_MODE_TRAINER_SKILL_1] = {BATTLE_EVENT_SPIKES, 1, 0},
+    },
+};
+`
+    const parsedSynthetic = parseHellTrainerSkills(synthetic)
+    expect(parsedSynthetic).toEqual([
+      {
+        trainer: 'TRAINER_SYNTHETIC_1',
+        slot: 'HELL_MODE_TRAINER_SKILL_1',
+        event: 'BATTLE_EVENT_EVIOLITE',
+        data0: '0',
+        data1: '0',
+        line: 5,
+      },
+      {
+        trainer: 'TRAINER_SYNTHETIC_1',
+        slot: 'HELL_MODE_TRAINER_SKILL_2',
+        event: 'BATTLE_EVENT_EXTRA_ABILITIES_1',
+        data0: 'ABILITY_UNNERVE',
+        data1: '0',
+        line: 6,
+      },
+      {
+        trainer: 'TRAINER_SYNTHETIC_2',
+        slot: 'HELL_MODE_TRAINER_SKILL_1',
+        event: 'BATTLE_EVENT_SPIKES',
+        data0: '1',
+        data1: '0',
+        line: 9,
+      },
+    ])
+
+    const realPath = join(
+      REPO_ROOT,
+      'pipeline/.upstream/eliteredux-source/src/data/hell_trainer_skills.h',
+    )
+    const realSource = readFileSync(realPath, 'utf-8')
+    const realRows = parseHellTrainerSkills(realSource)
+    const distinctTrainers = new Set(realRows.map((r) => r.trainer))
+    expect(distinctTrainers.size).toBe(24)
+    expect(realRows).toHaveLength(29)
+  })
+
+  it('contains one unit per hell skill row, all unported, each citing a header line that contains the event', () => {
+    const realPath = join(
+      REPO_ROOT,
+      'pipeline/.upstream/eliteredux-source/src/data/hell_trainer_skills.h',
+    )
+    const realSource = readFileSync(realPath, 'utf-8')
+    const realRows = parseHellTrainerSkills(realSource)
+    const realLines = realSource.split('\n')
+
+    for (const row of realRows) {
+      const unitKey = `${row.trainer}#${row.slot}:${row.event}`
+      const unit = result.units.find(
+        (u) => u.key === unitKey && u.kind === 'hell-trainer-skill',
+      )
+      expect(unit).toBeDefined()
+      expect(unit?.status).toBe('unported')
+      expect(unit?.citation).toBe(
+        `pipeline/.upstream/eliteredux-source/src/data/hell_trainer_skills.h:${row.line}`,
+      )
+      const citedLine = realLines[row.line - 1]
+      expect(citedLine).toContain(row.event)
+    }
+  })
+
+  it('mutation: session.ts reading sTrainerSkillList plus naming test required to flip ported', () => {
+    const calvinUnit = result.units.find(
+      (u) =>
+        u.key ===
+        'TRAINER_CALVIN_1#HELL_MODE_TRAINER_SKILL_1:BATTLE_EVENT_NO_PROTECT',
+    )!
+    expect(calvinUnit).toBeDefined()
+    expect(calvinUnit.status).toBe('unported')
+
+    const row = {
+      trainer: 'TRAINER_CALVIN_1',
+      slot: 'HELL_MODE_TRAINER_SKILL_1',
+      event: 'BATTLE_EVENT_NO_PROTECT',
+      data0: '0',
+      data1: '0',
+      line: 22,
+    }
+    const evidence = hellTrainerSkillEvidence(row)
+
+    // Baseline: unported
+    const baseline = classifyToken(
+      calvinUnit.token,
+      productionFiles,
+      testFiles,
+      evidence,
+    )
+    expect(baseline.status).toBe('unported')
+
+    // Mutation with naming/asserting test but WITHOUT sTrainerSkillList in session.ts: stays unported
+    const dummyAssertingTest: SourceFile[] = [
+      ...testFiles,
+      {
+        file: 'web/src/engine/sim/dummyHellSkill.test.ts',
+        source:
+          'it("tests hell skill", () => { expect(BATTLE_EVENT_NO_PROTECT).toBeDefined() })',
+      },
+    ]
+    const withoutSession = classifyToken(
+      calvinUnit.token,
+      productionFiles,
+      dummyAssertingTest,
+      evidence,
+    )
+    expect(withoutSession.status).toBe('unported')
+
+    // Mutation with sTrainerSkillList in session.ts but WITHOUT asserting test: stays unported
+    const sessionWithSkills = productionFiles.map((f) => {
+      if (!f.file.endsWith('session.ts')) return f
+      return {
+        file: f.file,
+        source: f.source + '\nconst _skillTable = sTrainerSkillList;\n',
+      }
+    })
+    const withoutTest = classifyToken(
+      calvinUnit.token,
+      sessionWithSkills,
+      [],
+      evidence,
+    )
+    expect(withoutTest.status).toBe('unported')
+
+    // Mutation with BOTH: flips to ported
+    const withBoth = classifyToken(
+      calvinUnit.token,
+      sessionWithSkills,
+      dummyAssertingTest,
+      evidence,
+    )
+    expect(withBoth.status).toBe('ported')
+  })
+
+  it('setweather is no longer in DEFAULT_ALLOWLIST; map-weather units exist for the 4 maps with verified trainer ids', () => {
+    expect(DEFAULT_ALLOWLIST.some((entry) => entry.key === 'setweather')).toBe(
+      false,
+    )
+
+    const setweatherUnit = result.units.find((u) => u.key === 'setweather')
+    expect(setweatherUnit).toBeDefined()
+    expect(setweatherUnit?.status).toBe('unported')
+    expect(setweatherUnit?.scope).toBe('overworld weather seeds battle weather')
+    expect(setweatherUnit?.citation).toBe(
+      'pipeline/.upstream/eliteredux-source/src/battle_util.c:4349',
+    )
+
+    // 4 map-weather units with verified trainer ids
+    const flanneryGym = result.units.find(
+      (u) =>
+        u.key === 'map-weather:LavaridgeTown_Gym_1F:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(flanneryGym).toBeDefined()
+    expect(flanneryGym?.status).toBe('unported')
+    expect(flanneryGym?.trainerIds).toContain('TRAINER_FLANNERY_1')
+    expect(flanneryGym?.trainerIds).toEqual([
+      'TRAINER_AXLE',
+      'TRAINER_COLE',
+      'TRAINER_DANIELLE',
+      'TRAINER_ELI',
+      'TRAINER_FLANNERY_1',
+      'TRAINER_GERALD',
+      'TRAINER_JACE',
+      'TRAINER_JEFF',
+      'TRAINER_KEEGAN',
+    ])
+
+    const mtPyre = result.units.find(
+      (u) => u.key === 'map-weather:MtPyre_Summit:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(mtPyre).toBeDefined()
+    expect(mtPyre?.status).toBe('unported')
+    expect(mtPyre?.trainerIds).toEqual(['TRAINER_ARCHIE_MT_PYRE'])
+
+    const desert = result.units.find(
+      (u) => u.key === 'map-weather:Route111_Desert:WEATHER_SANDSTORM',
+    )
+    expect(desert).toBeDefined()
+    expect(desert?.status).toBe('unported')
+    expect(desert?.trainerIds).toEqual([
+      'TRAINER_AMANDA',
+      'TRAINER_LETT',
+      'TRAINER_ORWELL',
+      'TRAINER_RODRICK',
+    ])
+
+    const sunhollow = result.units.find(
+      (u) => u.key === 'map-weather:Route111_SunhollowRuins:WEATHER_SANDSTORM',
+    )
+    expect(sunhollow).toBeDefined()
+    expect(sunhollow?.status).toBe('unported')
+    expect(sunhollow?.trainerIds).toEqual(['TRAINER_GRUNT_SUNHOLLOW_1'])
+
+    // Distinct setweather units in scripts
+    expect(
+      result.units.find((u) => u.key === 'setweather:WEATHER_DOWNPOUR'),
+    ).toBeDefined()
+    expect(
+      result.units.find((u) => u.key === 'setweather:WEATHER_FOG_HORIZONTAL'),
+    ).toBeDefined()
+    expect(
+      result.units.find((u) => u.key === 'setweather:WEATHER_RAIN'),
+    ).toBeDefined()
+    expect(
+      result.units.find((u) => u.key === 'setweather:WEATHER_SANDSTORM'),
+    ).toBeDefined()
   })
 })

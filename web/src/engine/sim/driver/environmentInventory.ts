@@ -49,6 +49,7 @@ export type EnvironmentUnitKind =
   | 'battle-type'
   | 'difficulty-flag'
   | 'trainer-flag'
+  | 'hell-trainer-skill'
   | 'battle-event'
   | 'script-event'
 
@@ -178,6 +179,8 @@ export interface EnvironmentUnit {
   trainerIds: string[]
   /** Production file and line providing qualifying evidence, or null. */
   productionEvidence?: string | null
+  /** Evidence configuration used to qualify this unit. */
+  evidence?: UnitEvidence
 }
 
 export interface EnvironmentUnitKindSummary {
@@ -244,12 +247,6 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<EnvironmentAllowlistEntry> = [
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5809',
   },
   {
-    key: 'setweather',
-    reason:
-      '`SetSav1Weather(weather);` writes the overworld weather; gBattleWeather is separately zeroed at battle start (src/battle_main.c:2721).',
-    cite: 'pipeline/.upstream/eliteredux-source/src/scrcmd.c:724',
-  },
-  {
     key: 'setfieldeffectargument',
     reason:
       '`extern s32 gFieldEffectArguments[8];` -- readers are field-effect, party-menu and battle-transition visual code; none drives battle state.',
@@ -274,6 +271,7 @@ export const UNIT_KIND_ORDER: ReadonlyArray<EnvironmentUnitKind> = [
   'battle-type',
   'difficulty-flag',
   'trainer-flag',
+  'hell-trainer-skill',
   'battle-event',
   'script-event',
 ]
@@ -295,6 +293,7 @@ const UPSTREAM = 'pipeline/.upstream/eliteredux-source'
 const UPSTREAM_SRC = `${UPSTREAM}/src`
 const BATTLE_EVENTS_C = `${UPSTREAM_SRC}/battle_events.c`
 const BATTLE_EVENTS_H = `${UPSTREAM}/include/constants/battle_events.h`
+const HELL_TRAINER_SKILLS_H = `${UPSTREAM_SRC}/data/hell_trainer_skills.h`
 const CODEGEN_PATH = `${UPSTREAM}/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt`
 const TRAINERS_PATH = join(REPO_ROOT, 'data/v2.65beta/trainers.json')
 const ENCOUNTERS_PATH = join(REPO_ROOT, 'data/v2.65beta/encounters.json')
@@ -464,6 +463,186 @@ export function scanTrainerIds(
     }
   }
   return [...ids].sort()
+}
+
+// ---------------------------------------------------------------------------
+// Hell trainer skills
+// ---------------------------------------------------------------------------
+
+export interface HellTrainerSkillRow {
+  trainer: string
+  slot: string
+  event: string
+  data0: string
+  data1: string
+  line: number
+}
+
+export function parseHellTrainerSkills(src: string): HellTrainerSkillRow[] {
+  const rows: HellTrainerSkillRow[] = []
+  let currentTrainer: string | null = null
+  const lines = src.split('\n')
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]
+    const commentIdx = rawLine.indexOf('//')
+    const line = (commentIdx >= 0 ? rawLine.slice(0, commentIdx) : rawLine).trim()
+    if (!line) continue
+
+    if (currentTrainer) {
+      const skillMatch = line.match(
+        /^\[([A-Za-z0-9_]+)\]\s*=\s*\{\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\},?/,
+      )
+      if (skillMatch) {
+        rows.push({
+          trainer: currentTrainer,
+          slot: skillMatch[1],
+          event: skillMatch[2],
+          data0: skillMatch[3],
+          data1: skillMatch[4],
+          line: i + 1,
+        })
+        continue
+      }
+
+      if (line.startsWith('}')) {
+        currentTrainer = null
+        continue
+      }
+    }
+
+    const trainerMatch = line.match(/^\[([A-Za-z0-9_]+)\]\s*=\s*\{\s*$/)
+    if (trainerMatch) {
+      currentTrainer = trainerMatch[1]
+      continue
+    }
+  }
+
+  return rows
+}
+
+export function hellTrainerSkillEvidence(row: HellTrainerSkillRow): UnitEvidence {
+  return {
+    productionFiles: [
+      'web/src/engine/sim/battleEvents.ts',
+      'web/src/engine/sim/driver/session.ts',
+    ],
+    caseBodyToken: row.event,
+    alsoRequires: [
+      {
+        file: 'web/src/engine/sim/driver/session.ts',
+        pattern: /\bsTrainerSkillList\b/,
+      },
+    ],
+    testMustAssert: true,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Map weather scanning
+// ---------------------------------------------------------------------------
+
+export const BATTLE_MAP_WEATHERS = [
+  'WEATHER_RAIN',
+  'WEATHER_RAIN_THUNDERSTORM',
+  'WEATHER_DOWNPOUR',
+  'WEATHER_SANDSTORM',
+  'WEATHER_DROUGHT',
+  'WEATHER_FOG_HORIZONTAL',
+] as const
+
+const BATTLE_WEATHER_SET = new Set<string>(BATTLE_MAP_WEATHERS)
+
+export const MAP_WEATHER_EVIDENCE: UnitEvidence = {
+  productionFiles: [
+    'web/src/engine/sim/driver/session.ts',
+    'web/src/engine/sim/driver/runBattle.ts',
+  ],
+  productionLinePattern: /\bweather\b/,
+  alsoRequires: [
+    {
+      file: 'web/src/engine/sim/driver/session.ts',
+      pattern: /\bweather\b/,
+    },
+  ],
+}
+
+export interface MapWeatherHit {
+  map: string
+  weather: string
+  trainerIds: string[]
+}
+
+export function scanMapHeaderWeathers(
+  scripts: ReadonlyArray<MapScript>,
+  mapsDir: string = MAPS_DIR,
+): MapWeatherHit[] {
+  const hits: MapWeatherHit[] = []
+  if (!existsSync(mapsDir)) return hits
+  const scriptMapNames = new Set(scripts.map((s) => s.map))
+  for (const entry of readdirSync(mapsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (!scriptMapNames.has(entry.name)) continue
+    const mapJsonPath = join(mapsDir, entry.name, 'map.json')
+    if (!existsSync(mapJsonPath)) continue
+    try {
+      const data = JSON.parse(readFileSync(mapJsonPath, 'utf-8')) as { weather?: string }
+      const weather = data.weather
+      if (weather && BATTLE_WEATHER_SET.has(weather)) {
+        const trainerIds = scanTrainerIds(scripts, [entry.name])
+        if (trainerIds.length > 0) {
+          hits.push({ map: entry.name, weather, trainerIds })
+        }
+      }
+    } catch {
+      // ignore malformed map.json
+    }
+  }
+  return hits.sort((a, b) => a.map.localeCompare(b.map))
+}
+
+export interface ScriptSetweatherHit {
+  weather: string
+  command: string
+  occurrences: Array<{ map: string; line: number }>
+  trainerIds: string[]
+}
+
+export function scanScriptSetweathers(
+  scripts: ReadonlyArray<MapScript>,
+): ScriptSetweatherHit[] {
+  const byWeather = new Map<string, Array<{ map: string; line: number }>>()
+  for (const script of scripts) {
+    const lines = script.source.split('\n')
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]
+      if (isCommentLine(line)) continue
+      const match = line.match(/\bsetweather\s+(WEATHER_[A-Z0-9_]+)\b/)
+      if (match) {
+        const weather = match[1]
+        if (BATTLE_WEATHER_SET.has(weather)) {
+          const list = byWeather.get(weather) ?? []
+          list.push({ map: script.map, line: index + 1 })
+          byWeather.set(weather, list)
+        }
+      }
+    }
+  }
+
+  const result: ScriptSetweatherHit[] = []
+  for (const [weather, occurrences] of [...byWeather.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  )) {
+    const maps = [...new Set(occurrences.map((o) => o.map))].sort()
+    const trainerIds = scanTrainerIds(scripts, maps)
+    result.push({
+      weather,
+      command: `setweather ${weather}`,
+      occurrences,
+      trainerIds,
+    })
+  }
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -867,6 +1046,7 @@ export interface MapSetupSpec {
   key: string
   token: string
   site: string
+  scope?: string
   citation: string
   evidence?: UnitEvidence
 }
@@ -987,7 +1167,9 @@ export const MAP_SETUP_SPECS: ReadonlyArray<MapSetupSpec> = [
     key: 'setweather',
     token: 'setweather',
     site: 'ScrCmd_setweather',
-    citation: cite(`${UPSTREAM_SRC}/scrcmd.c`, 724),
+    scope: 'overworld weather seeds battle weather',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4349),
+    evidence: MAP_WEATHER_EVIDENCE,
   },
   {
     key: 'setfieldeffectargument',
@@ -1135,7 +1317,7 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     key: 'RegisterTrainerBattleEvents',
     token: 'RegisterTrainerBattleEvents',
     site: 'CreateNPCTrainerParty',
-    scope: 'hell-mode extra trainer skills',
+    scope: 'data/hell_trainer_skills.h (29 rows across 24 trainers)',
     citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1773),
   },
 ]
@@ -1407,6 +1589,7 @@ export interface EnvironmentInventoryOptions {
   battleEventRows?: ReadonlyArray<EncounterBattleEventRow>
   eventSource?: string
   eventHeaderSource?: string
+  hellTrainerSkillsSource?: string
   /** Joined production corpus; used by synthetic tests instead of `productionFiles`. */
   productionSource?: string
   /** Per-file production corpus, so `productionFiles` evidence can scope a match. */
@@ -1416,6 +1599,7 @@ export interface EnvironmentInventoryOptions {
   extraMapSetupSpecs?: ReadonlyArray<MapSetupSpec>
   extraScriptEventSpecs?: ReadonlyArray<ScriptEventSpec>
   battleEventEvidence?: (event: string) => UnitEvidence
+  mapsDir?: string
 }
 
 function fileOf(citation: string): string {
@@ -1477,6 +1661,7 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
       testFile: classification.testFile,
       trainerIds: [...trainerIds].sort(),
       productionEvidence: allow ? null : classification.productionEvidence,
+      evidence: spec.evidence,
     })
   }
 
@@ -1490,9 +1675,10 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
         token: spec.token,
         site: spec.site,
         scope:
-          maps.length > 0
+          spec.scope ??
+          (maps.length > 0
             ? `${maps.length} map(s), ${occurrences.length} line(s): ${maps.join(', ')}`
-            : '0 maps',
+            : '0 maps'),
         citation: spec.citation,
         evidence: spec.evidence,
       },
@@ -1500,9 +1686,72 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
     )
   }
 
+  const mapHeaderWeathers = scanMapHeaderWeathers(scripts, options.mapsDir ?? MAPS_DIR)
+  for (const hit of mapHeaderWeathers) {
+    const key = `map-weather:${hit.map}:${hit.weather}`
+    const citation = cite(`${UPSTREAM_SRC}/battle_util.c`, 4349)
+    const scope =
+      hit.weather === 'WEATHER_RAIN_THUNDERSTORM'
+        ? `${hit.map} (${hit.weather}) + electric terrain (src/battle_util.c:4316-4322)`
+        : `${hit.map} (${hit.weather})`
+    pushUnit(
+      'map-setup',
+      {
+        key,
+        token: hit.weather,
+        site: 'map.json weather',
+        scope,
+        citation,
+        evidence: MAP_WEATHER_EVIDENCE,
+      },
+      hit.trainerIds,
+    )
+  }
+
+  const scriptSetweathers = scanScriptSetweathers(scripts)
+  for (const hit of scriptSetweathers) {
+    const key = `setweather:${hit.weather}`
+    const citation = cite(`${UPSTREAM_SRC}/battle_util.c`, 4349)
+    const scope = `${hit.occurrences.map((o) => `${o.map}:${o.line}`).join(', ')} (${hit.command})`
+    pushUnit(
+      'map-setup',
+      {
+        key,
+        token: hit.weather,
+        site: 'ScrCmd_setweather',
+        scope,
+        citation,
+        evidence: MAP_WEATHER_EVIDENCE,
+      },
+      hit.trainerIds,
+    )
+  }
+
   for (const spec of BATTLE_TYPE_SPECS) pushUnit('battle-type', spec)
   for (const spec of DIFFICULTY_FLAG_SPECS) pushUnit('difficulty-flag', spec)
   for (const spec of TRAINER_FLAG_SPECS) pushUnit('trainer-flag', spec)
+
+  const hellSkillsPath = join(REPO_ROOT, HELL_TRAINER_SKILLS_H)
+  const hellSkillsSource =
+    options.hellTrainerSkillsSource ??
+    (existsSync(hellSkillsPath) ? readFileSync(hellSkillsPath, 'utf-8') : '')
+  const hellSkillRows = parseHellTrainerSkills(hellSkillsSource)
+  for (const row of hellSkillRows) {
+    const key = `${row.trainer}#${row.slot}:${row.event}`
+    const citation = cite(HELL_TRAINER_SKILLS_H, row.line)
+    pushUnit(
+      'hell-trainer-skill',
+      {
+        key,
+        token: row.event,
+        site: 'sTrainerSkillList',
+        scope: `${row.trainer} (${row.slot})`,
+        citation,
+        evidence: hellTrainerSkillEvidence(row),
+      },
+      [row.trainer],
+    )
+  }
 
   const eventRowsByEvent = new Map<string, EncounterBattleEventRow[]>()
   for (const row of battleEventRows) {
@@ -1681,10 +1930,10 @@ export function generateEnvironmentInventoryDoc(
     'Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not',
   )
   lines.push(
-    'empty: eight units are provably battle-inert (cosmetics, overworld weather, field-effect arguments, prizes).',
+    `empty: ${result.totalAllowlisted} units are provably battle-inert (cosmetics, field-effect arguments, prizes).`,
   )
   lines.push('')
-  lines.push('1. **map-setup**: a flag/var/special/script command set by a map script before a battle.')
+  lines.push('1. **map-setup**: a flag/var/special/script command set by a map script before a battle, or map header weather.')
   lines.push(
     `   The scan covers all ${result.mapFileCount} \`data/maps/*/scripts.pory\` files; ${result.mapsWithSetup} contain at least one of`,
   )
@@ -1700,9 +1949,12 @@ export function generateEnvironmentInventoryDoc(
   )
   lines.push('4. **trainer-flag**: a `trainers.json` field, or an `AI_FLAG_*` bit the codegen mints from one.')
   lines.push(
-    '5. **battle-event**: one distinct `event` in `data/v2.65beta/encounters.json` `battleEvents`, with the C handler line.',
+    '5. **hell-trainer-skill**: per-(trainer, skill) entries from `data/hell_trainer_skills.h` registered under Hell difficulty.',
   )
-  lines.push('6. **script-event**: a battle script label pushed by one of the scripted setups above.')
+  lines.push(
+    '6. **battle-event**: one distinct `event` in `data/v2.65beta/encounters.json` `battleEvents`, with the C handler line.',
+  )
+  lines.push('7. **script-event**: a battle script label pushed by one of the scripted setups above.')
   lines.push('')
   lines.push(
     '`registerbattleevent` calls in map scripts are extracted into `encounters.json`, so they are represented by the',
@@ -1753,7 +2005,10 @@ export function generateEnvironmentInventoryDoc(
       return
     }
     const hasProductionEvidence =
-      kind === 'battle-type' || kind === 'map-setup' || kind === 'battle-event'
+      kind === 'battle-type' ||
+      kind === 'map-setup' ||
+      kind === 'battle-event' ||
+      kind === 'hell-trainer-skill'
     if (hasProductionEvidence) {
       lines.push(
         '| Unit key | Fights / maps | C citation | Status | Test file | Production evidence |',
@@ -1783,6 +2038,7 @@ export function generateEnvironmentInventoryDoc(
   pushSection('battle-type', 'Battle-Type Units')
   pushSection('difficulty-flag', 'Difficulty-Flag Units')
   pushSection('trainer-flag', 'Trainer-Flag Units')
+  pushSection('hell-trainer-skill', 'Hell-Trainer-Skill Units')
   pushSection('battle-event', 'Battle-Event Units')
   pushSection('script-event', 'Script-Event Units')
 
@@ -1803,12 +2059,29 @@ export function generateEnvironmentInventoryDoc(
   )
   lines.push('  allowlisted as inert for battle.')
   lines.push(
-    '- **Hell-mode trainer skills**: `src/battle_events.c:502` includes `data/hell_trainer_skills.h`, which is absent from',
+    '- **Hell-mode trainer skills**: `data/hell_trainer_skills.h` (`src/battle_events.c:502`) defines 29 skill rows across 24 trainers.',
   )
   lines.push(
-    '  the pinned tree. The events registered by `RegisterTrainerBattleEvents` therefore cannot be enumerated; the unit is',
+    '  `RegisterTrainerBattleEvents` (`src/battle_events.c:504-525`) registers these for Hell tier (`src/battle_main.c:1773`).',
   )
-  lines.push('  reported unported rather than guessed.')
+  lines.push(
+    '  Events not in `encounters.json` `battleEvents`: `BATTLE_EVENT_EVIOLITE`, `BATTLE_EVENT_EXTRA_ABILITIES_1`,',
+  )
+  lines.push(
+    '  `BATTLE_EVENT_EXTRA_ABILITIES_2`, `BATTLE_EVENT_EXTRA_ABILITIES_3`, `BATTLE_EVENT_LAST_STAND_STAGES`, `BATTLE_EVENT_TOXIC_SPIKES`.',
+  )
+  lines.push(
+    '  In `battleEvents.ts`, cases exist for `TOXIC_SPIKES` (:367) and `LAST_STAND_STAGES` (:548) (case exists, never registered for hell);',
+  )
+  lines.push(
+    '  `EVIOLITE` and `EXTRA_ABILITIES_1/2/3` have no case (C: `src/battle_util.c:7441-7445` and `src/pokemon.c:6369-6390, 6406-6432`).',
+  )
+  lines.push(
+    '  Other table events (`NO_PROTECT`, `SPIKES`, `PERMA_STICKY_WEB`, `ONSTAY_LEECH_SEED`, `POSTURE_DEFENSE`, `STEALTH_ROCK`, `LAST_BLEED`)',
+  )
+  lines.push(
+    '  have cases in `battleEvents.ts`, but are never registered for hell because `session.ts` does not read `sTrainerSkillList`.',
+  )
   lines.push(
     '- **`setwildbattlewithcustommoves`**: implementation read at `src/scrcmd.c:2620` (species, level, item, four moves,',
   )
@@ -1816,9 +2089,23 @@ export function generateEnvironmentInventoryDoc(
   )
   lines.push('  not simulated.')
   lines.push(
-    '- **`setweather`**: `ScrCmd_setweather` (`src/scrcmd.c:720-726`) only calls `SetSav1Weather`; `gBattleWeather` is',
+    '- **`setweather` and map weather**: `ScrCmd_setweather` (`src/scrcmd.c:720-726`) only calls `SetSav1Weather`. Overworld weather',
   )
-  lines.push('  zeroed at `src/battle_main.c:2721`, so overworld weather cannot enter a battle.')
+  lines.push(
+    '  enters battles via `TryDoEventsBeforeFirstTurn` calling `AbilityBattleEffects(ABILITYEFFECT_SWITCH_IN_WEATHER)` once',
+  )
+  lines.push(
+    '  (`src/battle_main.c:3333-3336`, `src/battle_util.c:4349-4389`). RAIN, RAIN_THUNDERSTORM and DOWNPOUR set permanent+temporary',
+  )
+  lines.push(
+    '  rain, SANDSTORM sets sandstorm, DROUGHT sets sun, and FOG_HORIZONTAL sets `WEATHER_FOG_PERMANENT` (FOG_DIAGONAL is commented out',
+  )
+  lines.push(
+    '  at `:4375` and does not trigger). `WEATHER_RAIN_THUNDERSTORM` additionally sets permanent Electric Terrain (`src/battle_util.c:4316-4322`).',
+  )
+  lines.push(
+    '  Because the sim does not seed battle weather from map data, `setweather` and map-weather units are reported unported rather than allowlisted.',
+  )
   lines.push(
     '- **Link/multi battles**: `BATTLE_TYPE_MULTI` is only set by `src/battle_tower.c:1526` (Battle Tower), which no scanned',
   )
