@@ -188,6 +188,37 @@ describe('Cycle 158 - one-turn volatiles (ENDTURN_GENERIC_BATTLER_TIMERS, battle
     expect(fresh.battlers[0]!.volatiles.drenched).toBe(2)
   })
 
+  it('a Baton Pass carry-over of dazed=3 and drenched=2 leaves 2 and 1 after the tick', () => {
+    // Baton Pass copies the outgoing mon's volatile timers to the replacement
+    // (battle_main.c:2878-2890, turn.ts savedVolatiles), then this same end turn ticks them
+    // once. Starting above 1 is what distinguishes "carried over and ticked" from "dropped".
+    const bpMoves: SimPartyMon['moves'] = ['MOVE_BATON_PASS', null, null, null]
+    const state = battle(
+      { moves: bpMoves, pp: [20, 0, 0, 0] },
+      [
+        partyMon('SPECIES_MUDKIP', { moves: bpMoves, pp: [20, 0, 0, 0] }),
+        partyMon('SPECIES_MUDKIP'),
+      ],
+    )
+    state.sides[1].party = [partyMon('SPECIES_MUDKIP')]
+    const b = state.battlers[0]!
+    b.volatiles.dazed = 3
+    b.volatiles.trepidation = 3
+    b.volatiles.drenched = 2
+    // The test seeds the timers directly, so nothing marks them as started this turn.
+    b.volatiles.started.dazed = false
+    b.volatiles.started.trepidation = false
+    b.volatiles.started.drenched = false
+
+    const deps: TurnLoopDeps = { ...LOOP_DEPS, replacement: { chooseReplacement: () => 1 } }
+    executeTurn(state, [useMove(1, 'MOVE_BATON_PASS'), null], deps)
+
+    expect(state.battlers[0]!.partyIndex).toBe(1)
+    expect(state.battlers[0]!.volatiles.dazed).toBe(2)
+    expect(state.battlers[0]!.volatiles.trepidation).toBe(2)
+    expect(state.battlers[0]!.volatiles.drenched).toBe(1)
+  })
+
   it('an entry ability sets violentRush for its entry turn and the next end turn clears it', () => {
     const state = battle(
       {},

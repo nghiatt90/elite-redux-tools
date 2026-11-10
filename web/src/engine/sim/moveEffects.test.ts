@@ -8942,10 +8942,13 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(switchedIn.volatiles.critBoost).toBe(1)
             expect(switchedIn.volatiles.perishSongTimer).toBe(2)
             expect(switchedIn.volatiles.perishSongTimerStartValue).toBe(3)
-            expect(switchedIn.volatiles.dazed).toBe(1)
-            // ticks down 1 -> 0 at the end of the turn (SUBTRACT_VOLATILE_TIMER, battle_util.c:2976)
+            // All three tick down 1 -> 0 at the end of the turn: SUBTRACT_VOLATILE_TIMER
+            // runs on dazed, trepidation, drenched in that order (battle_util.c:2975-2977).
+            // `started.*` is false here (the test sets the timers directly, without the
+            // move that would mark them started), so the end-turn ladder decrements each.
+            expect(switchedIn.volatiles.dazed).toBe(0)
             expect(switchedIn.volatiles.trepidation).toBe(0)
-            expect(switchedIn.volatiles.drenched).toBe(1)
+            expect(switchedIn.volatiles.drenched).toBe(0)
 
             // Outgoing mon spent PP (20 -> 19)
             expect(state.sides[0].party[0]!.pp[0]).toBe(19)
