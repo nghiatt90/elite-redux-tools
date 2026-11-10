@@ -50,6 +50,6 @@ describe('cycle 152g - battle_ai_ability.c is an AI trigger file', () => {
   it('keeps the CanFling citation on the definition line, not the comment above it', () => {
     const result = runInventory(items)
     const canFling = unitFor(result, 'fling', 'CanFling', 'CanFling')
-    expect(canFling?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_util.c:8414')
+    expect(canFling?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_util.c:8413')
   })
 })

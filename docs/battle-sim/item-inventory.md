@@ -531,7 +531,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 
 | Unit key | Items | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `CanFling` |  | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8414` | unported | none |
+| `CanFling` |  | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8413` | unported | none |
 | `ITEM_BIG_NUGGET` | Big Nugget | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6808` | unported (registered, untested) | none |
 | `ITEM_BLACK_SLUDGE` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8422` | unported (registered, untested) | none |
 | `ITEM_FLAME_ORB` | Flame Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8406` | unported (registered, untested) | none |
