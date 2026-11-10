@@ -524,14 +524,21 @@ export function extractModifyEffectChanceAbilities(source?: string): Set<string>
 }
 
 /**
- * The onReactive ported set: the abilities the reactive dispatcher really handles. That is the
- * PoisonPuppeteerClone set `runReactiveAbilityEffects` branches on (its own source of truth, not
- * the data census in statusEffects.ts) plus every ability compared in `runReactiveAbilityEffects`.
- * The two clone-set members whose handler only raises a "not modelled" note (Frostbind, Hemotoxin)
- * are still removed by NOTE_ONLY_SET during classification.
+ * The onReactive ported set: the abilities the reactive dispatcher really handles. That is every
+ * ability compared in `runReactiveAbilityEffects`, plus the intersection of the gate set
+ * `POISON_PUPPETEER_CLONE_ABILITIES` with the ids that appear as `case 'ABILITY_X'` labels inside
+ * `runPoisonPuppeteerClone`. The gate set alone is not evidence -- a mutation that deletes a case
+ * block must drop the ability, otherwise the dispatcher's real shape is not what is being measured.
+ * Blood Bath, Cryostasis, Chokehold, Entrance, Neurotoxin, Poison Puppeteer and Set Ablaze each have
+ * a `case` label. Frostbind and Hemotoxin are in the gate set but have no label (they are handled by
+ * the `abilityId ===` branch that only pushes a note), so they never enter this set; NOTE_ONLY_SET
+ * still removes any note-only pair during classification.
  */
 export function extractReactiveAbilities(source?: string): Set<string> {
-  return new Set<string>([...POISON_PUPPETEER_CLONE_ABILITIES, ...extractReactiveExtraAbilities(source)])
+  const content = source ?? readFileSync(STAT_BUFFS_PATH, 'utf-8')
+  const cloneHandled = extractCaseLabelsFromFunction(content, 'function runPoisonPuppeteerClone(')
+  const cloneAbilities = [...POISON_PUPPETEER_CLONE_ABILITIES].filter((id) => cloneHandled.has(id))
+  return new Set<string>([...cloneAbilities, ...extractReactiveExtraAbilities(content)])
 }
 
 /**
@@ -646,11 +653,26 @@ export function extractMoveFlagPredicateAbilities(source: string, declaration: s
 }
 
 /**
- * The onModifyMoveFlags abilities whose every C-granted flag family has a returning-true sim
- * branch in the matching predicate. An ability whose hook grants a family the sim has no predicate
- * for (PUNCH today) is not ported, and neither is one whose branch condition differs from the C.
+ * The move-flag families whose damage/immunity *consumers* read the sim predicate instead of the
+ * static move flag. Empty: the predicates mention the abilities, but Soundproof / Punk Rock /
+ * Amplifier still test `moveFlags.sound`, and the damage engine never applies Keen Edge's or
+ * Striker's multiplier through `isKeenEdgeMove` / `isStrikerMove`, so no family is wired end to end.
+ * A later cycle that ports those consumers adds the families here; until then every
+ * onModifyMoveFlags pair stays unported.
  */
-export function extractModifyMoveFlagsAbilities(sources: ModifyMoveFlagsSources = {}): Set<string> {
+export const MOVE_FLAG_CONSUMERS_WIRED: readonly MoveFlagFamily[] = []
+
+/**
+ * The onModifyMoveFlags abilities whose every C-granted flag family is both wired into its consumer
+ * (`consumersWired`, `MOVE_FLAG_CONSUMERS_WIRED` by default) and has a returning-true sim branch in
+ * the matching predicate. An ability whose hook grants a family the sim has no predicate for (PUNCH
+ * today) is not ported, and neither is one whose branch condition differs from the C. `consumersWired`
+ * is a parameter so tests can exercise the gate without changing the module constant.
+ */
+export function extractModifyMoveFlagsAbilities(
+  sources: ModifyMoveFlagsSources = {},
+  consumersWired: readonly MoveFlagFamily[] = MOVE_FLAG_CONSUMERS_WIRED,
+): Set<string> {
   const contents: Record<'statusEffects' | 'moveEnd' | 'moveTargetFlags', string> = {
     statusEffects: sources.statusEffects ?? readFileSync(STATUS_EFFECTS_PATH, 'utf-8'),
     moveEnd: sources.moveEnd ?? readFileSync(MOVE_END_PATH, 'utf-8'),
@@ -664,7 +686,9 @@ export function extractModifyMoveFlagsAbilities(sources: ModifyMoveFlagsSources 
   }
   const result = new Set<string>()
   for (const [id, flags] of Object.entries(MODIFY_MOVE_FLAGS_GRANTS)) {
-    if (flags.every((family) => perFamily.get(family)?.has(id) === true)) result.add(id)
+    if (flags.every((family) => consumersWired.includes(family) && perFamily.get(family)?.has(id) === true)) {
+      result.add(id)
+    }
   }
   return result
 }
@@ -1120,6 +1144,8 @@ export function isDirectlyPorted(
     case 'onModifyEffectChance':
       return PORTED_MODIFY_EFFECT_CHANCE_ABILITIES.has(abilityId)
     case 'onModifyMoveFlags':
+      // Empty while MOVE_FLAG_CONSUMERS_WIRED is empty, i.e. false for all 10 pairs. A predicate
+      // mentioning the ability is not a port: the damage/immunity consumers still read static flags.
       return PORTED_MODIFY_MOVE_FLAGS_ABILITIES.has(abilityId)
     case 'onModifyTargetFlag':
       return PORTED_TARGET_FLAG_ABILITIES.has(abilityId)
@@ -1385,10 +1411,10 @@ export function generateInventoryDoc(
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.')
   lines.push('14. **onModifyEffectChance**: `abilityId === \'ABILITY_X\'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.')
-  lines.push('15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when every granted family has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). PUNCH has no sim predicate (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported.')
+  lines.push('15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). `MOVE_FLAG_CONSUMERS_WIRED` is **empty**, so all 10 pairs are unported: the predicates mention the abilities, but the consumers that matter in the damage path still read the static move flags, so the ability changes nothing there. The unwired consumer groups: (a) `ABILITY_SOUNDPROOF` (`web/src/engine/abilities/impl/26-immune.ts:53`) and `ABILITY_PUNK_ROCK` / `ABILITY_AMPLIFIER` (`web/src/engine/abilities/impl/11-offensive-multiplier-d.ts:141,159,162`) test the static `ctx.moveFlags.sound` where the C calls `IsSoundMove` (`src/abilities.cc:1054`, `:3307`); (b) `ABILITY_CHESTNUT_AXE` grants KEEN_EDGE (`src/abilities.cc:3676`, hook `:11706-11712`) but the damage engine never applies the C\'s `DoesMoveMatchFlag(..., MOVE_FLAG_KEEN_EDGE)` 1.3x (Chestnut Axe + Energy Ball `roll[15]` is 22 with and without the ability); (c) `ABILITY_BACKSTREET_BOY` grants KICK (`src/abilities.cc:4609`, hook `:11570-11583`) but the damage engine never applies `IsStrikerBoosted` (Backstreet Boy + Fiery Dance is 152 with and without the ability). PUNCH has no sim predicate at all (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported even once every other family is wired.')
   lines.push('16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
   lines.push('17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
-  lines.push('18. **onReactive**: `abilityId === \'ABILITY_X\'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the abilities the same dispatcher routes into `runPoisonPuppeteerClone` through its exported `POISON_PUPPETEER_CLONE_ABILITIES` set; note-only branches are unported.')
+  lines.push('18. **onReactive**: `abilityId === \'ABILITY_X\'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the members of `POISON_PUPPETEER_CLONE_ABILITIES` that appear as `case \'ABILITY_X\'` labels inside `runPoisonPuppeteerClone` (the gate set alone is not evidence: Frostbind and Hemotoxin are in it but only raise a note); note-only branches are unported.')
   lines.push('19. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).')
   lines.push('20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).')
   lines.push('21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).')

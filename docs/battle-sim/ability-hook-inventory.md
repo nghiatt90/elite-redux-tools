@@ -25,10 +25,10 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).
 13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.
 14. **onModifyEffectChance**: `abilityId === 'ABILITY_X'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.
-15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when every granted family has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). PUNCH has no sim predicate (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported.
+15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). `MOVE_FLAG_CONSUMERS_WIRED` is **empty**, so all 10 pairs are unported: the predicates mention the abilities, but the consumers that matter in the damage path still read the static move flags, so the ability changes nothing there. The unwired consumer groups: (a) `ABILITY_SOUNDPROOF` (`web/src/engine/abilities/impl/26-immune.ts:53`) and `ABILITY_PUNK_ROCK` / `ABILITY_AMPLIFIER` (`web/src/engine/abilities/impl/11-offensive-multiplier-d.ts:141,159,162`) test the static `ctx.moveFlags.sound` where the C calls `IsSoundMove` (`src/abilities.cc:1054`, `:3307`); (b) `ABILITY_CHESTNUT_AXE` grants KEEN_EDGE (`src/abilities.cc:3676`, hook `:11706-11712`) but the damage engine never applies the C's `DoesMoveMatchFlag(..., MOVE_FLAG_KEEN_EDGE)` 1.3x (Chestnut Axe + Energy Ball `roll[15]` is 22 with and without the ability); (c) `ABILITY_BACKSTREET_BOY` grants KICK (`src/abilities.cc:4609`, hook `:11570-11583`) but the damage engine never applies `IsStrikerBoosted` (Backstreet Boy + Fiery Dance is 152 with and without the ability). PUNCH has no sim predicate at all (the sim only reads the static `punchBased` flag), so any hook that grants PUNCH stays unported even once every other family is wired.
 16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).
 17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).
-18. **onReactive**: `abilityId === 'ABILITY_X'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the abilities the same dispatcher routes into `runPoisonPuppeteerClone` through its exported `POISON_PUPPETEER_CLONE_ABILITIES` set; note-only branches are unported.
+18. **onReactive**: `abilityId === 'ABILITY_X'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the members of `POISON_PUPPETEER_CLONE_ABILITIES` that appear as `case 'ABILITY_X'` labels inside `runPoisonPuppeteerClone` (the gate set alone is not evidence: Frostbind and Hemotoxin are in it but only raise a note); note-only branches are unported.
 19. **onRevive**: Handled in `latchRecurringNightmareOnFaint` (`web/src/engine/sim/turn.ts`, `ABILITY_RECURRING_NIGHTMARE`).
 20. **onStatLowered**: Handled in `ON_STAT_LOWERED_HOOKS` (`web/src/engine/sim/statBuffs.ts`).
 21. **onStatusImmune**: Handled in `OWN_STATUS_IMMUNE_CONDITIONS` (`web/src/engine/sim/statusEffects.ts`).
@@ -46,7 +46,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onAccuracy | 50 | 50 | 0 | 0 | 0 | 50 |
 | onAfterTypeEffectiveness | 13 | 13 | 0 | 0 | 0 | 13 |
 | onAttacker | 144 | 139 | 0 | 5 | 0 | 144 |
-| onBattlerFaints | 55 | 38 | 0 | 17 | 0 | 35 |
+| onBattlerFaints | 55 | 38 | 0 | 17 | 0 | 37 |
 | onBeforeAttack | 9 | 0 | 0 | 9 | 0 | 3 |
 | onBlockStatDrops | 11 | 11 | 0 | 0 | 0 | 9 |
 | onCanStatusType | 8 | 8 | 0 | 0 | 0 | 8 |
@@ -63,7 +63,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onImmune | 19 | 19 | 0 | 0 | 0 | 19 |
 | onInfiltrate | 10 | 10 | 0 | 0 | 0 | 10 |
 | onModifyEffectChance | 13 | 13 | 0 | 0 | 0 | 12 |
-| onModifyMoveFlags | 10 | 7 | 0 | 3 | 0 | 10 |
+| onModifyMoveFlags | 10 | 0 | 0 | 10 | 0 | 10 |
 | onModifyTargetFlag | 7 | 7 | 0 | 0 | 0 | 7 |
 | onMoldBreaker | 10 | 10 | 0 | 0 | 0 | 10 |
 | onMoveType | 42 | 42 | 0 | 0 | 0 | 42 |
@@ -71,7 +71,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onParentalBond | 23 | 23 | 0 | 0 | 0 | 23 |
 | onPreemptAction | 5 | 5 | 0 | 0 | 0 | 5 |
 | onPriority | 19 | 11 | 0 | 8 | 0 | 14 |
-| onReactive | 18 | 10 | 0 | 8 | 0 | 13 |
+| onReactive | 18 | 10 | 0 | 8 | 0 | 15 |
 | onRecoil | 5 | 5 | 0 | 0 | 0 | 5 |
 | onRevive | 2 | 1 | 0 | 1 | 0 | 1 |
 | onStab | 44 | 44 | 0 | 0 | 0 | 43 |
@@ -83,7 +83,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1433** | **0** | **65** | **0** | **1371** |
+| **Total** | **1498** | **1426** | **0** | **72** | **0** | **1375** |
 
 ## Unported Ability Hook Pairs
 
@@ -148,11 +148,18 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 - `ABILITY_GENERATOR` (src/abilities.cc:6174) *(ability mentioned in test)*
 - `ABILITY_RETRIEVER` (src/abilities.cc:6574) *(ability mentioned in test)*
 
-### onModifyMoveFlags (3)
+### onModifyMoveFlags (10)
 
+- `ABILITY_BACKSTREET_BOY` (src/abilities.cc:11568) *(ability mentioned in test)*
 - `ABILITY_BRAWLING_WYVERN` (src/abilities.cc:7601) *(ability mentioned in test)*
+- `ABILITY_CHESTNUT_AXE` (src/abilities.cc:11707) *(ability mentioned in test)*
+- `ABILITY_FESTIVITIES` (src/abilities.cc:10193) *(ability mentioned in test)*
+- `ABILITY_GUNMAN` (src/abilities.cc:9533) *(ability mentioned in test)*
 - `ABILITY_JUNSHI_SANDA` (src/abilities.cc:7612) *(ability mentioned in test)*
 - `ABILITY_MIXED_MARTIAL_ARTS` (src/abilities.cc:9898) *(ability mentioned in test)*
+- `ABILITY_MUSICAL_NOTES` (src/abilities.cc:11988) *(ability mentioned in test)*
+- `ABILITY_REVERBATE` (src/abilities.cc:10656) *(ability mentioned in test)*
+- `ABILITY_TAEKKYEON` (src/abilities.cc:10665) *(ability mentioned in test)*
 
 ### onPriority (8)
 

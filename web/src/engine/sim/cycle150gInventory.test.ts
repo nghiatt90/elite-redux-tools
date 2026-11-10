@@ -18,6 +18,7 @@ import {
   extractAttackerBranchAbilities,
   extractCanStatusTypeAbilities,
   extractDefenderBranchAbilities,
+  extractFunctionSlice,
   extractModifyEffectChanceAbilities,
   extractModifyMoveFlagsAbilities,
   extractMoveFlagPredicateAbilities,
@@ -28,6 +29,7 @@ import {
   loadTestMentionedAbilities,
   runInventory,
   type AbilityHookRecord,
+  type MoveFlagFamily,
 } from './driver/abilityHookInventory'
 import { ON_RECOIL_ABILITIES, PORTED_ATTACKER_ABILITIES, PORTED_DEFENDER_ABILITIES } from './moveEnd'
 import { POISON_PUPPETEER_CLONE_ABILITIES } from './statBuffs'
@@ -106,21 +108,46 @@ describe('Cycle 150g (3a) - onCanStatusType comes from canPoisonType/canParalyze
     )
   })
 
-  it('deleting the Tummyache literals from both bypass arrays drops it; the control keeps it', () => {
+  it('deleting the two Tummyache lines drops it; the control keeps it', () => {
     expect(PORTED_CAN_STATUS_TYPE_ABILITIES.has('ABILITY_TUMMYACHE')).toBe(true)
-    // The literal appears in both the poison and the paralysis bypass arrays.
+    // Two lines carry the literal: the CanPoisonType bypass-array entry (statusEffects.ts:615) and
+    // the `CAN_STATUS_TYPE_ABILITIES` census list (:238). There is no CanParalyzeType entry.
     const mutated = dropLinesContaining(statusEffectsSource, "'ABILITY_TUMMYACHE',")
     expect(extractCanStatusTypeAbilities(mutated).has('ABILITY_TUMMYACHE')).toBe(false)
     expect(extractCanStatusTypeAbilities(statusEffectsSource).has('ABILITY_TUMMYACHE')).toBe(true)
   })
 
-  it('a made-up ability id with a data record but no sim branch is unported', () => {
+  it('a made-up id is evidence only inside a CanXType bypass array, and the classifier follows it', () => {
     const fabricated = 'ABILITY_SYNTHETIC_CAN_STATUS'
-    expect(isDirectlyPorted(fabricated, 'onCanStatusType')).toBe(false)
     const fabricatedData: Record<string, AbilityHookRecord> = {
       [fabricated]: { id: fabricated, sourceLine: 1, hooks: { onCanStatusType: { form: 'lambda' } } },
     }
+
+    // Outside both function slices a literal is not evidence: the slices end at the next declaration.
+    const outside = `${statusEffectsSource}\nconst SYNTHETIC_CAN_STATUS = '${fabricated}'\n`
+    expect(extractCanStatusTypeAbilities(outside).has(fabricated)).toBe(false)
+
+    // A real bypass-array entry inside canPoisonType is evidence the extractor sees.
+    const inArray = statusEffectsSource.replace(
+      "    'ABILITY_TUMMYACHE',\n  ]) {",
+      `    'ABILITY_TUMMYACHE',\n    '${fabricated}',\n  ]) {`,
+    )
+    expect(inArray).not.toBe(statusEffectsSource)
+    expect(extractCanStatusTypeAbilities(inArray).has(fabricated)).toBe(true)
+
+    // The classifier reads the evidence set, so with no entry it is unported even though the hook
+    // data defines the pair.
+    expect(isDirectlyPorted(fabricated, 'onCanStatusType')).toBe(false)
     expect(classifyPair(fabricated, 'onCanStatusType', fabricatedData)).toBe('unported')
+
+    // Control: once the extractor supplies a real branch, the same pair is ported.
+    PORTED_CAN_STATUS_TYPE_ABILITIES.add(fabricated)
+    try {
+      expect(isDirectlyPorted(fabricated, 'onCanStatusType')).toBe(true)
+      expect(classifyPair(fabricated, 'onCanStatusType', fabricatedData)).toBe('ported')
+    } finally {
+      PORTED_CAN_STATUS_TYPE_ABILITIES.delete(fabricated)
+    }
   })
 })
 
@@ -143,16 +170,41 @@ describe('Cycle 150g (3b) - onModifyEffectChance comes from getMoveEffectChance 
     expect(extractModifyEffectChanceAbilities(statusEffectsSource).has('ABILITY_THERMOMANCY')).toBe(true)
   })
 
-  it('a made-up ability id is not ported', () => {
-    expect(isDirectlyPorted('ABILITY_SYNTHETIC_EFFECT_CHANCE', 'onModifyEffectChance')).toBe(false)
+  it('a made-up id is evidence only as a positive equality comparison, and the classifier follows it', () => {
+    const fabricated = 'ABILITY_SYNTHETIC_EFFECT_CHANCE'
     const fabricatedData: Record<string, AbilityHookRecord> = {
-      ABILITY_SYNTHETIC_EFFECT_CHANCE: {
-        id: 'ABILITY_SYNTHETIC_EFFECT_CHANCE',
-        sourceLine: 1,
-        hooks: { onModifyEffectChance: { form: 'lambda' } },
-      },
+      [fabricated]: { id: fabricated, sourceLine: 1, hooks: { onModifyEffectChance: { form: 'lambda' } } },
     }
-    expect(classifyPair('ABILITY_SYNTHETIC_EFFECT_CHANCE', 'onModifyEffectChance', fabricatedData)).toBe('unported')
+
+    // A real positive comparison in the dispatch body is evidence.
+    const realBranch = statusEffectsSource.replace(
+      "        } else if (abilityId === 'ABILITY_THERMOMANCY') {",
+      `        } else if (abilityId === '${fabricated}') {\n          chance *= 3\n        } else if (abilityId === 'ABILITY_THERMOMANCY') {`,
+    )
+    expect(realBranch).not.toBe(statusEffectsSource)
+    expect(extractModifyEffectChanceAbilities(realBranch).has(fabricated)).toBe(true)
+
+    // An inequality sits outside a real branch: extractComparedAbilityLiterals documents it as no
+    // evidence (the same rule that keeps Trace unported), so the extractor does not see it.
+    const inequality = statusEffectsSource.replace(
+      '      if (isAttacker) {',
+      `      if (isAttacker && abilityId !== '${fabricated}') {`,
+    )
+    expect(inequality).not.toBe(statusEffectsSource)
+    expect(extractModifyEffectChanceAbilities(inequality).has(fabricated)).toBe(false)
+
+    // The classifier reads the evidence set, so with no entry it is unported.
+    expect(isDirectlyPorted(fabricated, 'onModifyEffectChance')).toBe(false)
+    expect(classifyPair(fabricated, 'onModifyEffectChance', fabricatedData)).toBe('unported')
+
+    // Control: once the extractor supplies a real branch, the same pair is ported.
+    PORTED_MODIFY_EFFECT_CHANCE_ABILITIES.add(fabricated)
+    try {
+      expect(isDirectlyPorted(fabricated, 'onModifyEffectChance')).toBe(true)
+      expect(classifyPair(fabricated, 'onModifyEffectChance', fabricatedData)).toBe('ported')
+    } finally {
+      PORTED_MODIFY_EFFECT_CHANCE_ABILITIES.delete(fabricated)
+    }
   })
 })
 
@@ -161,14 +213,22 @@ describe('Cycle 150g (3b) - onModifyEffectChance comes from getMoveEffectChance 
 // ---------------------------------------------------------------------------
 
 describe('Cycle 150g (3c) - onReactive comes from the reactive dispatcher', () => {
-  it('extracts the dispatcher comparisons plus the exported PoisonPuppeteerClone set', () => {
+  it('extracts the dispatcher comparisons plus the clone set members that have a case label', () => {
     const extracted = extractReactiveAbilities(statBuffsSource)
     expect(extracted).toEqual(PORTED_REACTIVE_ABILITIES)
-    for (const id of POISON_PUPPETEER_CLONE_ABILITIES) {
-      expect(extracted.has(id), `${id} from the clone dispatcher set`).toBe(true)
+    // The clone set only reaches a port through a case label (cycle 150i): the seven handled
+    // members are in, and the two note-only members (Frostbind, Hemotoxin) are not -- their only
+    // site is the `abilityId ===` branch that pushes a note, and NOTE_ONLY_SET removes them from
+    // the ported count anyway.
+    const caseHandled = [...POISON_PUPPETEER_CLONE_ABILITIES].filter(
+      (id) => !['ABILITY_FROSTBIND', 'ABILITY_HEMOTOXIN'].includes(id),
+    )
+    expect(caseHandled).toHaveLength(7)
+    for (const id of caseHandled) {
+      expect(extracted.has(id), `${id} has a case label in runPoisonPuppeteerClone`).toBe(true)
     }
-    // The clone set really reaches a handler: seven members run runPoisonPuppeteerClone; the two
-    // note-only ones (Frostbind, Hemotoxin) are removed by NOTE_ONLY_SET, not double counted.
+    expect(extracted.has('ABILITY_FROSTBIND'), 'note-only, no case label').toBe(false)
+    expect(extracted.has('ABILITY_HEMOTOXIN'), 'note-only, no case label').toBe(false)
     expect(NOTE_ONLY_SET.has('ABILITY_FROSTBIND:onReactive')).toBe(true)
     expect(NOTE_ONLY_SET.has('ABILITY_HEMOTOXIN:onReactive')).toBe(true)
     expect(isDirectlyPorted('ABILITY_FROSTBIND', 'onReactive')).toBe(false)
@@ -284,44 +344,55 @@ describe('Cycle 150g (6b) - onModifyMoveFlags comes from flag predicates', () =>
     ])
   })
 
-  it('ports the seven hooks whose every granted flag family has a returning-true branch', () => {
+  it('no hook is ported while no consumer family is wired', () => {
+    // Cycle 150i: MOVE_FLAG_CONSUMERS_WIRED is empty, so a returning-true predicate branch alone
+    // does not make a port. All 10 pairs stay unported until the consumers read the predicates.
     const extracted = extractModifyMoveFlagsAbilities()
     expect(extracted).toEqual(PORTED_MODIFY_MOVE_FLAGS_ABILITIES)
-    expect([...extracted].sort()).toEqual([
-      'ABILITY_BACKSTREET_BOY',
-      'ABILITY_CHESTNUT_AXE',
-      'ABILITY_FESTIVITIES',
-      'ABILITY_GUNMAN',
-      'ABILITY_MUSICAL_NOTES',
-      'ABILITY_REVERBATE',
-      'ABILITY_TAEKKYEON',
-    ])
+    expect(extracted.size).toBe(0)
+    for (const id of definedFor('onModifyMoveFlags')) {
+      expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} has no wired consumer`).toBe(false)
+    }
   })
 
   it('leaves the PUNCH-granting hooks unported: the sim has no PUNCH predicate', () => {
     for (const id of ['ABILITY_BRAWLING_WYVERN', 'ABILITY_JUNSHI_SANDA', 'ABILITY_MIXED_MARTIAL_ARTS']) {
       expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} grants PUNCH`).toBe(false)
     }
-    // Junshi Sanda and Mixed Martial Arts do have the KICK half; PUNCH alone keeps them unported.
+    // Junshi Sanda and Mixed Martial Arts do have the KICK half; PUNCH alone would keep them out of
+    // any wired port (today every pair is unported anyway, because no consumer family is wired).
     expect(extractMoveFlagPredicateAbilities(statusEffectsSource, 'export function isStrikerMove(').has('ABILITY_JUNSHI_SANDA')).toBe(true)
     expect(extractMoveFlagPredicateAbilities(statusEffectsSource, 'export function isStrikerMove(').has('ABILITY_MIXED_MARTIAL_ARTS')).toBe(true)
   })
 
-  it('Mixed Martial Arts also has a dead KICK guard: the sim compares the bare type, data is TYPE_-prefixed', () => {
-    // abilities.cc:9898-9905 CHECKs gBattleMoves[move].type == TYPE_NORMAL; the sim's isStrikerMove
-    // compares moveData?.type to 'NORMAL', but every moves.json type is TYPE_-prefixed, so the branch
-    // can never fire. Reported, not fixed in this cycle.
-    expect(statusEffectsSource).toContain("moveData?.type === 'NORMAL'")
+  it('Reverbate and Mixed Martial Arts compare the loader-normalised bare type, not the raw TYPE_ spelling', () => {
+    // abilities.cc:10657-10662 CHECKs gBattleMoves[move].type == TYPE_NORMAL; :9898-9905 does the
+    // same for Mixed Martial Arts. The sim sees the type after loadSimData.ts:188,214 has stripped
+    // the prefix (String(m.type).replace('TYPE_', '')), so the bare 'NORMAL' comparison is live.
     const moveTypes = new Set(rawMoves.map((m) => String(m.type)))
     expect([...moveTypes].every((type) => type.startsWith('TYPE_'))).toBe(true)
+    const normalised = new Set([...moveTypes].map((type) => type.replace('TYPE_', '')))
+    expect(normalised.has('NORMAL')).toBe(true)
+    expect(normalised.has('TYPE_NORMAL')).toBe(false)
+
+    // Reverbate (isSoundMove) and Mixed Martial Arts (isStrikerMove) both use the bare spelling.
+    const comparisons = ['export function isSoundMove(', 'export function isStrikerMove('].map((declaration) => {
+      const slice = extractFunctionSlice(statusEffectsSource, declaration)
+      expect(slice).toContain("moveData?.type === 'NORMAL'")
+      return slice.match(/moveData\?\.type === 'NORMAL'/g)?.length ?? 0
+    })
+    expect(comparisons.reduce((acc, n) => acc + n, 0)).toBeGreaterThanOrEqual(2)
   })
 
   it('deleting the Musical Notes branch from isSoundMove makes it unported; the control keeps it', () => {
-    expect(PORTED_MODIFY_MOVE_FLAGS_ABILITIES.has('ABILITY_MUSICAL_NOTES')).toBe(true)
+    // The wired list is passed explicitly: with the shipped empty MOVE_FLAG_CONSUMERS_WIRED every
+    // pair is unported regardless of its branch, so the branch-vs-no-branch difference is only
+    // observable for the family a later cycle wires.
+    const wired: readonly MoveFlagFamily[] = ['sound']
+    expect(extractModifyMoveFlagsAbilities({}, wired).has('ABILITY_MUSICAL_NOTES')).toBe(true)
     const mutated = removeBranch(statusEffectsSource, "battlerHasSimAbility(state, attacker, 'ABILITY_MUSICAL_NOTES'")
-    const mutatedSet = extractModifyMoveFlagsAbilities({ statusEffects: mutated })
-    expect(mutatedSet.has('ABILITY_MUSICAL_NOTES')).toBe(false)
-    expect(extractModifyMoveFlagsAbilities({ statusEffects: statusEffectsSource }).has('ABILITY_MUSICAL_NOTES')).toBe(true)
+    expect(extractModifyMoveFlagsAbilities({ statusEffects: mutated }, wired).has('ABILITY_MUSICAL_NOTES')).toBe(false)
+    expect(extractModifyMoveFlagsAbilities({ statusEffects: statusEffectsSource }, wired).has('ABILITY_MUSICAL_NOTES')).toBe(true)
   })
 })
 
@@ -342,7 +413,7 @@ describe('Cycle 150g - real inventory counts for the six hook kinds', () => {
     ['onModifyEffectChance', 13, 13, 0],
     ['onReactive', 18, 10, 8],
     ['onRecoil', 5, 5, 0],
-    ['onModifyMoveFlags', 10, 7, 3],
+    ['onModifyMoveFlags', 10, 0, 10],
   ]
 
   for (const [hook, defined, ported, unported] of expected) {
@@ -352,10 +423,13 @@ describe('Cycle 150g - real inventory counts for the six hook kinds', () => {
     })
   }
 
-  it('total unported is 65: the only movement is onModifyMoveFlags 10 -> 3', () => {
-    expect(result.totalUnported).toBe(65)
-    const moved = result.unportedPairs.filter((p) => p.hook === 'onModifyMoveFlags').map((p) => p.ability).sort()
-    expect(moved).toEqual(['ABILITY_BRAWLING_WYVERN', 'ABILITY_JUNSHI_SANDA', 'ABILITY_MIXED_MARTIAL_ARTS'])
+  it('total unported is 72: all 10 onModifyMoveFlags pairs are unported again', () => {
+    // Cycle 150g had 65 because seven flag-predicate branches counted as ports. Cycle 150i reverts
+    // that: the consumers still read the static flags, so the 150b/150f total of 72 is correct.
+    expect(result.totalUnported).toBe(72)
+    const unported = result.unportedPairs.filter((p) => p.hook === 'onModifyMoveFlags').map((p) => p.ability).sort()
+    expect(unported).toEqual(definedFor('onModifyMoveFlags'))
+    expect(unported).toHaveLength(10)
   })
 
   it('the generated inventory doc equals the committed docs/battle-sim/ability-hook-inventory.md', () => {
