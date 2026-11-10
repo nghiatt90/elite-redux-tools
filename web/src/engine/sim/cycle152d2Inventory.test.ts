@@ -105,7 +105,7 @@ describe('cycle 152d2 - non-battle effects allowlisted (A)', () => {
 })
 
 describe('cycle 152d2 - EatTargetBerry and EFFECT_CHANGE_TYPE_ON_ITEM (C, D)', () => {
-  it('baseline: C1 ports the pocket/Sticky Hold/removal flow, C2 stays gapped', () => {
+  it('baseline: C1 ports the pocket/Sticky Hold/removal flow, C2 ports the attacker consumeberry (cycle 152h)', () => {
     const result = runInventory(items)
 
     const c1 = unitFor(result, 'hold-trigger', 'POCKET_BERRIES', 'EatTargetBerry')
@@ -113,14 +113,15 @@ describe('cycle 152d2 - EatTargetBerry and EFFECT_CHANGE_TYPE_ON_ITEM (C, D)', (
     expect(c1?.effect).toBe('eatTargetBerry')
     expect(c1?.status).toBe('ported')
     expect(c1?.registeredUntested).toBe(false)
-    expect(c1?.testFile).toBe('web/src/engine/sim/moveEnd.test.ts')
+    // cycle 152h's Bug Bite test also names MOVE_BUG_BITE + ABILITY_STICKY_HOLD and sorts before moveEnd.test.ts.
+    expect(c1?.testFile).toBe('web/src/engine/sim/cycle152hBugBite.test.ts')
 
     const c2 = unitFor(result, 'hold-trigger', 'BattleScript_MoveEffectBugBite', 'BattleScript_MoveEffectBugBite')
     expect(c2?.citation).toBe(SCRIPT_REPO_PATH + ':1006')
     expect(c2?.effect).toBe('eatTargetBerry')
-    expect(c2?.status).toBe('unported')
+    expect(c2?.status).toBe('ported')
     expect(c2?.registeredUntested).toBe(false)
-    expect(c2?.testFile).toBeNull()
+    expect(c2?.testFile).toBe('web/src/engine/sim/cycle152hBugBite.test.ts')
   })
 
   it('baseline: Plate and Memory carry one unit per CHANGE_TYPE_ON_ITEM C site', () => {
@@ -256,9 +257,11 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test, so ported 400 -> 401,
     // unported 216 -> 215 and registered-untested 28 -> 27.
     // Cycle 152f: Natural Gift GetMovePriority ported, ported 401 -> 402, unported 215 -> 214.
+    // Cycle 152h: BattleScript_MoveEffectBugBite (attacker consumeberry) ported, ported 402 -> 403,
+    // unported 214 -> 213.
     expect(result.totalDefined).toBe(636)
-    expect(result.totalPorted).toBe(402)
-    expect(result.totalUnported).toBe(214)
+    expect(result.totalPorted).toBe(403)
+    expect(result.totalUnported).toBe(213)
     expect(result.totalRegisteredUntested).toBe(27)
     expect(result.totalAllowlisted).toBe(20)
     expect(result.totalUnclassified).toBe(0)

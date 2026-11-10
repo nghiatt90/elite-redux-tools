@@ -256,7 +256,8 @@ describe('cycle 152d - pinned counts', () => {
     // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test (215 unported, 27 untested).
     // Cycle 152f: Natural Gift GetMovePriority ported (214 unported).
-    expect(result.totalUnported).toBe(214)
+    // Cycle 152h: BattleScript_MoveEffectBugBite ported (213 unported).
+    expect(result.totalUnported).toBe(213)
     expect(result.totalRegisteredUntested).toBe(27)
   })
 })

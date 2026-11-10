@@ -424,14 +424,17 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   },
   // Synthetic sites (the C site does not name a HOLD_EFFECT_* token). See
   // SYNTHETIC_TRIGGER_SITES in runInventory.
-  // EatTargetBerry (battle_script_commands.c:13221) is moved to applyBugBite. The
-  // script-label site is a real gap: the sim only pushes an unmodelled note for the
-  // stolen berry's consumeberry.
+  // EatTargetBerry (battle_script_commands.c:13221) and BattleScript_MoveEffectBugBite
+  // (data/battle_scripts_1.s:1006) are both moved to applyBugBite, which ports the target's
+  // berry loss, the attacker's temporary item swap and the consumeberry call.
   EatTargetBerry: {
     files: ['web/src/engine/sim/moveEnd.ts'],
     functionName: 'applyBugBite',
   },
-  BattleScript_MoveEffectBugBite: { files: [] },
+  BattleScript_MoveEffectBugBite: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'applyBugBite',
+  },
   // EFFECT_CHANGE_TYPE_ON_ITEM compares `holdEffect == gBattleMoves[move].argument`,
   // so the HOLD_EFFECT_* scan cannot see it. Keyed by the C switch case and line.
   'CHANGE_TYPE_ON_ITEM:5036': {
@@ -1752,14 +1755,24 @@ export function syntheticTriggerSites(itemsByEffect: ReadonlyMap<string, string[
     },
     {
       // BattleScript_MoveEffectBugBite (data/battle_scripts_1.s:1006-1014) runs
-      // consumeberry BS_ATTACKER; the sim only pushes an unmodelled note for it.
+      // consumeberry BS_ATTACKER, TRUE; applyBugBite drives consumeBerryWithOverride on the
+      // attacker. The evidence is the berry's own move-end effect firing on the attacker
+      // (Sitrus heal, Liechi Attack raise), which only the cycle 152h test names.
       site: 'BattleScript_MoveEffectBugBite',
-      token: 'BattleScript_MoveEffectBugBite',
+      // The script label is not a sim identifier: production evidence is the VARIOUS_CONSUME_BERRY port it
+      // runs, and the unit keeps the script name.
+      token: 'consumeBerryWithOverride',
+      unitToken: 'BattleScript_MoveEffectBugBite',
       effect: 'eatTargetBerry',
       file: `${UPSTREAM_DATA}/battle_scripts_1.s`,
       citation: `${UPSTREAM_DATA}/battle_scripts_1.s:1006`,
+      functionName: 'applyBugBite',
       itemIds: [],
-      testTokens: [],
+      testTokens: ['MOVE_BUG_BITE', 'ITEM_SITRUS_BERRY', 'ITEM_LIECHI_BERRY'],
+      testPredicate: (clean) =>
+        tokenAppears(clean, 'MOVE_BUG_BITE') &&
+        tokenAppears(clean, 'ITEM_SITRUS_BERRY') &&
+        tokenAppears(clean, 'ITEM_LIECHI_BERRY'),
     },
   ]
   // EFFECT_CHANGE_TYPE_ON_ITEM: Judgment/Plate at battle_main.c:5036 (GetMonMoveType)

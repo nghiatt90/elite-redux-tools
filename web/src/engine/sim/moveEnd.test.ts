@@ -2249,16 +2249,19 @@ describe('Thief (MOVE_EFFECT_STEAL_ITEM, battle_script_commands.c:4579-4593)', (
 describe('Bug Bite (MOVE_EFFECT_BUG_BITE, battle_script_commands.c:4595-4597, EatTargetBerry :13221)', () => {
   const deps = () => itemMoveDeps(fixedDamage(30), {}, [MOVE_BUG_BITE])
 
-  it('eats the target berry; the move is CERTAIN so there is no seteffectwithchance draw (accuracy draw only)', () => {
+  it('eats the target berry and the attacker eats it; the move is CERTAIN so there is no seteffectwithchance draw (accuracy draw only)', () => {
     const rng = scriptedRng([0])
-    const state = battle([{}, { itemId: 'ITEM_ORAN_BERRY' }], rng)
+    // Attacker below full HP: ItemHealHp (battle_util.c:5311-5333) leaves the berry alone at full HP (:5315), so a
+    // 50/100 attacker eats the Oran Berry for its holdEffectStrength of 10 (:5318-5319) instead.
+    const state = battle([{ hp: 50 }, { itemId: 'ITEM_ORAN_BERRY' }], rng)
     const out = executeTurn(state, [useMove(1, MOVE_BUG_BITE), null], deps())
 
     expect(state.battlers[1]!.mon.hp).toBe(70)
     expect(state.battlers[1]!.mon.itemId).toBeNull()
+    expect(state.battlers[0]!.mon.hp).toBe(60) // 50 + 10 (ItemHealHp, :5318-5319)
     expect(state.battlers[0]!.mon.itemId).toBeNull() // the attacker's own (empty) slot is restored from changedItems
     expect(rng.calls).toBe(1)
-    expect(actionOf(out, 0).unmodelled.some((m) => m.startsWith("Bug Bite's consumeberry of ITEM_ORAN_BERRY"))).toBe(true)
+    expect(actionOf(out, 0).unmodelled.some((m) => m.includes('consumeberry'))).toBe(false)
   })
 
   it('leaves the attacker\'s own item alone', () => {

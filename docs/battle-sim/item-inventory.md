@@ -52,13 +52,13 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 249 | 112 | 19 | 126 | 0 | 11 |
+| `hold-trigger` | 249 | 113 | 19 | 125 | 0 | 11 |
 | `ai-trigger` | 61 | 17 | 0 | 44 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 5 | 0 | 0 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
 | `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
-| **total** | **636** | **402** | **27** | **214** | **0** | **20** |
+| **total** | **636** | **403** | **27** | **213** | **0** | **20** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -82,7 +82,6 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `AbilityBattleEffects` | 1 |
 | `hold-trigger` | `AdjustFriendship` | 1 |
 | `hold-trigger` | `BENEFITS_FROM_LEEK` | 1 |
-| `hold-trigger` | `BattleScript_MoveEffectBugBite` | 1 |
 | `hold-trigger` | `BattleScript_TryAdrenalineOrb` | 1 |
 | `hold-trigger` | `BattleScript_TryDestinyKnotTarget` | 1 |
 | `hold-trigger` | `CalcAttackStat` | 2 |
@@ -391,8 +390,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2371` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2371` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2404` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2404` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@pokemon.c:UseStatIncreaseItem:3058` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3058` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
-| `eatTargetBerry@battle_script_commands.c:EatTargetBerry` |  | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4595` | ported | `web/src/engine/sim/moveEnd.test.ts` |
-| `eatTargetBerry@battle_scripts_1.s:BattleScript_MoveEffectBugBite` |  | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1006` | unported | none |
+| `eatTargetBerry@battle_script_commands.c:EatTargetBerry` |  | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4595` | ported | `web/src/engine/sim/cycle152hBugBite.test.ts` |
+| `eatTargetBerry@battle_scripts_1.s:BattleScript_MoveEffectBugBite` |  | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1006` | ported | `web/src/engine/sim/cycle152hBugBite.test.ts` |
 
 ## AI-Trigger Units
 

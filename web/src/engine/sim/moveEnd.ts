@@ -121,7 +121,7 @@ import { hasFlag as abilitySlotsHaveFlag, isIronFistBoosted, resolveEffectiveMov
 import { battlerHasAbility } from '../abilities/dispatch'
 import { cancelMultiTurnMoves, findAbilitySlot } from './statusEffects'
 import type { AbilitySlots } from '../abilities/dispatch'
-import { canBattlerHeal, getAbilityStateOf, isMagicGuardProtected, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
+import { canBattlerHeal, getAbilityStateOf, isMagicGuardProtected, setAbilityStateOf, strikeoutClearFlags, strikeoutMarkDamagedBy } from './endTurn'
 import { isBattlerGrounded } from './grounding'
 import type { GroundingContext } from './grounding'
 import { syncPartyHp } from './outcome'
@@ -221,6 +221,7 @@ import { attackPreModify, calculateBattleStat, defensePreModify, spAttackPreModi
 import { TYPE_NAME_BY_ID } from './hazards'
 import {
   canBattlerSwitch,
+  consumeBerryWithOverride,
   doesBattlerHaveAbilityShield,
   hasAbilityIgnoringSuppression,
   tryScheduleSwitch,
@@ -6303,20 +6304,25 @@ function applyStealItem(
 }
 
 /**
- * MOVE_EFFECT_BUG_BITE via EatTargetBerry, battle_script_commands.c:13221-13234 (Bug Bite, Pluck). No alive /
- * DidMoveHit / CanBattlerGetOrLoseItem check; only IsStickyHold. The target loses the berry; BattleScript_MoveEffectBugBite
- * (data/battle_scripts_1.s:1006-1014) then runs `consumeberry BS_ATTACKER, TRUE` (VARIOUS_CONSUME_BERRY,
- * battle_script_commands.c:8024-8041), which fires the berry's ITEMEFFECT_BATTLER_MOVE_END effect on the attacker and
- * restores the attacker's own item from changedItems. The restore leaves the attacker's item unchanged, which is all
- * that is modelled; the berry's effect is gapped by name.
+ * MOVE_EFFECT_BUG_BITE via EatTargetBerry, battle_script_commands.c:13221-13235 (Bug Bite, Pluck). No alive /
+ * DidMoveHit / CanBattlerGetOrLoseItem check; only IsStickyHold. The target loses the berry (:13226); the
+ * attacker parks its own item in gBattleStruct->changedItems[battler] and temporarily holds the stolen berry
+ * (:13229-13230); BattleScript_MoveEffectBugBite (data/battle_scripts_1.s:1006-1014) then runs
+ * `consumeberry BS_ATTACKER, TRUE` (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041), which fires the
+ * berry's ITEMEFFECT_BATTLER_MOVE_END effect on the attacker and, when the effect did not fire, restores the
+ * attacker's own item from changedItems (:8037-8040). When the effect did fire the C returns at :8035 and
+ * MOVEEND_CHANGED_ITEMS (:4656-4665) hands the item back later.
  */
 function applyBugBite(
   state: BattleState,
   attackerId: number,
   targetId: number,
+  moveId: string,
   deps: TurnLoopDeps,
   unmodelled: string[],
+  statChanges: StatChangeOutcome[],
 ): void {
+  // BattleScript_MoveEffectBugBite (:1010-1011) is the sBERRY_OVERRIDE / `consumeberry BS_ATTACKER, TRUE` pair below.
   const attacker = state.battlers[attackerId]
   const target = state.battlers[targetId]
   if (!attacker || !target || !target.mon.itemId) return
@@ -6329,10 +6335,22 @@ function applyBugBite(
   ) {
     return
   }
+  // EatTargetBerry :13226-13230: `gLastUsedItem = UpdateBattlerItem(target, ITEM_NONE)` then the attacker parks its
+  // own item and takes the berry. changedItem is the sim's gBattleStruct->changedItems[battler]; null means the
+  // attacker held nothing, i.e. the C's changedItems[battler] = 0.
   clearBattlerItem(state, target, unmodelled)
-  unmodelled.push(
-    `Bug Bite's consumeberry of ${itemId} on the attacker (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041, ItemBattleEffects(ITEMEFFECT_BATTLER_MOVE_END)) is not modelled; only the target's berry loss is`,
-  )
+  attacker.changedItem = attacker.mon.itemId
+  attacker.mon.itemId = itemId
+  // VARIOUS_CONSUME_BERRY :8026-8030 returns at :8027 when the held item has no hold effect, BEFORE
+  // SetAbilityState(GREEDY, -1); consumeBerryWithOverride makes the same early return, so guard Greedy identically.
+  const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
+  if (holdEffect && holdEffect !== 'HOLD_EFFECT_NONE') {
+    setAbilityStateOf(attacker, 'ABILITY_GREEDY', -1)
+  }
+  // BattleScript_MoveEffectBugBite :1006-1014 -> `consumeberry BS_ATTACKER, TRUE`: restoreItem = TRUE.
+  // On a fired effect the C returns at :8035, leaving changedItems for MOVEEND_CHANGED_ITEMS (:4656-4665); that
+  // case skips a zero entry, so an attacker that held nothing keeps the berry's item id in its slot.
+  consumeBerryWithOverride(state, attackerId, attackerId, moveId, deps, unmodelled, statChanges, true)
 }
 
 /** MOVE_EFFECT_SMACK_DOWN, battle_script_commands.c:4598-4606. */
@@ -7402,7 +7420,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       applyKnockOff(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled)
       break
     case 'MOVE_EFFECT_BUG_BITE':
-      applyBugBite(state, attackerId, targetId, deps, unmodelled)
+      applyBugBite(state, attackerId, targetId, moveId, deps, unmodelled, statChanges)
       break
     case 'MOVE_EFFECT_SMACK_DOWN':
       applySmackDown(state, attackerId, targetId, deps)
