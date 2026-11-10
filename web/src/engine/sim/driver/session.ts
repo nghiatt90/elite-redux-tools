@@ -27,6 +27,7 @@ import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
+import { isKeenEdgeMove } from '../statusEffects'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -148,7 +149,11 @@ export function buildMoveAction(state: BattleState, data: SimDataBundle, battler
     flags: mData?.flags ?? {},
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
-    isKeenEdge: false,
+    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, {
+      dataContext: data.dataContext,
+      grounding: groundingFor(data, state),
+    }),
     naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
       ? naturalGiftPriority(state.battlers[battlerId]?.mon.itemId ?? null)
       : 0,

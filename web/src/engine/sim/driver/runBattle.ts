@@ -7,7 +7,8 @@ import { PARTY_SIZE } from '../constants'
 import type { BattleOutcome, BattleState, RandomSource, SimPartyMon } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
-import { createSession, stepTurn } from './session'
+import { isKeenEdgeMove } from '../statusEffects'
+import { createSession, groundingFor, stepTurn } from './session'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
 export interface RunBattleOptions {
@@ -106,7 +107,11 @@ export function defaultPlayerPolicy(
     flags: mData?.flags ?? {},
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
-    isKeenEdge: false,
+    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+    isKeenEdge: isKeenEdgeMove(state, 0, moveIdToUse, {
+      dataContext: data.dataContext,
+      grounding: groundingFor(data, state),
+    }),
     naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
       ? naturalGiftPriority(state.battlers[0]?.mon.itemId ?? null)
       : 0,

@@ -33,19 +33,30 @@ import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingle
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
 import { PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
+import { isKeenEdgeMove } from '../statusEffects'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
  * sim does not have yet (dynamic move type resolution, terrain grounding, the
- * Keen Edge helper, Mycelium Might) default to their NEUTRAL value -- same
- * precedent turn.test.ts's own hand-built `moveView()` fixture already uses
- * for every caller that does not care about ability-priority edge cases.
+ * Mycelium Might check) default to their NEUTRAL value -- same precedent
+ * turn.test.ts's own hand-built `moveView()` fixture already uses for every
+ * caller that does not care about ability-priority edge cases.
  * `hasStrongJawBoostFlag` is unconditionally false because FLAG_STRONG_JAW_BOOST
  * is never emitted on this build (grep-verified against
  * tools/codegen/src/er/move/BattleMovesGenerator.kt's `bitFlags` sources: three
  * hardcoded names plus MoveList.proto's own `flag_code_value` options, neither
  * of which include it) -- same "ported as dead code stays dead code" precedent
- * as aiCalcDamage.ts's FLAG_TWO_STRIKES note, not an approximation. */
-function buildMoveView(moveId: string, deps: AiSwitchingDeps, unmodelled: string[], itemId: string | null): TurnOrderMoveView {
+ * as aiCalcDamage.ts's FLAG_TWO_STRIKES note, not an approximation.
+ * `isKeenEdge` IS resolved here: `AiSwitchingDeps` extends `BridgeDeps`, which
+ * carries both `dataContext` and `grounding`, so Cutthroat's +1 priority
+ * (battle_main.c:4278) sees the AI's granted keen-edge moves too. */
+function buildMoveView(
+  state: BattleState,
+  battlerId: number,
+  moveId: string,
+  deps: AiSwitchingDeps,
+  unmodelled: string[],
+  itemId: string | null,
+): TurnOrderMoveView {
   const move = deps.moveData(moveId)
   if (!move) unmodelled.push(`buildMoveView: move data is unavailable for ${moveId}`)
 
@@ -63,7 +74,11 @@ function buildMoveView(moveId: string, deps: AiSwitchingDeps, unmodelled: string
     flags: move?.flags ?? {},
     split: move?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
-    isKeenEdge: false,
+    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, {
+      dataContext: deps.dataContext,
+      grounding: deps.grounding,
+    }),
     naturalGiftPriority: move?.effect === 'EFFECT_NATURAL_GIFT' ? naturalGiftPriority(itemId) : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
@@ -151,7 +166,7 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
     if (!battler || !moveId) {
       throw new Error(`chooseAiAction: chosen move slot ${choice.moveIndex} for battler ${battlerId} has no move`)
     }
-    moveView = buildMoveView(moveId, deps, unmodelled, battler.mon.itemId)
+    moveView = buildMoveView(flaggedState, battlerId, moveId, deps, unmodelled, battler.mon.itemId)
   }
 
   // STATE_BEFORE_ACTION_CHOSEN (battle_main.c:3641) resets the pending-switch

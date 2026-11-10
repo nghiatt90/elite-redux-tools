@@ -4548,7 +4548,10 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_BLADE_DANCE') {
     if (
       isBattlerAlive(state, targetId) &&
-      Boolean(moveData?.flags?.dance)
+      // IsDance(battler, move) (src/battle_util.c:9245) via DoesMoveMatchFlag,
+      // not the static FLAG_DANCE alone: Festivities / Taekkyeon / Backstreet
+      // Boy grant MOVE_FLAG_DANCE too (abilities.cc:10194, :10666, :11570).
+      isDanceMove(state, attackerId, moveData, deps)
     ) {
       unmodelled.push("Blade Dance's followup move (UseAttackerFollowUpMove MOVE_LEAF_BLADE, abilities.cc:9043; ABILITY_BLADE_DANCE) is not modelled")
     }

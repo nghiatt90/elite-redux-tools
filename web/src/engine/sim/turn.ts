@@ -1944,9 +1944,17 @@ export function performSwitchAction(
 }
 
 /** The TurnOrderMoveView of `moveId`, built from its move data over `base` (whose
- * battler-dependent fields are kept, as chooseAiAction's buildMoveView leaves them). */
-function moveViewFor(base: TurnOrderMoveView, moveId: string, dataContext: SimDataContext): TurnOrderMoveView {
-  const move = dataContext.move(moveId)
+ * battler-dependent fields are kept, as chooseAiAction's buildMoveView leaves them).
+ * `isKeenEdge` is recomputed for the NEW move because `base` carried the one for the
+ * move this view replaces (Encore / a locked move swap it, battle_main.c:4278). */
+function moveViewFor(
+  base: TurnOrderMoveView,
+  moveId: string,
+  deps: TurnLoopDeps,
+  state: BattleState,
+  battlerId: number,
+): TurnOrderMoveView {
+  const move = deps.dataContext.move(moveId)
   return {
     ...base,
     id: moveId,
@@ -1957,6 +1965,8 @@ function moveViewFor(base: TurnOrderMoveView, moveId: string, dataContext: SimDa
     power: move?.power ?? 0,
     flags: move?.flags ?? {},
     split: move?.split ?? 'STATUS',
+    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }),
   }
 }
 
@@ -1977,7 +1987,7 @@ function applyEncore(state: BattleState, battlerId: number, action: ChosenAction
     v.encoreTimer = 0
   }
   if (!slotMove || slotMove === action.chosenMove.id) return action
-  const view = moveViewFor(action.chosenMove, slotMove, deps.dataContext)
+  const view = moveViewFor(action.chosenMove, slotMove, deps, state, battlerId)
   return { ...action, chosenMove: view, moveToBeUsed: view }
 }
 
@@ -1991,7 +2001,7 @@ function applyLockedMove(state: BattleState, battlerId: number, action: ChosenAc
   const locked = state.lockedMoves[battlerId]
   if (!action || !battler || battler.mon.hp === 0 || !locked || !hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS | STATUS2_RECHARGE)) return action
   if (action.action === 'USE_MOVE' && action.chosenMove?.id === locked) return action
-  const view = action.chosenMove ? moveViewFor(action.chosenMove, locked, deps.dataContext) : buildMoveView(locked, deps.dataContext, state.battlers[battlerId]?.mon.itemId ?? null)
+  const view = action.chosenMove ? moveViewFor(action.chosenMove, locked, deps, state, battlerId) : buildMoveView(locked, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
   const target = action.target ?? (deps.dataContext.move(locked)?.target === 'USER' ? battlerId : battlerId ^ 1)
   return { action: 'USE_MOVE', chosenMove: view, moveToBeUsed: view, target }
 }
@@ -2751,8 +2761,8 @@ export function executeAction(
           currentChosenMoveId = mId
         },
         jumpToCalledMove: (calledMoveId: string, keepChosenMove: boolean = true, overrideTargetId?: number | null): ActionOutcome => {
-          const nextChosenMove = keepChosenMove ? chosenMove : buildMoveView(calledMoveId, deps.dataContext, state.battlers[battlerId]?.mon.itemId ?? null)
-          const nextCurrentMove = buildMoveView(calledMoveId, deps.dataContext, state.battlers[battlerId]?.mon.itemId ?? null)
+          const nextChosenMove = keepChosenMove ? chosenMove : buildMoveView(calledMoveId, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
+          const nextCurrentMove = buildMoveView(calledMoveId, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
           const nextTargetId = overrideTargetId !== undefined && overrideTargetId !== null
             ? overrideTargetId
             : getMoveTarget(state, battlerId, calledMoveId, deps)
@@ -2767,8 +2777,8 @@ export function executeAction(
 
       if (effectOutcome.jumpToCalledMove) {
         const { moveId: calledMoveId, keepChosenMove = true, targetId: overrideTargetId } = effectOutcome.jumpToCalledMove
-        const nextChosenMove = keepChosenMove ? chosenMove : buildMoveView(calledMoveId, deps.dataContext, state.battlers[battlerId]?.mon.itemId ?? null)
-        const nextCurrentMove = buildMoveView(calledMoveId, deps.dataContext, state.battlers[battlerId]?.mon.itemId ?? null)
+        const nextChosenMove = keepChosenMove ? chosenMove : buildMoveView(calledMoveId, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
+        const nextCurrentMove = buildMoveView(calledMoveId, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
         const nextTargetId = overrideTargetId !== undefined && overrideTargetId !== null
           ? overrideTargetId
           : getMoveTarget(state, battlerId, calledMoveId, deps)
@@ -4426,8 +4436,14 @@ export function executeAction(
   return runMovePipeline(action.chosenMove, action.chosenMove, targetId, false)
 }
 
-function buildMoveView(id: string, dataContext: SimDataContext, attackerItemId: string | null = null): TurnOrderMoveView {
-  const data = dataContext.move(id)
+function buildMoveView(
+  id: string,
+  deps: TurnLoopDeps,
+  state: BattleState,
+  battlerId: number,
+  attackerItemId: string | null = null,
+): TurnOrderMoveView {
+  const data = deps.dataContext.move(id)
   return {
     id,
     priority: data?.priority ?? 0,
@@ -4438,7 +4454,8 @@ function buildMoveView(id: string, dataContext: SimDataContext, attackerItemId: 
     flags: data?.flags ?? {},
     split: data?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
-    isKeenEdge: false,
+    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+    isKeenEdge: isKeenEdgeMove(state, battlerId, id, { dataContext: deps.dataContext, grounding: deps.grounding }),
     naturalGiftPriority: data?.effect === 'EFFECT_NATURAL_GIFT' ? naturalGiftPriority(attackerItemId) : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
@@ -4660,7 +4677,7 @@ function runPoppedExtraAttack(
   state.processingExtraAttacks = true
   state.currentExtraAttack = extraAttack
 
-  const moveView = buildMoveView(extraAttack.move, deps.dataContext, state.battlers[extraAttack.attacker]?.mon.itemId ?? null)
+  const moveView = buildMoveView(extraAttack.move, deps, state, extraAttack.attacker, state.battlers[extraAttack.attacker]?.mon.itemId ?? null)
   const extraAction: ChosenAction = {
     action: 'USE_MOVE',
     chosenMove: moveView,
@@ -4750,7 +4767,7 @@ function runFutureSightCountdown(
       continue
     }
 
-    const moveView = buildMoveView(moveId, deps.dataContext, state.battlers[attackerId]?.mon.itemId ?? null)
+    const moveView = buildMoveView(moveId, deps, state, attackerId, state.battlers[attackerId]?.mon.itemId ?? null)
     const action: ChosenAction = { action: 'USE_MOVE', chosenMove: moveView, moveToBeUsed: moveView, target: holderId }
 
     // Cmd_damagecalc (battle_script_commands.c:1605-1610): `if (gCurrentMove ==
