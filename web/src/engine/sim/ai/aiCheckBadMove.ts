@@ -214,12 +214,12 @@ import { weatherHasEffect } from '../fieldEndTurn'
 import { getWhoStrikesFirst, getBattlerTotalSpeedStat, TOTAL_SPEED_FULL } from '../turnOrder'
 import { buildFieldFacts, gapsToUnmodelled } from '../bridge'
 import { buildAccuracyInputs } from '../accuracyBridge'
-import { getTotalAccuracy } from '../accuracy'
+import { getTotalAccuracy, SUPER_EFFECTIVE_MULTIPLIER } from '../accuracy'
 import { getSingleUseAbilityCounter } from '../switchInAbility'
 import { SHIELDS_DOWN_PROTECTED_SPECIES } from '../statusEffects'
 import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getHealthPercentage, getRecoilFraction, isTargetingPartner } from './aiScorers'
 import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
-import { aiCalcDamage, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
+import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
 import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
 import { idiv } from '../../fixed'
 import type { MoveBehaviorEntry } from '../../basePower'
@@ -1077,10 +1077,16 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     // :727-730 -- Anticipation. The defender's single-use counter starts at 0
     // (SetSingleUseAbilityCounter has not fired), so an incoming move that would
     // land at UQ_4_12(2.0) or better is scored -5: Anticipation will "dodge" it.
-    // `CalcTypeEffectivenessMultiplier(...) >= UQ_4_12(2.0)` is exactly this
-    // file's own AI_EFFECTIVENESS enum `>= 5` (aiScorers.ts's mapping: 2048 ->
-    // x2, 4096 -> x4), and it is the same pure value `effResult` already holds
-    // (:600-607 above; the C recomputes it at :729 with no state change between).
+    // The C compares the RAW multiplier
+    // (`CalcTypeEffectivenessMultiplier(...) >= UQ_4_12(2.0)`, :729), not the
+    // collapsed AI_EFFECTIVENESS enum: aiGetEffectivenessEnum (aiScorers.ts:79)
+    // maps every multiplier that is not exactly 0/0.25/0.5/1/2/4 to x1, so a
+    // 3x/6x/8x hit would never be penalised by an enum `>= 5` test even though
+    // the C penalises it. `effResult` above stays the enum (its other checks
+    // need it); the raw UQ_4_12 value comes from AI_GetTypeEffectiveness.
+    // CalcTypeEffectivenessMultiplier flattens SPLIT_STATUS to UQ_4_12(1.0)
+    // (battle_util.c:7992), which can never reach 2.0, so status moves skip the
+    // raw call outright.
     // GetTotalAccuracy is called with `attackerActsAfterDefender = false`: the
     // AI scores BEFORE any action, so "the target already moved" is unknowable,
     // and it only feeds Zoom Lens (accuracy.ts:788). Passing false also keeps
@@ -1088,12 +1094,16 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     // with Random()), which a pure score must never do.
     if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', atkMoldBreaker) &&
         getSingleUseAbilityCounter(state, battlerDef, 'ABILITY_ANTICIPATION', deps.dataContext) === 0 &&
-        effResult.effectiveness >= 5) {
-      const anticipationAcc = buildAccuracyInputs(state, battlerAtk, battlerDef, moveId, false, deps)
-      unmodelled.push(...gapsToUnmodelled(anticipationAcc.gaps))
-      const anticipationAccResult = getTotalAccuracy(anticipationAcc.inputs)
-      unmodelled.push(...gapsToUnmodelled(anticipationAccResult.gaps))
-      if (anticipationAccResult.accuracy <= 100) return { score: score - 5, unmodelled }
+        move?.split !== 'STATUS') {
+      const anticipationEff = aiGetTypeEffectivenessRaw(state, moveId, battlerAtk, battlerDef, deps)
+      unmodelled.push(...anticipationEff.unmodelled)
+      if (anticipationEff.effectiveness >= SUPER_EFFECTIVE_MULTIPLIER) {
+        const anticipationAcc = buildAccuracyInputs(state, battlerAtk, battlerDef, moveId, false, deps)
+        unmodelled.push(...gapsToUnmodelled(anticipationAcc.gaps))
+        const anticipationAccResult = getTotalAccuracy(anticipationAcc.inputs)
+        unmodelled.push(...gapsToUnmodelled(anticipationAccResult.gaps))
+        if (anticipationAccResult.accuracy <= 100) return { score: score - 5, unmodelled }
+      }
     }
 
     // :733-735 -- Wonder Guard.

@@ -2939,7 +2939,14 @@ export function executeAction(
         unmodelled.push(...gapsToUnmodelled(accGaps))
         const accResult = getTotalAccuracy(accInputs)
         unmodelled.push(...gapsToUnmodelled(accResult.gaps))
-        const missed = state.rng.random16() % 100 >= accResult.accuracy
+        // :1427-1432 -- Anticipation's miss branch runs after GetTotalAccuracy
+        // and BEFORE the `(Random() % 100) >= accuracy` roll; the C's `else if`
+        // means a fired branch consumes NO draw. GetTotalAccuracy returns 0
+        // against a semi-invulnerable target (:1267-1275), so `accuracy <= 100`
+        // holds there even for Bide's accuracy-0 sentinel.
+        const missed =
+          tryAnticipationMiss(state, battlerId, bideTargetId, currentMove.id, accResult.accuracy, deps, unmodelled) ||
+          state.rng.random16() % 100 >= accResult.accuracy
         if (missed) {
           runMoveEndBookkeeping({
             state,
