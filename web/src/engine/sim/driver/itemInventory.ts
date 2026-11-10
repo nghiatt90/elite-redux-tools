@@ -60,6 +60,17 @@ export interface ItemAllowlistEntry {
   cite: string
 }
 
+export interface KnownPartialEntry {
+  key: string
+  whatDiffers: string
+  cite: string
+}
+
+export interface SitePortTarget {
+  files: string[]
+  functionName?: string
+}
+
 export interface ItemUnit {
   kind: ItemUnitKind
   /** Deterministic key: `<effect>@<file>:<site>` or the item id. */
@@ -80,6 +91,10 @@ export interface ItemUnit {
   testFile: string | null
   /** Items carrying the effect (trigger units) or the single item (item-keyed units). */
   itemIds: string[]
+  /** True when the site has no entry in C_SITE_SIM_MAP. */
+  unmappedSite?: boolean
+  /** Reason why a known partial port is kept unported. */
+  partialReason?: string
 }
 
 export interface ItemUnitKindSummary {
@@ -115,6 +130,261 @@ export interface ItemInventoryResult {
 
 /** Pinned in the test. Empty today: no C site is provably inert. */
 export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = []
+
+export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
+  {
+    key: 'HOLD_EFFECT_LIFE_ORB@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL',
+    whatDiffers:
+      'no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:6085',
+  },
+]
+
+export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
+  ITEMEFFECT_ON_SWITCH_IN: {
+    files: ['web/src/engine/sim/switchIn.ts'],
+    functionName: 'switchIn',
+  },
+  'ENDTURN_ITEMS1/2': {
+    files: ['web/src/engine/sim/endTurn.ts'],
+    functionName: 'runEndTurnEffects',
+  },
+  ENDTURN_ITEMS1: {
+    files: ['web/src/engine/sim/endTurn.ts'],
+    functionName: 'runEndTurnEffects',
+  },
+  ENDTURN_ITEMS2: {
+    files: ['web/src/engine/sim/endTurn.ts'],
+    functionName: 'runEndTurnEffects',
+  },
+  ITEMEFFECT_TARGET: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'runMoveEnd',
+  },
+  ITEMEFFECT_MOVE_END: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+  },
+  ITEMEFFECT_KINGSROCK: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'applyKingsRock',
+  },
+  ITEMEFFECT_LIFEORB_SHELLBELL: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'runMoveEnd',
+  },
+  ITEMEFFECT_ORBS: {
+    files: ['web/src/engine/sim/endTurn.ts'],
+    functionName: 'runEndTurnEffects',
+  },
+  GetBattlerTotalSpeedStat: {
+    files: ['web/src/engine/sim/turnOrder.ts'],
+    functionName: 'getBattlerTotalSpeedStat',
+  },
+  CanBattlerGetOrLoseItem: {
+    files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/moveEnd.ts'],
+    functionName: 'canBattlerGetOrLoseItem',
+  },
+  TryPrimalReversion: {
+    files: ['web/src/engine/sim/formChange.ts'],
+    functionName: 'tryPrimalReversion',
+  },
+  CanMegaEvolve: {
+    files: ['web/src/engine/sim/formChange.ts'],
+    functionName: 'canMegaEvolve',
+  },
+  Cmd_various: {
+    files: [],
+  },
+  BENEFITS_FROM_LEEK: {
+    files: ['web/src/engine/crit.ts'],
+  },
+  CalcAttackStat: {
+    files: ['web/src/engine/calculate.ts', 'web/src/engine/battleStat.ts'],
+  },
+  CalcDefenseStat: {
+    files: ['web/src/engine/calculate.ts', 'web/src/engine/battleStat.ts'],
+  },
+  CalcFinalDmg: {
+    files: ['web/src/engine/finalDamage.ts', 'web/src/engine/calculate.ts'],
+  },
+  CalcMoveBasePowerAfterModifiers: {
+    files: ['web/src/engine/basePower.ts'],
+  },
+  CalcCritChanceStage: {
+    files: ['web/src/engine/crit.ts'],
+  },
+  CheckGroundingEffects: {
+    files: ['web/src/engine/sim/grounding.ts', 'web/src/engine/calculate.ts'],
+  },
+  CheckLevitatingEffects: {
+    files: ['web/src/engine/sim/grounding.ts', 'web/src/engine/calculate.ts'],
+  },
+  CanBattlerEscape: {
+    files: ['web/src/engine/sim/escape.ts'],
+  },
+  IsAbilityPreventingEscape: {
+    files: ['web/src/engine/sim/escape.ts'],
+  },
+  IsBattlerAffectedByHazards: {
+    files: ['web/src/engine/sim/hazards.ts'],
+  },
+  SetActionsAndBattlersTurnOrder: {
+    files: ['web/src/engine/sim/turnOrder.ts'],
+  },
+  GetMoveSpeed: {
+    files: ['web/src/engine/sim/turnOrder.ts'],
+  },
+  MulByTypeEffectiveness: {
+    files: ['web/src/engine/typeEffectiveness.ts', 'web/src/engine/calculate.ts'],
+  },
+  DoBattlerEndTurnEffects: {
+    files: ['web/src/engine/sim/endTurn.ts'],
+  },
+  DoesBattlerHaveAbilityShield: {
+    files: ['web/src/engine/sim/turnOrder.ts'],
+  },
+  GetDrainedBigRootHp: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+  },
+  GetMultihitType: {
+    files: ['web/src/engine/multiHit.ts', 'web/src/engine/calculate.ts'],
+  },
+  GetTotalAccuracy: {
+    files: ['web/src/engine/sim/accuracy.ts'],
+  },
+  IsMoveMakingContact: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+  },
+  IsPowderImmune: {
+    files: ['web/src/engine/sim/statusEffects.ts'],
+  },
+  SetMoveEffect: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  SetSwapDamageCategory: {
+    files: ['web/src/engine/calculate.ts'],
+  },
+  SetTypeBeforeUsingMove: {
+    files: ['web/src/engine/calculate.ts'],
+  },
+  WrapDuration: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  sWeatherFlagsInfo: {
+    files: ['web/src/engine/sim/switchInAbility.ts'],
+  },
+  CheckMoveLimitations: {
+    files: ['web/src/engine/sim/attackCanceller.ts'],
+  },
+  Cmd_removeitem: {
+    files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/moveEnd.ts'],
+  },
+  Cmd_setlightscreen: {
+    files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/hitScripts.ts'],
+  },
+  Cmd_setreflect: {
+    files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/hitScripts.ts'],
+  },
+  Cmd_accuracycheck: {
+    files: ['web/src/engine/sim/accuracy.ts'],
+  },
+  Cmd_adjustdamage: {
+    files: ['web/src/engine/sim/turn.ts'],
+  },
+  HandleTerrainMove: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  IsBattlerWeatherAffected: {
+    files: ['web/src/engine/sim/turn.ts', 'web/src/engine/sim/moveEffects.ts'],
+  },
+  IsHailImmune: {
+    files: ['web/src/engine/sim/fieldEndTurn.ts'],
+  },
+  IsSandImmune: {
+    files: ['web/src/engine/sim/fieldEndTurn.ts'],
+  },
+  ProtosynthesisHandler: {
+    files: ['web/src/engine/sim/onWeather.ts'],
+  },
+  QuarkDriveHandler: {
+    files: ['web/src/engine/sim/onWeather.ts'],
+  },
+  StrikeoutClearFlags: {
+    files: ['web/src/engine/sim/endTurn.ts'],
+  },
+  TryChangeBattleTerrain: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  TrySetCantSelectMoveBattleScript: {
+    files: ['web/src/engine/sim/state.ts'],
+  },
+  GetBattlerWeight: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  ApplyTypeOverrideInformation: {
+    files: ['web/src/engine/basePower.ts'],
+  },
+  AbilityBattleEffects: {
+    files: ['web/src/engine/sim/moveEnd.ts', 'web/src/engine/sim/endTurn.ts'],
+  },
+  CanBattlerBeForceSwitched: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+  },
+  HandleMimicry: {
+    files: ['web/src/engine/sim/switchInAbility.ts', 'web/src/engine/sim/onWeather.ts'],
+  },
+  // Unported sites (functions absent from sim)
+  AdjustFriendship: { files: [] },
+  CheckQuickClaw_CustapBerryActivation: { files: [] },
+  Cmd_getexp: { files: [] },
+  Cmd_setmultihitcounter: { files: [] },
+  GetEvolutionTargetSpecies: { files: [] },
+  GetMonMoveType: { files: [] },
+  IsRunningFromBattleImpossible: { files: [] },
+  PlayStatChangeAnimation: { files: [] },
+  TryRunFromBattle: { files: [] },
+  UPDATE_FRIENDSHIP_FROM_ITEM: { files: [] },
+  // AI sites
+  AI_CheckBadMove: {
+    files: ['web/src/engine/sim/ai/aiCheckBadMove.ts'],
+    functionName: 'aiCheckBadMove',
+  },
+  AI_CheckViability: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+    functionName: 'aiCheckViability',
+  },
+  AI_MoveMakesContact: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+    functionName: 'aiMoveMakesContact',
+  },
+  WhichMoveBetter: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+  },
+  ShouldPivot: {
+    files: ['web/src/engine/sim/ai/aiSwitching.ts'],
+  },
+  ShouldFakeOut: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+  },
+  IsBattlerTrapped: {
+    files: ['web/src/engine/sim/ai/aiSwitching.ts'],
+  },
+  HasHealingItem: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+  },
+  IncreaseConfusionScore: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+  },
+  GetTrapDamage: {
+    files: ['web/src/engine/sim/ai/aiCheckViability.ts'],
+  },
+  PartyBattlerShouldAvoidHazards: {
+    files: ['web/src/engine/sim/ai/aiSwitching.ts'],
+  },
+  AI_DoubleBattle: {
+    files: [], // Doubles AI not built
+  },
+}
 
 export const UNIT_KIND_ORDER: ReadonlyArray<ItemUnitKind> = [
   'hold-trigger',
@@ -156,9 +426,10 @@ export const ITEM_INVENTORY_DOC_PATH = join(REPO_ROOT, 'docs/battle-sim/item-inv
 
 const HOLD_EFFECT_TOKEN_RE = /HOLD_EFFECT_[A-Z0-9_]+/g
 const ITEM_CASE_RE = /^\s*case (ITEM_[A-Z0-9_]+):/
-const ITEM_EFFECT_CASE_RE = /^\s*case (ITEMEFFECT_[A-Z_]+):/
 const TOP_LEVEL_FUNCTION_RE = /^[A-Za-z_][A-Za-z0-9_ \t*]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/
 const TOP_LEVEL_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_ \t*]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*(\[|=)/
+const TEMPLATE_IMPL_RE = /^constexpr\s+Ability\s+(Impl<[A-Za-z0-9_]+>)\s*=/
+const HOOK_MEMBER_RE = /^\s*\.([A-Za-z0-9_]+)\s*=/
 const MACRO_RE = /^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)/
 
 function escapeRegExp(value: string): string {
@@ -167,6 +438,160 @@ function escapeRegExp(value: string): string {
 
 export function tokenAppears(source: string, token: string): boolean {
   return new RegExp(`\\b${escapeRegExp(token)}\\b`).test(source)
+}
+
+/** Removes data-only note blocks that intentionally list identifiers without handling them. */
+export function stripNoteOnlyBlocks(repoRelative: string, source: string): string {
+  let out = source
+  if (!repoRelative || repoRelative === 'web/src/engine/basePower.ts') {
+    const start = out.indexOf('export const UNMODELLED_BASE_POWER_EFFECTS')
+    if (start >= 0) {
+      const end = out.indexOf('])', start)
+      if (end >= 0) out = out.slice(0, start) + out.slice(end + 2)
+    }
+  }
+  if (!repoRelative || repoRelative === 'web/src/engine/sim/switchIn.ts') {
+    const start = out.indexOf('const SWITCH_IN_HOLD_EFFECTS')
+    if (start >= 0) {
+      const end = out.indexOf('])', start)
+      if (end >= 0) out = out.slice(0, start) + out.slice(end + 2)
+    }
+  }
+  if (!repoRelative || repoRelative === 'web/src/engine/sim/endTurn.ts') {
+    const start = out.indexOf('const ITEMS_1_2_HOLD_EFFECTS')
+    if (start >= 0) {
+      const end = out.indexOf('])', start)
+      if (end >= 0) out = out.slice(0, start) + out.slice(end + 2)
+    }
+  }
+  if (!repoRelative || repoRelative === 'web/src/engine/sim/moveEnd.ts') {
+    const start = out.indexOf('const TARGET_ITEM_EFFECTS')
+    if (start >= 0) {
+      const end = out.indexOf('])', start)
+      if (end >= 0) out = out.slice(0, start) + out.slice(end + 2)
+    }
+  }
+  if (!repoRelative || repoRelative === 'web/src/engine/sim/moveEffects.ts') {
+    const token = "deps.grounding.holdEffectOf(i) === 'HOLD_EFFECT_ROOM_SERVICE'"
+    const start = out.indexOf(token)
+    if (start >= 0) {
+      const ifStart = out.lastIndexOf('if', start)
+      const end = out.indexOf('}', start)
+      if (ifStart >= 0 && end >= 0) out = out.slice(0, ifStart) + out.slice(end + 1)
+    }
+  }
+  return out
+}
+
+/** Drops skipped or todo test blocks: it.skip, describe.skip, test.skip, it.todo, test.todo, describe.todo. */
+export function stripSkippedTests(source: string): string {
+  let out = source
+  const pattern = /\b(?:it|test|describe)\.(?:skip|todo)\s*\(/
+  while (true) {
+    const match = pattern.exec(out)
+    if (!match) break
+    const start = match.index
+    let i = start + match[0].length
+    let depth = 1
+    while (i < out.length && depth > 0) {
+      const ch = out[i]
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const quote = ch
+        i += 1
+        while (i < out.length) {
+          if (out[i] === '\\') {
+            i += 2
+          } else if (out[i] === quote) {
+            i += 1
+            break
+          } else {
+            i += 1
+          }
+        }
+      } else if (ch === '(') {
+        depth += 1
+        i += 1
+      } else if (ch === ')') {
+        depth -= 1
+        i += 1
+      } else {
+        i += 1
+      }
+    }
+    out = out.slice(0, start) + ' '.repeat(i - start) + out.slice(i)
+  }
+  return out
+}
+
+/** Removes the string literal argument that is the test/describe title from it/test/describe calls. */
+export function stripTestTitles(source: string): string {
+  const pattern = /\b(?:it|test|describe)(?:\.[A-Za-z0-9_]+)*\s*\(\s*(['"`])/g
+  let out = ''
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(source)) !== null) {
+    const quote = match[1]
+    const quoteIndex = match.index + match[0].length - 1
+    out += source.slice(lastIndex, quoteIndex + 1)
+    let i = quoteIndex + 1
+    while (i < source.length) {
+      if (source[i] === '\\') {
+        i += 2
+      } else if (source[i] === quote) {
+        break
+      } else {
+        i += 1
+      }
+    }
+    out += ' '.repeat(Math.max(0, i - (quoteIndex + 1)))
+    lastIndex = i
+    pattern.lastIndex = i
+  }
+  out += source.slice(lastIndex)
+  return out
+}
+
+/** Prepares test source by stripping comments, skipped test blocks, and title strings. */
+export function cleanTestSource(source: string): string {
+  return stripTestTitles(stripSkippedTests(stripComments(source)))
+}
+
+/** Extracts the body of a top-level function or exported function from source code. */
+export function extractFunctionBody(source: string, functionName: string): string | null {
+  const pattern = new RegExp(
+    `(?:\\bfunction\\s+${functionName}\\b|\\bconst\\s+${functionName}\\s*=\\s*(?:function|\\([^)]*\\)\\s*=>)|export\\s+(?:async\\s+)?function\\s+${functionName}\\b)[^{]*\\{`,
+    'g',
+  )
+  const match = pattern.exec(source)
+  if (!match) return null
+  const braceStart = match.index + match[0].length - 1
+  let depth = 1
+  let i = braceStart + 1
+  while (i < source.length && depth > 0) {
+    const ch = source[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const q = ch
+      i += 1
+      while (i < source.length) {
+        if (source[i] === '\\') i += 2
+        else if (source[i] === q) {
+          i += 1
+          break
+        } else {
+          i += 1
+        }
+      }
+    } else if (ch === '{') {
+      depth += 1
+      i += 1
+    } else if (ch === '}') {
+      depth -= 1
+      i += 1
+    } else {
+      i += 1
+    }
+  }
+  return source.slice(braceStart + 1, i - 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -233,11 +658,17 @@ function collectEngineFiles(predicate: (repoRel: string, isTest: boolean) => boo
   return files
 }
 
-/** Non-test engine sources outside `sim/driver/`, comment-stripped. */
+/** Non-test, non-AI engine sources outside `sim/driver/`, comment-stripped and note-only-stripped. */
 export function loadEngineProductionFiles(): SourceFile[] {
   return collectEngineFiles(
-    (repoRel, isTest) => !isTest && !repoRel.startsWith('web/src/engine/sim/driver/'),
-  ).map((file) => ({ file: file.file, source: stripComments(file.source) }))
+    (repoRel, isTest) =>
+      !isTest &&
+      !repoRel.startsWith('web/src/engine/sim/driver/') &&
+      !repoRel.startsWith('web/src/engine/sim/ai/'),
+  ).map((file) => ({
+    file: file.file,
+    source: stripNoteOnlyBlocks(file.file, stripComments(file.source)),
+  }))
 }
 
 /** Non-test engine sources under `sim/ai/`, comment-stripped. */
@@ -247,11 +678,28 @@ export function loadEngineAiProductionFiles(): SourceFile[] {
   ).map((file) => ({ file: file.file, source: stripComments(file.source) }))
 }
 
-/** Engine test sources except this inventory's own test file. */
+/** Engine test sources outside `sim/driver/` and `sim/ai/`, excluding this inventory's own test file. */
 export function loadEngineTestFiles(): SourceFile[] {
   return collectEngineFiles(
-    (repoRel, isTest) => isTest && repoRel !== 'web/src/engine/sim/driver/itemInventory.test.ts',
-  )
+    (repoRel, isTest) =>
+      isTest &&
+      !repoRel.endsWith('Inventory.test.ts') &&
+      !repoRel.startsWith('web/src/engine/sim/driver/') &&
+      !repoRel.startsWith('web/src/engine/sim/ai/'),
+  ).map((file) => ({
+    file: file.file,
+    source: cleanTestSource(file.source),
+  }))
+}
+
+/** Engine test sources under `sim/ai/`, cleaned. */
+export function loadEngineAiTestFiles(): SourceFile[] {
+  return collectEngineFiles(
+    (repoRel, isTest) => isTest && repoRel.startsWith('web/src/engine/sim/ai/'),
+  ).map((file) => ({
+    file: file.file,
+    source: cleanTestSource(file.source),
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -290,10 +738,21 @@ export function buildMacroRegions(lines: string[]): Map<number, string> {
  * outside `ItemBattleEffects` gets its trigger kind.
  */
 export function nearestEnclosingDefinition(lines: string[], lineNumber: number): string {
+  let hookMember: string | null = null
   for (let index = lineNumber - 2; index >= 0; index -= 1) {
     const text = lines[index]
-    if (text.startsWith(' ') || text.startsWith('\t')) continue
+    if (text.startsWith(' ') || text.startsWith('\t')) {
+      if (!hookMember) {
+        const hookMatch = text.match(HOOK_MEMBER_RE)
+        if (hookMatch) hookMember = hookMatch[1]
+      }
+      continue
+    }
     if (text.trimStart().startsWith('#')) continue
+    const implMatch = text.match(TEMPLATE_IMPL_RE)
+    if (implMatch) {
+      return hookMember ? `${implMatch[1]}.${hookMember}` : implMatch[1]
+    }
     const variable = text.match(TOP_LEVEL_VARIABLE_RE)
     if (variable) return variable[1]
     const fn = text.match(TOP_LEVEL_FUNCTION_RE)
@@ -308,7 +767,7 @@ export interface ItemBattleEffectsRange {
   cases: Array<{ line: number; name: string }>
 }
 
-/** Locates `ItemBattleEffects` and its `case ITEMEFFECT_*` labels (1-indexed lines). */
+/** Locates `ItemBattleEffects` and its `switch (caseID)` branches (1-indexed lines). */
 export function findItemBattleEffectsRange(lines: string[]): ItemBattleEffectsRange | null {
   let start = -1
   for (let index = 0; index < lines.length; index += 1) {
@@ -324,16 +783,40 @@ export function findItemBattleEffectsRange(lines: string[]): ItemBattleEffectsRa
     if (text.startsWith(' ') || text.startsWith('\t') || text.trimStart().startsWith('#')) continue
     const fn = text.match(TOP_LEVEL_FUNCTION_RE)
     if (fn && !text.replace(/\s+$/, '').endsWith(';')) {
-      end = index // 0-based index equals the line number before the next definition
+      end = index
       break
     }
   }
   const cases: Array<{ line: number; name: string }> = []
-  for (let index = 0; index < lines.length; index += 1) {
+  let insideSwitch = false
+  let depth = 0
+  for (let index = start - 1; index < end; index += 1) {
     const line = index + 1
-    if (line < start || line > end) continue
-    const match = lines[index].match(ITEM_EFFECT_CASE_RE)
-    if (match) cases.push({ line, name: match[1] })
+    const text = lines[index]
+    if (!insideSwitch) {
+      if (/switch\s*\(\s*caseID\s*\)/.test(text)) {
+        insideSwitch = true
+        depth = (text.match(/\{/g) || []).length - (text.match(/\}/g) || []).length
+      }
+    } else {
+      if (depth === 1) {
+        const match = text.match(/^\s*case\s+([^:]+):/)
+        if (match) {
+          const raw = match[1].trim()
+          let name: string | null = null
+          if (raw === '1') {
+            name = 'ENDTURN_ITEMS1/2'
+          } else if (raw === '0') {
+            name = 'ITEMEFFECT_ON_SWITCH_IN'
+          } else if (/^ITEMEFFECT_[A-Z_]+$/.test(raw)) {
+            name = raw
+          }
+          if (name) cases.push({ line, name })
+        }
+      }
+      depth += (text.match(/\{/g) || []).length - (text.match(/\}/g) || []).length
+      if (depth <= 0) insideSwitch = false
+    }
   }
   return { start, end, cases }
 }
@@ -353,9 +836,50 @@ export function scanHoldEffectHits(
   const macros = buildMacroRegions(lines)
   const range = options.itemBattleEffects ? findItemBattleEffectsRange(lines) : null
   const hits: HoldEffectHit[] = []
+  const ppStack: boolean[] = []
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = index + 1
-    const tokens = lines[index].match(HOLD_EFFECT_TOKEN_RE)
+    const text = lines[index]
+    const trimmed = text.trimStart()
+
+    // Preprocessor #ifdef awareness: skip enum members inside #ifdef
+    if (trimmed.startsWith('#')) {
+      if (/^#\s*if(?:def|ndef)?\b/.test(trimmed)) {
+        const parentActive = ppStack.length === 0 || ppStack[ppStack.length - 1]
+        let active = true
+        const m = trimmed.match(/^\s*#\s*(?:ifdef\s+([A-Za-z0-9_]+)|if\s+defined\s*\(\s*([A-Za-z0-9_]+)\s*\))/)
+        if (m) {
+          const sym = m[1] || m[2]
+          if (sym.startsWith('HOLD_EFFECT_') || (sym.startsWith('ITEM_') && sym !== 'ITEM_EXPANSION')) {
+            active = false
+          }
+        }
+        ppStack.push(parentActive && active)
+        continue
+      } else if (/^#\s*else\b/.test(trimmed)) {
+        if (ppStack.length > 0) {
+          const parentActive = ppStack.length <= 1 || ppStack[ppStack.length - 2]
+          ppStack[ppStack.length - 1] = parentActive && !ppStack[ppStack.length - 1]
+        }
+        continue
+      } else if (/^#\s*elif\b/.test(trimmed)) {
+        if (ppStack.length > 0) {
+          const parentActive = ppStack.length <= 1 || ppStack[ppStack.length - 2]
+          ppStack[ppStack.length - 1] = parentActive
+        }
+        continue
+      } else if (/^#\s*endif\b/.test(trimmed)) {
+        ppStack.pop()
+        continue
+      }
+    }
+
+    if (ppStack.length > 0 && !ppStack[ppStack.length - 1]) {
+      continue
+    }
+
+    const tokens = text.match(HOLD_EFFECT_TOKEN_RE)
     if (!tokens) continue
     const unique = [...new Set(tokens)].filter((token) => effects.has(token))
     if (unique.length === 0) continue
@@ -399,7 +923,7 @@ export function parseFlingItems(source: string): Array<{ itemId: string; line: n
 // Classification
 // ---------------------------------------------------------------------------
 
-interface TokenClassification {
+export interface TokenClassification {
   status: ItemUnitStatus
   registeredUntested: boolean
   testFile: string | null
@@ -409,16 +933,74 @@ export function classifyToken(
   token: string,
   productionSource: string,
   testSources: ReadonlyArray<SourceFile>,
+  itemIds: ReadonlyArray<string> = [],
 ): TokenClassification {
   const production = tokenAppears(productionSource, token)
   const matchingFiles = testSources
-    .filter((file) => tokenAppears(stripComments(file.source), token))
+    .filter((file) => {
+      const clean = cleanTestSource(file.source)
+      if (tokenAppears(clean, token)) return true
+      for (const id of itemIds) {
+        if (tokenAppears(clean, id)) return true
+      }
+      return false
+    })
     .map((file) => file.file)
     .sort()
   const tested = matchingFiles.length > 0
   if (production && tested) return { status: 'ported', registeredUntested: false, testFile: matchingFiles[0] }
   if (production) return { status: 'unported', registeredUntested: true, testFile: null }
   return { status: 'unported', registeredUntested: false, testFile: matchingFiles[0] ?? null }
+}
+
+/** Checks production evidence for a given C site in the mapped function/file. */
+export function checkProductionEvidenceForSite(
+  site: string,
+  token: string,
+  productionFiles: ReadonlyArray<SourceFile>,
+  fallbackProductionSource: string,
+): { hasEvidence: boolean; unmappedSite: boolean } {
+  const target = C_SITE_SIM_MAP[site]
+  if (!target) {
+    return {
+      hasEvidence: tokenAppears(fallbackProductionSource, token),
+      unmappedSite: true,
+    }
+  }
+
+  if (target.files.length === 0) {
+    return { hasEvidence: false, unmappedSite: false }
+  }
+
+  const matchedFiles = productionFiles.filter((f) => target.files.includes(f.file))
+  if (matchedFiles.length === 0) {
+    if (target.functionName) {
+      const body = extractFunctionBody(fallbackProductionSource, target.functionName)
+      return {
+        hasEvidence: body !== null && tokenAppears(body, token),
+        unmappedSite: false,
+      }
+    }
+    return {
+      hasEvidence: tokenAppears(fallbackProductionSource, token),
+      unmappedSite: false,
+    }
+  }
+
+  for (const f of matchedFiles) {
+    if (target.functionName) {
+      const body = extractFunctionBody(f.source, target.functionName)
+      if (body && tokenAppears(body, token)) {
+        return { hasEvidence: true, unmappedSite: false }
+      }
+    } else {
+      if (tokenAppears(f.source, token)) {
+        return { hasEvidence: true, unmappedSite: false }
+      }
+    }
+  }
+
+  return { hasEvidence: false, unmappedSite: false }
 }
 
 /** A citation must be an exact `pinned C file:line`. */
@@ -458,7 +1040,9 @@ export interface ItemInventoryOptions {
   holdTriggerSources?: Record<string, string>
   aiTriggerSources?: Record<string, string>
   flingSource?: string
+  productionFiles?: ReadonlyArray<SourceFile>
   productionSource?: string
+  aiProductionFiles?: ReadonlyArray<SourceFile>
   aiProductionSource?: string
   testSources?: ReadonlyArray<SourceFile>
   allowlist?: ReadonlyArray<ItemAllowlistEntry>
@@ -472,13 +1056,40 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
   const holdSources = options.holdTriggerSources ?? loadHoldTriggerSources()
   const aiSources = options.aiTriggerSources ?? loadAiTriggerSources()
   const flingSource = options.flingSource ?? loadFlingSource()
-  const productionSource = stripComments(
-    options.productionSource ?? loadEngineProductionFiles().map((file) => file.source).join('\n'),
+
+  const rawProductionFiles = options.productionFiles ?? (options.productionSource !== undefined
+    ? [{ file: 'synthetic.ts', source: options.productionSource }]
+    : loadEngineProductionFiles())
+
+  const productionFiles = rawProductionFiles.map((f) => ({
+    file: f.file,
+    source: stripNoteOnlyBlocks(f.file, stripComments(f.source)),
+  }))
+
+  const fallbackProductionSource = options.productionSource !== undefined
+    ? stripNoteOnlyBlocks('', stripComments(options.productionSource))
+    : productionFiles.map((f) => f.source).join('\n')
+
+  const aiProductionFiles = options.aiProductionFiles ?? (options.aiProductionSource !== undefined
+    ? [{ file: 'synthetic-ai.ts', source: stripComments(options.aiProductionSource) }]
+    : loadEngineAiProductionFiles())
+
+  const fallbackAiProductionSource = options.aiProductionSource !== undefined
+    ? stripComments(options.aiProductionSource)
+    : aiProductionFiles.map((f) => f.source).join('\n')
+
+  const rawTestSources = options.testSources ?? collectEngineFiles(
+    (repoRel, isTest) => isTest && !repoRel.endsWith('Inventory.test.ts'),
   )
-  const aiProductionSource = stripComments(
-    options.aiProductionSource ?? loadEngineAiProductionFiles().map((file) => file.source).join('\n'),
+
+  const nonAiTestSources = rawTestSources.filter(
+    (f) => !f.file.startsWith('web/src/engine/sim/ai/') && !f.file.startsWith('web/src/engine/sim/driver/'),
   )
-  const testSources = options.testSources ?? loadEngineTestFiles()
+
+  const allTestSources = rawTestSources.filter(
+    (f) => !f.file.startsWith('web/src/engine/sim/driver/'),
+  )
+
   const effects = new Set(distinctResolvedHoldEffects(items))
 
   const itemsByEffect = new Map<string, string[]>()
@@ -513,9 +1124,50 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
   const units: ItemUnit[] = []
 
   for (const [key, hit] of holdHits) {
-    const classification = classifyToken(hit.effect, productionSource, testSources)
+    const itemIds = itemsByEffect.get(hit.effect) ?? []
+    const prodCheck = checkProductionEvidenceForSite(
+      hit.site,
+      hit.effect,
+      productionFiles,
+      fallbackProductionSource,
+    )
+    const matchingTests = nonAiTestSources
+      .filter((file) => {
+        const clean = cleanTestSource(file.source)
+        if (tokenAppears(clean, hit.effect)) return true
+        for (const id of itemIds) {
+          if (tokenAppears(clean, id)) return true
+        }
+        return false
+      })
+      .map((f) => f.file)
+      .sort()
+
+    const hasTest = matchingTests.length > 0
     const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
     const site = hit.site
+
+    let status: ItemUnitStatus
+    let registeredUntested = false
+
+    if (site === '?') {
+      status = 'unclassified'
+    } else if (allow) {
+      status = 'allowlisted'
+    } else if (knownPartial) {
+      status = 'unported'
+      registeredUntested = false
+    } else if (prodCheck.hasEvidence && hasTest) {
+      status = 'ported'
+    } else if (prodCheck.hasEvidence) {
+      status = 'unported'
+      registeredUntested = true
+    } else {
+      status = 'unported'
+      registeredUntested = false
+    }
+
     units.push({
       kind: 'hold-trigger',
       key,
@@ -524,17 +1176,60 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       site,
       file: `${UPSTREAM_SRC}/${hit.file}`,
       citation: allow?.cite ?? `${UPSTREAM_SRC}/${hit.file}:${hit.line}`,
-      status: site === '?' ? 'unclassified' : allow ? 'allowlisted' : classification.status,
-      registeredUntested: site === '?' || allow ? false : classification.registeredUntested,
-      testFile: classification.testFile,
-      itemIds: itemsByEffect.get(hit.effect) ?? [],
+      status,
+      registeredUntested,
+      testFile: matchingTests[0] ?? null,
+      itemIds,
+      unmappedSite: prodCheck.unmappedSite,
+      partialReason: knownPartial?.whatDiffers,
     })
   }
 
   for (const [key, hit] of aiHits) {
-    const classification = classifyToken(hit.effect, aiProductionSource, testSources)
+    const itemIds = itemsByEffect.get(hit.effect) ?? []
+    const prodCheck = checkProductionEvidenceForSite(
+      hit.site,
+      hit.effect,
+      aiProductionFiles,
+      fallbackAiProductionSource,
+    )
+    const matchingTests = allTestSources
+      .filter((file) => {
+        const clean = cleanTestSource(file.source)
+        if (tokenAppears(clean, hit.effect)) return true
+        for (const id of itemIds) {
+          if (tokenAppears(clean, id)) return true
+        }
+        return false
+      })
+      .map((f) => f.file)
+      .sort()
+
+    const hasTest = matchingTests.length > 0
     const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
     const site = hit.site
+
+    let status: ItemUnitStatus
+    let registeredUntested = false
+
+    if (site === '?') {
+      status = 'unclassified'
+    } else if (allow) {
+      status = 'allowlisted'
+    } else if (knownPartial) {
+      status = 'unported'
+      registeredUntested = false
+    } else if (prodCheck.hasEvidence && hasTest) {
+      status = 'ported'
+    } else if (prodCheck.hasEvidence) {
+      status = 'unported'
+      registeredUntested = true
+    } else {
+      status = 'unported'
+      registeredUntested = false
+    }
+
     units.push({
       kind: 'ai-trigger',
       key,
@@ -543,10 +1238,12 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       site,
       file: `${UPSTREAM_SRC}/${hit.file}`,
       citation: allow?.cite ?? `${UPSTREAM_SRC}/${hit.file}:${hit.line}`,
-      status: site === '?' ? 'unclassified' : allow ? 'allowlisted' : classification.status,
-      registeredUntested: site === '?' || allow ? false : classification.registeredUntested,
-      testFile: classification.testFile,
-      itemIds: itemsByEffect.get(hit.effect) ?? [],
+      status,
+      registeredUntested,
+      testFile: matchingTests[0] ?? null,
+      itemIds,
+      unmappedSite: prodCheck.unmappedSite,
+      partialReason: knownPartial?.whatDiffers,
     })
   }
 
@@ -555,8 +1252,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     if (!item.resolvedHoldEffect || item.resolvedHoldEffect === 'HOLD_EFFECT_NONE') continue
     if (effectsWithHoldUnit.has(item.resolvedHoldEffect)) continue
     const key = item.id
-    const classification = classifyToken(key, productionSource, testSources)
+    const classification = classifyToken(key, fallbackProductionSource, nonAiTestSources, [key])
     const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
     units.push({
       kind: 'item-data',
       key,
@@ -565,18 +1263,20 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       site: item.resolvedHoldEffect,
       file: ITEMS_REPO_REL,
       citation: allow?.cite ?? `none (data-only; ${ITEMS_REPO_REL})`,
-      status: allow ? 'allowlisted' : classification.status,
-      registeredUntested: allow ? false : classification.registeredUntested,
+      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
       testFile: classification.testFile,
       itemIds: [item.id],
+      partialReason: knownPartial?.whatDiffers,
     })
   }
 
   for (const item of items) {
     if (!item.naturalGift) continue
     const key = item.id
-    const classification = classifyToken(key, productionSource, testSources)
+    const classification = classifyToken(key, fallbackProductionSource, nonAiTestSources, [key])
     const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
     units.push({
       kind: 'natural-gift',
       key,
@@ -585,17 +1285,19 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       site: 'naturalGift',
       file: `${UPSTREAM_SRC}/${FLING_FILE}`,
       citation: allow?.cite ?? NATURAL_GIFT_CITATIONS.join('; '),
-      status: allow ? 'allowlisted' : classification.status,
-      registeredUntested: allow ? false : classification.registeredUntested,
+      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
       testFile: classification.testFile,
       itemIds: [item.id],
+      partialReason: knownPartial?.whatDiffers,
     })
   }
 
   for (const fling of parseFlingItems(flingSource)) {
     const key = fling.itemId
-    const classification = classifyToken(key, productionSource, testSources)
+    const classification = classifyToken(key, fallbackProductionSource, nonAiTestSources, [key])
     const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
     units.push({
       kind: 'fling',
       key,
@@ -604,10 +1306,11 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       site: 'VARIOUS_TRY_FLING',
       file: `${UPSTREAM_SRC}/${FLING_FILE}`,
       citation: allow?.cite ?? `${UPSTREAM_SRC}/${FLING_FILE}:${fling.line}`,
-      status: allow ? 'allowlisted' : classification.status,
-      registeredUntested: allow ? false : classification.registeredUntested,
+      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
       testFile: classification.testFile,
       itemIds: [fling.itemId],
+      partialReason: knownPartial?.whatDiffers,
     })
   }
 
@@ -661,7 +1364,15 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
 // ---------------------------------------------------------------------------
 
 function statusLabel(unit: ItemUnit): string {
-  return unit.status === 'unported' && unit.registeredUntested ? 'unported (registered, untested)' : unit.status
+  if (unit.partialReason) return `unported (partial: ${unit.partialReason})`
+  let base: string = unit.status
+  if (unit.status === 'unported' && unit.registeredUntested) {
+    base = 'unported (registered, untested)'
+  }
+  if (unit.unmappedSite) {
+    return `${base} (site-unmapped)`
+  }
+  return base
 }
 
 function formatItemList(itemIds: string[], names: Map<string, string>): string {
@@ -704,12 +1415,29 @@ export function generateItemInventoryDoc(
   lines.push('## Unit Kinds and Classification Rules')
   lines.push('')
   lines.push(
-    'A unit is **ported** only when its token appears in both a non-test, non-driver engine source file and an engine test',
+    'A unit is **ported** only when its token appears in production source in the mapped function/file that ports that C site',
   )
   lines.push(
-    'file, after comments are stripped. `registered, untested` means production handles the unit but no test names it;',
+    'and in an engine test file outside `sim/ai/` (and `sim/driver/`). Production evidence excludes `sim/ai/` for non-AI units.',
   )
-  lines.push('it is counted as unported. Allowlisted units require an exact pinned C `file:line`.')
+  lines.push(
+    'Comments and note-only gap blocks (`SWITCH_IN_HOLD_EFFECTS`, `ITEMS_1_2_HOLD_EFFECTS`, `TARGET_ITEM_EFFECTS`, etc.)',
+  )
+  lines.push(
+    'are stripped before scanning. Skipped tests (`it.skip`, `describe.skip`, `test.skip`, `it.todo`) and test title strings',
+  )
+  lines.push(
+    'are removed so names alone do not count as test evidence. Tests that reference any item id carrying the effect also qualify.',
+  )
+  lines.push(
+    '`registered, untested` means production handles the unit but no qualifying test names it; it is counted as unported.',
+  )
+  lines.push(
+    'Sites without an explicit mapping fall back to any non-AI production file and are flagged in the doc as `site-unmapped`.',
+  )
+  lines.push(
+    'Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowlisted units require an exact pinned C `file:line`.',
+  )
   lines.push('')
   lines.push(
     '1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,',
@@ -718,7 +1446,10 @@ export function generateItemInventoryDoc(
     '   `battle_script_commands.c`, `battle_main.c`, `pokemon.c` and `abilities.cc`. The site is the enclosing',
   )
   lines.push(
-    '   `ITEMEFFECT_*` case inside `ItemBattleEffects`, or the nearest enclosing function/table/macro elsewhere.',
+    '   `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),',
+  )
+  lines.push(
+    '   top-level `constexpr Ability Impl<ABILITY_X> =` declaration in `abilities.cc`, or the nearest enclosing function/macro elsewhere.',
   )
   lines.push('   The token is the `HOLD_EFFECT_*` name. Several hits of one effect in one site collapse to one unit.')
   lines.push(
@@ -760,6 +1491,20 @@ export function generateItemInventoryDoc(
     `Items in \`data/v2.65beta/items.json\`: ${result.itemCount}; distinct non-\`HOLD_EFFECT_NONE\` resolved hold effects: ${result.distinctHoldEffectCount}.`,
   )
   lines.push('')
+
+  if (KNOWN_PARTIAL_PORTS.length > 0) {
+    lines.push('## Known Partial Ports')
+    lines.push('')
+    lines.push('Units whose production handling diverges from the pinned C in ways confirmed by manual audit.')
+    lines.push('They are kept out of the ported count (status `unported` with a partial reason).')
+    lines.push('')
+    lines.push('| Unit key | What differs | C citation |')
+    lines.push('| --- | --- | --- |')
+    for (const partial of KNOWN_PARTIAL_PORTS) {
+      lines.push(`| \`${partial.key}\` | ${partial.whatDiffers} | \`${partial.cite}\` |`)
+    }
+    lines.push('')
+  }
 
   lines.push('## Unported Units by Trigger Kind')
   lines.push('')

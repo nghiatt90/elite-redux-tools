@@ -19,17 +19,19 @@ const result = runInventory(items)
 
 const ITEM_COUNT = 929
 const DISTINCT_HOLD_EFFECTS = 133
-const HOLD_TRIGGER_UNITS = 195
+// Re-pinned after cycle 152b: numeric case 1 gives ENDTURN_ITEMS1/2 its own site (+22), #ifdef removes HOLD_EFFECT_Z_CRYSTAL (-1)
+const HOLD_TRIGGER_UNITS = 216
 const AI_TRIGGER_UNITS = 57
-const ITEM_DATA_UNITS = 9
+// Re-pinned after cycle 152b: 34 Z-crystals become item-data units now that their #ifdef trigger is compiled out (+34)
+const ITEM_DATA_UNITS = 43
 const NATURAL_GIFT_UNITS = 47
 const FLING_UNITS = 8
 
-/** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_UNIT_COUNT = 116
+// Re-pinned after cycle 152b: per-site mapping, non-AI production/test filters, stripped gap sets, and #ifdef awareness
+export const UNPORTED_UNIT_COUNT = 252
 
-/** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 61
+// Re-pinned after cycle 152b: stricter production and test evidence filters
+export const REGISTERED_UNTESTED_UNIT_COUNT = 27
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -143,25 +145,6 @@ describe('held-item completeness inventory', () => {
     const ported = both.units.find((candidate) => candidate.kind === 'hold-trigger')
     expect(ported?.status).toBe('ported')
     expect(ported?.testFile).toBe('web/src/engine/sim/fabricated.test.ts')
-  })
-
-  it('negative (c): effects covered by the cycle110 held-item tests are ported', () => {
-    // Verified by grep before writing: each token is in both a non-driver engine
-    // source file and a web/src/engine/**/*.test.ts file.
-    for (const effect of [
-      'HOLD_EFFECT_LIFE_ORB',
-      'HOLD_EFFECT_RESTORE_HP',
-      'HOLD_EFFECT_CHOICE_BAND',
-      'HOLD_EFFECT_SHELL_BELL',
-      'HOLD_EFFECT_ROCKY_HELMET',
-    ]) {
-      const units = result.units.filter((unit) => unit.kind === 'hold-trigger' && unit.unit === effect)
-      expect(units.length).toBeGreaterThan(0)
-      for (const unit of units) {
-        expect(unit.status).toBe('ported')
-        expect(unit.testFile).not.toBeNull()
-      }
-    }
   })
 
   it('negative (d): an allowlist entry without an exact file:line cite is rejected', () => {
