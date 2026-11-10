@@ -265,8 +265,8 @@ const hasAbility = (
 // Source-text mutation helpers
 // ---------------------------------------------------------------------------
 
-/** Name of the top-level declaration that a slice of source starts at. */
-function findDeclarationLine(source: string, marker: string): number {
+/** Character index at which the `marker` text first appears in `source` (not a line number). */
+function findDeclarationIndex(source: string, marker: string): number {
   const index = source.indexOf(marker)
   if (index === -1) throw new Error(`marker not found: ${marker}`)
   return index
@@ -277,7 +277,7 @@ function findDeclarationLine(source: string, marker: string): number {
  * untouched. The result is not a valid program, which is fine: the extractors only read text.
  */
 function removeBranch(source: string, marker: string): string {
-  const start = findDeclarationLine(source, marker)
+  const start = findDeclarationIndex(source, marker)
   const open = source.indexOf('{', start)
   if (open === -1) throw new Error(`no block after ${marker}`)
   let depth = 0
@@ -293,7 +293,7 @@ function removeBranch(source: string, marker: string): string {
 
 /** Replaces the `if (...) { ... }` block whose header contains `marker` with `replacement`. */
 function replaceBranch(source: string, marker: string, replacement: string): string {
-  const start = findDeclarationLine(source, marker)
+  const start = findDeclarationIndex(source, marker)
   const open = source.indexOf('{', start)
   if (open === -1) throw new Error(`no block after ${marker}`)
   let depth = 0

@@ -16,6 +16,7 @@ import {
   BATTLE_TYPE_ARENA,
   B_SIDE_PLAYER,
   DEFAULT_STAT_STAGE,
+  DEFAULT_STAT_STAGE_RATIOS,
   ENUM_WEATHER_FOG,
   ENUM_WEATHER_HAIL,
   ENUM_WEATHER_RAIN,
@@ -253,7 +254,7 @@ import {
   isMagicGuardProtected,
   setAbilityStateOf,
 } from './endTurn'
-import { isBattlerGrounded } from './grounding'
+import { isBattlerGrounded, type GroundingContext } from './grounding'
 import { tryChangeBattleWeather, trySetStickyWeb, trySetTailwind } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
@@ -3138,16 +3139,48 @@ export function startTailwind(state: BattleState, battlerId: number, moveId: str
     return false
   }
 
-  // BattleScript_OnTailwindStart (data/battle_scripts_1.s:9266-9296): callifability is
-  // jumpifability -> BATTLER_HAS_ABILITY (mold breaker checked, no alive check).
-  // raisehighestattackingstat (VARIOUS_RAISE_HIGHEST_ATTACKING_STAT, battle_script_
-  // commands.c:8159-8170) passes BS_ptr 0; setcharge (:11620-11623) sets STATUS3_CHARGED_UP.
+  runOnTailwindStart(state, battlerId, moveId, deps, unmodelled)
+  return true
+}
+
+/** The deps BattleScript_OnTailwindStart needs: data lookups, the optional grounding context and
+ * the stat-stage ratio table. Both TurnLoopDeps and SwitchInAbilityDeps satisfy it. */
+export interface OnTailwindStartDeps {
+  dataContext: SimDataContext
+  grounding?: GroundingContext
+  statStageRatios?: [number, number][]
+}
+
+/**
+ * BattleScript_OnTailwindStart (data/battle_scripts_1.s:9267-9272), the four
+ * `callifability` calls run whenever Tailwind goes up: by the Tailwind move itself
+ * (BattleScript_EffectTailwind -> Cmd_settailwind), by Bleakwind Storm's
+ * EFFECT_TAILWIND_HIT, and by Air Blower / Air Lock / Blistering Sun's onEntry
+ * (abilities.cc:1388-1407, :10517-10519, whose pushed BattleScript_AirBlowerActivated
+ * calls `BattleScript_OnTailwindStart` at :9258). Callers reach it only once Tailwind is
+ * actually up: the C's CHECK_NOT(gSideStatuses & SIDE_STATUS_TAILWIND) returns before the
+ * script is pushed.
+ *
+ * `callifability` is jumpifability -> BATTLER_HAS_ABILITY (mold breaker checked, no alive
+ * check). raisehighestattackingstat (VARIOUS_RAISE_HIGHEST_ATTACKING_STAT,
+ * battle_script_commands.c:8159-8170) passes BS_ptr 0; setcharge (:11620-11623) sets
+ * STATUS3_CHARGED_UP. `moveId` is the move that started Tailwind, or undefined when an
+ * ability entry did (the other switch-in branches likewise omit it).
+ */
+export function runOnTailwindStart(
+  state: BattleState,
+  battlerId: number,
+  moveId: string | undefined,
+  deps: OnTailwindStartDeps,
+  unmodelled: string[],
+): void {
   const attackerHasMB = attackerHasMoldBreakerActive(state.battlers[battlerId]!, deps)
+  const statStageRatios = deps.statStageRatios ?? DEFAULT_STAT_STAGE_RATIOS
   for (const bId of [battlerId, battlerId ^ 2]) {
     const b = state.battlers[bId]
     if (!b) continue
     if (battlerHasSimAbility(state, b, 'ABILITY_WIND_RIDER', true, battlerId, attackerHasMB, deps.dataContext)) {
-      const statId = getHighestAttackingStatId(state, bId, deps.statStageRatios)
+      const statId = getHighestAttackingStatId(state, bId, statStageRatios)
       changeStatBuffs(state, bId, battlerId, battlerId, 1, statId, MOVE_EFFECT_AFFECTS_USER, false, deps, unmodelled, moveId)
     }
     if (
@@ -3157,8 +3190,6 @@ export function startTailwind(state: BattleState, battlerId: number, moveId: str
       b.statuses3 = setFlag(b.statuses3, STATUS3_CHARGED_UP)
     }
   }
-
-  return true
 }
 
 /**

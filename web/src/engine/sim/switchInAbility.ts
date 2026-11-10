@@ -177,7 +177,7 @@ import { NEUTRAL_TURN_ORDER_CONTEXT, recalculateMoveOrder } from './turnOrder'
 import type { HazardDeps } from './hazards'
 import { TYPE_ROCK_ID } from './hazards'
 import { isBattlerAlive } from './turn'
-import { applyTransformCopy, hasAbilityIgnoringSuppression } from './moveEffects'
+import { applyTransformCopy, hasAbilityIgnoringSuppression, runOnTailwindStart } from './moveEffects'
 // IsRolePlayBannedAbility (battle_util.c:8428-8436) lives with the other role-play/resuppression
 // predicates already extracted for the AI; reuse it rather than duplicating the four-entry table.
 import { isRolePlayBannedAbility } from './ai/aiAbilityHelpers'
@@ -1456,18 +1456,41 @@ export function applySwitchInAbilities(
       abilityId === 'ABILITY_AIR_LOCK' ||
       abilityId === 'ABILITY_BLISTERING_SUN'
     ) {
-      // Air Lock delegates Cloud Nine's onEntry and then Air Blower's (abilities.cc:1405-1407), so the
-      // weather is cleared before Tailwind goes up. Air Blower and Blistering Sun do not clear weather.
-      if (abilityId === 'ABILITY_AIR_LOCK') {
-        removeBattleWeather(state)
-        dispatchOnWeatherChange(state, deps, unmodelled)
-      }
+      // Air Blower onEntry (abilities.cc:1388-1402; the Tailwind writes are :1390-1394):
+      // CHECK_NOT(Tailwind already up); set Tailwind with TAILWIND_DURATION_SHORT, the side status
+      // and tailwindBattlerId; DisableSwitchInAbility on the holder and BATTLE_PARTNER
+      // (`battler ^ 2`, include/constants/battle.h:37); then push BattleScript_AirBlowerActivated
+      // (data/battle_scripts_1.s:9255-9259), whose `call BattleScript_OnTailwindStart` (:9258,
+      // script at :9267-9272) is the Wind Rider / Wind Power loop.
+      // Air Lock chains Cloud Nine's onEntry and then Air Blower's (abilities.cc:1405-1407).
+      // Cloud Nine only *pushes* BattleScript_AnnounceAirLockCloudNine (abilities.cc:652-657, the
+      // push is :655-657), so its `removeweather` (:11194-11205) is not synchronous. The callback
+      // stack is LIFO (BattleScriptCall/BattleScriptPushCursor, battle_util.c:1322-1325;
+      // BattleScriptPushCursorAndCallback, :4871-4875; popped by Cmd_end3,
+      // battle_script_commands.c:4013-4018), so Air Blower's script -- the Tailwind message and the
+      // Wind Rider / Wind Power calls -- runs BEFORE Cloud Nine's weather clear. The synchronous
+      // order is therefore: Tailwind, then the on-Tailwind-start reactions, then the weather clear
+      // and its onWeather dispatch. Air Blower and Blistering Sun do not clear weather.
       const side = battlerId & 1
       if (trySetTailwind(state, side, battlerId, TAILWIND_DURATION_SHORT)) {
         disableSwitchInAbility(state, battlerId, 'ABILITY_WIND_RIDER', deps.dataContext)
         disableSwitchInAbility(state, battlerId ^ 2, 'ABILITY_WIND_RIDER', deps.dataContext)
+        // BattleScript_AirBlowerActivated -> BattleScript_OnTailwindStart: BS_ATTACKER is the
+        // entering battler (battle_main.c:3362/:3375 set it before HandleSwitchInAbility, which
+        // never touches it), BS_ATTACKER_PARTNER is `battler ^ 2`. The CHECK_NOT above skips the
+        // whole Air Blower script, so this only runs when Tailwind actually went up.
+        runOnTailwindStart(state, battlerId, undefined, deps, unmodelled)
+      }
+      if (abilityId === 'ABILITY_AIR_LOCK') {
+        // Cloud Nine's pushed script clears the weather when it finally runs. The CHECK_NOT only
+        // guards the Tailwind half, so this runs even when Tailwind was already up.
+        removeBattleWeather(state)
+        dispatchOnWeatherChange(state, deps, unmodelled)
       }
       if (abilityId === 'ABILITY_BLISTERING_SUN') {
+        // Impl<ABILITY_BLISTERING_SUN> (abilities.cc:10517-10519) is Desolate Land's onEntry
+        // (:2566-2571: TryChangeBattleWeather synchronously, then push its activation script) |
+        // Air Blower's. The weather write happens first; its pushed script runs after Air Blower's.
         if (tryChangeBattleWeather(state, battlerId, ENUM_WEATHER_SUN_PRIMAL, true, deps)) {
           dispatchOnWeatherChange(state, deps, unmodelled)
         }

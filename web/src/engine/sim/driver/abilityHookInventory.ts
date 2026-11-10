@@ -935,7 +935,7 @@ export function isNoteOnlyBranchBody(body: string): boolean {
   rest = rest
     .replace(/\b(?:if|for|while|switch|else|break|continue)\b/g, '')
     .replace(/\breturn\s+(?:true|false)\b/g, '')
-    .replace(/[{}\[\]();]/g, '')
+    .replace(/[{}[\]();]/g, '')
     .replace(/\s+/g, '')
   return rest.length === 0
 }
