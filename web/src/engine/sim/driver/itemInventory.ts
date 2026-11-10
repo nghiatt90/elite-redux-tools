@@ -559,39 +559,181 @@ export function cleanTestSource(source: string): string {
 /** Extracts the body of a top-level function or exported function from source code. */
 export function extractFunctionBody(source: string, functionName: string): string | null {
   const pattern = new RegExp(
-    `(?:\\bfunction\\s+${functionName}\\b|\\bconst\\s+${functionName}\\s*=\\s*(?:function|\\([^)]*\\)\\s*=>)|export\\s+(?:async\\s+)?function\\s+${functionName}\\b)[^{]*\\{`,
+    `(?:\\b(?:export\\s+)?(?:async\\s+)?function\\s+${functionName}\\b|\\b(?:export\\s+)?const\\s+${functionName}\\s*=\\s*(?:async\\s+)?(?:function\\b)?)`,
     'g',
   )
-  const match = pattern.exec(source)
-  if (!match) return null
-  const braceStart = match.index + match[0].length - 1
-  let depth = 1
-  let i = braceStart + 1
-  while (i < source.length && depth > 0) {
-    const ch = source[i]
-    if (ch === "'" || ch === '"' || ch === '`') {
-      const q = ch
-      i += 1
-      while (i < source.length) {
-        if (source[i] === '\\') i += 2
-        else if (source[i] === q) {
-          i += 1
-          break
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(source)) !== null) {
+    let pos = match.index + match[0].length
+
+    // Skip whitespace and optional type parameters before '('
+    while (pos < source.length && source[pos] !== '(' && /\s/.test(source[pos])) {
+      pos += 1
+    }
+    if (source[pos] === '<') {
+      let angleDepth = 1
+      pos += 1
+      while (pos < source.length && angleDepth > 0) {
+        if (source[pos] === '<') angleDepth += 1
+        else if (source[pos] === '>') angleDepth -= 1
+        pos += 1
+      }
+      while (pos < source.length && source[pos] !== '(' && /\s/.test(source[pos])) {
+        pos += 1
+      }
+    }
+    if (source[pos] !== '(') continue
+
+    // 1. Skip parameter list by balanced-paren scan from the first '('
+    let parenDepth = 1
+    let i = pos + 1
+    while (i < source.length && parenDepth > 0) {
+      const ch = source[i]
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const q = ch
+        i += 1
+        while (i < source.length) {
+          if (source[i] === '\\') {
+            i += 2
+          } else if (source[i] === q) {
+            i += 1
+            break
+          } else {
+            i += 1
+          }
+        }
+      } else if (ch === '(') {
+        parenDepth += 1
+        i += 1
+      } else if (ch === ')') {
+        parenDepth -= 1
+        i += 1
+      } else {
+        i += 1
+      }
+    }
+    if (parenDepth > 0) continue
+
+    // 2. Skip optional return annotation by scanning forward at depth 0
+    let braceStart = -1
+    let seenColon = false
+    let lastToken = ''
+    let parenDepthAfter = 0
+    let bracketDepth = 0
+    let angleDepth = 0
+    let braceDepth = 0
+
+    while (i < source.length) {
+      const ch = source[i]
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const q = ch
+        i += 1
+        while (i < source.length) {
+          if (source[i] === '\\') {
+            i += 2
+          } else if (source[i] === q) {
+            i += 1
+            break
+          } else {
+            i += 1
+          }
+        }
+        continue
+      }
+
+      const atDepth0 = parenDepthAfter === 0 && bracketDepth === 0 && angleDepth === 0 && braceDepth === 0
+
+      if (source.startsWith('=>', i)) {
+        if (atDepth0) lastToken = '=>'
+        i += 2
+        continue
+      }
+
+      if (ch === '(') {
+        parenDepthAfter += 1
+        i += 1
+      } else if (ch === ')') {
+        parenDepthAfter = Math.max(0, parenDepthAfter - 1)
+        i += 1
+      } else if (ch === '[') {
+        bracketDepth += 1
+        i += 1
+      } else if (ch === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1)
+        i += 1
+      } else if (ch === '<') {
+        angleDepth += 1
+        i += 1
+      } else if (ch === '>') {
+        angleDepth = Math.max(0, angleDepth - 1)
+        i += 1
+      } else if (ch === '{') {
+        if (atDepth0) {
+          if (seenColon && (lastToken === ':' || lastToken === '|' || lastToken === '&')) {
+            braceDepth += 1
+            lastToken = '{'
+            i += 1
+          } else {
+            braceStart = i
+            break
+          }
         } else {
+          braceDepth += 1
           i += 1
         }
+      } else if (ch === '}') {
+        braceDepth = Math.max(0, braceDepth - 1)
+        if (parenDepthAfter === 0 && bracketDepth === 0 && angleDepth === 0 && braceDepth === 0) {
+          lastToken = '}'
+        }
+        i += 1
+      } else {
+        if (atDepth0 && !/\s/.test(ch)) {
+          if (ch === ':') {
+            seenColon = true
+            lastToken = ':'
+          } else if (ch === '|' || ch === '&') {
+            lastToken = ch
+          } else {
+            lastToken = ch
+          }
+        }
+        i += 1
       }
-    } else if (ch === '{') {
-      depth += 1
-      i += 1
-    } else if (ch === '}') {
-      depth -= 1
-      i += 1
-    } else {
-      i += 1
     }
+
+    if (braceStart === -1) continue
+
+    // 3. Scan the function body until matching '}'
+    let depth = 1
+    let bodyIdx = braceStart + 1
+    while (bodyIdx < source.length && depth > 0) {
+      const ch = source[bodyIdx]
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const q = ch
+        bodyIdx += 1
+        while (bodyIdx < source.length) {
+          if (source[bodyIdx] === '\\') bodyIdx += 2
+          else if (source[bodyIdx] === q) {
+            bodyIdx += 1
+            break
+          } else {
+            bodyIdx += 1
+          }
+        }
+      } else if (ch === '{') {
+        depth += 1
+        bodyIdx += 1
+      } else if (ch === '}') {
+        depth -= 1
+        bodyIdx += 1
+      } else {
+        bodyIdx += 1
+      }
+    }
+    return source.slice(braceStart + 1, bodyIdx - 1)
   }
-  return source.slice(braceStart + 1, i - 1)
+  return null
 }
 
 // ---------------------------------------------------------------------------
