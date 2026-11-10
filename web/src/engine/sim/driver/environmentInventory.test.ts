@@ -57,7 +57,7 @@ const MAP_SETUP_UNITS = 61
 // 5 static BATTLE_TYPE_* / FLAG_TAG_BATTLE units + 2 multi_2_vs_2 units
 // + 2 tag-battle units (FLAG_TAG_BATTLE already counted) in cycle 154.
 const BATTLE_TYPE_UNITS = 9
-const DIFFICULTY_FLAG_UNITS = 16
+const DIFFICULTY_FLAG_UNITS = 18
 const TRAINER_FLAG_UNITS = 14
 const HELL_TRAINER_SKILL_UNITS = 29
 const BATTLE_EVENT_UNITS = 34
@@ -93,8 +93,11 @@ const SCRIPT_EVENT_UNITS = 6
  * (RusturfTunnel and SeafloorCavern_Room9 through paren-less trainerbattle
  * calls, MarineCave_End and TerraCave_End through a scripted `setwildbattle`).
  * All four are unported because the sim does not seed battle weather.
+ *
+ * Moves 117 -> 119 in cycle 153i: two missing difficulty gates (Hell duplicate-item
+ * clause, Easy trainer EVs) became visible; both unported.
  */
-export const UNPORTED_UNIT_COUNT = 117
+export const UNPORTED_UNIT_COUNT = 119
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 3
@@ -1496,9 +1499,11 @@ describe('step 4: hell and difficulty rules', () => {
     { key: 'hellEvasionClause', identifier: 'IsEvasionClauseDisablingMove' },
     { key: 'hellSleepMovePP', identifier: 'CalculatePPWithBonusPlayer' },
     { key: 'sleepClause', identifier: 'IsSleepClauseDisablingMove' },
+    { key: 'hellHeldItemClause', identifier: 'DIFFICULTY_HELL' },
+    { key: 'easyTrainerEvs', identifier: 'DIFFICULTY_EASY' },
   ] as const
 
-  it('adds the seven hell/difficulty rules as unported difficulty-flag units with real C lines', () => {
+  it('adds the nine hell/difficulty rules as unported difficulty-flag units with real C lines', () => {
     for (const { key, identifier } of HELL_UNITS) {
       const unit = result.units.find(
         (candidate) => candidate.kind === 'difficulty-flag' && candidate.key === key,

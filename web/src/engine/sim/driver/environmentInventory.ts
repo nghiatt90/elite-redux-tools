@@ -1408,7 +1408,8 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     // then ace fallback), the same fallback as TrainerPartyGenerator.kt:177-178.
     token: 'parties',
     site: 'CreateNPCTrainerParty',
-    scope: 'DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection',
+    scope:
+      'DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection; DIFFICULTY_EASY is not modelled (ace/elite/hell tiers only, so Easy EV zeroing is not covered by this unit)',
     citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1735),
     evidence: {
       productionFiles: ['web/src/engine/sim/driver/buildParty.ts'],
@@ -1553,6 +1554,29 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     scope:
       'every difficulty except EASY: EFFECT_SLEEP / EFFECT_YAWN disabled when IsSleepDisabled(target) or, in doubles, the partner chose a sleep move',
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4977),
+  },
+  {
+    // GetHeldItemIfNotDuplicate first returns early unless the difficulty is
+    // DIFFICULTY_HELL, then walks the party so only the first holder of a given
+    // item keeps it. The caller rewrites battleMon.item from it.
+    key: 'hellHeldItemClause',
+    token: 'GetHeldItemIfNotDuplicate',
+    site: 'REQUEST_ALL_BATTLE battleMon.item',
+    scope:
+      'Hell: only the first player party mon holding a given item keeps it in battle (GetHeldItemIfNotDuplicate, pokemon.c:6293-6311); battle_controller_player.c:3478 assigns it to battleMon.item',
+    citation: cite(`${UPSTREAM_SRC}/pokemon.c`, 6297),
+  },
+  {
+    // battle_main.c:1856 says "Sets EVs to fully customized spreads if difficulty
+    // is Hard or higher"; the guard on the next line is `> DIFFICULTY_EASY`, so
+    // Easy leaves trainer EVs unset. Easy also takes the switch `default:` branch
+    // (battle_main.c:1744-1752) that uses the ace party size.
+    key: 'easyTrainerEvs',
+    token: 'DIFFICULTY_EASY',
+    site: 'CreateNPCTrainerParty EV spread',
+    scope:
+      'Easy: trainer EV spreads are not applied (difficultySetting > DIFFICULTY_EASY, battle_main.c:1857); the sim tiers are ace/elite/hell only, so DIFFICULTY_EASY is not modelled',
+    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1857),
   },
 ]
 

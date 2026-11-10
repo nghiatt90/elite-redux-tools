@@ -59,12 +59,12 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 61 | 0 | 0 | 56 | 0 | 5 |
 | `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
-| `difficulty-flag` | 16 | 1 | 1 | 15 | 0 | 0 |
+| `difficulty-flag` | 18 | 1 | 1 | 17 | 0 | 0 |
 | `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **169** | **44** | **3** | **117** | **0** | **8** |
+| **total** | **171** | **44** | **3** | **119** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -74,7 +74,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | --- | ---: | ---: |
 | `map-setup` | 56 | 0 |
 | `battle-type` | 8 | 2 |
-| `difficulty-flag` | 15 | 1 |
+| `difficulty-flag` | 17 | 1 |
 | `trainer-flag` | 3 | 0 |
 | `hell-trainer-skill` | 29 | 0 |
 | `battle-event` | 0 | 0 |
@@ -170,10 +170,12 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `HELL_MODE_EXTRA_LEVELS_FLAG` | FLAG_BADGE03_GET (pokemon_config.h:34): extra levels switch on after the third badge | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1805` | unported | none |
 | `RegisterTrainerBattleEvents` | data/hell_trainer_skills.h (29 rows across 24 trainers) | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1773` | unported | none |
 | `doubleBattleMode` | save-block double-battle mode toggle | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1757` | unported | none |
+| `easyTrainerEvs` | Easy: trainer EV spreads are not applied (difficultySetting > DIFFICULTY_EASY, battle_main.c:1857); the sim tiers are ace/elite/hell only, so DIFFICULTY_EASY is not modelled | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1857` | unported | `web/src/engine/sim/cycle153iDifficultyUnits.test.ts` |
 | `enableEvs` | save-block EV toggle | `pipeline/.upstream/eliteredux-source/src/pokemon.c:996` | unported | none |
-| `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | ported | `web/src/engine/sim/cycle154EnvironmentUnits.test.ts` |
+| `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection; DIFFICULTY_EASY is not modelled (ace/elite/hell tiers only, so Easy EV zeroing is not covered by this unit) | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | ported | `web/src/engine/sim/cycle154EnvironmentUnits.test.ts` |
 | `hellDamageReduction` | Hell: defender not on the player side takes x0.9 after FLAG_BADGE02_GET, then x0.75 for both sides | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7516` | unported | none |
 | `hellEvasionClause` | Hell trainer battles: player-side EFFECT_EVASION_UP and EFFECT_MINIMIZE are disabled | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4931` | unported | none |
+| `hellHeldItemClause` | Hell: only the first player party mon holding a given item keeps it in battle (GetHeldItemIfNotDuplicate, pokemon.c:6293-6311); battle_controller_player.c:3478 assigns it to battleMon.item | `pipeline/.upstream/eliteredux-source/src/pokemon.c:6297` | unported | `web/src/engine/sim/cycle153iDifficultyUnits.test.ts` |
 | `hellNoEnemyFullParalysis` | Hell: enemy-side attackers never lose the 25% full-paralysis roll | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3402` | unported | none |
 | `hellPlayerFlinchFails` | Hell: a flinch secondary with baseChance < 100 always fails on the player side | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3076` | unported | none |
 | `hellSleepMovePP` | Hell: player EFFECT_SLEEP_HIT / EFFECT_SLEEP / EFFECT_SNORE / EFFECT_REST / EFFECT_SLEEP_TALK have 2 PP; other player moves get base PP with no PP Up bonus | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2239` | unported | none |
