@@ -74,6 +74,8 @@ function defCtx(defenderIsEnraged: boolean): DefensiveMultiplierContext {
     defenderGender: 'MALE',
     defenderIsEnraged,
     attackerTypes: [],
+    // No attacker slots to scan in this direct-hook test.
+    matchesMoveFlag: () => false,
   }
 }
 

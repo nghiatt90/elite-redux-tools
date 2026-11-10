@@ -11,11 +11,12 @@ const SUPER_EFFECTIVE_THRESHOLD = uq(2.0) // GetSuperEffectiveMult(), hell mode 
 
 export const OFFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
   {
-    // DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH) === moveFlags.punchBased
+    // IsIronFistBoosted -> DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_PUNCH),
+    // src/battle_util.c:9375 -- a literal TYPE_NORMAL dummy, not the real move type.
     id: 'ABILITY_IRON_FIST',
-    src: 'src/abilities.cc:1504',
+    src: 'src/abilities.cc:1534',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.punchBased) MUL(ctx, 1.3)
+      if (ctx.matchesMoveFlag('punchBased', 'NORMAL')) MUL(ctx, 1.3)
     },
   },
   {
@@ -28,11 +29,12 @@ export const OFFENSIVE_MULTIPLIER_BATCH_B: AbilityImpl[] = [
     },
   },
   {
-    // IsMegaLauncherBoosted -> DoesMoveMatchFlag(..., MOVE_FLAG_MEGA_LAUNCHER) === moveFlags.bulletBased
+    // IsMegaLauncherBoosted -> DoesMoveMatchFlag(battler, move, TYPE_NORMAL,
+    // MOVE_FLAG_MEGA_LAUNCHER), src/battle_util.c:9373 -- a literal TYPE_NORMAL dummy.
     id: 'ABILITY_MEGA_LAUNCHER',
-    src: 'src/abilities.cc:2411',
+    src: 'src/abilities.cc:2441',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.bulletBased) MUL(ctx, 1.3)
+      if (ctx.matchesMoveFlag('bulletBased', 'NORMAL')) MUL(ctx, 1.3)
     },
   },
   {

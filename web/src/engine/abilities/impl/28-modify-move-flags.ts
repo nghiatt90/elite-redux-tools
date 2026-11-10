@@ -4,10 +4,13 @@
 //
 // These hooks are now wired for the consumers whose call-site moveType convention
 // has been checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for
-// Punching Glove), plus the Keen Edge and Striker offensive multipliers. The other
-// consumers -- Mega Launcher and the sound family (Soundproof/Punk Rock/Amplifier/
-// Liquid Voice) -- still test the static `ctx.moveFlags.*` flag, so grants for those
-// families do not yet change damage; see OnModifyMoveFlags's own doc (types.ts).
+// Punching Glove), the Iron Fist, Mega Launcher, Liquid Voice and Punk Rock offensive
+// multipliers (TYPE_NORMAL dummies), Punk Rock's defensive half (IsSoundMove on the
+// attacker), Hammer Fist (the real move type), plus Keen Edge and Striker. The
+// Amplifier/Bass Boosted/Sludgy Mix aliases pass the ctx through to Punk Rock
+// unchanged. Still static (`ctx.moveFlags.*` only, so grants do not yet change the
+// result): Soundproof's onImmune, the chooseStat hooks, onCrit, onParentalBond, and
+// the accuracy/sim consumers; see OnModifyMoveFlags's own doc (types.ts).
 //
 // 7 of this batch's 10 census abilities get a fresh entry here; Backstreet Boy,
 // Chestnut Axe, and Gunman already had a real entry for a different hook elsewhere

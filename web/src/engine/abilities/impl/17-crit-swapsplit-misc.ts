@@ -43,9 +43,9 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
     onPriority: (ctx) => (ctx.movePower > 0 && ctx.movePower <= 25 ? 1 : 0),
   },
   {
-    // IsIronFistBoosted(battler, move) == DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH),
-    // src/abilities.cc's punch-flag case -- same moveFlags.punchBased check Iron
-    // Fist itself uses (batch 03).
+    // IsIronFistBoosted(battler, move) -- the same punch flag Iron Fist's multiplier
+    // tests, but OnCritContext has no matchesMoveFlag, so only the move's static
+    // punchBased bit is checked here (no onModifyMoveFlags grant fallback).
     id: 'ABILITY_PRECISE_FIST',
     src: 'src/abilities.cc:4730',
     onCrit: (ctx) => (ctx.moveFlags.punchBased ? 1 : 0),

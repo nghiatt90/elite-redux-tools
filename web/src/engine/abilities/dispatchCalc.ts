@@ -463,7 +463,7 @@ export function hasFlag(
 }
 
 type OffensiveCtxInputs = Omit<OffensiveMultiplierContext, 'modifier' | 'resistance' | 'matchesMoveFlag'>
-type DefensiveCtxInputs = Omit<DefensiveMultiplierContext, 'modifier' | 'resistance'>
+type DefensiveCtxInputs = Omit<DefensiveMultiplierContext, 'modifier' | 'resistance' | 'matchesMoveFlag'>
 
 /**
  * CalculateAbilityMultipliers, src/battle_util.c:6964-6993 -- ONE shared modifier

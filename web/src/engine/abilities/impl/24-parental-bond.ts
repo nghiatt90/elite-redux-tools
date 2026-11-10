@@ -73,9 +73,10 @@ export const PARENTAL_BOND_ABILITIES: AbilityImpl[] = [
     onParentalBond: (ctx) => (ctx.moveFlags.hammerBased ? 'DUAL_WIELD' : null),
   },
   {
-    // IsMegaLauncherBoosted (bulletBased) or IsKeenEdge (sliceBased) -- like Liquid
-    // Voice's IsSoundMove note, DoesMoveMatchFlag's ability-granted-flag fallback
-    // (onModifyMoveFlags) isn't modelled; this checks the move's own flags only.
+    // IsMegaLauncherBoosted (bulletBased) or IsKeenEdge (sliceBased). Unlike the
+    // damage multipliers, OnParentalBondContext carries no matchesMoveFlag, so this
+    // still reads the move's own flags only -- DoesMoveMatchFlag's grant fallback is
+    // not threaded here (see OnModifyMoveFlags's doc, types.ts).
     id: 'ABILITY_DUAL_WIELD',
     src: 'src/abilities.cc:5459',
     onParentalBond: (ctx) => (ctx.moveFlags.bulletBased || ctx.moveFlags.sliceBased ? 'DUAL_WIELD' : null),

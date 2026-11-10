@@ -133,6 +133,14 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   moveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   moveFlags: Record<string, true>
+  /** DoesMoveMatchFlag for the ATTACKER's (move user's) abilities -- Punk Rock's
+   * defensive half calls IsSoundMove(attacker, move) (src/abilities.cc:3311, which is
+   * DoesMoveMatchFlag(attacker, move, TYPE_NORMAL, MOVE_FLAG_SOUND),
+   * src/battle_util.c:9379), so the grant scan is over the ATTACKER's slots even
+   * though the ability holder here is the defender. Built by
+   * dispatchCalc.computeAbilityMultiplier from the attacker's slots, the same
+   * closure the offensive ctx gets. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
   typeEffectiveness: number // UQ_4_12
   isCrit: boolean
   weather: string // FieldBattleState['weather'] -- ER's bare weather kind, e.g. 'HAIL'
@@ -562,18 +570,24 @@ export interface OnModifyMoveFlagsContext {
  * same names as MoveData.flags' own keys (see emit.py's _MOVE_FLAGS) so a future
  * `flag`-keyed fallback reads as `moveFlags[flag] || ability grants it`.
  *
- * Wired through dispatchCalc.doesMoveMatchFlag / OffensiveMultiplierContext.matchesMoveFlag
- * for the consumers whose call site's own moveType convention has been checked:
- * Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for Punching Glove -- the C
- * passes a literal TYPE_NORMAL dummy there), and the Keen Edge and Striker offensive
- * multipliers (the former passes the REAL move type, src/abilities.cc:3676; the latter
- * a TYPE_NORMAL dummy, src/battle_util.c:9377). The remaining consumers -- Iron Fist
- * itself, Mega Launcher and the sound family (Soundproof/Punk Rock/Amplifier/Liquid
- * Voice) -- still read the static `ctx.moveFlags.*` flag directly, so their grants do
- * not yet change damage. Each must be checked against its own call site's moveType
- * argument before wiring (several carry a comment flagging this gap -- Liquid Voice,
- * Punk Rock, Dual Wield, Magus Blades, Primal Maw, Raging Boxer). Each port below is
- * complete and correct for when that plumbing exists.
+ * Wired through dispatchCalc.doesMoveMatchFlag and the two multiplier contexts'
+ * `matchesMoveFlag` for the consumers whose call-site moveType convention has been
+ * checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for Punching
+ * Glove -- the C passes a literal TYPE_NORMAL dummy there); the Iron Fist, Mega
+ * Launcher, Liquid Voice and Punk Rock offensive multipliers (all TYPE_NORMAL
+ * dummies, src/battle_util.c:9373-9379); Punk Rock's defensive half (IsSoundMove on
+ * the ATTACKER, src/abilities.cc:3311); Hammer Fist (the REAL move type,
+ * src/abilities.cc:11529); and Keen Edge/Striker (real type, :3676; dummy,
+ * src/battle_util.c:9377). Amplifier/Bass Boosted/Sludgy Mix delegate to Punk Rock
+ * through the unchanged ctx.
+ *
+ * Still static (`ctx.moveFlags.*` only, so grants do not yet change the result):
+ * Soundproof's onImmune (26-immune.ts:53), the onChooseOffensiveStat/
+ * onChooseDefensiveStat hooks (18-offensive-multiplier-e.ts:38,48), onCrit
+ * (17-crit-swapsplit-misc.ts:51), onParentalBond (24-parental-bond.ts:81,115), and
+ * the accuracy/sim consumers. Each must be checked against its own call site's
+ * moveType argument before wiring; each port below is complete and correct for when
+ * that plumbing exists.
  */
 export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean
 

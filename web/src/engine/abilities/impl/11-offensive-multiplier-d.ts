@@ -131,35 +131,39 @@ export const OFFENSIVE_MULTIPLIER_BATCH_D: AbilityImpl[] = [
     },
   },
   {
-    // IsSoundMove's C also lets an attacker-held ability GRANT the sound flag
-    // (onModifyMoveFlags) when the move's own FLAG_SOUND is unset -- no ability in
-    // this engine currently implements that fallback, so this checks the move's own
-    // `sound` flag only. If a sound-granting ability is ever ported, revisit.
+    // IsSoundMove(battler, move) -> DoesMoveMatchFlag(battler, move, TYPE_NORMAL,
+    // MOVE_FLAG_SOUND), src/battle_util.c:9379 (src/abilities.cc:2793). The
+    // TYPE_NORMAL dummy means a moveType-conditioned grant (Reverbate) still fires.
     id: 'ABILITY_LIQUID_VOICE',
-    src: 'src/abilities.cc:2763',
+    src: 'src/abilities.cc:2790',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.sound) MUL(ctx, 1.2)
+      if (ctx.matchesMoveFlag('sound', 'NORMAL')) MUL(ctx, 1.2)
     },
-    // Real gap fix: the C's own onMoveType half (:2767-2771, sound Normal move ->
+    // Real gap fix: the C's own onMoveType half (:2795-2799, sound Normal move ->
     // Water) was missing -- BANSHEE/POWER_METAL/SAND_SONG/SNOW_SONG (18-offensive-
     // multiplier-e.ts's soundAteAbility) already ported this exact shape for their
-    // own types, this just never landed on Liquid Voice itself.
+    // own types, this just never landed on Liquid Voice itself. Unlike the
+    // multiplier above, this half tests the RAW `gBattleMoves[move].flags & FLAG_SOUND`
+    // (not IsSoundMove), so a granted sound flag does not trigger the type change.
     onMoveType: (ctx) => {
       if (ctx.moveType === 'NORMAL' && ctx.moveFlags?.sound) ctx.moveType = 'WATER'
     },
   },
   {
-    // See Liquid Voice's note above on IsSoundMove's unmodelled ability-granted
-    // fallback. Referenced by ABILITY_AMPLIFIER/ABILITY_BASS_BOOSTED/
-    // ABILITY_SLUDGY_MIX's aliases (already ported in batch H).
+    // IsSoundMove for both halves -- the offensive call scans the attacker's own
+    // slots, the defensive call IsSoundMove(attacker, move) scans the MOVE USER's
+    // slots even though the holder is the defender (src/abilities.cc:3307,3311;
+    // src/battle_util.c:9379). Referenced by ABILITY_AMPLIFIER/ABILITY_BASS_BOOSTED/
+    // ABILITY_SLUDGY_MIX's aliases (already ported in batch H), which pass this ctx
+    // through unchanged.
     id: 'ABILITY_PUNK_ROCK',
-    src: 'src/abilities.cc:3277',
+    src: 'src/abilities.cc:3305',
     flags: { breakable: true },
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.sound) MUL(ctx, 1.3)
+      if (ctx.matchesMoveFlag('sound', 'NORMAL')) MUL(ctx, 1.3)
     },
     onDefensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.sound) MUL(ctx, 0.5)
+      if (ctx.matchesMoveFlag('sound', 'NORMAL')) MUL(ctx, 0.5)
     },
   },
   {

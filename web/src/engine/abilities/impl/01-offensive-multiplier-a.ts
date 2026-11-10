@@ -169,14 +169,13 @@ export const OFFENSIVE_MULTIPLIER_BATCH_A: AbilityImpl[] = [
     },
   },
   {
-    // DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH) -- moves.json's `punchBased` flag is
-    // this pipeline's own name for exactly that (see emit.py's _MOVE_FLAGS: the key
-    // is renamed from the raw `iron_fist` proto field to read as "boosted by Iron
-    // Fist", i.e. punch-based).
+    // DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_PUNCH) -- the REAL move
+    // type here (unlike IsIronFistBoosted's TYPE_NORMAL dummy), OR the move's own
+    // hammer flag; src/abilities.cc:11529.
     id: 'ABILITY_HAMMER_FIST',
-    src: 'src/abilities.cc:11498',
+    src: 'src/abilities.cc:11526',
     onOffensiveMultiplier: (ctx) => {
-      if (ctx.moveFlags.punchBased || ctx.moveFlags.hammerBased) MUL(ctx, 1.25)
+      if (ctx.matchesMoveFlag('punchBased', ctx.moveType) || ctx.moveFlags.hammerBased) MUL(ctx, 1.25)
     },
   },
 ]

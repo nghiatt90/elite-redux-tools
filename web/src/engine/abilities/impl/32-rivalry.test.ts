@@ -74,6 +74,8 @@ function defCtx(attackerGender: 'MALE' | 'FEMALE' | 'GENDERLESS', defenderGender
     defenderGender,
     defenderIsEnraged: false,
     attackerTypes: [],
+    // No attacker slots to scan in this direct-hook test.
+    matchesMoveFlag: () => false,
   }
 }
 
