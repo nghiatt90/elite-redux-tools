@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { partitionAuditNotes } from './driver/abilityAuditNotes'
-import { findStaleAllowances, findUncoveredGapNotes, validateGapAllowance } from './driver/auditGate'
+import { findStaleAllowances, findUncoveredGapNotes, sharedNoteCovered, validateGapAllowance } from './driver/auditGate'
 import type { GapAllowance } from './driver/auditGate'
 import { ABILITY_GAP_ALLOWLIST, SHARED_NOISE_ALLOWLIST } from './driver/gapNoteAllowlist'
 import { loadSimData } from './driver/loadSimData'
@@ -62,6 +62,16 @@ describe('validateGapAllowance', () => {
 
   it('accepts a citation with file:line', () => {
     expect(validateGapAllowance({ note: SYNTHETIC, citation: CITATION })).toEqual([])
+  })
+})
+
+describe('sharedNoteCovered', () => {
+  it('needs every owner allowed, and treats no owners as uncovered', () => {
+    const note = 'Synthetic shared gap (battle_util.c:1): the widget is not modelled'
+    const covers = (...effects: string[]) => (effect: string) => effects.includes(effect)
+    expect(sharedNoteCovered(['A', 'B', 'C'], note, covers('A'))).toBe(false)
+    expect(sharedNoteCovered(['A', 'B'], note, covers('A', 'B'))).toBe(true)
+    expect(sharedNoteCovered([], note, covers('A'))).toBe(false)
   })
 })
 

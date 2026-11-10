@@ -49,6 +49,20 @@ export function findUncoveredGapNotes(
 }
 
 /**
+ * A note shared by many effects is covered only when *every* effect that raises
+ * it carries an allowance for it. One allowed effect must not mask the twenty
+ * others that raise the same note; an empty owner set counts as uncovered.
+ */
+export function sharedNoteCovered(
+  owners: Iterable<string>,
+  note: string,
+  covers: (effect: string, note: string) => boolean,
+): boolean {
+  const list = [...owners]
+  return list.length > 0 && list.every((effect) => covers(effect, note))
+}
+
+/**
  * Allowances that no longer match any note in `notes`: the gap was closed (or
  * the note was reworded), so the entry must leave the list rather than sit
  * there masking a future note that happens to reuse its text.

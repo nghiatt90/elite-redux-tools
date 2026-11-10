@@ -13,7 +13,7 @@ import { buildPlayerParty } from './buildParty'
 import { createRandomSource } from '../rng'
 import { findAllowance, splitRows } from './auditAllowlist'
 import { GAP_NOTE } from './abilityAuditNotes'
-import { allowanceMatchesNote, findStaleAllowances } from './auditGate'
+import { allowanceMatchesNote, findStaleAllowances, sharedNoteCovered } from './auditGate'
 import { SHARED_NOISE_ALLOWLIST } from './gapNoteAllowlist'
 import { buildMoveAction, createSession, stepTurn } from './session'
 
@@ -113,7 +113,7 @@ it.skipIf(process.env.SIM_AUDIT !== '1')('move effect audit', { timeout: 900_000
     (note) =>
       GAP_NOTE.test(note) &&
       !SHARED_NOISE_ALLOWLIST.some((a) => allowanceMatchesNote(note, a)) &&
-      ![...(effectsByNote.get(note) ?? [])].some((effect) => effectCoversNote(effect, note)),
+      !sharedNoteCovered(effectsByNote.get(note) ?? [], note, effectCoversNote),
   )
   expect(sharedUncovered).toEqual([])
   expect(findStaleAllowances([...shared.keys()], SHARED_NOISE_ALLOWLIST)).toEqual([])
