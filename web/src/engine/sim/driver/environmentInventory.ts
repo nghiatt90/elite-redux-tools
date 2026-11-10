@@ -558,13 +558,13 @@ export const MAP_WEATHER_EVIDENCE: UnitEvidence = {
     'web/src/engine/sim/driver/session.ts',
     'web/src/engine/sim/driver/runBattle.ts',
   ],
-  productionLinePattern: /\bweather\b/,
   alsoRequires: [
     {
       file: 'web/src/engine/sim/driver/session.ts',
-      pattern: /\bweather\b/,
+      pattern: /\bmapWeather\b|\bGetCurrentWeather\b|\boverworldWeather\b/,
     },
   ],
+  testMustAssert: true,
 }
 
 export interface MapWeatherHit {

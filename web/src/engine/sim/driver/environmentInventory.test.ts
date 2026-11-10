@@ -890,6 +890,65 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
     expect(withBoth.status).toBe('ported')
   })
 
+  it('mutation: map weather requires map-weather source in session.ts plus asserting test to flip ported', () => {
+    const desertUnit = result.units.find(
+      (u) => u.key === 'map-weather:Route111_Desert:WEATHER_SANDSTORM',
+    )!
+    expect(desertUnit).toBeDefined()
+    expect(desertUnit.status).toBe('unported')
+
+    const dummyAssertingTest: SourceFile[] = [
+      ...testFiles,
+      {
+        file: 'web/src/engine/sim/dummyMapWeather.test.ts',
+        source:
+          'it("tests map weather", () => { expect(WEATHER_SANDSTORM).toBeDefined() })',
+      },
+    ]
+
+    // 1. A session.ts copy with an added line `const weather = 'WEATHER_SANDSTORM'`
+    // leaves it unported even with an asserting test (rejects bare name match).
+    const sessionWithBareWeather = productionFiles.map((f) => {
+      if (!f.file.endsWith('session.ts')) return f
+      return {
+        file: f.file,
+        source: f.source + "\nconst weather = 'WEATHER_SANDSTORM';\n",
+      }
+    })
+    const bareMatch = classifyToken(
+      desertUnit.token,
+      sessionWithBareWeather,
+      dummyAssertingTest,
+      desertUnit.evidence,
+    )
+    expect(bareMatch.status).toBe('unported')
+
+    // 2. A copy with the new required pattern but no asserting test stays unported.
+    const sessionWithMapWeather = productionFiles.map((f) => {
+      if (!f.file.endsWith('session.ts')) return f
+      return {
+        file: f.file,
+        source: f.source + "\nconst mapWeather = 'WEATHER_SANDSTORM';\n",
+      }
+    })
+    const withoutTest = classifyToken(
+      desertUnit.token,
+      sessionWithMapWeather,
+      testFiles,
+      desertUnit.evidence,
+    )
+    expect(withoutTest.status).toBe('unported')
+
+    // 3. A copy with the pattern and an asserting test flips it to ported.
+    const withBoth = classifyToken(
+      desertUnit.token,
+      sessionWithMapWeather,
+      dummyAssertingTest,
+      desertUnit.evidence,
+    )
+    expect(withBoth.status).toBe('ported')
+  })
+
   it('setweather is no longer in DEFAULT_ALLOWLIST; map-weather units exist for the 4 maps with verified trainer ids', () => {
     expect(DEFAULT_ALLOWLIST.some((entry) => entry.key === 'setweather')).toBe(
       false,
