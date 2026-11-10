@@ -1265,9 +1265,9 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'BATTLE_TYPE_DOUBLE',
     site: 'BattleSetup_StartTrainerBattle',
     // battle_setup.c:1240 sets this only when two trainers approach; the driver's
-    // session.ts:242 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
+    // session.ts:245 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
     // records that battleTypeFlags never carries the double bit in this build.
-    scope: 'not started by the driver: session.ts:242 sets BATTLE_TYPE_TRAINER only',
+    scope: 'not started by the driver: session.ts:245 sets BATTLE_TYPE_TRAINER only',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
@@ -2386,7 +2386,7 @@ export function generateEnvironmentInventoryDoc(
     '- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,',
   )
   lines.push(
-    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:242`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
+    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:245`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
   )
   lines.push('  never runs a double battle regardless of a constant or a hand-built test state.')
   lines.push(

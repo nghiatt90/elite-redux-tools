@@ -252,9 +252,10 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     expect(count('fling')).toBe(11)
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test, so ported 400 -> 401,
     // unported 216 -> 215 and registered-untested 28 -> 27.
+    // Cycle 152f: Natural Gift GetMovePriority ported, ported 401 -> 402, unported 215 -> 214.
     expect(result.totalDefined).toBe(636)
-    expect(result.totalPorted).toBe(401)
-    expect(result.totalUnported).toBe(215)
+    expect(result.totalPorted).toBe(402)
+    expect(result.totalUnported).toBe(214)
     expect(result.totalRegisteredUntested).toBe(27)
     expect(result.totalAllowlisted).toBe(20)
     expect(result.totalUnclassified).toBe(0)

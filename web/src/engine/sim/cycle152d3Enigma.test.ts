@@ -337,10 +337,11 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // Cycle 152d4: +270 mega stones (266 ported + 4 allowlisted) = 636 defined, 400 ported, 20 allowlisted.
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test, so ported 400 -> 401,
     // unported 216 -> 215 and registered-untested 28 -> 27.
+    // Cycle 152f: Natural Gift GetMovePriority ported, ported 401 -> 402, unported 215 -> 214.
     expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(251)
     expect(result.totalDefined).toBe(636)
-    expect(result.totalPorted).toBe(401)
-    expect(result.totalUnported).toBe(215)
+    expect(result.totalPorted).toBe(402)
+    expect(result.totalUnported).toBe(214)
     expect(result.totalAllowlisted).toBe(20)
     expect(result.totalRegisteredUntested).toBe(27)
   })
