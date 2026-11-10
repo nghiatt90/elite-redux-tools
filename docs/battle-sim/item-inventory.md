@@ -43,6 +43,7 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
    `EffectNaturalGift`, `GetMovePriority`), citing the upstream read sites.
 5. **fling**: one unit per item read by `VARIOUS_TRY_FLING`, plus power units (`ITEM_IRON_BALL`, `ITEM_BIG_NUGGET`)
    and `CanFling`. Each requires a qualifying test that exercises Fling.
+6. **mega-stone**: one unit per item whose resolved hold effect is `HOLD_EFFECT_MEGA_STONE`. Requires production `GetMegaEvolutionSpecies` handling and sweep test evidence.
 
 Berry trigger conditions are represented by their `hold-trigger` units; this inventory does not create a second
 unit kind for them.
@@ -56,7 +57,8 @@ unit kind for them.
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
-| **total** | **366** | **134** | **28** | **216** | **0** | **16** |
+| `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
+| **total** | **636** | **400** | **28** | **216** | **0** | **20** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -542,4 +544,282 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `ITEM_POISON_BARB` | Poison Barb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8423` | unported (registered, untested) | none |
 | `ITEM_RAZOR_FANG` | Razor Fang | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8409` | unported (registered, untested) | none |
 | `ITEM_TOXIC_ORB` | Toxic Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8413` | unported (registered, untested) | none |
+
+## Mega-Stone Units
+
+One line per unit, sorted by unit key. `Items` lists the first five item names sharing the hold effect
+(then `+N`); item-keyed units list their own item.
+
+| Unit key | Items | C citation | Status | Test file |
+| --- | --- | --- | --- | --- |
+| `ITEM_ABOMASITE` | Abomasite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ABOMASITE_S` | Abomasite S | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ABSOLITE` | Absolite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ABSOLITE_Z` | Absolite Z | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AEGISLASHITE_R` | Aegislashite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AERODACTYLITE` | Aerodactylite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AGGRONITE` | Aggronite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AGGRONITE_R` | Aggronite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ALAKAZITE` | Alakazite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ALAKAZITE_R` | Alakazite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ALCREMITE` | Alcremite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ALTARIANITE` | Altarianite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ALTARIANITE_R` | Altarianite-R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AMPHAROSITE` | Ampharosite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AMPHYBUZZITE` | Amphybuzzite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ARBOKITE` | Arbokite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ARCANITE` | Arcanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ARCANITE_H` | Arcanite H | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ARCANITE_R` | Arcanite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ARTICUNITE` | Articunite-EX | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_AUDINITE` | Audinite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BANETTITE` | Banettite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BARBARACITE` | Barbaracite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BAXCALIBRITE` | Baxcalibrite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BEEDRILLITE` | Beedrillite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BEEDRILLITE_R` | Beedrillite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BLASTOISINITE` | Blastoisinite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BLASTOISINITE_X` | Blastoisinite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BLAZIKENITE` | Blazikenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BRELOOMITE` | Breloomite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_BRUXISHITE` | Bruxishite | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124` | allowlisted | none |
+| `ITEM_BUTTERFRENITE` | Butterfrenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CAMERUPTITE` | Cameruptite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CARBONIXITE` | Carbonixite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CENTISKITE` | Centiskite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHANDELURITE` | Chandelurite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHANDELURITE_R` | Chandelurite-R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHANDELURITE_Y` | Chandelurite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHARIZARDITE_X` | Charizardite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHARIZARDITE_Y` | Charizardite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHARIZARDITE_Z` | Charizardite Z | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHESNAUGHTITE` | Chesnaughtite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHIEN_PAOITE` | Chien-Paoite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CHIMECHITE` | Chimechite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CINDERACEITE` | Cinderaceite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CLEFABLITE` | Clefablite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CLEFABLITE_R` | Clefablite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CLEFABLITE_Y` | Clefablite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CLODSITE` | Clodsite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_COALOSSITE` | Coalossite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_COPPERAJITE` | Copperajite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CORMOTHITE` | Cormothite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CORNERSTONE_MASK` | Cornerstone Mask | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CORVINITE` | Corvinite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CRABOMINITE` | Crabominite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_CROBATITE` | Crobatite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DARKRANITE` | Darkranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DECIDUITE` | Deciduite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DECIDUITE_H` | Deciduite H | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DELPHOXITE` | Delphoxite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DEWGONGITE` | Dewgongite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DIANCITE` | Diancite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRACOVISHITE` | Dracovishite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRAGALGITE` | Dragalgite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRAGAPULTITE` | Dragapultite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRAGONINITE` | Dragoninite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRAGONINITE_Y` | Dragoninite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DRAMPANITE` | Drampanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DREDNAWITE` | Drednawite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DUDUDUNITE` | Dududunite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_DURALUDITE` | Duraludite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EELEKTROSSITE` | Eelektrossite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EEVITE` | Eevite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EMBOARITE` | Emboarite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EMPOLEONITE` | Empoleonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EMPOLEONITE_R` | Empoleonite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EXCADRILLITE_R` | Excadrillite-R | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124` | allowlisted | none |
+| `ITEM_EXCADRITE` | Excadrite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_EYE_OF_ENDER` | Eye of Ender | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124` | allowlisted | none |
+| `ITEM_FALINKSITE` | Falinksite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FERALIGITE_X` | Feraligite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FERALIGITE_Y` | Feraligite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FLOETTITE` | Floettite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FLYGONITE` | Flygonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FLYGONITE_R` | Flygonite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FLYGONITE_R_B` | Flygonite E | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FROSLASSITE` | Froslassite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FROSLASSITE_R` | Froslassite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_FROSLASSITE_Y` | Froslassite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GALLADITE` | Galladite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GALLADITE_R` | Galladite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARBODORITE` | Garbodorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARCHOMPITE` | Garchompite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARCHOMPITE_R` | Garchompite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARCHOMPITE_Z` | Garchompite Z | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARDEVOIRITE` | Gardevoirite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GARDEVOIRITE_R` | Gardevoirite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GENGARITE` | Gengarite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GENGARITE_X` | Gengarite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GLALITITE` | Glalitite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GLALITITE_R` | Glalitite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GLIMMORANITE` | Glimmoranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOLISOPITE` | Golisopite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOLISOPITE_Y` | Golisopite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOLURKITE` | Golurkite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOODRITE` | Goodranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOODRITE_H` | Goodrite-H | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GOTHITITE` | Gothitite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GRANBULLITE` | Granbullite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GRENINJITE` | Greninjite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GRIMMSNARLITE` | Grimmsnarlite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GYARADEATHITE_X` | Gyaradeathite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GYARADEATHITE_Y` | Gyaradeathite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GYARADOSITE` | Gyaradosite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_GYARADOSITE_Y` | Gyaradosite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HARIYAMITE` | Hariyamite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HATTERENITE` | Hatterenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HAWLUCHANITE` | Hawluchanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HAXORUSITE` | Haxorusite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HEARTHFLAME_MASK` | Hearthflame Mask | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HEATRANITE` | Heatranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HERACREUSITE` | Heracreusite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HERACRONITE` | Heracronite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HITMONCHANITE` | Hitmonchanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HITMONLEENITE` | Hitmonleenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HITMONTOPITE` | Hitmontopite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HOUNDOOMINITE` | Houndoominite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HOUNDOOMINITE_R` | Houndoominite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HYDREIGONITE` | Hydreigonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_HYDREIGONITE_R` | Hydreigonite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_INCINERITE` | Incinerite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_INFERNAPENITE` | Infernapite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_INFERNAPENITE_R` | Infernapite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_INTELEONITE` | Inteleonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_JELLICENTITE` | Jellicentite | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124` | allowlisted | none |
+| `ITEM_KANGASKHANITE` | Kangaskhanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KILOZUNITE` | Kilozunite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KINGAMBITITE_R` | Kingambitite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KINGDRANITE` | Kingdranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KINGLERITE` | Kinglerite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KINGLERITE_R` | Kinglerite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KLEAVITE` | Kleavite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KLEAVITE_R` | Kleavite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_KROOKODILENITE` | Krookodilenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LANTURNITE` | Lanturnite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LAPRASITE_X` | Laprasite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LAPRASITE_Y` | Laprasite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LATIASITE` | Latiasite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LATIOSITE` | Latiosite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LOPUNNITE` | Lopunnite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LUCARIONITE` | Lucarionite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LUCARIONITE_Z` | Lucarionite Z | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LUXRAYNITE` | Luxraynite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LUXRAYNITE_R` | Luxraynite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_LUXZERITE` | Luxzerite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MACHAMPITE` | Machampite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MACHAMPITE_R` | Machampite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAGEARNITE` | Magearnite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAGNEZONITE` | Magnezonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MALAMARITE` | Malamarite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAMOSWINITE_R` | Mamoswinite-R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MANECTITE` | Manectite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAWILITE` | Mawilite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAWILITE_R` | Mawilite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MAWILITE_R_B` | Mawilite P | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEDICHAMITE` | Medichamite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEGANIUMITE` | Meganiumite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MELMETALITE` | Melmetalite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEOWSCARADITE` | Meowscaradite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEOWSTICITE` | Meowsticite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEOWTHITE` | Meowthite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_METAGROSSITE` | Metagrossite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEWTWONITE_X` | Mewtwonite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MEWTWONITE_Y` | Mewtwonite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MIENSHAOITE` | Mienshaoite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MILOTICITE` | Miloticite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_MOLTRESITE` | Moltresite-EX | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_NIDOKINGITE` | Nidokingite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_NIDOQUEENITE` | Nidoqueenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ORBEETITE` | Orbeetite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ORICORIONITE` | Oricorionite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_PIDGEOTITE` | Pidgeotite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_PIKANITE` | Pikanite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_PINSIRITE` | Pinsirite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_POPCORMITE` | Popcormite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_PRIMARINITE` | Primarinite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_PYROARITE` | Pyroarite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_QUAGSIRENITE` | Quagsirenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_QUAQUAVITE` | Quaquavite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RAICHUNITE_X` | Raichunite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RAICHUNITE_Y` | Raichunite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RAPIDASHITE` | Rapidashite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RAPIDASHITE_G` | Rapidashite G | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RELICANTHITE` | Relicanthite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_REUNICLUSITE` | Reuniclusite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_REUNICLUSITE_R` | Reuniclusite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RIBOMBITE` | Ribombite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RIBOMBITE_R` | Ribombite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_RILLABOOMITE` | Rillaboomite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ROSERADEITE` | Roseradite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SABLENITE` | Sablenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SABLENITE_R` | Sablenite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SALAMENCITE` | Salamencite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SAMUROTTITE` | Samurottite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SAMUROTTITE_H` | Samurottite H | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SANDACONDITE` | Sandacondite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SANDSLASHITE` | Sandslashite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SANDSLASHITE_A` | Sandslashite-A | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCEPTILITE` | Sceptilite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCIZORITE` | Scizorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCIZORITE_R` | Scizorite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCOLIPITE` | Scolipite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCOVILLAINITE` | Scovillainite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCRAFTINITE` | Scraftinite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCYTHERITE` | Scytherite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SCYTHERITE_R` | Scytherite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SERPERIORITE` | Serperiorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SHARPEDONITE` | Sharpedonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SHEDINJITE` | Shedinjite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SHUCKLENITE` | Shucklenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SKARMORITE` | Skarmorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SKARMORITE_R` | Skarmorite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SKARMORITE_Y` | Skarmorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SKELEDIRGEITE` | Skeledirgeite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SLAKINGITE` | Slakingite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SLOWBRONITE` | Slowbronite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SLOWBRONITE_G` | Slowbronite G | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SLOWKINGITE` | Slowkingite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SLOWKINGITE_G` | Slowkingite G | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SNEASLERITE` | Sneaslerite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SNORLAXITE` | Snorlaxite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SNORLAXITE_R` | Snorlaxite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_STARAPTITE` | Staraptite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_STARMINITE` | Starminite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_STEELIXITE` | Steelixite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SWALOTITE` | Swalotite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SWAMPAGEITE` | Swampageite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_SWAMPERTITE` | Swampertite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TALONFLAMEITE` | Talonflameite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TATSUGIRINITE` | Tatsugirinite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TEAL_MASK` | Teal Mask | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TINKATITE` | Tinkatite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TINKATITE_R` | Tinkatite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TORTERRANITE` | Torterranite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TORTERRANITE_R` | Torterranite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TOUCANNONITE` | Toucannonite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TOXTRICITITE` | Toxtricitite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TOXTRICITITE_R` | Toxtricitite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TSAREENITE` | Tsareenite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TSAREENITE_R` | Tsareenite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TYPHLOSIONITE` | Typhlosionite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TYPHLOSIONITE_H` | Typhlosionite H | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TYRANITARITE` | Tyranitarite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_TYRANITARITE_R` | Tyranitarite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_URSALUNITE` | Ursalunite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_URSHIFITE` | Urshifite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_VANILLUXEITE` | Vanilluxeite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_VANILLUXEITE_R` | Vanilluxeite-R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_VENUSAURITE` | Venusaurite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_VENUSAURITE_X` | Venusaurite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_VICTREEBELITE` | Victreebelite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_WEAVILEITE` | Weavileite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_WEAVILEITE_R` | Weavilite R | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_WELLSPRING_MASK` | Wellspring Mask | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_WIGGLYTUFFITE` | Wigglytuffite Y | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_WIGGLYTUFFITE_X` | Wigglytuffite X | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_YVELTALITE` | Yveltalite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ZAPDOSITE` | Zapdosite-EX | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ZERAORITE` | Zeraorite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
+| `ITEM_ZYGARDITE` | Zygardite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8092-8100` | ported | `web/src/engine/sim/cycle152d4MegaStones.test.ts` |
 

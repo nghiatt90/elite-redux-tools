@@ -72,10 +72,10 @@ describe('cycle 152d2 - non-battle effects allowlisted (A)', () => {
       expect(unit?.citation).toBe(cite)
       expect(unit?.registeredUntested).toBe(false)
     }
-    // Cycle 152d3 added 11 Enigma Berry allowlist entries (5 + 11 = 16).
-    expect(result.totalAllowlisted).toBe(16)
+    // Cycle 152d4 added 4 no-row mega stone allowlist entries (16 + 4 = 20).
+    expect(result.totalAllowlisted).toBe(20)
     expect(validateAllowlist(DEFAULT_ALLOWLIST)).toEqual([])
-    expect(DEFAULT_ALLOWLIST).toHaveLength(16)
+    expect(DEFAULT_ALLOWLIST).toHaveLength(20)
 
     // ITEM_Z_RING stays unported: HOLD_EFFECT_Z_RING and ITEM_Z_RING occur nowhere in the
     // pinned C tree (src/, include/, data/), so there is no exact file:line cite to give.
@@ -250,11 +250,11 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     expect(count('item-data')).toBe(40)
     expect(count('natural-gift')).toBe(5)
     expect(count('fling')).toBe(11)
-    expect(result.totalDefined).toBe(366)
-    expect(result.totalPorted).toBe(134)
+    expect(result.totalDefined).toBe(636)
+    expect(result.totalPorted).toBe(400)
     expect(result.totalUnported).toBe(216)
     expect(result.totalRegisteredUntested).toBe(28)
-    expect(result.totalAllowlisted).toBe(16)
+    expect(result.totalAllowlisted).toBe(20)
     expect(result.totalUnclassified).toBe(0)
   })
 })

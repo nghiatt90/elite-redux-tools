@@ -34,7 +34,7 @@ import { stripComments } from './moveInventory'
  * effects; `stripComments` is the move inventory's pure helper.
  */
 
-export type ItemUnitKind = 'hold-trigger' | 'ai-trigger' | 'item-data' | 'natural-gift' | 'fling'
+export type ItemUnitKind = 'hold-trigger' | 'ai-trigger' | 'item-data' | 'natural-gift' | 'fling' | 'mega-stone'
 export type ItemUnitStatus = 'ported' | 'unported' | 'unclassified' | 'allowlisted'
 
 export interface NaturalGiftRecord {
@@ -239,6 +239,33 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = [
     reason: 'party menu / field / summary screen, not a battle turn (friendship item use)',
     cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:3523',
   },
+  // Cycle 152d4: Mega stones with no species.json megaList entry.
+  // EvolutionsGenerator.kt:111-124 emits no gFormChangeTable row, so GetMegaEvolutionSpecies
+  // (battle_util.c:8092-8100) returns SPECIES_NONE: the stone does nothing.
+  {
+    key: 'ITEM_BRUXISHITE',
+    reason:
+      'HOLD_EFFECT_MEGA_STONE but no species megaList entry, so EvolutionsGenerator.kt:111-124 emits no gFormChangeTable row and GetMegaEvolutionSpecies (battle_util.c:8092-8100) returns SPECIES_NONE: the stone does nothing',
+    cite: 'pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124',
+  },
+  {
+    key: 'ITEM_EXCADRILLITE_R',
+    reason:
+      'HOLD_EFFECT_MEGA_STONE but no species megaList entry, so EvolutionsGenerator.kt:111-124 emits no gFormChangeTable row and GetMegaEvolutionSpecies (battle_util.c:8092-8100) returns SPECIES_NONE: the stone does nothing',
+    cite: 'pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124',
+  },
+  {
+    key: 'ITEM_EYE_OF_ENDER',
+    reason:
+      'HOLD_EFFECT_MEGA_STONE but no species megaList entry, so EvolutionsGenerator.kt:111-124 emits no gFormChangeTable row and GetMegaEvolutionSpecies (battle_util.c:8092-8100) returns SPECIES_NONE: the stone does nothing',
+    cite: 'pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124',
+  },
+  {
+    key: 'ITEM_JELLICENTITE',
+    reason:
+      'HOLD_EFFECT_MEGA_STONE but no species megaList entry, so EvolutionsGenerator.kt:111-124 emits no gFormChangeTable row and GetMegaEvolutionSpecies (battle_util.c:8092-8100) returns SPECIES_NONE: the stone does nothing',
+    cite: 'pipeline/.upstream/eliteredux-source/tools/codegen/src/er/data/EvolutionsGenerator.kt:111-124',
+  },
 ]
 
 export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
@@ -321,6 +348,10 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   CanMegaEvolve: {
     files: ['web/src/engine/sim/formChange.ts'],
     functionName: 'canMegaEvolve',
+  },
+  GetMegaEvolutionSpecies: {
+    files: ['web/src/engine/sim/formChange.ts'],
+    functionName: 'megaEvolveBattler',
   },
   // Battle-script labels (data/battle_scripts_1.s). The C caller of the target
   // path is BattleScript_CuteCharmActivates (:10578); no sim function infatuates
@@ -634,11 +665,13 @@ export const UNIT_KIND_ORDER: ReadonlyArray<ItemUnitKind> = [
   'item-data',
   'natural-gift',
   'fling',
+  'mega-stone',
 ]
 
 const ENGINE_DIR = fileURLToPath(new URL('../../', import.meta.url))
 const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url))
 const ITEMS_PATH = join(REPO_ROOT, 'data/v2.65beta/items.json')
+const SPECIES_PATH = join(REPO_ROOT, 'data/v2.65beta/species.json')
 const HOLD_EFFECT_IDS_PATH = join(REPO_ROOT, 'data/v2.65beta/holdEffectIds.json')
 const SOURCES_LOCK_PATH = join(REPO_ROOT, 'sources.lock.json')
 const UPSTREAM_SRC = 'pipeline/.upstream/eliteredux-source/src'
@@ -1026,6 +1059,31 @@ export function extractFunctionBody(source: string, functionName: string): strin
 
 export function loadItems(path: string = ITEMS_PATH): ItemRecord[] {
   return JSON.parse(readFileSync(path, 'utf-8')) as ItemRecord[]
+}
+
+export interface MegaRow {
+  from: string
+  to: string
+}
+
+export function loadMegaRows(path: string = SPECIES_PATH): Map<string, MegaRow[]> {
+  const speciesList = JSON.parse(readFileSync(path, 'utf-8')) as Array<{
+    id: string
+    megas?: Array<{ from?: string; item?: string }>
+  }>
+  const map = new Map<string, MegaRow[]>()
+  for (const sp of speciesList) {
+    if (!sp.megas) continue
+    for (const mega of sp.megas) {
+      if (!mega.item) continue
+      const from = mega.from ?? sp.id
+      const to = sp.id
+      const list = map.get(mega.item) ?? []
+      list.push({ from, to })
+      map.set(mega.item, list)
+    }
+  }
+  return map
 }
 
 export function loadHoldEffectIds(path: string = HOLD_EFFECT_IDS_PATH): Record<string, number> {
@@ -1503,9 +1561,32 @@ export function checkProductionEvidenceForSite(
   return { hasEvidence: false, unmappedSite: false }
 }
 
-/** A citation must be an exact `pinned C file:line`. */
+/** A citation must be an exact `pinned C file:line` (or Kotlin codegen line range for allowlist). */
 export function isValidAllowlistCitation(cite: string): boolean {
-  return /\.(?:c|cc|h):\d+$/.test(cite)
+  return /\.(?:c|cc|h|kt):\d+(?:-\d+)?$/.test(cite)
+}
+
+/** Finds the qualifying sweep test file for mega stone units. */
+export function findMegaStoneTestFile(
+  hasRows: boolean,
+  testSources: ReadonlyArray<SourceFile>,
+): string | null {
+  if (!hasRows) return null
+  const sweepFile = testSources.find((file) => {
+    if (
+      file.file.startsWith('web/src/engine/sim/ai/') ||
+      file.file.startsWith('web/src/engine/sim/driver/')
+    ) {
+      return false
+    }
+    const clean = cleanTestSource(file.source)
+    return (
+      file.file.endsWith('cycle152d4MegaStones.test.ts') &&
+      tokenAppears(clean, 'MEGA_STONE_SWEEP') &&
+      tokenAppears(clean, 'megaEvolveBattler')
+    )
+  })
+  return sweepFile ? sweepFile.file : null
 }
 
 /** Returns human-readable problems; empty means every entry is well formed. */
@@ -1709,6 +1790,7 @@ export interface ItemInventoryOptions {
   holdTriggerScriptSources?: Record<string, string>
   aiTriggerSources?: Record<string, string>
   flingSource?: string
+  megaRows?: Map<string, Array<{ from: string; to: string }>>
   productionFiles?: ReadonlyArray<SourceFile>
   productionSource?: string
   aiProductionFiles?: ReadonlyArray<SourceFile>
@@ -2225,6 +2307,61 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     })
   }
 
+  const megaRows = options.megaRows ?? loadMegaRows()
+  const megaStones = items
+    .filter((item) => item.resolvedHoldEffect === 'HOLD_EFFECT_MEGA_STONE')
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+  const megaStoneProdCheck = checkProductionEvidenceForSite(
+    'GetMegaEvolutionSpecies',
+    'getMegaEvolutionSpecies',
+    productionFiles,
+    fallbackProductionSource,
+  )
+
+  for (const item of megaStones) {
+    const key = item.id
+    const rows = megaRows.get(key) ?? []
+    const hasRows = rows.length > 0
+    const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+
+    const testFile = findMegaStoneTestFile(hasRows, nonAiTestSources)
+    const hasProd = hasRows && megaStoneProdCheck.hasEvidence
+
+    let status: ItemUnitStatus
+    let registeredUntested = false
+
+    if (allow) {
+      status = 'allowlisted'
+    } else if (knownPartial) {
+      status = 'unported'
+    } else if (hasProd && testFile) {
+      status = 'ported'
+    } else if (hasProd && !testFile) {
+      status = 'unported'
+      registeredUntested = true
+    } else {
+      status = 'unported'
+    }
+
+    units.push({
+      kind: 'mega-stone',
+      key,
+      unit: key,
+      effect: 'HOLD_EFFECT_MEGA_STONE',
+      site: 'GetMegaEvolutionSpecies',
+      file: `${UPSTREAM_SRC}/battle_util.c`,
+      citation: allow?.cite ?? `${UPSTREAM_SRC}/battle_util.c:8092-8100`,
+      status,
+      registeredUntested,
+      testFile: allow ? null : testFile,
+      itemIds: [item.id],
+      unmappedSite: megaStoneProdCheck.unmappedSite,
+      partialReason: knownPartial?.whatDiffers,
+    })
+  }
+
   const summaries: ItemUnitKindSummary[] = UNIT_KIND_ORDER.map((kind) => {
     const subset = units.filter((unit) => unit.kind === kind)
     return {
@@ -2422,6 +2559,9 @@ export function generateItemInventoryDoc(
   lines.push(
     '   and `CanFling`. Each requires a qualifying test that exercises Fling.',
   )
+  lines.push(
+    '6. **mega-stone**: one unit per item whose resolved hold effect is `HOLD_EFFECT_MEGA_STONE`. Requires production `GetMegaEvolutionSpecies` handling and sweep test evidence.',
+  )
   lines.push('')
   lines.push(
     'Berry trigger conditions are represented by their `hold-trigger` units; this inventory does not create a second',
@@ -2510,6 +2650,7 @@ export function generateItemInventoryDoc(
   pushSection('item-data', 'Item-Data Units')
   pushSection('natural-gift', 'Natural-Gift Units')
   pushSection('fling', 'Fling Units')
+  pushSection('mega-stone', 'Mega-Stone Units')
 
   return `${lines.join('\n')}\n`
 }

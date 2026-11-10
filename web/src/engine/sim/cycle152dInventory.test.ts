@@ -247,7 +247,8 @@ describe('cycle 152d - pinned counts', () => {
     // Cycle 152d2: +7 Power Herb script, +2 EatTargetBerry, +4 CHANGE_TYPE_ON_ITEM,
     // -1 Power Herb item-data = +12 (340 -> 352).
     // Cycle 152d3: +14 Enigma Berry hold-trigger units = 366.
-    expect(result.totalDefined).toBe(366)
+    // Cycle 152d4: +270 Mega Stone units (266 ported, 4 allowlisted) = 636.
+    expect(result.totalDefined).toBe(636)
 
     expect(result.totalUnclassified).toBe(0)
     // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).

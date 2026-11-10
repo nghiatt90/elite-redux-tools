@@ -334,11 +334,12 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // Cycle 152d2 totals + the 14 Enigma units: 237 + 14 = 251 hold-trigger,
     // 352 + 14 = 366 defined, 131 + 3 = 134 ported, unported unchanged at 216,
     // allowlisted 5 + 11 = 16, registered-untested unchanged at 28.
+    // Cycle 152d4: +270 mega stones (266 ported + 4 allowlisted) = 636 defined, 400 ported, 20 allowlisted.
     expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(251)
-    expect(result.totalDefined).toBe(366)
-    expect(result.totalPorted).toBe(134)
+    expect(result.totalDefined).toBe(636)
+    expect(result.totalPorted).toBe(400)
     expect(result.totalUnported).toBe(216)
-    expect(result.totalAllowlisted).toBe(16)
+    expect(result.totalAllowlisted).toBe(20)
     expect(result.totalRegisteredUntested).toBe(28)
   })
 })

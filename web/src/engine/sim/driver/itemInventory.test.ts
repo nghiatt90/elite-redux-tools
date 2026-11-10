@@ -31,6 +31,7 @@ const ITEM_DATA_UNITS = 40
 // Re-pinned after cycle 152c: per-site natural-gift units (5) and fling units (11)
 const NATURAL_GIFT_UNITS = 5
 const FLING_UNITS = 11
+const MEGA_STONE_UNITS = 270
 
 // Unchanged by cycle 152d3: its 14 Enigma units are 3 ported + 11 allowlisted, so no
 // new unported unit. (Cycle 152d2: -5 item-data units allowlisted, -1 Power Herb
@@ -41,10 +42,10 @@ export const UNPORTED_UNIT_COUNT = 216
 export const REGISTERED_UNTESTED_UNIT_COUNT = 28
 
 /**
- * Re-pinned after cycle 152d3: 5 cycle-152d2 item-data units + 11 Enigma Berry
- * sites (4 no-run/no-exp battle reads + 7 non-battle pokemon.c reads).
+ * Re-pinned after cycle 152d4: 5 cycle-152d2 item-data units + 11 Enigma Berry
+ * sites + 4 no-row mega stones (BRUXISHITE, EXCADRILLITE_R, EYE_OF_ENDER, JELLICENTITE).
  */
-export const ALLOWLISTED_UNIT_COUNT = 16
+export const ALLOWLISTED_UNIT_COUNT = 20
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -87,6 +88,7 @@ describe('held-item completeness inventory', () => {
     expect(count('item-data')).toBe(ITEM_DATA_UNITS)
     expect(count('natural-gift')).toBe(NATURAL_GIFT_UNITS)
     expect(count('fling')).toBe(FLING_UNITS)
+    expect(count('mega-stone')).toBe(MEGA_STONE_UNITS)
   })
 
   it('classifies every unit exactly once as ported / unported / unclassified / allowlisted', () => {
