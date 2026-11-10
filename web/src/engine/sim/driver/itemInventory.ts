@@ -1468,7 +1468,16 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       .map((item) => item.id)
       .sort()
 
-    const naturalGiftSites = [
+    const naturalGiftSites: Array<{
+      site: string
+      token: string
+      file: string
+      citation: string
+      functionName: string
+      itemIds: string[]
+      testTokens: string[]
+      testRequires?: string[]
+    }> = [
       {
         site: 'CalcMoveBasePower',
         token: 'attackerNaturalGiftPower',
@@ -1476,7 +1485,13 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         citation: `${UPSTREAM_SRC}/battle_util.c:6840`,
         functionName: 'applyPreModifierBasePower',
         itemIds: allBerryIds,
-        testTokens: allBerryIds,
+        // basePower.test.ts calls applyPreModifierBasePower by name; it passes
+        // raw power values rather than berry ids, so the function name is the
+        // test token that identifies it.
+        testTokens: ['applyPreModifierBasePower', ...allBerryIds],
+        // basePower.test.ts is the file that calls applyPreModifierBasePower
+        // directly and checks the berry's power number.
+        testRequires: ['applyPreModifierBasePower'],
       },
       {
         site: 'GetMoveType',
@@ -1486,6 +1501,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         functionName: 'resolveMoveType',
         itemIds: allBerryIds,
         testTokens: allBerryIds,
+        // calculate.test.ts's Natural Gift case drives the berry-holding
+        // battler and asserts effectiveMoveType ELECTRIC/NORMAL.
+        testRequires: ['withCheri'],
       },
       {
         site: 'SetMoveEffect',
@@ -1495,6 +1513,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         functionName: 'applySecondaryMoveEffects',
         itemIds: effectBerryIds,
         testTokens: effectBerryIds,
+        // cycle87Effects.test.ts settles the secondary effect: Natural Gift
+        // paralyses through the Cheri Berry's secondary effect.
+        testRequires: ['applySecondaryMoveEffects'],
       },
       {
         site: 'EffectNaturalGift',
@@ -1504,6 +1525,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         functionName: 'executeAction',
         itemIds: allBerryIds,
         testTokens: allBerryIds,
+        // cycle129CopyEffects.test.ts uses this harness and asserts the berry
+        // is consumed (itemId cleared, usedHeldItem recorded) after the hit.
+        testRequires: ['giftUser'],
       },
       {
         site: 'GetMovePriority',
@@ -1531,8 +1555,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         nonAiTestSources,
         s.testTokens,
         (clean) =>
-          tokenAppears(clean, 'MOVE_NATURAL_GIFT') ||
-          tokenAppears(clean, 'EFFECT_NATURAL_GIFT'),
+          (tokenAppears(clean, 'MOVE_NATURAL_GIFT') ||
+            tokenAppears(clean, 'EFFECT_NATURAL_GIFT')) &&
+          (!s.testRequires || s.testRequires.some((t) => tokenAppears(clean, t))),
       )
       const allow = allowlistEntryFor(key, allowlist)
       const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)

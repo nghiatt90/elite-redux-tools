@@ -9,15 +9,6 @@ import {
 
 const items = loadItems()
 
-const NATURAL_GIFT_TEST_FILES = [
-  'calculate.test.ts',
-  'basePower.test.ts',
-  'cycle87Effects.test.ts',
-  'cycle149cMoveEndType.test.ts',
-  'cycle137MoveNotes.test.ts',
-  'cycle129CopyEffects.test.ts',
-]
-
 function testSourcesWithout(filePatterns: string[]) {
   return loadEngineTestFiles().filter(
     (f) => !filePatterns.some((pattern) => f.file.includes(pattern)),
@@ -33,18 +24,22 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const power = ngUnits.find((u) => u.site === 'CalcMoveBasePower')
     expect(power?.status).toBe('ported')
     expect(power?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_util.c:6840')
+    expect(power?.testFile).toBe('web/src/engine/basePower.test.ts')
 
     const type = ngUnits.find((u) => u.site === 'GetMoveType')
     expect(type?.status).toBe('ported')
     expect(type?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_main.c:5072')
+    expect(type?.testFile).toBe('web/src/engine/calculate.test.ts')
 
     const effect = ngUnits.find((u) => u.site === 'SetMoveEffect')
     expect(effect?.status).toBe('ported')
     expect(effect?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023')
+    expect(effect?.testFile).toBe('web/src/engine/sim/cycle87Effects.test.ts')
 
     const removal = ngUnits.find((u) => u.site === 'EffectNaturalGift')
     expect(removal?.status).toBe('ported')
     expect(removal?.citation).toBe('pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068')
+    expect(removal?.testFile).toBe('web/src/engine/sim/cycle129CopyEffects.test.ts')
 
     const priority = ngUnits.find((u) => u.site === 'GetMovePriority')
     expect(priority?.status).toBe('unported')
@@ -65,11 +60,18 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(stubUnit?.status).toBe('unported')
     expect(stubUnit?.registeredUntested).toBe(false)
 
-    // 2. Remove qualifying tests exercising Natural Gift
-    const testRes = runInventory(items, { testSources: testSourcesWithout(NATURAL_GIFT_TEST_FILES) })
+    // 2. Remove exactly the file the report credits (basePower.test.ts)
+    const testRes = runInventory(items, { testSources: testSourcesWithout(['basePower.test.ts']) })
     const testUnit = testRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'CalcMoveBasePower')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
+
+    // A decoy Natural Gift test does not satisfy this site's predicate: removing
+    // cycle129CopyEffects leaves the unit ported on basePower.test.ts.
+    const decoyRes = runInventory(items, { testSources: testSourcesWithout(['cycle129CopyEffects.test.ts']) })
+    const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'CalcMoveBasePower')
+    expect(decoyUnit?.status).toBe('ported')
+    expect(decoyUnit?.testFile).toBe('web/src/engine/basePower.test.ts')
   })
 
   it('Natural Gift type: stub handler -> unported; remove test -> registeredUntested', () => {
@@ -84,11 +86,18 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(stubUnit?.status).toBe('unported')
     expect(stubUnit?.registeredUntested).toBe(false)
 
-    // 2. Remove qualifying tests
-    const testRes = runInventory(items, { testSources: testSourcesWithout(NATURAL_GIFT_TEST_FILES) })
+    // 2. Remove exactly the file the report credits (calculate.test.ts)
+    const testRes = runInventory(items, { testSources: testSourcesWithout(['calculate.test.ts']) })
     const testUnit = testRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'GetMoveType')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
+
+    // A decoy Natural Gift test does not satisfy this site's predicate: removing
+    // cycle149cMoveEndType leaves the unit ported on calculate.test.ts.
+    const decoyRes = runInventory(items, { testSources: testSourcesWithout(['cycle149cMoveEndType.test.ts']) })
+    const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'GetMoveType')
+    expect(decoyUnit?.status).toBe('ported')
+    expect(decoyUnit?.testFile).toBe('web/src/engine/calculate.test.ts')
   })
 
   it('Natural Gift effect: stub handler -> unported; remove test -> registeredUntested', () => {
@@ -103,11 +112,18 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(stubUnit?.status).toBe('unported')
     expect(stubUnit?.registeredUntested).toBe(false)
 
-    // 2. Remove qualifying tests
-    const testRes = runInventory(items, { testSources: testSourcesWithout(NATURAL_GIFT_TEST_FILES) })
+    // 2. Remove exactly the file the report credits (cycle87Effects.test.ts)
+    const testRes = runInventory(items, { testSources: testSourcesWithout(['cycle87Effects.test.ts']) })
     const testUnit = testRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'SetMoveEffect')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
+
+    // A decoy Natural Gift test does not satisfy this site's predicate: removing
+    // calculate.test.ts leaves the unit ported on cycle87Effects.test.ts.
+    const decoyRes = runInventory(items, { testSources: testSourcesWithout(['calculate.test.ts']) })
+    const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'SetMoveEffect')
+    expect(decoyUnit?.status).toBe('ported')
+    expect(decoyUnit?.testFile).toBe('web/src/engine/sim/cycle87Effects.test.ts')
   })
 
   it('Natural Gift berry removal: stub handler -> unported; remove test -> registeredUntested', () => {
@@ -122,11 +138,18 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(stubUnit?.status).toBe('unported')
     expect(stubUnit?.registeredUntested).toBe(false)
 
-    // 2. Remove qualifying tests
-    const testRes = runInventory(items, { testSources: testSourcesWithout(NATURAL_GIFT_TEST_FILES) })
+    // 2. Remove exactly the file the report credits (cycle129CopyEffects.test.ts)
+    const testRes = runInventory(items, { testSources: testSourcesWithout(['cycle129CopyEffects.test.ts']) })
     const testUnit = testRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'EffectNaturalGift')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
+
+    // A decoy Natural Gift test does not satisfy this site's predicate: removing
+    // basePower.test.ts leaves the unit ported on cycle129CopyEffects.test.ts.
+    const decoyRes = runInventory(items, { testSources: testSourcesWithout(['basePower.test.ts']) })
+    const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'EffectNaturalGift')
+    expect(decoyUnit?.status).toBe('ported')
+    expect(decoyUnit?.testFile).toBe('web/src/engine/sim/cycle129CopyEffects.test.ts')
   })
 
   it('baseline: Fling has 11 units (2 ported, 8 registeredUntested, 1 unported)', () => {

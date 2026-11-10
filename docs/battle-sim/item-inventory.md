@@ -471,9 +471,9 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | --- | --- | --- | --- | --- |
 | `naturalGift@battle_main.c:GetMovePriority` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` | unported (partial: hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1) | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
 | `naturalGift@battle_main.c:GetMoveType` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5072` | ported | `web/src/engine/calculate.test.ts` |
-| `naturalGift@battle_script_commands.c:SetMoveEffect` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +40 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023` | ported | `web/src/engine/calculate.test.ts` |
-| `naturalGift@battle_scripts_1.s:EffectNaturalGift` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068` | ported | `web/src/engine/basePower.test.ts` |
-| `naturalGift@battle_util.c:CalcMoveBasePower` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
+| `naturalGift@battle_script_commands.c:SetMoveEffect` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +40 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023` | ported | `web/src/engine/sim/cycle87Effects.test.ts` |
+| `naturalGift@battle_scripts_1.s:EffectNaturalGift` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
+| `naturalGift@battle_util.c:CalcMoveBasePower` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840` | ported | `web/src/engine/basePower.test.ts` |
 
 ## Fling Units
 
