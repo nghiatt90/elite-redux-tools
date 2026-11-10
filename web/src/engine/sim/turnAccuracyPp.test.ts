@@ -236,14 +236,22 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
     expect(out2.actions[0].missed).toBe(true)
   })
 
-  it('gaps Cmd_accuracycheck\'s own Anticipation branch by name only when the defender holds it', () => {
+  it('raises no Anticipation note: the miss branch is ported', () => {
+    // Cmd_accuracycheck's Anticipation branch (battle_script_commands.c:1419-1445)
+    // only fires for a move that is >= 2x into the defender. TACKLE is Normal and
+    // the default defender type here is WATER, so Normal is 1x and the branch
+    // cannot fire: no miss, and no unmodelled note for either the holder or a
+    // non-holder. Cycle 159 ported the branch; the super-effective case is in
+    // cycle159AnticipationMirrorArmor.test.ts.
     const withAnticipation = battle([{ spe: 200 }, { spe: 50, abilities: { ability: 'ABILITY_ANTICIPATION', innates: [null, null, null] } }], scripted(0))
     const out = executeTurn(withAnticipation, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    expect(out.actions[0].unmodelled.some((u) => u.includes('Anticipation'))).toBe(true)
+    expect(out.actions[0].missed).toBe(false)
+    expect(out.actions[0].unmodelled.some((u) => u.includes('Anticipat'))).toBe(false)
 
     const without = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
     const out2 = executeTurn(without, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
-    expect(out2.actions[0].unmodelled.some((u) => u.includes('Anticipation'))).toBe(false)
+    expect(out2.actions[0].missed).toBe(false)
+    expect(out2.actions[0].unmodelled.some((u) => u.includes('Anticipat'))).toBe(false)
   })
 })
 
