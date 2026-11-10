@@ -323,13 +323,13 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     }
   })
 
-  it('counts: +14 hold-trigger units, 3 ported, 0 unported, 11 allowlisted, totals re-pinned', () => {
+  it('counts: +15 hold-trigger units, 3 ported, 0 unported, 12 allowlisted, totals re-pinned', () => {
     const result = runInventory(items)
     const enigma = result.units.filter((unit) => unit.kind === 'hold-trigger' && unit.unit === 'ITEM_ENIGMA_BERRY')
-    expect(enigma).toHaveLength(14)
+    expect(enigma).toHaveLength(15)
     expect(enigma.filter((unit) => unit.status === 'ported')).toHaveLength(3)
     expect(enigma.filter((unit) => unit.status === 'unported')).toHaveLength(0)
-    expect(enigma.filter((unit) => unit.status === 'allowlisted')).toHaveLength(11)
+    expect(enigma.filter((unit) => unit.status === 'allowlisted')).toHaveLength(12)
 
     // Cycle 152d2 totals + the 14 Enigma units: 237 + 14 = 251 hold-trigger,
     // 352 + 14 = 366 defined, 131 + 3 = 134 ported, unported unchanged at 216,
@@ -342,11 +342,12 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // units (`battle_ai_ability.c:1070`, `:1076`) moved to ai-trigger when that
     // file was reclassified as an AI source. 251 is the pre-152g count above.
     // Cycle 152h: Bug Bite / Pluck EatTargetBerry ported (battle_script_commands.c:13221-13234), ported 402 -> 403, unported 214 -> 213.
-    expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(249)
-    expect(result.totalDefined).toBe(636)
+    // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127) = 250 hold-trigger, 637 defined, 21 allowlisted.
+    expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(250)
+    expect(result.totalDefined).toBe(637)
     expect(result.totalPorted).toBe(403)
     expect(result.totalUnported).toBe(213)
-    expect(result.totalAllowlisted).toBe(20)
+    expect(result.totalAllowlisted).toBe(21)
     expect(result.totalRegisteredUntested).toBe(27)
   })
 })

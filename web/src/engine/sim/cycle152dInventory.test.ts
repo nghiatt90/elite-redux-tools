@@ -116,7 +116,11 @@ describe('cycle 152d - battle-script hold triggers (A)', () => {
     })
     // The synthetic BattleScript_MoveEffectBugBite unit is always emitted for its
     // hard-coded script site; this negative test is about hold-effect scanning.
-    const scanUnits = scriptUnits(result).filter((unit) => unit.unit.startsWith('HOLD_EFFECT_'))
+    // The BattleScript_EffectGeomancy synthetic unit replaces its script-scan hit
+    // and is likewise always emitted (cycle 152i).
+    const scanUnits = scriptUnits(result).filter(
+      (unit) => unit.unit.startsWith('HOLD_EFFECT_') && unit.site !== 'BattleScript_EffectGeomancy',
+    )
     expect(scanUnits).toHaveLength(0)
     expect(result.units.some((unit) => unit.site === 'BattleScript_Decoy')).toBe(false)
     expect(result.units.some((unit) => unit.site === 'BattleScript_LabelMention')).toBe(false)
@@ -237,7 +241,8 @@ describe('cycle 152d - pinned counts', () => {
     // +4 EFFECT_CHANGE_TYPE_ON_ITEM sites = 237.
     // Cycle 152d3 re-pin: +14 Enigma Berry C sites = 251.
     // Cycle 152g re-pin: -2 Booster Energy ScoreSwitchInAbility units moved to ai-trigger = 249.
-    expect(count('hold-trigger')).toBe(249)
+    // Cycle 152i: +1 Enigma Berry ShouldUseItem:1127 (battle_ai_switch_items.c:1127) allowlisted unit.
+    expect(count('hold-trigger')).toBe(250)
     // +battle_controller_opponent.c:1608 and +battle_ai_switch_items.c:528.
     // Cycle 152g re-pin: +2 Booster Energy units from hold-trigger = 61.
     expect(count('ai-trigger')).toBe(61)
@@ -250,7 +255,8 @@ describe('cycle 152d - pinned counts', () => {
     // -1 Power Herb item-data = +12 (340 -> 352).
     // Cycle 152d3: +14 Enigma Berry hold-trigger units = 366.
     // Cycle 152d4: +270 Mega Stone units (266 ported, 4 allowlisted) = 636.
-    expect(result.totalDefined).toBe(636)
+    // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127) = 637.
+    expect(result.totalDefined).toBe(637)
 
     expect(result.totalUnclassified).toBe(0)
     // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).

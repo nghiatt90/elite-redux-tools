@@ -73,9 +73,10 @@ describe('cycle 152d2 - non-battle effects allowlisted (A)', () => {
       expect(unit?.registeredUntested).toBe(false)
     }
     // Cycle 152d4 added 4 no-row mega stone allowlist entries (16 + 4 = 20).
-    expect(result.totalAllowlisted).toBe(20)
+    // Cycle 152i added the ShouldUseItem:1127 Enigma allowlist entry (20 + 1 = 21).
+    expect(result.totalAllowlisted).toBe(21)
     expect(validateAllowlist(DEFAULT_ALLOWLIST)).toEqual([])
-    expect(DEFAULT_ALLOWLIST).toHaveLength(20)
+    expect(DEFAULT_ALLOWLIST).toHaveLength(21)
 
     // ITEM_Z_RING stays unported: HOLD_EFFECT_Z_RING and ITEM_Z_RING occur nowhere in the
     // pinned C tree (src/, include/, data/), so there is no exact file:line cite to give.
@@ -234,7 +235,12 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     })
     expect(
       result.units.filter(
-        (unit) => unit.kind === 'hold-trigger' && unit.unit === 'HOLD_EFFECT_POWER_HERB' && unit.file.endsWith(SCRIPT_FILE),
+        (unit) =>
+          unit.kind === 'hold-trigger' &&
+          unit.unit === 'HOLD_EFFECT_POWER_HERB' &&
+          unit.file.endsWith(SCRIPT_FILE) &&
+          // The Geomancy synthetic unit is always emitted (cycle 152i).
+          unit.site !== 'BattleScript_EffectGeomancy',
       ),
     ).toHaveLength(0)
     expect(result.units.some((unit) => unit.site === 'BattleScript_Decoy')).toBe(false)
@@ -249,7 +255,8 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     // Cycle 152g: -2 hold-trigger / +2 ai-trigger, the two Booster Energy
     // `ScoreSwitchInAbility` units (`battle_ai_ability.c:1070`, `:1076`) moved
     // from hold-trigger to ai-trigger when that file was reclassified as an AI source.
-    expect(count('hold-trigger')).toBe(249)
+    // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127).
+    expect(count('hold-trigger')).toBe(250)
     expect(count('ai-trigger')).toBe(61)
     expect(count('item-data')).toBe(40)
     expect(count('natural-gift')).toBe(5)
@@ -259,11 +266,12 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     // Cycle 152f: Natural Gift GetMovePriority ported, ported 401 -> 402, unported 215 -> 214.
     // Cycle 152h: BattleScript_MoveEffectBugBite (attacker consumeberry) ported, ported 402 -> 403,
     // unported 214 -> 213.
-    expect(result.totalDefined).toBe(636)
+    // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127) = 637 defined.
+    expect(result.totalDefined).toBe(637)
     expect(result.totalPorted).toBe(403)
     expect(result.totalUnported).toBe(213)
     expect(result.totalRegisteredUntested).toBe(27)
-    expect(result.totalAllowlisted).toBe(20)
+    expect(result.totalAllowlisted).toBe(21)
     expect(result.totalUnclassified).toBe(0)
   })
 })
