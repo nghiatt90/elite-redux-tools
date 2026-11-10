@@ -75,8 +75,10 @@ const SCRIPT_EVENT_UNITS = 6
  * gameDifficulty moved to ported (buildParty.ts tier fallback) and
  * BATTLE_EVENT_STICKY_WEB moved to allowlisted (no C case). Moves 91 -> 118 in
  * cycle 154b: 27 Monotype Champion rule-site units were made visible; the
- * driver cannot feed `monotypeChampType`, so all 27 are unported. They are not
- * `registeredUntested` because the cycle 154b test names the token.
+ * driver cannot feed `monotypeChampType`, so all 27 are unported. They stayed
+ * out of `registeredUntested` only because the 154b evidence accepted
+ * `absorb.test.ts`'s `monotypeChampType: null` fixture as a test; cycle 154c
+ * removes that false match.
  *
  * Moves 118 -> 113 in cycle 153g: five trainer-flag units gain a `testPattern`
  * naming a real with/without pipeline test (`AI_FLAG_CHECK_BAD_MOVE`,
@@ -96,11 +98,20 @@ const SCRIPT_EVENT_UNITS = 6
  *
  * Moves 117 -> 119 in cycle 153i: two missing difficulty gates (Hell duplicate-item
  * clause, Easy trainer EVs) became visible; both unported.
+ *
+ * Moves 3 -> 18 in cycle 154c: the 27 Monotype Champion units now carry
+ * per-unit evidence whose `testPattern` requires the unit's own non-null
+ * champion type. Four unmodelled sites with a real typed test stay tested
+ * (three POISON sites plus one NORMAL), and all eight conditional ports gain
+ * one, but 15 unmodelled sites have no typed test and no sim port, so they now
+ * count as `registeredUntested` (their token is still named by the driver). This
+ * is a correction of false evidence, not new work: the old shared evidence was
+ * satisfied by `absorb.test.ts`'s `monotypeChampType: null` fixture.
  */
 export const UNPORTED_UNIT_COUNT = 119
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 3
+export const REGISTERED_UNTESTED_UNIT_COUNT = 18
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0

@@ -31,6 +31,22 @@ const classifyMonochamp = (files: SourceFile[]) =>
     (unit) => unit.kind === 'map-setup' && unit.key.startsWith('monochamp:'),
   )
 
+/**
+ * The eight sites whose branch the sim already implements, cited in each
+ * unit's scope. The other 19 sites have no sim port, so a synthetic driver
+ * feed must not flip them.
+ */
+const CONDITIONAL_PORT_KEYS = [
+  'monochamp:battle_util.c:2238',
+  'monochamp:battle_util.c:4850',
+  'monochamp:battle_util.c:6656',
+  'monochamp:battle_util.c:8672',
+  'monochamp:battle_util.c:8710',
+  'monochamp:battle_main.c:4205',
+  'monochamp:abilities.cc:5211',
+  'monochamp:battle_script_commands.c:8344',
+] as const
+
 const replaceLoadSimData = (source: string): SourceFile[] =>
   productionFiles.map((file) =>
     file.file.endsWith(LOAD_SIM_DATA) ? { file: file.file, source } : file,
@@ -73,7 +89,7 @@ describe('cycle 154b Monotype Champion rule-site units', () => {
     }
   })
 
-  it('flips every monochamp unit only when the driver assigns a non-null champion type', () => {
+  it('flips only the eight conditional ports when the driver assigns a non-null champion type', () => {
     const loadSimData = productionFiles.find((file) => file.file.endsWith(LOAD_SIM_DATA))
     expect(loadSimData).toBeDefined()
     if (!loadSimData) return
@@ -90,7 +106,19 @@ describe('cycle 154b Monotype Champion rule-site units', () => {
     expect(assignedSource).not.toBe(loadSimData.source)
     const assigned = classifyMonochamp(replaceLoadSimData(assignedSource))
     expect(assigned).toHaveLength(MONOCHAMP_RULE_SPECS.length)
-    expect(assigned.every((unit) => unit.status === 'ported')).toBe(true)
+
+    // The feed is necessary but not sufficient: only the sites where the sim
+    // already reads monotypeChampType have a production port to evidence.
+    expect(assigned.filter((unit) => unit.status === 'ported').map((unit) => unit.key).sort()).toEqual(
+      [...CONDITIONAL_PORT_KEYS].sort(),
+    )
+    expect(
+      assigned.filter((unit) => unit.status === 'unported').map((unit) => unit.key).sort(),
+    ).toEqual(
+      MONOCHAMP_RULE_SPECS.map((spec) => spec.key)
+        .filter((key) => !(CONDITIONAL_PORT_KEYS as readonly string[]).includes(key))
+        .sort(),
+    )
 
     // The same text in a comment is stripped before evidence is checked.
     const commentedSource = loadSimData.source.replace(
