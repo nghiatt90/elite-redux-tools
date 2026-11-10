@@ -429,39 +429,48 @@ function isBloodStainAffected(battler: BattlerState): boolean {
 /** CanBattlerHeal, battle_util.c:8979-8986 -- every clause is real state:
  * STATUS3_HEAL_BLOCK (packed statuses3 bit), STATUS1_BLEED, IsBloodStainAffected
  * (above) and IsAbilityOnOpposingSide (turn.ts's isAbilityAliveOnOpposingSide,
- * exported for this reuse) for Permanence/Hemolysis. IsAbilityOnOpposingSide's
- * own mold-breaker exception (IsAbilityOnSide's checkMoldBreaker=TRUE,
- * battle_util.c:4793/4795) is NOT applied here -- isAbilityAliveOnOpposingSide
- * already documents this gap at its own call site in turn.ts (the Pressure
- * check); same treatment, only surfaced here when Permanence or Hemolysis is
- * actually found on the opposing side. */
+ * exported for this reuse) for Permanence/Hemolysis. IsAbilityOnOpposingSide is
+ * `BATTLER_HAS_ABILITY_AND_ALIVE(battlerId, ability, TRUE)` (battle_util.c:
+ * 4792-4799, include/battle_util.h:74), so it routes through BattlerHasAbility ->
+ * IsSuppressed (:9255-9260): Neutralizing Gas, or Gastro Acid unless the holder
+ * has an ability shield, turns the block off. `dataContext` supplies those
+ * inputs; a caller without one keeps the raw lookup.
+ * Mold Breaker never bypasses these two: Permanence has no `.breakable`
+ * (abilities.cc:6745-6747) and Hemolysis has no Impl, so IsSuppressed's
+ * breakable-gated mold-breaker clause (:9255) does not fire (and
+ * isSimAbilitySuppressed ignores non-breakable ids). */
 /** The `jumpifhealingblocked` macro (asm/macros/battle_script.inc:2493-2510):
  * CanBattlerHeal (battle_util.c:8979-8986) minus its STATUS1_BLEED clause. */
-export function isHealingBlocked(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
+export function isHealingBlocked(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  unmodelled: string[],
+  dataContext?: SimDataContext,
+): boolean {
   const status1 = battler.mon.status1
   battler.mon.status1 = clearFlag(status1, STATUS1_BLEED)
-  const blocked = !canBattlerHeal(state, battlerId, battler, unmodelled)
+  const blocked = !canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)
   battler.mon.status1 = status1
   return blocked
 }
 
-export function canBattlerHeal(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): boolean {
+export function canBattlerHeal(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  unmodelled: string[],
+  dataContext?: SimDataContext,
+): boolean {
+  // Kept for call-site compatibility (every caller passes it); the two
+  // mold-breaker notes that used it were deleted -- see the doc comment above.
+  void unmodelled
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
   if (isBloodStainAffected(battler)) return false
-  if (isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_PERMANENCE')) {
-    unmodelled.push(
-      "CanBattlerHeal's IsAbilityOnOpposingSide(ABILITY_PERMANENCE) (battle_util.c:8983) found Permanence without its own mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793) applied; a Mold-Breaker-class attacker would bypass Permanence's healing block here",
-    )
-    return false
-  }
+  if (isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_PERMANENCE', dataContext)) return false
   if (hasFlag(battler.mon.status1, STATUS1_POISON) || hasFlag(battler.mon.status1, STATUS1_TOXIC_POISON)) {
-    if (isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_HEMOLYSIS')) {
-      unmodelled.push(
-        "CanBattlerHeal's IsAbilityOnOpposingSide(ABILITY_HEMOLYSIS) (battle_util.c:8984) found Hemolysis without its own mold-breaker suppression (IsAbilityOnSide's checkMoldBreaker=TRUE, battle_util.c:4793) applied; a Mold-Breaker-class attacker would bypass Hemolysis's healing block here",
-      )
-      return false
-    }
+    if (isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_HEMOLYSIS', dataContext)) return false
   }
   return true
 }
@@ -718,7 +727,7 @@ export function runLeechSeed(
     // BattleScript_LeechSeedTurnDrain:7490-7491:
     // jumpifhealingblocked BS_TARGET, BattleScript_LeechSeedHealBlock
     // jumpifstatus BS_TARGET, STATUS1_BLEED, BattleScript_LeechSeedHealBlock
-    if (canBattlerHeal(state, seederId, seeder, unmodelled)) {
+    if (canBattlerHeal(state, seederId, seeder, unmodelled, dataContext)) {
       let healAmount = hpDealt
       // manipulatedamage DMG_BIG_ROOT (battle_script_commands.c:9384-9386, battle_util.c:2369-2376)
       const seederItem = seeder.mon.itemId ? dataContext.item(seeder.mon.itemId) : null
@@ -1041,7 +1050,7 @@ function runEndTurnAbilities(
         // src/abilities.cc:1063-1074
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, { dataContext, grounding: deps?.grounding })
         ) {
@@ -1061,7 +1070,7 @@ function runEndTurnAbilities(
         // src/abilities.cc:1778-1789, 11284
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerWeatherAffected(state, battlerId, WEATHER_HAIL_ANY, { dataContext, grounding: deps?.grounding })
         ) {
@@ -1088,7 +1097,7 @@ function runEndTurnAbilities(
           results.push({ battlerId, effect: 'ABILITY', hpChange: battler.mon.hp - prevHp, fainted })
         } else if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerWeatherAffected(state, battlerId, WEATHER_RAIN_ANY, { dataContext, grounding: deps?.grounding })
         ) {
@@ -1142,7 +1151,7 @@ function runEndTurnAbilities(
         // src/abilities.cc:4041-4054, 5294, 8878, 10960
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2
         ) {
           const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 16))
@@ -1160,7 +1169,7 @@ function runEndTurnAbilities(
         // src/abilities.cc:4438-4449
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerTerrainAffectedByToxicTerrain(state, battlerId, battler, deps?.grounding)
         ) {
@@ -1178,7 +1187,7 @@ function runEndTurnAbilities(
       case 'ABILITY_SWEET_DREAMS': {
         // src/abilities.cc:4288-4300: maxHP / 8 while asleep or Comatose
         const asleep = hasFlag(battler.mon.status1, STATUS1_SLEEP) || battlerHasAbility(battler.mon.abilities, 'ABILITY_COMATOSE', NO_SUPPRESSION)
-        if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled) && asleep) {
+        if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) && asleep) {
           healEndTurn(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 8)), results)
         }
         break
@@ -1187,7 +1196,7 @@ function runEndTurnAbilities(
       case 'ABILITY_PEACEFUL_SLUMBER': {
         // src/abilities.cc:6341-6347: Sweet Dreams' hook (:4288-4300, maxHP / 8 while asleep or Comatose); when it declines, Self Sufficient's
         // (:4041-4054, maxHP / 16, not on the first turn). When Sweet Dreams ran, gBattleMoveDamage -= maxHP / 16 makes it an extra 1/16.
-        if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled)) break // both hooks open with these two CHECKs
+        if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)) break // both hooks open with these two CHECKs
         const asleep = hasFlag(battler.mon.status1, STATUS1_SLEEP) || battlerHasAbility(battler.mon.abilities, 'ABILITY_COMATOSE', NO_SUPPRESSION)
         if (asleep) {
           const sweetDreams = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
@@ -1203,7 +1212,7 @@ function runEndTurnAbilities(
         // src/abilities.cc (Impl<PEACEFUL_REST>.onEndTurn), BattleScript_RainDishActivates: maxHP / 8 in fog
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, { dataContext, grounding: deps?.grounding })
         ) {
@@ -1217,7 +1226,7 @@ function runEndTurnAbilities(
         // Impl<CELESTIAL_BLESSING>.onEndTurn, BattleScript_SelfSufficientActivates: maxHP / 12 on Misty Terrain
         if (
           battler.mon.hp !== battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled) &&
+          canBattlerHeal(state, battlerId, battler, unmodelled, dataContext) &&
           battler.volatiles.isFirstTurn !== 2 &&
           isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_MISTY_TERRAIN, { dataContext, grounding: deps?.grounding ?? NO_GROUNDING })
         ) {
@@ -1445,7 +1454,7 @@ function runEndTurnAbilities(
           if (battlerHasSimAbility(state, target, 'ABILITY_POISON_HEAL', true, targetId, false, dataContext)) {
             // Poison Heal heals instead; its FILTERs also skip the damage below.
             if (target.mon.hp === target.mon.maxHp) continue // FILTER_NOT(BATTLER_MAX_HP(target))
-            if (!canBattlerHeal(state, targetId, target, unmodelled)) continue // FILTER(CanBattlerHeal(target))
+            if (!canBattlerHeal(state, targetId, target, unmodelled, dataContext)) continue // FILTER(CanBattlerHeal(target))
             healEndTurn(state, targetId, target, hpFractionToDamage(target, 8), results)
             continue
           }
@@ -1719,7 +1728,7 @@ function runEndTurnAbilities(
             results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: -dmg, fainted })
           } else {
             if (target.mon.hp === target.mon.maxHp) continue
-            if (!canBattlerHeal(state, targetId, target, unmodelled)) continue
+            if (!canBattlerHeal(state, targetId, target, unmodelled, dataContext)) continue
             healEndTurn(state, targetId, target, hpFractionToDamage(target, 8), results)
           }
         }
@@ -1852,7 +1861,7 @@ export function runEndTurnEffects(
       hasFlag(battler.statuses3, STATUS3_ROOTED) &&
       battler.mon.hp !== 0 &&
       battler.mon.hp !== battler.mon.maxHp &&
-      canBattlerHeal(state, battlerId, battler, unmodelled)
+      canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)
     ) {
       let healAmount = Math.max(1, Math.floor(battler.mon.maxHp / 8))
       const item = battler.mon.itemId ? dataContext.item(battler.mon.itemId) : null
@@ -1880,7 +1889,7 @@ export function runEndTurnEffects(
       hasFlag(battler.statuses3, STATUS3_AQUA_RING) &&
       battler.mon.hp !== 0 &&
       battler.mon.hp !== battler.mon.maxHp &&
-      canBattlerHeal(state, battlerId, battler, unmodelled)
+      canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)
     ) {
       let healAmount = Math.max(1, Math.floor(battler.mon.maxHp / 16))
       const item = battler.mon.itemId ? dataContext.item(battler.mon.itemId) : null
@@ -1927,7 +1936,7 @@ export function runEndTurnEffects(
     // ENDTURN_ITEMS1 / ENDTURN_ITEMS2, :2460-2467 (battle_util.c:5622-5855).
     const holdEffect = statusDeps.grounding.holdEffectOf(battlerId)
     if (holdEffect === 'HOLD_EFFECT_LEFTOVERS') {
-      if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+      if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)) {
         const heal = Math.max(1, Math.floor(battler.mon.maxHp / 16))
         const prevHp = battler.mon.hp
         applyEndTurnHp(state, battlerId, battler, heal)
@@ -1939,7 +1948,7 @@ export function runEndTurnEffects(
     } else if (holdEffect === 'HOLD_EFFECT_BLACK_SLUDGE') {
       if (battler.mon.hp > 0) {
         if (battler.mon.types.includes('POISON')) {
-          if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+          if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)) {
             const heal = Math.max(1, Math.floor(battler.mon.maxHp / 16))
             const prevHp = battler.mon.hp
             applyEndTurnHp(state, battlerId, battler, heal)

@@ -490,7 +490,8 @@ export function runAttackCanceller(
 
   // CANCELLER_HEAL_BLOCKED, :3326-3336.
   if (
-    (hasFlag(attacker.statuses3, STATUS3_HEAL_BLOCK) || isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PERMANENCE')) &&
+    (hasFlag(attacker.statuses3, STATUS3_HEAL_BLOCK) ||
+      isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_PERMANENCE', dataContext)) &&
     move?.split === 'STATUS' &&
     isHealingMoveEffect(move?.effect ?? null)
   ) {

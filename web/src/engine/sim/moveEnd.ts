@@ -2913,7 +2913,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_RESILIENCE') {
     if (
       checkHalfHpAbility(target, hpDealt) &&
-      canBattlerHeal(state, targetId, target, unmodelled) &&
+      canBattlerHeal(state, targetId, target, unmodelled, deps.dataContext) &&
       getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0
     ) {
       const heal = Math.max(1, Math.floor(target.mon.maxHp / 4))
@@ -3820,7 +3820,7 @@ function handleAttackerMoveEndAbility(
       attacker.mon.hp > 0 &&
       hpDealt > 0 &&
       attacker.mon.hp < attacker.mon.maxHp &&
-      canBattlerHeal(state, attackerId, attacker, unmodelled)
+      canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
     ) {
       const heal = Math.max(1, Math.floor(hpDealt / 8))
       attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
@@ -3838,7 +3838,7 @@ function handleAttackerMoveEndAbility(
       attacker.mon.hp > 0 &&
       hpDealt > 0 &&
       attacker.mon.hp < attacker.mon.maxHp &&
-      canBattlerHeal(state, attackerId, attacker, unmodelled)
+      canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
     ) {
       const heal = Math.max(1, Math.floor(hpDealt / 10))
       attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
@@ -4148,7 +4148,7 @@ function handleAttackerMoveEndAbility(
         hpDealt > 0 &&
         attackerId !== targetId &&
         attacker.mon.hp < attacker.mon.maxHp &&
-        canBattlerHeal(state, attackerId, attacker, unmodelled)
+        canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
       ) {
         healFromAbilityDrain(state, attackerId, hpDealt, deps)
       }
@@ -4175,7 +4175,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
-      canBattlerHeal(state, attackerId, attacker, unmodelled)
+      canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
     ) {
       healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 4)), deps)
     }
@@ -4564,7 +4564,7 @@ function handleAttackerMoveEndAbility(
       if (
         targetDamage > 0 &&
         attacker.mon.hp < attacker.mon.maxHp &&
-        canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+        canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
         hasFlag(target.mon.status2, STATUS2_INFATUATION)
       ) {
         const heal = Math.max(1, Math.floor(hpDealt / 4))
@@ -4861,7 +4861,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
-      canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
       moveTypeName() === 'WATER'
     ) {
       healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 4)), deps)
@@ -5390,7 +5390,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
-      canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+      canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
       isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS')
     ) {
       healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 10)), deps)
@@ -6158,7 +6158,7 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
       }
 
       if (KO_SOUL_EATER_ABILITIES.has(abilityId)) {
-        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled)) {
+        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled, deps.dataContext)) {
           const heal = Math.max(1, Math.trunc((holder.mon.maxHp * 25) / 100))
           holder.mon.hp = Math.min(holder.mon.maxHp, holder.mon.hp + heal)
           syncPartyHp(state, i)
@@ -6167,7 +6167,7 @@ export function dispatchOnBattlerFaints(ctx: FaintDispatchContext): StatChangeOu
       }
 
       if (KO_JAWS_OF_CARNAGE_ABILITIES.has(abilityId)) {
-        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled)) {
+        if (holder.mon.hp < holder.mon.maxHp && canBattlerHeal(state, i, holder, unmodelled, deps.dataContext)) {
           const isBite = Boolean(ctx.moveData?.flags.biteBased)
           const percent = isBite ? 50 : 25
           const heal = Math.max(1, Math.trunc((holder.mon.maxHp * percent) / 100))
@@ -6872,7 +6872,7 @@ export function applyMoveEndItemEffectsAll(
       if (
         battler.mon.hp <= Math.floor(battler.mon.maxHp / 2) &&
         !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
-        canBattlerHeal(state, bId, battler, unmodelled)
+        canBattlerHeal(state, bId, battler, unmodelled, deps.dataContext)
       ) {
         const pct = itemData?.holdEffectStrength ?? 25
         // ItemHealHp (battle_util.c:5311-5320): gBattleMoveDamage = maxHP * param / 100, with NO minimum --
@@ -6891,7 +6891,7 @@ export function applyMoveEndItemEffectsAll(
       if (
         battler.mon.hp <= Math.floor(battler.mon.maxHp / 2) &&
         !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
-        canBattlerHeal(state, bId, battler, unmodelled)
+        canBattlerHeal(state, bId, battler, unmodelled, deps.dataContext)
       ) {
         let heal = itemData?.holdEffectStrength ?? 10
         if (hasRipenEffect(state, bId, deps)) heal *= 2
@@ -6915,7 +6915,7 @@ export function applyMoveEndItemEffectsAll(
       if (
         battler.mon.hp <= threshold &&
         !isUnnerveAbilityOnOpposingSide(state, bId, deps.dataContext) &&
-        canBattlerHeal(state, bId, battler, unmodelled)
+        canBattlerHeal(state, bId, battler, unmodelled, deps.dataContext)
       ) {
         const param = itemData?.holdEffectStrength ?? 3
         let heal = Math.max(1, Math.floor(battler.mon.maxHp / param))
@@ -7548,11 +7548,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         !battlerHasSimAbility(state, attacker, 'ABILITY_MADNESS_ENHANCEMENT', false, attackerId, false, deps.dataContext)
       ) {
         let enragedDmg = Math.floor(hpDealt / 3)
-        if (isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE')) enragedDmg *= 2
+        if (isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE', deps.dataContext)) enragedDmg *= 2
         recoilDmg = Math.max(1, recoilDmg + enragedDmg)
       }
       if (recoilDmg > 0) {
-        if (hasFlag(attacker.mon.status2, STATUS2_CONFUSION) && isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE')) {
+        if (hasFlag(attacker.mon.status2, STATUS2_CONFUSION) && isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE', deps.dataContext)) {
           recoilDmg *= 2
         }
         if (battlerHasHalfRecoil(attacker)) {
@@ -7588,7 +7588,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     battlerHasSimAbility(state, attacker, 'ABILITY_NOSFERATU', false, attackerId, false, deps.dataContext) &&
     isMoveMakingContact(moveData, attacker, deps.grounding.holdEffectOf(attackerId)) &&
     attacker.mon.hp < attacker.mon.maxHp &&
-    canBattlerHeal(state, attackerId, attacker, unmodelled)
+    canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
   ) {
     const heal = Math.max(1, Math.floor(hpDealt / 2))
     attacker.mon.hp = Math.min(attacker.mon.maxHp, attacker.mon.hp + heal)
@@ -7618,7 +7618,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
         if (
           hpDealt > 0 &&
           attacker.mon.hp < attacker.mon.maxHp &&
-          canBattlerHeal(state, attackerId, attacker, unmodelled) &&
+          canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
           !testSheerForceFlag(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding })
         ) {
           const heal = Math.max(1, Math.floor(hpDealt / 4))

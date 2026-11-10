@@ -691,9 +691,11 @@ function hasHalfRecoilAbility(state: BattleState, attacker: BattlerState, battle
  * (battle_util.c:9255-9260), so Neutralizing Gas, Gastro Acid and the ability
  * shield all apply, and the C's mold-breaker clause (gated on
  * `gAbilities[ability].breakable`, :9255) applies when `dataContext` is supplied.
- * With no `dataContext` the old raw lookup is kept: callers that have no data
- * bundle in scope (endTurn.ts / attackCanceller.ts / moveEnd.ts's existing call
- * sites) cannot evaluate the suppression clause. deductPp always supplies it.
+ * With no `dataContext` the old raw lookup is kept for the handful of callers
+ * whose scope has no data bundle (endTurn.ts's poisonHealBranch / abilityDrainsHp,
+ * plus the canBattlerHeal sites still deferred in moveEffects.ts, hitScripts.ts,
+ * absorb.ts and switchInAbility.ts). deductPp, canBattlerHeal, the heal-block
+ * canceller and the Cosmic Daze checks all supply it.
  * `attackerHasMoldBreaker` is the switching/pressuring move's mold-breaker
  * state (gHitMarker & HITMARKER_MOLD_BREAKER, :9255); Pressure is not breakable,
  * so it never changes Pressure's result. */
@@ -1631,7 +1633,7 @@ export function dispatchSwitchOutAbilities(
           //   maxHP * 33 / 100, clamped min 1. Fails if max HP or !CanBattlerHeal.
           if (battler.mon.hp <= 0) break
           if (battler.mon.hp >= battler.mon.maxHp) break
-          if (!canBattlerHeal(state, battlerId, battler, unmodelled)) break
+          if (!canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) break
 
           const heal = Math.max(1, Math.trunc((battler.mon.maxHp * 33) / 100))
           battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
@@ -1661,7 +1663,7 @@ export function dispatchSwitchOutAbilities(
             battler.mon.status1 = 0
             if (outgoingSlot) outgoingSlot.status1 = 0
           }
-          if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+          if (battler.mon.hp > 0 && battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
             const heal = Math.max(1, Math.trunc((battler.mon.maxHp * 33) / 100))
             battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
             if (outgoingSlot) outgoingSlot.hp = battler.mon.hp
@@ -2432,7 +2434,7 @@ export function executeAction(
     if (cancelResult.cancelledBy === 'CONFUSION') {
       // BattleScript_MoveUsedIsConfused (data/battle_scripts_1.s): datahpupdate BS_ATTACKER, tryfaintmon BS_ATTACKER.
       // Power is 80 with an opposing Cosmic Daze, else 40 (battle_util.c:3376-3378).
-      const power = isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_COSMIC_DAZE') ? 80 : 40
+      const power = isAbilityAliveOnOpposingSide(state, battlerId, 'ABILITY_COSMIC_DAZE', deps.dataContext) ? 80 : 40
       const selfHit = deps.damage.confusionSelfHit?.(state, battlerId, power)
       if (selfHit && selfHit.damage !== null) {
         unmodelled.push(...selfHit.unmodelled)
@@ -4125,7 +4127,7 @@ export function executeAction(
     // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3286-3324), also reached by
     // Dream Eater (:3567). manipulatedamage DMG_TO_HP_FROM_MOVE, battle_script_commands.c:9398-9411.
     if ((moveEffect === 'EFFECT_ABSORB' || moveEffect === 'EFFECT_DREAM_EATER') && hpDealt > 0) {
-      if (canBattlerHeal(state, battlerId, attackerBattler, unmodelled)) {
+      if (canBattlerHeal(state, battlerId, attackerBattler, unmodelled, deps.dataContext)) {
         const argument = moveData?.argumentInt ?? 0
         let drainHp = argument !== 0 ? Math.floor((hpDealt * argument) / 100) : Math.floor(hpDealt / 2)
         // GetDrainedBigRootHp, battle_util.c:2369-2377
