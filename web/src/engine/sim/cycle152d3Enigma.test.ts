@@ -341,10 +341,11 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // Cycle 152g: -2 hold-trigger, the two Booster Energy `ScoreSwitchInAbility`
     // units (`battle_ai_ability.c:1070`, `:1076`) moved to ai-trigger when that
     // file was reclassified as an AI source. 251 is the pre-152g count above.
+    // Cycle 152h: Bug Bite / Pluck EatTargetBerry ported (battle_script_commands.c:13221-13234), ported 402 -> 403, unported 214 -> 213.
     expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(249)
     expect(result.totalDefined).toBe(636)
-    expect(result.totalPorted).toBe(402)
-    expect(result.totalUnported).toBe(214)
+    expect(result.totalPorted).toBe(403)
+    expect(result.totalUnported).toBe(213)
     expect(result.totalAllowlisted).toBe(20)
     expect(result.totalRegisteredUntested).toBe(27)
   })
