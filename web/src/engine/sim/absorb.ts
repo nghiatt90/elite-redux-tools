@@ -152,7 +152,7 @@ export function applyAbsorbEffect(ctx: ApplyAbsorbContext): AbsorbOutcome {
   // 1. ABSORB_RESULT_HEAL (src/battle_util.c:4437-4444)
   // if (effect & ABSORB_RESULT_HEAL && !BATTLER_MAX_HP(battler) && CanBattlerHeal(battler))
   if ((effectFlags & ABSORB_RESULT_HEAL) !== 0) {
-    if (target.mon.hp < target.mon.maxHp && canBattlerHeal(state, targetId, target, unmodelled)) {
+    if (target.mon.hp < target.mon.maxHp && canBattlerHeal(state, targetId, target, unmodelled, deps.dataContext)) {
       const healAmount = Math.max(1, Math.floor(target.mon.maxHp / 4))
       const oldHp = target.mon.hp
       target.mon.hp = Math.min(target.mon.maxHp, target.mon.hp + healAmount)

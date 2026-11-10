@@ -2524,17 +2524,17 @@ function healBattler(state: BattleState, battlerId: number, battler: BattlerStat
  * (VARIOUS_CURE_STATUS, :7685-7689) clears all of status1 instead of healing.
  */
 function handleHealHalf(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
   const battler = state.battlers[battlerId]!
   const moveEffect = action.chosenMove!.effect
   deductPp(state, battlerId, action.chosenMove!.id, moveEffect, unmodelled)
 
-  if (moveEffect !== 'EFFECT_ROOST' && isHealingBlocked(state, battlerId, battler, unmodelled)) {
+  if (moveEffect !== 'EFFECT_ROOST' && isHealingBlocked(state, battlerId, battler, unmodelled, deps.dataContext)) {
     return outcome(ctx, { targetId: battlerId })
   }
 
   let heal = 0
-  if (canBattlerHeal(state, battlerId, battler, unmodelled)) {
+  if (canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
     if (battler.mon.hp === battler.mon.maxHp) return outcome(ctx, { targetId: battlerId })
     heal = Math.trunc(battler.mon.maxHp / 2)
     if (heal === 0) heal = 1
@@ -2702,7 +2702,7 @@ function handleWeatherRecovery(ctx: MoveEffectContext): ActionOutcome {
  * status cure (:791).
  */
 function handleJungleHealing(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
   const battler = state.battlers[battlerId]!
   const moveId = action.chosenMove!.id
   deductPp(state, battlerId, moveId, action.chosenMove!.effect, unmodelled)
@@ -2712,7 +2712,7 @@ function handleJungleHealing(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId: battlerId, missed: true })
   }
 
-  if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+  if (battler.mon.hp !== battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
     let heal = Math.trunc((battler.mon.maxHp * 25) / 100)
     if (heal === 0) heal = 1
     healBattler(state, battlerId, battler, heal)
@@ -2853,7 +2853,7 @@ function handleStrengthSap(ctx: MoveEffectContext): ActionOutcome {
 
   const mustLower =
     battler.mon.hp === battler.mon.maxHp ||
-    isHealingBlocked(state, battlerId, battler, unmodelled) ||
+    isHealingBlocked(state, battlerId, battler, unmodelled, deps.dataContext) ||
     hasFlag(battler.mon.status1, STATUS1_BLEED)
   const lowered = lowerAttack() !== 0
   if (mustLower && !lowered) return outcome(ctx, { targetId, statChanges })
@@ -4857,7 +4857,7 @@ function handleHealBell(ctx: MoveEffectContext): ActionOutcome {
   }
 
   // 3. tryhealpercenthealth BS_ATTACKER, 30, BattleScript_MoveEnd (:4862)
-  if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+  if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
     const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 30) / 100))
     healBattler(state, battlerId, battler, healAmount)
   }
@@ -4872,7 +4872,7 @@ function handleHealBell(ctx: MoveEffectContext): ActionOutcome {
  * tryhealpercenthealth BS_ATTACKER, 25, src/battle_script_commands.c:7896-7907.
  */
 function handleRefresh(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, action, unmodelled, deductPp } = ctx
+  const { state, battlerId, action, unmodelled, deductPp, deps } = ctx
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   const battler = state.battlers[battlerId]!
@@ -4893,7 +4893,7 @@ function handleRefresh(ctx: MoveEffectContext): ActionOutcome {
     }
 
     // tryhealpercenthealth BS_ATTACKER, 25, BattleScript_MoveEnd (:6494)
-    if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled)) {
+    if (battler.mon.hp < battler.mon.maxHp && canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
       const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 25) / 100))
       healBattler(state, battlerId, battler, healAmount)
     }
@@ -4901,7 +4901,7 @@ function handleRefresh(ctx: MoveEffectContext): ActionOutcome {
   } else {
     // BattleScript_EffectRefresh_NoStatusHeal (:6500)
     // tryhealpercenthealth BS_ATTACKER, 25, BattleScript_ButItFailed (:6501)
-    if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled)) {
+    if (battler.mon.hp === battler.mon.maxHp || !canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) {
       return outcome(ctx, { targetId: battlerId, missed: true })
     }
     const healAmount = Math.max(1, Math.trunc((battler.mon.maxHp * 25) / 100))
@@ -4918,7 +4918,7 @@ function handleRefresh(ctx: MoveEffectContext): ActionOutcome {
  * Cmd_tryhealhalfhealth BS_ATTACKER, src/battle_script_commands.c:9255-9274.
  */
 function handlePurify(ctx: MoveEffectContext): ActionOutcome {
-  const { state, battlerId, targetId, action, unmodelled, deductPp } = ctx
+  const { state, battlerId, targetId, action, unmodelled, deductPp, deps } = ctx
   const moveId = action.chosenMove!.id
   const moveEffect = action.chosenMove!.effect
   const battler = state.battlers[battlerId]!
@@ -4954,7 +4954,7 @@ function handlePurify(ctx: MoveEffectContext): ActionOutcome {
   // 5. tryhealhalfhealth BattleScript_AlreadyAtFullHp, BS_ATTACKER (:893, Cmd_tryhealhalfhealth
   // :9255-9274) -> BattleScript_RestoreHp (:3949-3955, no bleed branch): a user CanBattlerHeal
   // rejects (bleed included) gets a zero heal, a full-HP user goes to AlreadyAtFullHp.
-  if (canBattlerHeal(state, battlerId, battler, unmodelled) && battler.mon.hp < battler.mon.maxHp) {
+  if (canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext) && battler.mon.hp < battler.mon.maxHp) {
     healBattler(state, battlerId, battler, Math.max(1, Math.trunc(battler.mon.maxHp / 2)))
   }
 
@@ -5123,7 +5123,7 @@ function handleHealPulse(ctx: MoveEffectContext): ActionOutcome {
   }
 
   // 4. jumpifhealingblocked BS_TARGET, BattleScript_ButItFailed (:2258)
-  if (isHealingBlocked(state, targetId, target, unmodelled)) {
+  if (isHealingBlocked(state, targetId, target, unmodelled, deps.dataContext)) {
     return outcome(ctx, { targetId, missed: true })
   }
 
@@ -9168,7 +9168,7 @@ function finishBerryRemoval(
   // The C also requires the ateBerry bit (:6018), which is now set above.
   if (
     battlerHasSimAbility(state, battler, 'ABILITY_GLUTTONY', false, battlerId, false, deps.dataContext) &&
-    canBattlerHeal(state, battlerId, battler, unmodelled) &&
+    canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext) &&
     battler.ateBerry === true &&
     battler.mon.hp < battler.mon.maxHp
   ) {
@@ -9223,7 +9223,7 @@ export function consumeBerryWithOverride(
     case 'HOLD_EFFECT_RESTORE_HP':
     case 'HOLD_EFFECT_RESTORE_PCT_HP': {
       // ItemHealHp (battle_util.c:5311-5333), BattleScript_ItemHealHP_RemoveItemRet (data/battle_scripts_1.s:10859-10873)
-      if (!canBattlerHeal(state, battlerId, battler, unmodelled)) break
+      if (!canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) break
       // :5315 -- !(gBattleScripting.overrideBerryRequirements && gBattleMons[battlerId].hp == gBattleMons[battlerId].maxHP)
       if (battler.mon.hp === battler.mon.maxHp) break
       // :10860 -- jumpifconsumableblocked BS_SCRIPTING, BattleScript_Return (VARIOUS_JUMP_IF_CONSUMABLE_BLOCKED, :9024-9032)
@@ -9965,7 +9965,7 @@ export function handleDrainBrain(ctx: MoveEffectContext): ActionOutcome {
   // 5. jumpiffullhp / jumpifhealingblocked / jumpifstatus STATUS1_BLEED (:959-961)
   const mustLower =
     battler.mon.hp === battler.mon.maxHp ||
-    isHealingBlocked(state, battlerId, battler, unmodelled) ||
+    isHealingBlocked(state, battlerId, battler, unmodelled, deps.dataContext) ||
     hasFlag(battler.mon.status1, STATUS1_BLEED)
   const { delta, missed: lowerMissed } = lowerSpAttack()
   const lowered = delta !== 0

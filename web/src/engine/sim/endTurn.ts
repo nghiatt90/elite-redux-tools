@@ -513,21 +513,33 @@ function applyEndTurnHp(state: BattleState, battlerId: number, battler: BattlerS
  * null when Poison Heal's own REQUIRE guards (not at max HP, CanBattlerHeal)
  * fail, matching the C's `break` (tracker already advanced by the caller;
  * nothing happens this case). */
-function poisonHealBranch(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): number | null {
+function poisonHealBranch(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  unmodelled: string[],
+  dataContext?: SimDataContext,
+): number | null {
   if (battler.mon.hp === battler.mon.maxHp) return null // BATTLER_MAX_HP, :2498/:2523
-  if (!canBattlerHeal(state, battlerId, battler, unmodelled)) return null
+  if (!canBattlerHeal(state, battlerId, battler, unmodelled, dataContext)) return null
   const heal = Math.max(1, Math.trunc(battler.mon.maxHp / 8))
   return heal // positive: a heal
 }
 
 /** ENDTURN_POISON, battle_util.c:2492-2515. */
-function runPoison(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): EndTurnEffectResult | null {
+function runPoison(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  unmodelled: string[],
+  dataContext?: SimDataContext,
+): EndTurnEffectResult | null {
   if (!hasFlag(battler.mon.status1, STATUS1_POISON)) return null // REQUIRE, :2494
   if (battler.mon.hp === 0) return null // REQUIRE(IsBattlerAlive), :2495
 
   let hpChange: number
   if (battlerHasAbility(battler.mon.abilities, 'ABILITY_POISON_HEAL', NO_SUPPRESSION)) {
-    const heal = poisonHealBranch(state, battlerId, battler, unmodelled)
+    const heal = poisonHealBranch(state, battlerId, battler, unmodelled, dataContext)
     if (heal === null) return null
     hpChange = heal
   } else {
@@ -544,13 +556,19 @@ function runPoison(state: BattleState, battlerId: number, battler: BattlerState,
  * (:2532-2533) happens ONLY in the non-Poison-Heal branch, and BEFORE the
  * damage read (:2540 reads status1 AFTER the increment) -- both ported
  * exactly in that order. */
-function runBadPoison(state: BattleState, battlerId: number, battler: BattlerState, unmodelled: string[]): EndTurnEffectResult | null {
+function runBadPoison(
+  state: BattleState,
+  battlerId: number,
+  battler: BattlerState,
+  unmodelled: string[],
+  dataContext?: SimDataContext,
+): EndTurnEffectResult | null {
   if (!hasFlag(battler.mon.status1, STATUS1_TOXIC_POISON)) return null // REQUIRE, :2519
   if (battler.mon.hp === 0) return null // REQUIRE(IsBattlerAlive), :2520
 
   let hpChange: number
   if (battlerHasAbility(battler.mon.abilities, 'ABILITY_POISON_HEAL', NO_SUPPRESSION)) {
-    const heal = poisonHealBranch(state, battlerId, battler, unmodelled)
+    const heal = poisonHealBranch(state, battlerId, battler, unmodelled, dataContext)
     if (heal === null) return null
     hpChange = heal
   } else {
@@ -939,6 +957,7 @@ function abilityDrainsHp(
   holder: BattlerState,
   unmodelled: string[],
   results: EndTurnEffectResult[],
+  dataContext?: SimDataContext,
 ): void {
   for (let targetId = (holderId & 1) ^ 1; targetId < state.battlersCount; targetId += 2) {
     const target = state.battlers[targetId]
@@ -956,7 +975,7 @@ function abilityDrainsHp(
       results.push({ battlerId: holderId, effect: 'ABILITY', hpChange: holder.mon.hp - prevHp, fainted: holderFainted })
       continue
     }
-    if (!canBattlerHeal(state, holderId, holder, unmodelled)) continue // jumpifhealingblocked + jumpifstatus STATUS1_BLEED
+    if (!canBattlerHeal(state, holderId, holder, unmodelled, dataContext)) continue // jumpifhealingblocked + jumpifstatus STATUS1_BLEED
     if (
       battlerHasAbility(holder.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION) ||
       battlerHasAbility(target.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION)
@@ -1526,14 +1545,14 @@ function runEndTurnAbilities(
 
       case 'ABILITY_LIFE_STEAL': {
         // src/abilities.cc:9101-9114
-        abilityDrainsHp(state, battlerId, battler, unmodelled, results)
+        abilityDrainsHp(state, battlerId, battler, unmodelled, results, dataContext)
         break
       }
 
       case 'ABILITY_SOUL_TAP': {
         // src/abilities.cc:9959-9973: Life Steal's drain, but only in fog
         if (isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, { dataContext, grounding: deps?.grounding })) {
-          abilityDrainsHp(state, battlerId, battler, unmodelled, results)
+          abilityDrainsHp(state, battlerId, battler, unmodelled, results, dataContext)
         }
         break
       }
@@ -2020,9 +2039,9 @@ export function runEndTurnEffects(
     const leechResults = runLeechSeed(state, battlerId, battler, dataContext, unmodelled)
     results.push(...leechResults)
 
-    const poison = runPoison(state, battlerId, battler, unmodelled)
+    const poison = runPoison(state, battlerId, battler, unmodelled, dataContext)
     if (poison) results.push(poison)
-    const badPoison = poison ? null : runBadPoison(state, battlerId, battler, unmodelled)
+    const badPoison = poison ? null : runBadPoison(state, battlerId, battler, unmodelled, dataContext)
     if (badPoison) results.push(badPoison)
 
     // ENDTURN_SEA_OF_FIRE_DAMAGE, battle_util.c:2545-2562.

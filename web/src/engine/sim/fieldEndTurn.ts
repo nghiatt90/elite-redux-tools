@@ -585,7 +585,7 @@ export function runFieldEndTurnEffects(
             // jumpifhealingblocked -> ButItFailed, jumpifstatus STATUS1_BLEED -> MoveUsedBleedHeal.
             const bleeding = hasFlag(b.mon.status1, STATUS1_BLEED)
             if (bleeding || b.mon.hp < b.mon.maxHp) {
-              if (!isHealingBlocked(state, bId, b, unmodelled)) {
+              if (!isHealingBlocked(state, bId, b, unmodelled, dataContext)) {
                 if (bleeding) {
                   b.mon.status1 = 0
                   syncPartyHp(state, bId)

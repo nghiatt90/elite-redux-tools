@@ -1857,7 +1857,7 @@ export function applySwitchInAbilities(
         if (
           battler.mon.hp > 0 &&
           battler.mon.hp < battler.mon.maxHp &&
-          canBattlerHeal(state, battlerId, battler, unmodelled)
+          canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)
         ) {
           const heal = Math.max(1, Math.floor(battler.mon.maxHp / 4))
           battler.mon.hp = Math.min(battler.mon.maxHp, battler.mon.hp + heal)
