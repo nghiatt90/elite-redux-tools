@@ -4,9 +4,13 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ALLOWLIST,
   ENVIRONMENT_INVENTORY_DOC_PATH,
+  TRAINER_FLAG_SPECS,
+  classifyToken,
   generateEnvironmentInventoryDoc,
   isValidAllowlistCitation,
   loadBattleEventRows,
+  loadEngineProductionFiles,
+  loadEngineTestFiles,
   loadMapScripts,
   loadTrainers,
   runInventory,
@@ -15,6 +19,7 @@ import {
   type EnvironmentAllowlistEntry,
   type MapScript,
   type MapSetupSpec,
+  type SourceFile,
 } from './environmentInventory'
 
 const scripts = loadMapScripts()
@@ -36,10 +41,10 @@ const BATTLE_EVENT_UNITS = 34
 const SCRIPT_EVENT_UNITS = 6
 
 /** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_UNIT_COUNT = 38
+export const UNPORTED_UNIT_COUNT = 40
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 3
+export const REGISTERED_UNTESTED_UNIT_COUNT = 5
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -159,7 +164,7 @@ describe('environment and scripted-condition completeness inventory', () => {
   })
 
   it('validates every allowlist citation format', () => {
-    expect(DEFAULT_ALLOWLIST.length).toBe(7)
+    expect(DEFAULT_ALLOWLIST.length).toBe(8)
     for (const entry of DEFAULT_ALLOWLIST) {
       expect(isValidAllowlistCitation(entry.cite)).toBe(true)
       expect(entry.reason.length).toBeGreaterThan(0)
@@ -374,5 +379,84 @@ describe('environment and scripted-condition completeness inventory', () => {
 
     expect(existsSync(ENVIRONMENT_INVENTORY_DOC_PATH)).toBe(true)
     expect(readFileSync(ENVIRONMENT_INVENTORY_DOC_PATH, 'utf-8')).toBe(generated)
+  })
+})
+
+describe('trainer-flag evidence', () => {
+  const productionFiles = loadEngineProductionFiles()
+  const testFiles = loadEngineTestFiles()
+
+  const PORTED_TRAINER_FLAG_KEYS = [
+    'risky',
+    'preferStall',
+    'preferStatus',
+    'AI_FLAG_CHECK_BAD_MOVE',
+    'AI_FLAG_TRY_TO_FAINT',
+    'AI_FLAG_CHECK_VIABILITY',
+    'AI_FLAG_SMART_SWITCHING',
+    'AI_FLAG_WILL_SUICIDE',
+  ] as const
+
+  for (const key of PORTED_TRAINER_FLAG_KEYS) {
+    it(`classifies ${key} as ported on unmutated production files, and unported when the cited read line is removed`, () => {
+      const spec = TRAINER_FLAG_SPECS.find((s) => s.key === key)
+      expect(spec).toBeDefined()
+      if (!spec) return
+
+      const initial = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+      expect(initial.status).toBe('ported')
+
+      expect(spec.evidence?.productionLinePattern).toBeDefined()
+      const pattern = spec.evidence!.productionLinePattern!
+
+      // Filter out any line matching the production line pattern from all production files
+      const mutatedFiles: SourceFile[] = productionFiles.map((file) => ({
+        file: file.file,
+        source: file.source
+          .split('\n')
+          .filter((line) => !pattern.test(line))
+          .join('\n'),
+      }))
+
+      const mutated = classifyToken(spec.token, mutatedFiles, testFiles, spec.evidence)
+      expect(mutated.status).not.toBe('ported')
+    })
+  }
+
+  it('rejects aiFlags.ts alone as insufficient production evidence for trainer flags', () => {
+    for (const key of PORTED_TRAINER_FLAG_KEYS) {
+      const spec = TRAINER_FLAG_SPECS.find((s) => s.key === key)!
+      const classification = classifyToken(
+        spec.token,
+        [{ file: 'web/src/engine/sim/ai/aiFlags.ts', source: spec.token }],
+        testFiles,
+        spec.evidence,
+      )
+      expect(classification.status).toBe('unported')
+    }
+  })
+
+  it('flips forcedDouble to ported when a production file outside aiFlags.ts writes battlersCount', () => {
+    const spec = TRAINER_FLAG_SPECS.find((s) => s.key === 'forcedDouble')!
+    const realClassification = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+    expect(realClassification.status).toBe('unported')
+    expect(realClassification.registeredUntested).toBe(false)
+
+    // Synthetic production file where battlersCount is set based on forcedDouble
+    const syntheticFiles: SourceFile[] = [
+      ...productionFiles,
+      {
+        file: 'web/src/engine/sim/driver/syntheticDouble.ts',
+        source: 'const battlersCount = trainer.forcedDouble ? 4 : 2\n',
+      },
+    ]
+
+    const syntheticClassification = classifyToken(
+      spec.token,
+      syntheticFiles,
+      testFiles,
+      spec.evidence,
+    )
+    expect(syntheticClassification.status).toBe('ported')
   })
 })

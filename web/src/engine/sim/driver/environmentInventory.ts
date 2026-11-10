@@ -40,7 +40,7 @@ import { stripComments } from './moveInventory'
  * but no qualifying test does.
  *
  * `allowlisted` requires an exact pinned C `file:line` and a reason quoting that
- * line. The default list is NOT empty: seven units are provably inert for battle
+ * line. The default list is NOT empty: eight units are provably inert for battle
  * outcome (see `DEFAULT_ALLOWLIST`).
  */
 
@@ -96,6 +96,11 @@ export interface UnitEvidence {
   productionLinePattern?: RegExp
   /** Production files that never count as evidence for this unit. */
   productionExcludeFiles?: readonly string[]
+  /**
+   * Canonical flag token when the production read line uses a numeric dispatch
+   * key or helper name rather than the flag identifier itself.
+   */
+  evidenceToken?: string
 }
 
 export interface MapScript {
@@ -238,6 +243,12 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<EnvironmentAllowlistEntry> = [
     reason:
       '`if (gTrainerMoneyTable[i].classId == gTrainers[trainerId].trainerClass) break;` -- trainer class only selects the prize-money row (plus ball and victory music).',
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5794',
+  },
+  {
+    key: 'noSwitching',
+    reason:
+      '`if (gBattleTypeFlags & (AI_FLAG_DISABLE_SWITCHING))` tests gBattleTypeFlags (bit 1<<17, Battle Palace), so a trainer\'s aiFlags never reaches it.',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:611',
   },
 ]
 
@@ -504,7 +515,7 @@ function patternMatches(pattern: RegExp, source: string): boolean {
 /** The token and the behaviour pattern must co-occur on one production line. */
 function lineMatches(source: string, token: string, pattern: RegExp): boolean {
   for (const line of source.split('\n')) {
-    if (tokenAppears(line, token) && patternMatches(pattern, line)) return true
+    if ((token === '' || tokenAppears(line, token)) && patternMatches(pattern, line)) return true
   }
   return false
 }
@@ -520,13 +531,15 @@ export function classifyToken(
   testSources: ReadonlyArray<SourceFile>,
   evidence: UnitEvidence = {},
 ): TokenClassification {
+  const tokenToCheck = evidence.evidenceToken ?? token
+  const lineToken = evidence.evidenceToken && token === evidence.evidenceToken ? '' : token
   const productionFiles = asProductionFiles(production).map((file) => ({
     file: file.file,
     source: stripComments(file.source),
   }))
   const productionSource = productionFiles.map((file) => file.source).join('\n')
   // Raw name presence, unscoped by evidence: it decides `registeredUntested`.
-  const productionNamesToken = tokenAppears(productionSource, token)
+  const productionNamesToken = tokenAppears(productionSource, tokenToCheck)
 
   const requiredFiles = evidence.productionFiles
     ? new Set(evidence.productionFiles)
@@ -537,11 +550,11 @@ export function classifyToken(
     if (requiredFiles && !requiredFiles.has(file.file)) continue
     if (excludedFiles.has(file.file)) continue
     if (evidence.productionLinePattern) {
-      if (lineMatches(file.source, token, evidence.productionLinePattern)) {
+      if (lineMatches(file.source, lineToken, evidence.productionLinePattern)) {
         productionQualifies = true
         break
       }
-    } else if (tokenAppears(file.source, token)) {
+    } else if (tokenAppears(file.source, lineToken)) {
       productionQualifies = true
       break
     }
@@ -550,7 +563,7 @@ export function classifyToken(
   const matchingFiles = testSources
     .filter((file) => {
       const source = stripComments(file.source)
-      if (!tokenAppears(source, token)) return false
+      if (!tokenAppears(source, tokenToCheck)) return false
       return evidence.testPattern ? patternMatches(evidence.testPattern, source) : true
     })
     .map((file) => file.file)
@@ -801,7 +814,7 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'doubleBattleMode',
     site: 'CreateNPCTrainerParty',
     scope: 'save-block double-battle mode toggle',
-    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1759),
+    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1757),
   },
   {
     key: 'HELL_MODE_EXTRA_LEVELS_FLAG',
@@ -865,6 +878,12 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'trainers.json risky -> AI_FLAG_RISKY',
     scope: '4 trainers',
     citation: cite(CODEGEN_PATH, 181),
+    evidence: {
+      evidenceToken: 'AI_FLAG_RISKY',
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\b4:\s*\(.*=>\s*aiRisky\(/,
+      testPattern: /TRAINER_WINONA_2/,
+    },
   },
   {
     key: 'preferStall',
@@ -872,6 +891,11 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'trainers.json preferStall -> AI_FLAG_STALL',
     scope: '1 trainer',
     citation: cite(CODEGEN_PATH, 182),
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\bif\s*\(hasFlag\(state\.aiFlags,\s*AI_FLAG_STALL\)\)\s*\{/,
+      testPattern: /(?:stat \d flag on|without AI_FLAG_STALL)/,
+    },
   },
   {
     key: 'preferStatus',
@@ -879,6 +903,11 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'trainers.json preferStatus -> AI_FLAG_PREFER_STATUS_MOVES',
     scope: '6 trainers',
     citation: cite(CODEGEN_PATH, 183),
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\bhasFlag\(state\.aiFlags,\s*AI_FLAG_PREFER_STATUS_MOVES\)/,
+      testPattern: /AI_FLAG_PREFER_STATUS_MOVES.*\(flag on\)/,
+    },
   },
   {
     key: 'noSwitching',
@@ -900,8 +929,7 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     // is unmodelled and the fight stays singles.
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
-      productionLinePattern:
-        /\b(?:battlers\s*=|battlers\.push\(|battlerCount\s*[=+]|numActiveBattlers)/,
+      productionLinePattern: /\bbattlersCount\s*(?::|\+?=(?!=))/,
     },
   },
   {
@@ -923,49 +951,89 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'AI_FLAG_CHECK_BAD_MOVE',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 188),
+    citation: cite(CODEGEN_PATH, 187),
+    evidence: {
+      evidenceToken: 'AI_FLAG_CHECK_BAD_MOVE',
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\b0:\s*\(.*=>\s*aiCheckBadMove\(/,
+      testPattern: /(?:flag on.*AI_FLAG_CHECK_BAD_MOVE|AI_FLAG_CHECK_BAD_MOVE.*flag off)/s,
+    },
   },
   {
     key: 'AI_FLAG_TRY_TO_FAINT',
     token: 'AI_FLAG_TRY_TO_FAINT',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 189),
+    citation: cite(CODEGEN_PATH, 188),
+    evidence: {
+      evidenceToken: 'AI_FLAG_TRY_TO_FAINT',
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\b1:\s*\(.*=>\s*aiTryToFaint\(/,
+      testPattern: /AI_FLAG_TRY_TO_FAINT and the attacker already KOs/,
+    },
   },
   {
     key: 'AI_FLAG_CHECK_VIABILITY',
     token: 'AI_FLAG_CHECK_VIABILITY',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 190),
+    citation: cite(CODEGEN_PATH, 189),
+    evidence: {
+      evidenceToken: 'AI_FLAG_CHECK_VIABILITY',
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\b2:\s*\(.*=>\s*aiCheckViability\(/,
+      testPattern: /(?:flag on.*AI_FLAG_CHECK_VIABILITY|AI_FLAG_CHECK_VIABILITY.*flag off)/s,
+    },
   },
   {
     key: 'AI_FLAG_CHECK_FOE',
     token: 'AI_FLAG_CHECK_FOE',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 191),
+    citation: cite(CODEGEN_PATH, 190),
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      testPattern: /(?:flag on.*AI_FLAG_CHECK_FOE|AI_FLAG_CHECK_FOE.*flag off)/s,
+    },
   },
   {
     key: 'AI_FLAG_SMART_SWITCHING',
     token: 'AI_FLAG_SMART_SWITCHING',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 192),
+    citation: cite(CODEGEN_PATH, 191),
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern:
+        /\bhasFlag\(state\.aiFlags,\s*AI_FLAG_SMART_SWITCHING\)\s*&&\s*onlyPhysicalMoves\b/,
+      testPattern: /Smart Switching, and only physical moves/,
+    },
   },
   {
     key: 'AI_FLAG_HP_AWARE',
     token: 'AI_FLAG_HP_AWARE',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 193),
+    citation: cite(CODEGEN_PATH, 192),
+    evidence: {
+      evidenceToken: 'AI_FLAG_HP_AWARE',
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern: /\b8:\s*\(.*=>\s*aiHPAware\(/,
+      testPattern: /(?:flag on.*AI_FLAG_HP_AWARE|AI_FLAG_HP_AWARE.*flag off)/s,
+    },
   },
   {
     key: 'AI_FLAG_WILL_SUICIDE',
     token: 'AI_FLAG_WILL_SUICIDE',
     site: 'always-on AI flags',
     scope: 'all 932 trainers',
-    citation: cite(CODEGEN_PATH, 194),
+    citation: cite(CODEGEN_PATH, 193),
+    evidence: {
+      productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
+      productionLinePattern:
+        /\bconst willSuicide = hasFlag\(state\.aiFlags,\s*AI_FLAG_WILL_SUICIDE\)/,
+      testPattern: /AI_FLAG_WILL_SUICIDE is set/,
+    },
   },
 ]
 
@@ -1322,7 +1390,7 @@ export function generateEnvironmentInventoryDoc(
     'Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not',
   )
   lines.push(
-    'empty: seven units are provably battle-inert (cosmetics, overworld weather, field-effect arguments, prizes).',
+    'empty: eight units are provably battle-inert (cosmetics, overworld weather, field-effect arguments, prizes).',
   )
   lines.push('')
   lines.push('1. **map-setup**: a flag/var/special/script command set by a map script before a battle.')
