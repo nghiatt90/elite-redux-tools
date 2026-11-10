@@ -63,8 +63,14 @@ const DISTINCT_FLAG_KEYS = 42
  * and the argument/word plumbing (`argumenttomoveeffect`, `copyword`, `callifability`)
  * plus the still-unported attack/move/item micro-ops listed in the generated doc. Most of
  * the delta is flag pairs: tests that run one carrier move no longer prove a flag.
+ *
+ * Cycle 151d: 1456 -> 1442. `parseScripts` no longer takes a label inside a dead `.if`
+ * branch as the definition (`BattleScript_EffectBeatUp` resolves to the live :5775 body),
+ * and `manipulatedamage` is handled per operand (DMG_TO_HP_FROM_MOVE / DMG_BIG_ROOT /
+ * DMG_TO_HP_FROM_ABILITY / DMG_RECOIL_FROM_MISS). 14 legacy-script pairs became ported:
+ * Beat Up plus the 13 `BattleScript_EffectAbsorb` drain moves.
  */
-export const UNPORTED_PAIR_COUNT = 1456
+export const UNPORTED_PAIR_COUNT = 1442
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The

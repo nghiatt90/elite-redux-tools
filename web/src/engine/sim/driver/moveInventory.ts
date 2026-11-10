@@ -755,6 +755,13 @@ function secondaryIsConsumed(name: string, index: ConsumptionIndex): boolean {
 //     opcode unhandled again (mutation-tested in cycle151bInventory.test.ts).
 export interface ScriptOpcodeHandler {
   opcode: string
+  /**
+   * The operand the C handler switches on, for commands whose opcode alone is not a
+   * behaviour (`Cmd_manipulatedamage` is a `switch (gBattlescriptCurrInstr[1])`,
+   * `battle_script_commands.c:9357-9413`). An entry with an operand handles only the
+   * command with that second token; a different operand stays unhandled.
+   */
+  operand?: string
   cSite: string
   simSite: string
   probes: RegExp[]
@@ -1628,19 +1635,80 @@ export const SCRIPT_OPCODE_HANDLERS: ReadonlyArray<ScriptOpcodeHandler> = [
     simSite: 'web/src/engine/sim/turn.ts:1718',
     probes: [/export function performSwitchAction\(/],
   },
+
+  // `manipulatedamage` operands. Cmd_manipulatedamage switches on the operand
+  // (`battle_script_commands.c:9357-9413`), so each operand is its own handler. An
+  // operand the sim does not port stays unhandled and is reported with its operand.
+  {
+    opcode: 'manipulatedamage',
+    operand: 'DMG_TO_HP_FROM_MOVE',
+    // C :9398-9411: gHpDealt * argument / 100, else gHpDealt / 2, then GetDrainedBigRootHp.
+    cSite: 'battle_script_commands.c:9398',
+    simSite: 'web/src/engine/sim/turn.ts:4117',
+    probes: [/let drainHp = argument !== 0 \? Math\.floor\(\(hpDealt \* argument\) \/ 100\)/],
+  },
+  {
+    opcode: 'manipulatedamage',
+    operand: 'DMG_BIG_ROOT',
+    // C :9384-9386: GetDrainedBigRootHp(attacker, -damage). The sim repeats that math in
+    // Leech Seed (endTurn.ts), Strength Sap and Drain Brain (moveEffects.ts); the Leech Seed
+    // Big Root multiplication is the distinctive site.
+    cSite: 'battle_script_commands.c:9384',
+    simSite: 'web/src/engine/sim/endTurn.ts:724',
+    probes: [/seederItem\?\.resolvedHoldEffect === 'HOLD_EFFECT_BIG_ROOT'/],
+  },
+  {
+    opcode: 'manipulatedamage',
+    operand: 'DMG_TO_HP_FROM_ABILITY',
+    // C :9395-9397: GetDrainedBigRootHp(attacker, damage).
+    cSite: 'battle_script_commands.c:9395',
+    simSite: 'web/src/engine/sim/moveEnd.ts:3514',
+    probes: [/holdEffectOf\(battlerId\) === 'HOLD_EFFECT_BIG_ROOT'\) heal = Math\.trunc\(\(heal \* 3\) \/ 2\)/],
+  },
+  {
+    opcode: 'manipulatedamage',
+    operand: 'DMG_RECOIL_FROM_MISS',
+    // C :9362-9366: maxHP / 2, halved by the halfRecoil ability.
+    cSite: 'battle_script_commands.c:9362',
+    simSite: 'web/src/engine/sim/turn.ts:3703',
+    probes: [/let crashDamage = Math\.floor\(attackerBattler\.mon\.maxHp \/ 2\)/],
+  },
 ]
 
-/** Opcodes whose production site is present in the comment-stripped consumer source. */
+/** Handler key: `opcode operand` when the handler is operand-specific, else `opcode`. */
+function handlerKey(opcode: string, operand?: string): string {
+  return operand ? `${opcode} ${operand}` : opcode
+}
+
+/**
+ * The lookup key for a script command. `manipulatedamage` is the one opcode whose C
+ * handler dispatches on its second token, so each operand names its own production site:
+ * `manipulatedamage DMG_X` must be ported by the `DMG_X` entry specifically.
+ */
+function commandHandlerKey(command: string): string {
+  const tokens = command.trim().split(/\s+/)
+  const opcode = tokens[0] ?? ''
+  if (opcode === 'manipulatedamage' && tokens[1]) return handlerKey(opcode, tokens[1])
+  return opcode
+}
+
+/**
+ * Handler keys whose production site is present in the comment-stripped consumer source.
+ * Non-operand entries contribute their opcode; `manipulatedamage` entries contribute
+ * `manipulatedamage <operand>`.
+ */
 export function handledScriptOpcodes(source: string): Set<string> {
   const handled = new Set<string>()
   for (const handler of SCRIPT_OPCODE_HANDLERS) {
-    if (handler.probes.every((probe) => probe.test(source))) handled.add(handler.opcode)
+    if (handler.probes.every((probe) => probe.test(source))) {
+      handled.add(handlerKey(handler.opcode, handler.operand))
+    }
   }
   return handled
 }
 
-function opcodeHasHandler(opcode: string, handledOpcodes: ReadonlySet<string>): boolean {
-  return handledOpcodes.has(opcode)
+function opcodeHasHandler(command: string, handledOpcodes: ReadonlySet<string>): boolean {
+  return handledOpcodes.has(commandHandlerKey(command))
 }
 
 
@@ -2191,44 +2259,107 @@ export function evaluateScriptCondition(
   }
 }
 
+interface ScriptConditionFrame {
+  /** Whether the enclosing context (outer branches) is live. */
+  parentActive: boolean
+  /** Whether this branch contributes commands. */
+  branchActive: boolean
+  /** Set once a branch of this conditional has been live; a later `.else` must not re-open it. */
+  taken: boolean
+  /** Set by `.else`, so a following `.elseif`/`.else` cannot re-open the chain. */
+  seenElse: boolean
+}
+
+/**
+ * Applies one `.if`/`.elseif`/`.else`/`.endif` directive to a conditional stack. Shared by
+ * the file-level label scan and the per-script command scan so both evaluate
+ * `battle_config.h` the same way.
+ */
+function applyConditionalDirective(
+  stack: ScriptConditionFrame[],
+  kind: 'if' | 'elseif' | 'else' | 'endif',
+  expression: string,
+  resolve: (token: string) => number | undefined,
+): void {
+  if (kind === 'if') {
+    const branchActive = evaluateScriptCondition(expression, resolve)
+    stack.push({
+      parentActive: stack.every((frame) => frame.parentActive && frame.branchActive),
+      branchActive,
+      taken: branchActive,
+      seenElse: false,
+    })
+    return
+  }
+  if (kind === 'endif') {
+    stack.pop()
+    return
+  }
+  const frame = stack[stack.length - 1]
+  if (!frame) return
+  if (kind === 'elseif') {
+    if (frame.seenElse) {
+      frame.branchActive = false
+      return
+    }
+    const branchActive = !frame.taken && evaluateScriptCondition(expression, resolve)
+    frame.branchActive = branchActive
+    if (branchActive) frame.taken = true
+    return
+  }
+  frame.branchActive = !frame.taken
+  frame.taken = true
+  frame.seenElse = true
+}
+
 /**
  * Every top-level label in both script files, with its linear command list up to the first
  * terminator. `.if`/`.else` directives are evaluated against battle_config.h (only the live
  * branch contributes), and `call` targets are expanded one level so their commands count.
+ *
+ * The file-level conditional stack is tracked while scanning for labels: a label inside a
+ * dead branch is not a definition. `BattleScript_EffectBeatUp` has a dead
+ * `B_BEAT_UP_DMG < GEN_5` body at :5743 and the live `.else` body at :5775
+ * (`data/battle_scripts_1.s:5742-5780`), so only the latter defines the label.
  */
 export function parseScripts(files: ScriptFile[] = loadScriptFiles()): Map<string, ScriptRecord> {
   const resolve = battleConfigResolver()
   const scripts = new Map<string, ScriptRecord>()
   for (const file of files) {
+    const fileStack: ScriptConditionFrame[] = []
+    const fileActive = () => fileStack.every((frame) => frame.parentActive && frame.branchActive)
     for (let i = 0; i < file.lines.length; i++) {
+      const trimmedLine = file.lines[i].trim()
+      const fileDirective = trimmedLine.match(/^\.(if|elseif|else|endif)\b(.*)$/)
+      if (fileDirective) {
+        applyConditionalDirective(
+          fileStack,
+          fileDirective[1] as 'if' | 'elseif' | 'else' | 'endif',
+          fileDirective[2],
+          resolve,
+        )
+        continue
+      }
       const match = file.lines[i].match(LABEL_RE)
       if (!match) continue
+      if (!fileActive()) continue
       const label = match[1]
       if (scripts.has(label)) continue
       const commands: string[] = []
       let truncated = false
-      const stack: Array<{ parentActive: boolean; branchActive: boolean; seenElse: boolean }> = []
+      const stack: ScriptConditionFrame[] = []
       const active = () => stack.every((frame) => frame.parentActive && frame.branchActive)
       for (let j = i + 1; j < file.lines.length; j++) {
         const trimmed = file.lines[j].trim()
         if (!trimmed || trimmed.startsWith('@')) continue
         const directive = trimmed.match(/^\.(if|elseif|else|endif)\b(.*)$/)
         if (directive) {
-          if (directive[1] === 'if') {
-            stack.push({
-              parentActive: active(),
-              branchActive: evaluateScriptCondition(directive[2], resolve),
-              seenElse: false,
-            })
-          } else if (directive[1] === 'else') {
-            const frame = stack[stack.length - 1]
-            if (frame && !frame.seenElse) {
-              frame.branchActive = !frame.branchActive
-              frame.seenElse = true
-            }
-          } else if (directive[1] === 'endif') {
-            stack.pop()
-          }
+          applyConditionalDirective(
+            stack,
+            directive[1] as 'if' | 'elseif' | 'else' | 'endif',
+            directive[2],
+            resolve,
+          )
           continue
         }
         if (!active()) continue
@@ -2846,7 +2977,7 @@ function unhandledScriptCommands(
       if (names.some((name) => !secondaryIsConsumed(name, ctx.consumption))) unhandled.push(command)
       continue
     }
-    if (!opcodeHasHandler(opcode, ctx.consumption.handledOpcodes)) unhandled.push(command)
+    if (!opcodeHasHandler(command, ctx.consumption.handledOpcodes)) unhandled.push(command)
   }
   return unhandled
 }
@@ -2964,7 +3095,7 @@ export function runInventory(
 
   const units: MoveUnit[] = []
   const powerWarnings: MovePowerWarning[] = []
-  const unhandledScripts = new Map<string, { command: string; scripts: Set<string> }>()
+  const unhandledScripts = new Map<string, { command: string; opcode: string; scripts: Set<string> }>()
 
   for (const move of moves) {
     const behavior = behaviorInForce(move, behaviors)
@@ -3044,9 +3175,12 @@ export function runInventory(
       )
       for (const command of classified.unhandled) {
         const opcode = command.split(/\s+/)[0] ?? ''
-        const entry = unhandledScripts.get(opcode) ?? { command, scripts: new Set<string>() }
+        // `manipulatedamage <operand>` commands are keyed per operand, so the report and the
+        // generated doc name the operand rather than collapsing every operand into one line.
+        const key = commandHandlerKey(command)
+        const entry = unhandledScripts.get(key) ?? { command, opcode, scripts: new Set<string>() }
         entry.scripts.add(behavior.legacyConfig)
-        unhandledScripts.set(opcode, entry)
+        unhandledScripts.set(key, entry)
       }
       const allowance =
         allowlistFor('legacy-script', behavior.legacyConfig, allowlist) ??
@@ -3120,13 +3254,13 @@ export function runInventory(
       .filter((record) => usedScriptLabels.has(record.label))
       .sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)),
     unhandledScriptCommands: [...unhandledScripts.entries()]
-      .map(([opcode, entry]) => ({
+      .map(([, entry]) => ({
         command: entry.command,
-        opcode,
-        cLine: loadCommandHandlerLines().get(opcode) ?? 0,
+        opcode: entry.opcode,
+        cLine: loadCommandHandlerLines().get(entry.opcode) ?? 0,
         scripts: [...entry.scripts].sort(),
       }))
-      .sort((a, b) => (a.opcode < b.opcode ? -1 : a.opcode > b.opcode ? 1 : 0)),
+      .sort((a, b) => (a.command < b.command ? -1 : a.command > b.command ? 1 : 0)),
     flagCitations: new Map([...flagMetadata].map(([key, value]) => [key, value.citation])),
     citedLocations: [...citedLocations].sort(),
   }
