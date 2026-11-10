@@ -7629,7 +7629,10 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     } else if (atkHoldEffect === 'HOLD_EFFECT_THROAT_SPRAY') {
       // Throat Spray raises SpAtk by 1 when using a sound move (:6111-6124, battle_scripts_1.s:7618-7632). The C does not require a
       // damaging move, but this ladder only runs for damaging moves, so a sound STATUS move (handler path) never triggers it here.
-      const isSound = Boolean(moveData?.flags?.sound)
+      // REQUIRE(IsSoundMove(gBattlerAttacker, gCurrentMove)) (battle_util.c:6114 -> :9379) is
+      // DoesMoveMatchFlag(attacker, move, TYPE_NORMAL, MOVE_FLAG_SOUND): the static sound flag OR the
+      // ATTACKER's onModifyMoveFlags grant (Festivities, Reverbate, Musical Notes; abilities.cc:358-388).
+      const isSound = isSoundMove(state, attackerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled)
       const hitOrAffected = !isNoEffect || targetTurnDamaged || targetDamage > 0
       if (
         isSound &&

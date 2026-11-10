@@ -259,6 +259,7 @@ import {
   cancelMultiTurnMoves,
   doesSubstituteBlockMove,
   findAbilitySlot,
+  isKeenEdgeMove,
   isPowderImmune,
   isPreventableSecondaryEffect,
   MOVE_EFFECT_BLEED,
@@ -1059,7 +1060,13 @@ export function isBattlerProtected(
     evadesProtect = true
   } else if (
     battlerHasSimAbility(state, attackerBattler, 'ABILITY_PINNACLE_BLADE', false, attackerId, false, deps.dataContext) &&
-    moveData?.flags?.sliceBased === true
+    // battle_util.c:6597: IsKeenEdge(battlerId, move, moveType). The first argument is this
+    // function's own `battlerId` parameter (:6571) -- the PROTECTING battler -- not
+    // gBattlerAttacker, so DoesMoveMatchFlag scans the TARGET's ability slots. That is a C
+    // quirk (see REPORT.md); the sim passes targetId for the same reason. isKeenEdgeMove
+    // derives the resolved type itself (statusEffects.ts's GetTypeBeforeUsingMove port),
+    // which also reads the battler it is given -- a second-order deviation noted in REPORT.md.
+    isKeenEdgeMove(state, targetId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled)
   ) {
     evadesProtect = true
   } else if (!protectAffected) {

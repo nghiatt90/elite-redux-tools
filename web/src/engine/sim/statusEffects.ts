@@ -362,25 +362,6 @@ export const SHIELDS_DOWN_PROTECTED_SPECIES = [
 ] as const
 
 /**
- * All 10 abilities with `hooks.onModifyMoveFlags` in data/v2.65beta/abilityHooks.json.
- * DoesMoveMatchFlag (src/abilities.cc:331-361).
- * Derived using:
- * grep -oP '"onModifyMoveFlags":\{.*?"id":"ABILITY_[^"]*"' /home/nghiatruong/git-repos/personal/elitereduxtools/data/v2.65beta/abilityHooks.json
- */
-export const MODIFY_MOVE_FLAGS_ABILITIES = [
-  'ABILITY_BACKSTREET_BOY',
-  'ABILITY_BRAWLING_WYVERN',
-  'ABILITY_CHESTNUT_AXE',
-  'ABILITY_FESTIVITIES',
-  'ABILITY_GUNMAN',
-  'ABILITY_JUNSHI_SANDA',
-  'ABILITY_MIXED_MARTIAL_ARTS',
-  'ABILITY_MUSICAL_NOTES',
-  'ABILITY_REVERBATE',
-  'ABILITY_TAEKKYEON',
-] as const
-
-/**
  * All 10 abilities with `hooks.onInfiltrate` in data/v2.65beta/abilityHooks.json.
  * Infiltrates (src/battle_script_commands.c:12246-12250).
  * Derived using:
@@ -678,17 +659,19 @@ export function cancelMultiTurnMoves(battler: BattlerState, state?: BattleState)
 /**
  * IsSoundMove, src/battle_util.c:9379:
  * DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_SOUND).
- * Checks move's static sound flag, and falls back to onModifyMoveFlags abilities
- * (Festivities for dance moves, Musical Notes for status moves, Reverbate for Normal moves).
- * If attacker has an ability that modifies move flags that cannot be evaluated statically,
- * pushes 'DoesMoveMatchFlag' to unmodelled.
+ * Checks move's static sound flag, and falls back to onModifyMoveFlags abilities.
+ * Those are exactly Festivities (dance moves, abilities.cc:10194-10203), Musical Notes
+ * (status moves, :11988-11992) and Reverbate (Normal moves, :10657-10662); the other
+ * seven onModifyMoveFlags entries never answer TRUE for MOVE_FLAG_SOUND
+ * (`grep -n MOVE_FLAG_SOUND abilities.cc` shows only those three grant sites), so the
+ * scan is complete and pushes no gap note.
  */
 export function isSoundMove(
   state: BattleState,
   attackerId: number,
   moveId: string | null | undefined,
   deps: StatusDeps,
-  unmodelled?: string[],
+  _unmodelled?: string[],
 ): boolean {
   if (!moveId) return false
   const moveData = deps.dataContext.move(moveId)
@@ -717,14 +700,6 @@ export function isSoundMove(
     return true
   }
 
-  // Gap on any attacker ability that modifies move flags
-  for (const ability of MODIFY_MOVE_FLAGS_ABILITIES) {
-    if (battlerHasSimAbility(state, attacker, ability, false, attackerId, false, deps.dataContext)) {
-      unmodelled?.push('DoesMoveMatchFlag')
-      break
-    }
-  }
-
   return false
 }
 
@@ -733,15 +708,17 @@ export function isSoundMove(
  * DoesMoveMatchFlag(battler, move, GetTypeBeforeUsingMove(move, battler), MOVE_FLAG_KEEN_EDGE).
  * Checks move's static sliceBased flag (mapped to keen_edge in codegen/proto),
  * and falls back to onModifyMoveFlags abilities (Chestnut Axe for Grass moves,
- * tested against the RESOLVED type).
- * Gaps by name when attacker has an ability modifying move flags.
+ * tested against the RESOLVED type, abilities.cc:11709-11712).
+ * Chestnut Axe is the only onModifyMoveFlags entry that answers TRUE for
+ * MOVE_FLAG_KEEN_EDGE (`grep -n MOVE_FLAG_KEEN_EDGE abilities.cc` shows only that
+ * grant site), so the scan is complete and pushes no gap note.
  */
 export function isKeenEdgeMove(
   state: BattleState,
   attackerId: number,
   moveId: string | null | undefined,
   deps: StatusDeps,
-  unmodelled?: string[],
+  _unmodelled?: string[],
 ): boolean {
   if (!moveId) return false
   const moveData = deps.dataContext.move(moveId)
@@ -764,13 +741,6 @@ export function isKeenEdgeMove(
     return true
   }
 
-  for (const ability of MODIFY_MOVE_FLAGS_ABILITIES) {
-    if (battlerHasSimAbility(state, attacker, ability, false, attackerId, false, deps.dataContext)) {
-      unmodelled?.push('DoesMoveMatchFlag')
-      break
-    }
-  }
-
   return false
 }
 
@@ -786,8 +756,8 @@ export function isKeenEdgeMove(
  * Every other onModifyMoveFlags ability in the checkout grants PUNCH, SOUND,
  * DANCE, MEGA_LAUNCHER or KEEN_EDGE only (Brawling Wyvern :7603, Gunman :9535,
  * Festivities :10194, Reverbate :10657, Taekkyeon :10666, Chestnut Axe :11709,
- * Musical Notes :11988), never KICK, so unlike isSoundMove/isKeenEdgeMove there
- * is no DoesMoveMatchFlag gap to push here.
+ * Musical Notes :11988), never KICK, so like the SOUND and KEEN_EDGE predicates
+ * the scan here is complete and pushes no gap note.
  */
 export function isStrikerMove(
   state: BattleState,

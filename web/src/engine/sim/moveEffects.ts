@@ -260,6 +260,7 @@ import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { syncPartyHp } from './outcome'
 import { rapidSpinFree } from './hazards'
 import { attackPreModify, calculateBattleStat, spAttackPreModify } from '../battleStat'
+import { isMegaLauncherBoostedMove } from './moveTargetFlags'
 import type { SimDataContext } from './dataContext'
 import { CONFUSE_BERRY_FLAVORS, flavorRelationByNature } from './dataContext'
 import type { MoveBehaviors } from '../basePower'
@@ -5132,14 +5133,17 @@ function handleHealPulse(ctx: MoveEffectContext): ActionOutcome {
     return outcome(ctx, { targetId })
   }
 
-  // Mega Launcher check (:7268-7271):
-  // Checks if move has bulletBased flag and attacker or target has ABILITY_MEGA_LAUNCHER
-  // IsMegaLauncherBoosted(attacker, move) (battle_util.c:9373: MOVE_FLAG_MEGA_LAUNCHER, moves.json's
-  // bulletBased; ability-granted flags not applied) and then ON_ABILITY over the TARGET's abilities
-  // with the megaLauncherBoost bitfield (abilityHooks.json), checkMoldBreaker FALSE.
-  const isBulletBased = Boolean(deps.dataContext.move(moveId)?.flags.bulletBased)
+  // Mega Launcher check (battle_script_commands.c:7268-7271):
+  //   if (IsMegaLauncherBoosted(gBattlerAttacker, gCurrentMove))
+  //       ON_ABILITY(gActiveBattler, FALSE, gAbilities[ability].megaLauncherBoost, ...)
+  // IsMegaLauncherBoosted is DoesMoveMatchFlag(attacker, move, TYPE_NORMAL, MOVE_FLAG_MEGA_LAUNCHER)
+  // (battle_util.c:9373 -> abilities.cc:358-388): the move's static bulletBased flag OR the
+  // ATTACKER's onModifyMoveFlags grant. Gunman is the only grant for this family (status moves,
+  // abilities.cc:9533-9543), so a Gunman user's status move counts here even without the static
+  // flag. The heal then doubles only when the TARGET's megaLauncherBoost bitfield is set
+  // (abilityHooks.json), checkMoldBreaker FALSE.
   const megaLauncherBoosted =
-    isBulletBased &&
+    isMegaLauncherBoostedMove(state, battlerId, deps.dataContext.move(moveId), deps) &&
     MEGA_LAUNCHER_BOOST_ABILITIES.some((id) => battlerHasSimAbility(state, target, id, false, targetId, false, deps.dataContext))
 
   const heal = megaLauncherBoosted
