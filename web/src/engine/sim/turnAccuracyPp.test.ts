@@ -15,6 +15,8 @@ import type { DamageResolver, TurnLoopDeps } from './turn'
 import { executeTurn } from './turn'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimMoveData } from './dataContext'
+import { SUPER_EFFECTIVE_MULTIPLIER } from './accuracy'
+import { uq } from '../fixed'
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', '..', '..', 'data', 'v2.65beta')
 const snapshot = <T,>(name: string) => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T
@@ -237,21 +239,52 @@ describe('executeTurn: accuracy check (Cmd_accuracycheck, battle_script_commands
   })
 
   it('raises no Anticipation note: the miss branch is ported', () => {
-    // Cmd_accuracycheck's Anticipation branch (battle_script_commands.c:1419-1445)
-    // only fires for a move that is >= 2x into the defender. TACKLE is Normal and
-    // the default defender type here is WATER, so Normal is 1x and the branch
-    // cannot fire: no miss, and no unmodelled note for either the holder or a
-    // non-holder. Cycle 159 ported the branch; the super-effective case is in
+    // Cmd_accuracycheck's Anticipation branch (battle_script_commands.c:1427-1432)
+    // only fires for a move whose type effectiveness is >= UQ_4_12(2.0). TACKLE
+    // is Normal and the default defender type here is WATER, so Normal is 1x and
+    // the branch cannot fire: no miss. The holder's resolver supplies
+    // typeEffectiveness (the real uq(1.0) scale), so tryAnticipationMiss reaches
+    // the comparison and returns false WITHOUT pushing a note -- the resolver is
+    // not gapped, it evaluated. The ordinary roll then runs: TACKLE's accuracy
+    // 100 against scripted 0 is a hit (`0 >= 100` is false). Cycle 159 ported
+    // the branch; the super-effective case is in
     // cycle159AnticipationMirrorArmor.test.ts.
+    const neutral: DamageResolver = {
+      ...fixedDamage(10),
+      typeEffectiveness: () => ({ effectiveness: uq(1.0), unmodelled: [] }),
+    }
     const withAnticipation = battle([{ spe: 200 }, { spe: 50, abilities: { ability: 'ABILITY_ANTICIPATION', innates: [null, null, null] } }], scripted(0))
-    const out = executeTurn(withAnticipation, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    const out = executeTurn(withAnticipation, [useMove(1, TACKLE), null], deps(neutral))
     expect(out.actions[0].missed).toBe(false)
-    expect(out.actions[0].unmodelled.some((u) => u.includes('Anticipat'))).toBe(false)
+    expect(out.actions[0].unmodelled.some((u) => u.toUpperCase().includes('ANTICIPATION'))).toBe(false)
 
     const without = battle([{ spe: 200 }, { spe: 50 }], scripted(0))
     const out2 = executeTurn(without, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
     expect(out2.actions[0].missed).toBe(false)
-    expect(out2.actions[0].unmodelled.some((u) => u.includes('Anticipat'))).toBe(false)
+    expect(out2.actions[0].unmodelled.some((u) => u.toUpperCase().includes('ANTICIPATION'))).toBe(false)
+  })
+
+  it('the Anticipation note check is live: a 2x resolver fires the branch, a gapped one reports the note', () => {
+    // Same holder, but the resolver answers UQ_4_12(2.0) = SUPER_EFFECTIVE_MULTIPLIER,
+    // so the branch fires: missed with no Random() draw (scripted(0) is never
+    // consumed) and, because the resolver answered, no note.
+    const superEffective: DamageResolver = {
+      ...fixedDamage(10),
+      typeEffectiveness: () => ({ effectiveness: SUPER_EFFECTIVE_MULTIPLIER, unmodelled: [] }),
+    }
+    const withAnticipation = battle([{ spe: 200 }, { spe: 50, abilities: { ability: 'ABILITY_ANTICIPATION', innates: [null, null, null] } }], scripted(0))
+    const out = executeTurn(withAnticipation, [useMove(1, TACKLE), null], deps(superEffective))
+    expect(out.actions[0].missed).toBe(true)
+    expect(out.actions[0].unmodelled.some((u) => u.toUpperCase().includes('ANTICIPATION'))).toBe(false)
+
+    // The same holder with a resolver that has NO typeEffectiveness cannot
+    // evaluate the branch, so it reports the gap instead of passing silently.
+    // This is the case the `false` assertions above would catch if it leaked:
+    // the note is uppercase (ABILITY_ANTICIPATION: ...), hence toUpperCase().
+    const gapped = battle([{ spe: 200 }, { spe: 50, abilities: { ability: 'ABILITY_ANTICIPATION', innates: [null, null, null] } }], scripted(0))
+    const gap = executeTurn(gapped, [useMove(1, TACKLE), null], deps(fixedDamage(10)))
+    expect(gap.actions[0].missed).toBe(false)
+    expect(gap.actions[0].unmodelled.some((u) => u.toUpperCase().includes('ANTICIPATION'))).toBe(true)
   })
 })
 
