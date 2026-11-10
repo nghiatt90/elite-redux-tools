@@ -55,10 +55,10 @@ unit kind for them.
 | `hold-trigger` | 251 | 112 | 19 | 128 | 0 | 11 |
 | `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
-| `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
+| `natural-gift` | 5 | 5 | 0 | 0 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
 | `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
-| **total** | **636** | **401** | **27** | **215** | **0** | **20** |
+| **total** | **636** | **402** | **27** | **214** | **0** | **20** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -70,7 +70,6 @@ They are kept out of the ported count (status `unported` with a partial reason).
 | Unit key | What differs | C citation |
 | --- | --- | --- |
 | `HOLD_EFFECT_LIFE_ORB@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6085` |
-| `naturalGift@battle_main.c:GetMovePriority` | hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` |
 
 ## Known limitations
 
@@ -134,7 +133,6 @@ Test evidence is per effect token or item id, not per site.
 | `ai-trigger` | `ShouldPivot` | 1 |
 | `item-data` | `HOLD_EFFECT_Z_CRYSTAL` | 34 |
 | `item-data` | `HOLD_EFFECT_Z_RING` | 1 |
-| `natural-gift` | `GetMovePriority` | 1 |
 | `fling` | `CalcMoveBasePower` | 1 |
 | `fling` | `CanFling` | 1 |
 | `fling` | `VARIOUS_TRY_FLING` | 7 |
@@ -520,7 +518,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 
 | Unit key | Items | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `naturalGift@battle_main.c:GetMovePriority` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` | unported (partial: hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1) | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
+| `naturalGift@battle_main.c:GetMovePriority` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` | ported | `web/src/engine/sim/cycle152fNaturalGiftPriority.test.ts` |
 | `naturalGift@battle_main.c:GetMoveType` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5072` | ported | `web/src/engine/calculate.test.ts` |
 | `naturalGift@battle_script_commands.c:SetMoveEffect` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +40 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023` | ported | `web/src/engine/sim/cycle87Effects.test.ts` |
 | `naturalGift@battle_scripts_1.s:EffectNaturalGift` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |

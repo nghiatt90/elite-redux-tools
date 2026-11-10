@@ -38,7 +38,9 @@ const MEGA_STONE_UNITS = 270
 // new unported unit. (Cycle 152d2: -5 item-data units allowlisted, -1 Power Herb
 // item-data unit replaced by script units, +1 gapped consumeberry.)
 // Cycle 156: -1, Binding Band (`battle_util.c:2682`) gained a test.
-export const UNPORTED_UNIT_COUNT = 215
+// Cycle 152f: -1, Natural Gift's GetMovePriority unit is ported (naturalGiftPriority
+// computed from the holder's item instead of hardcoded 0).
+export const UNPORTED_UNIT_COUNT = 214
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
 // Cycle 156: -1, Binding Band (`battle_util.c:2682`) gained a test.

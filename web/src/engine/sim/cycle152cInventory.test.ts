@@ -16,7 +16,7 @@ function testSourcesWithout(filePatterns: string[]) {
 }
 
 describe('cycle 152c - Natural Gift and Fling per-site units', () => {
-  it('baseline: Natural Gift has 5 per-site units (4 ported, 1 priority gap)', () => {
+  it('baseline: Natural Gift has 5 per-site units (all ported)', () => {
     const res = runInventory(items)
     const ngUnits = res.units.filter((u) => u.kind === 'natural-gift')
     expect(ngUnits).toHaveLength(5)
@@ -42,10 +42,12 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(removal?.testFile).toBe('web/src/engine/sim/cycle129CopyEffects.test.ts')
 
     const priority = ngUnits.find((u) => u.site === 'GetMovePriority')
-    expect(priority?.status).toBe('unported')
+    // The known-partial entry was removed because the port computes
+    // NaturalGiftPriority (battle_main.c:4272).
+    expect(priority?.status).toBe('ported')
     expect(priority?.registeredUntested).toBe(false)
     expect(priority?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_main.c:4272')
-    expect(priority?.partialReason).toContain('naturalGiftPriority')
+    expect(priority?.testFile).toBe('web/src/engine/sim/cycle152fNaturalGiftPriority.test.ts')
   })
 
   it('Natural Gift power: stub handler -> unported; remove test -> registeredUntested', () => {

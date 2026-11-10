@@ -27,6 +27,7 @@ import type { AiSwitchingDeps } from './aiSwitching'
 import { getMostSuitableMonToSwitchInto } from './aiSwitching'
 import type { BattleState } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import { naturalGiftPriority } from '../turnOrder'
 import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
 import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingles } from './aiPipeline'
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
@@ -44,15 +45,12 @@ import { canMegaEvolve } from '../formChange'
  * hardcoded names plus MoveList.proto's own `flag_code_value` options, neither
  * of which include it) -- same "ported as dead code stays dead code" precedent
  * as aiCalcDamage.ts's FLAG_TWO_STRIKES note, not an approximation. */
-function buildMoveView(moveId: string, deps: AiSwitchingDeps, unmodelled: string[]): TurnOrderMoveView {
+function buildMoveView(moveId: string, deps: AiSwitchingDeps, unmodelled: string[], itemId: string | null): TurnOrderMoveView {
   const move = deps.moveData(moveId)
   if (!move) unmodelled.push(`buildMoveView: move data is unavailable for ${moveId}`)
 
   if (move?.effect === 'EFFECT_GRASSY_GLIDE') {
     unmodelled.push(`buildMoveView: isGrassyTerrainAffected not resolved for ${moveId} (EFFECT_GRASSY_GLIDE priority bonus needs grounding this batch does not wire)`)
-  }
-  if (move?.effect === 'EFFECT_NATURAL_GIFT') {
-    unmodelled.push(`buildMoveView: naturalGiftPriority not resolved for ${moveId} (EFFECT_NATURAL_GIFT priority needs the held item's Natural Gift table)`)
   }
 
   return {
@@ -66,7 +64,7 @@ function buildMoveView(moveId: string, deps: AiSwitchingDeps, unmodelled: string
     split: move?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     isKeenEdge: false,
-    naturalGiftPriority: 0,
+    naturalGiftPriority: move?.effect === 'EFFECT_NATURAL_GIFT' ? naturalGiftPriority(itemId) : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
   }
@@ -153,7 +151,7 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
     if (!battler || !moveId) {
       throw new Error(`chooseAiAction: chosen move slot ${choice.moveIndex} for battler ${battlerId} has no move`)
     }
-    moveView = buildMoveView(moveId, deps, unmodelled)
+    moveView = buildMoveView(moveId, deps, unmodelled, battler.mon.itemId)
   }
 
   // STATE_BEFORE_ACTION_CHOSEN (battle_main.c:3641) resets the pending-switch

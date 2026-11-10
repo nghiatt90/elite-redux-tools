@@ -275,12 +275,6 @@ export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
       'no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check',
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:6085',
   },
-  {
-    key: 'naturalGift@battle_main.c:GetMovePriority',
-    whatDiffers:
-      'hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1',
-    cite: 'pipeline/.upstream/eliteredux-source/src/battle_main.c:4272',
-  },
 ]
 
 export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
@@ -498,8 +492,8 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
     functionName: 'executeAction',
   },
   GetMovePriority: {
-    files: ['web/src/engine/sim/turn.ts'],
-    functionName: 'buildMoveView',
+    files: ['web/src/engine/sim/turnOrder.ts'],
+    functionName: 'getMovePriority',
   },
   VARIOUS_TRY_FLING: {
     files: ['web/src/engine/sim/moveEffects.ts'],
@@ -2187,9 +2181,13 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
         token: 'naturalGiftPriority',
         file: `${UPSTREAM_SRC}/battle_main.c`,
         citation: `${UPSTREAM_SRC}/battle_main.c:4272`,
-        functionName: 'buildMoveView',
+        functionName: 'getMovePriority',
         itemIds: ['ITEM_CUSTAP_BERRY'],
-        testTokens: ['ITEM_CUSTAP_BERRY'],
+        // cycle152fNaturalGiftPriority.test.ts is the only Natural Gift test that
+        // holds Enigma Berry; cycle129CopyEffects also carries the token in a
+        // fixture but never pairs it with an item, so it must not satisfy this site.
+        testTokens: ['ITEM_ENIGMA_BERRY'],
+        testRequires: ['ITEM_ENIGMA_BERRY'],
       },
     ]
 

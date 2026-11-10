@@ -6,6 +6,7 @@ import { canMegaEvolve } from '../formChange'
 import { PARTY_SIZE } from '../constants'
 import type { BattleOutcome, BattleState, RandomSource, SimPartyMon } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import { naturalGiftPriority } from '../turnOrder'
 import { createSession, stepTurn } from './session'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
@@ -106,7 +107,9 @@ export function defaultPlayerPolicy(
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     isKeenEdge: false,
-    naturalGiftPriority: 0,
+    naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
+      ? naturalGiftPriority(state.battlers[0]?.mon.itemId ?? null)
+      : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
   }

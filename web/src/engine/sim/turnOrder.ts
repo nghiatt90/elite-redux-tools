@@ -147,6 +147,15 @@ export interface TurnOrderMoveView {
   myceliumMightAffected: boolean
 }
 
+/** `NaturalGiftPriority(gBattleMons[battler].item)` -- added to EFFECT_NATURAL_GIFT's
+ * priority at battle_main.c:4272. NaturalGiftGenerator.kt:25-29 emits a case only for
+ * a berry whose `naturalGift.priority != 0` (Custap Berry alone, at 1) and
+ * `default: return TRUE`, so every held item -- Custap included -- and no item at all
+ * give 1. */
+export function naturalGiftPriority(_itemId: string | null): number {
+  return 1
+}
+
 /** One battler's chosen action for the turn.
  *
  * `moveToBeUsed` and `chosenMove` are separate because GetMoveSpeed reads two

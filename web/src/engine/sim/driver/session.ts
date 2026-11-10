@@ -26,6 +26,7 @@ import { battlerHasSimAbility, runReactiveAbilityEffects } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import { naturalGiftPriority } from '../turnOrder'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -148,7 +149,9 @@ export function buildMoveAction(state: BattleState, data: SimDataBundle, battler
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     isKeenEdge: false,
-    naturalGiftPriority: 0,
+    naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
+      ? naturalGiftPriority(state.battlers[battlerId]?.mon.itemId ?? null)
+      : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
   }
