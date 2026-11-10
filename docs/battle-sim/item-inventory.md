@@ -55,6 +55,10 @@ They are kept out of the ported count (status `unported` with a partial reason).
 | --- | --- | --- |
 | `HOLD_EFFECT_LIFE_ORB@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6085` |
 
+## Known limitations
+
+Test evidence is per effect token or item id, not per site.
+
 ## Unported Units by Trigger Kind
 
 | Unit kind | Trigger kind | Unported |

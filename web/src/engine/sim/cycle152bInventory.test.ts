@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  extractFunctionBody,
   loadItems,
   runInventory,
   scanHoldEffectHits,
@@ -267,6 +268,78 @@ it('tests the helper', () => {
       const unit = res.units.find((u) => u.unit === 'HOLD_EFFECT_SYNTHETIC')
       expect(unit?.status).toBe('unported')
       expect(unit?.registeredUntested).toBe(false)
+    })
+
+    it('(e) extractFunctionBody on a synthetic source whose function has an object-literal return type returns the real body', () => {
+      const syntheticSource = `
+export function testFunc(state: any): { a: number; b: string[]; TOKEN_RETURN_TYPE_ONLY: boolean } {
+  const TOKEN_IN_BODY = 'real_body'
+  return { a: 1, b: [] }
+}
+`
+      const body = extractFunctionBody(syntheticSource, 'testFunc')
+      expect(body).not.toBeNull()
+      expect(body).toContain('TOKEN_IN_BODY')
+      expect(body).not.toContain('TOKEN_RETURN_TYPE_ONLY')
+      expect(body).not.toContain('b: string[]')
+    })
+
+    it('(f) a synthetic end-turn production file with holdEffect === \'HOLD_EFFECT_LEFTOVERS\' inside such a function plus a non-skipped test is ported for ENDTURN_ITEMS1/2', () => {
+      const LEFTOVERS_ITEM: ItemRecord = {
+        id: 'ITEM_LEFTOVERS',
+        name: 'Leftovers',
+        grouping: 'ITEM_GROUP_HELD_ITEM',
+        holdEffect: 'HOLD_EFFECT_LEFTOVERS',
+        resolvedHoldEffect: 'HOLD_EFFECT_LEFTOVERS',
+      }
+      const C_SOURCE = `
+u8 ItemBattleEffects(u8 battler, u8 caseID) {
+    switch (caseID) {
+    case 1:
+        if (holdEffect == HOLD_EFFECT_LEFTOVERS) {
+            return 0;
+        }
+        break;
+    }
+    return 0;
+}
+`
+      const prodEndTurn: SourceFile = {
+        file: 'web/src/engine/sim/endTurn.ts',
+        source: `
+export function runEndTurnEffects(
+  state: any,
+): { results: any[]; unmodelled: string[] } {
+  if (holdEffect === 'HOLD_EFFECT_LEFTOVERS') {
+    // Leftovers recovery
+  }
+  return { results: [], unmodelled: [] };
+}
+`,
+      }
+      const testFile: SourceFile = {
+        file: 'web/src/engine/sim/endTurn.test.ts',
+        source: `
+it('heals with leftovers at end of turn', () => {
+  const effect = HOLD_EFFECT_LEFTOVERS;
+  expect(effect).toBeDefined();
+});
+`,
+      }
+      const res = runInventory([LEFTOVERS_ITEM], {
+        holdTriggerSources: { 'battle_util.c': C_SOURCE },
+        aiTriggerSources: {},
+        flingSource: '',
+        productionFiles: [prodEndTurn],
+        aiProductionFiles: [],
+        testSources: [testFile],
+        allowlist: [],
+      })
+      const unit = res.units.find((u) => u.unit === 'HOLD_EFFECT_LEFTOVERS' && u.site === 'ENDTURN_ITEMS1/2')
+      expect(unit).toBeDefined()
+      expect(unit?.status).toBe('ported')
+      expect(unit?.registeredUntested).toBe(false)
+      expect(unit?.testFile).toBe('web/src/engine/sim/endTurn.test.ts')
     })
   })
 

@@ -1648,6 +1648,11 @@ export function generateItemInventoryDoc(
     lines.push('')
   }
 
+  lines.push('## Known limitations')
+  lines.push('')
+  lines.push('Test evidence is per effect token or item id, not per site.')
+  lines.push('')
+
   lines.push('## Unported Units by Trigger Kind')
   lines.push('')
   if (result.unportedByTriggerKind.length === 0) {

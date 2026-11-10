@@ -28,7 +28,7 @@ const NATURAL_GIFT_UNITS = 47
 const FLING_UNITS = 8
 
 // Re-pinned after cycle 152b: per-site mapping, non-AI production/test filters, stripped gap sets, and #ifdef awareness
-export const UNPORTED_UNIT_COUNT = 252
+export const UNPORTED_UNIT_COUNT = 245
 
 // Re-pinned after cycle 152b: stricter production and test evidence filters
 export const REGISTERED_UNTESTED_UNIT_COUNT = 27
