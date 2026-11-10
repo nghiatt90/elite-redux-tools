@@ -197,6 +197,7 @@ import {
   STATUS2_RECHARGE,
   STATUS2_SUBSTITUTE,
   STATUS2_TORMENT,
+  STATUS2_WRAPPED,
   STATUS3_ALWAYS_HITS,
   STATUS3_ALWAYS_HITS_TURN,
   STATUS3_AQUA_RING,
@@ -1423,6 +1424,18 @@ export function applyDamage(
   battler.mon.hp = Math.max(0, battler.mon.hp - damage)
   if (battler.mon.hp === 0) {
     fainted.push(battlerId)
+    // FaintClearSetData's cross-battler loop, battle_main.c:2957-2962 (reached from
+    // cleareffectsonfaint in BattleScript_FaintAttacker/FaintTarget): a wrapped battler
+    // whose wrapper is the one that just fainted loses STATUS2_WRAPPED. As in the C,
+    // only the bit is cleared -- wrapTurns/wrapAbility stay on the wrapped battler --
+    // and the fainting battler's own status2 is not touched here.
+    for (let i = 0; i < state.battlersCount; i++) {
+      const wrapped = state.battlers[i]
+      if (!wrapped) continue
+      if (hasFlag(wrapped.mon.status2, STATUS2_WRAPPED) && state.wrappedBy[i] === battlerId) {
+        wrapped.mon.status2 = clearFlag(wrapped.mon.status2, STATUS2_WRAPPED)
+      }
+    }
     // gFaintedMonCount[side], battle.h:1002 -- the count Soul Harvest and
     // Supreme Overlord read.
     state.sides[battlerId & 1].faintedCount++

@@ -141,7 +141,9 @@ export function hasLiveReserve(state: BattleState, battlerId: number): boolean {
  * `gBattleStruct->wrappedBy[i]` is the switching-in battler. The C clears only
  * the status2 bit (the loop's infatuation half, STATUS2_INFATUATED_WITH, is
  * NOT ported), and this port does exactly that -- wrapTurns/wrapAbility on the
- * wrapped battler are left alone, as in C.
+ * wrapped battler are left alone, as in C. The faint half of the same release
+ * (FaintClearSetData, battle_main.c:2957-2962) is ported in turn.ts's
+ * applyDamage, not here, so this is not the only path that clears the bit.
  *
  * NOT ported: the rest of that cleanup -- escape-prevention (:2810-2814) and
  * always-hits (:2815-2818, STATUS3_ALWAYS_HITS' battlerWithSureHit) -- and the

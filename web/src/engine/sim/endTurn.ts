@@ -130,10 +130,11 @@
 //   ENDTURN_SALT_CURE       Ported (:2634-2648) -- STATUS4_SALT_CURE damage (1/4 for
 //                           Water/Steel else 1/8, Magic Guard); monotype-champion
 //                           Rock condition is unmodelled external fact.
-//   ENDTURN_WRAP             Unreachable -- STATUS2_WRAPPED/wrapTurns/
-//                           wrapAbility have no reader outside constants.ts/
-//                           create.ts; the monotype-champion sub-condition is
-//                           unreachable for the same reason as above.
+//   ENDTURN_WRAP            Ported (:2663-2705, runWrap) -- decrements wrapTurns;
+//                           while nonzero the wrapped battler takes maxHP/6
+//                           (grappler wrapper or Binding Band) else maxHP/8,
+//                           and at 0 the status clears. The monotype-champion
+//                           (Bug) sub-condition has no port.
 //   ENDTURN_OCTOLOCK        Ported (:2708-2716) plus BattleScript_OctolockEndTurn
 //                           (Def and SpDef -1, gates IsStatDropBlocked, Clear Amulet).
 //   ENDTURN_UPROAR          Unreachable -- STATUS2_UPROAR has no reader
