@@ -20,10 +20,12 @@ import {
   loadEngineProductionFiles,
   loadEngineTestFiles,
   loadMapScripts,
+  loadTagBattleRows,
   loadTrainers,
   parseHellTrainerSkills,
   runInventory,
   scanMapScripts,
+  scanTrainerIds,
   testFileAssertsToken,
   validateAllowlist,
   type EnvironmentAllowlistEntry,
@@ -44,7 +46,9 @@ const BATTLE_EVENT_ROWS = 51
 const DISTINCT_BATTLE_EVENTS = 34
 
 const MAP_SETUP_UNITS = 30
-const BATTLE_TYPE_UNITS = 5
+// 5 static BATTLE_TYPE_* / FLAG_TAG_BATTLE units + 2 multi_2_vs_2 units
+// + 2 tag-battle units (FLAG_TAG_BATTLE already counted) in cycle 154.
+const BATTLE_TYPE_UNITS = 9
 const DIFFICULTY_FLAG_UNITS = 16
 const TRAINER_FLAG_UNITS = 14
 const HELL_TRAINER_SKILL_UNITS = 29
@@ -58,9 +62,12 @@ const SCRIPT_EVENT_UNITS = 6
  * + 29 (hell skills) = 38 unported units. Rises 82 -> 89 in cycle 153e because
  * seven Hell/difficulty battle rules the inventory could not see were added as
  * difficulty-flag units; none is ported. The rise is the point: missing rules
- * must show up as unported rather than stay invisible.
+ * must show up as unported rather than stay invisible. Moves 89 -> 91 in cycle
+ * 154: +2 multi_2_vs_2 units and +2 tag-battle units (all unported), while
+ * gameDifficulty moved to ported (buildParty.ts tier fallback) and
+ * BATTLE_EVENT_STICKY_WEB moved to allowlisted (no C case).
  */
-export const UNPORTED_UNIT_COUNT = 89
+export const UNPORTED_UNIT_COUNT = 91
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 9
@@ -184,7 +191,7 @@ describe('environment and scripted-condition completeness inventory', () => {
   })
 
   it('validates every allowlist citation format', () => {
-    expect(DEFAULT_ALLOWLIST.length).toBe(7)
+    expect(DEFAULT_ALLOWLIST.length).toBe(8)
     for (const entry of DEFAULT_ALLOWLIST) {
       expect(isValidAllowlistCitation(entry.cite)).toBe(true)
       expect(entry.reason.length).toBeGreaterThan(0)
@@ -388,6 +395,186 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(fieldId?.trainerIds.length).toBeGreaterThan(0)
   })
 
+  it('cycle 154: scanTrainerIds reads paren-less multi_2_vs_2 opponents and skips the partner and back-pic ids', () => {
+    const fixture: MapScript[] = [
+      {
+        map: 'FabricatedMulti',
+        file: 'pipeline/.upstream/eliteredux-source/data/maps/FabricatedMulti/scripts.pory',
+        source: [
+          'Fabricated_EventScript_Multi::',
+          '\tmulti_2_vs_2 TRAINER_COURTNEY_METEOR_FALLS, Text_A, TRAINER_GRUNT_METEOR_FALLS, Text_B, TRAINER_STEVEN_MOSSDEEP, TRAINER_BACK_PIC_MAY',
+          '\ttrainerbattle_single(TRAINER_SINGLE_A, Text_C, Text_D)',
+          '\ttrainerbattle_double(TRAINER_DOUBLE_A, Text_E, Text_F, TRAINER_DOUBLE_B)',
+          '\tstarttagbattle(TRAINER_TAG_A, TRAINER_TAG_B, Text_G)',
+          '//\tmulti_2_vs_2 TRAINER_COMMENTED_A, Text_H, TRAINER_COMMENTED_B, Text_I, TRAINER_COMMENTED_PARTNER, TRAINER_BACK_PIC_MAY',
+        ].join('\n'),
+      },
+    ]
+
+    const ids = scanTrainerIds(fixture, ['FabricatedMulti'])
+    expect(ids).toEqual([
+      'TRAINER_COURTNEY_METEOR_FALLS',
+      'TRAINER_DOUBLE_A',
+      'TRAINER_DOUBLE_B',
+      'TRAINER_GRUNT_METEOR_FALLS',
+      'TRAINER_SINGLE_A',
+      'TRAINER_TAG_A',
+      'TRAINER_TAG_B',
+    ])
+    // The multi macro's fifth argument is the partner, not an opponent.
+    expect(ids).not.toContain('TRAINER_STEVEN_MOSSDEEP')
+    expect(ids).not.toContain('TRAINER_BACK_PIC_MAY')
+    expect(ids).not.toContain('TRAINER_COMMENTED_A')
+    expect(ids).not.toContain('TRAINER_COMMENTED_PARTNER')
+  })
+
+  it('cycle 154: multi_2_vs_2 units are unported and carry exactly the two opponents', () => {
+    const meteor = result.units.find(
+      (unit) => unit.kind === 'battle-type' && unit.key === 'multi_2_vs_2:MeteorFalls_1F_1R',
+    )
+    const mossdeep = result.units.find(
+      (unit) =>
+        unit.kind === 'battle-type' && unit.key === 'multi_2_vs_2:MossdeepCity_SpaceCenter_2F',
+    )
+    expect(meteor).toBeDefined()
+    expect(mossdeep).toBeDefined()
+    expect(meteor?.token).toBe('multi_2_vs_2')
+    expect(meteor?.status).toBe('unported')
+    expect(meteor?.trainerIds).toEqual([
+      'TRAINER_COURTNEY_METEOR_FALLS',
+      'TRAINER_GRUNT_METEOR_FALLS',
+    ])
+    expect(mossdeep?.status).toBe('unported')
+    expect(mossdeep?.trainerIds).toEqual([
+      'TRAINER_COURTNEY_MOSSDEEP',
+      'TRAINER_MAXIE_MOSSDEEP',
+    ])
+    for (const unit of [meteor, mossdeep]) {
+      expect(unit?.trainerIds).not.toContain('TRAINER_BACK_PIC_MAY')
+      expect(unit?.trainerIds).not.toContain('TRAINER_BACK_PIC_BRENDAN')
+      expect(unit?.trainerIds).not.toContain('TRAINER_STEVEN_MOSSDEEP')
+    }
+    expect(meteor?.scope).toContain('MeteorFalls_1F_1R')
+    expect(meteor?.scope).toContain('MAY_TREECKO')
+    expect(meteor?.scope).toContain('6 multi_2_vs_2 calls')
+    expect(mossdeep?.scope).toContain('MossdeepCity_SpaceCenter_2F:274')
+    expect(mossdeep?.scope).toContain('TRAINER_STEVEN_MOSSDEEP')
+    expect(mossdeep?.scope).toContain('1 multi_2_vs_2 call')
+
+    // Verified call count: 6 Meteor Falls calls, 1 Mossdeep call.
+    const meteorScript = scripts.find((script) => script.map === 'MeteorFalls_1F_1R')
+    const mossdeepScript = scripts.find((script) => script.map === 'MossdeepCity_SpaceCenter_2F')
+    expect(meteorScript?.source.match(/multi_2_vs_2/g)).toHaveLength(6)
+    expect(mossdeepScript?.source.match(/multi_2_vs_2/g)).toHaveLength(1)
+  })
+
+  it('cycle 154: a multi unit only flips when a driver battle-start line assigns battleTypeFlags', () => {
+    const unit = result.units.find(
+      (candidate) =>
+        candidate.kind === 'battle-type' && candidate.key === 'multi_2_vs_2:MeteorFalls_1F_1R',
+    )
+    expect(unit?.evidence).toBeDefined()
+    const evidence = unit!.evidence
+    const namedTest: SourceFile[] = [
+      {
+        file: 'web/src/engine/sim/fabricatedMulti.test.ts',
+        source: 'it("multi", () => { expect(multi_2_vs_2).toBe(true) })',
+      },
+    ]
+
+    // The name in a driver file without a battleTypeFlags assignment is not enough.
+    const namedOnly: SourceFile[] = [
+      { file: 'web/src/engine/sim/driver/session.ts', source: 'const multi_2_vs_2 = 1' },
+    ]
+    expect(classifyToken(unit!.token, namedOnly, namedTest, evidence).status).toBe('unported')
+
+    // Nor is an assignment outside the driver battle-start files.
+    const helperAssign: SourceFile[] = [
+      { file: 'web/src/engine/sim/ai/aiFlags.ts', source: 'battleTypeFlags |= multi_2_vs_2' },
+    ]
+    expect(classifyToken(unit!.token, helperAssign, namedTest, evidence).status).toBe('unported')
+
+    // The driver assignment alone is not a port either: a test must name it.
+    const driverAssign: SourceFile[] = [
+      { file: 'web/src/engine/sim/driver/session.ts', source: 'battleTypeFlags |= multi_2_vs_2' },
+    ]
+    expect(classifyToken(unit!.token, driverAssign, [], evidence).status).toBe('unported')
+    expect(classifyToken(unit!.token, driverAssign, namedTest, evidence).status).toBe('ported')
+  })
+
+  it('cycle 154: tag battles add three battle-type units with the union of tagBattles trainer ids', () => {
+    const tagRows = loadTagBattleRows()
+    // Pin the literal row count once, then derive everything else from the rows.
+    expect(tagRows).toHaveLength(26)
+    const union = [...new Set(tagRows.flatMap((row) => row.trainers))].sort()
+    const mapCount = new Set(tagRows.map((row) => row.map)).size
+    expect(result.tagBattleRowCount).toBe(tagRows.length)
+    expect(result.tagBattleMapCount).toBe(mapCount)
+
+    const tagKeys = ['FLAG_TAG_BATTLE', 'tagBattle:aiFlags', 'tagBattle:partyCap'] as const
+    const tagUnits = result.units.filter(
+      (unit) =>
+        unit.kind === 'battle-type' &&
+        (unit.key === 'FLAG_TAG_BATTLE' || unit.key.startsWith('tagBattle:')),
+    )
+    expect(tagUnits).toHaveLength(3)
+    for (const key of tagKeys) {
+      const unit = tagUnits.find((candidate) => candidate.key === key)
+      expect(unit).toBeDefined()
+      expect(unit?.status).not.toBe('ported')
+      expect(unit?.trainerIds).toEqual(union)
+    }
+
+    const flagTag = tagUnits.find((unit) => unit.key === 'FLAG_TAG_BATTLE')
+    expect(flagTag?.scope).toContain(String(tagRows.length))
+    expect(flagTag?.scope).toContain(String(mapCount))
+    expect(flagTag?.citation).toBe(
+      'pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470',
+    )
+
+    // Each cited C line contains the identifier the unit is about, and the
+    // scope says the tag-to-flag link is inferred rather than read.
+    const citedChecks = [
+      { key: 'tagBattle:aiFlags', identifier: 'AI_FLAG_CHECK_BAD_MOVE' },
+      { key: 'tagBattle:partyCap', identifier: 'monsCount' },
+    ] as const
+    for (const { key, identifier } of citedChecks) {
+      const unit = tagUnits.find((candidate) => candidate.key === key)
+      expect(unit?.scope).toContain('encounters.json')
+      const match = unit?.citation.match(/^(.*):(\d+)$/)
+      expect(match).not.toBeNull()
+      if (!match) continue
+      const lines = readFileSync(join(REPO_ROOT, match[1]), 'utf-8').split('\n')
+      expect(lines[Number(match[2]) - 1]).toContain(identifier)
+    }
+  })
+
+  it('cycle 154: BATTLE_EVENT_STICKY_WEB is allowlisted against the post-switch return', () => {
+    const entry = DEFAULT_ALLOWLIST.find(
+      (candidate) => candidate.key === 'BATTLE_EVENT_STICKY_WEB',
+    )
+    expect(entry).toBeDefined()
+    expect(entry?.cite).toBe('pipeline/.upstream/eliteredux-source/src/battle_events.c:362')
+    expect(entry?.reason).toContain('return EXEC_BATTLE_EVENTS_ALL_CLEAR;')
+
+    const unit = result.units.find(
+      (candidate) => candidate.kind === 'battle-event' && candidate.key === 'BATTLE_EVENT_STICKY_WEB',
+    )
+    expect(unit?.status).toBe('allowlisted')
+    expect(unit?.citation).toBe(entry?.cite)
+
+    const citeMatch = entry!.cite.match(/^(.*):(\d+)$/)
+    expect(citeMatch).not.toBeNull()
+    const citedLines = readFileSync(join(REPO_ROOT, citeMatch![1]), 'utf-8').split('\n')
+    expect(citedLines[Number(citeMatch![2]) - 1].trim()).toBe('return EXEC_BATTLE_EVENTS_ALL_CLEAR;')
+    // The C has no case for this event: only the PERMA_ variant exists.
+    const eventsSource = readFileSync(
+      join(REPO_ROOT, 'pipeline/.upstream/eliteredux-source/src/battle_events.c'),
+      'utf-8',
+    )
+    expect(eventsSource).not.toContain('case BATTLE_EVENT_STICKY_WEB')
+  })
+
   it('generates deterministic markdown and compares it with the committed doc (or writes with SIM_INVENTORY_WRITE=1)', () => {
     const generated = generateEnvironmentInventoryDoc(result)
     expect(generateEnvironmentInventoryDoc(result)).toBe(generated)
@@ -576,7 +763,7 @@ describe('step 1: non-trainer-flag evidence', () => {
     }
   })
 
-  it('4. registerBattleEvent(state, ev.event, ...) removed from session.ts flips every battle-event unit to unported', () => {
+  it('4. registerBattleEvent(state, ev.event, ...) removed from session.ts flips every non-allowlisted battle-event unit to unported', () => {
     const mutatedFiles = productionFiles.map((file) => {
       if (!file.file.endsWith('session.ts')) return file
       return {
@@ -595,8 +782,11 @@ describe('step 1: non-trainer-flag evidence', () => {
 
     const battleEventUnits = mutatedInventory.units.filter((u) => u.kind === 'battle-event')
     expect(battleEventUnits.length).toBe(34)
+    // BATTLE_EVENT_STICKY_WEB is allowlisted (no C case; battle_events.c:362),
+    // so it stays allowlisted even when session.ts stops registering events.
+    expect(battleEventUnits.filter((unit) => unit.status === 'unported')).toHaveLength(33)
     for (const unit of battleEventUnits) {
-      expect(unit.status).toBe('unported')
+      expect(['unported', 'allowlisted']).toContain(unit.status)
     }
   })
 

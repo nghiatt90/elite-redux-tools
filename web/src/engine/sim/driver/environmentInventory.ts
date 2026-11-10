@@ -214,6 +214,8 @@ export interface EnvironmentInventoryResult {
   mapsWithSetup: number
   battleEventRowCount: number
   distinctBattleEventCount: number
+  tagBattleRowCount: number
+  tagBattleMapCount: number
   trainerCount: number
 }
 
@@ -263,6 +265,12 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<EnvironmentAllowlistEntry> = [
     reason:
       '`if (gBattleTypeFlags & (AI_FLAG_DISABLE_SWITCHING))` tests gBattleTypeFlags (bit 1<<17, Battle Palace), so a trainer\'s aiFlags never reaches it.',
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:611',
+  },
+  {
+    key: 'BATTLE_EVENT_STICKY_WEB',
+    reason:
+      '`return EXEC_BATTLE_EVENTS_ALL_CLEAR;` is the post-switch fallthrough: BATTLE_EVENT_STICKY_WEB has no case (src/battle_events.c has only BATTLE_EVENT_PERMA_STICKY_WEB at :325 and :475), so the event cannot change battle state.',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_events.c:362',
   },
 ]
 
@@ -377,6 +385,21 @@ export function loadBattleEventRows(path: string = ENCOUNTERS_PATH): EncounterBa
   return data.battleEvents ?? []
 }
 
+export interface TagBattleRow {
+  guard?: string | null
+  map: string
+  script: string
+  trainers: string[]
+}
+
+/** `tagBattles` rows from encounters.json: two-opponent fights behind a guard. */
+export function loadTagBattleRows(path: string = ENCOUNTERS_PATH): TagBattleRow[] {
+  const data = JSON.parse(readFileSync(path, 'utf-8')) as {
+    tagBattles?: TagBattleRow[]
+  }
+  return data.tagBattles ?? []
+}
+
 function isCommentLine(line: string): boolean {
   return line.trimStart().startsWith('//') || line.trimStart().startsWith('@')
 }
@@ -443,8 +466,29 @@ export function tokenLines(
 
 const TRAINER_CALL_RE = /\b(?:trainerbattle[A-Za-z_]*|starttagbattle)\s*\(([^)]*)\)/g
 const TRAINER_ID_RE = /\bTRAINER_[A-Z0-9_]+\b/g
+/**
+ * The `multi_2_vs_2` script macro takes no parentheses in the map scripts:
+ * `multi_2_vs_2 TRAINER_A, text, TRAINER_B, text, PARTNER_ID, TRAINER_BACK_PIC_X`.
+ * Only the first and third arguments are opponents; the fifth is the in-game
+ * partner and the sixth a `TRAINER_BACK_PIC_*` sprite constant.
+ */
+const MULTI_CALL_RE = /\bmulti_2_vs_2\b([^\n]*)/
 
-/** Trainer ids passed to trainer-battle/starttagbattle calls in the given maps. */
+function multiCallTrainerIds(line: string): string[] {
+  const match = line.match(MULTI_CALL_RE)
+  if (!match) return []
+  const args = match[1].split(',')
+  const opponents = [args[0], args[2]].filter((arg): arg is string => arg !== undefined)
+  const ids: string[] = []
+  for (const arg of opponents) {
+    for (const id of arg.matchAll(TRAINER_ID_RE)) {
+      if (id[0] !== 'TRAINER_NONE') ids.push(id[0])
+    }
+  }
+  return ids
+}
+
+/** Trainer ids passed to trainer-battle/starttagbattle/multi_2_vs_2 calls in the given maps. */
 export function scanTrainerIds(
   scripts: ReadonlyArray<MapScript>,
   maps: ReadonlyArray<string>,
@@ -460,6 +504,7 @@ export function scanTrainerIds(
           if (id[0] !== 'TRAINER_NONE') ids.add(id[0])
         }
       }
+      for (const id of multiCallTrainerIds(line)) ids.add(id)
     }
   }
   return [...ids].sort()
@@ -1246,8 +1291,79 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     key: 'FLAG_TAG_BATTLE',
     token: 'FLAG_TAG_BATTLE',
     site: 'GetTrainerALoseText / GetTrainerBLoseText',
-    scope: '26 starttagbattle calls in 6 maps',
+    // The real scope is computed from `encounters.json` `tagBattles` in
+    // runInventory; this fallback is only used by synthetic callers.
+    scope: 'starttagbattle tag battles (computed from encounters.json tagBattles)',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1470),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
+  },
+]
+
+/**
+ * `multi_2_vs_2` story fights with an in-game partner. The macro body is not in
+ * the fetched tree (the upstream `asm/` directory is not in `sparse_paths`); the
+ * flags come from the C that starts the same battle shape,
+ * `src/battle_tower.c:1647`:
+ *   `gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;`
+ * `src/battle_main.c:537-540` and `:602-606` read MULTI/INGAME_PARTNER and
+ * `:614`/`:622` create the second opponent party under BATTLE_TYPE_TWO_OPPONENTS.
+ */
+export interface MultiBattleSpec extends StaticUnitSpec {
+  /** Map whose `scripts.pory` holds the calls; its ids are the opponents. */
+  map: string
+  /** Number of `multi_2_vs_2` calls in that map. */
+  callCount: number
+}
+
+export const MULTI_BATTLE_SPECS: ReadonlyArray<MultiBattleSpec> = [
+  {
+    key: 'multi_2_vs_2:MeteorFalls_1F_1R',
+    token: 'multi_2_vs_2',
+    map: 'MeteorFalls_1F_1R',
+    callCount: 6,
+    site: 'multi battle with an in-game partner (src/battle_tower.c:1647 shape)',
+    scope:
+      'MeteorFalls_1F_1R: 6 multi_2_vs_2 calls (:193, :202, :211, :220, :229, :238), opponents Courtney + Grunt, partner May (MAY_TREECKO/TORCHIC/MUDKIP_METEOR_FALLS) or Brendan (BRENDAN_*_METEOR_FALLS); second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C',
+    citation: cite(`${UPSTREAM_SRC}/battle_tower.c`, 1647),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'multi_2_vs_2:MossdeepCity_SpaceCenter_2F',
+    token: 'multi_2_vs_2',
+    map: 'MossdeepCity_SpaceCenter_2F',
+    callCount: 1,
+    site: 'multi battle with an in-game partner (src/battle_tower.c:1647 shape)',
+    scope:
+      'MossdeepCity_SpaceCenter_2F:274: 1 multi_2_vs_2 call, opponents Maxie + Courtney, partner TRAINER_STEVEN_MOSSDEEP; second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C',
+    citation: cite(`${UPSTREAM_SRC}/battle_tower.c`, 1647),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
+  },
+]
+
+/**
+ * Rules the C applies to a tag battle (two opponents). Each token is a C-side
+ * identifier the driver never assigns, so BATTLE_TYPE_DRIVER_EVIDENCE keeps them
+ * unported until the driver sets BATTLE_TYPE_TWO_OPPONENTS. The tag-to-flag link
+ * is inferred from `src/battle_main.c:1778` and `encounters.json`, not read from
+ * a macro: the `starttagbattle` asm expansion is not in the fetched tree.
+ */
+export const TAG_BATTLE_SPECS: ReadonlyArray<StaticUnitSpec> = [
+  {
+    key: 'tagBattle:aiFlags',
+    token: 'AI_FLAG_CHECK_BAD_MOVE',
+    site: 'GetAiScriptsInBattle BATTLE_TYPE_TWO_OPPONENTS branch',
+    scope:
+      'tag battles (two opponents): the trainer aiFlags are replaced by AI_FLAG_CHECK_BAD_MOVE | AI_FLAG_TRY_TO_FAINT | AI_FLAG_CHECK_VIABILITY | AI_FLAG_CHECK_FOE (src/battle_ai_main.c:144-145); tag-to-flag inferred from src/battle_main.c:1778 + encounters.json',
+    citation: cite(`${UPSTREAM_SRC}/battle_ai_main.c`, 145),
+    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'tagBattle:partyCap',
+    token: 'monsCount',
+    site: 'CreateNPCTrainerParty BATTLE_TYPE_TWO_OPPONENTS branch',
+    scope:
+      'tag battles (two opponents): each opponent party is capped at 3 mons (src/battle_main.c:1778-1782); tag-to-flag inferred from src/battle_main.c:1778 + encounters.json',
+    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1780),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
 ]
@@ -1255,10 +1371,20 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
 export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
   {
     key: 'gameDifficulty',
-    token: 'gSaveBlock2Ptr->gameDifficulty',
+    // The C names a save-block field TS can never contain. The sim implements the
+    // tier selection in buildParty.ts:84-89 (`trainerRow.parties?.[tier]`, elite
+    // then ace fallback), the same fallback as TrainerPartyGenerator.kt:177-178.
+    token: 'parties',
     site: 'CreateNPCTrainerParty',
     scope: 'DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection',
     citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1735),
+    evidence: {
+      productionFiles: ['web/src/engine/sim/driver/buildParty.ts'],
+      productionLinePattern: /parties\?\.\[tier\]/,
+      // A test must actually choose a tier, not merely mention the word party.
+      testPattern: /\btier\s*:\s*['"](?:ace|elite)['"]/,
+      testMustAssert: true,
+    },
   },
   {
     key: 'doubleBattleMode',
@@ -1663,6 +1789,7 @@ export interface EnvironmentInventoryOptions {
   mapScripts?: ReadonlyArray<MapScript>
   trainers?: ReadonlyArray<TrainerRecord>
   battleEventRows?: ReadonlyArray<EncounterBattleEventRow>
+  tagBattleRows?: ReadonlyArray<TagBattleRow>
   eventSource?: string
   eventHeaderSource?: string
   hellTrainerSkillsSource?: string
@@ -1690,6 +1817,9 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
   const scripts = options.mapScripts ?? loadMapScripts()
   const trainers = options.trainers ?? loadTrainers()
   const battleEventRows = options.battleEventRows ?? loadBattleEventRows()
+  const tagBattleRows = options.tagBattleRows ?? loadTagBattleRows()
+  const tagTrainerIds = [...new Set(tagBattleRows.flatMap((row) => row.trainers))].sort()
+  const tagMapCount = new Set(tagBattleRows.map((row) => row.map)).size
   const eventSource = options.eventSource ?? readFileSync(join(REPO_ROOT, BATTLE_EVENTS_C), 'utf-8')
   const eventHeaderSource =
     options.eventHeaderSource ?? readFileSync(join(REPO_ROOT, BATTLE_EVENTS_H), 'utf-8')
@@ -1803,7 +1933,24 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
     )
   }
 
-  for (const spec of BATTLE_TYPE_SPECS) pushUnit('battle-type', spec)
+  for (const spec of BATTLE_TYPE_SPECS) {
+    if (spec.key === 'FLAG_TAG_BATTLE') {
+      pushUnit(
+        'battle-type',
+        {
+          ...spec,
+          scope: `${tagBattleRows.length} tagBattles rows across ${tagMapCount} maps in encounters.json (starttagbattle)`,
+        },
+        tagTrainerIds,
+      )
+    } else {
+      pushUnit('battle-type', spec)
+    }
+  }
+  for (const spec of MULTI_BATTLE_SPECS) {
+    pushUnit('battle-type', spec, scanTrainerIds(scripts, [spec.map]))
+  }
+  for (const spec of TAG_BATTLE_SPECS) pushUnit('battle-type', spec, tagTrainerIds)
   for (const spec of DIFFICULTY_FLAG_SPECS) pushUnit('difficulty-flag', spec)
   for (const spec of TRAINER_FLAG_SPECS) pushUnit('trainer-flag', spec)
 
@@ -1894,6 +2041,8 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
     mapsWithSetup: mapScan.maps.length,
     battleEventRowCount: battleEventRows.length,
     distinctBattleEventCount: eventRowsByEvent.size,
+    tagBattleRowCount: tagBattleRows.length,
+    tagBattleMapCount: tagMapCount,
     trainerCount: trainers.length,
   }
 }
@@ -1986,15 +2135,15 @@ export function generateEnvironmentInventoryDoc(
   const portedBattleEventCount = result.units.filter(
     (unit) => unit.kind === 'battle-event' && unit.status === 'ported',
   ).length
-  const unportedStickyWeb = result.units.find(
-    (unit) =>
-      unit.kind === 'battle-event' &&
-      unit.key === 'BATTLE_EVENT_STICKY_WEB' &&
-      unit.status === 'unported',
+  const stickyWebUnit = result.units.find(
+    (unit) => unit.kind === 'battle-event' && unit.key === 'BATTLE_EVENT_STICKY_WEB',
   )
-  const stickyWebClause = unportedStickyWeb
-    ? `; \`${unportedStickyWeb.key}\` has no case label and is unported.`
-    : '.'
+  const stickyWebClause =
+    stickyWebUnit?.status === 'allowlisted'
+      ? `; \`${stickyWebUnit.key}\` has no case label and is allowlisted (\`src/battle_events.c:362\`, the post-switch \`return EXEC_BATTLE_EVENTS_ALL_CLEAR;\`) as a safe no-op.`
+      : stickyWebUnit
+        ? `; \`${stickyWebUnit.key}\` has no case label and is ${statusLabel(stickyWebUnit)}.`
+        : '.'
   lines.push(
     '- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts` (`registerBattleEvent`).',
   )
@@ -2182,10 +2331,43 @@ export function generateEnvironmentInventoryDoc(
   lines.push(
     '  Because the sim does not seed battle weather from map data, `setweather` and map-weather units are reported unported rather than allowlisted.',
   )
+  const multiCallCount = MULTI_BATTLE_SPECS.reduce((sum, spec) => sum + spec.callCount, 0)
   lines.push(
-    '- **Link/multi battles**: `BATTLE_TYPE_MULTI` is only set by `src/battle_tower.c:1526` (Battle Tower), which no scanned',
+    `- **Multi battles**: \`BATTLE_TYPE_MULTI\` is not Battle-Tower-only. ${multiCallCount} \`multi_2_vs_2\` calls in`,
   )
-  lines.push('  story map starts, so it is not defined as a unit here.')
+  lines.push(
+    '  `data/maps/MeteorFalls_1F_1R/scripts.pory` (:193, :202, :211, :220, :229, :238) and `data/maps/MossdeepCity_SpaceCenter_2F/scripts.pory` (:274)',
+  )
+  lines.push(
+    '  are story fights with an in-game partner. The macro body is not fetched (the upstream `asm/` tree is not in `sparse_paths`),',
+  )
+  lines.push(
+    '  so the flags are inferred from the C that starts the same shape: `src/battle_tower.c:1647` assigns',
+  )
+  lines.push(
+    '  `BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER`;',
+  )
+  lines.push(
+    '  `src/battle_main.c:537-540`/`:602-606` read MULTI/INGAME_PARTNER and `:614`/`:622` create the second opponent party.',
+  )
+  lines.push(
+    `  The driver never sets those bits, so the ${MULTI_BATTLE_SPECS.length} \`multi_2_vs_2:*\` units are unported.`,
+  )
+  lines.push(
+    `- **Tag battles**: \`encounters.json\` \`tagBattles\` has ${result.tagBattleRowCount} two-opponent rows across ${result.tagBattleMapCount} maps.`,
+  )
+  lines.push(
+    '  The C replaces the trainer AI flags under `BATTLE_TYPE_TWO_OPPONENTS` (`src/battle_ai_main.c:144-145`) and caps each',
+  )
+  lines.push(
+    '  opponent party at three mons (`src/battle_main.c:1778-1782`); the lose-text branch is the `FLAG_TAG_BATTLE` unit',
+  )
+  lines.push(
+    '  (`src/battle_setup.c:1470`). The `starttagbattle` macro expansion is not in the tree, so the tag-to-`BATTLE_TYPE_TWO_OPPONENTS`',
+  )
+  lines.push(
+    '  link is inferred from `src/battle_main.c:1778` and `encounters.json`, not read from a macro.',
+  )
   lines.push('')
 
   return `${lines.join('\n')}\n`

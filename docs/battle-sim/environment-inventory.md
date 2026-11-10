@@ -26,10 +26,10 @@ mention in a comment is not evidence, and neither is a name alone:
 - `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.
   The sim currently hardcodes `inverseBattle: false`, so it is unported.
 - Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts` (`registerBattleEvent`).
-  33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is unported.
+  33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is allowlisted (`src/battle_events.c:362`, the post-switch `return EXEC_BATTLE_EVENTS_ALL_CLEAR;`) as a safe no-op.
 
 Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not
-empty: 7 units are provably battle-inert (cosmetics, field-effect arguments, prizes).
+empty: 8 units are provably battle-inert (cosmetics, field-effect arguments, prizes).
 
 1. **map-setup**: a flag/var/special/script command set by a map script before a battle, or map header weather.
    The scan covers all 515 `data/maps/*/scripts.pory` files; 22 contain at least one of
@@ -50,13 +50,13 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 30 | 0 | 0 | 25 | 0 | 5 |
-| `battle-type` | 5 | 1 | 2 | 4 | 0 | 0 |
-| `difficulty-flag` | 16 | 0 | 1 | 16 | 0 | 0 |
+| `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
+| `difficulty-flag` | 16 | 1 | 1 | 15 | 0 | 0 |
 | `trainer-flag` | 14 | 4 | 6 | 8 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
-| `battle-event` | 34 | 33 | 0 | 1 | 0 | 0 |
+| `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **134** | **38** | **9** | **89** | **0** | **7** |
+| **total** | **138** | **39** | **9** | **91** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -65,11 +65,11 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
 | `map-setup` | 25 | 0 |
-| `battle-type` | 4 | 2 |
-| `difficulty-flag` | 16 | 1 |
+| `battle-type` | 8 | 2 |
+| `difficulty-flag` | 15 | 1 |
 | `trainer-flag` | 8 | 6 |
 | `hell-trainer-skill` | 29 | 0 |
-| `battle-event` | 1 | 0 |
+| `battle-event` | 0 | 0 |
 | `script-event` | 6 | 0 |
 
 ## Map-Setup Units
@@ -115,7 +115,11 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none | none |
 | `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/session.ts:242` |
 | `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none | none |
-| `FLAG_TAG_BATTLE` | 26 starttagbattle calls in 6 maps | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
+| `FLAG_TAG_BATTLE` | 26 tagBattles rows across 6 maps in encounters.json (starttagbattle) | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
+| `multi_2_vs_2:MeteorFalls_1F_1R` | MeteorFalls_1F_1R: 6 multi_2_vs_2 calls (:193, :202, :211, :220, :229, :238), opponents Courtney + Grunt, partner May (MAY_TREECKO/TORCHIC/MUDKIP_METEOR_FALLS) or Brendan (BRENDAN_*_METEOR_FALLS); second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1647` | unported | none | none |
+| `multi_2_vs_2:MossdeepCity_SpaceCenter_2F` | MossdeepCity_SpaceCenter_2F:274: 1 multi_2_vs_2 call, opponents Maxie + Courtney, partner TRAINER_STEVEN_MOSSDEEP; second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1647` | unported | none | none |
+| `tagBattle:aiFlags` | tag battles (two opponents): the trainer aiFlags are replaced by AI_FLAG_CHECK_BAD_MOVE | AI_FLAG_TRY_TO_FAINT | AI_FLAG_CHECK_VIABILITY | AI_FLAG_CHECK_FOE (src/battle_ai_main.c:144-145); tag-to-flag inferred from src/battle_main.c:1778 + encounters.json | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:145` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` | none |
+| `tagBattle:partyCap` | tag battles (two opponents): each opponent party is capped at 3 mons (src/battle_main.c:1778-1782); tag-to-flag inferred from src/battle_main.c:1778 + encounters.json | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1780` | unported | none | none |
 
 ## Difficulty-Flag Units
 
@@ -128,7 +132,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `RegisterTrainerBattleEvents` | data/hell_trainer_skills.h (29 rows across 24 trainers) | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1773` | unported | none |
 | `doubleBattleMode` | save-block double-battle mode toggle | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1757` | unported | none |
 | `enableEvs` | save-block EV toggle | `pipeline/.upstream/eliteredux-source/src/pokemon.c:996` | unported | none |
-| `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | unported | none |
+| `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | ported | `web/src/engine/sim/cycle154EnvironmentUnits.test.ts` |
 | `hellDamageReduction` | Hell: defender not on the player side takes x0.9 after FLAG_BADGE02_GET, then x0.75 for both sides | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7516` | unported | none |
 | `hellEvasionClause` | Hell trainer battles: player-side EFFECT_EVASION_UP and EFFECT_MINIMIZE are disabled | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4931` | unported | none |
 | `hellNoEnemyFullParalysis` | Hell: enemy-side attackers never lose the 25% full-paralysis roll | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3402` | unported | none |
@@ -226,7 +230,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `BATTLE_EVENT_STEADY_SPECIAL` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:386` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:461` |
 | `BATTLE_EVENT_STEADY_SPEED` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:392` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:469` |
 | `BATTLE_EVENT_STEALTH_ROCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:283` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:361` |
-| `BATTLE_EVENT_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/include/constants/battle_events.h:60` | unported | `web/src/engine/sim/battleEvents.test.ts` | none |
+| `BATTLE_EVENT_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:362` | allowlisted | `web/src/engine/sim/battleEvents.test.ts` | none |
 | `BATTLE_EVENT_SUBSTITUTE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:455` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:565` |
 | `BATTLE_EVENT_TENSE_BATTLE` | 8 encounter row(s), 8 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:357` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:426` |
 
@@ -266,6 +270,16 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
   rain, SANDSTORM sets sandstorm, DROUGHT sets sun, and FOG_HORIZONTAL sets `WEATHER_FOG_PERMANENT` (FOG_DIAGONAL is commented out
   at `:4375` and does not trigger). `WEATHER_RAIN_THUNDERSTORM` additionally sets permanent Electric Terrain (`src/battle_util.c:4316-4322`).
   Because the sim does not seed battle weather from map data, `setweather` and map-weather units are reported unported rather than allowlisted.
-- **Link/multi battles**: `BATTLE_TYPE_MULTI` is only set by `src/battle_tower.c:1526` (Battle Tower), which no scanned
-  story map starts, so it is not defined as a unit here.
+- **Multi battles**: `BATTLE_TYPE_MULTI` is not Battle-Tower-only. 7 `multi_2_vs_2` calls in
+  `data/maps/MeteorFalls_1F_1R/scripts.pory` (:193, :202, :211, :220, :229, :238) and `data/maps/MossdeepCity_SpaceCenter_2F/scripts.pory` (:274)
+  are story fights with an in-game partner. The macro body is not fetched (the upstream `asm/` tree is not in `sparse_paths`),
+  so the flags are inferred from the C that starts the same shape: `src/battle_tower.c:1647` assigns
+  `BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER`;
+  `src/battle_main.c:537-540`/`:602-606` read MULTI/INGAME_PARTNER and `:614`/`:622` create the second opponent party.
+  The driver never sets those bits, so the 2 `multi_2_vs_2:*` units are unported.
+- **Tag battles**: `encounters.json` `tagBattles` has 26 two-opponent rows across 6 maps.
+  The C replaces the trainer AI flags under `BATTLE_TYPE_TWO_OPPONENTS` (`src/battle_ai_main.c:144-145`) and caps each
+  opponent party at three mons (`src/battle_main.c:1778-1782`); the lose-text branch is the `FLAG_TAG_BATTLE` unit
+  (`src/battle_setup.c:1470`). The `starttagbattle` macro expansion is not in the tree, so the tag-to-`BATTLE_TYPE_TWO_OPPONENTS`
+  link is inferred from `src/battle_main.c:1778` and `encounters.json`, not read from a macro.
 
