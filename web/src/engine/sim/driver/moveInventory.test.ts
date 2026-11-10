@@ -72,7 +72,7 @@ const DISTINCT_SCRIPTS = 322
  * classifier and its pins are gone. `TOTAL_PAIRS` and both unported counts drop accordingly:
  * 1442 -> 239 unported (the flag kind contributed 1203 unported pairs), with 1945 pairs total.
  */
-export const UNPORTED_PAIR_COUNT = 238
+export const UNPORTED_PAIR_COUNT = 237
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -85,7 +85,7 @@ export const UNPORTED_PAIR_COUNT = 238
  * the flag kind and its 2099 pairs, so the pin drops to the non-flag remainder: 1314 -> 119
  * (the flag kind contributed 1195 registered-but-untested pairs).
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 118
+export const REGISTERED_UNTESTED_PAIR_COUNT = 117
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
