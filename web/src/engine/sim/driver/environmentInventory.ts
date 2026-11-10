@@ -467,6 +467,25 @@ export function tokenLines(
 const TRAINER_CALL_RE = /\b(?:trainerbattle[A-Za-z_]*|starttagbattle)\s*\(([^)]*)\)/g
 const TRAINER_ID_RE = /\bTRAINER_[A-Z0-9_]+\b/g
 /**
+ * The map scripts also use the paren-less macro form, e.g.
+ * `trainerbattle_single TRAINER_MIKE_2, Text_Intro, Text_Defeat`. In every
+ * suffixed variant (`_single`, `_double`, `_no_intro`, `_rematch`, ...) the
+ * first argument is the trainer id and the rest are text/script labels. A
+ * parenthesised call has no whitespace after the macro name, so it never
+ * matches here too.
+ */
+const PARENLESS_TRAINER_CALL_RE =
+  /\b(?:trainerbattle_[A-Za-z_0-9]*|starttagbattle)\s+(TRAINER_[A-Z0-9_]+)/
+/**
+ * The plain `trainerbattle` macro is the one exception: its first argument is a
+ * battle-set constant, not a trainer id. The three map-script uses are
+ * `trainerbattle TRAINER_BATTLE_SET_TRAINER_A, TRAINER_MAXIE_MOSSDEEP, ...`
+ * (MossdeepCity_SpaceCenter_2F:355), the same shape with `_B`
+ * (`:359`), and `trainerbattle TRAINER_BATTLE_PYRAMID, TRAINER_PHILLIP, ...`
+ * (BattleFrontier_BattlePyramidFloor:117), so the trainer id is argument two.
+ */
+const PLAIN_TRAINERBATTLE_CALL_RE = /\btrainerbattle\s+[^,\n]+,\s*(TRAINER_[A-Z0-9_]+)/
+/**
  * The `multi_2_vs_2` script macro takes no parentheses in the map scripts:
  * `multi_2_vs_2 TRAINER_A, text, TRAINER_B, text, PARTNER_ID, TRAINER_BACK_PIC_X`.
  * Only the first and third arguments are opponents; the fifth is the in-game
@@ -504,6 +523,10 @@ export function scanTrainerIds(
           if (id[0] !== 'TRAINER_NONE') ids.add(id[0])
         }
       }
+      const parenless = line.match(PARENLESS_TRAINER_CALL_RE)
+      if (parenless && parenless[1] !== 'TRAINER_NONE') ids.add(parenless[1])
+      const plainBattle = line.match(PLAIN_TRAINERBATTLE_CALL_RE)
+      if (plainBattle && plainBattle[1] !== 'TRAINER_NONE') ids.add(plainBattle[1])
       for (const id of multiCallTrainerIds(line)) ids.add(id)
     }
   }
@@ -635,7 +658,16 @@ export function scanMapHeaderWeathers(
       const weather = data.weather
       if (weather && BATTLE_WEATHER_SET.has(weather)) {
         const trainerIds = scanTrainerIds(scripts, [entry.name])
-        if (trainerIds.length > 0) {
+        // MarineCave_End/TerraCave_End have no trainer: a scripted
+        // `setwildbattle` still fights under the header weather, so it counts.
+        const hasScriptedWildBattle = scripts.some(
+          (script) =>
+            script.map === entry.name &&
+            script.source
+              .split('\n')
+              .some((line) => !isCommentLine(line) && /\bsetwildbattle\b/.test(line)),
+        )
+        if (trainerIds.length > 0 || hasScriptedWildBattle) {
           hits.push({ map: entry.name, weather, trainerIds })
         }
       }

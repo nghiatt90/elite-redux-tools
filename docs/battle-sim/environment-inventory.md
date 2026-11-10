@@ -57,14 +57,14 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `map-setup` | 57 | 0 | 0 | 52 | 0 | 5 |
+| `map-setup` | 61 | 0 | 0 | 56 | 0 | 5 |
 | `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
 | `difficulty-flag` | 16 | 1 | 1 | 15 | 0 | 0 |
 | `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **165** | **44** | **3** | **113** | **0** | **8** |
+| **total** | **169** | **44** | **3** | **117** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -72,7 +72,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
-| `map-setup` | 52 | 0 |
+| `map-setup` | 56 | 0 |
 | `battle-type` | 8 | 2 |
 | `difficulty-flag` | 15 | 1 |
 | `trainer-flag` | 3 | 0 |
@@ -103,9 +103,13 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `VAR_TOTEM_POKEMON_SP_DEF_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9154` | unported | none | none |
 | `VAR_TRAINER_PRIZE_BP` | 1 map(s), 18 line(s): EvergrandeCity_MonoChampRoom_1 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5809` | allowlisted | none | none |
 | `map-weather:LavaridgeTown_Gym_1F:WEATHER_FOG_HORIZONTAL` | LavaridgeTown_Gym_1F (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
+| `map-weather:MarineCave_End:WEATHER_FOG_HORIZONTAL` | MarineCave_End (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `map-weather:MtPyre_Summit:WEATHER_FOG_HORIZONTAL` | MtPyre_Summit (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `map-weather:Route111_Desert:WEATHER_SANDSTORM` | Route111_Desert (WEATHER_SANDSTORM) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `map-weather:Route111_SunhollowRuins:WEATHER_SANDSTORM` | Route111_SunhollowRuins (WEATHER_SANDSTORM) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
+| `map-weather:RusturfTunnel:WEATHER_FOG_HORIZONTAL` | RusturfTunnel (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
+| `map-weather:SeafloorCavern_Room9:WEATHER_FOG_HORIZONTAL` | SeafloorCavern_Room9 (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
+| `map-weather:TerraCave_End:WEATHER_FOG_HORIZONTAL` | TerraCave_End (WEATHER_FOG_HORIZONTAL) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `monochamp:abilities.cc:5201` | [POISON] Toxic Spill's onEntry is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Unmodelled (web/src/engine/sim/switchInAbility.ts:2303 skips the entry effect without the champion check). | `pipeline/.upstream/eliteredux-source/src/abilities.cc:5201` | unported | `web/src/engine/sim/absorb.test.ts` | none |
 | `monochamp:abilities.cc:5211` | [POISON] Toxic Spill's onEndTurn is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Conditional port at web/src/engine/sim/endTurn.ts:1409; only the driver feed is missing. | `pipeline/.upstream/eliteredux-source/src/abilities.cc:5211` | unported | `web/src/engine/sim/absorb.test.ts` | none |
 | `monochamp:abilities.cc:5246` | [POISON] Toxic Spill's onExit is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Unmodelled (web/src/engine/sim/turn.ts:1642 skips the exit effect without the champion check). | `pipeline/.upstream/eliteredux-source/src/abilities.cc:5246` | unported | `web/src/engine/sim/absorb.test.ts` | none |

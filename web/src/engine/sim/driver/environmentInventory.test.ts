@@ -25,6 +25,7 @@ import {
   loadTrainers,
   parseHellTrainerSkills,
   runInventory,
+  scanMapHeaderWeathers,
   scanMapScripts,
   scanTrainerIds,
   testFileAssertsToken,
@@ -50,7 +51,9 @@ const DISTINCT_BATTLE_EVENTS = 34
 // enumerated sites (19 battle_util.c + 2 battle_main.c + 3 abilities.cc + 3
 // battle_script_commands.c) move this from 30 to 57. They are measurement
 // units, not ports: the driver still hard-codes `monotypeChampType: null`.
-const MAP_SETUP_UNITS = 57
+// Cycle 153h adds four map-weather units (RusturfTunnel, SeafloorCavern_Room9,
+// MarineCave_End, TerraCave_End), moving 57 -> 61.
+const MAP_SETUP_UNITS = 61
 // 5 static BATTLE_TYPE_* / FLAG_TAG_BATTLE units + 2 multi_2_vs_2 units
 // + 2 tag-battle units (FLAG_TAG_BATTLE already counted) in cycle 154.
 const BATTLE_TYPE_UNITS = 9
@@ -85,8 +88,13 @@ const SCRIPT_EVENT_UNITS = 6
  * leaving `unported`. Both counts therefore fall: unported 118 -> 113,
  * registered-untested 9 -> 3. The remaining three are unrelated
  * battle-type/`speedDown` units. No count rose.
+ *
+ * Moves 113 -> 117 in cycle 153h: four map-weather units became visible
+ * (RusturfTunnel and SeafloorCavern_Room9 through paren-less trainerbattle
+ * calls, MarineCave_End and TerraCave_End through a scripted `setwildbattle`).
+ * All four are unported because the sim does not seed battle weather.
  */
-export const UNPORTED_UNIT_COUNT = 113
+export const UNPORTED_UNIT_COUNT = 117
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 3
@@ -486,7 +494,70 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(ids).not.toContain('TRAINER_COMMENTED_PARTNER')
   })
 
-  it('cycle 154: multi_2_vs_2 units are unported and carry exactly the two opponents', () => {
+  it('cycle 153h: scanTrainerIds reads the paren-less trainerbattle form and takes only the trainer argument', () => {
+    const fixture: MapScript[] = [
+      {
+        map: 'FabricatedParenless',
+        file: 'pipeline/.upstream/eliteredux-source/data/maps/FabricatedParenless/scripts.pory',
+        source: [
+          'Fabricated_EventScript_Trainers::',
+          '\ttrainerbattle_single TRAINER_FIXTURE_A, Text_Intro, Text_Defeat',
+          '\ttrainerbattle_no_intro TRAINER_FIXTURE_B, Text_Defeat',
+          '\ttrainerbattle_double TRAINER_FIXTURE_C, Text_Intro, Text_Defeat, Text_NotEnough, Script_Register',
+          '//\ttrainerbattle_single TRAINER_FIXTURE_D, Text_Intro, Text_Defeat',
+        ].join('\n'),
+      },
+    ]
+
+    const ids = scanTrainerIds(fixture, ['FabricatedParenless'])
+    expect(ids).toEqual(['TRAINER_FIXTURE_A', 'TRAINER_FIXTURE_B', 'TRAINER_FIXTURE_C'])
+    // Text/script labels are not trainer ids, and comment lines do not count.
+    expect(ids.some((id) => id.startsWith('Text_') || id.startsWith('Script_'))).toBe(false)
+    expect(ids).not.toContain('TRAINER_FIXTURE_D')
+  })
+
+  it('cycle 153h: a paren-less TRAINER_NONE call yields no trainer ids', () => {
+    const fixture: MapScript[] = [
+      {
+        map: 'FabricatedNone',
+        file: 'pipeline/.upstream/eliteredux-source/data/maps/FabricatedNone/scripts.pory',
+        source: '\ttrainerbattle_single TRAINER_NONE, Text_Intro, Text_Defeat',
+      },
+    ]
+    expect(scanTrainerIds(fixture, ['FabricatedNone'])).toEqual([])
+  })
+
+  it('cycle 153h: the real fog-map scripts list their paren-less trainer ids', () => {
+    const rusturf = scanTrainerIds(scripts, ['RusturfTunnel'])
+    expect(rusturf).toContain('TRAINER_GRUNT_RUSTURF_TUNNEL')
+    expect(rusturf).toContain('TRAINER_MIKE_2')
+    const room9 = scanTrainerIds(scripts, ['SeafloorCavern_Room9'])
+    expect(room9).toContain('TRAINER_ARCHIE')
+  })
+
+  it('cycle 153h: header weather only becomes a unit for battle weather, trainers or not', () => {
+    const hits = scanMapHeaderWeathers(scripts)
+    expect(hits.map((hit) => hit.map)).toEqual([
+      'LavaridgeTown_Gym_1F',
+      'MarineCave_End',
+      'MtPyre_Summit',
+      'Route111_Desert',
+      'Route111_SunhollowRuins',
+      'RusturfTunnel',
+      'SeafloorCavern_Room9',
+      'TerraCave_End',
+    ])
+    // AlteringCave_B1F has a `setwildbattle SPECIES_MEWTWO` line but
+    // WEATHER_NONE; Route111 has trainers and a custom-move wild battle but
+    // WEATHER_SUNNY. Neither weather is in BATTLE_MAP_WEATHERS, so neither map
+    // may be emitted.
+    for (const map of ['AlteringCave_B1F', 'Route111']) {
+      expect(hits.some((hit) => hit.map === map)).toBe(false)
+      expect(result.units.some((unit) => unit.key.startsWith(`map-weather:${map}:`))).toBe(false)
+    }
+  })
+
+  it('cycle 154: multi_2_vs_2 units are unported and carry the map trainers the scan finds', () => {
     const meteor = result.units.find(
       (unit) => unit.kind === 'battle-type' && unit.key === 'multi_2_vs_2:MeteorFalls_1F_1R',
     )
@@ -503,9 +574,17 @@ describe('environment and scripted-condition completeness inventory', () => {
       'TRAINER_GRUNT_METEOR_FALLS',
     ])
     expect(mossdeep?.status).toBe('unported')
+    // The unit takes scanTrainerIds over the whole map; cycle 153h made the
+    // paren-less `trainerbattle_no_intro`/`trainerbattle_single` calls at
+    // scripts.pory:72,78,84,363 visible, so the array grows from the two
+    // multi_2_vs_2 opponents to every trainer in the map.
     expect(mossdeep?.trainerIds).toEqual([
       'TRAINER_COURTNEY_MOSSDEEP',
+      'TRAINER_GRUNT_SPACE_CENTER_5',
+      'TRAINER_GRUNT_SPACE_CENTER_6',
+      'TRAINER_GRUNT_SPACE_CENTER_7',
       'TRAINER_MAXIE_MOSSDEEP',
+      'TRAINER_TABITHA_MOSSDEEP',
     ])
     for (const unit of [meteor, mossdeep]) {
       expect(unit?.trainerIds).not.toContain('TRAINER_BACK_PIC_MAY')
@@ -1284,7 +1363,7 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
     expect(withBoth.status).toBe('ported')
   })
 
-  it('setweather is no longer in DEFAULT_ALLOWLIST; map-weather units exist for the 4 maps with verified trainer ids', () => {
+  it('setweather is no longer in DEFAULT_ALLOWLIST; map-weather units exist for the 8 maps with verified trainer ids or a scripted wild fight', () => {
     expect(DEFAULT_ALLOWLIST.some((entry) => entry.key === 'setweather')).toBe(
       false,
     )
@@ -1297,7 +1376,8 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
       'pipeline/.upstream/eliteredux-source/src/battle_util.c:4349',
     )
 
-    // 4 map-weather units with verified trainer ids
+    // 8 map-weather units: 4 with verified trainer ids, 2 more that gained
+    // paren-less trainer ids in cycle 153h, and 2 with only a scripted wild fight.
     const flanneryGym = result.units.find(
       (u) =>
         u.key === 'map-weather:LavaridgeTown_Gym_1F:WEATHER_FOG_HORIZONTAL',
@@ -1311,6 +1391,10 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
       'TRAINER_DANIELLE',
       'TRAINER_ELI',
       'TRAINER_FLANNERY_1',
+      'TRAINER_FLANNERY_2',
+      'TRAINER_FLANNERY_3',
+      'TRAINER_FLANNERY_4',
+      'TRAINER_FLANNERY_5',
       'TRAINER_GERALD',
       'TRAINER_JACE',
       'TRAINER_JEFF',
@@ -1322,7 +1406,14 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
     )
     expect(mtPyre).toBeDefined()
     expect(mtPyre?.status).toBe('unported')
-    expect(mtPyre?.trainerIds).toEqual(['TRAINER_ARCHIE_MT_PYRE'])
+    expect(mtPyre?.trainerIds).toEqual([
+      'TRAINER_ARCHIE_MT_PYRE',
+      'TRAINER_GRUNT_MT_PYRE_1',
+      'TRAINER_GRUNT_MT_PYRE_2',
+      'TRAINER_GRUNT_MT_PYRE_3',
+      'TRAINER_GRUNT_MT_PYRE_4',
+      'TRAINER_MATT_MT_PYRE',
+    ])
 
     const desert = result.units.find(
       (u) => u.key === 'map-weather:Route111_Desert:WEATHER_SANDSTORM',
@@ -1342,6 +1433,39 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
     expect(sunhollow).toBeDefined()
     expect(sunhollow?.status).toBe('unported')
     expect(sunhollow?.trainerIds).toEqual(['TRAINER_GRUNT_SUNHOLLOW_1'])
+
+    // Cycle 153h: two fog maps whose trainers are called paren-lessly, and two
+    // whose only fight is a scripted wild battle (`setwildbattle`).
+    const rusturf = result.units.find(
+      (u) => u.key === 'map-weather:RusturfTunnel:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(rusturf).toBeDefined()
+    expect(rusturf?.status).toBe('unported')
+    expect(rusturf?.trainerIds).toEqual([
+      'TRAINER_GRUNT_RUSTURF_TUNNEL',
+      'TRAINER_MIKE_2',
+    ])
+
+    const room9 = result.units.find(
+      (u) => u.key === 'map-weather:SeafloorCavern_Room9:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(room9).toBeDefined()
+    expect(room9?.status).toBe('unported')
+    expect(room9?.trainerIds).toEqual(['TRAINER_ARCHIE'])
+
+    const marineCave = result.units.find(
+      (u) => u.key === 'map-weather:MarineCave_End:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(marineCave).toBeDefined()
+    expect(marineCave?.status).toBe('unported')
+    expect(marineCave?.trainerIds).toEqual([])
+
+    const terraCave = result.units.find(
+      (u) => u.key === 'map-weather:TerraCave_End:WEATHER_FOG_HORIZONTAL',
+    )
+    expect(terraCave).toBeDefined()
+    expect(terraCave?.status).toBe('unported')
+    expect(terraCave?.trainerIds).toEqual([])
 
     // Distinct setweather units in scripts
     expect(
