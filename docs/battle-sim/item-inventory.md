@@ -228,7 +228,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_DOUBLE_PRIZE@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Luck Incense | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5421` | unported | none |
 | `HOLD_EFFECT_DRIVE@battle_util.c:CanBattlerGetOrLoseItem` | Burn Drive, Chill Drive, Douse Drive, Shock Drive | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8261` | unported (registered, untested) | none |
 | `HOLD_EFFECT_EJECT_BUTTON@battle_util.c:ITEMEFFECT_TARGET` | Eject Button | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6142` | unported | none |
-| `HOLD_EFFECT_EJECT_PACK@battle_script_commands.c:ChangeStatBuffs` | Eject Pack | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9885` | ported | `web/src/engine/sim/cycle160EnragedEjectPackMinion.test.ts` |
+| `HOLD_EFFECT_EJECT_PACK@battle_script_commands.c:ChangeStatBuffs` | Eject Pack | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9885` | ported | `web/src/engine/sim/cycle160cEjectPackItem.test.ts` |
 | `HOLD_EFFECT_EVASION_UP@battle_script_commands.c:GetTotalAccuracy` | Bright Powder, Lax Incense | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1376` | ported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_EVIOLITE@battle_util.c:CalcDefenseStat` | Eviolite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7422` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_EXPERT_BELT@battle_util.c:CalcFinalDmg` | Expert Belt | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7648` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |

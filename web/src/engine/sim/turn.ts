@@ -4486,7 +4486,11 @@ export interface QueuedAttackDrainContext {
  * Per entry, in C's order:
  *   gQueuedSwitchData[0] = gQueuedSwitchData[gQueuedSwitchCount--]   LIFO (:788)
  *   FILTER(IsBattlerAlive(switching) || (SWITCH_MOVE && HEALING_WISH))  -- the
- *       exception does not apply: the sim only queues SWITCH_ABILITY entries.
+ *       exception does not apply: SWITCH_MOVE is never queued by the sim.
+ *   SWITCH_ITEM (:795-799):
+ *       FILTER(gBattleMons[source].item == gQueuedSwitchData[0].item)
+ *       FILTER_NOT(IsItemNegated(source))
+ *       FILTER_NOT(IsUnnerveAbilityOnOpposingSide(source))
  *   SWITCH_ABILITY:
  *       FILTER(BattlerHasAbility(source, ability, FALSE))            (:802)
  *       if (setAbilityState) { if (GetAbilityState(source, ability)) continue;
@@ -4530,19 +4534,52 @@ export function drainQueuedSwitches(
     if (!isBattlerAlive(state, switchingBattler)) continue
 
     const source = state.battlers[sourceBattler]
-    // FILTER(BattlerHasAbility(source, ability, FALSE)) (:802). FALSE = no Mold Breaker bypass;
-    // Neutralizing Gas / Gastro Acid still suppress.
-    if (!source || !battlerHasSimAbility(state, source, entry.ability, false, sourceBattler, false, deps.dataContext)) continue
+    if (entry.cause === 'ITEM') {
+      // SWITCH_ITEM (battle_util.c:795-799). `ability` is empty for this cause and must not be read.
+      // FILTER(gBattleMons[source].item == gQueuedSwitchData[0].item)
+      if (!source || source.mon.itemId !== entry.item) continue
+      // FILTER_NOT(IsItemNegated(source)) -- STATUS3_EMBARGO or ABILITY_KLUTZ (:6520-6524).
+      if (
+        hasFlag(source.statuses3, STATUS3_EMBARGO) ||
+        battlerHasSimAbility(state, source, 'ABILITY_KLUTZ', false, sourceBattler, false, deps.dataContext)
+      ) {
+        continue
+      }
+      // FILTER_NOT(IsUnnerveAbilityOnOpposingSide(source))
+      if (isUnnerveAbilityOnOpposingSide(state, sourceBattler, deps.dataContext)) continue
+    } else {
+      // FILTER(BattlerHasAbility(source, ability, FALSE)) (:802). FALSE = no Mold Breaker bypass;
+      // Neutralizing Gas / Gastro Acid still suppress.
+      if (!source || !battlerHasSimAbility(state, source, entry.ability, false, sourceBattler, false, deps.dataContext)) continue
 
-    if (entry.setAbilityState) {
-      const slot = findAbilitySlot(source.mon.abilities, entry.ability)
-      // GetAbilityState returns 0 and SetAbilityState is a no-op when the ability slot is gone.
-      if (slot !== -1 && source.volatiles.abilityState[slot]) continue
-      if (slot !== -1) source.volatiles.abilityState[slot] = 1
+      if (entry.setAbilityState) {
+        const slot = findAbilitySlot(source.mon.abilities, entry.ability)
+        // GetAbilityState returns 0 and SetAbilityState is a no-op when the ability slot is gone.
+        if (slot !== -1 && source.volatiles.abilityState[slot]) continue
+        if (slot !== -1) source.volatiles.abilityState[slot] = 1
+      }
     }
 
     // FILTER(CanBattlerSwitch(switching)) (:812).
     if (!canBattlerSwitch(state, switchingBattler)) continue
+
+    if (entry.script === 'EJECT_BUTTON') {
+      // BattleScript_EjectButtonActivates (data/battle_scripts_1.s:11352-11376). removeitem BS_ATTACKER
+      // (:11357) runs BEFORE openpartyscreen, and the C filters CanBattlerSwitch (:812) before running
+      // the script, so the item is consumed only when a switch will happen. The script has no Ingrain /
+      // Suction Cups / arena checks -- same as BattleScript_EmergencyExit -- so it takes the same forced
+      // switch path, with the same random replacement placeholder. The C's SWITCH_ITEM branch also sets
+      // gLastUsedItem = item (HandleAction_Switch, battle_util.c:393-396); the sim has no such field.
+      if (!source) continue
+      consumeHeldItem(state, source, unmodelled)
+      const chosenIndex = chooseRandomSwitchReplacement(state, switchingBattler)
+      const switchUnmodelled = performSwitchAction(state, switchingBattler, deps, {
+        ignoreEscapePrevention: true,
+        forcedPartyIndex: chosenIndex,
+      })
+      unmodelled.push(...switchUnmodelled)
+      continue
+    }
 
     if (entry.script === 'EMERGENCY_EXIT') {
       // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) has NO forced-switch blocks:

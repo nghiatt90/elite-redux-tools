@@ -763,14 +763,30 @@ export function changeStatBuffs(
                 script: 'EMERGENCY_EXIT',
               })
             } else {
-              const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
+              const holderItemId = battler.mon.itemId
+              const item = holderItemId ? deps.dataContext.item(holderItemId) : undefined
+              // GetBattlerHoldEffect(battler, TRUE) returns HOLD_EFFECT_NONE when IsItemNegated
+              // (battle_util.c:6526-6527; IsItemNegated at :6520-6524 = STATUS3_EMBARGO or ABILITY_KLUTZ).
+              const itemNegated =
+                hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+                battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
               const hasEjectPackItem =
                 item?.resolvedHoldEffect === 'HOLD_EFFECT_EJECT_PACK' &&
+                !itemNegated &&
                 !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
               if (hasEjectPackItem) {
-                // :9885-9892 -- SWITCH_ITEM / BattleScript_EjectButtonActivates has no
-                // QueuedSwitchAction shape yet (the entry only carries an ability id).
-                unmodelled.push('Eject Pack item switch trigger (SWITCH_ITEM / BattleScript_EjectButtonActivates, battle_script_commands.c:9885-9892) is not modelled')
+                // :9885-9892 -- SWITCH_ITEM / BattleScript_EjectButtonActivates. The drain re-checks the
+                // item, IsItemNegated and Unnerve (battle_util.c:795-799), then CanBattlerSwitch (:812)
+                // before the script's own removeitem runs; Eject Pack's item is consumed there, not here.
+                tryScheduleSwitch(state, {
+                  ability: '',
+                  cause: 'ITEM',
+                  item: holderItemId!,
+                  setAbilityState: false,
+                  switchingBattler: battlerId,
+                  sourceBattler: battlerId,
+                  script: 'EJECT_BUTTON',
+                })
               }
             }
           }

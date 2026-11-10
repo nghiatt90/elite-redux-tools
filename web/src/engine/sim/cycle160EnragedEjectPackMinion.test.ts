@@ -516,14 +516,16 @@ describe('cycle 160 - Eject Pack ability (battle_script_commands.c:9868-9893)', 
     expect(state.queuedSwitches).toEqual([])
   })
 
-  it('the ITEM branch is still only a note (SWITCH_ITEM has no QueuedSwitchAction shape)', () => {
+  it('the ITEM branch queues the SWITCH_ITEM entry (battle_script_commands.c:9885-9892)', () => {
     // :9885-9892 -- reached only when the ability branch above is not taken. ITEM_EJECT_PACK's
-    // resolvedHoldEffect is HOLD_EFFECT_EJECT_PACK; no opposing Unnerve, so the note fires.
-    const rng = scriptedRng([0, 0])
-    const state = ejectPackState(rng, { reserve: true, holderAbility: { ability: null, innates: [null, null, null] }, holderItem: 'ITEM_EJECT_PACK' })
-    const out = turn(state, GROWL)
-    expect(state.queuedSwitches).toEqual([])
-    expect(out.actions[0]!.unmodelled.some((u) => u.includes('Eject Pack item switch trigger (SWITCH_ITEM / BattleScript_EjectButtonActivates'))).toBe(true)
+    // resolvedHoldEffect is HOLD_EFFECT_EJECT_PACK; no opposing Unnerve, so the entry is queued.
+    const state = ejectPackState(scriptedRng([]), { reserve: true, holderAbility: { ability: null, innates: [null, null, null] }, holderItem: 'ITEM_EJECT_PACK' })
+    const unmodelled: string[] = []
+    changeStatBuffs(state, 1, 0, 1, -1, STAT_ATK, 0, false, { dataContext: DATA_CONTEXT, grounding: GROUNDING }, unmodelled, 'MOVE_GROWL')
+    expect(state.queuedSwitches).toEqual([
+      { ability: '', cause: 'ITEM', item: 'ITEM_EJECT_PACK', setAbilityState: false, switchingBattler: 1, sourceBattler: 1, script: 'EJECT_BUTTON' },
+    ])
+    expect(unmodelled.some((u) => u.includes('Eject Pack'))).toBe(false)
   })
 })
 

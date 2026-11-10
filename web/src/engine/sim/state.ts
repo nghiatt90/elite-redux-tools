@@ -846,13 +846,18 @@ export interface ExtraAttackAction {
 
 /**
  * One entry of `gQueuedSwitchData` -- `struct ExtraSwitchActionStruct`, include/battle_util.h:229-244
- * (battle_main.c:183). Only the SWITCH_ABILITY cause is modelled, so `script`/`item`/`move` are omitted;
- * every entry the sim can queue carries an ability id and, optionally, the flag asking the DRAIN (rather
- * than the hook) to spend the holder's ability state.
+ * (battle_main.c:183). Two causes are modelled: SWITCH_ABILITY (the default when `cause` is omitted) and
+ * SWITCH_ITEM (Eject Pack's item branch). A SWITCH_ITEM entry carries the item id in `item` and leaves
+ * `ability` empty, because the drain reads `item` for that cause; the drain must not read `ability` then.
+ * `move` (SWITCH_MOVE) is never set by the sim.
  */
 export interface QueuedSwitchAction {
-  /** `ability.id` -- the ability whose hook queued the switch. */
+  /** `cause` -- SWITCH_ABILITY (default, when omitted) or SWITCH_ITEM (battle_util.c:793-799). */
+  cause?: 'ABILITY' | 'ITEM'
+  /** `ability.id` -- the ability whose hook queued the switch; '' for a SWITCH_ITEM entry. */
   ability: string
+  /** `item` -- the held item id a SWITCH_ITEM drain re-checks (battle_util.c:795); absent for SWITCH_ABILITY. */
+  item?: string
   /** `ability.setAbilityState`: the drain tests `GetAbilityState` and sets it (Restraining Order),
    * instead of the hook spending it at schedule time (Chuckster). */
   setAbilityState: boolean
@@ -861,7 +866,7 @@ export interface QueuedSwitchAction {
   /** `sourceBattler` -- the holder whose ability queued it (gBattlerAttacker during the drain). */
   sourceBattler: number
   /** ExtraSwitchActionStruct.script (battle_util.c:369-376, :393); missing means 'RED_CARD'. */
-  script?: 'RED_CARD' | 'EMERGENCY_EXIT'
+  script?: 'RED_CARD' | 'EMERGENCY_EXIT' | 'EJECT_BUTTON'
 }
 
 /** A seeded random source. Declared here rather than imported from rng.ts so

@@ -362,9 +362,12 @@ describe('cycle 47: stat-lowered reactions and Eject Pack', () => {
       const unmodelled: string[] = []
       applyBattleStartPass(state, makeStartDeps({ 1: 'HOLD_EFFECT_EJECT_PACK' }), unmodelled)
 
-      // The ability branch is now ported (battle_script_commands.c:9877-9884); this holder has no
-      // Eject Pack ability, so it takes the item `else if` (:9885-9892), still a note.
-      expect(unmodelled.some((m) => m.includes('Eject Pack item switch trigger'))).toBe(true)
+      // The ability branch is ported (battle_script_commands.c:9877-9884); this holder has no
+      // Eject Pack ability, so it takes the item `else if` (:9885-9892), which queues the entry.
+      expect(state.queuedSwitches).toEqual([
+        { ability: '', cause: 'ITEM', item: 'ITEM_EJECT_PACK', setAbilityState: false, switchingBattler: 1, sourceBattler: 1, script: 'EJECT_BUTTON' },
+      ])
+      expect(unmodelled.some((m) => m.includes('Eject Pack'))).toBe(false)
     }
 
     // 9b: Opposing side has Unnerve -> Eject Pack suppressed, gap NOT pushed
