@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ALLOWLIST,
@@ -23,20 +25,23 @@ import {
 const moves = loadMoves()
 const behaviors = loadMoveBehaviors()
 const scripts = parseScripts()
+const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url))
 const result = runInventory(moves, behaviors, { scripts })
 
 const MOVE_EFFECT_PAIRS = 888
 const SECONDARY_EFFECT_PAIRS = 314
 const FLAG_PAIRS = 2099
 const LEGACY_SCRIPT_PAIRS = 600
+const EFFECT_LESS_PAIRS = 143
+const TOTAL_PAIRS = 4044
 const DISTINCT_SCRIPTS = 322
 const DISTINCT_FLAG_KEYS = 42
 
 /** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_PAIR_COUNT = 2296
+export const UNPORTED_PAIR_COUNT = 2743
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 2016
+export const REGISTERED_UNTESTED_PAIR_COUNT = 2271
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -51,6 +56,15 @@ describe('move completeness inventory', () => {
     expect(count('secondary-effect')).toBe(SECONDARY_EFFECT_PAIRS)
     expect(count('flag')).toBe(FLAG_PAIRS)
     expect(count('legacy-script')).toBe(LEGACY_SCRIPT_PAIRS)
+    expect(count('effect-less')).toBe(EFFECT_LESS_PAIRS)
+    expect(result.units).toHaveLength(TOTAL_PAIRS)
+    expect(result.summaries.map((summary) => summary.kind)).toEqual([
+      'move-effect',
+      'secondary-effect',
+      'flag',
+      'legacy-script',
+      'effect-less',
+    ])
 
     expect(result.scripts).toHaveLength(DISTINCT_SCRIPTS)
     expect(new Set(result.units.filter((unit) => unit.kind === 'flag').map((unit) => unit.unit)).size).toBe(
@@ -99,6 +113,31 @@ describe('move completeness inventory', () => {
     expect(allowlisted.length).toBeGreaterThan(0)
     for (const unit of allowlisted) {
       expect(unit.citation).toMatch(citationRegex)
+    }
+  })
+
+  it('every citation names an existing upstream file and a line inside it', () => {
+    const citations = new Set<string>()
+    for (const unit of result.units) if (unit.citation) citations.add(unit.citation)
+    for (const entry of DEFAULT_ALLOWLIST) citations.add(entry.citation)
+    const lineCounts = new Map<string, number>()
+    const countLines = (file: string): number => {
+      const cached = lineCounts.get(file)
+      if (cached !== undefined) return cached
+      const count = readFileSync(file, 'utf-8').split('\n').length
+      lineCounts.set(file, count)
+      return count
+    }
+    for (const citation of citations) {
+      for (const part of citation.split('; ')) {
+        const match = part.match(/^(pipeline\/\.upstream\/.+):(\d+)$/)
+        expect(match, part).not.toBeNull()
+        const file = resolve(REPO_ROOT, match![1])
+        const line = Number(match![2])
+        expect(existsSync(file), file).toBe(true)
+        expect(line).toBeGreaterThanOrEqual(1)
+        expect(line, `${file}:${line}`).toBeLessThanOrEqual(countLines(file))
+      }
     }
   })
 
@@ -190,7 +229,8 @@ describe('move completeness inventory', () => {
     // 2. Named in both -> ported.
     const both = runInventory([move], {}, {
       productionSource: registeredSource,
-      testSource: 'calculateMoveDamage(EFFECT_D3_REGISTERED)',
+      // A qualifying block: `it(...)` whose body calls the move pipeline and names the effect.
+      testSource: "it('d3', () => { calculateMoveDamage('EFFECT_D3_REGISTERED') })",
       scripts,
       allowlist: [],
     })
@@ -351,19 +391,35 @@ describe('move completeness inventory', () => {
     expect(effectUnit('MOVE_REST')?.unit).toBe('EFFECT_REST')
     expect(effectUnit('MOVE_REST')?.status).toBe('ported')
     expect(effectUnit('MOVE_HELPING_HAND')?.status).toBe('allowlisted')
-    expect(effectUnit('MOVE_ASSURANCE')?.status).toBe('unported')
+    // Declarative `attack.damage` behaviour (field, not an `EFFECT_*` key) counts as a port.
+    expect(effectUnit('MOVE_ASSURANCE')?.status).toBe('ported')
+    // A routing-list mention in `moveEffects.ts`'s plain-hit chain is not a port (item 1).
+    expect(effectUnit('MOVE_BELCH')?.status).toBe('unported')
 
     const flagUnit = (moveId: string, flag: string) =>
       result.units.find((unit) => unit.kind === 'flag' && unit.moveId === moveId && unit.unit === flag)
-    expect(flagUnit('MOVE_BITE', 'biteBased')?.status).toBe('ported')
-    expect(flagUnit('MOVE_HYPER_VOICE', 'sound')?.status).toBe('ported')
+    // The flag measurement is production-path + test evidence; sim tests currently set move
+    // flags at module scope, outside the qualifying blocks, so no flag pair is ported yet.
+    expect(flagUnit('MOVE_BITE', 'biteBased')?.status).toBe('unported')
+    expect(flagUnit('MOVE_BITE', 'biteBased')?.registeredUntested).toBe(true)
+    expect(flagUnit('MOVE_HYPER_VOICE', 'sound')?.status).toBe('unported')
     expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.status).toBe('unported')
+    // `lunarBased` has no sim-side production read at all.
+    expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.registeredUntested).toBe(false)
 
     const secondary = result.units.find(
       (unit) => unit.kind === 'secondary-effect' && unit.moveId === 'MOVE_CORROSIVE_GAS',
     )
     expect(secondary?.unit).toBe('MOVE_EFFECT_KNOCK_OFF')
     expect(secondary?.status).toBe('ported')
+
+    // Argument-driven: MOVE_INCITE's `argument.effect` is MOVE_EFFECT_ENRAGE, dispatched by
+    // handleThirdType through applyPrimaryStatusEffect's explicit case (every carrier served).
+    const incite = result.units.find(
+      (unit) => unit.kind === 'secondary-effect' && unit.moveId === 'MOVE_INCITE',
+    )
+    expect(incite?.unit).toBe('MOVE_EFFECT_ENRAGE')
+    expect(incite?.status).toBe('ported')
 
     const flagMetadata = loadFlagMetadata()
     expect(flagMetadata.get('ignoresStatStages')?.citation).toContain(
@@ -374,15 +430,30 @@ describe('move completeness inventory', () => {
     )
   })
 
-  it('legacy-script units always mirror their owning move effect status', () => {
+  it('legacy-script units map independently of their owning move effect', () => {
     const effectStatusByMove = new Map(
       result.units
         .filter((unit) => unit.kind === 'move-effect')
         .map((unit) => [unit.moveId, unit.status]),
     )
-    for (const unit of result.units.filter((candidate) => candidate.kind === 'legacy-script')) {
-      expect(unit.status).toBe(effectStatusByMove.get(unit.moveId))
-    }
+    const scripts = result.units.filter((unit) => unit.kind === 'legacy-script')
+    const diverging = scripts.filter((unit) => unit.status !== effectStatusByMove.get(unit.moveId))
+    // A script is not a mirror: it is ported only when runLegacyPreHit/runLegacyPostHit cases it
+    // or it issues a `setmoveeffect` consumed by the secondary path.
+    expect(diverging.length).toBeGreaterThan(0)
+    const restScript = scripts.find((unit) => unit.moveId === 'MOVE_REST')
+    expect(restScript?.unit).toBe('BattleScript_EffectRest')
+    expect(restScript?.status).toBe('unported')
+    expect(effectStatusByMove.get('MOVE_REST')).toBe('ported')
+  })
+
+  it('every move id appears somewhere in result.units', () => {
+    const moveIds = new Set(result.units.map((unit) => unit.moveId))
+    expect(moves.filter((move) => !moveIds.has(move.id)).map((move) => move.id)).toEqual([])
+    // MOVE_TEMPEST_STORM has `effect: null`; it used to yield zero units (cycle 151 report).
+    expect(result.units.filter((unit) => unit.moveId === 'MOVE_TEMPEST_STORM').map((unit) => unit.kind)).toContain(
+      'effect-less',
+    )
   })
 
   it('generates deterministic markdown and compares it with the committed doc (or writes with SIM_INVENTORY_WRITE=1)', () => {
