@@ -1682,6 +1682,21 @@ function opcodeHasHandler(opcode: string, handledOpcodes: ReadonlySet<string>): 
  *   saveattackerandtargetto34: the stack helpers used to loop battlers
  *   selectfirstvalidtarget/setallytonexttarget/showabilitypopup/recordability/movevaluescleanup/
  *   incrementgamestat: bookkeeping
+ *   playanimation        Cmd_playanimation        :4066-4105 -- sets `gActiveBattler` and emits
+ *                        `BtlController_EmitBattleAnimation` (or pushes `BattleScript_Pausex20`
+ *                        under `HITMARKER_NO_ANIMATIONS`; `DrawTerrainTypeBattleBackground()`
+ *                        for `B_ANIM_RESTORE_BG`). Presentation only.
+ *   setgraphicalstatchangevalues  Cmd_setgraphicalstatchangevalues  :4138-4171 -- writes
+ *                        `gBattleScripting.animArg1/animArg2`, animation arguments only.
+ *   playstatchangeanimation  Cmd_playstatchangeanimation  :4263-4266, calling
+ *                        `PlayStatChangeAnimation` :4172-4261 -- reads stats/abilities to pick
+ *                        an animation id and emits it; its only state write is
+ *                        `gBattleScripting.statAnimPlayed = TRUE` (:4258), a flag read only to
+ *                        suppress repeated animation.
+ *   status2animation     Cmd_status2animation     :5928-5942 -- emits
+ *                        `BtlController_EmitStatusAnimation`; no battle-state write.
+ *   updatestatusicon     Cmd_updatestatusicon     :10431-10453 -- emits
+ *                        `BtlController_EmitStatusIconUpdate`; no battle-state write.
  *   all `jumpif*` opcodes: conditional control flow. The taken branch's own commands are
  *   still in the parsed command list, so treating the jump itself as frame cannot hide a
  *   behaviour opcode.
@@ -1742,6 +1757,13 @@ const SCRIPT_FRAME_OPCODES = new Set([
   'recordability',
   'movevaluescleanup',
   'incrementgamestat',
+  // Presentation opcodes: controller animations / icon updates only (C lines cited in the
+  // doc comment above).
+  'playanimation',
+  'setgraphicalstatchangevalues',
+  'playstatchangeanimation',
+  'status2animation',
+  'updatestatusicon',
 ])
 
 /** True for a script opcode that carries no move-specific behaviour of its own. */
@@ -2686,19 +2708,33 @@ const BATTLE_SCRIPT_COMMANDS_PATH = 'pipeline/.upstream/eliteredux-source/src/ba
 let commandHandlerLines: Map<string, number> | null = null
 
 /**
- * Script opcode -> the line of its `Cmd_<opcode>` definition in
- * `battle_script_commands.c`. Commands implemented as `VARIOUS_*` subcommands (there is no
- * `Cmd_checkpoltergeist`) or macros are simply absent from the map.
+ * Script opcode -> the line of its `Cmd_<opcode>` **definition** in
+ * `battle_script_commands.c`. The forward declarations at the top of the file
+ * (`static void Cmd_x(void);`, :121-273) are skipped: they end in `;` and are not bodies.
+ * A definition writes its brace on the same line (`static void Cmd_x(void) {`) or on the
+ * next one when the line carries a comment (`static void Cmd_playanimation2(void)  // ...`,
+ * :4107-4108). Commands implemented as `VARIOUS_*` subcommands (there is no
+ * `Cmd_checkpoltergeist`) or macros are simply absent from the map. Pass `fresh` to bypass
+ * the module cache when reading a different source.
  */
 export function loadCommandHandlerLines(
   path: string = join(REPO_ROOT, BATTLE_SCRIPT_COMMANDS_PATH),
+  fresh = false,
 ): Map<string, number> {
-  if (commandHandlerLines) return commandHandlerLines
+  if (commandHandlerLines && !fresh) return commandHandlerLines
   const lines = readFileSync(path, 'utf-8').split('\n')
   const map = new Map<string, number>()
   for (let index = 0; index < lines.length; index++) {
     const match = lines[index].match(/^static void Cmd_([a-z0-9_]+)\(/)
-    if (match && !map.has(match[1])) map.set(match[1], index + 1)
+    if (!match) continue
+    // First definition wins; a skipped prototype does not occupy the slot.
+    if (map.has(match[1])) continue
+    // A forward declaration is not a definition.
+    if (/;\s*$/.test(lines[index])) continue
+    // Same-line brace, or a comment line with the body brace on the next line.
+    if (/\{\s*$/.test(lines[index]) || /^\s*\{/.test(lines[index + 1] ?? '')) {
+      map.set(match[1], index + 1)
+    }
   }
   commandHandlerLines = map
   return map
@@ -2742,6 +2778,17 @@ function effectHasScriptImplementation(effect: string | null, ctx: ClassifyConte
     ctx.consumption.postHitEffects.has(effect)
   )
 }
+
+/**
+ * `setmoveeffect` bits that modify the next effect rather than being an effect of their
+ * own: `#define MOVE_EFFECT_AFFECTS_USER 0x4000` and `#define MOVE_EFFECT_CERTAIN 0x8000`
+ * (`pipeline/.upstream/eliteredux-source/tools/codegen/src/er/defines/MoveEffectGenerator.kt:21-22`,
+ * listed again as enum values at :29-30). `setmoveeffect MOVE_EFFECT_DEF_SPDEF_DOWN |
+ * MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN` (Close Combat,
+ * `data/battle_scripts_1.s:6342`) names only one real effect; without this filter the two
+ * modifiers fail `secondaryIsConsumed` and the script is wrongly unported.
+ */
+const SETMOVEEFFECT_MODIFIER_BITS = new Set(['MOVE_EFFECT_AFFECTS_USER', 'MOVE_EFFECT_CERTAIN'])
 
 /**
  * Legacy-script production path (cycle 151b rework defect 4), computed from the script's
@@ -2789,8 +2836,11 @@ function unhandledScriptCommands(
       continue
     }
     if (opcode === 'setmoveeffect') {
-      const names = command.match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []
-      // `setmoveeffect 0` only clears the stored effect: nothing to dispatch.
+      const names = (command.match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []).filter(
+        (name) => !SETMOVEEFFECT_MODIFIER_BITS.has(name),
+      )
+      // `setmoveeffect 0` only clears the stored effect, and a command carrying only the
+      // modifier bits names no effect: nothing to dispatch either way.
       if (names.length === 0) continue
       if (names.some((name) => !secondaryIsConsumed(name, ctx.consumption))) unhandled.push(command)
       continue

@@ -331,30 +331,32 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
       {
         repoRelative: 'memory/battle_scripts.s',
         lines: [
-          'BattleScript_TestAnimationGap::',
+          'BattleScript_TestOpcodeGap::',
           '\tattackcanceler',
-          '\tplayanimation BS_ATTACKER, B_ANIM_STATS_CHANGE, sB_ANIM_ARG1',
+          '\topenpartyscreen BS_CHOOSE_FAINTED_MON, BattleScript_ButItFailed',
           '\tend',
         ],
       },
     ])
     const move: MoveRecord = {
-      id: 'MOVE_TEST_ANIMATION_GAP',
+      id: 'MOVE_TEST_OPCODE_GAP',
       effect: 'EFFECT_ERUPTION',
-      customBehavior: { legacyConfig: 'BattleScript_TestAnimationGap' },
+      customBehavior: { legacyConfig: 'BattleScript_TestOpcodeGap' },
     }
     const result = runInventory([move], behaviors, {
       consumerSource: REAL_CONSUMER,
-      testSource: block('MOVE_TEST_ANIMATION_GAP'),
+      testSource: block('MOVE_TEST_OPCODE_GAP'),
       scripts: gap,
       allowlist: [],
     })
-    // The owning effect is ported, but that says nothing about playanimation.
+    // The owning effect is ported, but that says nothing about openpartyscreen. (Cycle 151c
+    // moved playanimation and four other presentation opcodes to the frame set; this one is
+    // still a genuine gap, as is the party screen it opens.)
     expect(result.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
     const script = result.units.find((unit) => unit.kind === 'legacy-script')
     expect(script?.status).toBe('unported')
     expect(script?.registeredUntested).toBe(false)
-    expect(result.unhandledScriptCommands.map((command) => command.opcode)).toContain('playanimation')
+    expect(result.unhandledScriptCommands.map((command) => command.opcode)).toContain('openpartyscreen')
   })
 
   it('an opcode-specific handler is required: deleting its production site makes the opcode unhandled', () => {

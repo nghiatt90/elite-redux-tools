@@ -40,30 +40,42 @@ const DISTINCT_FLAG_KEYS = 42
 /**
  * Pinned today -- this number should only go DOWN.
  *
+ * Cycle 151c: 1530 -> 1456. Two classifier defects were fixed with no sim change:
+ *   - five presentation-only opcodes (`playanimation` :4066, `setgraphicalstatchangevalues`
+ *     :4138, `playstatchangeanimation` :4263 -> `PlayStatChangeAnimation` :4172,
+ *     `status2animation` :5928, `updatestatusicon` :10431) now count as frame opcodes;
+ *   - `MOVE_EFFECT_AFFECTS_USER` / `MOVE_EFFECT_CERTAIN` no longer count as effects of a
+ *     `setmoveeffect` (they are modifier bits, `MoveEffectGenerator.kt:21-22`), so Close
+ *     Combat's `MOVE_EFFECT_DEF_SPDEF_DOWN | ...` is handled.
+ * 74 legacy-script pairs (54 distinct script labels) became ported. Three labels that were
+ * non-skeleton opcode gaps instead became registered-but-untested -- all their commands are
+ * now handled, but no qualifying block names them: `BattleScript_EffectCalmMind`,
+ * `BattleScript_EffectMistyTerrain`, `BattleScript_EffectPsychicTerrain`.
+ *
  * Cycle 151b rework 2: 132 -> 1535. The rise is measurement, not a regression. The old
  * classifier let a script's non-skeleton commands ride on the owning effect's production
  * path (`if (effectImplemented) continue`), hiding every opcode the sim does not execute;
  * it also counted a flag as tested whenever a block merely ran any move carrying it. The
  * script now needs every non-skeleton opcode at an opcode-specific site
  * (`SCRIPT_OPCODE_HANDLERS`) and a flag needs the flag read (key or reading ability/effect)
- * in the block, so the genuine gaps show: animation/party-screen/icon opcodes
- * (`playanimation`, `playstatchangeanimation`, `setgraphicalstatchangevalues`,
- * `status2animation`, `updatestatusicon`, `openpartyscreen`, `makeinvisible`), the
+ * in the block, so the genuine gaps show: `openpartyscreen` / `makeinvisible`, the
  * explicitly unmodelled `manipulatedamage` / `tryroomservice` / `trytoclearprimalweather`,
  * and the argument/word plumbing (`argumenttomoveeffect`, `copyword`, `callifability`)
  * plus the still-unported attack/move/item micro-ops listed in the generated doc. Most of
  * the delta is flag pairs: tests that run one carrier move no longer prove a flag.
  */
-export const UNPORTED_PAIR_COUNT = 1530
+export const UNPORTED_PAIR_COUNT = 1456
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
  * flag rule now requires the flag key or a reading ability/effect, so the 2099 flag pairs
  * are mostly registered-but-untested: production reads the flag, but no qualifying block
  * names the key or the reader. The rest are effect-less damage moves and the legacy scripts
- * whose commands are all handled but which no test names.
+ * whose commands are all handled but which no test names. Cycle 151c: 1310 -> 1314 -- the
+ * three legacy-script labels above (`BattleScript_EffectCalmMind`, `...MistyTerrain`,
+ * `...PsychicTerrain`) moved from opcode gaps to registered-but-untested.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 1310
+export const REGISTERED_UNTESTED_PAIR_COUNT = 1314
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -462,16 +474,17 @@ describe('move completeness inventory', () => {
     const diverging = scripts.filter((unit) => unit.status !== effectStatusByMove.get(unit.moveId))
     // A script is not a mirror. `BattleScript_EffectRest` is a real port (handleRest
     // follows the script command by command), so the divergence is Calm Mind: its effect is
-    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while its script still runs
-    // `playstatchangeanimation`, an opcode the sim does not execute -- a genuine script gap,
-    // not merely untested, so `registeredUntested` is false.
+    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while its script is only
+    // registered-but-untested. Cycle 151c moved `playstatchangeanimation` to the frame set
+    // (presentation only), so the script no longer has an opcode gap; what remains is the
+    // absence of a qualifying block naming `BattleScript_EffectCalmMind`.
     expect(diverging.length).toBeGreaterThan(0)
     const calmMindScript = scripts.find((unit) => unit.moveId === 'MOVE_CALM_MIND')
     expect(calmMindScript?.unit).toBe('BattleScript_EffectCalmMind')
     expect(calmMindScript?.status).toBe('unported')
-    expect(calmMindScript?.registeredUntested).toBe(false)
+    expect(calmMindScript?.registeredUntested).toBe(true)
     expect(effectStatusByMove.get('MOVE_CALM_MIND')).toBe('ported')
-    // Scripts are still classified on their own: 372 of the 600 legacy-script pairs are
+    // Scripts are still classified on their own: 446 of the 600 legacy-script pairs are
     // ported today, so the divergence above is not an artefact of scripts being ignored.
     expect(scripts.some((unit) => unit.status === 'ported')).toBe(true)
   })
