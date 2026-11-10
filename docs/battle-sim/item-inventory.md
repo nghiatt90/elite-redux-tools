@@ -24,6 +24,12 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
    plus one synthetic site per C trigger that does not name a `HOLD_EFFECT_*` token:
    `EatTargetBerry` (`battle_script_commands.c:4595`), `BattleScript_MoveEffectBugBite`
    (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).
+   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per C read: the item
+   resolves to `HOLD_EFFECT_NONE` in this build (`FREE_ENIGMA_BERRY`, `include/global.h:96`;
+   `battle_main.c:721-735` zeroes the runtime data), so the token is the item id, not a
+   `HOLD_EFFECT_*` name. The battle sites are `battle_util.c:6533`, `:6548`, `:8255`, `:504`,
+   `battle_main.c:3546` and `battle_script_commands.c:3465`, `:3497`; the seven `pokemon.c`
+   reads are non-battle and allowlisted.
    `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.
    The site is the enclosing
    `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),
@@ -45,12 +51,12 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 237 | 108 | 20 | 129 | 0 | 0 |
+| `hold-trigger` | 251 | 111 | 20 | 129 | 0 | 11 |
 | `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
-| **total** | **352** | **131** | **28** | **216** | **0** | **5** |
+| **total** | **366** | **134** | **28** | **216** | **0** | **16** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -291,13 +297,13 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_PLATE@battle_main.c:CHANGE_TYPE_ON_ITEM:5137` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5137` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_PLATE@battle_util.c:CalcMoveBasePowerAfterModifiers` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7007` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_PLATE@battle_util.c:CanBattlerGetOrLoseItem` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8265` | ported | `web/src/engine/basePower.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectElectroShot` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5731` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectGeomancy` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4460` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectSkyDrop` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5811` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnRetaliation_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4431` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnSecondary_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4409` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnsAttackCheckSkipCharge` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4449` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_FirstTurnSemiInvulnerable` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5879` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectElectroShot` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5731` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectGeomancy` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4460` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectSkyDrop` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5811` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnRetaliation_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4431` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnSecondary_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4409` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnsAttackCheckSkipCharge` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4449` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_FirstTurnSemiInvulnerable` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5879` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
 | `HOLD_EFFECT_POWER_ITEM@battle_main.c:GetBattlerTotalSpeedStat` | Power Anklet, Power Band, Power Belt, Power Bracer, Power Lens +1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | unported (registered, untested) | none |
 | `HOLD_EFFECT_PREVENT_EVOLVE@pokemon.c:GetEvolutionTargetSpecies` | Everstone | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3155` | unported | none |
 | `HOLD_EFFECT_PRIMAL_ORB@battle_script_commands.c:Cmd_various` | Adamant Orb, Blue Orb, Dynamax Orb, Galactic Orb, Griseous Orb +12 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:7416` | unported | `web/src/engine/sim/formChange.test.ts` |
@@ -373,6 +379,20 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_WIDE_LENS@battle_script_commands.c:GetTotalAccuracy` | Wide Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1378` | ported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_WISE_GLASSES@battle_util.c:CalcMoveBasePowerAfterModifiers` | Wise Glasses | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6994` | unported (registered, untested) | none |
 | `HOLD_EFFECT_ZOOM_LENS@battle_script_commands.c:GetTotalAccuracy` | Zoom Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1380` | ported | `web/src/engine/sim/accuracy.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_main.c:IsRunningFromBattleImpossible` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:3546` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3465` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3465` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3497` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3497` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_util.c:CanBattlerGetOrLoseItem` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8255` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_util.c:GetBattlerHoldEffect` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6533` | ported | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_util.c:GetBattlerHoldEffectParam` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6548` | ported | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_util.c:TryRunFromBattle` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:504` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:AdjustFriendship:3523` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3523` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:ConvertPokemonToBattleTowerPokemon:837` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:837` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:GetEvolutionTargetSpecies:3145` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3145` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:GetItemEffectParamOffset:2963` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2963` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2371` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2371` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2404` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2404` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:UseStatIncreaseItem:3058` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3058` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
 | `eatTargetBerry@battle_script_commands.c:EatTargetBerry` |  | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4595` | ported | `web/src/engine/sim/moveEnd.test.ts` |
 | `eatTargetBerry@battle_scripts_1.s:BattleScript_MoveEffectBugBite` |  | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1006` | unported | none |
 

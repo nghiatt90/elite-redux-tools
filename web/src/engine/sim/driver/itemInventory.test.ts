@@ -19,9 +19,10 @@ const result = runInventory(items)
 
 const ITEM_COUNT = 929
 const DISTINCT_HOLD_EFFECTS = 133
-// Re-pinned after cycle 152d2: +7 Power Herb script labels, +2 EatTargetBerry sites,
-// +4 EFFECT_CHANGE_TYPE_ON_ITEM (Plate/Memory x 2 C sites)
-const HOLD_TRIGGER_UNITS = 237
+// Re-pinned after cycle 152d3: +14 Enigma Berry sites (3 ported battle reads, 4
+// no-run/no-exp battle reads, 7 non-battle pokemon.c reads) on top of cycle 152d2's
+// +7 Power Herb script labels, +2 EatTargetBerry sites, +4 EFFECT_CHANGE_TYPE_ON_ITEM.
+const HOLD_TRIGGER_UNITS = 251
 // Unchanged by cycle 152d2.
 const AI_TRIGGER_UNITS = 59
 // Re-pinned after cycle 152d2: ITEM_POWER_HERB loses its item-data unit once its hold
@@ -31,16 +32,19 @@ const ITEM_DATA_UNITS = 40
 const NATURAL_GIFT_UNITS = 5
 const FLING_UNITS = 11
 
-// Re-pinned after cycle 152d2: -5 item-data units allowlisted (Cleanse Tag, Pure Incense,
-// Dragon Scale, Upgrade, Gracidea), -1 Power Herb item-data unit replaced by script units,
-// +1 C2 (BattleScript_MoveEffectBugBite's consumeberry is still gapped)
+// Unchanged by cycle 152d3: its 14 Enigma units are 3 ported + 11 allowlisted, so no
+// new unported unit. (Cycle 152d2: -5 item-data units allowlisted, -1 Power Herb
+// item-data unit replaced by script units, +1 gapped consumeberry.)
 export const UNPORTED_UNIT_COUNT = 216
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
 export const REGISTERED_UNTESTED_UNIT_COUNT = 28
 
-/** Re-pinned after cycle 152d2: five item-data units with exact non-battle C cites. */
-export const ALLOWLISTED_UNIT_COUNT = 5
+/**
+ * Re-pinned after cycle 152d3: 5 cycle-152d2 item-data units + 11 Enigma Berry
+ * sites (4 no-run/no-exp battle reads + 7 non-battle pokemon.c reads).
+ */
+export const ALLOWLISTED_UNIT_COUNT = 16
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0

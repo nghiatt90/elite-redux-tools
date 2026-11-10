@@ -9171,11 +9171,6 @@ export function consumeBerryWithOverride(
   const itemId = battler.mon.itemId
   if (!itemId) return
 
-  if (itemId === 'ITEM_ENIGMA_BERRY') {
-    unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
-    return
-  }
-
   const itemData = deps.dataContext.item(itemId)
   const holdEffect = itemData?.resolvedHoldEffect ?? null
   if (!holdEffect || holdEffect === 'HOLD_EFFECT_NONE') return
@@ -9715,9 +9710,6 @@ export function handleGeomancy(ctx: MoveEffectContext): ActionOutcome {
       const itemNegated =
         hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
         battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
-      if (!itemNegated && itemId === 'ITEM_ENIGMA_BERRY') {
-        unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
-      }
       const holdEffect = !itemNegated && itemId ? (deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null) : null
       if (holdEffect !== 'HOLD_EFFECT_POWER_HERB') {
         return outcome(ctx, { missed: false })

@@ -13,7 +13,9 @@ import { stripComments } from './moveInventory'
  *      `jumpifholdeffect` / `jumpifnoholdeffect` and `twoturnmoveacceleratecheck`
  *      (Power Herb) lines in the battle script `data/battle_scripts_1.s` (site =
  *      enclosing script label), plus the synthetic C sites `EatTargetBerry`,
- *      `BattleScript_MoveEffectBugBite` and `EFFECT_CHANGE_TYPE_ON_ITEM`.
+ *      `BattleScript_MoveEffectBugBite`, `EFFECT_CHANGE_TYPE_ON_ITEM`, and the
+ *      Enigma Berry `ITEM_ENIGMA_BERRY` sites (the item resolves to
+ *      `HOLD_EFFECT_NONE`, so the token scan cannot see them).
  *   2. `ai-trigger`  -- one unit per (resolved hold effect, C trigger site) in the
  *      AI files `battle_ai_util.c`, `battle_ai_main.c`, `battle_controller_opponent.c`
  *      and `battle_ai_switch_items.c`.
@@ -174,6 +176,69 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = [
       'HOLD_EFFECT_GRACIDEA is read by no battle code; the only C mention is the debug text table (the item itself is a form-change item at form_change_tables.h:43)',
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_debug.c:2101',
   },
+  // Cycle 152d3: Enigma Berry. Under FREE_ENIGMA_BERRY the runtime holdEffect and
+  // holdEffectParam are zero (battle_main.c:721-735), so these reads are inert.
+  // The battle sites with no sim code have no run command / no experience gain;
+  // the pokemon.c sites run outside a battle turn.
+  {
+    key: 'ITEM_ENIGMA_BERRY@battle_util.c:TryRunFromBattle',
+    reason:
+      'the simulated battle has no run command (no runFromBattle/TryRunFromBattle code in web/src/engine/sim), so TryRunFromBattle never runs; its holdEffect read resolves to 0 under FREE_ENIGMA_BERRY',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:504',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@battle_main.c:IsRunningFromBattleImpossible',
+    reason:
+      'the simulated battle has no run command (no runFromBattle code in web/src/engine/sim), so IsRunningFromBattleImpossible never runs; its holdEffect read resolves to 0 under FREE_ENIGMA_BERRY',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_main.c:3546',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3465',
+    reason:
+      'the simulated battle has no experience gain (no getexp/expShare code in web/src/engine/sim), so Cmd_getexp never runs; under FREE_ENIGMA_BERRY the #else sets holdEffect = 0',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3465',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3497',
+    reason:
+      'the simulated battle has no experience gain (no getexp/expShare code in web/src/engine/sim), so Cmd_getexp never runs; under FREE_ENIGMA_BERRY the #else sets holdEffect = 0',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3497',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:ConvertPokemonToBattleTowerPokemon:837',
+    reason: 'party menu / field / summary screen, not a battle turn (battle tower conversion clears the item)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:837',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2371',
+    reason: 'party menu / field / summary screen, not a battle turn (party item use)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:2371',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2404',
+    reason: 'party menu / field / summary screen, not a battle turn (party item effect table)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:2404',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:GetItemEffectParamOffset:2963',
+    reason: 'party menu / field / summary screen, not a battle turn (item effect parameter read)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:2963',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:UseStatIncreaseItem:3058',
+    reason: 'party menu / field / summary screen, not a battle turn (stat-increase item use)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:3058',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:GetEvolutionTargetSpecies:3145',
+    reason: 'party menu / field / summary screen, not a battle turn (evolution item check)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:3145',
+  },
+  {
+    key: 'ITEM_ENIGMA_BERRY@pokemon.c:AdjustFriendship:3523',
+    reason: 'party menu / field / summary screen, not a battle turn (friendship item use)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:3523',
+  },
 ]
 
 export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
@@ -234,6 +299,20 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   CanBattlerGetOrLoseItem: {
     files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/moveEnd.ts'],
     functionName: 'canBattlerGetOrLoseItem',
+  },
+  // GetBattlerHoldEffect (:6533) and GetBattlerHoldEffectParam (:6548) read Enigma
+  // Berry's runtime holdEffect/holdEffectParam. With FREE_ENIGMA_BERRY those are
+  // zero (battle_main.c:721-735), so the sim's equivalent is bridge.ts's item-data
+  // resolution: `condition.resolvedHoldEffect` and
+  // `condition.itemResolvedHoldEffectStrength` (both HOLD_EFFECT_NONE / null for
+  // Enigma). Evidence is the field those builder functions derive, not the item id.
+  GetBattlerHoldEffect: {
+    files: ['web/src/engine/sim/bridge.ts'],
+    functionName: 'buildBattlerBattleState',
+  },
+  GetBattlerHoldEffectParam: {
+    files: ['web/src/engine/sim/bridge.ts'],
+    functionName: 'buildBattlerBattleState',
   },
   TryPrimalReversion: {
     files: ['web/src/engine/sim/formChange.ts'],
@@ -497,6 +576,9 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   AdjustFriendship: { files: [] },
   CheckQuickClaw_CustapBerryActivation: { files: [] },
   Cmd_getexp: { files: [] },
+  // The two Enigma reads inside Cmd_getexp's party Exp Share scan (:3465, :3497).
+  'Cmd_getexp:3465': { files: [] },
+  'Cmd_getexp:3497': { files: [] },
   Cmd_setmultihitcounter: { files: [] },
   GetEvolutionTargetSpecies: { files: [] },
   GetMonMoveType: { files: [] },
@@ -1458,6 +1540,13 @@ interface SyntheticTriggerSite {
   site: string
   /** Production-evidence token (appears in the mapped sim function). */
   token: string
+  /**
+   * Classification token shown as the unit's own token. Defaults to `token`.
+   * Enigma Berry needs this: production evidence is the sim field that resolves
+   * the item (`resolvedHoldEffect` / `itemResolvedHoldEffectStrength`), but the
+   * unit is the item id.
+   */
+  unitToken?: string
   /** Unit key prefix: the hold effect, or a marker such as `eatTargetBerry`. */
   effect: string
   file: string
@@ -1467,6 +1556,68 @@ interface SyntheticTriggerSite {
   testTokens: string[]
   testPredicate?: (cleanSource: string) => boolean
 }
+
+export interface EnigmaBerrySite {
+  site: string
+  /** Production-evidence token in the mapped sim function (or the item id). */
+  token: string
+  file: string
+  line: number
+  functionName?: string
+  /** Restricts which test files qualify: the test must name the item and the site. */
+  testPredicate?: (clean: string) => boolean
+}
+
+/**
+ * Every C site that reads `ITEM_ENIGMA_BERRY`. The item's resolved hold effect is
+ * `HOLD_EFFECT_NONE` (battle_main.c:721-735 zeroes the e-Reader data under
+ * `FREE_ENIGMA_BERRY`, include/global.h:96), so none of these appears in the
+ * `HOLD_EFFECT_*` scan; each becomes a synthetic `hold-trigger` unit keyed by the
+ * item id. The three battle sites with a sim port carry the field that resolves
+ * the item data; the rest are allowlisted with their exact C line.
+ */
+export const ENIGMA_BERRY_SITES: ReadonlyArray<EnigmaBerrySite> = [
+  // Battle sites with a sim port.
+  {
+    site: 'GetBattlerHoldEffect',
+    token: 'resolvedHoldEffect',
+    file: `${UPSTREAM_SRC}/battle_util.c`,
+    line: 6533,
+    functionName: 'buildBattlerBattleState',
+    testPredicate: (clean) =>
+      tokenAppears(clean, 'ITEM_ENIGMA_BERRY') && tokenAppears(clean, 'resolvedHoldEffect'),
+  },
+  {
+    site: 'GetBattlerHoldEffectParam',
+    token: 'itemResolvedHoldEffectStrength',
+    file: `${UPSTREAM_SRC}/battle_util.c`,
+    line: 6548,
+    functionName: 'buildBattlerBattleState',
+    testPredicate: (clean) =>
+      tokenAppears(clean, 'ITEM_ENIGMA_BERRY') && tokenAppears(clean, 'itemResolvedHoldEffectStrength'),
+  },
+  {
+    site: 'CanBattlerGetOrLoseItem',
+    token: 'ITEM_ENIGMA_BERRY',
+    file: `${UPSTREAM_SRC}/battle_util.c`,
+    line: 8255,
+    testPredicate: (clean) =>
+      tokenAppears(clean, 'ITEM_ENIGMA_BERRY') && tokenAppears(clean, 'CanBattlerGetOrLoseItem'),
+  },
+  // Battle sites the sim never runs: no run command / no experience gain.
+  { site: 'TryRunFromBattle', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_util.c`, line: 504 },
+  { site: 'IsRunningFromBattleImpossible', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_main.c`, line: 3546 },
+  { site: 'Cmd_getexp:3465', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_script_commands.c`, line: 3465 },
+  { site: 'Cmd_getexp:3497', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_script_commands.c`, line: 3497 },
+  // Non-battle pokemon.c reads: party menu / field / summary screen.
+  { site: 'ConvertPokemonToBattleTowerPokemon:837', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 837 },
+  { site: 'PokemonUseItemEffects:2371', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 2371 },
+  { site: 'PokemonUseItemEffects:2404', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 2404 },
+  { site: 'GetItemEffectParamOffset:2963', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 2963 },
+  { site: 'UseStatIncreaseItem:3058', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 3058 },
+  { site: 'GetEvolutionTargetSpecies:3145', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 3145 },
+  { site: 'AdjustFriendship:3523', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/pokemon.c`, line: 3523 },
+]
 
 /** Builds the synthetic (non-`HOLD_EFFECT_*`-token) trigger sites for one run. */
 export function syntheticTriggerSites(itemsByEffect: ReadonlyMap<string, string[]>): SyntheticTriggerSite[] {
@@ -1523,6 +1674,27 @@ export function syntheticTriggerSites(itemsByEffect: ReadonlyMap<string, string[
           tokenAppears(clean, holdEffect),
       })
     }
+  }
+  // Enigma Berry: the item's data hold effect is HOLD_EFFECT_NONE and the runtime
+  // value is zeroed (battle_main.c:721-735 under FREE_ENIGMA_BERRY,
+  // include/global.h:96), so the HOLD_EFFECT_* scan never sees it. One synthetic
+  // unit per C site, keyed by the item id. The production token is the sim field
+  // that carries the read for the ported battle sites (bridge.ts resolves the item
+  // data to `resolvedHoldEffect` / `itemResolvedHoldEffectStrength`), or the item
+  // id itself for CanBattlerGetOrLoseItem, which reads the item id directly.
+  for (const enigma of ENIGMA_BERRY_SITES) {
+    sites.push({
+      site: enigma.site,
+      token: enigma.token,
+      unitToken: 'ITEM_ENIGMA_BERRY',
+      effect: 'ITEM_ENIGMA_BERRY',
+      file: enigma.file,
+      citation: `${enigma.file}:${enigma.line}`,
+      functionName: enigma.functionName,
+      itemIds: ['ITEM_ENIGMA_BERRY'],
+      testTokens: ['ITEM_ENIGMA_BERRY'],
+      testPredicate: enigma.testPredicate,
+    })
   }
   return sites
 }
@@ -1781,7 +1953,7 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     units.push({
       kind: 'hold-trigger',
       key,
-      unit: s.token,
+      unit: s.unitToken ?? s.token,
       effect: s.effect,
       site: s.site,
       file: s.file,
@@ -2199,6 +2371,22 @@ export function generateItemInventoryDoc(
   lines.push(
     '   (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).',
   )
+  lines.push(
+    '   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per C read: the item',
+  )
+  lines.push(
+    '   resolves to `HOLD_EFFECT_NONE` in this build (`FREE_ENIGMA_BERRY`, `include/global.h:96`;',
+  )
+  lines.push(
+    '   `battle_main.c:721-735` zeroes the runtime data), so the token is the item id, not a',
+  )
+  lines.push(
+    '   `HOLD_EFFECT_*` name. The battle sites are `battle_util.c:6533`, `:6548`, `:8255`, `:504`,',
+  )
+  lines.push(
+    '   `battle_main.c:3546` and `battle_script_commands.c:3465`, `:3497`; the seven `pokemon.c`',
+  )
+  lines.push('   reads are non-battle and allowlisted.')
   lines.push(
     '   `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.',
   )

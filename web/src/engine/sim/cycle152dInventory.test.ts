@@ -235,7 +235,8 @@ describe('cycle 152d - pinned counts', () => {
     // Cycle 152d: +5 battle-script sites, +2 Booster Energy lines, +1 Acrobatics gem = 8.
     // Cycle 152d2 re-pin: +7 Power Herb script labels, +2 EatTargetBerry sites,
     // +4 EFFECT_CHANGE_TYPE_ON_ITEM sites = 237.
-    expect(count('hold-trigger')).toBe(237)
+    // Cycle 152d3 re-pin: +14 Enigma Berry C sites = 251.
+    expect(count('hold-trigger')).toBe(251)
     // +battle_controller_opponent.c:1608 and +battle_ai_switch_items.c:528.
     expect(count('ai-trigger')).toBe(59)
     // Cycle 152d: ITEM_DESTINY_KNOT and ITEM_ADRENALINE_ORB gain hold-trigger units (-2).
@@ -245,7 +246,8 @@ describe('cycle 152d - pinned counts', () => {
     expect(count('fling')).toBe(11)
     // Cycle 152d2: +7 Power Herb script, +2 EatTargetBerry, +4 CHANGE_TYPE_ON_ITEM,
     // -1 Power Herb item-data = +12 (340 -> 352).
-    expect(result.totalDefined).toBe(352)
+    // Cycle 152d3: +14 Enigma Berry hold-trigger units = 366.
+    expect(result.totalDefined).toBe(366)
 
     expect(result.totalUnclassified).toBe(0)
     // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).

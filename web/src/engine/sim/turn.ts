@@ -3178,9 +3178,6 @@ export function executeAction(
           const itemNegated =
             hasFlag(attackerBattler.statuses3, STATUS3_EMBARGO) ||
             battlerHasSimAbility(state, attackerBattler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
-          if (!itemNegated && itemId === 'ITEM_ENIGMA_BERRY') {
-            unmodelled.push('Enigma Berry holdEffect (battle_util.c:6533-6534) is not modelled')
-          }
           const holdEffect = !itemNegated && itemId ? (deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null) : null
           if (holdEffect === 'HOLD_EFFECT_POWER_HERB' && !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) {
             consumeHeldItem(state, attackerBattler, unmodelled)

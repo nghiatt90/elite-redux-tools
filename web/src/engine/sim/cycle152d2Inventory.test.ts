@@ -72,9 +72,10 @@ describe('cycle 152d2 - non-battle effects allowlisted (A)', () => {
       expect(unit?.citation).toBe(cite)
       expect(unit?.registeredUntested).toBe(false)
     }
-    expect(result.totalAllowlisted).toBe(5)
+    // Cycle 152d3 added 11 Enigma Berry allowlist entries (5 + 11 = 16).
+    expect(result.totalAllowlisted).toBe(16)
     expect(validateAllowlist(DEFAULT_ALLOWLIST)).toEqual([])
-    expect(DEFAULT_ALLOWLIST).toHaveLength(5)
+    expect(DEFAULT_ALLOWLIST).toHaveLength(16)
 
     // ITEM_Z_RING stays unported: HOLD_EFFECT_Z_RING and ITEM_Z_RING occur nowhere in the
     // pinned C tree (src/, include/, data/), so there is no exact file:line cite to give.
@@ -96,7 +97,9 @@ describe('cycle 152d2 - non-battle effects allowlisted (A)', () => {
       expect(unit?.citation).toBe(SCRIPT_REPO_PATH + ':' + line)
       expect(unit?.file).toBe(SCRIPT_REPO_PATH)
       expect(unit?.status).toBe('ported')
-      expect(unit?.testFile).toMatch(/cycle87bEffects\.test\.ts$|moveEffects\.test\.ts$/)
+      // cycle152d3 came later and its Power Herb positive control names ITEM_POWER_HERB,
+      // so it can be the alphabetically first matching test file.
+      expect(unit?.testFile).toMatch(/cycle87bEffects\.test\.ts$|moveEffects\.test\.ts$|cycle152d3Enigma\.test\.ts$/)
     }
   })
 })
@@ -241,16 +244,17 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     const result = runInventory(items)
     const count = (kind: ItemUnit['kind']) => result.units.filter((unit) => unit.kind === kind).length
 
-    expect(count('hold-trigger')).toBe(237)
+    // Cycle 152d3: +14 Enigma hold-trigger units (3 ported, 11 allowlisted).
+    expect(count('hold-trigger')).toBe(251)
     expect(count('ai-trigger')).toBe(59)
     expect(count('item-data')).toBe(40)
     expect(count('natural-gift')).toBe(5)
     expect(count('fling')).toBe(11)
-    expect(result.totalDefined).toBe(352)
-    expect(result.totalPorted).toBe(131)
+    expect(result.totalDefined).toBe(366)
+    expect(result.totalPorted).toBe(134)
     expect(result.totalUnported).toBe(216)
     expect(result.totalRegisteredUntested).toBe(28)
-    expect(result.totalAllowlisted).toBe(5)
+    expect(result.totalAllowlisted).toBe(16)
     expect(result.totalUnclassified).toBe(0)
   })
 })
