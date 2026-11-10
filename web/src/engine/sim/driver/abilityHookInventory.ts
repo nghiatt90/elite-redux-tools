@@ -160,9 +160,9 @@ export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
   { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1665' },
   { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1673' },
   { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1692' },
-  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1566' },
-  { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1566' },
-  { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1328' },
+  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1588' },
+  { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1588' },
+  { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1350' },
 ]
 
 export const NOTE_ONLY_SET: ReadonlySet<string> = new Set(NOTE_ONLY_PAIRS.map((p) => `${p.ability}:${p.hook}`))
