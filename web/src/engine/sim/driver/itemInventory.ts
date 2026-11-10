@@ -138,6 +138,12 @@ export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
       'no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check',
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_util.c:6085',
   },
+  {
+    key: 'naturalGift@battle_main.c:GetMovePriority',
+    whatDiffers:
+      'hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_main.c:4272',
+  },
 ]
 
 export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
@@ -209,6 +215,32 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   },
   CalcMoveBasePowerAfterModifiers: {
     files: ['web/src/engine/basePower.ts'],
+  },
+  CalcMoveBasePower: {
+    files: ['web/src/engine/basePower.ts'],
+    functionName: 'applyPreModifierBasePower',
+  },
+  GetMoveType: {
+    files: ['web/src/engine/calculate.ts'],
+    functionName: 'resolveMoveType',
+  },
+  EffectNaturalGift: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectNaturalGift: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  GetMovePriority: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'buildMoveView',
+  },
+  VARIOUS_TRY_FLING: {
+    files: ['web/src/engine/sim/moveEffects.ts'],
+  },
+  CanFling: {
+    files: ['web/src/engine/sim/hitScripts.ts'],
   },
   CalcCritChanceStage: {
     files: ['web/src/engine/crit.ts'],
@@ -417,9 +449,10 @@ export const FLING_FILE = 'battle_script_commands.c'
 /** `gNaturalGiftTable` read sites. */
 export const NATURAL_GIFT_CITATIONS = [
   `${UPSTREAM_SRC}/battle_util.c:6840`,
-  `${UPSTREAM_SRC}/battle_script_commands.c:3023`,
   `${UPSTREAM_SRC}/battle_main.c:5072`,
-  `${UPSTREAM_SRC}/battle_main.c:5171`,
+  `${UPSTREAM_SRC}/battle_script_commands.c:3023`,
+  'pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068',
+  `${UPSTREAM_SRC}/battle_main.c:4272`,
 ] as const
 
 export const ITEM_INVENTORY_DOC_PATH = join(REPO_ROOT, 'docs/battle-sim/item-inventory.md')
@@ -1073,14 +1106,19 @@ export interface TokenClassification {
 
 export function classifyToken(
   token: string,
-  productionSource: string,
+  productionSource: string | boolean,
   testSources: ReadonlyArray<SourceFile>,
   itemIds: ReadonlyArray<string> = [],
+  testPredicate?: (cleanSource: string, file: string) => boolean,
 ): TokenClassification {
-  const production = tokenAppears(productionSource, token)
+  const production =
+    typeof productionSource === 'boolean'
+      ? productionSource
+      : tokenAppears(productionSource, token)
   const matchingFiles = testSources
     .filter((file) => {
       const clean = cleanTestSource(file.source)
+      if (testPredicate && !testPredicate(clean, file.file)) return false
       if (tokenAppears(clean, token)) return true
       for (const id of itemIds) {
         if (tokenAppears(clean, id)) return true
@@ -1101,9 +1139,18 @@ export function checkProductionEvidenceForSite(
   token: string,
   productionFiles: ReadonlyArray<SourceFile>,
   fallbackProductionSource: string,
+  functionNameOverride?: string,
 ): { hasEvidence: boolean; unmappedSite: boolean } {
   const target = C_SITE_SIM_MAP[site]
+  const fnName = functionNameOverride ?? target?.functionName
   if (!target) {
+    if (fnName) {
+      const body = extractFunctionBody(fallbackProductionSource, fnName)
+      return {
+        hasEvidence: body !== null && tokenAppears(body, token),
+        unmappedSite: true,
+      }
+    }
     return {
       hasEvidence: tokenAppears(fallbackProductionSource, token),
       unmappedSite: true,
@@ -1116,8 +1163,8 @@ export function checkProductionEvidenceForSite(
 
   const matchedFiles = productionFiles.filter((f) => target.files.includes(f.file))
   if (matchedFiles.length === 0) {
-    if (target.functionName) {
-      const body = extractFunctionBody(fallbackProductionSource, target.functionName)
+    if (fnName) {
+      const body = extractFunctionBody(fallbackProductionSource, fnName)
       return {
         hasEvidence: body !== null && tokenAppears(body, token),
         unmappedSite: false,
@@ -1130,8 +1177,8 @@ export function checkProductionEvidenceForSite(
   }
 
   for (const f of matchedFiles) {
-    if (target.functionName) {
-      const body = extractFunctionBody(f.source, target.functionName)
+    if (fnName) {
+      const body = extractFunctionBody(f.source, fnName)
       if (body && tokenAppears(body, token)) {
         return { hasEvidence: true, unmappedSite: false }
       }
@@ -1413,46 +1460,209 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     })
   }
 
-  for (const item of items) {
-    if (!item.naturalGift) continue
-    const key = item.id
-    const classification = classifyToken(key, fallbackProductionSource, nonAiTestSources, [key])
-    const allow = allowlistEntryFor(key, allowlist)
-    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
-    units.push({
-      kind: 'natural-gift',
-      key,
-      unit: key,
-      effect: 'naturalGift',
-      site: 'naturalGift',
-      file: `${UPSTREAM_SRC}/${FLING_FILE}`,
-      citation: allow?.cite ?? NATURAL_GIFT_CITATIONS.join('; '),
-      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
-      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
-      testFile: classification.testFile,
-      itemIds: [item.id],
-      partialReason: knownPartial?.whatDiffers,
-    })
+  const naturalGiftItems = items.filter((item) => !!item.naturalGift)
+  if (naturalGiftItems.length > 0) {
+    const allBerryIds = naturalGiftItems.map((item) => item.id).sort()
+    const effectBerryIds = naturalGiftItems
+      .filter((item) => !!item.naturalGift?.effect)
+      .map((item) => item.id)
+      .sort()
+
+    const naturalGiftSites = [
+      {
+        site: 'CalcMoveBasePower',
+        token: 'attackerNaturalGiftPower',
+        file: `${UPSTREAM_SRC}/battle_util.c`,
+        citation: `${UPSTREAM_SRC}/battle_util.c:6840`,
+        functionName: 'applyPreModifierBasePower',
+        itemIds: allBerryIds,
+        testTokens: allBerryIds,
+      },
+      {
+        site: 'GetMoveType',
+        token: 'naturalGift',
+        file: `${UPSTREAM_SRC}/battle_main.c`,
+        citation: `${UPSTREAM_SRC}/battle_main.c:5072`,
+        functionName: 'resolveMoveType',
+        itemIds: allBerryIds,
+        testTokens: allBerryIds,
+      },
+      {
+        site: 'SetMoveEffect',
+        token: 'naturalGift',
+        file: `${UPSTREAM_SRC}/battle_script_commands.c`,
+        citation: `${UPSTREAM_SRC}/battle_script_commands.c:3023`,
+        functionName: 'applySecondaryMoveEffects',
+        itemIds: effectBerryIds,
+        testTokens: effectBerryIds,
+      },
+      {
+        site: 'EffectNaturalGift',
+        token: 'EFFECT_NATURAL_GIFT',
+        file: 'pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s',
+        citation: 'pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068',
+        functionName: 'executeAction',
+        itemIds: allBerryIds,
+        testTokens: allBerryIds,
+      },
+      {
+        site: 'GetMovePriority',
+        token: 'naturalGiftPriority',
+        file: `${UPSTREAM_SRC}/battle_main.c`,
+        citation: `${UPSTREAM_SRC}/battle_main.c:4272`,
+        functionName: 'buildMoveView',
+        itemIds: ['ITEM_CUSTAP_BERRY'],
+        testTokens: ['ITEM_CUSTAP_BERRY'],
+      },
+    ]
+
+    for (const s of naturalGiftSites) {
+      const key = unitKey('naturalGift', s.file, s.site)
+      const prodCheck = checkProductionEvidenceForSite(
+        s.site,
+        s.token,
+        productionFiles,
+        fallbackProductionSource,
+        s.functionName,
+      )
+      const classification = classifyToken(
+        s.token,
+        prodCheck.hasEvidence,
+        nonAiTestSources,
+        s.testTokens,
+        (clean) =>
+          tokenAppears(clean, 'MOVE_NATURAL_GIFT') ||
+          tokenAppears(clean, 'EFFECT_NATURAL_GIFT'),
+      )
+      const allow = allowlistEntryFor(key, allowlist)
+      const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+
+      units.push({
+        kind: 'natural-gift',
+        key,
+        unit: s.token,
+        effect: 'naturalGift',
+        site: s.site,
+        file: s.file,
+        citation: allow?.cite ?? s.citation,
+        status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+        registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
+        testFile: classification.testFile,
+        itemIds: s.itemIds,
+        unmappedSite: prodCheck.unmappedSite,
+        partialReason: knownPartial?.whatDiffers,
+      })
+    }
   }
 
-  for (const fling of parseFlingItems(flingSource)) {
-    const key = fling.itemId
-    const classification = classifyToken(key, fallbackProductionSource, nonAiTestSources, [key])
-    const allow = allowlistEntryFor(key, allowlist)
-    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+  const flingItems = parseFlingItems(flingSource)
+  if (flingItems.length > 0) {
+    for (const fling of flingItems) {
+      const key = fling.itemId
+      const prodCheck = checkProductionEvidenceForSite(
+        'VARIOUS_TRY_FLING',
+        key,
+        productionFiles,
+        fallbackProductionSource,
+      )
+      const classification = classifyToken(
+        key,
+        prodCheck.hasEvidence,
+        nonAiTestSources,
+        [key],
+        (clean) => tokenAppears(clean, 'MOVE_FLING') || tokenAppears(clean, 'EFFECT_FLING'),
+      )
+      const allow = allowlistEntryFor(key, allowlist)
+      const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+
+      units.push({
+        kind: 'fling',
+        key,
+        unit: key,
+        effect: 'VARIOUS_TRY_FLING',
+        site: 'VARIOUS_TRY_FLING',
+        file: `${UPSTREAM_SRC}/${FLING_FILE}`,
+        citation: allow?.cite ?? `${UPSTREAM_SRC}/${FLING_FILE}:${fling.line}`,
+        status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+        registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
+        testFile: classification.testFile,
+        itemIds: [fling.itemId],
+        unmappedSite: prodCheck.unmappedSite,
+        partialReason: knownPartial?.whatDiffers,
+      })
+    }
+
+    const powerFling = [
+      { itemId: 'ITEM_IRON_BALL', line: 6807 },
+      { itemId: 'ITEM_BIG_NUGGET', line: 6808 },
+    ]
+    for (const pf of powerFling) {
+      const key = pf.itemId
+      const prodCheck = checkProductionEvidenceForSite(
+        'CalcMoveBasePower',
+        key,
+        productionFiles,
+        fallbackProductionSource,
+        'applyPreModifierBasePower',
+      )
+      const classification = classifyToken(
+        key,
+        prodCheck.hasEvidence,
+        nonAiTestSources,
+        [key],
+        (clean) => tokenAppears(clean, 'MOVE_FLING') || tokenAppears(clean, 'EFFECT_FLING'),
+      )
+      const allow = allowlistEntryFor(key, allowlist)
+      const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+
+      units.push({
+        kind: 'fling',
+        key,
+        unit: key,
+        effect: 'VARIOUS_TRY_FLING',
+        site: 'CalcMoveBasePower',
+        file: `${UPSTREAM_SRC}/battle_util.c`,
+        citation: allow?.cite ?? `${UPSTREAM_SRC}/battle_util.c:${pf.line}`,
+        status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+        registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
+        testFile: classification.testFile,
+        itemIds: [pf.itemId],
+        unmappedSite: prodCheck.unmappedSite,
+        partialReason: knownPartial?.whatDiffers,
+      })
+    }
+
+    const canFlingKey = 'CanFling'
+    const canFlingProdCheck = checkProductionEvidenceForSite(
+      'CanFling',
+      canFlingKey,
+      productionFiles,
+      fallbackProductionSource,
+    )
+    const canFlingClassification = classifyToken(
+      canFlingKey,
+      canFlingProdCheck.hasEvidence,
+      nonAiTestSources,
+      [],
+      (clean) => tokenAppears(clean, 'MOVE_FLING') || tokenAppears(clean, 'EFFECT_FLING'),
+    )
+    const canFlingAllow = allowlistEntryFor(canFlingKey, allowlist)
+    const canFlingPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === canFlingKey)
+
     units.push({
       kind: 'fling',
-      key,
-      unit: key,
+      key: canFlingKey,
+      unit: canFlingKey,
       effect: 'VARIOUS_TRY_FLING',
-      site: 'VARIOUS_TRY_FLING',
-      file: `${UPSTREAM_SRC}/${FLING_FILE}`,
-      citation: allow?.cite ?? `${UPSTREAM_SRC}/${FLING_FILE}:${fling.line}`,
-      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
-      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
-      testFile: classification.testFile,
-      itemIds: [fling.itemId],
-      partialReason: knownPartial?.whatDiffers,
+      site: 'CanFling',
+      file: `${UPSTREAM_SRC}/battle_util.c`,
+      citation: canFlingAllow?.cite ?? `${UPSTREAM_SRC}/battle_util.c:8414`,
+      status: canFlingAllow ? 'allowlisted' : canFlingPartial ? 'unported' : canFlingClassification.status,
+      registeredUntested: canFlingAllow || canFlingPartial ? false : canFlingClassification.registeredUntested,
+      testFile: canFlingClassification.testFile,
+      itemIds: [],
+      unmappedSite: canFlingProdCheck.unmappedSite,
+      partialReason: canFlingPartial?.whatDiffers,
     })
   }
 
@@ -1602,13 +1812,17 @@ export function generateItemInventoryDoc(
     '3. **item-data**: one unit per item whose hold effect has no hold-trigger unit. The token is the item id.',
   )
   lines.push(
-    '4. **natural-gift**: one unit per berry with a `naturalGift` block, citing the `gNaturalGiftTable` read sites.',
+    '4. **natural-gift**: one unit per Natural Gift handling site (`CalcMoveBasePower`, `GetMoveType`, `SetMoveEffect`,',
   )
-  lines.push('   The token is the item id.')
   lines.push(
-    '5. **fling**: one unit per item read by `VARIOUS_TRY_FLING` (no `gFlingTable` definition is on disk). The token',
+    '   `EffectNaturalGift`, `GetMovePriority`), citing the upstream read sites.',
   )
-  lines.push('   is the item id.')
+  lines.push(
+    '5. **fling**: one unit per item read by `VARIOUS_TRY_FLING`, plus power units (`ITEM_IRON_BALL`, `ITEM_BIG_NUGGET`)',
+  )
+  lines.push(
+    '   and `CanFling`. Each requires a qualifying test that exercises Fling.',
+  )
   lines.push('')
   lines.push(
     'Berry trigger conditions are represented by their `hold-trigger` units; this inventory does not create a second',

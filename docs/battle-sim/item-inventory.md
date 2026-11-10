@@ -25,10 +25,10 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
 2. **ai-trigger**: the same rule for `battle_ai_util.c` and `battle_ai_main.c`; production evidence must come
    from a source file under `web/src/engine/sim/ai/`.
 3. **item-data**: one unit per item whose hold effect has no hold-trigger unit. The token is the item id.
-4. **natural-gift**: one unit per berry with a `naturalGift` block, citing the `gNaturalGiftTable` read sites.
-   The token is the item id.
-5. **fling**: one unit per item read by `VARIOUS_TRY_FLING` (no `gFlingTable` definition is on disk). The token
-   is the item id.
+4. **natural-gift**: one unit per Natural Gift handling site (`CalcMoveBasePower`, `GetMoveType`, `SetMoveEffect`,
+   `EffectNaturalGift`, `GetMovePriority`), citing the upstream read sites.
+5. **fling**: one unit per item read by `VARIOUS_TRY_FLING`, plus power units (`ITEM_IRON_BALL`, `ITEM_BIG_NUGGET`)
+   and `CanFling`. Each requires a qualifying test that exercises Fling.
 
 Berry trigger conditions are represented by their `hold-trigger` units; this inventory does not create a second
 unit kind for them.
@@ -40,9 +40,9 @@ unit kind for them.
 | `hold-trigger` | 216 | 93 | 20 | 123 | 0 | 0 |
 | `ai-trigger` | 57 | 17 | 0 | 40 | 0 | 0 |
 | `item-data` | 43 | 0 | 0 | 43 | 0 | 0 |
-| `natural-gift` | 47 | 9 | 6 | 38 | 0 | 0 |
-| `fling` | 8 | 7 | 1 | 1 | 0 | 0 |
-| **total** | **371** | **126** | **27** | **245** | **0** | **0** |
+| `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
+| `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
+| **total** | **332** | **116** | **28** | **216** | **0** | **0** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -54,6 +54,7 @@ They are kept out of the ported count (status `unported` with a partial reason).
 | Unit key | What differs | C citation |
 | --- | --- | --- |
 | `HOLD_EFFECT_LIFE_ORB@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6085` |
+| `naturalGift@battle_main.c:GetMovePriority` | hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` |
 
 ## Known limitations
 
@@ -116,8 +117,10 @@ Test evidence is per effect token or item id, not per site.
 | `item-data` | `HOLD_EFFECT_UPGRADE` | 1 |
 | `item-data` | `HOLD_EFFECT_Z_CRYSTAL` | 34 |
 | `item-data` | `HOLD_EFFECT_Z_RING` | 1 |
-| `natural-gift` | `naturalGift` | 38 |
-| `fling` | `VARIOUS_TRY_FLING` | 1 |
+| `natural-gift` | `GetMovePriority` | 1 |
+| `fling` | `CalcMoveBasePower` | 1 |
+| `fling` | `CanFling` | 1 |
+| `fling` | `VARIOUS_TRY_FLING` | 7 |
 
 ## Hold-Trigger Units
 
@@ -466,53 +469,11 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 
 | Unit key | Items | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `ITEM_AGUAV_BERRY` | Aguav Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_APICOT_BERRY` | Apicot Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_ASPEAR_BERRY` | Aspear Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_BABIRI_BERRY` | Babiri Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_BLUK_BERRY` | Bluk Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_CHARTI_BERRY` | Charti Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_CHERI_BERRY` | Cheri Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
-| `ITEM_CHESTO_BERRY` | Chesto Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_CHILAN_BERRY` | Chilan Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
-| `ITEM_CHOPLE_BERRY` | Chople Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_COBA_BERRY` | Coba Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_COLBUR_BERRY` | Colbur Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_CUSTAP_BERRY` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/heldItems.test.ts` |
-| `ITEM_ENIGMA_BERRY` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_FIGY_BERRY` | Figy Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle137MoveNotes.test.ts` |
-| `ITEM_GANLON_BERRY` | Ganlon Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_HABAN_BERRY` | Haban Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_IAPAPA_BERRY` | Iapapa Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle137MoveNotes.test.ts` |
-| `ITEM_KASIB_BERRY` | Kasib Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
-| `ITEM_KEBIA_BERRY` | Kebia Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_LANSAT_BERRY` | Lansat Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_LEPPA_BERRY` | Leppa Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle149cMoveEndType.test.ts` |
-| `ITEM_LIECHI_BERRY` | Liechi Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
-| `ITEM_LUM_BERRY` | Lum Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
-| `ITEM_MAGO_BERRY` | Mago Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_MICLE_BERRY` | Micle Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_NANAB_BERRY` | Nanab Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_OCCA_BERRY` | Occa Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
-| `ITEM_ORAN_BERRY` | Oran Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | `web/src/engine/sim/cycle107BerryAbilities.test.ts` |
-| `ITEM_PASSHO_BERRY` | Passho Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_PAYAPA_BERRY` | Payapa Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_PECHA_BERRY` | Pecha Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_PERSIM_BERRY` | Persim Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_PETAYA_BERRY` | Petaya Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_PINAP_BERRY` | Pinap Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_RAWST_BERRY` | Rawst Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_RAZZ_BERRY` | Razz Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_RINDO_BERRY` | Rindo Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_ROSELI_BERRY` | Roseli Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_SALAC_BERRY` | Salac Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
-| `ITEM_SHUCA_BERRY` | Shuca Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_SITRUS_BERRY` | Sitrus Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle107BerryAbilities.test.ts` |
-| `ITEM_STARF_BERRY` | Starf Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported (registered, untested) | none |
-| `ITEM_TANGA_BERRY` | Tanga Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_WACAN_BERRY` | Wacan Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
-| `ITEM_WIKI_BERRY` | Wiki Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | ported | `web/src/engine/sim/cycle107BerryAbilities.test.ts` |
-| `ITEM_YACHE_BERRY` | Yache Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840; pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023; pipeline/.upstream/eliteredux-source/src/battle_main.c:5072; pipeline/.upstream/eliteredux-source/src/battle_main.c:5171` | unported | none |
+| `naturalGift@battle_main.c:GetMovePriority` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4272` | unported (partial: hardcoded naturalGiftPriority: 0 instead of NaturalGiftPriority(item); Custap Berry gives priority: 1) | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
+| `naturalGift@battle_main.c:GetMoveType` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5072` | ported | `web/src/engine/calculate.test.ts` |
+| `naturalGift@battle_script_commands.c:SetMoveEffect` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +40 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3023` | ported | `web/src/engine/calculate.test.ts` |
+| `naturalGift@battle_scripts_1.s:EffectNaturalGift` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3068` | ported | `web/src/engine/basePower.test.ts` |
+| `naturalGift@battle_util.c:CalcMoveBasePower` | Aguav Berry, Apicot Berry, Aspear Berry, Babiri Berry, Bluk Berry +42 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6840` | ported | `web/src/engine/sim/cycle129CopyEffects.test.ts` |
 
 ## Fling Units
 
@@ -521,12 +482,15 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 
 | Unit key | Items | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `ITEM_BLACK_SLUDGE` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8422` | ported | `web/src/engine/sim/cycle90aAbilities.test.ts` |
-| `ITEM_FLAME_ORB` | Flame Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8406` | ported | `web/src/engine/sim/heldItems.test.ts` |
-| `ITEM_FROST_ORB` | Frost Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8416` | ported | `web/src/engine/sim/heldItems.test.ts` |
-| `ITEM_KINGS_ROCK` | King's Rock | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8410` | ported | `web/src/engine/sim/moveEnd.test.ts` |
+| `CanFling` |  | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8414` | unported | none |
+| `ITEM_BIG_NUGGET` | Big Nugget | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6808` | unported (registered, untested) | none |
+| `ITEM_BLACK_SLUDGE` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8422` | unported (registered, untested) | none |
+| `ITEM_FLAME_ORB` | Flame Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8406` | unported (registered, untested) | none |
+| `ITEM_FROST_ORB` | Frost Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8416` | unported (registered, untested) | none |
+| `ITEM_IRON_BALL` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6807` | ported | `web/src/engine/sim/cycle87Effects.test.ts` |
+| `ITEM_KINGS_ROCK` | King's Rock | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8410` | unported (registered, untested) | none |
 | `ITEM_LIGHT_BALL` | Light Ball | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8419` | ported | `web/src/engine/sim/cycle87Effects.test.ts` |
 | `ITEM_POISON_BARB` | Poison Barb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8423` | unported (registered, untested) | none |
-| `ITEM_RAZOR_FANG` | Razor Fang | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8409` | ported | `web/src/engine/sim/moveEnd.test.ts` |
-| `ITEM_TOXIC_ORB` | Toxic Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8413` | ported | `web/src/engine/sim/heldItems.test.ts` |
+| `ITEM_RAZOR_FANG` | Razor Fang | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8409` | unported (registered, untested) | none |
+| `ITEM_TOXIC_ORB` | Toxic Orb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8413` | unported (registered, untested) | none |
 

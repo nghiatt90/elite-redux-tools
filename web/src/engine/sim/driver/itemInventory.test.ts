@@ -24,14 +24,15 @@ const HOLD_TRIGGER_UNITS = 216
 const AI_TRIGGER_UNITS = 57
 // Re-pinned after cycle 152b: 34 Z-crystals become item-data units now that their #ifdef trigger is compiled out (+34)
 const ITEM_DATA_UNITS = 43
-const NATURAL_GIFT_UNITS = 47
-const FLING_UNITS = 8
+// Re-pinned after cycle 152c: per-site natural-gift units (5) and fling units (11)
+const NATURAL_GIFT_UNITS = 5
+const FLING_UNITS = 11
 
-// Re-pinned after cycle 152b: per-site mapping, non-AI production/test filters, stripped gap sets, and #ifdef awareness
-export const UNPORTED_UNIT_COUNT = 245
+// Re-pinned after cycle 152c: per-site natural-gift and fling units
+export const UNPORTED_UNIT_COUNT = 216
 
-// Re-pinned after cycle 152b: stricter production and test evidence filters
-export const REGISTERED_UNTESTED_UNIT_COUNT = 27
+// Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
+export const REGISTERED_UNTESTED_UNIT_COUNT = 28
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
