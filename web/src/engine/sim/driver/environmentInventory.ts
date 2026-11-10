@@ -564,6 +564,12 @@ export function classifyToken(
     .filter((file) => {
       const source = stripComments(file.source)
       if (!tokenAppears(source, tokenToCheck)) return false
+      if (
+        evidence.productionExcludeFiles?.includes('web/src/engine/sim/ai/aiFlags.ts') &&
+        tokenToCheck.startsWith('AI_FLAG_')
+      ) {
+        return evidence.testPattern ? patternMatches(evidence.testPattern, source) : false
+      }
       return evidence.testPattern ? patternMatches(evidence.testPattern, source) : true
     })
     .map((file) => file.file)
@@ -882,7 +888,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_RISKY',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b4:\s*\(.*=>\s*aiRisky\(/,
-      testPattern: /(?:flag on.*AI_FLAG_RISKY|AI_FLAG_RISKY.*flag off)/s,
     },
   },
   {
@@ -894,7 +899,7 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bif\s*\(hasFlag\(state\.aiFlags,\s*AI_FLAG_STALL\)\)\s*\{/,
-      testPattern: /(?:stat \d flag on|without AI_FLAG_STALL)/,
+      testPattern: /without AI_FLAG_STALL/,
     },
   },
   {
@@ -906,7 +911,7 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bhasFlag\(state\.aiFlags,\s*AI_FLAG_PREFER_STATUS_MOVES\)/,
-      testPattern: /AI_FLAG_PREFER_STATUS_MOVES.*\(flag on\)/,
+      testPattern: /AI_FLAG_PREFER_STATUS_MOVES rewards a status move/,
     },
   },
   {
@@ -956,7 +961,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_CHECK_BAD_MOVE',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b0:\s*\(.*=>\s*aiCheckBadMove\(/,
-      testPattern: /(?:flag on.*AI_FLAG_CHECK_BAD_MOVE|AI_FLAG_CHECK_BAD_MOVE.*flag off)/s,
     },
   },
   {
@@ -982,7 +986,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_CHECK_VIABILITY',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b2:\s*\(.*=>\s*aiCheckViability\(/,
-      testPattern: /(?:flag on.*AI_FLAG_CHECK_VIABILITY|AI_FLAG_CHECK_VIABILITY.*flag off)/s,
     },
   },
   {
@@ -993,7 +996,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     citation: cite(CODEGEN_PATH, 190),
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
-      testPattern: /(?:flag on.*AI_FLAG_CHECK_FOE|AI_FLAG_CHECK_FOE.*flag off)/s,
     },
   },
   {
@@ -1019,7 +1021,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_HP_AWARE',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b8:\s*\(.*=>\s*aiHPAware\(/,
-      testPattern: /(?:flag on.*AI_FLAG_HP_AWARE|AI_FLAG_HP_AWARE.*flag off)/s,
     },
   },
   {
@@ -1032,7 +1033,6 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern:
         /\bconst willSuicide = hasFlag\(state\.aiFlags,\s*AI_FLAG_WILL_SUICIDE\)/,
-      testPattern: /AI_FLAG_WILL_SUICIDE is set/,
     },
   },
 ]
