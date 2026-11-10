@@ -86,8 +86,6 @@ Comments, doc comments, trailing comments and inventory text. None is raised.
 | 985 | battler ${battlerId}: ${abilityId}'s consumeberry (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041) is not applied -- no consumeBerryWith... | yes | any ability whose consumeberry hook ran (`${abilityId}` in the text) |
 | 1776 | battler ${battlerId}: ENDTURN_ABILITIES (battle_util.c:2452-2459) is not applied -- ${slotAbility}'s onEndTurn hook was not run | yes | any ability with an onEndTurn hook (`${slotAbility}` in the text) |
 | 1960 | battler ${battlerId}: ENDTURN_ITEMS1/ENDTURN_ITEMS2 (battle_util.c:5622-5855) are not applied -- ${battler.mon.itemId}'s end-of-turn hold effect ($... | **no** | reachable via: unknown |
-| 2148 | battler ${battlerId}: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared | **no** | reachable via: unknown |
-| 2264 | battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented | **no** | reachable via: unknown |
 
 ### `web/src/engine/sim/damageResolver.ts`
 
@@ -268,24 +266,17 @@ phrase is added to `validate.sh`/`gap_union.py`, the count becomes **33** (the 5
 lines: 4 pre-existing attributed `STATUS2_WRAPPED ... are not modelled` rows plus this
 one).
 
-Three groups appear here:
+Two groups appear here:
 
 - `MulByTypeEffectiveness` (7 notes) and `AI_CheckBadMove: IsShieldsDownProtected` are
   AI notes from `web/src/engine/sim/ai/`; they only escaped the control baseline
   because the AI's decisions in those fights took a different branch.
-- `ENDTURN_COILED_UP` / `ENDTURN_GENERIC_BATTLER_TIMERS` are turn-structure notes raised
-  when the ability's fight leaves a volatile timer behind.
 - `MOVEEND_RECOIL ... enraged recoil` and `Eject Pack switch trigger` are the move-end
   and stat-buff sites reachable through the ability's own effect.
 
 | ability | note |
 |---|---|
 | ABILITY_BERSERK_DNA | MOVEEND_RECOIL's enraged recoil (savedDmg / 3, battle_script_commands.c:4492-4505) is not modelled |
-| ABILITY_CHAMPIONS_ENTRANCE | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_COIL_UP | battler 0: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared |
-| ABILITY_CURLIPEDE | battler 0: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared |
-| ABILITY_CUTTHROAT | battler 0: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared |
-| ABILITY_EDGELORD | battler 0: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared |
 | ABILITY_EJECT_PACK_ABILITY | Eject Pack switch trigger (battle_script_commands.c:9877-9893) is not modelled |
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): Ring Target on battler 0 (HOLD_EFFECT_RING_TARGET) is not modelled |
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): STATUS4_FORESIGHT on battler 0 is not modelled |
@@ -294,12 +285,4 @@ Three groups appear here:
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the Ground-vs-Flying grounding override (IsBattlerGrounded(battlerDef)) is not modelled |
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled |
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled |
-| ABILITY_KNOW_YOUR_PLACE | battler 1: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_ON_THE_PROWL | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_OVERWATCH | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_RAPID_RESPONSE | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
 | ABILITY_SHIELDS_DOWN | AI_CheckBadMove: IsShieldsDownProtected(battlerAtk) is not modelled (Minior form-state is not tracked); treated as not protected |
-| ABILITY_SHOWDOWN_MODE | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_SIDEWINDER | battler 0: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared |
-| ABILITY_TANGLED_TAILS | battler 1: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |
-| ABILITY_VIOLENT_RUSH | battler 0: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented |

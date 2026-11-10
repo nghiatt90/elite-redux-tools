@@ -155,9 +155,12 @@
 //   ENDTURN_GHASTLY_ECHO    Ported (:2813-2816) -- ghastlyEchoTimer (written by
 //                           turn.ts when Ghastly Echo's switch-in sets the status)
 //                           counts down and clears STATUS4_GHASTLY_ECHO at 0.
-//   ENDTURN_COILED_UP       Gapped -- STATUS4_COILED and STATUS4_CUTTHROAT are
-//                           both read for real by turnOrder.ts (priority).
-//                           Gapped whenever either bit is set.
+//   ENDTURN_COILED_UP       Ported (:2818-2829) -- clears STATUS4_COILED when
+//                           the battler's last move was a Strong Jaw (bite)
+//                           move and Sidewinder's ability state is 0; otherwise
+//                           resets Sidewinder's state to 0. Clears
+//                           STATUS4_CUTTHROAT when the last move is a Keen Edge
+//                           (slice) move.
 //   ENDTURN_TAUNT           Ported (:2831-2838) -- decrements tauntTimer until 0.
 //   ENDTURN_YAWN            Ported (:2839-2854) -- drowsiness countdown and
 //                           sleep on 0 turns remaining if CanSleep is true.
@@ -187,10 +190,12 @@
 //                           BattleScript_DisciplineLockEnds only prints.
 //   ENDTURN_PLASMA_FISTS    Ported (:2956-2959) -- clears STATUS4_PLASMA_FISTS; the
 //                           reader is calculate.ts's attackerPlasmaFists.
-//   ENDTURN_GENERIC_BATTLER_TIMERS Gapped (subset ported) -- fear (STATUS4_FEAR /
-//                           volatiles.fear) cleared when !started.fear (:2961-2964);
-//                           trepidation timer decremented. Other volatile timers
-//                           remain gapped.
+//   ENDTURN_GENERIC_BATTLER_TIMERS Ported (:2960-2979) -- fear (STATUS4_FEAR /
+//                           volatiles.fear) cleared when !started.fear; the five
+//                           one-turn volatiles (rapidResponse, readiedAction,
+//                           showdownMode, violentRush, onTheProwl) cleared when
+//                           not started this turn; dazed/trepidation/drenched
+//                           timers decremented when not started this turn.
 //   ENDTURN_BATTLER_COUNT   The ladder's own terminal case (:2981-2985) --
 //                           not a residual effect; ported as the loop's own
 //                           per-battler advance, see runEndTurnEffects below.
@@ -206,7 +211,7 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
-import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected } from './statusEffects'
+import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected, isKeenEdgeMove } from './statusEffects'
 import { isAbilityAliveOnOpposingSide } from './turn'
 import type { StatChangeOutcome } from './turn'
 import {
@@ -2142,11 +2147,24 @@ export function runEndTurnEffects(
     }
 
     // ENDTURN_COILED_UP, :2818-2829.
-    gapIf(
-      hasFlag(battler.statuses4, STATUS4_COILED) || hasFlag(battler.statuses4, STATUS4_CUTTHROAT),
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_COILED_UP (battle_util.c:2818-2829) is not applied -- STATUS4_COILED/STATUS4_CUTTHROAT were not cleared`,
-    )
+    const coiledLastMove = battler.lastMove ? dataContext.move(battler.lastMove) : undefined
+    if (
+      hasFlag(battler.statuses4, STATUS4_COILED) &&
+      Boolean(coiledLastMove?.flags?.biteBased) && // FLAG_STRONG_JAW_BOOST; MOVE_NONE has none
+      getAbilityStateOf(battler, 'ABILITY_SIDEWINDER') === 0
+    ) {
+      battler.statuses4 = clearFlag(battler.statuses4, STATUS4_COILED)
+    } else {
+      // The C's else runs whenever the if does not, including when COILED is clear: it only
+      // spends Sidewinder's state, so a nonzero state shields COILED for exactly one end turn.
+      setAbilityStateOf(battler, 'ABILITY_SIDEWINDER', 0)
+    }
+    if (
+      hasFlag(battler.statuses4, STATUS4_CUTTHROAT) &&
+      isKeenEdgeMove(state, battlerId, battler.lastMove, statusDeps, unmodelled)
+    ) {
+      battler.statuses4 = clearFlag(battler.statuses4, STATUS4_CUTTHROAT)
+    }
 
     // ENDTURN_TAUNT, :2831-2838.
     if (battler.volatiles.tauntTimer > 0) {
@@ -2245,24 +2263,37 @@ export function runEndTurnEffects(
     // ENDTURN_PLASMA_FISTS, :2956-2959 -- clears STATUS4_PLASMA_FISTS (its reader is calculate.ts's attackerPlasmaFists).
     battler.statuses4 = clearFlag(battler.statuses4, STATUS4_PLASMA_FISTS)
 
-    // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979 -- SUBTRACT_VOLATILE_TIMER(trepidation) (:2976)
-    if (battler.volatiles.trepidation > 0 && !battler.volatiles.started.trepidation) {
-      battler.volatiles.trepidation--
-    }
+    // ENDTURN_GENERIC_BATTLER_TIMERS, :2960-2979.
+    // fear (:2961-2964), then CLEAR_ONE_TURN in the C's order (:2966-2970).
     if (!battler.volatiles.started.fear) {
       battler.statuses4 = clearFlag(battler.statuses4, STATUS4_FEAR)
       battler.volatiles.fear = false
     }
-
-    gapIf(
-      battler.volatiles.rapidResponse ||
-        battler.volatiles.showdownMode ||
-        battler.volatiles.violentRush ||
-        battler.volatiles.onTheProwl ||
-        battler.volatiles.dazed !== 0,
-      unmodelled,
-      `battler ${battlerId}: ENDTURN_GENERIC_BATTLER_TIMERS (battle_util.c:2960-2979) is not applied -- one-turn volatile timers were not cleared/decremented`,
-    )
+    if (!battler.volatiles.started.rapidResponse) {
+      battler.volatiles.rapidResponse = false
+    }
+    if (!battler.volatiles.started.readiedAction) {
+      battler.volatiles.readiedAction = false
+    }
+    if (!battler.volatiles.started.showdownMode) {
+      battler.volatiles.showdownMode = false
+    }
+    if (!battler.volatiles.started.violentRush) {
+      battler.volatiles.violentRush = false
+    }
+    if (!battler.volatiles.started.onTheProwl) {
+      battler.volatiles.onTheProwl = false
+    }
+    // SUBTRACT_VOLATILE_TIMER, in the C's order: dazed, trepidation, drenched (:2975-2977).
+    if (battler.volatiles.dazed > 0 && !battler.volatiles.started.dazed) {
+      battler.volatiles.dazed--
+    }
+    if (battler.volatiles.trepidation > 0 && !battler.volatiles.started.trepidation) {
+      battler.volatiles.trepidation--
+    }
+    if (battler.volatiles.drenched > 0 && !battler.volatiles.started.drenched) {
+      battler.volatiles.drenched--
+    }
 
     // battle-over short-circuit (faint-replacement batch). The C does NOT
     // finish this battler's case list first: DoBattlerEndTurnEffects returns
