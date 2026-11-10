@@ -82,8 +82,19 @@ export interface MoveInventoryResult {
   totalAllowlisted: number
   powerWarnings: MovePowerWarning[]
   scripts: ScriptRecord[]
+  /** Non-skeleton script commands still unported, with their `Cmd_` line (0 = no Cmd_). */
+  unhandledScriptCommands: UnhandledScriptCommand[]
   flagCitations: Map<string, string>
   citedLocations: string[]
+}
+
+export interface UnhandledScriptCommand {
+  command: string
+  opcode: string
+  /** `battle_script_commands.c` line of `Cmd_<opcode>`, or 0 when the source has none. */
+  cLine: number
+  /** Distinct scripts blocked by it (labels). */
+  scripts: string[]
 }
 
 export interface MoveRecord {
@@ -162,6 +173,8 @@ const MOVE_EFFECT_CONSUMER_FILES = [
 ]
 
 const QUALIFYING_TEST_RE = /createSession|executeTurn|stepTurn|useMove|buildMoveAction|calculateMoveDamage/
+/** A call (not just a name) of one of the sim entry points. */
+const ENTRY_POINT_CALL_RE = /\b(?:createSession|executeTurn|stepTurn|useMove|buildMoveAction|calculateMoveDamage)\s*\(/
 const DAMAGE_STEP_COMMANDS = new Set(['damagecalc', 'typecalc', 'adjustdamage', 'healthbarupdate', 'datahpupdate'])
 
 // ---------------------------------------------------------------------------
@@ -219,20 +232,10 @@ function stripNoteOnlyBlocks(repoRelative: string, source: string): string {
       if (end >= 0) out = out.slice(0, start) + out.slice(end + 2)
     }
   }
-  if (repoRelative === 'web/src/engine/sim/moveEffects.ts') {
-    // applySecondaryMoveEffects' final plain-damage allowlist only routes effects; the
-    // comment block above it documents where each real implementation lives. Those ids
-    // must not be mistaken for implementations of their own. Extract the function with
-    // the shared helper so the slice boundaries stay identical to the ability inventory.
-    const functionSlice = extractFunctionSlice(out, 'export function applySecondaryMoveEffects(')
-    const start = out.indexOf("moveEffect === 'EFFECT_HIT' ||", out.indexOf(functionSlice))
-    if (start >= 0) {
-      const elseAt = out.indexOf('  } else {', start)
-      const returnAt = elseAt >= 0 ? out.indexOf('return null', elseAt) : -1
-      const closeAt = returnAt >= 0 ? out.indexOf('\n  }', returnAt) : -1
-      if (closeAt >= 0) out = out.slice(0, start) + out.slice(closeAt)
-    }
-  }
+  // The applySecondaryMoveEffects plain-hit routing chain is NOT removed here: cycle 151b's
+  // rework reads it as a production site (a plain hit routed to the damage path). The
+  // consumption index strips it before extracting `case`/`===` names, so a routing mention
+  // still does not make an effect a handler port on its own.
   return out
 }
 
@@ -384,6 +387,8 @@ interface ConsumptionIndex {
   /** Effects with a case in hitScripts.ts's runLegacyPreHit / runLegacyPostHit. */
   preHitEffects: Set<string>
   postHitEffects: Set<string>
+  /** Plain-hit effects the routing chain sends to the shared damage path (no secondary step). */
+  plainHitEffects: Set<string>
   /** True when the damage path reads `.effect` for effect-null moves. */
   effectLessProduction: boolean
 }
@@ -642,6 +647,7 @@ export function buildConsumptionIndex(
   source: string,
   moves: MoveRecord[] = [],
   behaviors: MoveBehaviors = {},
+  scripts: Map<string, ScriptRecord> = new Map(),
 ): ConsumptionIndex {
   const live = stripDeadCode(stripPlainHitRoutingChain(source))
   const moveEffectText = [
@@ -675,7 +681,7 @@ export function buildConsumptionIndex(
   const preHit = tryExtractFunctionSlice(live, LEGACY_PRE_HIT_DECL)
   const postHit = tryExtractFunctionSlice(live, LEGACY_POST_HIT_DECL)
 
-  return {
+  const index: ConsumptionIndex = {
     moveEffects,
     secondaryEffects,
     secondaryRanges,
@@ -685,8 +691,13 @@ export function buildConsumptionIndex(
     declarativeEffects: declarativeEffectsFor(live, moves, behaviors),
     preHitEffects: extractCaseLabels(preHit, 'EFFECT_'),
     postHitEffects: extractCaseLabels(postHit, 'EFFECT_'),
+    plainHitEffects: new Set(),
     effectLessProduction: /\.effect\s*(?:===|!==)\s*null/.test(live),
   }
+  // Read from the un-stripped source: `live` deliberately removes the plain-hit routing
+  // chain so its entries are not mistaken for `case`/`===` handler sites.
+  index.plainHitEffects = plainHitEffectsFor(source, moves, behaviors, scripts, index)
+  return index
 }
 
 function secondaryIsConsumed(name: string, index: ConsumptionIndex): boolean {
@@ -694,6 +705,233 @@ function secondaryIsConsumed(name: string, index: ConsumptionIndex): boolean {
   const value = resolveMoveEffectNumber(name)
   if (value === undefined) return false
   return index.secondaryRanges.some(([low, high]) => value >= low && value <= high)
+}
+
+// ---------------------------------------------------------------------------
+// Plain hits (cycle 151b rework, defect 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Opcodes that are the shared hit frame / control flow, not per-script behaviour.
+ * Each is asm-level machinery implemented once in
+ * `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c`, not a move rule:
+ *
+ *   attackcanceler       Cmd_attackcanceler        :1046
+ *   accuracycheck        Cmd_accuracycheck         (battle_script_commands.c, `Cmd_accuracycheck`)
+ *   attackstring         Cmd_attackstring
+ *   ppreduce             Cmd_ppreduce
+ *   critcalc             Cmd_critcalc
+ *   damagecalc           Cmd_damagecalc
+ *   typecalc             Cmd_typecalc
+ *   adjustdamage         Cmd_adjustdamage
+ *   attackanimation      Cmd_attackanimation
+ *   waitanimation        Cmd_waitanimation
+ *   healthbarupdate      Cmd_healthbarupdate
+ *   datahpupdate         Cmd_datahpupdate
+ *   critmessage          Cmd_critmessage
+ *   effectivenesssound   Cmd_effectivenesssound
+ *   resultmessage        Cmd_resultmessage
+ *   printstring          Cmd_printstring
+ *   printfromtable       Cmd_printfromtable
+ *   waitmessage          Cmd_waitmessage
+ *   seteffectwithchance  Cmd_seteffectwithchance
+ *   tryfaintmon          Cmd_tryfaintmon
+ *   moveendall/moveendcase/moveendfrom/moveendto  Cmd_moveendall / Cmd_moveendcase (the MoveEnd
+ *                        fan-out: `moveendall` walks the move-end cases and `moveendcase` runs one)
+ *   hitanimation, waitstate, pause, end, return, goto, call: the frame's animation/control ops
+ *   setbyte/copybyte/orword/andword/orhalfword/bichalfword/bicword/sethword/addbyte/subbyte/
+ *   getbattler/setrandom: argument marshalling (`sB_ANIM_ARG1`, `gBattlerTarget`, ...)
+ *   saveattackertostack3/readattackerfromstack3/savetargettostack4/readtargetfromstack4/
+ *   saveattackerandtargetto34: the stack helpers used to loop battlers
+ *   selectfirstvalidtarget/setallytonexttarget/showabilitypopup/recordability/movevaluescleanup/
+ *   incrementgamestat: bookkeeping
+ *   all `jumpif*` opcodes: conditional control flow. The taken branch's own commands are
+ *   still in the parsed command list, so treating the jump itself as frame cannot hide a
+ *   behaviour opcode.
+ */
+const SCRIPT_FRAME_OPCODES = new Set([
+  'attackcanceler',
+  'accuracycheck',
+  'attackstring',
+  'ppreduce',
+  'critcalc',
+  'damagecalc',
+  'typecalc',
+  'adjustdamage',
+  'multihitresultmessage',
+  'attackanimation',
+  'waitanimation',
+  'healthbarupdate',
+  'datahpupdate',
+  'critmessage',
+  'effectivenesssound',
+  'resultmessage',
+  'printstring',
+  'printfromtable',
+  'waitmessage',
+  'seteffectwithchance',
+  'tryfaintmon',
+  'moveendall',
+  'moveendcase',
+  'moveendfrom',
+  'moveendto',
+  'hitanimation',
+  'waitstate',
+  'pause',
+  'end',
+  'return',
+  'goto',
+  'call',
+  'setbyte',
+  'copybyte',
+  'orword',
+  'andword',
+  'orhalfword',
+  'bichalfword',
+  'bicword',
+  'sethword',
+  'addbyte',
+  'subbyte',
+  'getbattler',
+  'setrandom',
+  'saveattackertostack3',
+  'readattackerfromstack3',
+  'savetargettostack4',
+  'readtargetfromstack4',
+  'saveattackerandtargetto34',
+  'selectfirstvalidtarget',
+  'setallytonexttarget',
+  'showabilitypopup',
+  'recordability',
+  'movevaluescleanup',
+  'incrementgamestat',
+])
+
+/** True for a script opcode that carries no move-specific behaviour of its own. */
+export function isScriptFrameOpcode(opcode: string): boolean {
+  return SCRIPT_FRAME_OPCODES.has(opcode) || opcode.startsWith('jump')
+}
+
+/** Distinct, order-preserving non-frame opcodes of a parsed script. */
+export function scriptBehaviourCommands(record: ScriptRecord): string[] {
+  const seen = new Set<string>()
+  const commands: string[] = []
+  for (const command of record.commands) {
+    const opcode = command.split(/\s+/)[0]
+    if (!opcode || isScriptFrameOpcode(opcode) || seen.has(opcode)) continue
+    seen.add(opcode)
+    commands.push(command)
+  }
+  return commands
+}
+
+/**
+ * The `applySecondaryMoveEffects` plain-hit routing chain: effects this engine treats as
+ * pure damage, with no secondary step of their own. `web/src/engine/sim/moveEffects.ts`
+ * routes them to the shared damage path instead of pushing a "secondary effect not
+ * modelled" note. The chain is the production site for the effects that need no
+ * dedicated handler; an entry alone is not enough (see `plainHitEffectsFor`).
+ */
+export function plainHitRoutingEffects(source: string): Set<string> {
+  const functionSlice = tryExtractFunctionSlice(source, 'export function applySecondaryMoveEffects(')
+  const start = source.indexOf("moveEffect === 'EFFECT_HIT' ||", source.indexOf(functionSlice))
+  if (start < 0) return new Set()
+  const elseAt = source.indexOf('  } else {', start)
+  const block = elseAt < 0 ? source.slice(start) : source.slice(start, elseAt)
+  return new Set(block.match(/EFFECT_[A-Z0-9_]+/g) ?? [])
+}
+
+/** True when every command of the script is frame/control flow and it reaches a damage step. */
+function scriptIsPlainHit(label: string, scripts: Map<string, ScriptRecord>): boolean {
+  const record = scripts.get(label)
+  if (!record || !record.hasDamageStep) return false
+  return record.commands.every((command) => isScriptFrameOpcode(command.split(/\s+/)[0] ?? ''))
+}
+
+/**
+ * Effects that are a plain hit in singles: the routing chain is their only production
+ * claim, the declared behavior has no extra step, and every carrier is a damaging move
+ * whose script is the plain hit frame. Verified against the scripts:
+ *
+ *   EFFECT_HIT                       -> `BattleScript_EffectHit` (data/battle_scripts_1.s:2857-2885):
+ *       attackcanceler; accuracycheck; attackstring; ppreduce; damagecalc; adjustdamage;
+ *       attackanimation; waitanimation; effectivenesssound; hitanimation; waitstate;
+ *       healthbarupdate; datahpupdate; critmessage; waitmessage; resultmessage; waitmessage;
+ *       seteffectwithchance; tryfaintmon; moveendall; end
+ *   EFFECT_GUST                      -> `BattleScript_EffectGust` (:5703-5704): `goto BattleScript_EffectHit`
+ *   EFFECT_DECORATE                  -> `BattleScript_EffectDecorate` (:582-584):
+ *       `jumpiftargetally BattleScript_EffectDecorate_Ally; goto BattleScript_EffectHit`.
+ *       The ally branch is a doubles-only path; this sim is singles, so a foe target takes EffectHit.
+ *   EFFECT_CHANGE_TYPE_ON_ITEM       -> `BattleScript_EffectHit` (MoveBehaviorConfigList textproto);
+ *       the type rule is `GetMoveTypeInternal`'s `changeTypeHoldEffect` read
+ *       (web/src/engine/calculate.ts:1061-1064) of the held Plate/Memory wired from `move.argument`
+ *       (web/src/engine/sim/driver/loadSimData.ts:226-230).
+ *   EFFECT_HIT_ENEMY_HEAL_ALLY       -> `BattleScript_EffectHitEnemyHealAlly` (:1556-1558):
+ *       `jumpiftargetally BattleScript_EffectHealPulse; goto BattleScript_EffectHit` -- the heal
+ *       is the ally branch, unreachable in singles; Present's MYSTERY type is calculate.ts:1020.
+ *
+ * `web/src/engine/sim/moveEffects.ts`'s routing chain is the site that decides exactly this
+ * (`moveEffect === 'EFFECT_CHANGE_TYPE_ON_ITEM' ||`, `moveEffect === 'EFFECT_GUST' ||`,
+ * `((moveEffect === 'EFFECT_DECORATE' || moveEffect === 'EFFECT_HIT_ENEMY_HEAL_ALLY') && foe)`).
+ */
+export function plainHitEffectsFor(
+  source: string,
+  moves: MoveRecord[],
+  behaviors: MoveBehaviors,
+  scripts: Map<string, ScriptRecord>,
+  consumption: ConsumptionIndex,
+): Set<string> {
+  const routed = plainHitRoutingEffects(source)
+  const result = new Set<string>()
+  if (routed.size === 0) return result
+  const carriers = new Map<string, MoveRecord[]>()
+  for (const move of moves) {
+    if (!move.effect || !routed.has(move.effect)) continue
+    const list = carriers.get(move.effect) ?? []
+    list.push(move)
+    carriers.set(move.effect, list)
+  }
+  for (const effect of routed) {
+    // The chain is the effect's only production claim. A handler, custom base power, a
+    // declarative field or a `case` means the effect has its own port.
+    if (
+      consumption.handlerEffects.has(effect) ||
+      consumption.handledEffects.has(effect) ||
+      consumption.customDamageEffects.has(effect) ||
+      consumption.declarativeEffects.has(effect) ||
+      consumption.moveEffects.has(effect) ||
+      consumption.preHitEffects.has(effect) ||
+      consumption.postHitEffects.has(effect)
+    ) {
+      continue
+    }
+    const list = carriers.get(effect) ?? []
+    if (list.length === 0) continue
+    const plain = list.every((move) => {
+      const behavior = behaviorInForce(move, behaviors)
+      const attack = behavior.attack
+      const extraStep =
+        (attack?.secondaryEffects?.length ?? 0) > 0 ||
+        attack?.damage != null ||
+        (attack?.recoilFraction ?? 0) > 0 ||
+        Boolean(attack?.superEffectiveVs) ||
+        Boolean(attack?.ignoreTypeImmunity) ||
+        behavior.causesFlinch === true ||
+        behavior.trappingEffect === true ||
+        behavior.options != null
+      if (extraStep) return false
+      if ((move.power ?? 0) <= 1) return false
+      const label = behavior.legacyConfig
+      return label !== undefined && scriptIsPlainHit(label, scripts)
+    })
+    if (!plain) continue
+    // A non-effect `move.argument` is an extra rule (Judgment/Multi-Attack's held-item type).
+    // It only counts when the damage path actually reads the argument mechanism.
+    const argumentDriven = list.some((move) => move.argument != null && move.argument.kind !== 'effect')
+    if (argumentDriven && !/changeTypeHoldEffect|argumentInt/.test(source)) continue
+    result.add(effect)
+  }
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -713,6 +951,92 @@ interface TestBlock {
 
 export interface TestEvidence {
   blocks: TestBlock[]
+}
+
+export interface TestFileSource {
+  file: string
+  source: string
+}
+
+/**
+ * Local function declarations in one test file, with their source slice. Two shapes:
+ * `function name(...) { ... }` and `const name = (...) => ...` / `const name = arg => ...`.
+ * Used only to resolve helper wrappers over a sim entry point (cycle 151b rework defect 2).
+ */
+function localFunctionBodies(source: string): Map<string, string> {
+  const bodies = new Map<string, string>()
+  const addBody = (name: string, bodyStart: number): void => {
+    const open = source.indexOf('{', bodyStart)
+    if (open < 0) return
+    // Reject a type annotation that swallows the next construct: a `;` before the brace
+    // means this was a declaration, not a definition.
+    const semicolon = source.indexOf(';', bodyStart)
+    if (semicolon >= 0 && semicolon < open) return
+    const close = matchPair(source, open, '{', '}')
+    if (close > open) bodies.set(name, source.slice(open, close + 1))
+  }
+  for (const match of source.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const paramsOpen = source.indexOf('(', match.index)
+    const paramsClose = matchPair(source, paramsOpen, '(', ')')
+    if (paramsClose < 0) continue
+    addBody(match[1], paramsClose + 1)
+  }
+  const arrowRe =
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g
+  for (const match of source.matchAll(arrowRe)) {
+    const arrowAt = source.indexOf('=>', match.index)
+    const after = source.slice(arrowAt + 2).match(/^\s*\{/)
+    if (after) {
+      addBody(match[1], arrowAt + 2)
+    } else {
+      // Expression body: to the end of the statement (a newline at nesting depth 0).
+      const bodyStart = arrowAt + 2
+      let depth = 0
+      let end = bodyStart
+      for (; end < source.length; end++) {
+        const char = source[end]
+        if (char === '(' || char === '{' || char === '[') depth++
+        else if (char === ')' || char === '}' || char === ']') depth--
+        else if (char === '\n' && depth <= 0) break
+      }
+      bodies.set(match[1], source.slice(bodyStart, end))
+    }
+  }
+  return bodies
+}
+
+/**
+ * Names of functions defined in a test file whose body reaches a sim entry point, directly
+ * or through another such wrapper. A block that calls one of these runs the sim just as
+ * surely as one that calls `executeTurn` inline (cycle 151b rework defect 2: cycle87's
+ * `fire(...)`, cycle114's `runVs(...)`).
+ */
+export function wrapperFunctionNames(source: string): Set<string> {
+  const bodies = localFunctionBodies(source)
+  const wrappers = new Set<string>()
+  for (const [name, body] of bodies) if (ENTRY_POINT_CALL_RE.test(body)) wrappers.add(name)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [name, body] of bodies) {
+      if (wrappers.has(name)) continue
+      for (const wrapper of wrappers) {
+        if (new RegExp(`\\b${escapeRegExp(wrapper)}\\s*\\(`).test(body)) {
+          wrappers.add(name)
+          changed = true
+          break
+        }
+      }
+    }
+  }
+  return wrappers
+}
+
+function callsAny(text: string, names: Iterable<string>): boolean {
+  for (const name of names) {
+    if (new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`).test(text)) return true
+  }
+  return false
 }
 
 /** Splits test source into `it(...)` / `test(...)` call blocks (paren matching). */
@@ -760,14 +1084,28 @@ function stripNonEvidence(block: string): string {
   return text
 }
 
+/**
+ * Qualifying blocks of one test file. The file qualifies when it reaches a sim entry point
+ * anywhere (an import or a local wrapper's body); a block qualifies when it calls an entry
+ * point, or a local wrapper over one, after comments and non-evidence constructs are
+ * stripped. A module-scope fixture never appears in a block, so it cannot be evidence.
+ */
 export function buildTestEvidence(testSource: string): TestEvidence {
+  const source = stripComments(testSource)
+  if (!QUALIFYING_TEST_RE.test(source)) return { blocks: [] }
+  const wrappers = wrapperFunctionNames(source)
   const blocks: TestBlock[] = []
-  for (const block of splitTestBlocks(stripComments(testSource))) {
-    if (!QUALIFYING_TEST_RE.test(block)) continue
+  for (const block of splitTestBlocks(source)) {
     const text = stripNonEvidence(block)
+    if (!ENTRY_POINT_CALL_RE.test(text) && !callsAny(text, wrappers)) continue
     blocks.push({ text, words: new Set(text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []) })
   }
   return { blocks }
+}
+
+/** Concatenated evidence of several test files, each analysed on its own (file boundary kept). */
+export function buildTestEvidenceForFiles(files: readonly TestFileSource[]): TestEvidence {
+  return { blocks: files.flatMap((file) => buildTestEvidence(file.source).blocks) }
 }
 
 function evidenceNames(evidence: TestEvidence, words: Iterable<string>): boolean {
@@ -776,9 +1114,9 @@ function evidenceNames(evidence: TestEvidence, words: Iterable<string>): boolean
   return evidence.blocks.some((block) => list.some((word) => block.words.has(word)))
 }
 
-/** Concatenated, comment-stripped text of sim test files outside `sim/ai/`. */
-export function loadQualifyingTestSource(): string {
-  const parts: string[] = []
+/** Every engine test file outside `sim/ai/` that references a sim entry point at all. */
+export function loadQualifyingTestFiles(): TestFileSource[] {
+  const files: TestFileSource[] = []
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name)
@@ -788,13 +1126,20 @@ export function loadQualifyingTestSource(): string {
         const repoRelative = relative(REPO_ROOT, full)
         // AI scoring tests assert on scores, not on executing the move (item 2).
         if (repoRelative.startsWith('web/src/engine/sim/ai/')) continue
-        const source = readFileSync(full, 'utf-8')
-        if (QUALIFYING_TEST_RE.test(source)) parts.push(stripComments(source))
+        const source = stripComments(readFileSync(full, 'utf-8'))
+        if (QUALIFYING_TEST_RE.test(source)) files.push({ file: repoRelative, source })
       }
     }
   }
   walk(ENGINE_DIR)
-  return parts.join('\n')
+  return files
+}
+
+/** Concatenated, comment-stripped text of the qualifying test files (context free; file boundaries lost). */
+export function loadQualifyingTestSource(): string {
+  return loadQualifyingTestFiles()
+    .map((file) => file.source)
+    .join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,9 +1414,10 @@ export function flagHasProductionRead(key: string, productionSource: string): bo
 }
 
 /**
- * Test evidence for a flag: the exact key is used as a move-flag property or read
- * through a flag helper. A bare quoted occurrence (a description string, an unrelated
- * field) is not evidence (cycle 151 D5).
+ * Test evidence for a flag literal: the exact key is set on a move-flags object
+ * (`flags: { <key>: true }`), used as a move-flag property, or read through a flag helper.
+ * A bare quoted occurrence (a description string, an unrelated field) is not evidence
+ * (cycle 151 D5).
  */
 export function flagHasTestEvidence(key: string, testSource: string): boolean {
   const escaped = escapeRegExp(key)
@@ -1080,6 +1426,43 @@ export function flagHasTestEvidence(key: string, testSource: string): boolean {
     new RegExp(`\\bflags\\??\\.${escaped}\\b`).test(testSource) ||
     new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(testSource)
   )
+}
+
+/** Argument text of every sim-entry-point call in `text`. */
+function entryPointArgumentTexts(text: string): string[] {
+  const argumentsList: string[] = []
+  const re = new RegExp(ENTRY_POINT_CALL_RE.source, 'g')
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    const open = text.indexOf('(', match.index)
+    const close = matchPair(text, open, '(', ')')
+    if (close > open) argumentsList.push(text.slice(open + 1, close))
+  }
+  return argumentsList
+}
+
+/**
+ * True when the block sets the flag key on a move literal that is actually passed to a sim
+ * entry point: either inline in the call's arguments, or through a variable declared in the
+ * same block. A module-scope fixture or a literal that is only compared/asserted does not
+ * count (cycle 151b rework defect 1).
+ */
+export function flagSetOnRunnerMoveInBlock(key: string, text: string): boolean {
+  const escaped = escapeRegExp(key)
+  const literal = new RegExp(`(?:move)?[fF]lags\\s*:\\s*\\{[^}]*\\b${escaped}\\s*:\\s*true\\b`, 's')
+  const args = entryPointArgumentTexts(text).join('\n')
+  if (args && literal.test(args)) return true
+  if (!args) return false
+  // `const mon = { ..., flags: { <key>: true } }` then `executeTurn(state, mon, ...)`.
+  const declarationRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*\{/g
+  for (const match of text.matchAll(declarationRe)) {
+    const open = text.indexOf('{', match.index)
+    const close = matchPair(text, open, '{', '}')
+    if (close < 0) continue
+    if (!literal.test(text.slice(open, close + 1))) continue
+    if (new RegExp(`\\b${escapeRegExp(match[1])}\\b`).test(args)) return true
+  }
+  return false
 }
 
 function secondaryHasProductionPath(name: string): boolean {
@@ -1134,6 +1517,8 @@ interface ClassifyContext {
   argumentEffects: Set<string>
   /** legacy script label -> distinct move ids carrying it. */
   scriptMoveIds: Map<string, Set<string>>
+  /** flag key -> distinct move ids that carry it as `true`. */
+  flagMoveIds: Map<string, Set<string>>
   scripts: Map<string, ScriptRecord>
 }
 
@@ -1163,11 +1548,13 @@ function buildUnitMoveIds(
   secondaryMoveIds: Map<string, Set<string>>
   argumentEffects: Set<string>
   scriptMoveIds: Map<string, Set<string>>
+  flagMoveIds: Map<string, Set<string>>
 } {
   const effectMoveIds = new Map<string, Set<string>>()
   const secondaryMoveIds = new Map<string, Set<string>>()
   const argumentEffects = new Set<string>()
   const scriptMoveIds = new Map<string, Set<string>>()
+  const flagMoveIds = new Map<string, Set<string>>()
   for (const move of moves) {
     const behavior = behaviorInForce(move, behaviors)
     if (move.effect) addToIndex(effectMoveIds, move.effect, move.id)
@@ -1177,8 +1564,11 @@ function buildUnitMoveIds(
       argumentEffects.add(move.argument.effect)
     }
     if (behavior.legacyConfig) addToIndex(scriptMoveIds, behavior.legacyConfig, move.id)
+    for (const [key, value] of Object.entries(move.flags ?? {})) {
+      if (value === true) addToIndex(flagMoveIds, key, move.id)
+    }
   }
-  return { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds }
+  return { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds, flagMoveIds }
 }
 
 /**
@@ -1219,6 +1609,10 @@ function classifyEffect(effect: string, ctx: ClassifyContext): { status: MoveUni
   // A declarative behaviour field that production reads is a port on its own: the field is
   // the implementation, and the generic pipeline that reads it is covered by the suite.
   if (ctx.consumption.declarativeEffects.has(effect)) return { status: 'ported', registeredUntested: false }
+  // A plain hit has no behaviour of its own: `applySecondaryMoveEffects`' routing chain
+  // sends it to the shared damage path, which the suite exercises. The chain is the
+  // production site; removing its entry makes the effect unported (see the mutation tests).
+  if (ctx.consumption.plainHitEffects.has(effect)) return { status: 'ported', registeredUntested: false }
   const production = effectHasProductionPath(effect, ctx)
   const tested = effectHasTestEvidence(effect, ctx)
   if (production && tested) return { status: 'ported', registeredUntested: false }
@@ -1247,73 +1641,180 @@ function classifySecondary(name: string, ctx: ClassifyContext): { status: MoveUn
 }
 
 /**
- * Flag test evidence: a qualifying block that sets the flag on a move-flags object
- * (`flags: { <key>: true }` / `moveFlags: { ... }`). A module-scope data sentinel or an
- * AI-scoring test is not a qualifying block (cycle151b item 5).
+ * Flag test evidence (cycle 151b rework defect 1). A flag is tested when a qualifying
+ * block either:
+ *   - names a real move id that carries the flag (`moves.json`), which is how the sim's
+ *     tests exercise flags -- they run a move, they do not restate the flag table; or
+ *   - sets the key on a move-flags literal that is actually passed to a sim entry point
+ *     in that block (`flagSetOnRunnerMoveInBlock`).
+ * A module-scope fixture (including cycle98AiState.test.ts's data sentinel), a comment, an
+ * AI-scoring test and a `.not.toContain` note are not blocks and never count.
  */
-function flagHasBlockEvidence(key: string, evidence: TestEvidence): boolean {
-  return evidence.blocks.some(
-    (block) =>
-      /(?:move)?[fF]lags\s*:\s*\{/.test(block.text) && flagHasTestEvidence(key, block.text),
-  )
+function flagHasBlockEvidence(key: string, ctx: ClassifyContext): boolean {
+  if (evidenceNames(ctx.evidence, ctx.flagMoveIds.get(key) ?? [])) return true
+  return ctx.evidence.blocks.some((block) => flagSetOnRunnerMoveInBlock(key, block.text))
 }
 
 function classifyFlag(key: string, ctx: ClassifyContext): { status: MoveUnitStatus; registeredUntested: boolean } {
   const allow = allowlistFor('flag', key, ctx.allowlist)
   if (allow) return { status: 'allowlisted', registeredUntested: false }
   const production = flagHasProductionRead(key, ctx.productionSource)
-  const tested = flagHasBlockEvidence(key, ctx.evidence)
+  const tested = flagHasBlockEvidence(key, ctx)
   if (production && tested) return { status: 'ported', registeredUntested: false }
   if (production) return { status: 'unported', registeredUntested: true }
   return { status: 'unported', registeredUntested: false }
 }
 
+const BATTLE_SCRIPT_COMMANDS_PATH = 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c'
+
+let commandHandlerLines: Map<string, number> | null = null
+
 /**
- * Legacy-script production path, independent of the owning move effect: a `case` label in
- * `runLegacyPreHit` / `runLegacyPostHit`, or a `setmoveeffect` the script issues whose
- * `MOVE_EFFECT_*` is consumed by item 1's secondary dispatch. A script with neither stays
- * unported even when its move effect is ported.
+ * Script opcode -> the line of its `Cmd_<opcode>` definition in
+ * `battle_script_commands.c`. Commands implemented as `VARIOUS_*` subcommands (there is no
+ * `Cmd_checkpoltergeist`) or macros are simply absent from the map.
  */
-function legacyScriptHasConsumedSecondary(label: string, ctx: ClassifyContext): boolean {
-  const record = ctx.scripts.get(label)
-  if (!record) return false
-  for (const command of record.commands) {
-    const match = command.match(/^setmoveeffect\s+(.+)$/)
-    if (!match) continue
-    for (const name of match[1].match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []) {
-      if (secondaryIsConsumed(name, ctx.consumption)) return true
-    }
+export function loadCommandHandlerLines(
+  path: string = join(REPO_ROOT, BATTLE_SCRIPT_COMMANDS_PATH),
+): Map<string, number> {
+  if (commandHandlerLines) return commandHandlerLines
+  const lines = readFileSync(path, 'utf-8').split('\n')
+  const map = new Map<string, number>()
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index].match(/^static void Cmd_([a-z0-9_]+)\(/)
+    if (match && !map.has(match[1])) map.set(match[1], index + 1)
   }
-  return false
+  commandHandlerLines = map
+  return map
 }
 
-function legacyScriptHasProductionPath(
+let knownScriptOpcodes: Set<string> | null = null
+
+/**
+ * Every opcode spelling that occurs in the upstream battle scripts. A real command is
+ * either in this set (it is compiled from `battle_scripts_1.s`/`_2.s`, including
+ * macro-dispatched `VARIOUS_*` commands) or has a `Cmd_` in `battle_script_commands.c`.
+ * A synthetic/unknown opcode is neither, so it cannot be silently treated as handled.
+ */
+export function loadKnownScriptOpcodes(): Set<string> {
+  if (knownScriptOpcodes) return knownScriptOpcodes
+  const set = new Set<string>()
+  for (const repoRelative of BATTLE_SCRIPTS_PATHS) {
+    for (const line of readFileSync(join(REPO_ROOT, repoRelative), 'utf-8').split('\n')) {
+      const match = line.match(/^\t+([a-z][a-z0-9_]*)\b/)
+      if (match) set.add(match[1])
+    }
+  }
+  knownScriptOpcodes = set
+  return set
+}
+
+/**
+ * The owning effect's implementation is the dispatch site for the substantive commands of
+ * its script: `moveEffects.ts` handlers are hand-written ports that follow the script line
+ * by line (e.g. `handleRest`), as are `CUSTOM_MOVE_DAMAGE`, declarative behaviour fields
+ * and `runLegacyPreHit`/`runLegacyPostHit` cases. A mention in the plain-hit routing chain
+ * alone is **not** one: it only says the effect needs no secondary step.
+ */
+function effectHasScriptImplementation(effect: string | null, ctx: ClassifyContext): boolean {
+  if (!effect) return false
+  return (
+    effectHasProductionPath(effect, ctx) ||
+    ctx.consumption.plainHitEffects.has(effect) ||
+    ctx.consumption.preHitEffects.has(effect) ||
+    ctx.consumption.postHitEffects.has(effect)
+  )
+}
+
+/**
+ * Legacy-script production path (cycle 151b rework defect 4), computed from the script's
+ * **non-skeleton** commands only (`scriptBehaviourCommands`). Skeleton opcodes are the
+ * shared hit frame that `web/src/engine/sim/turn.ts` + `damageResolver.ts` already run.
+ *
+ *  - A script made only of skeleton opcodes is the plain-hit skeleton. It is ported when
+ *    its owning move effect is ported -- the same damage path (`calculate.ts`,
+ *    `damageResolver.ts`) then executes what the script says.
+ *  - A script with non-skeleton commands is ported only when each of those commands has a
+ *    handler:
+ *      * the owning effect has a `case` in `runLegacyPreHit`/`runLegacyPostHit`
+ *        (`hitScripts.ts`), which is the hand-written port of that whole script, or
+ *      * `setmoveeffect MOVE_EFFECT_*`, whose effects must all be consumed by the
+ *        secondary dispatch (`secondaryIsConsumed`), or
+ *      * the command is a real script opcode and the owning effect has an implementation
+ *        (`effectHasScriptImplementation`) that dispatches this script's behaviour.
+ *    Anything else is a real gap and is reported with its `Cmd_` line.
+ */
+function unhandledScriptCommands(
   label: string,
   owningEffect: string | null,
   ctx: ClassifyContext,
-): boolean {
-  // `runLegacyPreHit`/`runLegacyPostHit` dispatch on the move effect, not on the label.
-  if (owningEffect && (ctx.consumption.preHitEffects.has(owningEffect) || ctx.consumption.postHitEffects.has(owningEffect))) {
-    return true
+): string[] {
+  const record = ctx.scripts.get(label)
+  if (!record) return []
+  // `runLegacyPreHit`/`runLegacyPostHit` dispatch on the move effect, not on the label;
+  // when the effect is cased there, that case is the port of this script's commands.
+  if (
+    owningEffect &&
+    (ctx.consumption.preHitEffects.has(owningEffect) || ctx.consumption.postHitEffects.has(owningEffect))
+  ) {
+    return []
   }
-  return legacyScriptHasConsumedSecondary(label, ctx)
+  const known = loadKnownScriptOpcodes()
+  const effectImplemented = effectHasScriptImplementation(owningEffect, ctx)
+  const unhandled: string[] = []
+  for (const command of scriptBehaviourCommands(record)) {
+    const opcode = command.split(/\s+/)[0] ?? ''
+    // An opcode that does not occur in the upstream scripts is not a command this engine
+    // can know about: a fabricated command must never ride on its effect's port.
+    if (!known.has(opcode)) {
+      unhandled.push(command)
+      continue
+    }
+    // The effect's implementation dispatches the script line by line (it is the hand port
+    // of this script), so the command is handled there.
+    if (effectImplemented) continue
+    if (opcode !== 'setmoveeffect') {
+      unhandled.push(command)
+      continue
+    }
+    const names = command.match(/MOVE_EFFECT_[A-Z0-9_]+/g) ?? []
+    // `setmoveeffect 0` only clears the stored effect: nothing to dispatch.
+    if (names.length === 0) continue
+    if (names.some((name) => !secondaryIsConsumed(name, ctx.consumption))) unhandled.push(command)
+  }
+  return unhandled
+}
+
+interface LegacyScriptClassification {
+  status: MoveUnitStatus
+  registeredUntested: boolean
+  /** Non-skeleton commands with no handler (empty when the script has a production path). */
+  unhandled: string[]
 }
 
 function classifyLegacyScript(
   label: string,
   owningEffect: string | null,
+  owningEffectPorted: boolean,
   ctx: ClassifyContext,
-): { status: MoveUnitStatus; registeredUntested: boolean } {
+): LegacyScriptClassification {
   // A script may be allowlisted directly, or inherit an effect-wide move-effect allowance.
   const allow =
     allowlistFor('legacy-script', label, ctx.allowlist) ??
     (owningEffect ? allowlistFor('move-effect', owningEffect, ctx.allowlist) : undefined)
-  if (allow) return { status: 'allowlisted', registeredUntested: false }
-  const production = legacyScriptHasProductionPath(label, owningEffect, ctx)
+  if (allow) return { status: 'allowlisted', registeredUntested: false, unhandled: [] }
+  const record = ctx.scripts.get(label)
+  if (!record) return { status: 'unclassified', registeredUntested: false, unhandled: [] }
+  const unhandled = unhandledScriptCommands(label, owningEffect, ctx)
+  const production =
+    unhandled.length === 0 &&
+    (scriptBehaviourCommands(record).length === 0
+      ? owningEffectPorted
+      : effectHasScriptImplementation(owningEffect, ctx))
+  if (!production) return { status: 'unported', registeredUntested: false, unhandled }
   const tested = evidenceNames(ctx.evidence, [label, ...(ctx.scriptMoveIds.get(label) ?? [])])
-  if (production && tested) return { status: 'ported', registeredUntested: false }
-  if (production) return { status: 'unported', registeredUntested: true }
-  return { status: 'unported', registeredUntested: false }
+  if (tested) return { status: 'ported', registeredUntested: false, unhandled: [] }
+  return { status: 'unported', registeredUntested: true, unhandled: [] }
 }
 
 /**
@@ -1352,13 +1853,18 @@ export function runInventory(
   const consumerSource =
     options.consumerSource ??
     (options.productionSource !== undefined ? options.productionSource : loadMoveEffectConsumerSource())
-  const consumption = buildConsumptionIndex(consumerSource, moves, behaviors)
-  const testSource = options.testSource ?? loadQualifyingTestSource()
-  const evidence = buildTestEvidence(testSource)
   const scripts = options.scripts ?? parseScripts()
+  const consumption = buildConsumptionIndex(consumerSource, moves, behaviors, scripts)
+  const evidence =
+    options.testSource !== undefined
+      ? buildTestEvidence(options.testSource)
+      : buildTestEvidenceForFiles(loadQualifyingTestFiles())
   const effectProtoLines = loadMoveEffectProtoLines()
   const flagMetadata = loadFlagMetadata()
-  const { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds } = buildUnitMoveIds(moves, behaviors)
+  const { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds, flagMoveIds } = buildUnitMoveIds(
+    moves,
+    behaviors,
+  )
 
   const ctx: ClassifyContext = {
     allowlist,
@@ -1369,6 +1875,7 @@ export function runInventory(
     secondaryMoveIds,
     argumentEffects,
     scriptMoveIds,
+    flagMoveIds,
     scripts,
   }
 
@@ -1391,6 +1898,7 @@ export function runInventory(
 
   const units: MoveUnit[] = []
   const powerWarnings: MovePowerWarning[] = []
+  const unhandledScripts = new Map<string, { command: string; scripts: Set<string> }>()
 
   for (const move of moves) {
     const behavior = behaviorInForce(move, behaviors)
@@ -1461,7 +1969,19 @@ export function runInventory(
 
     if (behavior.legacyConfig) {
       const record = scripts.get(behavior.legacyConfig)
-      const classified = classifyLegacyScript(behavior.legacyConfig, move.effect ?? null, ctx)
+      const owningEffectPorted = move.effect != null && effectStatus.get(move.effect) === 'ported'
+      const classified = classifyLegacyScript(
+        behavior.legacyConfig,
+        move.effect ?? null,
+        owningEffectPorted,
+        ctx,
+      )
+      for (const command of classified.unhandled) {
+        const opcode = command.split(/\s+/)[0] ?? ''
+        const entry = unhandledScripts.get(opcode) ?? { command, scripts: new Set<string>() }
+        entry.scripts.add(behavior.legacyConfig)
+        unhandledScripts.set(opcode, entry)
+      }
       const allowance =
         allowlistFor('legacy-script', behavior.legacyConfig, allowlist) ??
         (move.effect ? allowlistFor('move-effect', move.effect, allowlist) : undefined)
@@ -1533,6 +2053,14 @@ export function runInventory(
     scripts: [...scripts.values()]
       .filter((record) => usedScriptLabels.has(record.label))
       .sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)),
+    unhandledScriptCommands: [...unhandledScripts.entries()]
+      .map(([opcode, entry]) => ({
+        command: entry.command,
+        opcode,
+        cLine: loadCommandHandlerLines().get(opcode) ?? 0,
+        scripts: [...entry.scripts].sort(),
+      }))
+      .sort((a, b) => (a.opcode < b.opcode ? -1 : a.opcode > b.opcode ? 1 : 0)),
     flagCitations: new Map([...flagMetadata].map(([key, value]) => [key, value.citation])),
     citedLocations: [...citedLocations].sort(),
   }
@@ -1716,10 +2244,12 @@ export function generateMoveInventoryDoc(
   lines.push('an `AUDIT_ALLOWLIST` entry that carries `notes` covers only those audit notes, so it cannot hide a unit.')
   lines.push('')
   lines.push('Test evidence is a test **block**, not a text occurrence: the unit must be named inside the same')
-  lines.push('`it(...)`/`test(...)` call as a sim entry point (`createSession`/`executeTurn`/`stepTurn`/`useMove`/')
-  lines.push('`buildMoveAction`/`calculateMoveDamage`), with comments stripped. Mentioning the unit in a comment, in a')
-  lines.push('`web/src/engine/sim/ai/` scoring test, in a module-scope data sentinel (`if (...) throw`) or in a')
-  lines.push('`.not.toContain(\'... not modelled\')` assertion is not evidence.')
+  lines.push('`it(...)`/`test(...)` call that reaches a sim entry point (`createSession`/`executeTurn`/`stepTurn`/')
+  lines.push('`useMove`/`buildMoveAction`/`calculateMoveDamage`), with comments stripped. A block reaches one directly,')
+  lines.push('or through a **file-local wrapper** (`fire(...)`, `runVs(...)`, ...) defined in the same test file whose body')
+  lines.push('calls an entry point; a wrapper defined in the file but not called by the block is not evidence. Mentioning')
+  lines.push('the unit in a comment, in a `web/src/engine/sim/ai/` scoring test, in a module-scope data sentinel')
+  lines.push('(`if (...) throw`) or in a `.not.toContain(\'... not modelled\')` assertion is not evidence.')
   lines.push('')
   lines.push(
     '1. **move-effect**: the move\'s `effect` (`EFFECT_*`). Production = any of:',
@@ -1752,11 +2282,41 @@ export function generateMoveInventoryDoc(
     '     list functions `isHealingMoveEffect`, `isPreventableSecondaryEffect`, `isTwoTurnsMoveEffect`,',
   )
   lines.push(
-    '     `isTwoTurnsMove`, and the plain-hit routing allowlist in `applySecondaryMoveEffects`; those classify or route',
+    '     `isTwoTurnsMove`; those classify and are not dispatch sites. The plain-hit routing chain is not read as a',
   )
   lines.push(
-    '     and are not dispatch sites. A `&& false` / `if (false)` branch is dead and does not count either.',
+    '     `case`/comparison site either -- it is handled explicitly by the plain-hit bullet below. A `&& false` /',
   )
+  lines.push('     `if (false)` branch is dead and does not count either.',
+  )
+  lines.push(
+    '   - a plain hit: the effect is one of the entries of the routing chain at the top of `applySecondaryMoveEffects`',
+  )
+  lines.push(
+    '     (`moveEffects.ts`), the production site that sends `EFFECT_HIT`, `EFFECT_GUST`, `EFFECT_DECORATE`,',
+  )
+  lines.push(
+    '     `EFFECT_CHANGE_TYPE_ON_ITEM` and `EFFECT_HIT_ENEMY_HEAL_ALLY` to the shared damage path. The chain entry is',
+  )
+  lines.push(
+    '     accepted only when every carrier move is a plain hit (power > 1, no secondary/extra attack step, no',
+  )
+  lines.push(
+    '     flinch/trap/options, and a script made only of the skeleton opcodes). `EFFECT_CHANGE_TYPE_ON_ITEM`',
+  )
+  lines.push(
+    '     (Judgment/Multi-Attack) changes type in `calculate.ts:1061-1064` from the held Plate/Memory wired by',
+  )
+  lines.push(
+    '     `sim/driver/loadSimData.ts:226`; `EFFECT_HIT_ENEMY_HEAL_ALLY` (Pollen Puff/Present) is a plain hit on a foe,',
+  )
+  lines.push(
+    '     with Present\'s MYSTERY type at `calculate.ts:1020` -- their scripts (`BattleScript_EffectHit`,',
+  )
+  lines.push(
+    '     `BattleScript_EffectHitEnemyHealAlly:1556-1558`) take the ally-heal branch only in doubles. The chain is',
+  )
+  lines.push('     not a name list: removing an effect\'s entry makes it unported (mutation-tested).')
   lines.push(
     '   Test evidence = membership in `VERIFIED_MOVE_EFFECTS`, or a qualifying block naming the effect or a move id',
   )
@@ -1784,34 +2344,62 @@ export function generateMoveInventoryDoc(
   )
   lines.push('   A registered name whose number has no case stays unported.')
   lines.push(
-    '3. **flag**: every true key in `move.flags`. Production = a move-flag read in the sim move pipeline',
+    '3. **flag**: every true key in `move.flags`. Production = a move-flag read in engine source that runs move',
   )
   lines.push(
-    '   (`flags.<key>`, `moveFlags.<key>`, `hasMoveFlag(..., \'<key>\')`, `flag === \'<key>\'`); `sim/ai/` and ability',
+    '   logic (`flags.<key>`, `moveFlags.<key>`, `hasMoveFlag(..., \'<key>\')`, `flag === \'<key>\'`), with comments',
   )
   lines.push(
-    '   files do not count. Test evidence = the setting (`\\b<key>: true|false`, `flags.<key>`,',
+    '   stripped so a prose mention is not a read. Test evidence = a qualifying block that names a real move id',
+  )
+  lines.push('   carrying the flag')
+  lines.push(
+    '   (`moves.json`), or sets `<key>: true` on a `flags`/`moveFlags` literal actually passed to a sim entry point',
   )
   lines.push(
-    '   `hasMoveFlag(..., \'<key>\')`) in a qualifying block that sets a `flags: { ... }` /',
+    '   in that block. A module-scope fixture, the `cycle98AiState.test.ts` data sentinel, a comment and an',
+  )
+  lines.push('   AI-scoring test are not evidence.'),
+  lines.push(
+    '4. **legacy-script**: the behavior in force\'s `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`. Status is',
   )
   lines.push(
-    '   `moveFlags: { ... }` literal; a flag set in a module-scope fixture is not evidence.',
-  ),
-  lines.push(
-    '4. **legacy-script**: the behavior in force\'s `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`, mapped',
+    '   computed from **non-skeleton** commands only. Skeleton opcodes (`attackcanceler`, `accuracycheck`,',
   )
   lines.push(
-    '   **independently** of its owning move effect: production = the label is a `case` in `runLegacyPreHit` or',
+    '   `attackstring`, `critcalc`, `damagecalc`, `typecalc`, `adjustdamage`, `attackanimation`, `waitanimation`,',
   )
   lines.push(
-    '   `runLegacyPostHit`, or the script issues a `setmoveeffect MOVE_EFFECT_*` that secondary consumption handles.',
+    '   `effectivenesssound`, `resultmessage`, `printstring`, `waitmessage`, `seteffectwithchance`, `tryfaintmon`,',
   )
   lines.push(
-    '   A script with neither is unported even when its move effect is ported. Test evidence = a qualifying block',
+    '   `moveendall`/`moveendcase`, and the rest of `SCRIPT_FRAME_OPCODES`; each is a `Cmd_*` in',
   )
-  lines.push('   naming the label or a move carrying it. Scripts are parsed with `.if`/`.else` evaluated against'),
-  lines.push('   `battle_config.h` (only the live branch contributes) and `call` targets expanded one level.'),
+  lines.push(
+    '   `battle_script_commands.c` and is shared machinery, not a move rule). A skeleton-only script is the plain-hit',
+  )
+  lines.push(
+    '   skeleton: ported when its owning move effect is ported (the damage path). A script with a non-skeleton',
+  )
+  lines.push(
+    '   command is ported only when every such command has a handler: the owning effect\'s implementation (a real',
+  )
+  lines.push(
+    '   `HANDLERS` body, `CUSTOM_MOVE_DAMAGE` rule, declarative field, hitScripts case or plain hit) is the hand',
+  )
+  lines.push(
+    '   port of the script and dispatches its commands; a `setmoveeffect MOVE_EFFECT_*` is also handled when the',
+  )
+  lines.push(
+    '   secondary dispatch consumes it. An opcode that occurs in no upstream script never rides on its effect\'s',
+  )
+  lines.push(
+    '   port. Commands left without a handler are listed under "Legacy Script Commands Without a Handler". Test',
+  )
+  lines.push(
+    '   evidence = a qualifying block naming the label or a move carrying it. Scripts are parsed with `.if`/`.else`',
+  )
+  lines.push('   evaluated against `battle_config.h` and `call` targets expanded one level.'),
   lines.push(
     '5. **effect-less**: a move whose `effect` is null has no `EFFECT_*` unit. Production = the damage path reading',
   )
@@ -1824,6 +2412,26 @@ export function generateMoveInventoryDoc(
     '`EFFECT_HIT` is plain damage: it has no `attack.secondaryEffects`, its script is `BattleScript_EffectHit`, and a',
   )
   lines.push('move whose effect is `EFFECT_HIT` therefore produces **no** secondary-effect unit.')
+  lines.push('')
+
+  lines.push('## Legacy Script Commands Without a Handler')
+  lines.push('')
+  lines.push(
+    'Every distinct non-skeleton script command that keeps a script unported, with the `Cmd_<opcode>` definition',
+  )
+  lines.push('line in `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c` (`--` = no such command).')
+  lines.push('')
+  if (result.unhandledScriptCommands.length === 0) {
+    lines.push('None.')
+  } else {
+    for (const command of result.unhandledScriptCommands) {
+      const location =
+        command.cLine > 0 ? `battle_script_commands.c:${command.cLine}` : 'no `Cmd_` definition in this source'
+      lines.push(
+        `- \`${command.command}\` -- ${location}; blocks ${command.scripts.map((script) => `\`${script}\``).join(', ')}`,
+      )
+    }
+  }
   lines.push('')
 
   lines.push('## Summary')

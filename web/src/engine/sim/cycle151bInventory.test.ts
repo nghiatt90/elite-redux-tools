@@ -7,6 +7,7 @@ import {
   buildConsumptionIndex,
   loadMoveBehaviors,
   loadMoves,
+  buildTestEvidence,
   loadMoveEffectConsumerSource,
   loadQualifyingTestSource,
   parseScripts,
@@ -121,10 +122,12 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     const venoshock = moveById('MOVE_VENOSHOCK')
     const test = block('EFFECT_DOUBLE_DMG_IF_STATUS1')
     expect(statusOf(venoshock, REAL_CONSUMER, test)).toBe('ported')
+    // Venoshock is a plain hit too, so the routing-chain entry is a production site as
+    // well as basePower.ts's case. Remove both: no production site may remain.
     const mutated = REAL_CONSUMER.replace(
       "case 'EFFECT_DOUBLE_DMG_IF_STATUS1':",
       "case 'EFFECT_DOUBLE_DMG_IF_STATUS1_REMOVED':",
-    )
+    ).replace("moveEffect === 'EFFECT_DOUBLE_DMG_IF_STATUS1' ||", "moveEffect === 'EFFECT_DOUBLE_DMG_IF_STATUS1_REMOVED' ||")
     expect(mutated).not.toBe(REAL_CONSUMER)
     expect(statusOf(venoshock, mutated, test)).toBe('unported')
   })
@@ -140,6 +143,12 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     mutated = mutated.replace(
       "moveData.effect === 'EFFECT_WEATHER_BALL'",
       "moveData.effect === 'EFFECT_WEATHER_BALL' && false",
+    )
+    // Weather Ball is plain-hit routed (`calculate.ts` carries its type rule); the chain
+    // entry is a production site, so remove it too.
+    mutated = mutated.replace(
+      "moveEffect === 'EFFECT_WEATHER_BALL' ||",
+      "moveEffect === 'EFFECT_WEATHER_BALL_REMOVED' ||",
     )
     expect(mutated).not.toBe(REAL_CONSUMER)
     expect(statusOf(ball, mutated, test)).toBe('unported')
@@ -243,7 +252,9 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     })
     expect(plain.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
     const legacy = plain.units.find((unit) => unit.kind === 'legacy-script')
-    expect(legacy?.status).toBe('unported')
+    // Cycle 151b rework: a skeleton-only script is the shared hit frame. Once its owning
+    // effect is ported (EFFECT_ERUPTION, CUSTOM_MOVE_DAMAGE) the damage path executes it.
+    expect(legacy?.status).toBe('ported')
     expect(legacy?.registeredUntested).toBe(false)
 
     const index = buildConsumptionIndex(REAL_CONSUMER, moves, behaviors)
@@ -266,6 +277,160 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
       allowlist: [],
     })
     expect(secondary.units.find((unit) => unit.kind === 'legacy-script')?.status).toBe('ported')
+  })
+
+  it('a skeleton-only script follows its effect; an unhandled non-skeleton command does not', () => {
+    const skeleton = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: ['BattleScript_TestSkeleton::', '\tattackcanceler', '\tdamagecalc', '\tend'],
+      },
+    ])
+    const skeletonMove: MoveRecord = {
+      id: 'MOVE_TEST_SKELETON',
+      effect: 'EFFECT_ERUPTION',
+      customBehavior: { legacyConfig: 'BattleScript_TestSkeleton' },
+    }
+    const skeletonResult = runInventory([skeletonMove], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      testSource: block('MOVE_TEST_SKELETON'),
+      scripts: skeleton,
+      allowlist: [],
+    })
+    expect(skeletonResult.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
+    expect(skeletonResult.units.find((unit) => unit.kind === 'legacy-script')?.status).toBe('ported')
+
+    const gap = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: ['BattleScript_TestGap::', '\tattackcanceler', '\tfrobnicate', '\tend'],
+      },
+    ])
+    const gapMove: MoveRecord = {
+      id: 'MOVE_TEST_GAP',
+      effect: 'EFFECT_ERUPTION',
+      customBehavior: { legacyConfig: 'BattleScript_TestGap' },
+    }
+    const gapResult = runInventory([gapMove], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      testSource: block('MOVE_TEST_GAP'),
+      scripts: gap,
+      allowlist: [],
+    })
+    expect(gapResult.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
+    const gapScript = gapResult.units.find((unit) => unit.kind === 'legacy-script')
+    expect(gapScript?.status).toBe('unported')
+    expect(gapScript?.registeredUntested).toBe(false)
+    expect(gapResult.unhandledScriptCommands.map((command) => command.opcode)).toContain('frobnicate')
+  })
+
+  it('a qualifying block that names a real move id is flag evidence; fixtures and forged literals are not', () => {
+    const bite = moveById('MOVE_BITE')
+    const flagSource = 'if (move.flags.biteBased) return true'
+    const flagUnit = (testSource: string) => {
+      const result = runInventory([bite], behaviors, {
+        consumerSource: REAL_CONSUMER,
+        productionSource: flagSource,
+        testSource,
+        scripts,
+        allowlist: [],
+      })
+      return result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'biteBased')
+    }
+    // `block('MOVE_BITE')` calls executeTurn in the same it() whose text names the move.
+    expect(flagUnit(block('MOVE_BITE'))?.status).toBe('ported')
+
+    // A module-scope fixture (the cycle98 sentinel pattern) is not inside any it() block.
+    const moduleScope = [
+      "const fixture = requireMove('MOVE_BITE')",
+      'if (!fixture.flags?.biteBased) throw new Error("changed")',
+      block(),
+    ].join('\n')
+    const moduleUnit = flagUnit(moduleScope)
+    expect(moduleUnit?.status).toBe('unported')
+    expect(moduleUnit?.registeredUntested).toBe(true)
+
+    // A `flags: { biteBased: true }` literal in a test that never runs a move is not evidence.
+    const forged = [
+      "it('forged', () => {",
+      '  const mon = { flags: { biteBased: true } }',
+      '  expect(mon.flags.biteBased).toBe(true)',
+      '})',
+    ].join('\n')
+    const forgedUnit = flagUnit(forged)
+    expect(forgedUnit?.status).toBe('unported')
+    expect(forgedUnit?.registeredUntested).toBe(true)
+  })
+
+  it('the cycle98 module-scope flag sentinel is outside every qualifying block', () => {
+    const lines = readFileSync(join(SIM_DIR, 'cycle98AiState.test.ts'), 'utf-8').split('\n')
+    expect(lines[149]).toContain('MOVE_HYPER_VOICE')
+    expect(lines[149]).toContain('flags?.sound')
+    const header = lines.slice(0, 150).join('\n')
+    expect(buildTestEvidence(header).blocks).toHaveLength(0)
+    const hyperVoice = moveById('MOVE_HYPER_VOICE')
+    const result = runInventory([hyperVoice], behaviors, {
+      consumerSource: REAL_CONSUMER,
+      testSource: header,
+      scripts,
+      allowlist: [],
+    })
+    const sound = result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'sound')
+    expect(sound?.status).toBe('unported')
+    expect(sound?.registeredUntested).toBe(true)
+  })
+
+  it('a block calling a file-local wrapper over executeTurn is evidence; an uncalled wrapper is not', () => {
+    const facade = moveById('MOVE_FACADE')
+    const wrapperDefinition = 'function fire(moveId: string) { return executeTurn({ moveId }) }'
+    const called = [wrapperDefinition, "it('wrapped', () => { fire('MOVE_FACADE') })"].join('\n')
+    expect(statusOf(facade, REAL_CONSUMER, called)).toBe('ported')
+
+    const uncalled = [wrapperDefinition, "it('not called', () => { void 'MOVE_FACADE' })"].join('\n')
+    const unit = effectUnitFor(facade, REAL_CONSUMER, uncalled)
+    expect(unit.status).toBe('unported')
+    expect(unit.registeredUntested).toBe(true)
+
+    // The real suite exercises these four through file-local helpers (cycle87's `fire`).
+    for (const effect of [
+      'EFFECT_FACADE',
+      'EFFECT_FLAIL',
+      'EFFECT_SYNCHRONOISE',
+      'EFFECT_POLTERGEIST',
+    ]) {
+      expect(statusByEffect.get(effect), effect).toBe('ported')
+    }
+  })
+
+  it('the five plain-hit effects are ported through the routing chain, and die with their entry', () => {
+    const cases: Array<[string, string, string]> = [
+      ['MOVE_DRAGON_DASH', 'EFFECT_HIT', "moveEffect === 'EFFECT_HIT' ||"],
+      ['MOVE_GUST', 'EFFECT_GUST', "moveEffect === 'EFFECT_GUST' ||"],
+      [
+        'MOVE_DECORATE',
+        'EFFECT_DECORATE',
+        "(moveEffect === 'EFFECT_DECORATE' || moveEffect === 'EFFECT_HIT_ENEMY_HEAL_ALLY')",
+      ],
+      [
+        'MOVE_JUDGMENT',
+        'EFFECT_CHANGE_TYPE_ON_ITEM',
+        "moveEffect === 'EFFECT_CHANGE_TYPE_ON_ITEM' ||",
+      ],
+      [
+        'MOVE_POLLEN_PUFF',
+        'EFFECT_HIT_ENEMY_HEAL_ALLY',
+        "(moveEffect === 'EFFECT_DECORATE' || moveEffect === 'EFFECT_HIT_ENEMY_HEAL_ALLY')",
+      ],
+    ]
+    for (const [moveId, effect, needle] of cases) {
+      const move = moveById(moveId)
+      const test = block(effect)
+      expect(statusOf(move, REAL_CONSUMER, test), effect).toBe('ported')
+      const renamed = needle.replace(/EFFECT_[A-Z0-9_]+/g, (name) => `${name}_MUTATED`)
+      const mutated = REAL_CONSUMER.replace(needle, renamed)
+      expect(mutated, effect).not.toBe(REAL_CONSUMER)
+      expect(statusOf(move, mutated, test), effect).toBe('unported')
+    }
   })
 
   it('script parser keeps only the live `.if` branch and expands `call` one level', () => {

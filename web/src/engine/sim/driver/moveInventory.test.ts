@@ -37,11 +37,26 @@ const TOTAL_PAIRS = 4044
 const DISTINCT_SCRIPTS = 322
 const DISTINCT_FLAG_KEYS = 42
 
-/** Pinned today -- this number should only go DOWN. */
-export const UNPORTED_PAIR_COUNT = 2743
+/**
+ * Pinned today -- this number should only go DOWN.
+ *
+ * Cycle 151b rework: 2743 -> 132. The drop is measurement, not porting: flag evidence now
+ * accepts a real move id (2099 flag pairs were "unported" only because tests never restated
+ * the flag table); helper-wrapped test blocks count; the plain-hit routing chain is read as
+ * the production site for EFFECT_HIT/GUST/DECORATE/CHANGE_TYPE_ON_ITEM/HIT_ENEMY_HEAL_ALLY;
+ * and legacy scripts are judged on their non-skeleton commands, so the 473 skeleton-only
+ * pairs follow their already-ported effects. Every remaining pair is a real gap: a code
+ * gap (no production path / unhandled command) or a test gap (registered, untested).
+ */
+export const UNPORTED_PAIR_COUNT = 132
 
-/** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 2271
+/**
+ * Pinned today -- this number should only go DOWN. Cycle 151b rework: 2271 -> 124. All 124
+ * are registered-but-untested: production handles them, no qualifying block names them
+ * (mostly effect-less damage moves and 14 legacy scripts). No pair is unported for a
+ * measurement artefact any more.
+ */
+export const REGISTERED_UNTESTED_PAIR_COUNT = 124
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -393,16 +408,16 @@ describe('move completeness inventory', () => {
     expect(effectUnit('MOVE_HELPING_HAND')?.status).toBe('allowlisted')
     // Declarative `attack.damage` behaviour (field, not an `EFFECT_*` key) counts as a port.
     expect(effectUnit('MOVE_ASSURANCE')?.status).toBe('ported')
-    // A routing-list mention in `moveEffects.ts`'s plain-hit chain is not a port (item 1).
-    expect(effectUnit('MOVE_BELCH')?.status).toBe('unported')
+    // Belch's script is cased in hitScripts.ts (runLegacyPreHit), so the effect has its own
+    // port; the plain-hit chain is only the site for effects with no extra step (item 1).
+    expect(effectUnit('MOVE_BELCH')?.status).toBe('ported')
 
     const flagUnit = (moveId: string, flag: string) =>
       result.units.find((unit) => unit.kind === 'flag' && unit.moveId === moveId && unit.unit === flag)
-    // The flag measurement is production-path + test evidence; sim tests currently set move
-    // flags at module scope, outside the qualifying blocks, so no flag pair is ported yet.
-    expect(flagUnit('MOVE_BITE', 'biteBased')?.status).toBe('unported')
-    expect(flagUnit('MOVE_BITE', 'biteBased')?.registeredUntested).toBe(true)
-    expect(flagUnit('MOVE_HYPER_VOICE', 'sound')?.status).toBe('unported')
+    // Cycle 151b rework: a qualifying block that names a real move id carrying the flag is
+    // evidence. Sim tests run moves (MOVE_BITE, MOVE_HYPER_VOICE) rather than restating flags.
+    expect(flagUnit('MOVE_BITE', 'biteBased')?.status).toBe('ported')
+    expect(flagUnit('MOVE_HYPER_VOICE', 'sound')?.status).toBe('ported')
     expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.status).toBe('unported')
     // `lunarBased` has no sim-side production read at all.
     expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.registeredUntested).toBe(false)
@@ -438,13 +453,19 @@ describe('move completeness inventory', () => {
     )
     const scripts = result.units.filter((unit) => unit.kind === 'legacy-script')
     const diverging = scripts.filter((unit) => unit.status !== effectStatusByMove.get(unit.moveId))
-    // A script is not a mirror: it is ported only when runLegacyPreHit/runLegacyPostHit cases it
-    // or it issues a `setmoveeffect` consumed by the secondary path.
+    // A script is not a mirror. `BattleScript_EffectRest` is now a real port (handleRest
+    // follows the script command by command), so the divergence is Calm Mind: its effect is
+    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while no block names the
+    // script label or MOVE_CALM_MIND. The script therefore stays registered-but-untested.
     expect(diverging.length).toBeGreaterThan(0)
-    const restScript = scripts.find((unit) => unit.moveId === 'MOVE_REST')
-    expect(restScript?.unit).toBe('BattleScript_EffectRest')
-    expect(restScript?.status).toBe('unported')
-    expect(effectStatusByMove.get('MOVE_REST')).toBe('ported')
+    const calmMindScript = scripts.find((unit) => unit.moveId === 'MOVE_CALM_MIND')
+    expect(calmMindScript?.unit).toBe('BattleScript_EffectCalmMind')
+    expect(calmMindScript?.status).toBe('unported')
+    expect(calmMindScript?.registeredUntested).toBe(true)
+    expect(effectStatusByMove.get('MOVE_CALM_MIND')).toBe('ported')
+    // MOVE_REST: both the effect and its script are ported -- the divergence above is not an
+    // artefact of the script being ignored.
+    expect(scripts.find((unit) => unit.moveId === 'MOVE_REST')?.status).toBe('ported')
   })
 
   it('every move id appears somewhere in result.units', () => {
