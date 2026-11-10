@@ -254,11 +254,17 @@ export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record
  * returns true, same short-circuit as the C's `if (gSwapDamageCategory) break`.
  * Only invoked for the "default" splitFlag case in resolveSplit -- USE_HIGHEST_OFFENSE/
  * USE_HIGHEST_DAMAGE are separate branches in the C that never reach ON_ABILITY at
- * all, matching resolveSplit's existing structure. */
-export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: OnSwapSplitContext): boolean {
+ * all, matching resolveSplit's existing structure.
+ *
+ * `matchesMoveFlag` is built here (not handed in) because DoesMoveMatchFlag scans the
+ * ATTACKER's own ability slots, which only this level has; Mystic Blades' hook then
+ * sees the same PRE-swap moveSplit and moveFlags it already reads. */
+export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: Omit<OnSwapSplitContext, 'matchesMoveFlag'>): boolean {
+  const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
+    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit)
   let swap = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
-    if (impl.onSwapSplit?.(ctx)) {
+    if (impl.onSwapSplit?.({ ...ctx, matchesMoveFlag })) {
       swap = true
       return 'break'
     }
@@ -271,11 +277,15 @@ export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: OnSwapSplitCo
  * ATTACKER's abilities bypasses screens for this hit. checkMoldBreaker=FALSE (an
  * attacker's own trait, never suppressed by its own Mold Breaker), so this uses
  * NEVER_SUPPRESSED like the offensive-multiplier loop's self-checks.
- */
-export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: OnInfiltrateContext): boolean {
+ *
+ * `matchesMoveFlag` is built here for the same reason as computeSwapSplit's: the
+ * grant scan is over the ATTACKER's own slots (Pinnacle Blade's DoesMoveMatchFlag). */
+export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: Omit<OnInfiltrateContext, 'matchesMoveFlag'>): boolean {
+  const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
+    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit)
   let infiltrates = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
-    if (impl.onInfiltrate?.(ctx)) {
+    if (impl.onInfiltrate?.({ ...ctx, matchesMoveFlag })) {
       infiltrates = true
       return 'break'
     }

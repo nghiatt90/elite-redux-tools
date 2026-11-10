@@ -72,7 +72,10 @@ export const CRIT_SWAPSPLIT_MISC: AbilityImpl[] = [
     id: 'ABILITY_MYSTIC_BLADES',
     src: 'src/abilities.cc:6460',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
-    onSwapSplit: (ctx) => ctx.moveSplit === 'PHYSICAL' && !!ctx.moveFlags.sliceBased,
+    // CHECK(gBattleMoves[move].split == SPLIT_PHYSICAL); CHECK(DoesMoveMatchFlag(
+    // battler, move, moveType, MOVE_FLAG_KEEN_EDGE)) -- the REAL move type
+    // (:6488-6495), so Chestnut Axe's GRASS-only grant can swap a non-slice move.
+    onSwapSplit: (ctx) => ctx.moveSplit === 'PHYSICAL' && ctx.matchesMoveFlag('sliceBased', ctx.moveType),
   },
   {
     id: 'ABILITY_ENERGIZED_HORNS',

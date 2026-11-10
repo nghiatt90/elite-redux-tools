@@ -22,7 +22,9 @@ export const INFILTRATE_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_PINNACLE_BLADE',
     src: 'src/abilities.cc:8661',
-    onInfiltrate: (ctx) => Boolean(ctx.moveFlags.sliceBased),
+    // DoesMoveMatchFlag(battler, move, moveType, MOVE_FLAG_KEEN_EDGE), the REAL move
+    // type (:8686-8689), so a GRASS-only grant (Chestnut Axe) is seen.
+    onInfiltrate: (ctx) => ctx.matchesMoveFlag('sliceBased', ctx.moveType),
   },
   {
     // The readiedAction volatile (a "did this Pokemon ready an action this turn"

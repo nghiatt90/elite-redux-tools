@@ -6,7 +6,8 @@
 // has been checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for
 // Punching Glove), the Iron Fist, Mega Launcher, Liquid Voice and Punk Rock offensive
 // multipliers (TYPE_NORMAL dummies), Punk Rock's defensive half (IsSoundMove on the
-// attacker), Hammer Fist (the real move type), plus Keen Edge and Striker. The
+// attacker), Hammer Fist (the real move type), Keen Edge and Striker, Mystic Blades'
+// onSwapSplit (real type) and Pinnacle Blade's onInfiltrate (real type). The
 // Amplifier/Bass Boosted/Sludgy Mix aliases pass the ctx through to Punk Rock
 // unchanged. Still static (`ctx.moveFlags.*` only, so grants do not yet change the
 // result): Soundproof's onImmune, the chooseStat hooks, onCrit, onParentalBond, and

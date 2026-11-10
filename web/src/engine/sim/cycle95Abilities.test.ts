@@ -17,7 +17,7 @@ import type { ReplacementDeps } from './switchIn'
 import type { TypeChart } from '../typeEffectiveness'
 import { computeParentalBondTrigger } from '../abilities/dispatchCalc'
 import { lookupAbility } from '../abilities/registry'
-import type { AbilityImpl, OnChooseOffensiveStatContext, OnSwapSplitContext } from '../abilities/types'
+import type { AbilityImpl, OnChooseOffensiveStatContext, OnModifyMoveFlagsContext, OnSwapSplitContext } from '../abilities/types'
 import {
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_CRAFTY_SHIELD,
@@ -531,14 +531,22 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
     if (!entry || 'unmodelled' in entry) throw new Error(`${id} not a real port`)
     return entry
   }
-  const swap = (overrides: Partial<OnSwapSplitContext> = {}): OnSwapSplitContext => ({
-    battlerId: 'x',
-    moveId: 'MOVE_SACRED_SWORD',
-    moveType: 'FIGHTING',
-    moveSplit: 'PHYSICAL',
-    moveFlags: { sliceBased: true },
-    ...overrides,
-  })
+  const swap = (overrides: Partial<OnSwapSplitContext> = {}): OnSwapSplitContext => {
+    const ctx = {
+      battlerId: 'x',
+      moveId: 'MOVE_SACRED_SWORD',
+      moveType: 'FIGHTING',
+      moveSplit: 'PHYSICAL' as const,
+      moveFlags: { sliceBased: true } as Record<string, true>,
+      ...overrides,
+    }
+    return {
+      ...ctx,
+      // Static-flag cases only; the stub reproduces DoesMoveMatchFlag's static-first
+      // answer (grants are covered at the calc level).
+      matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag']) => Boolean(ctx.moveFlags[flag]),
+    }
+  }
   const chooseStat = (secondaryStat: OnChooseOffensiveStatContext['secondaryStat']): OnChooseOffensiveStatContext => ({
     battlerId: 'x',
     moveId: 'MOVE_SACRED_SWORD',

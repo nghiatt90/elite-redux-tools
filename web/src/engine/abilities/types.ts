@@ -293,6 +293,14 @@ export interface OnSwapSplitContext {
   moveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // pre-swap split -- these hooks decide WHETHER to swap it
   moveFlags: Record<string, true>
+  /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 -- the
+   * move's own static flag bit first, then (only if unset) a scan of the ATTACKER's
+   * own ability slots for an `onModifyMoveFlags` grant. `moveType` here is the REAL
+   * move type (the ON_SWAP_SPLIT argument), not the TYPE_NORMAL dummy some other
+   * call sites pass. Built by dispatchCalc.computeSwapSplit closing over the
+   * attacker's slots/moveFlags together with this ctx's PRE-swap `moveSplit`, so a
+   * consumer never needs the slots itself. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 export interface OnMoveTypeContext {
@@ -537,6 +545,13 @@ export interface OnInfiltrateContext {
   moveFlags: Record<string, true>
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   attackerTypes: string[]
+  /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 -- the
+   * move's own static flag bit first, then (only if unset) a scan of the ATTACKER's
+   * own ability slots for an `onModifyMoveFlags` grant. `moveType` here is the REAL
+   * move type (the ON_INFILTRATE argument), not a TYPE_NORMAL dummy. Built by
+   * dispatchCalc.computeInfiltratesScreens closing over the attacker's slots/
+   * moveFlags/moveSplit, so a consumer never needs the slots itself. */
+  matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag'], moveType: string) => boolean
 }
 
 /**
@@ -570,16 +585,17 @@ export interface OnModifyMoveFlagsContext {
  * same names as MoveData.flags' own keys (see emit.py's _MOVE_FLAGS) so a future
  * `flag`-keyed fallback reads as `moveFlags[flag] || ability grants it`.
  *
- * Wired through dispatchCalc.doesMoveMatchFlag and the two multiplier contexts'
+ * Wired through dispatchCalc.doesMoveMatchFlag and the multiplier contexts'
  * `matchesMoveFlag` for the consumers whose call-site moveType convention has been
  * checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for Punching
  * Glove -- the C passes a literal TYPE_NORMAL dummy there); the Iron Fist, Mega
  * Launcher, Liquid Voice and Punk Rock offensive multipliers (all TYPE_NORMAL
  * dummies, src/battle_util.c:9373-9379); Punk Rock's defensive half (IsSoundMove on
  * the ATTACKER, src/abilities.cc:3311); Hammer Fist (the REAL move type,
- * src/abilities.cc:11529); and Keen Edge/Striker (real type, :3676; dummy,
- * src/battle_util.c:9377). Amplifier/Bass Boosted/Sludgy Mix delegate to Punk Rock
- * through the unchanged ctx.
+ * src/abilities.cc:11529); Keen Edge/Striker (real type, :3676; dummy,
+ * src/battle_util.c:9377); Mystic Blades' onSwapSplit and its aliases (real type,
+ * :6488-6495); and Pinnacle Blade's onInfiltrate (real type, :8686-8689).
+ * Amplifier/Bass Boosted/Sludgy Mix delegate to Punk Rock through the unchanged ctx.
  *
  * Still static (`ctx.moveFlags.*` only, so grants do not yet change the result):
  * Soundproof's onImmune (26-immune.ts:53), the onChooseOffensiveStat/

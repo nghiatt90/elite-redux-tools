@@ -9,7 +9,7 @@ import { ATE_FAMILY_AND_ONSTAB } from './15-ate-family-and-onstab'
 import { CRIT_SWAPSPLIT_MISC } from './17-crit-swapsplit-misc'
 import { isTargettedApplyOnFlagAppropriate } from '../applyOn'
 import { NEVER_CRIT } from '../../crit'
-import type { AbilityImpl, OnCritContext, OnSwapSplitContext, OffensiveMultiplierContext, DefensiveMultiplierContext } from '../types'
+import type { AbilityImpl, OnCritContext, OnSwapSplitContext, OffensiveMultiplierContext, DefensiveMultiplierContext, OnModifyMoveFlagsContext } from '../types'
 import { uq } from '../../fixed'
 
 function findAbility(id: string): AbilityImpl {
@@ -37,7 +37,21 @@ function critCtx(overrides: Partial<OnCritContext> = {}): OnCritContext {
 }
 
 function swapCtx(overrides: Partial<OnSwapSplitContext> = {}): OnSwapSplitContext {
-  return { battlerId: 'x', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL', moveFlags: {}, ...overrides }
+  const ctx = {
+    battlerId: 'x',
+    moveId: 'MOVE_TACKLE',
+    moveType: 'NORMAL',
+    moveSplit: 'PHYSICAL' as const,
+    moveFlags: {} as Record<string, true>,
+    ...overrides,
+  }
+  return {
+    ...ctx,
+    // These cases all exercise the static flag bit, so the stub reproduces
+    // DoesMoveMatchFlag's own static-first answer (no grants). Grant plumbing is
+    // covered at the calc level in sim/cycle150ibbbSwapSplitInfiltrate.test.ts.
+    matchesMoveFlag: (flag: OnModifyMoveFlagsContext['flag']) => Boolean(ctx.moveFlags[flag]),
+  }
 }
 
 function offCtx(overrides: Partial<OffensiveMultiplierContext> = {}): OffensiveMultiplierContext {
