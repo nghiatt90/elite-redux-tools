@@ -286,3 +286,48 @@ Two groups appear here:
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled |
 | ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled |
 | ABILITY_SHIELDS_DOWN | AI_CheckBadMove: IsShieldsDownProtected(battlerAtk) is not modelled (Minior form-state is not tracked); treated as not protected |
+
+## Gate (cycle 150f)
+
+Both audits now **fail** rather than quietly report. `web/src/engine/sim/driver/auditGate.ts`
+exports the pure checks, and `web/src/engine/sim/cycle150fAuditGate.test.ts` unit-tests
+them without running the 1016-ability sweep:
+
+- `findUncoveredGapNotes(notes, allowlist)` returns every note that matches the shared
+  `GAP_NOTE` (exported from `abilityAuditNotes.ts`, widened to the union of both audits'
+  patterns), names no `ABILITY_` id, and has no allowance. `abilityAudit.test.ts` asserts
+  it is empty after writing its output files.
+- `findStaleAllowances(notes, allowlist)` returns allowances whose note no longer occurs;
+  both audits assert that is empty too, so the list shrinks when a gap closes.
+- A `GapAllowance` needs a `citation` carrying `file:line`; `validateGapAllowance` rejects
+  one without it.
+
+The allowlists live in `web/src/engine/sim/driver/gapNoteAllowlist.ts`:
+
+- `ABILITY_GAP_ALLOWLIST` records the id-less gap notes the ability audit raises today
+  (the seven `MulByTypeEffectiveness` notes plus `Minion Control: party-based hit count
+  not modelled`). These are **known open gaps**, not ports: an allowance keeps the test
+  green but never removes the note from the JSON or the `UNATTRIBUTED: ` rows.
+- `SHARED_NOISE_ALLOWLIST` does the same for notes the move audit's shared-note filter
+  would hide (more than 20 effects raise them). Today the audit raises no shared note, so
+  the list is empty.
+
+`moveEffectAudit.test.ts` now writes those shared notes to `<out>_shared.json`
+(`{note: effectCount}`) instead of discarding them, and fails on a shared gap note that is
+neither in `SHARED_NOISE_ALLOWLIST` nor covered by an effect allowance in
+`auditAllowlist.ts`. Its `/manifest/` exclusion was deleted: no note in the sim contains
+that text. Moves skipped because `power <= 1` and they have no effect are counted in its
+console line (1 today).
+
+### Cycle 150f measurement
+
+Before: `ability_gaps` 9 lines (validate.sh regex), `move_notes` 0. After: `ability_gaps`
+9, `move_notes` 0 — unchanged, nothing hidden. The widened shared regex made one gap
+newly visible and it is now allowlisted: `ABILITY_MINION_CONTROL` raises
+`Minion Control: party-based hit count not modelled (caller supplied no minionControlCount)`
+(`web/src/engine/multiHit.ts`, C `battle_script_commands.c:1021-1040`). It does not match
+the validate.sh regex (no `is not modelled`), so the counted figure stays 9 while the
+`UNATTRIBUTED: ` rows grow by one. The eight distinct notes are the authoritative result
+of the run; the `ABILITY_BERSERK_DNA`, `ABILITY_EJECT_PACK_ABILITY` and
+`ABILITY_SHIELDS_DOWN` rows in the cycle-155 table no longer appear in the audit output
+(their gap notes are no longer raised in the two-turn fight).

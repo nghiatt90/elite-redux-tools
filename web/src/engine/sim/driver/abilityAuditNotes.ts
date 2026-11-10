@@ -11,11 +11,17 @@
 //
 // Pure and headless: no React, no fs, no data access.
 
-// The validate.sh gap phrases, plus the plural form several sites use
-// ("... are not applied", "status effects are not modelled yet").
-export const GAP_NOTE = /hook was not run|is not modelled|not applied|has no port|are not modelled/
+// The shared definition of a gap note, used by BOTH audits so they cannot
+// disagree about what counts as a gap. It started as the validate.sh phrases
+// plus the plural form several sites use ("... are not applied", "status
+// effects are not modelled yet"), then absorbed the move audit's wider pattern
+// (`not modelled`, `not run`, `no port`, `not supported`, `unmodelled`, and the
+// case-insensitive forms). Widen, never narrow: every phrase either audit ever
+// counted as a gap must keep counting.
+export const GAP_NOTE =
+  /hook was not run|is not modelled|are not modelled|not modelled|not applied|has no port|no port|not run|not supported|unmodelled/i
 
-const ABILITY_TOKEN = /ABILITY_[A-Z0-9_]+/
+export const ABILITY_TOKEN = /ABILITY_[A-Z0-9_]+/
 
 /**
  * Splits `notes` for the ability audit's row of `abilityId`.

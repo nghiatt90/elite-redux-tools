@@ -7,12 +7,14 @@
 // here; read traces for those.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { it } from 'vitest'
+import { it, expect } from 'vitest'
 import { loadSimData } from './loadSimData'
 import { buildPlayerParty } from './buildParty'
 import { createRandomSource } from '../rng'
 import { buildMoveAction, createSession, stepTurn } from './session'
 import { partitionAuditNotes } from './abilityAuditNotes'
+import { findStaleAllowances, findUncoveredGapNotes } from './auditGate'
+import { ABILITY_GAP_ALLOWLIST } from './gapNoteAllowlist'
 
 it.skipIf(process.env.SIM_AUDIT !== '1')('ability audit', { timeout: 900_000 }, () => {
   const data = loadSimData()
@@ -83,4 +85,11 @@ it.skipIf(process.env.SIM_AUDIT !== '1')('ability audit', { timeout: 900_000 }, 
   console.log(
     `ABILITY AUDIT ${Object.keys(rows).length} of ${abilityIds.length} abilities with notes -> ${out}, ${Object.keys(unattributedNotes).length} unattributed notes`,
   )
+
+  // Gate: write the files first (above), then fail if an id-less gap note was
+  // neither attributed nor explicitly allowlisted with a C citation. A stale
+  // entry fails too, so closing a gap forces its allowance out of the list.
+  const unattributedList = Object.keys(unattributedNotes)
+  expect(findUncoveredGapNotes(unattributedList, ABILITY_GAP_ALLOWLIST)).toEqual([])
+  expect(findStaleAllowances(unattributedList, ABILITY_GAP_ALLOWLIST)).toEqual([])
 })
