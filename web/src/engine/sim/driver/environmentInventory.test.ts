@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BATTLE_TYPE_SPECS,
   DEFAULT_ALLOWLIST,
+  DIFFICULTY_FLAG_SPECS,
   ENVIRONMENT_INVENTORY_DOC_PATH,
   MAP_SETUP_SPECS,
   TRAINER_FLAG_SPECS,
@@ -44,7 +45,7 @@ const DISTINCT_BATTLE_EVENTS = 34
 
 const MAP_SETUP_UNITS = 30
 const BATTLE_TYPE_UNITS = 5
-const DIFFICULTY_FLAG_UNITS = 9
+const DIFFICULTY_FLAG_UNITS = 16
 const TRAINER_FLAG_UNITS = 14
 const HELL_TRAINER_SKILL_UNITS = 29
 const BATTLE_EVENT_UNITS = 34
@@ -54,9 +55,12 @@ const SCRIPT_EVENT_UNITS = 6
  * Pinned count of unported units. Rises from 44 to 82 in cycle 153d because
  * false allowlist (setweather) and false absence claims (hell_trainer_skills.h)
  * were removed, adding 1 (setweather) + 4 (map headers) + 4 (script setweathers)
- * + 29 (hell skills) = 38 unported units.
+ * + 29 (hell skills) = 38 unported units. Rises 82 -> 89 in cycle 153e because
+ * seven Hell/difficulty battle rules the inventory could not see were added as
+ * difficulty-flag units; none is ported. The rise is the point: missing rules
+ * must show up as unported rather than stay invisible.
  */
-export const UNPORTED_UNIT_COUNT = 82
+export const UNPORTED_UNIT_COUNT = 89
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 9
@@ -1021,5 +1025,87 @@ const u16 sTrainerSkillList[TRAINERS_COUNT][MAX_HELL_TRAINERS_GYM_SKILLS][BATTLE
     expect(
       result.units.find((u) => u.key === 'setweather:WEATHER_SANDSTORM'),
     ).toBeDefined()
+  })
+})
+
+describe('step 4: hell and difficulty rules', () => {
+  const productionFiles = loadEngineProductionFiles()
+  const testFiles = loadEngineTestFiles()
+
+  /** The C identifier each cited line must contain (not always the unit token). */
+  const HELL_UNITS = [
+    { key: 'hellDamageReduction', identifier: 'isHellMode' },
+    { key: 'hellTypeEffectiveness', identifier: 'HELL_MODE_TYPE_EFFECTIVENESS_CHANGE' },
+    { key: 'hellNoEnemyFullParalysis', identifier: 'disableParalysisCancel' },
+    { key: 'hellPlayerFlinchFails', identifier: 'MOVE_EFFECT_FLINCH' },
+    { key: 'hellEvasionClause', identifier: 'IsEvasionClauseDisablingMove' },
+    { key: 'hellSleepMovePP', identifier: 'CalculatePPWithBonusPlayer' },
+    { key: 'sleepClause', identifier: 'IsSleepClauseDisablingMove' },
+  ] as const
+
+  it('adds the seven hell/difficulty rules as unported difficulty-flag units with real C lines', () => {
+    for (const { key, identifier } of HELL_UNITS) {
+      const unit = result.units.find(
+        (candidate) => candidate.kind === 'difficulty-flag' && candidate.key === key,
+      )
+      expect(unit).toBeDefined()
+      expect(unit?.status).toBe('unported')
+      // The token is a C-side identifier absent from comment-stripped production
+      // and from every test, so the rule is invisible to the sim, not merely
+      // untested.
+      expect(unit?.registeredUntested).toBe(false)
+
+      const match = unit?.citation.match(/^(.*):(\d+)$/)
+      expect(match).not.toBeNull()
+      if (!match) continue
+      const lines = readFileSync(join(REPO_ROOT, match[1]), 'utf-8').split('\n')
+      expect(lines[Number(match[2]) - 1]).toContain(identifier)
+    }
+  })
+
+  it('a production comment naming a hell token does not flip the unit to ported', () => {
+    const spec = DIFFICULTY_FLAG_SPECS.find((candidate) => candidate.key === 'hellDamageReduction')
+    expect(spec).toBeDefined()
+    if (!spec) return
+
+    const baseline = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+    expect(baseline.status).toBe('unported')
+
+    // A bare name in a comment is not production evidence: classifyToken strips
+    // comments before matching, the same mutation shape as the 153c/153d tests.
+    const commentOnly = productionFiles.map((file) =>
+      file.file.endsWith('attackCanceller.ts')
+        ? { file: file.file, source: `${file.source}\n// ${spec.token}\n` }
+        : file,
+    )
+    const commented = classifyToken(spec.token, commentOnly, testFiles, spec.evidence)
+    expect(commented.status).toBe('unported')
+    expect(commented.registeredUntested).toBe(false)
+
+    // The contrast: a real code line registers the name, but with no test naming
+    // it the unit is still unported -- a name alone is never a port.
+    const namedInCode = productionFiles.map((file) =>
+      file.file.endsWith('attackCanceller.ts')
+        ? { file: file.file, source: `${file.source}\nconst ${spec.token} = 1\n` }
+        : file,
+    )
+    const registered = classifyToken(spec.token, namedInCode, testFiles, spec.evidence)
+    expect(registered.status).toBe('unported')
+    expect(registered.registeredUntested).toBe(true)
+  })
+
+  it('corrects the two badge-flag scopes: FLAG_BADGE03_GET and player-only FLAG_BADGE05_GET', () => {
+    const extraLevels = result.units.find(
+      (candidate) =>
+        candidate.kind === 'difficulty-flag' && candidate.key === 'HELL_MODE_EXTRA_LEVELS_FLAG',
+    )
+    expect(extraLevels?.scope).toContain('FLAG_BADGE03_GET')
+
+    const zeroIvs = result.units.find(
+      (candidate) =>
+        candidate.kind === 'difficulty-flag' && candidate.key === 'HELL_MODE_0_IVS_FLAG',
+    )
+    expect(zeroIvs?.scope).toContain('FLAG_BADGE05_GET')
+    expect(zeroIvs?.scope).toContain('player')
   })
 })

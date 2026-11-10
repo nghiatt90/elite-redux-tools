@@ -1271,14 +1271,23 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     key: 'HELL_MODE_EXTRA_LEVELS_FLAG',
     token: 'HELL_MODE_EXTRA_LEVELS_FLAG',
     site: 'CreateNPCTrainerParty partyData switch',
-    scope: 'hell difficulty extra levels',
+    // pokemon_config.h:34 defines the flag as FLAG_BADGE03_GET, not a save-file
+    // settings toggle: Hell extra levels switch on automatically once that badge
+    // is held (`if (FlagGet(HELL_MODE_EXTRA_LEVELS_FLAG)) extraLevels =
+    // HELL_MODE_EXTRA_LEVELS;`, battle_main.c:1805).
+    scope:
+      'FLAG_BADGE03_GET (pokemon_config.h:34): extra levels switch on after the third badge',
     citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1805),
   },
   {
     key: 'HELL_MODE_0_IVS_FLAG',
     token: 'HELL_MODE_0_IVS_FLAG',
     site: 'CalculateMonStatsMaster',
-    scope: 'hell difficulty zero IVs',
+    // pokemon_config.h:35 defines the flag as FLAG_BADGE05_GET. The zero-IV
+    // branch is player-only: pokemon.c:989 tests isEnemyMon first, so enemy mons
+    // always get MAX_IVS regardless of the difficulty or the flag.
+    scope:
+      'FLAG_BADGE05_GET (pokemon_config.h:35): zeroes only the player side mons IVs, after the fifth badge; enemy mons keep MAX_IVS',
     citation: cite(`${UPSTREAM_SRC}/pokemon.c`, 989),
   },
   {
@@ -1319,6 +1328,73 @@ export const DIFFICULTY_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'CreateNPCTrainerParty',
     scope: 'data/hell_trainer_skills.h (29 rows across 24 trainers)',
     citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 1773),
+  },
+  // Hell / difficulty battle rules the C applies and the sim does not. Each token
+  // is a C-side identifier that no comment-stripped production file contains, so
+  // the plain token rule leaves the unit unported. None of these carry evidence:
+  // a name match must never be enough to mark a rule ported.
+  {
+    key: 'hellDamageReduction',
+    token: 'isHellMode',
+    site: 'final damage (isHellMode block)',
+    scope:
+      'Hell: defender not on the player side takes x0.9 after FLAG_BADGE02_GET, then x0.75 for both sides',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7516),
+  },
+  {
+    key: 'hellTypeEffectiveness',
+    token: 'HELL_MODE_TYPE_EFFECTIVENESS_CHANGE',
+    site: 'CalcTypeEffectivenessMultiplier',
+    // The code assigns UQ_4_12(2.5) for the 4.0x case (the surrounding comment
+    // says "2x"); GetSuperEffectiveMult (abilities.cc:430) returns 1.5x in Hell.
+    scope: 'Hell: 2.0x becomes 1.5x and 4.0x becomes 2.5x; GetSuperEffectiveMult returns 1.5x',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7934),
+  },
+  {
+    key: 'hellNoEnemyFullParalysis',
+    token: 'disableParalysisCancel',
+    site: 'CANCELLER_PARALYSED',
+    // The `Random() % 4` is evaluated before `!disableParalysisCancel` in the
+    // `&&` chain, so the draw still happens for enemies.
+    scope: 'Hell: enemy-side attackers never lose the 25% full-paralysis roll',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 3402),
+  },
+  {
+    // `MOVE_EFFECT_FLINCH` is live production code all over the sim, so it cannot
+    // be the token. `isHellMode` occurs only in production comments (stripped)
+    // and names the guard on the same cited line.
+    key: 'hellPlayerFlinchFails',
+    token: 'isHellMode',
+    site: 'GetMoveEffectChance',
+    scope: 'Hell: a flinch secondary with baseChance < 100 always fails on the player side',
+    citation: cite(`${UPSTREAM_SRC}/battle_script_commands.c`, 3076),
+  },
+  {
+    key: 'hellEvasionClause',
+    token: 'IsEvasionClauseDisablingMove',
+    site: 'IsEvasionClauseDisablingMove',
+    scope: 'Hell trainer battles: player-side EFFECT_EVASION_UP and EFFECT_MINIMIZE are disabled',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4931),
+  },
+  {
+    key: 'hellSleepMovePP',
+    token: 'CalculatePPWithBonusPlayer',
+    site: 'CalculatePPWithBonusPlayer',
+    scope:
+      'Hell: player EFFECT_SLEEP_HIT / EFFECT_SLEEP / EFFECT_SNORE / EFFECT_REST / EFFECT_SLEEP_TALK have 2 PP; other player moves get base PP with no PP Up bonus',
+    citation: cite(`${UPSTREAM_SRC}/pokemon.c`, 2239),
+  },
+  {
+    // `IsSleepClauseDisablingMove` itself is named inside a live `note(...)`
+    // string in aiMoveLimitations.ts, so it would register as untested rather
+    // than invisible. `partnerChoseSleepMove` is a C-side identifier from the
+    // same function and appears nowhere in the production tree.
+    key: 'sleepClause',
+    token: 'partnerChoseSleepMove',
+    site: 'IsSleepClauseDisablingMove',
+    scope:
+      'every difficulty except EASY: EFFECT_SLEEP / EFFECT_YAWN disabled when IsSleepDisabled(target) or, in doubles, the partner chose a sleep move',
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4977),
   },
 ]
 

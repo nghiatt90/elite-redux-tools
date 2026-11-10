@@ -51,12 +51,12 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 30 | 0 | 0 | 25 | 0 | 5 |
 | `battle-type` | 5 | 1 | 2 | 4 | 0 | 0 |
-| `difficulty-flag` | 9 | 0 | 1 | 9 | 0 | 0 |
+| `difficulty-flag` | 16 | 0 | 1 | 16 | 0 | 0 |
 | `trainer-flag` | 14 | 4 | 6 | 8 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 1 | 0 | 0 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **127** | **38** | **9** | **82** | **0** | **7** |
+| **total** | **134** | **38** | **9** | **89** | **0** | **7** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -66,7 +66,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | --- | ---: | ---: |
 | `map-setup` | 25 | 0 |
 | `battle-type` | 4 | 2 |
-| `difficulty-flag` | 9 | 1 |
+| `difficulty-flag` | 16 | 1 |
 | `trainer-flag` | 8 | 6 |
 | `hell-trainer-skill` | 29 | 0 |
 | `battle-event` | 1 | 0 |
@@ -123,12 +123,19 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | --- | --- | --- | --- | --- |
 | `GetHighestLevelInPlayerParty` | enemy level = player level + partyData.lvl + extraLevels | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1819` | unported | none |
 | `GetLevelCap` | level-cap EXP stop | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3511` | unported | none |
-| `HELL_MODE_0_IVS_FLAG` | hell difficulty zero IVs | `pipeline/.upstream/eliteredux-source/src/pokemon.c:989` | unported | none |
-| `HELL_MODE_EXTRA_LEVELS_FLAG` | hell difficulty extra levels | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1805` | unported | none |
+| `HELL_MODE_0_IVS_FLAG` | FLAG_BADGE05_GET (pokemon_config.h:35): zeroes only the player side mons IVs, after the fifth badge; enemy mons keep MAX_IVS | `pipeline/.upstream/eliteredux-source/src/pokemon.c:989` | unported | none |
+| `HELL_MODE_EXTRA_LEVELS_FLAG` | FLAG_BADGE03_GET (pokemon_config.h:34): extra levels switch on after the third badge | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1805` | unported | none |
 | `RegisterTrainerBattleEvents` | data/hell_trainer_skills.h (29 rows across 24 trainers) | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1773` | unported | none |
 | `doubleBattleMode` | save-block double-battle mode toggle | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1757` | unported | none |
 | `enableEvs` | save-block EV toggle | `pipeline/.upstream/eliteredux-source/src/pokemon.c:996` | unported | none |
 | `gameDifficulty` | DIFFICULTY_EASY / DIFFICULTY_ACE / DIFFICULTY_ELITE / DIFFICULTY_HELL party selection | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1735` | unported | none |
+| `hellDamageReduction` | Hell: defender not on the player side takes x0.9 after FLAG_BADGE02_GET, then x0.75 for both sides | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7516` | unported | none |
+| `hellEvasionClause` | Hell trainer battles: player-side EFFECT_EVASION_UP and EFFECT_MINIMIZE are disabled | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4931` | unported | none |
+| `hellNoEnemyFullParalysis` | Hell: enemy-side attackers never lose the 25% full-paralysis roll | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3402` | unported | none |
+| `hellPlayerFlinchFails` | Hell: a flinch secondary with baseChance < 100 always fails on the player side | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3076` | unported | none |
+| `hellSleepMovePP` | Hell: player EFFECT_SLEEP_HIT / EFFECT_SLEEP / EFFECT_SNORE / EFFECT_REST / EFFECT_SLEEP_TALK have 2 PP; other player moves get base PP with no PP Up bonus | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2239` | unported | none |
+| `hellTypeEffectiveness` | Hell: 2.0x becomes 1.5x and 4.0x becomes 2.5x; GetSuperEffectiveMult returns 1.5x | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7934` | unported | none |
+| `sleepClause` | every difficulty except EASY: EFFECT_SLEEP / EFFECT_YAWN disabled when IsSleepDisabled(target) or, in doubles, the partner chose a sleep move | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4977` | unported | none |
 | `speedDown` | iron-pill zero Speed IV | `pipeline/.upstream/eliteredux-source/src/pokemon.c:994` | unported (registered, untested) | none |
 
 ## Trainer-Flag Units
