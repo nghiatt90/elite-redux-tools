@@ -47,10 +47,10 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | `map-setup` | 22 | 0 | 0 | 16 | 0 | 6 |
 | `battle-type` | 5 | 1 | 2 | 4 | 0 | 0 |
 | `difficulty-flag` | 9 | 0 | 1 | 9 | 0 | 0 |
-| `trainer-flag` | 14 | 8 | 2 | 4 | 0 | 2 |
+| `trainer-flag` | 14 | 7 | 3 | 5 | 0 | 2 |
 | `battle-event` | 34 | 33 | 0 | 1 | 0 | 0 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **90** | **42** | **5** | **40** | **0** | **8** |
+| **total** | **90** | **41** | **6** | **41** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -61,7 +61,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `map-setup` | 16 | 0 |
 | `battle-type` | 4 | 2 |
 | `difficulty-flag` | 9 | 1 |
-| `trainer-flag` | 4 | 2 |
+| `trainer-flag` | 5 | 3 |
 | `battle-event` | 1 | 0 |
 | `script-event` | 6 | 0 |
 
@@ -132,7 +132,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `noSwitching` | 5 trainers | `pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:611` | allowlisted | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `preferStall` | 1 trainer | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:182` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `preferStatus` | 6 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:183` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
-| `risky` | 4 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:181` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` |
+| `risky` | 4 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:181` | unported (registered, untested) | none |
 | `trainerClass` | 72 trainer classes | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5794` | allowlisted | none |
 
 ## Battle-Event Units

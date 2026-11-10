@@ -882,7 +882,7 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
       evidenceToken: 'AI_FLAG_RISKY',
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\b4:\s*\(.*=>\s*aiRisky\(/,
-      testPattern: /TRAINER_WINONA_2/,
+      testPattern: /(?:flag on.*AI_FLAG_RISKY|AI_FLAG_RISKY.*flag off)/s,
     },
   },
   {
