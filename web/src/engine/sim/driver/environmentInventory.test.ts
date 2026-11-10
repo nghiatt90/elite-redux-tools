@@ -2,11 +2,15 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  BATTLE_TYPE_SPECS,
   DEFAULT_ALLOWLIST,
   ENVIRONMENT_INVENTORY_DOC_PATH,
+  MAP_SETUP_SPECS,
   TRAINER_FLAG_SPECS,
+  battleEventEvidence,
   classifyToken,
   generateEnvironmentInventoryDoc,
+  hasLiveCaseBody,
   isValidAllowlistCitation,
   loadBattleEventRows,
   loadEngineProductionFiles,
@@ -15,6 +19,7 @@ import {
   loadTrainers,
   runInventory,
   scanMapScripts,
+  testFileAssertsToken,
   validateAllowlist,
   type EnvironmentAllowlistEntry,
   type MapScript,
@@ -454,5 +459,259 @@ describe('trainer-flag evidence', () => {
       spec.evidence,
     )
     expect(syntheticClassification.status).toBe('ported')
+  })
+})
+
+describe('step 1: non-trainer-flag evidence', () => {
+  const productionFiles = loadEngineProductionFiles()
+  const testFiles = loadEngineTestFiles()
+
+  it('1. BATTLE_TYPE_TRAINER is ported on unmodified files, and flips to unported when mutated to battleTypeFlags: BATTLE_TYPE_TRAINER & 0,', () => {
+    const spec = BATTLE_TYPE_SPECS.find((s) => s.key === 'BATTLE_TYPE_TRAINER')!
+    expect(spec).toBeDefined()
+    const initial = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+    expect(initial.status).toBe('ported')
+
+    const mutatedFiles = productionFiles.map((file) => {
+      if (!file.file.endsWith('session.ts')) return file
+      return {
+        file: file.file,
+        source: file.source.replace(
+          'battleTypeFlags: BATTLE_TYPE_TRAINER,',
+          'battleTypeFlags: BATTLE_TYPE_TRAINER & 0,',
+        ),
+      }
+    })
+    const mutated = classifyToken(spec.token, mutatedFiles, testFiles, spec.evidence)
+    expect(mutated.status).toBe('unported')
+  })
+
+  it('2. FLAG_SYS_INVERSE_BATTLE stays unported with dummy constant; inverseBattle assigned from variable plus naming test flips to ported', () => {
+    const spec = MAP_SETUP_SPECS.find((s) => s.key === 'FLAG_SYS_INVERSE_BATTLE')!
+    expect(spec).toBeDefined()
+
+    // Baseline: unported
+    const baseline = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
+    expect(baseline.status).toBe('unported')
+
+    // Mutation 2a: dummy constant in constants.ts -- stays unported
+    const dummyConstantFiles = productionFiles.map((file) => {
+      if (!file.file.endsWith('constants.ts')) return file
+      return {
+        file: file.file,
+        source: file.source + '\nexport const FLAG_SYS_INVERSE_BATTLE = 1\n',
+      }
+    })
+    const dummyConstantClassification = classifyToken(
+      spec.token,
+      dummyConstantFiles,
+      testFiles,
+      spec.evidence,
+    )
+    expect(dummyConstantClassification.status).toBe('unported')
+
+    // Mutation 2b: inverseBattle assigned from a variable in session.ts plus a test naming it flips to ported
+    const variableAssignedFiles = productionFiles.map((file) => {
+      if (!file.file.endsWith('session.ts')) return file
+      return {
+        file: file.file,
+        source: file.source.replace('inverseBattle: false,', 'inverseBattle: data.inverse,'),
+      }
+    })
+    const namingTestFiles = [
+      ...testFiles,
+      {
+        file: 'web/src/engine/sim/dummyInverse.test.ts',
+        source: 'it("tests inverse battle", () => { expect(FLAG_SYS_INVERSE_BATTLE).toBe(1) })',
+      },
+    ]
+    const portedClassification = classifyToken(
+      spec.token,
+      variableAssignedFiles,
+      namingTestFiles,
+      spec.evidence,
+    )
+    expect(portedClassification.status).toBe('ported')
+  })
+
+  it('3. emptied case body for BATTLE_EVENT_REFLECT, SPIKES, STEALTH_ROCK, LAST_STAND flips to unported', () => {
+    const eventsToTest = [
+      'BATTLE_EVENT_REFLECT',
+      'BATTLE_EVENT_SPIKES',
+      'BATTLE_EVENT_STEALTH_ROCK',
+      'BATTLE_EVENT_LAST_STAND',
+    ]
+    for (const event of eventsToTest) {
+      const evidence = battleEventEvidence(event)
+      const initial = classifyToken(event, productionFiles, testFiles, evidence)
+      expect(initial.status).toBe('ported')
+
+      const mutatedFiles = productionFiles.map((file) => {
+        if (!file.file.endsWith('battleEvents.ts')) return file
+        const caseRegex = new RegExp(
+          `(case\\s+['"]${event}['"]\\s*:)[\\s\\S]*?(?=\\n\\s*(?:case|default|\\}))`,
+        )
+        const mutatedSource = file.source.replace(caseRegex, '$1\n      break')
+        expect(mutatedSource).not.toBe(file.source)
+        return { file: file.file, source: mutatedSource }
+      })
+
+      const mutated = classifyToken(event, mutatedFiles, testFiles, evidence)
+      expect(mutated.status).toBe('unported')
+    }
+  })
+
+  it('4. registerBattleEvent(state, ev.event, ...) removed from session.ts flips every battle-event unit to unported', () => {
+    const mutatedFiles = productionFiles.map((file) => {
+      if (!file.file.endsWith('session.ts')) return file
+      return {
+        file: file.file,
+        source: file.source.replace(
+          /registerBattleEvent\s*\(\s*state\s*,\s*ev\.event/g,
+          '// removed',
+        ),
+      }
+    })
+
+    const mutatedInventory = runInventory({
+      productionFiles: mutatedFiles,
+      testSources: testFiles,
+    })
+
+    const battleEventUnits = mutatedInventory.units.filter((u) => u.kind === 'battle-event')
+    expect(battleEventUnits.length).toBe(34)
+    for (const unit of battleEventUnits) {
+      expect(unit.status).toBe('unported')
+    }
+  })
+
+  it('5. a name only in the BATTLE_EVENT_STEADY_* array at battleEvents.ts:108-114 (case label deleted) flips to unported', () => {
+    const token = 'BATTLE_EVENT_STEADY_OFFENSE'
+    const evidence = battleEventEvidence(token)
+    const initial = classifyToken(token, productionFiles, testFiles, evidence)
+    expect(initial.status).toBe('ported')
+
+    const mutatedFiles = productionFiles.map((file) => {
+      if (!file.file.endsWith('battleEvents.ts')) return file
+      const caseRegex = new RegExp(
+        `case\\s+['"]${token}['"]\\s*:[\\s\\S]*?(?=\\n\\s*(?:case|default|\\}))`,
+      )
+      const mutatedSource = file.source.replace(caseRegex, '')
+      expect(mutatedSource).not.toBe(file.source)
+      return { file: file.file, source: mutatedSource }
+    })
+
+    const mutated = classifyToken(token, mutatedFiles, testFiles, evidence)
+    expect(mutated.status).toBe('unported')
+  })
+
+  it('6. a test that names the event only in a describe-level constant is not ported', () => {
+    const token = 'BATTLE_EVENT_REFLECT'
+    const evidence = battleEventEvidence(token)
+
+    const nonAssertingTest: SourceFile[] = [
+      {
+        file: 'web/src/engine/sim/describeOnly.test.ts',
+        source: `
+          const BATTLE_EVENT_REFLECT = 1
+          describe('describe-level constant only', () => {
+            it('does unrelated work', () => {
+              expect(1).toBe(1)
+            })
+          })
+        `,
+      },
+    ]
+
+    const classification = classifyToken(token, productionFiles, nonAssertingTest, evidence)
+    expect(classification.status).toBe('unported')
+  })
+
+  it('7. real mutation of the unmodified corpus for REFLECT/SPIKES/STEALTH_ROCK via runInventory', () => {
+    const events = ['BATTLE_EVENT_REFLECT', 'BATTLE_EVENT_SPIKES', 'BATTLE_EVENT_STEALTH_ROCK']
+    for (const event of events) {
+      const mutatedFiles = productionFiles.map((file) => {
+        if (!file.file.endsWith('battleEvents.ts')) return file
+        const caseRegex = new RegExp(
+          `(case\\s+['"]${event}['"]\\s*:)[\\s\\S]*?(?=\\n\\s*(?:case|default|\\}))`,
+        )
+        return {
+          file: file.file,
+          source: file.source.replace(caseRegex, '$1\n      break'),
+        }
+      })
+
+      const inventory = runInventory({
+        productionFiles: mutatedFiles,
+        testSources: testFiles,
+      })
+      const unit = inventory.units.find((u) => u.kind === 'battle-event' && u.key === event)
+      expect(unit?.status).toBe('unported')
+    }
+  })
+
+  it('pure helper hasLiveCaseBody correctly identifies live vs dead case bodies', () => {
+    const liveSwitch = `
+      switch (x) {
+        case 'FOO':
+          doSomething()
+          break
+        case 'BAR':
+        case 'BAZ': {
+          const y = 1
+          break
+        }
+      }
+    `
+    expect(hasLiveCaseBody(liveSwitch, 'FOO')).toBe(true)
+    expect(hasLiveCaseBody(liveSwitch, 'BAR')).toBe(true)
+    expect(hasLiveCaseBody(liveSwitch, 'BAZ')).toBe(true)
+
+    const deadSwitch = `
+      switch (x) {
+        case 'EMPTY_BREAK':
+          break
+        case 'EMPTY_RETURN':
+          return;
+        case 'EMPTY_BRACES': {}
+        case 'EMPTY_CLOSE':
+      }
+    `
+    expect(hasLiveCaseBody(deadSwitch, 'EMPTY_BREAK')).toBe(false)
+    expect(hasLiveCaseBody(deadSwitch, 'EMPTY_RETURN')).toBe(false)
+    expect(hasLiveCaseBody(deadSwitch, 'EMPTY_BRACES')).toBe(false)
+    expect(hasLiveCaseBody(deadSwitch, 'EMPTY_CLOSE')).toBe(false)
+    expect(hasLiveCaseBody(deadSwitch, 'NON_EXISTENT')).toBe(false)
+  })
+
+  it('pure helper testFileAssertsToken correctly checks assertion within test blocks', () => {
+    const describeOnly = `
+      const MY_TOKEN = 'token'
+      describe('suite', () => {
+        const INNER = MY_TOKEN
+        it('tests unrelated', () => {
+          expect(1).toBe(1)
+        })
+      })
+    `
+    expect(testFileAssertsToken(describeOnly, 'MY_TOKEN')).toBe(false)
+
+    const assertingTest = `
+      describe('suite', () => {
+        it('tests the token', () => {
+          expect(hasFlag(state, MY_TOKEN)).toBe(true)
+        })
+      })
+    `
+    expect(testFileAssertsToken(assertingTest, 'MY_TOKEN')).toBe(true)
+
+    const nonAssertingIt = `
+      describe('suite', () => {
+        it('uses token without expect', () => {
+          console.log(MY_TOKEN)
+        })
+      })
+    `
+    expect(testFileAssertsToken(nonAssertingIt, 'MY_TOKEN')).toBe(false)
   })
 })

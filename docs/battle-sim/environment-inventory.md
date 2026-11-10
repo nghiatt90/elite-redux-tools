@@ -18,11 +18,15 @@ mention in a comment is not evidence, and neither is a name alone:
 - `speedDown` requires a test that sets `speedDown: true` or `ironPill: true`. Every current fixture sets the flag to
   `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.
 - Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,
-  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:238`); `BATTLE_TYPE_DOUBLE` does not, so the driver
+  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:242`); `BATTLE_TYPE_DOUBLE` does not, so the driver
   never runs a double battle regardless of a constant or a hand-built test state.
 - `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active
   battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
   (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
+- `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.
+  The sim currently hardcodes `inverseBattle: false` (`session.ts:127,174,205`), so it is unported.
+- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts:250` (`registerBattleEvent`).
+  33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is unported.
 
 Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not
 empty: eight units are provably battle-inert (cosmetics, overworld weather, field-effect arguments, prizes).
@@ -96,9 +100,9 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit key | Fights / maps | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
-| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:238 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
+| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:242 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none |
-| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle145Abilities.test.ts` |
+| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` |
 | `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none |
 | `FLAG_TAG_BATTLE` | 26 starttagbattle calls in 6 maps | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none |
 

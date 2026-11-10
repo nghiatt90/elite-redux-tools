@@ -82,6 +82,11 @@ export interface UnitEvidence {
    */
   testPattern?: RegExp
   /**
+   * Test evidence must be a stripped test file in which the token appears inside
+   * an `it(` / `test(` block that also contains `expect(`.
+   */
+  testMustAssert?: boolean
+  /**
    * Production evidence must come from one of these repo-relative files. Used
    * by battle-type units: the driver only starts battles from `session.ts`,
    * `runBattle.ts` or `buildParty.ts`, so a constant declared in a unit-level
@@ -101,6 +106,16 @@ export interface UnitEvidence {
    * key or helper name rather than the flag identifier itself.
    */
   evidenceToken?: string
+  /**
+   * Every entry must match the comment-stripped production source of that
+   * repo-relative file, else the unit cannot be `ported`.
+   */
+  alsoRequires?: ReadonlyArray<{ file: string; pattern: RegExp }>
+  /**
+   * Production evidence is a `case '<token>':` label in a production file whose
+   * body is live (not bare break, bare return, or closing brace).
+   */
+  caseBodyToken?: string
 }
 
 export interface MapScript {
@@ -307,9 +322,14 @@ export const BATTLE_TYPE_DRIVER_FILES = [
 
 const BATTLE_TYPE_DRIVER_EVIDENCE: UnitEvidence = {
   productionFiles: BATTLE_TYPE_DRIVER_FILES,
-  // The flag must be assigned, not merely imported or named: `session.ts:238`
-  // has `battleTypeFlags: BATTLE_TYPE_TRAINER,`.
   productionLinePattern: /\bbattleTypeFlags\s*(?:\|=|:|=)/,
+}
+
+const BATTLE_TYPE_TRAINER_EVIDENCE: UnitEvidence = {
+  productionFiles: BATTLE_TYPE_DRIVER_FILES,
+  productionLinePattern: /\bbattleTypeFlags\s*:\s*BATTLE_TYPE_TRAINER\s*,?\s*$/,
+  testPattern: /\bcreateSession\b/,
+  testMustAssert: true,
 }
 
 const OWN_TEST_FILE = 'web/src/engine/sim/driver/environmentInventory.test.ts'
@@ -520,6 +540,144 @@ function lineMatches(source: string, token: string, pattern: RegExp): boolean {
   return false
 }
 
+function checkAlsoRequires(
+  productionFiles: ReadonlyArray<SourceFile>,
+  alsoRequires: ReadonlyArray<{ file: string; pattern: RegExp }>,
+): boolean {
+  for (const req of alsoRequires) {
+    const file = productionFiles.find((f) => f.file === req.file)
+    if (file) {
+      if (!patternMatches(req.pattern, file.source)) return false
+    } else {
+      const joined = productionFiles.find((f) => f.file === JOINED_PRODUCTION_FILE)
+      if (joined && patternMatches(req.pattern, joined.source)) {
+        continue
+      }
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Checks if a switch-case label for `token` has a live body.
+ * Starting at the label, skips consecutive `case ...:` / `default:` labels,
+ * then requires the first statement not to be a bare `break`, a bare `return`,
+ * or the closing `}` of the switch.
+ */
+export function hasLiveCaseBody(source: string, token: string): boolean {
+  const labelRegex = new RegExp(
+    `\\bcase\\s+['"\`]?${escapeRegExp(token)}['"\`]?\\s*:`,
+    'g',
+  )
+  let match: RegExpExecArray | null
+  while ((match = labelRegex.exec(source)) !== null) {
+    let rest = source.slice(match.index + match[0].length)
+
+    while (true) {
+      const nextLabel = rest.match(/^\s*(?:case\s+[^:;{}]+:|default\s*:)/)
+      if (nextLabel) {
+        rest = rest.slice(nextLabel[0].length)
+      } else {
+        break
+      }
+    }
+
+    rest = rest.trimStart()
+    if (rest.startsWith('{')) {
+      rest = rest.slice(1).trimStart()
+    }
+
+    if (rest.startsWith('}')) {
+      continue
+    }
+    if (/^break\b(?:\s*;|\s*\}|\s*$|\s*\n)/.test(rest)) {
+      continue
+    }
+    if (/^return\s*(?:;|\}|\n|$)/.test(rest)) {
+      continue
+    }
+
+    return true
+  }
+  return false
+}
+
+/** Extracts test callback block bodies from `it(` and `test(` declarations. */
+export function extractTestBlocks(source: string): string[] {
+  const blocks: string[] = []
+  const testRegex = /\b(?:it|test)(?:\.[a-zA-Z0-9_]+)?\s*\(/g
+  let match: RegExpExecArray | null
+  while ((match = testRegex.exec(source)) !== null) {
+    const startIdx = match.index + match[0].length
+    let depth = 0
+    let foundBrace = false
+    let blockStart = -1
+    let inString: string | null = null
+
+    for (let i = startIdx; i < source.length; i++) {
+      const char = source[i]
+      const prev = i > startIdx ? source[i - 1] : ''
+
+      if (inString) {
+        if (char === inString && prev !== '\\') {
+          inString = null
+        }
+        continue
+      }
+
+      if (char === "'" || char === '"' || char === '`') {
+        inString = char
+        continue
+      }
+
+      if (char === '{') {
+        if (!foundBrace) {
+          foundBrace = true
+          blockStart = i + 1
+        }
+        depth++
+      } else if (char === '}') {
+        depth--
+        if (foundBrace && depth === 0) {
+          blocks.push(source.slice(blockStart, i))
+          testRegex.lastIndex = i + 1
+          break
+        }
+      }
+    }
+  }
+  return blocks
+}
+
+/**
+ * Returns true if `token` appears inside at least one `it(` or `test(` block
+ * that also contains `expect(`.
+ */
+export function testFileAssertsToken(source: string, token: string): boolean {
+  const blocks = extractTestBlocks(source)
+  for (const block of blocks) {
+    if (tokenAppears(block, token) && /\bexpect\s*\(/.test(block)) {
+      return true
+    }
+  }
+  return false
+}
+
+export function battleEventEvidence(event: string): UnitEvidence {
+  return {
+    productionFiles: ['web/src/engine/sim/battleEvents.ts'],
+    caseBodyToken: event,
+    alsoRequires: [
+      {
+        file: 'web/src/engine/sim/driver/session.ts',
+        pattern: /\bregisterBattleEvent\s*\(\s*state\s*,\s*ev\.event\b/,
+      },
+    ],
+    testMustAssert: true,
+  }
+}
+
 /**
  * Classify one unit. `production` may be the per-file corpus (the normal case,
  * so `productionFiles` scoping is possible) or a single joined string used by
@@ -549,7 +707,12 @@ export function classifyToken(
   for (const file of productionFiles) {
     if (requiredFiles && !requiredFiles.has(file.file)) continue
     if (excludedFiles.has(file.file)) continue
-    if (evidence.productionLinePattern) {
+    if (evidence.caseBodyToken) {
+      if (hasLiveCaseBody(file.source, evidence.caseBodyToken)) {
+        productionQualifies = true
+        break
+      }
+    } else if (evidence.productionLinePattern) {
       if (lineMatches(file.source, lineToken, evidence.productionLinePattern)) {
         productionQualifies = true
         break
@@ -558,6 +721,10 @@ export function classifyToken(
       productionQualifies = true
       break
     }
+  }
+
+  if (evidence.alsoRequires && !checkAlsoRequires(productionFiles, evidence.alsoRequires)) {
+    productionQualifies = false
   }
 
   const matchingFiles = testSources
@@ -570,7 +737,13 @@ export function classifyToken(
       ) {
         return evidence.testPattern ? patternMatches(evidence.testPattern, source) : false
       }
-      return evidence.testPattern ? patternMatches(evidence.testPattern, source) : true
+      if (evidence.testPattern && !patternMatches(evidence.testPattern, source)) {
+        return false
+      }
+      if (evidence.testMustAssert && !testFileAssertsToken(source, tokenToCheck)) {
+        return false
+      }
+      return true
     })
     .map((file) => file.file)
     .sort()
@@ -578,7 +751,7 @@ export function classifyToken(
   if (productionQualifies && tested) {
     return { status: 'ported', registeredUntested: false, testFile: matchingFiles[0] }
   }
-  if (productionNamesToken && !tested) {
+  if ((productionQualifies || productionNamesToken) && !tested) {
     return { status: 'unported', registeredUntested: true, testFile: null }
   }
   return { status: 'unported', registeredUntested: false, testFile: matchingFiles[0] ?? null }
@@ -689,6 +862,14 @@ export const MAP_SETUP_SPECS: ReadonlyArray<MapSetupSpec> = [
     token: 'FLAG_SYS_INVERSE_BATTLE',
     site: 'IsInverseBattle',
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 8028),
+    evidence: {
+      productionFiles: [
+        'web/src/engine/sim/driver/session.ts',
+        'web/src/engine/sim/driver/runBattle.ts',
+      ],
+      productionLinePattern: /\binverseBattle\s*:\s*(?!false\b)\S/,
+      evidenceToken: 'FLAG_SYS_INVERSE_BATTLE',
+    },
   },
   {
     key: 'FLAG_SYS_DISABLE_AUTOHEAL',
@@ -768,16 +949,16 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'BattleSetup_StartTrainerBattle',
     scope: 'all 932 trainer battles',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1242),
-    evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
+    evidence: BATTLE_TYPE_TRAINER_EVIDENCE,
   },
   {
     key: 'BATTLE_TYPE_DOUBLE',
     token: 'BATTLE_TYPE_DOUBLE',
     site: 'BattleSetup_StartTrainerBattle',
     // battle_setup.c:1240 sets this only when two trainers approach; the driver's
-    // session.ts:238 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
+    // session.ts:242 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
     // records that battleTypeFlags never carries the double bit in this build.
-    scope: 'not started by the driver: session.ts:238 sets BATTLE_TYPE_TRAINER only',
+    scope: 'not started by the driver: session.ts:242 sets BATTLE_TYPE_TRAINER only',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
@@ -1152,6 +1333,7 @@ export interface EnvironmentInventoryOptions {
   allowlist?: ReadonlyArray<EnvironmentAllowlistEntry>
   extraMapSetupSpecs?: ReadonlyArray<MapSetupSpec>
   extraScriptEventSpecs?: ReadonlyArray<ScriptEventSpec>
+  battleEventEvidence?: (event: string) => UnitEvidence
 }
 
 function fileOf(citation: string): string {
@@ -1245,6 +1427,7 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
     list.push(row)
     eventRowsByEvent.set(row.event, list)
   }
+  const getBattleEventEvidence = options.battleEventEvidence ?? battleEventEvidence
   const eventCitations = buildBattleEventCitations(eventSource, eventHeaderSource)
   for (const event of [...eventRowsByEvent.keys()].sort()) {
     const rows = eventRowsByEvent.get(event) ?? []
@@ -1257,6 +1440,7 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
       site: 'battle_events.c switch',
       scope: `${rows.length} encounter row(s), ${maps.length} map(s)`,
       citation,
+      evidence: getBattleEventEvidence(event),
     })
   }
 
@@ -1375,7 +1559,7 @@ export function generateEnvironmentInventoryDoc(
     '- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,',
   )
   lines.push(
-    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:238`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
+    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:242`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
   )
   lines.push('  never runs a double battle regardless of a constant or a hand-built test state.')
   lines.push(
@@ -1385,6 +1569,18 @@ export function generateEnvironmentInventoryDoc(
     '  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen\'s `doubleBattle = TRUE`',
   )
   lines.push('  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.')
+  lines.push(
+    '- `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.',
+  )
+  lines.push(
+    '  The sim currently hardcodes `inverseBattle: false` (`session.ts:127,174,205`), so it is unported.',
+  )
+  lines.push(
+    '- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts:250` (`registerBattleEvent`).',
+  )
+  lines.push(
+    '  33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is unported.',
+  )
   lines.push('')
   lines.push(
     'Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not',
