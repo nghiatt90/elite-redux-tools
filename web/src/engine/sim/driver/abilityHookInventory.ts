@@ -258,23 +258,100 @@ const ESCAPE_PATH = join(ENGINE_DIR, 'sim/escape.ts')
 const SWITCH_IN_PATH = join(ENGINE_DIR, 'sim/switchInAbility.ts')
 
 /**
- * Extracts the slice of code corresponding to a function declaration, up to the next top-level
- * declaration at column 0 (another `function`/`export function` or a `const`/`export const`), or EOF.
+ * Extracts the slice of code corresponding to a function declaration, from the declaration through
+ * the closing brace that matches its body's opening brace. The declaration string must end at the
+ * `(` of the parameter list; the parameter list and any return-type annotation are skipped.
  *
- * Ending only at the next function used to sweep whole top-level tables that sit between two
- * functions into the caller's slice: `applyFrisk`'s slice ran through `ADD_TYPE_ON_ENTRY` and
- * `ANNOUNCE_ONLY_ON_ENTRY`, and `runReactiveAbilityEffects`'s through
- * `POISON_PUPPETEER_CLONE_ABILITIES`. Column-0 `const` tables are now boundaries too.
+ * Comments are blanked to spaces of equal length before returning (see
+ * `stripCommentsPreservingLayout`), so an ability id mentioned in a comment, in a gutted `if
+ * (false)` block or in the next function's JSDoc is not part of the slice. String literals are
+ * kept, so `'ABILITY_X'` branches still match. Ending at the matching brace also keeps top-level
+ * tables that sit between two functions out of the caller's slice (the old next-declaration rule
+ * swept `ADD_TYPE_ON_ENTRY` into `applyFrisk`'s slice and `POISON_PUPPETEER_CLONE_ABILITIES` into
+ * `runReactiveAbilityEffects`'s).
  */
 export function extractFunctionSlice(source: string, functionDeclaration: string): string {
-  const start = source.indexOf(functionDeclaration)
+  const stripped = stripCommentsPreservingLayout(source)
+  const start = stripped.indexOf(functionDeclaration)
   if (start === -1) {
     throw new Error(`Function declaration not found: ${functionDeclaration}`)
   }
-  const afterStart = source.slice(start + functionDeclaration.length)
-  const nextDeclarationMatch = afterStart.match(/\n(?:export\s+)?(?:function|const)\s+/)
-  const end = nextDeclarationMatch ? start + functionDeclaration.length + nextDeclarationMatch.index! : source.length
-  return source.slice(start, end)
+  const bodyOpen = findFunctionBodyOpen(stripped, start + functionDeclaration.length, functionDeclaration)
+  const bodyClose = findMatchingBrace(stripped, bodyOpen)
+  if (bodyClose === -1) {
+    throw new Error(`Unbalanced braces for function declaration: ${functionDeclaration}`)
+  }
+  return stripped.slice(start, bodyClose + 1)
+}
+
+/** Index just past the quoted string literal that starts at `start`. */
+function skipQuotedString(text: string, start: number): number {
+  const quote = text[start]
+  let i = start + 1
+  while (i < text.length && text[i] !== quote) {
+    if (text[i] === '\\') i++
+    i++
+  }
+  return i + 1
+}
+
+/** Index of the `}` matching the `{` at `open`, ignoring braces inside quoted strings. */
+function findMatchingBrace(text: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedString(text, i) - 1
+      continue
+    }
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/**
+ * Index of the `{` that opens the body of the function whose declaration ends at
+ * `declarationEnd` (immediately after the `(` of its parameter list). Walks the balanced parameter
+ * list, then the return-type annotation when there is one. A return type may itself be an object
+ * type (`): { acc: number } {`), whose closing brace is followed by the body brace.
+ */
+function findFunctionBodyOpen(stripped: string, declarationEnd: number, declaration: string): number {
+  if (!declaration.endsWith('(')) {
+    throw new Error(`Function body not found: ${declaration}`)
+  }
+  let depth = 1
+  let i = declarationEnd
+  while (i < stripped.length && depth > 0) {
+    const ch = stripped[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedString(stripped, i)
+      continue
+    }
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    i++
+  }
+  if (depth !== 0) throw new Error(`Function body not found: ${declaration}`)
+  while (i < stripped.length && /\s/.test(stripped[i])) i++
+  if (stripped[i] === '{') return i
+  if (stripped[i] !== ':') throw new Error(`Function body not found: ${declaration}`)
+  i++
+  while (i < stripped.length && /\s/.test(stripped[i])) i++
+  if (stripped[i] === '{') {
+    const typeClose = findMatchingBrace(stripped, i)
+    if (typeClose === -1) throw new Error(`Function body not found: ${declaration}`)
+    let body = typeClose + 1
+    while (body < stripped.length && /\s/.test(stripped[body])) body++
+    if (stripped[body] !== '{') throw new Error(`Function body not found: ${declaration}`)
+    return body
+  }
+  const body = stripped.indexOf('{', i)
+  if (body === -1) throw new Error(`Function body not found: ${declaration}`)
+  return body
 }
 
 /**
@@ -343,27 +420,17 @@ export function extractTargetFlagAbilities(): Set<string> {
 export function extractReactiveExtraAbilities(source?: string): Set<string> {
   const content = source ?? readFileSync(STAT_BUFFS_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function runReactiveAbilityEffects(')
-  const result = new Set<string>()
-  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(slice)) !== null) {
-    result.add(match[1])
-  }
+  const result = extractComparedAbilityLiterals(slice)
   if (result.size === 0) {
     throw new Error('Zero labels extracted for declaration: function runReactiveAbilityEffects(')
   }
   return result
 }
 
-export function extractReviveAbilities(): Set<string> {
-  const content = readFileSync(TURN_PATH, 'utf-8')
+export function extractReviveAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(TURN_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function latchRecurringNightmareOnFaint(')
-  const result = new Set<string>()
-  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(slice)) !== null) {
-    result.add(match[1])
-  }
+  const result = extractComparedAbilityLiterals(slice)
   if (result.size === 0) {
     throw new Error('Zero labels extracted for declaration: function latchRecurringNightmareOnFaint(')
   }
@@ -373,12 +440,7 @@ export function extractReviveAbilities(): Set<string> {
 export function extractBattlerFaintsExtraAbilities(): Set<string> {
   const content = readFileSync(MOVE_END_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function dispatchOnBattlerFaints(')
-  const result = new Set<string>()
-  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(slice)) !== null) {
-    result.add(match[1])
-  }
+  const result = extractComparedAbilityLiterals(slice)
   if (result.size === 0) {
     throw new Error('Zero labels extracted for declaration: function dispatchOnBattlerFaints(')
   }
@@ -580,8 +642,10 @@ export function extractDefenderBranchAbilities(source?: string): Set<string> {
 /**
  * The onRecoil abilities the MOVEEND_RECOIL loop really computes a recoil amount for: the ids
  * that are keys of both `ON_RECOIL_TYPES` (the type gate) and `ON_RECOIL_DIVISORS` (the damage
- * divisor), intersected with the loop's gate list `ON_RECOIL_ABILITIES`. A key present in only one
- * table either skips every type or divides by `undefined`, so it is not ported.
+ * divisor), intersected with the loop's gate list `ON_RECOIL_ABILITIES`, and only while
+ * `runMoveEnd` still reads both tables in its loop body. A key present in only one table either
+ * skips every type or divides by `undefined`, so it is not ported; a gutted loop that no longer
+ * reads the tables leaves the set empty.
  */
 export function extractRecoilAbilities(source?: string): Set<string> {
   const content = source ?? readFileSync(MOVE_END_PATH, 'utf-8')
@@ -590,6 +654,13 @@ export function extractRecoilAbilities(source?: string): Set<string> {
   const result = new Set<string>([...types].filter((id) => divisors.has(id) && ON_RECOIL_ABILITIES.includes(id)))
   if (result.size === 0) {
     throw new Error('Zero onRecoil abilities present in both ON_RECOIL_TYPES and ON_RECOIL_DIVISORS')
+  }
+  // `ON_RECOIL_TYPES[abilityId]` also appears in the `onRecoilHolders.some(...)` pre-check above the
+  // loop, so anchor on the loop's own `const types = ...` read; otherwise deleting the loop's type
+  // read would still look present.
+  const slice = extractFunctionSlice(content, 'export function runMoveEnd(')
+  if (!slice.includes('const types = ON_RECOIL_TYPES[abilityId]') || !slice.includes('ON_RECOIL_DIVISORS[abilityId]')) {
+    return new Set()
   }
   return result
 }
@@ -643,13 +714,15 @@ export interface ModifyMoveFlagsSources {
   moveTargetFlags?: string
 }
 
+/**
+ * The ability ids a flag predicate returns `true` for. A declaration with no returning-true branch
+ * yields the empty set: deleting the only branch is evidence the family is unported, not a reason
+ * to crash every importer of the pinned `PORTED_*` sets. Only a missing declaration throws, via
+ * `extractFunctionSlice`.
+ */
 export function extractMoveFlagPredicateAbilities(source: string, declaration: string): Set<string> {
   const slice = extractFunctionSlice(source, declaration)
-  const result = extractReturnedAbilityIds(slice)
-  if (result.size === 0) {
-    throw new Error(`Zero returning-true ability branches for declaration: ${declaration}`)
-  }
-  return result
+  return extractReturnedAbilityIds(slice)
 }
 
 /**
@@ -836,6 +909,48 @@ function stripStringLiterals(text: string): string {
     }
   }
   return out
+}
+
+/**
+ * Blanks `//` line comments and `/* ... *​/` block comments with spaces, keeping the string's
+ * length and every newline so offsets still line up with the raw text. Quoted strings are skipped,
+ * so a `//` inside a URL is not a comment; string literals themselves are kept so callers can still
+ * match `'ABILITY_X'`.
+ */
+function stripCommentsPreservingLayout(text: string): string {
+  const out = text.split('')
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedString(text, i)
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') {
+        out[i] = ' '
+        i++
+      }
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      out[i] = ' '
+      out[i + 1] = ' '
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) {
+        if (text[i] !== '\n') out[i] = ' '
+        i++
+      }
+      if (i < text.length) {
+        out[i] = ' '
+        out[i + 1] = ' '
+        i += 2
+      }
+      continue
+    }
+    i++
+  }
+  return out.join('')
 }
 
 /** Removes `name( ... )` calls with balanced parentheses. */
