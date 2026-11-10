@@ -24,8 +24,8 @@ mention in a comment is not evidence, and neither is a name alone:
   battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
   (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
 - `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.
-  The sim currently hardcodes `inverseBattle: false` (`session.ts:127,174,205`), so it is unported.
-- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts:250` (`registerBattleEvent`).
+  The sim currently hardcodes `inverseBattle: false`, so it is unported.
+- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts` (`registerBattleEvent`).
   33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is unported.
 
 Allowlisted units require an exact pinned C `file:line` whose line is quoted in the reason. The allowlist is not
@@ -71,40 +71,40 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 ## Map-Setup Units
 
-| Unit key | Fights / maps | C citation | Status | Test file |
-| --- | --- | --- | --- | --- |
-| `FLAG_ALPHA_CREATION` | 6 map(s), 18 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/pokemon.c:504` | allowlisted | none |
-| `FLAG_SHINY_CREATION` | 4 map(s), 4 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route132 | `pipeline/.upstream/eliteredux-source/src/pokemon.c:499` | allowlisted | none |
-| `FLAG_SYS_DISABLE_AUTOHEAL` | 5 map(s), 17 line(s): MossdeepCity_SpaceCenter_2F, Route111, SkyPillar_Outside, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none |
-| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | unported | none |
-| `FLAG_TOTEM_BATTLE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9144` | unported | none |
-| `HealPlayerParty` | 31 map(s), 52 line(s): BattleFrontier_BattleArenaBattleRoom, BattleFrontier_BattleArenaLobby, BattleFrontier_BattleDomeBattleRoom, BattleFrontier_BattleDomeLobby, BattleFrontier_BattleDomePreBattleRoom, BattleFrontier_BattleFactoryBattleRoom, BattleFrontier_BattleFactoryPreBattleRoom, BattleFrontier_BattlePalaceBattleRoom, BattleFrontier_BattlePalaceLobby, BattleFrontier_BattlePikeLobby, BattleFrontier_BattlePikeRoomNormal, BattleFrontier_BattlePyramidFloor, BattleFrontier_BattlePyramidLobby, BattleFrontier_BattleTowerBattleRoom, BattleFrontier_BattleTowerLobby, BattleFrontier_BattleTowerMultiBattleRoom, BattleFrontier_BattleTowerMultiPartnerRoom, FallarborTown_BattleTentBattleRoom, MeteorFalls_1F_1R, MossdeepCity_House1, MossdeepCity_SpaceCenter_2F, Route101, Route111, SkyPillar_Outside, SlateportCity_BattleTentBattleRoom, SlateportCity_BattleTentCorridor, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F, SootopolisCity_MysteryEventsHouse_B1F, TrainerHill_Entrance, VerdanturfTown_BattleTentBattleRoom | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none |
-| `VAR_BATTLE_FIELD_EFFECT_TYPE` | 3 map(s), 43 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4163` | unported | none |
-| `VAR_BATTLE_FIELD_ID` | 3 map(s), 44 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4164` | unported | none |
-| `VAR_MONOTYPE_BOOST` | 1 map(s), 40 line(s): EvergrandeCity_MonoChampRoom_1 | `pipeline/.upstream/eliteredux-source/src/field_specials.c:4943` | allowlisted | none |
-| `VAR_TOTEM_MESSAGE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9160` | unported | none |
-| `VAR_TOTEM_POKEMON_ACCURACY_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9156` | unported | none |
-| `VAR_TOTEM_POKEMON_ATK_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9151` | unported | none |
-| `VAR_TOTEM_POKEMON_DEF_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9152` | unported | none |
-| `VAR_TOTEM_POKEMON_EVASION_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9157` | unported | none |
-| `VAR_TOTEM_POKEMON_SPEED_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9155` | unported | none |
-| `VAR_TOTEM_POKEMON_SP_ATK_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9153` | unported | none |
-| `VAR_TOTEM_POKEMON_SP_DEF_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9154` | unported | none |
-| `VAR_TRAINER_PRIZE_BP` | 1 map(s), 18 line(s): EvergrandeCity_MonoChampRoom_1 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5809` | allowlisted | none |
-| `setfieldeffectargument` | 4 map(s), 7 line(s): BirthIsland_Exterior, LilycoveCity, Route120, Route128 | `pipeline/.upstream/eliteredux-source/include/field_effect.h:8` | allowlisted | none |
-| `setweather` | 11 map(s), 22 line(s): AshenWoods, FarawayIsland_Entrance, JaggedPass, MtPyre_Exterior, NavelRock_Top, Route111, Route113, Route120, SeafloorCavern_Room9, SkyPillar_Outside, SootopolisCity | `pipeline/.upstream/eliteredux-source/src/scrcmd.c:724` | allowlisted | none |
-| `setwildbattlewithcustommoves` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/scrcmd.c:2620` | unported | none |
-| `starttagbattle` | 6 map(s), 26 line(s): DewfordTown_Gym, FortreeCity_Gym, LavaridgeTown_Gym_1F, MauvilleCity_Gym, MossdeepCity_Gym, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none |
+| Unit key | Fights / maps | C citation | Status | Test file | Production evidence |
+| --- | --- | --- | --- | --- | --- |
+| `FLAG_ALPHA_CREATION` | 6 map(s), 18 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/pokemon.c:504` | allowlisted | none | none |
+| `FLAG_SHINY_CREATION` | 4 map(s), 4 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route132 | `pipeline/.upstream/eliteredux-source/src/pokemon.c:499` | allowlisted | none | none |
+| `FLAG_SYS_DISABLE_AUTOHEAL` | 5 map(s), 17 line(s): MossdeepCity_SpaceCenter_2F, Route111, SkyPillar_Outside, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
+| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | unported | none | none |
+| `FLAG_TOTEM_BATTLE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9144` | unported | none | none |
+| `HealPlayerParty` | 31 map(s), 52 line(s): BattleFrontier_BattleArenaBattleRoom, BattleFrontier_BattleArenaLobby, BattleFrontier_BattleDomeBattleRoom, BattleFrontier_BattleDomeLobby, BattleFrontier_BattleDomePreBattleRoom, BattleFrontier_BattleFactoryBattleRoom, BattleFrontier_BattleFactoryPreBattleRoom, BattleFrontier_BattlePalaceBattleRoom, BattleFrontier_BattlePalaceLobby, BattleFrontier_BattlePikeLobby, BattleFrontier_BattlePikeRoomNormal, BattleFrontier_BattlePyramidFloor, BattleFrontier_BattlePyramidLobby, BattleFrontier_BattleTowerBattleRoom, BattleFrontier_BattleTowerLobby, BattleFrontier_BattleTowerMultiBattleRoom, BattleFrontier_BattleTowerMultiPartnerRoom, FallarborTown_BattleTentBattleRoom, MeteorFalls_1F_1R, MossdeepCity_House1, MossdeepCity_SpaceCenter_2F, Route101, Route111, SkyPillar_Outside, SlateportCity_BattleTentBattleRoom, SlateportCity_BattleTentCorridor, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F, SootopolisCity_MysteryEventsHouse_B1F, TrainerHill_Entrance, VerdanturfTown_BattleTentBattleRoom | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
+| `VAR_BATTLE_FIELD_EFFECT_TYPE` | 3 map(s), 43 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4163` | unported | none | none |
+| `VAR_BATTLE_FIELD_ID` | 3 map(s), 44 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4164` | unported | none | none |
+| `VAR_MONOTYPE_BOOST` | 1 map(s), 40 line(s): EvergrandeCity_MonoChampRoom_1 | `pipeline/.upstream/eliteredux-source/src/field_specials.c:4943` | allowlisted | none | none |
+| `VAR_TOTEM_MESSAGE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9160` | unported | none | none |
+| `VAR_TOTEM_POKEMON_ACCURACY_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9156` | unported | none | none |
+| `VAR_TOTEM_POKEMON_ATK_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9151` | unported | none | none |
+| `VAR_TOTEM_POKEMON_DEF_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9152` | unported | none | none |
+| `VAR_TOTEM_POKEMON_EVASION_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9157` | unported | none | none |
+| `VAR_TOTEM_POKEMON_SPEED_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9155` | unported | none | none |
+| `VAR_TOTEM_POKEMON_SP_ATK_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9153` | unported | none | none |
+| `VAR_TOTEM_POKEMON_SP_DEF_BOOST` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9154` | unported | none | none |
+| `VAR_TRAINER_PRIZE_BP` | 1 map(s), 18 line(s): EvergrandeCity_MonoChampRoom_1 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:5809` | allowlisted | none | none |
+| `setfieldeffectargument` | 4 map(s), 7 line(s): BirthIsland_Exterior, LilycoveCity, Route120, Route128 | `pipeline/.upstream/eliteredux-source/include/field_effect.h:8` | allowlisted | none | none |
+| `setweather` | 11 map(s), 22 line(s): AshenWoods, FarawayIsland_Entrance, JaggedPass, MtPyre_Exterior, NavelRock_Top, Route111, Route113, Route120, SeafloorCavern_Room9, SkyPillar_Outside, SootopolisCity | `pipeline/.upstream/eliteredux-source/src/scrcmd.c:724` | allowlisted | none | none |
+| `setwildbattlewithcustommoves` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/scrcmd.c:2620` | unported | none | none |
+| `starttagbattle` | 6 map(s), 26 line(s): DewfordTown_Gym, FortreeCity_Gym, LavaridgeTown_Gym_1F, MauvilleCity_Gym, MossdeepCity_Gym, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
 
 ## Battle-Type Units
 
-| Unit key | Fights / maps | C citation | Status | Test file |
-| --- | --- | --- | --- | --- |
-| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:242 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
-| `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none |
-| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` |
-| `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none |
-| `FLAG_TAG_BATTLE` | 26 starttagbattle calls in 6 maps | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none |
+| Unit key | Fights / maps | C citation | Status | Test file | Production evidence |
+| --- | --- | --- | --- | --- | --- |
+| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:242 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` | none |
+| `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none | none |
+| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/session.ts:242` |
+| `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none | none |
+| `FLAG_TAG_BATTLE` | 26 starttagbattle calls in 6 maps | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
 
 ## Difficulty-Flag Units
 
@@ -141,42 +141,42 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 ## Battle-Event Units
 
-| Unit key | Fights / maps | C citation | Status | Test file |
-| --- | --- | --- | --- | --- |
-| `BATTLE_EVENT_EMBARGO` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:295` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_BLEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:270` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_BURNED` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:258` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_FROSTBITE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:266` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_PARALYZED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:254` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_SLEEP` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:262` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_STAND` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:433` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LAST_TOXIC` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:278` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LIGHTSCREEN` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:309` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_LUCKY_CHANT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:314` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_NO_PROTECT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:330` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_ONDS_COPY_STATS` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:480` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_ONSTAY_FORESIGHT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:415` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_ONSTAY_LEECH_SEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:420` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_ONSTAY_MAGNET_RISE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:427` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_ONSWITCH_MAT_BLOCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:402` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_PERMA_HEAL_BLOCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:461` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_PERMA_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:325` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_PERMA_WIDE_GUARD` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:320` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_POSTURE_DEFENSE` | 4 encounter row(s), 4 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:209` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_POSTURE_OFFENSE` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:201` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_POSTURE_SPDEF` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:225` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_POSTURE_SPECIAL` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:217` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_POSTURE_SPEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:233` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_REFLECT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:304` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_SPIKES` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:291` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STEADY_ACCURACY` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:395` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STEADY_DEFENSE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:383` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STEADY_SPECIAL` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:386` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STEADY_SPEED` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:392` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STEALTH_ROCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:283` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/include/constants/battle_events.h:60` | unported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_SUBSTITUTE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:455` | ported | `web/src/engine/sim/battleEvents.test.ts` |
-| `BATTLE_EVENT_TENSE_BATTLE` | 8 encounter row(s), 8 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:357` | ported | `web/src/engine/sim/battleEvents.test.ts` |
+| Unit key | Fights / maps | C citation | Status | Test file | Production evidence |
+| --- | --- | --- | --- | --- | --- |
+| `BATTLE_EVENT_EMBARGO` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:295` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:379` |
+| `BATTLE_EVENT_LAST_BLEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:270` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:346` |
+| `BATTLE_EVENT_LAST_BURNED` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:258` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:331` |
+| `BATTLE_EVENT_LAST_FROSTBITE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:266` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:341` |
+| `BATTLE_EVENT_LAST_PARALYZED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:254` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:326` |
+| `BATTLE_EVENT_LAST_SLEEP` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:262` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:336` |
+| `BATTLE_EVENT_LAST_STAND` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:433` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:538` |
+| `BATTLE_EVENT_LAST_TOXIC` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:278` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:356` |
+| `BATTLE_EVENT_LIGHTSCREEN` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:309` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:399` |
+| `BATTLE_EVENT_LUCKY_CHANT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:314` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:405` |
+| `BATTLE_EVENT_NO_PROTECT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:330` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:421` |
+| `BATTLE_EVENT_ONDS_COPY_STATS` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:480` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:600` |
+| `BATTLE_EVENT_ONSTAY_FORESIGHT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:415` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:495` |
+| `BATTLE_EVENT_ONSTAY_LEECH_SEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:420` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:509` |
+| `BATTLE_EVENT_ONSTAY_MAGNET_RISE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:427` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:524` |
+| `BATTLE_EVENT_ONSWITCH_MAT_BLOCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:402` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:481` |
+| `BATTLE_EVENT_PERMA_HEAL_BLOCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:461` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:571` |
+| `BATTLE_EVENT_PERMA_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:325` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:416` |
+| `BATTLE_EVENT_PERMA_WIDE_GUARD` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:320` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:411` |
+| `BATTLE_EVENT_POSTURE_DEFENSE` | 4 encounter row(s), 4 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:209` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:293` |
+| `BATTLE_EVENT_POSTURE_OFFENSE` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:201` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:287` |
+| `BATTLE_EVENT_POSTURE_SPDEF` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:225` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:305` |
+| `BATTLE_EVENT_POSTURE_SPECIAL` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:217` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:299` |
+| `BATTLE_EVENT_POSTURE_SPEED` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:233` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:311` |
+| `BATTLE_EVENT_REFLECT` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:304` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:393` |
+| `BATTLE_EVENT_SPIKES` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:291` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:373` |
+| `BATTLE_EVENT_STEADY_ACCURACY` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:395` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:473` |
+| `BATTLE_EVENT_STEADY_DEFENSE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:383` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:457` |
+| `BATTLE_EVENT_STEADY_SPECIAL` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:386` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:461` |
+| `BATTLE_EVENT_STEADY_SPEED` | 2 encounter row(s), 2 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:392` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:469` |
+| `BATTLE_EVENT_STEALTH_ROCK` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:283` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:361` |
+| `BATTLE_EVENT_STICKY_WEB` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/include/constants/battle_events.h:60` | unported | `web/src/engine/sim/battleEvents.test.ts` | none |
+| `BATTLE_EVENT_SUBSTITUTE` | 1 encounter row(s), 1 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:455` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:565` |
+| `BATTLE_EVENT_TENSE_BATTLE` | 8 encounter row(s), 8 map(s) | `pipeline/.upstream/eliteredux-source/src/battle_events.c:357` | ported | `web/src/engine/sim/battleEvents.test.ts` | `web/src/engine/sim/battleEvents.ts:426` |
 
 ## Script-Event Units
 

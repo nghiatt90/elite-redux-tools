@@ -176,6 +176,8 @@ export interface EnvironmentUnit {
   testFile: string | null
   /** Trainer ids reachable from the maps where a map-setup unit is set. */
   trainerIds: string[]
+  /** Production file and line providing qualifying evidence, or null. */
+  productionEvidence?: string | null
 }
 
 export interface EnvironmentUnitKindSummary {
@@ -499,7 +501,7 @@ export function loadEngineProductionFiles(): SourceFile[] {
       !isTest &&
       (!repoRel.startsWith('web/src/engine/sim/driver/') ||
         (LOADER_FILES as ReadonlyArray<string>).includes(repoRel)),
-  ).map((file) => ({ file: file.file, source: stripComments(file.source) }))
+  )
 }
 
 /** Engine test sources except this inventory's own test file. */
@@ -511,10 +513,11 @@ export function loadEngineTestFiles(): SourceFile[] {
 // Classification
 // ---------------------------------------------------------------------------
 
-interface TokenClassification {
+export interface TokenClassification {
   status: EnvironmentUnitStatus
   registeredUntested: boolean
   testFile: string | null
+  productionEvidence: string | null
 }
 
 const JOINED_PRODUCTION_FILE = '<joined-production>'
@@ -601,6 +604,53 @@ export function hasLiveCaseBody(source: string, token: string): boolean {
     return true
   }
   return false
+}
+
+/** Finds 1-based line of `case '<token>':` in unstripped source, skipping comment lines. */
+export function findCaseLabelLine(source: string, token: string): number | null {
+  const caseRegex = new RegExp(`\\bcase\\s+['"\`]?${escapeRegExp(token)}['"\`]?\\s*:`)
+  const lines = source.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+      continue
+    }
+    if (caseRegex.test(lines[i])) {
+      return i + 1
+    }
+  }
+  return null
+}
+
+/** Finds 1-based line matching token and pattern in unstripped source, skipping comment lines. */
+export function findPatternLine(source: string, token: string, pattern: RegExp): number | null {
+  const lines = source.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+      continue
+    }
+    pattern.lastIndex = 0
+    if ((token === '' || tokenAppears(lines[i], token)) && pattern.test(lines[i])) {
+      return i + 1
+    }
+  }
+  return null
+}
+
+/** Finds 1-based line containing token in unstripped source, skipping comment lines. */
+export function findTokenLine(source: string, token: string): number | null {
+  const lines = source.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+      continue
+    }
+    if (tokenAppears(lines[i], token)) {
+      return i + 1
+    }
+  }
+  return null
 }
 
 /** Extracts test callback block bodies from `it(` and `test(` declarations. */
@@ -691,7 +741,8 @@ export function classifyToken(
 ): TokenClassification {
   const tokenToCheck = evidence.evidenceToken ?? token
   const lineToken = evidence.evidenceToken && token === evidence.evidenceToken ? '' : token
-  const productionFiles = asProductionFiles(production).map((file) => ({
+  const rawProductionFiles = asProductionFiles(production)
+  const productionFiles = rawProductionFiles.map((file) => ({
     file: file.file,
     source: stripComments(file.source),
   }))
@@ -704,21 +755,32 @@ export function classifyToken(
     : null
   const excludedFiles = new Set(evidence.productionExcludeFiles ?? [])
   let productionQualifies = false
-  for (const file of productionFiles) {
+  let qualifyingFile: string | null = null
+  let qualifyingLine: number | null = null
+
+  for (let i = 0; i < productionFiles.length; i += 1) {
+    const file = productionFiles[i]
     if (requiredFiles && !requiredFiles.has(file.file)) continue
     if (excludedFiles.has(file.file)) continue
+    const rawSource = rawProductionFiles[i].source
     if (evidence.caseBodyToken) {
       if (hasLiveCaseBody(file.source, evidence.caseBodyToken)) {
         productionQualifies = true
+        qualifyingFile = file.file
+        qualifyingLine = findCaseLabelLine(rawSource, evidence.caseBodyToken)
         break
       }
     } else if (evidence.productionLinePattern) {
       if (lineMatches(file.source, lineToken, evidence.productionLinePattern)) {
         productionQualifies = true
+        qualifyingFile = file.file
+        qualifyingLine = findPatternLine(rawSource, lineToken, evidence.productionLinePattern)
         break
       }
     } else if (tokenAppears(file.source, lineToken)) {
       productionQualifies = true
+      qualifyingFile = file.file
+      qualifyingLine = findTokenLine(rawSource, lineToken || tokenToCheck)
       break
     }
   }
@@ -726,6 +788,11 @@ export function classifyToken(
   if (evidence.alsoRequires && !checkAlsoRequires(productionFiles, evidence.alsoRequires)) {
     productionQualifies = false
   }
+
+  const productionEvidence =
+    productionQualifies && qualifyingFile && qualifyingLine !== null
+      ? `${qualifyingFile}:${qualifyingLine}`
+      : null
 
   const matchingFiles = testSources
     .filter((file) => {
@@ -749,12 +816,27 @@ export function classifyToken(
     .sort()
   const tested = matchingFiles.length > 0
   if (productionQualifies && tested) {
-    return { status: 'ported', registeredUntested: false, testFile: matchingFiles[0] }
+    return {
+      status: 'ported',
+      registeredUntested: false,
+      testFile: matchingFiles[0],
+      productionEvidence,
+    }
   }
   if ((productionQualifies || productionNamesToken) && !tested) {
-    return { status: 'unported', registeredUntested: true, testFile: null }
+    return {
+      status: 'unported',
+      registeredUntested: true,
+      testFile: null,
+      productionEvidence,
+    }
   }
-  return { status: 'unported', registeredUntested: false, testFile: matchingFiles[0] ?? null }
+  return {
+    status: 'unported',
+    registeredUntested: false,
+    testFile: matchingFiles[0] ?? null,
+    productionEvidence,
+  }
 }
 
 /** A citation must be an exact `file:line` ending in a C/C++/header, or an upstream script. */
@@ -1394,6 +1476,7 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
       registeredUntested: allow ? false : classification.registeredUntested,
       testFile: classification.testFile,
       trainerIds: [...trainerIds].sort(),
+      productionEvidence: allow ? null : classification.productionEvidence,
     })
   }
 
@@ -1573,13 +1656,25 @@ export function generateEnvironmentInventoryDoc(
     '- `FLAG_SYS_INVERSE_BATTLE` requires production evidence in `session.ts` or `runBattle.ts` assigning `inverseBattle` from a non-literal value.',
   )
   lines.push(
-    '  The sim currently hardcodes `inverseBattle: false` (`session.ts:127,174,205`), so it is unported.',
+    '  The sim currently hardcodes `inverseBattle: false`, so it is unported.',
+  )
+  const portedBattleEventCount = result.units.filter(
+    (unit) => unit.kind === 'battle-event' && unit.status === 'ported',
+  ).length
+  const unportedStickyWeb = result.units.find(
+    (unit) =>
+      unit.kind === 'battle-event' &&
+      unit.key === 'BATTLE_EVENT_STICKY_WEB' &&
+      unit.status === 'unported',
+  )
+  const stickyWebClause = unportedStickyWeb
+    ? `; \`${unportedStickyWeb.key}\` has no case label and is unported.`
+    : '.'
+  lines.push(
+    '- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts` (`registerBattleEvent`).',
   )
   lines.push(
-    '- Battle-event units require a live switch case in `battleEvents.ts` and dispatch wiring in `session.ts:250` (`registerBattleEvent`).',
-  )
-  lines.push(
-    '  33 units qualify and are asserted in `battleEvents.test.ts`; `BATTLE_EVENT_STICKY_WEB` has no case label and is unported.',
+    `  ${portedBattleEventCount} units qualify and are asserted in \`battleEvents.test.ts\`${stickyWebClause}`,
   )
   lines.push('')
   lines.push(
@@ -1657,13 +1752,29 @@ export function generateEnvironmentInventoryDoc(
       lines.push('')
       return
     }
-    lines.push('| Unit key | Fights / maps | C citation | Status | Test file |')
-    lines.push('| --- | --- | --- | --- | --- |')
+    const hasProductionEvidence =
+      kind === 'battle-type' || kind === 'map-setup' || kind === 'battle-event'
+    if (hasProductionEvidence) {
+      lines.push(
+        '| Unit key | Fights / maps | C citation | Status | Test file | Production evidence |',
+      )
+      lines.push('| --- | --- | --- | --- | --- | --- |')
+    } else {
+      lines.push('| Unit key | Fights / maps | C citation | Status | Test file |')
+      lines.push('| --- | --- | --- | --- | --- |')
+    }
     for (const unit of subset) {
       const testFile = unit.testFile ? `\`${unit.testFile}\`` : 'none'
-      lines.push(
-        `| \`${unit.key}\` | ${unit.scope} | \`${unit.citation}\` | ${statusLabel(unit)} | ${testFile} |`,
-      )
+      if (hasProductionEvidence) {
+        const prodEvidence = unit.productionEvidence ? `\`${unit.productionEvidence}\`` : 'none'
+        lines.push(
+          `| \`${unit.key}\` | ${unit.scope} | \`${unit.citation}\` | ${statusLabel(unit)} | ${testFile} | ${prodEvidence} |`,
+        )
+      } else {
+        lines.push(
+          `| \`${unit.key}\` | ${unit.scope} | \`${unit.citation}\` | ${statusLabel(unit)} | ${testFile} |`,
+        )
+      }
     }
     lines.push('')
   }

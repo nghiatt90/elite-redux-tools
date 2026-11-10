@@ -714,4 +714,14 @@ describe('step 1: non-trainer-flag evidence', () => {
     `
     expect(testFileAssertsToken(nonAssertingIt, 'MY_TOKEN')).toBe(false)
   })
+
+  it('8. real corpus units have productionEvidence: BATTLE_EVENT_REFLECT has line in battleEvents.ts, FLAG_SYS_INVERSE_BATTLE has null', () => {
+    const inventory = runInventory()
+    const reflect = inventory.units.find((u) => u.key === 'BATTLE_EVENT_REFLECT')
+    expect(reflect?.productionEvidence?.startsWith('web/src/engine/sim/battleEvents.ts:')).toBe(
+      true,
+    )
+    const inverse = inventory.units.find((u) => u.key === 'FLAG_SYS_INVERSE_BATTLE')
+    expect(inverse?.productionEvidence).toBeNull()
+  })
 })
