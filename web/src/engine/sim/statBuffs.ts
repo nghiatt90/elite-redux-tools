@@ -76,6 +76,11 @@ import type { SimDataContext } from './dataContext'
 import { MOLD_BREAKABLE_ABILITIES, UNSUPPRESSABLE_ABILITIES } from './ai/aiAbilityHelpers'
 import { weatherHasEffect } from './fieldEndTurn'
 import type { GroundingContext } from './grounding'
+// statBuffs -> {switchInAbility, moveEffects} closes two module cycles. Both edges are function
+// declarations called only from inside changeStatBuffs, so the bindings are initialized by the time
+// any call runs; the pre-existing moveEffects <-> switchInAbility cycle is the same shape.
+import { getSingleUseAbilityCounter } from './switchInAbility'
+import { tryScheduleSwitch } from './moveEffects'
 
 const MOLD_BREAKABLE_SET = new Set(MOLD_BREAKABLE_ABILITIES)
 const UNSUPPRESSABLE_SET = new Set(UNSUPPRESSABLE_ABILITIES)
@@ -744,12 +749,29 @@ export function changeStatBuffs(
 
           if (!battler.round.disableEjectPack) {
             const hasEjectPackAbility = battlerHasSimAbility(state, battler, 'ABILITY_EJECT_PACK_ABILITY', false, attackerId, false, deps.dataContext)
-            const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
-            const hasEjectPackItem =
-              item?.resolvedHoldEffect === 'HOLD_EFFECT_EJECT_PACK' &&
-              !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
-            if (hasEjectPackAbility || hasEjectPackItem) {
-              unmodelled.push("Eject Pack switch trigger (battle_script_commands.c:9877-9893) is not modelled")
+            // :9877-9884 -- the ability branch is an `if`, the item branch its `else if`, so an
+            // Eject Pack holder whose ability fired never reaches the item test. TryScheduleSwitch
+            // only records the entry; drainQueuedSwitches re-checks BattlerHasAbility, CanBattlerSwitch
+            // and picks the replacement. `.setSingleUseCounter = TRUE` in the C is never read (nothing
+            // grep-matches the field outside its declaration), so no counter is set here.
+            if (hasEjectPackAbility && !getSingleUseAbilityCounter(state, battlerId, 'ABILITY_EJECT_PACK_ABILITY', deps.dataContext)) {
+              tryScheduleSwitch(state, {
+                ability: 'ABILITY_EJECT_PACK_ABILITY',
+                setAbilityState: false,
+                switchingBattler: battlerId,
+                sourceBattler: battlerId,
+                script: 'EMERGENCY_EXIT',
+              })
+            } else {
+              const item = battler.mon.itemId ? deps.dataContext.item(battler.mon.itemId) : undefined
+              const hasEjectPackItem =
+                item?.resolvedHoldEffect === 'HOLD_EFFECT_EJECT_PACK' &&
+                !isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)
+              if (hasEjectPackItem) {
+                // :9885-9892 -- SWITCH_ITEM / BattleScript_EjectButtonActivates has no
+                // QueuedSwitchAction shape yet (the entry only carries an ability id).
+                unmodelled.push('Eject Pack item switch trigger (SWITCH_ITEM / BattleScript_EjectButtonActivates, battle_script_commands.c:9885-9892) is not modelled')
+              }
             }
           }
         }

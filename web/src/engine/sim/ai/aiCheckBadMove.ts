@@ -216,6 +216,7 @@ import { buildFieldFacts, gapsToUnmodelled } from '../bridge'
 import { buildAccuracyInputs } from '../accuracyBridge'
 import { getTotalAccuracy } from '../accuracy'
 import { getSingleUseAbilityCounter } from '../switchInAbility'
+import { SHIELDS_DOWN_PROTECTED_SPECIES } from '../statusEffects'
 import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getHealthPercentage, getRecoilFraction, isTargetingPartner } from './aiScorers'
 import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
 import { aiCalcDamage, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
@@ -1027,7 +1028,18 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
             if (isNonVolatileStatusMoveEffect(effect)) return { score: score - 10, unmodelled }
             break
           case 'ABILITY_SHIELDS_DOWN':
-            unmodelled.push('AI_CheckBadMove: IsShieldsDownProtected(battlerAtk) is not modelled (Minior form-state is not tracked); treated as not protected')
+            // :660 -- IsShieldsDownProtected(battlerAtk) && IsNonVolatileStatusMoveEffect(moveEffect).
+            // IsShieldsDownProtected (battle_script_commands.c:6563-6576) requires BOTH a meteor-form
+            // species and BATTLER_HAS_ABILITY(battlerAtk, SHIELDS_DOWN). The case is reached through
+            // the DEFENDER's slot loop (:616-618), not the attacker's, so the ability half is checked
+            // here as well, via the AI's attacker-side policy helper.
+            if (
+              SHIELDS_DOWN_PROTECTED_SPECIES.includes(attacker.mon.speciesId as (typeof SHIELDS_DOWN_PROTECTED_SPECIES)[number]) &&
+              selfAbility(state, deps, attacker, 'ABILITY_SHIELDS_DOWN') &&
+              isNonVolatileStatusMoveEffect(effect)
+            ) {
+              return { score: score - 10, unmodelled }
+            }
             break
           case 'ABILITY_WONDER_SKIN':
             // Accuracy override to 50 for status moves -- has no effect on

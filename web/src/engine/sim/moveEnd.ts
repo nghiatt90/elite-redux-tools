@@ -7518,8 +7518,20 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       }
 
       let recoilDmg = fractionDmg + onRecoilDmg
-      if (hasFlag(attacker.mon.status2, STATUS2_ENRAGED)) {
-        unmodelled.push('MOVEEND_RECOIL\'s enraged recoil (savedDmg / 3, battle_script_commands.c:4492-4505) is not modelled')
+      // :4492-4506 -- Enraged adds savedDmg / 3 (:4498) to whatever recoil the fraction (:4474-4475)
+      // and the onRecoil hooks (:4482-4490) already produced, doubled when an opposing battler has
+      // Cosmic Daze (:4499), and the whole sum is floored at 1 (:4500's
+      // `max(1, gBattleMoveDamage + damage)`), so a zero savedDmg / 3 still deals 1. Madness
+      // Enhancement skips the addition entirely (:4493) -- its `else` (:4502-4504) only queues the
+      // popup, which deals no damage. The confusion doubling and the halfRecoil halving below stay
+      // after this block, in the C's order (:4510-4513).
+      if (
+        hasFlag(attacker.mon.status2, STATUS2_ENRAGED) &&
+        !battlerHasSimAbility(state, attacker, 'ABILITY_MADNESS_ENHANCEMENT', false, attackerId, false, deps.dataContext)
+      ) {
+        let enragedDmg = Math.floor(hpDealt / 3)
+        if (isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE')) enragedDmg *= 2
+        recoilDmg = Math.max(1, recoilDmg + enragedDmg)
       }
       if (recoilDmg > 0) {
         if (hasFlag(attacker.mon.status2, STATUS2_CONFUSION) && isAbilityAliveOnOpposingSide(state, attackerId, 'ABILITY_COSMIC_DAZE')) {

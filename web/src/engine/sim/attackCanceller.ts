@@ -220,7 +220,7 @@ const NO_ABILITY_SLOTS: AbilitySlots = { ability: null, innates: [null, null, nu
  * The egg filter (MON_DATA_SPECIES2 != SPECIES_EGG) is always true here -- eggs
  * cannot occur (state.ts's SimPartyMon doc). No Random() draw.
  */
-function getParentalBondCountMinionControl(state: BattleState, attackerId: number): number {
+export function getParentalBondCountMinionControl(state: BattleState, attackerId: number): number {
   const attacker = state.battlers[attackerId]
   const party = state.sides[attackerId & 1].party
   let count = 1

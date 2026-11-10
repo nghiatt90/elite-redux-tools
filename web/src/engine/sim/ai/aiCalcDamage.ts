@@ -30,7 +30,7 @@ import type { TypeChart } from '../../typeEffectiveness'
 import { applyModifier, idiv } from '../../fixed'
 import { computeParentalBondTrigger, getParentalBondMultiplier } from '../../abilities/dispatchCalc'
 import type { ParentalBondTrigger } from '../../abilities/types'
-import { resolveMultihitType } from '../attackCanceller'
+import { getParentalBondCountMinionControl, resolveMultihitType } from '../attackCanceller'
 import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
 import { createBattlerState } from '../create'
 import type { BridgeDeps, CalculationRoles } from '../bridge'
@@ -128,15 +128,17 @@ function withAiMasking(state: BattleState, battlerIds: number[]): BattleState {
 }
 
 /**
- * GetParentalBondCount, src/battle_script_commands.c:1010-1044, for the
- * triggers reachable without a live party roster. MINION_CONTROL needs a
- * count of the attacker's non-fainted, non-egg, non-status party members --
- * gapped by name rather than guessed, same precedent as multiHit.ts's own
- * parentalBondHitCount. TWO_TO_FIVE (Unrelenting) has no case in the C's own
- * switch and falls through to `return 1`, matching multiHit.ts's comment that
- * this trigger never actually grants a bonus hit.
+ * GetParentalBondCount, src/battle_script_commands.c:1010-1044. MINION_CONTROL's count
+ * (1 + every other eligible party slot) comes from attackCanceller.ts's live party scan,
+ * the same helper Cmd_attackcanceler uses (:1020-1041). TWO_TO_FIVE (Unrelenting) has no
+ * case in the C's own switch and falls through to `return 1`, matching multiHit.ts's
+ * comment that this trigger never actually grants a bonus hit.
+ *
+ * `state` must be a state whose `sides[].party` is the real roster: AI callers pass the
+ * masked clone from buildAiScenario, which copies only `battlers`, so `sides` and each
+ * copied battler's `partyIndex` are the live ones.
  */
-function parentalBondCount(trigger: ParentalBondTrigger): number | { unmodelled: string } {
+function parentalBondCount(trigger: ParentalBondTrigger, state: BattleState, attackerId: number): number | { unmodelled: string } {
   switch (trigger) {
     case 'HYPER_AGGRESSIVE':
     case 'PRIMAL_MAW':
@@ -146,7 +148,7 @@ function parentalBondCount(trigger: ParentalBondTrigger): number | { unmodelled:
     case 'THREE_HEADED':
       return 3
     case 'MINION_CONTROL':
-      return { unmodelled: 'GetParentalBondCount MINION_CONTROL (battle_script_commands.c:1021-1040) needs a live party count; not modelled here (no team roster reachable from AI_CalcDamage)' }
+      return getParentalBondCountMinionControl(state, attackerId)
     default:
       return 1
   }
@@ -375,7 +377,7 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
         // Must be Parental Bond (multihitType was MULTIHIT_SINGLE and
         // GetParentalBondType supplied a real trigger).
         if (parentalBondTrigger) {
-          const count = parentalBondCount(parentalBondTrigger)
+          const count = parentalBondCount(parentalBondTrigger, maskedState, attackerId)
           if (typeof count === 'number') {
             let multiplier = 0
             for (let i = 0; i < count; i++) multiplier += getParentalBondMultiplier(parentalBondTrigger, i)
