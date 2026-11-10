@@ -2293,8 +2293,29 @@ export function executeAction(
   // runMoveEndBookkeeping performs. Callers dispatch first, then bookkeep, and merge the result
   // into their ActionOutcome exactly as the status-move site (turn.ts:2673-2692) does.
   // `targetIdForDispatch === null` means the sim has no target at all; otherwise the C's
-  // gBattlerTarget is the originally selected target (`targetId` above), which is what callers
-  // pass when their own `currentTargetId` is null.
+  // gBattlerTarget is the target the controller returned at selection
+  // (battle_controller_opponent.c:1600-1601, 1625-1626): for MOVE_TARGET_USER / USER_OR_SELECTED
+  // that is the ATTACKER, not the foe the AI's action.target names. MOVE_TARGET_ALLY picks the
+  // live partner, else the attacker (battle_util.c:283-287). MOVE_CURSE uses getMoveTarget's own
+  // rule (:6353-6360): SELECTED for a Ghost (or under fog), USER otherwise.
+  const resolveMoveEndDispatchTarget = (
+    targetIdForDispatch: number,
+    moveId: string,
+    moveDataForDispatch: SimMoveData | undefined,
+  ): number => {
+    let moveTarget = moveDataForDispatch?.target ?? 'SELECTED'
+    if (moveId === 'MOVE_CURSE') {
+      const attackerMon = state.battlers[battlerId]?.mon
+      const isGhost = attackerMon?.types.includes('GHOST') ?? false
+      moveTarget = isGhost || isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) ? 'SELECTED' : 'USER'
+    }
+    if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'USER_OR_SELECTED') return battlerId
+    if (moveTarget === 'ALLY') {
+      const partner = battlerId ^ 2
+      return isBattlerAlive(state, partner) ? partner : battlerId
+    }
+    return targetIdForDispatch
+  }
   const dispatchDefenderMoveEnd = (
     targetIdForDispatch: number | null,
     moveId: string,
@@ -2306,7 +2327,7 @@ export function executeAction(
     const res = dispatchMoveEndDefenderAbilities({
       state,
       attackerId: battlerId,
-      targetId: targetIdForDispatch,
+      targetId: resolveMoveEndDispatchTarget(targetIdForDispatch, moveId, moveDataForDispatch),
       moveId,
       chosenMoveId,
       moveData: moveDataForDispatch,
@@ -2768,11 +2789,14 @@ export function executeAction(
       // (battle_script_commands.c:1928-1935, data/battle_scripts_1.s:4698-4704), so
       // handlePainSplit carries that in `targetDamage` and it is used here.
       const statusTargetId = currentTargetId ?? getMoveTarget(state, battlerId, currentMove.id, deps)
+      // gBattlerTarget for MOVEEND_ABILITIES is the controller's selection target, i.e. the attacker
+      // itself for USER / USER_OR_SELECTED moves (battle_controller_opponent.c:1600-1601).
+      const statusDispatchTargetId = resolveMoveEndDispatchTarget(statusTargetId, currentMove.id, moveData)
       const statusDamage = effectOutcome.targetDamage ?? 0
       const statusDefenderAbilities = dispatchMoveEndDefenderAbilities({
         state,
         attackerId: battlerId,
-        targetId: statusTargetId,
+        targetId: statusDispatchTargetId,
         moveId: currentMove.id,
         chosenMoveId: currentChosenMoveId,
         moveData,
