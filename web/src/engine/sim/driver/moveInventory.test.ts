@@ -10,8 +10,6 @@ import {
   buildUnportedGroups,
   formatUnportedGroup,
   generateMoveInventoryDoc,
-  flagHasTestEvidence,
-  loadFlagMetadata,
   loadMoveBehaviors,
   loadMoves,
   parseScripts,
@@ -30,12 +28,10 @@ const result = runInventory(moves, behaviors, { scripts })
 
 const MOVE_EFFECT_PAIRS = 888
 const SECONDARY_EFFECT_PAIRS = 314
-const FLAG_PAIRS = 2099
 const LEGACY_SCRIPT_PAIRS = 600
 const EFFECT_LESS_PAIRS = 143
-const TOTAL_PAIRS = 4044
+const TOTAL_PAIRS = 1945
 const DISTINCT_SCRIPTS = 322
-const DISTINCT_FLAG_KEYS = 42
 
 /**
  * Pinned today -- this number should only go DOWN.
@@ -69,8 +65,14 @@ const DISTINCT_FLAG_KEYS = 42
  * and `manipulatedamage` is handled per operand (DMG_TO_HP_FROM_MOVE / DMG_BIG_ROOT /
  * DMG_TO_HP_FROM_ABILITY / DMG_RECOIL_FROM_MISS). 14 legacy-script pairs became ported:
  * Beat Up plus the 13 `BattleScript_EffectAbsorb` drain moves.
+ *
+ * Cycle 151e: the `flag` unit kind was removed. A flag is a data attribute read by other
+ * units' mechanics (abilities, effects), which are inventoried already; text-matching flag
+ * evidence was the noisiest part of the inventory (2099 of 4044 pairs), so the kind, its
+ * classifier and its pins are gone. `TOTAL_PAIRS` and both unported counts drop accordingly:
+ * 1442 -> 239 unported (the flag kind contributed 1203 unported pairs), with 1945 pairs total.
  */
-export const UNPORTED_PAIR_COUNT = 1442
+export const UNPORTED_PAIR_COUNT = 239
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -79,9 +81,11 @@ export const UNPORTED_PAIR_COUNT = 1442
  * names the key or the reader. The rest are effect-less damage moves and the legacy scripts
  * whose commands are all handled but which no test names. Cycle 151c: 1310 -> 1314 -- the
  * three legacy-script labels above (`BattleScript_EffectCalmMind`, `...MistyTerrain`,
- * `...PsychicTerrain`) moved from opcode gaps to registered-but-untested.
+ * `...PsychicTerrain`) moved from opcode gaps to registered-but-untested. Cycle 151e removes
+ * the flag kind and its 2099 pairs, so the pin drops to the non-flag remainder: 1314 -> 119
+ * (the flag kind contributed 1195 registered-but-untested pairs).
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 1314
+export const REGISTERED_UNTESTED_PAIR_COUNT = 119
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -94,22 +98,18 @@ describe('move completeness inventory', () => {
     const count = (kind: string) => result.units.filter((unit) => unit.kind === kind).length
     expect(count('move-effect')).toBe(MOVE_EFFECT_PAIRS)
     expect(count('secondary-effect')).toBe(SECONDARY_EFFECT_PAIRS)
-    expect(count('flag')).toBe(FLAG_PAIRS)
     expect(count('legacy-script')).toBe(LEGACY_SCRIPT_PAIRS)
     expect(count('effect-less')).toBe(EFFECT_LESS_PAIRS)
     expect(result.units).toHaveLength(TOTAL_PAIRS)
     expect(result.summaries.map((summary) => summary.kind)).toEqual([
       'move-effect',
       'secondary-effect',
-      'flag',
       'legacy-script',
       'effect-less',
     ])
 
     expect(result.scripts).toHaveLength(DISTINCT_SCRIPTS)
-    expect(new Set(result.units.filter((unit) => unit.kind === 'flag').map((unit) => unit.unit)).size).toBe(
-      DISTINCT_FLAG_KEYS,
-    )
+    expect(result.units.some((unit) => (unit.kind as string) === 'flag')).toBe(false)
   })
 
   it('every (move, unit) pair is classified exactly once as ported / unported / unclassified / allowlisted', () => {
@@ -219,7 +219,7 @@ describe('move completeness inventory', () => {
     expect(allowlisted.totalUnported).toBe(baseline.totalUnported - 2)
   })
 
-  it('negative cases: unknown effect, secondary effect and flag are unported', () => {
+  it('negative cases: unknown effect and secondary effect are unported, and a fabricated flag yields no unit', () => {
     const fabricated: MoveRecord[] = [
       {
         id: 'MOVE_FABRICATED_UNKNOWN',
@@ -238,14 +238,17 @@ describe('move completeness inventory', () => {
       scripts,
       allowlist: [],
     })
-    for (const kind of ['move-effect', 'secondary-effect', 'flag', 'legacy-script']) {
+    for (const kind of ['move-effect', 'secondary-effect', 'legacy-script']) {
       const unit = fabricatedResult.units.find((candidate) => candidate.kind === kind)
       expect(unit?.status).toBe('unported')
     }
+    // A fabricated flag produces no unit at all: the `flag` kind was removed in cycle 151e.
+    expect(fabricatedResult.units.some((candidate) => (candidate.kind as string) === 'flag')).toBe(false)
+    expect(fabricatedResult.units.filter((candidate) => candidate.moveId === 'MOVE_FABRICATED_UNKNOWN')).toHaveLength(3)
     expect(fabricatedResult.totalUnclassified).toBe(0)
   })
 
-  it('negative cases: registered-but-untested, ported, comment-only and unread flags (D3)', () => {
+  it('negative cases: registered-but-untested, ported and comment-only (D3)', () => {
     const move: MoveRecord = {
       id: 'MOVE_D3_REGISTERED',
       effect: 'EFFECT_D3_REGISTERED',
@@ -291,40 +294,6 @@ describe('move completeness inventory', () => {
     const commentOnlyEffect = commentOnly.units.find((unit) => unit.kind === 'move-effect')
     expect(commentOnlyEffect?.status).toBe('unported')
     expect(commentOnlyEffect?.registeredUntested).toBe(false)
-
-    // 4. A flag read in production but never named in a test -> registeredUntested;
-    // a flag never read -> unported with no production path.
-    const flagMove: MoveRecord = {
-      id: 'MOVE_D3_FLAG',
-      effect: 'EFFECT_D3_FLAG',
-      flags: { d3SyntheticFlag: true },
-    }
-    const readFlag = runInventory([flagMove], {}, {
-      productionSource: 'if (move.flags.d3SyntheticFlag) return true',
-      testSource: '',
-      scripts,
-      allowlist: [],
-    })
-    const readUnit = readFlag.units.find((unit) => unit.kind === 'flag')
-    expect(readUnit?.status).toBe('unported')
-    expect(readUnit?.registeredUntested).toBe(true)
-
-    const unreadFlag = runInventory([flagMove], {}, {
-      productionSource: 'const unrelated = 1',
-      testSource: '',
-      scripts,
-      allowlist: [],
-    })
-    const unreadUnit = unreadFlag.units.find((unit) => unit.kind === 'flag')
-    expect(unreadUnit?.status).toBe('unported')
-    expect(unreadUnit?.registeredUntested).toBe(false)
-  })
-
-  it('flags need property/helper test evidence, not a bare quoted mention (D5)', () => {
-    expect(flagHasTestEvidence('sound', 'const move = { flags: { sound: true } }')).toBe(true)
-    expect(flagHasTestEvidence('sound', 'if (move.flags.sound) {')).toBe(true)
-    expect(flagHasTestEvidence('sound', "hasMoveFlag(mon, 'sound')")).toBe(true)
-    expect(flagHasTestEvidence('sound', "a description that says 'sound' in prose")).toBe(false)
   })
 
   it('anchors the four hand-derived move behaviors (D2)', () => {
@@ -437,16 +406,6 @@ describe('move completeness inventory', () => {
     // port; the plain-hit chain is only the site for effects with no extra step (item 1).
     expect(effectUnit('MOVE_BELCH')?.status).toBe('ported')
 
-    const flagUnit = (moveId: string, flag: string) =>
-      result.units.find((unit) => unit.kind === 'flag' && unit.moveId === moveId && unit.unit === flag)
-    // Cycle 151b rework: a qualifying block that names a real move id carrying the flag is
-    // evidence. Sim tests run moves (MOVE_BITE, MOVE_HYPER_VOICE) rather than restating flags.
-    expect(flagUnit('MOVE_BITE', 'biteBased')?.status).toBe('ported')
-    expect(flagUnit('MOVE_HYPER_VOICE', 'sound')?.status).toBe('ported')
-    expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.status).toBe('unported')
-    // `lunarBased` has no sim-side production read at all.
-    expect(flagUnit('MOVE_BLOOD_MOON', 'lunarBased')?.registeredUntested).toBe(false)
-
     const secondary = result.units.find(
       (unit) => unit.kind === 'secondary-effect' && unit.moveId === 'MOVE_CORROSIVE_GAS',
     )
@@ -460,14 +419,6 @@ describe('move completeness inventory', () => {
     )
     expect(incite?.unit).toBe('MOVE_EFFECT_ENRAGE')
     expect(incite?.status).toBe('ported')
-
-    const flagMetadata = loadFlagMetadata()
-    expect(flagMetadata.get('ignoresStatStages')?.citation).toContain(
-      'pipeline/.upstream/eliteredux-source/include/constants/pokemon.h:',
-    )
-    expect(flagMetadata.get('ignoresStatStages')?.citation).toContain(
-      'pipeline/.upstream/er-config/MoveList.proto:',
-    )
   })
 
   it('legacy-script units map independently of their owning move effect', () => {

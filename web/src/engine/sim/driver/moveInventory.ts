@@ -13,21 +13,20 @@ import {
 /**
  * Static completeness inventory for moves.json.
  *
- * Five unit kinds, each enumerated as one (move, unit) pair:
+ * Four unit kinds, each enumerated as one (move, unit) pair:
  *   1. `move-effect`      -- the move's `effect` field (`EFFECT_*`) in `data/v2.65beta/moves.json`.
  *   2. `secondary-effect` -- every `MOVE_EFFECT_*` in the behavior in force
  *      (`move.customBehavior ?? moveBehaviors[move.effect]`) plus the move's `argument.effect`.
- *   3. `flag`             -- every key whose value is true in `move.flags`.
- *   4. `legacy-script`    -- the behavior in force's `legacyConfig` script
+ *   3. `legacy-script`    -- the behavior in force's `legacyConfig` script
  *      (`pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s` / `_2.s`).
- *   5. `effect-less`      -- a move whose `effect` is null (no `EFFECT_*` unit exists for it).
+ *   4. `effect-less`      -- a move whose `effect` is null (no `EFFECT_*` unit exists for it).
  *
  * Nothing under `web/src/engine/` is imported for side effects here; the two
  * production constants this module extends with `export` are reported in
  * REPORT.md for this cycle.
  */
 
-export type MoveUnitKind = 'move-effect' | 'secondary-effect' | 'flag' | 'legacy-script' | 'effect-less'
+export type MoveUnitKind = 'move-effect' | 'secondary-effect' | 'legacy-script' | 'effect-less'
 export type MoveUnitStatus = 'ported' | 'unported' | 'unclassified' | 'allowlisted'
 
 export interface MoveUnit {
@@ -84,7 +83,6 @@ export interface MoveInventoryResult {
   scripts: ScriptRecord[]
   /** Non-skeleton script commands still unported, with their `Cmd_` line (0 = no Cmd_). */
   unhandledScriptCommands: UnhandledScriptCommand[]
-  flagCitations: Map<string, string>
   citedLocations: string[]
 }
 
@@ -141,9 +139,6 @@ const BATTLE_SCRIPTS_PATHS = [
   'pipeline/.upstream/eliteredux-source/data/battle_scripts_2.s',
 ]
 const MOVE_EFFECT_PROTO_PATH = 'pipeline/.upstream/er-config/MoveEffect.proto'
-const MOVE_LIST_PROTO_PATH = 'pipeline/.upstream/er-config/MoveList.proto'
-const POKEMON_HEADER_PATH = 'pipeline/.upstream/eliteredux-source/include/constants/pokemon.h'
-const EMIT_PY_PATH = 'pipeline/src/erdata/emit.py'
 const TRAINERS_PATH = join(REPO_ROOT, 'data/v2.65beta/trainers.json')
 const BATTLE_CONFIG_PATH = join(
   REPO_ROOT,
@@ -258,35 +253,6 @@ export function loadMoveEffectConsumerSource(): string {
   return MOVE_EFFECT_CONSUMER_FILES.map((repoRelative) =>
     stripNoteOnlyBlocks(repoRelative, stripComments(readFileSync(join(REPO_ROOT, repoRelative), 'utf-8'))),
   ).join('\n')
-}
-
-/** True for a sim source file whose move-pipeline reads count as flag production. */
-function isFlagProductionFile(repoRelative: string): boolean {
-  if (!repoRelative.startsWith('web/src/engine/sim/')) return false
-  if (repoRelative.startsWith('web/src/engine/sim/ai/')) return false
-  if (repoRelative.startsWith('web/src/engine/sim/driver/')) return false
-  // Ability dispatch is not part of the move pipeline (item 5).
-  return !/Ability[^/]*\.ts$/.test(repoRelative)
-}
-
-function flagProductionFiles(): string[] {
-  const files = new Set(MOVE_EFFECT_CONSUMER_FILES.map((repoRelative) => join(REPO_ROOT, repoRelative)))
-  for (const file of productionTypeScriptFiles()) {
-    const repoRelative = relative(REPO_ROOT, file)
-    if (isFlagProductionFile(repoRelative)) files.add(file)
-  }
-  return [...files]
-}
-
-/**
- * Comment-stripped move-pipeline source in which a flag read counts as production:
- * `MOVE_EFFECT_CONSUMER_FILES` plus the sim sources, excluding `sim/ai/` and ability
- * files. A flag read only in AI or ability code does not count (cycle 151b item 5).
- */
-export function loadFlagProductionSource(): string {
-  return flagProductionFiles()
-    .map((file) => stripNoteOnlyBlocks(relative(REPO_ROOT, file), stripComments(readFileSync(file, 'utf-8'))))
-    .join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -2442,51 +2408,6 @@ export function loadMoveEffectProtoLines(): Map<string, number> {
   return result
 }
 
-interface FlagMetadata {
-  citation: string
-}
-
-/** moves.json flag key -> pipeline/.upstream/er-config/MoveList.proto field line (+ pipeline/.upstream/eliteredux-source/include/constants/pokemon.h FLAG define when the proto names one). */
-export function loadFlagMetadata(): Map<string, FlagMetadata> {
-  const emit = readFileSync(join(REPO_ROOT, EMIT_PY_PATH), 'utf-8')
-  const protoFieldByKey = new Map<string, string>()
-  for (const match of emit.matchAll(/^\s*"([A-Za-z0-9_]+)":\s*"([a-z0-9_]+)",\s*$/gm)) {
-    protoFieldByKey.set(match[1], match[2])
-  }
-
-  const proto = readFileSync(join(REPO_ROOT, MOVE_LIST_PROTO_PATH), 'utf-8')
-  const protoLines = proto.split('\n')
-  const fieldLine = new Map<string, { line: number; flagCode: string | null }>()
-  protoLines.forEach((text, index) => {
-    const match = text.match(/^\s*bool\s+([a-z0-9_]+)\s*=\s*\d+\s*\[(.*)\];\s*$/)
-    if (!match) return
-    const code = match[2].match(/flag_code_value\)\s*=\s*"([^"]+)"/)
-    fieldLine.set(match[1], { line: index + 1, flagCode: code ? code[1] : null })
-  })
-
-  const header = readFileSync(join(REPO_ROOT, POKEMON_HEADER_PATH), 'utf-8')
-  const headerLines = header.split('\n')
-  const defineLine = new Map<string, number>()
-  headerLines.forEach((text, index) => {
-    const match = text.match(/^\s*#define\s+(FLAG_[A-Z0-9_]+)\b/)
-    if (match) defineLine.set(match[1], index + 1)
-  })
-
-  const metadata = new Map<string, FlagMetadata>()
-  for (const [key, field] of protoFieldByKey) {
-    const fieldInfo = fieldLine.get(field)
-    const citations: string[] = []
-    if (fieldInfo) citations.push(`${MOVE_LIST_PROTO_PATH}:${fieldInfo.line}`)
-    const flagCode = fieldInfo?.flagCode
-    if (flagCode && /^FLAG_[A-Z0-9_]+$/.test(flagCode)) {
-      const defineAt = defineLine.get(flagCode)
-      if (defineAt) citations.push(`${POKEMON_HEADER_PATH}:${defineAt}`)
-    }
-    metadata.set(key, { citation: citations.join('; ') })
-  }
-  return metadata
-}
-
 // ---------------------------------------------------------------------------
 // Classification
 // ---------------------------------------------------------------------------
@@ -2497,68 +2418,6 @@ function behaviorInForce(move: MoveRecord, behaviors: MoveBehaviors): BehaviorRe
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** A flag is registered when production code reads it as a move flag, not when a comment names it. */
-export function flagHasProductionRead(key: string, productionSource: string): boolean {
-  const escaped = escapeRegExp(key)
-  return (
-    new RegExp(`[fF]lags\\??\\.${escaped}\\b`).test(productionSource) ||
-    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(productionSource) ||
-    new RegExp(`flag\\s*===\\s*['"]${escaped}['"]`).test(productionSource)
-  )
-}
-
-/**
- * Test evidence for a flag literal: the exact key is set on a move-flags object
- * (`flags: { <key>: true }`), used as a move-flag property, or read through a flag helper.
- * A bare quoted occurrence (a description string, an unrelated field) is not evidence
- * (cycle 151 D5).
- */
-export function flagHasTestEvidence(key: string, testSource: string): boolean {
-  const escaped = escapeRegExp(key)
-  return (
-    new RegExp(`\\b${escaped}\\s*:\\s*(?:true|false)`).test(testSource) ||
-    new RegExp(`\\bflags\\??\\.${escaped}\\b`).test(testSource) ||
-    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(testSource)
-  )
-}
-
-/** Argument text of every sim-entry-point call in `text`. */
-function entryPointArgumentTexts(text: string): string[] {
-  const argumentsList: string[] = []
-  const re = new RegExp(ENTRY_POINT_CALL_RE.source, 'g')
-  let match: RegExpExecArray | null
-  while ((match = re.exec(text)) !== null) {
-    const open = text.indexOf('(', match.index)
-    const close = matchPair(text, open, '(', ')')
-    if (close > open) argumentsList.push(text.slice(open + 1, close))
-  }
-  return argumentsList
-}
-
-/**
- * True when the block sets the flag key on a move literal that is actually passed to a sim
- * entry point: either inline in the call's arguments, or through a variable declared in the
- * same block. A module-scope fixture or a literal that is only compared/asserted does not
- * count (cycle 151b rework defect 1).
- */
-export function flagSetOnRunnerMoveInBlock(key: string, text: string): boolean {
-  const escaped = escapeRegExp(key)
-  const literal = new RegExp(`(?:move)?[fF]lags\\s*:\\s*\\{[^}]*\\b${escaped}\\s*:\\s*true\\b`, 's')
-  const args = entryPointArgumentTexts(text).join('\n')
-  if (args && literal.test(args)) return true
-  if (!args) return false
-  // `const mon = { ..., flags: { <key>: true } }` then `executeTurn(state, mon, ...)`.
-  const declarationRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*\{/g
-  for (const match of text.matchAll(declarationRe)) {
-    const open = text.indexOf('{', match.index)
-    const close = matchPair(text, open, '{', '}')
-    if (close < 0) continue
-    if (!literal.test(text.slice(open, close + 1))) continue
-    if (new RegExp(`\\b${escapeRegExp(match[1])}\\b`).test(args)) return true
-  }
-  return false
 }
 
 function secondaryHasProductionPath(name: string): boolean {
@@ -2601,7 +2460,6 @@ function allowlistFor(
 
 interface ClassifyContext {
   allowlist: ReadonlyArray<InventoryAllowlistEntry>
-  productionSource: string
   /** Consuming-position identifiers and dispatch registries from the engine files. */
   consumption: ConsumptionIndex
   evidence: TestEvidence
@@ -2613,8 +2471,6 @@ interface ClassifyContext {
   argumentEffects: Set<string>
   /** legacy script label -> distinct move ids carrying it. */
   scriptMoveIds: Map<string, Set<string>>
-  /** flag key -> distinct move ids that carry it as `true`. */
-  flagMoveIds: Map<string, Set<string>>
   scripts: Map<string, ScriptRecord>
 }
 
@@ -2644,13 +2500,11 @@ function buildUnitMoveIds(
   secondaryMoveIds: Map<string, Set<string>>
   argumentEffects: Set<string>
   scriptMoveIds: Map<string, Set<string>>
-  flagMoveIds: Map<string, Set<string>>
 } {
   const effectMoveIds = new Map<string, Set<string>>()
   const secondaryMoveIds = new Map<string, Set<string>>()
   const argumentEffects = new Set<string>()
   const scriptMoveIds = new Map<string, Set<string>>()
-  const flagMoveIds = new Map<string, Set<string>>()
   for (const move of moves) {
     const behavior = behaviorInForce(move, behaviors)
     if (move.effect) addToIndex(effectMoveIds, move.effect, move.id)
@@ -2660,11 +2514,8 @@ function buildUnitMoveIds(
       argumentEffects.add(move.argument.effect)
     }
     if (behavior.legacyConfig) addToIndex(scriptMoveIds, behavior.legacyConfig, move.id)
-    for (const [key, value] of Object.entries(move.flags ?? {})) {
-      if (value === true) addToIndex(flagMoveIds, key, move.id)
-    }
   }
-  return { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds, flagMoveIds }
+  return { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds }
 }
 
 /**
@@ -2733,104 +2584,6 @@ function classifySecondary(name: string, ctx: ClassifyContext): { status: MoveUn
     evidenceNames(ctx.evidence, [name, ...(ctx.secondaryMoveIds.get(name) ?? [])])
   if (dispatched && tested) return { status: 'ported', registeredUntested: false }
   if (dispatched) return { status: 'unported', registeredUntested: true }
-  return { status: 'unported', registeredUntested: false }
-}
-
-/** Flags carried by this many moves or fewer need the flag named, not just a carrier run. */
-const FLAG_FEW_CARRIERS = 5
-/** Flags carried by this many moves or more are "generic" (`contact`, `protect`, ...). */
-const FLAG_GENERIC_CARRIERS = 100
-
-/**
- * Ability/effect identifiers that read `key` in production: every `flags.<key>` /
- * `hasMoveFlag(..., '<key>')` site contributes the `ABILITY_*` / `EFFECT_*` /
- * `MOVE_EFFECT_*` tokens in a small window around it. The window is the expression that
- * guards the read (`if (ctx.moveFlags.drillBased)` sits inside `ABILITY_MEGA_DRILL`), not
- * the whole file, so an unrelated neighbouring ability does not become a reader.
- */
-export function flagReaderTokens(key: string, productionSource: string): Set<string> {
-  const escaped = escapeRegExp(key)
-  const readRes = [
-    new RegExp(`[fF]lags\\??\\.${escaped}\\b`, 'g'),
-    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`, 'g'),
-    new RegExp(`flag\\s*===\\s*['"]${escaped}['"]`, 'g'),
-  ]
-  const readers = new Set<string>()
-  for (const re of readRes) {
-    let match: RegExpExecArray | null
-    while ((match = re.exec(productionSource)) !== null) {
-      const window = productionSource.slice(Math.max(0, match.index - 300), match.index + 300)
-      for (const token of window.match(/\b(?:ABILITY|EFFECT|MOVE_EFFECT)_[A-Z0-9_]+/g) ?? []) {
-        readers.add(token)
-      }
-    }
-  }
-  return readers
-}
-
-/**
- * Flag test evidence (cycle 151b rework defect 2). A qualifying block proves a flag only
- * when it names a subject carrying the flag **and** shows the flag's production read being
- * what the block exercises. Concretely, a block counts when:
- *   - it sets the flag key on a move-flags literal passed to a sim entry point
- *     (`flagSetOnRunnerMoveInBlock`, rule (a)); or
- *   - it names the flag key itself (`flags.<key>`, `hasMoveFlag(..., '<key>')`, or the
- *     quoted key) together with a move id that carries the flag; or
- *   - it names a move id that carries the flag **and** names an ability/effect token from
- *     the production site that reads the flag (`flagReaderTokens`, rule (b)).
- *
- * A bare move-id match is not enough. For a flag with fewer than `FLAG_FEW_CARRIERS`
- * carriers the test file must also name the flag key. For a generic flag
- * (`>= FLAG_GENERIC_CARRIERS` carriers, e.g. `contact`) the block itself must name the
- * key or a reading ability/effect: running one carrier move says nothing about the flag.
- * A module-scope fixture, a comment, an AI-scoring test and a `.not.toContain` note are
- * never blocks and never count.
- */
-function flagHasBlockEvidence(key: string, ctx: ClassifyContext): boolean {
-  const carriers = ctx.flagMoveIds.get(key) ?? new Set<string>()
-  const generic = carriers.size >= FLAG_GENERIC_CARRIERS
-  const readers = flagReaderTokens(key, ctx.productionSource)
-  const escaped = escapeRegExp(key)
-
-  const namesKey = (block: TestBlock): boolean =>
-    new RegExp(`[fF]lags\\??\\.${escaped}\\b`).test(block.text) ||
-    new RegExp(`hasMoveFlag\\([^)]*['"]${escaped}['"]`).test(block.text) ||
-    new RegExp(`['"\`]${escaped}['"\`]`).test(block.text)
-  const namesCarrier = (block: TestBlock): boolean => {
-    for (const moveId of carriers) if (block.words.has(moveId)) return true
-    return false
-  }
-  const showsReader = (block: TestBlock): boolean => {
-    for (const reader of readers) if (block.words.has(reader)) return true
-    return false
-  }
-
-  if (ctx.evidence.blocks.some((block) => flagSetOnRunnerMoveInBlock(key, block.text))) return true
-
-  const fileNamesKey = (file: string | undefined): boolean =>
-    ctx.evidence.blocks.some((block) => (block.file ?? '') === (file ?? '') && namesKey(block))
-
-  return ctx.evidence.blocks.some((block) => {
-    const subject = namesCarrier(block) || namesKey(block)
-    if (!subject) return false
-    // A generic flag always needs the read in the block itself.
-    if (generic) return namesKey(block) || showsReader(block)
-    const readEvidence = namesKey(block) || showsReader(block)
-    if (carriers.size < FLAG_FEW_CARRIERS) {
-      // A move-id-only match needs the file to name the flag key at all.
-      return readEvidence || fileNamesKey(block.file)
-    }
-    return readEvidence
-  })
-}
-
-function classifyFlag(key: string, ctx: ClassifyContext): { status: MoveUnitStatus; registeredUntested: boolean } {
-  const allow = allowlistFor('flag', key, ctx.allowlist)
-  if (allow) return { status: 'allowlisted', registeredUntested: false }
-  const production = flagHasProductionRead(key, ctx.productionSource)
-  const tested = flagHasBlockEvidence(key, ctx)
-  if (production && tested) return { status: 'ported', registeredUntested: false }
-  if (production) return { status: 'unported', registeredUntested: true }
   return { status: 'unported', registeredUntested: false }
 }
 
@@ -3057,22 +2810,19 @@ export function runInventory(
       ? buildTestEvidence(options.testSource)
       : buildTestEvidenceForFiles(loadQualifyingTestFiles())
   const effectProtoLines = loadMoveEffectProtoLines()
-  const flagMetadata = loadFlagMetadata()
-  const { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds, flagMoveIds } = buildUnitMoveIds(
+  const { effectMoveIds, secondaryMoveIds, argumentEffects, scriptMoveIds } = buildUnitMoveIds(
     moves,
     behaviors,
   )
 
   const ctx: ClassifyContext = {
     allowlist,
-    productionSource,
     consumption,
     evidence,
     effectMoveIds,
     secondaryMoveIds,
     argumentEffects,
     scriptMoveIds,
-    flagMoveIds,
     scripts,
   }
 
@@ -3091,7 +2841,6 @@ export function runInventory(
 
   // Per-unit caches: classification is a function of the unit, not of the move.
   const secondaryStatus = new Map<string, { status: MoveUnitStatus; registeredUntested: boolean }>()
-  const flagStatus = new Map<string, { status: MoveUnitStatus; registeredUntested: boolean }>()
 
   const units: MoveUnit[] = []
   const powerWarnings: MovePowerWarning[] = []
@@ -3146,24 +2895,6 @@ export function runInventory(
       })
     }
 
-    for (const [key, value] of Object.entries(move.flags ?? {})) {
-      if (value !== true) continue
-      let classified = flagStatus.get(key)
-      if (!classified) {
-        classified = classifyFlag(key, ctx)
-        flagStatus.set(key, classified)
-      }
-      const allowance = allowlistFor('flag', key, allowlist)
-      units.push({
-        kind: 'flag',
-        moveId: move.id,
-        unit: key,
-        status: classified.status,
-        registeredUntested: classified.registeredUntested,
-        citation: allowance?.citation ?? flagMetadata.get(key)?.citation ?? '',
-      })
-    }
-
     if (behavior.legacyConfig) {
       const record = scripts.get(behavior.legacyConfig)
       const owningEffectPorted = move.effect != null && effectStatus.get(move.effect) === 'ported'
@@ -3206,7 +2937,7 @@ export function runInventory(
   }
 
   const summaries: MoveUnitKindSummary[] = (
-    ['move-effect', 'secondary-effect', 'flag', 'legacy-script', 'effect-less'] as MoveUnitKind[]
+    ['move-effect', 'secondary-effect', 'legacy-script', 'effect-less'] as MoveUnitKind[]
   ).map((kind) => {
     const subset = units.filter((unit) => unit.kind === kind)
     return {
@@ -3261,7 +2992,6 @@ export function runInventory(
         scripts: [...entry.scripts].sort(),
       }))
       .sort((a, b) => (a.command < b.command ? -1 : a.command > b.command ? 1 : 0)),
-    flagCitations: new Map([...flagMetadata].map(([key, value]) => [key, value.citation])),
     citedLocations: [...citedLocations].sort(),
   }
 }
@@ -3359,7 +3089,7 @@ export function buildUnportedGroups(
     })
   }
 
-  const kindOrder: MoveUnitKind[] = ['move-effect', 'secondary-effect', 'flag', 'legacy-script', 'effect-less']
+  const kindOrder: MoveUnitKind[] = ['move-effect', 'secondary-effect', 'legacy-script', 'effect-less']
   return built.sort((a, b) =>
     a.kind !== b.kind
       ? kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind)
@@ -3544,24 +3274,7 @@ export function generateMoveInventoryDoc(
   )
   lines.push('   A registered name whose number has no case stays unported.')
   lines.push(
-    '3. **flag**: every true key in `move.flags`. Production = a move-flag read in engine source that runs move',
-  )
-  lines.push(
-    '   logic (`flags.<key>`, `moveFlags.<key>`, `hasMoveFlag(..., \'<key>\')`, `flag === \'<key>\'`), with comments',
-  )
-  lines.push(
-    '   stripped so a prose mention is not a read. Test evidence = a qualifying block that names a real move id',
-  )
-  lines.push('   carrying the flag')
-  lines.push(
-    '   (`moves.json`), or sets `<key>: true` on a `flags`/`moveFlags` literal actually passed to a sim entry point',
-  )
-  lines.push(
-    '   in that block. A module-scope fixture, the `cycle98AiState.test.ts` data sentinel, a comment and an',
-  )
-  lines.push('   AI-scoring test are not evidence.'),
-  lines.push(
-    '4. **legacy-script**: the behavior in force\'s `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`. Status is',
+    '3. **legacy-script**: the behavior in force\'s `legacyConfig` from `data/battle_scripts_1.s`/`_2.s`. Status is',
   )
   lines.push(
     '   computed from **non-skeleton** commands only. Skeleton opcodes (`attackcanceler`, `accuracycheck`,',
@@ -3604,7 +3317,7 @@ export function generateMoveInventoryDoc(
   )
   lines.push('   evaluated against `battle_config.h` and `call` targets expanded one level.'),
   lines.push(
-    '5. **effect-less**: a move whose `effect` is null has no `EFFECT_*` unit. Production = the damage path reading',
+    '4. **effect-less**: a move whose `effect` is null has no `EFFECT_*` unit. Production = the damage path reading',
   )
   lines.push(
     '   `.effect` for effect-null moves (`sim/damageResolver.ts`); test evidence = a qualifying block naming the move',
@@ -3615,6 +3328,16 @@ export function generateMoveInventoryDoc(
     '`EFFECT_HIT` is plain damage: it has no `attack.secondaryEffects`, its script is `BattleScript_EffectHit`, and a',
   )
   lines.push('move whose effect is `EFFECT_HIT` therefore produces **no** secondary-effect unit.')
+  lines.push('')
+
+  lines.push('## Known Gaps (flags, not inventoried)')
+  lines.push('')
+  lines.push(
+    '- `lunarBased` (`lunar` in the move data): 7 moves: `MOVE_BLOOD_MOON`, `MOVE_BLUE_MOON`, `MOVE_LUNAR_BLESSING`, `MOVE_LUNAR_DANCE`, `MOVE_MOONBLAST`, `MOVE_MOONGEIST_BEAM`, `MOVE_MOONLIGHT`. Read by Lunar Affinity\'s `onCopyMove` (`pipeline/.upstream/eliteredux-source/src/abilities.cc:8855-8859`: `CHECK(gBattleMoves[move].lunar)` then `UseOutOfTurnAttack(battler, target, ability, move, 0)`). Flag declared at `pipeline/.upstream/er-config/MoveList.proto:184`. The sim has no production read of it.',
+  )
+  lines.push(
+    '- `noKingsRock` (`no_kings_rock`): 1 move: `MOVE_CIRCLE_THROW`. Declared at `pipeline/.upstream/er-config/MoveList.proto:157`; the C consumes it as `FLAG_KINGS_ROCK_AFFECTED` (`pipeline/.upstream/eliteredux-source/src/battle_util.c:4056` `CanMoveHaveExtraFlinchChance`, `:6050` ITEMEFFECT_KINGSROCK). The sim models King\'s Rock through `isKingsRockAffected` in `web/src/engine/sim/moveEnd.ts:6407`, which reads `options.noKingsRock` from the effect behaviour, not the move flag. The codegen (`BattleMovesGenerator.kt:80-88`) likewise ignores the move flag and computes the flag from effect options, so Circle Throw is King\'s Rock-affected in both the C and the sim: the move flag is declared but unconsumed, not a sim gap.',
+  )
   lines.push('')
 
   lines.push('## Legacy Script Commands Without a Handler')
@@ -3687,7 +3410,6 @@ export function generateMoveInventoryDoc(
 
   pushGroupSection('Unported Move-Effect Groups', 'move-effect')
   pushGroupSection('Unported Secondary-Effect Groups', 'secondary-effect')
-  pushGroupSection('Unported Flag Groups', 'flag')
   pushGroupSection('Unported Legacy-Script Groups', 'legacy-script')
   pushGroupSection('Unported Effect-Less Moves', 'effect-less')
 

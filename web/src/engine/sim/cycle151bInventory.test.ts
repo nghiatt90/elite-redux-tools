@@ -221,11 +221,6 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     for (const effect of exemplars) expect(statusByEffect.get(effect), effect).toBe('ported')
   })
 
-  it('lunarBased stays unported (no production read; abilities.cc is not the sim)', () => {
-    const lunar = realResult.units.find((unit) => unit.kind === 'flag' && unit.unit === 'lunarBased')
-    expect(lunar?.status).toBe('unported')
-  })
-
   it('legacy scripts map independently of their owning move effect', () => {
     const fabricated = parseScripts([
       {
@@ -396,97 +391,28 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
     expect(mutated.unhandledScriptCommands.map((command) => command.opcode)).toContain('setoctolock')
   })
 
-  it('a qualifying block needs the flag read, not just a carrier move (cycle 151b rework 2)', () => {
-    const bite = moveById('MOVE_BITE')
-    // Production read of biteBased inside an ability object: the reader token is what a
-    // block must name when it does not name the flag key itself.
-    const flagSource = [
-      'const READER = {',
-      "  id: 'ABILITY_STRONG_JAW',",
-      '  onOffensiveMultiplier: (ctx) => {',
-      '    if (ctx.moveFlags.biteBased) return 1.5',
-      '  },',
-      '}',
-    ].join('\n')
-    const flagUnit = (testSource: string, productionSource = flagSource) => {
-      const result = runInventory([bite], behaviors, {
-        consumerSource: REAL_CONSUMER,
-        productionSource,
-        testSource,
-        scripts,
-        allowlist: [],
-      })
-      return result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'biteBased')
-    }
-    // A carrier move id alone is no longer evidence: the flag's read is not under test.
-    const moveIdOnly = flagUnit(block('MOVE_BITE'))
-    expect(moveIdOnly?.status).toBe('unported')
-    expect(moveIdOnly?.registeredUntested).toBe(true)
-
-    // Rule (b): the block names the reading ability and runs a carrier.
-    expect(flagUnit(block('MOVE_BITE', 'ABILITY_STRONG_JAW'))?.status).toBe('ported')
-    // The flag key itself in the block is enough.
-    expect(flagUnit(block('MOVE_BITE', 'hasMoveFlag(move, "biteBased")'))?.status).toBe('ported')
-
-    // A module-scope fixture (the cycle98 sentinel pattern) is not inside any it() block.
-    const moduleScope = [
-      "const fixture = requireMove('MOVE_BITE')",
-      'if (!fixture.flags?.biteBased) throw new Error("changed")',
-      block(),
-    ].join('\n')
-    const moduleUnit = flagUnit(moduleScope)
-    expect(moduleUnit?.status).toBe('unported')
-    expect(moduleUnit?.registeredUntested).toBe(true)
-
-    // A `flags: { biteBased: true }` literal in a test that never runs a move is not evidence.
-    const forged = [
-      "it('forged', () => {",
-      '  const mon = { flags: { biteBased: true } }',
-      '  expect(mon.flags.biteBased).toBe(true)',
-      '})',
-    ].join('\n')
-    const forgedUnit = flagUnit(forged)
-    expect(forgedUnit?.status).toBe('unported')
-    expect(forgedUnit?.registeredUntested).toBe(true)
-  })
-
-  it('a carrier-only block does not prove drillBased; the key or the reading ability does', () => {
-    const drill = moveById('MOVE_DRILL_RUN')
-    const flagUnit = (testSource: string) => {
-      const result = runInventory([drill], behaviors, {
-        consumerSource: REAL_CONSUMER,
-        testSource,
-        scripts,
-        allowlist: [],
-      })
-      return result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'drillBased')
-    }
-    // Production reads it under ABILITY_MEGA_DRILL, and five moves carry it -- nothing
-    // in a Tackle-only block exercises the flag.
-    expect(flagUnit(block('MOVE_TACKLE'))?.status).toBe('unported')
-    expect(flagUnit(block('MOVE_DRILL_RUN'))?.status).toBe('unported')
-    // Naming the flag key is evidence.
-    expect(flagUnit(block('MOVE_DRILL_RUN', 'hasMoveFlag(move, "drillBased")'))?.status).toBe('ported')
-    // So is running the drill move together with the ability that reads the flag.
-    expect(flagUnit(block('MOVE_DRILL_RUN', 'ABILITY_MEGA_DRILL'))?.status).toBe('ported')
-  })
-
-  it('the cycle98 module-scope flag sentinel is outside every qualifying block', () => {
+  it('the cycle98 module-scope sentinel is outside every qualifying block', () => {
     const lines = readFileSync(join(SIM_DIR, 'cycle98AiState.test.ts'), 'utf-8').split('\n')
     expect(lines[149]).toContain('MOVE_HYPER_VOICE')
     expect(lines[149]).toContain('flags?.sound')
     const header = lines.slice(0, 150).join('\n')
     expect(buildTestEvidence(header).blocks).toHaveLength(0)
-    const hyperVoice = moveById('MOVE_HYPER_VOICE')
-    const result = runInventory([hyperVoice], behaviors, {
-      consumerSource: REAL_CONSUMER,
+    // The module-scope fixture names MOVE_HYPER_VOICE but is not inside an `it(...)` block,
+    // so it is no evidence for the move either: the cycle 151e flag kind is gone, and the
+    // same rule is asserted on the move-effect unit of another move the header names.
+    const waterGun = moveById('MOVE_WATER_GUN')
+    const result = runInventory([waterGun], behaviors, {
+      // A production path the inventory can see, so only the missing test block decides.
+      productionSource: "switch (effect) { case 'EFFECT_DRENCH_HIT': break }",
       testSource: header,
       scripts,
       allowlist: [],
     })
-    const sound = result.units.find((unit) => unit.kind === 'flag' && unit.unit === 'sound')
-    expect(sound?.status).toBe('unported')
-    expect(sound?.registeredUntested).toBe(true)
+    const effect = result.units.find(
+      (unit) => unit.kind === 'move-effect' && unit.moveId === 'MOVE_WATER_GUN',
+    )
+    expect(effect?.status).toBe('unported')
+    expect(effect?.registeredUntested).toBe(true)
   })
 
   it('a block calling a file-local wrapper over executeTurn is evidence; an uncalled wrapper is not', () => {
