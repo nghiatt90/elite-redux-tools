@@ -9,6 +9,7 @@ import {
   DIFFICULTY_FLAG_SPECS,
   ENVIRONMENT_INVENTORY_DOC_PATH,
   MAP_SETUP_SPECS,
+  MAP_SCAN_TOKENS,
   TRAINER_FLAG_SPECS,
   battleEventEvidence,
   classifyToken,
@@ -45,7 +46,11 @@ const TRAINER_COUNT = 932
 const BATTLE_EVENT_ROWS = 51
 const DISTINCT_BATTLE_EVENTS = 34
 
-const MAP_SETUP_UNITS = 30
+// Cycle 154b adds one map-setup unit per Monotype Champion rule site: the 27
+// enumerated sites (19 battle_util.c + 2 battle_main.c + 3 abilities.cc + 3
+// battle_script_commands.c) move this from 30 to 57. They are measurement
+// units, not ports: the driver still hard-codes `monotypeChampType: null`.
+const MAP_SETUP_UNITS = 57
 // 5 static BATTLE_TYPE_* / FLAG_TAG_BATTLE units + 2 multi_2_vs_2 units
 // + 2 tag-battle units (FLAG_TAG_BATTLE already counted) in cycle 154.
 const BATTLE_TYPE_UNITS = 9
@@ -65,9 +70,12 @@ const SCRIPT_EVENT_UNITS = 6
  * must show up as unported rather than stay invisible. Moves 89 -> 91 in cycle
  * 154: +2 multi_2_vs_2 units and +2 tag-battle units (all unported), while
  * gameDifficulty moved to ported (buildParty.ts tier fallback) and
- * BATTLE_EVENT_STICKY_WEB moved to allowlisted (no C case).
+ * BATTLE_EVENT_STICKY_WEB moved to allowlisted (no C case). Moves 91 -> 118 in
+ * cycle 154b: 27 Monotype Champion rule-site units were made visible; the
+ * driver cannot feed `monotypeChampType`, so all 27 are unported. They are not
+ * `registeredUntested` because the cycle 154b test names the token.
  */
-export const UNPORTED_UNIT_COUNT = 91
+export const UNPORTED_UNIT_COUNT = 118
 
 /** Pinned today -- this number should only go DOWN. */
 export const REGISTERED_UNTESTED_UNIT_COUNT = 9
@@ -130,6 +138,45 @@ describe('environment and scripted-condition completeness inventory', () => {
       'SkyPillar_Outside',
       'SootopolisCity',
     ])
+  })
+
+  it('cycle 154b: pins the complete set of map-script setup identifiers the scan must cover', () => {
+    // `scanMapScripts` matches MAP_SCAN_TOKENS by substring, so a setup
+    // identifier the list does not cover would be invisible and MAPS_WITH_SETUP
+    // could silently stay at 22 after an upstream pin bump. Scan every
+    // `scripts.pory` for the two identifier families the battle setup uses.
+    const identifiers = new Set<string>()
+    for (const script of scripts) {
+      for (const match of script.source.matchAll(/\bVAR_(?:BATTLE|MONOTYPE)[A-Z_0-9]*\b/g)) {
+        identifiers.add(match[0])
+      }
+      for (const match of script.source.matchAll(/\bset(?:field|battle|inverse)[a-z_]*/g)) {
+        identifiers.add(match[0])
+      }
+    }
+    expect([...identifiers].sort()).toEqual([
+      'VAR_BATTLE_FIELD_EFFECT_TYPE',
+      'VAR_BATTLE_FIELD_ID',
+      'VAR_MONOTYPE_BOOST',
+      'setfieldeffectargument',
+    ])
+
+    // Each must be reachable: `VAR_BATTLE_FIELD_EFFECT_TYPE`,
+    // `VAR_MONOTYPE_BOOST` and `setfieldeffectargument` are MAP_SCAN_TOKENS;
+    // `VAR_BATTLE_FIELD_ID` is not, and is covered by its own MAP_SETUP_SPECS
+    // unit instead (the spec loop scans every spec token separately).
+    expect(MAP_SCAN_TOKENS).not.toContain('VAR_BATTLE_FIELD_ID')
+    expect(MAP_SETUP_SPECS.some((spec) => spec.token === 'VAR_BATTLE_FIELD_ID')).toBe(true)
+    for (const identifier of identifiers) {
+      const coveredByScanToken = MAP_SCAN_TOKENS.some((token) => token.includes(identifier))
+      const coveredBySpec = MAP_SETUP_SPECS.some((spec) => spec.token.includes(identifier))
+      expect(coveredByScanToken || coveredBySpec, `${identifier} would be invisible`).toBe(true)
+    }
+
+    // The list is substring-matched and these six tokens are the complete set
+    // found by the check above; adding a seventh without a new identifier
+    // family is a sign the list drifted.
+    expect(MAP_SCAN_TOKENS).toHaveLength(6)
   })
 
   it('loads 932 trainers and the true battleEvents row count', () => {

@@ -1738,6 +1738,268 @@ export const SCRIPT_EVENT_SPECS: ReadonlyArray<ScriptEventSpec> = [
   },
 ]
 
+/**
+ * Monotype Champion rule sites. `getMonotypeChampType()` reads
+ * `VAR_BATTLE_FIELD_EFFECT_TYPE == BATTLE_FIELD_EFFECT_MONOCHAMP` and returns
+ * `VarGet(VAR_BATTLE_FIELD_ID)` (battle_util.c:4074-4079), so every rule below
+ * is gated on a value the driver never sets: `loadSimData.ts:249` hard-codes
+ * `monotypeChampType: null`, and no other driver file assigns it. The sim
+ * already branches on `GroundingContext.monotypeChampType` at the sites named
+ * in each `scope`; only the driver feed is missing. A unit becomes `ported`
+ * when the driver assigns a non-null champion type.
+ */
+const MONOCHAMP_DRIVER_EVIDENCE: UnitEvidence = {
+  productionFiles: ['web/src/engine/sim/driver/loadSimData.ts'],
+  productionLinePattern: /monotypeChampType\s*:\s*(?!null\b)\S/,
+}
+
+/** One `map-setup` unit per Monotype Champion rule site. Citations were read in the C. */
+export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
+  {
+    key: 'monochamp:battle_util.c:1431',
+    token: 'monotypeChampType',
+    site: 'CheckMoveLimitations',
+    scope:
+      "[FIGHTING] status moves are unusable on the player's side: `gBattleMoves[move].split == SPLIT_STATUS && getMonotypeChampType() == TYPE_FIGHTING && GetBattlerSide(gActiveBattler) == B_SIDE_PLAYER`. Unmodelled, conditional note at web/src/engine/sim/ai/aiMoveLimitations.ts:93.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 1431),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:1632',
+    token: 'monotypeChampType',
+    site: 'CheckMoveLimitations move filter',
+    scope:
+      "[FIGHTING] the move filter repeats the status lock: `FILTER_NOT(... SPLIT_STATUS && ... TYPE_FIGHTING && GetBattlerSide(battlerId) == B_SIDE_PLAYER)`. Unmodelled, conditional note at web/src/engine/sim/ai/aiMoveLimitations.ts:93 (no limitation bit is set).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 1632),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:2238',
+    token: 'monotypeChampType',
+    site: 'ENDTURN_SWAMP',
+    scope:
+      "[WATER] the swamp timer does not tick down for the player's side: `!(getMonotypeChampType() == TYPE_WATER && side == B_SIDE_PLAYER) && --gSideTimers[side].swampTimer == 0`. Conditional port at web/src/engine/sim/fieldEndTurn.ts:906; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 2238),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:2488',
+    token: 'monotypeChampType',
+    site: 'ENDTURN_TOXIC_WASTE_DAMAGE',
+    scope:
+      "[POISON] `ENDTURN_TOXIC_WASTE_DAMAGE` runs Toxic Spill's onEndTurn with `ABILITY_NONE` when `getMonotypeChampType() == TYPE_POISON && gActiveBattler == B_SIDE_PLAYER`. The ability hook's champion check is conditionally ported at web/src/engine/sim/endTurn.ts:1409; the battle_util dispatch itself is not run.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 2488),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:2635',
+    token: 'monotypeChampType',
+    site: 'ENDTURN_SALT_CURE',
+    scope:
+      "[ROCK] `ENDTURN_SALT_CURE` damages every player mon as if salt-cured: `(getMonotypeChampType() == TYPE_ROCK && GET_BATTLER_SIDE(gActiveBattler) == B_SIDE_PLAYER) || (gStatuses4[gActiveBattler] & STATUS4_SALT_CURE)`, 1/4 for Water or Steel else 1/8. Unmodelled (web/src/engine/sim/endTurn.ts:2039 notes the ROCK half has no port).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 2635),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:2649',
+    token: 'monotypeChampType',
+    site: 'ENDTURN_WRAP',
+    scope:
+      "[BUG] `ENDTURN_WRAP` Infestation damage on every player mon: `getMonotypeChampType() == TYPE_BUG && ... GET_BATTLER_SIDE(gActiveBattler) == B_SIDE_PLAYER`. Unmodelled (web/src/engine/sim/endTurn.ts:614 notes the Bug branch has no port).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 2649),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:4850',
+    token: 'monotypeChampType',
+    site: 'CanBattlerEscape',
+    scope:
+      "[FIGHTING] the player's side cannot switch out: the `return FALSE` branch `GetBattlerSide(battlerId) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FIGHTING`. Conditional port at web/src/engine/sim/escape.ts:105; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4850),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:4971',
+    token: 'monotypeChampType',
+    site: 'IsSleepDisabled',
+    scope:
+      "[DARK] the AI sleep clause is disabled for the player's side: `asleepmons != 0 && !(getMonotypeChampType() == TYPE_DARK && GetBattlerSide(battlerId) == B_SIDE_PLAYER)`. Unmodelled (web/src/engine/sim/ai/aiMoveLimitations.ts:89 notes the Dark exemption).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 4971),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:6656',
+    token: 'monotypeChampType',
+    site: 'CheckGroundingEffects',
+    scope:
+      "[GROUND] the player's side is grounded: `getMonotypeChampType() == TYPE_GROUND && GetBattlerSide(battlerId) == B_SIDE_PLAYER`. Conditional port at web/src/engine/sim/grounding.ts:50; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 6656),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:7235',
+    token: 'monotypeChampType',
+    site: 'CalcAttackStat',
+    scope:
+      "[ICE] the attack uses Speed as the attack stat when the defender is on the player's side: `getMonotypeChampType() == TYPE_ICE && GetBattlerSide(battlerDef) == B_SIDE_PLAYER`. Unmodelled.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7235),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:7717',
+    token: 'monotypeChampType',
+    site: 'post-formula damage switch',
+    scope:
+      "[GRASS, PSYCHIC, ELECTRIC, POISON, STEEL, GROUND, FIGHTING] the switch at :7716-7756: 0.7 for Grass/Psychic/Electric against the champion side, 0.7 Poison and Steel for both sides, Ground 0.65 on super-effective hits vs the champion side, Fighting halves/quarters super-effective damage and multiplies Fighting moves by 1.5. Unmodelled note at web/src/engine/sim/ai/aiCalcDamage.ts:208-210.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7717),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:7861',
+    token: 'monotypeChampType',
+    site: 'MulByTypeEffectiveness',
+    scope:
+      "[FAIRY] Fairy moves hit Poison and Steel defenders super-effectively on the player's side: `moveType == TYPE_FAIRY && (defType == TYPE_POISON || defType == TYPE_STEEL) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FAIRY`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7861),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:7863',
+    token: 'monotypeChampType',
+    site: 'MulByTypeEffectiveness',
+    scope:
+      "[DRAGON] a 0x effectiveness becomes 1x on the player's side: `mod == UQ_4_12(0.0) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_DRAGON`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7863),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:7865',
+    token: 'monotypeChampType',
+    site: 'MulByTypeEffectiveness',
+    scope:
+      "[ROCK] the `getMonotypeChampType() == TYPE_ROCK` branch (:7865-7869): Rock-on-Rock is super-effective on the player's side, and non-player-side Rock moves become immune. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7865),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:8672',
+    token: 'monotypeChampType',
+    site: 'IsTrickRoomActive',
+    scope:
+      "[FLYING] Trick Room is never active: `IsAbilityOnField(ABILITY_CLUELESS) || getMonotypeChampType() == TYPE_FLYING`. Conditional port at web/src/engine/sim/turn.ts:631; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 8672),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:8674',
+    token: 'monotypeChampType',
+    site: 'IsTrickRoomActive',
+    scope:
+      "[NORMAL] Trick Room is active on odd battle turns: `getMonotypeChampType() == TYPE_NORMAL && gBattleResults.battleTurnCounter % 2 == 1`. Unmodelled (web/src/engine/sim/turnOrder.ts:186-191 documents the concept; no NORMAL-odd branch exists).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 8674),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:8710',
+    token: 'monotypeChampType',
+    site: 'isWonderRoomActive',
+    scope:
+      "[NORMAL] Wonder Room is active on even battle turns: `getMonotypeChampType() == TYPE_NORMAL && gBattleResults.battleTurnCounter % 2 == 0`. Conditional port at web/src/engine/sim/bridge.ts:627; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 8710),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:8907',
+    token: 'monotypeChampType',
+    site: 'IsBattlerCursed',
+    scope:
+      "[GHOST] `IsBattlerCursed` is true for the player's side: `getMonotypeChampType() == TYPE_GHOST && GetBattlerSide(battler) == B_SIDE_PLAYER`. Unmodelled (web/src/engine/sim/endTurn.ts:602 notes no port).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 8907),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_util.c:9132',
+    token: 'monotypeChampType',
+    site: 'AbilityOnEntryHandler Dragon Monotype',
+    scope:
+      "[DRAGON] a one-time Fearmonger entry on the player's side: `getMonotypeChampType() == TYPE_DRAGON && GetBattlerSide(battler) == B_SIDE_PLAYER && !gVolatileStructs[battler].usedMonotypeEntry`. Unmodelled (`usedMonotypeEntry` state exists in web/src/engine/sim/state.ts:217 but no logic reads it).",
+    citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 9132),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_main.c:4205',
+    token: 'monotypeChampType',
+    site: 'getBattlerTotalSpeedStat',
+    scope:
+      "[FLYING] the champion's side doubles its Speed: `GET_BATTLER_SIDE(battlerId) != B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FLYING`. Conditional port at web/src/engine/sim/turnOrder.ts:331; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 4205),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_main.c:5824',
+    token: 'monotypeChampType',
+    site: 'HandleMonoChampSpecialEffects',
+    scope:
+      "[all types] the switch :5823-5870, called from battle_main.c:3029: Grass/Electric/Fairy/Psychic set their terrain permanently, Fire sets primal sun, Flying strong winds, Water primal rain plus `swampTimer = 1`, Ice hail, and Dark puts the player's team to sleep (`MakePlayerTeamAsleep`). Unmodelled.",
+    citation: cite(`${UPSTREAM_SRC}/battle_main.c`, 5824),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:abilities.cc:5201',
+    token: 'monotypeChampType',
+    site: 'Impl<ABILITY_TOXIC_SPILL>.onEntry',
+    scope:
+      "[POISON] Toxic Spill's onEntry is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Unmodelled (web/src/engine/sim/switchInAbility.ts:2303 skips the entry effect without the champion check).",
+    citation: cite(`${UPSTREAM_SRC}/abilities.cc`, 5201),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:abilities.cc:5211',
+    token: 'monotypeChampType',
+    site: 'Impl<ABILITY_TOXIC_SPILL>.onEndTurn',
+    scope:
+      "[POISON] Toxic Spill's onEndTurn is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Conditional port at web/src/engine/sim/endTurn.ts:1409; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/abilities.cc`, 5211),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:abilities.cc:5246',
+    token: 'monotypeChampType',
+    site: 'Impl<ABILITY_TOXIC_SPILL>.onExit',
+    scope:
+      "[POISON] Toxic Spill's onExit is skipped when the champion is Poison: `CHECK_NOT(getMonotypeChampType() == TYPE_POISON)`. Unmodelled (web/src/engine/sim/turn.ts:1642 skips the exit effect without the champion check).",
+    citation: cite(`${UPSTREAM_SRC}/abilities.cc`, 5246),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_script_commands.c:979',
+    token: 'monotypeChampType',
+    site: 'SetMoldBreaker',
+    scope:
+      "[STEEL] the Mold Breaker marker is set for the non-player side: `getMonotypeChampType() == TYPE_STEEL && GetBattlerSide(battler) != B_SIDE_PLAYER`. Unmodelled.",
+    citation: cite(`${UPSTREAM_SRC}/battle_script_commands.c`, 979),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_script_commands.c:8344',
+    token: 'monotypeChampType',
+    site: 'Cmd_courtchange',
+    scope:
+      "[WATER] Court Change does not swap the swamp timer: `if (!(getMonotypeChampType() == TYPE_WATER)) SWAP(gSideTimers[0].swampTimer, gSideTimers[1].swampTimer, temp)`. Conditional port at web/src/engine/sim/moveEffects.ts:8773; only the driver feed is missing.",
+    citation: cite(`${UPSTREAM_SRC}/battle_script_commands.c`, 8344),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+  {
+    key: 'monochamp:battle_script_commands.c:8985',
+    token: 'monotypeChampType',
+    site: 'Intimidate data',
+    scope:
+      "[DRAGON] intimidate data uses `ABILITY_FEARMONGER` for the non-player attacker when `ability == ABILITY_NONE`: `getMonotypeChampType() == TYPE_DRAGON && GetBattlerSide(gBattlerAttacker) != B_SIDE_PLAYER && ability == ABILITY_NONE`. Unmodelled.",
+    citation: cite(`${UPSTREAM_SRC}/battle_script_commands.c`, 8985),
+    evidence: MONOCHAMP_DRIVER_EVIDENCE,
+  },
+]
+
 /** First line in battle_events.c naming an event, else its header definition. */
 export function buildBattleEventCitations(eventSource: string, headerSource: string): Map<string, string> {
   const sourceLines = eventSource.split('\n')
@@ -1931,6 +2193,14 @@ export function runInventory(options: EnvironmentInventoryOptions = {}): Environ
       },
       hit.trainerIds,
     )
+  }
+
+  // One unit per Monotype Champion rule site; every fight in this room is an
+  // opponent whose rules the type gate selects (the map holds the 18 type
+  // variants), so each unit carries the map's scanned opponent ids.
+  const monochampTrainerIds = scanTrainerIds(scripts, ['EvergrandeCity_MonoChampRoom_1'])
+  for (const spec of MONOCHAMP_RULE_SPECS) {
+    pushUnit('map-setup', spec, monochampTrainerIds)
   }
 
   for (const spec of BATTLE_TYPE_SPECS) {
