@@ -338,7 +338,10 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test, so ported 400 -> 401,
     // unported 216 -> 215 and registered-untested 28 -> 27.
     // Cycle 152f: Natural Gift GetMovePriority ported, ported 401 -> 402, unported 215 -> 214.
-    expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(251)
+    // Cycle 152g: -2 hold-trigger, the two Booster Energy `ScoreSwitchInAbility`
+    // units (`battle_ai_ability.c:1070`, `:1076`) moved to ai-trigger when that
+    // file was reclassified as an AI source. 251 is the pre-152g count above.
+    expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(249)
     expect(result.totalDefined).toBe(636)
     expect(result.totalPorted).toBe(402)
     expect(result.totalUnported).toBe(214)

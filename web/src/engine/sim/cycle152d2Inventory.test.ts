@@ -245,8 +245,11 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     const count = (kind: ItemUnit['kind']) => result.units.filter((unit) => unit.kind === kind).length
 
     // Cycle 152d3: +14 Enigma hold-trigger units (3 ported, 11 allowlisted).
-    expect(count('hold-trigger')).toBe(251)
-    expect(count('ai-trigger')).toBe(59)
+    // Cycle 152g: -2 hold-trigger / +2 ai-trigger, the two Booster Energy
+    // `ScoreSwitchInAbility` units (`battle_ai_ability.c:1070`, `:1076`) moved
+    // from hold-trigger to ai-trigger when that file was reclassified as an AI source.
+    expect(count('hold-trigger')).toBe(249)
+    expect(count('ai-trigger')).toBe(61)
     expect(count('item-data')).toBe(40)
     expect(count('natural-gift')).toBe(5)
     expect(count('fling')).toBe(11)
