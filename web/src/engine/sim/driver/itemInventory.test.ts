@@ -23,9 +23,12 @@ const DISTINCT_HOLD_EFFECTS = 133
 // Re-pinned after cycle 152d3: +14 Enigma Berry sites (3 ported battle reads, 4
 // no-run/no-exp battle reads, 7 non-battle pokemon.c reads) on top of cycle 152d2's
 // +7 Power Herb script labels, +2 EatTargetBerry sites, +4 EFFECT_CHANGE_TYPE_ON_ITEM.
-const HOLD_TRIGGER_UNITS = 251
-// Unchanged by cycle 152d2.
-const AI_TRIGGER_UNITS = 59
+// Cycle 152g: -2, the two Booster Energy `ScoreSwitchInAbility:1070` / `:1076` units
+// moved to ai-trigger when `battle_ai_ability.c` was reclassified as an AI source.
+const HOLD_TRIGGER_UNITS = 249
+// Re-pinned after cycle 152g: +2, the Booster Energy `ScoreSwitchInAbility:1070` / `:1076`
+// units moved here from hold-trigger (59 -> 61).
+const AI_TRIGGER_UNITS = 61
 // Re-pinned after cycle 152d2: ITEM_POWER_HERB loses its item-data unit once its hold
 // effect gains hold-trigger units (41 -> 40).
 const ITEM_DATA_UNITS = 40

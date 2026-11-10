@@ -18,7 +18,7 @@ Sites without an explicit mapping fall back to any non-AI production file and ar
 Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowlisted units require an exact pinned C `file:line`.
 
 1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,
-   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`, `battle_ai_ability.c`,
+   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`,
    `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle
    script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`),
    plus one synthetic site per C trigger that does not name a `HOLD_EFFECT_*` token:
@@ -36,7 +36,7 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
    top-level `constexpr Ability Impl<ABILITY_X> =` declaration in `abilities.cc`, or the nearest enclosing function/macro elsewhere.
    The token is the `HOLD_EFFECT_*` name. Several hits of one effect in one site collapse to one unit.
 2. **ai-trigger**: the same rule for `battle_ai_util.c`, `battle_ai_main.c`,
-   `battle_controller_opponent.c` and `battle_ai_switch_items.c`; production evidence must come
+   `battle_controller_opponent.c`, `battle_ai_switch_items.c` and `battle_ai_ability.c`; production evidence must come
    from a source file under `web/src/engine/sim/ai/`.
 3. **item-data**: one unit per item whose hold effect has no hold-trigger unit. The token is the item id.
 4. **natural-gift**: one unit per Natural Gift handling site (`CalcMoveBasePower`, `GetMoveType`, `SetMoveEffect`,
@@ -52,8 +52,8 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 251 | 112 | 19 | 128 | 0 | 11 |
-| `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
+| `hold-trigger` | 249 | 112 | 19 | 126 | 0 | 11 |
+| `ai-trigger` | 61 | 17 | 0 | 44 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 5 | 0 | 0 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
@@ -114,8 +114,6 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `IsBattlerWeatherAffected` | 1 |
 | `hold-trigger` | `IsRunningFromBattleImpossible` | 1 |
 | `hold-trigger` | `PlayStatChangeAnimation` | 1 |
-| `hold-trigger` | `ScoreSwitchInAbility:1070` | 1 |
-| `hold-trigger` | `ScoreSwitchInAbility:1076` | 1 |
 | `hold-trigger` | `SetActionsAndBattlersTurnOrder` | 2 |
 | `hold-trigger` | `SetMoveEffect` | 1 |
 | `hold-trigger` | `SetSwapDamageCategory` | 1 |
@@ -130,6 +128,8 @@ Test evidence is per effect token or item id, not per site.
 | `ai-trigger` | `IsBattlerTrapped` | 1 |
 | `ai-trigger` | `OpponentHandleChooseMove` | 1 |
 | `ai-trigger` | `PartyBattlerShouldAvoidHazards` | 3 |
+| `ai-trigger` | `ScoreSwitchInAbility:1070` | 1 |
+| `ai-trigger` | `ScoreSwitchInAbility:1076` | 1 |
 | `ai-trigger` | `ShouldPivot` | 1 |
 | `item-data` | `HOLD_EFFECT_Z_CRYSTAL` | 34 |
 | `item-data` | `HOLD_EFFECT_Z_RING` | 1 |
@@ -166,8 +166,6 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_BLUNDER_POLICY@battle_util.c:ITEMEFFECT_KINGSROCK` | Blunder Policy | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6055` | unported | none |
 | `HOLD_EFFECT_BOOSTER_ENERGY@abilities.cc:ProtosynthesisHandler` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/abilities.cc:6942` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_BOOSTER_ENERGY@abilities.cc:QuarkDriveHandler` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/abilities.cc:6998` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
-| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1070` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1070` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
-| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1076` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1076` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_CELL_BATTERY@battle_util.c:ITEMEFFECT_TARGET` | Cell Battery | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6191` | unported | none |
 | `HOLD_EFFECT_CHOICE_BAND@battle_util.c:CalcAttackStat` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7288` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_CHOICE_SCARF@battle_main.c:GetBattlerTotalSpeedStat` | Choice Scarf | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4220` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
@@ -410,6 +408,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_BINDING_BAND@battle_ai_util.c:GetTrapDamage` | Binding Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1728` | unported | `web/src/engine/sim/cycle156WrapPressure.test.ts` |
 | `HOLD_EFFECT_BLACK_SLUDGE@battle_ai_main.c:AI_CheckViability` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3113` | unported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `HOLD_EFFECT_BLACK_SLUDGE@battle_ai_util.c:HasHealingItem` | Black Sludge | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:1479` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
+| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1070` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1070` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
+| `HOLD_EFFECT_BOOSTER_ENERGY@battle_ai_ability.c:ScoreSwitchInAbility:1076` | Booster Energy | `pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1076` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_CHOICE_BAND@battle_ai_main.c:AI_CheckBadMove` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:1366` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_CHOICE_BAND@battle_ai_main.c:AI_CheckViability` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_main.c:3099` | unported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_CHOICE_BAND@battle_ai_util.c:ShouldFakeOut` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_ai_util.c:2130` | ported | `web/src/engine/battleStat.test.ts` |

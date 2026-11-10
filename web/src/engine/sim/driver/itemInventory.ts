@@ -9,7 +9,7 @@ import { stripComments } from './moveInventory'
  * Unit kinds:
  *   1. `hold-trigger` -- one unit per (resolved hold effect, C trigger site) in
  *      `battle_util.c`, `battle_script_commands.c`, `battle_main.c`, `pokemon.c`,
- *      `abilities.cc`, `battle_ai_ability.c`, `script_conditions.cc`, plus
+ *      `abilities.cc`, `script_conditions.cc`, plus
  *      `jumpifholdeffect` / `jumpifnoholdeffect` and `twoturnmoveacceleratecheck`
  *      (Power Herb) lines in the battle script `data/battle_scripts_1.s` (site =
  *      enclosing script label), plus the synthetic C sites `EatTargetBerry`,
@@ -17,8 +17,8 @@ import { stripComments } from './moveInventory'
  *      Enigma Berry `ITEM_ENIGMA_BERRY` sites (the item resolves to
  *      `HOLD_EFFECT_NONE`, so the token scan cannot see them).
  *   2. `ai-trigger`  -- one unit per (resolved hold effect, C trigger site) in the
- *      AI files `battle_ai_util.c`, `battle_ai_main.c`, `battle_controller_opponent.c`
- *      and `battle_ai_switch_items.c`.
+ *      AI files `battle_ai_util.c`, `battle_ai_main.c`, `battle_controller_opponent.c`,
+ *      `battle_ai_switch_items.c` and `battle_ai_ability.c`.
  *   3. `item-data`   -- one unit per item whose hold effect has NO `hold-trigger`
  *      unit (data-only effects such as mega stones read through other tables).
  *   4. `natural-gift`-- one unit per berry carrying a `naturalGift` block.
@@ -715,7 +715,6 @@ export const HOLD_TRIGGER_FILES = [
   'battle_main.c',
   'pokemon.c',
   'abilities.cc',
-  'battle_ai_ability.c',
   'script_conditions.cc',
 ] as const
 
@@ -727,6 +726,7 @@ export const AI_TRIGGER_FILES = [
   'battle_ai_main.c',
   'battle_controller_opponent.c',
   'battle_ai_switch_items.c',
+  'battle_ai_ability.c',
 ] as const
 
 export const FLING_FILE = 'battle_script_commands.c'
@@ -2526,7 +2526,7 @@ export function generateItemInventoryDoc(
     '1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,',
   )
   lines.push(
-    '   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`, `battle_ai_ability.c`,',
+    '   `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`,',
   )
   lines.push(
     '   `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle',
@@ -2576,7 +2576,7 @@ export function generateItemInventoryDoc(
     '2. **ai-trigger**: the same rule for `battle_ai_util.c`, `battle_ai_main.c`,',
   )
   lines.push(
-    '   `battle_controller_opponent.c` and `battle_ai_switch_items.c`; production evidence must come',
+    '   `battle_controller_opponent.c`, `battle_ai_switch_items.c` and `battle_ai_ability.c`; production evidence must come',
   )
   lines.push('   from a source file under `web/src/engine/sim/ai/`.')
   lines.push(

@@ -143,11 +143,11 @@ describe('cycle 152d - unscanned C files (B)', () => {
     )
     expect(bootsSwitch?.status).toBe('unported')
 
-    const boosterProto = unitFor(result, 'hold-trigger', 'HOLD_EFFECT_BOOSTER_ENERGY', 'ScoreSwitchInAbility:1070')
+    const boosterProto = unitFor(result, 'ai-trigger', 'HOLD_EFFECT_BOOSTER_ENERGY', 'ScoreSwitchInAbility:1070')
     expect(boosterProto?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1070')
     expect(boosterProto?.status).toBe('unported')
 
-    const boosterQuark = unitFor(result, 'hold-trigger', 'HOLD_EFFECT_BOOSTER_ENERGY', 'ScoreSwitchInAbility:1076')
+    const boosterQuark = unitFor(result, 'ai-trigger', 'HOLD_EFFECT_BOOSTER_ENERGY', 'ScoreSwitchInAbility:1076')
     expect(boosterQuark?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_ai_ability.c:1076')
     expect(boosterQuark?.status).toBe('unported')
 
@@ -236,9 +236,11 @@ describe('cycle 152d - pinned counts', () => {
     // Cycle 152d2 re-pin: +7 Power Herb script labels, +2 EatTargetBerry sites,
     // +4 EFFECT_CHANGE_TYPE_ON_ITEM sites = 237.
     // Cycle 152d3 re-pin: +14 Enigma Berry C sites = 251.
-    expect(count('hold-trigger')).toBe(251)
+    // Cycle 152g re-pin: -2 Booster Energy ScoreSwitchInAbility units moved to ai-trigger = 249.
+    expect(count('hold-trigger')).toBe(249)
     // +battle_controller_opponent.c:1608 and +battle_ai_switch_items.c:528.
-    expect(count('ai-trigger')).toBe(59)
+    // Cycle 152g re-pin: +2 Booster Energy units from hold-trigger = 61.
+    expect(count('ai-trigger')).toBe(61)
     // Cycle 152d: ITEM_DESTINY_KNOT and ITEM_ADRENALINE_ORB gain hold-trigger units (-2).
     // Cycle 152d2 re-pin: ITEM_POWER_HERB gains script units (-1) = 40.
     expect(count('item-data')).toBe(40)
