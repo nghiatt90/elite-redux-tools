@@ -19,22 +19,28 @@ const result = runInventory(items)
 
 const ITEM_COUNT = 929
 const DISTINCT_HOLD_EFFECTS = 133
-// Re-pinned after cycle 152d: +5 battle-script sites, +2 Booster Energy lines, +1 Acrobatics gem site
-const HOLD_TRIGGER_UNITS = 224
-// Re-pinned after cycle 152d: battle_controller_opponent.c:1608 (AI mega choice) and battle_ai_switch_items.c:528
+// Re-pinned after cycle 152d2: +7 Power Herb script labels, +2 EatTargetBerry sites,
+// +4 EFFECT_CHANGE_TYPE_ON_ITEM (Plate/Memory x 2 C sites)
+const HOLD_TRIGGER_UNITS = 237
+// Unchanged by cycle 152d2.
 const AI_TRIGGER_UNITS = 59
-// Re-pinned after cycle 152d: DESTINY_KNOT and ADRENALINE_ORB gain hold-trigger units, so their item-data units (-2)
-const ITEM_DATA_UNITS = 41
+// Re-pinned after cycle 152d2: ITEM_POWER_HERB loses its item-data unit once its hold
+// effect gains hold-trigger units (41 -> 40).
+const ITEM_DATA_UNITS = 40
 // Re-pinned after cycle 152c: per-site natural-gift units (5) and fling units (11)
 const NATURAL_GIFT_UNITS = 5
 const FLING_UNITS = 11
 
-// Re-pinned after cycle 152d: +7 unported (Destiny Knot target path, Adrenaline Orb, Booster Energy x2,
-// Acrobatics gem, AI primal-orb mega choice, AI Heavy-Duty Boots switch) and -2 item-data units removed
-export const UNPORTED_UNIT_COUNT = 221
+// Re-pinned after cycle 152d2: -5 item-data units allowlisted (Cleanse Tag, Pure Incense,
+// Dragon Scale, Upgrade, Gracidea), -1 Power Herb item-data unit replaced by script units,
+// +1 C2 (BattleScript_MoveEffectBugBite's consumeberry is still gapped)
+export const UNPORTED_UNIT_COUNT = 216
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
 export const REGISTERED_UNTESTED_UNIT_COUNT = 28
+
+/** Re-pinned after cycle 152d2: five item-data units with exact non-battle C cites. */
+export const ALLOWLISTED_UNIT_COUNT = 5
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -111,6 +117,10 @@ describe('held-item completeness inventory', () => {
 
   it('reports the current unclassified unit count -- this number should only go DOWN', () => {
     expect(result.totalUnclassified).toBe(UNCLASSIFIED_UNIT_COUNT)
+  })
+
+  it('reports the allowlisted unit count (cycle 152d2)', () => {
+    expect(result.totalAllowlisted).toBe(ALLOWLISTED_UNIT_COUNT)
   })
 
   it('validates every allowlist citation format', () => {

@@ -10,8 +10,10 @@ import { stripComments } from './moveInventory'
  *   1. `hold-trigger` -- one unit per (resolved hold effect, C trigger site) in
  *      `battle_util.c`, `battle_script_commands.c`, `battle_main.c`, `pokemon.c`,
  *      `abilities.cc`, `battle_ai_ability.c`, `script_conditions.cc`, plus
- *      `jumpifholdeffect` / `jumpifnoholdeffect` lines in the battle script
- *      `data/battle_scripts_1.s` (site = enclosing script label).
+ *      `jumpifholdeffect` / `jumpifnoholdeffect` and `twoturnmoveacceleratecheck`
+ *      (Power Herb) lines in the battle script `data/battle_scripts_1.s` (site =
+ *      enclosing script label), plus the synthetic C sites `EatTargetBerry`,
+ *      `BattleScript_MoveEffectBugBite` and `EFFECT_CHANGE_TYPE_ON_ITEM`.
  *   2. `ai-trigger`  -- one unit per (resolved hold effect, C trigger site) in the
  *      AI files `battle_ai_util.c`, `battle_ai_main.c`, `battle_controller_opponent.c`
  *      and `battle_ai_switch_items.c`.
@@ -131,8 +133,48 @@ export interface ItemInventoryResult {
   distinctHoldEffectCount: number
 }
 
-/** Pinned in the test. Empty today: no C site is provably inert. */
-export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = []
+/**
+ * Pinned in the test. Cycle 152d2 allowlists six non-battle item effects whose hold
+ * effects no battle code reads. Each cite is the exact pinned C line that proves the
+ * effect is field/use-time only, or (Dragon Scale / Upgrade / Gracidea) the debug text
+ * table that is the sole mention of the hold-effect enum member.
+ *
+ * `ITEM_Z_RING` is deliberately NOT here: `HOLD_EFFECT_Z_RING` and `ITEM_Z_RING` have
+ * no occurrence anywhere in the pinned C tree (`src/`, `include/`, `data/`), so no
+ * exact `file:line` cite exists. It stays an unported item-data unit.
+ */
+export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = [
+  {
+    key: 'ITEM_CLEANSE_TAG',
+    reason:
+      'resolved hold effect HOLD_EFFECT_REPEL is read by no battle code (its only C mention is the debug text table at battle_debug.c:2055); the item works through a field encounter-rate check on the item id, not the hold effect',
+    cite: 'pipeline/.upstream/eliteredux-source/src/wild_encounter.c:1166',
+  },
+  {
+    key: 'ITEM_PURE_INCENSE',
+    reason:
+      'resolved hold effect HOLD_EFFECT_REPEL is read by no battle code (its only C mention is the debug text table at battle_debug.c:2055); the item works through a daycare breeding check on the item id, not the hold effect',
+    cite: 'pipeline/.upstream/eliteredux-source/src/daycare.c:724',
+  },
+  {
+    key: 'ITEM_DRAGON_SCALE',
+    reason:
+      'HOLD_EFFECT_DRAGON_SCALE is read by no battle code; the only C mention is the debug text table (the item itself is an evolution stone at item_effects.h:571)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_debug.c:2066',
+  },
+  {
+    key: 'ITEM_UPGRADE',
+    reason:
+      'HOLD_EFFECT_UPGRADE is read by no battle code; the only C mention is the debug text table (the item itself is an evolution stone at item_effects.h:574)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_debug.c:2068',
+  },
+  {
+    key: 'ITEM_GRACIDEA',
+    reason:
+      'HOLD_EFFECT_GRACIDEA is read by no battle code; the only C mention is the debug text table (the item itself is a form-change item at form_change_tables.h:43)',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_debug.c:2101',
+  },
+]
 
 export const KNOWN_PARTIAL_PORTS: ReadonlyArray<KnownPartialEntry> = [
   {
@@ -217,6 +259,57 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   BattleScript_HangedOnMsg: {
     files: ['web/src/engine/sim/turn.ts'],
     functionName: 'adjustDamage',
+  },
+  // Power Herb: one unit per battle-script label that runs `twoturnmoveacceleratecheck`.
+  // Every label's charge-turn path funnels through executeAction's shared acceleration
+  // block (turn.ts, HOLD_EFFECT_POWER_HERB at :3185).
+  BattleScript_EffectTwoTurnSecondary_AfterSetString: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectTwoTurnRetaliation_AfterSetString: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectTwoTurnsAttackCheckSkipCharge: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectGeomancy: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectElectroShot: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_EffectSkyDrop: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  BattleScript_FirstTurnSemiInvulnerable: {
+    files: ['web/src/engine/sim/turn.ts'],
+    functionName: 'executeAction',
+  },
+  // Synthetic sites (the C site does not name a HOLD_EFFECT_* token). See
+  // SYNTHETIC_TRIGGER_SITES in runInventory.
+  // EatTargetBerry (battle_script_commands.c:13221) is moved to applyBugBite. The
+  // script-label site is a real gap: the sim only pushes an unmodelled note for the
+  // stolen berry's consumeberry.
+  EatTargetBerry: {
+    files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'applyBugBite',
+  },
+  BattleScript_MoveEffectBugBite: { files: [] },
+  // EFFECT_CHANGE_TYPE_ON_ITEM compares `holdEffect == gBattleMoves[move].argument`,
+  // so the HOLD_EFFECT_* scan cannot see it. Keyed by the C switch case and line.
+  'CHANGE_TYPE_ON_ITEM:5036': {
+    files: ['web/src/engine/calculate.ts'],
+    functionName: 'resolveMoveType',
+  },
+  'CHANGE_TYPE_ON_ITEM:5137': {
+    files: ['web/src/engine/calculate.ts'],
+    functionName: 'resolveMoveType',
   },
   // Unscanned C sites added in cycle 152d.
   OpponentHandleChooseMove: {
@@ -512,6 +605,12 @@ const HOOK_MEMBER_RE = /^\s*\.([A-Za-z0-9_]+)\s*=/
 const MACRO_RE = /^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)/
 const SCRIPT_LABEL_RE = /^[A-Za-z_][A-Za-z0-9_]*::?$/
 const SCRIPT_HOLD_JUMP_RE = /^\s*(?:jumpifholdeffect|jumpifnoholdeffect)\b/
+/**
+ * `twoturnmoveacceleratecheck` is Power Herb's trigger. The macro expands to a
+ * hold-effect check (the `asm/macros` definition is not in `sparse_paths`), so the
+ * macro name stands in for `HOLD_EFFECT_POWER_HERB` here.
+ */
+const SCRIPT_TWO_TURN_ACCEL_RE = /^\s*twoturnmoveacceleratecheck\b/
 
 /**
  * `<file>:<line>` -> site. `nearestEnclosingDefinition` cannot name a C++ template
@@ -1184,6 +1283,15 @@ export function scanBattleScriptHoldHits(
     const trimmed = text.trimStart()
     // `;` and `@` both start a comment in this assembler.
     if (trimmed.startsWith(';') || trimmed.startsWith('@')) continue
+    if (SCRIPT_TWO_TURN_ACCEL_RE.test(text)) {
+      // Power Herb's macro. Only a labelled script can own a trigger site; a bare
+      // mention before any label is not a site and produces no unit.
+      if (!effects.has('HOLD_EFFECT_POWER_HERB')) continue
+      const site = nearestScriptLabel(lines, index + 1)
+      if (site === '?') continue
+      hits.push({ effect: 'HOLD_EFFECT_POWER_HERB', file, site, line: index + 1 })
+      continue
+    }
     if (!SCRIPT_HOLD_JUMP_RE.test(text)) continue
     // Drop a trailing comment before looking for effect names.
     const code = text.replace(/[;@].*$/, '')
@@ -1342,6 +1450,83 @@ function unitKey(effect: string, file: string, site: string): string {
   return `${effect}@${file.split('/').pop()}:${site}`
 }
 
+/**
+ * A `hold-trigger` unit whose C site does not name a `HOLD_EFFECT_*` token, so the
+ * literal-token scan cannot see it. The natural-gift builder uses the same shape.
+ */
+interface SyntheticTriggerSite {
+  site: string
+  /** Production-evidence token (appears in the mapped sim function). */
+  token: string
+  /** Unit key prefix: the hold effect, or a marker such as `eatTargetBerry`. */
+  effect: string
+  file: string
+  citation: string
+  functionName?: string
+  itemIds: string[]
+  testTokens: string[]
+  testPredicate?: (cleanSource: string) => boolean
+}
+
+/** Builds the synthetic (non-`HOLD_EFFECT_*`-token) trigger sites for one run. */
+export function syntheticTriggerSites(itemsByEffect: ReadonlyMap<string, string[]>): SyntheticTriggerSite[] {
+  const sites: SyntheticTriggerSite[] = [
+    {
+      // EatTargetBerry, battle_script_commands.c:13221-13235, called from the
+      // MOVEEND_MOVE_EFFECTS2_ON_EACH switch at :4595-4597. applyBugBite ports the
+      // pocket check, Sticky Hold and berry removal.
+      site: 'EatTargetBerry',
+      token: 'POCKET_BERRIES',
+      effect: 'eatTargetBerry',
+      file: `${UPSTREAM_SRC}/battle_script_commands.c`,
+      citation: `${UPSTREAM_SRC}/battle_script_commands.c:4595`,
+      functionName: 'applyBugBite',
+      itemIds: [],
+      testTokens: ['MOVE_BUG_BITE', 'MOVE_PLUCK', 'ABILITY_STICKY_HOLD'],
+      testPredicate: (clean) =>
+        (tokenAppears(clean, 'MOVE_BUG_BITE') || tokenAppears(clean, 'MOVE_PLUCK')) &&
+        tokenAppears(clean, 'ABILITY_STICKY_HOLD'),
+    },
+    {
+      // BattleScript_MoveEffectBugBite (data/battle_scripts_1.s:1006-1014) runs
+      // consumeberry BS_ATTACKER; the sim only pushes an unmodelled note for it.
+      site: 'BattleScript_MoveEffectBugBite',
+      token: 'BattleScript_MoveEffectBugBite',
+      effect: 'eatTargetBerry',
+      file: `${UPSTREAM_DATA}/battle_scripts_1.s`,
+      citation: `${UPSTREAM_DATA}/battle_scripts_1.s:1006`,
+      itemIds: [],
+      testTokens: [],
+    },
+  ]
+  // EFFECT_CHANGE_TYPE_ON_ITEM: Judgment/Plate at battle_main.c:5036 (GetMonMoveType)
+  // and Multi-Attack/Memory at :5137 (GetMoveTypeInternal). The C compares
+  // `holdEffect == gBattleMoves[move].argument`, so the literal-token scan cannot see
+  // these; the token is the sim field that carries the branch.
+  const changeTypeSites = [
+    { site: 'CHANGE_TYPE_ON_ITEM:5036', line: 5036 },
+    { site: 'CHANGE_TYPE_ON_ITEM:5137', line: 5137 },
+  ]
+  for (const holdEffect of ['HOLD_EFFECT_PLATE', 'HOLD_EFFECT_MEMORY']) {
+    for (const changeType of changeTypeSites) {
+      sites.push({
+        site: changeType.site,
+        token: 'changeTypeHoldEffect',
+        effect: holdEffect,
+        file: `${UPSTREAM_SRC}/battle_main.c`,
+        citation: `${UPSTREAM_SRC}/battle_main.c:${changeType.line}`,
+        functionName: 'resolveMoveType',
+        itemIds: itemsByEffect.get(holdEffect) ?? [],
+        testTokens: ['MOVE_JUDGMENT', 'MOVE_MULTI_ATTACK'],
+        testPredicate: (clean) =>
+          (tokenAppears(clean, 'MOVE_JUDGMENT') || tokenAppears(clean, 'MOVE_MULTI_ATTACK')) &&
+          tokenAppears(clean, holdEffect),
+      })
+    }
+  }
+  return sites
+}
+
 // ---------------------------------------------------------------------------
 // Inventory
 // ---------------------------------------------------------------------------
@@ -1445,6 +1630,8 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       if (!aiHits.has(key)) aiHits.set(key, hit)
     }
   }
+
+  const syntheticSites = syntheticTriggerSites(itemsByEffect)
 
   const units: ItemUnit[] = []
 
@@ -1572,7 +1759,46 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
     })
   }
 
-  const effectsWithHoldUnit = new Set([...holdHits.values()].map((hit) => hit.effect))
+  for (const s of syntheticSites) {
+    const key = unitKey(s.effect, s.file, s.site)
+    const prodCheck = checkProductionEvidenceForSite(
+      s.site,
+      s.token,
+      productionFiles,
+      fallbackProductionSource,
+      s.functionName,
+    )
+    const classification = classifyToken(
+      s.token,
+      prodCheck.hasEvidence,
+      nonAiTestSources,
+      [...s.testTokens, ...s.itemIds],
+      s.testPredicate ? (clean) => s.testPredicate!(clean) : undefined,
+    )
+    const allow = allowlistEntryFor(key, allowlist)
+    const knownPartial = KNOWN_PARTIAL_PORTS.find((p) => p.key === key)
+
+    units.push({
+      kind: 'hold-trigger',
+      key,
+      unit: s.token,
+      effect: s.effect,
+      site: s.site,
+      file: s.file,
+      citation: allow?.cite ?? s.citation,
+      status: allow ? 'allowlisted' : knownPartial ? 'unported' : classification.status,
+      registeredUntested: allow || knownPartial ? false : classification.registeredUntested,
+      testFile: classification.testFile,
+      itemIds: s.itemIds,
+      unmappedSite: prodCheck.unmappedSite,
+      partialReason: knownPartial?.whatDiffers,
+    })
+  }
+
+  const effectsWithHoldUnit = new Set([
+    ...[...holdHits.values()].map((hit) => hit.effect),
+    ...syntheticSites.map((site) => site.effect),
+  ])
   for (const item of items) {
     if (!item.resolvedHoldEffect || item.resolvedHoldEffect === 'HOLD_EFFECT_NONE') continue
     if (effectsWithHoldUnit.has(item.resolvedHoldEffect)) continue
@@ -1962,7 +2188,19 @@ export function generateItemInventoryDoc(
     '   `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle',
   )
   lines.push(
-    '   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`).',
+    '   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`),',
+  )
+  lines.push(
+    '   plus one synthetic site per C trigger that does not name a `HOLD_EFFECT_*` token:',
+  )
+  lines.push(
+    '   `EatTargetBerry` (`battle_script_commands.c:4595`), `BattleScript_MoveEffectBugBite`',
+  )
+  lines.push(
+    '   (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).',
+  )
+  lines.push(
+    '   `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.',
   )
   lines.push(
     '   The site is the enclosing',

@@ -55,7 +55,9 @@ describe('cycle 152d - battle-script hold triggers (A)', () => {
   it('baseline: the five script trigger sites exist with their C citations and statuses', () => {
     const result = runInventory(items)
     const units = scriptUnits(result)
-    expect(units).toHaveLength(5)
+    // 5 cycle-152d labels + 7 Power Herb `twoturnmoveacceleratecheck` labels (cycle 152d2)
+    // + the synthetic BattleScript_MoveEffectBugBite site (also in battle_scripts_1.s).
+    expect(units).toHaveLength(13)
 
     const targetPath = unitFor(result, 'hold-trigger', 'HOLD_EFFECT_DESTINY_KNOT', 'BattleScript_TryDestinyKnotTarget')
     expect(targetPath?.citation).toBe(`${SCRIPT_REPO_PATH}:5201`)
@@ -112,7 +114,10 @@ describe('cycle 152d - battle-script hold triggers (A)', () => {
     const result = runInventory(items, {
       holdTriggerScriptSources: { [SCRIPT_FILE]: synthetic },
     })
-    expect(scriptUnits(result)).toHaveLength(0)
+    // The synthetic BattleScript_MoveEffectBugBite unit is always emitted for its
+    // hard-coded script site; this negative test is about hold-effect scanning.
+    const scanUnits = scriptUnits(result).filter((unit) => unit.unit.startsWith('HOLD_EFFECT_'))
+    expect(scanUnits).toHaveLength(0)
     expect(result.units.some((unit) => unit.site === 'BattleScript_Decoy')).toBe(false)
     expect(result.units.some((unit) => unit.site === 'BattleScript_LabelMention')).toBe(false)
   })
@@ -227,19 +232,24 @@ describe('cycle 152d - pinned counts', () => {
     const result = runInventory(items)
     const count = (kind: ItemUnit['kind']) => result.units.filter((unit) => unit.kind === kind).length
 
-    // +5 battle-script sites, +2 Booster Energy lines, +1 Acrobatics gem = 8 hold-trigger.
-    expect(count('hold-trigger')).toBe(224)
+    // Cycle 152d: +5 battle-script sites, +2 Booster Energy lines, +1 Acrobatics gem = 8.
+    // Cycle 152d2 re-pin: +7 Power Herb script labels, +2 EatTargetBerry sites,
+    // +4 EFFECT_CHANGE_TYPE_ON_ITEM sites = 237.
+    expect(count('hold-trigger')).toBe(237)
     // +battle_controller_opponent.c:1608 and +battle_ai_switch_items.c:528.
     expect(count('ai-trigger')).toBe(59)
-    // ITEM_DESTINY_KNOT and ITEM_ADRENALINE_ORB gain hold-trigger units, so their
-    // item-data units are gone (-2).
-    expect(count('item-data')).toBe(41)
+    // Cycle 152d: ITEM_DESTINY_KNOT and ITEM_ADRENALINE_ORB gain hold-trigger units (-2).
+    // Cycle 152d2 re-pin: ITEM_POWER_HERB gains script units (-1) = 40.
+    expect(count('item-data')).toBe(40)
     expect(count('natural-gift')).toBe(5)
     expect(count('fling')).toBe(11)
-    expect(result.totalDefined).toBe(340)
+    // Cycle 152d2: +7 Power Herb script, +2 EatTargetBerry, +4 CHANGE_TYPE_ON_ITEM,
+    // -1 Power Herb item-data = +12 (340 -> 352).
+    expect(result.totalDefined).toBe(352)
 
     expect(result.totalUnclassified).toBe(0)
-    expect(result.totalUnported).toBe(221)
+    // Cycle 152d2: -5 allowlisted, -1 Power Herb item-data, +1 gapped consumeberry (216).
+    expect(result.totalUnported).toBe(216)
     expect(result.totalRegisteredUntested).toBe(28)
   })
 })

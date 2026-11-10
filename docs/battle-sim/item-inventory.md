@@ -20,7 +20,11 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
 1. **hold-trigger**: one unit per (resolved hold effect, C trigger site) in `battle_util.c`,
    `battle_script_commands.c`, `battle_main.c`, `pokemon.c`, `abilities.cc`, `battle_ai_ability.c`,
    `script_conditions.cc`, and per `jumpifholdeffect` / `jumpifnoholdeffect` line in the battle
-   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`).
+   script `data/battle_scripts_1.s` (site = enclosing script label, e.g. `BattleScript_HangedOnMsg`),
+   plus one synthetic site per C trigger that does not name a `HOLD_EFFECT_*` token:
+   `EatTargetBerry` (`battle_script_commands.c:4595`), `BattleScript_MoveEffectBugBite`
+   (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).
+   `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.
    The site is the enclosing
    `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),
    top-level `constexpr Ability Impl<ABILITY_X> =` declaration in `abilities.cc`, or the nearest enclosing function/macro elsewhere.
@@ -41,12 +45,12 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 224 | 96 | 20 | 128 | 0 | 0 |
+| `hold-trigger` | 237 | 108 | 20 | 129 | 0 | 0 |
 | `ai-trigger` | 59 | 17 | 0 | 42 | 0 | 0 |
-| `item-data` | 41 | 0 | 0 | 41 | 0 | 0 |
+| `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 4 | 0 | 1 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
-| **total** | **340** | **119** | **28** | **221** | **0** | **0** |
+| **total** | **352** | **131** | **28** | **216** | **0** | **5** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -71,6 +75,7 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `AbilityBattleEffects` | 1 |
 | `hold-trigger` | `AdjustFriendship` | 1 |
 | `hold-trigger` | `BENEFITS_FROM_LEEK` | 1 |
+| `hold-trigger` | `BattleScript_MoveEffectBugBite` | 1 |
 | `hold-trigger` | `BattleScript_TryAdrenalineOrb` | 1 |
 | `hold-trigger` | `BattleScript_TryDestinyKnotTarget` | 1 |
 | `hold-trigger` | `CalcAttackStat` | 2 |
@@ -119,11 +124,6 @@ Test evidence is per effect token or item id, not per site.
 | `ai-trigger` | `OpponentHandleChooseMove` | 1 |
 | `ai-trigger` | `PartyBattlerShouldAvoidHazards` | 3 |
 | `ai-trigger` | `ShouldPivot` | 1 |
-| `item-data` | `HOLD_EFFECT_DRAGON_SCALE` | 1 |
-| `item-data` | `HOLD_EFFECT_GRACIDEA` | 1 |
-| `item-data` | `HOLD_EFFECT_POWER_HERB` | 1 |
-| `item-data` | `HOLD_EFFECT_REPEL` | 2 |
-| `item-data` | `HOLD_EFFECT_UPGRADE` | 1 |
 | `item-data` | `HOLD_EFFECT_Z_CRYSTAL` | 34 |
 | `item-data` | `HOLD_EFFECT_Z_RING` | 1 |
 | `natural-gift` | `GetMovePriority` | 1 |
@@ -275,6 +275,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_MACHO_BRACE@battle_main.c:GetBattlerTotalSpeedStat` | Macho Brace | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | unported (registered, untested) | none |
 | `HOLD_EFFECT_MARANGA_BERRY@battle_util.c:ITEMEFFECT_TARGET` | Maranga Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6234` | unported | none |
 | `HOLD_EFFECT_MEGA_STONE@battle_util.c:CanBattlerGetOrLoseItem` | Abomasite, Abomasite S, Absolite, Absolite Z, Aegislashite R +265 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8259` | ported | `web/src/engine/sim/cycle110bHeldItems.test.ts` |
+| `HOLD_EFFECT_MEMORY@battle_main.c:CHANGE_TYPE_ON_ITEM:5036` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5036` | ported | `web/src/engine/calculate.test.ts` |
+| `HOLD_EFFECT_MEMORY@battle_main.c:CHANGE_TYPE_ON_ITEM:5137` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5137` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_MEMORY@battle_util.c:CanBattlerGetOrLoseItem` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8263` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ENDTURN_ITEMS1/2` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5845` | unported | none |
 | `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ITEMEFFECT_MOVE_END` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5968` | unported | none |
@@ -285,8 +287,17 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_MIRROR_HERB@battle_script_commands.c:Cmd_various` | Mirror Herb | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:8284` | unported | `web/src/engine/sim/cycle148gFixes.test.ts` |
 | `HOLD_EFFECT_MIRROR_HERB@battle_util.c:AbilityBattleEffects` | Mirror Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4738` | unported | `web/src/engine/sim/cycle148gFixes.test.ts` |
 | `HOLD_EFFECT_MUSCLE_BAND@battle_util.c:CalcMoveBasePowerAfterModifiers` | Muscle Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6991` | ported | `web/src/engine/basePower.test.ts` |
+| `HOLD_EFFECT_PLATE@battle_main.c:CHANGE_TYPE_ON_ITEM:5036` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5036` | ported | `web/src/engine/calculate.test.ts` |
+| `HOLD_EFFECT_PLATE@battle_main.c:CHANGE_TYPE_ON_ITEM:5137` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5137` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_PLATE@battle_util.c:CalcMoveBasePowerAfterModifiers` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7007` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_PLATE@battle_util.c:CanBattlerGetOrLoseItem` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8265` | ported | `web/src/engine/basePower.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectElectroShot` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5731` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectGeomancy` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4460` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectSkyDrop` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5811` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnRetaliation_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4431` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnSecondary_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4409` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnsAttackCheckSkipCharge` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4449` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_FirstTurnSemiInvulnerable` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5879` | ported | `web/src/engine/sim/cycle87bEffects.test.ts` |
 | `HOLD_EFFECT_POWER_ITEM@battle_main.c:GetBattlerTotalSpeedStat` | Power Anklet, Power Band, Power Belt, Power Bracer, Power Lens +1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | unported (registered, untested) | none |
 | `HOLD_EFFECT_PREVENT_EVOLVE@pokemon.c:GetEvolutionTargetSpecies` | Everstone | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3155` | unported | none |
 | `HOLD_EFFECT_PRIMAL_ORB@battle_script_commands.c:Cmd_various` | Adamant Orb, Blue Orb, Dynamax Orb, Galactic Orb, Griseous Orb +12 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:7416` | unported | `web/src/engine/sim/formChange.test.ts` |
@@ -362,6 +373,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_WIDE_LENS@battle_script_commands.c:GetTotalAccuracy` | Wide Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1378` | ported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_WISE_GLASSES@battle_util.c:CalcMoveBasePowerAfterModifiers` | Wise Glasses | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6994` | unported (registered, untested) | none |
 | `HOLD_EFFECT_ZOOM_LENS@battle_script_commands.c:GetTotalAccuracy` | Zoom Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1380` | ported | `web/src/engine/sim/accuracy.test.ts` |
+| `eatTargetBerry@battle_script_commands.c:EatTargetBerry` |  | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4595` | ported | `web/src/engine/sim/moveEnd.test.ts` |
+| `eatTargetBerry@battle_scripts_1.s:BattleScript_MoveEffectBugBite` |  | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1006` | unported | none |
 
 ## AI-Trigger Units
 
@@ -439,11 +452,11 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | --- | --- | --- | --- | --- |
 | `ITEM_ALORAICHIUM_Z` | Aloraichium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_BUGINIUM_Z` | Buginium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_CLEANSE_TAG` | Cleanse Tag | `none (data-only; data/v2.65beta/items.json)` | unported | none |
+| `ITEM_CLEANSE_TAG` | Cleanse Tag | `pipeline/.upstream/eliteredux-source/src/wild_encounter.c:1166` | allowlisted | none |
 | `ITEM_DARKINIUM_Z` | Darkinium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DECIDIUM_Z` | Decidium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_DRAGONIUM_Z` | Dragonium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_DRAGON_SCALE` | Dragon Scale | `none (data-only; data/v2.65beta/items.json)` | unported | none |
+| `ITEM_DRAGON_SCALE` | Dragon Scale | `pipeline/.upstream/eliteredux-source/src/battle_debug.c:2066` | allowlisted | none |
 | `ITEM_EEVIUM_Z` | Eevium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_ELECTRIUM_Z` | Electrium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_FAIRIUM_Z` | Fairium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
@@ -451,7 +464,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `ITEM_FIRIUM_Z` | Firium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_FLYINIUM_Z` | Flyinium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_GHOSTIUM_Z` | Ghostium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_GRACIDEA` | Gracidea | `none (data-only; data/v2.65beta/items.json)` | unported | none |
+| `ITEM_GRACIDEA` | Gracidea | `pipeline/.upstream/eliteredux-source/src/battle_debug.c:2101` | allowlisted | none |
 | `ITEM_GRASSIUM_Z` | Grassium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_GROUNDIUM_Z` | Groundium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_ICIUM_Z` | Icium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
@@ -466,16 +479,15 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `ITEM_PIKANIUM_Z` | Pikanium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_PIKASHUNIUM_Z` | Pikashunium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_POISONIUM_Z` | Poisinium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_POWER_HERB` | Power Herb | `none (data-only; data/v2.65beta/items.json)` | unported | `web/src/engine/sim/cycle87bEffects.test.ts` |
 | `ITEM_PRIMARIUM_Z` | Primarium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_PSYCHIUM_Z` | Psychium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_PURE_INCENSE` | Pure Incense | `none (data-only; data/v2.65beta/items.json)` | unported | none |
+| `ITEM_PURE_INCENSE` | Pure Incense | `pipeline/.upstream/eliteredux-source/src/daycare.c:724` | allowlisted | none |
 | `ITEM_ROCKIUM_Z` | Rockium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_SNORLIUM_Z` | Snorlium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_SOLGANIUM_Z` | Solganium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_STEELIUM_Z` | Steelium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_TAPUNIUM_Z` | Tapunium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
-| `ITEM_UPGRADE` | Upgrade | `none (data-only; data/v2.65beta/items.json)` | unported | none |
+| `ITEM_UPGRADE` | Upgrade | `pipeline/.upstream/eliteredux-source/src/battle_debug.c:2068` | allowlisted | none |
 | `ITEM_WATERIUM_Z` | Waterium Z | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 | `ITEM_Z_RING` | Z-Ring | `none (data-only; data/v2.65beta/items.json)` | unported | none |
 
