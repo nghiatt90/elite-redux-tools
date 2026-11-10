@@ -90,7 +90,12 @@ describe('seeded gap allowlists', () => {
 })
 
 describe('real session', () => {
-  it('IMPOSTER raises an id-less gap note: unattributed, uncovered without an allowance, covered by the seeded list', () => {
+  // Cycle 155d: the subject moved from ABILITY_IMPOSTER to ABILITY_MINION_CONTROL.
+  // IMPOSTER's id-less notes were the seven `MulByTypeEffectiveness` admissions;
+  // `isAiAdmissionNote` now excludes those as AI noise, so IMPOSTER no longer
+  // raises a surviving unattributed note. MINION_CONTROL's note is not an AI
+  // admission, so it keeps this gate test's coverage intact.
+  it('MINION_CONTROL raises an id-less gap note: unattributed, uncovered without an allowance, covered by the seeded list', () => {
     const data = loadSimData()
     const trainer = data.trainersById.get('TRAINER_SAWYER_1')!
     const collect = (abilityId: string, seed: number): Set<string> => {
@@ -113,11 +118,16 @@ describe('real session', () => {
     // Same control baseline as abilityAudit.test.ts: ABILITY_NONE is a hook-free
     // real species ability slot, so this removes AI/generic notes.
     const baseline = new Set<string>([...collect('ABILITY_NONE', 1), ...collect('ABILITY_NONE', 2)])
-    const subjectNotes = [...collect('ABILITY_IMPOSTER', 1), ...collect('ABILITY_IMPOSTER', 2)]
-    const { unattributed } = partitionAuditNotes(subjectNotes, 'ABILITY_IMPOSTER', baseline)
+    // De-duplicated: both seeds can raise the same note, and the audit itself
+    // partitions a Set, while findUncoveredGapNotes de-duplicates internally.
+    const subjectNotes = [...new Set([...collect('ABILITY_MINION_CONTROL', 1), ...collect('ABILITY_MINION_CONTROL', 2)])]
+    const { unattributed } = partitionAuditNotes(subjectNotes, 'ABILITY_MINION_CONTROL', baseline)
 
     expect(unattributed.length).toBeGreaterThan(0)
-    expect(unattributed.some((n) => n.startsWith('MulByTypeEffectiveness (battle_util.c:7843):'))).toBe(true)
+    // Cycle 155d pinned expectation changed: AI admissions used to land here,
+    // and the surviving id-less note is now the Minion Control hit-count gap.
+    expect(unattributed.some((n) => n.startsWith('Minion Control: party-based hit count not modelled'))).toBe(true)
+    expect(unattributed.some((n) => n.startsWith('MulByTypeEffectiveness (battle_util.c:7843):'))).toBe(false)
     // Without the allowlist the gate goes red on exactly these notes; the seeded
     // list records them as known open gaps, so the audit's own check is green.
     expect(findUncoveredGapNotes(unattributed, [])).toEqual(unattributed)

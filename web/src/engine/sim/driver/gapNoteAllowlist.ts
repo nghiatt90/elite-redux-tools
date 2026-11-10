@@ -13,42 +13,11 @@ import type { GapAllowance } from './auditGate'
 const DOC = 'open gap, tracked in docs/battle-sim/unattributed-gap-notes.md'
 const C = 'pipeline/.upstream/eliteredux-source/src'
 
+// Cycle 155d removed the seven `MulByTypeEffectiveness (battle_util.c:7843):`
+// allowances: those notes are AI admissions (`isAiAdmissionNote` in
+// abilityAuditNotes.ts) and no longer reach the unattributed list, so the
+// allowances were stale. One id-less note remains genuinely unattributed.
 export const ABILITY_GAP_ALLOWLIST: GapAllowance[] = [
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): Ring Target on battler 0 (HOLD_EFFECT_RING_TARGET) is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): STATUS4_FORESIGHT on battler 0 is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): the Monotype Champion type overrides (Fairy/Dragon/Rock) are not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): the iceStatue volatile on battler 0 is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): the Ground-vs-Flying grounding override (IsBattlerGrounded(battlerDef)) is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
-  {
-    note: 'MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled',
-    citation: `${C}/battle_util.c:7843`,
-    reason: DOC,
-  },
   {
     note: 'Minion Control: party-based hit count not modelled (caller supplied no minionControlCount)',
     citation: `${C}/battle_script_commands.c:1021`,

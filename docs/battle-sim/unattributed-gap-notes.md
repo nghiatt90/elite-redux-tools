@@ -246,7 +246,7 @@ These run for every opponent trainer decision regardless of the player mon's abi
 | 1970 | AI_CheckBadMove: BattlerWillFaintFromWeather has no port (BattlerAffectedBySandstorm/Hail are not ported); treated as false | **no** | reachable via: unknown |
 | 2001 | AI_CheckBadMove: IsAbilityOfRating(ability, 5) has no port (sAiAbilityRatings has no JSON export anywhere in this data pipeline); treated as below ... | **no** | reachable via: unknown |
 
-## Measured UNATTRIBUTED rows (cycle 155 audit run)
+## Measured UNATTRIBUTED rows (cycle 155d audit run)
 
 Command:
 
@@ -255,37 +255,41 @@ SIM_AUDIT=1 SIM_AUDIT_OUT=<tmp> SIM_AUDIT_UNATTRIBUTED_OUT=<tmp> \
   npm --prefix web test -- --run src/engine/sim/driver/abilityAudit.test.ts
 ```
 
-The control ability was `ABILITY_NONE` (`abilityHooks.json` lists it with `"hooks": {}`,
-and it is a real species ability slot in `species.json`). The run produced **23
-`UNATTRIBUTED: ` rows across 17 abilities**, from **13 distinct note strings**. Current
-`validate.sh` regex (`hook was not run|is not modelled|not applied|has no port`) counts
-**28** lines in the audit JSON; the old attributed-only rows accounted for 6 of them.
-The one row that regex does not match is the plural `are not modelled` note under
-`ABILITY_IMPOSTER`, which is why the audit's own regex adds `are not modelled`. If that
-phrase is added to `validate.sh`/`gap_union.py`, the count becomes **33** (the 5 plural
-lines: 4 pre-existing attributed `STATUS2_WRAPPED ... are not modelled` rows plus this
-one).
+The control ability is `ABILITY_NONE` (`abilityHooks.json` lists it with `"hooks": {}`,
+and it is a real species ability slot in `species.json`).
 
-Two groups appear here:
+The cycle-155 revision of this section reported **23 `UNATTRIBUTED: ` rows across 17
+abilities from 13 distinct strings**, and **28** lines matching the `validate.sh`
+regex (`hook was not run|is not modelled|not applied|has no port`) in the audit JSON.
+Most of that table had already gone stale: the `ABILITY_BERSERK_DNA` enraged-recoil
+and `ABILITY_EJECT_PACK_ABILITY` Eject Pack rows no longer reproduce (both sites are
+ported — moveEnd.ts:7524-7545 and statBuffs.ts:751-768), and the
+`ABILITY_SHIELDS_DOWN` AI note is no longer raised.
 
-- `MulByTypeEffectiveness` (7 notes) and `AI_CheckBadMove: IsShieldsDownProtected` are
-  AI notes from `web/src/engine/sim/ai/`; they only escaped the control baseline
-  because the AI's decisions in those fights took a different branch.
-- `MOVEEND_RECOIL ... enraged recoil` and `Eject Pack switch trigger` are the move-end
-  and stat-buff sites reachable through the ability's own effect.
+A fresh **before** run on the current tree measured **8 rows across 2 abilities from
+8 distinct strings**, with **9** `validate.sh`-regex lines. Seven of the eight were
+`MulByTypeEffectiveness (battle_util.c:7843):` notes under `ABILITY_IMPOSTER`; the
+eighth was `ABILITY_MINION_CONTROL`'s Minion Control note. The seven are AI
+admissions: their `missing.add` calls run on every `mulByTypeEffectiveness` call
+whatever the ability, so the ABILITY_NONE control fight missed them only because the
+AI took a different branch in that ability's fight.
+
+**Cycle 155d** adds `isAiAdmissionNote` to `abilityAuditNotes.ts`; `partitionAuditNotes`
+now skips those notes exactly like control-baseline notes (attributed rows are checked
+first and are unchanged). The **after** run measures **1 `UNATTRIBUTED: ` row across 1
+ability from 1 distinct string**, and **3** `validate.sh`-regex lines (**9 → 3**; the
+six dropped lines are the six `is/are not modelled` variants of the seven AI notes —
+the plural Monotype note never matched that regex). Total note lines fall 431 → 424,
+and all seven losses are `UNATTRIBUTED` rows, so no attributed row changed.
+`move_notes` is unchanged at 0.
 
 | ability | note |
 |---|---|
-| ABILITY_BERSERK_DNA | MOVEEND_RECOIL's enraged recoil (savedDmg / 3, battle_script_commands.c:4492-4505) is not modelled |
-| ABILITY_EJECT_PACK_ABILITY | Eject Pack switch trigger (battle_script_commands.c:9877-9893) is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): Ring Target on battler 0 (HOLD_EFFECT_RING_TARGET) is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): STATUS4_FORESIGHT on battler 0 is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the Monotype Champion type overrides (Fairy/Dragon/Rock) are not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the iceStatue volatile on battler 0 is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the Ground-vs-Flying grounding override (IsBattlerGrounded(battlerDef)) is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled |
-| ABILITY_IMPOSTER | MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled |
-| ABILITY_SHIELDS_DOWN | AI_CheckBadMove: IsShieldsDownProtected(battlerAtk) is not modelled (Minior form-state is not tracked); treated as not protected |
+| ABILITY_MINION_CONTROL | Minion Control: party-based hit count not modelled (caller supplied no minionControlCount) |
+
+The surviving row is a genuine id-less gap raised by `web/src/engine/multiHit.ts`
+(C `battle_script_commands.c:1021-1040`), not an AI admission, so it stays
+allowlisted.
 
 ## Gate (cycle 150f)
 
@@ -304,10 +308,12 @@ them without running the 1016-ability sweep:
 
 The allowlists live in `web/src/engine/sim/driver/gapNoteAllowlist.ts`:
 
-- `ABILITY_GAP_ALLOWLIST` records the id-less gap notes the ability audit raises today
-  (the seven `MulByTypeEffectiveness` notes plus `Minion Control: party-based hit count
-  not modelled`). These are **known open gaps**, not ports: an allowance keeps the test
-  green but never removes the note from the JSON or the `UNATTRIBUTED: ` rows.
+- `ABILITY_GAP_ALLOWLIST` records the id-less gap notes the ability audit raises today.
+  After cycle 155d only `Minion Control: party-based hit count not modelled` is listed:
+  the seven `MulByTypeEffectiveness` entries became stale when `isAiAdmissionNote`
+  excluded those AI admissions (see the measurement above). These are **known open
+  gaps**, not ports: an allowance keeps the test green but never removes the note from
+  the JSON or the `UNATTRIBUTED: ` rows.
 - `SHARED_NOISE_ALLOWLIST` does the same for notes the move audit's shared-note filter
   would hide (more than 20 effects raise them). Today the audit raises no shared note, so
   the list is empty.

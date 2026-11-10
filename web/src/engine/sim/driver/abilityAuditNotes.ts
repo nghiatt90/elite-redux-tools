@@ -24,14 +24,44 @@ export const GAP_NOTE =
 export const ABILITY_TOKEN = /ABILITY_[A-Z0-9_]+/
 
 /**
+ * Fixed prefixes of notes the AI raises about its own port, not about the
+ * ability under test. `mulByTypeEffectiveness` adds its eight `missing` strings
+ * on EVERY call (aiShouldSwitch.ts:216-223), whatever the ability, so they reach
+ * the note stream only when the AI happens to evaluate an opposing mon in that
+ * fight -- exactly how they escaped the ABILITY_NONE control baseline and got
+ * counted as the ability's fault. `AI_CheckBadMove:` is the same shape: the
+ * prefix names the AI routine that admits an approximation, not a game effect.
+ *
+ * A prefix list, deliberately not an ability list: the match is on note text,
+ * and attributed rows (which contain the ability id) are checked first, so a
+ * note that names an ability still lands in that ability's row. Game-effect-
+ * keyed notes (`EFFECT_THIEF: ...`, `CanBePoisoned/IsStatusImmune: ...`) are NOT
+ * listed: they can describe ability-reachable gaps (e.g. the missing
+ * onCanStatusType ability-hook scan) and must keep counting.
+ */
+export const AI_ADMISSION_PREFIXES = [
+  'MulByTypeEffectiveness (battle_util.c:7843):',
+  'AI_CheckBadMove:',
+  'CalcPartyMonTypeEffectivenessMultiplier (battle_util.c:7998)',
+  'ShouldSwitchIfNaturalCure (battle_ai_switch_items.c:280):',
+] as const
+
+/** True for a note admitted by an AI code path rather than by the ability under test. */
+export function isAiAdmissionNote(note: string): boolean {
+  return AI_ADMISSION_PREFIXES.some((prefix) => note.startsWith(prefix))
+}
+
+/**
  * Splits `notes` for the ability audit's row of `abilityId`.
  *
  * - `attributed`: every note containing `abilityId`, gap phrase or not. This is
  *   the audit's historical output and must stay unchanged.
  * - `unattributed`: notes that are gap notes (`GAP_NOTE`), name no ability at
  *   all (`ABILITY_[A-Z0-9_]+`), and are not in `baseline` (the notes a
- *   hook-free control ability raises in the same fight, i.e. AI and generic
- *   notes that are not the ability's fault).
+ *   hook-free control ability raises in the same fight) and are not
+ *   `isAiAdmissionNote` (the notes an AI code path raises whatever the ability,
+ *   which the control fight may have missed only because the AI branched
+ *   differently). Both exclusions are noise, not the ability's fault.
  *
  * A note that names a DIFFERENT ability is neither: it will be counted in that
  * other ability's own row when the audit runs it.
@@ -51,6 +81,7 @@ export function partitionAuditNotes(
     if (!GAP_NOTE.test(note)) continue
     if (ABILITY_TOKEN.test(note)) continue
     if (baseline.has(note)) continue
+    if (isAiAdmissionNote(note)) continue
     unattributed.push(note)
   }
   return { attributed, unattributed }

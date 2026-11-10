@@ -1,7 +1,8 @@
 // Audit: which abilities still raise a "not modelled / hook was not run" note when a mon holding them fights two turns?
 // Skipped unless SIM_AUDIT === '1'. Writes {ability: notes[]} to $SIM_AUDIT_OUT (default .omc/solver/ability_audit.json), listing only
 // abilities with at least one note. Notes that name the ability under test are listed as-is; gap notes that name no ability at all
-// (and are not raised by a hook-free control ability in the same fight) are listed with an "UNATTRIBUTED: " prefix, and also written
+// (and are not raised by a hook-free control ability in the same fight, and are not AI admissions -- see
+// `isAiAdmissionNote` in abilityAuditNotes.ts) are listed with an "UNATTRIBUTED: " prefix, and also written
 // as {note: abilityIds[]} to $SIM_AUDIT_UNATTRIBUTED_OUT for docs/battle-sim/unattributed-gap-notes.md. Covers the hooks the sim
 // reports by name: on-entry, end-turn, move-end attacker and defender, on-faint. A hook that fails silently (no note) is invisible
 // here; read traces for those.
