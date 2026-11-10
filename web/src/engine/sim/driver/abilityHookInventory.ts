@@ -601,11 +601,29 @@ export function extractCanStatusTypeAbilities(source?: string): Set<string> {
   return result
 }
 
-/** The ability ids `getMoveEffectChance` compares with `abilityId === ...` in its dispatch body. */
+/**
+ * The ability ids `getMoveEffectChance` really branches on: the comparisons inside its two dispatch
+ * blocks, `if (isAttacker) {` and `if (isFoe) {`. Comparisons elsewhere in the function are not
+ * evidence -- notably the note-only guard at the top of the slot loop
+ * (`if (isAttacker && (abilityId === 'ABILITY_CORRUPTED_MIND' || ...)) unmodelled?.push(...)`),
+ * whose body only pushes an approximation note. Counting that guard kept Corrupted Mind "ported"
+ * after its real branch was deleted, and likewise Precise Fist after being dropped from the x5
+ * comparison. A header that is missing (a renamed guard in a mutation) simply yields no ids.
+ */
 export function extractModifyEffectChanceAbilities(source?: string): Set<string> {
   const content = source ?? readFileSync(STATUS_EFFECTS_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'export function getMoveEffectChance(')
-  const result = extractComparedAbilityLiterals(slice)
+  const result = new Set<string>()
+  for (const header of ['if (isAttacker) {', 'if (isFoe) {']) {
+    const start = slice.indexOf(header)
+    if (start === -1) continue
+    const open = start + header.length - 1
+    const close = findMatchingBrace(slice, open)
+    if (close === -1) continue
+    for (const id of extractComparedAbilityLiterals(slice.slice(open + 1, close))) {
+      result.add(id)
+    }
+  }
   if (result.size === 0) {
     throw new Error('Zero ability comparisons extracted from getMoveEffectChance')
   }
