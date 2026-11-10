@@ -144,7 +144,10 @@ export const ABILITY_HOOK_ALLOWLIST: ReadonlyArray<AllowlistEntry> = []
 export interface NoteOnlyPair {
   ability: string
   hook: HookKind
+  /** Repo-relative path plus 1-based line, for display only -- tests match on the path, not the line. */
   site: string
+  /** The stripped note line exactly as it appears at the site (the only text the table pins). */
+  note: string
 }
 
 /**
@@ -152,17 +155,72 @@ export interface NoteOnlyPair {
  * Classified as unported until real simulation behavior is ported.
  */
 export const NOTE_ONLY_PAIRS: ReadonlyArray<NoteOnlyPair> = [
-  { ability: 'ABILITY_AFTERSHOCK', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4542' },
-  { ability: 'ABILITY_BLADE_DANCE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:4552' },
-  { ability: 'ABILITY_HIGH_TIDE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5579' },
-  { ability: 'ABILITY_PURPLE_HAZE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5644' },
-  { ability: 'ABILITY_VOLCANO_RAGE', hook: 'onAttacker', site: 'web/src/engine/sim/moveEnd.ts:5677' },
-  { ability: 'ABILITY_GENERATOR', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1665' },
-  { ability: 'ABILITY_ENERGIZED', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1673' },
-  { ability: 'ABILITY_RETRIEVER', hook: 'onExit', site: 'web/src/engine/sim/turn.ts:1692' },
-  { ability: 'ABILITY_FROSTBIND', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1588' },
-  { ability: 'ABILITY_HEMOTOXIN', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1588' },
-  { ability: 'ABILITY_RETRIBUTION_BLOW', hook: 'onReactive', site: 'web/src/engine/sim/statBuffs.ts:1350' },
+  {
+    ability: 'ABILITY_AFTERSHOCK',
+    hook: 'onAttacker',
+    site: 'web/src/engine/sim/moveEnd.ts:4542',
+    note: `unmodelled.push("Aftershock's followup move (UseAttackerFollowUpMove MOVE_MAGNITUDE, abilities.cc:6355; ABILITY_AFTERSHOCK) is not modelled")`,
+  },
+  {
+    ability: 'ABILITY_BLADE_DANCE',
+    hook: 'onAttacker',
+    site: 'web/src/engine/sim/moveEnd.ts:4552',
+    note: `unmodelled.push("Blade Dance's followup move (UseAttackerFollowUpMove MOVE_LEAF_BLADE, abilities.cc:9043; ABILITY_BLADE_DANCE) is not modelled")`,
+  },
+  {
+    ability: 'ABILITY_HIGH_TIDE',
+    hook: 'onAttacker',
+    site: 'web/src/engine/sim/moveEnd.ts:5579',
+    note: `unmodelled.push("High Tide's followup move (UseAttackerFollowUpMove MOVE_SURF, abilities.cc:6477; ABILITY_HIGH_TIDE) is not modelled")`,
+  },
+  {
+    ability: 'ABILITY_PURPLE_HAZE',
+    hook: 'onAttacker',
+    site: 'web/src/engine/sim/moveEnd.ts:5644',
+    note: `unmodelled.push("Purple Haze's followup move (UseAttackerFollowUpMove MOVE_POISON_GAS, abilities.cc:10284; ABILITY_PURPLE_HAZE) is not modelled")`,
+  },
+  {
+    ability: 'ABILITY_VOLCANO_RAGE',
+    hook: 'onAttacker',
+    site: 'web/src/engine/sim/moveEnd.ts:5677',
+    note: `unmodelled.push("Volcano Rage's followup move (UseAttackerFollowUpMove MOVE_ERUPTION, abilities.cc:4845; ABILITY_VOLCANO_RAGE) is not modelled")`,
+  },
+  {
+    ability: 'ABILITY_GENERATOR',
+    hook: 'onExit',
+    site: 'web/src/engine/sim/turn.ts:1670',
+    note: 'unmodelled.push(`battler ${battlerId}: switch-out Generator SetSingleUseAbilityCounter is not modelled (ABILITY_GENERATOR)`)',
+  },
+  {
+    ability: 'ABILITY_ENERGIZED',
+    hook: 'onExit',
+    site: 'web/src/engine/sim/turn.ts:1678',
+    note: 'unmodelled.push(`battler ${battlerId}: switch-out Energized SetSingleUseAbilityCounter is not modelled (ABILITY_ENERGIZED)`)',
+  },
+  {
+    ability: 'ABILITY_RETRIEVER',
+    hook: 'onExit',
+    site: 'web/src/engine/sim/turn.ts:1697',
+    note: 'unmodelled.push(`battler ${battlerId}: switch-out Retriever item restoration is not modelled (ABILITY_RETRIEVER)`)',
+  },
+  {
+    ability: 'ABILITY_FROSTBIND',
+    hook: 'onReactive',
+    site: 'web/src/engine/sim/statBuffs.ts:1588',
+    note: 'const msg = `PoisonPuppeteerClone: ${abilityId} applies ${script} (src/abilities.cc:10000, 10083); that effect is not modelled`',
+  },
+  {
+    ability: 'ABILITY_HEMOTOXIN',
+    hook: 'onReactive',
+    site: 'web/src/engine/sim/statBuffs.ts:1588',
+    note: 'const msg = `PoisonPuppeteerClone: ${abilityId} applies ${script} (src/abilities.cc:10000, 10083); that effect is not modelled`',
+  },
+  {
+    ability: 'ABILITY_RETRIBUTION_BLOW',
+    hook: 'onReactive',
+    site: 'web/src/engine/sim/statBuffs.ts:1350',
+    note: 'unmodelled.push("Retribution Blow out-of-turn attack (abilities.cc:5145-5160) is not modelled (ABILITY_RETRIBUTION_BLOW)")',
+  },
 ]
 
 export const NOTE_ONLY_SET: ReadonlySet<string> = new Set(NOTE_ONLY_PAIRS.map((p) => `${p.ability}:${p.hook}`))
@@ -301,7 +359,7 @@ export function extractReviveAbilities(): Set<string> {
   const content = readFileSync(TURN_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function latchRecurringNightmareOnFaint(')
   const result = new Set<string>()
-  const regex = /(?:case\s+|abilityId\s*!==\s*|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  const regex = /(?:case\s+|abilityId\s*===\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = regex.exec(slice)) !== null) {
     result.add(match[1])
@@ -612,14 +670,17 @@ export function extractModifyMoveFlagsAbilities(sources: ModifyMoveFlagsSources 
 }
 
 /**
- * `'ABILITY_...'` literals that the code *branches* on: `case 'ABILITY_X':` labels and equality /
- * inequality comparisons against an ability variable (`abilityId === 'X'`, `slotAbility !== 'X'`, ...).
+ * `'ABILITY_...'` literals that the code *branches* on: `case 'ABILITY_X':` labels and positive
+ * equality comparisons against an ability variable (`abilityId === 'X'`, `slotAbility == 'X'`).
  * Bare literals that are arguments, array elements or map values are deliberately not evidence: the
  * Wind Rider branch passes `'ABILITY_WIND_RIDER'` to `disableSwitchInAbility` from the Air Blower
  * branch, so accepting argument literals kept Wind Rider "ported" after its own branch was deleted.
+ * Inequality comparisons are not evidence either: the Trace exclusion `abilityId !== 'ABILITY_TRACE'`
+ * in switchInAbility.ts mirrors the C's exemption (battle_util.c:9189-9195), not a Trace port, and it
+ * kept Trace "ported" after its own branch was deleted.
  */
 function extractComparedAbilityLiterals(slice: string): Set<string> {
-  const regex = /(?:case\s+|(?:abilityId|slotAbility|currentAbility)\s*(?:===|!==|==|!=)\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
+  const regex = /(?:case\s+|(?:abilityId|slotAbility|currentAbility)\s*(?:===|==)\s*)['"](ABILITY_[A-Z0-9_]+)['"]/g
   const result = new Set<string>()
   let match: RegExpExecArray | null
   while ((match = regex.exec(slice)) !== null) {
@@ -698,7 +759,7 @@ export function extractSwitchInAbilities(source?: string): Set<string> {
 
 export interface NoteOnlyRaiseSite {
   ability: string
-  /** Repo-relative path, matching the `site` field of NOTE_ONLY_PAIRS. */
+  /** Repo-relative path, matching the `site` field of NOTE_ONLY_PAIRS (minus its display line). */
   file: string
   /** 1-based line of the note text. */
   line: number
@@ -714,7 +775,7 @@ export const NOTE_ONLY_SCANNED_FILES: ReadonlyArray<{ file: string; path: string
 
 const ABILITY_TEST_PATTERNS: readonly RegExp[] = [
   /case\s+['"](ABILITY_[A-Z0-9_]+)['"]/g,
-  /(?:abilityId|slotAbility|currentAbility)\s*(?:===|!==|==|!=)\s*['"](ABILITY_[A-Z0-9_]+)['"]/g,
+  /(?:abilityId|slotAbility|currentAbility)\s*(?:===|==)\s*['"](ABILITY_[A-Z0-9_]+)['"]/g,
 ]
 
 /** Every ability id a single line tests or labels (`case 'X':`, `abilityId === 'X'`, `||` chains). */

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   NOTE_ONLY_PAIRS,
+  NOTE_ONLY_SCANNED_FILES,
   NOTE_ONLY_SET,
   PORTED_SWITCH_IN_ABILITIES,
   discoverNoteOnlyRaiseSites,
@@ -56,19 +57,22 @@ const abilityHooks: Record<string, AbilityHookRecord> = JSON.parse(readFileSync(
 const SWITCH_IN_PATH = join(import.meta.dirname, 'switchInAbility.ts')
 const MOVE_END_PATH = join(import.meta.dirname, 'moveEnd.ts')
 
+/** Moves are stripped exactly as the production loader does (`loadSimData.ts:188`
+ * `String(m.type).replace('TYPE_', '')`), so a `'TYPE_NORMAL'`-shaped fixture cannot hide a
+ * dead `moveData.type === 'NORMAL'` branch. */
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
   if (!m) throw new Error(`moves.json has no ${id}`)
   return {
     id,
     power: m.power as number,
-    type: m.type as string | null,
+    type: m.type ? String(m.type).replace('TYPE_', '') : null,
     split: m.split as SimMoveData['split'],
     effect: m.effect as string | null,
     flags: (m.flags as Record<string, true>) ?? {},
     accuracy: m.accuracy as number,
     hitsAir: m.hitsAir as SimMoveData['hitsAir'],
-    type2: m.type2 as string | null,
+    type2: m.type2 ? String(m.type2).replace('TYPE_', '') : null,
     target: m.target as string,
     argument: (m.argument ?? null) as SimMoveData['argument'],
     argumentInt: (m.argumentInt ?? null) as number | null,
@@ -337,23 +341,55 @@ describe('Cycle 150d (1) - the onEntry set comes from branches, not literals', (
 // ---------------------------------------------------------------------------
 
 describe('Cycle 150d (2) - note-only raise sites are computed, not hand-typed', () => {
-  it('the discovered sites and NOTE_ONLY_PAIRS agree exactly, sites included', () => {
-    const sites = discoverNoteOnlyRaiseSites()
+  // Line numbers are display only. The pinned identity of a note site is (ability, file, note
+  // text): inserting a comment above a site must not turn the table red, but the note text is
+  // what makes the site meaningful, so changing/removing it must.
+  const liveSources = NOTE_ONLY_SCANNED_FILES.map((f) => ({ file: f.file, content: readFileSync(f.path, 'utf8') }))
+  const fileOfSite = (p: (typeof NOTE_ONLY_PAIRS)[number]) => p.site.replace(/:\d+$/, '')
+  const pinnedKeys = () => NOTE_ONLY_PAIRS.map((p) => `${p.ability}>${fileOfSite(p)}>${p.note}`).sort()
+  const discoveredKeys = (sources: ReadonlyArray<{ file: string; content: string }>) =>
+    discoverNoteOnlyRaiseSites(sources)
+      .filter((s) => abilityHooks[s.ability] !== undefined)
+      .map((s) => `${s.ability}>${s.file}>${s.note}`)
+      .sort()
+
+  it('the discovered sites and NOTE_ONLY_PAIRS agree exactly, by (ability, file, note text)', () => {
+    const sites = discoverNoteOnlyRaiseSites(liveSources)
     expect(sites.length).toBeGreaterThan(0)
 
     // Pickpocket pushes a note-only note in moveEnd.ts but has no record in abilityHooks.json (the C
     // only references it outside abilities.cc), so the inventory never classifies it. Keep it visible.
     expect(sites.some((s) => s.ability === 'ABILITY_PICKPOCKET')).toBe(true)
 
-    const covered = sites
-      .filter((s) => abilityHooks[s.ability] !== undefined)
-      .map((s) => `${s.ability}>${s.file}:${s.line}`)
-      .sort()
-    expect(covered).toEqual(NOTE_ONLY_PAIRS.map((p) => `${p.ability}>${p.site}`).sort())
+    expect(discoveredKeys(liveSources)).toEqual(pinnedKeys())
 
     for (const site of sites) {
       expect(site.note, `${site.ability} note text`).toContain('is not modelled')
     }
+  })
+
+  it('inserting a line above a site keeps the table green (the line is display only)', () => {
+    const sources = liveSources.map((s) => ({ ...s }))
+    const moveEnd = sources.find((s) => s.file.endsWith('/moveEnd.ts'))
+    if (!moveEnd) throw new Error('NOTE_ONLY_SCANNED_FILES has no moveEnd.ts')
+    const lines = moveEnd.content.split('\n')
+    const at = lines.findIndex((line) => line.includes("ABILITY_AFTERSHOCK) is not modelled"))
+    expect(at, 'Aftershock note line not found').toBeGreaterThan(0)
+    lines.splice(at, 0, '      // cycle 161 line-independence probe')
+    moveEnd.content = lines.join('\n')
+
+    expect(discoveredKeys(sources)).toEqual(pinnedKeys())
+  })
+
+  it('deleting the note text turns the table red', () => {
+    const sources = liveSources.map((s) => ({ ...s }))
+    const moveEnd = sources.find((s) => s.file.endsWith('/moveEnd.ts'))
+    if (!moveEnd) throw new Error('NOTE_ONLY_SCANNED_FILES has no moveEnd.ts')
+    const before = moveEnd.content
+    moveEnd.content = before.replace("ABILITY_AFTERSHOCK) is not modelled", 'ABILITY_AFTERSHOCK)')
+    expect(moveEnd.content).not.toBe(before)
+
+    expect(discoveredKeys(sources)).not.toEqual(pinnedKeys())
   })
 
   for (const ability of ['ABILITY_FROSTBIND', 'ABILITY_HEMOTOXIN']) {

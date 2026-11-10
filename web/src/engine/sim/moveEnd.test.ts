@@ -87,13 +87,16 @@ const abilityIds = new Set(snapshot<Array<{ id: string }>>('abilities.json').map
 const rawItems = snapshot<Array<SimItemData>>('items.json')
 const itemsById = new Map(rawItems.map((item) => [item.id, item]))
 
+/** Stripped exactly as the production loader does (`loadSimData.ts:188`), so this fixture
+ * cannot keep a `moveData.type === 'TYPE_ELECTRIC'` comparison alive after the sim moved to
+ * the loader's bare spellings (MOVEEND_CHARGE, battle_script_commands.c:4928). */
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
   if (!m) throw new Error(`moves.json has no ${id}`)
   return {
     id,
     power: m.power as number,
-    type: m.type as string | null,
+    type: m.type ? String(m.type).replace('TYPE_', '') : null,
     split: m.split as SimMoveData['split'],
     effect: m.effect as string | null,
     target: m.target as string | undefined,

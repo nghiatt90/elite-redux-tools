@@ -41,19 +41,21 @@ const typeChart = snapshot<TypeChart>('types.json')
 const inverseTypeChart = snapshot<TypeChart>('typesInverse.json')
 const moveBehaviors = snapshot<{ behaviors: MoveBehaviors }>('moveBehaviors.json').behaviors
 
+/** Stripped as the production loader does (`loadSimData.ts:188`); Reverbate's sim branch
+ * (`statusEffects.ts`, abilities.cc:10656-10660) compares the bare `'NORMAL'`. */
 function requireMove(id: string): SimMoveData {
   const m = movesById.get(id)
   if (!m) throw new Error(`moves.json has no ${id}`)
   return {
     id,
     power: m.power as number,
-    type: m.type as string | null,
+    type: m.type ? String(m.type).replace('TYPE_', '') : null,
     split: m.split as SimMoveData['split'],
     effect: m.effect as string | null,
     flags: (m.flags as Record<string, true>) ?? {},
     accuracy: m.accuracy as number,
     hitsAir: m.hitsAir as SimMoveData['hitsAir'],
-    type2: m.type2 as string | null,
+    type2: m.type2 ? String(m.type2).replace('TYPE_', '') : null,
     target: m.target as string,
     argument: (m.argument ?? null) as SimMoveData['argument'],
     argumentInt: (m.argumentInt ?? null) as number | null,

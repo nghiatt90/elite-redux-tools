@@ -863,7 +863,7 @@ export function getMoveTarget(
   // Special cases (src/battle_util.c:6353-6360)
   if (moveId === 'MOVE_CURSE') {
     const attackerBattler = state.battlers[attacker]
-    const isGhost = attackerBattler?.mon.types.includes('TYPE_GHOST') ?? false
+    const isGhost = attackerBattler?.mon.types.includes('GHOST') ?? false
     if (isGhost || isBattlerWeatherAffected(state, attacker, WEATHER_FOG_ANY, deps)) {
       moveTarget = 'SELECTED'
     } else {
@@ -1082,7 +1082,7 @@ export function isBattlerProtected(
           break
 
         case 'MOVE_TANGLING_HUSK':
-          if (moveType !== 'TYPE_FIRE') return ProtectType.PROTECT_BLOCK
+          if (moveType !== 'FIRE') return ProtectType.PROTECT_BLOCK
           break
 
         case 'MOVE_CAMOUFLAGE':
@@ -1462,13 +1462,16 @@ function latchRecurringNightmareOnFaint(
   const battler = state.battlers[battlerId]
   if (!battler) return
   for (const { abilityId, slotIndex } of getBattlerAbilitySlotsReverse(battler.mon.abilities)) {
-    if (abilityId !== 'ABILITY_RECURRING_NIGHTMARE') continue
-    if ((state.singleUseAbility[battler.partyIndex]?.[slotIndex]?.[battlerId & 1] ?? 0) !== 0) continue
-    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
-    if (!isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) continue
-    const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
-    if (slot) slot[battlerId & 1] = 1
-    break
+    // Positive equality (not `!== ... continue`): the ability-hook inventory treats only
+    // `===`/`case` as branch evidence, and this IS the onRevive port branch.
+    if (abilityId === 'ABILITY_RECURRING_NIGHTMARE') {
+      if ((state.singleUseAbility[battler.partyIndex]?.[slotIndex]?.[battlerId & 1] ?? 0) !== 0) continue
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+      if (!isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)) continue
+      const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
+      if (slot) slot[battlerId & 1] = 1
+      break
+    }
   }
 }
 
@@ -1489,10 +1492,12 @@ function clearRecurringNightmareRevive(
   const battler = state.battlers[battlerId]
   if (!battler) return
   for (const { abilityId, slotIndex } of getBattlerAbilitySlotsReverse(battler.mon.abilities)) {
-    if (abilityId !== 'ABILITY_RECURRING_NIGHTMARE') continue
-    if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
-    const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
-    if (slot) slot[battlerId & 1] = 2
+    // Positive equality for the same reason as latchRecurringNightmareOnFaint's guard above.
+    if (abilityId === 'ABILITY_RECURRING_NIGHTMARE') {
+      if (isSimAbilitySuppressed(state, battler, abilityId, false, battlerId, false, deps.dataContext)) continue
+      const slot = state.singleUseAbility[battler.partyIndex]?.[slotIndex]
+      if (slot) slot[battlerId & 1] = 2
+    }
   }
 }
 

@@ -7549,7 +7549,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
 
   // Case 24: MOVEEND_CHARGE (:4922-4933) -- GET_MOVE_TYPE's dynamic type is read as the declared type.
   if (
-    moveData?.type === 'TYPE_ELECTRIC' &&
+    moveData?.type === 'ELECTRIC' &&
     moveData.power > 0 &&
     attacker &&
     !hasFlag(attacker.mon.status2, STATUS2_MULTIPLETURNS) &&
