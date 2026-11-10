@@ -306,6 +306,7 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   },
   ITEMEFFECT_MOVE_END: {
     files: ['web/src/engine/sim/moveEnd.ts'],
+    functionName: 'applyMoveEndItemEffectsAll',
   },
   ITEMEFFECT_KINGSROCK: {
     files: ['web/src/engine/sim/moveEnd.ts'],
@@ -322,6 +323,32 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   GetBattlerTotalSpeedStat: {
     files: ['web/src/engine/sim/turnOrder.ts'],
     functionName: 'getBattlerTotalSpeedStat',
+  },
+  // ChangeStatBuffs (battle_script_commands.c:9712). Clear Amulet (:9827) is
+  // `hasClearAmulet` (:334-338) and Eject Pack (:9885) is inside `changeStatBuffs`
+  // (:603 onward), so no single sim function holds both: map the file only.
+  ChangeStatBuffs: {
+    files: ['web/src/engine/sim/statBuffs.ts'],
+  },
+  // GetMoveTypeInternal's EFFECT_FLING branch (battle_main.c:5133-5135).
+  GetMoveTypeInternal: {
+    files: ['web/src/engine/calculate.ts'],
+    functionName: 'flingGemType',
+  },
+  // Impl<ABILITY_MERCILESS>.onCrit (abilities.cc:2669-2677) is an inline lambda in
+  // the CRIT_BATTLE_A table, not a top-level function: map the file only.
+  'Impl<ABILITY_MERCILESS>.onCrit': {
+    files: ['web/src/engine/abilities/impl/04-crit-a.ts'],
+  },
+  // Impl<ABILITY_NORTH_WIND>.onEntry (abilities.cc:4482-4495).
+  'Impl<ABILITY_NORTH_WIND>.onEntry': {
+    files: ['web/src/engine/sim/switchInAbility.ts'],
+    functionName: 'trySetAuroraVeil',
+  },
+  // Impl<ABILITY_ZEN_GARDEN>.onEntry (abilities.cc:11319-11341).
+  'Impl<ABILITY_ZEN_GARDEN>.onEntry': {
+    files: ['web/src/engine/sim/switchInAbility.ts'],
+    functionName: 'applySwitchInAbilities',
   },
   CanBattlerGetOrLoseItem: {
     files: ['web/src/engine/sim/moveEffects.ts', 'web/src/engine/sim/moveEnd.ts'],
@@ -605,6 +632,16 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   },
   // Unported sites (functions absent from sim)
   AdjustFriendship: { files: [] },
+  // Enigma Berry's non-battle pokemon.c reads. The line-suffixed site keys exist
+  // because ENIGMA_BERRY_SITES keys each read separately; the functions are absent
+  // from sim (party menu / field / summary screen), so these map to no file.
+  'AdjustFriendship:3523': { files: [] },
+  'ConvertPokemonToBattleTowerPokemon:837': { files: [] },
+  'GetEvolutionTargetSpecies:3145': { files: [] },
+  'GetItemEffectParamOffset:2963': { files: [] },
+  'PokemonUseItemEffects:2371': { files: [] },
+  'PokemonUseItemEffects:2404': { files: [] },
+  'UseStatIncreaseItem:3058': { files: [] },
   CheckQuickClaw_CustapBerryActivation: { files: [] },
   Cmd_getexp: { files: [] },
   // The two Enigma reads inside Cmd_getexp's party Exp Share scan (:3465, :3497).

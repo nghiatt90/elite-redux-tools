@@ -174,7 +174,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_CHOICE_BAND@battle_util.c:CalcAttackStat` | Choice Band | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7288` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_CHOICE_SCARF@battle_main.c:GetBattlerTotalSpeedStat` | Choice Scarf | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4220` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_CHOICE_SPECS@battle_util.c:CalcAttackStat` | Choice Specs | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7291` | ported | `web/src/engine/sim/cycle110bHeldItems.test.ts` |
-| `HOLD_EFFECT_CLEAR_AMULET@battle_script_commands.c:ChangeStatBuffs` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9827` | ported (site-unmapped) | `web/src/engine/sim/cycle104Hooks.test.ts` |
+| `HOLD_EFFECT_CLEAR_AMULET@battle_script_commands.c:ChangeStatBuffs` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9827` | ported | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_script_commands.c:PlayStatChangeAnimation` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4207` | unported | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_scripts_1.s:BattleScript_GulpMissileGulping` | Clear Amulet | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:7850` | ported | `web/src/engine/sim/cycle104Hooks.test.ts` |
 | `HOLD_EFFECT_CLEAR_AMULET@battle_util.c:DoBattlerEndTurnEffects` | Clear Amulet | `pipeline/.upstream/eliteredux-source/src/battle_util.c:2711` | unported | `web/src/engine/sim/cycle104Hooks.test.ts` |
@@ -229,7 +229,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_DOUBLE_PRIZE@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Luck Incense | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5421` | unported | none |
 | `HOLD_EFFECT_DRIVE@battle_util.c:CanBattlerGetOrLoseItem` | Burn Drive, Chill Drive, Douse Drive, Shock Drive | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8261` | unported (registered, untested) | none |
 | `HOLD_EFFECT_EJECT_BUTTON@battle_util.c:ITEMEFFECT_TARGET` | Eject Button | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6142` | unported | none |
-| `HOLD_EFFECT_EJECT_PACK@battle_script_commands.c:ChangeStatBuffs` | Eject Pack | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9885` | ported (site-unmapped) | `web/src/engine/sim/cycle160EnragedEjectPackMinion.test.ts` |
+| `HOLD_EFFECT_EJECT_PACK@battle_script_commands.c:ChangeStatBuffs` | Eject Pack | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9885` | ported | `web/src/engine/sim/cycle160EnragedEjectPackMinion.test.ts` |
 | `HOLD_EFFECT_EVASION_UP@battle_script_commands.c:GetTotalAccuracy` | Bright Powder, Lax Incense | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1376` | ported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_EVIOLITE@battle_util.c:CalcDefenseStat` | Eviolite | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7422` | ported | `web/src/engine/battleStat.test.ts` |
 | `HOLD_EFFECT_EXPERT_BELT@battle_util.c:CalcFinalDmg` | Expert Belt | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7648` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
@@ -245,7 +245,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_FROST_ORB@battle_util.c:ITEMEFFECT_ORBS` | Frost Orb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6270` | ported | `web/src/engine/sim/heldItems.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_main.c:ApplyTypeOverrideInformation` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5222` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_main.c:GetMonMoveType` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5034` | unported | `web/src/engine/basePower.test.ts` |
-| `HOLD_EFFECT_GEMS@battle_main.c:GetMoveTypeInternal` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5134` | ported (site-unmapped) | `web/src/engine/basePower.test.ts` |
+| `HOLD_EFFECT_GEMS@battle_main.c:GetMoveTypeInternal` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5134` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_main.c:SetTypeBeforeUsingMove` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5246` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_script_commands.c:SetMoveEffect` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:2935` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_GEMS@battle_util.c:CalcMoveBasePowerAfterModifiers` | Bug Gem, Dark Gem, Dragon Gem, Electric Gem, Fairy Gem +13 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7003` | ported | `web/src/engine/basePower.test.ts` |
@@ -257,7 +257,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_HONEY@battle_util.c:ITEMEFFECT_MOVE_END` | Honey | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5886` | unported | `web/src/engine/sim/cycle89aAbilities.test.ts` |
 | `HOLD_EFFECT_HONEY@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Honey | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5567` | unported | `web/src/engine/sim/cycle89aAbilities.test.ts` |
 | `HOLD_EFFECT_ICY_ROCK@battle_util.c:sWeatherFlagsInfo` | Icy Rock | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3716` | ported | `web/src/engine/sim/cycle115bFieldEffects.test.ts` |
-| `HOLD_EFFECT_IRON_BALL@abilities.cc:Impl<ABILITY_MERCILESS>.onCrit` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/abilities.cc:2674` | ported (site-unmapped) | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
+| `HOLD_EFFECT_IRON_BALL@abilities.cc:Impl<ABILITY_MERCILESS>.onCrit` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/abilities.cc:2674` | ported | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
 | `HOLD_EFFECT_IRON_BALL@battle_main.c:GetBattlerTotalSpeedStat` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4218` | ported | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
 | `HOLD_EFFECT_IRON_BALL@battle_util.c:CheckGroundingEffects` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6648` | ported | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
 | `HOLD_EFFECT_JABOCA_BERRY@battle_util.c:ITEMEFFECT_TARGET` | Jaboca Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6205` | unported | none |
@@ -269,7 +269,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_LIFE_ORB@battle_util.c:CalcFinalDmg` | Life Orb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7651` | ported | `web/src/engine/conditions.test.ts` |
 | `HOLD_EFFECT_LIFE_ORB@battle_util.c:ITEMEFFECT_LIFEORB_SHELLBELL` | Life Orb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6085` | unported (partial: no canProc / gQueuedAttackCount gate and targetDamage > 0 instead of damagedMons check) | `web/src/engine/conditions.test.ts` |
 | `HOLD_EFFECT_LIGHT_BALL@battle_util.c:CalcAttackStat` | Light Ball | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7271` | ported | `web/src/engine/battleStat.test.ts` |
-| `HOLD_EFFECT_LIGHT_CLAY@abilities.cc:Impl<ABILITY_NORTH_WIND>.onEntry` | Light Clay | `pipeline/.upstream/eliteredux-source/src/abilities.cc:4488` | ported (site-unmapped) | `web/src/engine/sim/cycle110HeldItems.test.ts` |
+| `HOLD_EFFECT_LIGHT_CLAY@abilities.cc:Impl<ABILITY_NORTH_WIND>.onEntry` | Light Clay | `pipeline/.upstream/eliteredux-source/src/abilities.cc:4488` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_LIGHT_CLAY@battle_script_commands.c:Cmd_setlightscreen` | Light Clay | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:10260` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_LIGHT_CLAY@battle_script_commands.c:Cmd_setreflect` | Light Clay | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:9327` | ported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
 | `HOLD_EFFECT_LIGHT_CLAY@battle_script_commands.c:Cmd_various` | Light Clay | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:7759` | unported | `web/src/engine/sim/cycle110HeldItems.test.ts` |
@@ -341,7 +341,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_SAFETY_GOGGLES@battle_script_commands.c:IsSandImmune` | Safety Goggles | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:10381` | ported | `web/src/engine/sim/turnFieldEndTurn.test.ts` |
 | `HOLD_EFFECT_SAFETY_GOGGLES@battle_util.c:IsPowderImmune` | Safety Goggles | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3193` | ported | `web/src/engine/sim/turnFieldEndTurn.test.ts` |
 | `HOLD_EFFECT_SCOPE_LENS@battle_script_commands.c:CalcCritChanceStage` | Razor Claw, Scope Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1547` | unported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
-| `HOLD_EFFECT_SEEDS@abilities.cc:Impl<ABILITY_ZEN_GARDEN>.onEntry` | Electric Seed, Grassy Seed, Misty Seed, Psychic Seed | `pipeline/.upstream/eliteredux-source/src/abilities.cc:11320` | ported (site-unmapped) | `web/src/engine/sim/switchInAbility.test.ts` |
+| `HOLD_EFFECT_SEEDS@abilities.cc:Impl<ABILITY_ZEN_GARDEN>.onEntry` | Electric Seed, Grassy Seed, Misty Seed, Psychic Seed | `pipeline/.upstream/eliteredux-source/src/abilities.cc:11320` | ported | `web/src/engine/sim/switchInAbility.test.ts` |
 | `HOLD_EFFECT_SEEDS@battle_script_commands.c:Cmd_various` | Electric Seed, Grassy Seed, Misty Seed, Psychic Seed | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:7819` | unported | `web/src/engine/sim/switchInAbility.test.ts` |
 | `HOLD_EFFECT_SEEDS@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Electric Seed, Grassy Seed, Misty Seed, Psychic Seed | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5585` | unported | `web/src/engine/sim/switchInAbility.test.ts` |
 | `HOLD_EFFECT_SHED_SHELL@battle_main.c:IsRunningFromBattleImpossible` | Shed Shell | `pipeline/.upstream/eliteredux-source/src/battle_main.c:3566` | unported | `web/src/engine/sim/cycle104Hooks.test.ts` |
@@ -388,13 +388,13 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `ITEM_ENIGMA_BERRY@battle_util.c:GetBattlerHoldEffect` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6533` | ported | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@battle_util.c:GetBattlerHoldEffectParam` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6548` | ported | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@battle_util.c:TryRunFromBattle` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:504` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:AdjustFriendship:3523` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3523` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:ConvertPokemonToBattleTowerPokemon:837` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:837` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:GetEvolutionTargetSpecies:3145` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3145` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:GetItemEffectParamOffset:2963` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2963` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2371` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2371` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2404` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2404` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
-| `ITEM_ENIGMA_BERRY@pokemon.c:UseStatIncreaseItem:3058` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3058` | allowlisted (site-unmapped) | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:AdjustFriendship:3523` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3523` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:ConvertPokemonToBattleTowerPokemon:837` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:837` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:GetEvolutionTargetSpecies:3145` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3145` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:GetItemEffectParamOffset:2963` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2963` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2371` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2371` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:PokemonUseItemEffects:2404` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:2404` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
+| `ITEM_ENIGMA_BERRY@pokemon.c:UseStatIncreaseItem:3058` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3058` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `eatTargetBerry@battle_script_commands.c:EatTargetBerry` |  | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:4595` | ported | `web/src/engine/sim/moveEnd.test.ts` |
 | `eatTargetBerry@battle_scripts_1.s:BattleScript_MoveEffectBugBite` |  | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:1006` | unported | none |
 

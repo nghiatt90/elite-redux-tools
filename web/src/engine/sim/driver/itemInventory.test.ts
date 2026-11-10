@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  C_SITE_SIM_MAP,
   DEFAULT_ALLOWLIST,
   ITEM_INVENTORY_DOC_PATH,
   generateItemInventoryDoc,
@@ -206,6 +207,148 @@ describe('held-item completeness inventory', () => {
 
     const choiceScarf = unitFor('HOLD_EFFECT_CHOICE_SCARF', 'GetBattlerTotalSpeedStat')
     expect(choiceScarf?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_main.c:4220')
+  })
+
+  it('leaves no real-inventory unit with an unmapped C site (cycle 152e)', () => {
+    const unmapped = result.units.filter((unit) => unit.unmappedSite)
+    expect(unmapped.map((unit) => unit.key)).toEqual([])
+  })
+
+  it('maps a fabricated site to its sim file/function and stops counting the rest of the file', () => {
+    const site = 'FabricatedEffect'
+    const token = 'HOLD_EFFECT_FABRICATED'
+    C_SITE_SIM_MAP[site] = {
+      files: ['web/src/engine/sim/fabricated.ts'],
+      functionName: 'mappedHandler',
+    }
+    try {
+      const testSources = [{ file: 'web/src/engine/sim/fabricated.test.ts', source: token }]
+      const inside = runInventory([FABRICATED_ITEM], {
+        ...SYNTHETIC_OPTIONS,
+        productionFiles: [
+          {
+            file: 'web/src/engine/sim/fabricated.ts',
+            source: `export function mappedHandler() {\n  return ${token}\n}\nexport function other() {\n  return 0\n}\n`,
+          },
+        ],
+        testSources,
+      })
+      const ported = inside.units.find((unit) => unit.kind === 'hold-trigger')
+      expect(ported?.site).toBe(site)
+      expect(ported?.unmappedSite).toBe(false)
+      expect(ported?.status).toBe('ported')
+
+      // The same token in a different function of the same mapped file is not evidence.
+      const outside = runInventory([FABRICATED_ITEM], {
+        ...SYNTHETIC_OPTIONS,
+        productionFiles: [
+          {
+            file: 'web/src/engine/sim/fabricated.ts',
+            source: `export function mappedHandler() {\n  return 0\n}\nexport function other() {\n  return ${token}\n}\n`,
+          },
+        ],
+        testSources,
+      })
+      const unported = outside.units.find((unit) => unit.kind === 'hold-trigger')
+      expect(unported?.status).toBe('unported')
+    } finally {
+      delete C_SITE_SIM_MAP[site]
+    }
+  })
+
+  it('scopes ITEMEFFECT_MOVE_END to applyMoveEndItemEffectsAll', () => {
+    const token = 'HOLD_EFFECT_FABRICATED'
+    // Minimal ItemBattleEffects switch whose ITEMEFFECT_MOVE_END case names the token.
+    const fabricatedC = [
+      'u8 ItemBattleEffects(u8 caseID, u8 battlerId, bool8 moveTurn)',
+      '{',
+      '    switch (caseID)',
+      '    {',
+      '    case ITEMEFFECT_MOVE_END:',
+      `        if (holdEffect == ${token}) return TRUE;`,
+      '        break;',
+      '    }',
+      '    return FALSE;',
+      '}',
+      '',
+    ].join('\n')
+    const testSources = [{ file: 'web/src/engine/sim/fabricated.test.ts', source: token }]
+    const options = {
+      ...SYNTHETIC_OPTIONS,
+      holdTriggerSources: { 'battle_util.c': fabricatedC },
+      testSources,
+    }
+
+    const inside = runInventory([FABRICATED_ITEM], {
+      ...options,
+      productionFiles: [
+        {
+          file: 'web/src/engine/sim/moveEnd.ts',
+          source: `export function applyMoveEndItemEffectsAll() {\n  return ${token}\n}\nexport function runMoveEnd() {\n  return 0\n}\n`,
+        },
+      ],
+    })
+    const ported = inside.units.find((unit) => unit.kind === 'hold-trigger')
+    expect(ported?.site).toBe('ITEMEFFECT_MOVE_END')
+    expect(ported?.status).toBe('ported')
+
+    // A token outside `applyMoveEndItemEffectsAll` no longer counts for this site.
+    const outside = runInventory([FABRICATED_ITEM], {
+      ...options,
+      productionFiles: [
+        {
+          file: 'web/src/engine/sim/moveEnd.ts',
+          source: `export function applyMoveEndItemEffectsAll() {\n  return 0\n}\nexport function runMoveEnd() {\n  return ${token}\n}\n`,
+        },
+      ],
+    })
+    const unported = outside.units.find((unit) => unit.kind === 'hold-trigger')
+    expect(unported?.status).toBe('unported')
+  })
+
+  it('scopes a newly mapped real site (GetMoveTypeInternal) to its sim function', () => {
+    const token = 'HOLD_EFFECT_GEMS'
+    const site = 'GetMoveTypeInternal'
+    const gemItem: ItemRecord = {
+      id: 'ITEM_FABRICATED_GEM',
+      name: 'Fabricated Gem',
+      grouping: 'POCKET_ITEMS',
+      holdEffect: token,
+      resolvedHoldEffect: token,
+    }
+    const fabricatedC = `Type ${site}(MoveEnum move, int battlerAtk) {\n    return ${token};\n}\n`
+    const testSources = [{ file: 'web/src/engine/basePower.test.ts', source: token }]
+    const options = {
+      ...SYNTHETIC_OPTIONS,
+      holdTriggerSources: { 'battle_main.c': fabricatedC },
+      testSources,
+    }
+
+    const inside = runInventory([gemItem], {
+      ...options,
+      productionFiles: [
+        {
+          file: 'web/src/engine/calculate.ts',
+          source: `export function flingGemType() {\n  return '${token}'\n}\nexport function ogerponMaskType() {\n  return null\n}\n`,
+        },
+      ],
+    })
+    const ported = inside.units.find((unit) => unit.kind === 'hold-trigger')
+    expect(ported?.site).toBe(site)
+    expect(ported?.unmappedSite).toBe(false)
+    expect(ported?.status).toBe('ported')
+
+    const outside = runInventory([gemItem], {
+      ...options,
+      productionFiles: [
+        {
+          file: 'web/src/engine/calculate.ts',
+          source: `export function flingGemType() {\n  return null\n}\nexport function ogerponMaskType() {\n  return '${token}'\n}\n`,
+        },
+      ],
+    })
+    const unported = outside.units.find((unit) => unit.kind === 'hold-trigger')
+    expect(unported?.status).toBe('unported')
   })
 
   it('generates deterministic markdown and compares it with the committed doc (or writes with SIM_INVENTORY_WRITE=1)', () => {
