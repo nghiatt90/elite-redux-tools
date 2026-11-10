@@ -205,6 +205,12 @@ export const DEFAULT_ALLOWLIST: ReadonlyArray<ItemAllowlistEntry> = [
     cite: 'pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3497',
   },
   {
+    key: 'ITEM_ENIGMA_BERRY@battle_ai_switch_items.c:ShouldUseItem:1127',
+    reason:
+      'the simulated trainer party has no gTrainers[].items (the codegen emits no .items), so the trainer-item loop in ShouldUseItem never runs; under FREE_ENIGMA_BERRY that branch sets itemEffects = 0',
+    cite: 'pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:1127',
+  },
+  {
     key: 'ITEM_ENIGMA_BERRY@pokemon.c:ConvertPokemonToBattleTowerPokemon:837',
     reason: 'party menu / field / summary screen, not a battle turn (battle tower conversion clears the item)',
     cite: 'pipeline/.upstream/eliteredux-source/src/pokemon.c:837',
@@ -392,8 +398,10 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
     functionName: 'adjustDamage',
   },
   // Power Herb: one unit per battle-script label that runs `twoturnmoveacceleratecheck`.
-  // Every label's charge-turn path funnels through executeAction's shared acceleration
-  // block (turn.ts, HOLD_EFFECT_POWER_HERB at :3185).
+  // Most labels' charge-turn path funnels through executeAction's shared acceleration
+  // block (turn.ts, HOLD_EFFECT_POWER_HERB at :3185). Geomancy is the exception:
+  // EFFECT_GEOMANCY is not in TWO_TURN_EFFECTS, so the charge turn is handleGeomancy's
+  // own and that label maps there.
   BattleScript_EffectTwoTurnSecondary_AfterSetString: {
     files: ['web/src/engine/sim/turn.ts'],
     functionName: 'executeAction',
@@ -407,8 +415,8 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
     functionName: 'executeAction',
   },
   BattleScript_EffectGeomancy: {
-    files: ['web/src/engine/sim/turn.ts'],
-    functionName: 'executeAction',
+    files: ['web/src/engine/sim/moveEffects.ts'],
+    functionName: 'handleGeomancy',
   },
   BattleScript_EffectElectroShot: {
     files: ['web/src/engine/sim/turn.ts'],
@@ -644,6 +652,9 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
   // The two Enigma reads inside Cmd_getexp's party Exp Share scan (:3465, :3497).
   'Cmd_getexp:3465': { files: [] },
   'Cmd_getexp:3497': { files: [] },
+  // The Enigma read in ShouldUseItem's trainer-item loop (:1127); no sim function
+  // reads a trainer item list.
+  'ShouldUseItem:1127': { files: [] },
   Cmd_setmultihitcounter: { files: [] },
   GetEvolutionTargetSpecies: { files: [] },
   GetMonMoveType: { files: [] },
@@ -1684,12 +1695,23 @@ export interface EnigmaBerrySite {
 }
 
 /**
- * Every C site that reads `ITEM_ENIGMA_BERRY`. The item's resolved hold effect is
- * `HOLD_EFFECT_NONE` (battle_main.c:721-735 zeroes the e-Reader data under
- * `FREE_ENIGMA_BERRY`, include/global.h:96), so none of these appears in the
- * `HOLD_EFFECT_*` scan; each becomes a synthetic `hold-trigger` unit keyed by the
- * item id. The three battle sites with a sim port carry the field that resolves
- * the item data; the rest are allowlisted with their exact C line.
+ * Every C site that reads `ITEM_ENIGMA_BERRY` in a battle path, plus the `pokemon.c`
+ * party item-effect reads. The item's resolved hold effect is `HOLD_EFFECT_NONE`
+ * (battle_main.c:721-735 zeroes the e-Reader data under `FREE_ENIGMA_BERRY`,
+ * include/global.h:96), so none of these appears in the `HOLD_EFFECT_*` scan; each
+ * becomes a synthetic `hold-trigger` unit keyed by the item id. The three battle
+ * sites with a sim port carry the field that resolves the item data; the rest are
+ * allowlisted with their exact C line.
+ *
+ * Excluded because they compare the item id for UI, field or text behaviour and
+ * never resolve a hold effect (so they cannot fire in a battle turn):
+ * battle_message.c:3770/:4135 (link/recorded-link berry name text),
+ * party_menu.c:4142/:4578/:5660, item_menu.c:1293/:1302/:1311,
+ * item_menu_icons.c:411/:634, menu_helpers.c:386, item_use.c:109,
+ * berry_blender.c:1540/:2288, berry.c:926/:1420/:1479,
+ * script_pokemon_util.c:126/:127. battle_main.c:690/:722 are the e-Reader
+ * battle-berry data setup: they copy the item data (zeroed by the same
+ * FREE_ENIGMA_BERRY blocks cited above), not a per-turn read.
  */
 export const ENIGMA_BERRY_SITES: ReadonlyArray<EnigmaBerrySite> = [
   // Battle sites with a sim port.
@@ -1719,8 +1741,11 @@ export const ENIGMA_BERRY_SITES: ReadonlyArray<EnigmaBerrySite> = [
     testPredicate: (clean) =>
       tokenAppears(clean, 'ITEM_ENIGMA_BERRY') && tokenAppears(clean, 'CanBattlerGetOrLoseItem'),
   },
-  // Battle sites the sim never runs: no run command / no experience gain.
+  // Battle sites the sim never runs: no run command / no experience gain / no
+  // trainer item list (the codegen emits no gTrainers[].items, so ShouldUseItem
+  // never runs; under FREE_ENIGMA_BERRY that branch sets itemEffects = 0).
   { site: 'TryRunFromBattle', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_util.c`, line: 504 },
+  { site: 'ShouldUseItem:1127', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_ai_switch_items.c`, line: 1127 },
   { site: 'IsRunningFromBattleImpossible', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_main.c`, line: 3546 },
   { site: 'Cmd_getexp:3465', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_script_commands.c`, line: 3465 },
   { site: 'Cmd_getexp:3497', token: 'ITEM_ENIGMA_BERRY', file: `${UPSTREAM_SRC}/battle_script_commands.c`, line: 3497 },
@@ -1775,6 +1800,25 @@ export function syntheticTriggerSites(itemsByEffect: ReadonlyMap<string, string[
         tokenAppears(clean, 'ITEM_LIECHI_BERRY'),
     },
   ]
+  // BattleScript_EffectGeomancy (data/battle_scripts_1.s:4455-4460). The script scan
+  // sees the label through `twoturnmoveacceleratecheck`, but a script-label unit takes
+  // its evidence from any test that names the effect token or an item id, so Power
+  // Herb's Solar Beam positive control would stand in for Geomancy. Listing the label
+  // here (same key, so it replaces the scan hit) lets the existing `testPredicate`
+  // channel pin the evidence to a test that actually drives Geomancy with a Power
+  // Herb holder. Production evidence is handleGeomancy's charge-turn branch.
+  sites.push({
+    site: 'BattleScript_EffectGeomancy',
+    token: 'HOLD_EFFECT_POWER_HERB',
+    effect: 'HOLD_EFFECT_POWER_HERB',
+    file: `${UPSTREAM_DATA}/battle_scripts_1.s`,
+    citation: `${UPSTREAM_DATA}/battle_scripts_1.s:4460`,
+    functionName: 'handleGeomancy',
+    itemIds: itemsByEffect.get('HOLD_EFFECT_POWER_HERB') ?? [],
+    testTokens: ['ITEM_POWER_HERB'],
+    testPredicate: (clean) =>
+      tokenAppears(clean, 'MOVE_GEOMANCY') && tokenAppears(clean, 'ITEM_POWER_HERB'),
+  })
   // EFFECT_CHANGE_TYPE_ON_ITEM: Judgment/Plate at battle_main.c:5036 (GetMonMoveType)
   // and Multi-Attack/Memory at :5137 (GetMoveTypeInternal). The C compares
   // `holdEffect == gBattleMoves[move].argument`, so the literal-token scan cannot see
@@ -1930,6 +1974,9 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
   }
 
   const syntheticSites = syntheticTriggerSites(itemsByEffect)
+  // A synthetic site wins over a script-scan hit with the same key: it is the entry
+  // that carries the narrower test predicate (BattleScript_EffectGeomancy).
+  for (const site of syntheticSites) holdHits.delete(unitKey(site.effect, site.file, site.site))
 
   const units: ItemUnit[] = []
 
@@ -2557,7 +2604,7 @@ export function generateItemInventoryDoc(
     '   (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).',
   )
   lines.push(
-    '   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per C read: the item',
+    '   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per battle-path C read: the item',
   )
   lines.push(
     '   resolves to `HOLD_EFFECT_NONE` in this build (`FREE_ENIGMA_BERRY`, `include/global.h:96`;',
@@ -2569,12 +2616,22 @@ export function generateItemInventoryDoc(
     '   `HOLD_EFFECT_*` name. The battle sites are `battle_util.c:6533`, `:6548`, `:8255`, `:504`,',
   )
   lines.push(
-    '   `battle_main.c:3546` and `battle_script_commands.c:3465`, `:3497`; the seven `pokemon.c`',
+    '   `battle_main.c:3546`, `battle_script_commands.c:3465`, `:3497` and the AI trainer-item read',
   )
-  lines.push('   reads are non-battle and allowlisted.')
+  lines.push(
+    '   `battle_ai_switch_items.c:1127`; the seven `pokemon.c` reads are non-battle and allowlisted.',
+  )
+  lines.push(
+    '   UI, field and item-name-text reads of the item id (party menu, item menu, berry blender,',
+  )
+  lines.push('   battle_message.c) are excluded: they never resolve a hold effect.')
   lines.push(
     '   `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.',
   )
+  lines.push(
+    '   `BattleScript_EffectGeomancy` replaces its script-scan hit (same key) so its test',
+  )
+  lines.push('   evidence must drive Geomancy with a Power Herb holder, not just name Power Herb.')
   lines.push(
     '   The site is the enclosing',
   )

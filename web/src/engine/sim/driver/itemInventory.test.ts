@@ -25,7 +25,10 @@ const DISTINCT_HOLD_EFFECTS = 133
 // +7 Power Herb script labels, +2 EatTargetBerry sites, +4 EFFECT_CHANGE_TYPE_ON_ITEM.
 // Cycle 152g: -2, the two Booster Energy `ScoreSwitchInAbility:1070` / `:1076` units
 // moved to ai-trigger when `battle_ai_ability.c` was reclassified as an AI source.
-const HOLD_TRIGGER_UNITS = 249
+// Cycle 152i: +1, the Enigma Berry read in the AI trainer-item loop
+// (`battle_ai_switch_items.c:1127`) gains a synthetic unit (allowlisted; Geomancy
+// stays one ported unit, now synthetic so its evidence is the Geomancy test).
+const HOLD_TRIGGER_UNITS = 250
 // Re-pinned after cycle 152g: +2, the Booster Energy `ScoreSwitchInAbility:1070` / `:1076`
 // units moved here from hold-trigger (59 -> 61).
 const AI_TRIGGER_UNITS = 61
@@ -53,8 +56,9 @@ export const REGISTERED_UNTESTED_UNIT_COUNT = 27
 /**
  * Re-pinned after cycle 152d4: 5 cycle-152d2 item-data units + 11 Enigma Berry
  * sites + 4 no-row mega stones (BRUXISHITE, EXCADRILLITE_R, EYE_OF_ENDER, JELLICENTITE).
+ * Cycle 152i: +1, the AI trainer-item Enigma read (`battle_ai_switch_items.c:1127`).
  */
-export const ALLOWLISTED_UNIT_COUNT = 20
+export const ALLOWLISTED_UNIT_COUNT = 21
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -355,6 +359,31 @@ describe('held-item completeness inventory', () => {
     })
     const unported = outside.units.find((unit) => unit.kind === 'hold-trigger')
     expect(unported?.status).toBe('unported')
+  })
+
+  it('pins the Geomancy Power Herb evidence to a test that drives Geomancy, not any Power Herb test', () => {
+    const unit = result.units.find(
+      (candidate) =>
+        candidate.kind === 'hold-trigger' &&
+        candidate.unit === 'HOLD_EFFECT_POWER_HERB' &&
+        candidate.site === 'BattleScript_EffectGeomancy',
+    )
+    // moveEffects.test.ts holds a Power Herb, uses MOVE_GEOMANCY and asserts the
+    // three +2 stages plus the consumed item; cycle152d3Enigma.test.ts only uses
+    // Power Herb as Solar Beam's positive control.
+    expect(unit?.status).toBe('ported')
+    expect(unit?.testFile).toBe('web/src/engine/sim/moveEffects.test.ts')
+    expect(unit?.testFile).not.toBe('web/src/engine/sim/cycle152d3Enigma.test.ts')
+
+    // The other Power Herb script labels keep the shared token/item-id evidence.
+    const sharedEvidence = result.units.find(
+      (candidate) =>
+        candidate.kind === 'hold-trigger' &&
+        candidate.unit === 'HOLD_EFFECT_POWER_HERB' &&
+        candidate.site === 'BattleScript_EffectTwoTurnsAttackCheckSkipCharge',
+    )
+    expect(sharedEvidence?.status).toBe('ported')
+    expect(sharedEvidence?.testFile).toBe('web/src/engine/sim/cycle152d3Enigma.test.ts')
   })
 
   it('generates deterministic markdown and compares it with the committed doc (or writes with SIM_INVENTORY_WRITE=1)', () => {

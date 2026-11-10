@@ -24,13 +24,17 @@ Preprocessor `#ifdef` blocks for enum symbols (compiled out) are skipped. Allowl
    plus one synthetic site per C trigger that does not name a `HOLD_EFFECT_*` token:
    `EatTargetBerry` (`battle_script_commands.c:4595`), `BattleScript_MoveEffectBugBite`
    (`battle_scripts_1.s:1006`) and `EFFECT_CHANGE_TYPE_ON_ITEM` (`battle_main.c:5036`, `:5137`).
-   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per C read: the item
+   Enigma Berry (`ITEM_ENIGMA_BERRY`) also contributes one synthetic unit per battle-path C read: the item
    resolves to `HOLD_EFFECT_NONE` in this build (`FREE_ENIGMA_BERRY`, `include/global.h:96`;
    `battle_main.c:721-735` zeroes the runtime data), so the token is the item id, not a
    `HOLD_EFFECT_*` name. The battle sites are `battle_util.c:6533`, `:6548`, `:8255`, `:504`,
-   `battle_main.c:3546` and `battle_script_commands.c:3465`, `:3497`; the seven `pokemon.c`
-   reads are non-battle and allowlisted.
+   `battle_main.c:3546`, `battle_script_commands.c:3465`, `:3497` and the AI trainer-item read
+   `battle_ai_switch_items.c:1127`; the seven `pokemon.c` reads are non-battle and allowlisted.
+   UI, field and item-name-text reads of the item id (party menu, item menu, berry blender,
+   battle_message.c) are excluded: they never resolve a hold effect.
    `twoturnmoveacceleratecheck` lines in the battle script are the Power Herb trigger.
+   `BattleScript_EffectGeomancy` replaces its script-scan hit (same key) so its test
+   evidence must drive Geomancy with a Power Herb holder, not just name Power Herb.
    The site is the enclosing
    `ITEMEFFECT_*` case inside `ItemBattleEffects` (with numeric `case 1:` mapped to `ENDTURN_ITEMS1/2`),
    top-level `constexpr Ability Impl<ABILITY_X> =` declaration in `abilities.cc`, or the nearest enclosing function/macro elsewhere.
@@ -52,13 +56,13 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 249 | 113 | 19 | 125 | 0 | 11 |
+| `hold-trigger` | 250 | 113 | 19 | 125 | 0 | 12 |
 | `ai-trigger` | 61 | 17 | 0 | 44 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 5 | 0 | 0 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
 | `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
-| **total** | **636** | **403** | **27** | **213** | **0** | **20** |
+| **total** | **637** | **403** | **27** | **213** | **0** | **21** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -295,7 +299,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_PLATE@battle_util.c:CalcMoveBasePowerAfterModifiers` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7007` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_PLATE@battle_util.c:CanBattlerGetOrLoseItem` | Draco Plate, Dread Plate, Earth Plate, Fist Plate, Flame Plate +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8265` | ported | `web/src/engine/basePower.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectElectroShot` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5731` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
-| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectGeomancy` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4460` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
+| `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectGeomancy` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4460` | ported | `web/src/engine/sim/moveEffects.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectSkyDrop` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5811` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnRetaliation_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4431` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnSecondary_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4409` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
@@ -376,6 +380,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_WIDE_LENS@battle_script_commands.c:GetTotalAccuracy` | Wide Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1378` | ported | `web/src/engine/sim/accuracy.test.ts` |
 | `HOLD_EFFECT_WISE_GLASSES@battle_util.c:CalcMoveBasePowerAfterModifiers` | Wise Glasses | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6994` | unported (registered, untested) | none |
 | `HOLD_EFFECT_ZOOM_LENS@battle_script_commands.c:GetTotalAccuracy` | Zoom Lens | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1380` | ported | `web/src/engine/sim/accuracy.test.ts` |
+| `ITEM_ENIGMA_BERRY@battle_ai_switch_items.c:ShouldUseItem:1127` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:1127` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@battle_main.c:IsRunningFromBattleImpossible` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:3546` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3465` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3465` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
 | `ITEM_ENIGMA_BERRY@battle_script_commands.c:Cmd_getexp:3497` | Enigma Berry | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3497` | allowlisted | `web/src/engine/sim/bridge.test.ts` |
