@@ -5,8 +5,8 @@
 // as {note: abilityIds[]} to $SIM_AUDIT_UNATTRIBUTED_OUT for docs/battle-sim/unattributed-gap-notes.md. Covers the hooks the sim
 // reports by name: on-entry, end-turn, move-end attacker and defender, on-faint. A hook that fails silently (no note) is invisible
 // here; read traces for those.
-import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { it } from 'vitest'
 import { loadSimData } from './loadSimData'
 import { buildPlayerParty } from './buildParty'
@@ -76,6 +76,8 @@ it.skipIf(process.env.SIM_AUDIT !== '1')('ability audit', { timeout: 900_000 }, 
   const out = process.env.SIM_AUDIT_OUT ?? resolve(process.cwd(), '../.omc/solver/ability_audit.json')
   const unattributedOut =
     process.env.SIM_AUDIT_UNATTRIBUTED_OUT ?? resolve(process.cwd(), '../.omc/solver/ability_audit_unattributed.json')
+  mkdirSync(dirname(out), { recursive: true })
+  mkdirSync(dirname(unattributedOut), { recursive: true })
   writeFileSync(out, JSON.stringify(rows, null, 1))
   writeFileSync(unattributedOut, JSON.stringify(unattributedNotes, null, 1))
   console.log(
