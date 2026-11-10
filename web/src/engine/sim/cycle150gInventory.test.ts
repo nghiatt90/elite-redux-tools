@@ -423,10 +423,12 @@ describe('Cycle 150g - real inventory counts for the six hook kinds', () => {
     })
   }
 
-  it('total unported is 72: all 10 onModifyMoveFlags pairs are unported again', () => {
+  it('total unported is 69: all 10 onModifyMoveFlags pairs are unported again', () => {
     // Cycle 150g had 65 because seven flag-predicate branches counted as ports. Cycle 150i reverts
-    // that: the consumers still read the static flags, so the 150b/150f total of 72 is correct.
-    expect(result.totalUnported).toBe(72)
+    // that: the consumers still read the static flags, so the 150b/150f total of 72 was correct.
+    // Cycle 162b ports the three remaining onTerrain cases (Harukaze, Generator, Energized),
+    // which lowers the total from 72 to 69.
+    expect(result.totalUnported).toBe(69)
     const unported = result.unportedPairs.filter((p) => p.hook === 'onModifyMoveFlags').map((p) => p.ability).sort()
     expect(unported).toEqual(definedFor('onModifyMoveFlags'))
     expect(unported).toHaveLength(10)
