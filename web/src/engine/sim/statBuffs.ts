@@ -67,6 +67,7 @@ import {
   applyFearEffect,
   applyPrimaryStatusEffect,
   canInfatuate,
+  doesSubstituteBlockMove,
   findAbilitySlot,
 } from './statusEffects'
 import type { StatusDeps } from './statusEffects'
@@ -366,7 +367,7 @@ export function getStatDropBlockType(
   return getStatDropBlock(state, battler, statId, selfStatDrop, battlerId, false, deps, unmodelled)
 }
 
-function hasMirrorArmor(
+export function hasMirrorArmor(
   state: BattleState,
   battler: BattlerState,
   attackerId: number,
@@ -581,6 +582,14 @@ export interface ChangeStatBuffsResult {
   delta: number
   multistringChooser: number
   missed?: boolean
+  /** ChangeStatBuffs's Mirror-Armor branch (battle_script_commands.c:9811-9826)
+   * returns 0 without touching the holder's stage, then
+   * BattleScript_MirrorArmorReflect (data/battle_scripts_1.s:3689-3706) recurses
+   * with MOVE_EFFECT_AFFECTS_USER so the ATTACKER eats the same statValue. The
+   * recursed drop is reported here; `delta` stays 0 for the holder, exactly as
+   * ChangeStatBuffs returns 0. `delta` is the recursed call's own signed change
+   * (post-Contrary/Simple/clamping), so a Contrary attacker rises instead. */
+  reflected?: { battlerId: number; delta: number }
 }
 
 /**
@@ -606,6 +615,9 @@ export function changeStatBuffs(
   const affectsUser = (flags & MOVE_EFFECT_AFFECTS_USER) !== 0
   const notProtectAffected = (flags & STAT_BUFF_NOT_PROTECT_AFFECTED) !== 0
   const dontSetBuffers = (flags & STAT_BUFF_DONT_SET_BUFFERS) !== 0
+  // :9784 -- updateMoveEffect is captured BEFORE STAT_BUFF_UPDATE_MOVE_EFFECT is
+  // stripped, and survives `if (dontSetBuffers) flags = 0` because it is a local.
+  const updateMoveEffect = (flags & STAT_BUFF_UPDATE_MOVE_EFFECT) !== 0
   let statValue = initialStatValue
   let activeFlags = flags
   if (!hasBsPtr) activeFlags &= ~STAT_BUFF_ALLOW_PTR
@@ -636,6 +648,13 @@ export function changeStatBuffs(
 
   let multistringChooser = 0
 
+  // :9765-9784 -- the C's `flags` local after the AFFECTS_USER / CERTAIN /
+  // NOT_PROTECT_AFFECTED / UPDATE_MOVE_EFFECT strips (and after
+  // `if (dontSetBuffers) flags = 0`). Only the decrease branch's
+  // `flags == STAT_BUFF_ALLOW_PTR` comparisons read it.
+  const reflectedFlags =
+    activeFlags & ~(MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN | STAT_BUFF_NOT_PROTECT_AFFECTED | STAT_BUFF_UPDATE_MOVE_EFFECT)
+
   // :9762 -- stat decrease
   if (statValue <= -1) {
     const dropBlocked = getStatDropBlock(state, battler, statId, affectsUser, attackerId, attackerHasMoldBreaker, deps, unmodelled)
@@ -653,7 +672,62 @@ export function changeStatBuffs(
       // SPECIFIC-only check at :1336).
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
     } else if (hasMirrorArmor(state, battler, attackerId, attackerHasMoldBreaker, deps.dataContext) && !affectsUser && attackerId !== targetId && battlerId === targetId) {
-      unmodelled.push("Mirror Armor stat reflection (battle_script_commands.c:9811; ABILITY_MIRROR_ARMOR) is not modelled")
+      // :9811-9826 -- Mirror Armor reflection, in TWO call shapes. By this
+      // point the C has stripped AFFECTS_USER / CERTAIN / NOT_PROTECT_AFFECTED /
+      // UPDATE_MOVE_EFFECT from its `flags` local (:9765-9784), so
+      // `flags == STAT_BUFF_ALLOW_PTR` really means "ALLOW_PTR is the only bit
+      // left" -- reflectedFlags reproduces that stripped value.
+      const pointerShape = reflectedFlags === STAT_BUFF_ALLOW_PTR
+      if (pointerShape || (updateMoveEffect && !battler.turn.statLowered)) {
+        // Unlike the Mist / stat-block / Clear Amulet branches above it, this
+        // branch never writes statLowered (:9811-9826 sets no such flag), so
+        // nothing here does either: the pointer shape reflects unconditionally,
+        // and the updateMoveEffect shape skips only when one of those OTHER
+        // branches already set the flag this turn.
+        // BattleScript_MirrorArmorReflect:3689-3692 -- `jumpifsubstituteblocks`
+        // runs before the reflection, so a Substitute absorbs it entirely (no
+        // stat loss for the holder OR the attacker).
+        const statusDeps: StatusDeps = {
+          dataContext: deps.dataContext,
+          grounding: deps.grounding ?? {
+            holdEffectOf: () => null,
+            monotypeChampType: null,
+            isCluelessOnField: false,
+            attackerHasMoldBreaker: false,
+          },
+        }
+        if (doesSubstituteBlockMove(state, attackerId, targetId, currentMoveId, statusDeps, unmodelled)) {
+          return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
+        }
+        // :3694 -- `statbuffchange MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED |
+        // STAT_BUFF_ALLOW_PTR`. AFFECTS_USER makes battler gBattlerAttacker, so
+        // the attacker's own Contrary/Simple/stat-block path runs; the
+        // affectsUser it implies also keeps Mist, the protect jump, Clear Amulet
+        // and Mirror Armor itself out of the recursed call. `statValue` is the
+        // value SET_STATCHANGER_WITH_SIGN stored (:9815/:9824), i.e. after the
+        // holder's Contrary/Simple/Subdue changes.
+        const reflected = changeStatBuffsImplicit(
+          state,
+          attackerId,
+          targetId,
+          statValue,
+          statId,
+          MOVE_EFFECT_AFFECTS_USER | STAT_BUFF_NOT_PROTECT_AFFECTED | STAT_BUFF_ALLOW_PTR,
+          true,
+          deps,
+          unmodelled,
+          currentMoveId,
+        )
+        return {
+          delta: 0,
+          multistringChooser: reflected.multistringChooser,
+          missed: false,
+          reflected: { battlerId: attackerId, delta: reflected.delta },
+        }
+      }
+      // Neither shape fired (no ALLOW_PTR pointer, and the updateMoveEffect
+      // shape is suppressed because an earlier blocker set statLowered this
+      // turn): the drop is swallowed with no reflection.
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }
     } else if (!certain && !affectsUser && hasClearAmulet(battler, deps.dataContext)) {
       return { delta: 0, multistringChooser: B_MSG_STAT_WONT_DECREASE, missed: false }

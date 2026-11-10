@@ -66,10 +66,10 @@
 //   - `IsStatDropBlocked` has no port anywhere in this codebase (confirmed:
 //     accuracy.ts's own header makes the same admission for its ACC case) --
 //     always false, gapped by name whenever `shouldLowerStat` is evaluated.
-//   - Anticipation's `GetSingleUseAbilityCounter` has no state anywhere in
-//     this codebase either (turn.ts's own admission, word for word) -- the
-//     whole Anticipation check is gapped by name whenever battlerDef holds
-//     the ability.
+//   - Anticipation (:727-730) IS scored now: switchInAbility.ts's
+//     GetSingleUseAbilityCounter/SetSingleUseAbilityCounter pair is real state,
+//     so the check runs as the C does (mold-breaker-aware ability, counter 0,
+//     effectiveness >= x2, GetTotalAccuracy <= 100 -> -5).
 //
 // PART 2 (cycle17) approximations, gapped by name at each site:
 //   - `sAiAbilityRatings[]` (IsAbilityOfRating, EFFECT_ROLE_PLAY) is a
@@ -212,7 +212,10 @@ import { computeIsAbsorbed, computeIsImmune } from '../../abilities/dispatchCalc
 import { isMagicGuardProtected } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
 import { getWhoStrikesFirst, getBattlerTotalSpeedStat, TOTAL_SPEED_FULL } from '../turnOrder'
-import { buildFieldFacts } from '../bridge'
+import { buildFieldFacts, gapsToUnmodelled } from '../bridge'
+import { buildAccuracyInputs } from '../accuracyBridge'
+import { getTotalAccuracy } from '../accuracy'
+import { getSingleUseAbilityCounter } from '../switchInAbility'
 import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getHealthPercentage, getRecoilFraction, isTargetingPartner } from './aiScorers'
 import { isAbilityPreventingEscape, countUsablePartyMons } from './aiPipeline'
 import { aiCalcDamage, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
@@ -1059,11 +1062,26 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
     }
 
-    // :727-730 -- Anticipation. GetSingleUseAbilityCounter has no state
-    // anywhere in this codebase (turn.ts's own admission) -- gapped
-    // wholesale whenever the defender holds the ability.
-    if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', atkMoldBreaker)) {
-      unmodelled.push('AI_CheckBadMove: Anticipation (battle_ai_main.c:727-730) needs GetSingleUseAbilityCounter, which has no state anywhere in this codebase (same admission as turn.ts\'s own header); not scored')
+    // :727-730 -- Anticipation. The defender's single-use counter starts at 0
+    // (SetSingleUseAbilityCounter has not fired), so an incoming move that would
+    // land at UQ_4_12(2.0) or better is scored -5: Anticipation will "dodge" it.
+    // `CalcTypeEffectivenessMultiplier(...) >= UQ_4_12(2.0)` is exactly this
+    // file's own AI_EFFECTIVENESS enum `>= 5` (aiScorers.ts's mapping: 2048 ->
+    // x2, 4096 -> x4), and it is the same pure value `effResult` already holds
+    // (:600-607 above; the C recomputes it at :729 with no state change between).
+    // GetTotalAccuracy is called with `attackerActsAfterDefender = false`: the
+    // AI scores BEFORE any action, so "the target already moved" is unknowable,
+    // and it only feeds Zoom Lens (accuracy.ts:788). Passing false also keeps
+    // this scoring pass from drawing RNG (getWhoStrikesFirst breaks speed ties
+    // with Random()), which a pure score must never do.
+    if (defAbility(state, deps, defender, 'ABILITY_ANTICIPATION', atkMoldBreaker) &&
+        getSingleUseAbilityCounter(state, battlerDef, 'ABILITY_ANTICIPATION', deps.dataContext) === 0 &&
+        effResult.effectiveness >= 5) {
+      const anticipationAcc = buildAccuracyInputs(state, battlerAtk, battlerDef, moveId, false, deps)
+      unmodelled.push(...gapsToUnmodelled(anticipationAcc.gaps))
+      const anticipationAccResult = getTotalAccuracy(anticipationAcc.inputs)
+      unmodelled.push(...gapsToUnmodelled(anticipationAccResult.gaps))
+      if (anticipationAccResult.accuracy <= 100) return { score: score - 5, unmodelled }
     }
 
     // :733-735 -- Wonder Guard.

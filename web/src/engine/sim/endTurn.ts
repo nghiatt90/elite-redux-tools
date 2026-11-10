@@ -234,6 +234,7 @@ import {
   changeStatBuffsImplicit,
   dispatchOnStatLowered,
   hasClearAmulet,
+  hasMirrorArmor,
   isBattlerWeatherAffected,
   isSimAbilitySuppressed,
   isStatDropBlocked,
@@ -243,6 +244,7 @@ import {
   runReactiveAbilityEffects,
   STAT_BUFF_ALLOW_PTR,
   STAT_BUFF_NOT_PROTECT_AFFECTED,
+  STAT_BUFF_UPDATE_MOVE_EFFECT,
 } from './statBuffs'
 import {
   CHOICE_HOLD_EFFECTS,
@@ -1317,23 +1319,26 @@ function runEndTurnAbilities(
           if (!hasFlag(wrapped.mon.status2, STATUS2_WRAPPED)) continue
           if (state.wrappedBy[i] !== battlerId) continue
           if (!canLowerStatOrMirrorArmor(state, i, STAT_SPEED, dataContext)) continue
-          // AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1, battler, i) (:277-284) -> SetMoveEffect (battle_script_commands.c:2765-2779):
-          // ChangeStatBuffsImplicit(-1, STAT_SPEED, affectsUser(0) | (Mirror Armor reflected ? STAT_BUFF_ALLOW_PTR : 0)); the sim's
-          // ChangeStatBuffs does not reflect (it reports a Mirror Armor target as unmodelled), so the flag stays 0. Shield Dust is skipped
-          // because HITMARKER_IGNORE_SAFEGUARD is set (:2348). The Sheer Force / substitute (:2388) / Mist / Protect checks there read
-          // gCurrentMove, which the sim does not keep across the end-turn phase.
+          // AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1, battler, i) (:277-284) -> SetMoveEffect (battle_script_commands.c:2765-2781):
+          // ChangeStatBuffsImplicit(-1, STAT_SPEED, affectsUser(0) | STAT_BUFF_UPDATE_MOVE_EFFECT |
+          // (mirrorArmorReflected ? STAT_BUFF_ALLOW_PTR : 0), gBattlescriptCurrInstr), where mirrorArmorReflected is
+          // HasMirrorArmor(gBattlerTarget) at SetMoveEffect's entry (:2314). ChangeStatBuffs now reflects through its
+          // Mirror-Armor branch (:9811-9826) instead of gapping it; ALLOW_PTR picks the unconditional call shape.
+          // Shield Dust is skipped because HITMARKER_IGNORE_SAFEGUARD is set (:2348). The Sheer Force / substitute (:2388)
+          // / Mist / Protect checks there read gCurrentMove, which the sim does not keep across the end-turn phase.
           gapIf(
             hasFlag(wrapped.mon.status2, STATUS2_SUBSTITUTE),
             unmodelled,
             `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${i} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
           )
+          const wrappedHasMirrorArmor = hasMirrorArmor(state, wrapped, battlerId, false, dataContext)
           const res = changeStatBuffsImplicit(
             state,
             battlerId,
             i,
             -1,
             STAT_SPEED,
-            0,
+            STAT_BUFF_UPDATE_MOVE_EFFECT | (wrappedHasMirrorArmor ? STAT_BUFF_ALLOW_PTR : 0),
             true,
             { dataContext, grounding: deps?.grounding },
             unmodelled,
@@ -1363,7 +1368,19 @@ function runEndTurnAbilities(
             unmodelled,
             `battler ${battlerId}: ${slotAbility}'s Speed drop on battler ${targetId} is applied without SetMoveEffect's DoesSubstituteBlockMove(gCurrentMove) (battle_script_commands.c:2388); gCurrentMove is not kept across the end-turn phase`,
           )
-          const res = changeStatBuffsImplicit(state, battlerId, targetId, -1, STAT_SPEED, 0, true, { dataContext, grounding: deps?.grounding }, unmodelled)
+          // Same SetMoveEffect flag shape as Serpent Bind above (:2773-2776): UPDATE_MOVE_EFFECT plus
+          // ALLOW_PTR when the target holds Mirror Armor, so ChangeStatBuffs reflects the drop.
+          const res = changeStatBuffsImplicit(
+            state,
+            battlerId,
+            targetId,
+            -1,
+            STAT_SPEED,
+            STAT_BUFF_UPDATE_MOVE_EFFECT | (hasMirrorArmor(state, target, battlerId, false, dataContext) ? STAT_BUFF_ALLOW_PTR : 0),
+            true,
+            { dataContext, grounding: deps?.grounding },
+            unmodelled,
+          )
           // Same DEFENDERSSTATFELL path as Serpent Bind above: AbilityStatusEffectSafe(MOVE_EFFECT_SPD_MINUS_1,
           // battler, target) at abilities.cc:11390-11411 makes the holder gBattlerAttacker and the target
           // gBattlerTarget (data/battle_scripts_1.s:10588-10594).

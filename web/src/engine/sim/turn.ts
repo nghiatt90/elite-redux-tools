@@ -63,12 +63,12 @@
 //     RoundState.protectMove can represent but which nothing in this loop
 //     ever sets (Protect is not modelled), so it is always unset.
 // Cmd_accuracycheck's own Anticipation miss branch (:1427-1432, distinct from
-// GetTotalAccuracy's ability loop that accuracy.ts already gaps) needs
-// GetSingleUseAbilityCounter, a per-battle "already triggered" flag with no
-// home in the state model, and the move's type-effectiveness multiplier,
-// which is not known until the damage resolver runs afterwards -- gapped by
-// name (accuracyBridge.ts's defenderHasAnticipation) only when the defender
-// actually holds the ability.
+// GetTotalAccuracy's ability loop) IS modelled: accuracyBridge.ts's
+// tryAnticipationMiss ports the three conditions (mold-breaker-aware
+// BATTLER_HAS_ABILITY for ABILITY_ANTICIPATION, GetSingleUseAbilityCounter ==
+// 0, CalcTypeEffectivenessMultiplier >= UQ_4_12(2.0)), sets the counter, and
+// returns true so the loop skips the Random() draw -- the C's `else if` means
+// a fired Anticipation consumes no accuracy roll at all.
 //
 // Absent from the three functions above SPECIFICALLY, listed because a reader
 // comparing this loop against them should not have to spot the gaps:
@@ -132,7 +132,7 @@ import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import { gapsToUnmodelled, weatherFromBitfield } from './bridge'
-import { buildAccuracyInputs } from './accuracyBridge'
+import { buildAccuracyInputs, tryAnticipationMiss } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
@@ -1012,20 +1012,11 @@ export function isBattlerProtected(
   // :6580-6588 -- switch (gRoundStructs[battlerId].protectMove) for Merculight and Detect
   switch (targetBattler.round.protectMove) {
     case 'MOVE_MERCULIGHT': {
-      const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
-        state,
-        attackerId,
-        targetId,
-        moveId,
-        targetHasActedThisTurn,
-        deps,
-      )
+      // IsBattlerProtected (battle_util.c:6579-6588) only calls GetTotalAccuracy;
+      // Cmd_accuracycheck's Anticipation branch is in a different function and
+      // never runs for this protect check.
+      const { inputs, gaps } = buildAccuracyInputs(state, attackerId, targetId, moveId, targetHasActedThisTurn, deps)
       unmodelled.push(...gapsToUnmodelled(gaps))
-      if (defenderHasAnticipation) {
-        unmodelled.push(
-          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
-        )
-      }
       const accResult = getTotalAccuracy(inputs)
       unmodelled.push(...gapsToUnmodelled(accResult.gaps))
       if (accResult.accuracy < 101 && !isStatus) {
@@ -1034,20 +1025,11 @@ export function isBattlerProtected(
       break
     }
     case 'MOVE_DETECT': {
-      const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
-        state,
-        attackerId,
-        targetId,
-        moveId,
-        targetHasActedThisTurn,
-        deps,
-      )
+      // IsBattlerProtected (battle_util.c:6579-6588) only calls GetTotalAccuracy;
+      // Cmd_accuracycheck's Anticipation branch is in a different function and
+      // never runs for this protect check.
+      const { inputs, gaps } = buildAccuracyInputs(state, attackerId, targetId, moveId, targetHasActedThisTurn, deps)
       unmodelled.push(...gapsToUnmodelled(gaps))
-      if (defenderHasAnticipation) {
-        unmodelled.push(
-          "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
-        )
-      }
       const accResult = getTotalAccuracy(inputs)
       unmodelled.push(...gapsToUnmodelled(accResult.gaps))
       if (accResult.accuracy < 101) {
@@ -3070,7 +3052,11 @@ export function executeAction(
           unmodelled.push(...gapsToUnmodelled(accGaps))
           const accResult = getTotalAccuracy(accInputs)
           unmodelled.push(...gapsToUnmodelled(accResult.gaps))
-          let missed = state.rng.random16() % 100 >= accResult.accuracy
+          // :1427-1432 -- Sky Drop's script reaches the same Cmd_accuracycheck
+          // else-branch; Anticipation fires before the roll and consumes no draw.
+          let missed =
+            tryAnticipationMiss(state, battlerId, currentTargetId, currentMove.id, accResult.accuracy, deps, unmodelled) ||
+            state.rng.random16() % 100 >= accResult.accuracy
           // BattleScript_EffectSkyDrop (data/battle_scripts_1.s:5795-5798):
           // runs typecalc then accuracycheck BattleScript_PrintMoveMissed.
           // Type immunity (UQ_4_12(0.0), battle_util.c:7900-7902) sets MOVE_RESULT_DOESNT_AFFECT_FOE,
@@ -3639,29 +3625,29 @@ export function executeAction(
     // BattleScript_EffectHit (battle_scripts_1.s:2857-2863): accuracycheck,
     // then attackstring/ppreduce, then critcalc/damagecalc inside
     // deps.damage.resolve below.
-    const { inputs: accInputs, gaps: accGaps, defenderHasAnticipation } = buildAccuracyInputs(state, battlerId, currentTargetId, currentMove.id, targetHasActedThisTurn, deps)
+    const { inputs: accInputs, gaps: accGaps } = buildAccuracyInputs(state, battlerId, currentTargetId, currentMove.id, targetHasActedThisTurn, deps)
     unmodelled.push(...gapsToUnmodelled(accGaps))
-    if (defenderHasAnticipation) {
-      unmodelled.push(
-        "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
-      )
-    }
     const accResult = getTotalAccuracy(accInputs)
     unmodelled.push(...gapsToUnmodelled(accResult.gaps))
     // battle_script_commands.c:1383-1384
     if (state.battlers[battlerId]?.round.usedMicleBerry) {
       state.battlers[battlerId]!.round.usedMicleBerry = false
     }
-    // :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 (\"cannot miss\")
-    // is not special-cased: Random() % 100 is at most 99, so the comparison
-    // can never be true, and the arithmetic alone carries the sentinel.
+    // :1427-1432 -- Anticipation's miss branch runs after GetTotalAccuracy and
+    // BEFORE the roll; the C's `else if` means no Random() draw is made when it
+    // fires. :1433 -- `(Random() % 100) >= accuracy` is a MISS. 101 ("cannot
+    // miss") is not special-cased: Random() % 100 is at most 99, so the
+    // comparison can never be true, and the arithmetic alone carries the sentinel.
     // BattleScript_EffectClearWeatherAndTerrainHit (s:685-715) and _EffectRemoveTerrainNoFail (s:717-744) have no accuracycheck at
     // all (attackcanceler, attackstring, ppreduce, damagecalc): they cannot miss and consume no draw.
     const scriptHasNoAccuracyCheck =
       moveEffect === 'EFFECT_CLEAR_WEATHER_AND_TERRAIN_HIT' ||
       moveEffect === 'EFFECT_REMOVE_TERRAIN_NO_FAIL' ||
       (moveEffect === 'EFFECT_SKY_DROP' && isSecondTurnSemiInvuln)
-    const missed = scriptHasNoAccuracyCheck ? false : state.rng.random16() % 100 >= accResult.accuracy
+    const missed = scriptHasNoAccuracyCheck
+      ? false
+      : tryAnticipationMiss(state, battlerId, currentTargetId, currentMove.id, accResult.accuracy, deps, unmodelled) ||
+        state.rng.random16() % 100 >= accResult.accuracy
 
     // Cmd_clearsemiinvulnerablebit (src/battle_script_commands.c:11568-11571)
     // Cleared on both hit and miss paths: BattleScript_SemiInvulnerableTryHit (:5889) and BattleScript_SemiInvulnerableMiss (:5893).
@@ -4250,7 +4236,12 @@ export function executeAction(
       unmodelled.push(...gapsToUnmodelled(hitAcc.gaps))
       const hitAccResult = getTotalAccuracy(hitAcc.inputs)
       unmodelled.push(...gapsToUnmodelled(hitAccResult.gaps))
-      if (state.rng.random16() % 100 >= hitAccResult.accuracy) {
+      // :1427-1432 sits in the same `else` branch this restart reaches, so a
+      // checksEveryHit move can be Anticipation-missed on any hit (the counter
+      // is already set after the first one, so it fires at most once). Firing it
+      // skips the Random() draw, exactly like the main site.
+      if (tryAnticipationMiss(state, battlerId, currentTargetId, currentMove.id, hitAccResult.accuracy, deps, unmodelled) ||
+          state.rng.random16() % 100 >= hitAccResult.accuracy) {
         // A miss ends the sequence: PrintMoveMissed -> BattleScript_MoveEnd with MOVE_RESULT_MISSED, so cases 0-18 run for an
         // effect-less hit (which clears the target's lastLandedMove) and MOVEEND_MULTIHIT_MOVE zeroes the counter.
         lastHitNoEffect = true
@@ -4653,11 +4644,13 @@ function runFutureSightCountdown(
       attackerTurnIndex >= 0 && targetTurnIndex >= 0 && targetTurnIndex < attackerTurnIndex
 
     // accuracycheck BattleScript_FutureAttackMiss (:8010-8013): Random() % 100 >= accuracy is a miss.
+    // Anticipation's branch (:1427-1432) runs first and skips that draw when it fires.
     const { inputs, gaps } = buildAccuracyInputs(state, attackerId, holderId, moveId, targetHasActedThisTurn, deps)
     unmodelled.push(...gapsToUnmodelled(gaps))
     const accResult = getTotalAccuracy(inputs)
     unmodelled.push(...gapsToUnmodelled(accResult.gaps))
-    if (state.rng.random16() % 100 >= accResult.accuracy) {
+    if (tryAnticipationMiss(state, attackerId, holderId, moveId, accResult.accuracy, deps, unmodelled) ||
+        state.rng.random16() % 100 >= accResult.accuracy) {
       // BattleScript_FutureAttackMiss (:8043-8049) only reports failure: no damage, no moveend.
       continue
     }

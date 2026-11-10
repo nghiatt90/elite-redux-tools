@@ -8,6 +8,7 @@ import type { BattleState, BattlerState, QueuedSwitchAction } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
 import { blocksPrankster, buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
+import { tryAnticipationMiss } from './accuracyBridge'
 import { gapsToUnmodelled } from './bridge'
 import { hasLiveReserve } from './switchIn'
 import {
@@ -237,6 +238,7 @@ import {
   dispatchOnStatLowered,
   getHighestAttackingStatId,
   getHighestStatIdExcept,
+  hasMirrorArmor,
   isBattlerWeatherAffected,
   isUnnerveAbilityOnOpposingSide,
   RESET_ALL_STATS,
@@ -412,22 +414,13 @@ function checkAccuracy(
     return true
   }
 
-  const { inputs, gaps, defenderHasAnticipation } = buildAccuracyInputs(
-    state,
-    battlerId,
-    targetId,
-    moveId,
-    targetHasActedThisTurn,
-    deps,
-  )
+  const { inputs, gaps } = buildAccuracyInputs(state, battlerId, targetId, moveId, targetHasActedThisTurn, deps)
   unmodelled.push(...gapsToUnmodelled(gaps))
-  if (defenderHasAnticipation) {
-    unmodelled.push(
-      "Cmd_accuracycheck's own Anticipation miss branch (battle_script_commands.c:1427-1432; ABILITY_ANTICIPATION) is not modelled: GetSingleUseAbilityCounter has no state anywhere in this codebase, and the type-effectiveness multiplier it needs is not known until the damage resolver runs afterwards",
-    )
-  }
   const accResult = getTotalAccuracy(inputs)
   unmodelled.push(...gapsToUnmodelled(accResult.gaps))
+  // :1427-1432 -- Anticipation fires BEFORE the roll and, being an `else if` in
+  // the C, consumes no Random() draw when it does.
+  if (tryAnticipationMiss(state, battlerId, targetId, moveId, accResult.accuracy, deps, unmodelled)) return true
   return state.rng.random16() % 100 >= accResult.accuracy
 }
 
@@ -514,6 +507,12 @@ function handleSingleStatDown(
   if (res.delta !== 0) {
     statChanges.push({ battlerId: targetId, stat: statId, change: res.delta })
   }
+  // Mirror Armor (battle_script_commands.c:9811-9826): the drop landed on the
+  // ATTACKER instead; `reflected` carries that signed change so the outcome
+  // records it (the holder's delta is 0 by construction).
+  if (res.reflected && res.reflected.delta !== 0) {
+    statChanges.push({ battlerId: res.reflected.battlerId, stat: statId, change: res.reflected.delta })
+  }
   if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
     dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
   }
@@ -555,6 +554,9 @@ function handleScaryFace(ctx: MoveEffectContext): ActionOutcome {
   )
   if (res.delta !== 0) {
     statChanges.push({ battlerId: targetId, stat: STAT_SPEED, change: res.delta })
+  }
+  if (res.reflected && res.reflected.delta !== 0) {
+    statChanges.push({ battlerId: res.reflected.battlerId, stat: STAT_SPEED, change: res.reflected.delta })
   }
   if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (battlerId & 1) !== (targetId & 1)) {
     dispatchOnStatLowered(state, targetId, battlerId, deps, unmodelled, statChanges)
@@ -12282,6 +12284,22 @@ export function applySecondaryMoveEffects(
   const statChanges: StatChangeOutcome[] = []
   let moveEffect2: string | null = null
 
+  // SetMoveEffect's own entry (battle_script_commands.c:2314):
+  // `AbilityEnum mirrorArmorReflected = HasMirrorArmor(gBattlerTarget);` -- a
+  // mold-breaker-aware ability read, so one evaluation serves every spec. It is
+  // a plain "the target has Mirror Armor" boolean (not a record of a reflection
+  // that already happened); the MINUS_1/MINUS_2 cases use it to add
+  // STAT_BUFF_ALLOW_PTR at :2773-2776 / :2804-2807, which is what makes the
+  // reflection fire even when gTurnStructs[battler].statLowered is already set
+  // for this turn (that unconditionality is the ALLOW_PTR call shape inside
+  // ChangeStatBuffs, statBuffs.ts).
+  const mirrorArmorReflected = (() => {
+    const targetBattler = state.battlers[targetId]
+    const attackerBattler = state.battlers[attackerId]
+    if (!targetBattler || !attackerBattler) return false
+    return hasMirrorArmor(state, targetBattler, attackerId, attackerHasMoldBreakerActive(attackerBattler, deps), deps.dataContext)
+  })()
+
   for (const spec of effectSpecs) {
     const storedForMoveEnd = MOVE_EFFECTS_STORED_FOR_MOVEEND.has(spec.effectName)
     const isDoubleSlap = spec.effectName === 'MOVE_EFFECT_DOUBLESLAP'
@@ -12479,7 +12497,11 @@ export function applySecondaryMoveEffects(
     // Stat changes: MOVE_EFFECT_*_MINUS_1 (battle_script_commands.c:2765-2781)
     if (baseEffectNum >= MOVE_EFFECT_ATK_MINUS_1 && baseEffectNum <= MOVE_EFFECT_EVS_MINUS_1) {
       const statId = baseEffectNum - MOVE_EFFECT_ATK_MINUS_1 + 1
-      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      // :2773-2776 -- `flags = affectsUser; if (mirrorArmorReflected && !affectsUser) flags |= STAT_BUFF_ALLOW_PTR;`
+      const flags =
+        (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) |
+        STAT_BUFF_UPDATE_MOVE_EFFECT |
+        (mirrorArmorReflected && !spec.affectsUser ? STAT_BUFF_ALLOW_PTR : 0)
       const res = changeStatBuffsImplicit(
         state,
         attackerId,
@@ -12498,6 +12520,9 @@ export function applySecondaryMoveEffects(
           stat: statId,
           change: res.delta,
         })
+      }
+      if (res.reflected && res.reflected.delta !== 0) {
+        statChanges.push({ battlerId: res.reflected.battlerId, stat: statId, change: res.reflected.delta })
       }
       if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (attackerId & 1) !== (targetId & 1)) {
         dispatchOnStatLowered(state, targetId, attackerId, deps, unmodelled, statChanges)
@@ -12534,7 +12559,11 @@ export function applySecondaryMoveEffects(
     // Stat changes: MOVE_EFFECT_*_MINUS_2 (battle_script_commands.c:2796-2812)
     if (baseEffectNum >= MOVE_EFFECT_ATK_MINUS_2 && baseEffectNum <= MOVE_EFFECT_EVS_MINUS_2) {
       const statId = baseEffectNum - MOVE_EFFECT_ATK_MINUS_2 + 1
-      const flags = (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) | STAT_BUFF_UPDATE_MOVE_EFFECT
+      // :2804-2807 -- same flag shape as MINUS_1.
+      const flags =
+        (spec.affectsUser ? MOVE_EFFECT_AFFECTS_USER : 0) |
+        STAT_BUFF_UPDATE_MOVE_EFFECT |
+        (mirrorArmorReflected && !spec.affectsUser ? STAT_BUFF_ALLOW_PTR : 0)
       const res = changeStatBuffsImplicit(
         state,
         attackerId,
@@ -12553,6 +12582,9 @@ export function applySecondaryMoveEffects(
           stat: statId,
           change: res.delta,
         })
+      }
+      if (res.reflected && res.reflected.delta !== 0) {
+        statChanges.push({ battlerId: res.reflected.battlerId, stat: statId, change: res.reflected.delta })
       }
       if (res.multistringChooser === B_MSG_DEFENDER_STAT_FELL && (attackerId & 1) !== (targetId & 1)) {
         dispatchOnStatLowered(state, targetId, attackerId, deps, unmodelled, statChanges)

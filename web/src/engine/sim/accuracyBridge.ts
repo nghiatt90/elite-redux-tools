@@ -56,10 +56,17 @@ import {
   hasFlag,
 } from './constants'
 import { isPhantomForce, semiInvulnerableState } from './unpack'
-import { battlerHasSimAbility, getStatDropBlockType, isBattlerWeatherAffected, isSimAbilitySuppressed } from './statBuffs'
+import {
+  attackerHasMoldBreakerActive,
+  battlerHasSimAbility,
+  getStatDropBlockType,
+  isBattlerWeatherAffected,
+  isSimAbilitySuppressed,
+} from './statBuffs'
 import { isKeenEdgeMove, isStrikerMove } from './statusEffects'
 import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
 import { getAbilityStateOf } from './endTurn'
+import { getSingleUseAbilityCounter, setSingleUseAbilityCounter } from './switchInAbility'
 
 const bareType = (type: string | null): string => (type ?? '').replace(/^TYPE_/, '')
 
@@ -107,12 +114,6 @@ export interface AccuracyBridgeDeps extends Pick<BridgeDeps, 'grounding' | 'data
 export interface AccuracyBridgeResult {
   inputs: AccuracyInputs
   gaps: BridgeGap[]
-  /** Whether the defender's ability slots name ABILITY_ANTICIPATION -- surfaced
-   * separately so the caller can gap Cmd_accuracycheck's OWN Anticipation
-   * miss branch (:1427-1432, NOT part of GetTotalAccuracy) by name only when
-   * it could actually have mattered, the same "gap only when it could have
-   * mattered" precedent as accuracy.ts's own Micle Berry/Ripen gap. */
-  defenderHasAnticipation: boolean
 }
 
 /**
@@ -187,7 +188,6 @@ export function buildAccuracyInputs(
       ? rawWeather
       : 'NONE'
 
-  const defenderHasAnticipation = defender.mon.abilities.ability === 'ABILITY_ANTICIPATION' || defender.mon.abilities.innates.includes('ABILITY_ANTICIPATION')
   const attackerHoldEffect = deps.grounding.holdEffectOf(attackerId)
   const defenderHoldEffect = deps.grounding.holdEffectOf(targetId)
 
@@ -314,5 +314,75 @@ export function buildAccuracyInputs(
     gravityActive,
   }
 
-  return { inputs, gaps, defenderHasAnticipation }
+  return { inputs, gaps }
+}
+
+/**
+ * Cmd_accuracycheck's own Anticipation miss branch,
+ * src/battle_script_commands.c:1427-1432:
+ *
+ *     if (accuracy <= 100 && BATTLER_HAS_ABILITY(gBattlerTarget, ABILITY_ANTICIPATION) &&
+ *         !GetSingleUseAbilityCounter(gBattlerTarget, ABILITY_ANTICIPATION) &&
+ *         CalcTypeEffectivenessMultiplier(move, type, gBattlerAttacker, gBattlerTarget, TRUE) >= UQ_4_12(2.0)) {
+ *         SetSingleUseAbilityCounter(gBattlerTarget, ABILITY_ANTICIPATION, TRUE);
+ *         ... MISSED ...
+ *     } else if ((Random() % 100) >= accuracy) { ... }
+ *
+ * Returns true when the move misses for that reason. The caller must then
+ * skip the `Random() % 100` roll entirely: the C's `else if` means the
+ * ordinary roll is not drawn when this branch fires. `accuracy === 101` is
+ * GetTotalAccuracy's "cannot miss" sentinel and never triggers (`<= 100`).
+ *
+ * BATTLER_HAS_ABILITY is BattlerHasAbility(battler, ability, TRUE)
+ * (include/battle_util.h:73), i.e. the Mold-Breaker-aware check, innates
+ * included -- battlerHasSimAbility's `checkMoldBreaker` argument.
+ *
+ * CalcTypeEffectivenessMultiplier flattens every SPLIT_STATUS move to
+ * UQ_4_12(1.0) after the chart (battle_util.c:7992), so a status move can
+ * never clear the 2.0 bar and needs no type calculation here.
+ */
+export function tryAnticipationMiss(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  accuracy: number,
+  deps: AccuracyBridgeDeps,
+  unmodelled: string[],
+): boolean {
+  if (accuracy > 100) return false
+  const attacker = state.battlers[attackerId]
+  const defender = state.battlers[targetId]
+  if (!attacker || !defender) return false
+
+  const attackerHasMoldBreaker = attackerHasMoldBreakerActive(attacker, deps)
+  if (!battlerHasSimAbility(state, defender, 'ABILITY_ANTICIPATION', true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
+    return false
+  }
+  // `!GetSingleUseAbilityCounter(...)`: the counter is 0 before it has fired.
+  if (getSingleUseAbilityCounter(state, targetId, 'ABILITY_ANTICIPATION', deps.dataContext) !== 0) return false
+
+  const move = deps.dataContext.move(moveId)
+  if (!move) {
+    unmodelled.push(`ABILITY_ANTICIPATION: moves.json lookup missed ${moveId} (NEEDS_DATA), so the miss branch is not applied`)
+    return false
+  }
+  if (move.split === 'STATUS') return false
+
+  if (!deps.damage?.typeEffectiveness) {
+    unmodelled.push(`ABILITY_ANTICIPATION: CalcTypeEffectivenessMultiplier is unavailable (no damage resolver on this path), so the miss branch is not applied`)
+    return false
+  }
+  const effectiveness = deps.damage.typeEffectiveness(state, attackerId, targetId, moveId)
+  if (effectiveness.effectiveness === null) {
+    unmodelled.push(
+      `ABILITY_ANTICIPATION: CalcTypeEffectivenessMultiplier could not be computed for ${moveId}: ${effectiveness.unmodelled.join('; ')} (NEEDS_DATA), so the miss branch is not applied`,
+    )
+    return false
+  }
+  if (effectiveness.effectiveness < SUPER_EFFECTIVE_MULTIPLIER) return false
+
+  // SetSingleUseAbilityCounter(gBattlerTarget, ABILITY_ANTICIPATION, TRUE)
+  setSingleUseAbilityCounter(state, targetId, 'ABILITY_ANTICIPATION', 1, deps.dataContext)
+  return true
 }
