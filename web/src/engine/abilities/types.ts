@@ -647,8 +647,7 @@ export interface OnModifyMoveFlagsContext {
  *
  * Still static (`ctx.moveFlags.*` only, so grants do not yet change the result):
  * Cutthroat's priority through `TurnOrderMoveView.isKeenEdge`, which both action
- * builders hard-code to false; Blade Dance's onAttacker (`moveFlags.dance`) and the
- * move-end Dancer path; the effect-chance PUNCH read (sim/statusEffects.ts:1866,
+ * builders hard-code to false; Blade Dance's onAttacker (`moveFlags.dance`); the effect-chance PUNCH read (sim/statusEffects.ts:1866,
  * there is no sim PUNCH predicate yet); and the accuracy/sim consumers. Each must be
  * checked against its own call site's moveType argument before wiring.
  */

@@ -161,6 +161,7 @@ import {
   NO_RECOIL_ABILITIES,
   runMoveEnd,
   runMoveEndBookkeeping,
+  runMoveEndDancer,
 } from './moveEnd'
 import { applyAbsorbEffect } from './absorb'
 import { tryPreemptiveActions } from './preempt'
@@ -2825,6 +2826,10 @@ export function executeAction(
       // itself for USER / USER_OR_SELECTED moves (battle_controller_opponent.c:1600-1601).
       const statusDispatchTargetId = resolveMoveEndDispatchTarget(statusTargetId, currentMove.id, moveData)
       const statusDamage = effectOutcome.targetDamage ?? 0
+      // MOVEEND_DANCER (case 4, :4854-4879) runs before MOVEEND_ABILITIES on this `goto BattleScript_MoveEnd`
+      // tail. Status dance moves (Swords Dance, Dragon Dance, ...) only take this handler path, so the
+      // copy must be queued here too; the hooks filter by move and a missed move copies nothing.
+      runMoveEndDancer(state, battlerId, statusDispatchTargetId, currentMove.id, moveData, Boolean(effectOutcome.missed), deps, unmodelled)
       const statusDefenderAbilities = dispatchMoveEndDefenderAbilities({
         state,
         attackerId: battlerId,

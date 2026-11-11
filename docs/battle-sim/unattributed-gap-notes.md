@@ -18,15 +18,15 @@ grep -rnE "is not modelled|has no port|not applied|hook was not run|are not mode
   web/src/engine/sim --include='*.ts' --exclude='*.test.ts'
 ```
 
-155 lines match. Each was read and classified:
+154 lines match. Each was read and classified:
 
 - **(A) raised note** -- a string that reaches the sim's note channel: `unmodelled.push(...)`,
   `note(...)`, `missing.add(...)`, `gaps.push(...)`, `gapIf(...)`, or a returned
   `unmodelled: [...]` string.
 - **(B) not a note** -- a comment, doc comment, trailing comment, inventory/doc text.
 
-**102 raised (A) sites. 59 of them do not contain an ability id in the raised text**
-(43 do: literal `ABILITY_X`, or an interpolated `${abilityId}` / `${slotAbility}` /
+**101 raised (A) sites. 59 of them do not contain an ability id in the raised text**
+(42 do: literal `ABILITY_X`, or an interpolated `${abilityId}` / `${slotAbility}` /
 `${held}` that is an ability id at runtime). 38 of the 102 are AI raise sites, and
 36 of those carry no id. "reachable via: unknown" means the surrounding code does not
 make the triggering ability clear; it is not a claim that no ability can reach it.
@@ -114,7 +114,6 @@ Comments, doc comments, trailing comments and inventory text. None is raised.
 | 6264 | UpdateBattlerItem's Power of Alchemy item memory (battle_script_commands.c:2206-2207; ABILITY_POWER_OF_ALCHEMY) is not modelled | yes | ABILITY_POWER_OF_ALCHEMY |
 | 6334 | Bug Bite's consumeberry of ${itemId} on the attacker (VARIOUS_CONSUME_BERRY, battle_script_commands.c:8024-8041, ItemBattleEffects(ITEMEFFECT_BATTL... | **no** | reachable via: unknown |
 | 7159 | move-end Synchronize (ABILITY_SYNCHRONIZE) is not modelled yet | yes | ABILITY_SYNCHRONIZE |
-| 7167 | move-end Dancer (ABILITY_DANCER) is not modelled yet | yes | ABILITY_DANCER |
 | 7346 | move-end target hold effect ${targetHoldEffect} is not modelled yet | **no** | reachable via: unknown |
 | 7479 | move-end effect ${moveData.effect} is not modelled yet | **no** | reachable via: unknown |
 | 7522 | MOVEEND_RECOIL\'s enraged recoil (savedDmg / 3, battle_script_commands.c:4492-4505) is not modelled | **no** | reachable via: unknown |

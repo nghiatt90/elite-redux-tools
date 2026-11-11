@@ -21,11 +21,11 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).
 9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.
 10. **onCanStatusType**: Quoted `ABILITY_...` ids inside `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`), extracted from source text: the CanPoisonType bypass array, the Angel's Wrath `MOVE_POISON_STING` comparison, and the CanParalyzeType bypass array.
-11. **onCopyMove**: Not ported (gapped in `web/src/engine/sim/moveEnd.ts`).
+11. **onCopyMove**: Dispatched by `runCopyMoveHook` from `runMoveEndDancer` (`web/src/engine/sim/moveEnd.ts`, MOVEEND_DANCER). Ported set: `PORTED_COPY_MOVE_ABILITIES` -- Dancer and Samba (`IsDance`), Parroting (`IsSoundMove`) and Lunar Affinity (the move's `lunar` flag), all four `onCopyMove` hooks in the data.
 12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).
 13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.
 14. **onModifyEffectChance**: `abilityId === 'ABILITY_X'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.
-15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, PUNCH in `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). `MOVE_FLAG_CONSUMERS_WIRED` is **empty**, so all 10 pairs are unported: every predicate now has its returning-true branch and the sim consumers listed below read the predicates, but the consumer sweep is incomplete (dance and keenEdge still have sites that test the static move flag, listed below), so the ability's grant changes nothing at that site. Cycle 150ibbd routed Heal Pulse's attacker read (`battle_script_commands.c:7269`), Throat Spray (`battle_util.c:6114`) and Pinnacle Blade's protect bypass (`battle_util.c:6597`) through the predicates, and removed `isSoundMove`/`isKeenEdgeMove`'s `DoesMoveMatchFlag` gap notes because Festivities/Musical Notes/Reverbate and Chestnut Axe are the only grants for those families. Cycle 150ibc added `matchesMoveFlag` to the onChooseOffensiveStat/onChooseDefensiveStat/onCrit/onImmune/onParentalBond contexts and routed Soundproof's `onImmune` (`src/abilities.cc:1054`, ATTACKER slots), Dual Wield's and Raging Boxer's `onParentalBond` (`:5488`, `:4162`), Roundhouse's `onChooseDefensiveStat` (`:5074`), Magical Fists'/Power Fists' choose-stat hooks (`:9158`, `:3691`) and Precise Fist's `onCrit` (`:4757`, holder slots) through it. The remaining unwired consumers: (a) dance -- `ABILITY_BLADE_DANCE`'s `onAttacker` tests `ctx.moveFlags.dance` (`web/src/engine/sim/moveEnd.ts:4551`) where the C calls `IsDance` (`src/abilities.cc:9040`), and move-end Dancer is gapped (`web/src/engine/sim/moveEnd.ts:7184-7185`); (b) keenEdge -- Cutthroat's +1 priority reads `TurnOrderMoveView.isKeenEdge`, which both action builders hard-code to `false` (`web/src/engine/sim/turnOrder.ts:437`, `web/src/engine/sim/driver/session.ts:151`, `web/src/engine/sim/turn.ts:4441`; C `battle_main.c:4278`). Cycle 150ibcc added PUNCH's predicate, `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), and routed `getMoveEffectChance`'s Precise Fist/Way of Precision read (`src/abilities.cc:4762-4765`, `IsIronFistBoosted` at `src/battle_util.c:9375`) through it; the per-family consumer sweep that would add `punch` to `MOVE_FLAG_CONSUMERS_WIRED` is queued, so a hook that grants PUNCH stays unported this cycle.
+15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, PUNCH in `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). `MOVE_FLAG_CONSUMERS_WIRED` is **empty**, so all 10 pairs are unported: every predicate now has its returning-true branch and the sim consumers listed below read the predicates, but the consumer sweep is incomplete (dance and keenEdge still have sites that test the static move flag, listed below), so the ability's grant changes nothing at that site. Cycle 150ibbd routed Heal Pulse's attacker read (`battle_script_commands.c:7269`), Throat Spray (`battle_util.c:6114`) and Pinnacle Blade's protect bypass (`battle_util.c:6597`) through the predicates, and removed `isSoundMove`/`isKeenEdgeMove`'s `DoesMoveMatchFlag` gap notes because Festivities/Musical Notes/Reverbate and Chestnut Axe are the only grants for those families. Cycle 150ibc added `matchesMoveFlag` to the onChooseOffensiveStat/onChooseDefensiveStat/onCrit/onImmune/onParentalBond contexts and routed Soundproof's `onImmune` (`src/abilities.cc:1054`, ATTACKER slots), Dual Wield's and Raging Boxer's `onParentalBond` (`:5488`, `:4162`), Roundhouse's `onChooseDefensiveStat` (`:5074`), Magical Fists'/Power Fists' choose-stat hooks (`:9158`, `:3691`) and Precise Fist's `onCrit` (`:4757`, holder slots) through it. The remaining unwired consumers: (a) dance -- move-end Dancer now copies through `isDanceMove` (cycle 150ibcd2), but the per-family consumer sweep that would list DANCE in `MOVE_FLAG_CONSUMERS_WIRED` is still queued (cycle 150ibcd3); (b) keenEdge -- Cutthroat's +1 priority reads `TurnOrderMoveView.isKeenEdge`, which both action builders hard-code to `false` (`web/src/engine/sim/turnOrder.ts:437`, `web/src/engine/sim/driver/session.ts:151`, `web/src/engine/sim/turn.ts:4441`; C `battle_main.c:4278`). Cycle 150ibcc added PUNCH's predicate, `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), and routed `getMoveEffectChance`'s Precise Fist/Way of Precision read (`src/abilities.cc:4762-4765`, `IsIronFistBoosted` at `src/battle_util.c:9375`) through it; the per-family consumer sweep that would add `punch` to `MOVE_FLAG_CONSUMERS_WIRED` is queued, so a hook that grants PUNCH stays unported this cycle.
 16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).
 17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).
 18. **onReactive**: `abilityId === 'ABILITY_X'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the members of `POISON_PUPPETEER_CLONE_ABILITIES` that appear as `case 'ABILITY_X'` labels inside `runPoisonPuppeteerClone` (the gate set alone is not evidence: Frostbind and Hemotoxin are in it but only raise a note); note-only branches are unported.
@@ -52,7 +52,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onCanStatusType | 8 | 8 | 0 | 0 | 0 | 8 |
 | onChooseDefensiveStat | 11 | 11 | 0 | 0 | 0 | 10 |
 | onChooseOffensiveStat | 20 | 20 | 0 | 0 | 0 | 19 |
-| onCopyMove | 4 | 0 | 0 | 4 | 0 | 1 |
+| onCopyMove | 4 | 4 | 0 | 0 | 0 | 4 |
 | onCrit | 31 | 31 | 0 | 0 | 0 | 28 |
 | onDefender | 122 | 122 | 0 | 0 | 0 | 122 |
 | onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 84 |
@@ -67,7 +67,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onModifyTargetFlag | 7 | 7 | 0 | 0 | 0 | 7 |
 | onMoldBreaker | 10 | 10 | 0 | 0 | 0 | 10 |
 | onMoveType | 42 | 42 | 0 | 0 | 0 | 42 |
-| onOffensiveMultiplier | 199 | 199 | 0 | 0 | 0 | 174 |
+| onOffensiveMultiplier | 199 | 199 | 0 | 0 | 0 | 175 |
 | onParentalBond | 23 | 23 | 0 | 0 | 0 | 23 |
 | onPreemptAction | 5 | 5 | 0 | 0 | 0 | 5 |
 | onPriority | 19 | 11 | 0 | 8 | 0 | 14 |
@@ -83,7 +83,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1429** | **0** | **69** | **0** | **1377** |
+| **Total** | **1498** | **1433** | **0** | **65** | **0** | **1381** |
 
 ## Unported Ability Hook Pairs
 
@@ -128,13 +128,6 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 - `ABILITY_PROTEAN` (src/abilities.cc:2331)
 - `ABILITY_RKS_SYSTEM` (src/abilities.cc:3135)
 - `ABILITY_STANCE_CHANGE` (src/abilities.cc:2396)
-
-### onCopyMove (4)
-
-- `ABILITY_DANCER` (src/abilities.cc:3008)
-- `ABILITY_LUNAR_AFFINITY` (src/abilities.cc:8855)
-- `ABILITY_PARROTING` (src/abilities.cc:6880) *(ability mentioned in test)*
-- `ABILITY_SAMBA` (src/abilities.cc:9406)
 
 ### onDisguise (3)
 

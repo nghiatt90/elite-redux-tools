@@ -12,7 +12,7 @@
 //  1   | MOVEEND_PROTECT_LIKE_EFFECT     | 4343-4433  | Delegated      | Already ported in turn.ts (handleProtectLikeMoveEnd); called here in enum order.
 //  2   | MOVEEND_RAGE                    | 4434-4443  | Gapped (cond.) | Target Rage attack raise; STATUS2_RAGE is not in state.ts.
 //  3   | MOVEEND_SYNCHRONIZE_TARGET      | 4523-4526  | Gapped (cond.) | Target Synchronize on status application; gapped if target has ABILITY_SYNCHRONIZE & status.
-//  4   | MOVEEND_DANCER                  | 4854-4879  | Gapped (cond.) | Dancer copying dance moves; gapped if danceBased move and other battler has ABILITY_DANCER.
+//  4   | MOVEEND_DANCER                  | 4854-4879  | Ported         | Dancer/Samba (dance), Parroting (sound), Lunar Affinity (lunar) copy the resolved move via UseOutOfTurnAttack, fastest first.
 //  5   | MOVEEND_ABILITIES               | 4527-4531  | Ported / Gap   | Target contact abilities (Rough Skin, Static, Flame Body, Poison Point, Effect Spore, Gooey). Other defender abilities gapped.
 //  6   | MOVEEND_ABILITIES_ATTACKER      | 4532-4536  | Ported / Gap   | Attacker contact abilities (Static, Flame Body, Poison Point/Touch). Other attacker abilities gapped.
 //  7   | MOVEEND_STATUS_IMMUNITY_ABILITIES 4537-4542  | Ported         | Re-checks every battler's status after the move; a removesStatusOnImmunity onStatusImmune ability cures it (battle_util.c:4505-4609), re-entering until a full pass cures nothing.
@@ -200,7 +200,7 @@ import {
 } from './statBuffs'
 import { benefitsFromStatBuffs, isBattlerWeatherAffected } from './statBuffs'
 import type { StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { ProtectType, applyDamage, getMoveTarget, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive, isBattlerProtected } from './turn'
+import { ProtectType, applyDamage, buildTurnOrderContext, getMoveTarget, handleProtectLikeMoveEnd, isAbilityAliveOnOpposingSide, isBattlerAlive, isBattlerProtected } from './turn'
 import type { SimDataContext, SimMoveData } from './dataContext'
 import { CONFUSE_BERRY_FLAVORS, flavorRelationByNature } from './dataContext'
 import {
@@ -216,7 +216,7 @@ import {
 } from './switchInAbility'
 import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { HP_TRANSFORMATIONS, apeShiftHandler, changeBattlerForm } from './formChange'
-import { TOTAL_SPEED_PRIMARY, getBattlerTotalSpeedStat } from './turnOrder'
+import { TOTAL_SPEED_PRIMARY, getBattlerTotalSpeedStat, getFastestBattler } from './turnOrder'
 import { attackPreModify, calculateBattleStat, defensePreModify, spAttackPreModify, spDefensePreModify } from '../battleStat'
 import { TYPE_NAME_BY_ID } from './hazards'
 import {
@@ -1290,6 +1290,105 @@ export function isDanceMove(
     return true
   }
   return false
+}
+
+/**
+ * AbilityBattleEffects(ABILITYEFFECT_MOVE_END_OTHER, battler, ...), src/battle_util.c:4496-4503:
+ * `ON_ABILITY(battler, FALSE, gAbilities[ability].onCopyMove, REQUIRE_NOT(onCopyMove(ability, battler,
+ * gBattlerAttacker, target, gCurrentMove)))` (:269-275) scans the dancer's slots high to low and stops at
+ * the first hook that returns nonzero. Only four abilities define `onCopyMove`
+ * (`data/v2.65beta/abilityHooks.json`): Dancer/Samba (src/abilities.cc:3008-3013, :9406-9409), Parroting
+ * (:6880-6887, `CHECK(IsSoundMove(attacker, move))`) and Lunar Affinity (:8855-8860, `CHECK(gBattleMoves[move].lunar)`).
+ * Each qualified slot calls UseOutOfTurnAttack (:3759-3777) through queueOutOfTurnAttack.
+ */
+function runCopyMoveHook(
+  state: BattleState,
+  deps: TurnLoopDeps,
+  dancerId: number,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  unmodelled: string[],
+): boolean {
+  const dancer = state.battlers[dancerId]
+  if (!dancer) return false
+  const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+
+  for (const { abilityId } of getBattlerAbilitySlotsReverse(dancer.mon.abilities)) {
+    // ON_ABILITY's FILTER_NOT(IsSuppressed(battler, ability, FALSE)) -- checkMoldBreaker is FALSE.
+    if (isSimAbilitySuppressed(state, dancer, abilityId, false, attackerId, false, deps.dataContext)) continue
+
+    let queued = false
+    if (abilityId === 'ABILITY_DANCER' || abilityId === 'ABILITY_SAMBA') {
+      // Impl<ABILITY_SAMBA>.onCopyMove is Impl<ABILITY_DANCER>.onCopyMove (:9406-9409).
+      if (isDanceMove(state, attackerId, moveData, deps)) {
+        queued = queueOutOfTurnAttack(state, deps, dancerId, targetId, abilityId, moveId, 0)
+      }
+    } else if (abilityId === 'ABILITY_PARROTING') {
+      if (isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)) {
+        queued = queueOutOfTurnAttack(state, deps, dancerId, targetId, abilityId, moveId, 0)
+      }
+    } else if (abilityId === 'ABILITY_LUNAR_AFFINITY') {
+      if (moveData?.flags?.lunarBased) {
+        queued = queueOutOfTurnAttack(state, deps, dancerId, targetId, abilityId, moveId, 0)
+      }
+    }
+    // REQUIRE_NOT(onCopyMove(...)): a hook returning 0 lets the next slot run; one that queues stops the scan.
+    if (queued) return true
+  }
+  return false
+}
+
+/**
+ * MOVEEND_DANCER, src/battle_script_commands.c:4854-4879. Every battler other than the move's user that
+ * is alive and has not yet used an out-of-turn copy this turn is a candidate; SortBattlersExcept
+ * (battle_main.c:4349-4385) orders them fastest first, and the C walks that list in reverse so the
+ * slowest queues first. `queueOutOfTurnAttack` pushes and the drain pops LIFO (turn.ts:4483-4491), so
+ * the fastest dancer's copy resolves first. The speed sort reuses the repeated-getFastestBattler
+ * approximation documented in fieldEndTurn.ts:448: same tie distribution, different RNG call sequence
+ * than the C bubble sort.
+ */
+export function runMoveEndDancer(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  noEffect: boolean,
+  deps: TurnLoopDeps,
+  unmodelled: string[],
+): void {
+  if (noEffect) return
+  const candidates: number[] = []
+  let include = 0
+  for (let i = 0; i < state.battlersCount; i++) {
+    const b = state.battlers[i]
+    if (!b || i === attackerId) continue
+    if (b.turn.dancerUsedMove) continue
+    if (!isBattlerAlive(state, i)) continue
+    candidates.push(i)
+    include |= 1 << i
+  }
+  if (candidates.length === 0) return
+
+  const ctx = buildTurnOrderContext(state, deps)
+  let exclude = ((1 << state.battlersCount) - 1) & ~include
+  const sorted: number[] = []
+  for (let k = 0; k < candidates.length; k++) {
+    const fastest = getFastestBattler(state, [], true, exclude, ctx, deps.statStageRatios)
+    sorted.push(fastest)
+    exclude |= 1 << fastest
+  }
+
+  // Reverse order so faster battlers resolve first (the drain pops LIFO).
+  for (let k = sorted.length - 1; k >= 0; k--) {
+    const dancerId = sorted[k]
+    // `target = GetBattlerSide(gBattlerTarget) == GetBattlerSide(gBattlerAttacker) ? gBattlerTarget
+    // : BATTLE_OPPOSITE(battler)` (:4497).
+    const copyTarget = (targetId & 1) === (attackerId & 1) ? targetId : dancerId ^ 1
+    runCopyMoveHook(state, deps, dancerId, attackerId, copyTarget, moveId, moveData, unmodelled)
+  }
 }
 
 /**
@@ -7182,13 +7281,10 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 4: MOVEEND_DANCER (:4854-4879)
-  if (moveData?.flags?.dance) {
-    for (const b of state.battlers) {
-      if (b && b.id !== attackerId && b.mon.hp > 0 && battlerHasAbility(b.mon.abilities, 'ABILITY_DANCER', () => false)) {
-        unmodelled.push('move-end Dancer (ABILITY_DANCER) is not modelled yet')
-        break
-      }
-    }
+  // Same confusion guard as Case 5 (`REQUIRE_NOT(!gProcessingExtraAttacks &&
+  // gRoundStructs[gBattlerAttacker].confusionSelfDmg)`); a skipped move (MOVE_RESULT_NO_EFFECT) copies nothing.
+  if (!(!state.processingExtraAttacks && attacker?.round.confusionSelfDmg)) {
+    runMoveEndDancer(state, attackerId, targetId, moveId, moveData, isNoEffect, deps, unmodelled)
   }
 
   // Case 5: MOVEEND_ABILITIES (:4527-4531)
