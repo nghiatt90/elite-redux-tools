@@ -285,28 +285,25 @@ function extractCaseLabels(source: string, prefix: 'EFFECT_' | 'MOVE_EFFECT_'): 
 }
 
 /**
- * Raw source slice from `declaration` to the next top-level `function`/`const`, or EOF.
+ * Raw source slice of one top-level function declaration, from the declaration through the `}`
+ * that closes its body (the same extent `extractRawFunctionSlice` returns).
  *
- * Two constraints meet here. First, callers index the slice back into `source`
- * (`source.replace(slice, '')` in `removeFunctionSlice`, `source.indexOf(slice)` in the plain-hit
- * routing readers), so it must be an exact substring -- hence `extractRawFunctionSlice`, not the
- * comment-blanked `extractFunctionSlice`.
+ * Callers index the slice back into `source` (`source.replace(slice, '')` in
+ * `removeFunctionSlice`, `source.indexOf(slice)` in the plain-hit routing readers), so it must be
+ * an exact substring -- hence `extractRawFunctionSlice`, not the comment-blanked
+ * `extractFunctionSlice`.
  *
- * Second, the *extent* is deliberately the pre-cycle one: the slice runs on to the next top-level
- * declaration instead of stopping at the function's closing brace. This inventory's pinned pair
- * counts were measured with that extent (the trailing whitespace, and for the last function in a
- * concatenated consumer file the next file's import header, reach the name scans and
- * `analyzeHandlerBody`), and the counts may not move in a test-infrastructure-only cycle.
+ * The extent stops at the closing brace rather than running on to the next top-level
+ * `function`/`const` or EOF. The old extent swept trailing blank lines and, for the last function
+ * of a concatenated consumer file, the next file's import header (`MOVE_EFFECT_WRAP`,
+ * `SOUNDPROOF_ABILITIES`, `SECONDARY_MOVE_EFFECT_MAP`, ...) into every scan. Those lines are
+ * import-list members, not `case`/`===` dispatch sites, so cycle 150i2b measured no pair moving
+ * when the extent switched. The same cycle had to repair `stripPlainHitRoutingChain`'s unbalanced
+ * splice, which the old extent had masked by running past the stray `}`.
  */
-function tryExtractFunctionSlice(source: string, declaration: string): string {
+export function tryExtractFunctionSlice(source: string, declaration: string): string {
   try {
-    const slice = extractRawFunctionSlice(source, declaration)
-    const start = source.indexOf(slice)
-    if (start < 0) return ''
-    const rest = source.slice(start + slice.length)
-    const nextDeclaration = rest.match(/\n(?:export\s+)?(?:function|const)\s+/)
-    const end = nextDeclaration ? start + slice.length + nextDeclaration.index! : source.length
-    return source.slice(start, end)
+    return extractRawFunctionSlice(source, declaration)
   } catch {
     return ''
   }
@@ -353,8 +350,16 @@ function stripPlainHitRoutingChain(source: string): string {
   if (start < 0) return source
   const elseAt = source.indexOf('  } else {', start)
   const returnAt = elseAt >= 0 ? source.indexOf('return null', elseAt) : -1
-  const closeAt = returnAt >= 0 ? source.indexOf('\n  }', returnAt) : -1
-  return closeAt >= 0 ? source.slice(0, start) + source.slice(closeAt) : source
+  const elseClose = '\n  }'
+  const closeAt = returnAt >= 0 ? source.indexOf(elseClose, returnAt) : -1
+  if (closeAt < 0) return source
+  // Remove the whole `else if (...) { ... } else { ... }` branch, starting at its `else`, not at
+  // the condition. Cutting at `start` drops the branch's opening `{` but keeps the `}` that closes
+  // its `else` body, which leaves the source one brace short and makes a brace-matched function
+  // slice stop at that stray `}` (cycle 150i2b).
+  const branchAt = source.lastIndexOf('else if (', start)
+  const branchStart = branchAt >= 0 ? branchAt : start
+  return source.slice(0, branchStart) + source.slice(closeAt + elseClose.length)
 }
 
 interface ConsumptionIndex {

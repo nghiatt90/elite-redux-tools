@@ -75,6 +75,14 @@ const DISTINCT_SCRIPTS = 322
  * Cycle 150ibcd3: 237 -> 236. The flag-consumer sweep's Leafage block in
  * `cycle150ibcd3FlagConsumers.test.ts` (Chestnut Axe grants KEEN_EDGE, so Sinister Claws
  * drops the target's SpD) names an effect-less move, so its pair became ported.
+ *
+ * Cycle 150i2b: 236 -> 236, measured, no pair flipped. `tryExtractFunctionSlice`
+ * (`moveInventory.ts:304`) now returns the brace-matched slice (`extractRawFunctionSlice`)
+ * instead of running to the next top-level declaration. With the corrected splice in
+ * `stripPlainHitRoutingChain` (`moveInventory.ts:347`), the only text the old extent added
+ * was the next file's import header (`statusEffects.ts`, `turn.ts`) or an interface
+ * preamble (`LegacyPostHitArgs`), and none of those lines carries a `case`/`===` dispatch
+ * site, so no move-effect, secondary-effect, legacy-script or effect-less unit moved.
  */
 export const UNPORTED_PAIR_COUNT = 236
 
@@ -89,6 +97,10 @@ export const UNPORTED_PAIR_COUNT = 236
  * the flag kind and its 2099 pairs, so the pin drops to the non-flag remainder: 1314 -> 119
  * (the flag kind contributed 1195 registered-but-untested pairs). Cycle 150ibcd3: 117 -> 116 --
  * the new Leafage block above is the only change, leaving the `<effect-less>` list at 85.
+ * Cycle 150i2b: 116 -> 116, measured with the brace-matched slice -- the trailing import
+ * headers the old extent swept in (`statusEffects.ts`'s `MOVE_EFFECT_WRAP` import, `turn.ts`'s
+ * `SECONDARY_MOVE_EFFECT_MAP` import) are import-list members, not dispatch sites, so no
+ * registered-but-untested pair moved either.
  */
 export const REGISTERED_UNTESTED_PAIR_COUNT = 116
 
