@@ -308,6 +308,7 @@ import {
   isBattlerTerrainAffected,
   isMyceliumMightActive,
   isPreventableSecondaryEffect,
+  isSoundMove,
   setOnMoveEffectReactionFlags,
   testSheerForceFlag,
   type StatusDeps,
@@ -7287,7 +7288,14 @@ export function handleSleepTalk(ctx: MoveEffectContext): ActionOutcome {
       unusableMovesBits |= 1 << i
     } else if ((attacker.mon.status2 & STATUS2_TORMENT) !== 0 && attacker.lastMove === m) {
       unusableMovesBits |= 1 << i
-    } else if (attacker.volatiles.throatChopTimer > 0 && mData?.flags?.sound === true) {
+    } else if (
+      // CheckMoveLimitations (src/battle_util.c:1652): FILTER_NOT(
+      //   gVolatileStructs[battlerId].throatChopTimer && IsSoundMove(battlerId, move)),
+      // and IsSoundMove is DoesMoveMatchFlag(..., MOVE_FLAG_SOUND) (:9379), so an
+      // onModifyMoveFlags grant such as Reverbate counts, not only the static sound flag.
+      attacker.volatiles.throatChopTimer > 0 &&
+      isSoundMove(state, battlerId, m, deps, unmodelled)
+    ) {
       unusableMovesBits |= 1 << i
     }
   }

@@ -51,13 +51,15 @@ describe('Cycle 150i3 (3) - getMoveEffectChance dispatch blocks are the only evi
     expect(extracted.has('ABILITY_WAY_OF_PRECISION')).toBe(true)
   })
 
-  it('deleting the real Corrupted Mind branch drops it even though the guard still names it', () => {
-    // The marker omits the leading `}` so the preceding branch's closing brace is not eaten with it;
-    // the whole-line text is still unique (`:1922` has `||` after the literal, no `else if`).
+  it('deleting the real Corrupted Mind branch drops it from the extraction', () => {
+    // Cycle 150ibcc removed the note-only `unmodelled.push` guard that used to name the id
+    // outside the dispatch blocks: Corrupted Mind's GET_MOVE_TYPE read (src/abilities.cc:9465-9470)
+    // and Precise Fist/Way of Precision's IsIronFistBoosted read (:4762-4765) are now modelled,
+    // so the only mention left is the real dispatch branch. The marker omits the leading `}` so
+    // the preceding branch's closing brace is not eaten with it.
     const mutated = removeBranch(statusEffectsSource, "else if (abilityId === 'ABILITY_CORRUPTED_MIND') {")
     expect(mutated.length).toBeLessThan(statusEffectsSource.length)
-    // The note-only guard outside both dispatch blocks still mentions the id; that is the point.
-    expect(mutated).toContain("abilityId === 'ABILITY_CORRUPTED_MIND'")
+    expect(mutated).not.toContain("abilityId === 'ABILITY_CORRUPTED_MIND'")
 
     const extracted = extractModifyEffectChanceAbilities(mutated)
     expect(extracted.has('ABILITY_CORRUPTED_MIND')).toBe(false)
@@ -76,17 +78,13 @@ describe('Cycle 150i3 (3) - getMoveEffectChance dispatch blocks are the only evi
     expect(extracted.has('ABILITY_WAY_OF_PRECISION')).toBe(true)
   })
 
-  it('an id named only in the unmodelled.push guard outside the dispatch blocks is not evidence', () => {
-    const guardOnly = 'ABILITY_SYNTHETIC_GUARD_ONLY'
-    const mutated = statusEffectsSource.replace(
-      "if (isAttacker && (abilityId === 'ABILITY_CORRUPTED_MIND'",
-      `if (isAttacker && (abilityId === 'ABILITY_CORRUPTED_MIND' || abilityId === '${guardOnly}'`,
-    )
-    expect(mutated).not.toBe(statusEffectsSource)
-    expect(mutated).toContain(guardOnly)
-
-    expect(extractModifyEffectChanceAbilities(statusEffectsSource).has(guardOnly)).toBe(false)
-    expect(extractModifyEffectChanceAbilities(mutated).has(guardOnly)).toBe(false)
+  it('the note-only guard is gone: every onModifyEffectChance ability is modelled', () => {
+    // Cycle 150ibcc removed the guard because getMoveEffectChance now resolves both reads:
+    // Corrupted Mind's GET_MOVE_TYPE (src/abilities.cc:9465-9470) and Precise Fist/Way of
+    // Precision's IsIronFistBoosted (:4762-4765). With no guard outside the dispatch blocks
+    // there is no longer a non-branch mention for the extractor to ignore.
+    expect(statusEffectsSource).not.toContain('unmodelled.push(`GetMoveEffectChance')
+    expect(extractModifyEffectChanceAbilities(statusEffectsSource).size).toBe(13)
   })
 
   it('a synthetic id added as a real branch in each dispatch block is extracted', () => {

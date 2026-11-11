@@ -795,6 +795,67 @@ export function isStrikerMove(
 }
 
 /**
+ * IsIronFistBoosted, src/battle_util.c:9375:
+ * DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_PUNCH).
+ * Checks the move's static punchBased flag (FLAG_IRON_FIST_BOOST) and the
+ * onModifyMoveFlags abilities that grant MOVE_FLAG_PUNCH (src/abilities.cc:358-386):
+ *   - Junshi Sanda (:7613-7622) when the move has FLAG_STRIKER_BOOST (`kickBased`);
+ *   - Mixed Martial Arts (:9898-9905) when the move's own data type is TYPE_NORMAL;
+ *   - Brawling Wyvern (:7603-7609) when the RESOLVED type is Dragon (IS_MOVE_TYPE,
+ *     include/battle.h:743, i.e. GetTypeBeforeUsingMove/dynamicMoveType).
+ * Every other onModifyMoveFlags ability grants KICK, SOUND, DANCE, MEGA_LAUNCHER or
+ * KEEN_EDGE (`grep -n MOVE_FLAG_PUNCH abilities.cc` shows only those three grant
+ * sites), so the scan is complete and pushes no gap note.
+ */
+export function isPunchMove(
+  state: BattleState,
+  attackerId: number,
+  moveId: string | null | undefined,
+  deps: StatusDeps,
+): boolean {
+  if (!moveId) return false
+  const moveData = deps.dataContext.move(moveId)
+  if (moveData?.flags?.punchBased) return true
+
+  const attacker = state.battlers[attackerId]
+  if (!attacker) return false
+
+  if (
+    moveData?.flags?.kickBased &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_JUNSHI_SANDA', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
+  }
+  // Mixed Martial Arts reads gBattleMoves[move].type, the DECLARED type (abilities.cc:9904),
+  // not IS_MOVE_TYPE. Same shape as isStrikerMove's KICK branch above.
+  if (
+    moveData?.type === 'NORMAL' &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_MIXED_MARTIAL_ARTS', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
+  }
+  // Brawling Wyvern calls IS_MOVE_TYPE(move, TYPE_DRAGON) (abilities.cc:7605), i.e. the
+  // RESOLVED type; resolve it the same way isKeenEdgeMove does above so an "-ate"
+  // ability that turns a move Dragon counts.
+  if (moveData?.type) {
+    const resolvedType = resolveEffectiveMoveType(
+      attacker.mon.abilities,
+      moveId,
+      moveData.type,
+      moveData.flags ?? {},
+    ).moveType
+    if (
+      resolvedType === 'DRAGON' &&
+      battlerHasSimAbility(state, attacker, 'ABILITY_BRAWLING_WYVERN', false, attackerId, false, deps.dataContext)
+    ) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
  * Infiltrates(battlerAtk, move, moveType, INFILTRATE_SUBSTITUTE), src/battle_script_commands.c:12246-12250.
  * Runs onInfiltrate hooks and checks (result & INFILTRATE_SUBSTITUTE).
  * - Infiltrator and aliases (Duality, King of the Jungle, Marine Apex) return SCREENS | SUBSTITUTE.
@@ -1843,7 +1904,10 @@ export function getMoveEffectChance(
   moveEffect: number,
   baseChance: number,
   deps: StatusDeps,
-  unmodelled?: string[],
+  // Kept for the call sites' positional shape. Corrupted Mind (resolved GET_MOVE_TYPE) and
+  // Precise Fist/Way of Precision (isPunchMove -> DoesMoveMatchFlag) are now modelled, so this
+  // function no longer raises a note.
+  _unmodelled?: string[],
 ): number {
   // battle_script_commands.c:3073:
   // if (moveEffect == MOVE_EFFECT_FLINCH && gTurnStructs[gBattlerAttacker].parentalBondOn < gTurnStructs[gBattlerAttacker].parentalBondInitialCount) return 0;
@@ -1862,8 +1926,17 @@ export function getMoveEffectChance(
 
   const moveData = moveId ? deps.dataContext.move(moveId) : null
   const moveType = moveData?.type ?? null
-  const isPsychic = moveType === 'PSYCHIC' || moveType === 'TYPE_PSYCHIC'
-  const isPunch = moveData?.flags?.punchBased === true
+  // Corrupted Mind reads GET_MOVE_TYPE (src/abilities.cc:9468), the RESOLVED/dynamic type
+  // (include/battle.h:735), not the declared gBattleMoves[move].type, so an "-ate" retype
+  // counts. Resolve it the way isKeenEdgeMove does above.
+  const resolvedMoveType =
+    attacker && moveId && moveType
+      ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveType, moveData?.flags ?? {}).moveType
+      : moveType
+  const isPsychic = resolvedMoveType === 'PSYCHIC' || resolvedMoveType === 'TYPE_PSYCHIC'
+  // Precise Fist/Way of Precision call IsIronFistBoosted (src/abilities.cc:4764), i.e.
+  // DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH), so the onModifyMoveFlags grants count too.
+  const isPunch = isPunchMove(state, attackerId, moveId, deps)
   // ON_ABILITY(abilityBattler, TRUE, ...) (:3082): the attacker's Mold Breaker can break another battler's
   // breakable hook (Bad Luck is breakable).
   const attackerHasMoldBreaker = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
@@ -1889,10 +1962,6 @@ export function getMoveEffectChance(
       if (isSimAbilitySuppressed(state, abilityBattler, abilityId, true, attackerId, attackerHasMoldBreaker, deps.dataContext)) {
         continue
       }
-      if (isAttacker && (abilityId === 'ABILITY_CORRUPTED_MIND' || abilityId === 'ABILITY_PRECISE_FIST' || abilityId === 'ABILITY_WAY_OF_PRECISION')) {
-        unmodelled?.push(`GetMoveEffectChance: ${abilityId} reads GET_MOVE_TYPE / DoesMoveMatchFlag(MOVE_FLAG_PUNCH); this uses the base type and flags.punchBased`)
-      }
-
       if (isAttacker) {
         if (abilityId === 'ABILITY_ANGELS_WRATH') {
           if (moveId === 'MOVE_POISON_STING') chance = 100
