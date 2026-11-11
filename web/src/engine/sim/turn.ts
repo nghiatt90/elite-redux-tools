@@ -274,6 +274,7 @@ import {
 import { runBattleEvents } from './battleEvents'
 import { runLegacyPostHit, runLegacyPreHit } from './hitScripts'
 import { SOUNDPROOF_ABILITIES } from './ai/aiAbilityHelpers'
+import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
 
 /**
  * Cmd_setsemiinvulnerablebit, src/battle_script_commands.c:11541-11566.
@@ -2326,22 +2327,38 @@ export function executeAction(
   // runMoveEndBookkeeping performs. Callers dispatch first, then bookkeep, and merge the result
   // into their ActionOutcome exactly as the status-move site (turn.ts:2673-2692) does.
   // `targetIdForDispatch === null` means the sim has no target at all; otherwise the C's
-  // gBattlerTarget is the target the controller returned at selection
-  // (battle_controller_opponent.c:1600-1601, 1625-1626): for MOVE_TARGET_USER / USER_OR_SELECTED
-  // that is the ATTACKER, not the foe the AI's action.target names. MOVE_TARGET_ALLY picks the
-  // live partner, else the attacker (battle_util.c:283-287). MOVE_CURSE uses getMoveTarget's own
-  // rule (:6353-6360): SELECTED for a Ghost (or under fog), USER otherwise.
+  // gBattlerTarget is the target returned by the controller at selection:
+  // - Opponent (battle_controller_opponent.c:1598-1601, 1625-1626): reads static gBattleMoves[].target,
+  //   no Curse special case or dynamic flags; MOVE_TARGET_USER / USER_OR_SELECTED -> gActiveBattler.
+  // - Player (battle_controller_player.c:2385-2398): MOVE_CURSE checks Ghost/fog; other moves use
+  //   dynamic GetBattlerBattleMoveTargetFlags (battle_util.c:128-150); moveTarget & MOVE_TARGET_USER
+  //   -> gActiveBattler, leaving USER_OR_SELECTED on the foe.
+  // MOVE_TARGET_ALLY picks the live partner, else the attacker (battle_util.c:283-287).
   const resolveMoveEndDispatchTarget = (
     targetIdForDispatch: number,
     moveId: string,
     moveDataForDispatch: SimMoveData | undefined,
   ): number => {
-    let moveTarget = moveDataForDispatch?.target ?? 'SELECTED'
-    if (moveId === 'MOVE_CURSE') {
-      const attackerMon = state.battlers[battlerId]?.mon
-      const isGhost = attackerMon?.types.includes('GHOST') ?? false
-      moveTarget = isGhost || isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) ? 'SELECTED' : 'USER'
+    const isPlayerSide = (battlerId & 1) === 0
+    if (isPlayerSide) {
+      const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+      let moveTarget: string
+      if (moveId === 'MOVE_CURSE') {
+        const attackerMon = state.battlers[battlerId]?.mon
+        const isGhost = attackerMon?.types.includes('GHOST') ?? false
+        moveTarget = isGhost || isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) ? 'SELECTED' : 'USER'
+      } else {
+        moveTarget = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveDataForDispatch, deps, statusDeps)
+      }
+      if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY') return battlerId
+      if (moveTarget === 'ALLY') {
+        const partner = battlerId ^ 2
+        return isBattlerAlive(state, partner) ? partner : battlerId
+      }
+      return targetIdForDispatch
     }
+
+    const moveTarget = moveDataForDispatch?.target ?? 'SELECTED'
     if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'USER_OR_SELECTED') return battlerId
     if (moveTarget === 'ALLY') {
       const partner = battlerId ^ 2
