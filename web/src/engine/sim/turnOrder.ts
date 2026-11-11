@@ -182,6 +182,9 @@ export interface ChosenAction {
   /** The battler id GetFullChosenTarget resolves to -- only read by
    * EFFECT_THIEF's item comparison at battle_main.c:4270. */
   target: number | null
+  /** Set when HandleAction_UseMove re-derived gBattlerTarget with
+   * GetMoveTarget(attacker, move, 0) (battle_util.c:226, :236). */
+  targetFromGetMoveTarget?: boolean
   /** `RET_MEGA_EVOLUTION` (battle_controller_opponent.c:1609, battle_main.c:3917-3918).
    * Sets gBattleStruct->mega.toEvolve for this battler. */
   mega?: boolean

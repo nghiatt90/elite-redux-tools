@@ -863,7 +863,9 @@ export function getMoveTarget(
   if (setTarget) {
     moveTarget = moveData?.target ?? 'SELECTED'
   } else {
-    moveTarget = moveData?.target ?? 'SELECTED'
+    // setTarget == 0 reads the DYNAMIC flags, battle_util.c:6350.
+    const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+    moveTarget = getBattlerBattleMoveTargetFlags(state, attacker, moveId, moveData, deps, statusDeps)
   }
 
   // Special cases (src/battle_util.c:6353-6360)
@@ -1976,7 +1978,7 @@ function moveViewFor(
  * Encore. Selection (battle_main.c:3689-3691) replaces an encored battler's chosen move with
  * encoredMove before turn order is computed; HandleAction_UseMove (battle_util.c:221-236) keeps
  * it, or -- when the slot no longer holds the encored move -- uses that slot's move and ends the
- * encore. The sim keeps the caller's target rather than re-running GetMoveTarget.
+ * encore. Both branches re-derive gBattlerTarget with GetMoveTarget (battle_util.c:226, :236).
  */
 function applyEncore(state: BattleState, battlerId: number, action: ChosenAction | null, deps: TurnLoopDeps): ChosenAction | null {
   const battler = state.battlers[battlerId]
@@ -1988,9 +1990,15 @@ function applyEncore(state: BattleState, battlerId: number, action: ChosenAction
     v.encoredMovePos = 0
     v.encoreTimer = 0
   }
-  if (!slotMove || slotMove === action.chosenMove.id) return action
-  const view = moveViewFor(action.chosenMove, slotMove, deps, state, battlerId)
-  return { ...action, chosenMove: view, moveToBeUsed: view }
+  if (!slotMove) return action
+  const view = slotMove === action.chosenMove.id ? action.chosenMove : moveViewFor(action.chosenMove, slotMove, deps, state, battlerId)
+  return {
+    ...action,
+    chosenMove: view,
+    moveToBeUsed: view,
+    target: getMoveTarget(state, battlerId, slotMove, deps),
+    targetFromGetMoveTarget: true,
+  }
 }
 
 /**
@@ -2339,6 +2347,11 @@ export function executeAction(
     moveId: string,
     moveDataForDispatch: SimMoveData | undefined,
   ): number => {
+    // HandleAction_UseMove already applied GetMoveTarget on the Encore path
+    // (battle_util.c:226, :236), including the dynamic flags and the Curse rule;
+    // no controller code runs after it before MOVEEND_ABILITIES
+    // (battle_script_commands.c:4527-4531).
+    if (action?.targetFromGetMoveTarget) return targetIdForDispatch
     const isPlayerSide = (battlerId & 1) === 0
     if (isPlayerSide) {
       const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
