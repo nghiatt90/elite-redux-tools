@@ -71,8 +71,12 @@ const DISTINCT_SCRIPTS = 322
  * evidence was the noisiest part of the inventory (2099 of 4044 pairs), so the kind, its
  * classifier and its pins are gone. `TOTAL_PAIRS` and both unported counts drop accordingly:
  * 1442 -> 239 unported (the flag kind contributed 1203 unported pairs), with 1945 pairs total.
+ *
+ * Cycle 150ibcd3: 237 -> 236. The flag-consumer sweep's Leafage block in
+ * `cycle150ibcd3FlagConsumers.test.ts` (Chestnut Axe grants KEEN_EDGE, so Sinister Claws
+ * drops the target's SpD) names an effect-less move, so its pair became ported.
  */
-export const UNPORTED_PAIR_COUNT = 237
+export const UNPORTED_PAIR_COUNT = 236
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -83,9 +87,10 @@ export const UNPORTED_PAIR_COUNT = 237
  * three legacy-script labels above (`BattleScript_EffectCalmMind`, `...MistyTerrain`,
  * `...PsychicTerrain`) moved from opcode gaps to registered-but-untested. Cycle 151e removes
  * the flag kind and its 2099 pairs, so the pin drops to the non-flag remainder: 1314 -> 119
- * (the flag kind contributed 1195 registered-but-untested pairs).
+ * (the flag kind contributed 1195 registered-but-untested pairs). Cycle 150ibcd3: 117 -> 116 --
+ * the new Leafage block above is the only change, leaving the `<effect-less>` list at 85.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 117
+export const REGISTERED_UNTESTED_PAIR_COUNT = 116
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0

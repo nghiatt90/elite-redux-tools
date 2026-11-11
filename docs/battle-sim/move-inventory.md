@@ -108,8 +108,8 @@ line in `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c` (`--
 | `move-effect` | 888 | 880 | 2 | 2 | 0 | 6 |
 | `secondary-effect` | 314 | 299 | 15 | 15 | 0 | 0 |
 | `legacy-script` | 600 | 460 | 14 | 134 | 0 | 6 |
-| `effect-less` | 143 | 57 | 86 | 86 | 0 | 0 |
-| **total** | **1945** | **1696** | **117** | **237** | **0** | **12** |
+| `effect-less` | 143 | 58 | 85 | 85 | 0 | 0 |
+| **total** | **1945** | **1697** | **116** | **236** | **0** | **12** |
 
 Unported includes registered-but-untested. C/script locations cited: 378.
 
@@ -204,7 +204,7 @@ One line per unit. Move count is the number of distinct moves carrying the unit 
 15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
 has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
 
-- `<effect-less>` (registered, untested): 86 moves (first 15): `MOVE_ACCELEROCK`, `MOVE_AIR_CUTTER`, `MOVE_ASTEROID_DOWNFALL`, `MOVE_ASTRAL_BARRAGE`, `MOVE_BLAST_BURN`, `MOVE_BLOOD_MOON`, `MOVE_BRUTAL_SWING`, `MOVE_BULLET_PUNCH`, `MOVE_CLAY_DART`, `MOVE_CORROSIVE_GAS`, `MOVE_DAZZLING_GLEAM`, `MOVE_DIAMOND_ARROW`, `MOVE_DISARMING_VOICE`, `MOVE_DRAKE_MISSILE`, `MOVE_DYNAMAX_CANNON`; 455 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_MIKE`
+- `<effect-less>` (registered, untested): 85 moves (first 15): `MOVE_ACCELEROCK`, `MOVE_AIR_CUTTER`, `MOVE_ASTEROID_DOWNFALL`, `MOVE_ASTRAL_BARRAGE`, `MOVE_BLAST_BURN`, `MOVE_BLOOD_MOON`, `MOVE_BRUTAL_SWING`, `MOVE_BULLET_PUNCH`, `MOVE_CLAY_DART`, `MOVE_CORROSIVE_GAS`, `MOVE_DAZZLING_GLEAM`, `MOVE_DIAMOND_ARROW`, `MOVE_DISARMING_VOICE`, `MOVE_DRAKE_MISSILE`, `MOVE_DYNAMAX_CANNON`; 455 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_MIKE`
 
 ## Allowlisted Pairs
 
