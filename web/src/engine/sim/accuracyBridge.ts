@@ -64,7 +64,7 @@ import {
   isSimAbilitySuppressed,
 } from './statBuffs'
 import { isKeenEdgeMove, isStrikerMove } from './statusEffects'
-import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
+import { getBattlerBattleMoveTargetFlags, isMegaLauncherBoostedMove } from './moveTargetFlags'
 import { getAbilityStateOf } from './endTurn'
 import { getSingleUseAbilityCounter, setSingleUseAbilityCounter } from './switchInAbility'
 
@@ -207,13 +207,11 @@ export function buildAccuracyInputs(
   // onModifyMoveFlags abilities (abilities.cc:374-388). Gunman is the only one
   // of those that answers TRUE for MEGA_LAUNCHER (abilities.cc:9533-9543: a
   // status move), so a Gunman holder's status moves count as Mega-Launcher
-  // boosted for Artillery/Deadeye/Super Scope. The other onModifyMoveFlags
-  // abilities (Brawling Wyvern PUNCH, Junshi Sanda PUNCH/KICK, Mixed Martial
-  // Arts PUNCH/KICK, Rite of Passage/Festivities DANCE/SOUND, Musical Notes,
-  // Reverbate, Taekkyeon) never grant MEGA_LAUNCHER and are not consulted.
-  const moveFlagMegaLauncher =
-    Boolean(move?.flags.bulletBased) ||
-    (move?.split === 'STATUS' && battlerHasSimAbility(state, attacker, 'ABILITY_GUNMAN', false, attackerId, false, deps.dataContext))
+  // boosted for Artillery/Deadeye/Super Scope. moveTargetFlags.ts's
+  // isMegaLauncherBoostedMove is that port; cycle 150ibcd3 replaced the
+  // hand-rolled `flags.bulletBased || Gunman-status` copy here with it so this
+  // accuracy consumer reads the same predicate as the rest of the sim.
+  const moveFlagMegaLauncher = isMegaLauncherBoostedMove(state, attackerId, move, deps)
 
   // GetTotalAccuracy runs its onAccuracy loop (:1354-1362) BEFORE the damage
   // step, so Fatal Precision and its aliases (abilities.cc:4397-4407) need

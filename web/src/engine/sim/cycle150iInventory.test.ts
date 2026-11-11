@@ -48,18 +48,20 @@ function removeBranch(source: string, marker: string): string {
 // ---------------------------------------------------------------------------
 
 describe('Cycle 150i (1) - onModifyMoveFlags needs a wired consumer, not just a predicate branch', () => {
-  it('ships an empty wired list, so no onModifyMoveFlags pair is ported', () => {
-    expect(MOVE_FLAG_CONSUMERS_WIRED).toEqual([])
-    expect(PORTED_MODIFY_MOVE_FLAGS_ABILITIES.size).toBe(0)
+  it('ships all six wired families, so every onModifyMoveFlags pair is ported', () => {
+    // Cycle 150ibcd3 completed the per-family consumer sweep: no C consumer of DoesMoveMatchFlag
+    // still reads a static move flag for any of the six families.
+    expect(MOVE_FLAG_CONSUMERS_WIRED).toEqual(['punch', 'kick', 'sound', 'dance', 'keenEdge', 'megaLauncher'])
+    expect(PORTED_MODIFY_MOVE_FLAGS_ABILITIES.size).toBe(10)
     expect(extractModifyMoveFlagsAbilities()).toEqual(PORTED_MODIFY_MOVE_FLAGS_ABILITIES)
   })
 
-  it('Musical Notes stays unported with the empty default even though isSoundMove has its branch', () => {
+  it('Musical Notes is ported now that SOUND is wired, and the branch is what carries it', () => {
     // The branch exists (the predicate mentions the ability) ...
     expect(statusEffectsSource).toContain("battlerHasSimAbility(state, attacker, 'ABILITY_MUSICAL_NOTES'")
-    // ... but no consumer reads isSoundMove for the damage path, so it is not a port.
-    expect(isDirectlyPorted('ABILITY_MUSICAL_NOTES', 'onModifyMoveFlags')).toBe(false)
-    expect(extractModifyMoveFlagsAbilities().has('ABILITY_MUSICAL_NOTES')).toBe(false)
+    // ... and SOUND's consumers read isSoundMove, so the pair ports.
+    expect(isDirectlyPorted('ABILITY_MUSICAL_NOTES', 'onModifyMoveFlags')).toBe(true)
+    expect(extractModifyMoveFlagsAbilities().has('ABILITY_MUSICAL_NOTES')).toBe(true)
   })
 
   it('with SOUND wired, the extractor ports Musical Notes only while its branch exists', () => {

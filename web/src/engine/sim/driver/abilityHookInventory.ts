@@ -771,21 +771,58 @@ export function extractMoveFlagPredicateAbilities(source: string, declaration: s
 }
 
 /**
- * The move-flag families whose damage/immunity *consumers* read the sim predicate instead of the
- * static move flag. Empty: the predicates all have their returning-true branches and their
- * damage-path consumers use them (the Keen Edge and Striker multipliers go through
- * `matchesMoveFlag`, Punk Rock/Amplifier through `matchesMoveFlag('sound', 'NORMAL')`, and cycle
- * 150ibc routed Soundproof's `onImmune` and Dual Wield's/Raging Boxer's `onParentalBond` through
- * it too), but two families still have an incomplete consumer sweep, so none is wired end to end:
- * dance -- move-end Dancer now copies through `isDanceMove`, but the per-family sweep that would
- * list DANCE is queued; and
- * keenEdge -- Cutthroat's priority (`TurnOrderMoveView.isKeenEdge`, hard-coded false by both
- * action builders). PUNCH now has a predicate (`isPunchMove`, cycle 150ibcc) and the effect-chance
- * read uses it, but its per-family consumer sweep is still queued. A later cycle that ports the
- * remaining consumers adds the families here; until then every onModifyMoveFlags pair stays
- * unported.
+ * The move-flag families whose damage/immunity *consumers* read a predicate that falls through to
+ * the ability-granted flag instead of the static move flag. All six were swept in cycle 150ibcd3,
+ * C consumer by C consumer, against `DoesMoveMatchFlag` (src/abilities.cc:358-386) and the six
+ * `Is*` wrappers it backs (src/battle_util.c:9245 IsDance, :9373 IsMegaLauncherBoosted, :9375
+ * IsIronFistBoosted, :9377 IsStrikerBoosted, :9379 IsSoundMove, :9381 IsKeenEdge):
+ *
+ * - punch -- every consumer goes through `DoesMoveMatchFlag`: Iron Fist's multiplier
+ *   (abilities.cc:1534), Power Fists (:3694), Raging Boxer (:4162), Hammer Fist (:11529) and
+ *   Precise Fist's effect chance (:4759-4764) read `matchesMoveFlag('punchBased', ...)` or the sim
+ *   predicate `isPunchMove`; Blitz Boxer's priority (:3727), the Punching Glove contact check
+ *   (battle_util.c:6564), the Punching Glove damage bonus (:7659), Icicle Fist (:12503) and
+ *   Vitality Strike (:8550) read `dispatchCalc.isIronFistBoosted`, the port of the C helper itself
+ *   (dummy TYPE_NORMAL, then the user's `onModifyMoveFlags` slots).
+ * - kick -- Striker's multiplier (abilities.cc:4609) and Roundhouse's choose-stat hooks
+ *   (:5074, :5079) read `matchesMoveFlag('kickBased', 'NORMAL')`; Sharp Talons' bleed (:11348) and
+ *   the accuracy `moveFlagStriker` read (accuracyBridge.ts:259) use `isStrikerMove`.
+ * - sound -- Soundproof's `onImmune` (abilities.cc:1054), Liquid Voice (:2793), Punk Rock
+ *   (:3307, :3311), Loud Bang (:3902), Amplifier (:4804), Parroting (:6883), Radio Jam (:7548),
+ *   Beautiful Music (:7842), Resonance (:7875), Piercing Solo (:8015), Chunky Bass Line (:8029),
+ *   Presto (:9400) and Grass Flute (:10073) use `matchesMoveFlag('sound', 'NORMAL')` or
+ *   `isSoundMove`; so do Throat Chop's canceller (battle_util.c:1465, :3482), the moveset filter
+ *   (:1652), Throat Spray (:6114) and `DoesSubstituteBlockMove` (battle_script_commands.c:12254).
+ *   The one static read left is the AI's own (`battle_ai_main.c:771`, `:1180` ->
+ *   aiCheckBadMove.ts:1471); the C AI is static there too, so it stays.
+ * - dance -- all four consumers (Dancer/Samba's `onCopyMove`, abilities.cc:3010; Two Step :6602;
+ *   Blade Dance :9040; Backflip :11589) call `isDanceMove` (cycle 150ibcd2 routed the copy hook).
+ * - keenEdge -- the Keen Edge multiplier (abilities.cc:3676), Sweeping Edge (:5343, :5348), Dual
+ *   Wield (:5488), Mystic Blades (:6491), Molten Blades (:7514), Pinnacle Blade (:8689, :8693),
+ *   Deep Cuts (:9092), Light Saber (:11023), Chainsaw (:11239) and Sinister Claws (:12418) use
+ *   `matchesMoveFlag('sliceBased', <real type>)` or `isKeenEdgeMove`; so do the end-turn read
+ *   (battle_util.c:2826), Pinnacle Blade's protect bypass (:6597) and Cutthroat's priority
+ *   (`battle_main.c:4278` -> `TurnOrderMoveView.isKeenEdge`, computed from `isKeenEdgeMove` by
+ *   every action builder since cycles 150ibcb/150ibcd, not hard-coded false any more).
+ * - megaLauncher -- Mega Launcher's multiplier (abilities.cc:2441), Deadeye (:4771), Artillery
+ *   (:4789, :4794), Pyro Shells (:5008) and Paint Shot (:10715) use
+ *   `matchesMoveFlag('bulletBased', 'NORMAL')`, `isMegaLauncherBoostedMove` or the accuracy
+ *   `moveFlagMegaLauncher` read, which cycle 150ibcd3 changed from a hand-rolled
+ *   `flags.bulletBased || Gunman-status` copy (accuracyBridge.ts) to that predicate. Heal Pulse
+ *   (battle_script_commands.c:7269) was routed in cycle 150ibbd.
+ *
+ * A family missing from this list would still gate its granting pairs out of
+ * `PORTED_MODIFY_MOVE_FLAGS_ABILITIES`; `cycle150ibcd3FlagConsumers.test.ts` pins the list and the
+ * scenario each family's grant changes.
  */
-export const MOVE_FLAG_CONSUMERS_WIRED: readonly MoveFlagFamily[] = []
+export const MOVE_FLAG_CONSUMERS_WIRED: readonly MoveFlagFamily[] = [
+  'punch',
+  'kick',
+  'sound',
+  'dance',
+  'keenEdge',
+  'megaLauncher',
+]
 
 /**
  * The onModifyMoveFlags abilities whose every C-granted flag family is both wired into its consumer
@@ -1326,8 +1363,8 @@ export function isDirectlyPorted(
     case 'onModifyEffectChance':
       return PORTED_MODIFY_EFFECT_CHANCE_ABILITIES.has(abilityId)
     case 'onModifyMoveFlags':
-      // Empty while MOVE_FLAG_CONSUMERS_WIRED is empty, i.e. false for all 10 pairs. A predicate
-      // mentioning the ability is not a port: the damage/immunity consumers still read static flags.
+      // A predicate mentioning the ability is not by itself a port: the pair also needs every
+      // granted family in MOVE_FLAG_CONSUMERS_WIRED (all six since cycle 150ibcd3).
       return PORTED_MODIFY_MOVE_FLAGS_ABILITIES.has(abilityId)
     case 'onModifyTargetFlag':
       return PORTED_TARGET_FLAG_ABILITIES.has(abilityId)
@@ -1593,7 +1630,7 @@ export function generateInventoryDoc(
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.')
   lines.push('14. **onModifyEffectChance**: `abilityId === \'ABILITY_X\'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.')
-  lines.push('15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, PUNCH in `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). `MOVE_FLAG_CONSUMERS_WIRED` is **empty**, so all 10 pairs are unported: every predicate now has its returning-true branch and the sim consumers listed below read the predicates, but the consumer sweep is incomplete (dance and keenEdge still have sites that test the static move flag, listed below), so the ability\'s grant changes nothing at that site. Cycle 150ibbd routed Heal Pulse\'s attacker read (`battle_script_commands.c:7269`), Throat Spray (`battle_util.c:6114`) and Pinnacle Blade\'s protect bypass (`battle_util.c:6597`) through the predicates, and removed `isSoundMove`/`isKeenEdgeMove`\'s `DoesMoveMatchFlag` gap notes because Festivities/Musical Notes/Reverbate and Chestnut Axe are the only grants for those families. Cycle 150ibc added `matchesMoveFlag` to the onChooseOffensiveStat/onChooseDefensiveStat/onCrit/onImmune/onParentalBond contexts and routed Soundproof\'s `onImmune` (`src/abilities.cc:1054`, ATTACKER slots), Dual Wield\'s and Raging Boxer\'s `onParentalBond` (`:5488`, `:4162`), Roundhouse\'s `onChooseDefensiveStat` (`:5074`), Magical Fists\'/Power Fists\' choose-stat hooks (`:9158`, `:3691`) and Precise Fist\'s `onCrit` (`:4757`, holder slots) through it. The remaining unwired consumers: (a) dance -- move-end Dancer now copies through `isDanceMove` (cycle 150ibcd2), but the per-family consumer sweep that would list DANCE in `MOVE_FLAG_CONSUMERS_WIRED` is still queued (cycle 150ibcd3); (b) keenEdge -- Cutthroat\'s +1 priority reads `TurnOrderMoveView.isKeenEdge`, which both action builders hard-code to `false` (`web/src/engine/sim/turnOrder.ts:437`, `web/src/engine/sim/driver/session.ts:151`, `web/src/engine/sim/turn.ts:4441`; C `battle_main.c:4278`). Cycle 150ibcc added PUNCH\'s predicate, `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), and routed `getMoveEffectChance`\'s Precise Fist/Way of Precision read (`src/abilities.cc:4762-4765`, `IsIronFistBoosted` at `src/battle_util.c:9375`) through it; the per-family consumer sweep that would add `punch` to `MOVE_FLAG_CONSUMERS_WIRED` is queued, so a hook that grants PUNCH stays unported this cycle.')
+  lines.push('15. **onModifyMoveFlags**: `MODIFY_MOVE_FLAGS_GRANTS` records the `MOVE_FLAG_*` families each hook grants, read from `src/abilities.cc` at the pinned SHA. A pair is ported only when **every** granted family is listed in `MOVE_FLAG_CONSUMERS_WIRED` **and** has a returning-true `battlerHasSimAbility` branch for that ability in the matching sim predicate: SOUND in `isSoundMove`, KEEN_EDGE in `isKeenEdgeMove`, KICK in `isStrikerMove`, PUNCH in `isPunchMove` (`web/src/engine/sim/statusEffects.ts`), DANCE in `isDanceMove` (`web/src/engine/sim/moveEnd.ts`), MEGA_LAUNCHER in `isMegaLauncherBoostedMove` (`web/src/engine/sim/moveTargetFlags.ts`). Cycle 150ibcd3 swept every C consumer of `DoesMoveMatchFlag` (`src/abilities.cc:358-386`) and of the six `Is*` wrappers (`src/battle_util.c:9245`, `:9373`, `:9375`, `:9377`, `:9379`, `:9381`) for all six families and wired all of them, so all 10 pairs are ported: punch, kick, sound, dance, keenEdge and megaLauncher. One static-read site changed: the accuracy bridge built `moveFlagMegaLauncher` from `flags.bulletBased` plus a Gunman-status test, and now calls `isMegaLauncherBoostedMove` (`web/src/engine/sim/accuracyBridge.ts`). Consumers that read `dispatchCalc.isIronFistBoosted` (punch: Punching Glove contact, Punching Glove damage, Blitz Boxer priority, Icicle Fist, Vitality Strike) and `matchesMoveFlag` (the calc-side multipliers and hooks) read the same `DoesMoveMatchFlag` port, so the ability-granted bit reaches them. The AI static sound reads (`src/battle_ai_main.c:771`, `:1180` -> `web/src/engine/sim/ai/aiCheckBadMove.ts`) stay because the C AI is static there too. Earlier cycles: 150ibbd routed Heal Pulse (`battle_script_commands.c:7269`), Throat Spray (`battle_util.c:6114`) and Pinnacle Blade (`battle_util.c:6597`); 150ibc added `matchesMoveFlag` to the onChooseOffensiveStat/onChooseDefensiveStat/onCrit/onImmune/onParentalBond contexts; 150ibcc ported PUNCH and the Precise Fist effect chance; 150ibcd2 routed the Dancer/Samba copy hook; cycles 150ibcb/150ibcd made every action builder compute `TurnOrderMoveView.isKeenEdge` with `isKeenEdgeMove` instead of hard-coding false.')
   lines.push('16. **onModifyTargetFlag**: Handled in `getBattlerBattleMoveTargetFlags` (`web/src/engine/sim/moveTargetFlags.ts`).')
   lines.push('17. **onPreemptAction**: Cases in `tryPreemptiveActions` (`web/src/engine/sim/preempt.ts`).')
   lines.push('18. **onReactive**: `abilityId === \'ABILITY_X\'` comparisons inside `runReactiveAbilityEffects` (`web/src/engine/sim/statBuffs.ts`) plus the members of `POISON_PUPPETEER_CLONE_ABILITIES` that appear as `case \'ABILITY_X\'` labels inside `runPoisonPuppeteerClone` (the gate set alone is not evidence: Frostbind and Hemotoxin are in it but only raise a note); note-only branches are unported.')

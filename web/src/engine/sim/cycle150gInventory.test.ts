@@ -344,25 +344,31 @@ describe('Cycle 150g (6b) - onModifyMoveFlags comes from flag predicates', () =>
     ])
   })
 
-  it('no hook is ported while no consumer family is wired', () => {
-    // Cycle 150i: MOVE_FLAG_CONSUMERS_WIRED is empty, so a returning-true predicate branch alone
-    // does not make a port. All 10 pairs stay unported until the consumers read the predicates.
+  it('ports every hook once all six consumer families are wired', () => {
+    // Cycle 150i: a returning-true predicate branch alone is not a port. Cycle 150ibcd3 swept the
+    // consumers for all six families and wired them, so every pair now clears both gates.
     const extracted = extractModifyMoveFlagsAbilities()
     expect(extracted).toEqual(PORTED_MODIFY_MOVE_FLAGS_ABILITIES)
-    expect(extracted.size).toBe(0)
+    expect([...extracted].sort()).toEqual([...definedFor('onModifyMoveFlags')].sort())
+    expect(extracted.size).toBe(10)
     for (const id of definedFor('onModifyMoveFlags')) {
-      expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} has no wired consumer`).toBe(false)
+      expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} has a wired consumer`).toBe(true)
     }
   })
 
-  it('leaves the PUNCH-granting hooks unported: the sim has no PUNCH predicate', () => {
+  it('ports the PUNCH-granting hooks: cycle 150ibcc added isPunchMove and 150ibcd3 wired its consumers', () => {
     for (const id of ['ABILITY_BRAWLING_WYVERN', 'ABILITY_JUNSHI_SANDA', 'ABILITY_MIXED_MARTIAL_ARTS']) {
-      expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} grants PUNCH`).toBe(false)
+      expect(isDirectlyPorted(id, 'onModifyMoveFlags'), `${id} grants PUNCH`).toBe(true)
     }
-    // Junshi Sanda and Mixed Martial Arts do have the KICK half; PUNCH alone would keep them out of
-    // any wired port (today every pair is unported anyway, because no consumer family is wired).
+    // Junshi Sanda and Mixed Martial Arts also have the KICK half, but the KICK predicate matching
+    // them is not what makes them ported -- both need the PUNCH branch too.
     expect(extractMoveFlagPredicateAbilities(statusEffectsSource, 'export function isStrikerMove(').has('ABILITY_JUNSHI_SANDA')).toBe(true)
     expect(extractMoveFlagPredicateAbilities(statusEffectsSource, 'export function isStrikerMove(').has('ABILITY_MIXED_MARTIAL_ARTS')).toBe(true)
+    expect([...extractMoveFlagPredicateAbilities(statusEffectsSource, 'export function isPunchMove(')].sort()).toEqual([
+      'ABILITY_BRAWLING_WYVERN',
+      'ABILITY_JUNSHI_SANDA',
+      'ABILITY_MIXED_MARTIAL_ARTS',
+    ])
   })
 
   it('Reverbate and Mixed Martial Arts compare the loader-normalised bare type, not the raw TYPE_ spelling', () => {
@@ -385,9 +391,8 @@ describe('Cycle 150g (6b) - onModifyMoveFlags comes from flag predicates', () =>
   })
 
   it('deleting the Musical Notes branch from isSoundMove makes it unported; the control keeps it', () => {
-    // The wired list is passed explicitly: with the shipped empty MOVE_FLAG_CONSUMERS_WIRED every
-    // pair is unported regardless of its branch, so the branch-vs-no-branch difference is only
-    // observable for the family a later cycle wires.
+    // The wired list is passed explicitly so this stays a test of the branch gate alone; since
+    // cycle 150ibcd3 the shipped MOVE_FLAG_CONSUMERS_WIRED also contains 'sound'.
     const wired: readonly MoveFlagFamily[] = ['sound']
     expect(extractModifyMoveFlagsAbilities({}, wired).has('ABILITY_MUSICAL_NOTES')).toBe(true)
     const mutated = removeBranch(statusEffectsSource, "battlerHasSimAbility(state, attacker, 'ABILITY_MUSICAL_NOTES'")
@@ -413,7 +418,7 @@ describe('Cycle 150g - real inventory counts for the six hook kinds', () => {
     ['onModifyEffectChance', 13, 13, 0],
     ['onReactive', 18, 10, 8],
     ['onRecoil', 5, 5, 0],
-    ['onModifyMoveFlags', 10, 0, 10],
+    ['onModifyMoveFlags', 10, 10, 0],
   ]
 
   for (const [hook, defined, ported, unported] of expected) {
@@ -423,16 +428,16 @@ describe('Cycle 150g - real inventory counts for the six hook kinds', () => {
     })
   }
 
-  it('total unported is 65: all 10 onModifyMoveFlags pairs are unported again', () => {
+  it('total unported is 55: the 10 onModifyMoveFlags pairs are ported', () => {
     // Cycle 150g had 65 because seven flag-predicate branches counted as ports. Cycle 150i reverts
     // that: the consumers still read the static flags, so the 150b/150f total of 72 was correct.
     // Cycle 162b ports the three remaining onTerrain cases (Harukaze, Generator, Energized),
     // which lowers the total from 72 to 69.
     // Cycle 150ibcd2 ports the four onCopyMove abilities (Dancer, Samba, Parroting, Lunar Affinity), 69 -> 65.
-    expect(result.totalUnported).toBe(65)
+    // Cycle 150ibcd3 completes the onModifyMoveFlags consumer sweep (all six families wired), 65 -> 55.
+    expect(result.totalUnported).toBe(55)
     const unported = result.unportedPairs.filter((p) => p.hook === 'onModifyMoveFlags').map((p) => p.ability).sort()
-    expect(unported).toEqual(definedFor('onModifyMoveFlags'))
-    expect(unported).toHaveLength(10)
+    expect(unported).toEqual([])
   })
 
   it('the generated inventory doc equals the committed docs/battle-sim/ability-hook-inventory.md', () => {
