@@ -152,7 +152,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | --- | --- | --- | --- | --- | --- |
 | `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:245 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` | none |
 | `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none | none |
-| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/session.ts:250` |
+| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/session.ts:251` |
 | `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none | none |
 | `FLAG_TAG_BATTLE` | 26 tagBattles rows across 6 maps in encounters.json (starttagbattle) | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
 | `multi_2_vs_2:MeteorFalls_1F_1R` | MeteorFalls_1F_1R: 6 multi_2_vs_2 calls (:193, :202, :211, :220, :229, :238), opponents Courtney + Grunt, partner May (MAY_TREECKO/TORCHIC/MUDKIP_METEOR_FALLS) or Brendan (BRENDAN_*_METEOR_FALLS); second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1647` | unported | none | none |
