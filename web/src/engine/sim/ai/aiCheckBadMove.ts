@@ -757,7 +757,7 @@ export function getBattlerSideSpeedAverage(state: BattleState, battlerId: number
   return getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
 }
 
-/** CanFling, battle_util.c:8413-8420. `IsItemNegated` (Embargo/Magic Room/
+/** CanFling, battle_util.c:8414-8420. `IsItemNegated` (Embargo/Magic Room/
  * Klutz suppression of fling-eligibility) has no port -- treated as not
  * negated (the common case), gapped by name. The species-locked-item
  * exclusions inside CanBattlerGetOrLoseItem (:8250-8270 -- Enigma Berry,

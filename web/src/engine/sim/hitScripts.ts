@@ -128,7 +128,7 @@ export function runLegacyPreHit(args: LegacyPreHitArgs): LegacyPreHitResult | nu
       return hasNonNegatedBerry(state, attackerId, deps) ? pass : fail
 
     case 'EFFECT_FLING': {
-      // VARIOUS_TRY_FLING, :8402-8433. CanFling, battle_util.c:8413-8420. The item leaves the slot now; its id is kept in
+      // VARIOUS_TRY_FLING, :8402-8433. CanFling, battle_util.c:8414-8420. The item leaves the slot now; its id is kept in
       // gTurnStructs[].flungItem for the damage (Iron Ball / Big Nugget power, a Gem's type) and for the effect it sets.
       const itemId = attacker.mon.itemId
       const negated = hasFlag(attacker.statuses3, STATUS3_EMBARGO) || battlerHasSimAbility(state, attacker, 'ABILITY_KLUTZ', false, attackerId, false, deps.dataContext)

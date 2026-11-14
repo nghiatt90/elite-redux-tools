@@ -2392,7 +2392,7 @@ export function runInventory(items: ItemRecord[], options: ItemInventoryOptions 
       effect: 'VARIOUS_TRY_FLING',
       site: 'CanFling',
       file: `${UPSTREAM_SRC}/battle_util.c`,
-      citation: canFlingAllow?.cite ?? `${UPSTREAM_SRC}/battle_util.c:8413`,
+      citation: canFlingAllow?.cite ?? `${UPSTREAM_SRC}/battle_util.c:8414`,
       status: canFlingAllow ? 'allowlisted' : canFlingPartial ? 'unported' : canFlingClassification.status,
       registeredUntested: canFlingAllow || canFlingPartial ? false : canFlingClassification.registeredUntested,
       testFile: canFlingClassification.testFile,
