@@ -17,12 +17,17 @@
 // unchanged and every caller passes a superset object.
 
 import type { BattleState } from './state'
-import { STATUS_FIELD_PSYCHIC_TERRAIN, STATUS_FIELD_TOXIC_TERRAIN, hasFlag } from './constants'
+import {
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  WEATHER_FOG_ANY,
+  hasFlag,
+} from './constants'
 import type { SimMoveData } from './dataContext'
 import type { StatusDeps } from './statusEffects'
 import { isBattlerTerrainAffected, isKeenEdgeMove, isSoundMove } from './statusEffects'
 import { isBattlerGrounded } from './grounding'
-import { battlerHasSimAbility } from './statBuffs'
+import { battlerHasSimAbility, isBattlerWeatherAffected } from './statBuffs'
 
 /**
  * IsMegaLauncherBoosted (src/battle_util.c:9373) -> DoesMoveMatchFlag(battler, move, TYPE_NORMAL, MOVE_FLAG_MEGA_LAUNCHER)
@@ -105,4 +110,48 @@ export function getBattlerBattleMoveTargetFlags(
     }
   }
   return flag
+}
+
+/**
+ * The PLAYER controller's target choice at move selection,
+ * src/battle_controller_player.c:2385-2398, returned as a battler id:
+ *
+ *     if (moveInfo->moves[...] == MOVE_CURSE) {
+ *         if (monType1/2/3 == TYPE_GHOST) moveTarget = MOVE_TARGET_SELECTED;
+ *         else if (IsBattlerWeatherAffected(gActiveBattler, WEATHER_FOG_ANY)) moveTarget = MOVE_TARGET_SELECTED;
+ *         else moveTarget = MOVE_TARGET_USER;
+ *     } else {
+ *         moveTarget = GetBattlerBattleMoveTargetFlags(...);
+ *     }
+ *     if (moveTarget & MOVE_TARGET_USER) gMultiUsePlayerCursor = gActiveBattler;
+ *     else gMultiUsePlayerCursor = <opposing side>;
+ *
+ * That id is what `gBattleStruct->moveTarget[]` stores for the turn, and
+ * HandleAction_UseMove (:242) reads it back without re-reading the flags, so the sim
+ * must decide it once, at selection, and not re-derive it at execution.
+ *
+ * The test is a BIT test: `MOVE_TARGET_USER` is set in USER, USER_OR_ALLY
+ * (USER | ALLY) and ALL_BATTLERS (0x100 | USER, include/constants/battle.h:499-501),
+ * but not in USER_OR_SELECTED (0x2). MOVE_TARGET_ALLY on the player side is left to
+ * `battlerId ^ 1` here; the live-partner re-check happens at execution
+ * (battle_util.c:283-287, resolveMoveEndDispatchTarget).
+ */
+export function getPlayerSelectedMoveTarget(
+  state: BattleState,
+  battlerId: number,
+  moveId: string,
+  moveData: SimMoveData | undefined,
+  deps: Pick<StatusDeps, 'dataContext' | 'grounding'>,
+  statusDeps: StatusDeps,
+): number {
+  let moveTarget: string
+  if (moveId === 'MOVE_CURSE') {
+    const isGhost = state.battlers[battlerId]?.mon.types.includes('GHOST') ?? false
+    moveTarget =
+      isGhost || isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) ? 'SELECTED' : 'USER'
+  } else {
+    moveTarget = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveData, deps, statusDeps)
+  }
+  if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'ALL_BATTLERS') return battlerId
+  return battlerId ^ 1
 }

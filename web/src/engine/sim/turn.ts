@@ -2381,15 +2381,22 @@ export function executeAction(
   // runMoveEndBookkeeping performs. Callers dispatch first, then bookkeep, and merge the result
   // into their ActionOutcome exactly as the status-move site (turn.ts:2673-2692) does.
   // `targetIdForDispatch === null` means the sim has no target at all; otherwise the C's
-  // gBattlerTarget is the target returned by the controller at selection:
+  // gBattlerTarget is the target the controller chose at SELECTION:
+  // - Player (battle_controller_player.c:2385-2398): the Curse rule and the dynamic
+  //   GetBattlerBattleMoveTargetFlags (battle_util.c:128-150) decide between self and the foe
+  //   then -- `moveTarget & MOVE_TARGET_USER` -> gActiveBattler, else the opposing side -- and
+  //   that id is stored in gBattleStruct->moveTarget[]. HandleAction_UseMove reads the STORED
+  //   target back (battle_util.c:242) and does not re-read the flags, so the action's target is
+  //   authoritative here: a type or weather change between selection and execution (a
+  //   Trick-or-Treat adding GHOST before a non-Ghost Curse runs) does not move the dispatch.
+  //   The sole exception is the MOVE_TARGET_ALLY re-check at execution, which re-reads dynamic
+  //   flags and picks the live partner, else the attacker (battle_util.c:283-287).
   // - Opponent (battle_controller_opponent.c:1598-1601, 1625-1626): reads static gBattleMoves[].target,
   //   no Curse special case or dynamic flags; MOVE_TARGET_USER / USER_OR_SELECTED -> gActiveBattler.
-  // - Player (battle_controller_player.c:2385-2398): MOVE_CURSE checks Ghost/fog; other moves use
-  //   dynamic GetBattlerBattleMoveTargetFlags (battle_util.c:128-150); moveTarget & MOVE_TARGET_USER
-  //   -> gActiveBattler, leaving USER_OR_SELECTED on the foe.
   // Both controllers test the MOVE_TARGET_USER BIT, so USER, USER_OR_ALLY (USER|ALLY) and
-  // ALL_BATTLERS (0x100|USER, include/constants/battle.h:499-501) all select the attacker.
-  // MOVE_TARGET_ALLY picks the live partner, else the attacker (battle_util.c:283-287).
+  // ALL_BATTLERS (0x100|USER, include/constants/battle.h:499-501) all select the attacker, while
+  // the opponent's mask additionally contains USER_OR_SELECTED. MOVE_TARGET_ALLY picks the live
+  // partner, else the attacker (battle_util.c:283-287), on either side.
   const targetHasUserBit = (flag: string): boolean =>
     flag === 'USER' || flag === 'USER_OR_ALLY' || flag === 'ALL_BATTLERS'
   const resolveMoveEndDispatchTarget = (
@@ -2404,16 +2411,10 @@ export function executeAction(
     if (action?.targetFromGetMoveTarget) return targetIdForDispatch
     const isPlayerSide = (battlerId & 1) === 0
     if (isPlayerSide) {
+      // The stored selection target is authoritative (battle_util.c:242); only the ALLY
+      // re-check reads flags again, and it does so with the move as it is being used now.
       const statusDeps: StatusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
-      let moveTarget: string
-      if (moveId === 'MOVE_CURSE') {
-        const attackerMon = state.battlers[battlerId]?.mon
-        const isGhost = attackerMon?.types.includes('GHOST') ?? false
-        moveTarget = isGhost || isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps) ? 'SELECTED' : 'USER'
-      } else {
-        moveTarget = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveDataForDispatch, deps, statusDeps)
-      }
-      if (targetHasUserBit(moveTarget)) return battlerId
+      const moveTarget = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveDataForDispatch, deps, statusDeps)
       if (moveTarget === 'ALLY') {
         const partner = battlerId ^ 2
         return isBattlerAlive(state, partner) ? partner : battlerId

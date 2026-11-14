@@ -27,7 +27,8 @@ import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
-import { isKeenEdgeMove } from '../statusEffects'
+import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
+import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -136,9 +137,19 @@ export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDama
   }
 }
 
-/** A MOVE action for `moveId` aimed at the other side (or the user for self-targeting moves). */
+/** A MOVE action for `moveId` aimed at the other side (or the user for self-targeting moves).
+ *
+ * The target is the CONTROLLER's choice at selection, which the C stores in
+ * `gBattleStruct->moveTarget[]` and HandleAction_UseMove reads back at execution
+ * (battle_util.c:242) -- it is not a pure function of the static target.
+ * - Player (battle_controller_player.c:2385-2398): getPlayerSelectedMoveTarget, i.e. the
+ *   dynamic flags with the Curse rule and the MOVE_TARGET_USER bit test.
+ * - Opponent (battle_controller_opponent.c:1598-1601): static
+ *   `target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)` -> self.
+ */
 export function buildMoveAction(state: BattleState, data: SimDataBundle, battlerId: number, moveId: string): ChosenAction {
   const mData = data.dataContext.move(moveId)
+  const statusDeps: StatusDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
   const view: TurnOrderMoveView = {
     id: moveId,
     priority: mData?.priority ?? 0,
@@ -151,17 +162,24 @@ export function buildMoveAction(state: BattleState, data: SimDataBundle, battler
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
-    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, {
-      dataContext: data.dataContext,
-      grounding: groundingFor(data, state),
-    }),
+    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, statusDeps),
     naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
       ? naturalGiftPriority(state.battlers[battlerId]?.mon.itemId ?? null)
       : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
   }
-  const target = mData?.target === 'USER' ? battlerId : battlerId ^ 1
+  const staticTarget = mData?.target ?? 'SELECTED'
+  const opponentSelfTargeted =
+    staticTarget === 'USER' ||
+    staticTarget === 'USER_OR_SELECTED' ||
+    staticTarget === 'USER_OR_ALLY' ||
+    staticTarget === 'ALL_BATTLERS'
+  const target = (battlerId & 1) === 0
+    ? getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
+    : opponentSelfTargeted
+      ? battlerId
+      : battlerId ^ 1
   const mega = canMegaEvolve(state, battlerId, data.dataContext)
   return { action: 'USE_MOVE', moveToBeUsed: view, chosenMove: view, target, ...(mega ? { mega: true } : {}) }
 }

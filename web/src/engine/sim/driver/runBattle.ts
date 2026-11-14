@@ -7,7 +7,8 @@ import { PARTY_SIZE } from '../constants'
 import type { BattleOutcome, BattleState, RandomSource, SimPartyMon } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
-import { isKeenEdgeMove } from '../statusEffects'
+import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
+import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { createSession, groundingFor, stepTurn } from './session'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
@@ -97,6 +98,7 @@ export function defaultPlayerPolicy(
 
   const moveIdToUse = bestMoveId ?? 'MOVE_STRUGGLE'
   const mData = data.dataContext.move(moveIdToUse)
+  const statusDeps: StatusDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
   const moveView: TurnOrderMoveView = {
     id: moveIdToUse,
     priority: mData?.priority ?? 0,
@@ -109,10 +111,7 @@ export function defaultPlayerPolicy(
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
-    isKeenEdge: isKeenEdgeMove(state, 0, moveIdToUse, {
-      dataContext: data.dataContext,
-      grounding: groundingFor(data, state),
-    }),
+    isKeenEdge: isKeenEdgeMove(state, 0, moveIdToUse, statusDeps),
     naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
       ? naturalGiftPriority(state.battlers[0]?.mon.itemId ?? null)
       : 0,
@@ -120,7 +119,9 @@ export function defaultPlayerPolicy(
     myceliumMightAffected: false,
   }
 
-  const target = mData?.target === 'USER' ? 0 : 1
+  // The player controller's selection target (battle_controller_player.c:2385-2398), stored in
+  // gBattleStruct->moveTarget[] and read back by HandleAction_UseMove (battle_util.c:242).
+  const target = getPlayerSelectedMoveTarget(state, 0, moveIdToUse, mData, statusDeps, statusDeps)
   const mega = canMegaEvolve(state, 0, data.dataContext)
   return {
     action: 'USE_MOVE',

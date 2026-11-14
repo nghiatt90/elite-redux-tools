@@ -344,6 +344,12 @@ describe('Cycle 150hb - MOVEEND_ABILITIES dispatch follows the acting controller
   //    player controller tests `& MOVE_TARGET_USER`.
   // -------------------------------------------------------------------------
 
+  // [cycle150hbd] These two tests pass the controller's SELECTION target as the action's
+  // `target`, not the static SELECTED target: battle_controller_player.c:2392-2397 turns
+  // Rain Dance's dynamic MOVE_TARGET_USER into `gMultiUsePlayerCursor = gActiveBattler`,
+  // and HandleAction_UseMove reads that stored id back (battle_util.c:242) instead of
+  // re-reading the flags. resolveMoveEndDispatchTarget no longer re-derives it. See
+  // getPlayerSelectedMoveTarget (moveTargetFlags.ts), which now builds the id at selection.
   it('2a: player Rain Dance dispatches on the user (own Crispy Cream draws once)', () => {
     // battle_controller_player.c:2392-2397 -> battle_util.c:134-139: no Forecast
     // means MOVE_TARGET_USER, so gMultiUsePlayerCursor = gActiveBattler.
@@ -352,20 +358,20 @@ describe('Cycle 150hb - MOVEEND_ABILITIES dispatch follows the acting controller
         { hp: 300, spe: 200, moves: ['MOVE_RAIN_DANCE', null, null, null], pp: [10, 0, 0, 0], abilities: hasAbility('ABILITY_CRISPY_CREAM') },
         { hp: 300, spe: 50 },
       ],
-      [useMove(1, move('MOVE_RAIN_DANCE')), null],
+      [useMove(0, move('MOVE_RAIN_DANCE')), null],
     )
     expect(rng.calls).toBe(1)
   })
 
   it('2b: player Rain Dance does not dispatch on the foe (foe Crispy Cream draws none)', () => {
-    // The parent commit read the static SELECTED target here and would have drawn on
-    // battler 1; the dynamic USER flag moves the dispatch to battler 0.
+    // The static SELECTED in moves.json is never the player controller's target here: the
+    // dynamic USER flag moved the selection to battler 0, which this test stores.
     const { rng } = runTurn(
       [
         { hp: 300, spe: 200, moves: ['MOVE_RAIN_DANCE', null, null, null], pp: [10, 0, 0, 0] },
         { hp: 300, spe: 50, abilities: hasAbility('ABILITY_CRISPY_CREAM') },
       ],
-      [useMove(1, move('MOVE_RAIN_DANCE')), null],
+      [useMove(0, move('MOVE_RAIN_DANCE')), null],
     )
     expect(rng.calls).toBe(0)
   })
@@ -427,13 +433,16 @@ describe('Cycle 150hb - MOVEEND_ABILITIES dispatch follows the acting controller
   // -------------------------------------------------------------------------
 
   it('4a: player non-Ghost Curse dispatches on the user', () => {
-    // battle_controller_player.c:2389-2396: no Ghost and no fog -> MOVE_TARGET_USER.
+    // battle_controller_player.c:2389-2396: no Ghost and no fog -> MOVE_TARGET_USER, so
+    // gMultiUsePlayerCursor = gActiveBattler and that id is what the action stores
+    // (battle_util.c:242). [cycle150hbd] The target below is the selection target 0, not
+    // the static SELECTED 1: the sim no longer re-derives it at execution.
     const { rng } = runTurn(
       [
         { hp: 300, spe: 200, moves: ['MOVE_CURSE', null, null, null], pp: [10, 0, 0, 0], abilities: hasAbility('ABILITY_CRISPY_CREAM') },
         { hp: 300, spe: 50 },
       ],
-      [useMove(1, move('MOVE_CURSE')), null],
+      [useMove(0, move('MOVE_CURSE')), null],
     )
     expect(rng.calls).toBe(1)
   })

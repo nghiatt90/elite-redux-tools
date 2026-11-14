@@ -23,11 +23,19 @@
 // BEFORE anything else and only then gates on targetDamage > 0, so one rng draw from a
 // dispatch = MOVEEND_ABILITIES ran on that battler holding it, zero = it did not.
 //
-// Reversion note: tests 1, 2, 3 and 4 exercise the helper directly -- tests 1/3 fail
-// without it (the foe, not the holder, is dispatched, so the holder draws zero) and
-// tests 2/4 fail without it (the holder, not the foe-attacker, is dispatched, so the
-// holder draws one). Test 5 is the regression guard for a plain SELECTED move, which the
-// helper deliberately leaves on targetIdForDispatch.
+// Reversion note: tests 1 and 2 exercise the helper directly on the opponent branch --
+// test 1 fails without it (the foe, not the holder, is dispatched, so the holder draws
+// zero) and test 2 fails without it (the holder, not the foe-attacker, is dispatched, so
+// the holder draws one). Test 5 is the regression guard for a plain SELECTED move, which
+// the helper deliberately leaves on targetIdForDispatch.
+//
+// [cycle150hbd] Tests 3 and 4 used to store the static opposing side as the action target
+// and rely on this helper to move a player ALL_BATTLERS dispatch onto the user. The action
+// built by buildMoveAction now stores the controller's SELECTION target instead
+// (battle_controller_player.c:2394-2398 -> gBattleStruct->moveTarget[]; HandleAction_UseMove
+// reads it back at battle_util.c:242), and resolveMoveEndDispatchTarget no longer re-derives
+// it, so both now store 0. The player-side ALL_BATTLERS bit test is pinned by
+// cycle150hbdPlayerTarget.test.ts (helper test 3 and buildMoveAction test 9) instead.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -321,13 +329,16 @@ describe('Cycle 150hbc - ALL_BATTLERS carries the MOVE_TARGET_USER bit', () => {
     // GetBattlerBattleMoveTargetFlags (moveTargetFlags.ts:51), which passes the
     // ALL_BATTLERS string through, then tests `moveTarget & MOVE_TARGET_USER`
     // (battle.h:501: ALL_BATTLERS = 0x100 | USER) -> gActiveBattler (battler 0).
+    // [cycle150hbd] The action below therefore stores the selection target 0, not the
+    // static opposing side: HandleAction_UseMove reads the stored id back
+    // (battle_util.c:242) and resolveMoveEndDispatchTarget no longer re-derives it.
     // One Crispy Cream coin, then the targetDamage gate: exactly one draw.
     const { rng } = runTurn(
       [
         { hp: 300, spe: 100, moves: ['MOVE_HAZE', null, null, null], pp: [20, 0, 0, 0], abilities: hasAbility('ABILITY_CRISPY_CREAM') },
         { hp: 300, spe: 50 },
       ],
-      [useMove(1, move('MOVE_HAZE')), null],
+      [useMove(0, move('MOVE_HAZE')), null],
     )
     expect(rng.calls).toBe(1)
   })
@@ -335,12 +346,14 @@ describe('Cycle 150hbc - ALL_BATTLERS carries the MOVE_TARGET_USER bit', () => {
   it('4: the same player Haze does not dispatch on the foe (foe Crispy Cream draws none)', () => {
     // gBattlerTarget is the player's own battler 0, which has no abilities: zero draws.
     // Reverting the bit test dispatches on the selected foe (battler 1) and this becomes 1.
+    // [cycle150hbd] Stored target 0 = the selection target (battle_controller_player.c:2394-2398),
+    // read back by HandleAction_UseMove (battle_util.c:242).
     const { rng } = runTurn(
       [
         { hp: 300, spe: 100, moves: ['MOVE_HAZE', null, null, null], pp: [20, 0, 0, 0] },
         { hp: 300, spe: 50, abilities: hasAbility('ABILITY_CRISPY_CREAM') },
       ],
-      [useMove(1, move('MOVE_HAZE')), null],
+      [useMove(0, move('MOVE_HAZE')), null],
     )
     expect(rng.calls).toBe(0)
   })
