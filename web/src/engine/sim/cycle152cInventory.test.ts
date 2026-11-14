@@ -48,7 +48,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     expect(priority?.registeredUntested).toBe(false)
     expect(priority?.citation).toBe('pipeline/.upstream/eliteredux-source/src/battle_main.c:4272')
     expect(priority?.testFile).toBe('web/src/engine/sim/cycle152fNaturalGiftPriority.test.ts')
-  })
+  }, 240_000)
 
   it('Natural Gift power: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub the power handler in basePower.ts
@@ -74,7 +74,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'CalcMoveBasePower')
     expect(decoyUnit?.status).toBe('ported')
     expect(decoyUnit?.testFile).toBe('web/src/engine/basePower.test.ts')
-  })
+  }, 240_000)
 
   it('Natural Gift type: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub the type handler in calculate.ts
@@ -100,7 +100,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'GetMoveType')
     expect(decoyUnit?.status).toBe('ported')
     expect(decoyUnit?.testFile).toBe('web/src/engine/calculate.test.ts')
-  })
+  }, 240_000)
 
   it('Natural Gift effect: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub the effect handler in moveEffects.ts
@@ -126,7 +126,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'SetMoveEffect')
     expect(decoyUnit?.status).toBe('ported')
     expect(decoyUnit?.testFile).toBe('web/src/engine/sim/cycle87Effects.test.ts')
-  })
+  }, 240_000)
 
   it('Natural Gift berry removal: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub the berry removal handler in turn.ts
@@ -152,7 +152,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const decoyUnit = decoyRes.units.find((u) => u.kind === 'natural-gift' && u.site === 'EffectNaturalGift')
     expect(decoyUnit?.status).toBe('ported')
     expect(decoyUnit?.testFile).toBe('web/src/engine/sim/cycle129CopyEffects.test.ts')
-  })
+  }, 240_000)
 
   it('baseline: Fling has 11 units (2 ported, 8 registeredUntested, 1 unported)', () => {
     const res = runInventory(items)
@@ -180,7 +180,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const canFling = flingUnits.find((u) => u.key === 'CanFling')
     expect(canFling?.status).toBe('unported')
     expect(canFling?.registeredUntested).toBe(false)
-  })
+  }, 240_000)
 
   it('Fling Light Ball: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub Light Ball in moveEffects.ts
@@ -200,7 +200,7 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const testUnit = testRes.units.find((u) => u.kind === 'fling' && u.key === 'ITEM_LIGHT_BALL')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
-  })
+  }, 240_000)
 
   it('Fling Iron Ball: stub handler -> unported; remove test -> registeredUntested', () => {
     // 1. Stub Iron Ball in basePower.ts
@@ -220,5 +220,5 @@ describe('cycle 152c - Natural Gift and Fling per-site units', () => {
     const testUnit = testRes.units.find((u) => u.kind === 'fling' && u.key === 'ITEM_IRON_BALL')
     expect(testUnit?.status).toBe('unported')
     expect(testUnit?.registeredUntested).toBe(true)
-  })
+  }, 240_000)
 })

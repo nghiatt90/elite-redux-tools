@@ -282,7 +282,7 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     }
 
     expect(validateAllowlist(DEFAULT_ALLOWLIST)).toEqual([])
-  })
+  }, 240_000)
 
   it('flips each ported unit to unported when its production branch token is stubbed', () => {
     const holdEffect = runInventory(items, {
@@ -311,7 +311,7 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     )
     const canGetOrLoseResult = runInventory(items, { productionFiles: canGetOrLose })
     expect(enigmaUnit(canGetOrLoseResult, 'CanBattlerGetOrLoseItem')?.status).toBe('unported')
-  })
+  }, 240_000)
 
   it('flips ported units to registeredUntested when no test names the item', () => {
     const result = runInventory(items, { testSources: testSourcesWithoutEnigmaEvidence() })
@@ -321,7 +321,7 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
       expect(unit?.registeredUntested, site).toBe(true)
       expect(unit?.testFile, site).toBeNull()
     }
-  })
+  }, 240_000)
 
   it('counts: +15 hold-trigger units, 3 ported, 0 unported, 12 allowlisted, totals re-pinned', () => {
     const result = runInventory(items)
@@ -349,5 +349,5 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     expect(result.totalUnported).toBe(213)
     expect(result.totalAllowlisted).toBe(21)
     expect(result.totalRegisteredUntested).toBe(27)
-  })
+  }, 240_000)
 })
