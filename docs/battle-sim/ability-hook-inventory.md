@@ -21,7 +21,7 @@ A `(ability, hook)` pair is classified as **ported** only when an explicit regis
 8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).
 9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.
 10. **onCanStatusType**: Quoted `ABILITY_...` ids inside `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`), extracted from source text: the CanPoisonType bypass array, the Angel's Wrath `MOVE_POISON_STING` comparison, and the CanParalyzeType bypass array.
-11. **onCopyMove**: Dispatched by `runCopyMoveHook` from `runMoveEndDancer` (`web/src/engine/sim/moveEnd.ts`, MOVEEND_DANCER). Ported set: `PORTED_COPY_MOVE_ABILITIES` -- Dancer and Samba (`IsDance`), Parroting (`IsSoundMove`) and Lunar Affinity (the move's `lunar` flag), all four `onCopyMove` hooks in the data.
+11. **onCopyMove**: Dispatched by `runCopyMoveHook` from `runMoveEndDancer` (`web/src/engine/sim/moveEnd.ts`, MOVEEND_DANCER). Ported set: the `abilityId === 'ABILITY_X'` comparisons inside `runCopyMoveHook`, extracted from source text -- Dancer and Samba (`IsDance`), Parroting (`IsSoundMove`) and Lunar Affinity (the move's `lunar` flag), all four `onCopyMove` hooks in the data.
 12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).
 13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.
 14. **onModifyEffectChance**: `abilityId === 'ABILITY_X'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.

@@ -464,6 +464,16 @@ export function extractReviveAbilities(source?: string): Set<string> {
   return result
 }
 
+export function extractCopyMoveAbilities(source?: string): Set<string> {
+  const content = source ?? readFileSync(MOVE_END_PATH, 'utf-8')
+  const slice = extractFunctionSlice(content, 'function runCopyMoveHook(')
+  const result = extractComparedAbilityLiterals(slice)
+  if (result.size === 0) {
+    throw new Error('Zero labels extracted for declaration: function runCopyMoveHook(')
+  }
+  return result
+}
+
 export function extractBattlerFaintsExtraAbilities(): Set<string> {
   const content = readFileSync(MOVE_END_PATH, 'utf-8')
   const slice = extractFunctionSlice(content, 'function dispatchOnBattlerFaints(')
@@ -1269,15 +1279,10 @@ export const PORTED_MODIFY_MOVE_FLAGS_ABILITIES = extractModifyMoveFlagsAbilitie
  * `web/src/engine/sim/moveEnd.ts` (MOVEEND_DANCER, src/battle_script_commands.c:4854-4879 ->
  * AbilityBattleEffects(ABILITYEFFECT_MOVE_END_OTHER), src/battle_util.c:4496-4503). Samba's hook
  * aliases Dancer's (:9406-9409), Parroting checks IsSoundMove (:6880-6887) and Lunar Affinity the
- * move's `lunar` flag (:8855-8860). Every ability with an `onCopyMove` hook in abilityHooks.json
- * is listed.
+ * move's `lunar` flag (:8855-8860). Read from the `abilityId ===` comparisons inside
+ * `runCopyMoveHook`, so every ability with an `onCopyMove` branch in the source text is included.
  */
-export const PORTED_COPY_MOVE_ABILITIES = new Set<string>([
-  'ABILITY_DANCER',
-  'ABILITY_LUNAR_AFFINITY',
-  'ABILITY_PARROTING',
-  'ABILITY_SAMBA',
-])
+export const PORTED_COPY_MOVE_ABILITIES = extractCopyMoveAbilities()
 
 const CALC_HOOKS = new Set<HookKind>([
   'onOffensiveMultiplier',
@@ -1626,7 +1631,7 @@ export function generateInventoryDoc(
   lines.push('8. **onBeforeAttack**: Not ported (no handler in `web/src/engine/`).')
   lines.push('9. **onBlockStatDrops**: Case labels of `statDropBlockForAbility` (`web/src/engine/sim/statBuffs.ts`), extracted from source text.')
   lines.push('10. **onCanStatusType**: Quoted `ABILITY_...` ids inside `canPoisonType` and `canParalyzeType` (`web/src/engine/sim/statusEffects.ts`), extracted from source text: the CanPoisonType bypass array, the Angel\'s Wrath `MOVE_POISON_STING` comparison, and the CanParalyzeType bypass array.')
-  lines.push('11. **onCopyMove**: Dispatched by `runCopyMoveHook` from `runMoveEndDancer` (`web/src/engine/sim/moveEnd.ts`, MOVEEND_DANCER). Ported set: `PORTED_COPY_MOVE_ABILITIES` -- Dancer and Samba (`IsDance`), Parroting (`IsSoundMove`) and Lunar Affinity (the move\'s `lunar` flag), all four `onCopyMove` hooks in the data.')
+  lines.push('11. **onCopyMove**: Dispatched by `runCopyMoveHook` from `runMoveEndDancer` (`web/src/engine/sim/moveEnd.ts`, MOVEEND_DANCER). Ported set: the `abilityId === \'ABILITY_X\'` comparisons inside `runCopyMoveHook`, extracted from source text -- Dancer and Samba (`IsDance`), Parroting (`IsSoundMove`) and Lunar Affinity (the move\'s `lunar` flag), all four `onCopyMove` hooks in the data.')
   lines.push('12. **onDisguise**: Not ported (bust handler not modelled; note in `web/src/engine/sim/moveEnd.ts`).')
   lines.push('13. **onExit**: Case labels of `dispatchSwitchOutAbilities` (`web/src/engine/sim/turn.ts`), extracted from source text; note-only branches are unported.')
   lines.push('14. **onModifyEffectChance**: `abilityId === \'ABILITY_X\'` comparisons inside `getMoveEffectChance` (`web/src/engine/sim/statusEffects.ts`), extracted from source text.')

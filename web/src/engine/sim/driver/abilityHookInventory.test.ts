@@ -9,6 +9,7 @@ import {
   extractAccuracyAbilities,
   extractBattlerFaintsExtraAbilities,
   extractCaseLabelsFromFunction,
+  extractCopyMoveAbilities,
   extractEndTurnAbilities,
   extractFunctionSlice,
   extractPreemptActionAbilities,
@@ -233,6 +234,13 @@ describe('ability hook completeness inventory', () => {
     const absorb = extractSimAbsorbExtraAbilities()
     expect(absorb.size).toBeGreaterThan(0)
     expect(absorb.has('ABILITY_FLASH_FIRE')).toBe(true)
+
+    const copyMove = extractCopyMoveAbilities()
+    expect(copyMove.size).toBe(4)
+    expect(copyMove.has('ABILITY_DANCER')).toBe(true)
+    expect(copyMove.has('ABILITY_LUNAR_AFFINITY')).toBe(true)
+    expect(copyMove.has('ABILITY_PARROTING')).toBe(true)
+    expect(copyMove.has('ABILITY_SAMBA')).toBe(true)
   })
 
   it('extractFunctionSlice throws if function declaration not found, and extractCaseLabelsFromFunction throws on 0 labels', () => {

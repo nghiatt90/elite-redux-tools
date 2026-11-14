@@ -692,12 +692,6 @@ export interface OnModifyMoveFlagsContext {
  * ATTACKER, :1054); and Dual Wield's / Raging Boxer's onParentalBond (Mega Launcher
  * dummy + Keen Edge with the REAL move type, :5488; Iron Fist dummy, :4162;
  * GetParentalBondType, battle_script_commands.c:990-1004).
- *
- * Still static (`ctx.moveFlags.*` only, so grants do not yet change the result):
- * Cutthroat's priority through `TurnOrderMoveView.isKeenEdge`, which both action
- * builders hard-code to false; Blade Dance's onAttacker (`moveFlags.dance`); the effect-chance PUNCH read (sim/statusEffects.ts:1866,
- * there is no sim PUNCH predicate yet); and the accuracy/sim consumers. Each must be
- * checked against its own call site's moveType argument before wiring.
  */
 export type OnModifyMoveFlags = (ctx: OnModifyMoveFlagsContext) => boolean
 
