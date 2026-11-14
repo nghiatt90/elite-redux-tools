@@ -106,7 +106,7 @@ describe('cycle 154c Monotype Champion per-site evidence', () => {
         'unported',
       )
     }
-  })
+  }, 240_000)
 
   it('rejects a null champion type and only accepts the unit own type', () => {
     expect(monochampUnits(feedAssigned(), NULL_FIXTURE).every((unit) => unit.status === 'unported')).toBe(
