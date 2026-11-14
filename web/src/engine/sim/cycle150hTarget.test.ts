@@ -257,8 +257,9 @@ const hasAbility = (ability: string | null, innates: [string | null, string | nu
 
 describe('Cycle 150h - self-target MOVEEND_ABILITIES dispatch', () => {
   // CANCELLER_PARALYSED (battle_util.c:3400-3413): `(Random() % 4) == 0` cancels. Swords Dance's
-  // data target is USER, so battle_controller_opponent.c:1600-1601 overwrites the controller's
-  // foe target with gActiveBattler before MoveEnd runs. One draw for the paralysis roll, one for
+  // data target is USER, so the player controller stores gActiveBattler as the selected target
+  // (battle_controller_player.c:2395-2398) and HandleAction_UseMove reads it back
+  // (battle_util.c:242) before MoveEnd runs. One draw for the paralysis roll, one for
   // the attacker's own Crispy Cream %2 (abilities.cc:10837-10842 draws before any check).
   // spe 200: turnOrder.ts halves a paralysed battler's speed for ordering, so 200 -> 100 still
   // outruns the foe's default 50 and the attacker keeps the first slot.
@@ -274,7 +275,7 @@ describe('Cycle 150h - self-target MOVEEND_ABILITIES dispatch', () => {
       },
       { hp: 300 },
     ], rng)
-    const out = executeTurn(state, [useMove(1, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
+    const out = executeTurn(state, [useMove(0, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
     expect(out.actions[0]!.cancelledBy).toBe('PARALYSIS')
     expect(rng.calls).toBe(2)
     // The dispatch carries targetDamage 0, so the delegated Flame Body / Freezing Point half
@@ -290,7 +291,7 @@ describe('Cycle 150h - self-target MOVEEND_ABILITIES dispatch', () => {
       { status1: STATUS1_PARALYSIS, spe: 200, moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [20, 0, 0, 0] },
       { hp: 300, abilities: hasAbility('ABILITY_CRISPY_CREAM') },
     ], rng)
-    const out = executeTurn(state, [useMove(1, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
+    const out = executeTurn(state, [useMove(0, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
     expect(out.actions[0]!.cancelledBy).toBe('PARALYSIS')
     expect(rng.calls).toBe(1)
   })
@@ -303,7 +304,7 @@ describe('Cycle 150h - self-target MOVEEND_ABILITIES dispatch', () => {
       { moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [20, 0, 0, 0], abilities: hasAbility('ABILITY_CRISPY_CREAM') },
       { hp: 300 },
     ], userRng)
-    executeTurn(user, [useMove(1, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
+    executeTurn(user, [useMove(0, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
     expect(userRng.calls).toBe(1)
 
     const foeRng = scriptedRng([0])
@@ -311,7 +312,7 @@ describe('Cycle 150h - self-target MOVEEND_ABILITIES dispatch', () => {
       { moves: ['MOVE_SWORDS_DANCE', null, null, null], pp: [20, 0, 0, 0] },
       { hp: 300, abilities: hasAbility('ABILITY_CRISPY_CREAM') },
     ], foeRng)
-    executeTurn(foe, [useMove(1, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
+    executeTurn(foe, [useMove(0, move('MOVE_SWORDS_DANCE')), null], testDeps(fixedDamage(0)))
     expect(foeRng.calls).toBe(0)
   })
 
