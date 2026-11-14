@@ -2387,7 +2387,11 @@ export function executeAction(
   // - Player (battle_controller_player.c:2385-2398): MOVE_CURSE checks Ghost/fog; other moves use
   //   dynamic GetBattlerBattleMoveTargetFlags (battle_util.c:128-150); moveTarget & MOVE_TARGET_USER
   //   -> gActiveBattler, leaving USER_OR_SELECTED on the foe.
+  // Both controllers test the MOVE_TARGET_USER BIT, so USER, USER_OR_ALLY (USER|ALLY) and
+  // ALL_BATTLERS (0x100|USER, include/constants/battle.h:499-501) all select the attacker.
   // MOVE_TARGET_ALLY picks the live partner, else the attacker (battle_util.c:283-287).
+  const targetHasUserBit = (flag: string): boolean =>
+    flag === 'USER' || flag === 'USER_OR_ALLY' || flag === 'ALL_BATTLERS'
   const resolveMoveEndDispatchTarget = (
     targetIdForDispatch: number,
     moveId: string,
@@ -2409,7 +2413,7 @@ export function executeAction(
       } else {
         moveTarget = getBattlerBattleMoveTargetFlags(state, battlerId, moveId, moveDataForDispatch, deps, statusDeps)
       }
-      if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY') return battlerId
+      if (targetHasUserBit(moveTarget)) return battlerId
       if (moveTarget === 'ALLY') {
         const partner = battlerId ^ 2
         return isBattlerAlive(state, partner) ? partner : battlerId
@@ -2418,7 +2422,7 @@ export function executeAction(
     }
 
     const moveTarget = moveDataForDispatch?.target ?? 'SELECTED'
-    if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'USER_OR_SELECTED') return battlerId
+    if (targetHasUserBit(moveTarget) || moveTarget === 'USER_OR_SELECTED') return battlerId
     if (moveTarget === 'ALLY') {
       const partner = battlerId ^ 2
       return isBattlerAlive(state, partner) ? partner : battlerId
