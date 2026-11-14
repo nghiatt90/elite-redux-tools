@@ -9189,7 +9189,10 @@ function finishBerryRemoval(
  * (every move-effect caller) nothing is restored; when TRUE (BattleScript_CudChew, :1016-1021)
  * the item parked in `changedItems` is handed back only if the berry effect did not fire
  * (:8035-8040). The early returns below mirror the C's own `return` before the restore block
- * (`HOLD_EFFECT_NONE` check at :8026-8028, and the fired-effect return at :8035).
+ * (`HOLD_EFFECT_NONE` check at :8026-8028 -- read on the RAW hold effect, before negation -- and
+ * the fired-effect return at :8035). Neither ItemBattleEffects' negated-item read (:5411) nor the
+ * HP-zero gate in its berry helpers (:5148) is an early return here: both leave `fired` false so
+ * the :8037-8040 restore still runs.
  */
 export function consumeBerryWithOverride(
   state: BattleState,
@@ -9202,22 +9205,33 @@ export function consumeBerryWithOverride(
   restoreItem = false,
 ): void {
   const battler = state.battlers[battlerId]
-  if (!battler || battler.mon.hp === 0) return
+  if (!battler) return
   const itemId = battler.mon.itemId
   if (!itemId) return
 
+  // VARIOUS_CONSUME_BERRY's own first check (:8026-8028) reads the RAW item hold effect.
   const itemData = deps.dataContext.item(itemId)
   const holdEffect = itemData?.resolvedHoldEffect ?? null
   if (!holdEffect || holdEffect === 'HOLD_EFFECT_NONE') return
   const param = itemData?.holdEffectStrength ?? 0
 
+  // ItemBattleEffects reads the item through GetBattlerHoldEffect(battlerId, TRUE) (battle_util.c:5411),
+  // and GetBattlerHoldEffect returns HOLD_EFFECT_NONE when IsItemNegated (:6520-6527) sees
+  // STATUS3_EMBARGO or ABILITY_KLUTZ. The switch then matches nothing, ItemBattleEffects returns 0,
+  // and the restore block below runs.
+  const negated =
+    hasFlag(battler.statuses3, STATUS3_EMBARGO) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)
+
   // Whether ItemBattleEffects returned nonzero: only finishBerryRemoval (Cmd_removeitem) paths
   // consume the item, and those are exactly the "effect fired" cases.
   let fired = false
 
-  switch (holdEffect) {
+  switch (negated ? null : holdEffect) {
     case 'HOLD_EFFECT_MICLE_BERRY': {
       // TrySetMicleBerry (battle_util.c:5257-5269), BattleScript_MicleBerryActivateRet (data/battle_scripts_1.s:11255-11265)
+      // HasEnoughHpToEatBerry (:5258) -- :5148 `if (gBattleMons[battlerId].hp == 0) return FALSE;`.
+      if (battler.mon.hp === 0) break
       battler.round.usedMicleBerry = true
       fired = finishBerryRemoval(state, attackerId, battlerId, deps, unmodelled) || fired
       break
@@ -9226,6 +9240,8 @@ export function consumeBerryWithOverride(
     case 'HOLD_EFFECT_RESTORE_PCT_HP': {
       // ItemHealHp (battle_util.c:5311-5333), BattleScript_ItemHealHP_RemoveItemRet (data/battle_scripts_1.s:10859-10873)
       if (!canBattlerHeal(state, battlerId, battler, unmodelled, deps.dataContext)) break
+      // HasEnoughHpToEatBerry (:5314) -- :5148 `if (gBattleMons[battlerId].hp == 0) return FALSE;`.
+      if (battler.mon.hp === 0) break
       // :5315 -- !(gBattleScripting.overrideBerryRequirements && gBattleMons[battlerId].hp == gBattleMons[battlerId].maxHP)
       if (battler.mon.hp === battler.mon.maxHp) break
       // :10860 -- jumpifconsumableblocked BS_SCRIPTING, BattleScript_Return (VARIOUS_JUMP_IF_CONSUMABLE_BLOCKED, :9024-9032)
@@ -9246,6 +9262,8 @@ export function consumeBerryWithOverride(
     case 'HOLD_EFFECT_CONFUSE_BITTER':
     case 'HOLD_EFFECT_CONFUSE_SOUR': {
       // HealConfuseBerry (battle_util.c:5167-5193): HasEnoughHpToEatBerry returns TRUE under sBERRY_OVERRIDE even at full HP.
+      // HasEnoughHpToEatBerry (:5168) -- :5148 `if (gBattleMons[battlerId].hp == 0) return FALSE;`.
+      if (battler.mon.hp === 0) break
       if (isUnnerveAbilityOnOpposingSide(state, battlerId, deps.dataContext)) break
       let heal = param > 0 ? Math.trunc(battler.mon.maxHp / param) : 1
       if (heal === 0) heal = 1
@@ -9294,6 +9312,8 @@ export function consumeBerryWithOverride(
     case 'HOLD_EFFECT_SP_ATTACK_UP':
     case 'HOLD_EFFECT_SP_DEFENSE_UP': {
       // StatRaiseBerry (battle_util.c:5195-5215), BattleScript_BerryStatRaiseRet (data/battle_scripts_1.s:11009-11029)
+      // CanRaiseStat && HasEnoughHpToEatBerry (:5196); the latter's :5148 makes a fainted battler eat nothing.
+      if (battler.mon.hp === 0) break
       const statId =
         holdEffect === 'HOLD_EFFECT_ATTACK_UP'
           ? STAT_ATK
@@ -9326,6 +9346,8 @@ export function consumeBerryWithOverride(
     }
     case 'HOLD_EFFECT_RANDOM_STAT_UP': {
       // RandomStatRaiseBerry (battle_util.c:5217-5255)
+      // HasEnoughHpToEatBerry (:5224) -- :5148 `if (gBattleMons[battlerId].hp == 0) return FALSE;`.
+      if (battler.mon.hp === 0) break
       let anyCanRaise = false
       for (let i = 0; i < 5; i++) {
         if (canRaiseStat(state, battlerId, STAT_ATK + i, deps.dataContext)) {

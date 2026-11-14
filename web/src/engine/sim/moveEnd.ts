@@ -6467,7 +6467,8 @@ function applyBugBite(
   }
   // BattleScript_MoveEffectBugBite :1006-1014 -> `consumeberry BS_ATTACKER, TRUE`: restoreItem = TRUE.
   // On a fired effect the C returns at :8035, leaving changedItems for MOVEEND_CHANGED_ITEMS (:4656-4665); that
-  // case skips a zero entry, so an attacker that held nothing keeps the berry's item id in its slot.
+  // case skips a zero entry, so an attacker that held nothing ends with no item -- Cmd_removeitem already cleared
+  // the berry's id from the slot when the effect consumed it.
   consumeBerryWithOverride(state, attackerId, attackerId, moveId, deps, unmodelled, statChanges, true)
 }
 
