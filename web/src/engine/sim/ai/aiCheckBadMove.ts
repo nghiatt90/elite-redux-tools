@@ -1469,7 +1469,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 10
       } else if (getHealthPercentage(state, battlerAtk) <= 25) {
         score -= 10
-      } else if (attacker.mon.moves.some((m) => m && deps.moveData(m)?.flags?.sound)) {
+      } else if (defender.mon.moves.some((m) => m && deps.moveData(m)?.flags?.sound)) {
         unmodelled.push('AI_CheckBadMove: B_SOUND_SUBSTITUTE >= GEN_6 is assumed true (this build targets a modern-gen ruleset, same assumption GetBattleMoveSplit makes for B_PHYSICAL_SPECIAL_SPLIT)')
         score -= 8
       }
