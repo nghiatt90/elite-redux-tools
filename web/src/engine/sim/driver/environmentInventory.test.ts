@@ -107,11 +107,23 @@ const SCRIPT_EVENT_UNITS = 6
  * count as `registeredUntested` (their token is still named by the driver). This
  * is a correction of false evidence, not new work: the old shared evidence was
  * satisfied by `absorb.test.ts`'s `monotypeChampType: null` fixture.
+ *
+ * Moves 18 -> 15 in cycle 150fb: `cycle150fbMulByTypeEffectiveness.test.ts`
+ * supplies typed, numeric tests for the three MulByTypeEffectiveness arms
+ * (FAIRY battle_util.c:7861, DRAGON :7863, ROCK :7865), so those three leave
+ * `registeredUntested` -- like the other tested-but-unported conditional ports
+ * (e.g. :2238, :4850, :6656). They stay unported because loadSimData.ts:249
+ * still feeds `monotypeChampType: null`; that driver gate, not the site port,
+ * is what keeps every Monotype Champion unit out of `ported`. The same cycle
+ * tightened the test patterns for :8985, :2635 and :9132 to require their own
+ * site tokens (`FEARMONGER`, `SALT_CURE`, `usedMonotypeEntry`), so the bare
+ * `monotypeChampType: 'DRAGON'|'ROCK'` fixtures no longer falsely mark those
+ * three as tested; they remain `registeredUntested`.
  */
 export const UNPORTED_UNIT_COUNT = 119
 
 /** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 18
+export const REGISTERED_UNTESTED_UNIT_COUNT = 15
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0

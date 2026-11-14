@@ -1969,7 +1969,7 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
       "[ROCK] `ENDTURN_SALT_CURE` damages every player mon as if salt-cured: `(getMonotypeChampType() == TYPE_ROCK && GET_BATTLER_SIDE(gActiveBattler) == B_SIDE_PLAYER) || (gStatuses4[gActiveBattler] & STATUS4_SALT_CURE)`, 1/4 for Water or Steel else 1/8. Unmodelled (web/src/engine/sim/endTurn.ts:2039 notes the ROCK half has no port).",
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 2635),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]ROCK['\"]/,
+      /(?:monotypeChampType\s*:\s*['\"]ROCK['\"][\s\S]{0,200}?(?:SALT_CURE|saltCure)|(?:SALT_CURE|saltCure)[\s\S]{0,200}?monotypeChampType\s*:\s*['\"]ROCK['\"])/,
       'web/src/engine/sim/endTurn.ts',
       /monotypeChampType[^\n]*['\"]ROCK['\"]/,
     ),
@@ -2057,12 +2057,12 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'monotypeChampType',
     site: 'MulByTypeEffectiveness',
     scope:
-      "[FAIRY] Fairy moves hit Poison and Steel defenders super-effectively on the player's side: `moveType == TYPE_FAIRY && (defType == TYPE_POISON || defType == TYPE_STEEL) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FAIRY`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+      "[FAIRY] Fairy moves hit Poison and Steel defenders super-effectively on the player's side: `moveType == TYPE_FAIRY && (defType == TYPE_POISON || defType == TYPE_STEEL) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FAIRY`. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:261; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`.",
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7861),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]FAIRY['\"]/,
-      'web/src/engine/typeEffectiveness.ts',
-      /monotypeChampType[\s\S]{0,160}?['\"]FAIRY['\"]/,
+      /monotypeChampType\s*:\s*['\"]FAIRY['\"][^\n]*uq\(2\.0\)/,
+      'web/src/engine/sim/ai/aiShouldSwitch.ts',
+      /moveType === 'FAIRY'[^\n]*champ === 'FAIRY'[^\n]*uq\(2\.0\)/,
     ),
   },
   {
@@ -2070,12 +2070,12 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'monotypeChampType',
     site: 'MulByTypeEffectiveness',
     scope:
-      "[DRAGON] a 0x effectiveness becomes 1x on the player's side: `mod == UQ_4_12(0.0) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_DRAGON`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+      "[DRAGON] a 0x effectiveness becomes 1x on the player's side: `mod == UQ_4_12(0.0) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_DRAGON`. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:263; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`.",
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7863),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]DRAGON['\"]/,
-      'web/src/engine/typeEffectiveness.ts',
-      /monotypeChampType[\s\S]{0,160}?['\"]DRAGON['\"]/,
+      /monotypeChampType\s*:\s*['\"]DRAGON['\"][^\n]*uq\(1\.0\)/,
+      'web/src/engine/sim/ai/aiShouldSwitch.ts',
+      /modifier === 0 && champ === 'DRAGON'[^\n]*uq\(1\.0\)/,
     ),
   },
   {
@@ -2083,12 +2083,12 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     token: 'monotypeChampType',
     site: 'MulByTypeEffectiveness',
     scope:
-      "[ROCK] the `getMonotypeChampType() == TYPE_ROCK` branch (:7865-7869): Rock-on-Rock is super-effective on the player's side, and non-player-side Rock moves become immune. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219.",
+      "[ROCK] the `getMonotypeChampType() == TYPE_ROCK` branch (:7865-7869): Rock-on-Rock is super-effective on the player's side, and non-player-side Rock moves become immune. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:267-268; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`. The non-player-side Rock arm is unreachable from CalcPartyMonTypeEffectivenessMultiplier (battlerDef is 0, battle_util.c:8003); it is reachable only from CalcTypeEffectivenessMultiplierInternal (:7922-7927), whose sim caller is not ported.",
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 7865),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]ROCK['\"]/,
-      'web/src/engine/typeEffectiveness.ts',
-      /monotypeChampType[\s\S]{0,160}?['\"]ROCK['\"]/,
+      /monotypeChampType\s*:\s*['\"]ROCK['\"][^\n]*uq\(2\.0\)/,
+      'web/src/engine/sim/ai/aiShouldSwitch.ts',
+      /champ === 'ROCK'\)[\s\S]{0,120}?defType === 'ROCK'[\s\S]{0,80}?moveType === 'ROCK'[\s\S]{0,60}?uq\(2\.0\)/,
     ),
   },
   {
@@ -2151,7 +2151,7 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
       "[DRAGON] a one-time Fearmonger entry on the player's side: `getMonotypeChampType() == TYPE_DRAGON && GetBattlerSide(battler) == B_SIDE_PLAYER && !gVolatileStructs[battler].usedMonotypeEntry`. Unmodelled (`usedMonotypeEntry` state exists in web/src/engine/sim/state.ts:217 but no logic reads it).",
     citation: cite(`${UPSTREAM_SRC}/battle_util.c`, 9132),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]DRAGON['\"]/,
+      /(?:monotypeChampType\s*:\s*['\"]DRAGON['\"][\s\S]{0,200}?usedMonotypeEntry|usedMonotypeEntry[\s\S]{0,200}?monotypeChampType\s*:\s*['\"]DRAGON['\"])/,
       'web/src/engine/sim/switchInAbility.ts',
       /monotypeChampType[\s\S]{0,160}?['\"]DRAGON['\"][\s\S]{0,160}?usedMonotypeEntry/,
     ),
@@ -2255,7 +2255,7 @@ export const MONOCHAMP_RULE_SPECS: ReadonlyArray<StaticUnitSpec> = [
       "[DRAGON] intimidate data uses `ABILITY_FEARMONGER` for the non-player attacker when `ability == ABILITY_NONE`: `getMonotypeChampType() == TYPE_DRAGON && GetBattlerSide(gBattlerAttacker) != B_SIDE_PLAYER && ability == ABILITY_NONE`. Unmodelled.",
     citation: cite(`${UPSTREAM_SRC}/battle_script_commands.c`, 8985),
     evidence: monochampEvidence(
-      /monotypeChampType\s*:\s*['\"]DRAGON['\"]/,
+      /(?:monotypeChampType\s*:\s*['\"]DRAGON['\"][\s\S]{0,200}?(?:FEARMONGER|Fearmonger)|(?:FEARMONGER|Fearmonger)[\s\S]{0,200}?monotypeChampType\s*:\s*['\"]DRAGON['\"])/,
       'web/src/engine/sim/switchInAbility.ts',
       /(?![^\n]*usedMonotypeEntry)[^\n]*monotypeChampType[^\n]*['\"]DRAGON['\"][^\n]*ABILITY_FEARMONGER/,
     ),

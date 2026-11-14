@@ -57,14 +57,14 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `map-setup` | 61 | 0 | 15 | 56 | 0 | 5 |
+| `map-setup` | 61 | 0 | 12 | 56 | 0 | 5 |
 | `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
 | `difficulty-flag` | 18 | 1 | 1 | 17 | 0 | 0 |
 | `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **171** | **44** | **18** | **119** | **0** | **8** |
+| **total** | **171** | **44** | **15** | **119** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -72,7 +72,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
-| `map-setup` | 56 | 15 |
+| `map-setup` | 56 | 12 |
 | `battle-type` | 8 | 2 |
 | `difficulty-flag` | 17 | 1 |
 | `trainer-flag` | 3 | 0 |
@@ -129,9 +129,9 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `monochamp:battle_util.c:6656` | [GROUND] the player's side is grounded: `getMonotypeChampType() == TYPE_GROUND && GetBattlerSide(battlerId) == B_SIDE_PLAYER`. Conditional port at web/src/engine/sim/grounding.ts:50; only the driver feed is missing. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6656` | unported | `web/src/engine/sim/turn.test.ts` | none |
 | `monochamp:battle_util.c:7235` | [ICE] the attack uses Speed as the attack stat when the defender is on the player's side: `getMonotypeChampType() == TYPE_ICE && GetBattlerSide(battlerDef) == B_SIDE_PLAYER`. Unmodelled. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7235` | unported (registered, untested) | none | none |
 | `monochamp:battle_util.c:7717` | [GRASS, PSYCHIC, ELECTRIC, POISON, STEEL, GROUND, FIGHTING] the switch at :7716-7756: 0.7 for Grass/Psychic/Electric against the champion side, 0.7 Poison and Steel for both sides, Ground 0.65 on super-effective hits vs the champion side, Fighting halves/quarters super-effective damage and multiplies Fighting moves by 1.5. Unmodelled note at web/src/engine/sim/ai/aiCalcDamage.ts:208-210. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7717` | unported (registered, untested) | none | none |
-| `monochamp:battle_util.c:7861` | [FAIRY] Fairy moves hit Poison and Steel defenders super-effectively on the player's side: `moveType == TYPE_FAIRY && (defType == TYPE_POISON || defType == TYPE_STEEL) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FAIRY`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7861` | unported (registered, untested) | none | none |
-| `monochamp:battle_util.c:7863` | [DRAGON] a 0x effectiveness becomes 1x on the player's side: `mod == UQ_4_12(0.0) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_DRAGON`. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7863` | unported (registered, untested) | none | none |
-| `monochamp:battle_util.c:7865` | [ROCK] the `getMonotypeChampType() == TYPE_ROCK` branch (:7865-7869): Rock-on-Rock is super-effective on the player's side, and non-player-side Rock moves become immune. Unmodelled note at web/src/engine/sim/ai/aiShouldSwitch.ts:219. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7865` | unported (registered, untested) | none | none |
+| `monochamp:battle_util.c:7861` | [FAIRY] Fairy moves hit Poison and Steel defenders super-effectively on the player's side: `moveType == TYPE_FAIRY && (defType == TYPE_POISON || defType == TYPE_STEEL) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_FAIRY`. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:261; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7861` | unported | `web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts` | none |
+| `monochamp:battle_util.c:7863` | [DRAGON] a 0x effectiveness becomes 1x on the player's side: `mod == UQ_4_12(0.0) && GetBattlerSide(battlerDef) == B_SIDE_PLAYER && getMonotypeChampType() == TYPE_DRAGON`. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:263; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7863` | unported | `web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts` | none |
+| `monochamp:battle_util.c:7865` | [ROCK] the `getMonotypeChampType() == TYPE_ROCK` branch (:7865-7869): Rock-on-Rock is super-effective on the player's side, and non-player-side Rock moves become immune. Site ported at web/src/engine/sim/ai/aiShouldSwitch.ts:267-268; inventory-unported because loadSimData.ts:249 still feeds `monotypeChampType: null`. The non-player-side Rock arm is unreachable from CalcPartyMonTypeEffectivenessMultiplier (battlerDef is 0, battle_util.c:8003); it is reachable only from CalcTypeEffectivenessMultiplierInternal (:7922-7927), whose sim caller is not ported. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7865` | unported | `web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts` | none |
 | `monochamp:battle_util.c:8672` | [FLYING] Trick Room is never active: `IsAbilityOnField(ABILITY_CLUELESS) || getMonotypeChampType() == TYPE_FLYING`. Conditional port at web/src/engine/sim/turn.ts:631; only the driver feed is missing. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8672` | unported | `web/src/engine/sim/turnOrder.test.ts` | none |
 | `monochamp:battle_util.c:8674` | [NORMAL] Trick Room is active on odd battle turns: `getMonotypeChampType() == TYPE_NORMAL && gBattleResults.battleTurnCounter % 2 == 1`. Unmodelled (web/src/engine/sim/turnOrder.ts:186-191 documents the concept; no NORMAL-odd branch exists). | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8674` | unported | `web/src/engine/sim/bridge.test.ts` | none |
 | `monochamp:battle_util.c:8710` | [NORMAL] Wonder Room is active on even battle turns: `getMonotypeChampType() == TYPE_NORMAL && gBattleResults.battleTurnCounter % 2 == 0`. Conditional port at web/src/engine/sim/bridge.ts:627; only the driver feed is missing. | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8710` | unported | `web/src/engine/sim/bridge.test.ts` | none |
