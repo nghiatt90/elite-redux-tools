@@ -466,7 +466,11 @@ describe('cycle 151b: a real port counts and a stub does not', () => {
       expect(mutated, effect).not.toBe(REAL_CONSUMER)
       expect(statusOf(move, mutated, test), effect).toBe('unported')
     }
-  })
+    // Ten `runInventory` calls over the whole sim source tree take minutes on a loaded
+    // machine (233s for this file alone); the 60s default times it out when the full
+    // suite runs in parallel. The timeout is the only thing wrong here: the assertions
+    // pass unchanged.
+  }, 300_000)
 
   it('script parser keeps only the live `.if` branch and expands `call` one level', () => {
     const rapid = scripts.get('BattleScript_EffectRapidSpin')
