@@ -10058,7 +10058,13 @@ export function handleWaterlog(ctx: MoveEffectContext): ActionOutcome {
     ? 50
     : (deps.dataContext.move(moveId)?.effectChance ?? 20)
 
-  // 4. seteffectwithchance (:3007, Cmd_seteffectwithchance, battle_script_commands.c:3092-3125)
+  // 4. seteffectwithchance (:3007, Cmd_seteffectwithchance, battle_script_commands.c:3092-3125).
+  // Cmd_damagecalc's GET_MOVE_TYPE answer is available here (TurnLoopDeps has the
+  // resolver), so pass it rather than letting Corrupted Mind fall back to the
+  // onMoveType-only resolution.
+  const resolvedMoveType = deps.damage.moveType
+    ? deps.damage.moveType(state, battlerId, targetId, moveId).moveType
+    : null
   const percentChance = getMoveEffectChance(
     state,
     battlerId,
@@ -10067,6 +10073,7 @@ export function handleWaterlog(ctx: MoveEffectContext): ActionOutcome {
     baseChance,
     deps,
     unmodelled,
+    resolvedMoveType,
   )
   // Cmd_seteffectwithchance's Minion Control no-op, battle_script_commands.c:3110-3112:
   //   } else if (gTurnStructs[attacker].parentalBondTrigger == ABILITY_MINION_CONTROL &&
@@ -11633,6 +11640,12 @@ export interface SecondaryMoveEffectContext {
   unmodelled: string[]
   snapJawRaiseSpeed?: boolean | null
   order?: readonly number[]
+  /** GetMoveTypeInternal's answer as Cmd_damagecalc stored it in
+   * gBattleStruct->dynamicMoveType (battle_script_commands.c:1606-1612), carried
+   * by the caller that holds a TurnLoopDeps. Optional because StatusDeps itself
+   * has no damage resolver; without it getMoveEffectChance keeps its
+   * onMoveType-only fallback. */
+  resolvedMoveType?: string | null
 }
 
 /**
@@ -12385,6 +12398,9 @@ export function applySecondaryMoveEffects(
       spec.chance,
       deps,
       unmodelled,
+      // Cmd_damagecalc's dynamicMoveType write, forwarded by turn.ts (TurnLoopDeps
+      // holders); a caller that omits it keeps the onMoveType-only fallback.
+      ctx.resolvedMoveType,
     )
 
     // C: !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT). damageResolver.ts returns 0 exactly when the hit is

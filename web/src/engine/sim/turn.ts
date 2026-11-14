@@ -1052,6 +1052,22 @@ export function isBattlerProtected(
   let evadesProtect = false
   const isContact = moveData?.flags?.contact === true
 
+  // battle_util.c:6574 GET_MOVE_TYPE(move, moveType) reads the ATTACKER's resolved
+  // type (GetMoveTypeInternal / gBattleStruct->dynamicMoveType), which the Pinnacle
+  // Blade branch below passes to IsKeenEdge (:6597). The answer does not depend on
+  // the target (resolveMoveType reads the attacker, move and field only), but the
+  // resolver's signature takes one and the C's own check is a straight hit on the
+  // protecting battler, so targetId is passed.
+  const attackerHasPinnacleBlade = battlerHasSimAbility(
+    state,
+    attackerBattler,
+    'ABILITY_PINNACLE_BLADE',
+    false,
+    attackerId,
+    false,
+    deps.dataContext,
+  )
+
   if (
     (battlerHasSimAbility(state, attackerBattler, 'ABILITY_UNSEEN_FIST', false, attackerId, false, deps.dataContext) ||
       battlerHasSimAbility(state, attackerBattler, 'ABILITY_FINAL_BLOW', false, attackerId, false, deps.dataContext)) &&
@@ -1064,14 +1080,28 @@ export function isBattlerProtected(
   ) {
     evadesProtect = true
   } else if (
-    battlerHasSimAbility(state, attackerBattler, 'ABILITY_PINNACLE_BLADE', false, attackerId, false, deps.dataContext) &&
+    attackerHasPinnacleBlade &&
     // battle_util.c:6597: IsKeenEdge(battlerId, move, moveType). The first argument is this
     // function's own `battlerId` parameter (:6571) -- the PROTECTING battler -- not
     // gBattlerAttacker, so DoesMoveMatchFlag scans the TARGET's ability slots. That is a C
-    // quirk (see REPORT.md); the sim passes targetId for the same reason. isKeenEdgeMove
-    // derives the resolved type itself (statusEffects.ts's GetTypeBeforeUsingMove port),
-    // which also reads the battler it is given -- a second-order deviation noted in REPORT.md.
-    isKeenEdgeMove(state, targetId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, unmodelled)
+    // quirk (see REPORT.md); the sim passes targetId for the same reason. The MOVE TYPE,
+    // however, is the attacker's (:6574): passing attackerResolvedMoveType stops the
+    // target's "-ate" abilities from deciding it (isKeenEdgeMove's own fallback reads
+    // whoever it is given, which here is the target).
+    isKeenEdgeMove(
+      state,
+      targetId,
+      moveId,
+      { dataContext: deps.dataContext, grounding: deps.grounding },
+      unmodelled,
+      // Resolved lazily, only on this branch: a resolver that cannot name the type
+      // leaves the onMoveType fallback to run inside the predicate.
+      deps.damage.moveType
+        ? deps.damage.moveType(state, attackerId, targetId, moveId).moveType
+        : moveData?.type
+          ? resolveEffectiveMoveType(attackerBattler.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
+          : null,
+    )
   ) {
     evadesProtect = true
   } else if (!protectAffected) {
@@ -1960,6 +1990,14 @@ function moveViewFor(
   battlerId: number,
 ): TurnOrderMoveView {
   const move = deps.dataContext.move(moveId)
+  // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+  // GetTypeBeforeUsingMove is target-independent (resolveMoveType reads the attacker,
+  // move and field only), and turn order is computed before a target is fixed, so the
+  // opposing battler is passed only to satisfy the resolver's signature.
+  const resolvedMoveType =
+    deps.damage.moveType && state.battlers[battlerId]
+      ? deps.damage.moveType(state, battlerId, battlerId ^ 1, moveId).moveType
+      : null
   return {
     ...base,
     id: moveId,
@@ -1971,8 +2009,14 @@ function moveViewFor(
     power: move?.power ?? 0,
     flags: move?.flags ?? {},
     split: move?.split ?? 'STATUS',
-    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
-    isKeenEdge: isKeenEdgeMove(state, battlerId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }),
+    isKeenEdge: isKeenEdgeMove(
+      state,
+      battlerId,
+      moveId,
+      { dataContext: deps.dataContext, grounding: deps.grounding },
+      undefined,
+      resolvedMoveType,
+    ),
   }
 }
 
@@ -4264,6 +4308,10 @@ export function executeAction(
         grounding: deps.grounding,
         moveBehaviors: deps.moveBehaviors,
       },
+      // Cmd_damagecalc wrote this into gBattleStruct->dynamicMoveType
+      // (battle_script_commands.c:1606-1612); Cmd_seteffectwithchance's
+      // GetMoveEffectChance runs on the same move use, so Corrupted Mind reads it.
+      resolvedMoveType: damageMoveType,
       unmodelled,
     })
 
@@ -4518,6 +4566,14 @@ function buildMoveView(
   attackerItemId: string | null = null,
 ): TurnOrderMoveView {
   const data = deps.dataContext.move(id)
+  // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
+  // The resolution is target-independent (resolveMoveType reads the attacker, move and
+  // field only), and a locked/called/extra view is built before a target is fixed, so
+  // the opposing battler is passed only to satisfy the resolver's signature.
+  const resolvedMoveType =
+    deps.damage.moveType && state.battlers[battlerId]
+      ? deps.damage.moveType(state, battlerId, battlerId ^ 1, id).moveType
+      : null
   return {
     id,
     priority: data?.priority ?? 0,
@@ -4529,8 +4585,14 @@ function buildMoveView(
     flags: data?.flags ?? {},
     split: data?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
-    // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
-    isKeenEdge: isKeenEdgeMove(state, battlerId, id, { dataContext: deps.dataContext, grounding: deps.grounding }),
+    isKeenEdge: isKeenEdgeMove(
+      state,
+      battlerId,
+      id,
+      { dataContext: deps.dataContext, grounding: deps.grounding },
+      undefined,
+      resolvedMoveType,
+    ),
     naturalGiftPriority: data?.effect === 'EFFECT_NATURAL_GIFT' ? naturalGiftPriority(attackerItemId) : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,

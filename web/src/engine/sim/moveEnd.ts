@@ -3673,6 +3673,12 @@ function handleAttackerMoveEndAbility(
   targetHasActedThisTurn?: boolean,
   noEffect?: boolean,
   fainted: number[] = [],
+  /** Cmd_damagecalc's dynamicMoveType for this move use, forwarded by runMoveEnd
+   * (MoveEndContext.resolvedMoveType). The onAttacker Keen Edge checks (Deep Cuts,
+   * Chainsaw, Molten Blades, Light Saber, Pinnacle Blade, Sinister Claws) read
+   * GET_MOVE_TYPE in the C, so they consume this rather than only the onMoveType
+   * slice; IsKeenEdge's own signature is battle_util.c:9381 and each hook's
+   * call is cited at its branch below. */
   resolvedMoveType?: string | null,
   storedBattleMoveDamage?: number,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
@@ -3989,7 +3995,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
-      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       state.rng.random16() % 2 !== 0
     ) {
       applyAbilityOnHitStatus(state, MOVE_EFFECT_BLEED, attackerId, targetId, moveId, statusDeps, unmodelled, result)
@@ -4066,7 +4072,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       (abilityId === 'ABILITY_CHAINSAW'
-        ? isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled)
+        ? isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType)
         : Boolean(moveData?.flags?.hammerBased)) &&
       canLowerStatOrMirrorArmor(state, targetId, STAT_DEF, deps.dataContext)
     ) {
@@ -4787,7 +4793,7 @@ function handleAttackerMoveEndAbility(
       hpDealt > 0 &&
       attackerId !== targetId &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
-      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       state.rng.random16() % 100 < 20
     ) {
       applyAbilityOnHitStatus(state, MOVE_EFFECT_BURN, attackerId, targetId, moveId, statusDeps, unmodelled, result)
@@ -4965,7 +4971,7 @@ function handleAttackerMoveEndAbility(
       target.mon.hp > 0 &&
       hpDealt > 0 &&
       attackerId !== targetId &&
-      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       state.rng.random16() % 2 !== 0
     ) {
       const branch = state.rng.random16() % 4
@@ -4998,7 +5004,7 @@ function handleAttackerMoveEndAbility(
   // Pinnacle Blade (src/abilities.cc:8687-8720; its onInfiltrate half is statusEffects.ts infiltratesSubstitute): DidMoveHit() only -- the
   // target may already have fainted -- then a Keen Edge move. A keen-edge move always infiltrates Substitute, so the hit landed on the mon.
   if (abilityId === 'ABILITY_PINNACLE_BLADE') {
-    if (hpDealt > 0 && attackerId !== targetId && isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled)) {
+    if (hpDealt > 0 && attackerId !== targetId && isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType)) {
       // BattleScript_AttackerDestroysSubstitute (data/battle_scripts_1.s:10706-10710) only prints a message and plays the fade animation; the
       // state change is the C's `substituteHP = 0` (:8698-8700), which MOVEEND_SUBSTITUTE (case 16) turns into the cleared STATUS2_SUBSTITUTE.
       if (target.volatiles.substituteHp) {
@@ -5386,7 +5392,7 @@ function handleAttackerMoveEndAbility(
       target.mon.hp > 0 &&
       hpDealt > 0 &&
       attackerId !== targetId &&
-      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled) &&
+      isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       canLowerStatOrMirrorArmor(state, targetId, STAT_SPDEF, deps.dataContext)
     ) {
       const affected = getOncePerTurnAbilityCounter(state, attackerId, abilityId, deps.dataContext)

@@ -719,6 +719,14 @@ export function isKeenEdgeMove(
   moveId: string | null | undefined,
   deps: StatusDeps,
   _unmodelled?: string[],
+  /** GetMoveTypeInternal's full answer for this move use (see
+   * TurnLoopDeps.damage.moveType), or null when the caller has no resolver.
+   * A caller that holds one MUST pass it: the C's GetTypeBeforeUsingMove
+   * (battle_util.c:9381, battle_main.c:5093-5204) resolves Weather Ball, Hidden
+   * Power, Judgment, Terrain Pulse, Ion Deluge/Electrify and the onMoveType
+   * abilities, not just the last of those. When omitted (every test double and
+   * stub resolver) this falls back to the onMoveType-only resolution below. */
+  resolvedMoveType?: string | null,
 ): boolean {
   if (!moveId) return false
   const moveData = deps.dataContext.move(moveId)
@@ -731,9 +739,12 @@ export function isKeenEdgeMove(
   // (battle_util.c:9381), i.e. the RESOLVED type, not the declared one. Only
   // Chestnut Axe's grant reads it (`moveType == TYPE_GRASS`, abilities.cc:11709),
   // and an "-ate" ability such as Fertilize can turn a Normal move into Grass.
-  const resolvedType = moveData?.type
-    ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
-    : null
+  const resolvedType =
+    resolvedMoveType !== undefined && resolvedMoveType !== null
+      ? resolvedMoveType.replace(/^TYPE_/, '')
+      : moveData?.type
+        ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
+        : null
   if (
     resolvedType === 'GRASS' &&
     battlerHasSimAbility(state, attacker, 'ABILITY_CHESTNUT_AXE', false, attackerId, false, deps.dataContext)
@@ -812,6 +823,8 @@ export function isPunchMove(
   attackerId: number,
   moveId: string | null | undefined,
   deps: StatusDeps,
+  /** GetMoveTypeInternal's full answer; see isKeenEdgeMove's parameter. */
+  resolvedMoveType?: string | null,
 ): boolean {
   if (!moveId) return false
   const moveData = deps.dataContext.move(moveId)
@@ -836,20 +849,19 @@ export function isPunchMove(
   }
   // Brawling Wyvern calls IS_MOVE_TYPE(move, TYPE_DRAGON) (abilities.cc:7605), i.e. the
   // RESOLVED type; resolve it the same way isKeenEdgeMove does above so an "-ate"
-  // ability that turns a move Dragon counts.
-  if (moveData?.type) {
-    const resolvedType = resolveEffectiveMoveType(
-      attacker.mon.abilities,
-      moveId,
-      moveData.type,
-      moveData.flags ?? {},
-    ).moveType
-    if (
-      resolvedType === 'DRAGON' &&
-      battlerHasSimAbility(state, attacker, 'ABILITY_BRAWLING_WYVERN', false, attackerId, false, deps.dataContext)
-    ) {
-      return true
-    }
+  // ability that turns a move Dragon counts. A caller holding a resolver passes
+  // GetMoveTypeInternal's full answer instead (Terrain Pulse in a terrain, ...).
+  const resolvedType =
+    resolvedMoveType !== undefined && resolvedMoveType !== null
+      ? resolvedMoveType.replace(/^TYPE_/, '')
+      : moveData?.type
+        ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
+        : null
+  if (
+    resolvedType === 'DRAGON' &&
+    battlerHasSimAbility(state, attacker, 'ABILITY_BRAWLING_WYVERN', false, attackerId, false, deps.dataContext)
+  ) {
+    return true
   }
 
   return false
@@ -1908,6 +1920,10 @@ export function getMoveEffectChance(
   // Precise Fist/Way of Precision (isPunchMove -> DoesMoveMatchFlag) are now modelled, so this
   // function no longer raises a note.
   _unmodelled?: string[],
+  /** GetMoveTypeInternal's full answer for this move use; see isKeenEdgeMove's
+   * parameter. Omitted by callers without a resolver, which keeps the old
+   * onMoveType-only fallback. */
+  resolvedMoveType?: string | null,
 ): number {
   // battle_script_commands.c:3073:
   // if (moveEffect == MOVE_EFFECT_FLINCH && gTurnStructs[gBattlerAttacker].parentalBondOn < gTurnStructs[gBattlerAttacker].parentalBondInitialCount) return 0;
@@ -1928,15 +1944,20 @@ export function getMoveEffectChance(
   const moveType = moveData?.type ?? null
   // Corrupted Mind reads GET_MOVE_TYPE (src/abilities.cc:9468), the RESOLVED/dynamic type
   // (include/battle.h:735), not the declared gBattleMoves[move].type, so an "-ate" retype
-  // counts. Resolve it the way isKeenEdgeMove does above.
-  const resolvedMoveType =
-    attacker && moveId && moveType
-      ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveType, moveData?.flags ?? {}).moveType
-      : moveType
-  const isPsychic = resolvedMoveType === 'PSYCHIC' || resolvedMoveType === 'TYPE_PSYCHIC'
+  // counts -- and so does every other GetMoveTypeInternal branch (Terrain Pulse,
+  // Weather Ball, ...) when the caller supplies the resolver's answer. Without one,
+  // resolve it the way isKeenEdgeMove does above.
+  const effectiveMoveType =
+    resolvedMoveType !== undefined && resolvedMoveType !== null
+      ? resolvedMoveType.replace(/^TYPE_/, '')
+      : attacker && moveId && moveType
+        ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, moveType, moveData?.flags ?? {}).moveType
+        : moveType
+  const isPsychic = effectiveMoveType === 'PSYCHIC' || effectiveMoveType === 'TYPE_PSYCHIC'
   // Precise Fist/Way of Precision call IsIronFistBoosted (src/abilities.cc:4764), i.e.
   // DoesMoveMatchFlag(..., MOVE_FLAG_PUNCH), so the onModifyMoveFlags grants count too.
-  const isPunch = isPunchMove(state, attackerId, moveId, deps)
+  // Pass the same resolved type through so Brawling Wyvern's IS_MOVE_TYPE sees it.
+  const isPunch = isPunchMove(state, attackerId, moveId, deps, resolvedMoveType)
   // ON_ABILITY(abilityBattler, TRUE, ...) (:3082): the attacker's Mold Breaker can break another battler's
   // breakable hook (Bad Luck is breakable).
   const attackerHasMoldBreaker = attacker ? attackerHasMoldBreakerActive(attacker, deps) : false
