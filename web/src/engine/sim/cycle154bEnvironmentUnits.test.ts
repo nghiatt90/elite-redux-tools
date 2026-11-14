@@ -32,14 +32,17 @@ const classifyMonochamp = (files: SourceFile[]) =>
   )
 
 /**
- * The eight sites whose branch the sim already implements, cited in each
- * unit's scope. The other 19 sites have no sim port, so a synthetic driver
+ * The eleven sites whose branch the sim already implements, cited in each
+ * unit's scope. The other 16 sites have no sim port, so a synthetic driver
  * feed must not flip them.
  */
 const CONDITIONAL_PORT_KEYS = [
   'monochamp:battle_util.c:2238',
   'monochamp:battle_util.c:4850',
   'monochamp:battle_util.c:6656',
+  'monochamp:battle_util.c:7861',
+  'monochamp:battle_util.c:7863',
+  'monochamp:battle_util.c:7865',
   'monochamp:battle_util.c:8672',
   'monochamp:battle_util.c:8710',
   'monochamp:battle_main.c:4205',
@@ -89,7 +92,7 @@ describe('cycle 154b Monotype Champion rule-site units', () => {
     }
   })
 
-  it('flips only the eight conditional ports when the driver assigns a non-null champion type', () => {
+  it('flips only the eleven conditional ports when the driver assigns a non-null champion type', () => {
     const loadSimData = productionFiles.find((file) => file.file.endsWith(LOAD_SIM_DATA))
     expect(loadSimData).toBeDefined()
     if (!loadSimData) return

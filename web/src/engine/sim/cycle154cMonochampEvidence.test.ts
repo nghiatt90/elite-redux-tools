@@ -25,13 +25,16 @@ const productionFiles = loadEngineProductionFiles()
 const testFiles = loadEngineTestFiles()
 
 /**
- * The eight sites whose branch the sim already implements. The other 19 have no
+ * The eleven sites whose branch the sim already implements. The other 16 have no
  * sim port, so a synthetic driver feed must not flip them.
  */
 const CONDITIONAL_PORT_KEYS: readonly string[] = [
   'monochamp:battle_util.c:2238',
   'monochamp:battle_util.c:4850',
   'monochamp:battle_util.c:6656',
+  'monochamp:battle_util.c:7861',
+  'monochamp:battle_util.c:7863',
+  'monochamp:battle_util.c:7865',
   'monochamp:battle_util.c:8672',
   'monochamp:battle_util.c:8710',
   'monochamp:battle_main.c:4205',
@@ -128,6 +131,9 @@ describe('cycle 154c Monotype Champion per-site evidence', () => {
       'monochamp:battle_util.c:2238': OWN_FILE,
       'monochamp:battle_util.c:4850': 'web/src/engine/sim/escape.test.ts',
       'monochamp:battle_util.c:6656': 'web/src/engine/sim/turn.test.ts',
+      'monochamp:battle_util.c:7861': 'web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts',
+      'monochamp:battle_util.c:7863': 'web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts',
+      'monochamp:battle_util.c:7865': 'web/src/engine/sim/ai/cycle150fbMulByTypeEffectiveness.test.ts',
       'monochamp:battle_util.c:8672': 'web/src/engine/sim/turnOrder.test.ts',
       'monochamp:battle_util.c:8710': 'web/src/engine/sim/bridge.test.ts',
       'monochamp:battle_main.c:4205': 'web/src/engine/sim/turnOrder.test.ts',
