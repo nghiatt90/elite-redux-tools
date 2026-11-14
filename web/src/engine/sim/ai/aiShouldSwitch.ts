@@ -44,7 +44,7 @@ import { UQ_ONE, idiv, mulModifier, uq } from '../../fixed'
 import { getTypeModifier, type TypeModifierInputs } from '../../typeEffectiveness'
 import { forEachAbility } from '../../abilities/dispatch'
 import { isBattlerGrounded } from '../grounding'
-import { battlerHasSimAbility } from '../statBuffs'
+import { battlerHasSimAbility, isSimAbilitySuppressed } from '../statBuffs'
 import { weatherHasEffect } from '../fieldEndTurn'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
 import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
@@ -232,12 +232,14 @@ function mulByTypeEffectiveness(state: BattleState, moveId: string, moveType: st
   const battler = state.battlers[0]
   const champ = deps.grounding.monotypeChampType
 
-  // ON_ABILITY(battlerAtk, FALSE, onTypeEffectiveness) -- :7847-7851. A ported
-  // hook signals "changed" by writing ctx.modifier (see dispatchCalc.ts's
+  // ON_ABILITY(battlerAtk, FALSE, onTypeEffectiveness) -- :7847-7851. The
+  // macro FILTER_NOTs IsSuppressed (battle_util.h:269-275, battle_util.c:9254-9261),
+  // so a Gastro Acid'd / Neutralizing Gas'd ability must not fire. A ported hook
+  // signals "changed" by writing ctx.modifier (see dispatchCalc.ts's
   // resolveTypeEffectivenessComponent for the same inference).
   let abilityModified = false
   if (battler) {
-    forEachAbility(battler.mon.abilities, () => false, (impl) => {
+    forEachAbility(battler.mon.abilities, (id) => isSimAbilitySuppressed(state, battler, id, false, 0, false, deps.dataContext), (impl) => {
       if (!impl.onTypeEffectiveness) return
       // attackerId/defenderId are the damage path's own labels, not sim battler
       // indices; no ported onTypeEffectiveness body reads them.
