@@ -107,9 +107,9 @@ line in `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c` (`--
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `move-effect` | 888 | 880 | 2 | 2 | 0 | 6 |
 | `secondary-effect` | 314 | 299 | 15 | 15 | 0 | 0 |
-| `legacy-script` | 600 | 460 | 14 | 134 | 0 | 6 |
+| `legacy-script` | 600 | 461 | 13 | 133 | 0 | 6 |
 | `effect-less` | 143 | 58 | 85 | 85 | 0 | 0 |
-| **total** | **1945** | **1697** | **116** | **236** | **0** | **12** |
+| **total** | **1945** | **1698** | **115** | **235** | **0** | **12** |
 
 Unported includes registered-but-untested. C/script locations cited: 378.
 
@@ -168,7 +168,6 @@ has at least one of the group's moves (first 8 ids listed). Trainer ids are sort
 - `BattleScript_EffectParalyze` (unported): 1 move: `MOVE_THUNDER_WAVE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4362; 35 elite-tier trainers (first 8): `TRAINER_AMY_AND_LIV_4`, `TRAINER_ANDRES_4`, `TRAINER_ANNA_AND_MEG_4`, `TRAINER_AURON`, `TRAINER_BECK`, `TRAINER_BUFFEL`, `TRAINER_CARTER`, `TRAINER_CLARK`
 - `BattleScript_EffectParalyzeIgnoreType` (unported): 2 moves: `MOVE_GLARE`, `MOVE_STUN_SPORE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4346; 5 elite-tier trainers: `TRAINER_DRAKE_3`, `TRAINER_DRAKE_4`, `TRAINER_SEBASTIAN`, `TRAINER_STEVE_2`, `TRAINER_WINSTON_1`
 - `BattleScript_EffectPoison` (unported): 1 move: `MOVE_POISON_POWDER`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4332; no elite-tier trainer carries them
-- `BattleScript_EffectPsychicTerrain` (registered, untested): 1 move: `MOVE_PSYCHIC_TERRAIN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2195; no elite-tier trainer carries them
 - `BattleScript_EffectRapidSpin` (unported): 1 move: `MOVE_RAPID_SPIN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5402; 22 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_DICK`, `TRAINER_BENJAMIN_1`, `TRAINER_CATHERINE_4`, `TRAINER_DONNY`, `TRAINER_DUSTY_1`, `TRAINER_ETHAN_2`, `TRAINER_FLANNERY_2`, `TRAINER_FLANNERY_3`
 - `BattleScript_EffectRecoilIfMiss` (unported): 5 moves: `MOVE_AXE_KICK`, `MOVE_HIGH_JUMP_KICK`, `MOVE_JUMP_KICK`, `MOVE_SUPERCELL_SLAM`, `MOVE_ZEPHYR_RUSH`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4141; 126 elite-tier trainers (first 8): `TRAINER_ABIGAIL_1`, `TRAINER_ABIGAIL_2`, `TRAINER_ABIGAIL_3`, `TRAINER_ABIGAIL_4`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ALEXIA`, `TRAINER_ALYSSA`, `TRAINER_AMANDA`
 - `BattleScript_EffectRest` (unported): 1 move: `MOVE_REST`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4023; 32 elite-tier trainers (first 8): `TRAINER_BENJAMIN_2`, `TRAINER_BRAWLY_2`, `TRAINER_CORY_3`, `TRAINER_CORY_4`, `TRAINER_CRISTIAN`, `TRAINER_GRUNT_SPACE_CENTER_4`, `TRAINER_HALEY_2`, `TRAINER_HALEY_3`

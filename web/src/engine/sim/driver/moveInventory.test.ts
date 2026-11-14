@@ -91,8 +91,13 @@ const DISTINCT_SCRIPTS = 322
  * (`orword`, `setbyte`, `goto`) or a `jump*` conditional
  * (`jumpifability`/`jumpifhealingblocked`/`jumpifstatus`/`jumpifabsent`), and none of
  * those is a behaviour opcode, so no legacy-script pair changed status.
+ *
+ * Cycle 152: 236 -> 235. `cycle152EncorePrecedence.test.ts` runs `MOVE_PSYCHIC_TERRAIN`
+ * through `executeTurn`, giving the inventory test evidence for
+ * `BattleScript_EffectPsychicTerrain`, so that legacy-script pair moved from unported to
+ * ported.
  */
-export const UNPORTED_PAIR_COUNT = 236
+export const UNPORTED_PAIR_COUNT = 235
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -109,8 +114,12 @@ export const UNPORTED_PAIR_COUNT = 236
  * headers the old extent swept in (`statusEffects.ts`'s `MOVE_EFFECT_WRAP` import, `turn.ts`'s
  * `SECONDARY_MOVE_EFFECT_MAP` import) are import-list members, not dispatch sites, so no
  * registered-but-untested pair moved either.
+ *
+ * Cycle 152: 116 -> 115. `cycle152EncorePrecedence.test.ts` exercises
+ * `MOVE_PSYCHIC_TERRAIN` through `executeTurn`, so `BattleScript_EffectPsychicTerrain` is
+ * now test-backed rather than registered-but-untested.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 116
+export const REGISTERED_UNTESTED_PAIR_COUNT = 115
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
