@@ -191,18 +191,6 @@ These run for every opponent trainer decision regardless of the player mon's abi
 | 89 | CheckMoveLimitations' sleep-clause check (battle_util.c:1659, IsSleepClauseDisablingMove :4977-5018) is not modelled: gameDifficulty, the monotype-... | **no** | reachable via: unknown |
 | 94 | CheckMoveLimitations' monotype-champion status-move lock (battle_util.c:1632-1633) is not modelled | **no** | reachable via: unknown |
 
-### `web/src/engine/sim/ai/aiShouldSwitch.ts`
-
-| line | note (abridged) | `ABILITY_` id in text? | raised by / reachable via |
-|---:|---|---|---|
-| 217 | MulByTypeEffectiveness (battle_util.c:7843): Ring Target on battler 0 (HOLD_EFFECT_RING_TARGET) is not modelled | **no** | reachable via: unknown |
-| 218 | MulByTypeEffectiveness (battle_util.c:7843): STATUS4_FORESIGHT on battler 0 is not modelled | **no** | reachable via: unknown |
-| 219 | MulByTypeEffectiveness (battle_util.c:7843): the Monotype Champion type overrides (Fairy/Dragon/Rock) are not modelled | **no** | reachable via: unknown |
-| 220 | MulByTypeEffectiveness (battle_util.c:7843): the iceStatue volatile on battler 0 is not modelled | **no** | reachable via: unknown |
-| 221 | MulByTypeEffectiveness (battle_util.c:7843): the Ground-vs-Flying grounding override (IsBattlerGrounded(battlerDef)) is not modelled | **no** | reachable via: unknown |
-| 222 | MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled | **no** | reachable via: unknown |
-| 223 | MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled | **no** | reachable via: unknown |
-
 ### `web/src/engine/sim/ai/aiCalcDamage.ts`
 
 | line | note (abridged) | `ABILITY_` id in text? | raised by / reachable via |

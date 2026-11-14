@@ -19,18 +19,21 @@
 // case-insensitive forms). Widen, never narrow: every phrase either audit ever
 // counted as a gap must keep counting.
 export const GAP_NOTE =
-  /hook was not run|is not modelled|are not modelled|not modelled|not applied|has no port|no port|not run|not supported|unmodelled/i
+  /hook was not run|is not modelled|are not modelled|not modelled|not applied|not dispatched|has no port|no port|not run|not supported|unmodelled/i
 
 export const ABILITY_TOKEN = /ABILITY_[A-Z0-9_]+/
 
 /**
  * Fixed prefixes of notes the AI raises about its own port, not about the
- * ability under test. `mulByTypeEffectiveness` adds its eight `missing` strings
- * on EVERY call (aiShouldSwitch.ts:216-223), whatever the ability, so they reach
- * the note stream only when the AI happens to evaluate an opposing mon in that
- * fight -- exactly how they escaped the ABILITY_NONE control baseline and got
- * counted as the ability's fault. `AI_CheckBadMove:` is the same shape: the
- * prefix names the AI routine that admits an approximation, not a game effect.
+ * ability under test. `mulByTypeEffectiveness` used to add eight `missing`
+ * strings on EVERY call against the old aiShouldSwitch.ts:216-223, whatever the
+ * ability, so they reached the note stream only when the AI happened to evaluate
+ * an opposing mon in that fight -- exactly how they escaped the ABILITY_NONE
+ * control baseline and got counted as the ability's fault. That function is now
+ * fully ported (battle_util.c:7843-7884, cycle 150fb) and raises no note; the
+ * prefix stays because any note it might raise again would still be an AI
+ * admission. `AI_CheckBadMove:` is the same shape: the prefix names the AI
+ * routine that admits an approximation, not a game effect.
  *
  * A prefix list, deliberately not an ability list: the match is on note text,
  * and attributed rows (which contain the ability id) are checked first, so a

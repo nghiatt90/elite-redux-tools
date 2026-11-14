@@ -34,12 +34,18 @@ import {
   STATUS3_PERISH_SONG,
   STATUS3_ROOTED,
   STATUS4_COMMANDED,
+  STATUS4_FORESIGHT,
   STATUS_FIELD_INVERSE_ROOM,
+  WEATHER_STRONG_WINDS,
   hasFlag,
 } from '../constants'
 import { selfAbility } from './aiAbilityHelpers'
 import { UQ_ONE, idiv, mulModifier, uq } from '../../fixed'
 import { getTypeModifier, type TypeModifierInputs } from '../../typeEffectiveness'
+import { forEachAbility } from '../../abilities/dispatch'
+import { isBattlerGrounded } from '../grounding'
+import { battlerHasSimAbility } from '../statBuffs'
+import { weatherHasEffect } from '../fieldEndTurn'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
 import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
 import { canIndexMoveFaintTarget } from './aiScorers'
@@ -204,25 +210,80 @@ function updateTypeModifier(defType: string, effect: string | null, modifier: nu
   return modifier
 }
 
-/** MulByTypeEffectiveness, battle_util.c:7843-7889, for one defending type.
- * Only the GetTypeModifier chart lookup and UpdateTypeModifier are ported; every
- * other override the C folds in has no equivalent in this AI type fold and is
- * reported once per `missing` set (one note per mechanism, each naming
- * battle_util.c:7843). */
-function mulByTypeEffectiveness(state: BattleState, moveId: string, moveType: string, defType: string, deps: AiDamageDeps, missing: Set<string>): number {
-  // GetTypeModifier(moveType, defType, battlerAtk=0, battlerDef=0) -- the C
-  // really does pass 0 for both battlers at :8003; reproduced, not corrected.
+/** GetBattlerHoldEffect(battler, TRUE), battle_util.c:6526-6536 with
+ * IsItemNegated (:6520-6524): STATUS3_EMBARGO or an unsuppressed Klutz makes the
+ * item read as HOLD_EFFECT_NONE. */
+function negationAwareHoldEffect(state: BattleState, battlerId: number, deps: AiDamageDeps): string | null {
+  const battler = state.battlers[battlerId]
+  if (!battler?.mon.itemId) return null
+  if (hasFlag(battler.statuses3, STATUS3_EMBARGO)) return null
+  if (battlerHasSimAbility(state, battler, 'ABILITY_KLUTZ', false, battlerId, false, deps.dataContext)) return null
+  return deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null
+}
+
+/** MulByTypeEffectiveness, battle_util.c:7843-7884, for one defending type.
+ *
+ * CalcPartyMonTypeEffectivenessMultiplier passes 0 for BOTH battler arguments
+ * (:8003), so every `battlerAtk`/`battlerDef` read here is the player's active
+ * battler (state.battlers[0]) -- never the AI and never the reserve mon. */
+function mulByTypeEffectiveness(state: BattleState, moveId: string, moveType: string, defType: string, deps: AiDamageDeps): number {
+  // GetTypeModifier(moveType, defType, battlerAtk=0, battlerDef=0) -- :7844.
   let modifier = getTypeModifier(moveType, defType, deps.typeChart, deps.inverseTypeChart, typeModifierInputsFor(state, 0, 0, deps))
-  missing.add("MulByTypeEffectiveness (battle_util.c:7843): battler 0's onTypeEffectiveness ability hooks (ON_ABILITY) are not dispatched here")
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): Ring Target on battler 0 (HOLD_EFFECT_RING_TARGET) is not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): STATUS4_FORESIGHT on battler 0 is not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): the Monotype Champion type overrides (Fairy/Dragon/Rock) are not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): the iceStatue volatile on battler 0 is not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): the Ground-vs-Flying grounding override (IsBattlerGrounded(battlerDef)) is not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): the tarShot volatile on battler 0 is not modelled')
-  missing.add('MulByTypeEffectiveness (battle_util.c:7843): WEATHER_STRONG_WINDS is not modelled')
-  const effect = deps.moveData(moveId)?.effect ?? null
-  modifier = updateTypeModifier(defType, effect, modifier, deps)
+  const battler = state.battlers[0]
+  const champ = deps.grounding.monotypeChampType
+
+  // ON_ABILITY(battlerAtk, FALSE, onTypeEffectiveness) -- :7847-7851. A ported
+  // hook signals "changed" by writing ctx.modifier (see dispatchCalc.ts's
+  // resolveTypeEffectivenessComponent for the same inference).
+  let abilityModified = false
+  if (battler) {
+    forEachAbility(battler.mon.abilities, () => false, (impl) => {
+      if (!impl.onTypeEffectiveness) return
+      // attackerId/defenderId are the damage path's own labels, not sim battler
+      // indices; no ported onTypeEffectiveness body reads them.
+      const ctx = { attackerId: 'attacker', defenderId: 'defender', moveId, moveType, modifier, defType }
+      impl.onTypeEffectiveness(ctx)
+      if (ctx.modifier !== modifier) {
+        modifier = ctx.modifier
+        abilityModified = true
+        return 'break'
+      }
+    })
+  }
+
+  if (!abilityModified) {
+    // :7854 -- GetBattlerHoldEffect(battlerDef, TRUE), so Embargo/Klutz negate it.
+    if (modifier === 0 && negationAwareHoldEffect(state, 0, deps) === 'HOLD_EFFECT_RING_TARGET') modifier = uq(1.0)
+    // :7857-7858.
+    else if ((moveType === 'FIGHTING' || moveType === 'NORMAL') && defType === 'GHOST' && hasFlag(battler?.statuses4 ?? 0, STATUS4_FORESIGHT) && modifier === 0)
+      modifier = uq(1.0)
+    // :7860-7862 -- GetBattlerSide(0) is always B_SIDE_PLAYER here (:8003).
+    else if (moveType === 'FAIRY' && (defType === 'POISON' || defType === 'STEEL') && champ === 'FAIRY') modifier = uq(2.0)
+    // :7863-7864.
+    else if (modifier === 0 && champ === 'DRAGON') modifier = uq(1.0)
+    // :7865-7869. The `side != B_SIDE_PLAYER` arm (a Rock move vs an opponent's
+    // Rock mon) is unreachable from this caller because battlerDef is 0 (:8003).
+    // This arm still swallows the iceStatue arm below when the champion is ROCK.
+    else if (champ === 'ROCK') {
+      if (defType === 'ROCK' && moveType === 'ROCK') modifier = uq(2.0)
+    }
+    // :7870-7871.
+    else if (battler?.volatiles.iceStatue && moveType === 'ICE' && defType === 'ICE' && modifier < uq(1.0)) modifier *= 2
+  }
+
+  // :7874 -- IsBattlerGrounded(battlerDef=0), the type-inclusive check.
+  if (moveType === 'GROUND' && defType === 'FLYING' && isBattlerGrounded(state, 0, deps.grounding) && modifier === 0) modifier = uq(1.0)
+
+  // :7876.
+  modifier = updateTypeModifier(defType, deps.moveData(moveId)?.effect ?? null, modifier, deps)
+
+  // :7878.
+  if (moveType === 'FIRE' && battler?.volatiles.tarShot) modifier = uq(2.0)
+
+  // :7881-7883 -- WEATHER_STRONG_WINDS weakens super-effective Flying hits.
+  if (hasFlag(state.field.weather, WEATHER_STRONG_WINDS) && weatherHasEffect(state, deps.grounding) && defType === 'FLYING' && modifier >= uq(2.0))
+    modifier = uq(1.0)
+
   return modifier
 }
 
@@ -233,17 +294,15 @@ function mulByTypeEffectiveness(state: BattleState, moveId: string, moveType: st
  * its Levitate/Mountaineer/Gifted Mind checks. Those three checks therefore read
  * gBattleMons[level] out of bounds and are NOT applied here (one note per call
  * that reaches them, per the brief). */
-function calcPartyMonTypeEffectivenessMultiplier(state: BattleState, reserve: SimPartyMon, moveId: string, deps: AiDamageDeps, unmodelled: string[]): number {
+export function calcPartyMonTypeEffectivenessMultiplier(state: BattleState, reserve: SimPartyMon, moveId: string, deps: AiDamageDeps, unmodelled: string[]): number {
   const move = deps.moveData(moveId)
   const moveType = move?.type ?? null
   let modifier = UQ_ONE
   if (moveId !== 'MOVE_STRUGGLE' && moveType && moveType !== 'MYSTERY') {
     const type1 = reserve.types[0]
     const type2 = reserve.types[1]
-    const missing = new Set<string>()
-    modifier = mulModifier(modifier, mulByTypeEffectiveness(state, moveId, moveType, type1, deps, missing))
-    if (type2 !== type1) modifier = mulModifier(modifier, mulByTypeEffectiveness(state, moveId, moveType, type2, deps, missing))
-    unmodelled.push(...missing)
+    modifier = mulModifier(modifier, mulByTypeEffectiveness(state, moveId, moveType, type1, deps))
+    if (type2 !== type1) modifier = mulModifier(modifier, mulByTypeEffectiveness(state, moveId, moveType, type2, deps))
     unmodelled.push(
       "CalcPartyMonTypeEffectivenessMultiplier (battle_util.c:7998) passes the mon's level as battlerDef, so its Levitate/Mountaineer/Gifted Mind checks read out-of-bounds gBattleMons[level]",
     )

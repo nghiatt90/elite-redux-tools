@@ -60,13 +60,15 @@ describe('partitionAuditNotes with AI admissions', () => {
 describe('AI admission prefix coverage', () => {
   // Every fixed string aiShouldSwitch.ts adds to its `missing` set must satisfy
   // isAiAdmissionNote, so a new AI note cannot silently reappear as an
-  // unattributed ability gap.
+  // unattributed ability gap. Cycle 150fb finished the MulByTypeEffectiveness
+  // port (battle_util.c:7843-7884), which removed every `missing.add` literal
+  // from that file, so zero literals is the correct state; the invariant below
+  // still guards any that return.
   it('every missing.add literal in aiShouldSwitch.ts is an AI admission note', () => {
     const source = readFileSync(new URL('./ai/aiShouldSwitch.ts', import.meta.url), 'utf8')
     const literals: string[] = []
     const re = /missing\.add\((['"])(.*?)\1\)/g
     for (let m = re.exec(source); m !== null; m = re.exec(source)) literals.push(m[2])
-    expect(literals.length).toBeGreaterThan(0)
     const missed = literals.filter((literal) => !isAiAdmissionNote(literal))
     expect(missed).toEqual([])
   })
