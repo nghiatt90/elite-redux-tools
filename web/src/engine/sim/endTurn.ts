@@ -213,7 +213,7 @@ import { isBattlerGrounded } from './grounding'
 import { battlerSide } from './turnOrder'
 import type { StatusDeps } from './statusEffects'
 import { canBeBurned, canBeConfused, canBePoisoned, canGetFrostbite, canSleep, cancelMultiTurnMoves, findAbilitySlot, isBattlerTerrainAffected, isKeenEdgeMove } from './statusEffects'
-import { isAbilityAliveOnOpposingSide } from './turn'
+import { isAbilityAliveOnOpposingSide, isBattlerAlive } from './turn'
 import type { StatChangeOutcome } from './turn'
 import {
   apeShiftHandler,
@@ -976,13 +976,30 @@ function abilityDrainsHp(
       continue
     }
     if (!canBattlerHeal(state, holderId, holder, unmodelled, dataContext)) continue // jumpifhealingblocked + jumpifstatus STATUS1_BLEED
-    if (
-      battlerHasAbility(holder.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION) ||
-      battlerHasAbility(target.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION)
-    ) {
-      unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3309-3317; ABILITY_SOUL_LINKER): the second hit on the drained battler is not modelled')
-    }
+
+    // BattleScript_AbsorbLeech_Test's Soul Linker jumps (:3304-3305) land on
+    // BattleScript_AbsorbSoulLinker (:3309-3317): call BattleScript_AbsorbUpdateHp (the holder heals
+    // `damage`), then `healthbarupdate BS_TARGET; datahpupdate BS_TARGET` with the same still-negative
+    // gBattleMoveDamage (Cmd_datahpupdate, battle_script_commands.c:1908-1911: hp goes up, clamped to
+    // maxHP), so the target heals the identical amount. Big Root / Absorbant are NOT re-applied -- the C
+    // reuses the stored value. Step 5 `jumpifabsent BS_TARGET` (:3303; VARIOUS_JUMP_IF_ABSENT ->
+    // !IsBattlerAlive, battle_script_commands.c:6769-6772) skips the branch for a target this tick just
+    // fainted, and jumps to BattleScript_AbsorbLeech_SkipSoulLinker, which still heals the holder.
+    // The trailing `manipulatedamage DMG_CHANGE_SIGN` (:3317) has no consumer: there is no MOVEEND at
+    // end of turn, so no further hit lands on the holder.
+    const soulLinkerActive =
+      isBattlerAlive(state, targetId) &&
+      (battlerHasAbility(holder.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION) ||
+        battlerHasAbility(target.mon.abilities, 'ABILITY_SOUL_LINKER', NO_SUPPRESSION))
     if (holder.mon.hp > 0) healEndTurn(state, holderId, holder, damage, results)
+    if (soulLinkerActive) {
+      const prevHp = target.mon.hp
+      applyEndTurnHp(state, targetId, target, damage)
+      const actualHeal = target.mon.hp - prevHp
+      if (actualHeal > 0) {
+        results.push({ battlerId: targetId, effect: 'ABILITY', hpChange: actualHeal, fainted: false })
+      }
+    }
   }
 }
 

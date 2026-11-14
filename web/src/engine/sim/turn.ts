@@ -4239,10 +4239,22 @@ export function executeAction(
       attackerDamage = (attackerDamage ?? 0) + selfDmg
     }
 
-    // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3286-3293) ->
+    // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3287-3291) ->
     // BattleScript_AbsorbLeech (:3293-3297) -> BattleScript_AbsorbLeech_Test (:3298-3306), also reached by
-    // Dream Eater (:3567). manipulatedamage DMG_TO_HP_FROM_MOVE, battle_script_commands.c:9398-9411.
-    if ((moveEffect === 'EFFECT_ABSORB' || moveEffect === 'EFFECT_DREAM_EATER') && hpDealt > 0) {
+    // Dream Eater (:3567) and by Matcha Gotcha's BattleScript_EffectMatchaGotcha (:3334-3354, whose
+    // `goto BattleScript_AbsorbHeal` at :3354 runs after its burn roll at :3352-3353).
+    // manipulatedamage DMG_TO_HP_FROM_MOVE, battle_script_commands.c:9398-9411.
+    //
+    // Draw order: the C rolls the burn (setmoveeffect MOVE_EFFECT_BURN; seteffectwithchance,
+    // battle_scripts_1.s:3352-3353) BEFORE jumping to BattleScript_AbsorbHeal, whereas this block runs
+    // before applySecondaryMoveEffects. That is safe without reordering: the drain path draws no RNG --
+    // Big Root / Absorbant / Liquid Ooze / Soul Linker are state lookups and the drain amount is
+    // arithmetic on hpDealt (battle_script_commands.c:9398-9411) -- so the stream stays accuracy, then
+    // the move's effectChance roll, exactly as before Matcha Gotcha was added here.
+    if (
+      (moveEffect === 'EFFECT_ABSORB' || moveEffect === 'EFFECT_DREAM_EATER' || moveEffect === 'EFFECT_MATCHA_GOTCHA') &&
+      hpDealt > 0
+    ) {
       if (canBattlerHeal(state, battlerId, attackerBattler, unmodelled, deps.dataContext)) {
         const argument = moveData?.argumentInt ?? 0
         let drainHp = argument !== 0 ? Math.floor((hpDealt * argument) / 100) : Math.floor(hpDealt / 2)

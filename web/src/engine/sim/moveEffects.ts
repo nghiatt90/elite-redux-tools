@@ -12233,8 +12233,10 @@ export function applySecondaryMoveEffects(
     // CERTAIN, then BattleScript_EffectHit. Struggle is the only user.
     effectSpecs.push({ effectName: 'MOVE_EFFECT_RECOIL_HP_25', chance: moveData?.effectChance ?? 0, affectsUser: true, certain: true })
   } else if (moveEffect === 'EFFECT_MATCHA_GOTCHA') {
-    // BattleScript_EffectMatchaGotcha (data/battle_scripts_1.s:946-966)
-    // setmoveeffect MOVE_EFFECT_BURN; seteffectwithchance (drain handled in turn.ts)
+    // BattleScript_EffectMatchaGotcha (data/battle_scripts_1.s:3334-3354): the burn is
+    // `setmoveeffect MOVE_EFFECT_BURN; seteffectwithchance` (:3352-3353), then `goto
+    // BattleScript_AbsorbHeal` (:3354) for the drain, which the "Drain:
+    // BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal" block in turn.ts handles.
     effectSpecs.push({
       effectName: 'MOVE_EFFECT_BURN',
       chance: moveData?.effectChance ?? 0,
