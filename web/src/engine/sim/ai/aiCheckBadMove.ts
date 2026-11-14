@@ -106,9 +106,9 @@
 //     own "no prediction" branch, not an invented substitute.
 //   - `CanBattlerGetOrLoseItem`'s species-locked-item exclusions (Genesect+
 //     Drive, Silvally+Memory, Arceus+Plate) are ported directly (cheap,
-//     3 species checks); `IsItemNegated` (Embargo/Magic Room/Klutz
-//     suppression of fling-eligibility) has no port -- always treated as
-//     not negated, the common case.
+//     3 species checks); `IsItemNegated` is ported for CanFling as the
+//     Embargo flag or Klutz ability check (`battle_util.c:6520-6524` has no
+//     Magic Room clause).
 //   - `DoesBattlerHaveAbilityShield`'s ability-loop (`blocksAbilitySuppression`)
 //     is ported as a real bitfield scan, but the current abilityHooks.json
 //     snapshot has zero abilities with that bitfield set, so the loop is
@@ -153,6 +153,7 @@ import {
   STATUS3_AQUA_RING,
   STATUS3_MAGNET_RISE,
   STATUS3_POWER_TRICK,
+  STATUS3_EMBARGO,
   STATUS3_IMPRISONED_OTHERS,
   STATUS3_YAWN,
   STATUS3_GASTRO_ACID,
@@ -209,6 +210,7 @@ import {
 } from './aiAbilityHelpers'
 export { PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES, isRolePlayBannedAbility, isRolePlayBannedAbilityAtk } from './aiAbilityHelpers'
 import { computeIsAbsorbed, computeIsImmune } from '../../abilities/dispatchCalc'
+import { battlerHasSimAbility } from '../statBuffs'
 import { isMagicGuardProtected } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
 import { getWhoStrikesFirst, getBattlerTotalSpeedStat, TOTAL_SPEED_FULL } from '../turnOrder'
@@ -757,12 +759,10 @@ export function getBattlerSideSpeedAverage(state: BattleState, battlerId: number
   return getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
 }
 
-/** CanFling, battle_util.c:8414-8420. `IsItemNegated` (Embargo/Magic Room/
- * Klutz suppression of fling-eligibility) has no port -- treated as not
- * negated (the common case), gapped by name. The species-locked-item
- * exclusions inside CanBattlerGetOrLoseItem (:8250-8270 -- Enigma Berry,
- * Primal Orb, Mega Stone, and the three species+hold-effect pairs) ARE
- * ported since they are three cheap direct comparisons, not a scan. */
+/** CanBattlerGetOrLoseItem, battle_util.c:8250-8270. The species-locked-item
+ * exclusions (Enigma Berry, Primal Orb, Mega Stone, and the three
+ * species+hold-effect pairs) ARE ported since they are three cheap direct
+ * comparisons, not a scan. `IsItemNegated` is checked by the caller. */
 export function canBattlerGetOrLoseItemApprox(battler: BattlerState, itemId: string, deps: AiDamageDeps): boolean {
   if (itemId === 'ITEM_ENIGMA_BERRY') return false
   const holdEffect = deps.dataContext.item(itemId)?.resolvedHoldEffect ?? null
@@ -773,10 +773,18 @@ export function canBattlerGetOrLoseItemApprox(battler: BattlerState, itemId: str
   if (species.startsWith('SPECIES_ARCEUS') && holdEffect === 'HOLD_EFFECT_PLATE') return false
   return true
 }
-function canFling(attacker: BattlerState, deps: AiDamageDeps, unmodelled: string[]): boolean {
+/** CanFling, battle_util.c:8414-8420. Order matches the C's short-circuit:
+ * no item, then `IsItemNegated` (:6520-6524 -- Embargo flag or Klutz, with
+ * no Magic Room clause), then `CanBattlerGetOrLoseItem`. Klutz is checked
+ * with `checkMoldBreaker = FALSE`, so ability suppression (Gastro Acid,
+ * Neutralizing Gas) is honoured. */
+function canFling(state: BattleState, attacker: BattlerState, deps: AiDamageDeps): boolean {
   const itemId = attacker.mon.itemId
   if (!itemId) return false
-  unmodelled.push('CanFling: IsItemNegated (Embargo/Magic Room/Klutz suppression) has no port; treated as not negated')
+  const negated =
+    hasFlag(attacker.statuses3, STATUS3_EMBARGO) ||
+    battlerHasSimAbility(state, attacker, 'ABILITY_KLUTZ', false, attacker.id, false, deps.dataContext)
+  if (negated) return false
   return canBattlerGetOrLoseItemApprox(attacker, itemId, deps)
 }
 
@@ -2236,7 +2244,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (hasFlag(state.field.statuses, STATUS_FIELD_ION_DELUGE) || partnerMoveIsSameNoTarget(state, battlerAtk)) score -= 10
       break
     case 'EFFECT_FLING':
-      if (!canFling(attacker, deps, unmodelled)) score -= 10 // no item to fling
+      if (!canFling(state, attacker, deps)) score -= 10 // no item to fling
       break
     case 'EFFECT_EMBARGO':
       if (defAbility(state, deps, defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk)) score -= 10
