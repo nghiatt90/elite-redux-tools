@@ -2021,27 +2021,35 @@ function moveViewFor(
 }
 
 /**
- * Encore. Selection (battle_main.c:3689-3691) replaces an encored battler's chosen move with
- * encoredMove before turn order is computed; HandleAction_UseMove (battle_util.c:221-236) keeps
- * it, or -- when the slot no longer holds the encored move -- uses that slot's move and ends the
- * encore. Both branches re-derive gBattlerTarget with GetMoveTarget (battle_util.c:226, :236).
+ * Encore, selection half. Selection (battle_main.c:3689-3691) replaces an encored battler's
+ * chosen move with the move in encoredMovePos before turn order is computed, so priority and
+ * ordering read that move; the target it resolves here (GetFullChosenTarget, battle_util.c:167)
+ * likewise exists only to order the turn. HandleAction_UseMove does NOT run at selection: at the
+ * battler's own action (:222-236, after the alive check at :176) it re-derives gBattlerTarget
+ * with GetMoveTarget, and -- when the slot no longer holds the encored move -- uses that slot's
+ * move and ends the encore (:228-236). Both halves live in executeAction; this function only
+ * performs the selection-time move swap (and the ordering-only target) and records the
+ * execution-time re-derivation with `targetFromGetMoveTarget`.
+ *
+ * Branch :217-219 (STATUS2_MULTIPLETURNS / STATUS2_RECHARGE with gLockedMoves) precedes both
+ * Encore branches: such a battler uses gLockedMoves and keeps the stored
+ * gBattleStruct->moveTarget, so the encore is neither re-targeted nor ended here.
  */
 function applyEncore(state: BattleState, battlerId: number, action: ChosenAction | null, deps: TurnLoopDeps): ChosenAction | null {
   const battler = state.battlers[battlerId]
   if (!action || action.action !== 'USE_MOVE' || !action.chosenMove || !battler?.volatiles.encoredMove) return action
+  // Same gate as applyLockedMove (:217-219), which runs before the Encore branches.
+  if (battler.mon.hp !== 0 && state.lockedMoves[battlerId] && hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS | STATUS2_RECHARGE)) return action
   const v = battler.volatiles
   const slotMove = battler.mon.moves[v.encoredMovePos]
-  if (slotMove !== v.encoredMove) {
-    v.encoredMove = null
-    v.encoredMovePos = 0
-    v.encoreTimer = 0
-  }
   if (!slotMove) return action
   const view = slotMove === action.chosenMove.id ? action.chosenMove : moveViewFor(action.chosenMove, slotMove, deps, state, battlerId)
   return {
     ...action,
     chosenMove: view,
     moveToBeUsed: view,
+    // Selection-time only: GetFullChosenTarget (:167) reads GetMoveTarget to order the turn.
+    // The execution-time re-derivation happens in executeAction (:226, :236).
     target: getMoveTarget(state, battlerId, slotMove, deps),
     targetFromGetMoveTarget: true,
   }
@@ -2370,6 +2378,27 @@ export function executeAction(
 
   const attackerBattler = state.battlers[battlerId]!
   let targetId = action.target
+  // HandleAction_UseMove:222-236 -- the Encore branches run at the battler's OWN action, after
+  // the alive check at :176 and after every faster mover has acted, and both re-derive
+  // gBattlerTarget with GetMoveTarget(attacker, currentMove, 0). That call reads the DYNAMIC
+  // target flags and the Curse rule against the field as it stands NOW, so a faster foe that set
+  // Psychic Terrain this turn changes an encored Expanding Force's flag to BOTH. The action's
+  // selection-time `target` (battle_main.c:3689-3691, GetFullChosenTarget:167) was only used to
+  // order the turn. Branch :217-219 and applyEncore's matching guard leave
+  // targetFromGetMoveTarget unset, so a locked battler keeps the STORED target as in the C.
+  if (action.targetFromGetMoveTarget && action.chosenMove) {
+    targetId = getMoveTarget(state, battlerId, action.chosenMove.id, deps)
+    // HandleAction_UseMove:228-236 also ends the encore here, at use time, when the slot no
+    // longer holds the encored move. Branch :217-219 never reaches this block (applyEncore
+    // returned the locked action unchanged), so a locked battler's encore is left for
+    // ENDTURN_ENCORE exactly as the C does.
+    const encore = attackerBattler.volatiles
+    if (encore.encoredMove && attackerBattler.mon.moves[encore.encoredMovePos] !== encore.encoredMove) {
+      encore.encoredMove = null
+      encore.encoredMovePos = 0
+      encore.encoreTimer = 0
+    }
+  }
   const unmodelled: string[] = []
 
   // One MOVEEND_ABILITIES (case 5) defender pass shared by every move-end exit below that never
@@ -2404,10 +2433,10 @@ export function executeAction(
     moveId: string,
     moveDataForDispatch: SimMoveData | undefined,
   ): number => {
-    // HandleAction_UseMove already applied GetMoveTarget on the Encore path
-    // (battle_util.c:226, :236), including the dynamic flags and the Curse rule;
-    // no controller code runs after it before MOVEEND_ABILITIES
-    // (battle_script_commands.c:4527-4531).
+    // executeAction already applied GetMoveTarget on the Encore path at the battler's
+    // own action (battle_util.c:226, :236), including the dynamic flags and the Curse
+    // rule, and `targetIdForDispatch` is that execution-time re-derivation; no controller
+    // code runs after it before MOVEEND_ABILITIES (battle_script_commands.c:4527-4531).
     if (action?.targetFromGetMoveTarget) return targetIdForDispatch
     const isPlayerSide = (battlerId & 1) === 0
     if (isPlayerSide) {
