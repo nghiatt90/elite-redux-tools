@@ -753,13 +753,18 @@ export function runAttackCanceller(
     const attackerSlots = attacker.mon.abilities
     const defenderBattler = targetId !== null ? state.battlers[targetId] : undefined
     const defenderSlots = defenderBattler ? defenderBattler.mon.abilities : NO_ABILITY_SLOTS
-    // The same two facts sim/damageResolver.ts feeds calculateMoveDamage's
-    // OnParentalBondContext: the scenario's moveType is `move.type ?? 'NORMAL'`
-    // (bare spelling) and its weather is weatherFromBitfield(state.field.weather)
-    // via buildFieldBattleState/buildFieldFacts.
+    // GetParentalBondType's moveType argument is GET_MOVE_TYPE's answer
+    // (battle_script_commands.c:1033,1084) -- the RESOLVED type, not the declared
+    // `gBattleMoves[move].type`. This stage has no DamageResolver, so it can only
+    // reach the -ate onMoveType subset (the same limitation as CANCELLER_POWDER_STATUS
+    // above); the item/effect/field retypes stay unmodelled here. `declaredMoveType`
+    // keeps the declared type for the IS_MOVE_TYPE readers (matchesMoveFlag's
+    // declaredMoveType argument). Weather is weatherFromBitfield(state.field.weather),
+    // the same fact sim/damageResolver.ts's buildFieldBattleState supplies.
+    const declaredParentalBondType = bareType(move?.type) || 'NORMAL'
     const parentalBondCtx: OnParentalBondInputs = {
-      moveType: bareType(move?.type) || 'NORMAL',
-      declaredMoveType: bareType(move?.type) || 'NORMAL',
+      moveType: resolveEffectiveMoveType(attackerSlots, moveId, declaredParentalBondType, move?.flags ?? {}).moveType,
+      declaredMoveType: declaredParentalBondType,
       moveFlags: move?.flags ?? {},
       moveSplit: move?.split ?? 'STATUS',
       weather: weatherFromBitfield(state.field.weather).weather,

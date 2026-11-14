@@ -1691,6 +1691,12 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   let absorbingAbility: string | null = null
   let berryReduced = false
 
+  // GetParentalBondType receives GET_MOVE_TYPE's answer -- the RESOLVED type after
+  // SetTypeBeforeUsingMove/the dynamic-type write-back (battle_script_commands.c:1033,1084
+  // and battle_ai_util.c:660-682) -- not the declared `gBattleMoves[move].type`. Resolve
+  // it here without folding the resolver's notes into the result: calcInternal already
+  // reports them. `declaredMoveType` stays the declared type for IS_MOVE_TYPE readers.
+  const hitPlanMoveType = resolveMoveType(scenario, moveType).moveType
   const hitPlanResult = resolveHitPlan(
     move,
     attacker.abilitySlots,
@@ -1698,7 +1704,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     hasFlag(attacker.abilitySlots, 'skillLink'),
     attacker.condition.resolvedHoldEffect,
     scenario.hitCount,
-    { moveType, declaredMoveType: moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, attackerHeads: attacker.condition.heads },
+    { moveType: hitPlanMoveType, declaredMoveType: moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, attackerHeads: attacker.condition.heads },
     scenario.beatUpHitCount,
     scenario.minionControlCount,
   )

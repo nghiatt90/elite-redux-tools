@@ -22,7 +22,7 @@
 // change" per this batch's own brief.
 
 import type { MoveData, DamageCalcScenario } from '../../calculate'
-import { calculateMoveDamage } from '../../calculate'
+import { calculateMoveDamage, resolveMoveType } from '../../calculate'
 import type { BattleConstants } from '../../types'
 import type { MoveBehaviors } from '../../basePower'
 import { isUnmodelledBasePowerNote } from '../../basePower'
@@ -292,10 +292,19 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
   if (!built) return { dmg: 0, unmodelled: [`move ${moveId}: move data is unavailable`] }
   const { move, scenario, maskedState, unmodelled } = built
 
+  // GetParentalBondType's moveType argument is the one CalculateMoveDamage wrote back
+  // through its `u8* moveType` (battle_ai_util.c:660-682), not the declared
+  // `gBattleMoves[move].type`. With no power the damage call never runs, so fall back to
+  // SetTypeBeforeUsingMove + GET_MOVE_TYPE's answer (resolveMoveType).
+  let resolvedMoveType = resolveMoveType(scenario, scenario.move.type ?? 'NORMAL').moveType
+
   // `if (gBattleMoves[move].power) { ... } else { dmg = 0; }` (:665-679).
   let dmg = 0
   if (move.power) {
     const result = calculateMoveDamage(scenario)
+    // effectiveMoveType is the type the winning branch actually used (including the
+    // type2 case that rewrites *moveType, battle_util.c:7771-7779).
+    resolvedMoveType = result.effectiveMoveType
     // calculateMoveDamage warns "not modelled" for moves whose real battle damage bypasses
     // CalculateMoveDamage (basePower.ts UNMODELLED_BASE_POWER_EFFECTS / _MOVE_IDS).
     // AI_CalcDamage never models that damage either: Super Fang, Level Damage, Psywave,
@@ -330,7 +339,7 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
   let parentalBondTrigger: ParentalBondTrigger | null = null
   if (!multihitType) {
     parentalBondTrigger = computeParentalBondTrigger(scenario.attacker.abilitySlots, scenario.defender.abilitySlots, {
-      moveType: scenario.move.type ?? 'NORMAL',
+      moveType: resolvedMoveType,
       declaredMoveType: scenario.move.type ?? 'NORMAL',
       moveFlags: move.flags,
       moveSplit: scenario.move.split ?? 'STATUS',
