@@ -2,7 +2,7 @@ from erdata.parse import parse_abilities, parse_items, parse_moves, parse_specie
 
 
 def test_species_count():
-    assert len(parse_species()) == 1911
+    assert len(parse_species()) == 1926
 
 
 def test_moves_count():
@@ -10,7 +10,7 @@ def test_moves_count():
 
 
 def test_abilities_count():
-    assert len(parse_abilities()) == 1034
+    assert len(parse_abilities()) == 1063
 
 
 def test_items_count():

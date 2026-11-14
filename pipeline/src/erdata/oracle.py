@@ -16,8 +16,8 @@ import urllib.request
 from erdata.paths import UPSTREAM
 
 _URL = (
-    "https://raw.githubusercontent.com/ForwardFeed/ER-nextdex/main/"
-    "static/js/data/gameDataV2.65beta.json"
+    "https://raw.githubusercontent.com/ForwardFeed/ER-nextdex/72f001f841b76e9a1361e88ab08e78f741a45957/"
+    "static/js/data/gameDataV2.65.4.json"
 )
 _CACHE = UPSTREAM / "nextdex_gameData.json"
 

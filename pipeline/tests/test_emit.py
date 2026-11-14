@@ -326,12 +326,11 @@ def test_deevolution_targets_are_flagged_for_eviolite():
     }
 
 
-def test_abominable_monster_and_icicle_fist_names_are_swapped():
-    # Upstream's own bug at the pinned released build (er-config corrected it later in
-    # b5aaee6bbeb3, 2026-04-21). The shipped ROM shows these two swapped, so the
-    # snapshot must too -- this test exists so nobody "fixes" it back.
+def test_abominable_monster_and_icicle_fist_names_are_not_swapped():
+    # Upstream's names were swapped until er-config b5aaee6bbeb3 (2026-04-21), which is
+    # before the pinned v2.65.4.1b build, so the ids carry their own names here.
     _, _, abilities, _, _ = _fixtures()
     name_index = {a.name: a for a in abilities}
     by_id = {_ability_dict(a, abilities, name_index)["id"]: _ability_dict(a, abilities, name_index) for a in abilities if a.name in ("Icicle Fist", "Abominable Monster")}
-    assert by_id["ABILITY_ABOMINABLE_MONSTER"]["name"] == "Icicle Fist"
-    assert by_id["ABILITY_ICICLE_FIST"]["name"] == "Abominable Monster"
+    assert by_id["ABILITY_ABOMINABLE_MONSTER"]["name"] == "Abominable Monster"
+    assert by_id["ABILITY_ICICLE_FIST"]["name"] == "Icicle Fist"

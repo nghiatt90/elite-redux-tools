@@ -23,7 +23,7 @@ def test_playable_count_matches_published_dex():
     # At the v2.65.3b (March) pin, SPECIES_DURALUDON_PARTNER_MEGA still carries
     # randomizer_banned: SPECIES_HIDDEN (unhidden in a later, unreleased commit),
     # so it's excluded here -- one fewer than the April tip's 1907.
-    assert len(playable_species(species)) == 1906
+    assert len(playable_species(species)) == 1922
 
 
 def test_form_inherits_dex_but_not_stats():
