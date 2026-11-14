@@ -4093,6 +4093,11 @@ export function executeAction(
     const targetHpBefore = targetBattler?.mon.hp ?? 0
     applyDamage(state, currentTargetId, targetDamage, fainted, deps, battlerId)
     const hpDealt = targetHpBefore - (targetBattler?.mon.hp ?? 0)
+    // gBattleMoveDamage as it will stand at MOVEEND_ABILITIES. Only the drain block below leaves it in a
+    // state that differs from the hit's damage (Cmd_manipulatedamage, battle_script_commands.c:9359-9360,
+    // :9398-9411), and BattleScript_AttackerSoulLinker (data/battle_scripts_1.s:11467-11472) reads it;
+    // undefined keeps the move-end hooks on targetDamage, their pre-existing input.
+    let storedBattleMoveDamage: number | undefined
 
     // Cmd_datahpupdate damage tracking (src/battle_script_commands.c:1935-1959)
     if (targetBattler && hpDealt > 0) {
@@ -4183,7 +4188,8 @@ export function executeAction(
       attackerDamage = (attackerDamage ?? 0) + selfDmg
     }
 
-    // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3286-3324), also reached by
+    // Drain: BattleScript_EffectAbsorb -> BattleScript_AbsorbHeal (data/battle_scripts_1.s:3286-3293) ->
+    // BattleScript_AbsorbLeech (:3293-3297) -> BattleScript_AbsorbLeech_Test (:3298-3306), also reached by
     // Dream Eater (:3567). manipulatedamage DMG_TO_HP_FROM_MOVE, battle_script_commands.c:9398-9411.
     if ((moveEffect === 'EFFECT_ABSORB' || moveEffect === 'EFFECT_DREAM_EATER') && hpDealt > 0) {
       if (canBattlerHeal(state, battlerId, attackerBattler, unmodelled, deps.dataContext)) {
@@ -4198,16 +4204,46 @@ export function executeAction(
         if (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_LIQUID_OOZE', false, battlerId, false, deps.dataContext)) {
           applyDamage(state, battlerId, drainHp, fainted, deps)
           attackerDamage = (attackerDamage ?? 0) + drainHp
+          // BattleScript_AbsorbLiquidOoze (:3318-3324): DMG_CHANGE_SIGN leaves the positive drain in
+          // gBattleMoveDamage, so a Soul Linker holder still takes that much at move end.
+          storedBattleMoveDamage = drainHp
         } else {
+          // Step 7 of BattleScript_AbsorbLeech_Test: call BattleScript_AbsorbUpdateHp heals the
+          // attacker first. The jumpifhealingblocked / jumpifstatus STATUS1_BLEED returns (steps
+          // 3-4) are already covered by the canBattlerHeal gate above, whose CanBattlerHeal
+          // (battle_util.c:8979-8986) is exactly those two clauses.
           attackerBattler.mon.hp = Math.min(attackerBattler.mon.maxHp, attackerBattler.mon.hp + drainHp)
           syncPartyHp(state, battlerId)
+          // BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3309-3317): after the attacker
+          // heal, `datahpupdate BS_TARGET` applies the same still-negative gBattleMoveDamage
+          // (Cmd_datahpupdate, battle_script_commands.c:1908-1911: hp -= negative, clamp maxHP),
+          // so the target heals the identical amount. Big Root / Absorbant are NOT re-applied --
+          // the C reuses the stored gBattleMoveDamage. Step 5 `jumpifabsent BS_TARGET`
+          // (:3303; VARIOUS_JUMP_IF_ABSENT -> !IsBattlerAlive, battle_script_commands.c:6769-6772)
+          // skips the branch for a target this hit just fainted, so no revive.
+          if (
+            targetBattler &&
+            isBattlerAlive(state, currentTargetId) &&
+            (battlerHasSimAbility(state, attackerBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext) ||
+              battlerHasSimAbility(state, targetBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext))
+          ) {
+            targetBattler.mon.hp = Math.min(targetBattler.mon.maxHp, targetBattler.mon.hp + drainHp)
+            syncPartyHp(state, currentTargetId)
+            // `manipulatedamage DMG_CHANGE_SIGN` at the end of BattleScript_AbsorbSoulLinker (:3317) flips
+            // the now-spent negative heal back to +drainHp, the value MOVEEND_ABILITIES still holds and
+            // BattleScript_AttackerSoulLinker applies to BS_ATTACKER. The plain heal path takes
+            // `goto BattleScript_AbsorbUpdateHp` (:3304-3305) with no flip, so its stored value stays
+            // negative and the move-end hook deals nothing.
+            storedBattleMoveDamage = drainHp
+          } else {
+            storedBattleMoveDamage = -drainHp
+          }
         }
-        if (
-          battlerHasSimAbility(state, attackerBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext) ||
-          (targetBattler && battlerHasSimAbility(state, targetBattler, 'ABILITY_SOUL_LINKER', false, battlerId, false, deps.dataContext))
-        ) {
-          unmodelled.push('BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3306-3313; ABILITY_SOUL_LINKER) is not modelled')
-        }
+      } else {
+        // `manipulatedamage DMG_TO_HP_FROM_MOVE` zeroes gBattleMoveDamage when CanBattlerHeal fails
+        // (battle_script_commands.c:9399-9402), before the jumpifhealingblocked / jumpifstatus BLEED
+        // returns (:3301-3302), so the move-end Soul Linker hook applies 0.
+        storedBattleMoveDamage = 0
       }
     }
 
@@ -4264,6 +4300,7 @@ export function executeAction(
       chosenMoveId: currentChosenMoveId,
       targetDamage: targetDamage ?? 0,
       hpDealt,
+      storedBattleMoveDamage,
       noEffect: targetDamage === null || targetDamage === 0,
       isCriticalHit,
       isSuperEffective,

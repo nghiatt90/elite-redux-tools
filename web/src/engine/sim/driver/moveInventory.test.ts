@@ -83,6 +83,14 @@ const DISTINCT_SCRIPTS = 322
  * was the next file's import header (`statusEffects.ts`, `turn.ts`) or an interface
  * preamble (`LegacyPostHitArgs`), and none of those lines carries a `case`/`===` dispatch
  * site, so no move-effect, secondary-effect, legacy-script or effect-less unit moved.
+ *
+ * Cycle 151f: 236 -> 236, measured, no pair flipped. `parseScripts` now expands `call`
+ * transitively instead of one level, so `BattleScript_AbsorbLeech_Test`'s commands
+ * (`data/battle_scripts_1.s:3298-3306`) finally show up inside `BattleScript_EffectAbsorb`
+ * (and `BattleScript_AbilityDrainsHp`). Every command it contributes is a frame opcode
+ * (`orword`, `setbyte`, `goto`) or a `jump*` conditional
+ * (`jumpifability`/`jumpifhealingblocked`/`jumpifstatus`/`jumpifabsent`), and none of
+ * those is a behaviour opcode, so no legacy-script pair changed status.
  */
 export const UNPORTED_PAIR_COUNT = 236
 
@@ -397,6 +405,81 @@ describe('move completeness inventory', () => {
 
     // Defog's script never damages; the power>1 warning relies on this being false.
     expect(scripts.get('BattleScript_EffectDefog')?.hasDamageStep).toBe(false)
+  })
+
+  it('expands `call` transitively: an unported command two calls deep is reported', () => {
+    // The real case this cycle fixes: BattleScript_EffectAbsorb calls AbsorbLeech, which calls
+    // AbsorbLeech_Test (data/battle_scripts_1.s:3286-3306). The fabricated chain below has the
+    // same depth; `frobnicate` is a genuine non-skeleton opcode (not a `jump*` frame opcode and
+    // not in loadKnownScriptOpcodes), so it must make the owning script unported.
+    const deep = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: [
+          'BattleScript_TestTransitiveRoot::',
+          '\tcall BattleScript_TestTransitiveMid',
+          '\tend',
+          'BattleScript_TestTransitiveMid::',
+          '\tcall BattleScript_TestTransitiveDeep',
+          '\treturn',
+          'BattleScript_TestTransitiveDeep::',
+          '\tfrobnicate',
+          '\tend',
+        ],
+      },
+    ])
+    // Two levels of `call` splicing happened: the deepest command is visible at the root.
+    expect(deep.get('BattleScript_TestTransitiveRoot')?.commands).toContain('frobnicate')
+
+    const move: MoveRecord = {
+      id: 'MOVE_TEST_TRANSITIVE_GAP',
+      effect: 'EFFECT_TEST_TRANSITIVE_GAP',
+      customBehavior: { legacyConfig: 'BattleScript_TestTransitiveRoot' },
+    }
+    const result = runInventory([move], behaviors, {
+      productionSource: "switch (effect) { case 'EFFECT_TEST_TRANSITIVE_GAP': break }",
+      testSource: "it('gap', () => { calculateMoveDamage('EFFECT_TEST_TRANSITIVE_GAP') })",
+      scripts: deep,
+      allowlist: [],
+    })
+    // The owning effect is ported, so the unported verdict can only come from the script.
+    expect(result.units.find((unit) => unit.kind === 'move-effect')?.status).toBe('ported')
+    const script = result.units.find((unit) => unit.kind === 'legacy-script')
+    expect(script?.status).toBe('unported')
+    expect(result.unhandledScriptCommands.map((command) => command.opcode)).toContain('frobnicate')
+  })
+
+  it('terminates on self-recursive and mutually recursive `call` pairs', () => {
+    // A label already on the current expansion path is kept as the raw `call` and not expanded
+    // again. The test completing at all is the termination proof; the shapes pin the behaviour.
+    const recursive = parseScripts([
+      {
+        repoRelative: 'memory/battle_scripts.s',
+        lines: [
+          'BattleScript_TestSelf::',
+          '\tcall BattleScript_TestSelf',
+          '\tend',
+          'BattleScript_TestMutualA::',
+          '\tcall BattleScript_TestMutualB',
+          '\tend',
+          'BattleScript_TestMutualB::',
+          '\tcall BattleScript_TestMutualA',
+          '\treturn',
+        ],
+      },
+    ])
+    // Self-call: the root's own label is on the path, so the call is preserved verbatim.
+    expect(recursive.get('BattleScript_TestSelf')?.commands).toEqual([
+      'call BattleScript_TestSelf',
+      'end',
+    ])
+    // Mutual: A -> B expands once; B's `call A` loops back to a label already on the path and
+    // stays raw, so A's list is B's two commands followed by A's own terminator.
+    expect(recursive.get('BattleScript_TestMutualA')?.commands).toEqual([
+      'call BattleScript_TestMutualA',
+      'return',
+      'end',
+    ])
   })
 
   it('flags moves with power above 1 whose script has no damage step', () => {

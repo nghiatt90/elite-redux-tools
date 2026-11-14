@@ -2286,7 +2286,7 @@ function applyConditionalDirective(
 /**
  * Every top-level label in both script files, with its linear command list up to the first
  * terminator. `.if`/`.else` directives are evaluated against battle_config.h (only the live
- * branch contributes), and `call` targets are expanded one level so their commands count.
+ * branch contributes), and `call` targets are expanded transitively so their commands count.
  *
  * The file-level conditional stack is tracked while scanning for labels: a label inside a
  * dead branch is not a definition. `BattleScript_EffectBeatUp` has a dead
@@ -2350,16 +2350,35 @@ export function parseScripts(files: ScriptFile[] = loadScriptFiles()): Map<strin
       })
     }
   }
-  // Expand `call Target` one level so delegated commands (including damage steps) follow.
-  for (const record of scripts.values()) {
+  // Expand `call Target` transitively so delegated commands (including damage steps)
+  // follow more than one level. `call` is in SCRIPT_FRAME_OPCODES, so a callee's own
+  // commands are never classified on their own -- they only count once spliced into the
+  // root script. Snapshot every record's linear command list first so the expansion
+  // cannot read a sibling that has already been rewritten (the old loop mutated
+  // `record.commands` in map-insertion order). `path` holds the labels on the current
+  // expansion path, seeded with the root, so self- and mutual recursion terminate and a
+  // `call` back into the root keeps the old `target.label !== record.label` guard.
+  const rawCommands = new Map<string, string[]>()
+  for (const [label, record] of scripts) rawCommands.set(label, record.commands)
+  const expandCommands = (label: string, path: Set<string>): string[] => {
+    const commands = rawCommands.get(label)
+    if (!commands) return []
     const expanded: string[] = []
-    for (const command of record.commands) {
+    for (const command of commands) {
       const call = command.match(/^call\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/)
-      const target = call ? scripts.get(call[1]) : undefined
-      if (target && target.label !== record.label) expanded.push(...target.commands)
-      else expanded.push(command)
+      const target = call ? call[1] : undefined
+      if (target && target !== label && !path.has(target) && rawCommands.has(target)) {
+        const next = new Set(path)
+        next.add(target)
+        expanded.push(...expandCommands(target, next))
+      } else {
+        expanded.push(command)
+      }
     }
-    record.commands = expanded
+    return expanded
+  }
+  for (const record of scripts.values()) {
+    record.commands = expandCommands(record.label, new Set([record.label]))
     if (record.commands.length > 60) record.truncated = true
   }
   for (const record of scripts.values()) {

@@ -1499,6 +1499,11 @@ export interface MoveEndAbilitiesContext {
   moveData: SimMoveData | undefined
   targetDamage: number
   hpDealt?: number
+  /** gBattleMoveDamage as it stands when MOVEEND_ABILITIES runs. BattleScript_AttackerSoulLinker
+   * (data/battle_scripts_1.s:11467-11472) applies this value, and a draining move's absorb script has
+   * already flipped it back to a positive heal amount (data/battle_scripts_1.s:3317), so it is the drain,
+   * not the hit's damage. Undefined = no stored value was supplied; hooks fall back to targetDamage. */
+  storedBattleMoveDamage?: number
   isCriticalHit?: boolean
   /** The turn loop's "target's slot was already reached" (turn.ts targetHasActedThisTurn); the negation of
    * `GetBattlerTurnOrderNum(target) >= gCurrentTurnActionNumber`, read by From the Shadows. Undefined = not supplied. */
@@ -1600,6 +1605,7 @@ function handleDefenderMoveEndAbility(
   statusDeps: StatusDeps,
   unmodelled: string[],
   fainted: number[],
+  storedBattleMoveDamage?: number,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -1614,19 +1620,23 @@ function handleDefenderMoveEndAbility(
   // Soul Linker (src/abilities.cc:4273-4285, ON_EITHER_ABILITY at :4282-4285). This is the defender
   // half: holder = target, opponent = attacker. BattleScript_AttackerSoulLinker
   // (data/battle_scripts_1.s:11467-11472) runs `healthbarupdate BS_ATTACKER; datahpupdate BS_ATTACKER;
-  // tryfaintmon BS_ATTACKER` with gBattleMoveDamage, the move's own damage (positive) -- so the move's
-  // attacker takes the damage it dealt. DidMoveHit/ShouldApplyOnHitEffect (:4060-4062) are read as
+  // tryfaintmon BS_ATTACKER` with gBattleMoveDamage -- so the move's attacker takes that stored amount.
+  // For most moves it is the damage just dealt (passed as targetDamage), but a draining move rewrites
+  // it: DMG_CHANGE_SIGN at :3317 leaves the positive drain amount, which is why the stored value wins
+  // when the caller supplies one. DidMoveHit/ShouldApplyOnHitEffect (:4060-4062) are read as
   // "the move dealt damage", the same reading as Strikeout below.
   if (abilityId === 'ABILITY_SOUL_LINKER') {
+    const linkDamage = storedBattleMoveDamage ?? targetDamage
     if (
       targetDamage > 0 &&
+      linkDamage > 0 &&
       target.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       moveId !== 'MOVE_PAIN_SPLIT' &&
       !battlerHasSimAbility(state, attacker, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
     ) {
-      applyDamage(state, attackerId, targetDamage, fainted, deps)
-      result.attackerDamage += targetDamage
+      applyDamage(state, attackerId, linkDamage, fainted, deps)
+      result.attackerDamage += linkDamage
     }
     return result
   }
@@ -3657,6 +3667,7 @@ function handleAttackerMoveEndAbility(
   noEffect?: boolean,
   fainted: number[] = [],
   resolvedMoveType?: string | null,
+  storedBattleMoveDamage?: number,
 ): { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } {
   const result: { attackerDamage: number; statusApplied: StatusAppliedOutcome | null; statChanges: StatChangeOutcome[] } = {
     attackerDamage: 0,
@@ -3670,18 +3681,21 @@ function handleAttackerMoveEndAbility(
 
   // Soul Linker (src/abilities.cc:4273-4285, ON_EITHER_ABILITY at :4282-4285). This is the attacker
   // half: holder = attacker, opponent = target. BattleScript_AttackerSoulLinker
-  // (data/battle_scripts_1.s:11467-11472) damages BS_ATTACKER -- the holder -- by the move's own
-  // damage, so a Soul Linker holder takes the same damage it inflicts.
+  // (data/battle_scripts_1.s:11467-11472) damages BS_ATTACKER -- the holder -- by gBattleMoveDamage,
+  // so a Soul Linker holder normally takes the same damage it inflicts. A draining move has already
+  // sign-flipped that value back to the positive drain amount (:3317), and the stored value wins.
   if (abilityId === 'ABILITY_SOUL_LINKER') {
+    const linkDamage = storedBattleMoveDamage ?? targetDamage
     if (
       targetDamage > 0 &&
+      linkDamage > 0 &&
       attacker.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
       target.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       moveId !== 'MOVE_PAIN_SPLIT' &&
       !battlerHasSimAbility(state, target, 'ABILITY_SOUL_LINKER', false, attackerId, false, deps.dataContext)
     ) {
-      applyDamage(state, attackerId, targetDamage, fainted, deps)
-      result.attackerDamage += targetDamage
+      applyDamage(state, attackerId, linkDamage, fainted, deps)
+      result.attackerDamage += linkDamage
     }
     return result
   }
@@ -5868,6 +5882,7 @@ export function dispatchMoveEndDefenderAbilities(ctx: MoveEndAbilitiesContext): 
         statusDeps,
         unmodelled,
         fainted,
+        ctx.storedBattleMoveDamage,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -5934,6 +5949,7 @@ export function dispatchMoveEndAttackerAbilities(ctx: MoveEndAbilitiesContext): 
         ctx.noEffect,
         ctx.fainted,
         ctx.resolvedMoveType,
+        ctx.storedBattleMoveDamage,
       )
       if (abRes.attackerDamage > 0) {
         result.attackerDamage += abRes.attackerDamage
@@ -6827,6 +6843,13 @@ export interface MoveEndContext {
   targetDamage: number
   /** gTurnStructs[attacker].savedDmg -- the HP actually removed from the target (gHpDealt, :4335). */
   hpDealt: number
+  /** gBattleMoveDamage as it stands when MOVEEND_ABILITIES runs (case 5, battle_script_commands.c:4527-4536).
+   * MOVEEND_SUM_DAMAGE (:4334-4338) only reads gHpDealt, so nothing between the move's script and this
+   * point rewrites the value Cmd_manipulatedamage left behind. A draining move ends its script with
+   * DMG_CHANGE_SIGN in BattleScript_AbsorbSoulLinker (data/battle_scripts_1.s:3317), leaving the positive
+   * drain amount, and BattleScript_AttackerSoulLinker (:11467-11472) applies exactly that. Undefined =
+   * no stored value; Soul Linker falls back to targetDamage. */
+  storedBattleMoveDamage?: number
   isCriticalHit?: boolean
   isSuperEffective?: boolean
   /** gBattleStruct->moveEffect2, set by seteffectwithchance (moveEffects.ts applySecondaryMoveEffects). */
@@ -7305,6 +7328,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       moveData,
       targetDamage,
       hpDealt,
+      storedBattleMoveDamage: ctx.storedBattleMoveDamage,
       isCriticalHit: ctx.isCriticalHit ?? false,
       deps,
       unmodelled,
@@ -7333,6 +7357,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       moveData,
       targetDamage,
       hpDealt,
+      storedBattleMoveDamage: ctx.storedBattleMoveDamage,
       isCriticalHit: ctx.isCriticalHit ?? false,
       targetHasActedThisTurn: ctx.targetHasActedThisTurn,
       noEffect: isNoEffect,
