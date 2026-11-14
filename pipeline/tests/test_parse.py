@@ -6,11 +6,11 @@ def test_species_count():
 
 
 def test_moves_count():
-    assert len(parse_moves()) == 1032
+    assert len(parse_moves()) == 1041
 
 
 def test_abilities_count():
-    assert len(parse_abilities()) == 1063
+    assert len(parse_abilities()) == 1074
 
 
 def test_items_count():

@@ -1,19 +1,19 @@
 {
   "game_version": "v2.65.4.1b",
-  "pin_policy": "Pin the upstream commits matching the RELEASED build players run, not the tip of `upcoming`. Elite Redux cuts releases from `upcoming` with no tag or release branch. ABILITIES_COUNT is a necessary but NOT sufficient check -- it can hold across a long run of unreleased commits, so do not rely on it alone to pick a SHA. The previous pin (v2.65beta, er-config 123fc66, 2026-03-27) was fixed by direct observation of a real v2.65.3b ROM. The current pin (v2.65.4.1b, the latest release per eliteredux.net, 'Last Updated October 06, 2026') is er-config 7285071 'Movepool fixes' (2026-10-06T17:44:10Z): ER-nextdex built its first 2.65.4 data (ForwardFeed/ER-nextdex 72f001f, 2026-10-06T23:54Z) with its er-config submodule at that commit, and it is the last er-config commit before 2026-10-07T08:20Z. The eliteredux-source SHA f756909 'movepool changes' is the mirror commit made 12s later, as with every prior pair. Not independently confirmed: eliteredux.net gives no timezone or time of day for the release, and nextdex's 2.65.4 data was refreshed on 2026-10-19 from a later commit, so the Oct 6 commit is the best match to the release date, not proof of the build. tests/test_oracle.py asserts ABILITIES_COUNT and species data against ER-nextdex's published (released-game) data -- keep that green when repinning.",
+  "pin_policy": "Pin the upstream commits matching the RELEASED build players run, not the tip of `upcoming`. Elite Redux cuts releases from `upcoming` with no tag or release branch. ABILITIES_COUNT is a necessary but NOT sufficient check -- it can hold across a long run of unreleased commits, so do not rely on it alone to pick a SHA. Earlier pins: v2.65beta (er-config 123fc66, 2026-03-27, fixed by direct observation of a real v2.65.3b ROM) and an Oct 6 pin (er-config 7285071) that turned out to be the original v2.65.4, not 4.1b: the eliteredux.net 'What's new' text and its 'Last Updated October 06, 2026' date match the v2.65.4 video uploaded 2026-10-07, and ER-nextdex labelled its Oct 6 sync 'in sync with 2.65.4' (ForwardFeed/ER-nextdex 8b7faf7). The current pin (v2.65.4.1b, the hotfix) is er-config 8b1d29d 'Energy ball is light move' (2026-10-19T02:02:27Z) with eliteredux-source dd34f57 'Update SavingVersionNumShort as well oops' (2026-10-19T04:32:59Z). Evidence: the source's in-game version string changes from 'v2.65 Beta2.1' to 'v2.65.4.1' in e239439 (04:25Z) and dd34f57 (04:32Z), and the next er-config commit (0505f4e, 14:34Z) comes 10 hours later; ER-nextdex re-synced its '2.65.4' data to er-config 8b1d29d on 2026-10-19 (ForwardFeed/ER-nextdex e26cee4, f1fdd77) -- that file has 1074 abilities, matching AbilityEnum.proto at 8b1d29d (ids 0-1073), and lacks the 0505f4e change (Minior's Photon Burst). Not independently confirmed: no upstream marker or dated release note exists for 4.1b, so the exact build time within 2026-10-19 04:32Z-14:34Z is inferred, and the source string was stale (Beta2.1) even at the 2.65.3b release, so on its own it is weak evidence. The next release, v2.65.5 (2026-11-02), is er-config 0572570 / eliteredux-source 60f7d52 per ER-nextdex d51e0c1 -- not pinned here. tests/test_oracle.py asserts ABILITIES_COUNT and species data against ER-nextdex's published (released-game) data -- keep that green when repinning.",
   "sources": {
     "er-config": {
       "repo": "https://github.com/Elite-Redux/er-config",
       "branch": "upcoming",
-      "sha": "7285071bd25c6d86e8f171f5283823be57fc8ecf",
-      "date": "2026-10-06T17:44:10Z",
+      "sha": "8b1d29d2b4d531191748144a37fbd25b594260d2",
+      "date": "2026-10-19T02:02:27Z",
       "sparse_paths": []
     },
     "eliteredux-source": {
       "repo": "https://github.com/Elite-Redux/eliteredux-source",
       "branch": "upcoming",
-      "sha": "f7569098b6735009376151ef8520cc331b779ac5",
-      "date": "2026-10-06T17:44:22Z",
+      "sha": "dd34f5777567aec64cf63a14b0cf22bda49fbab1",
+      "date": "2026-10-19T04:32:59Z",
       "sparse_paths": [
         "graphics/pokemon",
         "src/data",

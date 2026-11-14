@@ -225,6 +225,7 @@ _BARE_MACROS = {
 }
 _BARE_MACRO_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\((.*)\)$", re.DOTALL)
 _FIELD_ASSIGN_RE = re.compile(r"^\.(\w+)\s*=\s*(.*)$", re.DOTALL)
+_LEADING_COMMENT_RE = re.compile(r"\A(?:\s*//[^\n]*\n)+\s*")
 _ALIAS_RE = re.compile(r"^Impl<(ABILITY_\w+)>\.(\w+)$")
 _MACRO_VALUE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\((.*)\)$", re.DOTALL)
 
@@ -257,6 +258,7 @@ def split_block_fields(body: str, ability_id: str, allowed: dict[str, set[str]])
     all_known = allowed["hooks"] | allowed["applyOn"] | allowed["bitfields"]
     entries = []
     for part in _split_top_level(body):
+        part = _LEADING_COMMENT_RE.sub("", part)
         assign = _FIELD_ASSIGN_RE.match(part)
         if assign:
             field, value = assign.group(1), assign.group(2)

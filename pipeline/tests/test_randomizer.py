@@ -15,7 +15,7 @@ def test_abilities_count_matches_gapfree_enum():
     # released build in test_oracle.test_abilities_count_matches_the_released_game --
     # if that one fails too, the lockfile has run ahead of the ROM, not the enum.
     abilities = parse_abilities()
-    assert _abilities_count(abilities) == 1063
+    assert _abilities_count(abilities) == 1074
 
 
 def test_exact_groups_count_and_membership():
@@ -23,8 +23,8 @@ def test_exact_groups_count_and_membership():
     groups = _build_exact_groups(abilities)
 
     distinct = {tuple(v) for v in groups.values()}
-    assert len(distinct) == 23
-    assert sum(len(g) for g in distinct) == 56
+    assert len(distinct) == 24
+    assert sum(len(g) for g in distinct) == 58
 
     assert groups["ABILITY_FILTER"] == groups["ABILITY_SOLID_ROCK"]
     assert len(groups["ABILITY_FILTER"]) == 6
@@ -75,4 +75,4 @@ def test_compound_count():
     # names a real ability, so it doesn't parse as a compound (it becomes a proper
     # two-ability compound, "Grassy Surge + Infiltrator.", only in a later,
     # unreleased commit) -- one fewer than the April tip's 150.
-    assert len(compounds) == 165
+    assert len(compounds) == 166
