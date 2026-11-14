@@ -12,6 +12,8 @@ function offCtx(overrides: Partial<OnChooseOffensiveStatContext> = {}): OnChoose
   const base = {
     battlerId: 'attacker',
     moveId: 'MOVE_TACKLE',
+    declaredMoveType: 'NORMAL',
+    resolvedMoveType: 'NORMAL',
     isCrit: false,
     isUnaware: false,
     moveSplit: 'PHYSICAL' as const,
@@ -33,6 +35,8 @@ function defCtx(overrides: Partial<OnChooseDefensiveStatContext> = {}): OnChoose
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
+    declaredMoveType: 'NORMAL',
+    resolvedMoveType: 'NORMAL',
     noPositiveStatStages: false,
     isUnaware: false,
     isCrit: false,

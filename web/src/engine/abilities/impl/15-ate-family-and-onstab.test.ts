@@ -45,6 +45,7 @@ describe('ate family + onStab batch', () => {
       defenderId: 'defender',
       moveId: 'MOVE_TACKLE',
       moveType: 'NORMAL',
+      declaredMoveType: 'NORMAL',
       moveSplit: 'PHYSICAL' as const,
       moveFlags: { contact: true as const },
       moveEffectChance: 0,

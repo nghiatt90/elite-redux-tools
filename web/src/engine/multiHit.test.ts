@@ -15,7 +15,7 @@ function move(overrides: Partial<MultiHitMoveData> = {}): MultiHitMoveData {
 }
 
 function pbCtx(overrides: Partial<OnParentalBondInputs> = {}): OnParentalBondInputs {
-  return { moveType: 'NORMAL', moveFlags: {}, moveSplit: 'PHYSICAL', weather: 'NONE', attackerHeads: 1, ...overrides }
+  return { moveType: 'NORMAL', declaredMoveType: 'NORMAL', moveFlags: {}, moveSplit: 'PHYSICAL', weather: 'NONE', attackerHeads: 1, ...overrides }
 }
 
 describe('resolveHitPlan -- a move\'s own multi-hit effect', () => {

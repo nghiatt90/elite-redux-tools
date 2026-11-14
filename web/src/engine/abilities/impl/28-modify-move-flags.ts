@@ -2,6 +2,14 @@
 // field-report audit. DoesMoveMatchFlag (src/abilities.cc:358-386): each port below
 // is a complete, correct answer to "does this ability grant the move this flag."
 //
+// Grants do NOT read the caller's `ctx.moveType` argument except where the C does:
+// Chestnut Axe alone tests the argument (`moveType == TYPE_GRASS`, src/abilities.cc:
+// 11711). Mixed Martial Arts (:9901) and Reverbate (:10657) test the move's DECLARED
+// base type (`gBattleMoves[move].type`, ctx.declaredMoveType), and Brawling Wyvern
+// (:7607) tests the RESOLVED type (IS_MOVE_TYPE, include/battle.h:743,
+// ctx.resolvedMoveType) -- so a TYPE_NORMAL dummy caller does not make every move
+// Normal, and a real-type caller does not hide an -ate retype.
+//
 // These hooks are now wired for the consumers whose call-site moveType convention
 // has been checked: Iron Fist's punch path (dispatchCalc.isIronFistBoosted, for
 // Punching Glove), the Iron Fist, Mega Launcher, Liquid Voice and Punk Rock offensive
@@ -23,7 +31,9 @@ export const MODIFY_MOVE_FLAGS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_BRAWLING_WYVERN',
     src: 'src/abilities.cc:7575',
-    onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && ctx.moveType === 'DRAGON',
+    // IS_MOVE_TYPE(move, TYPE_DRAGON), src/abilities.cc:7607 -- the RESOLVED type
+    // (dynamicMoveType if set, else the declared type; include/battle.h:743).
+    onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && ctx.resolvedMoveType === 'DRAGON',
   },
   {
     id: 'ABILITY_FESTIVITIES',
@@ -47,7 +57,9 @@ export const MODIFY_MOVE_FLAGS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_MIXED_MARTIAL_ARTS',
     src: 'src/abilities.cc:9872',
-    onModifyMoveFlags: (ctx) => (ctx.flag === 'punchBased' || ctx.flag === 'kickBased') && ctx.moveType === 'NORMAL',
+    // `gBattleMoves[move].type == TYPE_NORMAL`, src/abilities.cc:9901 -- the
+    // DECLARED base type, not the caller's moveType argument nor the resolved type.
+    onModifyMoveFlags: (ctx) => (ctx.flag === 'punchBased' || ctx.flag === 'kickBased') && ctx.declaredMoveType === 'NORMAL',
   },
   {
     id: 'ABILITY_MUSICAL_NOTES',
@@ -57,7 +69,9 @@ export const MODIFY_MOVE_FLAGS_ABILITIES: AbilityImpl[] = [
   {
     id: 'ABILITY_REVERBATE',
     src: 'src/abilities.cc:10628',
-    onModifyMoveFlags: (ctx) => ctx.flag === 'sound' && ctx.moveType === 'NORMAL',
+    // `gBattleMoves[move].type == TYPE_NORMAL`, src/abilities.cc:10657 -- the
+    // DECLARED base type, not the caller's moveType argument nor the resolved type.
+    onModifyMoveFlags: (ctx) => ctx.flag === 'sound' && ctx.declaredMoveType === 'NORMAL',
   },
   {
     id: 'ABILITY_TAEKKYEON',

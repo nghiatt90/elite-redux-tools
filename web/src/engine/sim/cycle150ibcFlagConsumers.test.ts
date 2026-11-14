@@ -301,8 +301,9 @@ describe("cycle 150ibc (B) - Precise Fist's crit stage reads DoesMoveMatchFlag",
 
 describe('cycle 150ibc (C) - Soundproof blocks a move made sound by the ATTACKER', () => {
   it('Reverbate on the attacker makes Tackle sound, so Soundproof blocks it', () => {
-    // Reverbate grants SOUND when moveType == NORMAL (src/abilities.cc:10656) and
-    // IsSoundMove passes the TYPE_NORMAL dummy, so the grant answers.
+    // Reverbate grants SOUND when the move's DECLARED type is Normal
+    // (gBattleMoves[move].type, src/abilities.cc:10657) -- Tackle qualifies -- and
+    // IsSoundMove passes the literal TYPE_NORMAL dummy, so the grant answers.
     const blocked = damage('MOVE_TACKLE', slots('ABILITY_REVERBATE'), slots('ABILITY_SOUNDPROOF'))
     expect(blocked.isImmune).toBe(true)
     expect(blocked.rolls.every((d) => d === 0)).toBe(true)

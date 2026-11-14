@@ -225,18 +225,16 @@ function damage(moveId: string, attackerAbility: string | null, defenderAbility:
 }
 
 describe('Cycle 150ibb -- Iron Fist grants reach the punch multiplier', () => {
-  it('Iron Fist + Mixed Martial Arts + Flamethrower: 1.3x via MMA\'s NORMAL-only grant', () => {
-    // Flamethrower (special 90): 42*90=3780; *196=740,880; /256=2894; /50=57; +2=59.
-    // TypeEff Fire vs Normal = 1x, no STAB. Mixed Martial Arts (:9872) grants PUNCH
-    // when the caller's moveType argument is TYPE_NORMAL -- exactly Iron Fist's dummy
-    // (battle_util.c:9375). finalModifier = uq(1.3)=1331:
-    // applyModifier(1331,59) = floor((78429+512)/1024) = 77.
-    // rolls: 100% 59 -> 77; 85% floor(59*.85)=50 -> floor(77*.85)=65.
+  it("Iron Fist + Mixed Martial Arts + Flamethrower: no boost (MMA reads the move's declared type)", () => {
+    // MMA grants PUNCH/KICK only when gBattleMoves[move].type == TYPE_NORMAL
+    // (src/abilities.cc:9899-9903), i.e. Flamethrower's declared FIRE type blocks the
+    // grant even though IsIronFistBoosted passes the literal TYPE_NORMAL as the
+    // flag-check argument (src/battle_util.c:9373-9379). TypeEff Fire vs Normal = 1x,
+    // no STAB, so the roll stays at the neutral 59.
     const neutral = damage('MOVE_FLAMETHROWER', null)
     const mma = damageWith('MOVE_FLAMETHROWER', slotsWith('ABILITY_IRON_FIST', ['ABILITY_MIXED_MARTIAL_ARTS', null, null]))
     expect(neutral.rolls[15]).toBe(59)
-    expect(mma.rolls[15]).toBe(77)
-    expect(mma.rolls[0]).toBe(65)
+    expect(mma.rolls).toEqual(neutral.rolls)
   })
 
   it('Iron Fist alone + Flamethrower: no boost (negative)', () => {
@@ -331,15 +329,15 @@ describe('Cycle 150ibb -- Hammer Fist passes the real move type', () => {
 })
 
 describe('Cycle 150ibb -- Punk Rock offensive half', () => {
-  it('Punk Rock + Reverbate + Flamethrower: 1.3x via the NORMAL-only sound grant', () => {
-    // Reverbate (:10628) grants SOUND when the caller's moveType argument is NORMAL,
-    // and Punk Rock's IsSoundMove passes that TYPE_NORMAL dummy (:3307). base 59 ->
-    // applyModifier(1331,59)=77; 85% 50 -> 65.
+  it("Punk Rock + Reverbate + Flamethrower: no boost (Reverbate reads the move's declared type)", () => {
+    // Reverbate grants SOUND only when gBattleMoves[move].type == TYPE_NORMAL
+    // (src/abilities.cc:10655-10661). Flamethrower is declared Fire, so no SOUND is
+    // granted even though IsSoundMove passes the literal TYPE_NORMAL as the
+    // flag-check argument (src/battle_util.c:9373-9379); the roll stays at 59.
     const neutral = damage('MOVE_FLAMETHROWER', null)
     const both = damageWith('MOVE_FLAMETHROWER', slotsWith('ABILITY_PUNK_ROCK', ['ABILITY_REVERBATE', null, null]))
     expect(neutral.rolls[15]).toBe(59)
-    expect(both.rolls[15]).toBe(77)
-    expect(both.rolls[0]).toBe(65)
+    expect(both.rolls).toEqual(neutral.rolls)
   })
 
   it('Punk Rock alone + a non-sound move: no boost (negative)', () => {
@@ -378,14 +376,15 @@ describe('Cycle 150ibb -- Punk Rock defensive half scans the ATTACKER', () => {
     expect(walled.rolls).toEqual(neutral.rolls)
   })
 
-  it('a Reverbate grant on the ATTACKER makes a non-sound move count as sound (0.5x)', () => {
-    // Reverbate is on the attacker, so IsSoundMove(attacker, move) sees the grant.
-    // Flamethrower base 59 -> applyModifier(512,59)=30; 85% 50 -> 25.
+  it("a Reverbate on the ATTACKER does not make a non-Normal move count as sound", () => {
+    // Reverbate's grant requires gBattleMoves[move].type == TYPE_NORMAL
+    // (src/abilities.cc:10655-10661); Flamethrower is declared Fire, so even with
+    // Reverbate on the attacker IsSoundMove(attacker, move) sees no grant and the
+    // defender's Punk Rock half never applies (rolls stay at the neutral 59).
     const neutral = damage('MOVE_FLAMETHROWER', null)
     const walled = damageWith('MOVE_FLAMETHROWER', slots('ABILITY_REVERBATE'), slots('ABILITY_PUNK_ROCK'))
     expect(neutral.rolls[15]).toBe(59)
-    expect(walled.rolls[15]).toBe(30)
-    expect(walled.rolls[0]).toBe(25)
+    expect(walled.rolls).toEqual(neutral.rolls)
   })
 
   it('Reverbate on the DEFENDER does not count', () => {

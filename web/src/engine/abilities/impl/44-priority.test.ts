@@ -11,6 +11,7 @@ function inputs(overrides: Partial<PriorityDispatchInputs> = {}): PriorityDispat
     moveId: 'MOVE_TACKLE',
     moveEffect: null,
     moveType: 'NORMAL',
+    declaredMoveType: 'NORMAL',
     movePower: 40,
     movePriority: 0,
     moveSplit: 'PHYSICAL',
@@ -158,6 +159,7 @@ describe('the dispatch itself', () => {
         holderSlots: { ability: 'ABILITY_PRANKSTER', innates: ['ABILITY_GALE_WINGS', null, null] },
         moveSplit: 'STATUS',
         moveType: 'FLYING',
+        declaredMoveType: 'FLYING',
       }),
     )
     expect(total).toBe(2)

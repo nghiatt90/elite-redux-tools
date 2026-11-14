@@ -40,7 +40,11 @@ export interface OffensiveMultiplierContext extends ModifierAccumulator {
   battlerId: string // the move's user (battlerAtk) -- see note above, NOT necessarily the ability holder
   defenderId: string
   moveId: string
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType) -- the ctx's own `moveType`
+  /** moves.json's declared base type, i.e. `gBattleMoves[move].type` -- what Mixed
+   * Martial Arts/Reverbate read (src/abilities.cc:9901/10657), as distinct from the
+   * resolved `moveType` above. */
+  declaredMoveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // post-swap split (IS_MOVE_PHYSICAL/IS_MOVE_SPECIAL)
   moveFlags: Record<string, true> // gBattleMoves[move].flags -- moves.json's own `flags` shape
   /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 -- the
@@ -130,7 +134,10 @@ export interface DefensiveMultiplierContext extends ModifierAccumulator {
   defenderId: string // the ability's own battler == the move's target here
   attackerId: string
   moveId: string
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType)
+  /** moves.json's declared base type (`gBattleMoves[move].type`) -- see
+   * OffensiveMultiplierContext's own field of the same name. */
+  declaredMoveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   moveFlags: Record<string, true>
   /** DoesMoveMatchFlag for the ATTACKER's (move user's) abilities -- Punk Rock's
@@ -196,6 +203,13 @@ export interface OnCritContext {
   battlerId: string // whose ability this is (attacker OR defender side -- onCrit runs for both)
   defenderId: string
   moveId: string
+  /** moves.json's declared base type (`gBattleMoves[move].type`) -- the type the
+   * onModifyMoveFlags grant scan reads for Mixed Martial Arts/Reverbate
+   * (src/abilities.cc:9901/10657). Distinct from `resolvedMoveType`. */
+  declaredMoveType: string
+  /** The RESOLVED type (post-onMoveType) -- what Brawling Wyvern's IS_MOVE_TYPE
+   * check sees (include/battle.h:743). */
+  resolvedMoveType: string
   typeEffectiveness: number // UQ_4_12
   // Merciless's own condition set -- the target's (move's target, i.e. the
   // defender's) status/stat-stage/item facts. Not filled in for the abilities
@@ -254,6 +268,11 @@ export interface OnAfterTypeEffectivenessContext {
 export interface OnChooseOffensiveStatContext {
   battlerId: string
   moveId: string
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
+  /** The RESOLVED type (post-onMoveType), read by Brawling Wyvern's own grant. */
+  resolvedMoveType: string
   isCrit: boolean
   isUnaware: boolean
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
@@ -275,6 +294,11 @@ export interface OnChooseDefensiveStatContext {
   attackerId: string
   defenderId: string
   moveId: string
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
+  /** The RESOLVED type (post-onMoveType), read by Brawling Wyvern's own grant. */
+  resolvedMoveType: string
   noPositiveStatStages: boolean
   isUnaware: boolean
   isCrit: boolean
@@ -308,7 +332,10 @@ export interface OnChooseDefensiveStatContext {
 export interface OnSwapSplitContext {
   battlerId: string
   moveId: string
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType)
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS' // pre-swap split -- these hooks decide WHETHER to swap it
   moveFlags: Record<string, true>
   /** DoesMoveMatchFlag(battler, move, moveType, flag), src/abilities.cc:358-386 -- the
@@ -486,7 +513,10 @@ export type OnRecoil = (ctx: OnRecoilContext) => number
 export type OnMoldBreaker = (ctx: OnMoldBreakerContext) => boolean
 
 export interface OnParentalBondContext {
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType)
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
   moveFlags: Record<string, true>
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   weather: string // FieldBattleState's bare weather kind, e.g. 'HAIL'
@@ -549,7 +579,10 @@ export interface OnAbsorbContext {
 export type OnAbsorb = (ctx: OnAbsorbContext) => boolean
 
 export interface OnImmuneContext {
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType)
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
   moveFlags: Record<string, true>
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   weather: string
@@ -578,7 +611,10 @@ export interface OnImmuneContext {
 export type OnImmune = (ctx: OnImmuneContext) => boolean
 
 export interface OnInfiltrateContext {
-  moveType: string
+  moveType: string // the RESOLVED type (post-onMoveType)
+  /** moves.json's declared base type (`gBattleMoves[move].type`), read by the
+   * onModifyMoveFlags grant scan (Mixed Martial Arts/Reverbate, :9901/10657). */
+  declaredMoveType: string
   moveFlags: Record<string, true>
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
   attackerTypes: string[]
@@ -606,7 +642,19 @@ export type OnInfiltrate = (ctx: OnInfiltrateContext) => boolean
 
 export interface OnModifyMoveFlagsContext {
   flag: 'punchBased' | 'kickBased' | 'bulletBased' | 'sliceBased' | 'sound' | 'dance'
+  /** The CALLER's moveType argument as passed to DoesMoveMatchFlag -- NOT the
+   * move's own type. Keen Edge's wrapper passes the real type (:3676), while
+   * IsIronFistBoosted/IsStrikerBoosted/IsMegaLauncherBoosted/IsSoundMove pass the
+   * literal TYPE_NORMAL dummy (src/battle_util.c:9373-9379). Chestnut Axe's own
+   * hook is the one grant that reads THIS argument (`moveType == TYPE_GRASS`,
+   * src/abilities.cc:11711). */
   moveType: string
+  /** moves.json's declared base type, `gBattleMoves[move].type` -- what Mixed
+   * Martial Arts (:9901) and Reverbate (:10657) test for TYPE_NORMAL. */
+  declaredMoveType: string
+  /** The RESOLVED type (post-onMoveType), i.e. IS_MOVE_TYPE(move, ...)'s operand
+   * (include/battle.h:743) -- what Brawling Wyvern (:7607) tests for TYPE_DRAGON. */
+  resolvedMoveType: string
   moveFlags: Record<string, true>
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
 }

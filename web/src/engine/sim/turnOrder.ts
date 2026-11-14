@@ -119,6 +119,12 @@ export interface TurnOrderMoveView {
   /** `GetTypeBeforeUsingMove(move, battler)` -- the move's RESOLVED type. Read by
    * the Gale Wings ability family through onPriority. */
   resolvedType: string
+  /** `gBattleMoves[move].type` -- the DECLARED base type, forwarded to the
+   * onPriority DoesMoveMatchFlag grant scan (Mixed Martial Arts/Reverbate,
+   * src/abilities.cc:9901/10657). Optional only for the many test doubles that
+   * predate it; getMovePriority falls back to `resolvedType` when absent (the sim's
+   * own builders always set it). */
+  declaredType?: string
   /** `gBattleMoves[move].power` -- read by Perfectionist through onPriority. */
   power: number
   /** `gBattleMoves[move].flags` -- moves.json's own shape. Read by the onPriority
@@ -404,6 +410,7 @@ export function getMovePriority(state: BattleState, battlerId: number, move: Tur
     moveId: move.id,
     moveEffect: move.effect,
     moveType: move.resolvedType,
+    declaredMoveType: move.declaredType ?? move.resolvedType,
     movePower: move.power,
     movePriority: move.priority,
     moveSplit: move.split,

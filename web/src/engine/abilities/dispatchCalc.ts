@@ -128,7 +128,7 @@ export function computeParentalBondTrigger(attackerSlots: AbilitySlots, defender
   // scans the attacker's own slots, exactly as computeSwapSplit's closure does.
   const ctx: OnParentalBondContext = {
     ...inputs,
-    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit, inputs.declaredMoveType, inputs.moveType),
   }
   let trigger: ParentalBondTrigger | null = null
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
@@ -209,7 +209,7 @@ export function computeIsAbsorbed(defenderSlots: AbilitySlots, ctx: OnAbsorbCont
 export function computeIsImmune(defenderSlots: AbilitySlots, attackerSlots: AbilitySlots, inputs: Omit<OnImmuneContext, 'matchesMoveFlag'>, attackerHasMoldBreaker: boolean): boolean {
   const ctx: OnImmuneContext = {
     ...inputs,
-    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit, inputs.declaredMoveType, inputs.moveType),
   }
   let blocked = false
   forEachAbility(defenderSlots, suppressedByMoldBreaker(attackerHasMoldBreaker), (impl) => {
@@ -231,8 +231,10 @@ export function computeIsImmune(defenderSlots: AbilitySlots, attackerSlots: Abil
  * The `moveType` argument is the CALLER's, not the move's: Keen Edge passes the real
  * type (:3676), while Striker/Iron Fist/Mega Launcher/sound pass the literal
  * TYPE_NORMAL dummy from their IsXBoosted wrapper (src/battle_util.c:9374-9379).
- * An onModifyMoveFlags block that is itself conditioned on moveType therefore only
- * grants through the dummy callers when that dummy happens to match.
+ * Chestnut Axe is the only grant that reads it (:11711). Mixed Martial Arts and
+ * Reverbate instead read `declaredMoveType` (gBattleMoves[move].type, :9901/:10657)
+ * and Brawling Wyvern reads `resolvedMoveType` (IS_MOVE_TYPE, :7607), so both must
+ * be the move's real types regardless of which dummy the caller passes.
  */
 export function doesMoveMatchFlag(
   slots: AbilitySlots,
@@ -240,11 +242,13 @@ export function doesMoveMatchFlag(
   moveType: string,
   moveFlags: Record<string, true>,
   moveSplit: OnModifyMoveFlagsContext['moveSplit'],
+  declaredMoveType: string,
+  resolvedMoveType: string,
 ): boolean {
   if (moveFlags[flag]) return true
   let granted = false
   forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
-    if (impl.onModifyMoveFlags?.({ flag, moveType, moveFlags, moveSplit })) {
+    if (impl.onModifyMoveFlags?.({ flag, moveType, declaredMoveType, resolvedMoveType, moveFlags, moveSplit })) {
       granted = true
       return 'break'
     }
@@ -256,10 +260,19 @@ export function doesMoveMatchFlag(
  * IsIronFistBoosted, src/battle_util.c:9409 -- `DoesMoveMatchFlag(battler, move,
  * TYPE_NORMAL, MOVE_FLAG_PUNCH)`, i.e. the shared helper with the C's own literal
  * TYPE_NORMAL dummy. Owner-side only (the move's own user, never the other battler),
- * so it uses NEVER_SUPPRESSED like every other self-check.
+ * so it uses NEVER_SUPPRESSED like every other self-check. `declaredMoveType`/
+ * `resolvedMoveType` are the move's REAL types (gBattleMoves[move].type and the
+ * post-onMoveType value), which the dummy argument does not carry -- Mixed Martial
+ * Arts/Reverbate/Brawling Wyvern read those fields, not the dummy.
  */
-export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record<string, true>, moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'): boolean {
-  return doesMoveMatchFlag(attackerSlots, 'punchBased', 'NORMAL', moveFlags, moveSplit)
+export function isIronFistBoosted(
+  attackerSlots: AbilitySlots,
+  moveFlags: Record<string, true>,
+  moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS',
+  declaredMoveType: string,
+  resolvedMoveType: string,
+): boolean {
+  return doesMoveMatchFlag(attackerSlots, 'punchBased', 'NORMAL', moveFlags, moveSplit, declaredMoveType, resolvedMoveType)
 }
 
 /** SetSwapDamageCategory's default-splitFlag branch (src/battle_util.c:7341-7348):
@@ -276,7 +289,7 @@ export function isIronFistBoosted(attackerSlots: AbilitySlots, moveFlags: Record
  * sees the same PRE-swap moveSplit and moveFlags it already reads. */
 export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: Omit<OnSwapSplitContext, 'matchesMoveFlag'>): boolean {
   const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
-    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit)
+    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit, ctx.declaredMoveType, ctx.moveType)
   let swap = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (impl.onSwapSplit?.({ ...ctx, matchesMoveFlag })) {
@@ -297,7 +310,7 @@ export function computeSwapSplit(attackerSlots: AbilitySlots, ctx: Omit<OnSwapSp
  * grant scan is over the ATTACKER's own slots (Pinnacle Blade's DoesMoveMatchFlag). */
 export function computeInfiltratesScreens(attackerSlots: AbilitySlots, ctx: Omit<OnInfiltrateContext, 'matchesMoveFlag'>): boolean {
   const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
-    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit)
+    doesMoveMatchFlag(attackerSlots, flag, moveType, ctx.moveFlags, ctx.moveSplit, ctx.declaredMoveType, ctx.moveType)
   let infiltrates = false
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     if (impl.onInfiltrate?.({ ...ctx, matchesMoveFlag })) {
@@ -525,7 +538,7 @@ export function computeAbilityMultiplier(
   // Keen Edge/Striker sees a plain closure over the same moveFlags/moveSplit it
   // already reads.
   const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
-    doesMoveMatchFlag(attackerSlots, flag, moveType, offensive.moveFlags, offensive.moveSplit)
+    doesMoveMatchFlag(attackerSlots, flag, moveType, offensive.moveFlags, offensive.moveSplit, offensive.declaredMoveType, offensive.moveType)
   const shared = { ...offensive, ...defensive, modifier: uq(1.0), resistance: uq(1.0), matchesMoveFlag }
 
   if (!hasFortKnox(defenderSlots)) {
@@ -690,7 +703,7 @@ export function computeAbilityCritBonus(
     // reach the defender's hook and vice versa.
     const { moveSplit, ...hookInputs } = inputs
     const matchesMoveFlag = (flag: OnModifyMoveFlagsContext['flag'], moveType: string): boolean =>
-      doesMoveMatchFlag(slots, flag, moveType, inputs.moveFlags, moveSplit)
+      doesMoveMatchFlag(slots, flag, moveType, inputs.moveFlags, moveSplit, inputs.declaredMoveType, inputs.resolvedMoveType)
     forEachAbility(slots, suppressed, (impl) => {
       if (blocked || !impl.onCrit) return
       if (!isTargettedApplyOnFlagAppropriate(sourceIsAttacker, sourceIsTarget, sourceIsAttacker, false, impl.applyOn?.onCritFor)) return
@@ -732,7 +745,7 @@ export function computeChooseOffensiveStat(attackerSlots: AbilitySlots, defaultS
     ...inputs,
     statToUse: defaultStat,
     secondaryStat: {},
-    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+    matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit, inputs.declaredMoveType, inputs.resolvedMoveType),
   }
   forEachAbility(attackerSlots, NEVER_SUPPRESSED, (impl) => {
     impl.onChooseOffensiveStat?.(ctx)
@@ -771,7 +784,7 @@ export function computeChooseDefensiveStat(attackerSlots: AbilitySlots, defender
       // The C passes `battlerAtk` as DoesMoveMatchFlag's owner for BOTH runs
       // (:7392-7394), so this closure is the same over the attacker's slots even when
       // `slots` is the defender's.
-      matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit),
+      matchesMoveFlag: (flag, moveType) => doesMoveMatchFlag(attackerSlots, flag, moveType, inputs.moveFlags, inputs.moveSplit, inputs.declaredMoveType, inputs.resolvedMoveType),
     }
     forEachAbility(slots, NEVER_SUPPRESSED, (impl) => {
       if (!impl.onChooseDefensiveStat) return

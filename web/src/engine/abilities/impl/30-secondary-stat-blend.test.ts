@@ -12,6 +12,8 @@ function offInputs(overrides: Partial<{ moveFlags: Record<string, true>; moveSpl
   return {
     battlerId: 'attacker',
     moveId: 'MOVE_TACKLE',
+    declaredMoveType: 'NORMAL',
+    resolvedMoveType: 'NORMAL',
     isCrit: false,
     isUnaware: false,
     moveSplit: 'PHYSICAL' as const,
@@ -26,6 +28,8 @@ function defInputs(overrides: Partial<{ moveFlags: Record<string, true>; moveSpl
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: 'MOVE_TACKLE',
+    declaredMoveType: 'NORMAL',
+    resolvedMoveType: 'NORMAL',
     noPositiveStatStages: false,
     isUnaware: false,
     isCrit: false,

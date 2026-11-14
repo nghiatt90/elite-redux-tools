@@ -120,6 +120,8 @@ export const ALIAS_ABILITIES: AbilityImpl[] = [
     id: 'ABILITY_CHESTNUT_AXE',
     src: 'src/abilities.cc:11679',
     onOffensiveMultiplier: aliasOffensiveMultiplier('ABILITY_KEEN_EDGE'),
+    // The ONE grant that reads the caller's moveType ARGUMENT: `return moveType ==
+    // TYPE_GRASS;`, src/abilities.cc:11711 -- not the move's declared or resolved type.
     onModifyMoveFlags: (ctx) => ctx.flag === 'sliceBased' && ctx.moveType === 'GRASS',
   },
   {

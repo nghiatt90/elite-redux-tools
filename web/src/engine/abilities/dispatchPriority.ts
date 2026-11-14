@@ -48,6 +48,9 @@ export interface PriorityDispatchInputs {
   moveEffect: string | null
   /** GetTypeBeforeUsingMove's result -- the RESOLVED type, not the declared one. */
   moveType: string
+  /** `gBattleMoves[move].type` -- the move's DECLARED base type, forwarded to
+   * DoesMoveMatchFlag for Mixed Martial Arts/Reverbate (:9901/:10657). */
+  declaredMoveType: string
   movePower: number
   movePriority: number
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS'
@@ -77,7 +80,7 @@ export function computeAbilityPriorityBonus(inputs: PriorityDispatchInputs): num
     moveSplit: inputs.moveSplit,
     // BATTLER_MAX_HP, include/battle.h:749.
     holderAtMaxHp: inputs.holderHp === inputs.holderMaxHp,
-    isIronFistBoosted: isIronFistBoosted(inputs.holderSlots, inputs.moveFlags, inputs.moveSplit),
+    isIronFistBoosted: isIronFistBoosted(inputs.holderSlots, inputs.moveFlags, inputs.moveSplit, inputs.declaredMoveType, inputs.moveType),
     targetHp: inputs.targetHp,
     targetMaxHp: inputs.targetMaxHp,
   }

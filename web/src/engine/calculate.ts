@@ -343,6 +343,9 @@ function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spa
       battlerId: 'attacker',
       moveId: scenario.move.id,
       moveType,
+      // The move's declared base type (gBattleMoves[move].type). OnSwapSplit's own
+      // consumers still read ctx.moveType as their caller argument, unchanged.
+      declaredMoveType: moveType,
       moveSplit: split,
       moveFlags: scenario.move.flags,
     })
@@ -597,6 +600,11 @@ function computeAttackStat(
   // value for the 5 hypothesis-based ones once those needed real context to
   // decide).
   attackerHasMoldBreaker: boolean,
+  // The RESOLVED move type for this hit (post-onMoveType), supplied by calcInternal
+  // -- onChooseOffensiveStat's DoesMoveMatchFlag grant scan forwards the declared
+  // type from `move` and this resolved value (Mixed Martial Arts/Reverbate read the
+  // former, Brawling Wyvern the latter).
+  resolvedMoveType: string,
 ) {
   const { attacker, defender, move, field } = scenario
   const unmodelled: string[] = []
@@ -616,6 +624,8 @@ function computeAttackStat(
       : computeChooseOffensiveStat(attacker.abilitySlots, defaultAtkStat, {
           battlerId: 'attacker',
           moveId: move.id,
+          declaredMoveType: move.type ?? 'NORMAL',
+          resolvedMoveType,
           isCrit: forcedCrit,
           // Unaware IS breakable -- a defender's Unaware here can be bypassed by
           // the attacker's own Mold Breaker.
@@ -648,7 +658,15 @@ function computeAttackStat(
   return { value: finalAtk, unmodelled }
 }
 
-function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'SPECIAL', isCrit: boolean, statStageRatios: [number, number][]) {
+function computeDefenseStat(
+  scenario: DamageCalcScenario,
+  split: 'PHYSICAL' | 'SPECIAL',
+  isCrit: boolean,
+  statStageRatios: [number, number][],
+  // The RESOLVED move type for this hit, supplied by calcInternal for the
+  // onChooseDefensiveStat grant scan (see computeAttackStat's own parameter).
+  resolvedMoveType: string,
+) {
   const { attacker, defender, move } = scenario
   const unmodelled: string[] = []
 
@@ -660,6 +678,8 @@ function computeDefenseStat(scenario: DamageCalcScenario, split: 'PHYSICAL' | 'S
     attackerId: 'attacker',
     defenderId: 'defender',
     moveId: move.id,
+    declaredMoveType: move.type ?? 'NORMAL',
+    resolvedMoveType,
     noPositiveStatStages: noPositive,
     isUnaware: hasFlag(attacker.abilitySlots, 'unaware'),
     isCrit,
@@ -720,12 +740,19 @@ function scenarioCritStageInputs(scenario: DamageCalcScenario): CritStageInputs 
   // hypotheticalTypeEffectiveness are null here (no specific type is in scope at
   // this call site) -- see OnMoldBreakerContext's own doc on that tradeoff.
   const attackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, move.split ?? 'STATUS', null, null, true)
+  // The onCrit DoesMoveMatchFlag grant scan needs both the declared base type and
+  // the RESOLVED type (post-onMoveType); the latter is recomputed here because this
+  // crit-stage pass runs outside calcInternal's own resolved-type scope.
+  const declaredMoveType = move.type ?? 'NORMAL'
+  const resolvedMoveType = resolveMoveType(scenario, declaredMoveType).moveType
   const abilityBonus = computeAbilityCritBonus(
     attacker.abilitySlots,
     defender.abilitySlots,
     {
       defenderId: 'defender',
       moveId: move.id,
+      declaredMoveType,
+      resolvedMoveType,
       typeEffectiveness: uq(1.0),
       defenderStatus1: defender.condition.status1,
       defenderSpeedStageNegative: defender.statStages.spe < 0,
@@ -1184,7 +1211,7 @@ function calcInternal(
     computeIsImmune(
       defender.abilitySlots,
       attacker.abilitySlots,
-      { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, movePriority: move.priority ?? 0 },
+      { moveType, declaredMoveType: move.type ?? 'NORMAL', moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, movePriority: move.priority ?? 0 },
       attackerHasMoldBreaker,
     )
   ) {
@@ -1281,8 +1308,8 @@ function calcInternal(
     if (note) unmodelled.push(note)
   }
 
-  const atk = computeAttackStat(scenario, split, isCrit, statStageRatios, attackerHasMoldBreaker)
-  const def = computeDefenseStat(scenario, split, isCrit, statStageRatios)
+  const atk = computeAttackStat(scenario, split, isCrit, statStageRatios, attackerHasMoldBreaker, moveType)
+  const def = computeDefenseStat(scenario, split, isCrit, statStageRatios, moveType)
   unmodelled.push(...atk.unmodelled, ...def.unmodelled)
 
   let dmg = idiv(attacker.level * 2, 5) + 2
@@ -1300,6 +1327,7 @@ function calcInternal(
       defenderId: 'defender',
       moveId: move.id,
       moveType,
+      declaredMoveType: move.type ?? 'NORMAL',
       moveSplit: split,
       moveFlags: move.flags,
       moveEffectChance: move.effectChance,
@@ -1338,6 +1366,7 @@ function calcInternal(
       attackerId: 'attacker',
       moveId: move.id,
       moveType,
+      declaredMoveType: move.type ?? 'NORMAL',
       moveSplit: split,
       moveFlags: move.flags,
       typeEffectiveness,
@@ -1374,10 +1403,10 @@ function calcInternal(
     screensActive:
       !isCrit &&
       screensApply(field, split) &&
-      !computeInfiltratesScreens(attacker.abilitySlots, { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
+      !computeInfiltratesScreens(attacker.abilitySlots, { moveType, declaredMoveType: move.type ?? 'NORMAL', moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', attackerTypes: attacker.types }),
     isDoubleBattle: field.isDoubleBattle,
     resistBerryMultiplier: berryMult,
-    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow, move.flags, split),
+    attackerItemMultiplier: attackerFinalItemMultiplier(attacker, typeEffectiveness, scenario.sameMoveTurnsInARow, move.flags, split, move.type ?? 'NORMAL', moveType),
     // Real bug found auditing this: was checking only move.effect ===
     // 'EFFECT_MISC_HIT', which is true for ALL 8 current EFFECT_MISC_HIT moves
     // (MISC_EFFECT_FAINTED_MON_BOOST, _ELECTRIC_TERRAIN_BOOST, etc.), not just
@@ -1510,6 +1539,8 @@ function attackerFinalItemMultiplier(
   sameMoveTurnsInARow: number,
   moveFlags: Record<string, true>,
   moveSplit: 'PHYSICAL' | 'SPECIAL' | 'STATUS',
+  declaredMoveType: string,
+  resolvedMoveType: string,
 ): number {
   const effect = attacker.condition.resolvedHoldEffect
   if (effect === 'HOLD_EFFECT_LIFE_ORB') return uq(1.3)
@@ -1518,7 +1549,7 @@ function attackerFinalItemMultiplier(
     const percentBoost = Math.min(sameMoveTurnsInARow * (attacker.holdEffectStrength ?? 0), 100)
     return uq(1.0) + percentToModifier(percentBoost)
   }
-  if (effect === 'HOLD_EFFECT_PUNCHING_GLOVE' && isIronFistBoosted(attacker.abilitySlots, moveFlags, moveSplit)) return uq(1.1)
+  if (effect === 'HOLD_EFFECT_PUNCHING_GLOVE' && isIronFistBoosted(attacker.abilitySlots, moveFlags, moveSplit, declaredMoveType, resolvedMoveType)) return uq(1.1)
   // Amulet Coin (Meowth Partner-only) is deferred.
   return uq(1.0)
 }
@@ -1667,7 +1698,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
     hasFlag(attacker.abilitySlots, 'skillLink'),
     attacker.condition.resolvedHoldEffect,
     scenario.hitCount,
-    { moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, attackerHeads: attacker.condition.heads },
+    { moveType, declaredMoveType: moveType, moveFlags: move.flags, moveSplit: move.split ?? 'STATUS', weather: field.weather, attackerHeads: attacker.condition.heads },
     scenario.beatUpHitCount,
     scenario.minionControlCount,
   )

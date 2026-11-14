@@ -673,8 +673,15 @@ export function isMoveMakingContact(
   if (attackerHoldEffect === 'HOLD_EFFECT_PROTECTIVE_PADS') {
     return false
   }
-  if (attackerHoldEffect === 'HOLD_EFFECT_PUNCHING_GLOVE' && isIronFistBoosted(attacker.mon.abilities, moveData.flags, moveData.split ?? 'STATUS')) {
-    return false
+  if (attackerHoldEffect === 'HOLD_EFFECT_PUNCHING_GLOVE') {
+    // The full grant scan needs the move's real types, not just the caller's
+    // TYPE_NORMAL dummy: MMA/Reverbate read the declared type and Brawling Wyvern
+    // the resolved one (src/abilities.cc:9901/10657/7607).
+    const declaredMoveType = moveData.type ? moveData.type.replace(/^TYPE_/, '') : 'NORMAL'
+    const resolvedMoveType = resolveEffectiveMoveType(attacker.mon.abilities, moveData.id, declaredMoveType, moveData.flags ?? {}).moveType
+    if (isIronFistBoosted(attacker.mon.abilities, moveData.flags, moveData.split ?? 'STATUS', declaredMoveType, resolvedMoveType)) {
+      return false
+    }
   }
   return true
 }
@@ -4837,11 +4844,15 @@ function handleAttackerMoveEndAbility(
   // Icicle Fist (src/abilities.cc:12500-12508): IsIronFistBoosted(battler, move) (DoesMoveMatchFlag(... MOVE_FLAG_PUNCH),
   // battle_util.c:9375), CanGetFrostbite(target), then the 30% roll, then AbilityStatusEffect(MOVE_EFFECT_FROSTBITE).
   if (abilityId === 'ABILITY_ICICLE_FIST') {
+    const fistDeclaredType = moveData?.type ? moveData.type.replace(/^TYPE_/, '') : 'NORMAL'
+    const fistResolvedType = resolvedMoveType
+      ? resolvedMoveType.replace(/^TYPE_/, '')
+      : resolveEffectiveMoveType(attacker.mon.abilities, moveId, fistDeclaredType, moveData?.flags ?? {}).moveType
     if (
       target.mon.hp > 0 &&
       hpDealt > 0 &&
       attackerId !== targetId &&
-      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS') &&
+      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS', fistDeclaredType, fistResolvedType) &&
       canGetFrostbite(state, targetId, attackerId, statusDeps) &&
       state.rng.random16() % 100 < 30
     ) {
@@ -5501,13 +5512,17 @@ function handleAttackerMoveEndAbility(
   // uses: manipulatedamage DMG_TO_HP_FROM_ABILITY (GetDrainedBigRootHp, battle_util.c:2369-2377: Big Root and Absorbant
   // both multiply by 3/2), healthbarupdate/datahpupdate BS_ATTACKER. Nothing else follows.
   if (abilityId === 'ABILITY_VITALITY_STRIKE') {
+    const fistDeclaredType = moveData?.type ? moveData.type.replace(/^TYPE_/, '') : 'NORMAL'
+    const fistResolvedType = resolvedMoveType
+      ? resolvedMoveType.replace(/^TYPE_/, '')
+      : resolveEffectiveMoveType(attacker.mon.abilities, moveId, fistDeclaredType, moveData?.flags ?? {}).moveType
     if (
       attacker.mon.hp > 0 &&
       hpDealt > 0 &&
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
-      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS')
+      isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS', fistDeclaredType, fistResolvedType)
     ) {
       healFromAbilityDrain(state, attackerId, Math.max(1, Math.floor(hpDealt / 10)), deps)
     }

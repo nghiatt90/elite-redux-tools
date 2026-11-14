@@ -536,6 +536,7 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
       battlerId: 'x',
       moveId: 'MOVE_SACRED_SWORD',
       moveType: 'FIGHTING',
+      declaredMoveType: 'FIGHTING',
       moveSplit: 'PHYSICAL' as const,
       moveFlags: { sliceBased: true } as Record<string, true>,
       ...overrides,
@@ -553,6 +554,8 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
       moveId: 'MOVE_SACRED_SWORD',
       isCrit: false,
       isUnaware: false,
+      declaredMoveType: 'NORMAL' as const,
+      resolvedMoveType: 'NORMAL' as const,
       moveSplit: 'PHYSICAL' as const,
       moveFlags: { sliceBased: true } as Record<string, true>,
       isHighestAttackingStat: true,
@@ -593,7 +596,7 @@ describe('Cycle 95 - Best Offense (:10215-10220) and Magus Blades (:10235-10241)
   it('Magus Blades resolves to the Dual Wield parental-bond trigger on a slice move only; Best Offense has none', () => {
     const slots = (ability: string) => ({ ability, innates: [null, null, null] as [null, null, null] })
     const none = { ability: null, innates: [null, null, null] as [null, null, null] }
-    const ctx = (moveFlags: Record<string, true>) => ({ moveType: 'FIGHTING', moveFlags, moveSplit: 'PHYSICAL' as const, weather: 'NONE', attackerHeads: 1 })
+    const ctx = (moveFlags: Record<string, true>) => ({ moveType: 'FIGHTING', declaredMoveType: 'FIGHTING', moveFlags, moveSplit: 'PHYSICAL' as const, weather: 'NONE', attackerHeads: 1 })
     expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), none, ctx({ sliceBased: true }))).toBe('DUAL_WIELD')
     expect(computeParentalBondTrigger(slots('ABILITY_MAGUS_BLADES'), none, ctx({}))).toBeNull()
     expect(computeParentalBondTrigger(slots('ABILITY_BEST_OFFENSE'), none, ctx({ sliceBased: true }))).toBeNull()

@@ -759,6 +759,7 @@ export function runAttackCanceller(
     // via buildFieldBattleState/buildFieldFacts.
     const parentalBondCtx: OnParentalBondInputs = {
       moveType: bareType(move?.type) || 'NORMAL',
+      declaredMoveType: bareType(move?.type) || 'NORMAL',
       moveFlags: move?.flags ?? {},
       moveSplit: move?.split ?? 'STATUS',
       weather: weatherFromBitfield(state.field.weather).weather,

@@ -38,7 +38,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST')
     const defender = slots('ABILITY_TEST_HALVE')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', declaredMoveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -57,7 +57,7 @@ describe('computeAbilityMultiplier', () => {
 
     const attacker = slots('ABILITY_TEST_BOOST2')
     const defender = slots('ABILITY_TEST_FORTKNOX')
-    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
+    const base = { defenderId: 'defender', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', declaredMoveType: 'NORMAL', moveSplit: 'PHYSICAL' as const, moveFlags: {}, moveEffectChance: 0, ateBoost: false, defenderHasComatose: false, attackerSlowStartTimer: 5, attackerHasStab: false, typeEffectiveness: uq(1.0), isCrit: false, weather: 'NONE', defenderAtMaxHp: true, attackerActsFirst: true, defenderTypes: [] as string[], defenderAbilityOn: false, attackerGender: 'MALE' as const, defenderGender: 'MALE' as const, defenderIsConfused: false, defenderIsEnraged: false, defenderStatus1: new Set<string>(), defenderHasBloodStainEffect: false, attackerIsUnaware: false, defenderHasAnyLoweredStat: false, attackerTypes: [] as string[] }
     const result = computeAbilityMultiplier(attacker, defender, { battlerId: 'attacker', basePower: 40, attackerHasAnyStatus: false,
     attackerHp: 100,
     attackerMaxHp: 100,
@@ -88,6 +88,8 @@ describe('computeAbilityCritBonus', () => {
       defenderResolvedHoldEffect: null,
       moveFlags: {},
       moveSplit: 'PHYSICAL',
+      declaredMoveType: 'NORMAL',
+      resolvedMoveType: 'NORMAL',
       basePower: 40,
       attackerActsFirst: true,
     })
@@ -111,6 +113,8 @@ describe('computeAbilityCritBonus', () => {
       defenderResolvedHoldEffect: null,
       moveFlags: {},
       moveSplit: 'PHYSICAL' as const,
+      declaredMoveType: 'NORMAL',
+      resolvedMoveType: 'NORMAL',
       basePower: 40,
       attackerActsFirst: true,
     }
@@ -135,6 +139,8 @@ describe('computeAbilityCritBonus', () => {
       defenderResolvedHoldEffect: null,
       moveFlags: {},
       moveSplit: 'PHYSICAL',
+      declaredMoveType: 'NORMAL',
+      resolvedMoveType: 'NORMAL',
       basePower: 40,
       attackerActsFirst: true,
     })
@@ -160,23 +166,25 @@ describe('hasStabOverride and hasFlag', () => {
 
 describe('isIronFistBoosted', () => {
   it("the move's own static punchBased flag wins outright, no ability needed", () => {
-    expect(isIronFistBoosted(slots(null), { punchBased: true }, 'PHYSICAL')).toBe(true)
+    expect(isIronFistBoosted(slots(null), { punchBased: true }, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(true)
   })
 
   it('a non-punch move with no relevant ability is not boosted', () => {
-    expect(isIronFistBoosted(slots(null), {}, 'PHYSICAL')).toBe(false)
+    expect(isIronFistBoosted(slots(null), {}, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(false)
   })
 
-  it("falls back to an ability's onModifyMoveFlags, passing the dummy TYPE_NORMAL (not the move's real type)", () => {
+  it("falls back to an ability's onModifyMoveFlags, and MMA reads the move's declared type (src/abilities.cc:9901)", () => {
     const grantsPunchOnNormalOnly: AbilityImpl = {
       id: 'ABILITY_TEST_GRANTS_PUNCH',
       src: 'test',
-      onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && ctx.moveType === 'NORMAL',
+      onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && ctx.declaredMoveType === 'NORMAL',
     }
     registerAbilities([grantsPunchOnNormalOnly])
-    // No moveType is passed in at all -- this always checks against the dummy, so
-    // it grants punch regardless of what type the move actually is.
-    expect(isIronFistBoosted(slots('ABILITY_TEST_GRANTS_PUNCH'), {}, 'PHYSICAL')).toBe(true)
+    // isIronFistBoosted still passes the literal TYPE_NORMAL as the flag-check
+    // argument (src/battle_util.c:9373-9379), but the grant itself now reads the
+    // move's declared base type rather than that argument.
+    expect(isIronFistBoosted(slots('ABILITY_TEST_GRANTS_PUNCH'), {}, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(true)
+    expect(isIronFistBoosted(slots('ABILITY_TEST_GRANTS_PUNCH'), {}, 'PHYSICAL', 'FIRE', 'FIRE')).toBe(false)
   })
 
   it('does not fall back to an ability that requires a flag already present', () => {
@@ -186,8 +194,8 @@ describe('isIronFistBoosted', () => {
       onModifyMoveFlags: (ctx) => ctx.flag === 'punchBased' && Boolean(ctx.moveFlags.kickBased),
     }
     registerAbilities([crossSwap])
-    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), {}, 'PHYSICAL')).toBe(false)
-    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), { kickBased: true }, 'PHYSICAL')).toBe(true)
+    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), {}, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(false)
+    expect(isIronFistBoosted(slots('ABILITY_TEST_CROSS_SWAP'), { kickBased: true }, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(true)
   })
 })
 
@@ -200,7 +208,7 @@ describe('computeSwapSplit', () => {
 
   it('no matching ability -> no swap', () => {
     expect(
-      computeSwapSplit(slots(null), { battlerId: 'attacker', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', moveSplit: 'PHYSICAL', moveFlags: {} }),
+      computeSwapSplit(slots(null), { battlerId: 'attacker', moveId: 'MOVE_TACKLE', moveType: 'NORMAL', declaredMoveType: 'NORMAL', moveSplit: 'PHYSICAL', moveFlags: {} }),
     ).toBe(false)
   })
 
@@ -211,6 +219,7 @@ describe('computeSwapSplit', () => {
         battlerId: 'attacker',
         moveId: 'MOVE_SLASH',
         moveType: 'NORMAL',
+        declaredMoveType: 'NORMAL',
         moveSplit: 'PHYSICAL',
         moveFlags: { sliceBased: true },
       }),
@@ -224,6 +233,7 @@ describe('computeSwapSplit', () => {
         battlerId: 'attacker',
         moveId: 'MOVE_SLASH',
         moveType: 'NORMAL',
+        declaredMoveType: 'NORMAL',
         moveSplit: 'SPECIAL',
         moveFlags: { sliceBased: true },
       }),

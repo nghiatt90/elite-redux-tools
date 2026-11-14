@@ -70,6 +70,7 @@ function buildMoveView(
     effect: move?.effect ?? null,
     isStatus: move?.split === 'STATUS',
     resolvedType: move?.type ?? 'MYSTERY', // GetTypeBeforeUsingMove's dynamic resolution not applied -- declared type used.
+    declaredType: move?.type ?? 'MYSTERY',
     power: move?.power ?? 0,
     flags: move?.flags ?? {},
     split: move?.split ?? 'STATUS',

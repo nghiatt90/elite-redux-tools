@@ -103,6 +103,7 @@ export function defaultPlayerPolicy(
     effect: mData?.effect ?? null,
     isStatus: mData?.split === 'STATUS',
     resolvedType: mData?.type ?? 'NORMAL',
+    declaredType: mData?.type ?? 'NORMAL',
     power: mData?.power ?? 0,
     flags: mData?.flags ?? {},
     split: mData?.split ?? 'STATUS',

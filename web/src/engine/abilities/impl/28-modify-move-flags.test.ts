@@ -10,7 +10,15 @@ function findAbility(id: string): AbilityImpl {
 }
 
 function ctx(overrides: Partial<OnModifyMoveFlagsContext> = {}): OnModifyMoveFlagsContext {
-  return { flag: 'sound', moveType: 'NORMAL', moveFlags: {}, moveSplit: 'PHYSICAL', ...overrides }
+  return {
+    flag: 'sound',
+    moveType: 'NORMAL',
+    declaredMoveType: 'NORMAL',
+    resolvedMoveType: 'NORMAL',
+    moveFlags: {},
+    moveSplit: 'PHYSICAL',
+    ...overrides,
+  }
 }
 
 function grants(id: string, overrides: Partial<OnModifyMoveFlagsContext> = {}): boolean {
@@ -25,15 +33,21 @@ describe('modify move flags batch AB', () => {
     expect(grants('ABILITY_BACKSTREET_BOY', { flag: 'sound', moveFlags: { dance: true } })).toBe(false)
   })
 
-  it('Brawling Wyvern grants Punch to Dragon-type moves only', () => {
-    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', moveType: 'DRAGON' })).toBe(true)
-    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', moveType: 'NORMAL' })).toBe(false)
-    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'kickBased', moveType: 'DRAGON' })).toBe(false)
+  it('Brawling Wyvern grants Punch to Dragon-type moves only (IS_MOVE_TYPE, i.e. the RESOLVED type; src/abilities.cc:7600-7609)', () => {
+    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', resolvedMoveType: 'DRAGON' })).toBe(true)
+    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', resolvedMoveType: 'NORMAL' })).toBe(false)
+    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'kickBased', resolvedMoveType: 'DRAGON' })).toBe(false)
+    // The caller's moveType argument is irrelevant to this grant.
+    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', moveType: 'DRAGON', resolvedMoveType: 'NORMAL' })).toBe(false)
+    expect(grants('ABILITY_BRAWLING_WYVERN', { flag: 'punchBased', moveType: 'NORMAL', resolvedMoveType: 'DRAGON' })).toBe(true)
   })
 
-  it('Chestnut Axe grants Keen Edge to Grass-type moves only', () => {
+  it('Chestnut Axe grants Keen Edge to Grass-type moves only (reads the CALLER argument; src/abilities.cc:11706-11715)', () => {
     expect(grants('ABILITY_CHESTNUT_AXE', { flag: 'sliceBased', moveType: 'GRASS' })).toBe(true)
     expect(grants('ABILITY_CHESTNUT_AXE', { flag: 'sliceBased', moveType: 'WATER' })).toBe(false)
+    // Chestnut Axe is the one grant that really does read ctx.moveType.
+    expect(grants('ABILITY_CHESTNUT_AXE', { flag: 'sliceBased', moveType: 'GRASS', declaredMoveType: 'FIRE' })).toBe(true)
+    expect(grants('ABILITY_CHESTNUT_AXE', { flag: 'sliceBased', moveType: 'WATER', declaredMoveType: 'GRASS' })).toBe(false)
   })
 
   it('Festivities cross-swaps Dance <-> Sound', () => {
@@ -53,11 +67,14 @@ describe('modify move flags batch AB', () => {
     expect(grants('ABILITY_JUNSHI_SANDA', { flag: 'punchBased', moveFlags: {} })).toBe(false)
   })
 
-  it('Mixed Martial Arts grants Punch or Kick to Normal-type moves only', () => {
-    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', moveType: 'NORMAL' })).toBe(true)
-    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'kickBased', moveType: 'NORMAL' })).toBe(true)
-    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'sound', moveType: 'NORMAL' })).toBe(false)
-    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', moveType: 'FIRE' })).toBe(false)
+  it('Mixed Martial Arts grants Punch or Kick to Normal-type moves only (declared base type; src/abilities.cc:9899-9903)', () => {
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', declaredMoveType: 'NORMAL' })).toBe(true)
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'kickBased', declaredMoveType: 'NORMAL' })).toBe(true)
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'sound', declaredMoveType: 'NORMAL' })).toBe(false)
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', declaredMoveType: 'FIRE' })).toBe(false)
+    // Not keyed on the caller's argument any more.
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', moveType: 'FIRE', declaredMoveType: 'NORMAL' })).toBe(true)
+    expect(grants('ABILITY_MIXED_MARTIAL_ARTS', { flag: 'punchBased', moveType: 'NORMAL', declaredMoveType: 'FIRE' })).toBe(false)
   })
 
   it('Musical Notes grants Sound to status moves only', () => {
@@ -65,9 +82,12 @@ describe('modify move flags batch AB', () => {
     expect(grants('ABILITY_MUSICAL_NOTES', { flag: 'sound', moveSplit: 'PHYSICAL' })).toBe(false)
   })
 
-  it('Reverbate grants Sound to Normal-type moves only', () => {
-    expect(grants('ABILITY_REVERBATE', { flag: 'sound', moveType: 'NORMAL' })).toBe(true)
-    expect(grants('ABILITY_REVERBATE', { flag: 'sound', moveType: 'FIRE' })).toBe(false)
+  it('Reverbate grants Sound to Normal-type moves only (declared base type; src/abilities.cc:10655-10661)', () => {
+    expect(grants('ABILITY_REVERBATE', { flag: 'sound', declaredMoveType: 'NORMAL' })).toBe(true)
+    expect(grants('ABILITY_REVERBATE', { flag: 'sound', declaredMoveType: 'FIRE' })).toBe(false)
+    // Not keyed on the caller's argument any more.
+    expect(grants('ABILITY_REVERBATE', { flag: 'sound', moveType: 'FIRE', declaredMoveType: 'NORMAL' })).toBe(true)
+    expect(grants('ABILITY_REVERBATE', { flag: 'sound', moveType: 'NORMAL', declaredMoveType: 'FIRE' })).toBe(false)
   })
 
   it('Taekkyeon grants Dance to non-status moves only', () => {

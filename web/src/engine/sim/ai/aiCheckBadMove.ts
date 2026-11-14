@@ -964,6 +964,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       const built = move
         ? {
             moveType: resolvedType ?? 'NORMAL',
+            declaredMoveType: move.type ?? 'NORMAL',
             moveFlags: built_flags(move),
           }
         : null
@@ -974,7 +975,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
           computeIsImmune(
             defender.mon.abilities,
             attacker.mon.abilities,
-            { moveType: built.moveType, moveFlags: built.moveFlags, moveSplit: (move?.split ?? 'STATUS') as 'PHYSICAL' | 'SPECIAL' | 'STATUS', weather, movePriority: move?.priority ?? 0 },
+            { moveType: built.moveType, declaredMoveType: built.declaredMoveType, moveFlags: built.moveFlags, moveSplit: (move?.split ?? 'STATUS') as 'PHYSICAL' | 'SPECIAL' | 'STATUS', weather, movePriority: move?.priority ?? 0 },
             atkMoldBreaker,
           )
         ) {

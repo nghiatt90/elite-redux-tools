@@ -17,6 +17,7 @@ function ctx(overrides: Partial<DefensiveMultiplierContext> = {}): DefensiveMult
     attackerId: 'attacker',
     moveId: 'MOVE_TACKLE',
     moveType: 'NORMAL',
+    declaredMoveType: 'NORMAL',
     moveSplit: 'PHYSICAL',
     moveFlags: {},
     typeEffectiveness: uq(1.0),

@@ -509,6 +509,7 @@ describe('cycle 105a - computeAbilityPriorityBonus honours isSuppressed', () => 
     moveId: 'MOVE_SWORDS_DANCE',
     moveEffect: 'EFFECT_ATTACK_UP_2',
     moveType: 'NORMAL',
+    declaredMoveType: 'NORMAL',
     movePower: 0,
     movePriority: 0,
     moveSplit: 'STATUS' as const,

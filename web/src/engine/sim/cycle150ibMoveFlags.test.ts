@@ -299,15 +299,31 @@ describe('Cycle 150ib -- DoesMoveMatchFlag grants reach Keen Edge and Striker', 
   })
 })
 
-describe('Cycle 150ib -- doesMoveMatchFlag passes the caller\'s moveType', () => {
-  it('Mixed Martial Arts grants KICK only when the type argument is NORMAL', () => {
-    // Mirrors src/abilities.cc:9872: (flag == PUNCH || flag == KICK) && moveType == NORMAL.
-    // This is what makes Striker's TYPE_NORMAL dummy and Keen Edge's REAL type behave
-    // differently for a type-conditioned grant.
+describe('Cycle 150ib -- doesMoveMatchFlag threads the move\'s own types', () => {
+  it('Mixed Martial Arts reads the DECLARED type, not the caller\'s argument', () => {
+    // src/abilities.cc:9901: (flag == PUNCH || flag == KICK) && gBattleMoves[move].type
+    // == TYPE_NORMAL. The caller's `moveType` argument (Striker's TYPE_NORMAL dummy,
+    // Keen Edge's real type) is irrelevant to this grant.
     const mma = slots('ABILITY_MIXED_MARTIAL_ARTS')
-    expect(doesMoveMatchFlag(mma, 'kickBased', 'NORMAL', {}, 'PHYSICAL')).toBe(true)
-    expect(doesMoveMatchFlag(mma, 'kickBased', 'FIRE', {}, 'PHYSICAL')).toBe(false)
+    expect(doesMoveMatchFlag(mma, 'kickBased', 'NORMAL', {}, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(true)
+    expect(doesMoveMatchFlag(mma, 'kickBased', 'NORMAL', {}, 'PHYSICAL', 'FIRE', 'FIRE')).toBe(false)
     // The static flag still wins without consulting any ability (:362-364).
-    expect(doesMoveMatchFlag(mma, 'kickBased', 'FIRE', { kickBased: true }, 'PHYSICAL')).toBe(true)
+    expect(doesMoveMatchFlag(mma, 'kickBased', 'FIRE', { kickBased: true }, 'PHYSICAL', 'FIRE', 'FIRE')).toBe(true)
+  })
+
+  it('Brawling Wyvern reads the RESOLVED type (IS_MOVE_TYPE), not the argument', () => {
+    // src/abilities.cc:7607: CHECK(IS_MOVE_TYPE(move, TYPE_DRAGON)); include/battle.h:743
+    // takes dynamicMoveType (resolved) when set, else the declared type.
+    const wyvern = slots('ABILITY_BRAWLING_WYVERN')
+    expect(doesMoveMatchFlag(wyvern, 'punchBased', 'NORMAL', {}, 'PHYSICAL', 'NORMAL', 'DRAGON')).toBe(true)
+    expect(doesMoveMatchFlag(wyvern, 'punchBased', 'NORMAL', {}, 'PHYSICAL', 'DRAGON', 'FIRE')).toBe(false)
+  })
+
+  it('Chestnut Axe keys on the caller\'s moveType ARGUMENT', () => {
+    // src/abilities.cc:11711: `return moveType == TYPE_GRASS;` -- the only grant that
+    // reads the argument (IsKeenEdge passes the real move type, :3676).
+    const axe = slots('ABILITY_CHESTNUT_AXE')
+    expect(doesMoveMatchFlag(axe, 'sliceBased', 'GRASS', {}, 'PHYSICAL', 'NORMAL', 'NORMAL')).toBe(true)
+    expect(doesMoveMatchFlag(axe, 'sliceBased', 'FIRE', {}, 'PHYSICAL', 'GRASS', 'GRASS')).toBe(false)
   })
 })
