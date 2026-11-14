@@ -3,7 +3,7 @@
 Uses Cloudflare Pages' native Git integration rather than a GitHub Actions workflow --
 zero YAML to maintain, no API tokens to store as repo secrets, and per-PR preview
 deploys come free. The build itself never runs Python; it copies the committed
-`data/v2.65beta/` snapshot into the site and runs `vite build`.
+`data/v2.65.4.1b/` snapshot into the site and runs `vite build`.
 
 ## One-time setup (manual, in the Cloudflare dashboard)
 
@@ -35,7 +35,7 @@ Two things worth knowing about the settings above:
 - **Root directory `web` is not a default.** Left blank, the build finds no
   `package.json` and fails immediately. The output directory is relative to it, so
   `dist`, not `web/dist`.
-- **`prebuild` reaches outside the root directory**, copying `../data/v2.65beta`.
+- **`prebuild` reaches outside the root directory**, copying `../data/v2.65.4.1b`.
   That is fine -- Cloudflare clones the whole repo and merely runs the build inside
   `web/` -- but it is the least standard thing here, so check it first if a build
   fails.
@@ -49,11 +49,11 @@ source change.
 `npm run build` (in `web/`) runs, via its `prebuild` hook:
 
 ```
-rm -rf public/data && mkdir -p public/data && cp -r ../data/v2.65beta public/data/
+rm -rf public/data && mkdir -p public/data && cp -r ../data/v2.65.4.1b public/data/
 tsc -b && vite build
 ```
 
-The committed `data/v2.65beta/` snapshot (species/moves/abilities/type-chart JSON plus
+The committed `data/v2.65.4.1b/` snapshot (species/moves/abilities/type-chart JSON plus
 sprites, 7,641 files / 10.2MB) is copied straight into the build -- no pipeline run, no
 `uv`, no `grpcio-tools`, no Pillow in the Cloudflare build image at all. This is also
 why local `npm run dev` and `npm run build` both work identically without ever fetching
@@ -82,7 +82,7 @@ from GitHub or running the Python pipeline: the data is already sitting in the r
 ## Updating the data snapshot
 
 Re-run the pipeline (`cd pipeline && uv run python -m erdata.build`), review the diff
-under `data/v2.65beta/`, commit it, and push -- Cloudflare picks up the new snapshot on
+under `data/v2.65.4.1b/`, commit it, and push -- Cloudflare picks up the new snapshot on
 the next build automatically.
 
 `.github/workflows/refresh-data.yml` does the same thing from CI -- run it from the

@@ -2,7 +2,7 @@ import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
 
 // Matches sources.lock.json's game_version and web/package.json's sync-data script,
 // which copies data/<version>/ to public/data/<version>/ before dev/build.
-const DATA_VERSION = 'v2.65beta'
+const DATA_VERSION = 'v2.65.4.1b'
 const BASE = `/data/${DATA_VERSION}`
 
 async function getJSON<T>(path: string): Promise<T> {
