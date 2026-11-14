@@ -300,19 +300,33 @@ function isBloodStainAffected(state: BattleState, deps: AiDamageDeps, battler: B
   return selfAbility(state, deps, battler, 'ABILITY_BLOOD_STAIN')
 }
 
-/** `CanBattlerHeal(battler)`, battle_util.c:8979-8986. `IsAbilityOnOpposingSide`
- * (Permanence/Hemolysis) has no port anywhere in this codebase -- no existing
- * "any battler on a side" ability scanner exists to build it from within this
- * batch's scope, so both checks are gapped, treated as absent (the common
- * case). Gapped only when the battler is actually asleep/poisoned enough for
- * it to matter is not tracked either; reported once per call as a standing
- * caveat. (The aiPipeline moveLimitations note this used to cite was retired
- * by cycle 98, when that mask became real.) */
-function canBattlerHeal(state: BattleState, deps: AiDamageDeps, battler: BattlerState, unmodelled: string[]): boolean {
+/** `IsAbilityOnOpposingSide(battler, ability)` -> `IsAbilityOnSide`,
+ * battle_util.c:4792-4799: any live battler on the opposite side for which
+ * `BATTLER_HAS_ABILITY_AND_ALIVE(id, ability, TRUE)` holds. `TRUE` is
+ * checkMoldBreaker, so the read goes through `defAbility` and IsSuppressed
+ * (:9255-9260: Neutralizing Gas, Gastro Acid unless ability-shielded) applies.
+ * Same loop shape as aiMoveLimitations.ts's Permanence scan. */
+function isAbilityOnOpposingSide(state: BattleState, deps: AiDamageDeps, battlerId: number, abilityId: string): boolean {
+  for (let id = 0; id < state.battlersCount; id++) {
+    if ((id & 1) === (battlerId & 1)) continue
+    const foe = state.battlers[id]
+    if (!foe || foe.mon.hp === 0) continue
+    if (defAbility(state, deps, foe, abilityId, deps.grounding.attackerHasMoldBreaker)) return true
+  }
+  return false
+}
+
+/** `CanBattlerHeal(battler)`, battle_util.c:8979-8986: Heal Block (:8980),
+ * Bleed (:8981), Blood Stain (:8982), then Permanence on either side (:8983)
+ * and -- only while poisoned, `status1 & STATUS1_POISON_ANY` (:8984) --
+ * Hemolysis on either side. Both ability clauses are the opposing-side scan
+ * above, so IsSuppressed applies to the holder. */
+function canBattlerHeal(state: BattleState, deps: AiDamageDeps, battler: BattlerState, battlerId: number): boolean {
   if (hasFlag(battler.statuses3, STATUS3_HEAL_BLOCK)) return false
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
   if (isBloodStainAffected(state, deps, battler)) return false
-  unmodelled.push('CanBattlerHeal: IsAbilityOnOpposingSide(battler, ABILITY_PERMANENCE/ABILITY_HEMOLYSIS) has no port anywhere in this codebase; treated as absent')
+  if (isAbilityOnOpposingSide(state, deps, battlerId, 'ABILITY_PERMANENCE')) return false
+  if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityOnOpposingSide(state, deps, battlerId, 'ABILITY_HEMOLYSIS')) return false
   return true
 }
 
@@ -435,7 +449,7 @@ function shouldAbsorb(state: BattleState, battlerAtk: number, battlerDef: number
     const move = deps.dataContext.move(moveId) // `.argumentInt` lives on SimMoveData, not MoveData.
     const healPercent = move?.argumentInt ? move.argumentInt : 50
     let healDmg = Math.floor((healPercent * damage) / 100)
-    if (!canBattlerHeal(state, deps, attacker, unmodelled)) healDmg = 0
+    if (!canBattlerHeal(state, deps, attacker, battlerAtk)) healDmg = 0
     const targetCanFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
     unmodelled.push(...targetCanFaint.unmodelled)
     if (targetCanFaint.canFaint) {
@@ -463,7 +477,7 @@ function shouldRecover(state: BattleState, battlerAtk: number, battlerDef: numbe
   const { dmg, unmodelled: dmgU } = aiCalcDamage(state, moveId, battlerAtk, battlerDef, deps)
   unmodelled.push(...dmgU)
   let healAmount = Math.floor((healPercent * dmg) / 100)
-  if (!canBattlerHeal(state, deps, attacker, unmodelled)) healAmount = 0
+  if (!canBattlerHeal(state, deps, attacker, battlerAtk)) healAmount = 0
   const targetCanFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
   unmodelled.push(...targetCanFaint.unmodelled)
   if (targetCanFaint.canFaint) {
