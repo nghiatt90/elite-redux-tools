@@ -192,9 +192,10 @@ Steven in the Space Center uses this custom branch too (`multi_2_vs_2 ... TRAINE
     as `hp == 0` wherever the AI scans targets (`ChooseMoveOrAction_Doubles` skips only `hp == 0`, `battle_ai_main.c:354`).
 2.6 Battle start with four leads: `applyBattleStartPass` and the lead switch-in abilities run for four battlers in speed / Trick Room order; a replacement
     re-entry mid-battle follows the same ordering.
-2.7 Partner mons live on the player side, so the player's innate gate and ability randomizer apply to them (`GetInnateInSlot`, `battle_util.c:8799-8802`,
-    `isPlayer` decided by side). `createSession` gates innates only for `playerParty` today (`session.ts` + `innateGate.ts`); gate the partner's mons with
-    the same rule and cite it.
+2.7 Partner innate gating: `GetInnateInSlot` takes `isPlayer` as a parameter (`battle_util.c:8799-8803`). The partner controller passes `FALSE` when it builds the partner's battle mon
+    (`battle_controller_player_partner.c:678-680`), so an AI partner STARTS ungated; only the later recomputes, `UpdateAbilityStateIndicesForNewSpecies` (`battle_util.c:8807`) and
+    `RepopulateAbilities` (`:9282`), use `GetBattlerSide(battler) == B_SIDE_PLAYER` and would gate it. `createSession` gates only `playerParty` today (`session.ts:239-250`); port the partner's start-up
+    as ungated and the recompute paths as side-gated, citing these lines. (Corrected 2026-11-15 from an earlier "partner is gated like the player" claim, found by the D5 plan review.)
 
 ### Step 3 - the turn loop in doubles (M1)
 3.1 Per-slot action selection in `session.stepTurn`: actions array filled for every active battler; `buildMoveAction` target selection for
