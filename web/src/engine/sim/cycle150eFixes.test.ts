@@ -676,11 +676,14 @@ describe('Cycle 150e 4 - Pain Split carries the target\'s HP loss', () => {
     const state = battle([
       { moves: ['MOVE_PAIN_SPLIT', null, null, null], pp: [20, 0, 0, 0], hp: 100, maxHp: 300 },
       { hp: 180, maxHp: 300, abilities: hasAbility('ABILITY_EMERGENCY_EXIT') },
-    ], scriptedRng([0, 1, 0, 0]), {
+    ], scriptedRng([0]), {
       opponentParty: [partyMon('SPECIES_MUDKIP', 100), partyMon('SPECIES_MUDKIP', 100), partyMon('SPECIES_MUDKIP', 100)],
       battleTypeFlags: BATTLE_TYPE_TRAINER,
     })
-    const out = executeTurn(state, [useMove(1, move('MOVE_PAIN_SPLIT')), null], testDeps(fixedDamage(0)))
+    // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) draws no random number;
+    // the replacement slot comes from deps.replacement.
+    const deps = { ...testDeps(fixedDamage(0)), replacement: { chooseReplacement: () => 1 } }
+    const out = executeTurn(state, [useMove(1, move('MOVE_PAIN_SPLIT')), null], deps)
     expect(out.actions[0]!.targetDamage).toBe(40)
     expect(state.battlers[1]!.partyIndex).toBe(1)
     expect(state.queuedSwitches).toHaveLength(0)

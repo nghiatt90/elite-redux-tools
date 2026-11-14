@@ -514,10 +514,10 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
     it('non-last action slot: the switched-in entry move runs before the next action', () => {
       // Battler 0 (spe 100) Tackles the Emergency Exit holder for 60: 100 -> 40 HP, crossing half
       // (CheckHalfHpAbility, battle_util.c:9043-9048) and queueing the switch. The reserve has
-      // Telekinetic, whose entry move is MOVE_TELEKINESIS. Draws: Tackle accuracy (0), then
-      // chooseRandomSwitchReplacement's random16() % PARTY_SIZE = 1 (battle_script_commands.c:10176-10180),
-      // which picks party slot 1.
-      const rng = scriptedRng([0, 1])
+      // Telekinetic, whose entry move is MOVE_TELEKINESIS. Draws: Tackle accuracy (0) only -- no
+      // Random() runs on BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500), so the
+      // replacement comes from deps.replacement and selects party slot 1.
+      const rng = scriptedRng([0])
       const { lead, reserve } = emergencyExitParties()
       const state = battle(
         [
@@ -530,7 +530,7 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
         BATTLE_TYPE_TRAINER,
       )
 
-      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), useMove(0, 'MOVE_TACKLE')], testDeps(fixedDamage(60)))
+      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), useMove(0, 'MOVE_TACKLE')], testDeps(fixedDamage(60), GROUNDING, { chooseReplacement: () => 1 }))
 
       expect(state.battlers[1]!.partyIndex).toBe(1)
       // Tackle (slot 0), then the switch-in entry move at that same slot, then battler 1's action.
@@ -549,7 +549,7 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
       // fix it runs before the end-of-turn ladders, so ENDTURN_TELEKINESIS still decrements 3 -> 2.
       // Without it, the attack would sit in the queue until the post-end-turn drain
       // (battle_main.c:3483), leaving the timer at 3.
-      const rng = scriptedRng([0, 1])
+      const rng = scriptedRng([0])
       const { lead, reserve } = emergencyExitParties()
       const state = battle(
         [
@@ -562,7 +562,7 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
         BATTLE_TYPE_TRAINER,
       )
 
-      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), null], testDeps(fixedDamage(60)))
+      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), null], testDeps(fixedDamage(60), GROUNDING, { chooseReplacement: () => 1 }))
 
       expect(state.battlers[1]!.partyIndex).toBe(1)
       expect(res.actions.map((a) => `${a.battlerId}@${a.turnOrderIndex}`)).toEqual(['1@0', '0@1', '1@1'])
@@ -573,7 +573,7 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
     })
 
     it('negative: a queued switch whose new mon has no entry-move ability leaves the queues empty', () => {
-      const rng = scriptedRng([0, 1])
+      const rng = scriptedRng([0])
       const lead = partyMon({ hp: 100, maxHp: 100, types: WATER, abilities: holderAbility('ABILITY_EMERGENCY_EXIT') })
       const reserve = partyMon({ hp: 100, maxHp: 100, types: WATER })
       const state = battle(
@@ -587,7 +587,7 @@ describe('Cycle 148d - UseEntryMove review fixes', () => {
         BATTLE_TYPE_TRAINER,
       )
 
-      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), null], testDeps(fixedDamage(60)))
+      const res = executeTurn(state, [useMove(1, 'MOVE_TACKLE'), null], testDeps(fixedDamage(60), GROUNDING, { chooseReplacement: () => 1 }))
 
       expect(state.battlers[1]!.partyIndex).toBe(1)
       // Tackle, then the blank slot battler 1 still consumes -- but no entry-move outcome at index 0.

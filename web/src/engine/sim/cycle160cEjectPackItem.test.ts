@@ -238,6 +238,9 @@ function testDeps(damage: DamageResolver): TurnLoopDeps {
     dataContext: DATA_CONTEXT,
     moveBehaviors,
     hazardTypes: { typeChart, inverseTypeChart, inverseBattle: false },
+    // BattleScript_EjectButtonActivates (data/battle_scripts_1.s:11352-11376) draws no random
+    // number; the pick is the same injected chooser the faint path uses.
+    replacement: { chooseReplacement: () => 1 },
   }
 }
 
@@ -320,13 +323,16 @@ describe('cycle 160c - Eject Pack item branch (battle_script_commands.c:9885-989
 
   it('end to end: switches to the reserve and consumes the item', () => {
     // Growl: accuracy draw 0 (hit), effect chance draw 0 (Atk -1 fires). The drain then filters
-    // CanBattlerSwitch (:812) and picks a replacement: roll 1 (slot 0 is the current partyIndex
-    // and is rejected; slot 1 is accepted, battle_script_commands.c:10176-10180). The script's
-    // removeitem (:11357) runs before the party screen.
-    const state = ejectPackState(scriptedRng([0, 0, 1]), { reserve: true, holderItem: 'ITEM_EJECT_PACK' })
+    // CanBattlerSwitch (:812) and asks deps.replacement for slot 1. No Random() runs on
+    // BattleScript_EjectButtonActivates (data/battle_scripts_1.s:11352-11376), so the pick adds no
+    // draw; the third draw is the end-of-turn speed tie-break. The script's removeitem (:11357)
+    // runs before openpartyscreen (:11359).
+    const rng = scriptedRng([0, 0])
+    const state = ejectPackState(rng, { reserve: true, holderItem: 'ITEM_EJECT_PACK' })
     const outgoing = state.battlers[1]!
     const out = turn(state, GROWL)
 
+    expect(rng.calls).toBe(3) // accuracy + secondary + the end-of-turn speed tie-break; the pick draws nothing
     expect(state.battlers[1]!.partyIndex).toBe(1) // switched into the reserve
     expect(state.battlers[1]!.mon.itemId).toBeNull() // removeitem BS_ATTACKER (:11357)
     // The C's usedHeldItems is keyed by party slot; the sim carries it on the battler object that

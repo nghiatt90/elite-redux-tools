@@ -280,6 +280,9 @@ function testDeps(damage: DamageResolver): TurnLoopDeps {
     dataContext: DATA_CONTEXT,
     moveBehaviors,
     hazardTypes: { typeChart, inverseTypeChart, inverseBattle: false },
+    // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) draws no random number;
+    // the pick is the same injected chooser the faint path uses.
+    replacement: { chooseReplacement: () => 1 },
   }
 }
 
@@ -450,14 +453,16 @@ describe('cycle 160 - Eject Pack ability (battle_script_commands.c:9868-9893)', 
   it('switches the holder out after a stat drop when a reserve exists', () => {
     // :9877-9884: BattlerHasAbility(battler, EJECT_PACK_ABILITY) && !GetSingleUseAbilityCounter
     // -> TryScheduleSwitch(SWITCH_ABILITY, BattleScript_EmergencyExitPopupNoPause). The drain
-    // re-checks the ability and CanBattlerSwitch, then picks a replacement. Growl's secondary is
-    // 100% (EFFECT_ATTACK_DOWN_HIT), so the Atk -1 reaches ChangeStatBuffs and schedules.
-    // Draws: accuracy 0 (hit), secondary chance 0 (fires), replacement pick 1 (slot 0 is the
-    // current partyIndex and is rejected; slot 1 is accepted).
-    const rng = scriptedRng([0, 0, 1, 1, 1, 1])
+    // re-checks the ability and CanBattlerSwitch, then asks deps.replacement for slot 1.
+    // Growl's secondary is 100% (EFFECT_ATTACK_DOWN_HIT), so the Atk -1 reaches
+    // ChangeStatBuffs and schedules. Draws: accuracy 0 (hit), secondary chance 0 (fires), then
+    // the end-of-turn speed tie-break; BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500)
+    // draws no random number, so the pick adds nothing.
+    const rng = scriptedRng([0, 0])
     const state = ejectPackState(rng, { reserve: true })
     const out = turn(state, GROWL)
 
+    expect(rng.calls).toBe(3) // accuracy + secondary + the end-of-turn speed tie-break; the pick draws nothing
     expect(state.battlers[1]!.partyIndex).toBe(1) // switched into the reserve
     expect(state.queuedSwitches).toEqual([])
     expect(out.actions[0]!.unmodelled.some((u) => u.includes('Eject Pack'))).toBe(false)

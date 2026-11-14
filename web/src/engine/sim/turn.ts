@@ -232,7 +232,7 @@ import {
 } from './constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from './escape'
 import type { MoveBehaviors } from '../basePower'
-import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, chooseRandomSwitchReplacement, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
+import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
   battlerHasSimAbility,
@@ -4662,14 +4662,26 @@ export function drainQueuedSwitches(
 
     if (entry.script === 'EJECT_BUTTON') {
       // BattleScript_EjectButtonActivates (data/battle_scripts_1.s:11352-11376). removeitem BS_ATTACKER
-      // (:11357) runs BEFORE openpartyscreen, and the C filters CanBattlerSwitch (:812) before running
-      // the script, so the item is consumed only when a switch will happen. The script has no Ingrain /
-      // Suction Cups / arena checks -- same as BattleScript_EmergencyExit -- so it takes the same forced
-      // switch path, with the same random replacement placeholder. The C's SWITCH_ITEM branch also sets
-      // gLastUsedItem = item (HandleAction_Switch, battle_util.c:393-396); the sim has no such field.
+      // (:11357) runs BEFORE openpartyscreen (:11359), and the C filters CanBattlerSwitch (:812) before
+      // running the script, so the item is consumed only when a switch will happen. The script has no
+      // Ingrain / Suction Cups / arena checks -- same as BattleScript_EmergencyExit -- so it takes the
+      // same forced switch path. No Random() runs on this script: the player picks through
+      // openpartyscreen (:11359) and the AI through GetMostSuitableMonToSwitchInto
+      // (src/battle_controller_opponent.c:1645-1656), so the pick comes from deps.replacement exactly
+      // as the faint path's does. The C's SWITCH_ITEM branch also sets gLastUsedItem = item
+      // (HandleAction_Switch, battle_util.c:393-396); the sim has no such field.
       if (!source) continue
       consumeHeldItem(state, source, unmodelled)
-      const chosenIndex = chooseRandomSwitchReplacement(state, switchingBattler)
+      if (!deps.replacement) {
+        unmodelled.push(`drainQueuedSwitches: EJECT_BUTTON queued switch for battler ${switchingBattler} had no deps.replacement supplied -- nothing to switch into`)
+        continue
+      }
+      const chosenIndex = deps.replacement.chooseReplacement(state, switchingBattler, unmodelled)
+      const chosenSlot = state.sides[switchingBattler & 1].party[chosenIndex]
+      if (!chosenSlot || chosenSlot.speciesId === null || chosenSlot.hp <= 0 || chosenIndex === state.battlers[switchingBattler]?.partyIndex) {
+        unmodelled.push(`drainQueuedSwitches: EJECT_BUTTON replacement choice ${chosenIndex} for battler ${switchingBattler} is not a usable party slot`)
+        continue
+      }
       const switchUnmodelled = performSwitchAction(state, switchingBattler, deps, {
         ignoreEscapePrevention: true,
         forcedPartyIndex: chosenIndex,
@@ -4685,12 +4697,21 @@ export function drainQueuedSwitches(
       // CanBattlerBeForceSwitched (abilities.cc:2608-2615, called at :2622), while Hollow Ice Zone's
       // schedule (abilities.cc:12178-12196) has no such gate and names the same
       // BattleScript_EmergencyExitPopupNoPause (:12190). Nothing in the script tests BATTLE_TYPE_ARENA.
-      // Replacement selection is NOT ported here: in the game the player picks the party member
-      // (openpartyscreen) and the AI uses GetMostSuitableMonToSwitchInto (src/battle_controller_opponent.c:1652-1654);
-      // the random pick is a placeholder left for the supervisor/user to decide.
+      // No Random() runs on this script either: the player picks through openpartyscreen (:9487) and
+      // the AI through GetMostSuitableMonToSwitchInto (src/battle_controller_opponent.c:1645-1656), so
+      // the pick comes from deps.replacement exactly as the faint path's does.
       // ignoreEscapePrevention is true because BattleScript_EmergencyExit reaches switchoutabilities /
       // switchhandleorder without a CanBattlerEscape check.
-      const chosenIndex = chooseRandomSwitchReplacement(state, switchingBattler)
+      if (!deps.replacement) {
+        unmodelled.push(`drainQueuedSwitches: EMERGENCY_EXIT queued switch for battler ${switchingBattler} had no deps.replacement supplied -- nothing to switch into`)
+        continue
+      }
+      const chosenIndex = deps.replacement.chooseReplacement(state, switchingBattler, unmodelled)
+      const chosenSlot = state.sides[switchingBattler & 1].party[chosenIndex]
+      if (!chosenSlot || chosenSlot.speciesId === null || chosenSlot.hp <= 0 || chosenIndex === state.battlers[switchingBattler]?.partyIndex) {
+        unmodelled.push(`drainQueuedSwitches: EMERGENCY_EXIT replacement choice ${chosenIndex} for battler ${switchingBattler} is not a usable party slot`)
+        continue
+      }
       const switchUnmodelled = performSwitchAction(state, switchingBattler, deps, {
         ignoreEscapePrevention: true,
         forcedPartyIndex: chosenIndex,

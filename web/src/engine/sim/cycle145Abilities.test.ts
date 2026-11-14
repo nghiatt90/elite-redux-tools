@@ -492,9 +492,9 @@ describe('Cycle 145 - Wimp Out / Emergency Exit onDefender (abilities.cc:2616-26
   }
 
   it('Wimp Out schedules a self-switch with sourceBattler = switchingBattler = the holder', () => {
-    // Pick 0 is the current party slot and is rejected by the shared placeholder replacement selection loop;
-    // pick 1 is taken. The hook itself draws nothing.
-    const rng = scriptedRng([0 /* rejected */, 1 /* accepted */])
+    // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) draws no random number:
+    // the replacement comes from deps.replacement, so the hook and the drain both draw nothing.
+    const rng = scriptedRng([])
     const state = crossedBattle('ABILITY_WIMP_OUT', rng)
     const unmodelled: string[] = []
     defenderHit(state, 'MOVE_TACKLE', 60, LOOP_DEPS, unmodelled, [], 60)
@@ -507,11 +507,12 @@ describe('Cycle 145 - Wimp Out / Emergency Exit onDefender (abilities.cc:2616-26
     expect(state.battlers[1]!.volatiles.abilityState[0]).toBe(0)
     expectNoDefenderGaps(unmodelled)
 
-    // The drain runs the self-switch through the ordinary SWITCH_ABILITY filters and picks a reserve.
-    drainQueuedSwitches(state, turnDeps(60), [])
+    // The drain runs the self-switch through the ordinary SWITCH_ABILITY filters and takes
+    // the injected chooser's reserve pick.
+    drainQueuedSwitches(state, { ...turnDeps(60), replacement: { chooseReplacement: () => 1 } }, [])
     expect(state.battlers[1]!.partyIndex).toBe(1)
     expect(state.queuedSwitches).toEqual([])
-    expect(rng.calls).toBe(2)
+    expect(rng.calls).toBe(0)
   })
 
   it('Emergency Exit reuses Wimp Out\'s lambda and queues under its own id', () => {

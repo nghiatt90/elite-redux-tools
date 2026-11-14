@@ -11022,8 +11022,9 @@ export function forceRandomSwitch(
 
 /**
  * Replacement selection loop (battle_script_commands.c:10176-10180): draws one random16()
- * per pass until a non-fainted reserve slot is chosen. Used by forceRandomSwitch and
- * drainQueuedSwitches's EMERGENCY_EXIT path.
+ * per pass until a non-fainted reserve slot is chosen. Used by forceRandomSwitch (the
+ * Roar / Red Card forced-switch path) only -- the Emergency Exit / Eject Button scripts
+ * draw no random number, so drainQueuedSwitches uses deps.replacement for those.
  */
 export function chooseRandomSwitchReplacement(state: BattleState, battlerId: number): number {
   const party = state.sides[battlerId & 1].party

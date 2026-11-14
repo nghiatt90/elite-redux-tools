@@ -354,9 +354,11 @@ describe('Cycle 148g Fixes', () => {
           foeMon({ species: 'SPECIES_CHANSEY_REDUX', ability: 'ABILITY_EMERGENCY_EXIT' }),
           [foeMon({ species: 'SPECIES_MUDKIP', ability: 'ABILITY_LOW_BLOW' })],
         ),
-        // accuracy 0, no crit, max damage roll; replacement draw 1 picks party slot 1;
-        // then the incoming Feint Attack: accuracy 0, no crit, max damage roll.
-        rng: scriptedRng([0, 1, 0, 1, 0, 1, 0]),
+        // accuracy 0, no crit, max damage roll. BattleScript_EmergencyExit
+        // (data/battle_scripts_1.s:9479-9500) draws no random number, so the session's
+        // replacement chooser picks party slot 1 without consuming a roll; then the
+        // incoming Feint Attack: accuracy 0, no crit, max damage roll.
+        rng: scriptedRng([0, 1, 0, 0, 1, 0]),
       })
 
       expect(session.state.battlers[1]!.mon.speciesId).toBe('SPECIES_MUDKIP')

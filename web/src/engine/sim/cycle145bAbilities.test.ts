@@ -144,7 +144,10 @@ function fixedDamage(amount: number): DamageResolver {
 }
 
 function turnDeps(amount: number): TurnLoopDeps {
-  return { ...LOOP_DEPS, damage: fixedDamage(amount) }
+  // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) draws no random number, so
+  // the EMERGENCY_EXIT drains take this chooser. forceRandomSwitch (Roar / Red Card) keeps its
+  // own Random() loop and ignores it.
+  return { ...LOOP_DEPS, damage: fixedDamage(amount), replacement: { chooseReplacement: () => 1 } }
 }
 
 function move(id: string) {
@@ -275,8 +278,9 @@ describe('Cycle 145b - Patchwork (src/abilities.cc:8636-8655)', () => {
 describe('Cycle 145b - Wimp Out / Emergency Exit / Hollow Ice Zone vs Roar / RED_CARD', () => {
   it('Wimp Out holder rooted crosses half HP: switches out anyway (BattleScript_EmergencyExit has no STATUS3_ROOTED gate)', () => {
     // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) has NO jumpifstatus3 STATUS3_ROOTED,
-    // unlike BattleScript_RedCardActivates_AfterPrintString (:11326).
-    const rng = scriptedRng([0 /* rejected: current index 0 */, 1 /* accepted */])
+    // unlike BattleScript_RedCardActivates_AfterPrintString (:11326). It also draws no random number:
+    // the replacement comes from deps.replacement.
+    const rng = scriptedRng([])
     const state = crossedBattle('ABILITY_WIMP_OUT', rng)
     state.battlers[1]!.statuses3 = setFlag(state.battlers[1]!.statuses3, STATUS3_ROOTED)
 
@@ -319,7 +323,8 @@ describe('Cycle 145b - Wimp Out / Emergency Exit / Hollow Ice Zone vs Roar / RED
 
   it('Suction Cups on the Wimp Out holder switches out anyway (BattleScript_EmergencyExit has no Suction Cups gate)', () => {
     // BattleScript_EmergencyExit (data/battle_scripts_1.s:9479-9500) has NO jumpifabilityflag ABILITY_SUCTION_CUPS.
-    const rng = scriptedRng([0, 1])
+    // It draws no random number: the replacement comes from deps.replacement.
+    const rng = scriptedRng([])
     const state = holderBattle('ABILITY_WIMP_OUT', {}, rng, { opponentParty: liveParty(), battleTypeFlags: BATTLE_TYPE_TRAINER })
     state.battlers[1]!.mon.hp = 40
     // Holder carries both Wimp Out and Suction Cups in an innate slot.
@@ -387,8 +392,9 @@ describe('Cycle 145b - Wimp Out / Emergency Exit / Hollow Ice Zone vs Roar / RED
   it('Hollow Ice Zone entry is queued with script: EMERGENCY_EXIT and ignores Ingrain on the switching attacker', () => {
     // Hollow Ice Zone (src/abilities.cc:12188-12194) queues BattleScript_EmergencyExitPopupNoPause
     // with switchingBattler = sourceBattler = battler (the attacker).
-    // The drain runs the EMERGENCY_EXIT path without Ingrain blocks.
-    const rng = scriptedRng([0, 1])
+    // The drain runs the EMERGENCY_EXIT path without Ingrain blocks, and the script draws no
+    // random number (data/battle_scripts_1.s:9479-9500): the pick comes from deps.replacement.
+    const rng = scriptedRng([])
     const state = battle(
       monFor('SPECIES_MUDKIP', { abilities: ability('ABILITY_HOLLOW_ICE_ZONE') }),
       monFor('SPECIES_MUDKIP', { abilities: noAbility }),

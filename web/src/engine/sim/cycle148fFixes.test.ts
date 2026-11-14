@@ -426,9 +426,10 @@ describe('Cycle 148f Fixes', () => {
           foeMon({ species: 'SPECIES_CHANSEY_REDUX', ability: 'ABILITY_EMERGENCY_EXIT' }),
           [foeMon({ species: 'SPECIES_MUDKIP' })],
         ),
-        // accuracy 0, no crit, max damage roll, then the replacement draw picks
-        // party slot 1 (chooseRandomSwitchReplacement, battle_script_commands.c:10176-10180).
-        rng: scriptedRng([0, 1, 0], 1),
+        // accuracy 0, no crit, max damage roll. BattleScript_EmergencyExit
+        // (data/battle_scripts_1.s:9479-9500) draws no random number: the session's
+        // injected replacement chooser picks party slot 1 with no rng draw.
+        rng: scriptedRng([0, 1, 0]),
       })
 
       // Tyranitar's innate Juggernaut (abilities.cc:4168-4179) blends 20% of the
