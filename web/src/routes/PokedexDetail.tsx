@@ -30,7 +30,7 @@ export default function PokedexDetail() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4">
+    <div className="h-full overflow-y-auto thin-scrollbar p-4">
       <Link className="text-sm underline" to="/">
         <span className="lg:hidden">← Back to list</span>
         <span className="hidden lg:inline">✕ Close</span>

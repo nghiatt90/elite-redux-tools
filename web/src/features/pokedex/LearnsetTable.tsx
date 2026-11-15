@@ -45,7 +45,7 @@ export default function LearnsetTable({ learnset }: { learnset: Species['learnse
         ))}
       </div>
 
-      <div className="overflow-x-auto rounded-md border" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="overflow-x-auto thin-scrollbar rounded-md border" style={{ borderColor: 'var(--color-border)' }}>
         <table className="w-full text-xs min-w-[420px]">
           <thead>
             <tr style={{ color: 'var(--color-text-muted)' }} className="border-b" >

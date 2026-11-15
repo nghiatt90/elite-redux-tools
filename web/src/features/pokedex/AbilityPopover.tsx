@@ -76,7 +76,7 @@ export default function AbilityPopover({
       {open && (
         <div
           role="tooltip"
-          className={`absolute z-30 top-full ${align === 'right' ? 'right-0' : 'left-0'} mt-1 rounded-md border p-2.5 shadow-lg text-xs overflow-y-auto`}
+          className={`absolute z-30 top-full ${align === 'right' ? 'right-0' : 'left-0'} mt-1 rounded-md border p-2.5 shadow-lg text-xs overflow-y-auto thin-scrollbar`}
           style={{
             width: 'min(85vw, 280px)',
             maxHeight: 'min(60vh, 320px)',

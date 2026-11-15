@@ -74,9 +74,11 @@ describe('PokedexShell and FilterRail desktop layout', () => {
     // FilterRail inside desktop wrapper has h-full overflow-y-auto thin-scrollbar
     expect(html).toContain('thin-scrollbar')
     expect(html).toContain('w-56 shrink-0 h-full overflow-y-auto thin-scrollbar')
+    // Middle species list container has h-full overflow-y-auto thin-scrollbar
+    expect(html).toContain('class="h-full overflow-y-auto thin-scrollbar"')
   })
 
-  it('renders detail pane with lg:w-[560px] xl:w-[640px] when a pokemon detail route is active', () => {
+  it('renders detail pane with lg:w-[560px] xl:w-[640px] and thin-scrollbar when a pokemon detail route is active', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/pokemon/SPECIES_BULBASAUR']}>
         <Routes>
@@ -89,7 +91,7 @@ describe('PokedexShell and FilterRail desktop layout', () => {
 
     expect(html).toContain('lg:w-[560px] xl:w-[640px]')
     expect(html).toContain(
-      'flex-1 lg:flex-none lg:w-[560px] xl:w-[640px] lg:shrink-0 h-full overflow-y-auto lg:border-l',
+      'flex-1 lg:flex-none lg:w-[560px] xl:w-[640px] lg:shrink-0 h-full overflow-y-auto thin-scrollbar lg:border-l',
     )
     expect(html).toContain('Detail Content')
   })

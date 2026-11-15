@@ -34,7 +34,7 @@ const SpeciesListView = forwardRef<SpeciesListHandle, Props>(function SpeciesLis
   const items = virtualizer.getVirtualItems()
 
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto">
+    <div ref={parentRef} className="h-full overflow-y-auto thin-scrollbar">
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {items.map((item) => {
           const s = species[item.index]

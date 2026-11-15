@@ -241,7 +241,7 @@ export default function PokedexShell() {
 
       {isDetailActive && (
         <div
-          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[640px] lg:shrink-0 h-full overflow-y-auto lg:border-l"
+          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[640px] lg:shrink-0 h-full overflow-y-auto thin-scrollbar lg:border-l"
           style={{ borderColor: 'var(--color-border)' }}
         >
           <Outlet />

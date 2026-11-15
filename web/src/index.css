@@ -114,20 +114,24 @@ img.pixelated {
   cursor: pointer;
 }
 
+*,
 .thin-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
 }
 
+*::-webkit-scrollbar,
 .thin-scrollbar::-webkit-scrollbar {
   width: 4px;
   height: 4px;
 }
 
+*::-webkit-scrollbar-track,
 .thin-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
+*::-webkit-scrollbar-thumb,
 .thin-scrollbar::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 9999px;

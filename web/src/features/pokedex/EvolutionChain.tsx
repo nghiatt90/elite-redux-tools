@@ -61,7 +61,7 @@ export default function EvolutionChain({ species }: { species: Species }) {
   return (
     <div className="space-y-3">
       {!noRegularEvolution && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto thin-scrollbar pb-1">
           {stages.map((stage, i) => (
             <div key={i} className="flex items-center gap-2 shrink-0">
               {i > 0 && (
