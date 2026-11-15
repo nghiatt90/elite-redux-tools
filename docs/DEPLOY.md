@@ -2,8 +2,8 @@
 
 Uses Cloudflare Pages' native Git integration rather than a GitHub Actions workflow --
 zero YAML to maintain, no API tokens to store as repo secrets, and per-PR preview
-deploys come free. The build itself never runs Python; it copies the committed
-`data/v2.65.4.1b/` snapshot into the site and runs `vite build`.
+deploys come free. The build itself never runs Python; it copies committed data
+snapshots into the site and runs `vite build`.
 
 ## One-time setup (manual, in the Cloudflare dashboard)
 
@@ -35,7 +35,8 @@ Two things worth knowing about the settings above:
 - **Root directory `web` is not a default.** Left blank, the build finds no
   `package.json` and fails immediately. The output directory is relative to it, so
   `dist`, not `web/dist`.
-- **`prebuild` reaches outside the root directory**, copying `../data/v2.65.4.1b`.
+- **`prebuild` reaches outside the root directory**, running `node scripts/sync-data.mjs`
+  to copy committed data snapshots under `../data/`.
   That is fine -- Cloudflare clones the whole repo and merely runs the build inside
   `web/` -- but it is the least standard thing here, so check it first if a build
   fails.
@@ -49,40 +50,53 @@ source change.
 `npm run build` (in `web/`) runs, via its `prebuild` hook:
 
 ```
-rm -rf public/data && mkdir -p public/data && cp -r ../data/v2.65.4.1b public/data/
+node scripts/sync-data.mjs
 tsc -b && vite build
 ```
 
-The committed `data/v2.65.4.1b/` snapshot (species/moves/abilities/type-chart JSON plus
-sprites, 7,641 files / 10.2MB) is copied straight into the build -- no pipeline run, no
-`uv`, no `grpcio-tools`, no Pillow in the Cloudflare build image at all. This is also
-why local `npm run dev` and `npm run build` both work identically without ever fetching
-from GitHub or running the Python pipeline: the data is already sitting in the repo.
+The sync script (`web/scripts/sync-data.mjs`) ships all 3 versions (`v2.65.5`, `v2.65.4.1b`,
+and `v2.65beta`):
+- Cleans `public/data/`.
+- Copies all 9 JSON data files (`abilities.json`, `abilityHooks.json`, `items.json`,
+  `meta.json`, `moveBehaviors.json`, `moves.json`, `natures.json`, `species.json`,
+  `types.json`) for each of `v2.65.5`, `v2.65.4.1b`, and `v2.65beta` into `public/data/<version>/`.
+- Copies all 7,752 sprites (1,938 species × 4 variants) from `data/v2.65.5/sprites/` into
+  `public/data/v2.65.5/sprites/`.
+- For `v2.65.4.1b` and `v2.65beta`, compares each `<SPECIES>/<variant>.png` against
+  `data/v2.65.5/sprites/<SPECIES>/<variant>.png` by byte equality (`Buffer.equals`):
+  only copies differing or newly introduced sprites into `public/data/<version>/sprites/`,
+  and writes the sorted list of overridden `<SPECIES>/<variant>` keys to
+  `public/data/<version>/spriteOverrides.json` (`[]` for `v2.65.5`).
+
+At runtime, `spriteUrl(speciesId, variant, version)` checks whether `version !== 'v2.65.5'`
+and whether `${speciesId}/${variant}` is listed in that version's sprite overrides. If so,
+it loads `/data/${version}/sprites/${speciesId}/${variant}.png`; otherwise it falls back to
+`/data/v2.65.5/sprites/${speciesId}/${variant}.png`.
 
 ## Verifying a deploy
 
-- Cloudflare's free tier caps a deployment at 20,000 files and 25MiB per file. The
-  current build ships **7,641 files / 10.2MB**, of which 7,628 are sprites -- four
-  PNGs (front, front-shiny, back, icon) for each of 1,907 species, median 752 bytes.
-  Everything that is not a sprite is 13 files.
-  (`du` reports ~27MB for the same tree: 7,600 sub-KB files each round up to a 4KB
-  filesystem cluster. 10.2MB is the number that gets served.)
-- The **file count**, not the size, is the constraint worth watching. A second pinned
-  game version roughly doubles the sprites to ~15,300 and a third would breach the
-  20,000 cap. If multiple versions ever need to be live at once, sprites have to be
-  shared across them (only 79 of 7,628 changed across five months of upstream) or
-  moved out to R2.
+- Cloudflare's free tier caps a deployment at 20,000 files and 25MiB per file. Thanks to
+  sprite deduplication across versions (only 20 overridden sprites in `v2.65.4.1b` and 311
+  in `v2.65beta`), the entire deployment ships **~8,125 files / ~11MB**, well below the
+  20,000-file ceiling:
+  - `v2.65.5`: 9 JSONs + 7,752 sprites + `spriteOverrides.json` = 7,762 files
+  - `v2.65.4.1b`: 9 JSONs + 20 sprites + `spriteOverrides.json` = 30 files
+  - `v2.65beta`: 9 JSONs + 311 sprites + `spriteOverrides.json` = 321 files
+  - Web application assets (HTML, JS bundles, icons, redirects) = ~12 files
+  - Total: ~8,125 files.
 - `public/_redirects` (`/* /index.html 200`) makes client-side routing
   (`/pokemon/:id`) work on a hard refresh or direct link -- Cloudflare Pages honors it
   automatically once it's in the build output.
 - After a deploy, load the `.pages.dev` URL directly at `/pokemon/SPECIES_PIKACHU` (not
   just `/`) to confirm the redirect rule is live, and check the browser console for
   errors on both the list and detail routes.
+- Confirm version switching in the header dropdown (or via `?v=v2.65.5`, `?v=v2.65.4.1b`,
+  `?v=v2.65.3b`) loads the corresponding data snapshot and sprites cleanly.
 
 ## Updating the data snapshot
 
 Re-run the pipeline (`cd pipeline && uv run python -m erdata.build`), review the diff
-under `data/v2.65.4.1b/`, commit it, and push -- Cloudflare picks up the new snapshot on
+under `data/v2.65.5/`, commit it, and push -- Cloudflare picks up the new snapshot on
 the next build automatically.
 
 `.github/workflows/refresh-data.yml` does the same thing from CI -- run it from the
@@ -95,5 +109,5 @@ what broke the randomizer once already. The pipeline tests run before the PR is
 opened, so the `ABILITIES_COUNT` assertion has to pass first.
 
 Regenerating sprites re-encodes every PNG even when the pixels are identical (Pillow
-version differences), which turns a no-op refresh into a 7,600-file diff. Only commit
-sprites whose pixels actually changed.
+version differences), which turns a no-op refresh into a multi-thousand-file diff. Only
+commit sprites whose pixels actually changed.

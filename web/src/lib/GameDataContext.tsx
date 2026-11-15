@@ -1,8 +1,30 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { loadAbilities, loadItems, loadMeta, loadMoves, loadSpecies, loadTypeChart } from './data'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
+import {
+  DEFAULT_DATA_VERSION,
+  getDataVersion,
+  loadAbilities,
+  loadItems,
+  loadMeta,
+  loadMoves,
+  loadSpecies,
+  loadSpriteOverrides,
+  loadTypeChart,
+  setDataVersion,
+  setSpriteOverrides,
+  type DataVersion,
+} from './data'
 import type { Ability, Item, Meta, Move, Species, TypeChart } from './types'
 
-interface GameData {
+export interface GameData {
+  version: DataVersion
   species: Species[]
   speciesById: Map<string, Species>
   moves: Move[]
@@ -15,31 +37,59 @@ interface GameData {
   meta: Meta
 }
 
-type State =
+export type State =
   | { status: 'loading' }
   | { status: 'error'; error: Error }
   | { status: 'ready'; data: GameData }
 
+interface GameDataVersionContextValue {
+  version: DataVersion
+  setVersion: (v: DataVersion) => void
+}
+
 const GameDataStateContext = createContext<State>({ status: 'loading' })
+const GameDataVersionContext = createContext<GameDataVersionContextValue>({
+  version: DEFAULT_DATA_VERSION,
+  setVersion: () => {},
+})
 
 export function GameDataProvider({ children }: { children: ReactNode }) {
+  const [version, setVersionState] = useState<DataVersion>(() => getDataVersion())
   const [state, setState] = useState<State>({ status: 'loading' })
+
+  const setVersion = useCallback((newVersion: DataVersion) => {
+    setDataVersion(newVersion)
+    if (typeof window !== 'undefined' && window.location?.search) {
+      const params = new URLSearchParams(window.location.search)
+      if (params.has('v')) {
+        params.set('v', newVersion)
+        const query = params.toString()
+        const newUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+        window.history.replaceState(null, '', newUrl)
+      }
+    }
+    setVersionState(newVersion)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
+    setState({ status: 'loading' })
     Promise.all([
-      loadSpecies(),
-      loadMoves(),
-      loadAbilities(),
-      loadItems(),
-      loadTypeChart(),
-      loadMeta(),
+      loadSpecies(version),
+      loadMoves(version),
+      loadAbilities(version),
+      loadItems(version),
+      loadTypeChart(version),
+      loadMeta(version),
+      loadSpriteOverrides(version),
     ])
-      .then(([species, moves, abilities, items, typeChart, meta]) => {
+      .then(([species, moves, abilities, items, typeChart, meta, overrides]) => {
         if (cancelled) return
+        setSpriteOverrides(version, overrides)
         setState({
           status: 'ready',
           data: {
+            version,
             species,
             speciesById: new Map(species.map((s) => [s.id, s])),
             moves,
@@ -59,15 +109,25 @@ export function GameDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [version])
+
+  const versionValue = useMemo(() => ({ version, setVersion }), [version, setVersion])
 
   return (
-    <GameDataStateContext.Provider value={state}>{children}</GameDataStateContext.Provider>
+    <GameDataVersionContext.Provider value={versionValue}>
+      <GameDataStateContext.Provider value={state}>
+        {children}
+      </GameDataStateContext.Provider>
+    </GameDataVersionContext.Provider>
   )
 }
 
 export function useGameDataState() {
   return useContext(GameDataStateContext)
+}
+
+export function useGameDataVersion() {
+  return useContext(GameDataVersionContext)
 }
 
 /** Only valid to call from inside a subtree that has already checked status === 'ready'. */
@@ -90,4 +150,3 @@ export function useAbilityDisplayName(id: string | undefined): string {
   if (!id) return ''
   return abilitiesById.get(id)?.name ?? id
 }
-

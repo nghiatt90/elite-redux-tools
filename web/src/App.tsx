@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router'
-import { GameDataProvider, useGameDataState } from './lib/GameDataContext'
+import { DATA_VERSIONS, type DataVersion } from './lib/data'
+import { GameDataProvider, useGameDataState, useGameDataVersion } from './lib/GameDataContext'
 import ThemeToggle from './lib/ThemeToggle'
 import DamageCalculator from './routes/DamageCalculator'
 import PokedexDetail from './routes/PokedexDetail'
@@ -38,8 +39,9 @@ function Nav({ className = '' }: { className?: string }) {
   )
 }
 
-function Header() {
+export function Header() {
   const state = useGameDataState()
+  const { version, setVersion } = useGameDataVersion()
   const meta = state.status === 'ready' ? state.data.meta : undefined
 
   return (
@@ -48,13 +50,30 @@ function Header() {
         <div className="flex items-center gap-4 min-w-0">
           <div className="flex items-baseline gap-2 min-w-0 shrink-0">
             <span className="font-semibold shrink-0">Elite Redux Pokedex</span>
+            <select
+              aria-label="Game version"
+              value={version}
+              onChange={(e) => setVersion(e.target.value as DataVersion)}
+              className="rounded px-1.5 py-0.5 text-xs border cursor-pointer"
+              style={{
+                borderColor: 'var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+              }}
+            >
+              {DATA_VERSIONS.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
             {meta && (
               <span
                 className="text-xs truncate hidden sm:inline"
                 style={{ color: 'var(--color-text-muted)' }}
                 title={`Data generated ${meta.generatedAt}`}
               >
-                {meta.gameVersion} · data as of {meta.generatedAt.slice(0, 10)}
+                · data as of {meta.generatedAt.slice(0, 10)}
               </span>
             )}
           </div>
@@ -126,20 +145,28 @@ function AppRoutes() {
   )
 }
 
+function AppShell() {
+  const { version } = useGameDataVersion()
+
+  return (
+    <div
+      className="h-screen flex flex-col"
+      style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}
+    >
+      <Header />
+      <div className="flex-1 min-h-0">
+        <AppRoutes key={version} />
+      </div>
+      <Footer />
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <GameDataProvider>
-        <div
-          className="h-screen flex flex-col"
-          style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}
-        >
-          <Header />
-          <div className="flex-1 min-h-0">
-            <AppRoutes />
-          </div>
-          <Footer />
-        </div>
+        <AppShell />
       </GameDataProvider>
     </BrowserRouter>
   )
