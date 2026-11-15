@@ -2,7 +2,7 @@ from erdata.parse import parse_abilities, parse_items, parse_moves, parse_specie
 
 
 def test_species_count():
-    assert len(parse_species()) == 1926
+    assert len(parse_species()) == 1942
 
 
 def test_moves_count():
@@ -10,13 +10,13 @@ def test_moves_count():
 
 
 def test_abilities_count():
-    assert len(parse_abilities()) == 1074
+    assert len(parse_abilities()) == 1084
 
 
 def test_items_count():
     # Sum of every items/*.textproto in er-config (9 files: pockets + Unused, which
     # is er-config's own name for that file, not something this pipeline excludes).
-    assert len(parse_items()) == 929
+    assert len(parse_items()) == 931
 
 
 def test_pikachu_stats():

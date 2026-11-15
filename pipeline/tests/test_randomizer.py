@@ -6,7 +6,7 @@ from erdata.randomizer import parse_randomizer_banned
 
 def test_banned_count_and_none_included():
     banned = parse_randomizer_banned()
-    assert len(banned) == 38
+    assert len(banned) == 39
     assert "ABILITY_NONE" in banned
 
 
@@ -15,7 +15,7 @@ def test_abilities_count_matches_gapfree_enum():
     # released build in test_oracle.test_abilities_count_matches_the_released_game --
     # if that one fails too, the lockfile has run ahead of the ROM, not the enum.
     abilities = parse_abilities()
-    assert _abilities_count(abilities) == 1074
+    assert _abilities_count(abilities) == 1084
 
 
 def test_exact_groups_count_and_membership():
@@ -70,9 +70,5 @@ def test_compound_count():
     abilities = parse_abilities()
     name_index = {a.name: a for a in abilities}
     compounds = [a for a in abilities if _components(a.description, name_index)]
-    # At the v2.65.3b (March) pin, ABILITY_KING_OF_THE_JUNGLE's description is
-    # "Infiltrator + deals 1.5x more damage to Grass-types." -- only the first half
-    # names a real ability, so it doesn't parse as a compound (it becomes a proper
-    # two-ability compound, "Grassy Surge + Infiltrator.", only in a later,
-    # unreleased commit) -- one fewer than the April tip's 150.
-    assert len(compounds) == 166
+    # At the v2.65.5 pin, 169 compound abilities parse.
+    assert len(compounds) == 169

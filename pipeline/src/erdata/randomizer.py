@@ -21,7 +21,7 @@ import re
 from erdata.paths import ER_SOURCE
 
 _SOURCE_FILE = "src/abilities.cc"
-_EXPECTED_BANNED_COUNT = 38
+_EXPECTED_BANNED_COUNT = 39
 
 _SPECIALIZATION = re.compile(r"constexpr Ability Impl<ABILITY_(\w+)>\s*=\s*\{")
 
