@@ -167,9 +167,9 @@ export default function PokedexShell() {
   }, [query, results, highlightedIndex, navigate])
 
   return (
-    <div className="h-full flex">
+    <div className="h-full min-h-0 flex overflow-hidden">
       {filtersVisible && (
-        <div className="hidden md:block">
+        <div className="hidden md:block h-full min-h-0">
           <FilterRail filters={filters} onChange={setFilters} sort={sort} onSortChange={setSort} />
         </div>
       )}
@@ -241,7 +241,7 @@ export default function PokedexShell() {
 
       {isDetailActive && (
         <div
-          className="flex-1 lg:flex-none lg:w-[440px] lg:shrink-0 h-full overflow-y-auto lg:border-l"
+          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[640px] lg:shrink-0 h-full overflow-y-auto lg:border-l"
           style={{ borderColor: 'var(--color-border)' }}
         >
           <Outlet />

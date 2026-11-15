@@ -37,7 +37,7 @@ export default function FilterRail({ filters, onChange, sort, onSortChange, clas
   }
 
   return (
-    <div className={`${className} overflow-y-auto p-3 space-y-4 text-sm`}>
+    <div className={`${className} h-full overflow-y-auto thin-scrollbar p-3 space-y-4 text-sm`}>
       <SortSection sort={sort} onChange={onSortChange} />
 
       <section>
