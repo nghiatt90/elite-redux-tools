@@ -285,8 +285,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_MEMORY@battle_main.c:CHANGE_TYPE_ON_ITEM:5036` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5036` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_MEMORY@battle_main.c:CHANGE_TYPE_ON_ITEM:5137` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5137` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_MEMORY@battle_util.c:CanBattlerGetOrLoseItem` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8263` | ported | `web/src/engine/calculate.test.ts` |
-| `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ENDTURN_ITEMS1/2` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5845` | unported | none |
-| `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ITEMEFFECT_MOVE_END` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5968` | unported | none |
+| `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ENDTURN_ITEMS1/2` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5845` | unported | `web/src/engine/sim/cycle150ibcd3cConfigNotes.test.ts` |
+| `HOLD_EFFECT_MENTAL_HERB@battle_util.c:ITEMEFFECT_MOVE_END` | Mental Herb | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5968` | unported | `web/src/engine/sim/cycle150ibcd3cConfigNotes.test.ts` |
 | `HOLD_EFFECT_METAL_POWDER@battle_util.c:CalcDefenseStat` | Metal Powder | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7418` | unported (registered, untested) | none |
 | `HOLD_EFFECT_METRONOME@battle_util.c:CalcFinalDmg` | Metronome | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7644` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_MICLE_BERRY@battle_util.c:ENDTURN_ITEMS1/2` | Micle Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5852` | unported | none |
