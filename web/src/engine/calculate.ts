@@ -323,7 +323,15 @@ function toDamageContext(scenario: DamageCalcScenario): DamageContext {
  * onTypeEffectiveness/onAfterTypeEffectiveness fix above). USE_HIGHEST_OFFENSE/
  * USE_HIGHEST_DAMAGE are separate C branches that never reach ON_ABILITY at all, so
  * the ability census is only consulted for the `default` case here too. */
-function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spatk: number; def: number; spdef: number }): 'PHYSICAL' | 'SPECIAL' {
+function resolveSplit(
+  scenario: DamageCalcScenario,
+  rawStats: { atk: number; spatk: number; def: number; spdef: number },
+  /** GetMoveTypeInternal's answer for this move -- the C's `*moveType` at
+   * DoMoveDamageCalc's SetSwapDamageCategory call (src/battle_util.c:7771), NOT the
+   * declared `gBattleMoves[move].type`. OnSwapSplit hooks receive that resolved type
+   * (:7317, the function's own `Type moveType` parameter). */
+  resolvedMoveType: string,
+): 'PHYSICAL' | 'SPECIAL' {
   // CalcAttackStat (:7219: IS_MOVE_PHYSICAL ? STAT_ATK : STAT_SPATK) and
   // CalcDefenseStat (:7400-7405: HITS_DEF/IS_MOVE_PHYSICAL -> STAT_DEF, else
   // STAT_SPDEF) read a STATUS split as SPATK/SPDEF. Only a null split -- which
@@ -338,14 +346,18 @@ function resolveSplit(scenario: DamageCalcScenario, rawStats: { atk: number; spa
     const specialScore = rawStats.spatk * rawStats.def
     split = physicalScore > specialScore ? 'PHYSICAL' : physicalScore < specialScore ? 'SPECIAL' : base
   } else {
-    const moveType = scenario.move.type ?? 'NORMAL'
     const swap = computeSwapSplit(scenario.attacker.abilitySlots, {
       battlerId: 'attacker',
       moveId: scenario.move.id,
-      moveType,
-      // The move's declared base type (gBattleMoves[move].type). OnSwapSplit's own
-      // consumers still read ctx.moveType as their caller argument, unchanged.
-      declaredMoveType: moveType,
+      // The C's `*moveType` argument (src/battle_util.c:7771): the RESOLVED type
+      // (dynamicMoveType/onMoveType write-back), which is also what
+      // DoesMoveMatchFlag's moveType argument carries (:7317-7348). Chestnut Axe
+      // reads it directly (`return moveType == TYPE_GRASS`, src/abilities.cc:11711),
+      // so a Fertilize-retyped Normal move really does count as Grass here.
+      moveType: resolvedMoveType,
+      // The move's declared base type (gBattleMoves[move].type) -- the OTHER readers
+      // of the move's type (Mixed Martial Arts/Reverbate/Brawling Wyvern) key on it.
+      declaredMoveType: scenario.move.type ?? 'NORMAL',
       moveSplit: split,
       moveFlags: scenario.move.flags,
     })
@@ -1642,7 +1654,7 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
   const { move, attacker, defender, field } = scenario
   const moveType = move.type ?? 'NORMAL'
   const attackerRaw = { atk: scenario.attacker.rawStats.atk, spatk: scenario.attacker.rawStats.spatk, def: scenario.attacker.rawStats.def, spdef: scenario.attacker.rawStats.spdef }
-  const split = resolveSplit(scenario, attackerRaw)
+  const split = resolveSplit(scenario, attackerRaw, resolveMoveType(scenario, moveType).moveType)
   const cheapAttackerHasMoldBreaker = computeAttackerHasMoldBreaker(attacker.abilitySlots, move.id, split)
   const isForcedMinRoll =
     battlerHasAbility(defender.abilitySlots, 'ABILITY_BAD_LUCK', () => cheapAttackerHasMoldBreaker) ||
