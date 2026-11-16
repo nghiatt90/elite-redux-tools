@@ -105,7 +105,7 @@ describe('AI_CheckBadMove EFFECT_SUBSTITUTE sound penalty reads the target moves
     const s = state({ moves: ['MOVE_TACKLE', null, null, null] }, { moves: ['MOVE_SUPERSONIC', null, null, null] })
     const r = check(s, 'MOVE_SUBSTITUTE')
     expect(r.score).toBe(92)
-    expect(hasSoundNote(r.unmodelled)).toBe(true)
+    expect(hasSoundNote(r.unmodelled)).toBe(false)
   })
 
   it('applies a single -8 when both sides have a sound move', () => {

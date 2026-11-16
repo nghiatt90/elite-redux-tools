@@ -1478,7 +1478,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       } else if (getHealthPercentage(state, battlerAtk) <= 25) {
         score -= 10
       } else if (defender.mon.moves.some((m) => m && deps.moveData(m)?.flags?.sound)) {
-        unmodelled.push('AI_CheckBadMove: B_SOUND_SUBSTITUTE >= GEN_6 is assumed true (this build targets a modern-gen ruleset, same assumption GetBattleMoveSplit makes for B_PHYSICAL_SPECIAL_SPLIT)')
+        // B_SOUND_SUBSTITUTE is GEN_7 (battle_config.h:73), so the >= GEN_6 guard is true
         score -= 8
       }
       break
@@ -1493,7 +1493,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_ENCORE': {
       const timer = effect === 'EFFECT_DISABLE' ? defender.volatiles.disableTimer : defender.volatiles.encoreTimer
       const mentalHerbBlocks = aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)
-      unmodelled.push('AI_CheckBadMove: B_MENTAL_HERB >= GEN_5 is assumed true, same modern-gen-ruleset assumption as EFFECT_SUBSTITUTE\'s B_SOUND_SUBSTITUTE check')
+      // B_MENTAL_HERB is GEN_5 (battle_config.h:102), so the >= GEN_5 guard is true
       if (timer === 0 && !mentalHerbBlocks && !doesPartnerHaveSameMoveEffect(state, battlerAtk)) {
         const goesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
         if (goesFirst) {
@@ -1679,7 +1679,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         break
       }
       if (aiHoldEffectIs(defender, 'HOLD_EFFECT_MENTAL_HERB', deps)) {
-        unmodelled.push("AI_CheckBadMove: B_MENTAL_HERB >= GEN_5 is assumed true, same modern-gen-ruleset assumption as EFFECT_SUBSTITUTE's B_SOUND_SUBSTITUTE check")
+        // B_MENTAL_HERB is GEN_5 (battle_config.h:102), so the >= GEN_5 guard is true
         score -= 6
       }
       break
