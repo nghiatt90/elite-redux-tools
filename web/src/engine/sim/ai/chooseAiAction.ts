@@ -34,7 +34,9 @@ import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
 import { PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
 import { isKeenEdgeMove } from '../statusEffects'
+import { isSimAbilitySuppressed } from '../statBuffs'
 import { resolveEffectiveMoveType } from '../../abilities/dispatchCalc'
+import type { AbilitySlots } from '../../abilities/dispatch'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
  * sim does not have yet (dynamic move type resolution beyond the onMoveType
@@ -74,13 +76,23 @@ function buildMoveView(
   // Plasma Fists) still fall back to the declared type. attackCanceller.ts:609-610
   // reaches the same subset for its Powder check; aiCheckBadMove.ts:288-294 already
   // reports the variable-type gap for the scoring path, so no second note here.
+  // GetMoveTypeInternal's final loop runs through ON_ABILITY
+  // (battle_main.c:5200-5201), whose FILTER_NOT(IsSuppressed)
+  // (include/battle_util.h:269-275) drops a Gastro Acid / Neutralizing Gas
+  // ability. `mon.abilities` carries the RAW slots, so clear the suppressed ones
+  // for this call -- same filter damageResolver.ts's moveType applies on the
+  // player side. (checkMoldBreaker FALSE: the attacker's own ability is never
+  // Mold-Breaker-suppressed -- battle_util.c:9257's `battler != attacker`.)
+  const attacker = state.battlers[battlerId]
+  const rawSlots = attacker?.mon.abilities ?? { ability: null, innates: [null, null, null] }
+  const alive = (id: string | null): string | null =>
+    id && attacker && !isSimAbilitySuppressed(state, attacker, id, false, battlerId, false, deps.dataContext) ? id : null
+  const abilitySlots: AbilitySlots = {
+    ability: alive(rawSlots.ability),
+    innates: [alive(rawSlots.innates[0]), alive(rawSlots.innates[1]), alive(rawSlots.innates[2])],
+  }
   const resolvedType = move
-    ? resolveEffectiveMoveType(
-        state.battlers[battlerId]?.mon.abilities ?? { ability: null, innates: [null, null, null] },
-        moveId,
-        declaredType,
-        move.flags ?? {},
-      ).moveType
+    ? resolveEffectiveMoveType(abilitySlots, moveId, declaredType, move.flags ?? {}).moveType
     : declaredType
 
   return {

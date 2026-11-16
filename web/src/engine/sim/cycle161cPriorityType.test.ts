@@ -201,4 +201,19 @@ describe('cycle 161c - the view builder carries GetTypeBeforeUsingMove', () => {
     expect(action.chosenMove?.declaredType).toBe('NORMAL')
     expect(action.chosenMove?.resolvedType).toBe('FLYING')
   })
+
+  it('7. chooseAiAction: Gastro Acid on the AI holder keeps its view type NORMAL', () => {
+    const s = makeSession({ foeAbility: 'ABILITY_AERILATE' })
+    s.state.battlers[1]!.statuses3 |= STATUS3_GASTRO_ACID
+    const { action } = chooseAiAction(s.state, 1, s.chooseAiDeps)
+
+    // GetMoveTypeInternal's onMoveType loop skips a suppressed ability
+    // (FILTER_NOT(IsSuppressed), include/battle_util.h:269-275), so the raw
+    // ABILITY_AERILATE slot must not retype Tackle -- the same answer case 3
+    // gets through the player-side builder.
+    expect(action.action).toBe('USE_MOVE')
+    expect(action.chosenMove?.id).toBe('MOVE_TACKLE')
+    expect(action.chosenMove?.declaredType).toBe('NORMAL')
+    expect(action.chosenMove?.resolvedType).toBe('NORMAL')
+  })
 })
