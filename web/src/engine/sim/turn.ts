@@ -138,7 +138,8 @@ export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
 import { getParentalBondMultiplier, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
 import { isUnmodelledBasePowerNote, weatherBallType } from '../basePower'
-import type { ParentalBondTrigger } from '../abilities/types'
+import { isUnmodelled, type ParentalBondTrigger } from '../abilities/types'
+import { lookupAbility } from '../abilities/registry'
 import { battlerHasAbility } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
@@ -2561,11 +2562,24 @@ export function executeAction(
   // GetParentalBondType (:1084) -- so resolve it only when one of them can read it:
   // the powder check needs STATUS2_POWDER, and the parental-bond setup needs
   // multiHitCounter still zero (its own guard) on a move IsMoveAffectedByParentalBond
-  // can accept (a STATUS move fails its first check, :13165). Anything else leaves
-  // the parameter undefined, keeping the extra evaluation and its notes off every
-  // action that cannot read the type.
+  // can accept (a STATUS move fails its first check, :13165) AND an attacker ability
+  // bearing an onParentalBond hook -- GetParentalBondType loops the attacker's slots
+  // and returns null when none has one (dispatchCalc.ts computeParentalBondTrigger),
+  // so without such a slot nothing can read this answer. Anything else leaves the
+  // parameter undefined, keeping the extra evaluation and its notes off every action
+  // that cannot read the type.
+  const attackerCanBondTrigger = [
+    attackerBattler.mon.abilities.ability,
+    ...attackerBattler.mon.abilities.innates,
+  ].some((id) => {
+    const entry = id ? lookupAbility(id) : undefined
+    return !!entry && !isUnmodelled(entry) && !!entry.onParentalBond
+  })
   const moveCanReachParentalBond =
-    !attackerBattler.turn.multiHitCounter && initialMoveData !== undefined && initialMoveData.split !== 'STATUS'
+    !attackerBattler.turn.multiHitCounter &&
+    initialMoveData !== undefined &&
+    initialMoveData.split !== 'STATUS' &&
+    attackerCanBondTrigger
   let cancellerResolvedMoveType: string | null | undefined
   if (hasFlag(attackerMon?.status2 ?? 0, STATUS2_POWDER) || moveCanReachParentalBond) {
     const type2Pick =
