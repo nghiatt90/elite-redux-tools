@@ -155,3 +155,35 @@ export function getPlayerSelectedMoveTarget(
   if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'ALL_BATTLERS') return battlerId
   return battlerId ^ 1
 }
+
+/**
+ * The OPPONENT controller's target choice at move selection,
+ * src/battle_controller_opponent.c:1600-1606 (OpponentHandleChooseMove's `default:`
+ * case), returned as a battler id:
+ *
+ *     if (target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)) gBattlerTarget = gActiveBattler;
+ *     if (target & MOVE_TARGET_BOTH) gBattlerTarget = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+ *
+ * The first test is a BIT test: MOVE_TARGET_USER is set in USER, USER_OR_ALLY
+ * (USER | ALLY) and ALL_BATTLERS (0x100 | USER), and USER_OR_SELECTED is a bit set
+ * only in itself (include/constants/battle.h:496-501), so exactly those four
+ * spellings select the attacker. Singles only: BOTH yields the player's left
+ * position, battler 0 here, and the absent-partner fallback to PLAYER_RIGHT never
+ * fires. The opponent branch has no Curse special case (unlike :2385-2398).
+ */
+export function getOpponentSelectedMoveTarget(
+  battlerId: number,
+  staticTarget: string | undefined,
+  aiChosenTarget: number,
+): number {
+  if (
+    staticTarget === 'USER' ||
+    staticTarget === 'USER_OR_SELECTED' ||
+    staticTarget === 'USER_OR_ALLY' ||
+    staticTarget === 'ALL_BATTLERS'
+  ) {
+    return battlerId
+  }
+  if (staticTarget === 'BOTH') return 0
+  return aiChosenTarget
+}

@@ -28,7 +28,7 @@ import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
-import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
+import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -144,8 +144,9 @@ export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDama
  * (battle_util.c:242) -- it is not a pure function of the static target.
  * - Player (battle_controller_player.c:2385-2398): getPlayerSelectedMoveTarget, i.e. the
  *   dynamic flags with the Curse rule and the MOVE_TARGET_USER bit test.
- * - Opponent (battle_controller_opponent.c:1598-1601): static
- *   `target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)` -> self.
+ * - Opponent (battle_controller_opponent.c:1600-1606): getOpponentSelectedMoveTarget,
+ *   i.e. the static `target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)` -> self
+ *   bit test and MOVE_TARGET_BOTH -> player left.
  */
 export function buildMoveAction(
   state: BattleState,
@@ -187,16 +188,9 @@ export function buildMoveAction(
     myceliumMightAffected: false,
   }
   const staticTarget = mData?.target ?? 'SELECTED'
-  const opponentSelfTargeted =
-    staticTarget === 'USER' ||
-    staticTarget === 'USER_OR_SELECTED' ||
-    staticTarget === 'USER_OR_ALLY' ||
-    staticTarget === 'ALL_BATTLERS'
   const target = (battlerId & 1) === 0
     ? getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
-    : opponentSelfTargeted
-      ? battlerId
-      : battlerId ^ 1
+    : getOpponentSelectedMoveTarget(battlerId, staticTarget, battlerId ^ 1)
   const mega = canMegaEvolve(state, battlerId, data.dataContext)
   return { action: 'USE_MOVE', moveToBeUsed: view, chosenMove: view, target, ...(mega ? { mega: true } : {}) }
 }

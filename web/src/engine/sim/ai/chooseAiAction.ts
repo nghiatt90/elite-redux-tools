@@ -35,6 +35,7 @@ import { PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
 import { isKeenEdgeMove } from '../statusEffects'
 import { isSimAbilitySuppressed } from '../statBuffs'
+import { getOpponentSelectedMoveTarget } from '../moveTargetFlags'
 import { resolveEffectiveMoveType } from '../../abilities/dispatchCalc'
 import type { AbilitySlots } from '../../abilities/dispatch'
 
@@ -193,12 +194,13 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
 
   const battler = flaggedState.battlers[battlerId]
   let moveView: TurnOrderMoveView | null = null
+  let chosenMoveId: string | null = null
   if (choice.kind === 'move') {
-    const moveId = battler?.mon.moves[choice.moveIndex]
-    if (!battler || !moveId) {
+    chosenMoveId = battler?.mon.moves[choice.moveIndex] ?? null
+    if (!battler || !chosenMoveId) {
       throw new Error(`chooseAiAction: chosen move slot ${choice.moveIndex} for battler ${battlerId} has no move`)
     }
-    moveView = buildMoveView(flaggedState, battlerId, moveId, deps, unmodelled, battler.mon.itemId)
+    moveView = buildMoveView(flaggedState, battlerId, chosenMoveId, deps, unmodelled, battler.mon.itemId)
   }
 
   // STATE_BEFORE_ACTION_CHOSEN (battle_main.c:3641) resets the pending-switch
@@ -238,7 +240,13 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
       action: 'USE_MOVE',
       moveToBeUsed: moveView!,
       chosenMove: moveView!,
-      target: battlerTarget,
+      // OpponentHandleChooseMove's `default:` case, battle_controller_opponent.c:1600-1606:
+      // the opponent controller overwrites the AI's own target for self-target moves.
+      target: getOpponentSelectedMoveTarget(
+        battlerId,
+        chosenMoveId === null ? undefined : deps.moveData(chosenMoveId)?.target,
+        battlerTarget,
+      ),
       ...(mega ? { mega: true } : {}),
     },
     unmodelled,
