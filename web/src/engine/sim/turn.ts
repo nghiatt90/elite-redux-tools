@@ -1056,10 +1056,10 @@ export function isBattlerProtected(
 
   // battle_util.c:6574 GET_MOVE_TYPE(move, moveType) reads the ATTACKER's resolved
   // type (GetMoveTypeInternal / gBattleStruct->dynamicMoveType), which the Pinnacle
-  // Blade branch below passes to IsKeenEdge (:6597). The answer does not depend on
-  // the target (resolveMoveType reads the attacker, move and field only), but the
-  // resolver's signature takes one and the C's own check is a straight hit on the
-  // protecting battler, so targetId is passed.
+  // Blade branch below passes to IsKeenEdge (:6597). For a `type2` move that
+  // dynamicMoveType already holds Cmd_attackcanceler's type2 pick (:1048-1056,
+  // battle_util.c:7775-7785), so the resolver's typeEffectiveness answer -- the same
+  // one Camouflage reads -- wins over the plain GetMoveTypeInternal answer below.
   const attackerHasPinnacleBlade = battlerHasSimAbility(
     state,
     attackerBattler,
@@ -1069,6 +1069,22 @@ export function isBattlerProtected(
     false,
     deps.dataContext,
   )
+
+  // Resolved lazily, only on the Pinnacle Blade branch (below): a resolver that
+  // cannot name the type leaves the onMoveType fallback to run inside the predicate.
+  // The type2 pick comes first; for any other move both calls agree
+  // (typeEffectiveness' effectiveMoveType for a non-type2 move is exactly
+  // resolveMoveType's answer), but there is nothing to gain from the heavier call then.
+  const attackerResolvedMoveType = (): string | null => {
+    if (moveData?.type2 && deps.damage.typeEffectiveness) {
+      const pick = deps.damage.typeEffectiveness(state, attackerId, targetId, moveId)
+      if (pick.effectiveMoveType) return pick.effectiveMoveType.replace(/^TYPE_/, '')
+    }
+    if (deps.damage.moveType) return deps.damage.moveType(state, attackerId, targetId, moveId).moveType
+    return moveData?.type
+      ? resolveEffectiveMoveType(attackerBattler.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
+      : null
+  }
 
   if (
     (battlerHasSimAbility(state, attackerBattler, 'ABILITY_UNSEEN_FIST', false, attackerId, false, deps.dataContext) ||
@@ -1087,7 +1103,7 @@ export function isBattlerProtected(
     // function's own `battlerId` parameter (:6571) -- the PROTECTING battler -- not
     // gBattlerAttacker, so DoesMoveMatchFlag scans the TARGET's ability slots. That is a C
     // quirk (see REPORT.md); the sim passes targetId for the same reason. The MOVE TYPE,
-    // however, is the attacker's (:6574): passing attackerResolvedMoveType stops the
+    // however, is the attacker's (:6574): passing attackerResolvedMoveType() stops the
     // target's "-ate" abilities from deciding it (isKeenEdgeMove's own fallback reads
     // whoever it is given, which here is the target).
     isKeenEdgeMove(
@@ -1096,13 +1112,7 @@ export function isBattlerProtected(
       moveId,
       { dataContext: deps.dataContext, grounding: deps.grounding },
       unmodelled,
-      // Resolved lazily, only on this branch: a resolver that cannot name the type
-      // leaves the onMoveType fallback to run inside the predicate.
-      deps.damage.moveType
-        ? deps.damage.moveType(state, attackerId, targetId, moveId).moveType
-        : moveData?.type
-          ? resolveEffectiveMoveType(attackerBattler.mon.abilities, moveId, moveData.type, moveData.flags ?? {}).moveType
-          : null,
+      attackerResolvedMoveType(),
     )
   ) {
     evadesProtect = true
@@ -2543,6 +2553,34 @@ export function executeAction(
   // attackerHoldEffect.
   const attackerMon = state.battlers[battlerId]?.mon
   const attackerHoldEffect = attackerMon?.itemId ? (deps.dataContext.item(attackerMon.itemId)?.resolvedHoldEffect ?? null) : null
+  // Cmd_attackcanceler's GET_MOVE_TYPE (battle_script_commands.c:1048) is the same
+  // answer Camouflage re-derives at :1232: CalculateMoveDamageAndEffectiveness writes
+  // the type2 pick into dynamicMoveType (:1048-1056, battle_util.c:7775-7785), and
+  // GetMoveTypeInternal is that same function's answer when there is no type2. Two
+  // canceller sites read it -- CANCELLER_POWDER_STATUS (:3468-3480) and
+  // GetParentalBondType (:1084) -- so resolve it only when one of them can read it:
+  // the powder check needs STATUS2_POWDER, and the parental-bond setup needs
+  // multiHitCounter still zero (its own guard) on a move IsMoveAffectedByParentalBond
+  // can accept (a STATUS move fails its first check, :13165). Anything else leaves
+  // the parameter undefined, keeping the extra evaluation and its notes off every
+  // action that cannot read the type.
+  const moveCanReachParentalBond =
+    !attackerBattler.turn.multiHitCounter && initialMoveData !== undefined && initialMoveData.split !== 'STATUS'
+  let cancellerResolvedMoveType: string | null | undefined
+  if (hasFlag(attackerMon?.status2 ?? 0, STATUS2_POWDER) || moveCanReachParentalBond) {
+    const type2Pick =
+      initialMoveData?.type2 && targetId !== null && deps.damage.typeEffectiveness
+        ? deps.damage.typeEffectiveness(state, battlerId, targetId, action.chosenMove.id)
+        : null
+    if (type2Pick) unmodelled.push(...type2Pick.unmodelled)
+    if (type2Pick?.effectiveMoveType) {
+      cancellerResolvedMoveType = type2Pick.effectiveMoveType.replace(/^TYPE_/, '')
+    } else if (deps.damage.moveType) {
+      const resolved = deps.damage.moveType(state, battlerId, targetId ?? battlerId, action.chosenMove.id)
+      unmodelled.push(...resolved.unmodelled)
+      cancellerResolvedMoveType = resolved.moveType === null ? null : resolved.moveType.replace(/^TYPE_/, '')
+    }
+  }
   const cancelResult = runAttackCanceller(
     state,
     battlerId,
@@ -2554,6 +2592,7 @@ export function executeAction(
     deps.grounding,
     action.chosenMove,
     deps.dataContext,
+    cancellerResolvedMoveType,
   )
   if (cancelResult.cancelledBy) {
     // CANCELLER_POWDER_MOVE jumps to BattleScript_PowderMoveNoEffect (battle_util.c:3459-3461) and

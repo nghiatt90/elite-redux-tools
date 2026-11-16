@@ -398,6 +398,16 @@ export function runAttackCanceller(
   grounding?: GroundingContext,
   moveView: TurnOrderMoveView | null = null,
   dataContext?: SimDataContext,
+  /** GET_MOVE_TYPE's answer for this use (include/battle.h:735-740), i.e.
+   * gBattleStruct->dynamicMoveType as Cmd_attackcanceler writes it at
+   * battle_script_commands.c:1048-1056: GetMoveTypeInternal's full resolution,
+   * then -- for a `type2` move -- the type that CalculateMoveDamageAndEffectiveness
+   * found stronger (battle_util.c:7775-7785). Bare type name (`'FIRE'`), already
+   * stripped of `TYPE_`. `undefined` means the caller has no damage resolver and
+   * this module falls back to the onMoveType (-ate) subset, which is all a test
+   * double can answer; `null` means the caller's resolver could not name the type
+   * either, so the declared type stands (GET_MOVE_TYPE's own fallback). */
+  resolvedMoveType?: string | null,
 ): AttackCancellerResult {
   const attacker = state.battlers[attackerId]
   if (!attacker) return NO_CANCEL
@@ -595,19 +605,22 @@ export function runAttackCanceller(
   //       if (moveType == TYPE_FIRE) { powderSelfDmg = TRUE; gBattleMoveDamage = ...; effect = 1; }
   //   }
   // GET_MOVE_TYPE (include/battle.h:735-740) reads dynamicMoveType when bit 7 is set, else the
-  // declared type. The full resolution is calculate.ts's resolveMoveType (GetMoveTypeInternal,
-  // battle_main.c:5093-5204), and the damage bridge exposes it as DamageResolver.moveType, which
-  // is deterministic -- it builds its own scenario with drawRandom = false, so it draws no RNG.
-  // This canceller stage still answers with the -ate onMoveType subset only because
-  // runAttackCanceller's parameters do not include a DamageResolver (it receives the state, ids,
-  // move data, moveView, dataContext and grounding), so it cannot reach deps.damage.moveType;
-  // the item/effect/field branches (Hidden Power, Judgment/Plate, Weather Ball, ...) therefore
-  // remain unmodelled at THIS check. The script that follows
-  // (BattleScript_MoveUsedPowder, data/battle_scripts_1.s:8769-8787) is one of the two cancel
-  // scripts that still runs attackstring and ppreduce (:8772), so turn.ts spends the PP.
+  // declared type. This stage runs AFTER Cmd_attackcanceler's type2 write
+  // (battle_script_commands.c:1048-1056, CalculateMoveDamageAndEffectiveness -> battle_util.c:
+  // 7775-7785), so for a `type2` move it reads the type2 pick; the caller now passes that
+  // whole answer as `resolvedMoveType` (turn.ts computes it with the damage resolver).
+  // When the parameter is undefined (test doubles with no resolver) this still answers with
+  // the -ate onMoveType subset only -- the one part resolveEffectiveMoveType can reach -- so
+  // the item/effect/field/type2 branches stay unmodelled at THIS check for such callers.
+  // The script that follows (BattleScript_MoveUsedPowder, data/battle_scripts_1.s:8769-8787)
+  // is one of the two cancel scripts that still runs attackstring and ppreduce (:8772), so
+  // turn.ts spends the PP.
   if (hasFlag(attacker.mon.status2, STATUS2_POWDER)) {
     const declaredType = bareType(moveView?.resolvedType ?? move?.type) || 'NORMAL'
-    const resolvedType = resolveEffectiveMoveType(attacker.mon.abilities, moveId, declaredType, move?.flags ?? {}).moveType
+    const resolvedType =
+      resolvedMoveType === undefined
+        ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, declaredType, move?.flags ?? {}).moveType
+        : (resolvedMoveType ?? declaredType)
     if (resolvedType === 'FIRE') {
       attacker.round.powderSelfDmg = true
       cancelMultiTurnMoves(attacker)
@@ -754,16 +767,22 @@ export function runAttackCanceller(
     const defenderBattler = targetId !== null ? state.battlers[targetId] : undefined
     const defenderSlots = defenderBattler ? defenderBattler.mon.abilities : NO_ABILITY_SLOTS
     // GetParentalBondType's moveType argument is GET_MOVE_TYPE's answer
-    // (battle_script_commands.c:1033,1084) -- the RESOLVED type, not the declared
-    // `gBattleMoves[move].type`. This stage has no DamageResolver, so it can only
-    // reach the -ate onMoveType subset (the same limitation as CANCELLER_POWDER_STATUS
-    // above); the item/effect/field retypes stay unmodelled here. `declaredMoveType`
-    // keeps the declared type for the IS_MOVE_TYPE readers (matchesMoveFlag's
-    // declaredMoveType argument). Weather is weatherFromBitfield(state.field.weather),
-    // the same fact sim/damageResolver.ts's buildFieldBattleState supplies.
+    // (battle_script_commands.c:1033,1084) -- the RESOLVED type with the type2
+    // pick Cmd_attackcanceler already wrote into dynamicMoveType (:1048-1056),
+    // not the declared `gBattleMoves[move].type`. The caller supplies that whole
+    // answer as `resolvedMoveType`; when it is undefined (test doubles with no
+    // resolver) this stage can only reach the -ate onMoveType subset, the same
+    // limitation as CANCELLER_POWDER_STATUS above, and the item/effect/field
+    // retypes stay unmodelled here. `declaredMoveType` keeps the declared type for
+    // the IS_MOVE_TYPE readers (matchesMoveFlag's declaredMoveType argument).
+    // Weather is weatherFromBitfield(state.field.weather), the same fact
+    // sim/damageResolver.ts's buildFieldBattleState supplies.
     const declaredParentalBondType = bareType(move?.type) || 'NORMAL'
     const parentalBondCtx: OnParentalBondInputs = {
-      moveType: resolveEffectiveMoveType(attackerSlots, moveId, declaredParentalBondType, move?.flags ?? {}).moveType,
+      moveType:
+        resolvedMoveType === undefined
+          ? resolveEffectiveMoveType(attackerSlots, moveId, declaredParentalBondType, move?.flags ?? {}).moveType
+          : (resolvedMoveType ?? declaredParentalBondType),
       declaredMoveType: declaredParentalBondType,
       moveFlags: move?.flags ?? {},
       moveSplit: move?.split ?? 'STATUS',

@@ -1705,10 +1705,24 @@ export function calculateMoveDamage(scenario: DamageCalcScenario): DamageCalcRes
 
   // GetParentalBondType receives GET_MOVE_TYPE's answer -- the RESOLVED type after
   // SetTypeBeforeUsingMove/the dynamic-type write-back (battle_script_commands.c:1033,1084
-  // and battle_ai_util.c:660-682) -- not the declared `gBattleMoves[move].type`. Resolve
-  // it here without folding the resolver's notes into the result: calcInternal already
-  // reports them. `declaredMoveType` stays the declared type for IS_MOVE_TYPE readers.
-  const hitPlanMoveType = resolveMoveType(scenario, moveType).moveType
+  // and battle_ai_util.c:660-682) -- not the declared `gBattleMoves[move].type`. For a
+  // `type2` move Cmd_attackcanceler (:1048-1056) overwrites that with the type2 pick of
+  // DoMoveDamageCalc (battle_util.c:7769-7785) before GetParentalBondType runs, so the
+  // hit plan must see the winner. The roll loop below (:1741) is what fills
+  // fullDamageForRoll's per-(crit, hit) cache, so the winner is not memoised yet here;
+  // recompute the same comparison through `evaluate` (no duplicate formula). hitModifier
+  // is neutral (uq(1.0)): it scales both candidates identically, so it cannot change
+  // which damage is larger. `declaredMoveType` stays the declared type for IS_MOVE_TYPE
+  // readers.
+  const type2WinnerMoveType = (): string => {
+    const primary = evaluate(moveType, false, uq(1.0), 0)
+    if (move.type2 && move.type2 !== moveType && move.type2 !== 'MYSTERY') {
+      const alternate = evaluate(move.type2, false, uq(1.0), 0)
+      if (alternate.dmg > primary.dmg) return alternate.resolvedMoveType
+    }
+    return primary.resolvedMoveType
+  }
+  const hitPlanMoveType = type2WinnerMoveType()
   const hitPlanResult = resolveHitPlan(
     move,
     attacker.abilitySlots,
