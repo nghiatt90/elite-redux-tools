@@ -694,12 +694,14 @@ function hasHalfRecoilAbility(state: BattleState, attacker: BattlerState, battle
  * (battle_util.c:9255-9260), so Neutralizing Gas, Gastro Acid and the ability
  * shield all apply, and the C's mold-breaker clause (gated on
  * `gAbilities[ability].breakable`, :9255) applies when `dataContext` is supplied.
- * Every caller supplies one: attackCanceller.ts:494, endTurn.ts:471/473
- * (its CanBattlerHeal port, reached from moveEffects.ts, hitScripts.ts,
+ * Every in-tree caller supplies one -- attackCanceller.ts's Permanence check,
+ * endTurn.ts's CanBattlerHeal port (reached from moveEffects.ts, hitScripts.ts,
  * absorb.ts, switchInAbility.ts, fieldEndTurn.ts and endTurn.ts's own healers),
- * moveEnd.ts:7676/7680 and turn.ts:1353/2485. Cycle 156d threaded the last
- * heal-side caller (switchInAbility.ts), so the `dataContext`-less raw lookup
- * below is now unreached; it stays as the documented no-bundle shape only.
+ * moveEnd.ts's Enraged recoil doubling, and in this file deductPp's Pressure
+ * check and the Cosmic Daze power check -- except a `deductPp` caller that omits
+ * its optional `deps`. None exists today, so the `dataContext`-less raw lookup
+ * below is reached only by such a deps-less `deductPp` caller (see the comment
+ * in `deductPp`); it stays as the documented no-bundle shape.
  * `attackerHasMoldBreaker` is the switching/pressuring move's mold-breaker
  * state (gHitMarker & HITMARKER_MOLD_BREAKER, :9255); Pressure is not breakable,
  * so it never changes Pressure's result. */
