@@ -1041,11 +1041,11 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
       if (vestBlocksStatus && moveId !== 'MOVE_ME_FIRST' && data.dataContext.move(moveId)?.split === 'STATUS') continue
       if (holdsChoiceItem && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
       if (abilityLocksMove && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
-      const action = buildMoveAction(state, data, 0, moveId)
+      const action = buildMoveAction(state, data, 0, moveId, session.turnDeps.damage)
       choices.push({ action })
     }
   }
-  if (choices.length === 0) choices.push({ action: buildMoveAction(state, data, 0, 'MOVE_STRUGGLE') })
+  if (choices.length === 0) choices.push({ action: buildMoveAction(state, data, 0, 'MOVE_STRUGGLE', session.turnDeps.damage) })
 
   const party = state.sides[0].party
   for (let i = 0; i < party.length; i++) {

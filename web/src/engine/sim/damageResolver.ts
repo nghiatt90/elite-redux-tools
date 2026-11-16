@@ -40,6 +40,7 @@ import type { BridgeDeps } from './bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from './bridge'
 import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, STATUS_FIELD_TERRAIN_ANY, hasFlag } from './constants'
 import { isBattlerTerrainAffected } from './statusEffects'
+import { isSimAbilitySuppressed } from './statBuffs'
 import type { DamageResolution, DamageResolveContext, DamageResolver } from './turn'
 import type { ChosenAction } from './turnOrder'
 
@@ -309,7 +310,22 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
       // between two draws of the move's own script (MOVEEND_PROTECT_LIKE_EFFECT
       // runs after damagecalc), so it must not shift the stream.
       const { scenario, unmodelled } = buildScenarioFor(state, attackerId, targetId, move, { targetHasActedThisTurn: false }, false)
-      const resolved = resolveMoveType(scenario, move.type ?? 'NORMAL')
+      // GetMoveTypeInternal's final loop runs through ON_ABILITY
+      // (battle_main.c:5200-5201), whose FILTER_NOT(IsSuppressed)
+      // (include/battle_util.h:269-275) drops a Gastro Acid / Neutralizing Gas
+      // ability; the same filter gates the Aurora Borealis/Chloroplast reads in
+      // resolveMoveType. The bridge carries the RAW slots, so clear the suppressed
+      // ones for this call. (checkMoldBreaker FALSE: the attacker's own ability is
+      // never Mold-Breaker-suppressed -- battle_util.c:9257's `battler != attacker`.)
+      const attacker = state.battlers[attackerId]!
+      const slots = scenario.attacker.abilitySlots
+      const alive = (id: string | null): string | null =>
+        id && !isSimAbilitySuppressed(state, attacker, id, false, attackerId, false, deps.dataContext) ? id : null
+      const abilitySlots = {
+        ability: alive(slots.ability),
+        innates: [alive(slots.innates[0]), alive(slots.innates[1]), alive(slots.innates[2])] as [string | null, string | null, string | null],
+      }
+      const resolved = resolveMoveType({ ...scenario, attacker: { ...scenario.attacker, abilitySlots } }, move.type ?? 'NORMAL')
       // Type resolution never reads Beat Up's per-hit base Attack (its type comes from
       // GetMoveTypeInternal alone, battle_main.c:5093-5204), so that note answers a
       // question this call does not ask.

@@ -34,9 +34,11 @@ import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
 import { PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
 import { isKeenEdgeMove } from '../statusEffects'
+import { resolveEffectiveMoveType } from '../../abilities/dispatchCalc'
 
 /** `TurnOrderMoveView` fields this batch cannot resolve without a wiring this
- * sim does not have yet (dynamic move type resolution, terrain grounding, the
+ * sim does not have yet (dynamic move type resolution beyond the onMoveType
+ * "-ate" subset -- see `resolvedType` below --, terrain grounding, the
  * Mycelium Might check) default to their NEUTRAL value -- same precedent
  * turn.test.ts's own hand-built `moveView()` fixture already uses for every
  * caller that does not care about ability-priority edge cases.
@@ -64,13 +66,30 @@ function buildMoveView(
     unmodelled.push(`buildMoveView: isGrassyTerrainAffected not resolved for ${moveId} (EFFECT_GRASSY_GLIDE priority bonus needs grounding this batch does not wire)`)
   }
 
+  const declaredType = move?.type ?? 'MYSTERY'
+  // GetTypeBeforeUsingMove (battle_main.c:5206-5209 -> GetMoveTypeInternal
+  // :5093-5204) is this view's source. `AiDamageDeps` carries no DamageResolver, so
+  // only the onMoveType "-ate" subset is reachable here: the item/effect/field arms
+  // (Weather Ball, Hidden Power, Judgment/Plate, Natural Gift, Electrify, Ion Deluge,
+  // Plasma Fists) still fall back to the declared type. attackCanceller.ts:609-610
+  // reaches the same subset for its Powder check; aiCheckBadMove.ts:288-294 already
+  // reports the variable-type gap for the scoring path, so no second note here.
+  const resolvedType = move
+    ? resolveEffectiveMoveType(
+        state.battlers[battlerId]?.mon.abilities ?? { ability: null, innates: [null, null, null] },
+        moveId,
+        declaredType,
+        move.flags ?? {},
+      ).moveType
+    : declaredType
+
   return {
     id: moveId,
     priority: move?.priority ?? 0,
     effect: move?.effect ?? null,
     isStatus: move?.split === 'STATUS',
-    resolvedType: move?.type ?? 'MYSTERY', // GetTypeBeforeUsingMove's dynamic resolution not applied -- declared type used.
-    declaredType: move?.type ?? 'MYSTERY',
+    resolvedType,
+    declaredType,
     power: move?.power ?? 0,
     flags: move?.flags ?? {},
     split: move?.split ?? 'STATUS',

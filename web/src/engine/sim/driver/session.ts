@@ -9,7 +9,7 @@
 
 import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
-import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructsClear, turnStructsClear, type ActionOutcome, type TurnLoopDeps, type TurnOutcome } from '../turn'
+import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructsClear, turnStructsClear, type ActionOutcome, type DamageResolver, type TurnLoopDeps, type TurnOutcome } from '../turn'
 import { applyBattleStartPass, getSingleUseAbilityCounter } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
@@ -147,16 +147,33 @@ export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDama
  * - Opponent (battle_controller_opponent.c:1598-1601): static
  *   `target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)` -> self.
  */
-export function buildMoveAction(state: BattleState, data: SimDataBundle, battlerId: number, moveId: string): ChosenAction {
+export function buildMoveAction(
+  state: BattleState,
+  data: SimDataBundle,
+  battlerId: number,
+  moveId: string,
+  damage?: DamageResolver,
+): ChosenAction {
   const mData = data.dataContext.move(moveId)
   const statusDeps: StatusDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
+  const declaredType = mData?.type ?? 'NORMAL'
+  // GetTypeBeforeUsingMove (battle_main.c:5206-5209, -> GetMoveTypeInternal :5093-5204):
+  // the RESOLVED type, which getMovePriority forwards as the onPriority `moveType`
+  // (turnOrder.ts:412). Target-independent, so the opposing battler only satisfies the
+  // resolver's signature. Without the caller's resolver (`damage`; the session's own is
+  // `session.turnDeps.damage`) the declared type stands in, leaving -ate / Weather Ball
+  // / Electrify retypes unapplied for this view.
+  const resolvedType =
+    damage?.moveType && state.battlers[battlerId]
+      ? (damage.moveType(state, battlerId, battlerId ^ 1, moveId).moveType ?? declaredType)
+      : declaredType
   const view: TurnOrderMoveView = {
     id: moveId,
     priority: mData?.priority ?? 0,
     effect: mData?.effect ?? null,
     isStatus: mData?.split === 'STATUS',
-    resolvedType: mData?.type ?? 'NORMAL',
-    declaredType: mData?.type ?? 'NORMAL',
+    resolvedType,
+    declaredType,
     power: mData?.power ?? 0,
     flags: mData?.flags ?? {},
     split: mData?.split ?? 'STATUS',

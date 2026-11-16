@@ -2006,7 +2006,11 @@ function moveViewFor(
     priority: move?.priority ?? 0,
     effect: move?.effect ?? null,
     isStatus: move?.split === 'STATUS',
-    resolvedType: move?.type ?? 'MYSTERY',
+    // GetTypeBeforeUsingMove (battle_main.c:5206-5209, -> GetMoveTypeInternal
+    // :5093-5204): the RESOLVED type, not the declared one. getMovePriority forwards
+    // this as the onPriority `moveType`, so an -ate / Weather Ball / Electrify retype
+    // reaches the Gale Wings family (abilities.cc:126-131).
+    resolvedType: resolvedMoveType ?? move?.type ?? 'MYSTERY',
     declaredType: move?.type ?? 'MYSTERY',
     power: move?.power ?? 0,
     flags: move?.flags ?? {},
@@ -4627,7 +4631,8 @@ function buildMoveView(
     priority: data?.priority ?? 0,
     effect: data?.effect ?? null,
     isStatus: data?.split === 'STATUS',
-    resolvedType: data?.type ?? 'NORMAL',
+    // GetTypeBeforeUsingMove's answer (see moveViewFor's comment above).
+    resolvedType: resolvedMoveType ?? data?.type ?? 'NORMAL',
     declaredType: data?.type ?? 'NORMAL',
     power: data?.power ?? 0,
     flags: data?.flags ?? {},

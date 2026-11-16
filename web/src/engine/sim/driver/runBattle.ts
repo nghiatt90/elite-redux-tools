@@ -7,6 +7,7 @@ import { PARTY_SIZE } from '../constants'
 import type { BattleOutcome, BattleState, RandomSource, SimPartyMon } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
+import type { DamageResolver } from '../turn'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { createSession, groundingFor, stepTurn } from './session'
@@ -55,6 +56,7 @@ export interface BattleRunResult {
 export function defaultPlayerPolicy(
   state: BattleState,
   data: SimDataBundle,
+  damage?: DamageResolver,
 ): ChosenAction | null {
   const battler = state.battlers[0]
   if (!battler || battler.mon.hp === 0) {
@@ -99,13 +101,22 @@ export function defaultPlayerPolicy(
   const moveIdToUse = bestMoveId ?? 'MOVE_STRUGGLE'
   const mData = data.dataContext.move(moveIdToUse)
   const statusDeps: StatusDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
+  const declaredType = mData?.type ?? 'NORMAL'
+  // GetTypeBeforeUsingMove's answer (see buildMoveAction in session.ts): the RESOLVED
+  // type, which getMovePriority forwards as the onPriority `moveType`. Without a
+  // resolver the declared type stands in -- runBattle passes `session.turnDeps.damage`,
+  // so its own policy resolves retypes; a caller-constructed one may not.
+  const resolvedType =
+    damage?.moveType && state.battlers[0]
+      ? (damage.moveType(state, 0, 1, moveIdToUse).moveType ?? declaredType)
+      : declaredType
   const moveView: TurnOrderMoveView = {
     id: moveIdToUse,
     priority: mData?.priority ?? 0,
     effect: mData?.effect ?? null,
     isStatus: mData?.split === 'STATUS',
-    resolvedType: mData?.type ?? 'NORMAL',
-    declaredType: mData?.type ?? 'NORMAL',
+    resolvedType,
+    declaredType,
     power: mData?.power ?? 0,
     flags: mData?.flags ?? {},
     split: mData?.split ?? 'STATUS',
@@ -168,7 +179,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
 
       const playerAction = options.playerPolicy
         ? options.playerPolicy(state, turnUnmodelled)
-        : defaultPlayerPolicy(state, data)
+        : defaultPlayerPolicy(state, data, session.turnDeps.damage)
 
       const step = stepTurn(session, playerAction)
       const turnOutcome = step.outcome
