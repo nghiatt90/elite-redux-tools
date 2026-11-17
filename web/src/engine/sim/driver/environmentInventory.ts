@@ -1292,6 +1292,16 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1242),
     evidence: BATTLE_TYPE_TRAINER_EVIDENCE,
   },
+  // Step 0.3 assumption (doubles-plan): the `choose_mons` macro body is not in the
+  // pinned tree (`asm/` is not in sparse_paths). The cap comes from the special it
+  // must wrap: `ChooseHalfPartyForBattle` sets VAR_FRONTIER_FACILITY =
+  // FACILITY_MULTI_OR_EREADER (script_pokemon_util.c:173-176), so
+  // `GetMaxBattleEntries` returns MULTI_PARTY_SIZE = 3 (party_menu.c:5954-5963;
+  // constants/global.h:79-80). `ReducePlayerPartyToSelectedMons`
+  // (script_pokemon_util.c:210-228) is the only function that moves the chosen
+  // order into gPlayerParty; that `choose_mons` calls it is assumed, not read.
+  // If it does not, partner and enemy levels (battle_tower.c:2404,
+  // battle_main.c:1819) see the full party instead of the chosen three.
   {
     key: 'BATTLE_TYPE_DOUBLE',
     token: 'BATTLE_TYPE_DOUBLE',
@@ -1303,6 +1313,15 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
+  // Step 0.2 assumption: `starttagbattle` has 26 call sites under data/maps and no
+  // definition anywhere in the fetched tree (`asm/` is not in sparse_paths). The
+  // assumed Juan/Wallace flag set is BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE |
+  // BATTLE_TYPE_TWO_OPPONENTS with no INGAME_PARTNER, which is what the C sets
+  // whenever two trainers approach: battle_setup.c:1239-1240 (and trainer_see.c:
+  // 264-273 configures both). If wrong, only the AI flag source
+  // (battle_ai_main.c:144-145), the 3-mon per-opponent cap
+  // (battle_main.c:1778-1782) and HasNoMonsToSwitch's 0-2/3-5 slot windows
+  // (battle_util.c:3674-3690) change.
   {
     key: 'BATTLE_TYPE_TWO_OPPONENTS',
     token: 'BATTLE_TYPE_TWO_OPPONENTS',
@@ -1311,6 +1330,18 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
+  // Step 0.1/0.4 assumptions: the `multi_2_vs_2` macro body is absent, so the
+  // flags are read from the story path it must reach: DoSpecialTrainerBattle's
+  // SPECIAL_BATTLE_MULTI 2-vs-2 branch sets TRAINER | DOUBLE | TWO_OPPONENTS |
+  // MULTI | INGAME_PARTNER (battle_tower.c:1645-1647) and calls
+  // FillPartnerParty(gPartnerTrainerId) (:1651-1652). The partner party is
+  // gTrainers[gPartnerTrainerId - TRAINER_CUSTOM_PARTNER].party, i.e. the ace
+  // tier (battle_tower.c:2394-2402), at level = highest in the player party, IV
+  // 31. The Meteor Falls partner id is chosen by gender (MALE -> MAY_*, FEMALE ->
+  // BRENDAN_*, MeteorFalls_1F_1R/scripts.pory:40-43) and starter (:167-171,
+  // :186-190); fixing MAY_TORCHIC_METEOR_FALLS assumes a male player with
+  // Torchic. The script symbol is an ordinary trainer id that the absent macro
+  // must pass through VAR_0x8006 for the C to shift into the custom range.
   {
     key: 'BATTLE_TYPE_INGAME_PARTNER',
     token: 'BATTLE_TYPE_INGAME_PARTNER',
@@ -1646,6 +1677,13 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     scope: '5 trainers',
     citation: cite(CODEGEN_PATH, 184),
   },
+  // Step 0.5 gap: Tate & Liza has forcedDouble: true and MossdeepCity_Gym has a
+  // guard-null BATTLE_EVENT_TENSE_BATTLE row (encounters.json, script
+  // MossdeepCity_Gym_EventScript_TateAndLiza). No fight spec carries battleEvents
+  // (fights.ts FightRow has no such field); eventsForFight is called only by
+  // solverCli.ts:98,105 (map from --map or mapForTrainer) and solver.ts:464
+  // chainStageEvents. dbl-1+ must wire the map's events into the doubles fight
+  // spec; this cycle intentionally does not.
   {
     key: 'forcedDouble',
     token: 'forcedDouble',

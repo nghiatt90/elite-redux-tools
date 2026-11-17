@@ -153,18 +153,89 @@ Steven in the Space Center uses this custom branch too (`multi_2_vs_2 ... TRAINE
 0.1 Confirm that `trainers.json` `parties.ace` is the base `gTrainers[].party` that `FillPartnerParty` reads (compare against the codegen
     `eliteredux-source:tools/codegen/` output rules and `emit.py`), and record the partner mons (ace tier) for `MAY_TORCHIC_METEOR_FALLS` and
     `TRAINER_STEVEN_MOSSDEEP`. The Space Center script `:274` is `multi_2_vs_2` with a `TRAINER_STEVEN_MOSSDEEP` partner id, i.e. the custom-partner
-    branch (`battle_tower.c:2394-2412`); `sStevenMons` (`:2372-2393`) is the other special battle and is not used here.
-0.2 Confirm the Juan `starttagbattle` flag set by checking how `secret_base.c:1162-1173` and the tag-battle spec consume
+    branch (`battle_tower.c:2394-2461`); `sStevenMons` (`:2372-2393`) is the other special battle and is not used here.
+    **Result: confirmed.** `TrainerPartyGenerator.kt:177-178,208-213` emits `.partySize = ace.monList.size`, `.party = __sParty_<ace hash>`,
+    and `.partyInsane`/`.partyHell` from `elite`/`hell` with `ace` fallbacks; `trainers.py:90-94` and `emit.py:593-617` reproduce exactly those
+    tiers as `parties.ace/elite/hell`, so `ace` is the un-fallback-ed base party. `FillPartnerParty`'s custom branch reads
+    `gTrainers[partner - TRAINER_CUSTOM_PARTNER].partySize` and `.party` (`battle_tower.c:2399-2402`), then sets the level
+    `GetHighestLevelInPlayerParty()` clamped to 1..100 (`:2404-2410`), IV 31/personality/OT (`:2412`), nature (`:2415`), item (`:2416`),
+    ability slot (`:2417`), speed-down/hidden-power type (`:2419-2421`), EVs (`:2425-2446`), stats (`:2448`), moves+PP (`:2450-2453`), ball
+    (`:2455-2458`) and OT name (`:2460-2461`). `elite`/`hell` are read only by `CreateNPCTrainerParty` (`battle_main.c:1744-1750`, `:1803-1811`),
+    never by `FillPartnerParty`. `multi_2_vs_2` reaches `FillPartnerParty` at `battle_tower.c:1652` (the `SPECIAL_BATTLE_MULTI` 2-vs-2 branch,
+    flags at `:1645-1647`); `:1525` is the Battle Tower `FRONTIER_MODE_MULTIS` path and `:1617` is `SPECIAL_BATTLE_STEVEN`, so neither is this
+    fight. `gPartnerTrainerId = VarGet(gSpecialVar_0x8006) + TRAINER_CUSTOM_PARTNER` (`:1651`): the script symbol is the ordinary trainer enum
+    (`TRAINER_STEVEN_MOSSDEEP` = 285), shifted into the custom range, so `FillPartnerParty` indexes `gTrainers[285]`. The macro that fills
+    `VAR_0x8006` is absent from the fetched tree (`asm/` is not in `sparse_paths`); the pass-through is an assumption recorded in
+    `environmentInventory.ts`. One JSON caveat: `ability` is the effective ability resolved by `emit.py:541-566`, not the textproto string
+    (`textprotoAbility` carries that), which matches what the game fights with because the codegen omits `.ability` when the named ability is
+    not on the species (slot 0 is used). All six recorded partner mons (3 May + 3 Steven) have `hiddenPowerType: TYPE_NORMAL`, `ironPill: false`.
+    * `MAY_TORCHIC_METEOR_FALLS` ace (3 mons): `SPECIES_PIKACHU_POP_STAR` / `NATURE_JOLLY` / `ABILITY_PIXILATE` / `ITEM_LIGHT_BALL`,
+      Fake Out, Slam, Thunder Punch, Spotlight, EVs 252 HP / 128 Atk / 128 Spe; `SPECIES_SLIGGOO_HISUIAN` / `NATURE_BOLD` /
+      `ABILITY_BULLETPROOF` / `ITEM_LEFTOVERS`, Dragon Pulse, Body Press, Muddy Water, Shelter, EVs 252 Def / 252 SpA; `SPECIES_BLAZIKEN` /
+      `NATURE_ADAMANT` / `ABILITY_SPEED_BOOST` / `ITEM_CHARCOAL`, Detect, Frustration, Blaze Kick, Double Kick, EVs 128 HP / 128 Atk / 252 Spe.
+    * `TRAINER_STEVEN_MOSSDEEP` ace (3 mons): `SPECIES_AGGRON` / `NATURE_BOLD` / `ABILITY_HEATPROOF` / `ITEM_ASSAULT_VEST`, Stomp, Hard Press,
+      Head Smash, Body Press, EVs 252 HP / 252 Atk / 4 Def; `SPECIES_GENESECT` / `NATURE_RASH` / `ABILITY_FATAL_PRECISION` / `ITEM_LIFE_ORB`,
+      Flash Cannon, Struggle Bug, Hydro Pump, Powder Snow, EVs 4 HP / 252 SpA / 252 Spe; `SPECIES_METAGROSS` / `NATURE_ADAMANT` /
+      `ABILITY_TOUGH_CLAWS` / `ITEM_OCCA_BERRY`, Psychic Fangs, Meteor Mash, Ice Punch, High Horsepower, EVs 4 HP / 252 Atk / 252 Spe.
+      Its `elite`/`hell` parties differ, but only `ace` is read here.
+0.2 Confirm the Juan `starttagbattle` flag set by checking how `secret_base.c:1158-1175` and the tag-battle spec consume
     `TAG_TEAM_WALLACE_JUAN`; if the macro cannot be found, record the assumption in `environmentInventory.ts` (the tag-to-flag
     link) and in this plan, and run M2 under the assumed flags. A wrong flag set changes only the AI flag source (`battle_ai_main.c:144-145`) and
     `HasNoMonsToSwitch` routing.
-0.3 Confirm the multi player cap is 3 (`GetMaxBattleEntries`, `party_menu.c:5954-5957`) and what `MAX_FRONTIER_PARTY_SIZE` is for
-    `ReducePlayerPartyToSelectedMons` (`script_pokemon_util.c:210-227`).
+    **Result: assumption recorded.** `GetTagTeamTrainerLoseText` (`secret_base.c:1158-1175`) only switches the lose text off `VAR_TAG_TEAM_ID`; it
+    sets no battle flags. `starttagbattle` has 26 call sites under `data/maps/` and no definition anywhere in the fetched tree (`include/`,
+    `src/`, `data/*.inc`); `asm/` is not in `sparse_paths`, so the expansion cannot be read. The C path that starts a two-opponent trainer battle
+    sets exactly `BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TRAINER` when `gNoOfApproachingTrainers == 2`
+    (`battle_setup.c:1239-1240`), and `trainer_see.c:264-273` configures both trainers for that case. Assumed set:
+    `BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TRAINER`, no `BATTLE_TYPE_INGAME_PARTNER`. Consequence if wrong: the AI flags
+    are the TWO_OPPONENTS override `AI_FLAG_CHECK_BAD_MOVE | AI_FLAG_TRY_TO_FAINT | AI_FLAG_CHECK_VIABILITY | AI_FLAG_CHECK_FOE`
+    (`battle_ai_main.c:144-145`), each opponent party is capped at 3 (`battle_main.c:1778-1782`), and `HasNoMonsToSwitch` uses opponent slots
+    0-2 for battler 1 and 3-5 for battler 3 (`battle_util.c:3674-3690`). Recorded in `environmentInventory.ts`.
+0.3 Confirm the multi player cap is 3 (`GetMaxBattleEntries`, `party_menu.c:5954-5963`) and what `MAX_FRONTIER_PARTY_SIZE` is for
+    `ReducePlayerPartyToSelectedMons` (`script_pokemon_util.c:210-228`).
+    **Result: cap confirmed, reduce assumed.** `GetMaxBattleEntries` returns `MULTI_PARTY_SIZE` for `FACILITY_MULTI_OR_EREADER`
+    (`party_menu.c:5954-5963`, MULTI branch `:5956-5957`); `MULTI_PARTY_SIZE` is `PARTY_SIZE / 2` = 3 (`include/constants/global.h:79-80`).
+    The special that sets the facility var is `ChooseHalfPartyForBattle` (`script_pokemon_util.c:173-176`: `VAR_FRONTIER_FACILITY =
+    FACILITY_MULTI_OR_EREADER`). `ReducePlayerPartyToSelectedMons` (`script_pokemon_util.c:210-228`) copies the chosen order into
+    `gPlayerParty[0..5]` through a `MAX_FRONTIER_PARTY_SIZE` = 6 buffer (`include/constants/global.h:86`), zeroes the rest and calls
+    `CalculatePlayerPartyCount()`. The `choose_mons` macro is not in the fetched tree (not in `data/specials.inc`, no `asm/`), and
+    `frontier_util.c:893` is `SetSelectedPartyOrder` (`:886-893`), the Battle Frontier path, not `choose_mons`. The vanilla analogue calls
+    the choose-party script (`SootopolisCity_MysteryEventsHouse_1F/scripts.pory:99`, the special itself at `:133`) and then
+    `ReducePlayerPartyToSelectedMons` (`:110`); the link multi path reduces too (`cable_club.c:822-823`). **Assumed:** `choose_mons` reduces
+    the working party to the chosen 3 before the battle, so `GetHighestLevelInPlayerParty` (`battle_tower.c:2669-2681`) and the enemy
+    level (`battle_main.c:1819`) see only those 3; if it
+    does not, both see the full party. Recorded in `environmentInventory.ts`.
 0.4 Meteor Falls partner is one of six ids (`MeteorFalls_1F_1R/scripts.pory:193-238`, by player gender (May/Brendan) AND starter); the coverage doc
     (`boss-fight-coverage.md:198-213`) settles only the starter and fixes `MAY_TORCHIC_METEOR_FALLS`. Record the gender assumption too; the six
     ids all have 3/3/3 parties (compare their mons in `trainers.json` and note any difference).
+    **Result: confirmed; the "all six are 3/3/3" claim is true but understates the split.** The gender branch is `checkplayergender` at `:39`,
+    `MALE -> EventScript_May` (`:40-41`), `FEMALE -> EventScript_Brendan` (`:42-43`); the starter branch is `switch VAR_STARTER_MON` at
+    `:167-171` (May) and `:186-190` (Brendan), and the six calls are `:193, :202, :211, :220, :229, :238`. All six ids have 3 mons in each of
+    `ace`/`elite`/`hell`. The gender changes two of the three party slots, not just the starter: `MAY_*` slots 0-1 are `SPECIES_PIKACHU_POP_STAR`
+    (JOLLY/PIXILATE/LIGHT_BALL; Fake Out, Slam, Thunder Punch, Spotlight; EVs 252 HP / 128 Atk / 128 Spe) and `SPECIES_SLIGGOO_HISUIAN`
+    (BOLD/BULLETPROOF/LEFTOVERS; Dragon Pulse, Body Press, Muddy Water, Shelter; EVs 252 Def / 252 SpA), while `BRENDAN_*` slots 0-1 are
+    `SPECIES_PIKACHU_ROCK_STAR` (MODEST/ARMOR_TAIL/LIGHT_BALL; Fake Out, Metallic Melody, Electroweb, Spotlight; EVs 252 HP / 128 SpA / 128 Spe)
+    and `SPECIES_SLIGGOO` (CALM/POISON_HEAL/TOXIC_ORB; Dragon Pulse, Helping Hand, Water Pledge, Charm; EVs 252 SpA / 252 SpD). Slot 2 follows
+    the starter: `SCEPTILE` (JOLLY/PROTEAN/MIRACLE_SEED; Detect, Swords Dance, Dragon Claw, Leaf Blade; EVs 252 Atk / 252 Spe; the textproto
+    names `ABILITY_DETERMINATION`, so `abilityDivergence: true` and the effective slot-0 ability is PROTEAN), `BLAZIKEN`
+    (ADAMANT/SPEED_BOOST/CHARCOAL; Detect, Frustration, Blaze Kick, Double Kick; EVs 128 HP / 128 Atk / 252 Spe) or `SWAMPERT`
+    (ADAMANT/SWIFT_SWIM/MYSTIC_WATER; EVs 252 Atk / 252 Def) — the two SWAMPERT copies order the same four moves differently (May:
+    Torrent Fist, Life Dew, Rock Slide, Rain Dance; Brendan: Torrent Fist, Rock Slide, Rain Dance, Life Dew) and May's has 4 HP EVs where
+    Brendan's has 0. **Assumed:** the sim's fixed `MAY_TORCHIC_METEOR_FALLS` means a male player (`:40-41`) with the Torchic starter (`:168`);
+    `boss-fight-coverage.md:198-213` settles only the starter.
 0.5 Confirm the Tense Battle event reaches the sim: `encounters.json` `battleEvents` has `BATTLE_EVENT_TENSE_BATTLE` for map `MossdeepCity_Gym`,
     script `MossdeepCity_Gym_EventScript_TateAndLiza` (guard null); check `battleEventSetup.ts` selects it for the Tate & Liza fight spec.
+    **Result: row confirmed; event selection is not wired into a fight spec.** The row is
+    `{"event":"BATTLE_EVENT_TENSE_BATTLE","guard":null,"map":"MossdeepCity_Gym","script":"MossdeepCity_Gym_EventScript_TateAndLiza"}`, and
+    the script registers it unconditionally before the battle (`MossdeepCity_Gym/scripts.pory:996`). `eventsForFight` selects rows by
+    `row.map === mapName` and includes `guard === null` (`battleEventSetup.ts:29-33`); the six other Mossdeep rows have `var(VAR_RESULT)` guards
+    (they are the gym-trainer rows from `MossdeepCity_Gym_EventScript_CheckTrainers`) and are skipped (`battleEvents.test.ts:782-789`). Only two
+    callers exist: `solverCli.ts:98,105` (map name from `--map` or `mapForTrainer`, which parses `boss-fight-coverage.md:95`) and
+    `solver.ts:464` `chainStageEvents` (chains only; `TRAINER_TATE_AND_LIZA_1` is `format:'double'` with no `chainId`). `FightRow` has no
+    `battleEvents` field (`fights.ts:14-27`), and no test runs a Tate & Liza battle with the event (the only Mossdeep call is the loader
+    assertion above). **Gap for dbl-1+:** the doubles fight spec/driver must call
+    `eventsForFight(encounters.battleEvents, 'MossdeepCity_Gym', defeated)` and pass the result into `createSession`'s `battleEvents`
+    (`session.ts:297-301`); no wiring was added in this cycle.
 
 ### Step 1 - double-only damage terms (pure engine, calculator-testable, no sim state)
 1.1 Widen `engine/types.ts:298` to `boolean`; stop `bridge.ts:637` hard-coding false (derive from `battleTypeFlags & BATTLE_TYPE_DOUBLE`).
@@ -257,9 +328,11 @@ Steven in the Space Center uses this custom branch too (`multi_2_vs_2 ... TRAINE
   spread x0.75 where two foes are alive, partner AI moves in M3, and the correct winner when only one side's three own mons are down.
 
 ## Risks / open questions
-- **Unverified C inputs**: the `starttagbattle`, `multi_2_vs_2`, `choose_mons` macro bodies are absent from the tree, so Juan's flag set and the exact multi party cap are assumptions
-  (step 0.2/0.3); and `trainers.json` `parties.ace` being the base `gTrainers[].party` is checked in step 0.1 (the partner tier itself is settled: base party,
-  highest chosen player level). Step 0 resolves or records each as an explicit assumption.
+- **Unverified C inputs**: resolved as far as the pinned tree allows in Step 0. The `starttagbattle`, `multi_2_vs_2` and `choose_mons` macro
+  bodies are still absent (`asm/` is not in `sparse_paths`), so Juan's flag set (0.2) and the `choose_mons` party reduction (0.3) remain explicit
+  assumptions, recorded in `environmentInventory.ts`; the multi cap of 3 (`party_menu.c:5954-5963`), `parties.ace` as the base `gTrainers[].party`
+  (0.1) and the partner/gender data (0.4) are confirmed from the C, codegen and `trainers.json`. Step 0 also records the missing Tate & Liza event
+  wiring (0.5) as a dbl-1+ deliverable.
 - **Size**: the turn loop has no multi-target concept and ~60 `^ 1` sites; Step 3 is the largest and riskiest. The AI port (Step 4) adds ~300 lines of
   `AI_DoubleBattle` plus ~30 dead-branch sites. Expect the work to span many driver cycles.
 - **Solver cost** with two player battlers (Design decision 4): joint action space grows multiplicatively; top-K pruning is a heuristic and may
