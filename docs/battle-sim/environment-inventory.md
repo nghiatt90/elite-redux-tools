@@ -144,7 +144,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `setweather:WEATHER_RAIN` | Route120:100 (setweather WEATHER_RAIN) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `setweather:WEATHER_SANDSTORM` | Route111:92, Route111:279 (setweather WEATHER_SANDSTORM) | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4349` | unported | none | none |
 | `setwildbattlewithcustommoves` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/scrcmd.c:2620` | unported | none | none |
-| `starttagbattle` | 6 map(s), 26 line(s): DewfordTown_Gym, FortreeCity_Gym, LavaridgeTown_Gym_1F, MauvilleCity_Gym, MossdeepCity_Gym, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
+| `starttagbattle` | 6 map(s), 26 line(s): DewfordTown_Gym, FortreeCity_Gym, LavaridgeTown_Gym_1F, MauvilleCity_Gym, MossdeepCity_Gym, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | `web/src/engine/sim/driver/cycled3-3Chains.test.ts` | none |
 
 ## Battle-Type Units
 

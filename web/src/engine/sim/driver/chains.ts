@@ -1,7 +1,21 @@
 // Fight chains with no heal between stages (docs/battle-sim/chains-plan.md
 // decisions 1 and Step 3). Pure: the caller supplies the boss-id set, so this
 // module never reaches for node:fs and stays drivable from a Web Worker.
-import type { TagBattle, TrainerChain } from '../../../lib/types'
+// Structural copies of `lib/types` rows, kept local because `engine/` must not
+// import from `lib/`, `features/` or `routes/` (see web/src/engine/layering.test.ts).
+export interface TrainerChain {
+  map: string
+  script: string
+  trainers: string[] // 2+ distinct ids, reachable together in one playthrough
+  healFree: boolean // FLAG_SYS_DISABLE_AUTOHEAL bracketed every member but the first
+}
+
+export interface TagBattle {
+  map: string
+  script: string
+  trainers: [string, string] // starttagbattle's own two ids, in call order
+  guard: string | null
+}
 
 export interface FightSpec {
   trainerIds: string[]

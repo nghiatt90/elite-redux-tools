@@ -4,9 +4,8 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { TagBattle, TrainerChain } from '../../../lib/types'
 import { loadBossTrainerIds } from './bossSet'
-import { buildChains, type ChainSpec } from './chains'
+import { buildChains, type ChainSpec, type TagBattle, type TrainerChain } from './chains'
 import { FIGHTS } from './fights'
 
 const encounters = JSON.parse(
