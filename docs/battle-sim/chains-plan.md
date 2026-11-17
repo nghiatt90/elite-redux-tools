@@ -1,12 +1,12 @@
 # Plan: trainer chains without healing (D3)
 
-_Status: APPROVED by a cold Opus reviewer after 3 rounds (round 1: PP is refilled at battle end, Juan is not data-derivable; round 2: stale Goal/Verification wording; round 3: APPROVED). Not yet committed or executed. Vikunja task 61. Planning only: no code is changed by this document._
+_Status: REVISED 2026-11-17 after Yoshi's route (`story-route.md`): `TRAINER_WALLY_MAUVILLE` is added as a single fight. A first revision the same day also added a player-observed Weather Institute 2F chain; Yoshi then corrected the route (the Weather Institute has no forced fight except Shelly, a plain single fight; the no-heal gauntlet he remembered is the Space Center 2F one, already a script-derived chain), so that chain is removed and the chain set is back to five derived plus Juan; NOT yet re-reviewed. Before that: APPROVED by a cold Opus reviewer after 3 rounds (round 1: PP is refilled at battle end, Juan is not data-derivable; round 2: stale Goal/Verification wording; round 3: APPROVED). Not yet committed or executed. Vikunja task 61. Planning only: no code is changed by this document._
 
 ## Goal
 
 Fights that the game forces back to back with no heal between them are evaluated as one chain: the player's HP, `status1` and fainted mons carry from each
 fight into the next (PP and held items are restored by the game between battles, see Context), a chain is won only if every stage is won, and the five singles chains are derived from the game's own data
-(`trainerChains`) while Juan's two-stage chain is a cited, hand-written table.
+(`trainerChains`) while Juan's two-stage chain comes from a cited, hand-written table (script-cited). Every chain is script-evidenced; none rests on a player observation.
 
 ## Context (verified facts)
 
@@ -18,11 +18,18 @@ fight into the next (PP and held items are restored by the game between battles,
 | Chain | Source | Heal before first | No heal between | Notes |
 |---|---|---|---|---|
 | Archie, Oceanic Museum: `GRUNT_MUSEUM_1`, `GRUNT_MUSEUM_2`, `ARCHIE_SLATEPORT` | `trainerChains` | yes (`SlateportCity_OceanicMuseum_2F/scripts.pory:13-14`; the heal before Archie is commented out `:69`) | yes | `healFree: true` |
-| Space Center 2F grunts: `GRUNT_SPACE_CENTER_5/6/7` | `trainerChains` | yes (`MossdeepCity_SpaceCenter_2F/scripts.pory:69-70`) | yes | `healFree: true`; the Maxie+Courtney multi fight (`multi_2_vs_2` at `:275`, heal at `:264`) is a separate fight (see `doubles-plan.md`) |
-| Gym 8 groups (bottom/middle/top): `BRIDGET,CRISSY,BETHANY`, `DAPHNE,CONNIE,ANDREA`, `OLIVIA,BRIANNA,ANNIKA` | `trainerChains` | first fight healed, flag set after it (`SootopolisCity_Gym_1F/scripts.pory:545-549`, `:603-607`, `:652-656`) | fights 1->2->3 | only `multichoice2` case 1 is a chain; cases 2-4 are a solo fight then a two-on-one tag battle with auto-heal on (`:551-561`), so each is healed |
+| Space Center 2F grunts: `GRUNT_SPACE_CENTER_5/6/7` | `trainerChains` | yes (`MossdeepCity_SpaceCenter_2F/scripts.pory:69-70`) | yes (flag set `:69`, cleared `:87`; battles `:72, :78, :84`; heal skip at `battle_main.c:844`) | `healFree: true`; `story-route.md` step 27 (Yoshi's no-heal gauntlet). The stair grunt `GRUNT_SPACE_CENTER_2` (1F, step 26) is a healed single fight before it, and the Maxie+Courtney multi fight (`multi_2_vs_2` at `:274`, heal at `:264`, step 28) is a separate healed fight after it (see `doubles-plan.md`) |
+| Gym 8 groups (bottom/middle/top): `BRIDGET,CRISSY,BETHANY`, `DAPHNE,CONNIE,ANDREA`, `OLIVIA,BRIANNA,ANNIKA` | `trainerChains` | first fight healed, flag set after it (`SootopolisCity_Gym_1F/scripts.pory:545-549`, `:603-607`, `:652-656`) | fights 1->2->3 | in each of the three groups only `multichoice2` case 1 is a chain (case 1 of the bottom, middle and top group alike: `:545-549`, `:603-607`, `:652-656`); cases 2-4 are a solo fight then a two-on-one tag battle with auto-heal on (`:551-561` for the bottom group), so each is healed |
 | Juan stage 1 -> stage 2: `JUAN_1`+`WALLACE`, `JUAN_5`+`WALLACE_5` | `tagBattles` (NOT `trainerChains`) | yes (`:275`) | yes: flag set `:276`, stage 2 starts from `Juan_Battle_2` (`:286-290`), cleared `:279`/`:301` | both stages are tag battles, so the chain needs the doubles work (M2 of `doubles-plan.md`) |
+There is no Weather Institute chain: Yoshi confirmed (2026-11-17) that the only forced fight there is Shelly (`Route119_WeatherInstitute_2F/scripts.pory:52`, `story-route.md` step 19), a
+single healed fight, and no Weather Institute script sets `FLAG_SYS_DISABLE_AUTOHEAL`.
 
-Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fights); Wally (`VictoryRoadRework`, `healFree: false`: effectively healed, so two fresh fights).
+Route fights outside the 40 (Yoshi's route, `story-route.md`): only `TRAINER_WALLY_MAUVILLE` (`MauvilleCity/scripts.pory:229`, step 10), which is a SINGLE fight, not a chain (one `trainerbattle_no_intro`,
+default heal). It is not in `boss-fight-coverage.md`; its party is loaded from `data/v2.65beta/trainers.json` like every other trainer.
+
+Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fights or the route); Wally at Victory Road (`VictoryRoadRework`, `healFree: false`: effectively healed, so two fresh fights; both rows are also `excluded` from solver runs as
+buggy in the pinned version, player-observed (Yoshi), not in the scripts at pin bdebcbbf, `story-route.md` step 35). The earlier
+wording "Wally is not a chain / out of scope" referred to this Victory Road entry only, not to `TRAINER_WALLY_MAUVILLE`.
 
 ### What carries between consecutive battles (C)
 - The heal is a battle-START gate: `if (!FlagGet(FLAG_SYS_DISABLE_AUTOHEAL)) HealPlayerParty();` (`src/battle_main.c:844`, again `src/pokemon.c:2120`). `CB2_EndTrainerBattle`
@@ -67,6 +74,8 @@ Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fight
    therefore a small hand-written table citing `SootopolisCity_Gym_1F/scripts.pory:275-290` (heal `:275`, flag `:276`, stage 2 `Juan_Battle_2` `:286-290`, clear `:279`/`:301`), guarded by a test that
    fails if `encounters.json` `tagBattles` loses either row. (Extending the pipeline emitter to link continuations is a possible later change; it needs a `pipeline/` edit plus a data regeneration and
    is out of scope here.) Stage order for `trainerChains` is script order; a test asserts the `trainers` array order equals the call order in the script for every chain.
+   Count: `trainerChains` has 8 entries (Space Center 2F, Route111 Winstrates, SkyPillar_Outside, Oceanic Museum 2F, three Sootopolis groups, VictoryRoadRework Wally); keeping only `healFree: true` entries
+   whose trainers are boss ids leaves 5 (Winstrates and Sky Pillar are not boss ids; Wally VR is `healFree: false`); plus the one hand entry (Juan) gives 6 `ChainSpec`s.
 2. **`carryParty` is a pure function** `(startParty, endState) -> SimPartyMon[]` implementing exactly the C rules above: HP and `status1` from the live battler where one is active (else the party
    slot); fainted stay fainted; a Mega or form-changed mon is reverted by overwriting `speciesId`, `types`, `abilities`, `rawStats`, `maxHp` from `startParty`, with `hp += newMaxHP - oldMaxHP` floored at 1
    (fainted untouched, Shedinja 1) per `pokemon.c:1027-1043`; **PP reset to the maximum** (`MonRestorePP`; the sim does not model `ppBonuses`, `state.ts:45`, so the maximum is the `pp` in `startParty`, which is at maximum for stage 1 and stays there because every carry resets it; Step 0.4 confirms the build path yields maximum PP); the form-revert HP rule uses `oldMaxHP` = the end-state slot's `maxHp` and `newMaxHP` = `startParty[i].maxHp`; `itemId` restored from `startParty` (`TryRestoreStolenItems`); everything battle-scoped
@@ -80,7 +89,7 @@ Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fight
    `workerData: { trainerId, tier, battleEvents }` (one trainer, one event set), so it carries a chain id and per-stage events for chain runs; `solverWorker.ts` is therefore part of Step 4.
 5. **Gym 8 group branch** is the player's choice (`multichoice2`). Case 1 is the chain; cases 2-4 are healed independent fights (a solo then a tag pair) that need the doubles work. Until M2 lands only case 1
    is evaluable; once it lands the solver reports each branch and the chain verdict is the player's best branch, with every branch shown. Reporting default: case 1 (the only no-heal shape; no claim is made that it
-   is harder than the tag-pair branches).
+   is harder than the tag-pair branches). Whether cases 2-4 leave every gym trainer `defeated` (Juan's gate) is open: `story-route.md` Open question 4, "Gym 8 tag-battle gate".
 6. **Player bag items are not modelled** (the solver policy never uses the bag), so a chain result assumes no in-battle healing items. Stated in solver output, not silently assumed.
 7. **Battle events**: a stage's `defeatedSet` includes the trainers beaten earlier in the same chain so `eventsForFight` guards behave as in the game.
 
@@ -104,9 +113,11 @@ Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fight
 2.2 Negative/with-without test: the same two-stage chain run with heal-between versus carry-over gives a different stage-2 result for a hand-built party (proves carry changes an output number).
 
 ### Step 3 - chain definitions from data
-3.1 `chains.ts`: build `ChainSpec[]` from `trainerChains` (the five singles chains), filtered by the boss-id set passed in as a parameter, `healFree` chains only, stage order from script order; add the Juan pair from the hand-written
-    table of decision 1 (not from `tagBattles`), with a presence guard that `encounters.json` `tagBattles` still contains both Juan rows.
-3.2 Tests: the derived set equals the five expected chains (Archie museum, Space Center grunts, three gym 8 groups) plus Juan; Winstrates and Sky Pillar are excluded by the 40-fight filter; Wally is not a chain.
+3.1 `chains.ts`: build `ChainSpec[]` from `trainerChains` (the five singles chains), filtered by the boss-id set passed in as a parameter, `healFree` chains only, stage order from script order; add the Juan pair
+    from the hand-written table of decision 1 (not from `tagBattles`), with the presence guard of decision 1. Each `ChainSpec` carries an `evidence` label (`script` for all six) that the solver report prints.
+3.2 Tests: the DERIVED set (from `trainerChains`) equals exactly the five expected chains (Archie museum, Space Center grunts, three gym 8 groups); the full `ChainSpec[]` equals those five plus the one hand
+    entry (Juan), six in all; Winstrates and Sky Pillar are excluded by the filter; neither Wally entry is a chain (`TRAINER_WALLY_VR_1/_2` is `healFree: false`; `TRAINER_WALLY_MAUVILLE` is a single fight);
+    Shelly (`TRAINER_SHELLY_WEATHER_INSTITUTE`) is in no chain.
 
 ### Step 4 - evaluator and driver
 4.1 `scoreChain` and the `FitnessEvaluator` wrapper; `solverCli.ts` accepts `--chain <id>` (chosen, not optional), each stage's `battleEvents` set from `eventsForFight` with the accumulated `defeatedSet`;
@@ -118,7 +129,7 @@ Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fight
 5.1 Update `plan.md`, `solver.md` (chains section), `boss-fight-coverage.md` (a note linking the chain table), STATE.md D3 line.
 
 ## Verification
-`npx tsc -b web`, full vitest suite, `npm run build`, both sim audits; singles smoke unchanged (Step 1 equality test); the Step 2 tests; the Step 3 derivation test is the guard that the five singles chains match `trainerChains` and that the Juan table's two `tagBattles` rows still exist.
+`npx tsc -b web`, full vitest suite, `npm run build`, both sim audits; singles smoke unchanged (Step 1 equality test); the Step 2 tests; the Step 3 derivation test is the guard that the five singles chains match `trainerChains`, and that the Juan table's two `tagBattles` rows still exist.
 
 ## Risks / open questions
 - **Heal semantics are per-script**: the emitter's `healFree` rule ("flag set at every member except the first") matches the three scripts read here, but a direct heal between members is a documented blind spot (`encounters.py:201-214`); Step 0.2 re-checks it.
@@ -126,4 +137,4 @@ Not in scope: Winstrates (`Route111`) and Sky Pillar chains (not in the 40 fight
 - **Party order after a fight** (Step 0.1) and **item restore** (`B_RESTORE_ALL_ITEMS`) and the end-of-battle stat recompute (PP refill and the HP-after-revert rule, verified at `battle_main.c:4845-4852` and `pokemon.c:965,1012-1043`) are the three C behaviours the carry function leans on; the order point is not yet verified.
 - **No bag healing** is assumed (decision 6); a real player may heal in the battle menu at a turn cost, so a chain loss in the sim is not proof the chain is unbeatable.
 - **Cost**: a chain of three fights is roughly three times a single-fight evaluation per game (`solver-evaluation.md` measures ~1.3-1.4 s per game per fight); the solver's search budget is re-checked in `docs/battle-sim/solver-v2-plan.md` (the D4 plan).
-- **Out of scope**: Winstrates, Sky Pillar, Wally, Double Battle Mode, experience/level changes between stages (the player sits at the level cap, `innate-gating-plan.md`).
+- **Out of scope**: Winstrates, Sky Pillar, Wally at Victory Road (as a chain), Double Battle Mode, experience/level changes between stages (the player sits at the level cap, `innate-gating-plan.md`).

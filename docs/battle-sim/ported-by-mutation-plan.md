@@ -62,7 +62,7 @@ text-matching as the ground truth that the existing inventories lack.
    considers failures from behavioural files only, which removes the circularity (count-pinning tests failing because the classifier's input text changed).
 4. **Candidate tests are chosen by coverage of the guarded REGION's lines**, not the token's line. A handler's `KEY: fn` line runs at module load for almost every test, but the handler BODY runs only when invoked,
    so the region is the function body / clause / consequent from decision 1. A file is a candidate if its v8 coverage executes at least one line of the region. No candidate file -> `uncovered`, no run. The coverage map is
-   built once per source hash by running each behavioural test file under `@vitest/coverage-v8` (a new dev dependency; Yoshi must approve before it is added) and storing, per file, the executed ranges. If one vitest
+   built once per source hash by running each behavioural test file under `@vitest/coverage-v8` (a new dev dependency; allowed by Yoshi 2026-11-17) and storing, per file, the executed ranges. If one vitest
    process per file proves too slow, Step 0.2 compares it against a single `--coverage` run with a custom reporter that splits by test file.
 5. **Verdict classes** and their mapping to inventory status:
 
@@ -145,7 +145,7 @@ text-matching as the ground truth that the existing inventories lack.
 - **Site-shape coverage**: the operator handles five shapes; the rest are reported, not guessed. The share of units hit by `unrecognised-site` is a Step 0 output and may force more shapes.
 - **Equivalent mutants and dead branches** survive and need cited allowlist entries; they are never auto-classified.
 - **Shared-helper mutations** make unrelated behavioural tests red; `killed` then means "some behavioural test fails", the intended definition, and `killedBy` is recorded so a human can sanity-check suspicious kills.
-- **New dev dependency** (`@vitest/coverage-v8`) needs Yoshi's approval before Step 0.2.
+- **New dev dependency** (`@vitest/coverage-v8`) allowed by Yoshi 2026-11-17.
 - **Scope**: D6 ADDS a verified column and a report; it changes no existing status, pinned count, gate or deletion (all deferred, step 4.2). Promotion later moves pinned counts and lands one inventory per change with the delta shown.
 - **Attribution of kills**: deleting a `HANDLERS` entry also flips `isHandledMoveEffect` (`moveEffects.ts:11488-11489`), which AI or solver code may call, so a kill can come from changed AI choice rather than the effect
   itself. That fits the "some behavioural test fails" definition, and the `killedBy` triage looks for AI-driven kills.
