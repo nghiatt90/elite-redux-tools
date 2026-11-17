@@ -163,14 +163,30 @@ export function buildPlayerParty(
   specs: PlayerMonSpec[],
   defaultLevel = 50,
   bundle: SimDataBundle = getDefaultBundle(),
+  options?: { levelCap?: number; ignoreCap?: boolean },
 ): SimPartyMon[] {
+  // The cap is an upper bound (innate-gating-plan decision 1): a spec above it is
+  // rejected before any stat is computed, and no clamping happens. `ignoreCap`
+  // keeps the escape hatch for boxed over-cap mons and is reported by the solver.
+  if (options?.levelCap !== undefined && !options.ignoreCap) {
+    for (const spec of specs) {
+      const level = spec.level ?? options.levelCap
+      if (level > options.levelCap) {
+        throw new Error(
+          `buildPlayerParty: ${spec.species} level ${level} exceeds the level cap ${options.levelCap}`,
+        )
+      }
+    }
+  }
+
   return specs.map((spec) => {
     const species = bundle.speciesById.get(spec.species)
     if (!species) {
       throw new Error(`buildPlayerParty: unknown species ${spec.species}`)
     }
 
-    const level = spec.level ?? defaultLevel
+    // A spec with no level defaults to the fight's cap when one is supplied.
+    const level = spec.level ?? options?.levelCap ?? defaultLevel
     const isShedinja = species.id === 'SPECIES_SHEDINJA' || species.id === 'SPECIES_SHEDINJA_MEGA'
     const ironPill = Boolean(spec.ironPill)
     const iv = (stat: StatKey): number => (stat === 'spe' && ironPill ? 0 : 31)

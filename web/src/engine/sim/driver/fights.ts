@@ -8,7 +8,8 @@
  * (EventScript_Debug_CheatStart) sets all eight badge flags. It is a debug script: ignored for progression.
  */
 
-import { type GymNumber, type ProgressionRow } from './progression'
+import { levelCapFor } from '../innateGate'
+import { highestBadgeRange, type GymNumber, type ProgressionRow } from './progression'
 
 export interface FightRow extends ProgressionRow {
   trainerIds: string[] // every id of the fight; fightId === trainerIds[0] (first in script order)
@@ -576,3 +577,19 @@ export const FIGHTS: readonly FightRow[] = [
       'EverGrandeCity_DrakesRoom:50: required to unlock Champion room.',
   },
 ]
+
+/**
+ * The strict level cap for the trainer's fight, from the badges held at that
+ * point in the story (innate-gating-plan step 2.3). `'min'` assumes only the
+ * required gyms are cleared; `'max'` also assumes every skippable gym in
+ * `mayBefore` is cleared. Both are the highest-badge index (not a count), which
+ * is what GetLevelCap indexes (src/pokemon.c:4633-4668).
+ */
+export function levelCapForFight(trainerId: string, scenario: 'min' | 'max'): number {
+  const row = FIGHTS.find((fight) => fight.trainerIds.includes(trainerId))
+  if (!row) {
+    throw new Error(`levelCapForFight: unknown trainer id ${trainerId}`)
+  }
+  const badges = highestBadgeRange(row)[scenario]
+  return levelCapFor(badges)
+}
