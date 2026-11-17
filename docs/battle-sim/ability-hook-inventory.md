@@ -57,7 +57,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onDefender | 122 | 122 | 0 | 0 | 0 | 122 |
 | onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 84 |
 | onDisguise | 3 | 0 | 0 | 3 | 0 | 2 |
-| onEndTurn | 67 | 67 | 0 | 0 | 0 | 65 |
+| onEndTurn | 67 | 67 | 0 | 0 | 0 | 66 |
 | onEntry | 225 | 225 | 0 | 0 | 0 | 207 |
 | onExit | 12 | 9 | 0 | 3 | 0 | 12 |
 | onImmune | 19 | 19 | 0 | 0 | 0 | 19 |
@@ -83,7 +83,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1381** |
+| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1382** |
 
 ## Unported Ability Hook Pairs
 
