@@ -23,7 +23,7 @@ import { stripComments } from './moveInventory'
  *   6. `script-event`    -- one battle script label a scripted setup pushes.
  *
  * A unit is `ported` only when its token appears in BOTH a qualifying engine
- * source file (non-test, outside `sim/driver/` except the four loader files) and
+ * source file (non-test, outside `sim/driver/` except the loader files) and
  * an engine test file, after comments are stripped. A name alone can be a false
  * positive, so a unit may attach `UnitEvidence` that narrows what counts:
  *
@@ -313,6 +313,7 @@ export const ENVIRONMENT_INVENTORY_DOC_PATH = join(REPO_ROOT, 'docs/battle-sim/e
 export const LOADER_FILES = [
   'web/src/engine/sim/driver/session.ts',
   'web/src/engine/sim/driver/runBattle.ts',
+  'web/src/engine/sim/driver/battleFormat.ts',
   'web/src/engine/sim/driver/buildParty.ts',
   'web/src/engine/sim/driver/loadSimData.ts',
 ] as const
@@ -320,8 +321,11 @@ export const LOADER_FILES = [
 /**
  * The driver's battle-start path. `loadSimData.ts` is a data loader, so it is
  * deliberately absent: declaring a type field there does not start a battle.
- * `BATTLE_TYPE_TRAINER` is set in `session.ts:238`; `BATTLE_TYPE_DOUBLE` is not
- * set anywhere in these files, so the driver never runs a double battle.
+ * `battleFormat.ts` computes `gBattleTypeFlags` for a format, but `createSession`
+ * only ever gives it a single non-forced trainer, so it qualifies
+ * `BATTLE_TYPE_TRAINER` (its own evidence list) and not `BATTLE_TYPE_DOUBLE`:
+ * `BATTLE_TYPE_DOUBLE` is set nowhere in these files, so the driver still never
+ * runs a double battle.
  */
 export const BATTLE_TYPE_DRIVER_FILES = [
   'web/src/engine/sim/driver/session.ts',
@@ -329,14 +333,18 @@ export const BATTLE_TYPE_DRIVER_FILES = [
   'web/src/engine/sim/driver/buildParty.ts',
 ] as const
 
+const BATTLE_TYPE_FORMAT_FILE = 'web/src/engine/sim/driver/battleFormat.ts'
+
 const BATTLE_TYPE_DRIVER_EVIDENCE: UnitEvidence = {
   productionFiles: BATTLE_TYPE_DRIVER_FILES,
   productionLinePattern: /\bbattleTypeFlags\s*(?:\|=|:|=)/,
 }
 
 const BATTLE_TYPE_TRAINER_EVIDENCE: UnitEvidence = {
-  productionFiles: BATTLE_TYPE_DRIVER_FILES,
-  productionLinePattern: /\bbattleTypeFlags\s*:\s*BATTLE_TYPE_TRAINER\s*,?\s*$/,
+  // Every format starts from TRAINER in battleFormat.ts, the function that now
+  // computes gBattleTypeFlags for a session.
+  productionFiles: [...BATTLE_TYPE_DRIVER_FILES, BATTLE_TYPE_FORMAT_FILE],
+  productionLinePattern: /\bbattleTypeFlags\s*=\s*BATTLE_TYPE_TRAINER\s*$/,
   testPattern: /\bcreateSession\b/,
   testMustAssert: true,
 }
@@ -748,8 +756,8 @@ function collectEngineFiles(predicate: (repoRel: string, isTest: boolean) => boo
 }
 
 /**
- * Non-test engine sources. `sim/driver/` is excluded except the four loaders,
- * which are the places the sim sources a unit from data.
+ * Non-test engine sources. `sim/driver/` is excluded except the loader files,
+ * which are the places the sim sources a unit from data or starts a battle.
  */
 export function loadEngineProductionFiles(): SourceFile[] {
   return collectEngineFiles(
@@ -1306,10 +1314,12 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     key: 'BATTLE_TYPE_DOUBLE',
     token: 'BATTLE_TYPE_DOUBLE',
     site: 'BattleSetup_StartTrainerBattle',
-    // battle_setup.c:1240 sets this only when two trainers approach; the driver's
-    // session.ts:245 sets BATTLE_TYPE_TRAINER alone, and aiCheckBadMove.ts:28
-    // records that battleTypeFlags never carries the double bit in this build.
-    scope: 'not started by the driver: session.ts:245 sets BATTLE_TYPE_TRAINER only',
+    // battle_setup.c:1240 sets this only when two trainers approach; battleFormat.ts
+    // computes it from a format, but the only format createSession builds is a
+    // single non-forced trainer (a forced-double trainer throws until dbl-3), and
+    // aiCheckBadMove.ts:28 records that battleTypeFlags never carries the double
+    // bit in this build.
+    scope: 'not started by a session: createSession refuses forcedDouble (dbl-3) and only builds a single trainer',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
@@ -2669,7 +2679,7 @@ export function generateEnvironmentInventoryDoc(
     'test file, after comments are stripped. Qualifying production files are all non-test files under `web/src/engine/`',
   )
   lines.push(
-    'except `sim/driver/`, plus the four loader files `session.ts`, `runBattle.ts`, `buildParty.ts` and `loadSimData.ts`.',
+    'except `sim/driver/`, plus the loader files `session.ts`, `runBattle.ts`, `battleFormat.ts`, `buildParty.ts` and `loadSimData.ts`.',
   )
   lines.push(
     '`registered, untested` means production names the token but no qualifying test does; it is counted as unported. A',
@@ -2683,12 +2693,14 @@ export function generateEnvironmentInventoryDoc(
     '  `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.',
   )
   lines.push(
-    '- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,',
+    '- Battle-type units must have the flag assigned on the driver battle-start path (`session.ts`, `runBattle.ts`,',
   )
   lines.push(
-    '  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:245`); `BATTLE_TYPE_DOUBLE` does not, so the driver',
+    '  `buildParty.ts` or `battleFormat.ts`). `BATTLE_TYPE_TRAINER` qualifies (`battleFormat.ts`); `BATTLE_TYPE_DOUBLE`',
   )
-  lines.push('  never runs a double battle regardless of a constant or a hand-built test state.')
+  lines.push(
+    '  does not because `createSession` refuses a forced-double trainer (dbl-3), so the driver never runs a double battle.',
+  )
   lines.push(
     '- `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active',
   )

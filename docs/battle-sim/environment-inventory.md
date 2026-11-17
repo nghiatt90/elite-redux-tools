@@ -11,15 +11,15 @@ against the battle simulator. It covers no species, move, ability or item data.
 
 A unit is **ported** only when its token appears in both a qualifying non-test engine source file and an engine
 test file, after comments are stripped. Qualifying production files are all non-test files under `web/src/engine/`
-except `sim/driver/`, plus the four loader files `session.ts`, `runBattle.ts`, `buildParty.ts` and `loadSimData.ts`.
+except `sim/driver/`, plus the loader files `session.ts`, `runBattle.ts`, `battleFormat.ts`, `buildParty.ts` and `loadSimData.ts`.
 `registered, untested` means production names the token but no qualifying test does; it is counted as unported. A
 mention in a comment is not evidence, and neither is a name alone:
 
 - `speedDown` requires a test that sets `speedDown: true` or `ironPill: true`. Every current fixture sets the flag to
   `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.
-- Battle-type units must have the flag assigned in the driver battle-start path (`session.ts`, `runBattle.ts`,
-  `buildParty.ts`). `BATTLE_TYPE_TRAINER` qualifies (`session.ts:245`); `BATTLE_TYPE_DOUBLE` does not, so the driver
-  never runs a double battle regardless of a constant or a hand-built test state.
+- Battle-type units must have the flag assigned on the driver battle-start path (`session.ts`, `runBattle.ts`,
+  `buildParty.ts` or `battleFormat.ts`). `BATTLE_TYPE_TRAINER` qualifies (`battleFormat.ts`); `BATTLE_TYPE_DOUBLE`
+  does not because `createSession` refuses a forced-double trainer (dbl-3), so the driver never runs a double battle.
 - `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active
   battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
   (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
@@ -58,13 +58,13 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 61 | 0 | 12 | 56 | 0 | 5 |
-| `battle-type` | 9 | 1 | 2 | 8 | 0 | 0 |
+| `battle-type` | 9 | 1 | 0 | 8 | 0 | 0 |
 | `difficulty-flag` | 18 | 1 | 1 | 17 | 0 | 0 |
 | `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **171** | **44** | **15** | **119** | **0** | **8** |
+| **total** | **171** | **44** | **13** | **119** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -73,7 +73,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
 | `map-setup` | 56 | 12 |
-| `battle-type` | 8 | 2 |
+| `battle-type` | 8 | 0 |
 | `difficulty-flag` | 17 | 1 |
 | `trainer-flag` | 3 | 0 |
 | `hell-trainer-skill` | 29 | 0 |
@@ -150,10 +150,10 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit key | Fights / maps | C citation | Status | Test file | Production evidence |
 | --- | --- | --- | --- | --- | --- |
-| `BATTLE_TYPE_DOUBLE` | not started by the driver: session.ts:245 sets BATTLE_TYPE_TRAINER only | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` | none |
-| `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported (registered, untested) | none | none |
-| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/session.ts:291` |
-| `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported (registered, untested) | none | none |
+| `BATTLE_TYPE_DOUBLE` | not started by a session: createSession refuses forcedDouble (dbl-3) and only builds a single trainer | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` | none |
+| `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported | `web/src/engine/sim/cycle38DoublesRoster.test.ts` | none |
+| `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/battleFormat.ts:73` |
+| `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/cycle38DoublesRoster.test.ts` | none |
 | `FLAG_TAG_BATTLE` | 26 tagBattles rows across 6 maps in encounters.json (starttagbattle) | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1470` | unported | none | none |
 | `multi_2_vs_2:MeteorFalls_1F_1R` | MeteorFalls_1F_1R: 6 multi_2_vs_2 calls (:193, :202, :211, :220, :229, :238), opponents Courtney + Grunt, partner May (MAY_TREECKO/TORCHIC/MUDKIP_METEOR_FALLS) or Brendan (BRENDAN_*_METEOR_FALLS); second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1647` | unported | none | none |
 | `multi_2_vs_2:MossdeepCity_SpaceCenter_2F` | MossdeepCity_SpaceCenter_2F:274: 1 multi_2_vs_2 call, opponents Maxie + Courtney, partner TRAINER_STEVEN_MOSSDEEP; second opponent party at src/battle_main.c:614,622; macro not in tree, flags inferred from the C | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1647` | unported | none | none |

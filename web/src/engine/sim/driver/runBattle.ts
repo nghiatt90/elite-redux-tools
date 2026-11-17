@@ -10,6 +10,7 @@ import { naturalGiftPriority } from '../turnOrder'
 import type { DamageResolver } from '../turn'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
+import { partySlotsFor } from '../partySlots'
 import { createSession, cloneParty, groundingFor, stepTurn } from './session'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
@@ -67,11 +68,17 @@ export function defaultPlayerPolicy(
   const battler = state.battlers[0]
   if (!battler || battler.mon.hp === 0) {
     const party = state.sides[0].party
-    const activeIdx = battler?.partyIndex ?? -1
+    const [first, last] = partySlotsFor(state, 0)
+    const active = new Set<number>()
+    for (let id = 0; id < state.battlers.length; id++) {
+      if ((id & 1) !== 0) continue
+      const other = state.battlers[id]
+      if (other) active.add(other.partyIndex)
+    }
     let nextSlot = PARTY_SIZE
-    for (let i = 0; i < party.length; i++) {
+    for (let i = first; i < Math.min(last, party.length); i++) {
       const m = party[i]
-      if (m && m.speciesId !== null && m.hp > 0 && i !== activeIdx) {
+      if (m && m.speciesId !== null && m.hp > 0 && !active.has(i)) {
         nextSlot = i
         break
       }

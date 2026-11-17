@@ -57,6 +57,7 @@
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
 import { B_SIDE_PLAYER, clearFlag, hasFlag, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE, STATUS2_WRAPPED } from './constants'
+import { partySlotsFor } from './partySlots'
 import { isUnnerveAbilityOnOpposingSide } from './statBuffs'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
@@ -111,12 +112,29 @@ export interface ReplacementDeps {
 }
 
 /** Any OTHER party slot on this battler's side that is alive and not an empty
- * slot -- the condition `applyEndOfTurnReplacements` gates a replacement on. */
+ * slot -- the condition `applyEndOfTurnReplacements` gates a replacement on.
+ *
+ * "Other" is relative to the battler's own slot RANGE (partySlotsFor) and to every
+ * active party slot on that side, not just this battler's. In singles that reduces to
+ * the old `index !== battler.partyIndex`; in a double it keeps a partner's active mon
+ * out of the reserve list. */
 export function hasLiveReserve(state: BattleState, battlerId: number): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return false
-  const party = state.sides[battlerId & 1].party
-  return party.some((slot, index) => index !== battler.partyIndex && slot.speciesId !== null && slot.hp > 0)
+  const side = battlerId & 1
+  const party = state.sides[side].party
+  const [first, last] = partySlotsFor(state, battlerId)
+  const active = new Set<number>()
+  for (let id = 0; id < state.battlers.length; id++) {
+    if ((id & 1) !== side) continue
+    const other = state.battlers[id]
+    if (other) active.add(other.partyIndex)
+  }
+  for (let i = first; i < Math.min(last, party.length); i++) {
+    const slot = party[i]
+    if (slot && slot.speciesId !== null && slot.hp > 0 && !active.has(i)) return true
+  }
+  return false
 }
 
 /** Cmd_switchindataupdate + SwitchInClearSetData's NON-Baton-Pass, NON-Shed-

@@ -122,8 +122,15 @@ const SCRIPT_EVENT_UNITS = 6
  */
 export const UNPORTED_UNIT_COUNT = 119
 
-/** Pinned today -- this number should only go DOWN. */
-export const REGISTERED_UNTESTED_UNIT_COUNT = 15
+/**
+ * Moves 15 -> 13 in cycle 38 (dbl-2a): `cycle38DoublesRoster.test.ts` asserts
+ * `battleTypeFlagsFor`'s TWO_OPPONENTS and INGAME_PARTNER bits, so those two leave
+ * `registeredUntested`. They stay unported: `createSession` never runs a double
+ * battle until the doubles turn loop lands (dbl-3).
+ *
+ * Pinned today -- this number should only go DOWN.
+ */
+export const REGISTERED_UNTESTED_UNIT_COUNT = 13
 
 /** Pinned today -- this number should only go DOWN. */
 export const UNCLASSIFIED_UNIT_COUNT = 0
@@ -332,9 +339,10 @@ describe('environment and scripted-condition completeness inventory', () => {
   })
 
   it('negative (c): features really handled and tested today are ported; name-only matches are not', () => {
-    // `BATTLE_TYPE_TRAINER` is a real port: the driver starts every session as a
-    // trainer battle (`session.ts:238`, matching `battle_setup.c:1242`), and the
-    // AI tests build states with that flag.
+    // `BATTLE_TYPE_TRAINER` is a real port: `createSession` builds every session
+    // through `buildBattleState`, which starts the flags at `BATTLE_TYPE_TRAINER`
+    // (`battleFormat.ts`, matching `battle_setup.c:1242`), and the AI tests build
+    // states with that flag.
     const trainerBattle = result.units.find(
       (candidate) => candidate.kind === 'battle-type' && candidate.key === 'BATTLE_TYPE_TRAINER',
     )
@@ -353,10 +361,11 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(speedDown?.registeredUntested).toBe(true)
 
     // `BATTLE_TYPE_DOUBLE` is only named: C sets it when two trainers approach
-    // (`src/battle_setup.c:1240`), but the driver's `session.ts:238` sets
-    // `BATTLE_TYPE_TRAINER` alone and `aiCheckBadMove.ts:28` records that
-    // `battleTypeFlags` never carries the double bit in this build. A test that
-    // pokes the constant on a hand-built state does not port double battles.
+    // (`src/battle_setup.c:1240`), but `createSession` only asks `battleFormat.ts`
+    // for a single non-forced trainer (a forced-double trainer throws until dbl-3)
+    // and `aiCheckBadMove.ts:28` records that `battleTypeFlags` never carries the
+    // double bit in this build. A test that pokes the constant on a hand-built
+    // state does not port double battles.
     const doubleBattle = result.units.find(
       (candidate) => candidate.kind === 'battle-type' && candidate.key === 'BATTLE_TYPE_DOUBLE',
     )
@@ -914,19 +923,19 @@ describe('step 1: non-trainer-flag evidence', () => {
   const productionFiles = loadEngineProductionFiles()
   const testFiles = loadEngineTestFiles()
 
-  it('1. BATTLE_TYPE_TRAINER is ported on unmodified files, and flips to unported when mutated to battleTypeFlags: BATTLE_TYPE_TRAINER & 0,', () => {
+  it('1. BATTLE_TYPE_TRAINER is ported on unmodified files, and flips to unported when mutated to battleTypeFlags = BATTLE_TYPE_TRAINER & 0', () => {
     const spec = BATTLE_TYPE_SPECS.find((s) => s.key === 'BATTLE_TYPE_TRAINER')!
     expect(spec).toBeDefined()
     const initial = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
     expect(initial.status).toBe('ported')
 
     const mutatedFiles = productionFiles.map((file) => {
-      if (!file.file.endsWith('session.ts')) return file
+      if (!file.file.endsWith('battleFormat.ts')) return file
       return {
         file: file.file,
         source: file.source.replace(
-          'battleTypeFlags: BATTLE_TYPE_TRAINER,',
-          'battleTypeFlags: BATTLE_TYPE_TRAINER & 0,',
+          'const battleTypeFlags = BATTLE_TYPE_TRAINER',
+          'const battleTypeFlags = BATTLE_TYPE_TRAINER & 0',
         ),
       }
     })

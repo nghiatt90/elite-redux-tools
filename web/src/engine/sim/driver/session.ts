@@ -7,18 +7,16 @@
 // rather than capturing it, so they are built once per session and a clone only has
 // to rebuild them around its own state.
 
-import { createBattleState, createBattlerState } from '../create'
 import { createBridgeDamageResolver } from '../damageResolver'
 import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructsClear, turnStructsClear, type ActionOutcome, type DamageResolver, type TurnLoopDeps, type TurnOutcome } from '../turn'
 import { applyBattleStartPass, getSingleUseAbilityCounter } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
-import { battleAiSetupFlags } from '../ai/aiFlags'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { BATTLE_TYPE_TRAINER, clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
+import { clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
-import type { BattleState, RandomSource, SimBattleMon, SimPartyMon, Slot4 } from '../state'
+import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
 import { gateInnates } from '../innateGate'
 import type { GroundingContext } from '../grounding'
@@ -31,7 +29,9 @@ import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
+import { buildBattleState } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
+import { partySlotsFor } from '../partySlots'
 
 export type Tier = 'ace' | 'elite' | 'hell'
 
@@ -74,36 +74,22 @@ export function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
   }))
 }
 
-function toBattleMon(incoming: SimPartyMon): SimBattleMon {
-  return {
-    speciesId: incoming.speciesId as string,
-    rawStats: incoming.rawStats,
-    moves: incoming.moves,
-    pp: incoming.pp,
-    hp: incoming.hp,
-    maxHp: incoming.maxHp,
-    itemId: incoming.itemId,
-    statStages: [],
-    types: incoming.types,
-    level: incoming.level,
-    nature: incoming.nature,
-    hiddenPowerType: incoming.hiddenPowerType,
-    speedDown: incoming.speedDown,
-    abilities: incoming.abilities,
-    abilityNum: incoming.abilityNum,
-    gender: incoming.gender,
-    status1: incoming.status1,
-    status2: 0,
-    evs: incoming.evs,
-  }
-}
-
+/** The first live reserve slot for the player's battler 0, honouring its own slot
+ * range and excluding every active party slot of side 0. In singles this is today's
+ * `index !== battler.partyIndex`; in doubles it must also skip the partner's active
+ * slot (dbl-2a). */
 export function firstLiveReplacement(state: BattleState): number {
   const party = state.sides[0].party
-  const currentPartyIndex = state.battlers[0]?.partyIndex ?? -1
-  for (let i = 0; i < party.length; i++) {
+  const [first, last] = partySlotsFor(state, 0)
+  const active = new Set<number>()
+  for (let id = 0; id < state.battlers.length; id++) {
+    if ((id & 1) !== 0) continue
+    const battler = state.battlers[id]
+    if (battler) active.add(battler.partyIndex)
+  }
+  for (let i = first; i < Math.min(last, party.length); i++) {
     const mon = party[i]
-    if (mon && mon.speciesId !== null && mon.hp > 0 && i !== currentPartyIndex) return i
+    if (mon && mon.speciesId !== null && mon.hp > 0 && !active.has(i)) return i
   }
   return PARTY_SIZE
 }
@@ -251,6 +237,12 @@ function buildDeps(
 export function createSession(options: SessionOptions): BattleSession {
   const tier = options.tier ?? 'elite'
   const data = options.data
+  // A forced-double trainer needs four battlers and the doubles turn loop, which this
+  // cycle (dbl-2a) does not run. Refuse rather than silently build a singles state
+  // that claims BATTLE_TYPE_DOUBLE.
+  if (options.opponentTrainer.forcedDouble) {
+    throw new Error(`createSession: forced-double trainer ${options.opponentTrainer.id} needs the doubles turn loop (dbl-3)`)
+  }
   const playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
   const leadIndex = options.leadIndex ?? 0
@@ -274,25 +266,17 @@ export function createSession(options: SessionOptions): BattleSession {
     throw new Error(`createSession: opponentParty for ${options.opponentTrainer.id} (${tier}) must not be empty`)
   }
 
-  const state = createBattleState({
-    battlers: [
-      createBattlerState(0, toBattleMon(lead), leadIndex),
-      createBattlerState(1, toBattleMon(opponentParty[0]), 0),
-    ],
-    playerParty,
-    opponentParty,
-    // A session is always a trainer battle. CanBattlerBeForceSwitched needs this
-    // bit for Emergency Exit / Wimp Out (abilities.cc:2608-2615, called at :2622)
-    // and Restraining Order (:8579-8597); the sim ports those gates in moveEnd.ts
-    // (:3249-3267 and :3019-3036). Red Card does NOT read it: its hold effect
-    // schedules unconditionally (battle_util.c:6130-6141) and its script tests only
-    // Rooted / Suction Cups / Commander (data/battle_scripts_1.s:11320-11335).
-    // See docs/battle-sim/session-battle-type-flags.md.
-    battleTypeFlags: BATTLE_TYPE_TRAINER,
-    aiFlags: battleAiSetupFlags(options.opponentTrainer, 0),
-    tier,
-    rng: options.rng,
-  })
+  const state = buildBattleState(
+    { opponents: [options.opponentTrainer] },
+    {
+      data,
+      tier,
+      playerParty,
+      opponentParties: [opponentParty],
+      leadIndex: options.leadIndex,
+      rng: options.rng,
+    },
+  )
 
   if (options.battleEvents) {
     for (const ev of options.battleEvents) {

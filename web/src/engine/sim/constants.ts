@@ -415,11 +415,14 @@ export const DEFAULT_STAT_STAGE_RATIOS: [number, number][] = [
   [2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [1, 1], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2],
 ]
 
-/** include/constants/battle.h:49, 52, 66, 67 -- BattleTypeFlags */
+/** include/constants/battle.h:49, 52, 55, 64, 66, 67, 71 -- BattleTypeFlags */
 export const BATTLE_TYPE_DOUBLE = 1 << 0
 export const BATTLE_TYPE_TRAINER = 1 << 3
+export const BATTLE_TYPE_MULTI = 1 << 6
+export const BATTLE_TYPE_TWO_OPPONENTS = 1 << 15
 export const BATTLE_TYPE_PALACE = 1 << 17
 export const BATTLE_TYPE_ARENA = 1 << 18
+export const BATTLE_TYPE_INGAME_PARTNER = 1 << 22
 
 /** include/battle.h:69 -- BattleResources.flags */
 export const RESOURCE_FLAG_ROOST = 0x2

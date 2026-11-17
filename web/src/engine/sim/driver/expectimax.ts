@@ -73,6 +73,7 @@ import { applyStatStage } from '../../stats'
 import { battlerHasSimAbility } from '../statBuffs'
 import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
 import type { ChosenAction } from '../turnOrder'
+import { partySlotsFor } from '../partySlots'
 import { aiDamageDepsFor, buildMoveAction, cloneParty, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
@@ -1048,9 +1049,16 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   if (choices.length === 0) choices.push({ action: buildMoveAction(state, data, 0, 'MOVE_STRUGGLE', session.turnDeps.damage) })
 
   const party = state.sides[0].party
-  for (let i = 0; i < party.length; i++) {
+  const [firstSlot, lastSlot] = partySlotsFor(state, 0)
+  const active = new Set<number>()
+  for (let id = 0; id < state.battlers.length; id++) {
+    if ((id & 1) !== 0) continue
+    const other = state.battlers[id]
+    if (other) active.add(other.partyIndex)
+  }
+  for (let i = firstSlot; i < Math.min(lastSlot, party.length); i++) {
     const mon = party[i]
-    if (mon && mon.speciesId !== null && mon.hp > 0 && i !== battler.partyIndex) {
+    if (mon && mon.speciesId !== null && mon.hp > 0 && !active.has(i)) {
       choices.push({ action: { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null }, switchTo: i })
     }
   }
