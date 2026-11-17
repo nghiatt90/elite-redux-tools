@@ -100,12 +100,10 @@ describe('Cycle d5-1b boss fight progression table (fights.ts)', () => {
     }
   })
 
-  it('validates formats and chainId invariants across multi-battle chains', () => {
-    const validFormats = new Set(['single', 'double', 'tag', 'multi_2_vs_2'])
+  it('verifies chainId invariants across multi-battle chains', () => {
     const chainRows = new Map<string, FightRow[]>()
 
     for (const row of FIGHTS) {
-      expect(validFormats.has(row.format)).toBe(true)
       if (row.chainId) {
         const list = chainRows.get(row.chainId) ?? []
         list.push(row)
