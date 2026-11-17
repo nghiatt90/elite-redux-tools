@@ -617,17 +617,18 @@ export const FIGHTS: readonly FightRow[] = [
  * The level cap for a fight, from the badges held at that point in the story
  * (innate-gating-plan step 1.2). Finds the row whose `trainerIds` contains the
  * trainer id -- ANY member, not only `fightId`, so `TRAINER_WALLACE` finds
- * Juan's row. A placed row yields its cap: the highest required gym
+ * Juan's row.
+ *
+ * A tagged row never yields a cap: it returns `{ awaiting, row }`, where
+ * `awaiting` is the reason the fight is not run -- `row.excluded` (why the
+ * pinned build's fight is unusable), `'deferred (v1 scope)'` for a row marked
+ * `deferred` (a fixed literal, NOT `row.deferredReason`), or `'awaitingRoute'`
+ * for a row with no route position. Precedence is excluded, deferred,
+ * awaitingRoute. A placed row yields its cap: the highest required gym
  * (`highestBadgeRange(row).min`, the only value now that every row is placed)
  * indexed into GetLevelCap's strict table (src/pokemon.c:4661). A trainer id in
  * no row yields `undefined`, which the CLI treats as today's `--level` (default
  * 50, no cap).
- *
- * NOTE: the `awaitingRoute` / `excluded` fields on `FightRow` are added by queue
- * item d5-1c, which has not landed; until then the tagged `{ awaiting }` outcome
- * below is unreachable, so only the placed-row and `undefined` branches are
- * implemented. When d5-1c lands an awaiting/excluded row must return
- * `{ awaiting: row.excluded ?? 'awaitingRoute', row }` instead of a cap.
  */
 export function levelCapForTrainer(
   trainerId: string,
@@ -635,6 +636,15 @@ export function levelCapForTrainer(
   const row = FIGHTS.find((fight) => fight.trainerIds.includes(trainerId))
   if (!row) {
     return undefined
+  }
+  if (row.excluded !== undefined) {
+    return { awaiting: row.excluded, row }
+  }
+  if (row.deferred === true) {
+    return { awaiting: 'deferred (v1 scope)', row }
+  }
+  if (row.awaitingRoute === true) {
+    return { awaiting: 'awaitingRoute', row }
   }
   return {
     cap: levelCapFor(highestBadgeRange(row).min),
