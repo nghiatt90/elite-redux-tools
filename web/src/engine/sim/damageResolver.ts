@@ -35,7 +35,8 @@ import type { BattleConstants } from '../types'
 import type { MoveBehaviors } from '../basePower'
 import { isUnmodelledBasePowerNote } from '../basePower'
 import type { TypeChart } from '../typeEffectiveness'
-import type { BattleState, RandomSource } from './state'
+import type { BattleState, BattlerState, RandomSource } from './state'
+import type { AbilitySlots } from '../abilities/dispatch'
 import type { BridgeDeps } from './bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from './bridge'
 import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, STATUS_FIELD_TERRAIN_ANY, hasFlag } from './constants'
@@ -64,6 +65,29 @@ function magnitudeTier(random: RandomSource): 4 | 5 | 6 | 7 | 8 | 9 | 10 {
   if (roll < 85) return 8
   if (roll < 95) return 9
   return 10
+}
+
+/**
+ * Blank every slot `isSimAbilitySuppressed` reports as suppressed for one ally.
+ * CalcFinalDmg's ally reducers are BATTLER_HAS_ABILITY_AND_ALIVE(partner, X, TRUE)
+ * (battle_util.c:7637-7640), and BattlerHasAbility's own IsSuppressed gate
+ * (:9271-9279, :9255-9261) drops a slot under Gastro Acid / Neutralizing Gas, so
+ * the raw bridge slots must be filtered before calculate.ts reads them.
+ * `checkMoldBreaker` is FALSE because calculate.ts applies Mold Breaker itself.
+ */
+function suppressSlotsForAlly(
+  state: BattleState,
+  partner: BattlerState,
+  slots: AbilitySlots,
+  attackerId: number,
+  dataContext: BridgeDeps['dataContext'],
+): AbilitySlots {
+  const live = (id: string | null): string | null =>
+    id && !isSimAbilitySuppressed(state, partner, id, false, attackerId, false, dataContext) ? id : null
+  return {
+    ability: live(slots.ability),
+    innates: [live(slots.innates[0]), live(slots.innates[1]), live(slots.innates[2])],
+  }
 }
 
 export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): DamageResolver {
@@ -110,14 +134,22 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     atkPartnerAlive: isBattlerAlive(state, attackerId ^ 2),
   })
   // CalcFinalDmg's three ally-ability reducers (:7637-7640) are each
-  // BATTLER_HAS_ABILITY_AND_ALIVE(BATTLE_PARTNER(battlerDef), ability, TRUE):
-  // the defender's partner must be alive for its slots to matter. Build those
-  // slots through the same bridge the defender uses, never by hand; `null`
-  // means no alive partner (every singles scenario) and reads as zero reducers.
+  // BATTLER_HAS_ABILITY_AND_ALIVE(BATTLE_PARTNER(battlerDef), ability, TRUE),
+  // and BATTLER_HAS_ABILITY_AND_ALIVE is IsBattlerAlive(b) && BattlerHasAbility(b,
+  // ability, TRUE) (include/battle_util.h:74). BattlerHasAbility runs the slot
+  // through IsSuppressed (battle_util.c:9271-9279 -> :9255-9261), so a partner
+  // under Gastro Acid, or any partner while Neutralizing Gas is active, must not
+  // feed a reducer even though its raw slots name the ability. The bridge carries
+  // the RAW slots, so blank the suppressed ones here before the engine reads them.
+  // `checkMoldBreaker` stays FALSE: calculate.ts:1417-1424 applies Mold Breaker
+  // itself to these same slots. `null` means no alive partner (every singles
+  // scenario) and reads as zero reducers.
   const defenderPartnerId = targetId ^ 2
-  const defenderAllyAbilitySlots = isBattlerAlive(state, defenderPartnerId)
-    ? buildBattlerBattleState(state, defenderPartnerId, roles, deps).battler.abilitySlots
-    : null
+  const defenderPartner = state.battlers[defenderPartnerId]
+  const defenderAllyAbilitySlots =
+    isBattlerAlive(state, defenderPartnerId) && defenderPartner
+      ? suppressSlotsForAlly(state, defenderPartner, buildBattlerBattleState(state, defenderPartnerId, roles, deps).battler.abilitySlots, attackerId, deps.dataContext)
+      : null
   const unmodelled = [
     ...gapsToUnmodelled(attacker.gaps).map((gap) => `attacker.${gap}`),
     ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),

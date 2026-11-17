@@ -46,7 +46,7 @@ import { NEUTRAL_TURN_ORDER_CONTEXT } from './turnOrder'
 import type { GroundingContext } from './grounding'
 import type { SimDataContext, SimItemData, SimMoveData, SimSpeciesData } from './dataContext'
 import type { BridgeDeps } from './bridge'
-import { BATTLE_TYPE_DOUBLE, SIDE_STATUS_LUCKY_CHANT, SIDE_STATUS_REFLECT } from './constants'
+import { BATTLE_TYPE_DOUBLE, SIDE_STATUS_LUCKY_CHANT, SIDE_STATUS_REFLECT, STATUS3_GASTRO_ACID } from './constants'
 import { registerAbilities, _resetRegistryForTests } from '../abilities/registry'
 import { MOLD_BREAKER_ABILITIES } from '../abilities/impl/23-mold-breaker'
 import { applyModifier, mulModifier, uq } from '../fixed'
@@ -412,6 +412,50 @@ describe('defender ally ability reducers from sim state (battle_util.c:7637-7640
     const state = doubles(ability('ABILITY_FRIEND_GUARD', 'ABILITY_CARETAKER'))
     state.battlers[0]!.mon.abilities = ability('ABILITY_MOLD_BREAKER')
     expect(playerDamage(state, TACKLE)).toBe(31)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 3b. Suppression: the reducers read BattlerHasAbility's IsSuppressed gate
+//     (battle_util.c:9271-9279, :9255-9261 via include/battle_util.h:74)
+// ---------------------------------------------------------------------------
+describe('defender ally abilities respect Gastro Acid / Neutralizing Gas', () => {
+  it('Friend Guard on a Gastro-Acid partner is suppressed -> 61, not 31', () => {
+    // BATTLER_HAS_ABILITY_AND_ALIVE(partner, FRIEND_GUARD, TRUE) is false once
+    // IsSuppressed sees STATUS3_GASTRO_ACID on the partner (Friend Guard is not
+    // `unsuppressable`), so CalcFinalDmg applies no x0.5. Removing the
+    // suppression filter in damageResolver.ts would restore 31.
+    const suppressed = doubles(ability('ABILITY_FRIEND_GUARD'))
+    suppressed.battlers[3]!.statuses3 |= STATUS3_GASTRO_ACID
+    expect(playerDamage(suppressed, TACKLE)).toBe(61)
+
+    // Negative: the same partner without Gastro Acid still halves to 31.
+    expect(playerDamage(doubles(ability('ABILITY_FRIEND_GUARD')), TACKLE)).toBe(31)
+  })
+
+  it('Friend Guard under Neutralizing Gas is suppressed -> 61', () => {
+    // gFieldTimers.neutralizingGas suppresses every non-unsuppressable ability on
+    // every battler, the partner included.
+    const gas = doubles(ability('ABILITY_FRIEND_GUARD'))
+    gas.field.timers.neutralizingGas = true
+    expect(playerDamage(gas, TACKLE)).toBe(61)
+    expect(playerDamage(doubles(ability('ABILITY_FRIEND_GUARD')), TACKLE)).toBe(31)
+  })
+
+  it('AI path: Gastro-Acid Friend Guard equals the no-Friend-Guard 62', () => {
+    // aiCalcDamage feeds the MASKED state through the same filter, so the AI
+    // estimate must match its own partner-fainted/no-reducer number (62, see the
+    // Mold Breaker AI case above) rather than the halved 31.
+    const aiNoReducer = aiDamage(doubles(ability('ABILITY_FRIEND_GUARD'), 0), TACKLE)
+    expect(aiNoReducer).toBe(62)
+
+    const suppressed = doubles(ability('ABILITY_FRIEND_GUARD'))
+    suppressed.battlers[3]!.statuses3 |= STATUS3_GASTRO_ACID
+    expect(aiDamage(suppressed, TACKLE)).toBe(aiNoReducer)
+    expect(aiDamage(suppressed, TACKLE)).not.toBe(31)
+
+    // Negative: with the ability live the AI path still halves to 31.
+    expect(aiDamage(doubles(ability('ABILITY_FRIEND_GUARD')), TACKLE)).toBe(31)
   })
 })
 
