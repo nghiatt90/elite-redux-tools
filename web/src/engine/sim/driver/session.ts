@@ -43,8 +43,10 @@ export interface SessionOptions {
   rng: RandomSource
   /** Player party slot that starts on the field; default 0. */
   leadIndex?: number
-  /** Which party slot the player sends in after a faint; default is the first live mon that is not already out. */
-  playerReplacement?: (state: BattleState) => number
+  /** Which party slot the player sends in after a faint; default is the first live mon
+   * that is not already out. `battlerId` is the fainting player battler (0 in singles,
+   * 0 or 2 in a double). */
+  playerReplacement?: (state: BattleState, battlerId: number) => number
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
 }
 
@@ -54,7 +56,7 @@ export interface BattleSession {
   trainer: TrainerData
   turnDeps: TurnLoopDeps
   chooseAiDeps: ChooseAiActionDeps
-  playerReplacement: (state: BattleState) => number
+  playerReplacement: (state: BattleState, battlerId: number) => number
   /** Notes from the battle-start pass. */
   startUnmodelled: string[]
 }
@@ -74,16 +76,18 @@ export function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
   }))
 }
 
-/** The first live reserve slot for the player's battler 0, honouring its own slot
- * range and excluding every active party slot of side 0. In singles this is today's
- * `index !== battler.partyIndex`; in doubles it must also skip the partner's active
- * slot (dbl-2a). */
-export function firstLiveReplacement(state: BattleState): number {
-  const party = state.sides[0].party
-  const [first, last] = partySlotsFor(state, 0)
+/** The first live reserve slot for one of the player's battlers, honouring that
+ * battler's own slot range and excluding every active party slot of side 0. In singles
+ * this is today's `index !== battler.partyIndex`; in doubles it must also skip the
+ * partner's active slot (dbl-2a), and `battlerId` picks which half of a partner party
+ * to scan -- battler 2 owns slots 3-5 in an INGAME_PARTNER fight (dbl-2b). */
+export function firstLiveReplacement(state: BattleState, battlerId = 0): number {
+  const side = battlerId & 1
+  const party = state.sides[side].party
+  const [first, last] = partySlotsFor(state, battlerId)
   const active = new Set<number>()
   for (let id = 0; id < state.battlers.length; id++) {
-    if ((id & 1) !== 0) continue
+    if ((id & 1) !== side) continue
     const battler = state.battlers[id]
     if (battler) active.add(battler.partyIndex)
   }
@@ -188,7 +192,7 @@ function buildDeps(
   state: BattleState,
   data: SimDataBundle,
   trainer: TrainerData,
-  playerReplacement: (state: BattleState) => number,
+  playerReplacement: (state: BattleState, battlerId: number) => number,
 ): { turnDeps: TurnLoopDeps; chooseAiDeps: ChooseAiActionDeps } {
   const random: RandomSource = { random16: () => state.rng.random16() }
   const grounding = groundingFor(data, state)
@@ -213,7 +217,7 @@ function buildDeps(
   const replacementDeps: ReplacementDeps = {
     chooseReplacement(battleState: BattleState, battlerId: number, unmodelled: string[]): number {
       if ((battlerId & 1) === 1) return aiOpponentReplacement.chooseReplacement(battleState, battlerId, unmodelled)
-      return playerReplacement(battleState)
+      return playerReplacement(battleState, battlerId)
     },
   }
 

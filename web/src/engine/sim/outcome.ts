@@ -6,7 +6,8 @@
 // C call sites this batch treats as "the outcome is decided here" and why.
 //
 // PARTY HP, NOT BATTLER HP: both C functions sum `GetMonData(&party[i],
-// MON_DATA_HP)` over the WHOLE roster, never `gBattleMons[battler].hp`
+// MON_DATA_HP)` over the roster (the partner branch described at the end of this
+// header narrows the PLAYER's sum to slots 0-2), never `gBattleMons[battler].hp`
 // directly. In the real game the active battler's own party slot stays live
 // throughout the fight -- every damage/heal path re-syncs it via a controller
 // message (`BtlController_EmitSetMonData(..., MON_DATA_HP, ...)`, e.g.
@@ -25,11 +26,16 @@
 // excluded, matching `GetMonData(..., MON_DATA_SPECIES)` being falsy.
 //
 // BATTLE_TYPE_INGAME_PARTNER's own MULTI_PARTY_SIZE branch
-// (NoAliveMonsForPlayer, :3690-3694) is doubles-only (in-game partner trainer
-// battles) and unreachable: this sim is singles-only (CLAUDE.md).
+// (NoAliveMonsForPlayer, :3690-3694) sums only the PLAYER's own half, slots [0,3);
+// the partner's three mons at 3-5 are not the player's to lose. The C also gates that
+// branch on `gPartnerTrainerId == TRAINER_STEVEN_PARTNER || gPartnerTrainerId >=
+// TRAINER_CUSTOM_PARTNER` (include/constants/trainers.h:18-19). Every in-game-partner
+// fight this game runs is one of those two (docs/battle-sim/doubles-plan.md Step 0), so
+// the battle-type flag is used as the proxy and the id test is not reproduced.
+// NoAliveMonsForOpponent (:3707-3719) has no such branch and always sums all six.
 
 import type { BattleOutcome, BattleState } from './state'
-import { B_SIDE_OPPONENT, B_SIDE_PLAYER } from './constants'
+import { B_SIDE_OPPONENT, B_SIDE_PLAYER, BATTLE_TYPE_INGAME_PARTNER, MULTI_PARTY_SIZE } from './constants'
 
 /** Writes a battler's current HP back to its own party slot, so
  * `computeBattleOutcome`'s party-only summation stays accurate without
@@ -67,9 +73,16 @@ export function syncPartyHp(state: BattleState, battlerId: number): void {
 function noAliveMonsForSide(state: BattleState, sideIndex: 0 | 1): boolean {
   const party = state.sides[sideIndex].party
   if (party.length === 0) return false
+  // NoAliveMonsForPlayer, :3690-3694: in an in-game-partner fight only the player's
+  // own MULTI_PARTY_SIZE slots decide whether the player has lost; the partner's mons
+  // at 3-5 are excluded. NoAliveMonsForOpponent (:3707-3719) has no equivalent.
+  const slots =
+    sideIndex === B_SIDE_PLAYER && (state.battleTypeFlags & BATTLE_TYPE_INGAME_PARTNER) !== 0
+      ? party.slice(0, MULTI_PARTY_SIZE)
+      : party
   let hpCount = 0
-  for (const mon of party) {
-    if (mon.speciesId === null) continue // MON_DATA_SPECIES falsy, :3691/:3697/:3712
+  for (const mon of slots) {
+    if (mon.speciesId === null) continue // MON_DATA_SPECIES falsy, :3692/:3697/:3712
     hpCount += mon.hp
   }
   return hpCount === 0

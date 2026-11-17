@@ -56,8 +56,8 @@
 //   endTurn.ts's ITEMS_1_2_HOLD_EFFECTS).
 
 import { clearBattlerLastTakenMove, createBattlerState } from './create'
-import { B_SIDE_PLAYER, clearFlag, hasFlag, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE, STATUS2_WRAPPED } from './constants'
-import { partySlotsFor } from './partySlots'
+import { B_SIDE_PLAYER, clearFlag, hasFlag, REPLACEMENT_ORDER_DOUBLES, STATUS1_ANY, STATUS1_SLEEP, STATUS2_CONFUSION, STATUS2_NIGHTMARE, STATUS2_WRAPPED } from './constants'
+import { hasNoMonsToSwitch, partySlotsFor } from './partySlots'
 import { isUnnerveAbilityOnOpposingSide } from './statBuffs'
 import { applySwitchInHazards, type HazardDeps } from './hazards'
 import type { BattlerState, BattleState, SimBattleMon, SimPartyMon } from './state'
@@ -293,16 +293,35 @@ export function switchIn(
  * state-3 gate is waiting for (see this module's header). A replacement that
  * faints to its own entry hazards is replaced again (HandleFaintedMonActions
  * runs again for it in the C), until a mon survives, the side runs out of
- * reserves, or the battle is decided. No-op entirely once the battle is
- * decided, matching BattleScript_HandleFaintedMon's own checkteamslost-then-
- * jump-to-FaintedMonEnd shortcut. */
+ * reserves, or the battle is decided. A fainted battler with no reserve at all in a
+ * double is instead marked absent (see the Cmd_openpartyscreen citation below). No-op
+ * entirely once the battle is decided, matching BattleScript_HandleFaintedMon's own
+ * checkteamslost-then-jump-to-FaintedMonEnd shortcut. */
 export function applyEndOfTurnReplacements(state: BattleState, deps: ReplacementDeps, switchDeps: HazardDeps, unmodelled: string[]): void {
   if (state.battleOutcome) return
-  for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
+  // ORDER: Cmd_openpartyscreen's BS_FAINTED_LINK_MULTIPLE_1 branch prompts battler 0,
+  // then 2, then 1, then 3 (src/battle_script_commands.c:5226-5319; see
+  // REPLACEMENT_ORDER_DOUBLES). When BOTH battlers of one side fainted, that side's
+  // second prompt comes from the BS_FAINTED_LINK_MULTIPLE_2 branch (:5321-5350), which
+  // handles battler 2 (if 0 fainted too) and then battler 3 (if 1 fainted too) -- the
+  // same left-before-right order, so one flat pass over [0, 2, 1, 3] covers both.
+  // Singles keeps gBattlersCount order.
+  const order: readonly number[] = state.battlersCount === 4 ? REPLACEMENT_ORDER_DOUBLES : [0, 1]
+  for (const battlerId of order) {
     while (!state.battleOutcome && state.battlers[battlerId]?.mon.hp === 0 && hasLiveReserve(state, battlerId)) {
       const partyIndex = deps.chooseReplacement(state, battlerId, unmodelled)
       tryRecurringNightmare(state, battlerId, switchDeps)
       switchIn(state, battlerId, partyIndex, switchDeps, unmodelled)
+    }
+    // Cmd_openpartyscreen's doubles branch marks a fainted battler with nothing to send
+    // in as ABSENT (`gAbsentBattlerFlags |= gBitTable[gActiveBattler]`, :5234 and the
+    // same pair in the other three blocks at :5250/:5265/:5281), the source of
+    // isBattlerAlive's own absentBattlerFlags test (turn.ts:336). hasNoMonsToSwitch is
+    // FALSE outside BATTLE_TYPE_DOUBLE (:3611), so singles never marks anyone. The
+    // battler keeps hp 0, which is what an AI target scan testing only `hp == 0` reads
+    // (ChooseMoveOrAction_Doubles, src/battle_ai_main.c:354).
+    if (!state.battleOutcome && state.battlers[battlerId]?.mon.hp === 0 && hasNoMonsToSwitch(state, battlerId)) {
+      state.absentBattlerFlags |= 1 << battlerId
     }
   }
 }

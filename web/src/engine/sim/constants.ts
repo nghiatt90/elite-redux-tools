@@ -26,6 +26,10 @@ export const MAX_BATTLERS_COUNT = 4
 export const MAX_MON_MOVES = 4
 /** include/constants/global.h:79 */
 export const PARTY_SIZE = 6
+/** include/constants/global.h:80 -- `PARTY_SIZE / 2`: the slots ONE trainer owns in
+ * a multi/partner party (NoAliveMonsForPlayer, battle_script_commands.c:3690-3694,
+ * and HasNoMonsToSwitch's flank scans, battle_util.c:3629-3641). */
+export const MULTI_PARTY_SIZE = 3
 /** include/constants/pokemon.h:464 -- innate slots per species. */
 export const NUM_INNATE_PER_SPECIES = 3
 /** include/constants/pokemon.h:458 -- `BattlePokemon.abilities[]` length: the
@@ -423,6 +427,15 @@ export const BATTLE_TYPE_TWO_OPPONENTS = 1 << 15
 export const BATTLE_TYPE_PALACE = 1 << 17
 export const BATTLE_TYPE_ARENA = 1 << 18
 export const BATTLE_TYPE_INGAME_PARTNER = 1 << 22
+
+/** The battler order Cmd_openpartyscreen prompts replacements in for a DOUBLE battle
+ * (src/battle_script_commands.c:5226-5319, the BS_FAINTED_LINK_MULTIPLE_1 branch):
+ * battler 0, then battler 2 (`gBitTable[2] & hitmarkerFaintBits && !(gBitTable[0] &
+ * hitmarkerFaintBits)`, :5247), then battler 1 (:5262), then battler 3 (:5278). When
+ * BOTH battlers of a side fainted, that side's second prompt instead comes from the
+ * BS_FAINTED_LINK_MULTIPLE_2 branch below it (:5321-5350), which handles 2 then 3 --
+ * still left battler before right. Singles keeps gBattlersCount order, `[0, 1]`. */
+export const REPLACEMENT_ORDER_DOUBLES: readonly number[] = [0, 2, 1, 3]
 
 /** include/battle.h:69 -- BattleResources.flags */
 export const RESOURCE_FLAG_ROOST = 0x2

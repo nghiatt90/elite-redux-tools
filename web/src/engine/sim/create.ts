@@ -35,6 +35,7 @@ import type {
 } from './state'
 import { ABILITY_SLOT_COUNT, MOVE_HISTORY_COUNT, SWITCH_IN_ABILITY_DONE_COUNT, defaultStatStages } from './state'
 import { BATTLER_NONE, MAX_BATTLERS_COUNT, NUM_BATTLE_STATS, PARTY_SIZE, STAT_STAGE_CHECK_NOT_NEEDED, WEATHER_NONE } from './constants'
+import { slotsForFlags } from './partySlots'
 import type { InnateTier } from './innateGate'
 
 function nullSlot4(): Slot4<string | null> {
@@ -415,7 +416,9 @@ export interface CreateBattleStateOptions {
   playerParty?: SimPartyMon[]
   opponentParty?: SimPartyMon[]
   /** `gBattleTypeFlags`. Left 0 by default: the caller supplies the format, and
-   * an invented default here would silently decide singles-vs-doubles. */
+   * an invented default here would silently decide singles-vs-doubles. It also gates
+   * the per-side slot-range / duplicate-partyIndex roster checks -- without it there
+   * is no format to check against, so only the party-length check runs. */
   battleTypeFlags?: number
   /** `AI_THINKING_STRUCT->aiFlags` -- from the trainer, so the caller supplies
    * it. See state.ts for why there is only one value for the whole battle. */
@@ -425,28 +428,60 @@ export interface CreateBattleStateOptions {
   rng: RandomSource
 }
 
+/** The roster checks for one side.
+ *
+ * The first two are the original batch's: a supplied party must be real, and an
+ * active battler must point inside it. The slot-range and duplicate checks are
+ * dbl-2b's, and only run when the caller supplied `battleTypeFlags` -- without the
+ * format there is no range to check against, and every pre-existing hand-built
+ * `createBattleState({ battlers, rng })` call predates the format and passes no flags.
+ *
+ * Ranges come from `slotsForFlags`, the same port of HasNoMonsToSwitch's flank split
+ * (src/battle_util.c:3629-3641, :3672-3685) that `partySlotsFor` uses, so a partner
+ * fight's battler 2 must start from slots [3,6) and an INGAME_PARTNER player side's
+ * two battlers may not share a `partyIndex` (`battle_controllers.c:160-171` starts them
+ * at 0 and 3; a duplicate would make one of them unswitchable, since switchIn refuses
+ * `partyIndex === battler.partyIndex`). */
+function assertRosterHoldsActiveBattlers(
+  party: SimPartyMon[] | undefined,
+  battlers: (BattlerState | null)[],
+  side: 0 | 1,
+  battleTypeFlags: number | undefined,
+): void {
+  if (party === undefined) return
+  if (party.length === 0) throw new Error(`side ${side}: a supplied party must not be empty (omit it to opt out of outcome tracking)`)
+  const seen = new Set<number>()
+  battlers.forEach((battler, id) => {
+    if (!battler || (id & 1) !== side) return
+    if (battler.partyIndex >= party.length) {
+      throw new Error(`side ${side}: battler ${id} has partyIndex ${battler.partyIndex}, outside its ${party.length}-mon party`)
+    }
+    if (battleTypeFlags === undefined) return
+    const [first, last] = slotsForFlags(battleTypeFlags, id)
+    if (battler.partyIndex < first || battler.partyIndex >= last) {
+      throw new Error(
+        `side ${side}: battler ${id} has partyIndex ${battler.partyIndex}, outside its [${first}, ${last}) slot range`,
+      )
+    }
+    if (seen.has(battler.partyIndex)) {
+      throw new Error(`side ${side}: battler ${id} has partyIndex ${battler.partyIndex}, already held by another active battler`)
+    }
+    seen.add(battler.partyIndex)
+  })
+}
+
 /** Assembles a battle at turn zero. Takes battlers already built (turning a
  * party entry into a SimBattleMon needs stat calculation and ability
  * resolution, which are not this batch's job) and fills in everything that
  * starts empty. */
-function assertRosterHoldsActiveBattlers(party: SimPartyMon[] | undefined, battlers: (BattlerState | null)[], side: 0 | 1): void {
-  if (party === undefined) return
-  if (party.length === 0) throw new Error(`side ${side}: a supplied party must not be empty (omit it to opt out of outcome tracking)`)
-  battlers.forEach((battler, id) => {
-    if (battler && (id & 1) === side && battler.partyIndex >= party.length) {
-      throw new Error(`side ${side}: battler ${id} has partyIndex ${battler.partyIndex}, outside its ${party.length}-mon party`)
-    }
-  })
-}
-
 export function createBattleState(options: CreateBattleStateOptions): BattleState {
   const battlers = options.battlers.slice(0, MAX_BATTLERS_COUNT)
   while (battlers.length < MAX_BATTLERS_COUNT) battlers.push(null)
   // outcome.ts reads an EMPTY party as "no roster data", so a side whose
   // roster was supplied but came out empty (a mapping bug) could never lose.
   // Omitting the party is the only way to opt out; a supplied one must be real.
-  assertRosterHoldsActiveBattlers(options.playerParty, battlers, 0)
-  assertRosterHoldsActiveBattlers(options.opponentParty, battlers, 1)
+  assertRosterHoldsActiveBattlers(options.playerParty, battlers, 0, options.battleTypeFlags)
+  assertRosterHoldsActiveBattlers(options.opponentParty, battlers, 1, options.battleTypeFlags)
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3406 -- battle-start call decrements isFirstTurn
   for (const battler of battlers) {
