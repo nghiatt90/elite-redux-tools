@@ -145,7 +145,7 @@ export const FIGHTS: readonly FightRow[] = [
     requiredBefore: [1, 2, 3, 4, 5],
     mayBefore: [7, 8],
     evidence:
-      'FortreeCity/map.json:178 warps into FortreeCity_GymReworked:91 which calls FortreeCity_Gym_EventScript_Winona at FortreeCity_Gym:518; sets FLAG_BADGE06_GET at :30.',
+      'FortreeCity/map.json:178 warps into FortreeCity_GymReworked:91 which calls FortreeCity_Gym_EventScript_Winona at FortreeCity_Gym:518; sets FLAG_BADGE06_GET at :30. requiredBefore 1,2,3,4: Norman opens only when FLAG_BADGE01..04_GET are all set (PetalburgCity_Gym:1731). requiredBefore 5: the route to Fortree crosses water and Surf needs FLAG_BADGE05_GET (src/field_control_avatar.c:502; Route118/scripts.pory:61 says rivers need Surf), badge 5 set at PetalburgCity_Gym:410. mayBefore 7,8: EverGrandeCity_PokemonLeague_1F:40 states badge 6 is the only badge that can be skipped, so badges 7 and 8 can already be held.',
     mandatory: true,
     mandatoryCitation:
       'EverGrandeCity_PokemonLeague_1F:39-57 door guard checks goto_if_unset FLAG_BADGE06_GET (:56); script comment at :40-41 ("Its assumed the player has the remaining badges") is what makes gyms 1-8 mandatory in the legal-subset test as an assumption in a comment, not an explicit flag check.',
@@ -158,7 +158,7 @@ export const FIGHTS: readonly FightRow[] = [
     requiredBefore: [1, 2, 3, 4, 5],
     mayBefore: [6],
     evidence:
-      'MossdeepCity_Gym:1009/1012/1015: double battle with forcedDouble; sets FLAG_BADGE07_GET at MossdeepCity_Gym:71.',
+      'MossdeepCity_Gym:1009/1012/1015: double battle with forcedDouble; sets FLAG_BADGE07_GET at MossdeepCity_Gym:71. requiredBefore 1,2,3,4: Norman opens only when FLAG_BADGE01..04_GET are all set (PetalburgCity_Gym:1731). requiredBefore 5: Mossdeep is reached across Route124 water and Surf needs FLAG_BADGE05_GET (src/field_control_avatar.c:502; Route124/map.json:17-34), badge 5 set at PetalburgCity_Gym:410. mayBefore 6: badge 6 is the only badge that can be skipped (EverGrandeCity_PokemonLeague_1F:40) and the Mossdeep Gym script checks no badge 6 (MossdeepCity_Gym:1009-1015).',
     mandatory: true,
     mandatoryCitation:
       'MossdeepCity_Gym:85: sets VAR_MOSSDEEP_SPACE_CENTER_STATE to 1, triggering Space Center story and unlocking HM08 Dive.',
@@ -177,7 +177,7 @@ export const FIGHTS: readonly FightRow[] = [
     requiredBefore: [1, 2, 3, 4, 5, 7],
     mayBefore: [6],
     evidence:
-      'SootopolisCity_Gym_1F:278 chains starttagbattle stage 1 into stage 2 at :288 under FLAG_SYS_DISABLE_AUTOHEAL; sets FLAG_BADGE08_GET at :319.',
+      'SootopolisCity_Gym_1F:278 chains starttagbattle stage 1 into stage 2 at :288 under FLAG_SYS_DISABLE_AUTOHEAL; sets FLAG_BADGE08_GET at :319. requiredBefore 1,2,3,4: Norman opens only when FLAG_BADGE01..04_GET are all set (PetalburgCity_Gym:1731). requiredBefore 5: Surf needs FLAG_BADGE05_GET (src/field_control_avatar.c:502), badge 5 set at PetalburgCity_Gym:410, and Route126 is water-only (Route126/map.json:17-29). requiredBefore 7: reaching Sootopolis needs Dive, gated on FLAG_BADGE07_GET (src/field_control_avatar.c:517) and emerging to MAP_SOOTOPOLIS_CITY (Underwater_SootopolisCity/scripts.pory:7); the alternate Mossdeep rocket route also requires FLAG_DEFEATED_MOSSDEEP_GYM, set together with badge 7 (MossdeepCity_Gym:70-71; MossdeepCity/scripts.pory:466). mayBefore 6: badge 6 is checked only after the fight (:295) and is the only badge that can be skipped (EverGrandeCity_PokemonLeague_1F:40).',
     mandatory: true,
     mandatoryCitation:
       'SootopolisCity_Gym_1F:319: Rain Badge required to use Waterfall to reach Ever Grande City.',
