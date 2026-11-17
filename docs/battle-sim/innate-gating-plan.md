@@ -1,13 +1,13 @@
 # Plan: Elite level caps per fight and player innate gating (D5)
 
-_Status: REVISED 2026-11-17; APPROVED by cold review round 3 (route/gym order, tier elite, Elite cap mode confirmed by Yoshi); six wording notes applied. Revision history: route steps 29-40 from Yoshi (no row awaits the route; Wally VR rows `excluded`; `levelCapForTrainer` defined, `scoreTeam` options object, `--ignore-cap` through `workerData`); earlier, non-gym rows from `story-route.md`, awaiting rows excluded from solver runs, the `--level` default/cap contradiction removed; first, Yoshi's correction (fixed route, gym-trainer loop). History: APPROVED by a cold Opus reviewer after 3 rounds (round 1: badge flag versus count, undefined fight key, contradictory API, no evolution mechanism; round 2: evolution check would reject legal teams, Elite-vs-Ace test confounded by the opponent party; round 3: APPROVED) on the skippable-gym premise; Yoshi then fixed the gym route (all 8 gyms required, in order), which rewrote the `getHighestBadge` note, decision 2, Step 1.1-1.3, Step 3.2's `--badge-scenario` flag (dropped) and the story-order risk. Not yet committed or executed. Vikunja task 63. Planning only: no sim code is changed by this document._
+_Status: REVISED 2026-11-17; APPROVED by cold review round 3 (route/gym order, tier elite, Elite cap mode confirmed by Yoshi); six wording notes applied. Later the same day (Yoshi, v1 scope, not re-reviewed): seven easy rows are `deferred` (`story-route.md` "Deferred fights (add back later)"), handled like `excluded` rows by the lookup and the solver; the StageKey set is unchanged (10). Revision history: route steps 29-40 from Yoshi (no row awaits the route; Wally VR rows `excluded`; `levelCapForTrainer` defined, `scoreTeam` options object, `--ignore-cap` through `workerData`); earlier, non-gym rows from `story-route.md`, awaiting rows excluded from solver runs, the `--level` default/cap contradiction removed; first, Yoshi's correction (fixed route, gym-trainer loop). History: APPROVED by a cold Opus reviewer after 3 rounds (round 1: badge flag versus count, undefined fight key, contradictory API, no evolution mechanism; round 2: evolution check would reject legal teams, Elite-vs-Ace test confounded by the opponent party; round 3: APPROVED) on the skippable-gym premise; Yoshi then fixed the gym route (all 8 gyms required, in order), which rewrote the `getHighestBadge` note, decision 2, Step 1.1-1.3, Step 3.2's `--badge-scenario` flag (dropped) and the story-order risk. Not yet committed or executed. Vikunja task 63. Planning only: no sim code is changed by this document._
 
 ## Decisions pending Yoshi (2026-11-17)
 
 Items 1, 2 and 5 are answered; 3 and 4 are open and this plan decides neither.
 1. **Difficulty tier**: ANSWERED by Yoshi: `elite` (the data tiers are `ace` / `elite` / `hell`; `solverCli --tier` defaults to `elite`).
 2. **Level-cap mode**: ANSWERED and verified: the menu's 'Elite' cap mode is `LEVEL_CAPS_ELITE`, which selects the table `levelCapsStrict = {16, 23, 36, 45, 50, 55, 60, 70, 80, 100}` (`src/pokemon.c:4649-4671`, comment '// Elite'). This plan calls it the 'Elite' table (the code name `levelCapsStrict` is mentioned only here).
-3. **EVs**: Yoshi says `enableEvs` is ON and the solver must solve the EV distribution (252 per stat, 510 total: `include/constants/pokemon.h:326-327`); today `solver.ts:32` `EV_TEMPLATES` plus `:293-295` swap only a few fixed templates. EV distribution search: out of scope of D4/D5 as written; to be planned separately after discussion with Yoshi; do not implement.
+3. **EVs**: Yoshi says `enableEvs` is ON and the solver must solve the EV distribution (252 per stat, 510 total: `include/constants/pokemon.h:326-327`); today `solver.ts:32` `EV_TEMPLATES` plus `:293-295` swap only a few fixed templates. DECIDED (Yoshi, 2026-11-17): version 1 searches only a small pre-defined set of EV distributions (the existing `EV_TEMPLATES` approach); the advanced point-by-point EV search is DEFERRED to a later version. Out of scope of D5.
 4. **Compute budget for D4's full run** (`solver-v2-plan.md` decision 12): to be discussed with Yoshi; the EV search will multiply D4's cost, so do not decide it.
 5. **D6 coverage dependency**: `@vitest/coverage-v8` ALLOWED by Yoshi.
 
@@ -15,7 +15,9 @@ Items 1, 2 and 5 are answered; 3 and 4 are open and this plan decides neither.
 
 For each of the 40 fights, plus the one route fight outside the 40 that Yoshi's route contains (`TRAINER_WALLY_MAUVILLE`,
 `docs/battle-sim/story-route.md`; parties from `data/v2.65beta/trainers.json`), except the rows flagged `excluded` (the two Wally Victory Road rows,
-`story-route.md` step 35), which have a row but are never run, the sim builds the player's party under the game's real level rules: the player's levels are bounded by the
+`story-route.md` step 35) and the rows flagged `deferred` (v1 scope, Yoshi 2026-11-17: May Route 103, the Sunhollow desert grunt, the Space Center 1F
+stair grunt and Gym 8's four trainer rows; seven rows, 13 ids, `story-route.md` "Deferred fights (add back later)"), which have a row but are never run
+(so v1 runs 32 of the 40 route steps, 34 of the 43 `fights.ts` rows), the sim builds the player's party under the game's real level rules: the player's levels are bounded by the
 Elite level cap for the badges held at that point in the story, and the player's innates are gated by those levels (slot 2 off below 17,
 slot 3 off below 24) while the AI keeps all three. The innate gate itself is already ported; what is missing is the per-fight cap and its use
 by the party builder and the solver.
@@ -58,9 +60,9 @@ by the party builder and the solver.
    (they get gated accordingly) but never higher unless an explicit `ignoreCap` is passed (boxed over-cap mons are legal in the game, so the escape hatch exists
    but is off by default and reported when used).
 2. **The table stores the highest badge flag held, keyed by trainer id.** `driver/fights.ts` (with `driver/progression.ts`) under `web/src/engine/sim/driver/` has rows
-   `{ fightId, trainerIds: string[], format, chainId?, gymNumber?, holdsBracelet?, requiredBefore, mayBefore, evidence, mandatory, mandatoryCitation, awaitingRoute?, excluded? }`
-   (`format` is the `fights.ts:15` enum `'single'|'double'|'tag'|'multi_2_vs_2'`; `chainId` marks a no-heal chain, `gymNumber` a gym leader row, `holdsBracelet` Norman's row; `awaitingRoute?: true` and
-   `excluded?: string` are added by d5-1c), where the badge value is the `getHighestBadge()` return value (0..9; 9 = `FLAG_SYS_GAME_CLEAR`), i.e. the largest gym in `requiredBefore`; under the fixed route it equals the badge count, and `mayBefore` is empty for every row
+   `{ fightId, trainerIds: string[], format, chainId?, gymNumber?, holdsBracelet?, requiredBefore, mayBefore, evidence, mandatory, mandatoryCitation, awaitingRoute?, excluded?, deferred?, deferredReason? }`
+   (`format` is the `fights.ts:15` enum `'single'|'double'|'tag'|'multi_2_vs_2'`; `chainId` marks a no-heal chain, `gymNumber` a gym leader row, `holdsBracelet` Norman's row; `awaitingRoute?: true`,
+   `excluded?: string`, `deferred?: true` and `deferredReason?: string` are added by d5-1c; `deferred` marks a correct row left out of v1 to be re-enabled later, unlike `excluded`, which marks a buggy one), where the badge value is the `getHighestBadge()` return value (0..9; 9 = `FLAG_SYS_GAME_CLEAR`), i.e. the largest gym in `requiredBefore`; under the fixed route it equals the badge count, and `mayBefore` is empty for every row
    (queue item d5-1c), so each fight has ONE badge value, not a range. The key is the trainer id because that is what the solver already takes (`--trainer`) and what
    `web/src/engine/sim/driver/bossSet.ts` exports: `loadBossTrainerIds` returns 55 trainer ids for the 43 script-level fights (`boss-fight-coverage.md:66`; "40 fights" is STATE.md's target-set wording for the same set); multi-id fights
    (Juan + Wallace, Space Center 5/6/7, the Meteor Falls and Mossdeep `multi_2_vs_2` pairs) are one row listing all their ids. Gym 8's own ten ids are FOUR rows, all at the same badge state (`[1..7]`): Tiffany alone
@@ -69,7 +71,9 @@ by the party builder and the solver.
    `player-observed (Yoshi), not in the scripts at pin bdebcbbf`); (iii) `docs/battle-sim/story-route.md`, Yoshi's route, whose rows the scripts do not place are labelled `player-observed (Yoshi), not in the scripts at pin bdebcbbf` and are
    copied with that label into the row's `evidence`. There are no `inferred` rows: route steps 1-40 place every row (steps 29-40 supplied 2026-11-17), so NO row carries `awaitingRoute` in the real table. The field stays defined for
    any row a later correction leaves unplaced (it would keep its `requiredBefore` as a lower bound, closed downward under the fixed gym order). The two Wally Victory Road rows (`TRAINER_WALLY_VR_1`, `TRAINER_WALLY_VR_2`, step 35) keep
-   `requiredBefore [1..8]` and carry `excluded: 'buggy in pinned version (player-observed)'` (`story-route.md` "Excluded rows"; `boss-fight-coverage.md` Unresolved item 3); neither id is chosen over the other. The route fight
+   `requiredBefore [1..8]` and carry `excluded: 'buggy in pinned version (player-observed)'` (`story-route.md` "Excluded rows"; `boss-fight-coverage.md` Unresolved item 3); neither id is chosen over the other. Seven rows
+   (`TRAINER_MAY_ROUTE_103_TORCHIC`, `TRAINER_GRUNT_SUNHOLLOW_1`, `TRAINER_GRUNT_SPACE_CENTER_2`, `TRAINER_TIFFANY`, `TRAINER_BRIDGET`, `TRAINER_DAPHNE`, `TRAINER_OLIVIA`) keep their `requiredBefore` and carry `deferred: true`,
+   `deferredReason: 'v1 scope (Yoshi 2026-11-17): easy battle, add back later'` (`story-route.md` "Deferred fights (add back later)"). The route fight
    outside the 40 (`TRAINER_WALLY_MAUVILLE`) gets a row too, from `story-route.md`; it is not in
    `loadBossTrainerIds`, so the coverage test stays one-directional (every boss id is in a row) and a second test asserts the route-only rows are exactly those `story-route.md` lists.
    None is taken from the usual Hoenn order without a script or a Yoshi statement (this ROM hack reworks story order, e.g. `VictoryRoadRework`).
@@ -97,21 +101,24 @@ by the party builder and the solver.
 1.2 Every fight has ONE `getHighestBadge()` value, the largest gym in its `requiredBefore`; there is no min/max range and no earliest-versus-latest default. Rows of route steps 1-40 are exact.
     **The lookup.** `web/src/engine/sim/driver/fights.ts` exports
     `levelCapForTrainer(trainerId): { cap: number; row: FightRow; evidence: string } | { awaiting: string; row: FightRow } | undefined`. It finds the row whose `trainerIds` contains `trainerId` (ANY member, not only
-    `fightId`, so `--trainer TRAINER_WALLACE` finds Juan's row). A placed row returns `{ cap: levelCapFor(highestBadge), row, evidence }`. A row with `awaitingRoute: true` or `excluded` returns the tagged
-    `{ awaiting, row }`, where `awaiting` is the `excluded` text or `'awaitingRoute'`. A trainer id in no row returns `undefined`.
+    `fightId`, so `--trainer TRAINER_WALLACE` finds Juan's row). A placed row returns `{ cap: levelCapFor(highestBadge), row, evidence }`. A row with `awaitingRoute: true`, `excluded` or `deferred` returns the tagged
+    `{ awaiting, row }`, where `awaiting` is the `excluded` text, `'awaitingRoute'`, or exactly `'deferred (v1 scope)'` for a deferred row. A trainer id in no row returns `undefined`.
     **The three outcomes, used identically by Step 2.3, Step 3 and d4-4.** (a) Placed row: the cap applies (Step 3's level rule). (b) Tagged `{ awaiting }`: the solver CLI REFUSES and exits non-zero with exactly
     `refused: <trainerId> is in fights.ts row <fightId> (<awaiting>); no level cap is trusted for it`; batch runs (d4-4) do not refuse but skip the row and list it with the same text. (c) `undefined`: `--level` behaves as today
-    (default 50, no cap). In the real table after d5-1c, (b) is reached only by the two Wally VR rows (`excluded`); no row is `awaitingRoute`. If a later correction leaves a row unplaced it gets `awaitingRoute: true` with its
+    (default 50, no cap). In the real table after d5-1c, (b) is reached only by the two Wally VR rows (`excluded`) and the seven `deferred` rows; no row is `awaitingRoute`. If a later correction leaves a row unplaced it gets `awaitingRoute: true` with its
     `requiredBefore` as a lower bound, and placing it later is a data edit only.
 1.3 `web/src/engine/sim/driver/fights.ts` with a test that every id returned by `loadBossTrainerIds` (`web/src/engine/sim/driver/bossSet.ts:11-45`) is in exactly one row and every row has non-empty evidence (exists since d5-1b; d5-1c adds
     the fixed-route assertions, the route-only rows of Decision 2, the assertion that no row is `awaitingRoute`, and the assertion that the `excluded` rows are exactly `TRAINER_WALLY_VR_1` and `TRAINER_WALLY_VR_2`,
-    `story-route.md` "Excluded rows"; plus `levelCapForTrainer` tests: a non-first member id finds its row, an excluded id returns `{ awaiting }`, an unknown id returns `undefined`).
+    `story-route.md` "Excluded rows", and that the `deferred` rows are exactly the seven of `story-route.md` "Deferred fights (add back later)"; plus `levelCapForTrainer` tests: a non-first member id finds its row, an excluded id returns `{ awaiting }`,
+    a deferred id (including a non-first member such as `TRAINER_CRISSY`) returns `{ awaiting: 'deferred (v1 scope)' }`, an unknown id returns `undefined`).
     Distinct StageKeys under the fixed route: a fight after gym k and before gym k+1 has `requiredBefore = [1..k]`, so `highestBadge = k` (highest flag), `badgeCount = k` (all lower gyms are held) and `braceletHeld = k >= 5`, giving the nine
     keys `h0-n0-b0`, `h1-n1-b0`, `h2-n2-b0`, `h3-n3-b0`, `h4-n4-b0`, `h5-n5-b1`, `h6-n6-b1`, `h7-n7-b1`, `h8-n8-b1`, plus `h4-n4-b1` for Norman's own fight, whose row has `holdsBracelet` (`fights.ts:133`) because the bracelet is handed
     over before that battle (`PetalburgCity_Gym/scripts.pory:1754-1763`): at most 10. `h4-n4-b0` exists only if some non-Norman fight falls between gyms 4 and 5 (the Sunhollow rows, steps 15-16 of `story-route.md`, `requiredBefore [1..4]`); d5-1c reports the exact
     list from the corrected table. Under the route of steps 1-40 the non-excluded rows use TEN keys: `h0-n0-b0` (steps 1-3), `h1-n1-b0` (4-7), `h2-n2-b0` (8-11), `h3-n3-b0` (12-14), `h4-n4-b0` (15-16),
     `h4-n4-b1` (17, Norman), `h5-n5-b1` (18-21), `h6-n6-b1` (22-25), `h7-n7-b1` (26-34: Space Center, Archie Seafloor Cavern, Gym 8's four trainer rows, Juan), `h8-n8-b1` (36-40, Elite Four and Champion); the excluded
-    Wally VR rows (`[1..8]`) add no key, so the whole table also has ten. (The earlier 12-key list, with `h4-n3-b0` and `h8-n7-b1`, came from skippable-gym subsets and no longer applies.)
+    Wally VR rows (`[1..8]`) add no key, so the whole table also has ten. Re-derived from the non-deferred, non-excluded rows only (the v1 set): still TEN, no key disappears, because each key a
+    deferred row uses keeps another row (`h0-n0-b0`: Petalburg Woods grunt and Roxanne, steps 2-3; `h4-n4-b0`: Courtney Sunhollow, step 16; `h7-n7-b1`: Space Center 2F gauntlet, Maxie + Courtney, Archie Seafloor
+    Cavern and Juan, steps 27-29 and 34). (The earlier 12-key list, with `h4-n3-b0` and `h8-n7-b1`, came from skippable-gym subsets and no longer applies.)
 
 ### Step 2 - apply the cap in the builder
 2.1 `buildPlayerParty`'s signature is positional, `buildPlayerParty(specs, defaultLevel = 50, bundle)` (`web/src/engine/sim/driver/buildParty.ts:162-166`) with about 47 callers. Add a FOURTH optional parameter
@@ -119,12 +126,12 @@ by the party builder and the solver.
     a spec with no level defaults to the cap, a spec level above the cap THROWS unless `ignoreCap` is set (there is no clamping), and `ignoreCap` use is reported by the solver.
 2.2 `createSession` keeps gating at session build (`web/src/engine/sim/driver/session.ts:256-258`). The existing `cycle144InnateGate.test.ts:75-147` already runs `buildPlayerParty` -> `createSession` at Hell 9/10/16/17/23/24 and Elite
     1/16/17/23/24, including Ace and the AI keeping all three, so no gate tests are duplicated; new tests cover only the cap behaviors (default-to-cap, throw above cap, `ignoreCap`).
-2.3 `levelCapFor` gets its first production caller, `levelCapForTrainer` in `web/src/engine/sim/driver/fights.ts` (Step 1.2); an `awaitingRoute` or `excluded` row has no trusted cap and the lookup returns the tagged
+2.3 `levelCapFor` gets its first production caller, `levelCapForTrainer` in `web/src/engine/sim/driver/fights.ts` (Step 1.2); an `awaitingRoute`, `excluded` or `deferred` row has no trusted cap and the lookup returns the tagged
     `{ awaiting }` result instead, which the CLI turns into the Step 1.2 refusal. `buildPlayerParty` itself never reads the table; it takes the cap only through `options.levelCap`.
 
 ### Step 3 - solver and CLI
 One rule for the solver's level, used by 3.1 and 3.2 alike, keyed on the three outcomes of `levelCapForTrainer` (Step 1.2). (a) Placed row: `--level` omitted means level = the fight's cap; `--level` below the cap
-lowers the level to that value; `--level` above the cap is an ERROR unless `--ignore-cap` is passed (then the given level is used and reported). There is no clamping. (b) `{ awaiting }` (an `awaitingRoute` or `excluded`
+lowers the level to that value; `--level` above the cap is an ERROR unless `--ignore-cap` is passed (then the given level is used and reported). There is no clamping. (b) `{ awaiting }` (an `awaitingRoute`, `excluded` or `deferred`
 row): refused with the Step 1.2 message. (c) `undefined` (no row): `--level` behaves as today (default 50, no cap).
 3.1 `scoreTeam`'s signature (`web/src/engine/sim/driver/solver.ts:409-418`, today eight parameters ending in `battleEvents`) gains a NINTH optional parameter `options?: { levelCap?: number; ignoreCap?: boolean }`, passed
     straight to `buildPlayerParty`'s Step 2.1 `options` (`solver.ts:419-420`, which today takes the team's max level, default 50). Its callers: `createLocalEvaluator` (`solver.ts:400-406`; its only other caller is `solver.bench.test.ts:11`) gains a FIFTH optional `options` parameter (after `expectimax`) and passes it through, and
@@ -137,9 +144,9 @@ row): refused with the Step 1.2 message. (c) `undefined` (no row): `--level` beh
     The existing `--gym N` flag (`solverCli.ts:43`, feeding `availableStones(data0, gym)` at `:47`) is independent of the row: if it disagrees with the row's StageKey (N - 1 != the row's badge count) the CLI prints a WARNING
     and keeps the `--gym` value for Mega stones; D5 does not change that, and D4 Step 3.1 owns the fix (Mega gating from the StageKey).
     The report states: the cap and the badge value; the row's evidence label, printed as the literal `script` or `player-observed (Yoshi), not in the scripts at pin bdebcbbf` (gym rows 1-4 and 6-8 print the latter, because their
-    position is the fixed gym order; Norman's row prints `script`, Decision 2 (i)); the Elite cap mode (Decision 3); any `--ignore-cap` use; the excluded rows (by trainer id, with their `excluded` text); and the out-of-scope TM/tutor note.
+    position is the fixed gym order; Norman's row prints `script`, Decision 2 (i)); the Elite cap mode (Decision 3); any `--ignore-cap` use; the excluded rows (by trainer id, with their `excluded` text) and the deferred rows (by trainer id, `deferred (v1 scope)`); and the out-of-scope TM/tutor note.
     **How the label is derived.** The label is `player-observed (Yoshi), not in the scripts at pin bdebcbbf` if the row's `evidence` string contains that literal, else `script`. d5-1c must therefore keep Norman's
-    evidence free of that literal (it states his position through the script checks at `PetalburgCity_Gym/scripts.pory:1719/1731/1743` only). A single-trainer run (`--trainer`) lists ALL excluded rows of the table, not only the requested row.
+    evidence free of that literal (it states his position through the script checks at `PetalburgCity_Gym/scripts.pory:1719/1731/1743` only). A single-trainer run (`--trainer`) lists ALL excluded and deferred rows of the table, not only the requested row.
 
 ### Step 4 - tests (hand-derived from the C)
 4.1 Cap behaviors only (the gate itself is already covered, see 2.2): a fight row's `highestBadge` -> `levelCapFor` -> `buildPlayerParty` default level; a spec above the cap throws; `ignoreCap` passes;
@@ -147,7 +154,7 @@ row): refused with the Step 1.2 message. (c) `undefined` (no row): `--level` beh
 4.2 A with/without comparison that isolates the gate: the same species at the SAME level (16) under tier Elite versus tier Ace (Ace never gates), same opponent, so the only difference is innate slots 2 and 3,
     and the result differs in an output number (the enemy level moves with the player's, `web/src/engine/sim/driver/session.ts:260-261`, which is why level 16 versus 50 would not isolate it). Changing tier also changes the opponent party
     (`buildOpponentParty` picks `parties[tier]`, `driver/buildParty.ts:84-89`), so the opponent must be a trainer whose `ace` and `elite` parties are identical: the synthetic one in
-    `cycle144InnateGate.test.ts:66-73`, or one of the three real ones listed at `boss-fight-coverage.md:68`; the test asserts the two parties are equal before comparing. The player species is chosen by a rule the test asserts, not by memory: a `species.json` entry whose innate slots 2 and 3 are both non-null
+    `cycle144InnateGate.test.ts:66-73`, or one of the three real ones listed at `boss-fight-coverage.md:68` (`TRAINER_MAY_ROUTE_103_TORCHIC` is deferred and `TRAINER_WALLY_VR_2` excluded from solver runs, but a unit test may still use their parties; `TRAINER_GRUNT_MUSEUM_1` is neither); the test asserts the two parties are equal before comparing. The player species is chosen by a rule the test asserts, not by memory: a `species.json` entry whose innate slots 2 and 3 are both non-null
     and whose slot-3 ability changes the damage of a fixed move against that opponent (found by scanning `abilityHooks.json` for a damage-calculation hook on that ability and then checking the number
     differs between the gated and ungated builds before the test is committed); the test asserts both innate slots are non-null and that the compared damage values differ, so it cannot pass for an unrelated reason.
 4.3 `levelCapFor(0..9)` table tests and the evolution-level warning on hand-built species (a species whose chain evolves at 36 yields a warning at cap 16 and the run continues; a species with no evolutions yields none).

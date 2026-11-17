@@ -1,5 +1,5 @@
 # Boss-fight coverage: the 40 Elite-difficulty fights
-
+_v1 scope (Yoshi, 2026-11-17): 7 of the 40 are deferred (May Route 103, the Sunhollow grunt, the Space Center 1F stair grunt, Gym 8's four trainer rows; 13 trainer ids), kept but not run; see `story-route.md` "Deferred fights (add back later)". This document's measurements still cover all 40._\
 _Measured — the solver's fixed opponent set resolves to 55 trainer ids fielding 227 species / 399 moves / 357 abilities / 100 items; the damage engine already covers almost all of it, and what is left is turn-loop work, not damage work_
 
 Measured 2026-09-16 against the committed `data/v2.65beta` snapshot and the pinned
