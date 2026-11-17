@@ -257,4 +257,31 @@ describe('Progression model (StageKey and progression rules)', () => {
       }
     }
   })
+
+  it('respects holdsBracelet on a row before badge 5 is cleared', () => {
+    const rowWithBracelet: ProgressionRow = {
+      fightId: 'TRAINER_WITH_BRACELET',
+      requiredBefore: [1, 2, 3, 4],
+      mayBefore: [],
+      evidence: 'test holdsBracelet before badge 5',
+      holdsBracelet: true,
+    }
+    const subsetBeforeBadge5 = new Set<GymNumber>([1, 2, 3, 4])
+    const key = stageKeyFor(rowWithBracelet, subsetBeforeBadge5)
+    expect(key).toEqual({
+      highestBadge: 4,
+      badgeCount: 4,
+      braceletHeld: true,
+    })
+
+    const rowWithoutBracelet: ProgressionRow = {
+      ...rowWithBracelet,
+      holdsBracelet: false,
+    }
+    expect(stageKeyFor(rowWithoutBracelet, subsetBeforeBadge5)).toEqual({
+      highestBadge: 4,
+      badgeCount: 4,
+      braceletHeld: false,
+    })
+  })
 })

@@ -69,8 +69,8 @@ by the party builder and the solver.
 1.2 Where min != max (the player can do the fight at different points), the table stores the range and the solver treats the cap as a scenario parameter (default: the minimum, i.e. the tightest cap,
     reported with the badge assumption).
 1.3 Add `driver/fights.ts` plus a test that every id returned by `loadBossTrainerIds` (`driver/bossSet.ts:11-45`) is in exactly one row and every row has non-empty evidence.
-    Over legal subsets constrained by mandatory story fights, the table collapses to exactly 11 distinct StageKeys:
-    `h0-n0-b0`, `h1-n1-b0`, `h2-n2-b0`, `h3-n3-b0`, `h4-n3-b0`, `h4-n4-b0`, `h5-n5-b1`, `h6-n6-b1`, `h7-n7-b1`, `h8-n7-b1`, `h8-n8-b1`.
+    Over legal subsets constrained by mandatory story fights, the table collapses to exactly 12 distinct StageKeys:
+    `h0-n0-b0`, `h1-n1-b0`, `h2-n2-b0`, `h3-n3-b0`, `h4-n3-b0`, `h4-n4-b0`, `h4-n4-b1`, `h5-n5-b1`, `h6-n6-b1`, `h7-n7-b1`, `h8-n7-b1`, `h8-n8-b1`.
 
 ### Step 2 - apply the cap in the builder
 2.1 `buildPlayerParty`'s signature is positional, `buildPlayerParty(specs, defaultLevel = 50, bundle)` (`driver/buildParty.ts:162-166`) with about 47 callers. Add a FOURTH optional parameter

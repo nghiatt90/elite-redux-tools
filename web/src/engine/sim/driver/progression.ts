@@ -12,6 +12,13 @@ export interface ProgressionRow {
   mayBefore: GymNumber[]      // skippable gyms that may or may not be cleared
   evidence: string
   inferred?: boolean
+  /**
+   * Set when the Mega Bracelet is held even if badge 5 is not yet earned.
+   * Sourced from decomp: PetalburgCity_Gym/scripts.pory:1741-1763 (case 6)
+   * gives ITEM_MEGA_BRACELET on first talk before the battle, while
+   * FLAG_BADGE05_GET is only set post-battle at :410.
+   */
+  holdsBracelet?: boolean
 }
 
 /**
@@ -38,7 +45,8 @@ export function clearedBefore(
  * - getHighestBadge returns the highest FLAG_BADGE0x_GET flag held (src/pokemon.c:4635-4647),
  *   not a badge count (0 if empty).
  * - The Mega Bracelet is handed over in Norman's Gym 5 script
- *   (data/maps/PetalburgCity_Gym/scripts.pory:1755-1761), so braceletHeld requires gym 5 cleared.
+ *   (data/maps/PetalburgCity_Gym/scripts.pory:1755-1761), so braceletHeld requires gym 5 cleared
+ *   unless row.holdsBracelet === true.
  */
 export function stageKeyFor(
   row: ProgressionRow,
@@ -54,7 +62,7 @@ export function stageKeyFor(
   return {
     highestBadge,
     badgeCount: cleared.size,
-    braceletHeld: cleared.has(5),
+    braceletHeld: cleared.has(5) || row.holdsBracelet === true,
   }
 }
 

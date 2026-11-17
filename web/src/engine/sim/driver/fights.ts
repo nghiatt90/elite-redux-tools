@@ -95,7 +95,7 @@ export const FIGHTS: readonly FightRow[] = [
       'DewfordTown_Gym:719/722/725: leader battle; sets FLAG_BADGE02_GET at DewfordTown_Gym:161.',
     mandatory: true,
     mandatoryCitation:
-      'PetalburgCity_Gym:1743: Norman requires flag(FLAG_BADGE02_GET) along with badges 1, 3, and 4.',
+      "gates Norman's intro at PetalburgCity_Gym:1738 (requires FLAG_BADGE02_GET along with badges 1, 3, and 4 before Gym 5).",
   },
   {
     fightId: 'TRAINER_WATTSON_1',
@@ -108,7 +108,7 @@ export const FIGHTS: readonly FightRow[] = [
       'MauvilleCity_Gym:586/589/592: leader battle; sets FLAG_BADGE03_GET at MauvilleCity_Gym:69.',
     mandatory: true,
     mandatoryCitation:
-      'PetalburgCity_Gym:1743: Norman requires flag(FLAG_BADGE03_GET) along with badges 1, 2, and 4.',
+      "gates Norman's intro at PetalburgCity_Gym:1738 (requires FLAG_BADGE03_GET along with badges 1, 2, and 4 before Gym 5).",
   },
   {
     fightId: 'TRAINER_FLANNERY_1',
@@ -121,17 +121,18 @@ export const FIGHTS: readonly FightRow[] = [
       'LavaridgeTown_Gym_1F:638/641/644: leader battle; sets FLAG_BADGE04_GET at LavaridgeTown_Gym_1F:73.',
     mandatory: true,
     mandatoryCitation:
-      'PetalburgCity_Gym:1743: Norman requires flag(FLAG_BADGE04_GET) along with badges 1, 2, and 3.',
+      "gates Norman's intro at PetalburgCity_Gym:1738 (requires FLAG_BADGE04_GET along with badges 1, 2, and 3 before Gym 5).",
   },
   {
     fightId: 'TRAINER_NORMAN_1',
     trainerIds: ['TRAINER_NORMAN_1'],
     format: 'single',
     gymNumber: 5,
-    requiredBefore: [1, 2, 3, 4, 5],
+    requiredBefore: [1, 2, 3, 4],
     mayBefore: [],
+    holdsBracelet: true,
     evidence:
-      'PetalburgCity_Gym:1760 gives ITEM_MEGA_BRACELET in case 6 before battle; battle occurs on subsequent talk at :1756, so bracelet is held during fight (gym 5 required before).',
+      'PetalburgCity_Gym:1741-1763 case 6 gives ITEM_MEGA_BRACELET (:1760) on first talk before the battle, while FLAG_BADGE05_GET is only set post-battle at :410; during the fight badges 1-4 are held and bracelet is held.',
     mandatory: true,
     mandatoryCitation:
       'PetalburgCity_Gym:410,481: Balance Badge required to trigger Wally father giving HM03 Surf.',
@@ -147,7 +148,7 @@ export const FIGHTS: readonly FightRow[] = [
       'FortreeCity/map.json:178 warps into FortreeCity_GymReworked:91 which calls FortreeCity_Gym_EventScript_Winona at FortreeCity_Gym:518; sets FLAG_BADGE06_GET at :30.',
     mandatory: true,
     mandatoryCitation:
-      'EverGrandeCity_PokemonLeague_1F:40,56: door guard checks goto_if_unset FLAG_BADGE06_GET because Winonas badge is the only one that can be skipped.',
+      'EverGrandeCity_PokemonLeague_1F:39-57 door guard checks goto_if_unset FLAG_BADGE06_GET (:56); script comment at :40-41 ("Its assumed the player has the remaining badges") is what makes gyms 1-8 mandatory in the legal-subset test as an assumption in a comment, not an explicit flag check.',
   },
   {
     fightId: 'TRAINER_TATE_AND_LIZA_1',

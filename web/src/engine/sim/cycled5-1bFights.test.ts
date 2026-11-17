@@ -157,8 +157,8 @@ describe('Cycle d5-1b boss fight progression table (fights.ts)', () => {
     expect(Array.from(subsets[0]).sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
 
     const stageKeys = distinctStageKeys(FIGHTS, subsets)
-    // Exactly 11 distinct StageKeys measured across all 42 fights
-    expect(stageKeys.length).toBe(11)
+    // Exactly 12 distinct StageKeys measured across all 42 fights
+    expect(stageKeys.length).toBe(12)
     expect(stageKeys.map(stageKeyId)).toEqual([
       'h0-n0-b0',
       'h1-n1-b0',
@@ -166,6 +166,7 @@ describe('Cycle d5-1b boss fight progression table (fights.ts)', () => {
       'h3-n3-b0',
       'h4-n3-b0',
       'h4-n4-b0',
+      'h4-n4-b1',
       'h5-n5-b1',
       'h6-n6-b1',
       'h7-n7-b1',
@@ -196,6 +197,24 @@ describe('Cycle d5-1b boss fight progression table (fights.ts)', () => {
     expect(stageKeyFor(brawly, subsets[0])).toEqual({
       highestBadge: 4,
       badgeCount: 3,
+      braceletHeld: false,
+    })
+
+    // Hand check 4: Norman (requiredBefore: [1, 2, 3, 4], mayBefore: [], holdsBracelet: true) -> h4-n4-b1
+    const norman = FIGHTS.find((f) => f.fightId === 'TRAINER_NORMAN_1')!
+    expect(stageKeyFor(norman, subsets[0])).toEqual({
+      highestBadge: 4,
+      badgeCount: 4,
+      braceletHeld: true,
+    })
+    // Negative case: row with same requiredBefore [1, 2, 3, 4] but no holdsBracelet gives braceletHeld: false
+    const normanWithoutBracelet: FightRow = {
+      ...norman,
+      holdsBracelet: undefined,
+    }
+    expect(stageKeyFor(normanWithoutBracelet, subsets[0])).toEqual({
+      highestBadge: 4,
+      badgeCount: 4,
       braceletHeld: false,
     })
   })
