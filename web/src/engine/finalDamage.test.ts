@@ -98,9 +98,11 @@ describe('calcFinalDamage -- individual stages, value AND position', () => {
     expect(calcFinalDamage(100, stages({ typeEffectiveness: uq(1.0), hasSuperEffectiveBoost: true })).dmg).toBe(100) // below 2x, no boost
   })
 
-  it('#11 ally damage reducers stack multiplicatively (Friend Guard + Caretaker)', () => {
+  it('#11 ally damage reducers stack multiplicatively, x0.5 each (Friend Guard + Caretaker)', () => {
     const result = calcFinalDamage(100, stages({ allyDamageReducerCount: 2 }))
-    expect(result.dmg).toBe(applyModifier(mulModifier(mulModifier(uq(1.0), uq(0.75)), uq(0.75)), 100))
+    // battle_util.c:7638-7640: each of Friend Guard / Caretaker / Food Lovers is a
+    // separate `MulModifier(&finalModifier, UQ_4_12(0.5))`, not 0.75.
+    expect(result.dmg).toBe(applyModifier(mulModifier(mulModifier(uq(1.0), uq(0.5)), uq(0.5)), 100))
   })
 })
 

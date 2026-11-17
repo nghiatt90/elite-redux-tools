@@ -295,7 +295,11 @@ export interface FieldBattleState extends ConditionFieldContext {
     attacker: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
     defender: { reflect: boolean; lightScreen: boolean; auroraVeil: boolean; luckyChant: boolean }
   }
-  isDoubleBattle: false // v1 is singles-only; literal type keeps multi-target code unreachable
+  /** `gBattleTypeFlags & BATTLE_TYPE_DOUBLE` -- only affects the screens multiplier
+   * (0.5 singles vs 0.66 doubles, battle_util.c:7621-7626). The standalone
+   * calculator is still singles-only and every existing caller passes `false`; the
+   * doubles engine (dbl-2a) is what will feed `true`. */
+  isDoubleBattle: boolean
   /** IsInverseRoomActive(), battle_util.c:8680-8687 -- STATUS_FIELD_INVERSE_ROOM,
    * unless ABILITY_CLUELESS is on the field. Collapses both causes into one
    * caller-supplied fact, same precedent as gravityActive above (also

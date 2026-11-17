@@ -206,6 +206,16 @@ export interface DamageCalcScenario {
    * hold effect / type give a Gem its type (GetMoveTypeInternal, battle_main.c:5133-5135) and its id decides the 130-power
    * items (battle_util.c:6804-6812). Unset in the calculator, where Fling reads the held item. */
   flungItem?: { id: string; holdEffect: string | null; holdEffectType: string | null } | null
+  /** GetMoveTargetCount(move, battlerAtk, battlerDef), battle_util.c:6761-6781, as the
+   * caller computed it (moveTargetCount.ts has the port; wiring it off sim state is
+   * dbl-3b). `>= 2` gives CalcFinalDmg's x0.75 multi-target term (:7498). Optional
+   * because every existing scenario predates it; absent reads as 1 (single target). */
+  targetCount?: number
+  /** The defender's ALIVE partner's ability slots (BATTLE_PARTNER(battlerDef)), for
+   * CalcFinalDmg's three ally-ability reducers at battle_util.c:7637-7640. `null` or
+   * absent means no alive partner, which is every singles scenario. Optional for the
+   * same reason as targetCount. */
+  defenderAllyAbilitySlots?: AbilitySlots | null
 }
 
 export interface DamageCalcResult {
@@ -1396,9 +1406,27 @@ function calcInternal(
     attackerHasMoldBreaker,
   )
   const berryMult = resistBerryMultiplier(attacker.abilitySlots, defender, moveType, typeEffectiveness)
+  // GetMoveTargetCount(...) >= 2 -> x0.75 (battle_util.c:7498). The standalone
+  // calculator leaves `targetCount` unset, which reads as one target (single-target).
+  const isMultiTarget = (scenario.targetCount ?? 1) >= 2
+  // CalcFinalDmg's three ally-ability reducers, battle_util.c:7637-7640. Each is
+  // BATTLER_HAS_ABILITY_AND_ALIVE(BATTLE_PARTNER(battlerDef), ability, TRUE): the
+  // partner must be alive (the scenario only supplies slots when it is) and Mold
+  // Breaker suppresses the two `breakable` abilities -- Friend Guard and Food Lovers
+  // per abilityHooks.json -- but not Caretaker.
+  const allySlots = scenario.defenderAllyAbilitySlots ?? null
+  const allyDamageReducerCount = allySlots
+    ? [
+        battlerHasAbility(allySlots, 'ABILITY_FRIEND_GUARD', () => attackerHasMoldBreaker),
+        battlerHasAbility(allySlots, 'ABILITY_CARETAKER', () => false),
+        battlerHasAbility(allySlots, 'ABILITY_FOOD_LOVERS', () => attackerHasMoldBreaker),
+      ].filter(Boolean).length
+    : 0
   const finalResult = calcFinalDamage(dmg, {
     ...defaultFinalDamageStages({ typeEffectiveness }),
     abilityMultiplier,
+    isMultiTarget,
+    allyDamageReducerCount,
     parentalBondMultiplier: hitModifier,
     // MISC_EFFECT_INCREASED_CRIT_DAMAGE moves crit for x2.0 instead of x1.5
     // (src/battle_util.c:7536-7540); move.argument threading isn't wired into

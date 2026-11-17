@@ -13,9 +13,9 @@
 import { applyModifier, mulModifier, uq } from './fixed'
 
 export interface FinalDamageStages {
-  /** #1 multi-target reduction (:7524) -- always false in this v1 singles-only engine;
-   * kept as an explicit field (not hardcoded away) so doubles support later is a
-   * one-line change here, not a rewrite. */
+  /** #1 multi-target reduction (:7498) -- GetMoveTargetCount(...) >= 2, supplied by
+   * the caller (see moveTargetCount.ts). Always false in the standalone singles
+   * calculator; the doubles engine feeds it later. */
   isMultiTarget: boolean
   /** #2 type effectiveness, as a UQ_4_12 value from typeEffectiveness.ts. */
   typeEffectiveness: number
@@ -37,14 +37,15 @@ export interface FinalDamageStages {
   /** #9 screens -- Reflect/Light Screen/Aurora Veil, already resolved to "does this
    * apply" by the caller (crit and Infiltrator both bypass it -- see calculate.ts). */
   screensActive: boolean
-  isDoubleBattle: boolean // only affects the screens multiplier (0.5 vs 0.66)
+  isDoubleBattle: boolean // only affects the screens multiplier, 0.5 vs 0.66 (:7621-7626)
   /** #10 Parental Bond-family bonus hit's own reduced-power multiplier, UQ_4_12 --
    * uq(1.0) for a move's first/only hit and for every hit of a move's OWN
    * multi-hit effect (Population Bomb, Double Hit, ...), which never scale power
    * per hit. Set by calculate.ts per-hit via multiHit.ts's resolveHitPlan. */
   parentalBondMultiplier: number
-  /** #11 defender's ally Friend Guard/Caretaker/Food Lovers count (0-3, each x0.75) --
-   * always 0 in singles (no ally exists to have the ability). */
+  /** #11 defender's ally Friend Guard/Caretaker/Food Lovers count (0-3, each x0.5,
+   * battle_util.c:7637-7640) -- always 0 in singles (no ally exists to have the
+   * ability). */
   allyDamageReducerCount: number
   /** #12 attacker's held item, already resolved to its UQ_4_12 multiplier by the
    * caller (Expert Belt/Life Orb/Metronome/Amulet Coin/Punching Glove -- see
@@ -101,7 +102,7 @@ export function calcFinalDamage(dmg: number, stages: FinalDamageStages): FinalDa
     trace.push({ stage, channel: 'dmg', before, after: d })
   }
 
-  // #1 multi-target (:7524)
+  // #1 multi-target (:7498)
   if (stages.isMultiTarget) mulFinal('multiTarget', uq(0.75))
 
   // #2 type effectiveness (:7527)
@@ -122,14 +123,14 @@ export function calcFinalDamage(dmg: number, stages: FinalDamageStages): FinalDa
   if (stages.stabInHalves === 4) mulFinal('stab', uq(2.0))
   else if (stages.stabInHalves === 3) mulFinal('stab', uq(1.5))
 
-  // #9 screens (:7648-7656)
+  // #9 screens (:7621-7626)
   if (stages.screensActive) mulFinal('screens', stages.isDoubleBattle ? uq(0.66) : uq(0.5))
 
   // #10 Parental Bond family (:7658-7662)
   if (stages.parentalBondMultiplier !== uq(1.0)) mulFinal('parentalBond', stages.parentalBondMultiplier)
 
-  // #11 ally damage reducers, x0.75 each, stacking (:7665-7667)
-  for (let i = 0; i < stages.allyDamageReducerCount; i++) mulFinal('allyDamageReducer', uq(0.75))
+  // #11 ally damage reducers, x0.5 each, stacking (:7637-7640)
+  for (let i = 0; i < stages.allyDamageReducerCount; i++) mulFinal('allyDamageReducer', uq(0.5))
 
   // #12 attacker item (:7670-7688)
   if (stages.attackerItemMultiplier !== uq(1.0)) mulFinal('attackerItem', stages.attackerItemMultiplier)
