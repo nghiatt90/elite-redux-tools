@@ -230,7 +230,7 @@ Static detection of bitfield names across production TypeScript source files und
 | `toxicTerrainImmune` | Yes | `web/src/engine/sim/fieldEndTurn.ts` |
 | `unaware` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/battleStat.ts`, `web/src/engine/calculate.ts`, `web/src/engine/sim/accuracy.ts`, `web/src/engine/sim/ai/aiCheckViability.ts`, `web/src/engine/sim/moveEffects.ts` |
 | `unnerve` | Yes | `web/src/engine/calculate.ts`, `web/src/engine/sim/statBuffs.ts` |
-| `unsuppressable` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts` |
+| `unsuppressable` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts`, `web/src/engine/sim/ai/aiCalcDamage.ts` |
 
 ### Complete List of 36 Bitfield-Only Abilities
 
