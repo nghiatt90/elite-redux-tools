@@ -43,7 +43,7 @@ by the party builder and the solver.
    `er-level-asymmetries.md:38-39`), so the builder/solver default for a fight is `levelCapFor(badgesAt(fight))`; a caller may pass lower levels
    (they get gated accordingly) but never higher unless an explicit `ignoreCap` is passed (boxed over-cap mons are legal in the game, so the escape hatch exists
    but is off by default and reported when used).
-2. **The table stores the highest badge flag held, keyed by trainer id.** `fightBadges.ts` under `web/src/engine/sim/driver/` has rows `{ trainerIds: string[], highestBadgeMin, highestBadgeMax, evidence }`
+2. **The table stores the highest badge flag held, keyed by trainer id.** `driver/fights.ts` (with `driver/progression.ts`) under `web/src/engine/sim/driver/` has rows `{ fightId, trainerIds: string[], requiredBefore, mayBefore, evidence, mandatory, mandatoryCitation }`
    where the badge values are the `getHighestBadge()` return value (0..9; 9 = `FLAG_SYS_GAME_CLEAR`), NOT a count. The key is the trainer id because that is what the solver already takes (`--trainer`) and what
    `bossSet.ts` exports: `loadBossTrainerIds` returns 55 trainer ids for the 43 script-level fights (`boss-fight-coverage.md:66`; "40 fights" is STATE.md's target-set wording for the same set); multi-id fights
    (Juan + Wallace, Space Center 5/6/7) are one row listing all their ids. Gym 8's own ten ids (Tiffany plus three groups, `boss-fight-coverage.md:165-172`) share one row DELIBERATELY because they occur at the same badge
@@ -65,10 +65,12 @@ by the party builder and the solver.
 ### Step 1 - fight-to-badges table (data, read-only research first)
 1.1 For each fight row in `boss-fight-coverage.md` (`:71-190`) determine which `FLAG_BADGE0x_GET` flags can be set when it occurs, and from that the lowest and highest possible
     `getHighestBadge()` value, using the map scripts under `pipeline/.upstream/eliteredux-source/data/maps/` (flag guards, `FLAG_BADGE0x_GET` checks, `VAR_*` progression variables) and `encounters.json`
-    guards. Work out WHICH flags are set (a skipped gym changes the index), not how many. Record `{trainerIds, highestBadgeMin, highestBadgeMax, evidence}`.
+    guards. Work out WHICH flags are set (a skipped gym changes the index), not how many. Record `{trainerIds, requiredBefore, mayBefore, evidence}` in `driver/fights.ts` built on `driver/progression.ts`.
 1.2 Where min != max (the player can do the fight at different points), the table stores the range and the solver treats the cap as a scenario parameter (default: the minimum, i.e. the tightest cap,
     reported with the badge assumption).
-1.3 Add `fightBadges.ts` plus a test that every id returned by `loadBossTrainerIds` (`driver/bossSet.ts:11-45`) is in exactly one row and every row has non-empty evidence.
+1.3 Add `driver/fights.ts` plus a test that every id returned by `loadBossTrainerIds` (`driver/bossSet.ts:11-45`) is in exactly one row and every row has non-empty evidence.
+    Over legal subsets constrained by mandatory story fights, the table collapses to exactly 11 distinct StageKeys:
+    `h0-n0-b0`, `h1-n1-b0`, `h2-n2-b0`, `h3-n3-b0`, `h4-n3-b0`, `h4-n4-b0`, `h5-n5-b1`, `h6-n6-b1`, `h7-n7-b1`, `h8-n7-b1`, `h8-n8-b1`.
 
 ### Step 2 - apply the cap in the builder
 2.1 `buildPlayerParty`'s signature is positional, `buildPlayerParty(specs, defaultLevel = 50, bundle)` (`driver/buildParty.ts:162-166`) with about 47 callers. Add a FOURTH optional parameter
@@ -76,13 +78,13 @@ by the party builder and the solver.
     a spec with no level defaults to the cap, a spec level above the cap THROWS unless `ignoreCap` is set (there is no clamping), and `ignoreCap` use is reported by the solver.
 2.2 `createSession` keeps gating at session build (`session.ts:239-250`). The existing `cycle144InnateGate.test.ts:75-147` already runs `buildPlayerParty` -> `createSession` at Hell 9/10/16/17/23/24 and Elite
     1/16/17/23/24, including Ace and the AI keeping all three, so no gate tests are duplicated; new tests cover only the cap behaviors (default-to-cap, throw above cap, `ignoreCap`).
-2.3 `levelCapFor` gets its first production caller (`fightBadges` lookup).
+2.3 `levelCapFor` gets its first production caller (`driver/fights.ts` lookup).
 
 ### Step 3 - solver and CLI
 3.1 `scoreTeam` takes the cap and passes it as `options.levelCap` to `buildPlayerParty` (`solver.ts:419-420`, which today takes the team's max level, default 50); the move pool filter
     `learnableMoves` (`solver.ts:112`) uses the capped level; the evolution-level warning of Design decision 5 is printed before the search starts. Solver specs always carry an explicit level (`defaultSet` sets `.level`, `solver.ts:232`), so in the solver the cap acts only
     through the throw-above-cap path and the CLI's `min(cap, --level)`; the default-to-cap path of Step 2.1 is reached only by direct `buildPlayerParty` callers.
-3.2 `solverCli.ts` has an existing `--level` flag (default 50, `:3, :38`): when the fight is a boss fight with a table row, the cap comes from `fightBadges` and `--level` may only lower it (a value above the cap
+3.2 `solverCli.ts` has an existing `--level` flag (default 50, `:3, :38`): when the fight is a boss fight with a table row, the cap comes from `driver/fights.ts` and `--level` may only lower it (a value above the cap
     is an error unless `--ignore-cap`); with no table row (an arbitrary trainer id) `--level` behaves as today. New flags: `--badge-scenario min|max` and `--ignore-cap`. The cap reaches the worker
     threads because `solverCli.ts:64` builds the `workerData` object and `solverWorker.ts:8-18` calls `scoreTeam` with it; both carry the cap. The report states the cap, the badge assumption, and the out-of-scope
     TM/tutor note.
