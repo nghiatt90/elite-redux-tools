@@ -256,7 +256,12 @@ export function createSession(options: SessionOptions): BattleSession {
   const leadIndex = options.leadIndex ?? 0
   const lead = playerParty[leadIndex]
   if (!lead) throw new Error(`createSession: leadIndex ${leadIndex} is outside the ${playerParty.length}-mon playerParty`)
-  if (lead.hp === 0) throw new Error(`createSession: leadIndex ${leadIndex} names a fainted party slot`)
+  // Only an explicitly chosen lead slot must be alive. With the default lead (leadIndex
+  // undefined) the turn-1 battle-start sequence replaces a fainted slot itself
+  // (HandleFaintedMonActions, battle_main.c:3407-3414), and existing callers rely on that.
+  if (options.leadIndex !== undefined && lead.hp === 0) {
+    throw new Error(`createSession: leadIndex ${leadIndex} names a fainted party slot`)
+  }
   // GetInnateInSlot (src/battle_util.c:8799-8802) gates the PLAYER's innates by
   // level and difficulty; the AI keeps all three (buildOpponentParty is untouched).
   for (const mon of playerParty) {
