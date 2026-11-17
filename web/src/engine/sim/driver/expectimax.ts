@@ -1175,6 +1175,9 @@ export interface ExpectimaxBattleResult {
    * (`state.battlers[0].mon`): the sim writes `pp`/`itemId` to the party slot only on
    * switch-out (`turn.ts switchBattlerOut`), and `status1` only there and on Rest. */
   finalParty: SimPartyMon[]
+  /** The player's active battler at the end (`state.battlers[0]`): `carryParty` reads
+   * its live HP and `status1`, which the party slot above may not have. */
+  finalActive: BattlerState
 }
 
 /** Plays one battle with the expectimax policy on the player's side. */
@@ -1204,6 +1207,7 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     turns,
     finalScore: positionScore(session.state),
     finalParty: cloneParty(session.state.sides[0].party),
+    finalActive: session.state.battlers[0]!,
   }
 }
 

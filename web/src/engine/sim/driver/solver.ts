@@ -10,7 +10,10 @@
 import type { StatKey } from '../../types'
 import { playExpectimaxBattle } from './expectimax'
 import { buildPlayerParty, type PlayerMonSpec } from './buildParty'
-import type { SimDataBundle } from './loadSimData'
+import { eventsForFight } from './battleEventSetup'
+import { carryParty, firstLiveSlot } from './carryParty'
+import type { ChainSpec } from './chains'
+import type { EncounterBattleEvent, SimDataBundle, TrainerData } from './loadSimData'
 import { isEligibleMove } from './verifiedMoveEffects'
 
 export type Team = PlayerMonSpec[]
@@ -426,4 +429,142 @@ export function scoreTeam(
     scoreSum += Math.max(-1, Math.min(1, result.finalScore / 6))
   }
   return { winRate: wins / games, meanScore: scoreSum / games, games }
+}
+
+/** One stage's `battleEvents`, already filtered by the guards active at that stage. */
+export type StageEvents = Array<Array<{ event: string; data0: number | null; data1: number | null }>>
+
+/** Resolves every stage's trainer; a tag stage cannot run in the singles sim (chains-plan Step 4.3). */
+function chainStageTrainers(data: SimDataBundle, chain: ChainSpec): TrainerData[] {
+  return chain.stages.map((stage, index) => {
+    if (stage.format !== 'single') {
+      throw new Error(
+        `scoreChain: stage ${index + 1} of ${chain.id} is a tag battle; doubles is not built`,
+      )
+    }
+    const id = stage.trainerIds[0]!
+    const trainer = data.trainersById.get(id)
+    if (!trainer) throw new Error(`unknown trainer ${id}`)
+    return trainer
+  })
+}
+
+/**
+ * Each stage's events, with the guards seeing every trainer beaten earlier in the chain
+ * (`eventsForFight` drops a `!defeated(TRAINER_X)` row once X is in the set; chains-plan
+ * decision 7).
+ */
+export function chainStageEvents(
+  chain: ChainSpec,
+  map: string,
+  battleEvents: EncounterBattleEvent[],
+): StageEvents {
+  const defeatedSoFar = new Set<string>()
+  return chain.stages.map((stage) => {
+    const events = eventsForFight(battleEvents, map, defeatedSoFar).events
+    for (const id of stage.trainerIds) defeatedSoFar.add(id)
+    return events.map((e) => ({ event: e.event, data0: e.data0, data1: e.data1 }))
+  })
+}
+
+/**
+ * Scores a team against a no-heal chain (chains-plan decision 4): stage k of game g uses
+ * seed `seedOffset + g * 1000 + k`, the party carries between stages via `carryParty`, and
+ * a loss, draw or turn-out ends the game, its unplayed stages scoring the clamp floor -1.
+ */
+export function scoreChain(
+  data: SimDataBundle,
+  chain: ChainSpec,
+  tier: 'ace' | 'elite' | 'hell',
+  team: Team,
+  games: number,
+  expectimax?: import('./expectimax').ExpectimaxOptions,
+  seedOffset = 0,
+  stageEvents?: StageEvents,
+): Fitness {
+  const trainers = chainStageTrainers(data, chain)
+  const level = Math.max(...team.map((m) => m.level ?? 50))
+  const startParty = buildPlayerParty(team, level, data)
+  let wins = 0
+  let scoreSum = 0
+  for (let g = 1; g <= games; g++) {
+    let party = startParty
+    let leadIndex: number | undefined
+    let gameScore = 0
+    let won = true
+    for (let k = 1; k <= trainers.length; k++) {
+      const result = playExpectimaxBattle({
+        data,
+        playerParty: party,
+        opponentTrainer: trainers[k - 1]!,
+        tier,
+        seed: seedOffset + g * 1000 + k,
+        expectimax,
+        battleEvents: stageEvents?.[k - 1],
+        leadIndex,
+      })
+      gameScore += Math.max(-1, Math.min(1, result.finalScore / 6))
+      party = carryParty(party, result.finalParty, result.finalActive)
+      leadIndex = firstLiveSlot(party)
+      if (result.outcome !== 'WON') {
+        won = false
+        gameScore -= trainers.length - k
+        break
+      }
+    }
+    if (won) wins++
+    scoreSum += gameScore / trainers.length
+  }
+  return { winRate: wins / games, meanScore: scoreSum / games, games }
+}
+
+/** Per-stage diagnostic for one chain run: stage k uses seed `seed * 1000 + k`, the same
+ * battles as game `seed` of `scoreChain` with seedOffset 0. Stops at the first non-win. */
+export function playChainOnce(
+  data: SimDataBundle,
+  chain: ChainSpec,
+  tier: 'ace' | 'elite' | 'hell',
+  team: Team,
+  seed: number,
+  stageEvents?: StageEvents,
+): Array<{ trainerId: string; outcome: string; turns: number; partyHp: number[] }> {
+  const trainers = chainStageTrainers(data, chain)
+  const level = Math.max(...team.map((m) => m.level ?? 50))
+  let party = buildPlayerParty(team, level, data)
+  let leadIndex: number | undefined
+  const out: Array<{ trainerId: string; outcome: string; turns: number; partyHp: number[] }> = []
+  for (let k = 1; k <= trainers.length; k++) {
+    const trainer = trainers[k - 1]!
+    const result = playExpectimaxBattle({
+      data,
+      playerParty: party,
+      opponentTrainer: trainer,
+      tier,
+      seed: seed * 1000 + k,
+      battleEvents: stageEvents?.[k - 1],
+      leadIndex,
+    })
+    party = carryParty(party, result.finalParty, result.finalActive)
+    out.push({
+      trainerId: trainer.id,
+      outcome: result.outcome,
+      turns: result.turns,
+      partyHp: party.map((mon) => mon.hp),
+    })
+    leadIndex = firstLiveSlot(party)
+    if (result.outcome !== 'WON') break
+  }
+  return out
+}
+
+/** Scores teams against one fixed chain, `games` seeded runs per team. */
+export function createChainEvaluator(
+  data: SimDataBundle,
+  chain: ChainSpec,
+  tier: 'ace' | 'elite' | 'hell' = 'elite',
+  stageEvents?: StageEvents,
+  expectimax?: import('./expectimax').ExpectimaxOptions,
+): FitnessEvaluator {
+  return async (teams, games) =>
+    teams.map((team) => scoreChain(data, chain, tier, team, games, expectimax, 0, stageEvents))
 }
