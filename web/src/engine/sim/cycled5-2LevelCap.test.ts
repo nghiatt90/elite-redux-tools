@@ -113,7 +113,7 @@ function placed(trainerId: string): { cap: number; row: FightRow; evidence: stri
 describe('cycle d5-2 - levelCapForTrainer', () => {
   it('finds a row by any trainer id, not just fightId', () => {
     // Juan's row (fightId TRAINER_JUAN_1) also lists TRAINER_WALLACE.
-    // requiredBefore [1, 2, 3, 4, 5, 7] -> highest required gym 7
+    // requiredBefore [1, 2, 3, 4, 5, 6, 7] -> highest required gym 7
     // -> levelCapsStrict[7] = 70 (src/pokemon.c:4661:
     // {16, 23, 36, 45, 50, 55, 60, 70, 80, 100}).
     const found = placed('TRAINER_WALLACE')
@@ -136,11 +136,11 @@ describe('cycle d5-2 - levelCapForTrainer', () => {
   })
 
   it('feeds the cap into the builder default level', () => {
-    // TRAINER_MAY_ROUTE_110_TORCHIC: requiredBefore [1] -> badge 1 -> 23.
+    // TRAINER_MAY_ROUTE_110_TORCHIC: requiredBefore [1, 2] -> badge 2 -> 36.
     const cap = placed('TRAINER_MAY_ROUTE_110_TORCHIC').cap
-    expect(cap).toBe(23)
+    expect(cap).toBe(36)
     const party = buildPlayerParty([tackleSpec], 50, data, { levelCap: cap })
-    expect(party[0]!.level).toBe(23)
+    expect(party[0]!.level).toBe(36)
   })
 })
 
