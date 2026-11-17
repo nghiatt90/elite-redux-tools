@@ -71,9 +71,9 @@ import {
 import { createRandomSource } from '../rng'
 import { applyStatStage } from '../../stats'
 import { battlerHasSimAbility } from '../statBuffs'
-import type { BattleState, BattlerState, SimBattleMon } from '../state'
+import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
 import type { ChosenAction } from '../turnOrder'
-import { aiDamageDepsFor, buildMoveAction, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
+import { aiDamageDepsFor, buildMoveAction, cloneParty, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
 /** The only move metadata the cycle-142 field-condition terms need: whether a
@@ -1155,12 +1155,13 @@ export function createHeuristicPlayerReplacement(data: SimDataBundle): (state: B
 
 export interface ExpectimaxBattleOptions {
   data: SimDataBundle
-  playerParty: import('../state').SimPartyMon[]
+  playerParty: SimPartyMon[]
   opponentTrainer: import('./loadSimData').TrainerData
   tier?: 'ace' | 'elite' | 'hell'
   seed: number
   maxTurns?: number
   expectimax?: ExpectimaxOptions
+  leadIndex?: number
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
 }
 
@@ -1169,6 +1170,11 @@ export interface ExpectimaxBattleResult {
   turns: number
   /** positionScore at the end of the battle. */
   finalScore: number
+  /** The player's party at the end of the battle (`state.sides[0].party`), deep-copied.
+   * The mon still on the field keeps its live `status1`/`pp`/`itemId` on the battler
+   * (`state.battlers[0].mon`): the sim writes `pp`/`itemId` to the party slot only on
+   * switch-out (`turn.ts switchBattlerOut`), and `status1` only there and on Rest. */
+  finalParty: SimPartyMon[]
 }
 
 /** Plays one battle with the expectimax policy on the player's side. */
@@ -1181,6 +1187,7 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     opponentTrainer: options.opponentTrainer,
     tier: options.tier,
     rng: createRandomSource(options.seed),
+    leadIndex: options.leadIndex,
     playerReplacement: createHeuristicPlayerReplacement(options.data),
     battleEvents: options.battleEvents,
   })
@@ -1192,7 +1199,12 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     if (choice) applyChoice(session, choice)
     stepTurn(session, choice ? choice.action : null)
   }
-  return { outcome: session.state.battleOutcome ?? 'MAX_TURNS', turns, finalScore: positionScore(session.state) }
+  return {
+    outcome: session.state.battleOutcome ?? 'MAX_TURNS',
+    turns,
+    finalScore: positionScore(session.state),
+    finalParty: cloneParty(session.state.sides[0].party),
+  }
 }
 
 /** Fraction of `games` seeded battles the player wins. */

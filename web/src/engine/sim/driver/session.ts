@@ -41,6 +41,8 @@ export interface SessionOptions {
   opponentTrainer: TrainerData
   tier?: Tier
   rng: RandomSource
+  /** Player party slot that starts on the field; default 0. */
+  leadIndex?: number
   /** Which party slot the player sends in after a faint; default is the first live mon that is not already out. */
   playerReplacement?: (state: BattleState) => number
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
@@ -57,7 +59,7 @@ export interface BattleSession {
   startUnmodelled: string[]
 }
 
-function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
+export function cloneParty(party: SimPartyMon[]): SimPartyMon[] {
   return party.map((p) => ({
     ...p,
     moves: [...p.moves] as Slot4<string | null>,
@@ -251,6 +253,10 @@ export function createSession(options: SessionOptions): BattleSession {
   const data = options.data
   const playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
+  const leadIndex = options.leadIndex ?? 0
+  const lead = playerParty[leadIndex]
+  if (!lead) throw new Error(`createSession: leadIndex ${leadIndex} is outside the ${playerParty.length}-mon playerParty`)
+  if (lead.hp === 0) throw new Error(`createSession: leadIndex ${leadIndex} names a fainted party slot`)
   // GetInnateInSlot (src/battle_util.c:8799-8802) gates the PLAYER's innates by
   // level and difficulty; the AI keeps all three (buildOpponentParty is untouched).
   for (const mon of playerParty) {
@@ -265,7 +271,7 @@ export function createSession(options: SessionOptions): BattleSession {
 
   const state = createBattleState({
     battlers: [
-      createBattlerState(0, toBattleMon(playerParty[0]), 0),
+      createBattlerState(0, toBattleMon(lead), leadIndex),
       createBattlerState(1, toBattleMon(opponentParty[0]), 0),
     ],
     playerParty,

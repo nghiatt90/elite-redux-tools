@@ -34,11 +34,14 @@ wording "Wally is not a chain / out of scope" referred to this Victory Road entr
 ### What carries between consecutive battles (C)
 - The heal is a battle-START gate: `if (!FlagGet(FLAG_SYS_DISABLE_AUTOHEAL)) HealPlayerParty();` (`src/battle_main.c:844`, again `src/pokemon.c:2120`). `CB2_EndTrainerBattle`
   does no cleanup (`battle_setup.c:1298-1316`).
-- Persisted through the party array: HP (0 = fainted stays fainted) and `status1` (written by `SetPlayerMonData`, `battle_controller_player.c:3802-3840`).
+- Persisted through the party array: HP (0 = fainted stays fainted) and `status1` (written by `SetPlayerMonData`'s `REQUEST_ALL_BATTLE` branch,
+  `battle_controller_player.c:3801-3841`, called at `:3790`; `MON_DATA_STATUS` at `:3821`, `MON_DATA_HP` at `:3823`).
 - **PP does NOT persist.** At the end of every battle `CalculateMonStats` runs on every party mon (`battle_main.c:4845-4852`, `B_RECALCULATE_STATS` is `GEN_7`,
   `battle_config.h:33`); `CalculateMonStats` is `CalculateMonStatsMaster(mon, TRUE, FALSE)` (`pokemon.c:965`), which sets every move's PP to base PP when `shouldRestorePP`
-  (`:1012-1017`) and then calls `MonRestorePP` (`:1019`), restoring PP to the maximum including PP bonuses. So every chain stage starts with full PP; a PP-stall or
-  Struggle-dependent line cannot carry over.
+  (`:1012-1017`) and then calls `MonRestorePP` (`:1019`; definition `pokemon.c:4211-4222`), which for each non-empty move slot sets PP to
+  `CalculatePPWithBonus(move, MON_DATA_PP_BONUSES, slot)` (`:2260-2263`): base PP plus `basePP * 20% * ppUpCount`, so PP comes back to the maximum INCLUDING PP bonuses
+  (Step 0.4 verified). The sim does not model `ppBonuses` (`SimBattleMon`'s omitted-field note, `state.ts:45`), so its maximum is the party slot's `pp`. So every chain stage
+  starts with full PP; a PP-stall or Struggle-dependent line cannot carry over.
 - HP after the end-of-battle recompute (`pokemon.c:1027-1043`): a fainted mon (HP 0, old max HP non-zero) returns early and stays at 0; any other mon gets
   `hp += newMaxHP - oldMaxHP`, floored at 1 (Shedinja is forced to 1). This only matters when a form revert changes max HP (Mega, primal, origin, HP-threshold forms).
 - Reset at battle end: Mega evolution and form changes are undone for all slots (`battle_main.c:4829-4831`); stat stages, weather, terrain, screens, hazards and `status2` live in
@@ -50,8 +53,23 @@ wording "Wally is not a chain / out of scope" referred to this Victory Road entr
   `TryRestoreStolenItems` (`battle_util.c:8478-8498`, called at `battle_main.c:4827` for trainer battles) sets each party mon's item back to `itemStolen[i].originalItem`,
   captured at battle start (`battle_main.c:2781`). So a consumed Sitrus Berry or Focus Sash is back for the next fight; HP is not.
 - Lead selection for the next fight (singles): `SetBattlePartyIds` (`battle_controllers.c:615-675`) takes the first party slot passing `IsValidForBattle` (hp != 0), not the
-  previous active mon.
-- Whether the party ORDER changes during a fight is not verified here (Step 0.1).
+  previous active mon. It runs once, from `InitBattleControllers` (`battle_controllers.c:99`), against `gPlayerParty` in field order.
+- **The party ORDER does not change during a fight (Step 0.1, verified).**
+  `SwitchPartyOrder` (`battle_main.c:3587-3611`) only rewrites `gBattlePartyCurrentOrder`, the battle-order nibble array: it copies that battler's saved order in, calls
+  `SwitchPartyMonSlots` (via `party_menu.c:6260-6264`, which swaps two nibbles in `gBattlePartyCurrentOrder`, `party_menu.c:154`) and writes the order back. It is called on a
+  voluntary switch at `battle_script_commands.c:5434` (`Cmd_switchhandleorder` case 1, `!BATTLE_TYPE_MULTI`) and `:5458` (cases 2/3, the non-link, non-partner branch of the same
+  command), and on a Roar/Whirlwind/Red Card forced switch at `:10184` (`Cmd_forcerandomswitch`, `!IsMultiBattle()`); none touches the `gPlayerParty` structs. The
+  `gPlayerParty` permuters are only `UpdatePartyToBattleOrder`/`UpdatePartyToFieldOrder` (`party_menu.c:6280-6296`), and they are called as a pair around the in-battle party
+  menu: battle order on open (`OpenPartyMenuInBattle` `:6038`, `ChooseMonForInBattleItem` `:6050`) and again on entering the summary screen (`:2807`; the transform is
+  idempotent), field order when the menu closes (`Task_ClosePartyMenuAndSetCB2` `:1060`, `menuType == PARTY_MENU_TYPE_IN_BATTLE`), so the net effect on the field order is the
+  identity. `TrySwitchInPokemon` (`party_menu.c:6061-6110`), the menu's "send out" action, does swap structs (`SwapPartyPokemon` `:6107`) but swaps the two party ids in
+  `gBattlePartyCurrentOrder` in the same step (`SwitchPartyMonSlots` `:6106`), so the slot-to-id mapping it relies on is preserved and the close-time
+  `UpdatePartyToFieldOrder` writes every mon back to its original field index. The faint-replacement choice does not even take that path: `HandleChooseMonSelection`'s
+  `PARTY_ACTION_CHOOSE_FAINTED_MON` case (`party_menu.c:1116-1129`) only records `gSelectedMonPartyId` and closes. End of battle (`battle_main.c:4820-4852`) calls
+  `TryRestoreStolenItems`, `UndoMegaEvolution`/`UndoFormChange` and `CalculateMonStats` per `gPlayerParty[i]` index without reading the battle order. So the lead rule reads the
+  array `SetBattlePartyIds` read at battle start and the sim's `state.sides[0].party` (which writes a switched-out mon back to `party[battler.partyIndex]`,
+  `turn.ts:1839-1853`, and never reorders) matches it; `finalParty` is exposed in that order. The one exception is a deliberate player reorder from the in-battle menu's Shift
+  action (`SwitchPartyMon`, `party_menu.c:3062-3076`), which is a party-menu action, not part of switching, and has no sim counterpart.
 
 ### Sim today
 - `driver/session.ts:238-300` `createSession` deep-copies the player party and starts from `playerParty[0]`; `toBattleMon` (`:75-97`) accepts a pre-damaged `SimPartyMon` (hp, pp, itemId,
@@ -100,11 +118,17 @@ wording "Wally is not a chain / out of scope" referred to this Victory Road entr
 ## Steps
 
 ### Step 0 - verify the unverified inputs (read-only)
-0.1 In `battle_main.c` (end of battle, `:4827-4852`) and `battle_controller_player.c`, confirm the party array order is not changed by in-battle switching, and that a fainted mon's HP 0 and `status1`
-    survive to the next battle; record the lines. If order changes, the lead rule in decision 3 changes.
+0.1 **VERIFIED (verdict: order unchanged).** `SwitchPartyOrder` (`battle_main.c:3587-3611`, called at `battle_script_commands.c:5434`, `:5458`, `:10184`) rewrites only
+    `gBattlePartyCurrentOrder`; the `gPlayerParty` permuters (`party_menu.c:6280-6296`) are the in-battle party-menu open/close pair and compose to the identity, and the
+    end-of-battle block (`battle_main.c:4820-4852`) never reads the battle order. Full lines in "What carries between consecutive battles (C)". A fainted mon's HP 0 survives
+    into the end-of-battle `CalculateMonStats` (`pokemon.c:1027-1043` returns early for `currentHP == 0` with a non-zero old max) and `status1` is written to the party slot on
+    switch-out (`turn.ts:1839-1853` in the sim; `SetPlayerMonData`'s `REQUEST_ALL_BATTLE` branch, `battle_controller_player.c:3801-3841` called at `:3790`, writes
+    `MON_DATA_STATUS` (`:3821`) and `MON_DATA_HP` (`:3823`)).
 0.2 Confirm, for each in-scope chain, that no `special` heal, script `healparty`, or flag clear occurs between members besides what the table lists (read the cited script ranges end to end, including `:87`, `:102` clears).
 0.3 Confirm `status1` packs toxic/sleep counters in the sim and the C the same way (so carrying `status1` carries the counters).
-0.4 Confirm `MonRestorePP` (`pokemon.c:4211-4222`) restores to max PP including bonuses and that `ppBonuses` is not modelled in the sim (PP max is base PP under the sim's own rule); record the lines.
+0.4 **VERIFIED.** `MonRestorePP` (`pokemon.c:4211-4222`) restores each non-empty move slot with `CalculatePPWithBonus(move, bonus, slot)` (`:2260-2263`, base PP plus
+    `basePP * 20% * ppUpCount`), so the restore is to the maximum INCLUDING PP bonuses; `CalculateMonStatsMaster` reaches it through `shouldRestorePP` (`:1012-1019`). The sim
+    does not model `ppBonuses` (`state.ts:45`), so the sim's PP maximum is the party slot's `pp`.
 
 ### Step 1 - expose the end state and the lead
 1.1 `playExpectimaxBattle`/`runBattle` return `finalParty` (decision 4); existing callers ignore the new field (no change to singles results, test asserts equality of outcome/turns/finalScore).
@@ -139,7 +163,10 @@ wording "Wally is not a chain / out of scope" referred to this Victory Road entr
 ## Risks / open questions
 - **Heal semantics are per-script**: the emitter's `healFree` rule ("flag set at every member except the first") matches the three scripts read here, but a direct heal between members is a documented blind spot (`encounters.py:201-214`); Step 0.2 re-checks it.
 - **Gym 8 branches 2-4** need doubles; the reported gym 8 verdict depends on which branch the player picks. Moot in v1 (the gym 8 trainers are deferred).
-- **Party order after a fight** (Step 0.1) and **item restore** (`B_RESTORE_ALL_ITEMS`) and the end-of-battle stat recompute (PP refill and the HP-after-revert rule, verified at `battle_main.c:4845-4852` and `pokemon.c:965,1012-1043`) are the three C behaviours the carry function leans on; the order point is not yet verified.
+- **Party order after a fight is verified unchanged** (Step 0.1; the "What carries between consecutive battles" bullet records the lines): in-battle switching rewrites only
+  `gBattlePartyCurrentOrder`, the party-menu open/close pair restores `gPlayerParty`, and the end-of-battle block never reads the battle order. **Item restore**
+  (`B_RESTORE_ALL_ITEMS`) and the end-of-battle stat recompute (PP refill and the HP-after-revert rule, verified at `battle_main.c:4845-4852` and `pokemon.c:965,1012-1043`) are
+  the remaining C behaviours the carry function leans on.
 - **No bag healing** is assumed (decision 6); a real player may heal in the battle menu at a turn cost, so a chain loss in the sim is not proof the chain is unbeatable.
 - **Cost**: a chain of three fights is roughly three times a single-fight evaluation per game (`solver-evaluation.md` measures ~1.3-1.4 s per game per fight); the solver's search budget is re-checked in `docs/battle-sim/solver-v2-plan.md` (the D4 plan).
 - **Out of scope**: Winstrates, Sky Pillar, Wally at Victory Road (as a chain), Double Battle Mode, experience/level changes between stages (the player sits at the level cap, `innate-gating-plan.md`).

@@ -10,7 +10,7 @@ import { naturalGiftPriority } from '../turnOrder'
 import type { DamageResolver } from '../turn'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
-import { createSession, groundingFor, stepTurn } from './session'
+import { createSession, cloneParty, groundingFor, stepTurn } from './session'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
 export interface RunBattleOptions {
@@ -20,6 +20,7 @@ export interface RunBattleOptions {
   tier?: 'ace' | 'elite' | 'hell'
   rng?: RandomSource
   maxTurns?: number
+  leadIndex?: number
   playerPolicy?: (state: BattleState, unmodelled: string[]) => ChosenAction | null
 }
 
@@ -47,6 +48,11 @@ export interface BattleRunResult {
   unmodelled: Map<string, number>
   error?: string
   megaEvolutions: number
+  /** The player's party at the end of the battle, deep-copied. Absent on the error return.
+   * The mon still on the field keeps its live `status1`/`pp`/`itemId` on the battler
+   * (`state.battlers[0].mon`): `pp`/`itemId` reach the party slot only on switch-out
+   * (`turn.ts switchBattlerOut`), `status1` only there and on Rest. */
+  finalParty?: SimPartyMon[]
 }
 
 /**
@@ -169,6 +175,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       opponentTrainer: options.opponentTrainer,
       tier,
       rng: options.rng ?? { random16: () => 0 },
+      leadIndex: options.leadIndex,
     })
     const { state } = session
     recordUnmodelled(session.startUnmodelled)
@@ -212,6 +219,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       log,
       unmodelled: unmodelledMap,
       megaEvolutions,
+      finalParty: cloneParty(state.sides[0].party),
     }
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? (err.stack ?? err.message) : String(err)
