@@ -122,11 +122,11 @@ describe('cycle d5-2 - levelCapForTrainer', () => {
   })
 
   it('returns the { cap, row, evidence } shape', () => {
-    // TRAINER_MAY_ROUTE_103_TORCHIC: requiredBefore [] -> badge 0
+    // TRAINER_GRUNT_PETALBURG_WOODS: requiredBefore [] -> badge 0
     // -> levelCapsStrict[0] = 16.
-    const found = placed('TRAINER_MAY_ROUTE_103_TORCHIC')
+    const found = placed('TRAINER_GRUNT_PETALBURG_WOODS')
     expect(found.cap).toBe(16)
-    expect(found.row.fightId).toBe('TRAINER_MAY_ROUTE_103_TORCHIC')
+    expect(found.row.fightId).toBe('TRAINER_GRUNT_PETALBURG_WOODS')
     expect(found.evidence).toBe(found.row.evidence)
     expect(found.evidence.length).toBeGreaterThan(0)
   })
