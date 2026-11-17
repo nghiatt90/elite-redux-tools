@@ -579,17 +579,31 @@ export const FIGHTS: readonly FightRow[] = [
 ]
 
 /**
- * The strict level cap for the trainer's fight, from the badges held at that
- * point in the story (innate-gating-plan step 2.3). `'min'` assumes only the
- * required gyms are cleared; `'max'` also assumes every skippable gym in
- * `mayBefore` is cleared. Both are the highest-badge index (not a count), which
- * is what GetLevelCap indexes (src/pokemon.c:4633-4668).
+ * The level cap for a fight, from the badges held at that point in the story
+ * (innate-gating-plan step 1.2). Finds the row whose `trainerIds` contains the
+ * trainer id -- ANY member, not only `fightId`, so `TRAINER_WALLACE` finds
+ * Juan's row. A placed row yields its cap: the highest required gym
+ * (`highestBadgeRange(row).min`, the only value now that every row is placed)
+ * indexed into GetLevelCap's strict table (src/pokemon.c:4661). A trainer id in
+ * no row yields `undefined`, which the CLI treats as today's `--level` (default
+ * 50, no cap).
+ *
+ * NOTE: the `awaitingRoute` / `excluded` fields on `FightRow` are added by queue
+ * item d5-1c, which has not landed; until then the tagged `{ awaiting }` outcome
+ * below is unreachable, so only the placed-row and `undefined` branches are
+ * implemented. When d5-1c lands an awaiting/excluded row must return
+ * `{ awaiting: row.excluded ?? 'awaitingRoute', row }` instead of a cap.
  */
-export function levelCapForFight(trainerId: string, scenario: 'min' | 'max'): number {
+export function levelCapForTrainer(
+  trainerId: string,
+): { cap: number; row: FightRow; evidence: string } | { awaiting: string; row: FightRow } | undefined {
   const row = FIGHTS.find((fight) => fight.trainerIds.includes(trainerId))
   if (!row) {
-    throw new Error(`levelCapForFight: unknown trainer id ${trainerId}`)
+    return undefined
   }
-  const badges = highestBadgeRange(row)[scenario]
-  return levelCapFor(badges)
+  return {
+    cap: levelCapFor(highestBadgeRange(row).min),
+    row,
+    evidence: row.evidence,
+  }
 }

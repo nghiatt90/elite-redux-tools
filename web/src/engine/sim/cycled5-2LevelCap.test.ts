@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import { createRandomSource } from './rng'
 import { buildMoveAction, createSession, stepTurn } from './driver/session'
 import { buildPlayerParty } from './driver/buildParty'
-import { levelCapForFight } from './driver/fights'
+import { levelCapForTrainer, type FightRow } from './driver/fights'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 
 const data = loadSimData()
@@ -101,34 +101,44 @@ describe('cycle d5-2 - buildPlayerParty level cap', () => {
   })
 })
 
-describe('cycle d5-2 - levelCapForFight', () => {
-  it('maps an empty row to badge 0', () => {
-    // TRAINER_MAY_ROUTE_103_TORCHIC: requiredBefore [] / mayBefore [].
-    // getHighestBadge() = 0 -> levelCapsStrict[0] = 16.
-    expect(levelCapForFight('TRAINER_MAY_ROUTE_103_TORCHIC', 'min')).toBe(16)
-    expect(levelCapForFight('TRAINER_MAY_ROUTE_103_TORCHIC', 'max')).toBe(16)
+/** Narrows a lookup result to a placed row, failing the test on the tagged/absent outcomes. */
+function placed(trainerId: string): { cap: number; row: FightRow; evidence: string } {
+  const found = levelCapForTrainer(trainerId)
+  if (!found || 'awaiting' in found) {
+    throw new Error(`expected a placed row for ${trainerId}`)
+  }
+  return found
+}
+
+describe('cycle d5-2 - levelCapForTrainer', () => {
+  it('finds a row by any trainer id, not just fightId', () => {
+    // Juan's row (fightId TRAINER_JUAN_1) also lists TRAINER_WALLACE.
+    // requiredBefore [1, 2, 3, 4, 5, 7] -> highest required gym 7
+    // -> levelCapsStrict[7] = 70 (src/pokemon.c:4661:
+    // {16, 23, 36, 45, 50, 55, 60, 70, 80, 100}).
+    const found = placed('TRAINER_WALLACE')
+    expect(found.cap).toBe(70)
+    expect(found.row.fightId).toBe('TRAINER_JUAN_1')
   })
 
-  it('uses the highest required/may badge on a gym leader row', () => {
-    // TRAINER_WATTSON_1: requiredBefore [1] / mayBefore [2, 4].
-    // min badge = 1 -> 23; max badge = 4 -> 50.
-    expect(levelCapForFight('TRAINER_WATTSON_1', 'min')).toBe(23)
-    expect(levelCapForFight('TRAINER_WATTSON_1', 'max')).toBe(50)
+  it('returns the { cap, row, evidence } shape', () => {
+    // TRAINER_MAY_ROUTE_103_TORCHIC: requiredBefore [] -> badge 0
+    // -> levelCapsStrict[0] = 16.
+    const found = placed('TRAINER_MAY_ROUTE_103_TORCHIC')
+    expect(found.cap).toBe(16)
+    expect(found.row.fightId).toBe('TRAINER_MAY_ROUTE_103_TORCHIC')
+    expect(found.evidence).toBe(found.row.evidence)
+    expect(found.evidence.length).toBeGreaterThan(0)
   })
 
-  it('honours a skippable gym in mayBefore on a non-leader row', () => {
-    // TRAINER_MAY_ROUTE_110_TORCHIC: requiredBefore [1] / mayBefore [2].
-    // min badge = 1 -> 23; max badge = 2 -> 36.
-    expect(levelCapForFight('TRAINER_MAY_ROUTE_110_TORCHIC', 'min')).toBe(23)
-    expect(levelCapForFight('TRAINER_MAY_ROUTE_110_TORCHIC', 'max')).toBe(36)
-  })
-
-  it('throws for a trainer id that is not a fight', () => {
-    expect(() => levelCapForFight('TRAINER_NOT_A_FIGHT', 'min')).toThrow(/TRAINER_NOT_A_FIGHT/)
+  it('returns undefined (not a throw) for a trainer id in no row', () => {
+    expect(levelCapForTrainer('TRAINER_NOT_A_FIGHT')).toBeUndefined()
   })
 
   it('feeds the cap into the builder default level', () => {
-    const cap = levelCapForFight('TRAINER_MAY_ROUTE_110_TORCHIC', 'min') // 23
+    // TRAINER_MAY_ROUTE_110_TORCHIC: requiredBefore [1] -> badge 1 -> 23.
+    const cap = placed('TRAINER_MAY_ROUTE_110_TORCHIC').cap
+    expect(cap).toBe(23)
     const party = buildPlayerParty([tackleSpec], 50, data, { levelCap: cap })
     expect(party[0]!.level).toBe(23)
   })
