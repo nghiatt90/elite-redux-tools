@@ -41,7 +41,9 @@ import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from
 import { STATUS2_DEFENSE_CURL, STATUS4_ELECTRIFIED, STATUS4_PLASMA_FISTS, STATUS_FIELD_ION_DELUGE, STATUS_FIELD_TERRAIN_ANY, hasFlag } from './constants'
 import { isBattlerTerrainAffected } from './statusEffects'
 import { isSimAbilitySuppressed } from './statBuffs'
-import type { DamageResolution, DamageResolveContext, DamageResolver } from './turn'
+import { getBattlerBattleMoveTargetFlags } from './moveTargetFlags'
+import { getMoveTargetCount } from '../moveTargetCount'
+import { isBattlerAlive, type DamageResolution, type DamageResolveContext, type DamageResolver } from './turn'
 import type { ChosenAction } from './turnOrder'
 
 export interface BridgeDamageResolverDeps extends BridgeDeps {
@@ -89,6 +91,33 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
   const attacker = buildBattlerBattleState(state, attackerId, roles, deps)
   const defender = buildBattlerBattleState(state, targetId, roles, deps)
   const field = buildFieldBattleState(state, roles, deps)
+  // GetMoveTargetCount(move, battlerAtk, battlerDef), battle_util.c:6761-6781,
+  // whose >= 2 answer gives CalcFinalDmg's x0.75 multi-target term (:7498). The
+  // flag is the DYNAMIC one (GetBattlerBattleMoveTargetFlags, :128-149 -- the
+  // same call accuracyBridge.ts/moveEnd.ts make), because an ability or terrain
+  // can widen a SELECTED move to BOTH. Aliveness is IsBattlerAlive (:6685-6694);
+  // a battler's partner is `id ^ 2` (BATTLE_PARTNER). In singles the partner ids
+  // are past battlersCount, so they read dead and BOTH reduces to 1 -- there is
+  // deliberately no singles special case here.
+  const statusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+  const targetFlag = getBattlerBattleMoveTargetFlags(state, attackerId, move.id, deps.dataContext.move(move.id), deps, statusDeps)
+  const targetCount = getMoveTargetCount({
+    moveId: move.id,
+    targetFlag,
+    atkAlive: isBattlerAlive(state, attackerId),
+    defAlive: isBattlerAlive(state, targetId),
+    defPartnerAlive: isBattlerAlive(state, targetId ^ 2),
+    atkPartnerAlive: isBattlerAlive(state, attackerId ^ 2),
+  })
+  // CalcFinalDmg's three ally-ability reducers (:7637-7640) are each
+  // BATTLER_HAS_ABILITY_AND_ALIVE(BATTLE_PARTNER(battlerDef), ability, TRUE):
+  // the defender's partner must be alive for its slots to matter. Build those
+  // slots through the same bridge the defender uses, never by hand; `null`
+  // means no alive partner (every singles scenario) and reads as zero reducers.
+  const defenderPartnerId = targetId ^ 2
+  const defenderAllyAbilitySlots = isBattlerAlive(state, defenderPartnerId)
+    ? buildBattlerBattleState(state, defenderPartnerId, roles, deps).battler.abilitySlots
+    : null
   const unmodelled = [
     ...gapsToUnmodelled(attacker.gaps).map((gap) => `attacker.${gap}`),
     ...gapsToUnmodelled(defender.gaps).map((gap) => `defender.${gap}`),
@@ -189,6 +218,8 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     flungItem: flungId
       ? { id: flungId, holdEffect: flungData?.resolvedHoldEffect ?? null, holdEffectType: flungData?.holdEffectType?.replace(/^TYPE_/, '') ?? null }
       : null,
+    targetCount,
+    defenderAllyAbilitySlots,
   }
   return { scenario, unmodelled }
   }

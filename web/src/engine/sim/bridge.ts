@@ -88,6 +88,7 @@ import {
   slowStartTimer,
 } from './unpack'
 import {
+  BATTLE_TYPE_DOUBLE,
   DEFAULT_STAT_STAGE,
   STAT_ATK,
   STAT_DEF,
@@ -634,7 +635,9 @@ export function buildFieldBattleState(state: BattleState, roles: CalculationRole
       terrain: facts.terrain,
       gravityActive: facts.gravityActive,
       sides: buildFieldSides(state, roles),
-      isDoubleBattle: false,
+      // `gBattleTypeFlags & BATTLE_TYPE_DOUBLE` chooses the screens multiplier,
+      // 0.66 in doubles vs 0.5 in singles (battle_util.c:7622-7629).
+      isDoubleBattle: (state.battleTypeFlags & BATTLE_TYPE_DOUBLE) !== 0,
       isInverseRoomActive: inverseRoom,
       isInverseBattleFlagSet: deps.inverseBattle,
       isWonderRoomActive: wonderRoom,

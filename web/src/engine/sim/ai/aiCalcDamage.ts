@@ -36,6 +36,9 @@ import { createBattlerState } from '../create'
 import type { BridgeDeps, CalculationRoles } from '../bridge'
 import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from '../bridge'
 import { B_SIDE_OPPONENT } from '../constants'
+import { getBattlerBattleMoveTargetFlags } from '../moveTargetFlags'
+import { getMoveTargetCount } from '../../moveTargetCount'
+import { isBattlerAlive } from '../turn'
 
 export interface AiDamageDeps extends BridgeDeps {
   moveData(id: string): MoveData | undefined
@@ -185,6 +188,26 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
   const attackerBridge = buildBattlerBattleState(maskedState, attackerId, roles, deps)
   const defenderBridge = buildBattlerBattleState(maskedState, defenderId, roles, deps)
   const fieldBridge = buildFieldBattleState(maskedState, roles, deps)
+  // The same GetMoveTargetCount (battle_util.c:6761-6781 -> CalcFinalDmg's
+  // x0.75 at :7498) and BATTLE_PARTNER ability-slot read (:7637-7640) the
+  // player path feeds, computed off the MASKED state exactly as the attacker
+  // and defender bridges above are. SetBattlerData only blanks items/moves, so
+  // aliveness and abilities are the live ones; in singles the partner ids are
+  // past battlersCount, so the count reduces to 1 and the slots to null.
+  const statusDeps = { dataContext: deps.dataContext, grounding: deps.grounding }
+  const targetFlag = getBattlerBattleMoveTargetFlags(maskedState, attackerId, moveId, deps.dataContext.move(moveId), deps, statusDeps)
+  const targetCount = getMoveTargetCount({
+    moveId,
+    targetFlag,
+    atkAlive: isBattlerAlive(maskedState, attackerId),
+    defAlive: isBattlerAlive(maskedState, defenderId),
+    defPartnerAlive: isBattlerAlive(maskedState, defenderId ^ 2),
+    atkPartnerAlive: isBattlerAlive(maskedState, attackerId ^ 2),
+  })
+  const defenderPartnerId = defenderId ^ 2
+  const defenderAllyAbilitySlots = isBattlerAlive(maskedState, defenderPartnerId)
+    ? buildBattlerBattleState(maskedState, defenderPartnerId, roles, deps).battler.abilitySlots
+    : null
   const unmodelled = [
     ...gapsToUnmodelled(attackerBridge.gaps).map((g) => `attacker.${g}`),
     ...gapsToUnmodelled(defenderBridge.gaps).map((g) => `defender.${g}`),
@@ -253,6 +276,8 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
     beatUpBaseAttack: attackerBridge.battler.rawStats.atk,
     beatUpHitCount: 1,
     defenderUsedGlaiveRush: false,
+    targetCount,
+    defenderAllyAbilitySlots,
   }
 
   return { move, scenario, maskedState, unmodelled }
