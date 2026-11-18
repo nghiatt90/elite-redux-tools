@@ -1534,6 +1534,22 @@ export interface MoveEndAbilitiesResult {
 }
 
 /**
+ * TARGET_TURN_DAMAGED, include/battle.h:750:
+ * `gTurnStructs[gBattlerTarget].physicalDmg != 0 || gTurnStructs[gBattlerTarget].specialDmg != 0`.
+ * Those two fields are written only by Cmd_datahpupdate after HP is actually removed from the
+ * battler (src/battle_script_commands.c:1937 physical, :1948 special). The substitute branch just
+ * above those writes (:1877-1893) only sets `dmg` and gHpDealt, so a Substitute that absorbed the
+ * hit leaves physicalDmg/specialDmg at zero and TARGET_TURN_DAMAGED false. `hpDealt` is this hit's
+ * removed HP; the turn-struct term additionally carries an earlier hit of the same multi-hit move
+ * (the struct is zeroed after every action, battle_main.c:234 / TurnStructsClear :4511).
+ */
+export function targetTurnDamaged(state: BattleState, targetId: number, hpDealt: number): boolean {
+  const target = state.battlers[targetId]
+  if (!target) return hpDealt > 0
+  return hpDealt > 0 || target.turn.physicalDmg !== 0 || target.turn.specialDmg !== 0
+}
+
+/**
  * ON_EITHER(TalonTrap), src/abilities.cc:4713-4730. ON_EITHER's signature is
  * `(ability, battler, opponent, move, moveType)` (:53) and
  * HandleAttackerAbility/HandleDefenderAbility (:9034 / :9075) pass
@@ -1557,14 +1573,17 @@ function tryTalonTrapWrap(
   holderId: number,
   opponentId: number,
   attackerId: number,
+  /** gBattlerTarget: the battler whose turn struct TARGET_TURN_DAMAGED reads. */
+  targetId: number,
   moveData: SimMoveData | undefined,
   targetDamage: number,
+  hpDealt: number,
   attackerHoldEffect: string | null,
 ): boolean {
   const holder = state.battlers[holderId]
   const opponent = state.battlers[opponentId]
   if (!holder || !opponent) return false
-  if (!(targetDamage > 0 && opponent.mon.hp > 0)) return false // ShouldApplyOnHitEffect(opponent)
+  if (!(targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && opponent.mon.hp > 0)) return false // ShouldApplyOnHitEffect(opponent)
   if (holder.mon.hp === 0) return false // IsBattlerAlive(battler)
   // IsMoveMakingContact(move, gBattlerAttacker): the MOVE USER's Long Reach /
   // Protective Pads / Punching Glove, not the holder's -- they are the same
@@ -1637,6 +1656,7 @@ function handleDefenderMoveEndAbility(
     if (
       targetDamage > 0 &&
       linkDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // DidMoveHit (battle_util.c:4060) -- TARGET_TURN_DAMAGED (battle.h:750)
       target.mon.hp > 0 && // CHECK(IsBattlerAlive(battler))
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       moveId !== 'MOVE_PAIN_SPLIT' &&
@@ -1656,7 +1676,7 @@ function handleDefenderMoveEndAbility(
   // battle_gfx_sfx_util.c:405-406 (`broken = 1; on = 0`), run when that animation launches --
   // so the break happens here, where the hook fires.
   if (abilityId === 'ABILITY_ILLUSION') {
-    if (targetDamage > 0 && target.illusion.on && !target.illusion.broken) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.illusion.on && !target.illusion.broken) {
       target.illusion.broken = true
       target.illusion.on = false
     }
@@ -1677,7 +1697,7 @@ function handleDefenderMoveEndAbility(
   // Strikeout (src/abilities.cc:11143-11155): CHECK(DidMoveHit()), CHECK(GetBattlerSide(attacker) != GetBattlerSide(battler)); DidMoveHit is
   // read as "the move dealt damage", like the other ports here. Unlike most defender hooks it does not require the holder to be alive.
   if (abilityId === 'ABILITY_STRIKEOUT') {
-    if (targetDamage > 0 && (attackerId & 1) !== (targetId & 1)) strikeoutMarkDamagedBy(target, abilityId, attackerId)
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && (attackerId & 1) !== (targetId & 1)) strikeoutMarkDamagedBy(target, abilityId, attackerId)
     return result
   }
 
@@ -1692,6 +1712,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) -- the hit dealt damage and the attacker is alive.
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !isMagicGuardProtected(state, attacker)
@@ -1713,7 +1734,7 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_POISON_QUILLS'
   ) {
     // ON_EITHER(PoisonPoint) (src/abilities.cc:987-995): CHECK(ShouldApplyOnHitEffect(opponent)).
-    if (targetDamage > 0 && attacker.mon.hp > 0 && canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0 && canBePoisoned(state, targetId, attackerId, 'MOVE_NONE', statusDeps)) {
       if (isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
         if (state.rng.random16() % 100 < 30) {
           const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_POISON, moveId, statusDeps, unmodelled, false, false, true)
@@ -1728,7 +1749,7 @@ function handleDefenderMoveEndAbility(
   // 3. Static on defender (src/abilities.cc:610-618, 8183)
   if (abilityId === 'ABILITY_STATIC' || abilityId === 'ABILITY_WHITE_NOISE') {
     // ON_EITHER(Static) (src/abilities.cc:610-618): CHECK(ShouldApplyOnHitEffect(opponent)).
-    if (targetDamage > 0 && attacker.mon.hp > 0 && canBeParalyzed(state, targetId, attackerId, statusDeps)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0 && canBeParalyzed(state, targetId, attackerId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 10
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_PARALYSIS, moveId, statusDeps, unmodelled, false, false, true)
@@ -1742,7 +1763,7 @@ function handleDefenderMoveEndAbility(
   // 4. Flame Body on defender (src/abilities.cc:1126-1134, 4364, 6106)
   if (abilityId === 'ABILITY_FLAME_BODY' || abilityId === 'ABILITY_SMOLDERING_WOOD' || abilityId === 'ABILITY_SUPER_HOT_GOO') {
     // ON_EITHER(FlameBody) (src/abilities.cc:1126-1134): CHECK(ShouldApplyOnHitEffect(opponent)).
-    if (targetDamage > 0 && attacker.mon.hp > 0 && canBeBurned(state, attackerId, targetId, statusDeps)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0 && canBeBurned(state, attackerId, targetId, statusDeps)) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 30 : 20
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_BURN, moveId, statusDeps, unmodelled, false, false, true)
@@ -1758,6 +1779,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:818-819).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !isPowderImmune(state, targetId, attackerId, statusDeps)
@@ -2283,6 +2305,7 @@ function handleDefenderMoveEndAbility(
     // ON_EITHER(CuteCharm) (src/abilities.cc:1207-1209): CHECK(ShouldApplyOnHitEffect(opponent)).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       canInfatuate(state, targetId, attackerId, statusDeps)
@@ -2298,6 +2321,7 @@ function handleDefenderMoveEndAbility(
     // ON_EITHER(Damp) (src/abilities.cc:564-566): CHECK(ShouldApplyOnHitEffect(opponent)).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !attacker.mon.types.includes('WATER')
@@ -3434,7 +3458,7 @@ function handleDefenderMoveEndAbility(
   // Talon Trap, onDefender half (src/abilities.cc:4713-4730 via ON_EITHER_ABILITY, :54). Holder =
   // target, opponent = attacker.
   if (abilityId === 'ABILITY_TALON_TRAP') {
-    tryTalonTrapWrap(state, deps, targetId, attackerId, attackerId, moveData, targetDamage, attackerHoldEffect)
+    tryTalonTrapWrap(state, deps, targetId, attackerId, attackerId, targetId, moveData, targetDamage, hpDealt, attackerHoldEffect)
   }
 
   return result
@@ -5677,7 +5701,7 @@ function handleAttackerMoveEndAbility(
   // Talon Trap, onAttacker half (src/abilities.cc:4713-4730 via ON_EITHER_ABILITY, :54). Holder =
   // attacker, opponent = target; see tryTalonTrapWrap.
   if (abilityId === 'ABILITY_TALON_TRAP') {
-    tryTalonTrapWrap(state, deps, attackerId, targetId, attackerId, moveData, targetDamage, attackerHoldEffect)
+    tryTalonTrapWrap(state, deps, attackerId, targetId, attackerId, targetId, moveData, targetDamage, hpDealt, attackerHoldEffect)
   }
 
   // 13. Growing Tooth (src/abilities.cc:3848-3856)
