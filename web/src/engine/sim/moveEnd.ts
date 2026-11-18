@@ -4058,7 +4058,7 @@ function handleAttackerMoveEndAbility(
     const effectiveType = rawType ? resolveEffectiveMoveType(attacker.mon.abilities, moveId, rawType, moveData?.flags ?? {}).moveType : null
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       effectiveType === 'ROCK' &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
@@ -4072,7 +4072,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_DEEP_CUTS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
       isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
@@ -4087,7 +4087,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_BEAUTIFUL_MUSIC') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       state.rng.random16() % 2 !== 0 &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
@@ -4100,7 +4100,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_DEAD_POWER') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       !hasFlag(target.mon.status2, STATUS2_CURSED) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -4115,7 +4115,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_ASSASSINS_TOOLS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect)
     ) {
@@ -4134,7 +4134,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_CRUSHING_JAW') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       Boolean(moveData?.flags?.biteBased) &&
       state.rng.random16() % 2 !== 0 &&
@@ -4149,7 +4149,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_CHAINSAW' || abilityId === 'ABILITY_DENTING_BLOWS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       (abilityId === 'ABILITY_CHAINSAW'
         ? isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType)
@@ -4171,7 +4171,11 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_DAREDEVIL') {
     // CHECK(ShouldApplyOnHitEffect(battler)) precedes CHECK(IsRecklessBoosted(...))
     // (abilities.cc:12384-12385), so the type is only resolved once the hit gates pass.
-    if (attacker.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+    if (
+      attacker.mon.hp > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
+      attackerId !== targetId
+    ) {
       // IsRecklessBoosted (abilities.cc:463-470) short-circuits on the flag and STATUS2_ENRAGED;
       // only the third arm calls onRecoil(100, battler, moveType), so only that arm needs the type.
       let recklessBoosted = Boolean(moveData?.flags?.reckless) || hasFlag(attacker.mon.status2, STATUS2_ENRAGED)
