@@ -2932,7 +2932,7 @@ function handleDefenderMoveEndAbility(
   // 41. Crispy Cream (src/abilities.cc:10838-10842): `Random() % 2 ? Flame Body : Freezing Point` -- the coin is drawn before either hook's own checks.
   if (abilityId === 'ABILITY_CRISPY_CREAM') {
     const flameBody = state.rng.random16() % 2 !== 0
-    if (targetDamage > 0 && attacker.mon.hp > 0) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0) {
       const contact = isMoveMakingContact(moveData, attacker, attackerHoldEffect)
       if (flameBody) {
         // Flame Body (abilities.cc:1126-1134): contact 30, otherwise 20
@@ -3024,7 +3024,12 @@ function handleDefenderMoveEndAbility(
   // CryoProficiencyHail(battler)`, a non-short-circuit `|`, so the Frostbite roll is drawn before the Hail check). Frostbite: ShouldApplyOnHitEffect(opponent),
   // CanGetFrostbite, then Random() % 100 < (contact ? 20 : 30); AbilityStatusEffectSafe(MOVE_EFFECT_FROSTBITE, battler, opponent) = holder inflicts, attacker receives.
   if (abilityId === 'ABILITY_FREEZING_POINT' || abilityId === 'ABILITY_CRYO_PROFICIENCY') {
-    if (targetDamage > 0 && attacker.mon.hp > 0 && canGetFrostbite(state, attackerId, targetId, statusDeps)) {
+    if (
+      targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
+      attacker.mon.hp > 0 &&
+      canGetFrostbite(state, attackerId, targetId, statusDeps)
+    ) {
       const chance = isMoveMakingContact(moveData, attacker, attackerHoldEffect) ? 20 : 30
       if (state.rng.random16() % 100 < chance) {
         const res = applyPrimaryStatusEffect(state, targetId, attackerId, MOVE_EFFECT_FROSTBITE, moveId, statusDeps, unmodelled, false, false, true)
@@ -3041,6 +3046,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_CRYO_PROFICIENCY') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       !hasFlag(state.field.weather, WEATHER_HAIL_ANY) &&
       !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY) &&
@@ -3056,6 +3062,7 @@ function handleDefenderMoveEndAbility(
   if (contactStatus) {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       contactStatus.can(state, attackerId, targetId, statusDeps) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -3073,6 +3080,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_MAGICAL_DUST') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !attacker.mon.types.includes('PSYCHIC')
@@ -3365,6 +3373,7 @@ function handleDefenderMoveEndAbility(
     const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(attackerPrimary) &&
@@ -3386,6 +3395,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_DAYBREAK') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       canBeBurned(state, attackerId, targetId, statusDeps) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect)
@@ -3410,6 +3420,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_MENACING_SITUATION') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !attacker.volatiles.fear &&
@@ -3429,6 +3440,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_WOODLAND_CURSE') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !attacker.mon.types.includes('GRASS')
