@@ -4868,7 +4868,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_IMPALER') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
       Boolean(moveData?.flags?.hornBased) &&
@@ -4882,7 +4882,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_MOLTEN_BLADES') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
       isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
@@ -4897,7 +4897,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_TOXIC_CHAIN' || abilityId === 'ABILITY_KOMODO') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps) &&
       state.rng.random16() % 100 < 30
@@ -4909,14 +4909,14 @@ function handleAttackerMoveEndAbility(
   // ---- Cycle 106: on-hit attacker abilities. ShouldApplyOnHitEffect(target) == DidMoveHit() && IsBattlerAlive(target)
   // (src/battle_util.c:4058-4062: WasMoveSuccessful() = !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) && attacker != target,
   // DidMoveHit() = WasMoveSuccessful() && TARGET_TURN_DAMAGED), read with the same approximation the Impaler block uses
-  // (target alive, hpDealt > 0, attacker != target). The roll is always drawn last, after every earlier CHECK passes.
+  // (target alive, TARGET_TURN_DAMAGED, attacker != target). The roll is always drawn last, after every earlier CHECK passes.
 
   // Arc Flash (src/abilities.cc:8082-8090): CanBeParalyzed(battler, target), then the 50% roll, then AbilityStatusEffect(MOVE_EFFECT_PARALYSIS).
   // Its onDefender half (:8091-8097) is separate and untouched.
   if (abilityId === 'ABILITY_ARC_FLASH') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeParalyzed(state, attackerId, targetId, statusDeps) &&
       state.rng.random16() % 2 !== 0
@@ -4948,7 +4948,7 @@ function handleAttackerMoveEndAbility(
       : resolveEffectiveMoveType(attacker.mon.abilities, moveId, fistDeclaredType, moveData?.flags ?? {}).moveType
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isIronFistBoosted(attacker.mon.abilities, moveData?.flags ?? {}, moveData?.split ?? 'STATUS', fistDeclaredType, fistResolvedType) &&
       canGetFrostbite(state, targetId, attackerId, statusDeps) &&
@@ -4963,7 +4963,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_LASER_DRILL') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
       Boolean(moveData?.flags?.hornBased) &&
@@ -4978,7 +4978,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_PIERCING_SOLO') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
@@ -4993,7 +4993,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_RADIO_JAM') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeDisabled(state, targetId, attackerId, statusDeps) &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
