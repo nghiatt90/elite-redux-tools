@@ -25,7 +25,7 @@ import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
-import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget } from '../moveTargetFlags'
+import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget, playerCanSelectMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import { buildBattleState, gatePlayerInnates } from './battleFormat'
@@ -135,9 +135,17 @@ export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDama
  * (battle_util.c:242) -- it is not a pure function of the static target.
  * - Player (battle_controller_player.c:2385-2398): getPlayerSelectedMoveTarget, i.e. the
  *   dynamic flags with the Curse rule and the MOVE_TARGET_USER bit test.
- * - Opponent (battle_controller_opponent.c:1600-1606): getOpponentSelectedMoveTarget,
+ * - Opponent (battle_controller_opponent.c:1599-1611): getOpponentSelectedMoveTarget,
  *   i.e. the static `target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER)` -> self
  *   bit test and MOVE_TARGET_BOTH -> player left.
+ *
+ * `chosenTarget` is the pick made before the action was built: `gMultiUsePlayerCursor`
+ * for a player battler, `gBattleStruct->aiChosenTarget` for the AI. It only survives
+ * on the player side when the move is target-selectable in a double
+ * (canSelectTarget, battle_controller_player.c:2402-2410 -- see
+ * playerCanSelectMoveTarget); the AI's own choice is used as-is for any other static
+ * target (battle_controller_opponent.c:1583, :1599-1611). Omitting it is exactly the old
+ * behaviour.
  */
 export function buildMoveAction(
   state: BattleState,
@@ -145,10 +153,16 @@ export function buildMoveAction(
   battlerId: number,
   moveId: string,
   damage?: DamageResolver,
+  chosenTarget?: number,
 ): ChosenAction {
   const mData = data.dataContext.move(moveId)
   const statusDeps: StatusDeps = { dataContext: data.dataContext, grounding: groundingFor(data, state) }
   const declaredType = mData?.type ?? 'NORMAL'
+  // A chosen target is only meaningful as a battler id on the field.
+  const chosenTargetId =
+    chosenTarget !== undefined && Number.isInteger(chosenTarget) && chosenTarget >= 0 && chosenTarget < state.battlersCount
+      ? chosenTarget
+      : undefined
   // GetTypeBeforeUsingMove (battle_main.c:5206-5209, -> GetMoveTypeInternal :5093-5204):
   // the RESOLVED type, which getMovePriority forwards as the onPriority `moveType`
   // (turnOrder.ts:412). Target-independent, so the opposing battler only satisfies the
@@ -157,7 +171,7 @@ export function buildMoveAction(
   // / Electrify retypes unapplied for this view.
   const resolvedType =
     damage?.moveType && state.battlers[battlerId]
-      ? (damage.moveType(state, battlerId, battlerId ^ 1, moveId).moveType ?? declaredType)
+      ? (damage.moveType(state, battlerId, chosenTargetId ?? (battlerId ^ 1), moveId).moveType ?? declaredType)
       : declaredType
   const view: TurnOrderMoveView = {
     id: moveId,
@@ -179,9 +193,17 @@ export function buildMoveAction(
     myceliumMightAffected: false,
   }
   const staticTarget = mData?.target ?? 'SELECTED'
-  const target = (battlerId & 1) === 0
-    ? getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
-    : getOpponentSelectedMoveTarget(battlerId, staticTarget, battlerId ^ 1)
+  const target =
+    (battlerId & 1) === 0
+      ? chosenTargetId !== undefined && playerCanSelectMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
+        ? chosenTargetId
+        : getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
+      : getOpponentSelectedMoveTarget(
+          battlerId,
+          staticTarget,
+          chosenTargetId ?? (battlerId ^ 1),
+          state.absentBattlerFlags,
+        )
   const mega = canMegaEvolve(state, battlerId, data.dataContext)
   return { action: 'USE_MOVE', moveToBeUsed: view, chosenMove: view, target, ...(mega ? { mega: true } : {}) }
 }
@@ -421,11 +443,17 @@ export interface StepResult {
   unmodelled: string[]
 }
 
-/** Chooses the opponent's action with the ported AI (or uses `fixedOpponentAction`, `null` meaning no action), then runs one turn with `playerAction`. */
+/** Chooses the opponent's action with the ported AI (or uses `fixedOpponentAction`, `null` meaning no action), then runs one turn with `playerAction`.
+ *
+ * `slotActions` supplies the actions for battlers 2 and 3 of a double, which the AI
+ * does not select yet (dbl-4d). Without it the array is exactly today's
+ * `[playerAction, opponentAction, null, null]`; battler 1's AI call is unchanged.
+ */
 export function stepTurn(
   session: BattleSession,
   playerAction: ChosenAction | null,
   fixedOpponentAction?: ChosenAction | null,
+  slotActions?: { 2?: ChosenAction | null; 3?: ChosenAction | null },
 ): StepResult {
   const { state } = session
   const unmodelled: string[] = []
@@ -446,7 +474,11 @@ export function stepTurn(
     unmodelled.push(...aiResult.unmodelled)
   }
 
-  const outcome = executeTurn(state, [playerAction, opponentAction, null, null], session.turnDeps)
+  const outcome = executeTurn(
+    state,
+    [playerAction, opponentAction, slotActions?.[2] ?? null, slotActions?.[3] ?? null],
+    session.turnDeps,
+  )
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)
   unmodelled.push(
     ...outcome.endTurnUnmodelled,

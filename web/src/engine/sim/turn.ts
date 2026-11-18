@@ -170,6 +170,8 @@ import { checkMegaEvolutionBeforeTurn, undoMegaEvolution } from './formChange'
 import { setSingleUseAbilityCounter } from './switchInAbility'
 import {
   BATTLE_TYPE_ARENA,
+  BATTLE_TYPE_DOUBLE,
+  BIT_FLANK,
   B_SIDE_PLAYER,
   clearFlag,
   hasFlag,
@@ -893,15 +895,15 @@ export function getMoveTarget(
       [1, 3], // B_SIDE_PLAYER -> OPPONENT_LEFT (1), OPPONENT_RIGHT (3)
       [0, 2], // B_SIDE_OPPONENT -> PLAYER_LEFT (0), PLAYER_RIGHT (2)
     ]
-    if (state.battlersCount > 2) {
-      const target = targets[side][0]
-      if (isAlive(target)) return target
-      const flank = target ^ 2
-      if (isAlive(flank)) return flank
-      return target
-    } else {
-      return targets[side][0]
+    if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
+      // :6334 -- `Random() % 2` picks the left or right foe; exactly one draw.
+      const target = targets[side][state.rng.random16() % 2]
+      // :6335-6336 -- a dead pick flips to the flank, and the C does NOT re-check that
+      // the flank is alive: it returns it even when both foes are down.
+      return isAlive(target) ? target : target ^ BIT_FLANK
     }
+    // :6337 -- singles never draws and always takes the left slot of the table.
+    return targets[side][0]
   }
 
   let targetBattler = 0
@@ -932,9 +934,13 @@ export function getMoveTarget(
       break
     }
     case 'RANDOM': {
+      // src/battle_util.c:6393-6401: follow-me redirect, then
+      // `gBattleTypeFlags & BATTLE_TYPE_DOUBLE` picks SetRandomTarget, else the
+      // opposing left position. Keyed on the battle flag, not on the battler count,
+      // so singles takes the no-draw branch even if the state carries four slots.
       if (isAffectedByFollowMe(state, attacker, side, moveId, deps)) {
         targetBattler = state.sides[side]?.timers.followmeTarget ?? (attacker ^ 1)
-      } else if (state.battlersCount > 2) {
+      } else if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
         targetBattler = setRandomTarget(attacker)
       } else {
         targetBattler = attacker ^ 1

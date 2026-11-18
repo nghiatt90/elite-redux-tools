@@ -428,6 +428,13 @@ export const BATTLE_TYPE_PALACE = 1 << 17
 export const BATTLE_TYPE_ARENA = 1 << 18
 export const BATTLE_TYPE_INGAME_PARTNER = 1 << 22
 
+/** include/constants/battle.h:46 -- `#define BIT_FLANK 2`: the right-hand battler of a
+ * side. SetRandomTarget flips a dead pick with `target ^= BIT_FLANK`
+ * (src/battle_util.c:6335). Battler ids are laid out [player left, opponent left,
+ * player right, opponent right] (`B_POSITION_*`, battle.h:30-33), so XOR 2 crosses
+ * the flank. */
+export const BIT_FLANK = 2
+
 /** The battler order Cmd_openpartyscreen prompts replacements in for a DOUBLE battle
  * (src/battle_script_commands.c:5226-5319, the BS_FAINTED_LINK_MULTIPLE_1 branch):
  * battler 0, then battler 2 (`gBitTable[2] & hitmarkerFaintBits && !(gBitTable[0] &
