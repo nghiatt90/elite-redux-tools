@@ -48,6 +48,7 @@ import { battlerHasSimAbility, isSimAbilitySuppressed } from '../statBuffs'
 import { weatherHasEffect } from '../fieldEndTurn'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
 import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
+import { isDoubleBattle } from './aiCheckBadMove'
 import { canIndexMoveFaintTarget } from './aiScorers'
 import { getWhoStrikesFirst, type ChosenAction, type TurnOrderMoveView } from '../turnOrder'
 
@@ -67,15 +68,35 @@ type SwitchHelperResult = { decided: boolean; chosenPartyIndex: number; unmodell
 const NOT_DECIDED: SwitchHelperResult = { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled: [] }
 
 /** A reserve slot ShouldSwitch's own loops skip: fainted, empty, the active
- * battler's own slot, or the slot already queued via `monToSwitchIntoId`
- * (singles: `battlerIn1 === battlerIn2 === gActiveBattler`, so both of the C's
- * duplicate checks collapse to one, same precedent as aiSwitching.ts's own
- * singles collapse). */
+ * battler's own slot, or the slot already queued via `monToSwitchIntoId`.
+ *
+ * The C computes `battlerIn1`/`battlerIn2` at each site and skips BOTH of their
+ * party slots and both of their `monToSwitchIntoId` values
+ * (battle_ai_switch_items.c:166-177 and :238-244 in FindMonThatAbsorbsOpponentsMove,
+ * :432-443 and :465-471 in FindMonWithFlagsAndSuperEffective, :629-640 and
+ * :658-664 in ShouldSwitch). In singles `battlerIn1 === battlerIn2 ===
+ * gActiveBattler`, so the two duplicate checks collapse to one. In doubles
+ * `battlerIn1 = gActiveBattler` and `battlerIn2` is the flank partner
+ * (`BATTLE_PARTNER(GetBattlerPosition(gActiveBattler))` at :172/:438,
+ * `GetBattlerPosition(gActiveBattler) ^ BIT_FLANK` at :635 -- both are
+ * position ^ 2, and GetBattlerAtPosition is the identity, so both name
+ * `battlerId ^ 2` here) UNLESS that partner's bit is set in
+ * `gAbsentBattlerFlags`, in which case `battlerIn2 = gActiveBattler` again
+ * (so no extra checks apply). */
 function isInvalidReserveSlot(state: BattleState, battlerId: number, index: number): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return true
   const mon = state.sides[battlerId & 1].party[index]
-  return !mon || mon.speciesId === null || mon.hp === 0 || index === battler.partyIndex || index === battler.monToSwitchIntoId
+  if (!mon || mon.speciesId === null || mon.hp === 0 || index === battler.partyIndex || index === battler.monToSwitchIntoId) return true
+  if (!isDoubleBattle(state)) return false
+  // :166-177/:238-244, :432-443/:465-471, :629-640/:658-664. A partner absent
+  // from the field collapses battlerIn2 back onto battlerIn1, whose two slots
+  // are already excluded above.
+  const partnerId = battlerId ^ 2
+  if (hasFlag(state.absentBattlerFlags, 1 << partnerId)) return false
+  const partner = state.battlers[partnerId]
+  if (!partner) return false
+  return index === partner.partyIndex || index === partner.monToSwitchIntoId
 }
 
 /** ShouldSwitchIfAllBadMoves, battle_ai_switch_items.c:49-62. Reads and CLEARS
@@ -102,27 +123,45 @@ function shouldSwitchIfPerishSong(state: BattleState, battlerId: number): Switch
   return NOT_DECIDED
 }
 
-/** HasSuperEffectiveMoveAgainstOpponents, :320-343 -- singles-only (no
- * BATTLE_TYPE_DOUBLE partner loop). `noRng=true` short-circuits on the FIRST
- * super-effective move found; `noRng=false` draws `Random() % 10 != 0` per
- * super-effective move found and only stops on a hit (a `% 10 == 0` miss
- * keeps scanning the remaining move slots, it does not abort the loop). */
-function hasSuperEffectiveMoveAgainstOpponents(state: BattleState, battlerId: number, noRng: boolean, deps: AiDamageDeps): { result: boolean; unmodelled: string[] } {
+/** HasSuperEffectiveMoveAgainstOpponents, :320-373. The C scans the foe at
+ * BATTLE_OPPOSITE first, then -- only in a double battle -- the same move set
+ * against that foe's BATTLE_PARTNER (`opposingId ^ 2`); each loop is skipped
+ * when its target's bit is set in `gAbsentBattlerFlags` (:330, :352).
+ *
+ * `noRng=true` short-circuits on the FIRST super-effective move found;
+ * `noRng=false` draws `Random() % 10 != 0` per super-effective move found and
+ * only stops on a hit (a `% 10 == 0` miss keeps scanning the remaining move
+ * slots, it does not abort the loop). Draw order is the C's: all of the
+ * first foe's move slots in order, then all of the partner foe's.
+ * `aiGetTypeEffectiveness`'s `unmodelled` entries are collected across both
+ * loops, as today. */
+export function hasSuperEffectiveMoveAgainstOpponents(state: BattleState, battlerId: number, noRng: boolean, deps: AiDamageDeps): { result: boolean; unmodelled: string[] } {
   const battler = state.battlers[battlerId]
   const opposingId = battlerId ^ 1
-  const opposing = state.battlers[opposingId]
   const unmodelled: string[] = []
-  if (!battler || !opposing) return { result: false, unmodelled }
+  if (!battler) return { result: false, unmodelled }
 
-  for (const moveId of battler.mon.moves) {
-    if (!moveId) continue
-    const { effectiveness, unmodelled: u } = aiGetTypeEffectiveness(state, moveId, battlerId, opposingId, deps)
-    unmodelled.push(...u)
-    if (effectiveness >= UQ_ONE * 2) {
-      if (noRng) return { result: true, unmodelled }
-      if (state.rng.random16() % 10 !== 0) return { result: true, unmodelled }
+  const scan = (targetId: number): boolean => {
+    const target = state.battlers[targetId]
+    if (!target || hasFlag(state.absentBattlerFlags, 1 << targetId)) return false
+    for (const moveId of battler.mon.moves) {
+      if (!moveId) continue
+      const { effectiveness, unmodelled: u } = aiGetTypeEffectiveness(state, moveId, battlerId, targetId, deps)
+      unmodelled.push(...u)
+      if (effectiveness >= UQ_ONE * 2) {
+        if (noRng) return true
+        if (state.rng.random16() % 10 !== 0) return true
+      }
     }
+    return false
   }
+
+  // :330-346.
+  if (scan(opposingId)) return { result: true, unmodelled }
+  // :347-348.
+  if (!isDoubleBattle(state)) return { result: false, unmodelled }
+  // :350-368 -- GetBattlerAtPosition(BATTLE_PARTNER(opposingPosition)).
+  if (scan(opposingId ^ 2)) return { result: true, unmodelled }
   return { result: false, unmodelled }
 }
 
@@ -450,8 +489,11 @@ function shouldSwitchIfEncored(state: BattleState, battlerId: number, deps: AiDa
   return { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled }
 }
 
-/** ShouldSwitchIfWonderGuard, :79-145. Singles-only (`BATTLE_TYPE_DOUBLE`
- * always false). `AI_GetTypeEffectiveness(move, gActiveBattler, opposingBattler)`
+/** ShouldSwitchIfWonderGuard, :79-145. Returns FALSE immediately in a double
+ * battle (:89-90), before any ability lookup, type-effectiveness call, RNG draw
+ * or `AI_monToSwitchIntoId` write -- so in doubles neither this helper nor its
+ * caller's `decide` closure touches `chosenPartyIndex`.
+ * `AI_GetTypeEffectiveness(move, gActiveBattler, opposingBattler)`
  * is called with `gActiveBattler` as the attacker for EVERY candidate move,
  * including a reserve mon's own move -- the same "the currently active
  * battler casts it, not the candidate" quirk aiSwitching.ts's
@@ -462,6 +504,8 @@ function shouldSwitchIfWonderGuard(state: BattleState, battlerId: number, deps: 
   const opposing = state.battlers[opposingId]
   const unmodelled: string[] = []
   if (!battler || !opposing) return NOT_DECIDED
+  // :89-90 -- the C's very first statement: doubles never take this path.
+  if (isDoubleBattle(state)) return NOT_DECIDED
   if (!selfAbility(state, deps, opposing, 'ABILITY_WONDER_GUARD')) return NOT_DECIDED
 
   for (const moveId of battler.mon.moves) {
