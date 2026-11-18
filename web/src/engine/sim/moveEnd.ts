@@ -3798,7 +3798,8 @@ function handleAttackerMoveEndAbility(
     const targetPrimary = target.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       moveId === 'MOVE_ROAR_OF_TIME' &&
-      targetDamage > 0 && // ShouldApplyOnHitEffect(target)
+      targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       !hasAbilityIgnoringSuppression(target, 'ABILITY_SLOW_START') &&
       !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(targetPrimary) &&
@@ -4729,6 +4730,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       !target.mon.types.includes('GRASS') &&
       !hasFlag(target.statuses3, STATUS3_LEECHSEED) &&
       (moveData?.effect === 'EFFECT_ABSORB' || moveData?.effect === 'EFFECT_DREAM_EATER')
@@ -4806,7 +4808,7 @@ function handleAttackerMoveEndAbility(
 
   // 9. Elemental Charge (src/abilities.cc:5495-5519)
   if (abilityId === 'ABILITY_ELEMENTAL_CHARGE') {
-    if (target.mon.hp > 0 && targetDamage > 0) {
+    if (target.mon.hp > 0 && targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt)) {
       if (state.rng.random16() % 100 < 20) {
         if (moveTypeMatches(moveData, 'ELECTRIC')) {
           if (canBeParalyzed(state, attackerId, targetId, statusDeps)) {
@@ -4839,6 +4841,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps)
     ) {
       if (state.rng.random16() % 100 < 30) {
@@ -5702,6 +5705,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
       Boolean(moveData?.flags?.biteBased)
     ) {
@@ -5724,6 +5728,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(target.mon.status2, STATUS2_WRAPPED)
     ) {
@@ -5763,6 +5768,8 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_GROWING_TOOTH') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
+      attacker.mon.hp > 0 &&
       Boolean(moveData?.flags?.biteBased) &&
       canRaiseStat(state, attackerId, STAT_ATK, deps.dataContext)
     ) {
@@ -5802,6 +5809,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.types.includes('GHOST')
     ) {
       let type1 = target.mon.types[0] ?? 'MYSTERY'
@@ -5839,6 +5847,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       canBeConfused(state, targetId, attackerId, statusDeps) &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled)
     ) {
@@ -5867,6 +5876,7 @@ function handleAttackerMoveEndAbility(
     if (
       target.mon.hp > 0 &&
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       isKingsRockAffected(moveData, deps)
     ) {
       if (state.rng.random16() % 100 < 10) {
