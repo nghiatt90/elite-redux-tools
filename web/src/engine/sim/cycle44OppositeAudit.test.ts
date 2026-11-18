@@ -17,6 +17,7 @@ export const VALID_CLASSES = new Set([
   'needs-chosen-target',
   'singles-only-ai',
   'comment-only',
+  'wrong-battler-singles-bug',
 ])
 
 export interface ParsedTableRow {
@@ -167,7 +168,8 @@ describe('cycle44 raw `^ 1` audit (dbl-3c)', () => {
       if (
         row.classLabel === 'single-foe-by-design' ||
         row.classLabel === 'needs-all-foes' ||
-        row.classLabel === 'needs-chosen-target'
+        row.classLabel === 'needs-chosen-target' ||
+        row.classLabel === 'wrong-battler-singles-bug'
       ) {
         expect(row.cCitation).toBeTruthy()
         expect(C_CITATION_REGEX.test(row.cCitation)).toBe(true)

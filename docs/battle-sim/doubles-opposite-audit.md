@@ -7,6 +7,7 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 - `BATTLE_OPPOSITE(id)` (`include/constants/battle.h:36`) is defined as `((id) ^ 1)`. In doubles (4 battlers: 0, 1, 2, 3), `battlerId ^ 1` flips position between 0 <-> 1 and 2 <-> 3; it identifies ONE of the two foes, not "the foe side".
 - `(battlerId & 1) ^ 1` or `side ^ 1` is an OPPOSING SIDE index (`GetBattlerSide(b) ^ 1`). Used as a loop start `for (i = (b & 1) ^ 1; i < battlersCount; i += 2)`, it iterates every foe in a double battle.
 - A raw `battlerId ^ 1` in code is only correct in doubles when the C itself uses `BATTLE_OPPOSITE(...)` at that point.
+- `wrong-battler-singles-bug` classifies sites where `battlerId ^ 1` queries an opposing battler/side, but C checks the battler itself (a singles-visible fidelity bug, not a doubles targeting issue).
 
 ## Table
 
@@ -56,7 +57,7 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 | web/src/engine/sim/moveTargetFlags.ts:137 | `* `battlerId ^ 1` here; the live-partner re-check happens at execution` | comment-only | battle_util.c:283 | none | Docstring comment for getPlayerSelectedMoveTarget explaining execution-time live-partner re-check. |
 | web/src/engine/sim/moveTargetFlags.ts:150 | `return battlerId ^ 1` | needs-chosen-target | battle_controller_player.c:2401 | chosen target | getPlayerSelectedMoveTarget: returns battlerId ^ 1 instead of (GetBattlerPosition(battlerId) & BIT_SIDE) ^ BIT_SIDE (battle_controller_player.c:2401) or GetDefaultMoveTarget (pokemon.c:1267). |
 | web/src/engine/sim/preempt.ts:58 | `for (let opponent = battlerSide(turnBattler) ^ 1; opponent < state.battlersCount; opponent += 2) {` | side-flip | battle_util.c:824 | none | TryPreemptiveActions: side index flip battlerSide(turnBattler) ^ 1, used as loop start opponent += 2 over all foes (GetOppositeSide(battler), battle_util.c:824, battle_anim_mons.c:671). |
-| web/src/engine/sim/statBuffs.ts:134 | `if (isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_BLOOD_STAIN')) return false` | needs-all-foes | battle_util.c:8990 | all foes | benefitsFromStatBuffs: passes battlerId ^ 1 to isAbilityAliveOnSide (which expects side 0/1, so battler 2 yields 3 which matches no battler side); C calls IsBloodStainAffected (battle_util.c:8990). |
+| web/src/engine/sim/statBuffs.ts:134 | `if (isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_BLOOD_STAIN')) return false` | wrong-battler-singles-bug | battle_util.c:9000 | none for doubles; separate fidelity fix (check own ability + Ghost/Rock exemption) | benefitsFromStatBuffs: checks opposing side for Blood Stain, but C calls IsBloodStainAffected(battler) (battle_util.c:9000-9004) checking battler's own ability with Ghost/Rock exemption (singles fidelity bug, not doubles targeting). |
 | web/src/engine/sim/statBuffs.ts:135 | `if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_HEMOLYSIS')) return false` | needs-all-foes | battle_util.c:8991 | all foes | benefitsFromStatBuffs: passes battlerId ^ 1 to isAbilityAliveOnSide instead of side index (battlerId & 1) ^ 1; C calls IsAbilityOnOpposingSide (battle_util.c:8991, -> IsAbilityOnSide, :4795-4801, scanning all opposing battlers). |
 | web/src/engine/sim/statBuffs.ts:989 | `const opposite = battlerId ^ 1` | single-foe-by-design | battle_util.c:8388 | none | isUnnerveAbilityOnOpposingSide: C explicitly defines int opponent = BATTLE_OPPOSITE(battlerId) (battle_util.c:8388). |
 | web/src/engine/sim/statBuffs.ts:1336 | `for (let opp = (i & 1) ^ 1; opp < state.battlersCount; opp += 2) {` | side-flip | abilities.cc:7077 | none | ABILITY_EGOIST: side index flip (i & 1) ^ 1 used as loop start opp += 2 over all foes (GetOppositeSide(battler), abilities.cc:7077). |
@@ -98,21 +99,36 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 
 - `side-flip`: 30
 - `single-foe-by-design`: 28
-- `needs-all-foes`: 4
+- `needs-all-foes`: 3
 - `needs-chosen-target`: 8
 - `singles-only-ai`: 5
 - `comment-only`: 6
+- `wrong-battler-singles-bug`: 1
 - **Total**: 81
 
 ## Follow-up items
 
-The 12 sites classified as `needs-all-foes` (4 sites) and `needs-chosen-target` (8 sites) represent the sim code requiring updates for full doubles targeting. They are grouped below by file and proposed as separate fix items:
+The 11 sites classified as `needs-all-foes` (3 sites) and `needs-chosen-target` (8 sites) represent the sim code requiring updates for full doubles targeting. They are grouped below by file and proposed as separate fix items:
 
-### 1. `web/src/engine/sim/statBuffs.ts` (2 sites, `needs-all-foes`)
-- Lines 134, 135 in `benefitsFromStatBuffs`:
-  - Line 134: `isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_BLOOD_STAIN')`. In C (`battle_util.c:8990`), `IsBloodStainAffected(battler)` checks if the battler itself has Blood Stain (not the opposing side).
-  - Line 135: `isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_HEMOLYSIS')`. In C (`battle_util.c:8991`), `IsAbilityOnOpposingSide` calls `IsAbilityOnSide(BATTLE_OPPOSITE(battler), ...)` (`battle_util.c:4795-4801`) which checks both opposing battlers. The TS call passed `battlerId ^ 1` as `side`, which for battler 2 evaluates to 3 (never matching any battler's `id & 1`). Must pass `(battlerId & 1) ^ 1`.
-- **Proposed item**: `dbl-3c-statbuffs` (~30 changed lines with unit tests).
+### 1. `web/src/engine/sim/statBuffs.ts` (1 site `needs-all-foes`, 1 separate singles fidelity fix)
+- Line 135 in `benefitsFromStatBuffs` (`needs-all-foes`): `if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_HEMOLYSIS')) return false`. In C (`battle_util.c:8991`), `IsAbilityOnOpposingSide` calls `IsAbilityOnSide(BATTLE_OPPOSITE(battler), ...)` (`battle_util.c:4795-4801`) which checks both opposing battlers. The TS call passed `battlerId ^ 1` as `side`, which for battler 2 evaluates to 3 (never matching any battler's `id & 1`). Must pass `(battlerId & 1) ^ 1`.
+  - **Proposed item**: `dbl-3c-statbuffs` (~15 lines: pass `(battlerId & 1) ^ 1`).
+- Line 134 in `benefitsFromStatBuffs` (`wrong-battler-singles-bug`): `if (isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_BLOOD_STAIN')) return false`. In C (`battle_util.c:8988-8993`, `:9000-9004`):
+  ```c
+  int BenefitsFromStatBuffs(int battler) {
+      if (gBattleMons[battler].status1 & STATUS1_BLEED) return FALSE;
+      if (IsBloodStainAffected(battler)) return FALSE;
+      if (gBattleMons[battler].status1 & STATUS1_POISON_ANY && IsAbilityOnOpposingSide(battler, ABILITY_HEMOLYSIS)) return FALSE;
+      return TRUE;
+  }
+  int IsBloodStainAffected(int battler) {
+      if (IS_BATTLER_OF_TYPE(battler, TYPE_GHOST)) return FALSE;
+      if (IS_BATTLER_OF_TYPE(battler, TYPE_ROCK)) return FALSE;
+      return BATTLER_HAS_ABILITY(battler, ABILITY_BLOOD_STAIN);
+  }
+  ```
+  `IsBloodStainAffected(battler)` returns FALSE for Ghost or Rock types, else `BATTLER_HAS_ABILITY(battler, ABILITY_BLOOD_STAIN)`. The sim checks the opposing side's Blood Stain instead of the battler's own ability. This is a singles-visible fidelity bug rather than a doubles targeting problem.
+  - **Proposed item**: `dbl-3c-bloodstain-fidelity` (~25 lines with test: check own ability + Ghost/Rock exemption).
 
 ### 2. `web/src/engine/sim/moveTargetFlags.ts` & `web/src/engine/sim/driver/session.ts` (2 sites, `needs-chosen-target`)
 - `moveTargetFlags.ts:150` in `getPlayerSelectedMoveTarget`: returns `battlerId ^ 1` when target is not user/ally/all-battlers. In C (`battle_controller_player.c:2401`), default position is `(GetBattlerPosition(battlerId) & BIT_SIDE) ^ BIT_SIDE`, or in doubles `GetDefaultMoveTarget(battlerId)` (`pokemon.c:1267`). For battler 2, `2 ^ 1 = 3` targets player right's opposite instead of position 1.
