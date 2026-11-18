@@ -7,6 +7,16 @@
 // OpponentHandleChooseMove reading gBattleStruct->aiMoveOrAction). See
 // aiShouldSwitch.ts for ShouldSwitch/ShouldUseItem's own port (cycle 15).
 //
+// DOUBLES (dbl-4e): BattleAI_ChooseMoveOrAction's own branch
+// (battle_ai_main.c:195-198) is now modelled -- `!(gBattleTypeFlags &
+// BATTLE_TYPE_DOUBLE)` -> ChooseMoveOrAction_Singles, else
+// ChooseMoveOrAction_Doubles (aiPipeline.ts:351). The doubles chooser owns its
+// own per-target scoring loop, so the singles scoring sequence is NOT run for a
+// double; only ComputeBattleAiScores' outer BattleAI_SetupAIData(0xF)'s
+// SetRandomTarget draw (:186, one draw in a double, battle_util.c:6334) still
+// happens first, because ComputeBattleAiScores (:208-212) runs before
+// BattleAI_ChooseMoveOrAction in the C.
+//
 // CYCLE15 FIX PASS (this file): the original cycle15 pass had this backwards
 // -- it ran AI_TrySwitchOrUseItem BEFORE move scoring, scoring only when it
 // didn't switch. cycle13's diagnose-output.md §2 correction (lead-verified)
@@ -29,9 +39,9 @@ import type { BattleState } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
 import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
-import { chooseMoveOrActionSingles, computeBattleAiScores, setRandomTargetSingles } from './aiPipeline'
+import { chooseMoveOrActionDoubles, chooseMoveOrActionSingles, computeBattleAiScores, setRandomTarget, setRandomTargetSingles, type AiChoice } from './aiPipeline'
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
-import { PARTY_SIZE } from '../constants'
+import { BATTLE_TYPE_DOUBLE, hasFlag, PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
 import { isKeenEdgeMove } from '../statusEffects'
 import { isSimAbilitySuppressed } from '../statBuffs'
@@ -168,29 +178,79 @@ export interface ChooseAiActionDeps extends AiSwitchingDeps {
  * as-is, with no second `ShouldSwitch` draw. This is a real, named gap, not a
  * silent simplification.
  *
- * `battlerId` must be an opponent battler (odd id) -- same restriction
- * aiSwitching.ts's `createAiOpponentReplacement` already enforces, and for the
- * same reason: this port only reaches trainer AI data (`state.aiFlags`,
- * `deps.trainer`) for the opponent side.
+ * `battlerId` must be an opponent battler (odd id): 1 or 3 in the four-battler
+ * states `buildBattleState` produces. Both flanks are supported as of dbl-4e --
+ * `BattleAI_SetupFlags` reads gTrainerBattleOpponent_A for every AI battler
+ * (`battle_ai_main.c:147`, :152), so `deps.trainer` stays the battle-wide
+ * opponent-A row rather than the battler's own trainer (see
+ * `trainerForBattler` in driver/battleFormat.ts for the roster-side lookup).
+ * Even ids still throw: 0 is player-controlled, and the in-game partner
+ * (battler 2, BATTLE_TYPE_INGAME_PARTNER) has its own controller and AI
+ * (battle_controller_player_partner.c) that this sim does not port -- dbl-6b.
  */
 export function chooseAiAction(state: BattleState, battlerId: number, deps: ChooseAiActionDeps): { action: ChosenAction; unmodelled: string[] } {
-  if ((battlerId & 1) !== 1) {
-    throw new Error(`chooseAiAction: battler ${battlerId} is not on the opponent side`)
+  if (battlerId < 0 || battlerId >= state.battlersCount) {
+    throw new Error(`chooseAiAction: battler ${battlerId} is not in this battle (${state.battlersCount} battlers)`)
   }
-  const battlerTarget = setRandomTargetSingles(battlerId)
+  if ((battlerId & 1) !== 1) {
+    throw new Error(
+      `chooseAiAction: battler ${battlerId} is not on the opponent side (battler 0 is player-controlled; the in-game partner, battler 2, is dbl-6b)`,
+    )
+  }
   const unmodelled: string[] = []
 
   const aiFlags = battleAiSetupFlags(deps.trainer, state.battleTypeFlags)
   const flaggedState: BattleState = { ...state, aiFlags }
 
   // Step 1, battle_main.c:3632-3639 (STATE_TURN_START_RECORD) -- scoring and
-  // ChooseMoveOrAction_Singles' own tie-break/second switch check, BEFORE
+  // the chooser's own tie-break/second switch check, BEFORE
   // AI_TrySwitchOrUseItem ever runs.
-  const { scores, unmodelled: scoreUnmodelled } = computeBattleAiScores(flaggedState, battlerId, battlerTarget, deps)
-  unmodelled.push(...scoreUnmodelled)
+  let battlerTarget: number
+  let choice: AiChoice
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
+    // BattleAI_ChooseMoveOrAction (:195-198) takes the doubles branch. The
+    // chooser re-runs BattleAI_SetupAIData(0xF) per target (:358-361), so the
+    // singles scoring sequence above is not run; ComputeBattleAiScores' own
+    // outer BattleAI_SetupAIData(0xF) (:210) still comes first, and its
+    // SetRandomTarget (:186) is the FIRST draw in a double
+    // (battle_util.c:6334) -- its return value is discarded because :363 and
+    // :437 overwrite gBattlerTarget, so only the draw is observable.
+    setRandomTarget(flaggedState, battlerId)
 
-  const { choice, unmodelled: choiceUnmodelled } = chooseMoveOrActionSingles(flaggedState, battlerId, scores, deps)
-  unmodelled.push(...choiceUnmodelled)
+    const doubles = chooseMoveOrActionDoubles(flaggedState, battlerId, deps)
+    unmodelled.push(...doubles.unmodelled)
+    // :438 -- gBattleStruct->aiChosenTarget[sBattler_AI] = gBattlerTarget: the
+    // per-battler target this port takes as its battlerTarget.
+    battlerTarget = doubles.target
+
+    let moveIndex = doubles.moveIndex
+    if (moveIndex === null) {
+      // :382-385/:438 -- 0xFF means "no action scored for the winning target"
+      // (the AI itself or a fainted battler won the -1 tie at :421-435).
+      // OpponentHandleChooseMove's `default:` case then evaluates
+      // `moveInfo->moves[chosenMoveId]` with chosenMoveId == 0xFF
+      // (battle_controller_opponent.c:1600), an index past the 4-slot array
+      // with no defined behaviour in the C. Rather than invent one, fall back
+      // to slot 0 and report it.
+      unmodelled.push(
+        'chooseAiAction: ChooseMoveOrAction_Doubles returned 0xFF (battle_ai_main.c:355/:438); OpponentHandleChooseMove reads moveInfo->moves[0xFF] (battle_controller_opponent.c:1600) with no defined behaviour -- using move slot 0',
+      )
+      moveIndex = 0
+    }
+    // The doubles chooser returns a move slot or 0xFF only (:382-385's
+    // AI_CHOICE_FLEE/ai_CHOICE_WATCH are unreachable for a trainer's aiFlags),
+    // so there is no AI_CHOICE_SWITCH to carry here.
+    choice = { kind: 'move', moveIndex }
+  } else {
+    battlerTarget = setRandomTargetSingles(battlerId)
+
+    const { scores, unmodelled: scoreUnmodelled } = computeBattleAiScores(flaggedState, battlerId, battlerTarget, deps)
+    unmodelled.push(...scoreUnmodelled)
+
+    const { choice: singlesChoice, unmodelled: choiceUnmodelled } = chooseMoveOrActionSingles(flaggedState, battlerId, scores, deps)
+    unmodelled.push(...choiceUnmodelled)
+    choice = singlesChoice
+  }
 
   const battler = flaggedState.battlers[battlerId]
   let moveView: TurnOrderMoveView | null = null
@@ -246,6 +306,7 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
         battlerId,
         chosenMoveId === null ? undefined : deps.moveData(chosenMoveId)?.target,
         battlerTarget,
+        state.absentBattlerFlags,
       ),
       ...(mega ? { mega: true } : {}),
     },

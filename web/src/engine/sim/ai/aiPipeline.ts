@@ -4,9 +4,9 @@
 // singles-only half of BattleAI_ChooseMoveOrAction (:190-205), and the second
 // switch check embedded in ChooseMoveOrAction_Singles (:294-318).
 //
-// The doubles chooser is ported as of dbl-4a (cycle 3d3p) but NOT wired into
-// any live path: `chooseAiAction` still calls the singles half only (that is
-// dbl-4d). AI_DoubleBattle's own scoring is ported as of dbl-4b (cycle 3d3q,
+// The doubles chooser is ported as of dbl-4a (cycle 3d3p) and wired into
+// `chooseAiAction` as of dbl-4e (cycle 4e), which takes it whenever
+// BATTLE_TYPE_DOUBLE is set. AI_DoubleBattle's own scoring is ported as of dbl-4b (cycle 3d3q,
 // aiDoubleBattle.ts), and its partner-target DAMAGE GATE and ability loop
 // (:2303-2398) landed in dbl-4b2 (cycle 3d3r); the partner-target
 // attack-effect switch (:2395-2482) landed in dbl-4b3 (cycle 3d3s).
@@ -307,8 +307,10 @@ export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number
 /**
  * ChooseMoveOrAction_Doubles, battle_ai_main.c:341-440 -- one scoring pass per
  * live battler that is not the AI itself, then one target pick over those
- * battlers' best move scores. dbl-4a: NOT wired into `chooseAiAction` (dbl-4d),
- * and the ally-facing half is still missing: `AI_DATA->partnerMove =
+ * battlers' best move scores. dbl-4e: wired into `chooseAiAction`, which takes
+ * this branch whenever `state.battleTypeFlags` has BATTLE_TYPE_DOUBLE
+ * (`battle_ai_main.c:195-198`). The ally-facing half is still missing:
+ * `AI_DATA->partnerMove =
  * GetAllyChosenMove()` (:368) is dbl-4b, and the partner-gated helpers the
  * scorers call (`isValidDoubleBattle`, aiCheckBadMove.ts) landed in dbl-4c
  * (cycle 4c1); the three that need `gBattleStruct->moveTarget` are real as of

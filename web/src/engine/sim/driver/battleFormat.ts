@@ -81,6 +81,44 @@ export function battleTypeFlagsFor(format: BattleFormat): number {
   return battleTypeFlags
 }
 
+/**
+ * The trainer record whose party `battlerId` fields (docs/battle-sim/doubles-plan.md
+ * "Per-battler trainer lookup"): battler 1 is `opponents[0]`; battler 3 is
+ * `opponents[1]`, or `opponents[0]` when one trainer fields both flanks (a forced
+ * double); battler 2 is the in-game partner; battler 0 is the player, who has no
+ * trainer record here.
+ *
+ * This is a ROSTER lookup only. AI flags do NOT come from it: BattleAI_SetupFlags
+ * reads `gTrainers[gTrainerBattleOpponent_A].aiFlags` for every AI battler
+ * (battle_ai_main.c:147) and ORs the DOUBLE_BATTLE bit on (:152-154), so
+ * `chooseAiAction` keeps using the single battle-wide row (`deps.trainer`).
+ */
+export function trainerForBattler(format: BattleFormat, battlerId: number): TrainerData {
+  switch (battlerId) {
+    case 1: {
+      const first = format.opponents[0]
+      if (!first) throw new Error('trainerForBattler: the format has no opponent trainer')
+      return first
+    }
+    case 3: {
+      const first = format.opponents[0]
+      if (!first) throw new Error('trainerForBattler: the format has no opponent trainer')
+      // TWO_OPPONENTS puts trainer B on the right flank; a forced double keeps
+      // both flanks on the one trainer.
+      return format.opponents[1] ?? first
+    }
+    case 2:
+      if (!format.partner) {
+        throw new Error('trainerForBattler: battler 2 has no partner in this format')
+      }
+      return format.partner
+    case 0:
+      throw new Error('trainerForBattler: battler 0 is the player, who has no trainer record')
+    default:
+      throw new Error(`trainerForBattler: battler ${battlerId} is not a battler in these formats`)
+  }
+}
+
 /** An empty party slot -- the C's `SPECIES_NONE` entry. `hasLiveReserve` and every
  * other reserve scan treat `speciesId === null` as "no mon here". */
 function emptyPartySlot(): SimPartyMon {
