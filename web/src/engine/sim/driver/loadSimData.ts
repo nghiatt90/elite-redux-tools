@@ -66,6 +66,32 @@ export interface EncounterBattleEvent {
   script: string
 }
 
+/** One `tagBattles` row: a multi-battler scripted fight (26 in v2.65beta). */
+export interface EncounterTagBattle {
+  guard: string | null
+  map: string
+  script: string
+  trainers: string[]
+}
+
+/** One `fieldEffects` row: a scripted field-effect setup (23 in v2.65beta). */
+export interface EncounterFieldEffect {
+  effectType: string
+  fieldId: string
+  guard: string | null
+  map: string
+  script: string
+  trainers: string[]
+}
+
+/** One `inverseBattles` row: a fight where FLAG_SYS_INVERSE_BATTLE is set (1 in v2.65beta). */
+export interface EncounterInverseBattle {
+  guard: string | null
+  map: string
+  script: string
+  trainers: string[]
+}
+
 export interface SimDataBundle {
   dataContext: SimDataContext
   typeChart: TypeChart
@@ -83,6 +109,9 @@ export interface SimDataBundle {
   trainersById: Map<string, TrainerData>
   trainers: TrainerData[]
   battleEvents: EncounterBattleEvent[]
+  tagBattles: EncounterTagBattle[]
+  fieldEffects: EncounterFieldEffect[]
+  inverseBattles: EncounterInverseBattle[]
 }
 
 export interface LoadSimDataOptions {
@@ -105,8 +134,16 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
   const holdEffectIds = readJson<Record<string, number>>('holdEffectIds.json')
   const typeChart = readJson<TypeChart>('types.json')
   const inverseTypeChart = readJson<TypeChart>('typesInverse.json')
-  const rawEncounters = readJson<{ battleEvents?: EncounterBattleEvent[] }>('encounters.json')
+  const rawEncounters = readJson<{
+    battleEvents?: EncounterBattleEvent[]
+    tagBattles?: EncounterTagBattle[]
+    fieldEffects?: EncounterFieldEffect[]
+    inverseBattles?: EncounterInverseBattle[]
+  }>('encounters.json')
   const battleEvents = rawEncounters.battleEvents ?? []
+  const tagBattles = rawEncounters.tagBattles ?? []
+  const fieldEffects = rawEncounters.fieldEffects ?? []
+  const inverseBattles = rawEncounters.inverseBattles ?? []
 
   const speciesById = new Map<string, any>(rawSpecies.map((s) => [s.id as string, s]))
   const movesById = new Map<string, any>(rawMoves.map((m) => [m.id as string, m]))
@@ -270,5 +307,15 @@ export function loadSimData(options?: LoadSimDataOptions): SimDataBundle {
     trainersById,
     trainers,
     battleEvents,
+    tagBattles,
+    fieldEffects,
+    inverseBattles,
   }
+}
+
+/** True when some `inverseBattles` row lists `trainerId`. That row is where the game
+ * sets FLAG_SYS_INVERSE_BATTLE (GetTypeModifier's FlagGet, battle_util.c:8028); the
+ * guard is null for the one row in v2.65beta, so guards are not evaluated here. */
+export function isInverseBattleTrainer(data: SimDataBundle, trainerId: string): boolean {
+  return data.inverseBattles.some((row) => row.trainers.includes(trainerId))
 }

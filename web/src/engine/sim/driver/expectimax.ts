@@ -1147,10 +1147,12 @@ export function chooseExpectimaxAction(
   return bestMove ? bestMove.choice : bestSwitch ? bestSwitch.choice : null
 }
 
-/** After a faint the player's replacement comes from the game's own "most suitable mon" heuristic. */
-export function createHeuristicPlayerReplacement(data: SimDataBundle): (state: BattleState) => number {
+/** After a faint the player's replacement comes from the game's own "most suitable mon" heuristic.
+ * `inverseBattle` is FlagGet(B_FLAG_INVERSE_BATTLE) (battle_util.c:8028), forwarded to the AI deps
+ * that score the candidate switch-ins. */
+export function createHeuristicPlayerReplacement(data: SimDataBundle, inverseBattle = false): (state: BattleState) => number {
   return (state) => {
-    const deps = aiDamageDepsFor(data, state)
+    const deps = aiDamageDepsFor(data, state, inverseBattle)
     const battler = state.battlers[0]
     if (!battler) return PARTY_SIZE
     const saved = battler.monToSwitchIntoId
@@ -1170,6 +1172,8 @@ export interface ExpectimaxBattleOptions {
   maxTurns?: number
   expectimax?: ExpectimaxOptions
   leadIndex?: number
+  /** FlagGet(B_FLAG_INVERSE_BATTLE) (battle_util.c:8028); derived from encounters.json. */
+  inverseBattle?: boolean
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
 }
 
@@ -1199,7 +1203,8 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     tier: options.tier,
     rng: createRandomSource(options.seed),
     leadIndex: options.leadIndex,
-    playerReplacement: createHeuristicPlayerReplacement(options.data),
+    playerReplacement: createHeuristicPlayerReplacement(options.data, options.inverseBattle),
+    inverseBattle: options.inverseBattle,
     battleEvents: options.battleEvents,
   })
   let turns = 0

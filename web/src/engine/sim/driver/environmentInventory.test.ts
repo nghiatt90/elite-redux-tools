@@ -119,8 +119,12 @@ const SCRIPT_EVENT_UNITS = 6
  * site tokens (`FEARMONGER`, `SALT_CURE`, `usedMonotypeEntry`), so the bare
  * `monotypeChampType: 'DRAGON'|'ROCK'` fixtures no longer falsely mark those
  * three as tested; they remain `registeredUntested`.
+ * Moves 119 -> 118 in cycle 5a (dbl-5): `cycle5aInverseBattle.test.ts` names
+ * FLAG_SYS_INVERSE_BATTLE and runBattle.ts/session.ts carry the non-literal
+ * `inverseBattle` assignment (the FlagGet at battle_util.c:8028), so that unit
+ * leaves `unported`.
  */
-export const UNPORTED_UNIT_COUNT = 119
+export const UNPORTED_UNIT_COUNT = 118
 
 /**
  * Moves 15 -> 13 in cycle 38 (dbl-2a): `cycle38DoublesRoster.test.ts` asserts
@@ -943,22 +947,30 @@ describe('step 1: non-trainer-flag evidence', () => {
     expect(mutated.status).toBe('unported')
   })
 
-  it('2. FLAG_SYS_INVERSE_BATTLE stays unported with dummy constant; inverseBattle assigned from variable plus naming test flips to ported', () => {
+  it('2. FLAG_SYS_INVERSE_BATTLE is ported by the session/runBattle assignment (battle_util.c:8028); a dummy constant alone is not enough', () => {
     const spec = MAP_SETUP_SPECS.find((s) => s.key === 'FLAG_SYS_INVERSE_BATTLE')!
     expect(spec).toBeDefined()
 
-    // Baseline: unported
+    // Baseline: ported. The real drivers carry `inverseBattle: options.inverseBattle`,
+    // the FlagGet whose C site is battle_util.c:8028, and cycle5aInverseBattle.test.ts
+    // names the flag.
     const baseline = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
-    expect(baseline.status).toBe('unported')
+    expect(baseline.status).toBe('ported')
+    expect(baseline.productionEvidence).toMatch(
+      /^web\/src\/engine\/sim\/driver\/(?:session|runBattle)\.ts:\d+$/,
+    )
 
-    // Mutation 2a: dummy constant in constants.ts -- stays unported
-    const dummyConstantFiles = productionFiles.map((file) => {
-      if (!file.file.endsWith('constants.ts')) return file
-      return {
-        file: file.file,
-        source: file.source + '\nexport const FLAG_SYS_INVERSE_BATTLE = 1\n',
-      }
-    })
+    // Mutation 2a: a dummy constant in constants.ts, with session.ts and runBattle.ts
+    // removed, stays unported -- naming the flag is not the ported evidence.
+    const dummyConstantFiles = productionFiles
+      .filter((file) => !file.file.endsWith('session.ts') && !file.file.endsWith('runBattle.ts'))
+      .map((file) => {
+        if (!file.file.endsWith('constants.ts')) return file
+        return {
+          file: file.file,
+          source: file.source + '\nexport const FLAG_SYS_INVERSE_BATTLE = 1\n',
+        }
+      })
     const dummyConstantClassification = classifyToken(
       spec.token,
       dummyConstantFiles,
@@ -966,15 +978,17 @@ describe('step 1: non-trainer-flag evidence', () => {
       spec.evidence,
     )
     expect(dummyConstantClassification.status).toBe('unported')
+    expect(dummyConstantClassification.productionEvidence).toBeNull()
 
-    // Mutation 2b: inverseBattle assigned from a variable in session.ts plus a test naming it flips to ported
-    const variableAssignedFiles = productionFiles.map((file) => {
-      if (!file.file.endsWith('session.ts')) return file
-      return {
-        file: file.file,
-        source: file.source.replace('inverseBattle: false,', 'inverseBattle: data.inverse,'),
-      }
-    })
+    // Mutation 2b: an `inverseBattle` assignment from a non-literal variable in
+    // runBattle.ts plus a naming test flips it to ported.
+    const variableAssignedFiles: SourceFile[] = [
+      ...dummyConstantFiles,
+      {
+        file: 'web/src/engine/sim/driver/runBattle.ts',
+        source: 'const x = { inverseBattle: options.inverseBattle }\n',
+      },
+    ]
     const namingTestFiles = [
       ...testFiles,
       {
@@ -1175,14 +1189,18 @@ describe('step 1: non-trainer-flag evidence', () => {
     expect(testFileAssertsToken(nonAssertingIt, 'MY_TOKEN')).toBe(false)
   })
 
-  it('8. real corpus units have productionEvidence: BATTLE_EVENT_REFLECT has line in battleEvents.ts, FLAG_SYS_INVERSE_BATTLE has null', () => {
+  it('8. real corpus units have productionEvidence: BATTLE_EVENT_REFLECT has line in battleEvents.ts, FLAG_SYS_INVERSE_BATTLE has the runBattle.ts assignment (battle_util.c:8028)', () => {
     const inventory = runInventory()
     const reflect = inventory.units.find((u) => u.key === 'BATTLE_EVENT_REFLECT')
     expect(reflect?.productionEvidence?.startsWith('web/src/engine/sim/battleEvents.ts:')).toBe(
       true,
     )
     const inverse = inventory.units.find((u) => u.key === 'FLAG_SYS_INVERSE_BATTLE')
-    expect(inverse?.productionEvidence).toBeNull()
+    // battle_util.c:8028's FlagGet now has a production line: runBattle.ts passes
+    // `inverseBattle: options.inverseBattle` through to createSession.
+    expect(inverse?.productionEvidence).toMatch(
+      /^web\/src\/engine\/sim\/driver\/runBattle\.ts:\d+$/,
+    )
   })
 })
 

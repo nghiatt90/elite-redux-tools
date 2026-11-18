@@ -22,6 +22,9 @@ export interface RunBattleOptions {
   rng?: RandomSource
   maxTurns?: number
   leadIndex?: number
+  /** FlagGet(B_FLAG_INVERSE_BATTLE) for the whole battle (battle_util.c:8028); derive it
+   * from `isInverseBattleTrainer` in encounters.json's inverseBattles list. */
+  inverseBattle?: boolean
   playerPolicy?: (state: BattleState, unmodelled: string[]) => ChosenAction | null
 }
 
@@ -183,6 +186,7 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       tier,
       rng: options.rng ?? { random16: () => 0 },
       leadIndex: options.leadIndex,
+      inverseBattle: options.inverseBattle,
     })
     const { state } = session
     recordUnmodelled(session.startUnmodelled)

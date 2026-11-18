@@ -57,14 +57,14 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `map-setup` | 61 | 0 | 12 | 56 | 0 | 5 |
+| `map-setup` | 61 | 1 | 12 | 55 | 0 | 5 |
 | `battle-type` | 9 | 1 | 0 | 8 | 0 | 0 |
 | `difficulty-flag` | 18 | 1 | 1 | 17 | 0 | 0 |
 | `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **171** | **44** | **13** | **119** | **0** | **8** |
+| **total** | **171** | **45** | **13** | **118** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -72,7 +72,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
-| `map-setup` | 56 | 12 |
+| `map-setup` | 55 | 12 |
 | `battle-type` | 8 | 0 |
 | `difficulty-flag` | 17 | 1 |
 | `trainer-flag` | 3 | 0 |
@@ -87,7 +87,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `FLAG_ALPHA_CREATION` | 6 map(s), 18 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/pokemon.c:504` | allowlisted | none | none |
 | `FLAG_SHINY_CREATION` | 4 map(s), 4 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route132 | `pipeline/.upstream/eliteredux-source/src/pokemon.c:499` | allowlisted | none | none |
 | `FLAG_SYS_DISABLE_AUTOHEAL` | 5 map(s), 17 line(s): MossdeepCity_SpaceCenter_2F, Route111, SkyPillar_Outside, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
-| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | unported | none | none |
+| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | ported | `web/src/engine/sim/cycle5aInverseBattle.test.ts` | `web/src/engine/sim/driver/runBattle.ts:189` |
 | `FLAG_TOTEM_BATTLE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9144` | unported | none | none |
 | `HealPlayerParty` | 31 map(s), 52 line(s): BattleFrontier_BattleArenaBattleRoom, BattleFrontier_BattleArenaLobby, BattleFrontier_BattleDomeBattleRoom, BattleFrontier_BattleDomeLobby, BattleFrontier_BattleDomePreBattleRoom, BattleFrontier_BattleFactoryBattleRoom, BattleFrontier_BattleFactoryPreBattleRoom, BattleFrontier_BattlePalaceBattleRoom, BattleFrontier_BattlePalaceLobby, BattleFrontier_BattlePikeLobby, BattleFrontier_BattlePikeRoomNormal, BattleFrontier_BattlePyramidFloor, BattleFrontier_BattlePyramidLobby, BattleFrontier_BattleTowerBattleRoom, BattleFrontier_BattleTowerLobby, BattleFrontier_BattleTowerMultiBattleRoom, BattleFrontier_BattleTowerMultiPartnerRoom, FallarborTown_BattleTentBattleRoom, MeteorFalls_1F_1R, MossdeepCity_House1, MossdeepCity_SpaceCenter_2F, Route101, Route111, SkyPillar_Outside, SlateportCity_BattleTentBattleRoom, SlateportCity_BattleTentCorridor, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F, SootopolisCity_MysteryEventsHouse_B1F, TrainerHill_Entrance, VerdanturfTown_BattleTentBattleRoom | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
 | `VAR_BATTLE_FIELD_EFFECT_TYPE` | 3 map(s), 43 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4163` | unported | none | none |

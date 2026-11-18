@@ -47,12 +47,18 @@ export interface SessionOptions {
    * 0 or 2 in a double). */
   playerReplacement?: (state: BattleState, battlerId: number) => number
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
+  /** FlagGet(B_FLAG_INVERSE_BATTLE) for the whole battle (battle_util.c:8028): when true,
+   * GetTypeModifier reads inverseTypeChart instead of typeChart. Callers derive it from
+   * `isInverseBattleTrainer` in encounters.json's inverseBattles list. */
+  inverseBattle?: boolean
 }
 
 export interface BattleSession {
   state: BattleState
   data: SimDataBundle
   trainer: TrainerData
+  /** FlagGet(B_FLAG_INVERSE_BATTLE); see SessionOptions.inverseBattle. */
+  inverseBattle: boolean
   turnDeps: TurnLoopDeps
   chooseAiDeps: ChooseAiActionDeps
   playerReplacement: (state: BattleState, battlerId: number) => number
@@ -112,13 +118,13 @@ export function groundingFor(data: SimDataBundle, state: BattleState): Grounding
   return { ...data.grounding, holdEffectOf: (battlerId) => holdEffectOfBattler(state, battlerId, data.dataContext) }
 }
 
-export function aiDamageDepsFor(data: SimDataBundle, state: BattleState): AiDamageDeps {
+export function aiDamageDepsFor(data: SimDataBundle, state: BattleState, inverseBattle = false): AiDamageDeps {
   return {
     grounding: groundingFor(data, state),
     turnOrder: data.turnOrder,
     statStageRatios: data.statStageRatios,
     dataContext: data.dataContext,
-    inverseBattle: false,
+    inverseBattle,
     moveData: data.moveData,
     typeChart: data.typeChart,
     inverseTypeChart: data.inverseTypeChart,
@@ -214,6 +220,7 @@ function buildDeps(
   data: SimDataBundle,
   trainer: TrainerData,
   playerReplacement: (state: BattleState, battlerId: number) => number,
+  inverseBattle: boolean,
 ): { turnDeps: TurnLoopDeps; chooseAiDeps: ChooseAiActionDeps } {
   const random: RandomSource = { random16: () => state.rng.random16() }
   const grounding = groundingFor(data, state)
@@ -222,7 +229,7 @@ function buildDeps(
     grounding,
     turnOrder: data.turnOrder,
     statStageRatios: data.statStageRatios,
-    inverseBattle: false,
+    inverseBattle,
     moveData: data.moveData,
     typeChart: data.typeChart,
     inverseTypeChart: data.inverseTypeChart,
@@ -231,7 +238,7 @@ function buildDeps(
     random,
   })
 
-  const aiDamageDeps = aiDamageDepsFor(data, state)
+  const aiDamageDeps = aiDamageDepsFor(data, state, inverseBattle)
   const chooseAiDeps: ChooseAiActionDeps = { ...aiDamageDeps, trainer }
 
   const aiOpponentReplacement = createAiOpponentReplacement(aiDamageDeps)
@@ -253,7 +260,7 @@ function buildDeps(
     hazardTypes: {
       typeChart: data.typeChart,
       inverseTypeChart: data.inverseTypeChart,
-      inverseBattle: false,
+      inverseBattle,
     },
   }
   return { turnDeps, chooseAiDeps }
@@ -262,6 +269,7 @@ function buildDeps(
 export function createSession(options: SessionOptions): BattleSession {
   const tier = options.tier ?? 'elite'
   const data = options.data
+  const inverseBattle = options.inverseBattle ?? false
   // A forced-double trainer needs four battlers and the doubles turn loop, which this
   // cycle (dbl-2a) does not run. Refuse rather than silently build a singles state
   // that claims BATTLE_TYPE_DOUBLE.
@@ -308,7 +316,7 @@ export function createSession(options: SessionOptions): BattleSession {
   }
 
   const playerReplacement = options.playerReplacement ?? firstLiveReplacement
-  const { turnDeps, chooseAiDeps } = buildDeps(state, data, options.opponentTrainer, playerReplacement)
+  const { turnDeps, chooseAiDeps } = buildDeps(state, data, options.opponentTrainer, playerReplacement, inverseBattle)
 
   const startUnmodelled: string[] = []
   const startOutcomes: ActionOutcome[] = []
@@ -421,7 +429,7 @@ export function createSession(options: SessionOptions): BattleSession {
     startUnmodelled,
   )
 
-  return { state, data, trainer: options.opponentTrainer, turnDeps, chooseAiDeps, playerReplacement, startUnmodelled }
+  return { state, data, trainer: options.opponentTrainer, inverseBattle, turnDeps, chooseAiDeps, playerReplacement, startUnmodelled }
 }
 
 /**
@@ -432,7 +440,7 @@ export function cloneSession(session: BattleSession, seed: number): BattleSessio
   const { rng, ...rest } = session.state
   const copy = structuredClone(rest) as Omit<BattleState, 'rng'>
   const state = { ...copy, rng: createRandomSource(seed) } as BattleState
-  const { turnDeps, chooseAiDeps } = buildDeps(state, session.data, session.trainer, session.playerReplacement)
+  const { turnDeps, chooseAiDeps } = buildDeps(state, session.data, session.trainer, session.playerReplacement, session.inverseBattle)
   void rng
   return { ...session, state, turnDeps, chooseAiDeps }
 }
