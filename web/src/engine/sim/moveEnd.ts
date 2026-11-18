@@ -29,7 +29,7 @@
 // 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Ported         | Updates lastTakenMove, lastTakenMoveFrom (:4773-4781).
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
 // 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (:4268-4288), Thief (:4579-4593), Bug Bite (:4595-4597, EatTargetBerry :13221) minus the berry's own effect (gapped), Smack Down (:4598-4606).
-// 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Unreachable    | Double battle second target iteration; sim is single battle.
+// 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Ported (turn.ts) | BOTH/FOES_AND_ALLY second-target loop lives in executeAction around runMovePipeline (turn.ts, "MOVEEND_NEXT_TARGET" block); not in this ladder because it re-enters the whole effect script.
 // 22   | MOVEEND_MOVE_EFFECTS2           | 4633-4655  | Gapped (cond.) | Post-target-item move effects (Make It Rain, Burn Up, Scale Shot, Wyrm Wind).
 // 23   | MOVEEND_RECOIL                  | 4457-4517  | Ported         | Recoil self-damage; Magic Guard, noRecoil (Rock Head/Steel Barrel/Bruteforce), halfRecoil.
 // 24   | MOVEEND_CHARGE                  | 4922-4933  | Ported         | Clears STATUS3_CHARGED_UP on Electric damaging move.
@@ -7601,7 +7601,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   }
 
   // Case 21: MOVEEND_NEXT_TARGET (:4782-4822)
-  // Double battle second target loop.
+  // The double-battle second-target loop is not part of this ladder: the C's case resets
+  // moveendState and re-enters the whole effect script, so the sim implements it in
+  // turn.ts's executeAction, around the runMovePipeline call ("MOVEEND_NEXT_TARGET").
+  // The per-target passes are recorded on ActionOutcome.targets; the primary outcome
+  // fields stay the first target's.
 
   // Case 22: MOVEEND_MOVE_EFFECTS2 (:4633-4655)
   if (ctx.moveEffect2 === 'MOVE_EFFECT_BURN_UP') {

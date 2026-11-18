@@ -349,6 +349,18 @@ export interface StatusAppliedOutcome {
   status: string
 }
 
+/** One pass of a spread move's effect script (MOVEEND_NEXT_TARGET,
+ * battle_script_commands.c:4782-4822). Recorded in `ActionOutcome.targets` for a
+ * BOTH / FOES_AND_ALLY move in a double battle, in the order the passes ran. */
+export interface ActionOutcomeTarget {
+  targetId: number | null
+  missed: boolean
+  targetDamage: number | null
+  fainted: number[]
+  statChanges: StatChangeOutcome[] | null
+  statusApplied: StatusAppliedOutcome | null
+}
+
 /** What one battler's action did. Returned rather than logged so tests and the
  * eventual solver can assert on a turn without re-deriving it. */
 export interface ActionOutcome {
@@ -411,6 +423,14 @@ export interface ActionOutcome {
    * battle script, which this batch does not model, so the order here is the
    * loop's own and a later batch should assert against the script. */
   fainted: number[]
+  /**
+   * MOVEEND_NEXT_TARGET's per-target passes (battle_script_commands.c:4782-4822):
+   * one entry per pass over the effect script, in the order they ran. Present only
+   * for a BOTH / FOES_AND_ALLY move in a double battle (plus any move an ability or
+   * terrain widens to BOTH); absent in singles and for every other target flag.
+   * The primary fields above describe the FIRST entry.
+   */
+  targets?: ActionOutcomeTarget[]
   /**
    * Overrides gChosenMove for move-end bookkeeping (src/battle_script_commands.c:10483, 10836).
    * E.g. Transform and Sketch set gChosenMove = 0xFFFF (MOVE_UNSET).
@@ -2547,9 +2567,18 @@ export function executeAction(
     return { statChanges: res.statChanges, statusApplied: res.statusApplied }
   }
 
+  // The two per-action hitmarker bits MOVEEND_NEXT_TARGET manipulates. The C clears both
+  // between actions (RunTurnActionsFunctions, battle_main.c:4661-4667), so they are
+  // closure-local here rather than state fields. `noPpDeduct` is HITMARKER_NO_PPDEDUCT,
+  // which Cmd_ppreduce clears and consumes on its first call (:1465-1467); `noAttackString`
+  // is HITMARKER_NO_ATTACKSTRING, on which Cmd_ppreduce returns without deducting (:1472)
+  // and Cmd_attackcanceler skips its attacker-alive test (:1074).
+  let noPpDeduct = false
+  let noAttackString = false
+
   // battle_util.c:205-207, data/battle_scripts_1.s:4776: PP is not deducted for extra attacks
   // without movePos (Metronome) or under sleepTalk (Sleep Talk), or when noPpDeduct is set.
-  const shouldDeductPp =
+  const shouldDeductPp = () =>
     !state.processingExtraAttacks ||
     (Boolean(state.currentExtraAttack?.movePos) &&
       !state.battlers[battlerId]?.turn.sleepTalk &&
@@ -2559,8 +2588,15 @@ export function executeAction(
   // HITMARKER_NO_PPDEDUCT skips it, once. A script that reaches ppreduce twice (Gastro Acid's
   // failure into BattleScript_EffectPoison, Assist's ppreduce before jumptocalledmove) deducts twice.
   const performPpDeduct = () => {
+    // :1465-1467 -- HITMARKER_NO_PPDEDUCT short-circuits and is cleared by this very call.
+    if (noPpDeduct) {
+      noPpDeduct = false
+      return
+    }
+    // :1472 -- HITMARKER_NO_ATTACKSTRING returns without deducting (BOTH's second pass).
+    if (noAttackString) return
     // Cmd_ppreduce charges the move actually used (gCurrentMove), i.e. the encore swap.
-    if (shouldDeductPp) {
+    if (shouldDeductPp()) {
       deductPp(state, battlerId, performedMove.id, performedMove.effect, unmodelled, deps)
     }
   }
@@ -4707,7 +4743,137 @@ export function executeAction(
     }
   }
 
-  return runMovePipeline(performedMove, performedMove, targetId, false)
+  // -------------------------------------------------------------------------
+  // MOVEEND_NEXT_TARGET, battle_script_commands.c:4782-4822
+  //
+  // In a double battle a BOTH / FOES_AND_ALLY move re-runs its effect script from
+  // attackcanceler once per additional target: accuracy, Protect, damage, secondary
+  // effects and the move's own move-end all run again with a new gBattlerTarget
+  // (:4806-4813). PP is charged once: FOES_AND_ALLY sets HITMARKER_NO_PPDEDUCT before
+  // the re-run (:4795) and Cmd_ppreduce clears it and returns (:1465-1467); BOTH sets
+  // HITMARKER_NO_ATTACKSTRING (:4801), on which Cmd_ppreduce returns without deducting
+  // (:1472). Both are closure-local markers (see performPpDeduct).
+  //
+  // The flag is the DYNAMIC GetBattlerBattleMoveTargetFlags (:4788-4789), not the raw
+  // moveData.target: an ability or terrain can widen a SELECTED move to BOTH.
+  const spreadFlags = getBattlerBattleMoveTargetFlags(
+    state,
+    battlerId,
+    performedMove.id,
+    initialMoveData,
+    deps,
+    { dataContext: deps.dataContext, grounding: deps.grounding },
+  )
+  const spreadLoopMove =
+    hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE) && (spreadFlags === 'BOTH' || spreadFlags === 'FOES_AND_ALLY')
+
+  // HandleAction_UseMove, battle_util.c:283-289: in a double, a FOES_AND_ALLY move starts
+  // on the first alive non-attacker scanning ids from 0 -- not on the controller's stored
+  // target -- so the target+1 scan below reaches every other battler (that is how a
+  // right-slot attacker's ally is hit at all). :285's Commander-state skip is not carried.
+  let firstTargetId = targetId
+  if (spreadLoopMove && spreadFlags === 'FOES_AND_ALLY') {
+    // No alive non-attacker leaves gBattlerTarget = gBattlersCount, which the
+    // pipeline's own liveness test rejects (the C's ButItFailed path).
+    firstTargetId = state.battlersCount
+    for (let b = 0; b < state.battlersCount; b++) {
+      if (b === battlerId) continue
+      if (isBattlerAlive(state, b)) {
+        firstTargetId = b
+        break
+      }
+    }
+  }
+
+  const first = runMovePipeline(performedMove, performedMove, firstTargetId, false)
+  if (!spreadLoopMove) return first
+  let current = first
+
+  const passes: ActionOutcomeTarget[] = []
+  const recordPass = (o: ActionOutcome) => {
+    passes.push({
+      targetId: o.targetId,
+      missed: o.missed,
+      targetDamage: o.targetDamage,
+      fainted: [...o.fainted],
+      statChanges: o.statChanges,
+      statusApplied: o.statusApplied,
+    })
+    // :4784-4785 -- "the move did something" (Throat Spray's reader in the C; the sim
+    // carries no reader). A miss still sets it (MOVE_RESULT_MISSED is not NO_EFFECT);
+    // immunity / an absorbing ability is the modelled NO_EFFECT shape, i.e. 0 damage on
+    // a hit that was not missed.
+    if (o.cancelledBy === null && !(!o.missed && o.targetDamage === 0)) {
+      attackerBattler.round.targetAffected = true
+    }
+  }
+  recordPass(current)
+  const allNotes = [...current.unmodelled]
+  const allFainted = [...current.fainted]
+  let allAttackerDamage = current.attackerDamage
+  // `?? state.battlersCount` mirrors the C's out-of-range gBattlerTarget when the
+  // first pass found no living target at all; the forward scan then starts past the end.
+  let currentTargetId: number = current.targetId ?? state.battlersCount
+
+  while (
+    !noAttackString && // :4790
+    current.cancelledBy === null && // HITMARKER_UNABLE_TO_USE_MOVE
+    !current.battleOver &&
+    !state.battleOutcome && // Cmd_attackcanceler :1068-1071 on the re-run
+    !attackerBattler.round.chargingTurn // :4787
+  ) {
+    let nextTargetId: number
+    if (spreadFlags === 'FOES_AND_ALLY') {
+      // :4794-4798 -- first alive id after the current target, skipping the attacker.
+      // Running off the end leaves gBattlersCount, which IsBattlerAlive (:6685-6694)
+      // reports dead because it is not a battler.
+      nextTargetId = state.battlersCount
+      for (let b = currentTargetId + 1; b < state.battlersCount; b++) {
+        if (b === battlerId) continue
+        if (isBattlerAlive(state, b)) {
+          nextTargetId = b
+          break
+        }
+      }
+      noPpDeduct = true // :4795
+    } else {
+      // :4800-4801 -- GetBattlerAtPosition(BATTLE_PARTNER(GetBattlerPosition(target)))
+      // is the partner id, `target ^ 2` (include/constants/battle.h:37).
+      nextTargetId = currentTargetId ^ 2
+      noAttackString = true // :4801
+    }
+    if (!isBattlerAlive(state, nextTargetId)) {
+      // :4815-4817 -- no further target: set NO_ATTACKSTRING and clear NO_PPDEDUCT, then
+      // fall through to the rest of the move-end ladder.
+      noAttackString = true
+      noPpDeduct = false
+      break
+    }
+    // Cmd_attackcanceler :1073-1077 -- the re-run's script fails an unalive attacker and
+    // jumps to MoveEnd (setting UNABLE_TO_USE_MOVE, which ends this loop next iteration),
+    // EXCEPT when HITMARKER_NO_ATTACKSTRING is set: that is BOTH's second pass, which the
+    // game still runs after a recoil/Life-Orb faint.
+    if (!noAttackString && !isBattlerAlive(state, battlerId)) break
+
+    const notesBefore = unmodelled.length
+    currentTargetId = nextTargetId
+    current = runMovePipeline(performedMove, performedMove, currentTargetId, false)
+    recordPass(current)
+    allNotes.push(...current.unmodelled.slice(notesBefore))
+    allFainted.push(...current.fainted)
+    if (current.attackerDamage !== null) allAttackerDamage = (allAttackerDamage ?? 0) + current.attackerDamage
+  }
+
+  // The primary fields stay the FIRST pass's (the only target in every single-target
+  // consumer's world); `fainted` is the ordered union across passes and `attackerDamage`
+  // the sum, matching what the one action did overall. Per-pass detail is in `targets`.
+  return {
+    ...first,
+    attackerDamage: allAttackerDamage,
+    unmodelled: allNotes,
+    fainted: allFainted,
+    targets: passes,
+  }
 }
 
 function buildMoveView(
