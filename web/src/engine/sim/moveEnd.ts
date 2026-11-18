@@ -5422,7 +5422,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_KNOW_YOUR_PLACE' || abilityId === 'ABILITY_TANGLED_TAILS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       !target.volatiles.dazed &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect)
@@ -5439,7 +5439,7 @@ function handleAttackerMoveEndAbility(
     const moveType = moveTypeName()
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveType !== null &&
       !target.mon.types.includes(moveType) &&
@@ -5482,7 +5482,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_SINISTER_CLAWS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       canLowerStatOrMirrorArmor(state, targetId, STAT_SPDEF, deps.dataContext)
@@ -5527,7 +5527,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_SPINNING_TOP') {
     if (
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attackerId !== targetId &&
       moveTypeName() === 'FIGHTING' &&
       checkAndSetOncePerTurnAbility(state, attackerId, abilityId, deps.dataContext)
@@ -5573,7 +5573,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_VENOBLAZE_PINCERS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveData?.split === 'PHYSICAL' &&
       state.rng.random16() % 100 < 20
@@ -5594,7 +5594,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_VIRUS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveTypeName() === 'ELECTRIC' &&
       canBePoisoned(state, attackerId, targetId, moveId, statusDeps)
@@ -5616,7 +5616,7 @@ function handleAttackerMoveEndAbility(
       : resolveEffectiveMoveType(attacker.mon.abilities, moveId, fistDeclaredType, moveData?.flags ?? {}).moveType
     if (
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
@@ -5633,7 +5633,7 @@ function handleAttackerMoveEndAbility(
   // neither SetMoveEffect's Sheer Force gate (battle_script_commands.c:2361) nor its Substitute gate (:2388) applies;
   // BattleScript_MoveEffectCurse (data/battle_scripts_1.s:3378-3382) is statusanimation + message alone.
   if (abilityId === 'ABILITY_WINGS_OF_PESTILENCE') {
-    if (target.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+    if (target.mon.hp > 0 && targetTurnDamaged(state, targetId, hpDealt) && attackerId !== targetId) { // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       if (state.rng.random16() % 100 < 10 && !hasFlag(target.mon.status2, STATUS2_CURSED)) {
         target.mon.status2 = setFlag(target.mon.status2, STATUS2_CURSED)
         if (!result.statusApplied) result.statusApplied = { battlerId: targetId, status: 'CURSE' }
