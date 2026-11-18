@@ -3807,8 +3807,12 @@ function handleCurse(ctx: MoveEffectContext): ActionOutcome {
 
   if (isGhost || isFog) {
     // Ghost Curse
-    // jumpifbytenotequal gBattlerAttacker, gBattlerTarget / getmovetarget BS_ATTACKER
-    const actualTargetId = targetId === null || targetId === battlerId ? battlerId ^ 1 : targetId
+    // battle_scripts_1.s:4969-4972: `jumpifbytenotequal gBattlerAttacker, gBattlerTarget`
+    // skips the re-target unless the target IS the user; `getmovetarget BS_ATTACKER` then
+    // runs GetMoveTarget(attacker, move, 0) (battle_util.c:6343-6416), whose SELECTED
+    // branch draws SetRandomTarget (battle_util.c:6326-6341) in doubles.
+    const actualTargetId =
+      targetId !== null && targetId !== battlerId ? targetId : getMoveTarget(state, battlerId, moveId, deps)
     const target = state.battlers[actualTargetId]
     deductPp(state, battlerId, moveId, moveEffect, unmodelled)
 

@@ -34,7 +34,6 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 | web/src/engine/sim/moveEffects.ts:3232 | `const targetSide = (battlerId & 1) ^ 1` | side-flip | battle_script_commands.c:11979 | none | handleStealthRock: opposing side index flip (battlerId & 1) ^ 1 (Cmd_setstealthrock, battle_script_commands.c:11979). |
 | web/src/engine/sim/moveEffects.ts:3256 | `const targetSide = (battlerId & 1) ^ 1` | side-flip | battle_script_commands.c:11820 | none | handleToxicSpikes: opposing side index flip (battlerId & 1) ^ 1 (Cmd_settoxicspikes, battle_script_commands.c:11820). |
 | web/src/engine/sim/moveEffects.ts:3279 | `const targetSide = (battlerId & 1) ^ 1` | side-flip | battle_script_commands.c:11462 | none | handleStickyWeb: opposing side index flip (battlerId & 1) ^ 1 (Cmd_setstickyweb, battle_script_commands.c:11462). |
-| web/src/engine/sim/moveEffects.ts:3811 | `const actualTargetId = targetId === null \|\| targetId === battlerId ? battlerId ^ 1 : targetId` | needs-chosen-target | battle_scripts_1.s:4971 | chosen target | Ghost Curse: when targetId is null/self, hard-codes battlerId ^ 1 instead of getmovetarget BS_ATTACKER (data/battle_scripts_1.s:4971, -> SetRandomTarget, battle_util.c:6394). |
 | web/src/engine/sim/moveEffects.ts:8777 | `* and flips *BattlerId fields with BATTLE_OPPOSITE (id ^ 1). Never fails.` | comment-only | battle_script_commands.c:8362 | none | Docstring comment for Court Change describing UPDATE_COURTCHANGED_BATTLER. |
 | web/src/engine/sim/moveEffects.ts:8830 | `// :8359-8374 -- UPDATE_COURTCHANGED_BATTLER: BATTLE_OPPOSITE(id) = id ^ 1` | comment-only | battle_script_commands.c:8362 | none | Implementation comment citing UPDATE_COURTCHANGED_BATTLER macro in Court Change. |
 | web/src/engine/sim/moveEffects.ts:8831 | `;[t0.reflectBattlerId, t1.reflectBattlerId] = [t1.reflectBattlerId ^ 1, t0.reflectBattlerId ^ 1]` | single-foe-by-design | battle_script_commands.c:8366 | none | Court Change reflectBattlerId: C macro UPDATE_COURTCHANGED_BATTLER uses BATTLE_OPPOSITE (battle_script_commands.c:8366). |
@@ -100,11 +99,11 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 - `side-flip`: 34
 - `single-foe-by-design`: 28
 - `needs-all-foes`: 2
-- `needs-chosen-target`: 6
+- `needs-chosen-target`: 5
 - `singles-only-ai`: 5
 - `comment-only`: 6
 - `wrong-battler-singles-bug`: 0
-- **Total**: 81
+- **Total**: 80
 
 ## Follow-up items
 
@@ -122,9 +121,10 @@ Both sites were resolved in cycle46:
 - **Ported in cycle47** (`dbl-3c-action-targets-b`): both functions above now also apply the double-battle override at `battle_controller_player.c:2414-2416`. When the move target is not USER / USER_OR_SELECTED and `CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1`, the cursor is replaced by `GetDefaultMoveTarget` (`pokemon.c:1267-1285`, the `<= 1` branch only: the `> 1` branch draws `Random() & 1` and is unreachable from this call site, so the helper draws no rng) and `canSelectTarget` is cleared. `GetDefaultMoveTarget`'s own `(battlerId & 1) ^ 1` is the new `moveTargetFlags.ts:303` table row. The zero-PP override that precedes it (:2412-2413) stays unported: the sim does not carry the selection screen's PP state.
 - **Resolved item**: `dbl-3c-action-targets`, `dbl-3c-action-targets-b`.
 
-### 3. `web/src/engine/sim/moveEffects.ts` (1 site, `needs-chosen-target`)
-- Line 3811 in `handleCurse`: `const actualTargetId = targetId === null || targetId === battlerId ? battlerId ^ 1 : targetId`. Ghost Curse in C (`data/battle_scripts_1.s:4971`) executes `getmovetarget BS_ATTACKER` (`battle_util.c:6394`, which calls `SetRandomTarget(attacker)` in doubles). Hard-coding `battlerId ^ 1` bypasses double-battle random targeting.
-- **Proposed item**: `dbl-3c-curse-target` (~25 changed lines with unit tests).
+### 3. `web/src/engine/sim/moveEffects.ts` (resolved in cycle48)
+The one `needs-chosen-target` site in `handleCurse` was fixed in cycle48:
+- Ghost Curse in C (`data/battle_scripts_1.s:4969-4972`) only re-targets when the target IS the user, via `getmovetarget BS_ATTACKER` -> `GetMoveTarget(attacker, move, 0)` (`battle_util.c:6343-6416`, whose SELECTED branch calls `SetRandomTarget`, `battle_util.c:6326-6341`). `handleCurse` now calls the sim's `getMoveTarget` in that branch instead of hard-coding `battlerId ^ 1`, so doubles draws the C's single `Random() % 2` and singles stays draw-free.
+- **Resolved item**: `dbl-3c-curse-target`.
 
 ### 4. `web/src/engine/sim/turn.ts` (7 sites: 2 `needs-all-foes`, 5 `needs-chosen-target`)
 - **Follow Me fallbacks** (Lines 935, 962, `needs-chosen-target`): in `getMoveTarget` (SELECTED and RANDOM), `followmeTarget ?? (attacker ^ 1)` falls back to `attacker ^ 1`. If followme is active, C uses `gSideTimers[side].followmeTarget` (`battle_util.c:6366`, `:6394`); fallback should use normal target resolution rather than hard-coding opposite. Sizing: ~30 changed lines.
