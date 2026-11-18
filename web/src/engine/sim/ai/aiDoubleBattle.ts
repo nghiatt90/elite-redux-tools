@@ -450,10 +450,11 @@ export function aiDoubleBattle(
         }
         case 'EFFECT_AFTER_YOU': { // :2469-2477
           // FOE(battler) = (battler ^ BIT_SIDE) & BIT_SIDE, battle_ai_util.h:10,
-          // which is `(battler & 1) ^ 1`; BATTLE_PARTNER(FOE) is `^ 2`. The
-          // `||` short-circuits, so the second tie-break draw only happens when
-          // the first comparison returns 0.
-          const foe = (partnerId & 1) ^ 1
+          // which is the opposite side of the battler (bit 0 flipped);
+          // BATTLE_PARTNER(FOE) flips bit 1. The `||` short-circuits, so the
+          // second tie-break draw only happens when the first comparison
+          // returns 0.
+          const foe = 1 - (partnerId & 1)
           if (
             getWhoStrikesFirst(state, partnerId, foe, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1 ||
             getWhoStrikesFirst(state, partnerId, foe ^ 2, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1
