@@ -96,8 +96,11 @@ const DISTINCT_SCRIPTS = 322
  * through `executeTurn`, giving the inventory test evidence for
  * `BattleScript_EffectPsychicTerrain`, so that legacy-script pair moved from unported to
  * ported.
+ *
+ * Cycle 41: 235 -> 234. `cycle41DoublesActions.test.ts` runs MOVE_AIR_CUTTER through
+ * `buildMoveAction`, giving the effect-less move test evidence.
  */
-export const UNPORTED_PAIR_COUNT = 235
+export const UNPORTED_PAIR_COUNT = 234
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -118,8 +121,12 @@ export const UNPORTED_PAIR_COUNT = 235
  * Cycle 152: 116 -> 115. `cycle152EncorePrecedence.test.ts` exercises
  * `MOVE_PSYCHIC_TERRAIN` through `executeTurn`, so `BattleScript_EffectPsychicTerrain` is
  * now test-backed rather than registered-but-untested.
+ *
+ * Cycle 41: 115 -> 114 (the same pair also leaves unported, 235 -> 234).
+ * `cycle41DoublesActions.test.ts` runs MOVE_AIR_CUTTER through `buildMoveAction`, giving
+ * the effect-less move test evidence.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 115
+export const REGISTERED_UNTESTED_PAIR_COUNT = 114
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
