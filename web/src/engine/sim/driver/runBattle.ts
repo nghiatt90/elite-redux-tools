@@ -12,6 +12,7 @@ import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { partySlotsFor } from '../partySlots'
 import { createSession, cloneParty, groundingFor, stepTurn } from './session'
+import type { BattleFormat } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
 export interface RunBattleOptions {
@@ -25,6 +26,9 @@ export interface RunBattleOptions {
   /** FlagGet(B_FLAG_INVERSE_BATTLE) for the whole battle (battle_util.c:8028); derive it
    * from `isInverseBattleTrainer` in encounters.json's inverseBattles list. */
   inverseBattle?: boolean
+  /** Battle format; defaults to a single-trainer fight for `opponentTrainer`. The
+   * doubles player policy does not exist yet, so a double returns an ERROR result. */
+  format?: BattleFormat
   playerPolicy?: (state: BattleState, unmodelled: string[]) => ChosenAction | null
 }
 
@@ -187,7 +191,19 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       rng: options.rng ?? { random16: () => 0 },
       leadIndex: options.leadIndex,
       inverseBattle: options.inverseBattle,
+      format: options.format,
     })
+    // The loop below picks only the player's first battler; the doubles policy is dbl-5c.
+    if (session.state.battlersCount === 4) {
+      return {
+        outcome: 'ERROR',
+        turns: turnCount,
+        log,
+        unmodelled: unmodelledMap,
+        error: 'runBattle: the doubles player policy is dbl-5c',
+        megaEvolutions,
+      }
+    }
     const { state } = session
     recordUnmodelled(session.startUnmodelled)
 

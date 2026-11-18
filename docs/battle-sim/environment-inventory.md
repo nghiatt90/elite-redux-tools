@@ -19,10 +19,11 @@ mention in a comment is not evidence, and neither is a name alone:
   `false`, so production implements the C rule (`src/pokemon.c:994`, `if (speedDown) speedIV = 0;`) but no test asserts it.
 - Battle-type units must have the flag assigned on the driver battle-start path (`session.ts`, `runBattle.ts`,
   `buildParty.ts` or `battleFormat.ts`). `BATTLE_TYPE_TRAINER` qualifies (`battleFormat.ts`); `BATTLE_TYPE_DOUBLE`
-  does not because `createSession` refuses a forced-double trainer (dbl-3), so the driver never runs a double battle.
+  qualifies because `createSession` passes its format to `buildBattleState` and reads the DOUBLE bit, so a
+  forced-double trainer starts four battlers (`battle_main.c:1757-1762`, `:1910-1913`).
 - `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active
-  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen's `doubleBattle = TRUE`
-  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.
+  battlers. `createSession` keeps the format instead of refusing a forced-double trainer, so `buildBattleState`
+  builds four battlers (`TrainerPartyGenerator.kt:207` -> `battle_main.c:1910-1913`).
 - `AI_FLAG_CHECK_FOE` is unported: the C reads it in `GetMovesArray` (`src/battle_ai_util.c:1353`) to choose the
   real moveset versus `battleHistory->usedMoves`. Every trainer carries the bit, so the sim hard-codes the
   `IsBattlerAIControlled(battler) || ... aiFlags & AI_FLAG_CHECK_FOE` TRUE branch and reads the real moveset
@@ -58,13 +59,13 @@ battle-event units rather than a separate script-command unit. The sim loads tha
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `map-setup` | 61 | 1 | 12 | 55 | 0 | 5 |
-| `battle-type` | 9 | 1 | 0 | 8 | 0 | 0 |
+| `battle-type` | 9 | 2 | 0 | 7 | 0 | 0 |
 | `difficulty-flag` | 18 | 1 | 1 | 17 | 0 | 0 |
-| `trainer-flag` | 14 | 9 | 0 | 3 | 0 | 2 |
+| `trainer-flag` | 14 | 10 | 0 | 2 | 0 | 2 |
 | `hell-trainer-skill` | 29 | 0 | 0 | 29 | 0 | 0 |
 | `battle-event` | 34 | 33 | 0 | 0 | 0 | 1 |
 | `script-event` | 6 | 0 | 0 | 6 | 0 | 0 |
-| **total** | **171** | **45** | **13** | **118** | **0** | **8** |
+| **total** | **171** | **47** | **13** | **116** | **0** | **8** |
 
 Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 34 distinct events. Map scripts scanned: 515; maps with a setup token: 22.
 
@@ -73,9 +74,9 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | Unit kind | Unported | Registered, untested |
 | --- | ---: | ---: |
 | `map-setup` | 55 | 12 |
-| `battle-type` | 8 | 0 |
+| `battle-type` | 7 | 0 |
 | `difficulty-flag` | 17 | 1 |
-| `trainer-flag` | 3 | 0 |
+| `trainer-flag` | 2 | 0 |
 | `hell-trainer-skill` | 29 | 0 |
 | `battle-event` | 0 | 0 |
 | `script-event` | 6 | 0 |
@@ -87,7 +88,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `FLAG_ALPHA_CREATION` | 6 map(s), 18 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/pokemon.c:504` | allowlisted | none | none |
 | `FLAG_SHINY_CREATION` | 4 map(s), 4 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route132 | `pipeline/.upstream/eliteredux-source/src/pokemon.c:499` | allowlisted | none | none |
 | `FLAG_SYS_DISABLE_AUTOHEAL` | 5 map(s), 17 line(s): MossdeepCity_SpaceCenter_2F, Route111, SkyPillar_Outside, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
-| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | ported | `web/src/engine/sim/cycle5aInverseBattle.test.ts` | `web/src/engine/sim/driver/runBattle.ts:189` |
+| `FLAG_SYS_INVERSE_BATTLE` | 1 map(s), 8 line(s): MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8028` | ported | `web/src/engine/sim/cycle5aInverseBattle.test.ts` | `web/src/engine/sim/driver/runBattle.ts:193` |
 | `FLAG_TOTEM_BATTLE` | 6 map(s), 6 line(s): MeteorFalls_HaxorusRoom, PetalburgWoods_BreloomRoom, Route111, Route114, Route132, Seaspray_Cave_B1F | `pipeline/.upstream/eliteredux-source/src/battle_util.c:9144` | unported | none | none |
 | `HealPlayerParty` | 31 map(s), 52 line(s): BattleFrontier_BattleArenaBattleRoom, BattleFrontier_BattleArenaLobby, BattleFrontier_BattleDomeBattleRoom, BattleFrontier_BattleDomeLobby, BattleFrontier_BattleDomePreBattleRoom, BattleFrontier_BattleFactoryBattleRoom, BattleFrontier_BattleFactoryPreBattleRoom, BattleFrontier_BattlePalaceBattleRoom, BattleFrontier_BattlePalaceLobby, BattleFrontier_BattlePikeLobby, BattleFrontier_BattlePikeRoomNormal, BattleFrontier_BattlePyramidFloor, BattleFrontier_BattlePyramidLobby, BattleFrontier_BattleTowerBattleRoom, BattleFrontier_BattleTowerLobby, BattleFrontier_BattleTowerMultiBattleRoom, BattleFrontier_BattleTowerMultiPartnerRoom, FallarborTown_BattleTentBattleRoom, MeteorFalls_1F_1R, MossdeepCity_House1, MossdeepCity_SpaceCenter_2F, Route101, Route111, SkyPillar_Outside, SlateportCity_BattleTentBattleRoom, SlateportCity_BattleTentCorridor, SlateportCity_OceanicMuseum_2F, SootopolisCity_Gym_1F, SootopolisCity_MysteryEventsHouse_B1F, TrainerHill_Entrance, VerdanturfTown_BattleTentBattleRoom | `pipeline/.upstream/eliteredux-source/src/battle_main.c:844` | unported | none | none |
 | `VAR_BATTLE_FIELD_EFFECT_TYPE` | 3 map(s), 43 line(s): EverGrandeCity_ChampionsRoom, EvergrandeCity_MonoChampRoom_1, MossdeepCity_Gym | `pipeline/.upstream/eliteredux-source/src/battle_util.c:4163` | unported | none | none |
@@ -150,7 +151,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 
 | Unit key | Fights / maps | C citation | Status | Test file | Production evidence |
 | --- | --- | --- | --- | --- | --- |
-| `BATTLE_TYPE_DOUBLE` | not started by a session: createSession refuses forcedDouble (dbl-3) and only builds a single trainer | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` | none |
+| `BATTLE_TYPE_DOUBLE` | a forced-double trainer or a two-opponent format started by createSession | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` | `web/src/engine/sim/driver/session.ts:291` |
 | `BATTLE_TYPE_INGAME_PARTNER` | Battle Tower multi with an in-game partner | `pipeline/.upstream/eliteredux-source/src/battle_tower.c:1526` | unported | `web/src/engine/sim/cycle38DoublesRoster.test.ts` | none |
 | `BATTLE_TYPE_TRAINER` | all 932 trainer battles | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1242` | ported | `web/src/engine/sim/cycle153cEnvironmentUnits.test.ts` | `web/src/engine/sim/driver/battleFormat.ts:73` |
 | `BATTLE_TYPE_TWO_OPPONENTS` | two approaching trainers | `pipeline/.upstream/eliteredux-source/src/battle_setup.c:1240` | unported | `web/src/engine/sim/cycle38DoublesRoster.test.ts` | none |
@@ -195,7 +196,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | `AI_FLAG_TRY_TO_FAINT` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:188` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `AI_FLAG_WILL_SUICIDE` | all 932 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:193` | ported | `web/src/engine/sim/ai/aiCheckBadMove.test.ts` |
 | `encounterMusic_gender` | trainer-mon gender bias | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1794` | unported | none |
-| `forcedDouble` | 78 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:207` | unported | `web/src/engine/sim/ai/aiFlags.test.ts` |
+| `forcedDouble` | 78 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:207` | ported | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `noSwitching` | 5 trainers | `pipeline/.upstream/eliteredux-source/src/battle_ai_switch_items.c:611` | allowlisted | `web/src/engine/sim/ai/aiFlags.test.ts` |
 | `preferStall` | 1 trainer | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:182` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |
 | `preferStatus` | 6 trainers | `pipeline/.upstream/eliteredux-source/tools/codegen/src/er/trainer/TrainerPartyGenerator.kt:183` | ported | `web/src/engine/sim/ai/aiCheckViability.test.ts` |

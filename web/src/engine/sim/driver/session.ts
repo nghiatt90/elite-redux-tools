@@ -14,7 +14,7 @@ import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
+import { BATTLE_TYPE_DOUBLE, clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
@@ -28,7 +28,7 @@ import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget, playerCanSelectMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
-import { buildBattleState, gatePlayerInnates } from './battleFormat'
+import { battleTypeFlagsFor, buildBattleState, gatePlayerInnates, type BattleFormat } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 import { partySlotsFor } from '../partySlots'
 
@@ -51,12 +51,21 @@ export interface SessionOptions {
    * GetTypeModifier reads inverseTypeChart instead of typeChart. Callers derive it from
    * `isInverseBattleTrainer` in encounters.json's inverseBattles list. */
   inverseBattle?: boolean
+  /** The battle's format; defaults to a single-trainer format for `opponentTrainer`.
+   * A defaulted format whose trainer is `forcedDouble` is a double: battle_main.c:
+   * 1757-1762 sets `isDoubleBattle` and :1910-1913 ORs `gTrainers[].doubleBattle`
+   * back into `gBattleTypeFlags`, which battleFormat.ts ports. In-game partner
+   * formats are out of scope (dbl-6b). */
+  format?: BattleFormat
 }
 
 export interface BattleSession {
   state: BattleState
   data: SimDataBundle
   trainer: TrainerData
+  /** The format this session was built from; `{ opponents: [trainer] }` when the
+   * caller passed no format. cloneSession keeps it through the spread. */
+  format: BattleFormat
   /** FlagGet(B_FLAG_INVERSE_BATTLE); see SessionOptions.inverseBattle. */
   inverseBattle: boolean
   turnDeps: TurnLoopDeps
@@ -270,12 +279,17 @@ export function createSession(options: SessionOptions): BattleSession {
   const tier = options.tier ?? 'elite'
   const data = options.data
   const inverseBattle = options.inverseBattle ?? false
-  // A forced-double trainer needs four battlers and the doubles turn loop, which this
-  // cycle (dbl-2a) does not run. Refuse rather than silently build a singles state
-  // that claims BATTLE_TYPE_DOUBLE.
-  if (options.opponentTrainer.forcedDouble) {
-    throw new Error(`createSession: forced-double trainer ${options.opponentTrainer.id} needs the doubles turn loop (dbl-3)`)
-  }
+  // Partner formats need the partner party and player policy this cycle does not build.
+  if (options.format?.partner) throw new Error('createSession: the in-game partner formats are dbl-6b')
+  // battle_main.c:1757-1762 decides `isDoubleBattle` from the save option or
+  // `gTrainers[].doubleBattle`, and :1910-1913 ORs `gTrainers[].doubleBattle` back into
+  // `gBattleTypeFlags` in the else branch. battleFormat.ts ports both branches, so the
+  // default format makes a forced-double trainer a double (TRAINER | DOUBLE) whatever
+  // the player's usable-mon count.
+  const format: BattleFormat = options.format ?? { opponents: [options.opponentTrainer] }
+  if (format.opponents[0]?.id !== options.opponentTrainer.id) throw new Error(`createSession: format.opponents[0] must be ${options.opponentTrainer.id}`)
+  const hasDoubleBit = (battleTypeFlags: number): boolean => (battleTypeFlags & BATTLE_TYPE_DOUBLE) !== 0
+  const isDouble = hasDoubleBit(battleTypeFlagsFor(format))
   const playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
   const leadIndex = options.leadIndex ?? 0
@@ -284,7 +298,9 @@ export function createSession(options: SessionOptions): BattleSession {
   // Only an explicitly chosen lead slot must be alive. With the default lead (leadIndex
   // undefined) the turn-1 battle-start sequence replaces a fainted slot itself
   // (HandleFaintedMonActions, battle_main.c:3407-3414), and existing callers rely on that.
-  if (options.leadIndex !== undefined && lead.hp === 0) {
+  // In a double buildBattleState applies leadIndex to battler 0 and the same start pass
+  // replaces a fainted lead, so this check stays singles-only.
+  if (!isDouble && options.leadIndex !== undefined && lead.hp === 0) {
     throw new Error(`createSession: leadIndex ${leadIndex} names a fainted party slot`)
   }
   // GetInnateInSlot (src/battle_util.c:8799-8802) gates the PLAYER's innates by
@@ -292,22 +308,31 @@ export function createSession(options: SessionOptions): BattleSession {
   gatePlayerInnates(playerParty, tier)
 
   const playerMaxLevel = Math.max(...playerParty.map((m) => m.level))
-  const opponentParty = buildOpponentParty(options.opponentTrainer, tier, playerMaxLevel, data)
-  if (opponentParty.length === 0) {
-    throw new Error(`createSession: opponentParty for ${options.opponentTrainer.id} (${tier}) must not be empty`)
+  const opponentParties = format.opponents.map((trainer) => buildOpponentParty(trainer, tier, playerMaxLevel, data))
+  for (let i = 0; i < opponentParties.length; i++) {
+    if (opponentParties[i]!.length === 0) {
+      throw new Error(`createSession: opponentParty for ${format.opponents[i]!.id} (${tier}) must not be empty`)
+    }
   }
 
-  const state = buildBattleState(
-    { opponents: [options.opponentTrainer] },
-    {
-      data,
-      tier,
-      playerParty,
-      opponentParties: [opponentParty],
-      leadIndex: options.leadIndex,
-      rng: options.rng,
-    },
-  )
+  const state = buildBattleState(format, {
+    data,
+    tier,
+    playerParty,
+    opponentParties,
+    leadIndex: options.leadIndex,
+    rng: options.rng,
+  })
+
+  // A forced-double trainer still must start four battlers: battle_main.c:1757-1762 /
+  // :1910-1913 OR `.doubleBattle` into the flags, and HandleTurnActionSelectionState
+  // then loops `gActiveBattler` 0..`gBattlersCount-1` (:3629). Only the format that
+  // makes it a double is allowed; an explicit `forcedDouble: false` format is a
+  // contradiction and still throws.
+  const forcedDoubleMismatch = (forcedDouble: boolean, battlersCount: number): boolean => forcedDouble && battlersCount !== 4
+  if (forcedDoubleMismatch(options.opponentTrainer.forcedDouble, state.battlersCount)) {
+    throw new Error(`createSession: forced-double trainer ${options.opponentTrainer.id} needs a double format`)
+  }
 
   if (options.battleEvents) {
     for (const ev of options.battleEvents) {
@@ -429,7 +454,7 @@ export function createSession(options: SessionOptions): BattleSession {
     startUnmodelled,
   )
 
-  return { state, data, trainer: options.opponentTrainer, inverseBattle, turnDeps, chooseAiDeps, playerReplacement, startUnmodelled }
+  return { state, data, trainer: options.opponentTrainer, format, inverseBattle, turnDeps, chooseAiDeps, playerReplacement, startUnmodelled }
 }
 
 /**
@@ -453,9 +478,12 @@ export interface StepResult {
 
 /** Chooses the opponent's action with the ported AI (or uses `fixedOpponentAction`, `null` meaning no action), then runs one turn with `playerAction`.
  *
- * `slotActions` supplies the actions for battlers 2 and 3 of a double, which the AI
- * does not select yet (dbl-4d). Without it the array is exactly today's
- * `[playerAction, opponentAction, null, null]`; battler 1's AI call is unchanged.
+ * `slotActions` supplies battler 2's action (the player's second battler) and may
+ * override battler 3's. In a double battler 3 is AI-chosen too unless the caller
+ * supplies it, after battler 1's call: HandleTurnActionSelectionState runs action
+ * selection for `gActiveBattler` 0..`gBattlersCount-1` (battle_main.c:3629), and
+ * STATE_TURN_START_RECORD (:3634-3639) is where the AI scores each battler.
+ * Singles never reaches the battler-3 branch, so it stays draw-for-draw unchanged.
  */
 export function stepTurn(
   session: BattleSession,
@@ -476,15 +504,26 @@ export function stepTurn(
   )
 
   let opponentAction: ChosenAction | null = fixedOpponentAction ?? null
-  if (fixedOpponentAction === undefined && state.battlers[1] && state.battlers[1].mon.hp > 0) {
-    const aiResult = chooseAiAction(state, 1, session.chooseAiDeps)
-    opponentAction = aiResult.action
-    unmodelled.push(...aiResult.unmodelled)
+  let secondOpponentAction: ChosenAction | null = slotActions?.[3] ?? null
+  if (fixedOpponentAction === undefined) {
+    if (state.battlers[1] && state.battlers[1].mon.hp > 0) {
+      const aiResult = chooseAiAction(state, 1, session.chooseAiDeps)
+      opponentAction = aiResult.action
+      unmodelled.push(...aiResult.unmodelled)
+    }
+    // Battler 3's action: the C picks actions in battler-id order (:3629), so its AI
+    // call follows battler 1's. `battlersCount === 4` keeps singles byte-identical --
+    // no extra draw happens when the state has only two battlers.
+    if (state.battlersCount === 4 && state.battlers[3] && state.battlers[3].mon.hp > 0 && slotActions?.[3] === undefined) {
+      const aiResult = chooseAiAction(state, 3, session.chooseAiDeps)
+      secondOpponentAction = aiResult.action
+      unmodelled.push(...aiResult.unmodelled)
+    }
   }
 
   const outcome = executeTurn(
     state,
-    [playerAction, opponentAction, slotActions?.[2] ?? null, slotActions?.[3] ?? null],
+    [playerAction, opponentAction, slotActions?.[2] ?? null, secondOpponentAction],
     session.turnDeps,
   )
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)

@@ -270,16 +270,22 @@ describe('buildBattleState: singles is deep-equal to the pre-change literal', ()
   })
 })
 
-describe('createSession: doubles are not run yet (dbl-3)', () => {
-  it('refuses a forced-double trainer rather than building a singles state', () => {
-    expect(() =>
-      createSession({
-        data,
-        playerParty: buildPlayerParty(SPECS, 50, data),
-        opponentTrainer: forcedTrainer,
-        rng: createRandomSource(1),
-      }),
-    ).toThrow(`createSession: forced-double trainer ${forcedTrainer.id} needs the doubles turn loop (dbl-3)`)
+describe('createSession: a forced-double trainer starts a double (dbl-5b)', () => {
+  it('builds four battlers instead of refusing the trainer', () => {
+    // battle_main.c:1757-1762 sets `isDoubleBattle` from `gTrainers[].doubleBattle`,
+    // and :1910-1913 ORs that bit into `gBattleTypeFlags`; the action-selection loop
+    // then runs gActiveBattler 0..gBattlersCount-1 (:3629), i.e. four battlers. dbl-3
+    // landed the doubles turn loop, so dbl-5b lets createSession reach it rather than
+    // refusing the trainer.
+    const session = createSession({
+      data,
+      playerParty: buildPlayerParty(SPECS, 50, data),
+      opponentTrainer: forcedTrainer,
+      rng: createRandomSource(1),
+    })
+    expect(session.state.battlersCount).toBe(4)
+    expect(session.state.battleTypeFlags & BATTLE_TYPE_DOUBLE).toBe(BATTLE_TYPE_DOUBLE)
+    expect(session.state.battleTypeFlags & BATTLE_TYPE_TRAINER).toBe(BATTLE_TYPE_TRAINER)
   })
 })
 

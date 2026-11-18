@@ -321,11 +321,10 @@ export const LOADER_FILES = [
 /**
  * The driver's battle-start path. `loadSimData.ts` is a data loader, so it is
  * deliberately absent: declaring a type field there does not start a battle.
- * `battleFormat.ts` computes `gBattleTypeFlags` for a format, but `createSession`
- * only ever gives it a single non-forced trainer, so it qualifies
- * `BATTLE_TYPE_TRAINER` (its own evidence list) and not `BATTLE_TYPE_DOUBLE`:
- * `BATTLE_TYPE_DOUBLE` is set nowhere in these files, so the driver still never
- * runs a double battle.
+ * `battleFormat.ts` computes `gBattleTypeFlags` for a format, and since dbl-5b
+ * `createSession` passes it that format, so a forced-double trainer (and a
+ * two-opponent format) starts a four-battler session. `session.ts` reads the
+ * DOUBLE bit of that result, which is the driver-side evidence.
  */
 export const BATTLE_TYPE_DRIVER_FILES = [
   'web/src/engine/sim/driver/session.ts',
@@ -1314,12 +1313,12 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     key: 'BATTLE_TYPE_DOUBLE',
     token: 'BATTLE_TYPE_DOUBLE',
     site: 'BattleSetup_StartTrainerBattle',
-    // battle_setup.c:1240 sets this only when two trainers approach; battleFormat.ts
-    // computes it from a format, but the only format createSession builds is a
-    // single non-forced trainer (a forced-double trainer throws until dbl-3), and
-    // aiCheckBadMove.ts:28 records that battleTypeFlags never carries the double
-    // bit in this build.
-    scope: 'not started by a session: createSession refuses forcedDouble (dbl-3) and only builds a single trainer',
+    // battle_setup.c:1240 sets this when two trainers approach. battle_main.c:1757-1762
+    // decides `isDoubleBattle` from the save option or `gTrainers[].doubleBattle`, and
+    // :1910-1913 ORs `gTrainers[].doubleBattle` back in. Since dbl-5b createSession
+    // passes its format to battleFormat.ts and reads the DOUBLE bit, so a forced-double
+    // trainer or a two-opponent format starts four battlers.
+    scope: 'a forced-double trainer or a two-opponent format started by createSession',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
@@ -1700,11 +1699,10 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'trainers.json forcedDouble -> doubleBattle = TRUE',
     scope: '78 trainers',
     citation: cite(CODEGEN_PATH, 207),
-    // TrainerPartyGenerator.kt:207 emits `doubleBattle = TRUE`, which would make
-    // the fight a double. In the engine the field is only read by `aiFlags.ts`
-    // to OR AI_FLAG_DOUBLE_BATTLE; nothing outside it changes the number of
-    // active battlers (session.ts builds exactly two battlers), so the C effect
-    // is unmodelled and the fight stays singles.
+    // TrainerPartyGenerator.kt:207 emits `doubleBattle = TRUE`, which makes the fight
+    // a double: battle_main.c:1757-1762 sets `isDoubleBattle` and :1910-1913 ORs the
+    // bit into `gBattleTypeFlags`. Since dbl-5b session.ts keeps the format (instead
+    // of refusing a forced-double trainer) and ties the flag to four active battlers.
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bbattlersCount\s*(?::|\+?=(?!=))/,
@@ -2699,15 +2697,18 @@ export function generateEnvironmentInventoryDoc(
     '  `buildParty.ts` or `battleFormat.ts`). `BATTLE_TYPE_TRAINER` qualifies (`battleFormat.ts`); `BATTLE_TYPE_DOUBLE`',
   )
   lines.push(
-    '  does not because `createSession` refuses a forced-double trainer (dbl-3), so the driver never runs a double battle.',
+    '  qualifies because `createSession` passes its format to `buildBattleState` and reads the DOUBLE bit, so a',
+  )
+  lines.push(
+    '  forced-double trainer starts four battlers (`battle_main.c:1757-1762`, `:1910-1913`).',
   )
   lines.push(
     '- `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active',
   )
   lines.push(
-    '  battlers. The engine only ORs `AI_FLAG_DOUBLE_BATTLE`; the codegen\'s `doubleBattle = TRUE`',
+    '  battlers. `createSession` keeps the format instead of refusing a forced-double trainer, so `buildBattleState`',
   )
-  lines.push('  (`TrainerPartyGenerator.kt:207`) is unmodelled, so the fight stays singles.')
+  lines.push('  builds four battlers (`TrainerPartyGenerator.kt:207` -> `battle_main.c:1910-1913`).')
   lines.push(
     '- `AI_FLAG_CHECK_FOE` is unported: the C reads it in `GetMovesArray` (`src/battle_ai_util.c:1353`) to choose the',
   )

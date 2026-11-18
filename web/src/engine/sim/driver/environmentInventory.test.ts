@@ -123,8 +123,15 @@ const SCRIPT_EVENT_UNITS = 6
  * FLAG_SYS_INVERSE_BATTLE and runBattle.ts/session.ts carry the non-literal
  * `inverseBattle` assignment (the FlagGet at battle_util.c:8028), so that unit
  * leaves `unported`.
+ *
+ * Moves 118 -> 116 in cycle 5b (dbl-5b): `BATTLE_TYPE_DOUBLE` and `forcedDouble`
+ * leave `unported`. `createSession` now takes a `BattleFormat` and passes it to
+ * `buildBattleState`, so a forced-double trainer starts four battlers:
+ * battle_main.c:1757-1762 sets `isDoubleBattle` from `gTrainers[].doubleBattle`,
+ * and :1910-1913 ORs it into `gBattleTypeFlags` in the else branch. The driver
+ * reads that DOUBLE bit and `stepTurn` drives battler 3's AI (battle_main.c:3629).
  */
-export const UNPORTED_UNIT_COUNT = 118
+export const UNPORTED_UNIT_COUNT = 116
 
 /**
  * Moves 15 -> 13 in cycle 38 (dbl-2a): `cycle38DoublesRoster.test.ts` asserts
@@ -364,26 +371,25 @@ describe('environment and scripted-condition completeness inventory', () => {
     expect(speedDown?.status).toBe('unported')
     expect(speedDown?.registeredUntested).toBe(true)
 
-    // `BATTLE_TYPE_DOUBLE` is only named: C sets it when two trainers approach
-    // (`src/battle_setup.c:1240`), but `createSession` only asks `battleFormat.ts`
-    // for a single non-forced trainer (a forced-double trainer throws until dbl-3)
-    // and `aiCheckBadMove.ts:28` records that `battleTypeFlags` never carries the
-    // double bit in this build. A test that pokes the constant on a hand-built
-    // state does not port double battles.
+    // `BATTLE_TYPE_DOUBLE` is a real port now: `createSession` hands its
+    // `BattleFormat` to `buildBattleState` and reads the DOUBLE bit off
+    // `battleTypeFlagsFor`. A forced-double trainer therefore starts four battlers
+    // -- battle_main.c:1757-1762 sets `isDoubleBattle` from
+    // `gTrainers[].doubleBattle`, and :1910-1913 ORs it into `gBattleTypeFlags`.
     const doubleBattle = result.units.find(
       (candidate) => candidate.kind === 'battle-type' && candidate.key === 'BATTLE_TYPE_DOUBLE',
     )
-    expect(doubleBattle?.status).toBe('unported')
+    expect(doubleBattle?.status).toBe('ported')
     expect(doubleBattle?.registeredUntested).toBe(false)
 
-    // `forcedDouble` is only named: the codegen emits `doubleBattle = TRUE`
-    // (`TrainerPartyGenerator.kt:207`), but the engine only ORs
-    // `AI_FLAG_DOUBLE_BATTLE` in `aiFlags.ts`. Nothing outside it changes the
-    // number of active battlers, so the fight is still singles -- unmodelled.
+    // `forcedDouble` is a real port too: the codegen emits `doubleBattle = TRUE`
+    // (`TrainerPartyGenerator.kt:207`), battle_main.c:1757-1762 / :1910-1913 make
+    // it a double, and createSession keeps the format instead of refusing the
+    // trainer, tying `forcedDouble` to four active battlers.
     const forcedDouble = result.units.find(
       (candidate) => candidate.kind === 'trainer-flag' && candidate.key === 'forcedDouble',
     )
-    expect(forcedDouble?.status).toBe('unported')
+    expect(forcedDouble?.status).toBe('ported')
     expect(forcedDouble?.registeredUntested).toBe(false)
   })
 
@@ -898,11 +904,24 @@ describe('trainer-flag evidence', () => {
     }
   })
 
-  it('flips forcedDouble to ported when a production file outside aiFlags.ts writes battlersCount', () => {
+  it('ports forcedDouble through a production line outside aiFlags.ts that ties it to battlersCount', () => {
     const spec = TRAINER_FLAG_SPECS.find((s) => s.key === 'forcedDouble')!
     const realClassification = classifyToken(spec.token, productionFiles, testFiles, spec.evidence)
-    expect(realClassification.status).toBe('unported')
+    // session.ts's forcedDoubleMismatch pins the C's effect: battle_main.c:1757-1762
+    // sets `isDoubleBattle` from `gTrainers[].doubleBattle` and :1910-1913 ORs it into
+    // `gBattleTypeFlags`, so the fight starts four active battlers.
+    expect(realClassification.status).toBe('ported')
     expect(realClassification.registeredUntested).toBe(false)
+
+    // aiFlags.ts alone stays insufficient: ORing AI_FLAG_DOUBLE_BATTLE does not
+    // change the number of active battlers.
+    const aiFlagsOnly = classifyToken(
+      spec.token,
+      [{ file: 'web/src/engine/sim/ai/aiFlags.ts', source: 'if (trainer.forcedDouble) flags |= AI_FLAG_DOUBLE_BATTLE\n' }],
+      testFiles,
+      spec.evidence,
+    )
+    expect(aiFlagsOnly.status).toBe('unported')
 
     // Synthetic production file where battlersCount is set based on forcedDouble
     const syntheticFiles: SourceFile[] = [
