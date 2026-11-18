@@ -1,9 +1,14 @@
 // Orchestration: BattleAI_SetupAIData (battle_ai_main.c:158-188),
-// ChooseMoveOrAction_Singles (:270-339), BattleAI_DoAIProcessing (:442-474),
-// ComputeBattleAiScores (:208-212), the singles-only half of
-// BattleAI_ChooseMoveOrAction (:190-205), and the second switch check embedded
-// in ChooseMoveOrAction_Singles (:294-318). Singles only, per this batch's own
-// scope -- ChooseMoveOrAction_Doubles (:341-440) is not ported.
+// ChooseMoveOrAction_Singles (:270-339), ChooseMoveOrAction_Doubles (:341-440),
+// BattleAI_DoAIProcessing (:442-474), ComputeBattleAiScores (:208-212), the
+// singles-only half of BattleAI_ChooseMoveOrAction (:190-205), and the second
+// switch check embedded in ChooseMoveOrAction_Singles (:294-318).
+//
+// The doubles chooser is ported as of dbl-4a (cycle 3d3p) but NOT wired into
+// any live path: `chooseAiAction` still calls the singles half only (that is
+// dbl-4d). Its two partner-facing pieces stay out of scope: `AI_DATA->
+// partnerMove = GetAllyChosenMove()` (:368) and AI_DoubleBattle's own scoring
+// (dbl-4b), plus `IsValidDoubleBattle` (dbl-4c).
 //
 // AI_CheckBadMove PART 1 is wired for real as of the ai-checkbadmove-1 batch
 // (aiCheckBadMove.ts, battle_ai_main.c:488-1298 through EFFECT_PERISH_SONG).
@@ -16,7 +21,7 @@
 
 import type { BattleState, BattlerState } from '../state'
 import type { BaseStats } from '../../types'
-import { hasFlag, PARTY_SIZE, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS3_ROOTED, STATUS4_COMMANDED } from '../constants'
+import { BATTLE_TYPE_DOUBLE, hasFlag, PARTY_SIZE, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS3_ROOTED, STATUS4_COMMANDED } from '../constants'
 import { AI_FLAG_CHECK_BAD_MOVE, AI_FLAG_CHECK_VIABILITY, AI_FLAG_PREFER_BATON_PASS, AI_FLAG_TRY_TO_FAINT } from './aiFlags'
 import { aiHPAware, aiRisky, aiTryToFaint } from './aiScorers'
 import { aiCheckBadMove } from './aiCheckBadMove'
@@ -95,6 +100,43 @@ export function setupAiScores(state: BattleState, battlerAtk: number, deps: AiDa
  * `setupAiScores`'s own doc for why this draws no RNG. */
 export function setRandomTargetSingles(battlerAtk: number): number {
   return battlerAtk ^ 1
+}
+
+/** include/constants/battle.h:45-46. */
+const BIT_SIDE = 1
+const BIT_FLANK = 2
+
+/** IsBattlerAlive, battle_util.c:6685-6694. A local copy of turn.ts's export of
+ * the same: turn.ts -> ai/chooseAiAction -> this module, so importing back from
+ * turn.ts would close a runtime cycle. The absent-battler test is what makes a
+ * replaced battler read as fainted here (docs/battle-sim/doubles-plan.md step
+ * 2.5) -- its slot keeps hp > 0 while `gAbsentBattlerFlags` holds its bit. */
+function isBattlerAlive(state: BattleState, battlerId: number): boolean {
+  if (battlerId >= state.battlersCount) return false
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0) return false
+  return !hasFlag(state.absentBattlerFlags, 1 << battlerId)
+}
+
+/**
+ * SetRandomTarget, battle_util.c:6326-6341 -- the same table and rules as
+ * turn.ts's own closure (:908-926), duplicated here for the cycle reason above.
+ * In a double this draws `Random() % 2` exactly once (:6334); a dead pick flips
+ * to the flank with `^ BIT_FLANK` and the C does NOT re-check the flank (:6335-
+ * 6336), so two fainted foes still yield one of them. Singles draws nothing and
+ * takes the left entry (`targets[side][0]`, :6337).
+ */
+export function setRandomTarget(state: BattleState, battlerId: number): number {
+  const side = battlerId & BIT_SIDE // GetBattlerSide
+  const targets = [
+    [1, 3], // B_SIDE_PLAYER -> B_POSITION_OPPONENT_LEFT, B_POSITION_OPPONENT_RIGHT
+    [0, 2], // B_SIDE_OPPONENT -> B_POSITION_PLAYER_LEFT, B_POSITION_PLAYER_RIGHT
+  ]
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
+    const target = targets[side][state.rng.random16() % 2]
+    return isBattlerAlive(state, target) ? target : target ^ BIT_FLANK
+  }
+  return targets[side][0]
 }
 
 /**
@@ -243,4 +285,113 @@ export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number
 
   const pick = bestIndices[state.rng.random16() % bestIndices.length]
   return { choice: { kind: 'move', moveIndex: pick }, unmodelled }
+}
+
+/**
+ * ChooseMoveOrAction_Doubles, battle_ai_main.c:341-440 -- one scoring pass per
+ * live battler that is not the AI itself, then one target pick over those
+ * battlers' best move scores. dbl-4a: NOT wired into `chooseAiAction` (dbl-4d),
+ * and the ally-facing half is still missing: `AI_DATA->partnerMove =
+ * GetAllyChosenMove()` (:368) is dbl-4b, and the partner-gated helpers the
+ * scorers call (`isValidDoubleBattle`, aiCheckBadMove.ts) are dbl-4c. The flags
+ * this cycle's own tests dispatch (AI_FLAG_HP_AWARE, or none) read neither.
+ *
+ * ORDERING, which the caller's RNG stream depends on. Per live non-self `i`
+ * (:353-356 skip, :358-361 setup): `setupAiScores`'s score reset (BattleAI_SetupAIData, :361),
+ * then SetRandomTarget's single draw (:186 inside SetupAIData; its return value
+ * is discarded because :363 overwrites gBattlerTarget with `i` -- ONLY the draw
+ * is observable), then one `doAiProcessing` per set `state.aiFlags` bit with
+ * `battlerDef = i` (:371-380, bit 0 upward), then the move tie-break's draw
+ * (:404, ONE draw even when only one slot is best). After the loop, exactly one
+ * more draw for the target (`Random() % mostViableTargetsNo`, :437).
+ *
+ * NO DAMAGE CACHE, deliberately: `AI_DATA->simulatedDmg` / `->effectiveness`
+ * (GetAiLogicData, :223-268; written back write-only at :414-417) is a
+ * battle-start copy of AI_CalcDamage, and this sim recomputes the same triple
+ * on demand (aiScorers.ts's header). GetAiLogicData fills it for every alive
+ * AI-controlled attacker against EVERY other battler -- its own ally included,
+ * :245-246 -- which is exactly what `battlerDef = i` asks aiCalcDamage for here. So
+ * no new state field and no cache: the numbers are the cache's numbers.
+ * `aiFinalScore` (:415) has no reader anywhere.
+ *
+ * Quirks reproduced, not fixed (they match chooseMoveOrActionSingles' own):
+ * slot 0 seeds the tie-break unconditionally, even when `moves[0]` is
+ * MOVE_NONE (:387-403); the target loop seeds from index 0 unconditionally, so
+ * the AI itself (0xFF action, -1 points) and fainted battlers are candidates
+ * whenever every score is -1 or ties (:421-435); the ally's dead-zone is
+ * `best < 100` -- strict, so exactly 100 survives (:407-411).
+ *
+ * NOT modelled, by scope: `AI_ACTION_FLEE`/`AI_ACTION_WATCH` (:382-385) cannot
+ * be set by any trainer flag (same reasoning as chooseMoveOrActionSingles);
+ * the `BATTLE_TYPE_PALACE` `palaceFlags >> 4` branch (:359-360); and
+ * `RecordLastUsedMoveByTarget` (:366, `RecordKnownMove(gBattlerTarget,
+ * gLastMoves[gBattlerTarget])`, battle_ai_util.c:446) -- the sim has no
+ * known-move/`RecordKnownMove` store at all, so there is no helper to call and
+ * this stays a named gap.
+ */
+export function chooseMoveOrActionDoubles(state: BattleState, battlerAtk: number, deps: AiSwitchingDeps): { moveIndex: number | null; target: number; unmodelled: string[] } {
+  const unmodelled: string[] = []
+  const aiMon = state.battlers[battlerAtk]
+  const actionOrMoveIndex: (number | null)[] = [null, null, null, null] // null == 0xFF
+  const bestMovePointsForTarget = [-1, -1, -1, -1]
+
+  for (let i = 0; i < 4; i++) {
+    // :353-356 -- self and fainted battlers are never scored; their 0xFF/-1 row
+    // can still WIN the target pick below, because -1 ties with -1.
+    if (i === battlerAtk || !isBattlerAlive(state, i)) {
+      actionOrMoveIndex[i] = null
+      bestMovePointsForTarget[i] = -1
+      continue
+    }
+
+    const setup = setupAiScores(state, battlerAtk, deps)
+    const scores = setup.scores
+    unmodelled.push(...setup.unmodelled)
+
+    // :361 + :186 -- BattleAI_SetupAIData(0xF) ends with SetRandomTarget, whose
+    // draw is the only effect that survives :363's overwrite.
+    setRandomTarget(state, battlerAtk)
+
+    // :369-380 -- `flags >>= 1` per pass, so bit 0 first.
+    for (let bit = 0; bit < 32; bit++) {
+      if (!hasFlag(state.aiFlags, 1 << bit)) continue
+      unmodelled.push(...doAiProcessing(state, battlerAtk, i, bit, scores, deps))
+    }
+
+    // :390-403 -- two independent comparisons in this order: equal appends to the
+    // tie list, strictly greater resets it. Slot 0 seeds both unconditionally.
+    let best = scores[0]
+    const indices = [0]
+    for (let j = 1; j < 4; j++) {
+      if (!aiMon || aiMon.mon.moves[j] === null) continue // MOVE_NONE (:391)
+      if (scores[j] === best) indices.push(j)
+      if (scores[j] > best) {
+        best = scores[j]
+        indices.length = 0
+        indices.push(j)
+      }
+    }
+
+    actionOrMoveIndex[i] = indices[state.rng.random16() % indices.length] // :404
+    bestMovePointsForTarget[i] = best
+    // :407-411 -- Don't use a move against the ally unless it scores at least 100.
+    if (i === (battlerAtk ^ BIT_FLANK) && bestMovePointsForTarget[i] < 100) bestMovePointsForTarget[i] = -1
+  }
+
+  // :421-435 -- same unconditional-index-0 seed as the move tie-break above.
+  let mostMovePoints = bestMovePointsForTarget[0]
+  let targets = [0]
+  for (let i = 1; i < 4; i++) {
+    if (mostMovePoints === bestMovePointsForTarget[i]) targets.push(i)
+    if (mostMovePoints < bestMovePointsForTarget[i]) {
+      mostMovePoints = bestMovePointsForTarget[i]
+      targets = [i]
+    }
+  }
+
+  // :437 -- ONE draw, always, even with a single viable target. :438 writes
+  // gBattleStruct->aiChosenTarget; the sim has no such field, so the caller
+  // takes the returned target instead.
+  const target = targets[state.rng.random16() % targets.length]
+  return { moveIndex: actionOrMoveIndex[target], target, unmodelled }
 }
