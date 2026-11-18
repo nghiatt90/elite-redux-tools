@@ -3838,7 +3838,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_RESONANCE') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBleed(state, targetId, attackerId, statusDeps) &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
@@ -3852,7 +3852,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_SOLENOGLYPHS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBePoisoned(state, attackerId, targetId, 'MOVE_NONE', statusDeps) &&
       Boolean(moveData?.flags?.biteBased) &&
@@ -3866,7 +3866,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_RAZOR_SHARP' || abilityId === 'ABILITY_TO_THE_BONE') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isCriticalHit === true &&
       canBleed(state, targetId, attackerId, statusDeps)
@@ -3879,7 +3879,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FEARMONGER') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       !target.volatiles.fear &&
       !hasFlag(target.statuses4, STATUS4_FEAR) &&
@@ -3966,7 +3966,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_WHIPLASH') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveData?.split === 'PHYSICAL' &&
       canLowerStatOrMirrorArmor(state, targetId, STAT_DEF, deps.dataContext)
@@ -4010,7 +4010,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_AFTERMATH') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveData?.effect === 'EFFECT_EXPLOSION'
     ) {
@@ -4024,7 +4024,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_ENERGY_TAP') {
     if (
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
     ) {
@@ -4042,7 +4042,7 @@ function handleAttackerMoveEndAbility(
       attacker.mon.types.includes('GRASS') &&
       effectiveType === 'GRASS' &&
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
     ) {
