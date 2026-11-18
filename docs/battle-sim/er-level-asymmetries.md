@@ -18,7 +18,8 @@ Verified at the pinned SHA (2026-09-10). Enemy level = `GetHighestLevelInPlayerP
   `levelCapsMore[] = {18,25,40,50,55,70,85,92,95,100}`,
   `levelCapsStrict[] = {16,23,36,45,50,55,60,70,80,100}` (Elite).
   So "minimise gyms cleared" and "party max level" are coupled dimensions, not independent,
-  and how tightly depends on a save setting.
+  and how tightly depends on a save setting. The sim's builder now applies the Strict cap per fight
+  (`levelCapForTrainer` -> `buildPlayerParty` options), and the solver CLI defaults to it.
 - **Enemy EVs need difficulty > EASY *and* the player's `enableEvs` setting.**
   `battle_main.c:1857` gates writing the config spread; `pokemon.c:996-997` then zeroes all
   six EVs when `!gSaveBlock2Ptr->enableEvs`, with no `isEnemyMon` exemption, and

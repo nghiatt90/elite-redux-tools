@@ -38,7 +38,9 @@ Save settings that act as fixed inputs: Double Battle Mode **off**, EVs **on**, 
 **Strict**. Strict caps interact with Elite's player-only innate gating: below level 17 the
 player loses their second innate and below 24 their third, while the AI keeps all three at any
 level, so the earliest fights are played at a structural disadvantage. See
-[Party level is not symmetric](er-level-asymmetries.md).
+[Party level is not symmetric](er-level-asymmetries.md). The fixed Strict caps are now applied
+by `buildPlayerParty` options and by the solver CLI per fight (see
+[innate-gating-plan.md](innate-gating-plan.md)).
 
 ## What already exists
 

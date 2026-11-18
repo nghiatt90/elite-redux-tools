@@ -7,15 +7,32 @@ item, nature, EV template and moves for the set that wins most often in the simu
 
 ```bash
 npm --prefix web run solver:build
-node web/dist-solver/solverCli.mjs --trainer TRAINER_X --team SPECIES_A,SPECIES_B,SPECIES_C,SPECIES_D,SPECIES_E,SPECIES_F --level 50 --passes 2 --out .omc/solver/x.json
+node web/dist-solver/solverCli.mjs --trainer TRAINER_X --team SPECIES_A,SPECIES_B,SPECIES_C,SPECIES_D,SPECIES_E,SPECIES_F --passes 2 --out .omc/solver/x.json
 ```
 
 Run it from the repository root (it reads `data/v2.65beta` relative to the working directory, or
-`ER_DATA_DIR`). Flags: `--tier` (default `elite`), `--workers` (default CPU count minus one),
-`--passes`, `--out`.
+`ER_DATA_DIR`). Flags:
+- `--tier` (default `elite`)
+- `--workers` (default CPU count minus one)
+- `--passes`, `--out`
+- `--level`: when omitted, defaults to the fight's level cap from `fights.ts`. Passing a level below the cap lowers the player level. Passing a level above the cap throws an error unless `--ignore-cap` is specified. If the trainer has no `fights.ts` row, it falls back to `--level` (default 50, no cap).
+- `--ignore-cap`: bypasses the cap check when `--level` exceeds the fight's level cap.
+- `--gym N`: gym progress for available Mega stones. If `--gym N` disagrees with the fight's badge count (`gym - 1 !== resolved.badges`), a warning is printed while keeping `--gym` for Mega stones.
 
 Add `--chain SCRIPT_ID` instead of `--trainer` to score a no-heal chain (see "Chains" below);
-`--map` overrides the map the chain's battle events are read from.
+`--map` overrides the map the chain's battle events are read from. Note that `--chain` runs do not apply a cap (the level cap logic is guarded by `!chainId`).
+
+For `--trainer` runs:
+- A fight with an `awaitingRoute`, `excluded`, or `deferred` row in `fights.ts` is refused with a non-zero exit code (no level cap is trusted for it).
+- If any candidate species has an evolution level exceeding the fight's level, an evolution-level warning is printed (`warning: <species> needs level <needed>, cap is <cap>`), but execution continues (warning only, never rejected).
+- The run report prints:
+  - Elite cap mode: `level caps: Elite (player's setting, confirmed by Yoshi)`
+  - The cap, badge value, evidence label (`script` or `player-observed (Yoshi), not in the scripts at pin bdebcbbf`), and solver level:
+    `level cap <cap> at badge value <badges> (evidence: <label>); solver level <level>`
+  - Any `--ignore-cap` usage: `--ignore-cap used: level <level> exceeds the cap <cap>`
+  - If there is no `fights.ts` row: `no fights.ts row for <trainerId>: --level <level> (default 50), no cap`
+  - Unrun rows for every `FIGHTS` row marked `excluded` or `deferred` (one line per trainer id)
+  - The TM/tutor out-of-scope note: `note: TM and tutor availability is story-gated and not modelled; the full tutor list is always allowed`
 
 ## How it plays and scores
 
