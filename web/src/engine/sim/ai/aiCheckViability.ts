@@ -249,8 +249,9 @@ function hasMoveEffect(battler: BattlerState, effect: string, deps: AiDamageDeps
   return battler.mon.moves.some((m) => m && deps.moveData(m)?.effect === effect)
 }
 
-/** `HasDamagingMove(battlerId)`, battle_ai_util.c:1631-1639. */
-function hasDamagingMove(battler: BattlerState, deps: AiDamageDeps): boolean {
+/** `HasDamagingMove(battlerId)`, battle_ai_util.c:1631-1639. Exported for
+ * AI_DoubleBattle's own-effect switch (aiDoubleBattle.ts). */
+export function hasDamagingMove(battler: BattlerState, deps: AiDamageDeps): boolean {
   return battler.mon.moves.some((m) => m && (deps.moveData(m)?.power ?? 0) !== 0)
 }
 
@@ -994,7 +995,7 @@ function hasWeatherBallAndNoForcedTyping(state: BattleState, battler: BattlerSta
 /** `ShouldSetSandstorm(battler, holdEffect)`, battle_ai_util.c:1159-1169
  * (`holdEffect` is never read). `BATTLER_HAS_ABILITY`-family reads here are on
  * the attacker itself, so never suppressed. No RNG. */
-function shouldSetSandstorm(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+export function shouldSetSandstorm(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY | WEATHER_PRIMAL_ANY)) return false
@@ -1002,7 +1003,7 @@ function shouldSetSandstorm(state: BattleState, battlerAtk: number, deps: AiDama
 }
 
 /** `ShouldSetHail`, battle_ai_util.c:1171-1182. */
-function shouldSetHail(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+export function shouldSetHail(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_HAIL_ANY | WEATHER_PRIMAL_ANY)) return false
@@ -1014,7 +1015,7 @@ function shouldSetHail(state: BattleState, battlerAtk: number, deps: AiDamageDep
 }
 
 /** `ShouldSetRain`, battle_ai_util.c:1184-1197. */
-function shouldSetRain(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+export function shouldSetRain(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_RAIN_ANY | WEATHER_PRIMAL_ANY)) return false
@@ -1032,7 +1033,7 @@ function shouldSetRain(state: BattleState, battlerAtk: number, deps: AiDamageDep
 }
 
 /** `ShouldSetSun`, battle_ai_util.c:1199-1215. */
-function shouldSetSun(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+export function shouldSetSun(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_SUN_ANY | WEATHER_PRIMAL_ANY)) return false
@@ -1057,7 +1058,7 @@ function shouldSetSun(state: BattleState, battlerAtk: number, deps: AiDamageDeps
 /** `sFogAbilities[]`, battle_ai_util.c:1217-1223, transcribed literally. */
 const FOG_ABILITIES: readonly string[] = ['ABILITY_ECTOPLASM', 'ABILITY_ETHEREAL_RUSH', 'ABILITY_WHITE_NOISE', 'ABILITY_PEACEFUL_REST', 'ABILITY_SURPRISE']
 /** `ShouldSetFog`, battle_ai_util.c:1225-1240. */
-function shouldSetFog(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
+export function shouldSetFog(state: BattleState, battlerAtk: number, deps: AiDamageDeps): boolean {
   const attacker = state.battlers[battlerAtk] as BattlerState
   if (!weatherHasEffect(state, deps.grounding)) return false
   if (hasFlag(state.field.weather, WEATHER_FOG_ANY | WEATHER_PRIMAL_ANY)) return false
