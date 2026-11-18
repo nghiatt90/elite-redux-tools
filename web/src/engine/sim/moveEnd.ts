@@ -3894,7 +3894,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_MENACING_SITUATION') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       !target.volatiles.fear &&
       !hasFlag(target.statuses4, STATUS4_FEAR) &&
@@ -3910,7 +3910,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FREEZING_POINT' || abilityId === 'ABILITY_CRYO_PROFICIENCY') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canGetFrostbite(state, targetId, attackerId, statusDeps)
     ) {
@@ -3927,7 +3927,7 @@ function handleAttackerMoveEndAbility(
   if (contactStatus) {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       contactStatus.can(state, targetId, attackerId, statusDeps) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -3941,7 +3941,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_MAGICAL_DUST') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !target.mon.types.includes('PSYCHIC')
@@ -5146,7 +5146,7 @@ function handleAttackerMoveEndAbility(
     const targetPrimary = target.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       target.mon.hp > 0 && // ShouldApplyOnHitEffect(opponent)
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !PERSISTENT_OR_UNSUPPRESSABLE_ABILITIES.includes(targetPrimary) &&
@@ -5167,7 +5167,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_DAYBREAK') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect)
@@ -5653,7 +5653,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_WOODLAND_CURSE') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !target.mon.types.includes('GRASS')
