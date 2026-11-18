@@ -149,7 +149,7 @@ describe('cycle44 raw `^ 1` audit (dbl-3c)', () => {
     const docContent = readFileSync(DOC_PATH, 'utf8')
     const tableRows = parseAuditTable(docContent)
 
-    expect(tableRows.length).toBe(80)
+    expect(tableRows.length).toBe(81)
 
     const comparison = compareCounts(fileCounts, tableRows)
     expect(comparison.diffs).toEqual([])
@@ -160,7 +160,7 @@ describe('cycle44 raw `^ 1` audit (dbl-3c)', () => {
     const docContent = readFileSync(DOC_PATH, 'utf8')
     const tableRows = parseAuditTable(docContent)
 
-    expect(tableRows.length).toBe(80)
+    expect(tableRows.length).toBe(81)
 
     for (const row of tableRows) {
       expect(VALID_CLASSES.has(row.classLabel)).toBe(true)

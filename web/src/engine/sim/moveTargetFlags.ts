@@ -19,6 +19,7 @@
 import type { BattleState } from './state'
 import {
   BATTLE_TYPE_DOUBLE,
+  MAX_BATTLERS_COUNT,
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_FOG_ANY,
@@ -132,10 +133,13 @@ export function getBattlerBattleMoveTargetFlags(
  * must decide it once, at selection, and not re-derive it at execution.
  *
  * The test is a BIT test: `MOVE_TARGET_USER` is set in USER, USER_OR_ALLY
- * (USER | ALLY) and ALL_BATTLERS (0x100 | USER, include/constants/battle.h:499-501),
+ * (USER | ALLY) and ALL_BATTLERS (0x100 | USER, include/constants/battle.h:496-501),
  * but not in USER_OR_SELECTED (0x2). MOVE_TARGET_ALLY on the player side is left to
  * `(battlerId & 1) ^ 1` here; the live-partner re-check happens at execution
  * (battle_util.c:283-287, resolveMoveEndDispatchTarget).
+ *
+ * The double-battle override at :2414-2416 then replaces the cursor with
+ * GetDefaultMoveTarget when every other battler is absent -- ported below.
  */
 export function getPlayerSelectedMoveTarget(
   state: BattleState,
@@ -147,6 +151,23 @@ export function getPlayerSelectedMoveTarget(
 ): number {
   const moveTarget = playerMoveTargetFlag(state, battlerId, moveId, moveData, deps, statusDeps)
   if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'ALL_BATTLERS') return battlerId
+  // battle_controller_player.c:2414-2416, the double-battle override of the cursor set at
+  // :2397-2400:
+  //     } else if (!(moveTarget & (MOVE_TARGET_USER | MOVE_TARGET_USER_OR_SELECTED)) &&
+  //                CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1) {
+  //         gMultiUsePlayerCursor = GetDefaultMoveTarget(gActiveBattler);
+  //     }
+  // Another BIT test: USER, USER_OR_ALLY and ALL_BATTLERS returned above (all carry
+  // MOVE_TARGET_USER), so USER_OR_SELECTED (0x2) is the only spelling left that must skip the
+  // override. The zero-PP branch that precedes it in the same `else` block (:2412-2413) stays
+  // unported: it reads the selection screen's current PP, which the sim does not carry.
+  if (
+    hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE) &&
+    moveTarget !== 'USER_OR_SELECTED' &&
+    countAliveMonsExceptActive(state, battlerId) <= 1
+  ) {
+    return defaultMoveTargetForActive(state, battlerId)
+  }
   return (battlerId & 1) ^ 1
 }
 
@@ -181,11 +202,14 @@ function playerMoveTargetFlag(
  *     if (moveTarget == (MOVE_TARGET_USER | MOVE_TARGET_ALLY) && IsBattlerAlive(BATTLE_PARTNER(gActiveBattler)))
  *         canSelectTarget = 1;
  *
- * The two later overrides -- zero PP (:2412-2413) and
- * `CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1` (:2414-2416) -- are
- * selection-UI state the sim does not carry into buildMoveAction; callers that pass an
- * explicit target are already past that screen.
- */export function playerCanSelectMoveTarget(
+ * Of the two later overrides in the same `else` block, the zero-PP one (:2412-2413) is
+ * selection-UI state the sim does not carry into buildMoveAction (callers that pass an
+ * explicit target are already past that screen), but the
+ * `CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1` one (:2414-2416) depends only on
+ * `gAbsentBattlerFlags` and IS ported below: it clears canSelectTarget (:2414-2416) and moves
+ * the cursor to GetDefaultMoveTarget.
+ */
+export function playerCanSelectMoveTarget(
   state: BattleState,
   battlerId: number,
   moveId: string,
@@ -195,6 +219,24 @@ function playerMoveTargetFlag(
 ): boolean {
   if (!hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) return false
   const moveTarget = playerMoveTargetFlag(state, battlerId, moveId, moveData, deps, statusDeps)
+  // battle_controller_player.c:2414-2416 -- the same override also clears canSelectTarget:
+  //     } else if (!(moveTarget & (MOVE_TARGET_USER | MOVE_TARGET_USER_OR_SELECTED)) &&
+  //                CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1) {
+  //         gMultiUsePlayerCursor = GetDefaultMoveTarget(gActiveBattler);
+  //         canSelectTarget = 0;
+  //     }
+  // Checked before the 'USER_OR_ALLY' and mask returns below, because the C override wins over
+  // the canSelectTarget = 1 assignments at :2403-2410. USER, USER_OR_ALLY and ALL_BATTLERS all
+  // carry MOVE_TARGET_USER and USER_OR_SELECTED is its own bit (include/constants/battle.h:496-501).
+  if (
+    moveTarget !== 'USER' &&
+    moveTarget !== 'USER_OR_ALLY' &&
+    moveTarget !== 'ALL_BATTLERS' &&
+    moveTarget !== 'USER_OR_SELECTED' &&
+    countAliveMonsExceptActive(state, battlerId) <= 1
+  ) {
+    return false
+  }
   // USER_OR_ALLY is USER | ALLY, so it fails the mask and gets its own partner-alive
   // exception (:2409-2410).
   if (moveTarget === 'USER_OR_ALLY') return isPartnerAlive(state, battlerId)
@@ -216,6 +258,50 @@ function isPartnerAlive(state: BattleState, battlerId: number): boolean {
   const battler = state.battlers[partner]
   if (!battler || battler.mon.hp === 0) return false
   return (state.absentBattlerFlags & (1 << partner)) === 0
+}
+
+/**
+ * CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE), src/pokemon.c:1242-1252
+ * (BATTLE_ALIVE_EXCEPT_ACTIVE is 0, include/pokemon.h:397):
+ *
+ *     for (i = 0; i < MAX_BATTLERS_COUNT; i++) {
+ *         if (i != gActiveBattler && !(gAbsentBattlerFlags & gBitTable[i])) retVal++;
+ *     }
+ *
+ * It tests ONLY the absent flag, never hp; inlined here for the same reason as
+ * isPartnerAlive (turn.ts imports this module).
+ */
+function countAliveMonsExceptActive(state: BattleState, battlerId: number): number {
+  let count = 0
+  for (let i = 0; i < MAX_BATTLERS_COUNT; i++) {
+    if (i !== battlerId && !hasFlag(state.absentBattlerFlags, 1 << i)) count++
+  }
+  return count
+}
+
+/**
+ * GetDefaultMoveTarget's double-battle `<= 1` branch, src/pokemon.c:1267-1285:
+ *
+ *     u8 opposing = BATTLE_OPPOSITE(GetBattlerPosition(battlerId) & BIT_SIDE);
+ *     ...
+ *     } else {
+ *         if (gAbsentBattlerFlags & gBitTable[opposing])
+ *             return GetBattlerAtPosition(BATTLE_PARTNER(opposing));
+ *         else
+ *             return GetBattlerAtPosition(opposing);
+ *     }
+ *
+ * The only caller is the :2414-2416 override, whose condition is
+ * `CountAliveMonsInBattle(BATTLE_ALIVE_EXCEPT_ACTIVE) <= 1`, so GetDefaultMoveTarget's
+ * `> 1` branch -- the one that draws `Random() & 1` -- is unreachable and is not ported:
+ * this helper draws no rng. BATTLE_OPPOSITE is the XOR-with-one macro and
+ * BATTLE_PARTNER the XOR-with-two macro (include/constants/battle.h:36-37);
+ * GetBattlerAtPosition is the identity for a non-multi battle, so the position
+ * doubles as the battler id.
+ */
+function defaultMoveTargetForActive(state: BattleState, battlerId: number): number {
+  const opposing = (battlerId & 1) ^ 1
+  return hasFlag(state.absentBattlerFlags, 1 << opposing) ? opposing ^ 2 : opposing
 }
 
 /**
