@@ -6,12 +6,12 @@
 //   IsValidDoubleBattle                 battle_ai_util.c:2270-2280
 //   IsDoubleBattle -> IS_DOUBLE_BATTLE  battle_anim_mons.c:712, :22
 //   PartnerHasSameMoveEffectWithoutTarget battle_ai_util.c:2306-2312
-//   DoesPartnerHaveSameMoveEffect       battle_ai_util.c:2295-2304 (stub, dbl-4c2)
+//   DoesPartnerHaveSameMoveEffect       battle_ai_util.c:2295-2304 (real, dbl-4c2)
 //   PartnerMoveIsSameNoTarget           battle_ai_util.c:2366-2370
 //   PartnerMoveEffectIsWeather          battle_ai_util.c:2326-2336
 //   PartnerMoveEffectIsTerrain          battle_ai_util.c:2338-2348
 //   PartnerMoveIs                       battle_ai_util.c:2350-2356
-//   PartnerMoveIsSameAsAttacker         battle_ai_util.c:2358-2364 (stub, dbl-4c2)
+//   PartnerMoveIsSameAsAttacker         battle_ai_util.c:2358-2364 (real, dbl-4c2)
 //   BATTLE_OPPOSITE / BATTLE_PARTNER    include/constants/battle.h:36-37
 //   AI_CheckBadMove scoring sites       battle_ai_main.c:1072/-10 (:1120-1123),
 //     EFFECT_SUNNY_DAY :1304 (-8), EFFECT_GRASSY_TERRAIN :1880 (-20),
@@ -273,32 +273,45 @@ describe('PartnerMoveIsSameNoTarget (battle_ai_util.c:2366-2370) via EFFECT_LUCK
   })
 })
 
-describe('kept stubs report the dbl-4c2 gap only in a double battle', () => {
-  it('DoesPartnerHaveSameMoveEffect (battle_ai_util.c:2295-2304): doubles note, score unchanged', () => {
+describe('the two moveTarget helpers are real as of dbl-4c2', () => {
+  // DoesPartnerHaveSameMoveEffect, battle_ai_util.c:2295-2304:
+  //   if (gBattleMoves[move].effect == gBattleMoves[partnerMove].effect &&
+  //       gChosenMoveByBattler[battlerAtkPartner] != MOVE_NONE &&
+  //       gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef) return TRUE;
+  // With moveTarget[1] at its initial 0 and battlerDef 0, the partner picking
+  // Leech Seed is the same effect at the same target, so EFFECT_LEECH_SEED
+  // (battle_ai_main.c:1185) scores -20, no note.
+  it('DoesPartnerHaveSameMoveEffect (battle_ai_util.c:2295-2304): 100 - 20 = 80, no note', () => {
     const doubles = doublesFixture({
       aiMoves: ['MOVE_LEECH_SEED', null, null, null],
       partnerMoves: ['MOVE_LEECH_SEED', null, null, null],
     })
     const r = scoreDoubles(doubles.state, doubles.deps, doubles.aiId, 'MOVE_LEECH_SEED')
-    expect(r.score).toBe(100)
-    expect(r.unmodelled.some((note) => note.includes('DoesPartnerHaveSameMoveEffect'))).toBe(true)
+    expect(r.score).toBe(80)
+    expect(r.unmodelled.some((note) => note.includes('DoesPartnerHaveSameMoveEffect'))).toBe(false)
 
     const singles = singlesFixture({ aiMoves: ['MOVE_LEECH_SEED', null, null, null] })
     const s = scoreDoubles(singles.state, singles.deps, singles.aiId, 'MOVE_LEECH_SEED')
+    expect(s.score).toBe(100) // `if (!IsDoubleBattle()) return FALSE;`
     expect(s.unmodelled.some((note) => note.includes('DoesPartnerHaveSameMoveEffect'))).toBe(false)
   })
 
-  it('PartnerMoveIsSameAsAttacker (battle_ai_util.c:2358-2364): doubles note, score unchanged', () => {
+  // PartnerMoveIsSameAsAttacker, battle_ai_util.c:2358-2364:
+  //   if (gChosenMoveByBattler[battlerAtkPartner] != MOVE_NONE && move == partnerMove &&
+  //       gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef) return TRUE;
+  // EFFECT_EMBARGO (battle_ai_main.c:1950-1952) scores -10.
+  it('PartnerMoveIsSameAsAttacker (battle_ai_util.c:2358-2364): 100 - 10 = 90, no note', () => {
     const doubles = doublesFixture({
       aiMoves: ['MOVE_EMBARGO', null, null, null],
       partnerMoves: ['MOVE_EMBARGO', null, null, null],
     })
     const r = scoreDoubles(doubles.state, doubles.deps, doubles.aiId, 'MOVE_EMBARGO')
-    expect(r.score).toBe(100)
-    expect(r.unmodelled.some((note) => note.includes('PartnerMoveIsSameAsAttacker'))).toBe(true)
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((note) => note.includes('PartnerMoveIsSameAsAttacker'))).toBe(false)
 
     const singles = singlesFixture({ aiMoves: ['MOVE_EMBARGO', null, null, null] })
     const s = scoreDoubles(singles.state, singles.deps, singles.aiId, 'MOVE_EMBARGO')
+    expect(s.score).toBe(100) // `if (!IsDoubleBattle()) return FALSE;`
     expect(s.unmodelled.some((note) => note.includes('PartnerMoveIsSameAsAttacker'))).toBe(false)
   })
 })

@@ -5527,6 +5527,11 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
       const encoredPos = a.targetFromGetMoveTarget ? state.battlers[i]?.volatiles.encoredMovePos : undefined
       const pos = encoredPos ?? (state.battlers[i]?.mon.moves.indexOf(a.chosenMove.id) ?? -1)
       state.chosenMovePositions[i] = pos >= 0 ? pos : 0
+      // battle_main.c:3916 -- the normal move-chosen branch stores the controller's chosen
+      // target in gBattleStruct->moveTarget[gActiveBattler]. The encored branch at
+      // battle_main.c:3687-3692 does NOT write moveTarget, so an encored action
+      // (`targetFromGetMoveTarget`) keeps whatever value was there before.
+      if (!a.targetFromGetMoveTarget && a.target !== null) state.moveTarget[i] = a.target
     }
   }
   const outcomes: ActionOutcome[] = []

@@ -743,6 +743,11 @@ export interface BattleState {
   lastTakenMoveFrom: (string | null)[][]
   /** `u8 chosenMovePositions[MAX_BATTLERS_COUNT]` (include/battle.h:633). */
   chosenMovePositions: number[]
+  /** `u8 moveTarget[MAX_BATTLERS_COUNT]` (gBattleStruct, include/battle.h:601): the target a
+   * battler's chosen move was selected against. HandleAction_UseMove writes it at selection
+   * time (battle_main.c:3916) and the AI partner helpers read it (battle_ai_util.c:2295-2304,
+   * :2314-2323, :2358-2364). The encored branch (:3687-3692) does NOT write it. */
+  moveTarget: number[]
   /** `u16 wrappedMove[MAX_BATTLERS_COUNT]` (gBattleStruct, battle_script_commands.c:2740): the move that wrapped each battler. */
   wrappedMove: (string | null)[]
   /** `MoveEnum gLockedMoves[MAX_BATTLERS_COUNT]` (battle_main.c:215): the move a battler is locked into while STATUS2_MULTIPLETURNS

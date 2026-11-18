@@ -30,11 +30,13 @@
 // construction. The five partner helpers that need no `gBattleStruct->moveTarget`
 // (`PartnerHasSameMoveEffectWithoutTarget`, `PartnerMoveIsSameNoTarget`,
 // `PartnerMoveEffectIsWeather`, `PartnerMoveEffectIsTerrain`, `PartnerMoveIs`)
-// are real transcriptions; `DoesPartnerHaveSameMoveEffect` and
-// `PartnerMoveIsSameAsAttacker` remain false (dbl-4c2 needs `moveTarget`) but
-// now report an `unmodelled` note whenever the run is actually a double battle.
-// Each helper starts with `if (!IsDoubleBattle()) return FALSE;` in the C, so
-// singles still short-circuits to false before any partner read.
+// are real transcriptions, and as of dbl-4c2 the three that read
+// `gBattleStruct->moveTarget` (`DoesPartnerHaveSameMoveEffect`,
+// `PartnerMoveEffectIsStatusSameTarget`, `PartnerMoveIsSameAsAttacker`) are
+// real too: state.ts now models `moveTarget` and turn.ts writes it from each
+// USE_MOVE action (battle_main.c:3916). Each helper starts with
+// `if (!IsDoubleBattle()) return FALSE;` in the C, so singles still
+// short-circuits to false before any partner read.
 //
 // FIX PASS (post-review, cycle16): three findings from the first review
 // pass are corrected here rather than left as approximations --
@@ -540,11 +542,35 @@ export function canBeParalyzedBase(state: BattleState, target: BattlerState, _de
   return { canParalyze: true, unmodelled }
 }
 
+/** PartnerMoveEffectIsStatusSameTarget, battle_ai_util.c:2314-2323:
+ *   if (!IsDoubleBattle()) return FALSE;
+ *   if (gChosenMoveByBattler[partner] != MOVE_NONE &&
+ *       gBattleStruct->moveTarget[partner] == battlerDef &&
+ *       (gBattleMoves[partnerMove].effect == EFFECT_SLEEP || ... EFFECT_POISON,
+ *        EFFECT_TOXIC, EFFECT_PARALYZE, EFFECT_WILL_O_WISP, EFFECT_YAWN)) return TRUE;
+ * `battlerAtkPartner` is the C's explicit partner argument (BATTLE_PARTNER at the
+ * AI_CanParalyze caller); `partnerMove` is `AI_DATA->partnerMove`. */
+export function partnerMoveEffectIsStatusSameTarget(state: BattleState, deps: AiDamageDeps, battlerAtkPartner: number, battlerDef: number, partnerMove: string | null): boolean {
+  if (!isDoubleBattle(state)) return false
+  if (partnerMove === null) return false
+  if (state.moveTarget[battlerAtkPartner] !== battlerDef) return false
+  const effect = deps.moveData(partnerMove)?.effect
+  return (
+    effect === 'EFFECT_SLEEP' ||
+    effect === 'EFFECT_POISON' ||
+    effect === 'EFFECT_TOXIC' ||
+    effect === 'EFFECT_PARALYZE' ||
+    effect === 'EFFECT_WILL_O_WISP' ||
+    effect === 'EFFECT_YAWN'
+  )
+}
+
 /** AI_CanParalyze, battle_ai_util.c:2046-2054 -- the ONLY one of the three
  * AI_Can* wrappers that adds checks beyond its base Can-status function
  * (AI_CanPutToSleep/AI_CanPoison are bare passthroughs to CanSleep/
- * CanBePoisoned, per the C's own one-line bodies). PartnerMoveEffectIsStatusSameTarget
- * always returns false (see this module's doubles-only helpers). */
+ * CanBePoisoned, per the C's own one-line bodies). Its last `||` operand is
+ * PartnerMoveEffectIsStatusSameTarget(BATTLE_PARTNER(battlerAtk), battlerDef,
+ * partnerMove), now a real transcription (dbl-4c2). */
 export function aiCanParalyze(state: BattleState, attacker: BattlerState, target: BattlerState, moveId: string, deps: AiDamageDeps): { canParalyze: boolean; unmodelled: string[] } {
   const base = canBeParalyzedBase(state, target, deps)
   if (!base.canParalyze) return base
@@ -552,6 +578,8 @@ export function aiCanParalyze(state: BattleState, attacker: BattlerState, target
   const unmodelled = [...base.unmodelled, ...effResult.unmodelled]
   if (effResult.effectiveness === 0) return { canParalyze: false, unmodelled }
   if (doesSubstituteBlockMove(state, deps, attacker, target, deps.moveData(moveId), unmodelled)) return { canParalyze: false, unmodelled }
+  const partnerMove = getAllyChosenMove(state, attacker.id)
+  if (partnerMoveEffectIsStatusSameTarget(state, deps, battlePartner(attacker.id), target.id, partnerMove)) return { canParalyze: false, unmodelled }
   return { canParalyze: true, unmodelled }
 }
 
@@ -597,22 +625,30 @@ export function doesSubstituteBlockMove(state: BattleState, deps: AiDamageDeps, 
  * returns MOVE_NONE for a dead, non-AI or higher-id partner).
  *
  * `gChosenMoveByBattler[battlerAtkPartner] != MOVE_NONE` (the C's second
- * operand in the two implemented helpers) has no separate sim field; it is
+ * operand in these helpers) has no separate sim field; it is
  * exactly `partnerMove !== null`, because `partnerMove` IS
- * `AI_DATA->partnerMove = GetAllyChosenMove()` for that same partner. */
+ * `AI_DATA->partnerMove = GetAllyChosenMove()` for that same partner.
+ * The `gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef` operand is
+ * `state.moveTarget[battlePartner(battlerAtk)] === battlerDef` (dbl-4c2). */
 export function partnerHasSameMoveEffectWithoutTarget(state: BattleState, deps: AiDamageDeps, moveId: string, partnerMove: string | null): boolean {
   // PartnerHasSameMoveEffectWithoutTarget, battle_ai_util.c:2306-2312.
   if (!isDoubleBattle(state)) return false
   if (partnerMove === null) return false
   return (deps.moveData(moveId)?.effect ?? null) === (deps.moveData(partnerMove)?.effect ?? null)
 }
-function doesPartnerHaveSameMoveEffect(state: BattleState, _battlerAtk: number, unmodelled: string[]): boolean {
-  // DoesPartnerHaveSameMoveEffect, battle_ai_util.c:2295-2304.
-  // dbl-4c2: needs gBattleStruct->moveTarget[partner]
-  // (`gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef`), which
-  // state.ts does not model (grep `moveTarget` -- no such field).
-  if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: DoesPartnerHaveSameMoveEffect needs gBattleStruct->moveTarget[partner], which the sim does not model; treated as false')
-  return false
+function doesPartnerHaveSameMoveEffect(state: BattleState, deps: AiDamageDeps, battlerAtk: number, battlerDef: number, moveId: string): boolean {
+  // DoesPartnerHaveSameMoveEffect, battle_ai_util.c:2295-2304:
+  //   if (!IsDoubleBattle()) return FALSE;
+  //   if (gBattleMoves[move].effect == gBattleMoves[partnerMove].effect &&
+  //       gChosenMoveByBattler[battlerAtkPartner] != MOVE_NONE &&
+  //       gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef) return TRUE;
+  if (!isDoubleBattle(state)) return false
+  const partnerMove = getAllyChosenMove(state, battlerAtk)
+  if (partnerMove === null) return false
+  return (
+    (deps.moveData(moveId)?.effect ?? null) === (deps.moveData(partnerMove)?.effect ?? null) &&
+    state.moveTarget[battlePartner(battlerAtk)] === battlerDef
+  )
 }
 function partnerMoveIsSameNoTarget(state: BattleState, moveId: string, partnerMove: string | null): boolean {
   // PartnerMoveIsSameNoTarget, battle_ai_util.c:2366-2370.
@@ -655,12 +691,15 @@ function partnerMoveIs(state: BattleState, partnerMove: string | null, moveCheck
   if (!isDoubleBattle(state)) return false
   return partnerMove !== null && partnerMove === moveCheck
 }
-function partnerMoveIsSameAsAttacker(state: BattleState, _battlerAtk: number, unmodelled: string[]): boolean {
-  // PartnerMoveIsSameAsAttacker, battle_ai_util.c:2358-2364.
-  // dbl-4c2: needs gBattleStruct->moveTarget[partner], which state.ts does not
-  // model (grep `moveTarget` -- no such field).
-  if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: PartnerMoveIsSameAsAttacker needs gBattleStruct->moveTarget[partner], which the sim does not model; treated as false')
-  return false
+function partnerMoveIsSameAsAttacker(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string): boolean {
+  // PartnerMoveIsSameAsAttacker, battle_ai_util.c:2358-2364:
+  //   if (!IsDoubleBattle()) return FALSE;
+  //   if (gChosenMoveByBattler[battlerAtkPartner] != MOVE_NONE && move == partnerMove &&
+  //       gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef) return TRUE;
+  if (!isDoubleBattle(state)) return false
+  const partnerMove = getAllyChosenMove(state, battlerAtk)
+  if (partnerMove === null) return false
+  return moveId === partnerMove && state.moveTarget[battlePartner(battlerAtk)] === battlerDef
 }
 
 /** AnyStatIsRaised, battle_ai_util.c:1313-1320. */
@@ -1569,7 +1608,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_LEECH_SEED':
-      if (hasFlag(defender.statuses3, STATUS3_LEECHSEED) || isBattlerOfType(defender, 'GRASS') || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      if (hasFlag(defender.statuses3, STATUS3_LEECHSEED) || isBattlerOfType(defender, 'GRASS') || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 20
       } else if (defAbility(state, deps, defender, 'ABILITY_LIQUID_OOZE', atkMoldBreaker)) {
         score -= 3
@@ -1585,7 +1624,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       // EFFECT_ENCORE tests DoesPartnerHaveSameMoveEffect (:1204-1205).
       const partnerRepeats = effect === 'EFFECT_DISABLE'
         ? partnerHasSameMoveEffectWithoutTarget(state, deps, moveId, partnerMove)
-        : doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)
+        : doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)
       if (timer === 0 && !mentalHerbBlocks && !partnerRepeats) {
         const goesFirst = getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0
         if (goesFirst) {
@@ -1611,7 +1650,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_MEAN_LOOK': {
       const trapResult = isBattlerTrapped(state, defender, true, deps)
       unmodelled.push(...trapResult.unmodelled)
-      if (trapResult.trapped || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) score -= 10
+      if (trapResult.trapped || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) score -= 10
       break
     }
     case 'EFFECT_NIGHTMARE':
@@ -1619,13 +1658,13 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 10
       } else if (!hasFlag(defender.mon.status1, STATUS1_SLEEP) || ALWAYS_SLEEPING_ABILITIES.some((id) => selfAbility(state, deps, defender, id))) {
         score -= 8
-      } else if (doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      } else if (doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 10
       }
       break
     case 'EFFECT_CURSE':
       if (isBattlerOfType(attacker, 'GHOST') || isBattlerWeatherAffected(state, WEATHER_FOG_ANY, deps)) {
-        if (hasFlag(defender.mon.status2, STATUS2_CURSED) || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+        if (hasFlag(defender.mon.status2, STATUS2_CURSED) || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
           score -= 10
         } else if (getHealthPercentage(state, battlerAtk) <= 50) {
           score -= 6
@@ -1661,7 +1700,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_FORESIGHT':
       if (hasFlag(defender.statuses4, STATUS4_FORESIGHT)) score -= 10
-      else if (defender.mon.statStages[7] /* STAT_EVASION */ <= 4 || !isBattlerOfType(defender, 'GHOST') || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) score -= 9
+      else if (defender.mon.statStages[7] /* STAT_EVASION */ <= 4 || !isBattlerOfType(defender, 'GHOST') || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) score -= 9
       break
     case 'EFFECT_PERISH_SONG': {
       // Doubles branch (:1282-1292) is dead code in singles -- only the else
@@ -1766,7 +1805,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_TORMENT': {
-      if (hasFlag(defender.mon.status2, STATUS2_TORMENT) || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      if (hasFlag(defender.mon.status2, STATUS2_TORMENT) || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 10
         break
       }
@@ -1780,7 +1819,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!aiCanBurn(defender, unmodelled) || isMagicGuardProtected(state, defender)) score -= 10
       break
     case 'EFFECT_MEMENTO':
-      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 10
       } else if (!shouldLowerStat(state, deps, defender, 1 /* STAT_ATK */, atkMoldBreaker, unmodelled) || !shouldLowerStat(state, deps, defender, 4 /* STAT_SPATK */, atkMoldBreaker, unmodelled)) {
         score -= 10
@@ -1895,7 +1934,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_HIT_SWITCH_TARGET': {
-      if (doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      if (doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 10 // don't scare away pokemon twice
       } else {
         if (getHealthPercentage(state, battlerDef) < 10) {
@@ -2015,7 +2054,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         hasFlag(defender.statuses3, STATUS3_ALWAYS_HITS) ||
         selfAbility(state, deps, attacker, 'ABILITY_NO_GUARD') ||
         defAbility(state, deps, defender, 'ABILITY_NO_GUARD', atkMoldBreaker) ||
-        doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)
+        doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)
       ) {
         score -= 10
       }
@@ -2131,14 +2170,14 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_HEALING_WISH': // healing wish, lunar dance
-      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) {
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
         score -= 10
       } else {
         unmodelled.push('AI_CheckBadMove: IsPartyFullyHealedExceptBattler has no party-wide scan anywhere in this sim (only active battlers are modelled); treated as false')
       }
       break
     case 'EFFECT_FINAL_GAMBIT':
-      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) score -= 10
+      if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) score -= 10
       break
     case 'EFFECT_NATURE_POWER': {
       const naturePowerMove = getNaturePowerMove(state, deps, unmodelled)
@@ -2146,7 +2185,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       return { score: r.score, unmodelled: [...unmodelled, ...r.unmodelled] }
     }
     case 'EFFECT_TAUNT':
-      if (defender.volatiles.tauntTimer > 0 || doesPartnerHaveSameMoveEffect(state, battlerAtk, unmodelled)) score -= 1
+      if (defender.volatiles.tauntTimer > 0 || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) score -= 1
       if (defender.volatiles.tauntTimer !== 0) score -= 10
       break
     case 'EFFECT_BESTOW':
@@ -2361,10 +2400,10 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!canFling(state, attacker, deps)) score -= 10 // no item to fling
       break
     case 'EFFECT_EMBARGO':
-      if (defAbility(state, deps, defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) score -= 10
+      if (defAbility(state, deps, defender, 'ABILITY_KLUTZ', atkMoldBreaker) || defender.volatiles.embargoTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) score -= 10
       break
     case 'EFFECT_POWDER':
-      if (!hasMoveWithType(defender, 'FIRE', deps) || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) score -= 10
+      if (!hasMoveWithType(defender, 'FIRE', deps) || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) score -= 10
       break
     case 'EFFECT_TELEKINESIS': {
       if (
@@ -2372,7 +2411,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         isGravityActive(state, deps) ||
         aiHoldEffectIs(defender, 'HOLD_EFFECT_IRON_BALL', deps) ||
         isTelekinesisBannedSpecies(defender.mon.speciesId) ||
-        partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)
+        partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)
       ) {
         score -= 10
       }
@@ -2381,7 +2420,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_THROAT_CHOP':
       break
     case 'EFFECT_HEAL_BLOCK':
-      if (defender.volatiles.healBlockTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) score -= 10
+      if (defender.volatiles.healBlockTimer !== 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) score -= 10
       break
     case 'EFFECT_SOAK':
       // The C's own IS_BATTLER_OF_TYPE-style all-three-types comparison means
@@ -2389,7 +2428,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       // "type3 == TYPE_MYSTERY" leg of this check the same way a genuine
       // Water/Water/(none) target would -- reproduced as-is via `.types.includes`.
       if (
-        partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled) ||
+        partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId) ||
         (defender.mon.types[0] === 'WATER' && defender.mon.types[1] === 'WATER' && defender.mon.types[2] === 'MYSTERY')
       ) {
         score -= 10 // target is already water-only
@@ -2397,9 +2436,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     case 'EFFECT_THIRD_TYPE':
       if (moveId === 'MOVE_TRICK_OR_TREAT') {
-        if (isBattlerOfType(defender, 'GHOST') || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) score -= 10
+        if (isBattlerOfType(defender, 'GHOST') || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) score -= 10
       } else if (moveId === 'MOVE_FORESTS_CURSE') {
-        if (isBattlerOfType(defender, 'GRASS') || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) score -= 10
+        if (isBattlerOfType(defender, 'GRASS') || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) score -= 10
       }
       break
     case 'EFFECT_HIT_ENEMY_HEAL_ALLY': // pollen puff
@@ -2414,7 +2453,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_ELECTRIFY':
       if (
         getWhoStrikesFirst(state, battlerAtk, battlerDef, [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 0 ||
-        partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)
+        partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)
       ) {
         score -= 10
       }
@@ -2423,7 +2462,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!isTargetingPartner(battlerAtk, battlerDef)) {
         const defPos = countPositiveStatStages(defender)
         const defNeg = countNegativeStatStages(defender)
-        if (defPos === 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)) {
+        if (defPos === 0 || partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)) {
           score -= 10 // no good stat changes to make bad
         } else if (defNeg < defPos) {
           score -= 5 // more stages would be made positive than negative
@@ -2452,7 +2491,7 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         isInstructBannedMove(instructedMove) ||
         moveRequiresRecharging(instructedMove) ||
         moveCallsOtherMove(instructedMove) ||
-        partnerMoveIsSameAsAttacker(state, battlerAtk, unmodelled)
+        partnerMoveIsSameAsAttacker(state, battlerAtk, battlerDef, moveId)
       ) {
         unmodelled.push('AI_CheckBadMove: gLockedMoves[battlerDef] and STATUS2_MULTIPLETURNS are not checked here (no port for either); this is a widening-safe omission since both would only ADD more -10 triggers to an already-true OR chain')
         score -= 10

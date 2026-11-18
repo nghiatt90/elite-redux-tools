@@ -15,7 +15,8 @@
 // `state.chosenMovePositions` through `getAllyChosenMove` directly, which is
 // the same value the chooser's own copy would hold (wiring it is dbl-4b), and
 // `IsValidDoubleBattle` is a real check as of dbl-4c (cycle 4c1), alongside the
-// five partner helpers that need no `moveTarget`.
+// five partner helpers that need no `moveTarget`; the three that read
+// `gBattleStruct->moveTarget` are real as of dbl-4c2 (cycle 4c2).
 //
 // AI_CheckBadMove PART 1 is wired for real as of the ai-checkbadmove-1 batch
 // (aiCheckBadMove.ts, battle_ai_main.c:488-1298 through EFFECT_PERISH_SONG).
@@ -310,7 +311,8 @@ export function chooseMoveOrActionSingles(state: BattleState, battlerAtk: number
  * and the ally-facing half is still missing: `AI_DATA->partnerMove =
  * GetAllyChosenMove()` (:368) is dbl-4b, and the partner-gated helpers the
  * scorers call (`isValidDoubleBattle`, aiCheckBadMove.ts) landed in dbl-4c
- * (cycle 4c1); the three that need `gBattleStruct->moveTarget` are dbl-4c2. The flags
+ * (cycle 4c1); the three that need `gBattleStruct->moveTarget` are real as of
+ * dbl-4c2. The flags
  * this cycle's own tests dispatch (AI_FLAG_HP_AWARE, or none) read neither.
  *
  * ORDERING, which the caller's RNG stream depends on. Per live non-self `i`
