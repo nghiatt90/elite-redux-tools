@@ -2775,6 +2775,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_SPITEFUL') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       moveId !== 'MOVE_STRUGGLE' &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -2802,6 +2803,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_SUPERSWEET_SYRUP') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(attacker.statuses3, STATUS3_EMBARGO) &&
@@ -2816,7 +2818,7 @@ function handleDefenderMoveEndAbility(
   // Scrapyard's hook without the contact check. checkcondition CONDITION_SPIKES (battle_script_commands.c:9606-9611) layers the
   // attacker's side (gBattlerTarget after swapbattlerandtargetvia34).
   if (abilityId === 'ABILITY_DROP_BLOCKS') {
-    if (targetDamage > 0) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt)) {
       const sideState = state.sides[(targetId & 1) ^ 1]!
       if (sideState.timers.spikesAmount < 3) {
         sideState.timers.spikesAmount++
@@ -2828,7 +2830,7 @@ function handleDefenderMoveEndAbility(
   // 34. Loose Thorns (src/abilities.cc:11042-11051; BattleScript_DefenderSetsCreepingThorns, data/battle_scripts_1.s:9439-9447;
   // CONDITION_CREEPING_THORNS, battle_script_commands.c:9627-9633): Stealth Rock slot filled with TYPE_GRASS.
   if (abilityId === 'ABILITY_LOOSE_THORNS') {
-    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
       const sideState = state.sides[(targetId & 1) ^ 1]!
       if (!hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
         sideState.statuses = setFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)
@@ -2843,6 +2845,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_VOODOO_POWER') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       moveData?.split === 'SPECIAL' &&
       canBleed(state, attackerId, attackerId, statusDeps) &&
@@ -2862,6 +2865,7 @@ function handleDefenderMoveEndAbility(
     const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       !hasAbilityIgnoringSuppression(attacker, abilityId) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -2879,7 +2883,7 @@ function handleDefenderMoveEndAbility(
   // RESOURCE_FLAG_FLASH_FIRE)) (:8321-8322): a damaging hit on a live holder, or a Fire hit while already Flash-Fire-boosted.
   if (abilityId === 'ABILITY_FLAMMABLE_COAT') {
     if (
-      ((targetDamage > 0 && target.mon.hp > 0) || target.volatiles.flashFire) &&
+      ((targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0) || target.volatiles.flashFire) &&
       moveTypeMatches(moveData, 'FIRE') &&
       target.mon.speciesId === 'SPECIES_LUMBERING_SLOTH' &&
       !hasFlag(target.mon.status2, STATUS2_TRANSFORMED)
@@ -2893,7 +2897,7 @@ function handleDefenderMoveEndAbility(
   // (battle_util.c:3778-3795) for the holder; BattleScript_SurgeActivatesRet (data/battle_scripts_1.s:9957-9962) runs OnTerrainChanged.
   if (abilityId === 'ABILITY_BRAIN_OVERLOAD' || abilityId === 'ABILITY_POWER_LEAK') {
     const terrainFlag = abilityId === 'ABILITY_BRAIN_OVERLOAD' ? STATUS_FIELD_PSYCHIC_TERRAIN : STATUS_FIELD_ELECTRIC_TERRAIN
-    if (targetDamage > 0 && tryChangeBattleTerrain(state, targetId, terrainFlag, deps)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && tryChangeBattleTerrain(state, targetId, terrainFlag, deps)) {
       dispatchOnTerrainChange(state, deps, unmodelled)
     }
   }
