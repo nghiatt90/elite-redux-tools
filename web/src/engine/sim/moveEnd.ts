@@ -2794,7 +2794,12 @@ function handleDefenderMoveEndAbility(
   // 31. Contact counterattacks: Cold Rebound, Ice Downfall, Snap Trap (ability) -- UseOutOfTurnAttack(battler, attacker, ability, move, power)
   const counterattack = CONTACT_COUNTERATTACKS[abilityId]
   if (counterattack) {
-    if (targetDamage > 0 && attacker.mon.hp > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+    if (
+      targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
+      attacker.mon.hp > 0 &&
+      isMoveMakingContact(moveData, attacker, attackerHoldEffect)
+    ) {
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, counterattack[0], counterattack[1])
     }
   }
@@ -2904,7 +2909,7 @@ function handleDefenderMoveEndAbility(
 
   // 39. Deflect (src/abilities.cc:12536-12544): Parry's shape without the contact check -- UseOutOfTurnAttack(MOVE_VACUUM_WAVE, 20).
   if (abilityId === 'ABILITY_DEFLECT') {
-    if (targetDamage > 0 && attacker.mon.hp > 0) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0) {
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_VACUUM_WAVE', 20)
     }
   }
@@ -2914,6 +2919,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_FOG_MACHINE') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       !hasFlag(state.field.weather, WEATHER_FOG_ANY) &&
       !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY) &&
@@ -2950,6 +2956,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_MALODOR') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(attacker.statuses3, STATUS3_GASTRO_ACID) &&
@@ -2964,6 +2971,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_PERISH_BODY') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -3091,7 +3099,7 @@ function handleDefenderMoveEndAbility(
 
   // 48. Wind Chimes (src/abilities.cc:12513-12522): Deflect's shape with Hyper Voice at power 30 -- ShouldApplyOnHitEffect(attacker), no contact check.
   if (abilityId === 'ABILITY_WIND_CHIMES') {
-    if (targetDamage > 0 && attacker.mon.hp > 0) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0) {
       queueOutOfTurnAttack(state, deps, targetId, attackerId, abilityId, 'MOVE_HYPER_VOICE', 30)
     }
   }
@@ -3134,6 +3142,7 @@ function handleDefenderMoveEndAbility(
     const attackerPrimary = attacker.mon.abilities.ability ?? 'ABILITY_NONE'
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       target.mon.abilities.ability === abilityId &&
       !hasAbilityIgnoringSuppression(attacker, abilityId) &&
@@ -3164,7 +3173,11 @@ function handleDefenderMoveEndAbility(
   // drakelpHeadReformHandler runs from switchInAbility.ts's onEntry pass and onWeather.ts's
   // dispatchOnTerrainChange, so a toxic terrain or a repeated switch-in clears the counter.
   if (abilityId === 'ABILITY_DRAKELP_HEAD') {
-    if (targetDamage > 0 && getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0) {
+    if (
+      targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
+      getSingleUseAbilityCounter(state, targetId, abilityId, deps.dataContext) === 0
+    ) {
       setSingleUseAbilityCounter(state, targetId, abilityId, 1, deps.dataContext)
       const canLowerStat = attacker.mon.hp > 0 && canLowerStatOrMirrorArmor(state, attackerId, STAT_ATK, deps.dataContext)
       if (canLowerStat) {
@@ -3182,6 +3195,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_CHUCKSTER') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       !target.volatiles.abilityState[slotIndex] &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect)
     ) {
@@ -3205,6 +3219,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_RESTRAINING_ORDER') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       !target.volatiles.abilityState[slotIndex] &&
       canBattlerSwitch(state, attackerId) &&
@@ -3237,6 +3252,7 @@ function handleDefenderMoveEndAbility(
     const species = target.mon.speciesId
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(attacker)
       (species === 'SPECIES_CRAMORANT_GORGING' || species === 'SPECIES_CRAMORANT_GULPING')
     ) {
@@ -3315,6 +3331,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_ARC_FLASH') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(attacker)
       canBeBurned(state, attackerId, targetId, statusDeps) &&
       state.rng.random16() % 2 !== 0
