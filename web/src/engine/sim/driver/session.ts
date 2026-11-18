@@ -171,7 +171,7 @@ export function buildMoveAction(
   // / Electrify retypes unapplied for this view.
   const resolvedType =
     damage?.moveType && state.battlers[battlerId]
-      ? (damage.moveType(state, battlerId, chosenTargetId ?? (battlerId ^ 1), moveId).moveType ?? declaredType)
+      ? (damage.moveType(state, battlerId, chosenTargetId ?? ((battlerId & 1) ^ 1), moveId).moveType ?? declaredType)
       : declaredType
   const view: TurnOrderMoveView = {
     id: moveId,
@@ -201,7 +201,7 @@ export function buildMoveAction(
       : getOpponentSelectedMoveTarget(
           battlerId,
           staticTarget,
-          chosenTargetId ?? (battlerId ^ 1),
+          chosenTargetId ?? ((battlerId & 1) ^ 1),
           state.absentBattlerFlags,
         )
   const mega = canMegaEvolve(state, battlerId, data.dataContext)

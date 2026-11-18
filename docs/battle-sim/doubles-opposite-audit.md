@@ -20,8 +20,8 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 | web/src/engine/sim/ai/aiShouldSwitch.ts:461 | `const opposingId = battlerId ^ 1` | singles-only-ai | battle_ai_switch_items.c:89 | AI item dbl-4c | ShouldSwitchIfWonderGuard: singles-only opposite position check (battle_ai_switch_items.c:89); doubles early-returns false at :86. |
 | web/src/engine/sim/ai/aiSwitching.ts:267 | `const opposingBattlerId = aiBattlerId ^ 1` | singles-only-ai | battle_ai_switch_items.c:1001 | AI item dbl-4d | GetMostSuitableMonToSwitchInto: singles-only branch (battle_ai_switch_items.c:1001); doubles branch is at :985-996. |
 | web/src/engine/sim/bridge.ts:434 | `// caller declared -- not `battlerId ^ 1`, which assumes singles and assumes` | comment-only | include/constants/battle.h:36 | none | Comment in unpackers explaining why caller-declared roles are used instead of assuming singles. |
-| web/src/engine/sim/driver/session.ts:174 | `? (damage.moveType(state, battlerId, chosenTargetId ?? (battlerId ^ 1), moveId).moveType ?? declaredType)` | single-foe-by-design | battle_main.c:5206 | none | buildMoveAction: mirrors GetTypeBeforeUsingMove(move, battlerAtk) (battle_main.c:5206-5209), which is target-independent in C; target passed only to satisfy resolver signature. |
-| web/src/engine/sim/driver/session.ts:204 | `chosenTargetId ?? (battlerId ^ 1),` | needs-chosen-target | battle_controller_opponent.c:1583 | chosen target | buildMoveAction: fallback for opponent moves when chosenTargetId is omitted hard-codes opposite battler instead of AI chosen target (gBattleStruct->aiChosenTarget, battle_controller_opponent.c:1583, :1610). |
+| web/src/engine/sim/driver/session.ts:174 | `? (damage.moveType(state, battlerId, chosenTargetId ?? ((battlerId & 1) ^ 1), moveId).moveType ?? declaredType)` | single-foe-by-design | battle_main.c:5206 | none | buildMoveAction: mirrors GetTypeBeforeUsingMove(move, battlerAtk) (battle_main.c:5206-5209), which is target-independent in C; target passed only to satisfy resolver signature. |
+| web/src/engine/sim/driver/session.ts:204 | `chosenTargetId ?? ((battlerId & 1) ^ 1),` | side-flip | battle_controller_opponent.c:1583 | none | buildMoveAction: opponent move fallback when chosenTargetId is omitted uses opposite-side left battler ((battlerId & 1) ^ 1) matching GetDefaultMoveTarget (battle_controller_opponent.c:1583, pokemon.c:1267). |
 | web/src/engine/sim/endTurn.ts:962 | `for (let targetId = (holderId & 1) ^ 1; targetId < state.battlersCount; targetId += 2) {` | side-flip | battle_script_commands.c:3298 | none | Side index flip (holderId & 1) ^ 1, used as loop start targetId += 2 over all foes. Correct in doubles. |
 | web/src/engine/sim/endTurn.ts:1408 | `for (const targetId of [battlerId ^ 1, battlerId ^ 3]) {` | single-foe-by-design | abilities.cc:11394 | none | ABILITY_SAP_TRAP: targets BATTLE_OPPOSITE(battler) (battlerId ^ 1) and BATTLE_PARTNER(target) (battlerId ^ 3), directly mirroring abilities.cc:11394-11402. |
 | web/src/engine/sim/endTurn.ts:1694 | `target: (battlerId & 1) ^ 1,` | side-flip | abilities.cc:12108 | none | ABILITY_SUMO_WRESTLER: side index flip matching GetOppositeSide(battler) (abilities.cc:12108, battle_anim_mons.c:671). |
@@ -54,8 +54,8 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 | web/src/engine/sim/moveEnd.ts:2495 | `for (let foeId = (targetId & 1) ^ 1; foeId < state.battlersCount; foeId += 2) {` | side-flip | abilities.cc:3249 | none | Cotton Down stat drops: side index flip (targetId & 1) ^ 1 used as loop start foeId += 2 over all foes (GetOppositeSide(battler), abilities.cc:3249, data/battle_scripts_1.s:8553). |
 | web/src/engine/sim/moveEnd.ts:2774 | `const sideState = state.sides[(targetId & 1) ^ 1]!` | side-flip | abilities.cc:10999 | none | Drop Blocks: side index flip (targetId & 1) ^ 1 for opponent side timer (abilities.cc:10999). |
 | web/src/engine/sim/moveEnd.ts:2786 | `const sideState = state.sides[(targetId & 1) ^ 1]!` | side-flip | abilities.cc:11046 | none | Loose Thorns: side index flip (targetId & 1) ^ 1 for opponent side timer (abilities.cc:11046). |
-| web/src/engine/sim/moveTargetFlags.ts:137 | `* `battlerId ^ 1` here; the live-partner re-check happens at execution` | comment-only | battle_util.c:283 | none | Docstring comment for getPlayerSelectedMoveTarget explaining execution-time live-partner re-check. |
-| web/src/engine/sim/moveTargetFlags.ts:150 | `return battlerId ^ 1` | needs-chosen-target | battle_controller_player.c:2401 | chosen target | getPlayerSelectedMoveTarget: returns battlerId ^ 1 instead of (GetBattlerPosition(battlerId) & BIT_SIDE) ^ BIT_SIDE (battle_controller_player.c:2401) or GetDefaultMoveTarget (pokemon.c:1267). |
+| web/src/engine/sim/moveTargetFlags.ts:137 | `* `(battlerId & 1) ^ 1` here; the live-partner re-check happens at execution` | comment-only | battle_util.c:283 | none | Docstring comment for getPlayerSelectedMoveTarget explaining execution-time live-partner re-check. |
+| web/src/engine/sim/moveTargetFlags.ts:150 | `return (battlerId & 1) ^ 1` | side-flip | battle_controller_player.c:2397 | none | getPlayerSelectedMoveTarget: returns (battlerId & 1) ^ 1 matching (GetBattlerPosition(battler) & BIT_SIDE) ^ BIT_SIDE (battle_controller_player.c:2397-2400). |
 | web/src/engine/sim/preempt.ts:58 | `for (let opponent = battlerSide(turnBattler) ^ 1; opponent < state.battlersCount; opponent += 2) {` | side-flip | battle_util.c:824 | none | TryPreemptiveActions: side index flip battlerSide(turnBattler) ^ 1, used as loop start opponent += 2 over all foes (GetOppositeSide(battler), battle_util.c:824, battle_anim_mons.c:671). |
 | web/src/engine/sim/statBuffs.ts:142 | `if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityAliveOnSide(state, (battlerId & 1) ^ 1, 'ABILITY_HEMOLYSIS')) return false` | side-flip | battle_util.c:8991 | none | benefitsFromStatBuffs: passes the opposing side index (battlerId & 1) ^ 1, matching IsAbilityOnOpposingSide (battle_util.c:8991, IsAbilityOnSide :4795-4801). |
 | web/src/engine/sim/statBuffs.ts:989 | `const opposite = battlerId ^ 1` | single-foe-by-design | battle_util.c:8388 | none | isUnnerveAbilityOnOpposingSide: C explicitly defines int opponent = BATTLE_OPPOSITE(battlerId) (battle_util.c:8388). |
@@ -96,10 +96,10 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 
 ## Summary by Class
 
-- `side-flip`: 31
+- `side-flip`: 33
 - `single-foe-by-design`: 28
 - `needs-all-foes`: 2
-- `needs-chosen-target`: 8
+- `needs-chosen-target`: 6
 - `singles-only-ai`: 5
 - `comment-only`: 6
 - `wrong-battler-singles-bug`: 0
@@ -107,17 +107,18 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 
 ## Follow-up items
 
-The 10 sites classified as `needs-all-foes` (2 sites) and `needs-chosen-target` (8 sites) represent the sim code requiring updates for full doubles targeting. They are grouped below by file and proposed as separate fix items:
+The 8 sites classified as `needs-all-foes` (2 sites) and `needs-chosen-target` (6 sites) represent the sim code requiring updates for full doubles targeting. They are grouped below by file and proposed as separate fix items:
 
 ### 1. `web/src/engine/sim/statBuffs.ts` (resolved in cycle45)
 Both `benefitsFromStatBuffs` sites were fixed in cycle45:
 - **Blood Stain fidelity**: replaced the opposing-side ability check with `IsBloodStainAffected` (`battle_util.c:9000-9004`), checking the battler's own ability with the Ghost/Rock type exemption. This removed the raw `^ 1` line entirely.
 - **Hemolysis side flip**: changed the opposing battler check to pass the opposing side index `(battlerId & 1) ^ 1`, matching `IsAbilityOnOpposingSide` (`battle_util.c:8991`, `IsAbilityOnSide` :4795-4801). This site is now classified as `side-flip` (`none` doubles fix needed).
 
-### 2. `web/src/engine/sim/moveTargetFlags.ts` & `web/src/engine/sim/driver/session.ts` (2 sites, `needs-chosen-target`)
-- `moveTargetFlags.ts:150` in `getPlayerSelectedMoveTarget`: returns `battlerId ^ 1` when target is not user/ally/all-battlers. In C (`battle_controller_player.c:2401`), default position is `(GetBattlerPosition(battlerId) & BIT_SIDE) ^ BIT_SIDE`, or in doubles `GetDefaultMoveTarget(battlerId)` (`pokemon.c:1267`). For battler 2, `2 ^ 1 = 3` targets player right's opposite instead of position 1.
-- `session.ts:204` in `buildMoveAction`: opponent move fallback `chosenTargetId ?? (battlerId ^ 1)`. When `chosenTargetId` is omitted, defaulting to `battlerId ^ 1` bypasses the AI's chosen target (`gBattleStruct->aiChosenTarget`, `battle_controller_opponent.c:1583`, `:1610`).
-- **Proposed item**: `dbl-3c-action-targets` (~35 changed lines with unit tests).
+### 2. `web/src/engine/sim/moveTargetFlags.ts` & `web/src/engine/sim/driver/session.ts` (resolved in cycle46)
+Both sites were resolved in cycle46:
+- `moveTargetFlags.ts:150` in `getPlayerSelectedMoveTarget`: returns `(battlerId & 1) ^ 1` matching default cursor position `(GetBattlerPosition(battler) & BIT_SIDE) ^ BIT_SIDE` (`battle_controller_player.c:2397-2400`). Reclassified as `side-flip` (`none` doubles fix needed).
+- `session.ts:204` in `buildMoveAction`: opponent move fallback `chosenTargetId ?? ((battlerId & 1) ^ 1)`. In C the opponent controller always reads `gBattleStruct->aiChosenTarget[gActiveBattler]` (`battle_controller_opponent.c:1583`), so omitted target is a sim fallback choosing the opposite-side left battler matching `GetBattlerAtPosition(opposing)` in `GetDefaultMoveTarget` (`pokemon.c:1267-1270`). Reclassified as `side-flip` (`none` doubles fix needed).
+- **Resolved item**: `dbl-3c-action-targets`.
 
 ### 3. `web/src/engine/sim/moveEffects.ts` (1 site, `needs-chosen-target`)
 - Line 3811 in `handleCurse`: `const actualTargetId = targetId === null || targetId === battlerId ? battlerId ^ 1 : targetId`. Ghost Curse in C (`data/battle_scripts_1.s:4971`) executes `getmovetarget BS_ATTACKER` (`battle_util.c:6394`, which calls `SetRandomTarget(attacker)` in doubles). Hard-coding `battlerId ^ 1` bypasses double-battle random targeting.

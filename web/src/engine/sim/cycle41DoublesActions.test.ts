@@ -240,9 +240,10 @@ describe('(2) buildMoveAction honours a chosen target only where canSelectTarget
 
   it('a BOTH move ignores chosenTarget (canSelectTarget is not set)', () => {
     // :2407-2409 -- MOVE_TARGET_BOTH is in the mask, so the cursor is not selectable and
-    // the player target stays the getPlayerSelectedMoveTarget fallback, battlerId ^ 1 = 3.
+    // the player target stays the getPlayerSelectedMoveTarget fallback, (2 & 1) ^ 1 = 1
+    // (battle_controller_player.c:2397-2400).
     const state = doublesState()
-    expect(buildMoveAction(state, data, 2, 'MOVE_AIR_CUTTER', undefined, 1).target).toBe(3)
+    expect(buildMoveAction(state, data, 2, 'MOVE_AIR_CUTTER', undefined, 1).target).toBe(1)
   })
 
   it('singles is unchanged for a player and an opponent move', () => {

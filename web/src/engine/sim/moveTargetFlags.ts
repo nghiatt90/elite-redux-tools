@@ -134,7 +134,7 @@ export function getBattlerBattleMoveTargetFlags(
  * The test is a BIT test: `MOVE_TARGET_USER` is set in USER, USER_OR_ALLY
  * (USER | ALLY) and ALL_BATTLERS (0x100 | USER, include/constants/battle.h:499-501),
  * but not in USER_OR_SELECTED (0x2). MOVE_TARGET_ALLY on the player side is left to
- * `battlerId ^ 1` here; the live-partner re-check happens at execution
+ * `(battlerId & 1) ^ 1` here; the live-partner re-check happens at execution
  * (battle_util.c:283-287, resolveMoveEndDispatchTarget).
  */
 export function getPlayerSelectedMoveTarget(
@@ -147,7 +147,7 @@ export function getPlayerSelectedMoveTarget(
 ): number {
   const moveTarget = playerMoveTargetFlag(state, battlerId, moveId, moveData, deps, statusDeps)
   if (moveTarget === 'USER' || moveTarget === 'USER_OR_ALLY' || moveTarget === 'ALL_BATTLERS') return battlerId
-  return battlerId ^ 1
+  return (battlerId & 1) ^ 1
 }
 
 /** The `moveTarget` word both the cursor choice and the canSelectTarget gate read:
