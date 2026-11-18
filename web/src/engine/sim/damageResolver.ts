@@ -215,7 +215,14 @@ export function createBridgeDamageResolver(deps: BridgeDamageResolverDeps): Dama
     magnitudeTier: drawRandom && move.effect === 'EFFECT_MAGNITUDE' ? magnitudeTier(deps.random) : null,
     attackerRolloutCounter: Math.min(3, Math.max(0, attackerBattlerState.volatiles.rolloutCounter)) as 0 | 1 | 2 | 3,
     attackerHasDefenseCurl: hasFlag(attackerBattlerState.mon.status2, STATUS2_DEFENSE_CURL),
-    attackerWasHitThisTurn: attacker.battler.condition.wasDamagedThisTurnBy !== 'none',
+    // CalcMoveBasePower reads the ATTACKER's OWN gRoundStructs entry, whoever dealt the hit --
+    // EFFECT_FOCUS_PUNCH's 40-power override (battle_util.c:6851-6852) and MOVE_SELF_DESTRUCT's
+    // doubling (:6901-6903). Any damager counts: an ally, or a foe that is not this move's target.
+    // Cmd_datahpupdate (:1935-1959) skips BOTH writes under HITMARKER_PASSIVE_DAMAGE, so poison /
+    // weather / recoil leave them at 0. `condition.wasDamagedThisTurnBy` is role-relative (bridge.ts
+    // matches the damager against the declared attacker/defender) and its `damaged` flag is set by
+    // passive damage too, so it is the wrong source on both counts.
+    attackerWasHitThisTurn: attackerBattlerState.round.physicalDmg > 0 || attackerBattlerState.round.specialDmg > 0,
     // Without a hitIndex DamageContext's one-representative stand-in applies (the attacker's own Attack, with the gap
     // reported above); with one, the hit's own party slot (beatUpBaseAttack above).
     beatUpBaseAttack,

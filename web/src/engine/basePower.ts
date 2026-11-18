@@ -354,8 +354,9 @@ export function applyPreModifierBasePower(
     return { power: basePower * 2 ** (ctx.attackerRolloutCounter - 1), unmodelled: [] }
   }
   if (moveEffect === 'EFFECT_FOCUS_PUNCH') {
-    // battle_util.c:6876-6877 -- a full override (not a multiplier) to 40 power
-    // if the attacker took ANY damage this turn before acting, matching
+    // battle_util.c:6851-6852 -- a full override (not a multiplier) to 40 power
+    // if the attacker's own gRoundStructs physicalDmg/specialDmg is nonzero
+    // (any damager; passive damage excluded), matching
     // Focus Punch's real "loses focus and does a weak hit instead of failing
     // outright" mechanic. Was previously bucketed as "needs turn history" --
     // wrong, same mistake as Magnitude/Pursuit: it's a plain scenario fact.

@@ -309,7 +309,12 @@ function buildAiScenario(state: BattleState, moveId: string, attackerId: number,
     magnitudeTier: null,
     attackerRolloutCounter: 0,
     attackerHasDefenseCurl: false,
-    attackerWasHitThisTurn: attackerBridge.battler.condition.wasDamagedThisTurnBy !== 'none',
+    // Same source as the player path (damageResolver.ts): the attacker's own live gRoundStructs
+    // counters, any damager (battle_util.c:6851-6852, :6901-6903). SetBattlerData masking only
+    // blanks items/moves, and the AI's round memset (battle_ai_main.c:200-202) runs AFTER scoring,
+    // so `maskedState.battlers[attackerId].round` is the live struct the C reads.
+    attackerWasHitThisTurn:
+      (maskedState.battlers[attackerId]!.round.physicalDmg > 0) || (maskedState.battlers[attackerId]!.round.specialDmg > 0),
     // MISC_EFFECT_TOOK_DAMAGE_BOOST reads gBattleStruct->timesDamaged (battle_util.c:6870), which AI_CalcDamage's CalcMoveBasePower sees as is.
     // MISC_EFFECT_DOUBLE_DAMAGE stays unset: its Random() has no value this port could reuse (same reason as magnitudeTier above).
     attackerTimesDamaged: state.sides[attackerId & 1]?.timesDamaged[state.battlers[attackerId]?.partyIndex ?? 0] ?? 0,

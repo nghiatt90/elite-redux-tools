@@ -147,13 +147,16 @@ export interface DamageContext {
   /** STATUS2_DEFENSE_CURL -- only changes EFFECT_ROLLOUT's own counter===0 branch
    * (battle_util.c:6838-6841): doubles power on an otherwise-unboosted first use. */
   attackerHasDefenseCurl: boolean
-  /** gRoundStructs[battlerAtk].physicalDmg/specialDmg, collapsed to one boolean --
-   * "was the attacker damaged (by either category) earlier THIS turn, before
-   * acting" (battle_script_commands.c:1939-1951 sets it on taking a hit; reset
-   * each turn, per the "Round" -- one turn -- naming, same scope as
-   * sameMoveTurnsInARow's own "Battle"-wide vs per-turn distinction). Used by
-   * EFFECT_FOCUS_PUNCH (:6876-6877, power forced to 40 if true) and
-   * MOVE_SELF_DESTRUCT's own hardcoded case (:6926-6927, doubles power) -- a
+  /** `gRoundStructs[battlerAtk].physicalDmg || gRoundStructs[battlerAtk].specialDmg`,
+   * collapsed to one boolean -- "the ATTACKER took a damaging hit earlier THIS
+   * turn, before acting", from ANY source (ally or foe, not only the declared
+   * defender). Cmd_datahpupdate (battle_script_commands.c:1935-1959) writes
+   * those two counters on a real hit and skips both under
+   * HITMARKER_PASSIVE_DAMAGE, so passive damage (poison/weather/recoil) does not
+   * set them. Reset each turn, per the "Round" -- one turn -- naming, same scope
+   * as sameMoveTurnsInARow's own "Battle"-wide vs per-turn distinction. Used by
+   * EFFECT_FOCUS_PUNCH (battle_util.c:6851-6852, power forced to 40 if true) and
+   * MOVE_SELF_DESTRUCT's own hardcoded case (:6901-6903, doubles power) -- a
    * plain scenario fact, no turn simulation needed, same shape as
    * defenderIsSwitching. */
   attackerWasHitThisTurn: boolean

@@ -1709,7 +1709,7 @@ describe('calculateMoveDamage -- Victory Bomb, modeled as a directly-selectable 
   })
 })
 
-describe('calculateMoveDamage -- EFFECT_FOCUS_PUNCH forces power to 40 if the attacker was hit this turn (battle_util.c:6876-6877)', () => {
+describe('calculateMoveDamage -- EFFECT_FOCUS_PUNCH forces power to 40 if the attacker was hit this turn (battle_util.c:6851-6852)', () => {
   it('a plain scenario flag, no turn history needed (same fix as Magnitude/Pursuit)', () => {
     const notHit = calculateMoveDamage(scenario({ move: moveData('MOVE_FOCUS_PUNCH') }))
     const wasHit = calculateMoveDamage(scenario({ move: moveData('MOVE_FOCUS_PUNCH'), attackerWasHitThisTurn: true }))

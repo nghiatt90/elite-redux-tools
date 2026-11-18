@@ -394,7 +394,7 @@ describe('applyPreModifierBasePower', () => {
     expect(applyPreModifierBasePower(50, 'EFFECT_PURSUIT', null, ctx({ defenderIsSwitching: false }), 0, null, false).power).toBe(50)
   })
 
-  it('EFFECT_FOCUS_PUNCH forces power to 40 (not a multiplier) only if the attacker was hit this turn (battle_util.c:6876-6877)', () => {
+  it('EFFECT_FOCUS_PUNCH forces power to 40 (not a multiplier) only if the attacker was hit this turn (battle_util.c:6851-6852)', () => {
     expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: true }), 0, null, false).power).toBe(40)
     expect(applyPreModifierBasePower(150, 'EFFECT_FOCUS_PUNCH', null, ctx({ attackerWasHitThisTurn: false }), 0, null, false).power).toBe(150)
   })

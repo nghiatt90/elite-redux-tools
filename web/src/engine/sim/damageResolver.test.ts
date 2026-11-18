@@ -281,7 +281,7 @@ describe('createBridgeDamageResolver: neutralToggleNotes keyed on the real consu
     expect(plain.some((u) => u.includes('attackerRolloutCounter'))).toBe(false)
     expect(plain.some((u) => u.includes('beatUpBaseAttack'))).toBe(false)
   })
-  it('Focus Punch drops to 40 power, and Self-Destruct doubles, once the attacker was hit this turn (battle_util.c:6876-6877, :6926-6927)', () => {
+  it('Focus Punch drops to 40 power, and Self-Destruct doubles, once the attacker was hit this turn (battle_util.c:6851-6852, :6901-6903)', () => {
     for (const [id, direction] of [['MOVE_FOCUS_PUNCH', 'down'], ['MOVE_SELF_DESTRUCT', 'up']] as const) {
       const fresh = state()
       const hit = state()
