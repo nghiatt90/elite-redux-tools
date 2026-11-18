@@ -4396,7 +4396,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FIRE_ASPECT') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveTypeName() === 'FIRE' &&
       canBeBurned(state, targetId, attackerId, statusDeps)
@@ -4409,7 +4409,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FIRES_WRATH') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
       !isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -4444,7 +4444,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FROSTMAW') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canGetFrostbite(state, targetId, attackerId, statusDeps) &&
       Boolean(moveData?.flags?.biteBased) &&
@@ -4459,7 +4459,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_FUNGAL_INFECTION') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       !target.mon.types.includes('GRASS') &&
       !hasFlag(target.statuses3, STATUS3_LEECHSEED) &&
@@ -4473,7 +4473,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_GHOST_PEPPER') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       moveTypeName() === 'GRASS' &&
       canBeBurned(state, targetId, attackerId, statusDeps) &&
@@ -4487,7 +4487,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_GRASS_FLUTE') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isSoundMove(state, attackerId, moveId, statusDeps, unmodelled) &&
       !target.volatiles.fear
@@ -4499,7 +4499,12 @@ function handleAttackerMoveEndAbility(
   // Hardened Sheath (src/abilities.cc:4942-4952): ShouldApplyOnHitEffect(battler), horn move (gBattleMoves[move].hornBased), then a direct
   // ChangeStatBuffs(battler, 1, STAT_ATK, MOVE_EFFECT_AFFECTS_USER, NULL) -- not via SetMoveEffect, so no Sheer Force / Substitute gate.
   if (abilityId === 'ABILITY_HARDENED_SHEATH') {
-    if (attacker.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId && Boolean(moveData?.flags?.hornBased)) {
+    if (
+      attacker.mon.hp > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
+      attackerId !== targetId &&
+      Boolean(moveData?.flags?.hornBased)
+    ) {
       const res = changeStatBuffs(
         state,
         attackerId,
@@ -4524,7 +4529,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_HAUNTING_FRENZY') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isKingsRockAffected(moveData, deps) &&
       state.rng.random16() % 100 < 20
