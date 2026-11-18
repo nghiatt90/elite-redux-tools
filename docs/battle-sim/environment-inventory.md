@@ -165,7 +165,7 @@ Trainers in `data/v2.65beta/trainers.json`: 932. `battleEvents` rows: 51 across 
 | Unit key | Fights / maps | C citation | Status | Test file |
 | --- | --- | --- | --- | --- |
 | `GetHighestLevelInPlayerParty` | enemy level = player level + partyData.lvl + extraLevels | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1819` | unported | none |
-| `GetLevelCap` | level-cap EXP stop | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3511` | unported | none |
+| `GetLevelCap` | level-cap EXP stop | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3511` | unported | `web/src/engine/sim/cycle58SolverLevel.test.ts` |
 | `HELL_MODE_0_IVS_FLAG` | FLAG_BADGE05_GET (pokemon_config.h:35): zeroes only the player side mons IVs, after the fifth badge; enemy mons keep MAX_IVS | `pipeline/.upstream/eliteredux-source/src/pokemon.c:989` | unported | none |
 | `HELL_MODE_EXTRA_LEVELS_FLAG` | FLAG_BADGE03_GET (pokemon_config.h:34): extra levels switch on after the third badge | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1805` | unported | none |
 | `RegisterTrainerBattleEvents` | data/hell_trainer_skills.h (29 rows across 24 trainers) | `pipeline/.upstream/eliteredux-source/src/battle_main.c:1773` | unported | none |
