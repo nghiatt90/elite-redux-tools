@@ -77,13 +77,13 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onStab | 44 | 44 | 0 | 0 | 0 | 43 |
 | onStat | 63 | 62 | 0 | 1 | 0 | 58 |
 | onStatLowered | 11 | 11 | 0 | 0 | 0 | 8 |
-| onStatusImmune | 40 | 40 | 0 | 0 | 0 | 39 |
+| onStatusImmune | 40 | 40 | 0 | 0 | 0 | 40 |
 | onSwapSplit | 7 | 7 | 0 | 0 | 0 | 7 |
 | onTerrain | 7 | 7 | 0 | 0 | 0 | 7 |
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
 | onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1382** |
+| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1383** |
 
 ## Unported Ability Hook Pairs
 
