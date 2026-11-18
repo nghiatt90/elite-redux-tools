@@ -19,7 +19,8 @@
 //   - `AI_DATA->items[]` / `ItemId_GetPocket` read items.json's `grouping`
 //     (SimItemData.grouping).
 //   - The doubles-only branches (PLEDGE, QUASH, MAGIC_ROOM partner, LUCKY_CHANT,
-//     FLAME_BURST) are gated on `isValidDoubleBattle`, dead on this build.
+//     FLAME_BURST) are gated on `isValidDoubleBattle`: dead in singles, reachable
+//     in a doubles BattleState since dbl-4c (cycle 4c1) made it a real check.
 //   - GetWhoStrikesFirst(..., TRUE) draws state.rng on a speed tie
 //     (battle_main.c:4397); each call site cites its C line.
 //
@@ -40,9 +41,11 @@
 // `AI_DATA->predictedMoves[]`, the genuinely unmodelled prediction system
 // aiCheckBadMove.ts's own header gaps -- it is the DEFENDER's real last used
 // move (`battler.lastMove`, a tracked field), so every read of it below is
-// live data, not a gap. `AI_DATA->partnerMove` IS the doubles-only field that
-// is always MOVE_NONE on this singles-only build (structural, matching
-// aiCheckBadMove.ts's own non-gapped treatment of the same field).
+// live data, not a gap. `AI_DATA->partnerMove` is MOVE_NONE in singles
+// (GetAllyChosenMove returns null: no partner slot); the EFFECT_HAZE helper is
+// wired to it in doubles as of dbl-4c (cycle 4c1), but the remaining
+// partnerMove reads below (IncreaseBurnScore/IncreaseConfusionScore/defogBody)
+// still treat it as MOVE_NONE -- a doubles-only gap, not a singles one.
 //
 // RNG: AI_CheckViability itself contains 35 direct `Random()`/`AI_RandLessThan`
 // lines across its FULL range (:2515-3986, lead's own grep count) -- every one
@@ -57,14 +60,14 @@
 // (they are not lines of AI_CheckViability's own body); each is called out at
 // its own definition below.
 //
-// Singles-only (this project's own scope, CLAUDE.md), matching
-// aiCheckBadMove.ts's own precedent: `isValidDoubleBattle`/`isDoubleBattle`
-// reads are transcribed as real (if unreachable) calls, and every
-// `if (isDoubleBattle) {...}` branch here is DEAD CODE on this build, not a
-// gap (EFFECT_ROAR/EFFECT_CLEAR_SMOG's ally-inclusive stat count,
+// Singles is unchanged, and doubles is now reachable: `isValidDoubleBattle`
+// (aiCheckBadMove.ts) was a hardcoded `false` until dbl-4c (cycle 4c1); it is a
+// real transcription of battle_ai_util.c:2270-2280 now, so every
+// `if (isDoubleBattle) {...}` branch here is dead in singles and live in a
+// doubles BattleState (EFFECT_ROAR/EFFECT_CLEAR_SMOG's ally-inclusive stat count,
 // EFFECT_HIT_ESCAPE/PARTING_SHOT's doubles branch inside ShouldPivot's own
 // caller). `AI_DATA->partnerMove`-gated `PartnerHasSameMoveEffectWithoutTarget`
-// (EFFECT_HAZE) reuses aiCheckBadMove.ts's own always-false doubles helper.
+// (EFFECT_HAZE) likewise reads the partner's real chosen move via GetAllyChosenMove.
 //
 // Reused rather than rewritten (per the brief): `MOLD_BREAKABLE_ABILITIES`,
 // `ALWAYS_SLEEPING_ABILITIES`, `defAbility`/`selfAbility`, `u8`, `atMaxHp`,
@@ -194,6 +197,7 @@ import {
   canBeConfused,
   doesSubstituteBlockMove,
   partnerHasSameMoveEffectWithoutTarget,
+  getAllyChosenMove,
   anyStatIsRaised,
   countPositiveStatStages,
   isStickyHold,
@@ -887,9 +891,10 @@ function increaseSleepScore(state: BattleState, battlerAtk: number, battlerDef: 
 }
 
 /** `IncreaseConfusionScore(battlerAtk, battlerDef, move, score)`,
- * battle_ai_util.c:2733-2746. `AI_DATA->partnerMove` is always MOVE_NONE
- * (structural, see this module's header) so `IsConfusionMoveEffect(gBattleMoves
- * [AI_DATA->partnerMove].effect)` is always false here -- not a gap. No RNG. */
+ * battle_ai_util.c:2733-2746. This helper still treats `AI_DATA->partnerMove`
+ * as MOVE_NONE (doubles-only gap: it is not wired to GetAllyChosenMove here)
+ * so `IsConfusionMoveEffect(gBattleMoves
+ * [AI_DATA->partnerMove].effect)` is always false here. No RNG. */
 function increaseConfusionScore(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1117,8 +1122,8 @@ function shouldFrostbiteSelf(state: BattleState, battlerId: number, deps: AiDama
 }
 
 /** `IncreaseBurnScore(battlerAtk, battlerDef, move, score)`, battle_ai_util.c:
- * 2688-2699. `AI_CanBurn`'s `partnerMove` term is always MOVE_NONE on this
- * singles-only build (structural). No RNG. */
+ * 2688-2699. `AI_CanBurn`'s `partnerMove` term is still treated as MOVE_NONE
+ * here (doubles-only gap: not wired to GetAllyChosenMove). No RNG. */
 function increaseBurnScore(state: BattleState, battlerAtk: number, battlerDef: number, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1247,9 +1252,9 @@ function countBattlerStatIncreases(battler: BattlerState, countEvasionAcc: boole
  * enters by `FALLTHROUGH` after its own IncreaseStatUpScore. The C's inner
  * `break`s all leave the `switch (move)` and then the case -- early returns
  * here. The `isDoubleBattle` partner-hazard pre-empt (:3390-3394,
- * `IsHazardMoveEffect(partnerMove effect)`) is dead code on this singles-only
- * build (`AI_DATA->partnerMove` is MOVE_NONE, structural), so it is not
- * transcribed and `IsHazardMoveEffect` has no call site to port. */
+ * `IsHazardMoveEffect(partnerMove effect)`) is not transcribed yet; it reads
+ * `AI_DATA->partnerMove`, which this helper still treats as MOVE_NONE (a
+ * doubles-only gap), so `IsHazardMoveEffect` has no call site to port. */
 function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1514,8 +1519,9 @@ export function aiCheckViability(state: BattleState, battlerAtk: number, battler
 
   // :2555-2556 -- check thawing moves.
   if (hasFlag(attacker.mon.status1, STATUS1_FREEZE | STATUS1_FROSTBITE) && hasMoveFlag(move, 'thawUser')) {
-    // `gBattleTypeFlags & BATTLE_TYPE_DOUBLE` -- always false on this build
-    // (see `isValidDoubleBattle`'s own doc), so this is dead code, not a gap.
+    // `gBattleTypeFlags & BATTLE_TYPE_DOUBLE` -- 10 in singles, 20 in a double
+    // battle with a live partner or both foes alive (IsValidDoubleBattle,
+    // battle_ai_util.c:2270-2280).
     score += isValidDoubleBattle(state, battlerAtk) ? 20 : 10
   }
 
@@ -1951,13 +1957,11 @@ function applyMoveEffectSwitch(
       break
 
     case 'EFFECT_HAZE':
-      // `AnyStatIsRaised(BATTLE_PARTNER(battlerAtk))` -- the ATTACKER'S OWN
-      // PARTNER (not the attacker itself, and not the defender); the partner
-      // slot does not exist in this sim's singles-only battler state (only
-      // battlerAtk/battlerDef are ever populated), so this reads as always
-      // false here, matching `partnerHasSameMoveEffectWithoutTarget`'s own
-      // always-false doubles-only treatment for the second half of the `||`.
-      if (partnerHasSameMoveEffectWithoutTarget(state, battlerAtk)) score -= 3
+      // `AnyStatIsRaised(BATTLE_PARTNER(battlerAtk)) || PartnerHasSameMoveEffectWithoutTarget(...)`
+      // (battle_ai_main.c:2830-2831). The partner stat scan is still not
+      // transcribed, but the helper is real: it compares the partner's chosen
+      // move's effect (GetAllyChosenMove, aiCheckBadMove.ts) with this move's.
+      if (partnerHasSameMoveEffectWithoutTarget(state, deps, moveId, getAllyChosenMove(state, battlerAtk))) score -= 3
       break
     // NOTE: the C's own `case EFFECT_HAZE` block ends with a stray
     // `FALLTHROUGH` INSIDE its own braces before `break` (:335), which the

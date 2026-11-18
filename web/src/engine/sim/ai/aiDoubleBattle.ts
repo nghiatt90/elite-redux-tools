@@ -31,14 +31,18 @@ import { hasFlag, MAX_STAT_STAGE, STAT_ATK, STAT_SPATK, STAT_SPEED, STATUS1_ANY,
 import { isBattlerGrounded } from '../grounding'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { getBattlerBattleMoveTargetFlags } from '../moveTargetFlags'
-import { aiHoldEffectParam, holdEffectId, isBattlerAIControlled, type AiDamageDeps } from './aiCalcDamage'
+import { aiHoldEffectParam, holdEffectId, type AiDamageDeps } from './aiCalcDamage'
 import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, getMoveDamageResult, isStatLoweringEffect, isTargetingPartner, MOVE_POWER_WEAK } from './aiScorers'
-import { battlerAbility, battlerStatCanRise, canBeConfused, doesBattlerIgnoreAbilityChecks, hasMoveWithSplit, hasMoveWithType, isBattlerOfType, moveType as resolveMoveType } from './aiCheckBadMove'
+import { battlerAbility, battlerStatCanRise, canBeConfused, doesBattlerIgnoreAbilityChecks, getAllyChosenMove, hasMoveWithSplit, hasMoveWithType, isBattlerOfType, moveType as resolveMoveType } from './aiCheckBadMove'
 import { defAbility, isSuppressed, selfAbility } from './aiAbilityHelpers'
 import { getAbilityRating, isAbilityOfRating } from './aiAbilityRatings'
 import { isBattlerAlive } from './aiPipeline'
 import { AI_FLAG_HP_AWARE } from './aiFlags'
 import { hasDamagingMove, hasMoveWithLowAccuracy, shouldSetFog, shouldSetHail, shouldSetRain, shouldSetSandstorm, shouldSetSun } from './aiCheckViability'
+
+// Kept as this module's public name for existing callers (cycle3d3q's own test);
+// the definition moved to aiCheckBadMove.ts to avoid a runtime import cycle.
+export { getAllyChosenMove }
 
 /** AI_EFFECTIVENESS_x0, constants/battle_ai.h:18. */
 const AI_EFFECTIVENESS_x0 = 0
@@ -88,27 +92,10 @@ function isUngroundingEffect(effect: string | null): boolean {
 }
 
 /**
- * GetAllyChosenMove, battle_ai_util.c:2277-2287 -- the AI's partner's chosen
- * move, or MOVE_NONE (`null`). `sBattler_AI` is the caller's own `battlerAtk`.
- *
- * The `partnerBattler > sBattler_AI` guard is the "lower id chooses first"
- * rule: the AI only knows its ally's pick when the ally is the earlier battler.
- * `IsBattlerAIControlled` is aiCalcDamage.ts's port of the same C function; on
- * this build it is "opponent side" (`(id & 1) === B_SIDE_OPPONENT`), so a
- * player-side partner reads as not AI-controlled.
- *
- * `gBattleStruct->chosenMovePositions[partner]` is `state.chosenMovePositions`;
- * the stored value is a move SLOT index, and the array access it feeds
- * (`gBattleMons[partner].moves[slot]`) yields MOVE_NONE for an empty slot,
- * which is the sim's `null`.
+ * GetAllyChosenMove (battle_ai_util.c:2277-2287) now lives in aiCheckBadMove.ts:
+ * this module imports aiCheckBadMove, so importing it back would close a
+ * runtime cycle. The partner helpers that also read it are there too.
  */
-export function getAllyChosenMove(state: BattleState, battlerAtk: number): string | null {
-  const partner = battlePartner(battlerAtk)
-  if (!isBattlerAlive(state, partner) || !isBattlerAIControlled(partner)) return null
-  else if (partner > battlerAtk) return null // Battler with the lower id chooses the move first.
-  const chosenMove = state.chosenMovePositions[partner]
-  return state.battlers[partner]?.mon.moves[chosenMove] ?? null
-}
 
 /**
  * AI_DoubleBattle, battle_ai_main.c:2213-2511.
