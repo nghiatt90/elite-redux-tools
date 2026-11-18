@@ -40,6 +40,7 @@ import {
   DEFAULT_STAT_STAGE,
   STAT_ATK,
   STAT_DEF,
+  STAT_SPDEF,
   STAT_SPEED,
   STATUS2_SUBSTITUTE,
   STATUS3_CHARGED_UP,
@@ -206,6 +207,7 @@ function runSubstituteWith(
 
 const attackStage = (state: BattleState, battler: number) => state.battlers[battler]!.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
 const defStage = (state: BattleState, battler: number) => state.battlers[battler]!.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+const spDefStage = (state: BattleState, battler: number) => state.battlers[battler]!.mon.statStages[STAT_SPDEF] ?? DEFAULT_STAT_STAGE
 const speedStage = (state: BattleState, battler: number) => state.battlers[battler]!.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
 
 describe('cycle53 1: Gooey requires TARGET_TURN_DAMAGED (abilities.cc:2482-2492)', () => {
@@ -360,7 +362,25 @@ describe('cycle53 10: Sand Spit requires TARGET_TURN_DAMAGED (abilities.cc:3317-
   })
 })
 
-describe('cycle53 11: doubles reads the per-target turn struct, not another foe', () => {
+describe('cycle53 11: Balloon Blitz (Inflatable alias) requires TARGET_TURN_DAMAGED (abilities.cc:9282 -> 3860)', () => {
+  it('behind a Substitute: a Fire move leaves Defense and SpDef at 0', () => {
+    // Impl<ABILITY_INFLATABLE>.onDefender delegates to ShouldApplyOnHitEffect(battler) (:3860-3862).
+    // Behind a Substitute TARGET_TURN_DAMAGED is zero, so Def and SpDef remain unchanged.
+    const { state, rng } = runSubstituteWith('MOVE_EMBER', 'ABILITY_BALLOON_BLITZ', [7])
+    expect(defStage(state, 1)).toBe(DEFAULT_STAT_STAGE)
+    expect(spDefStage(state, 1)).toBe(DEFAULT_STAT_STAGE)
+    expect(rng.calls).toBe(0)
+  })
+
+  it('without a Substitute: a Fire move raises Defense and SpDef by 1', () => {
+    // Inflatable raises Defense +1 and SpDef +1 on Fire/Flying damage (:3864-3866).
+    const { state } = runTurnWith('MOVE_EMBER', 'ABILITY_BALLOON_BLITZ', [0])
+    expect(defStage(state, 1)).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(spDefStage(state, 1)).toBe(DEFAULT_STAT_STAGE + 1)
+  })
+})
+
+describe('cycle53 12: doubles reads the per-target turn struct, not another foe', () => {
   it('battler 0 hits battler 1 (Gooey, behind a Substitute); battler 3 turn-damaged does not trigger it', () => {
     // Distinct speeds so the 4-battler move-end pass draws nothing for speed ties; any draw is Gooey's
     // (it draws none, so rng.calls stays 0).

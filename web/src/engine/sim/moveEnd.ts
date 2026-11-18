@@ -2224,12 +2224,11 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_BALLOON_BLITZ' ||
     abilityId === 'ABILITY_BALLOON_BOMBER'
   ) {
-    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3860-3862). The gate is applied to the
-    // Inflatable id only: Balloon Blitz / Balloon Bomber reach this branch through aliases whose own
-    // hook source carries no CHECK (see REPORT.md).
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3860-3862). Balloon Blitz and Balloon
+    // Bomber delegate to Impl<ABILITY_INFLATABLE>.onDefender, so all three ids are gated.
     if (
       targetDamage > 0 &&
-      (abilityId !== 'ABILITY_INFLATABLE' || targetTurnDamaged(state, targetId, hpDealt)) &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE', 'FLYING') &&
       (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext))
