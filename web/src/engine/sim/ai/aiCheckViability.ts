@@ -42,10 +42,13 @@
 // aiCheckBadMove.ts's own header gaps -- it is the DEFENDER's real last used
 // move (`battler.lastMove`, a tracked field), so every read of it below is
 // live data, not a gap. `AI_DATA->partnerMove` is MOVE_NONE in singles
-// (GetAllyChosenMove returns null: no partner slot); the EFFECT_HAZE helper is
-// wired to it in doubles as of dbl-4c (cycle 4c1), but the remaining
-// partnerMove reads below (IncreaseBurnScore/IncreaseConfusionScore/defogBody)
-// still treat it as MOVE_NONE -- a doubles-only gap, not a singles one.
+// (GetAllyChosenMove returns null: no partner slot). In doubles it is wired
+// through GetAllyChosenMove for the EFFECT_HAZE helper (dbl-4c, cycle 4c1),
+// IncreaseBurnScore / IncreaseConfusionScore, defogBody's partner-hazard
+// pre-empt and MOVE_WIDE_GUARD's partner branch (cycle 4c5). The remaining
+// partnerMove-derived term reachable from this file is IncreaseFrostbiteScore's
+// AI_CanGiveFrostbite (its PartnerMoveEffectIsStatusSameTarget operand, which
+// the sim helper still omits) -- a doubles-only gap, not a singles one.
 //
 // RNG: AI_CheckViability itself contains 35 direct `Random()`/`AI_RandLessThan`
 // lines across its FULL range (:2515-3986, lead's own grep count) -- every one
@@ -213,6 +216,8 @@ import {
   aiCanBurn,
   canGetFrostbite,
   aiCanGiveFrostbite,
+  isHazardMoveEffect,
+  isConfusionMoveEffect,
   battlerAbility,
   u8,
   countNegativeStatStages,
@@ -891,10 +896,10 @@ function increaseSleepScore(state: BattleState, battlerAtk: number, battlerDef: 
 }
 
 /** `IncreaseConfusionScore(battlerAtk, battlerDef, move, score)`,
- * battle_ai_util.c:2733-2746. This helper still treats `AI_DATA->partnerMove`
- * as MOVE_NONE (doubles-only gap: it is not wired to GetAllyChosenMove here)
- * so `IsConfusionMoveEffect(gBattleMoves
- * [AI_DATA->partnerMove].effect)` is always false here. No RNG. */
+ * battle_ai_util.c:2733-2746. The C's `!IsConfusionMoveEffect(gBattleMoves
+ * [AI_DATA->partnerMove].effect)` is a real doubles read now: the partner's
+ * chosen move comes from GetAllyChosenMove (MOVE_NONE/null in singles, where
+ * `IsConfusionMoveEffect` is false). No RNG. */
 function increaseConfusionScore(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -906,7 +911,9 @@ function increaseConfusionScore(state: BattleState, battlerAtk: number, battlerD
   const canConfuse = canBeConfused(defender, unmodelled)
   const move = deps.moveData(moveId)
   const secondaryOk = moveConfusionThresholdOk(move)
-  if (canConfuse && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_CONFUSION', deps) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_STATUS', deps) && secondaryOk) {
+  const partnerMove = getAllyChosenMove(state, battlerAtk)
+  const partnerEffect = partnerMove ? (deps.moveData(partnerMove)?.effect ?? null) : null
+  if (canConfuse && !isConfusionMoveEffect(partnerEffect) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_CONFUSION', deps) && !aiHoldEffectIs(defender, 'HOLD_EFFECT_CURE_STATUS', deps) && secondaryOk) {
     if (hasFlag(defender.mon.status1, STATUS1_PARALYSIS) || (selfAbility(state, deps, attacker, 'ABILITY_SERENE_GRACE') && hasMoveEffect(attacker, 'EFFECT_FLINCH_HIT', deps))) {
       score += 3
     } else {
@@ -1092,10 +1099,12 @@ function shouldPoisonSelf(state: BattleState, battlerId: number, deps: AiDamageD
   )
 }
 
-/** `ShouldBurnSelf(battler)`, battle_ai_util.c:2059-2068. */
+/** `ShouldBurnSelf(battler)`, battle_ai_util.c:2059-2068. The C's first
+ * condition is `CanBeBurned(battler)` (it does NOT call AI_CanBurn), so the
+ * partner term is not involved: `aiCanBurn` gets a null partner. */
 function shouldBurnSelf(state: BattleState, battlerId: number, deps: AiDamageDeps, unmodelled: string[]): boolean {
   const battler = state.battlers[battlerId] as BattlerState
-  if (!aiCanBurn(battler, unmodelled)) return false
+  if (!aiCanBurn(battler, unmodelled, null, deps)) return false
   return (
     selfAbility(state, deps, battler, 'ABILITY_QUICK_FEET') ||
     selfAbility(state, deps, battler, 'ABILITY_HEATPROOF') ||
@@ -1122,8 +1131,9 @@ function shouldFrostbiteSelf(state: BattleState, battlerId: number, deps: AiDama
 }
 
 /** `IncreaseBurnScore(battlerAtk, battlerDef, move, score)`, battle_ai_util.c:
- * 2688-2699. `AI_CanBurn`'s `partnerMove` term is still treated as MOVE_NONE
- * here (doubles-only gap: not wired to GetAllyChosenMove). No RNG. */
+ * 2688-2699. `AI_CanBurn`'s partner term is the ally's real chosen move
+ * (`AI_DATA->partnerMove` -> GetAllyChosenMove), so a Will-O-Wisp the partner
+ * already picked on the same target suppresses the score. No RNG. */
 function increaseBurnScore(state: BattleState, battlerAtk: number, battlerDef: number, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1132,7 +1142,7 @@ function increaseBurnScore(state: BattleState, battlerAtk: number, battlerDef: n
     unmodelled.push(...faint.unmodelled)
     if (faint.canFaint) return score
   }
-  if (aiCanBurn(defender, unmodelled)) {
+  if (aiCanBurn(defender, unmodelled, getAllyChosenMove(state, battlerAtk), deps)) {
     score++
     if (hasMoveWithSplit(defender, 'PHYSICAL', deps)) {
       const canFaint = canTargetFaintAi(state, battlerDef, battlerAtk, deps)
@@ -1252,9 +1262,10 @@ function countBattlerStatIncreases(battler: BattlerState, countEvasionAcc: boole
  * enters by `FALLTHROUGH` after its own IncreaseStatUpScore. The C's inner
  * `break`s all leave the `switch (move)` and then the case -- early returns
  * here. The `isDoubleBattle` partner-hazard pre-empt (:3390-3394,
- * `IsHazardMoveEffect(partnerMove effect)`) is not transcribed yet; it reads
- * `AI_DATA->partnerMove`, which this helper still treats as MOVE_NONE (a
- * doubles-only gap), so `IsHazardMoveEffect` has no call site to port. */
+ * `IsHazardMoveEffect(partnerMove effect) && GetWhoStrikesFirst(battlerAtk,
+ * BATTLE_PARTNER(battlerAtk), TRUE) == 1`) reads the ally's real chosen move
+ * (GetAllyChosenMove) and skips the evasion bonus when the partner is setting
+ * hazards up and strikes first; the C's `break` is this switch's own `break`. */
 function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, moveId: string, score: number, deps: AiDamageDeps, unmodelled: string[]): number {
   const attacker = state.battlers[battlerAtk] as BattlerState
   const defender = state.battlers[battlerDef] as BattlerState
@@ -1269,6 +1280,16 @@ function defogBody(state: BattleState, battlerAtk: number, battlerDef: number, m
         score += 3
       } else if (!hasFlag(defSide, SIDE_STATUS_SPIKES)) {
         // Don't blow away hazards if you set them up
+        if (isValidDoubleBattle(state, battlerAtk)) {
+          const partnerMove = getAllyChosenMove(state, battlerAtk)
+          const partnerEffect = partnerMove ? (deps.moveData(partnerMove)?.effect ?? null) : null
+          // Partner is going to set up hazards, and goes first. GetWhoStrikesFirst
+          // returns 1 when its SECOND argument (the partner) is faster
+          // (battle_main.c:4391-4396).
+          if (isHazardMoveEffect(partnerEffect) && getWhoStrikesFirst(state, battlerAtk, battlePartner(battlerAtk), [null, null, null, null], true, deps.turnOrder, deps.statStageRatios) === 1) break // Don't use Defog if partner is going to set up hazards
+        }
+
+        // check defog lowering evasion
         if (shouldLowerStat(state, deps, defender, STAT_EVASION, deps.grounding.attackerHasMoldBreaker, unmodelled)) {
           if (defender.mon.statStages[STAT_EVASION] > 7 || hasMoveWithLowAccuracy(attacker, 90, true, deps, unmodelled)) score += 2
           else score++
@@ -2399,6 +2420,17 @@ function applyMoveEffectSwitch(
           const predictedTarget = predicted ? deps.moveData(predicted)?.target : undefined
           if (predicted !== null && (predictedTarget === 'BOTH' || predictedTarget === 'FOES_AND_ALLY')) {
             score = protectChecks(state, battlerAtk, battlerDef, predicted, score, deps)
+          } else if (isDoubleBattle) {
+            // battle_ai_main.c:3163-3165 -- the ally's chosen move is a
+            // spread move: guard it unless the attacker has Telepathy
+            // (`BattlerHasAbility(battlerAtk, ABILITY_TELEPATHY, TRUE)`; the
+            // attacker is its own gBattlerAttacker, so this is selfAbility).
+            // The C passes the PREDICTED move (MOVE_NONE here), which
+            // protectChecks treats as "no predicted move" and rolls.
+            const partnerMove = getAllyChosenMove(state, battlerAtk)
+            if (partnerMove && deps.moveData(partnerMove)?.target === 'FOES_AND_ALLY') {
+              if (!selfAbility(state, deps, attacker, 'ABILITY_TELEPATHY')) score = protectChecks(state, battlerAtk, battlerDef, predicted, score, deps)
+            }
           }
           break
         }

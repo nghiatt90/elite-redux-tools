@@ -767,12 +767,20 @@ export function isStickyHold(state: BattleState, deps: AiDamageDeps, defender: B
 }
 
 /** AI_CanBurn/CanBeBurned, battle_ai_util.c:2079-2084 + battle_util.c:5061-5069.
+ * The C's second disjunct is `gBattleMoves[partnerMove].effect ==
+ * EFFECT_WILL_O_WISP` -- the ally is about to burn the same target, so the AI
+ * should not double up. `partnerMove` is `AI_DATA->partnerMove`, i.e.
+ * `getAllyChosenMove` (MOVE_NONE/null in singles). Passed by each caller
+ * rather than read here: the two aiCheckBadMove.ts call sites pass the ally's
+ * real chosen move, while ShouldBurnSelf passes null because the C calls
+ * `CanBeBurned` there, not AI_CanBurn -- see their call sites.
  * IsMyceliumMightActive and IsStatusImmune(CHECK_BURN) both need ability-hook
  * wiring this batch does not have -- same gap shape as part 1's canBePoisoned/
  * canSleep/canBeParalyzedBase/canBeConfused. */
-export function aiCanBurn(defender: BattlerState, unmodelled: string[]): boolean {
+export function aiCanBurn(defender: BattlerState, unmodelled: string[], partnerMove: string | null, deps: AiDamageDeps): boolean {
   if (hasFlag(defender.mon.status1, STATUS1_ANY)) return false
   if (isBattlerOfType(defender, 'FIRE')) return false
+  if (partnerMove !== null && deps.moveData(partnerMove)?.effect === 'EFFECT_WILL_O_WISP') return false
   unmodelled.push('AI_CanBurn/CanBeBurned: IsMyceliumMightActive is gapped (no current-move-ignores-immunity tracking) and IsStatusImmune(battlerDef, CHECK_BURN) needs an onCanStatusType ability-hook scan this batch does not wire; treated as not protected')
   return true
 }
@@ -856,7 +864,7 @@ function moveCallsOtherMove(moveId: string | null): boolean {
  * EFFECT_TOXIC_SPIKES / EFFECT_STICKY_WEB / EFFECT_STEALTH_ROCK. EFFECT_DEFOG's
  * doubles pre-empt (:1676-1683) calls it with the ally's chosen move's effect
  * to tell whether the partner is about to set hazards up. */
-function isHazardMoveEffect(effect: string | null): boolean {
+export function isHazardMoveEffect(effect: string | null): boolean {
   return effect === 'EFFECT_SPIKES' || effect === 'EFFECT_TOXIC_SPIKES' || effect === 'EFFECT_STICKY_WEB' || effect === 'EFFECT_STEALTH_ROCK'
 }
 
@@ -864,7 +872,7 @@ function isHazardMoveEffect(effect: string | null): boolean {
  * EFFECT_FLATTER / EFFECT_TEETER_DANCE only. EFFECT_CONFUSE_HIT is commented
  * out in the C (it is only called for Electric Terrain there), so a partner's
  * MOVE_CONFUSE_RAY (EFFECT_CONFUSE) deliberately does NOT count. */
-function isConfusionMoveEffect(effect: string | null): boolean {
+export function isConfusionMoveEffect(effect: string | null): boolean {
   return effect === 'EFFECT_SWAGGER' || effect === 'EFFECT_FLATTER' || effect === 'EFFECT_TEETER_DANCE'
 }
 
@@ -1988,7 +1996,8 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_WILL_O_WISP':
-      if (!aiCanBurn(defender, unmodelled) || isMagicGuardProtected(state, defender)) score -= 10
+      // battle_ai_main.c:1395 -- `AI_CanBurn(battlerAtk, battlerDef, AI_DATA->partnerMove)`.
+      if (!aiCanBurn(defender, unmodelled, partnerMove, deps) || isMagicGuardProtected(state, defender)) score -= 10
       break
     case 'EFFECT_MEMENTO':
       if (countUsablePartyMons(state, battlerAtk) === 0 || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
@@ -2050,7 +2059,8 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         unmodelled.push(...r.unmodelled)
         if (!r.canPoison) score -= 10
       } else if (hasFlag(attacker.mon.status1, STATUS1_BURN)) {
-        if (!aiCanBurn(defender, unmodelled)) score -= 10
+        // battle_ai_main.c:1436 -- `AI_CanBurn(battlerAtk, battlerDef, AI_DATA->partnerMove)`.
+        if (!aiCanBurn(defender, unmodelled, partnerMove, deps)) score -= 10
       } else if (hasFlag(attacker.mon.status1, STATUS1_FROSTBITE)) {
         const r = aiCanGiveFrostbite(state, attacker, defender, moveId, deps)
         unmodelled.push(...r.unmodelled)
