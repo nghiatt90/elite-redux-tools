@@ -407,7 +407,7 @@ function canMoveFaintBattler(state: BattleState, moveId: string | null, attacker
  * skipped (status-move accuracy==0 already covers the dominant real case,
  * "always hits" moves). `AI_DATA->moveLimitations` is not read here (every
  * move usable, same as elsewhere in this batch). */
-function hasMoveWithLowAccuracy(battler: BattlerState, accCheck: number, ignoreStatus: boolean, deps: AiDamageDeps, unmodelled: string[]): boolean {
+export function hasMoveWithLowAccuracy(battler: BattlerState, accCheck: number, ignoreStatus: boolean, deps: AiDamageDeps, unmodelled: string[]): boolean {
   unmodelled.push('HasMoveWithLowAccuracy: AI_GetMoveAccuracy (weather/item/ability-modified accuracy) is approximated by the move\'s own declared accuracy')
   for (const moveId of battler.mon.moves) {
     if (!moveId) continue

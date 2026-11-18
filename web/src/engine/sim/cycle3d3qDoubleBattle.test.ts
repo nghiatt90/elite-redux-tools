@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 // Cycle 3d3q (dbl-4b first slice): AI_DoubleBattle (battle_ai_main.c:2213-2511)
 // minus the partner-target branch body (:2303-2483, ported later: ability loop
-// in cycle 3d3r, effect switch left to dbl-4b3), plus
+// in cycle 3d3r, attack-effect switch in cycle 3d3s), plus
 // GetAllyChosenMove (battle_ai_util.c:2277-2287).
 //
 // C lines checked:
@@ -11,8 +11,8 @@
 //     own-effect switch          :2257-2272
 //     global-weather switch      :2274-2301
 //     partner-target branch tail :2484 (ability loop :2303-2398 ported in
-//                                 cycle 3d3r; effect switch :2401-2483 stays
-//                                 for dbl-4b3)
+//                                 cycle 3d3r; effect switch :2395-2482 ported
+//                                 in cycle 3d3s)
 //     opponent branch            :2485-2510
 //   GetAllyChosenMove            battle_ai_util.c:2277-2287
 //   IsTrappingMoveEffect         battle_ai_util.c:1501-1513
@@ -27,12 +27,12 @@
 // 1: the ally then has the LOWER id, which is the only way GetAllyChosenMove
 // returns a move at all (`partnerBattler > sBattler_AI` -> MOVE_NONE). The
 // wiring case uses the production orientation instead (AI 1, ally 3) so the
-// partner-target note can be switched on and off by fainting the ally.
+// ally's row is scored (its rng draws appear) and disappears when it faints.
 //
-// RNG: AI_DoubleBattle itself draws nothing. The two getWhoStrikesFirst calls
-// only draw on a speed TIE, and every fixture below gives the two battlers
-// distinct speeds, so no test here scripts rng except the chooseMoveOrAction_
-// Doubles wiring case, which is the chooser's own draws.
+// RNG: AI_DoubleBattle itself draws nothing except getWhoStrikesFirst's
+// speed-tie break. Every fixture below gives the two battlers distinct speeds,
+// so no test here scripts rng except the chooseMoveOrAction_Doubles wiring
+// case, which is the chooser's own draws.
 
 import { describe, expect, it } from 'vitest'
 
@@ -412,7 +412,7 @@ describe('opponent branch (:2485-2510)', () => {
 })
 
 describe('partner-target branch tail (:2484)', () => {
-  it('subtracts 30 and reports the named dbl-4b3 gap', () => {
+  it('subtracts 30 with no dbl-4b3 gap note left', () => {
     const { state, deps } = allyFixture({
       aiMoves: ['MOVE_TACKLE', null, null, null],
       partnerMoves: [null, null, null, null],
@@ -421,9 +421,10 @@ describe('partner-target branch tail (:2484)', () => {
 
     const result = scoreAgainst(state, deps, 'MOVE_TACKLE', 1) // battlerDef == our ally
     expect(result.score).toBe(70)
-    // The ability loop (:2303-2398) is ported (cycle 3d3r); only the
-    // attack-effect switch at battle_ai_main.c:2401-2483 remains for dbl-4b3.
-    expect(result.unmodelled).toContain('AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported')
+    // The attack-effect switch at battle_ai_main.c:2395-2482 is ported (cycle
+    // 3d3s); Tackle's effect is 0 (EFFECT_HIT), which matches no case, so the
+    // unconditional score -= 30 at :2484 is the only movement.
+    expect(result.unmodelled.some((line) => line.startsWith('AI_DoubleBattle: partner-target attack-effect switch'))).toBe(false)
   })
 })
 
@@ -440,9 +441,9 @@ describe('DISPATCH wiring (AI_FLAG_DOUBLE_BATTLE, bit 7)', () => {
     return { state, deps: aiDamageDepsFor(data, state) }
   }
 
-  const NOTE = 'AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported'
+  const NOTE_PREFIX = 'AI_DoubleBattle: partner-target attack-effect switch'
 
-  it('runs through chooseMoveOrActionDoubles and reports the partner note for the allied row', () => {
+  it('runs through chooseMoveOrActionDoubles with no partner gap note for the allied row', () => {
     const { state, deps } = wiringFixture()
     const rng = scriptedRng([0, 0, 0, 0, 0, 0, 0]) // 3 scored targets x 2 + 1 final
     state.rng = rng
@@ -450,7 +451,9 @@ describe('DISPATCH wiring (AI_FLAG_DOUBLE_BATTLE, bit 7)', () => {
     const result = chooseMoveOrActionDoubles(state, 1, deps)
 
     expect(result.moveIndex).toBe(0)
-    expect(result.unmodelled.filter((line) => line === NOTE)).toHaveLength(1)
+    // battle_ai_main.c:2395-2482 is ported as of cycle 3d3s; the former
+    // placeholder note is gone. Tackle matches no case, so :2484's -30 applies.
+    expect(result.unmodelled.filter((line) => line.startsWith(NOTE_PREFIX))).toHaveLength(0)
     expect(rng.overrun).toBe(false)
   })
 
@@ -463,7 +466,7 @@ describe('DISPATCH wiring (AI_FLAG_DOUBLE_BATTLE, bit 7)', () => {
     const result = chooseMoveOrActionDoubles(state, 1, deps)
 
     expect(result.moveIndex).toBe(0)
-    expect(result.unmodelled.filter((line) => line === NOTE)).toHaveLength(0)
+    expect(result.unmodelled.filter((line) => line.startsWith(NOTE_PREFIX))).toHaveLength(0)
     expect(rng.overrun).toBe(false)
   })
 })

@@ -192,14 +192,16 @@ function scriptedRng(values: number[]): RandomSource & { calls: number; overrun:
   return rng
 }
 
-const DBL43_NOTE = 'AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported'
+const DBL43_NOTE_PREFIX = 'AI_DoubleBattle: partner-target attack-effect switch'
 
 describe('partner-target damage gate (:2304) and baseline', () => {
-  it('an ordinary partner ability never scores: -30 and the dbl-4b3 gap note', () => {
+  it('an ordinary partner ability never scores: -30 and no dbl-4b3 gap note', () => {
     const { state, deps } = partnerFixture({ aiMoves: ['MOVE_THUNDER_WAVE', null, null, null] })
     const result = scoreAgainstPartner(state, deps, 'MOVE_THUNDER_WAVE')
     expect(result.score).toBe(70)
-    expect(result.unmodelled).toContain(DBL43_NOTE)
+    // The switch at battle_ai_main.c:2395-2482 is ported (cycle 3d3s);
+    // Thunder Wave's EFFECT_PARALYZE matches no case, so :2484's -30 stands.
+    expect(result.unmodelled.some((line) => line.startsWith(DBL43_NOTE_PREFIX))).toBe(false)
   })
 
   it('draws no rng', () => {
@@ -435,7 +437,8 @@ describe('gates (:2306)', () => {
     clearHpAware(state)
     const result = scoreAgainstPartner(state, deps, 'MOVE_THUNDER_WAVE')
     expect(result.score).toBe(70)
-    expect(result.unmodelled).toContain(DBL43_NOTE)
+    // dbl-4b3's switch is ported; Thunder Wave matches no case there either.
+    expect(result.unmodelled.some((line) => line.startsWith(DBL43_NOTE_PREFIX))).toBe(false)
   })
 
   it('a move whose own data target is BOTH skips the ability loop', () => {

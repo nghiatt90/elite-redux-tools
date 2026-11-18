@@ -8,8 +8,8 @@
 // any live path: `chooseAiAction` still calls the singles half only (that is
 // dbl-4d). AI_DoubleBattle's own scoring is ported as of dbl-4b (cycle 3d3q,
 // aiDoubleBattle.ts), and its partner-target DAMAGE GATE and ability loop
-// (:2303-2398) landed in dbl-4b2 (cycle 3d3r); only the partner-target
-// attack-effect switch (:2401-2483, dbl-4b3) still reports a named gap.
+// (:2303-2398) landed in dbl-4b2 (cycle 3d3r); the partner-target
+// attack-effect switch (:2395-2482) landed in dbl-4b3 (cycle 3d3s).
 // `AI_DATA->partnerMove = GetAllyChosenMove()`
 // (:368) is still not filled by the chooser itself: aiDoubleBattle reads
 // `state.chosenMovePositions` through `getAllyChosenMove` directly, which is
@@ -69,8 +69,9 @@ const DISPATCH: Record<number, Scorer> = {
   1: (s, a, d, m, i, sc, deps) => aiTryToFaint(s, a, d, m, i, sc, deps), // AI_FLAG_TRY_TO_FAINT
   2: (s, a, d, m, i, sc, deps) => aiCheckViability(s, a, d, m, sc, deps, i), // AI_FLAG_CHECK_VIABILITY -- part 1 (this batch), part 2 to follow
   4: (s, a, d, m, _i, sc, deps) => aiRisky(s, a, d, m, sc, deps), // AI_FLAG_RISKY
-  // AI_FLAG_DOUBLE_BATTLE -- all but the partner-target attack-effect switch
-  // (:2401-2483, dbl-4b3), which reports a named gap.
+  // AI_FLAG_DOUBLE_BATTLE -- AI_DoubleBattle, complete since dbl-4b3
+  // (cycle 3d3s): the partner-target attack-effect switch (:2395-2482) is
+  // ported.
   7: (s, a, d, m, i, sc, deps) => aiDoubleBattle(s, a, d, m, i, sc, deps),
   8: (s, a, d, m, _i, sc, deps) => aiHPAware(s, a, d, m, sc, deps), // AI_FLAG_HP_AWARE
 }
