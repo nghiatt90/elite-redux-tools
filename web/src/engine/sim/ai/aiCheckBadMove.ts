@@ -330,7 +330,7 @@ const STAT_LOWERING_EFFECTS = new Set([
   'EFFECT_ACCURACY_DOWN', 'EFFECT_EVASION_DOWN', 'EFFECT_ATTACK_DOWN_2', 'EFFECT_DEFENSE_DOWN_2', 'EFFECT_SPEED_DOWN_2',
   'EFFECT_SPECIAL_ATTACK_DOWN_2', 'EFFECT_SPECIAL_DEFENSE_DOWN_2', 'EFFECT_ACCURACY_DOWN_2', 'EFFECT_EVASION_DOWN_2',
 ])
-export function isStatLoweringMoveEffect(effect: string | null): boolean {
+function isStatLoweringMoveEffect(effect: string | null): boolean {
   return !!effect && STAT_LOWERING_EFFECTS.has(effect)
 }
 

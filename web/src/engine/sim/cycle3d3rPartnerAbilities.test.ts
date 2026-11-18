@@ -16,9 +16,9 @@
 //   BattlerStatCanRise                battle_ai_util.c:1293-1303
 //   DoesBattlerIgnoreAbilityChecks    battle_ai_util.c:1046-1051
 //   HasMoveWithSplit / HasMoveWithType battle_ai_util.c:1371-1391
-//   IsStatLoweringEffect              battle_ai_util.c:1605-1629 (the port
-//     calls aiCheckBadMove's narrower IsStatLoweringMoveEffect, :1096-1116;
-//     see REPORT.md uncertainty 1)
+//   IsStatLoweringEffect              battle_ai_util.c:1605-1629 (ported as
+//     aiScorers.ts's isStatLoweringEffect; the narrower
+//     IsStatLoweringMoveEffect, :1096-1116, is a different predicate)
 //
 // LAYOUT. Doubles, so battlers 0/2 are the player side (the AI's foes) and 1/3
 // the opponent side. The AI is battler 3 and its ally (the scored target) is
@@ -53,7 +53,7 @@ import { aiDamageDepsFor } from './driver/session'
 import { createRandomSource } from './rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from './state'
 import type { SimItemData } from './dataContext'
-import { MAX_STAT_STAGE, STAT_SPEED, STATUS3_GASTRO_ACID } from './constants'
+import { MAX_STAT_STAGE, STAT_ATK, STAT_SPEED, STATUS3_GASTRO_ACID } from './constants'
 import { AI_FLAG_HP_AWARE } from './ai/aiFlags'
 import type { AiDamageDeps } from './ai/aiCalcDamage'
 import { aiDoubleBattle } from './ai/aiDoubleBattle'
@@ -140,6 +140,20 @@ function withDiscouragedEffect(deps: AiDamageDeps, moveId: string): AiDamageDeps
       const move = real(id)
       if (id !== moveId || !move) return move
       return { ...move, effect: 'EFFECT_SUPERPOWER' }
+    },
+  }
+}
+
+/** A deps whose move table reports `effect` for `moveId`, leaving every other
+ * field (notably `power`, so the damage gate still reads it) intact. */
+function withEffect(deps: AiDamageDeps, moveId: string, effect: string): AiDamageDeps {
+  const real = deps.moveData
+  return {
+    ...deps,
+    moveData: (id) => {
+      const move = real(id)
+      if (id !== moveId || !move) return move
+      return { ...move, effect }
     },
   }
 }
@@ -382,6 +396,31 @@ describe('Contrary / Contempt / Defiant / Competitive (:2359-2374)', () => {
   it('Contempt follows the Defiant arm', () => {
     const { state, deps } = partnerFixture({ aiMoves: ['MOVE_SCREECH', null, null, null], partnerAbility: 'ABILITY_CONTEMPT' })
     expect(scoreAgainstPartner(state, deps, 'MOVE_SCREECH').score).toBe(101)
+  })
+
+  // IsStatLoweringEffect, battle_ai_util.c:1605-1629, is the 14
+  // IsStatLoweringMoveEffect labels PLUS Tickle/Captivate/Noble Roar. The
+  // overlay keeps MOVE_SCREECH's `power` 0, so the partner-target damage gate
+  // still reads MOVE_POWER_WEAK (aiScorers.ts:250).
+  it('Contrary scores +2 for EFFECT_TICKLE (not in IsStatLoweringMoveEffect)', () => {
+    const { state, deps } = partnerFixture({ aiMoves: ['MOVE_SCREECH', null, null, null], partnerAbility: 'ABILITY_CONTRARY' })
+    expect(scoreAgainstPartner(state, withEffect(deps, 'MOVE_SCREECH', 'EFFECT_TICKLE'), 'MOVE_SCREECH').score).toBe(102)
+  })
+
+  it('Defiant scores +1 for EFFECT_CAPTIVATE with Attack below max', () => {
+    const { state, deps } = partnerFixture({ aiMoves: ['MOVE_SCREECH', null, null, null], partnerAbility: 'ABILITY_DEFIANT' })
+    setStatStage(state, 1, STAT_ATK, MAX_STAT_STAGE - 1)
+    expect(scoreAgainstPartner(state, withEffect(deps, 'MOVE_SCREECH', 'EFFECT_CAPTIVATE'), 'MOVE_SCREECH').score).toBe(101)
+  })
+
+  it('Competitive scores +1 for EFFECT_NOBLE_ROAR with Sp. Atk below max', () => {
+    const { state, deps } = partnerFixture({ aiMoves: ['MOVE_SCREECH', null, null, null], partnerAbility: 'ABILITY_COMPETITIVE' })
+    expect(scoreAgainstPartner(state, withEffect(deps, 'MOVE_SCREECH', 'EFFECT_NOBLE_ROAR'), 'MOVE_SCREECH').score).toBe(101)
+  })
+
+  it('Contrary does not score for an effect outside IsStatLoweringEffect: -30', () => {
+    const { state, deps } = partnerFixture({ aiMoves: ['MOVE_SCREECH', null, null, null], partnerAbility: 'ABILITY_CONTRARY' })
+    expect(scoreAgainstPartner(state, withEffect(deps, 'MOVE_SCREECH', 'EFFECT_HIT'), 'MOVE_SCREECH').score).toBe(70)
   })
 })
 

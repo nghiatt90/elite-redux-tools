@@ -456,6 +456,11 @@ const STAT_LOWERING_EFFECTS = new Set([
   'EFFECT_TICKLE', 'EFFECT_CAPTIVATE', 'EFFECT_NOBLE_ROAR',
 ]) // :1605-1629
 
+/** IsStatLoweringEffect, battle_ai_util.c:1605-1629. */
+export function isStatLoweringEffect(effect: string | null): boolean {
+  return !!effect && STAT_LOWERING_EFFECTS.has(effect)
+}
+
 /** High-HP discouraged effects, AI_HPAware :4204-4218 (`GetHealthPercentage > 70`). */
 const HP_AWARE_HIGH_HP_DISCOURAGED = new Set([
   'EFFECT_EXPLOSION', 'EFFECT_RESTORE_HP', 'EFFECT_REST', 'EFFECT_DESTINY_BOND', 'EFFECT_ENDURE', 'EFFECT_MORNING_SUN',

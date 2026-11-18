@@ -38,8 +38,8 @@ import { isBattlerGrounded } from '../grounding'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { getBattlerBattleMoveTargetFlags } from '../moveTargetFlags'
 import { aiHoldEffectParam, holdEffectId, isBattlerAIControlled, type AiDamageDeps } from './aiCalcDamage'
-import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, getMoveDamageResult, isTargetingPartner, MOVE_POWER_WEAK } from './aiScorers'
-import { battlerAbility, battlerStatCanRise, doesBattlerIgnoreAbilityChecks, hasMoveWithSplit, hasMoveWithType, isBattlerOfType, isStatLoweringMoveEffect, moveType as resolveMoveType } from './aiCheckBadMove'
+import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, getMoveDamageResult, isStatLoweringEffect, isTargetingPartner, MOVE_POWER_WEAK } from './aiScorers'
+import { battlerAbility, battlerStatCanRise, doesBattlerIgnoreAbilityChecks, hasMoveWithSplit, hasMoveWithType, isBattlerOfType, moveType as resolveMoveType } from './aiCheckBadMove'
 import { isSuppressed, selfAbility } from './aiAbilityHelpers'
 import { isAbilityOfRating } from './aiAbilityRatings'
 import { isBattlerAlive } from './aiPipeline'
@@ -326,16 +326,16 @@ export function aiDoubleBattle(
               break
             }
             case 'ABILITY_CONTRARY':
-              if (isStatLoweringMoveEffect(effect)) return { score: score + 2, unmodelled }
+              if (isStatLoweringEffect(effect)) return { score: score + 2, unmodelled }
               break
             case 'ABILITY_CONTEMPT':
             case 'ABILITY_DEFIANT':
-              if (isStatLoweringMoveEffect(effect) && battlerStatCanRise(state, partner, STAT_ATK, deps)) {
+              if (isStatLoweringEffect(effect) && battlerStatCanRise(state, partner, STAT_ATK, deps)) {
                 return { score: score + 1, unmodelled }
               }
               break
             case 'ABILITY_COMPETITIVE':
-              if (isStatLoweringMoveEffect(effect) && battlerStatCanRise(state, partner, STAT_SPATK, deps)) {
+              if (isStatLoweringEffect(effect) && battlerStatCanRise(state, partner, STAT_SPATK, deps)) {
                 return { score: score + 1, unmodelled }
               }
               break
