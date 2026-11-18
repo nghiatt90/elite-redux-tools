@@ -26,8 +26,12 @@
 // `BattleState` rather than dead by construction. dbl-4c3 transcribed the
 // def-partner ability checks (:674-706) and the doubles halves of
 // EFFECT_ROTOTILLER, EFFECT_GEAR_UP, EFFECT_MAGNETIC_FLUX and
-// EFFECT_PERISH_SONG; EFFECT_HAZE's doubles half is the one remaining from the
-// original list and is still not transcribed branch by branch. The five partner
+// EFFECT_PERISH_SONG; dbl-4c4 transcribed the doubles halves of
+// EFFECT_FLOWER_SHIELD, EFFECT_AROMATIC_MIST, EFFECT_PROTECT (guards and
+// protectUses), EFFECT_DEFOG's partner-hazard pre-empt, EFFECT_CONFUSE/
+// SWAGGER/FLATTER's partner-move operand and EFFECT_PLEDGE. EFFECT_HAZE's
+// doubles half is the one remaining from the original list and is still not
+// transcribed branch by branch. The five partner
 // helpers that need no `gBattleStruct->moveTarget`
 // (`PartnerHasSameMoveEffectWithoutTarget`, `PartnerMoveIsSameNoTarget`,
 // `PartnerMoveEffectIsWeather`, `PartnerMoveEffectIsTerrain`, `PartnerMoveIs`)
@@ -848,11 +852,21 @@ function moveCallsOtherMove(moveId: string | null): boolean {
   return !!moveId && OTHER_MOVE_CALLING_MOVES.has(moveId)
 }
 
-/** IsHazardMoveEffect, battle_ai_util.c:1118-1127 -- EFFECT_DEFOG's own call
- * site (:1677) is inside the isDoubleBattle-gated "partner is about to set up
- * hazards" pre-empt, which is not transcribed yet (dbl-4c2), so this helper
- * has no live call site here; kept undefined intentionally (not ported as
- * unreachable dead code, unlike the partner helpers that do have call sites). */
+/** IsHazardMoveEffect, battle_ai_util.c:1118-1127 -- EFFECT_SPIKES /
+ * EFFECT_TOXIC_SPIKES / EFFECT_STICKY_WEB / EFFECT_STEALTH_ROCK. EFFECT_DEFOG's
+ * doubles pre-empt (:1676-1683) calls it with the ally's chosen move's effect
+ * to tell whether the partner is about to set hazards up. */
+function isHazardMoveEffect(effect: string | null): boolean {
+  return effect === 'EFFECT_SPIKES' || effect === 'EFFECT_TOXIC_SPIKES' || effect === 'EFFECT_STICKY_WEB' || effect === 'EFFECT_STEALTH_ROCK'
+}
+
+/** IsConfusionMoveEffect, battle_ai_util.c:1084-1094 -- EFFECT_SWAGGER /
+ * EFFECT_FLATTER / EFFECT_TEETER_DANCE only. EFFECT_CONFUSE_HIT is commented
+ * out in the C (it is only called for Electric Terrain there), so a partner's
+ * MOVE_CONFUSE_RAY (EFFECT_CONFUSE) deliberately does NOT count. */
+function isConfusionMoveEffect(effect: string | null): boolean {
+  return effect === 'EFFECT_SWAGGER' || effect === 'EFFECT_FLATTER' || effect === 'EFFECT_TEETER_DANCE'
+}
 
 /** TERRAIN_HAS_EFFECT, include/battle_util.h:47 -- `!IsAbilityOnField(ABILITY_CLUELESS)`. */
 function terrainHasEffect(state: BattleState, deps: AiDamageDeps): boolean {
@@ -1714,15 +1728,12 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_CONFUSE':
     case 'EFFECT_SWAGGER':
     case 'EFFECT_FLATTER': {
-      // battle_ai_main.c:1166-1170: the second operand is
+      // battle_ai_main.c:1166-1169: the second operand is
       // IsConfusionMoveEffect(gBattleMoves[AI_DATA->partnerMove].effect)
       // (battle_ai_util.c:1084-1094: EFFECT_SWAGGER / EFFECT_FLATTER /
-      // EFFECT_TEETER_DANCE), i.e. the ATTACKER's partner's chosen move.
-      // It is MOVE_NONE -> effect 0 in singles, which is why the old
-      // "never set in singles" note reached the right answer; in doubles a
-      // partner move exists, so the gap is real and is reported here.
-      const partnerMoveIsConfusion = false // IsConfusionMoveEffect(partnerMove) not ported (dbl-4c2).
-      if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: EFFECT_CONFUSE/EFFECT_SWAGGER/EFFECT_FLATTER second operand IsConfusionMoveEffect(AI_DATA->partnerMove) is not ported; treated as false')
+      // EFFECT_TEETER_DANCE). A MOVE_NONE partner move has effect 0 in the C,
+      // which is why the helper takes `null` and returns false for it.
+      const partnerMoveIsConfusion = !!partnerMove && isConfusionMoveEffect(deps.moveData(partnerMove)?.effect ?? null)
       if (!canBeConfused(defender, unmodelled) || partnerMoveIsConfusion) score -= 20
       break
     }
@@ -2080,15 +2091,20 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       const r = aiCheckBadMove(state, battlerAtk, battlerDef, 'MOVE_NONE', score, deps)
       return { score: r.score, unmodelled: [...unmodelled, ...r.unmodelled] }
     }
-    case 'EFFECT_FLOWER_SHIELD':
-      // Singles half only; the partner-of-attacker half is dbl-4c2 work.
-      if (!isBattlerOfType(attacker, 'GRASS')) score -= 10
+    case 'EFFECT_FLOWER_SHIELD': {
+      // battle_ai_main.c:1471-1473. `isDoubleBattle` is IsValidDoubleBattle(battlerAtk) (:497).
+      const flowerPartner = state.battlers[battlePartner(battlerAtk)]
+      if (!isBattlerOfType(attacker, 'GRASS') && !(isValidDoubleBattle(state, battlerAtk) && !!flowerPartner && isBattlerOfType(flowerPartner, 'GRASS'))) score -= 10
       break
-    case 'EFFECT_AROMATIC_MIST':
-      // Singles half only (`!isDoubleBattle` is the C's first OR operand); the
-      // doubles operands are dbl-4c2 work.
-      score -= 10
+    }
+    case 'EFFECT_AROMATIC_MIST': {
+      // battle_ai_main.c:1474-1476. A dead (or absent) partner reads as the C's `hp == 0`.
+      const mistPartner = state.battlers[battlePartner(battlerAtk)]
+      if (!isValidDoubleBattle(state, battlerAtk) || !mistPartner || mistPartner.mon.hp === 0 || !battlerStatCanRise(state, mistPartner, 5 /* STAT_SPDEF */, deps)) {
+        score -= 10
+      }
       break
+    }
     case 'EFFECT_BIDE': {
       const defHasDamagingMove = defender.mon.moves.some((m) => m && (deps.moveData(m)?.power ?? 0) !== 0)
       if (!defHasDamagingMove || getHealthPercentage(state, battlerAtk) < 30 || hasFlag(defender.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) score -= 10
@@ -2246,10 +2262,13 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_PROTECT': {
       let decreased = false
       if (moveId === 'MOVE_QUICK_GUARD' || moveId === 'MOVE_WIDE_GUARD' || moveId === 'MOVE_CRAFTY_SHIELD') {
-        // Singles half only (`!isDoubleBattle` is true in singles); the
-        // doubles operands are dbl-4c2 work.
-        score -= 10
-        decreased = true
+        // battle_ai_main.c:1608-1620 -- only penalised outside a doubles battle;
+        // in doubles these fall through to the incapacitated-defender check and
+        // skip the protectUses block ("These moves have infinite usage", :1630).
+        if (!isValidDoubleBattle(state, battlerAtk)) {
+          score -= 10
+          decreased = true
+        }
       } else if (moveId === 'MOVE_MAT_BLOCK' && !attacker.volatiles.isFirstTurn) {
         score -= 10
         decreased = true
@@ -2261,8 +2280,9 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         } else if (moveId !== 'MOVE_QUICK_GUARD' && moveId !== 'MOVE_WIDE_GUARD' && moveId !== 'MOVE_CRAFTY_SHIELD') {
           unmodelled.push("AI_CheckBadMove: GetBattlerSecondaryDamage(battlerAtk) has no port; treated as 0, so the \"will faint after protecting\" branch (>= the attacker's own HP) never fires")
           if (attacker.volatiles.protectUses === 1 && state.rng.random16() % 100 < 50) {
-            // Singles (-6) half only; the doubles half is dbl-4c2 work.
-            score -= 6
+            // battle_ai_main.c:1637-1645 -- the draw is only made when
+            // protectUses == 1, then doubles is -10 and singles -6.
+            score -= isValidDoubleBattle(state, battlerAtk) ? 10 : 6
           } else if (attacker.volatiles.protectUses >= 2) {
             score -= 10
           }
@@ -2289,8 +2309,22 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
         score -= 10 // Don't blow away opposing hazards.
         handled = true
       }
-      // The "partner is about to set up hazards" pre-empt check (:1676-1683)
-      // is dead in singles and not transcribed for doubles yet (dbl-4c2).
+      // battle_ai_main.c:1676-1683 -- in doubles, -10 when the partner's chosen
+      // move is a hazard move AND GetWhoStrikesFirst(PARTNER, battlerAtk, FALSE)
+      // is truthy. That function returns non-zero when its SECOND argument is
+      // faster (battle_main.c:4391-4396: 1 if battler1Speed < battler2Speed,
+      // 0 if it is greater), so the C's truthy result is the sim's `=== 1`,
+      // i.e. the Defog user strikes before its partner -- despite the C's own
+      // inline comment saying the reverse. Ported as the code reads; the C
+      // passes ignoreChosenMoves FALSE, matched here with `false` and no
+      // staged actions (this caller is scoring a hypothetical move).
+      if (!handled && isValidDoubleBattle(state, battlerAtk)) {
+        const partnerEffect = partnerMove ? (deps.moveData(partnerMove)?.effect ?? null) : null
+        if (isHazardMoveEffect(partnerEffect) && getWhoStrikesFirst(state, battlePartner(battlerAtk), battlerAtk, [null, null, null, null], false, deps.turnOrder, deps.statStageRatios) === 1) {
+          score -= 10
+          handled = true
+        }
+      }
       if (!handled) {
         if (defender.mon.statStages[7] /* STAT_EVASION */ === MIN_STAT_STAGE || (defAbility(state, deps, defender, 'ABILITY_CONTRARY', atkMoldBreaker) && !isTargetingPartner(battlerAtk, battlerDef))) {
           score -= 10
@@ -2521,14 +2555,19 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (partnerMoveEffectIsTerrain(state, deps, partnerMove) || getCurrentTerrain(state, deps) === STATUS_FIELD_TOXIC_TERRAIN) score -= 20
       if (!terrainHasEffect(state, deps)) score -= 20
       break
-    case 'EFFECT_PLEDGE':
-      // battle_ai_main.c:1901-1910: the whole body is gated on
-      // `isDoubleBattle && partner hp > 0`, so singles genuinely scores
-      // nothing. The doubles combo check (partnerMove is a DIFFERENT pledge
-      // move and the partner is asleep/frozen -> -10) is not transcribed yet
-      // (dbl-4c2); report it rather than silently scoring as the C would not.
-      if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: EFFECT_PLEDGE combo check (partner chose a different pledge move while asleep/frozen -> -10) is not ported; treated as false')
+    case 'EFFECT_PLEDGE': {
+      // battle_ai_main.c:1901-1910. The whole body is gated on the local
+      // isDoubleBattle (IsValidDoubleBattle, :497) and a living partner; the
+      // combos are only "different pledge moves", and a sleeping/frozen
+      // partner will cause the combo to fail.
+      const pledgePartner = state.battlers[battlePartner(battlerAtk)]
+      if (isValidDoubleBattle(state, battlerAtk) && pledgePartner && pledgePartner.mon.hp > 0) {
+        if (partnerMove !== null && deps.moveData(partnerMove)?.effect === 'EFFECT_PLEDGE' && moveId !== partnerMove) {
+          if (hasFlag(pledgePartner.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) score -= 10
+        }
+      }
       break
+    }
     case 'EFFECT_TRICK_ROOM':
       if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) {
         score -= 10
