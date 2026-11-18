@@ -2570,6 +2570,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_CURSED_BODY') {
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       !attacker.volatiles.disabledMove &&
       !isAbilityStatusProtected(state, attackerId, CHECK_RESTRICTING, targetId, statusDeps) &&
@@ -2589,6 +2590,7 @@ function handleDefenderMoveEndAbility(
     // src/abilities.cc:2213-2224; CHECK(ShouldApplyOnHitEffect(battler)) at :2213.
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'DARK', 'BUG', 'GHOST') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2615,6 +2617,7 @@ function handleDefenderMoveEndAbility(
     // src/abilities.cc:2650-2659; CHECK(ShouldApplyOnHitEffect(battler)) at :2650.
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'WATER') &&
       canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)
@@ -2641,6 +2644,7 @@ function handleDefenderMoveEndAbility(
     // src/abilities.cc:3291-3300; CHECK(ShouldApplyOnHitEffect(battler)) at :3291.
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE', 'WATER') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2667,6 +2671,7 @@ function handleDefenderMoveEndAbility(
     // src/abilities.cc:7339-7348, 12405; CHECK(ShouldApplyOnHitEffect(battler)) at :7339.
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE') &&
       canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)
@@ -2691,7 +2696,7 @@ function handleDefenderMoveEndAbility(
   }
 
   // Cryo Architect onDefender (src/abilities.cc:9602-9633). CHECK(ShouldApplyOnHitEffect(battler)) ->
-  // the holder is alive and the hit dealt damage (the neighbouring defender reading); CHECK(moveType
+  // the holder is alive and TARGET_TURN_DAMAGED is set (the neighbouring defender reading); CHECK(moveType
   // == WATER || ICE). If Def can still rise (CanRaiseStat == CompareStat(..., CMP_LESS_THAN), :9610):
   // a Water move only arms bit 1 of the ability state (`state |= 1 << 1`, :9612-9615) -- the raise
   // happens two end turns later, see endTurn.ts -- while an Ice move raises Def by 1 at once (:9617-9620,
@@ -2700,7 +2705,7 @@ function handleDefenderMoveEndAbility(
   // SetStatChanger + BattleScriptCall(TargetAbilityStatRaiseOnMoveEnd) is transcribed as the
   // Steam Engine / Thermal Exchange changeStatBuffs calls just above.
   if (abilityId === 'ABILITY_CRYO_ARCHITECT') {
-    if (target.mon.hp > 0 && targetDamage > 0 && moveTypeMatches(moveData, 'WATER', 'ICE')) {
+    if (target.mon.hp > 0 && targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && moveTypeMatches(moveData, 'WATER', 'ICE')) {
       const isWater = moveTypeMatches(moveData, 'WATER')
       if (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
         if (isWater) {
@@ -2748,7 +2753,7 @@ function handleDefenderMoveEndAbility(
   // 28. Electromorphosis family (src/abilities.cc:5299-5308, 5313)
   if (abilityId === 'ABILITY_ELECTROMORPHOSIS' || abilityId === 'ABILITY_ATOMIC_BURST') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:5299-5301).
-    if (targetDamage > 0 && target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
       target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
     }
   }
@@ -2757,7 +2762,7 @@ function handleDefenderMoveEndAbility(
   // gBattleMoveDamage = gTurnStructs[battler].dmg: the sim does not maintain TurnState.dmg (first damage taken this turn, :1933),
   // so the hit's own hp dealt stands in -- identical for a single-hit KO of a mon that was undamaged this turn.
   if (abilityId === 'ABILITY_INNARDS_OUT') {
-    if (targetDamage > 0 && attacker.mon.hp > 0 && target.mon.hp <= 0 && !isMagicGuardProtected(state, attacker)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && attacker.mon.hp > 0 && target.mon.hp <= 0 && !isMagicGuardProtected(state, attacker)) {
       applyDamage(state, attackerId, hpDealt, fainted, deps)
       result.attackerDamage += hpDealt
     }
