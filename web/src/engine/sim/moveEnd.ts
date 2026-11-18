@@ -29,7 +29,7 @@
 // 18   | MOVEEND_MIRROR_MOVE             | 4773-4781  | Ported         | Updates lastTakenMove, lastTakenMoveFrom (:4773-4781).
 // 19   | MOVEEND_MULTIHIT_MOVE           | 4880-4921  | Unreachable    | Multi-hit loop; resolved upstream in calculateMoveDamage / attackCanceller.
 // 20   | MOVEEND_MOVE_EFFECTS2_ON_EACH   | 4573-4632  | Ported / Gap   | Ported: Knock Off (:4268-4288), Thief (:4579-4593), Bug Bite (:4595-4597, EatTargetBerry :13221) minus the berry's own effect (gapped), Smack Down (:4598-4606).
-// 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Ported (turn.ts) | BOTH/FOES_AND_ALLY second-target loop lives in executeAction around runMovePipeline (turn.ts, "MOVEEND_NEXT_TARGET" block); not in this ladder because it re-enters the whole effect script.
+// 21   | MOVEEND_NEXT_TARGET             | 4782-4822  | Ported (turn.ts) | BOTH/FOES_AND_ALLY second-target loop lives in executeAction around runMovePipeline (turn.ts, "MOVEEND_NEXT_TARGET" block); because it re-enters the whole effect script, cases 22-30 of that ladder run ONCE after the last pass, in the 'SPREAD_TAIL' call.
 // 22   | MOVEEND_MOVE_EFFECTS2           | 4633-4655  | Gapped (cond.) | Post-target-item move effects (Make It Rain, Burn Up, Scale Shot, Wyrm Wind).
 // 23   | MOVEEND_RECOIL                  | 4457-4517  | Ported         | Recoil self-damage; Magic Guard, noRecoil (Rock Head/Steel Barrel/Bruteforce), halfRecoil.
 // 24   | MOVEEND_CHARGE                  | 4922-4933  | Ported         | Clears STATUS3_CHARGED_UP on Electric damaging move.
@@ -6851,6 +6851,10 @@ export function applyMoveEndClearBits(
     attacker.round.targetAffected = false
     attacker.turn.gemBoost = false
     attacker.statuses3 = clearFlag(attacker.statuses3, STATUS3_ME_FIRST)
+    // :4950-4951 -- the per-move accumulators are cleared here, once, after the whole action (MOVEEND_CLEAR_BITS is in the
+    // tail half of the ladder, so on a spread move this runs once after the last pass, not per target).
+    attacker.turn.damagedMons = 0
+    attacker.turn.savedDmg = 0
   }
   if (target) {
     target.turn.berryReduced = false
@@ -6893,12 +6897,22 @@ export interface MoveEndContext {
   /** MOVE_RESULT_NO_EFFECT (include/constants/battle.h:389) */
   noEffect?: boolean
   /**
-   * Which half of the ladder to walk. MOVEEND_MULTIHIT_MOVE (case 19, :4880-4921) sits in the middle of it: for every hit but
+   * Which slice of the ladder to walk. MOVEEND_MULTIHIT_MOVE (case 19, :4880-4921) sits in the middle of it: for every hit but
    * the last it resets `moveendState` to 0 and re-runs the move's script, so cases 0-18 run once per hit and cases 20-30 once,
    * after the last. 'FIRST' is cases 0-18 (plus the faint hook and ABILITYEFFECT_REACTIVE that bracket them), 'SECOND' is cases
    * 19-30, 'FULL' (the default, every single-hit move) is both in one call.
+   *
+   * The spread loop (MOVEEND_NEXT_TARGET, :4782-4822) uses the same split for a different reason: case 21 resets `moveendState`
+   * to 0 and returns into the effect script for every target but the last, so cases 22-30 never run on those passes.
+   * 'SPREAD_PASS' is cases 0-18 plus case 20 (the MOVEEND_MOVE_EFFECTS2_ON_EACH half that must run per target), and
+   * 'SPREAD_TAIL' is cases 22-30 plus the trailing faint dispatch, run once after the last pass.
    */
-  part?: 'FULL' | 'FIRST' | 'SECOND'
+  part?: 'FULL' | 'FIRST' | 'SECOND' | 'SPREAD_PASS' | 'SPREAD_TAIL'
+  /**
+   * gBattleStruct->changedItems. A spread move's passes and its tail share one map, as one C array is shared: case 20 parks a
+   * stolen item per pass and case 27 hands it over once, at the end. Omitted = a fresh per-call map (the single-hit path).
+   */
+  changedItems?: Map<number, string>
 }
 
 /**
@@ -7274,13 +7288,15 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     doesSubstituteBlockMove(state, attackerId, targetId, moveId, { dataContext: deps.dataContext, grounding: deps.grounding }, [])
   const targetTurnDamaged = hpDealt > 0 && !subAbsorbedHit
   // gBattleStruct->changedItems: items parked at MOVEEND_MOVE_EFFECTS2_ON_EACH and handed over at MOVEEND_CHANGED_ITEMS.
-  const changedItems = new Map<number, string>()
+  // A spread action passes one shared map so a steal parked on an early pass is handed over by the single tail (:4656-4665).
+  const changedItems = ctx.changedItems ?? new Map<number, string>()
 
   const part = ctx.part ?? 'FULL'
   const isNoEffect = ctx.noEffect ?? !(hpDealt > 0 || targetDamage > 0 || targetTurnDamaged)
 
   // Cases 0-18 (see MoveEndContext.part). The block is not re-indented so the single-hit diff stays readable.
-  if (part !== 'SECOND') {
+  // 'SPREAD_TAIL' skips them: case 21 already ran them once per target (:4809 resets moveendState, :4812 re-enters the script).
+  if (part !== 'SECOND' && part !== 'SPREAD_TAIL') {
   // BattleScript_MoveEndTryFaintTarget -> BattleScript_FaintTarget -> onfaintedbyattacker
   // (battle_scripts_1.s:2881-2882, 6911-6912), which runs before moveendall.
   if (target && target.mon.hp === 0 && fainted.includes(targetId)) {
@@ -7557,7 +7573,10 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
     }
   }
 
-  // Case 20: MOVEEND_MOVE_EFFECTS2_ON_EACH (:4573-4632)
+  // Case 20: MOVEEND_MOVE_EFFECTS2_ON_EACH (:4573-4632). Runs on EVERY target pass -- the C reads and clears
+  // gBattleStruct->moveEffect2 at the top of the case (:4576-4577), once per scripted pass. Only the tail skips it, because
+  // case 27 hands over whatever it parked. The block is not re-indented, as above.
+  if (part !== 'SPREAD_TAIL') {
   switch (ctx.moveEffect2) {
     case 'MOVE_EFFECT_STEAL_ITEM':
       applyStealItem(state, attackerId, targetId, targetTurnDamaged, deps, unmodelled, changedItems)
@@ -7599,6 +7618,7 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
       }
       break
   }
+  }
 
   // Case 21: MOVEEND_NEXT_TARGET (:4782-4822)
   // The double-battle second-target loop is not part of this ladder: the C's case resets
@@ -7606,6 +7626,18 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // turn.ts's executeAction, around the runMovePipeline call ("MOVEEND_NEXT_TARGET").
   // The per-target passes are recorded on ActionOutcome.targets; the primary outcome
   // fields stay the first target's.
+  //
+  // That re-entry is why cases 22-30 never run on a pass that still has a target: :4809
+  // sets moveendState = 0 and :4814 returns into the effect script. Only the pass after
+  // which no further target exists falls through (:4815-4818) to them. A spread pass
+  // therefore stops here; turn.ts runs cases 22-30 once, as 'SPREAD_TAIL'.
+  if (part === 'SPREAD_PASS') {
+    return {
+      attackerDamage: hadAttackerDamage ? totalAttackerDamage : null,
+      statChanges: statChanges.length > 0 ? statChanges : null,
+      statusApplied,
+    }
+  }
 
   // Case 22: MOVEEND_MOVE_EFFECTS2 (:4633-4655)
   if (ctx.moveEffect2 === 'MOVE_EFFECT_BURN_UP') {
@@ -7652,7 +7684,11 @@ export function runMoveEnd(ctx: MoveEndContext): MoveEndOutcome {
   // (:4474-4475) and the onRecoil hooks below (:4482-4490); for Struggle the former is zero
   // because EFFECT_RECOIL_HP_25 has no recoilFraction in moveBehaviors (its quarter-HP cost is
   // the move's own script effect), so only the onRecoil half applies.
-  if (moveData?.split !== 'STATUS' && hpDealt > 0 && attacker && attacker.mon.hp > 0) {
+  // :4462 REQUIRE_NOT(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) and :4463 REQUIRE_NOT(HITMARKER_UNABLE_TO_USE_MOVE):
+  // the flags belong to the LAST pass of a spread action (MoveValuesCleanUp only runs before a re-entry, :4810), so a final
+  // pass that missed, was protected (:1204 sets MISSED) or could not move still blocks recoil even when earlier passes
+  // dealt damage. The per-hit path keeps its hpDealt-only approximation, so multi-hit stays bit-identical.
+  if (moveData?.split !== 'STATUS' && hpDealt > 0 && attacker && attacker.mon.hp > 0 && !(part === 'SPREAD_TAIL' && isNoEffect)) {
     const struggle = moveId === 'MOVE_STRUGGLE'
     if (struggle || (!isMagicGuardProtected(state, attacker) && !battlerHasNoRecoil(attacker))) {
       const fraction = getRecoilFraction(moveData?.effect, deps.moveBehaviors, moveData?.customBehavior)

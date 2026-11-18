@@ -2576,6 +2576,29 @@ export function executeAction(
   let noPpDeduct = false
   let noAttackString = false
 
+  // MOVEEND_NEXT_TARGET's tail split (MoveEndContext.part). A BOTH / FOES_AND_ALLY move resets moveendState and re-enters the
+  // effect script for every target but the last (:4806-4814), so cases 22-30 of Cmd_moveend run ONCE, after the last pass,
+  // against the SUM in savedDmg (:4334-4342). `spreadDeferTail` switches the main runMoveEnd call to 'SPREAD_PASS';
+  // `spreadTail` accumulates what the single 'SPREAD_TAIL' call needs; `spreadPassSerial` / `spreadTailEndSerial` say whether
+  // the action's LAST pass was one that reached move-end at all (a miss, a Protect block and a cancellation return early).
+  let spreadDeferTail = false
+  let spreadPassSerial = 0
+  let spreadTailEndSerial = -1
+  let spreadChangedItems: Map<number, string> | null = null
+  type SpreadTailAccumulator = {
+    targetId: number
+    /** Sum of every pass's targetDamage (the sim's stand-in for gTurnStructs[attacker].damagedMons). */
+    targetDamage: number
+    /** Sum of every pass's gHpDealt -- gTurnStructs[attacker].savedDmg (:4335). */
+    hpDealt: number
+    noEffect: boolean
+    moveEffect2: string | null
+    isCriticalHit: boolean | undefined
+    isSuperEffective: boolean | undefined
+    resolvedMoveType: string | null | undefined
+  }
+  let spreadTail: SpreadTailAccumulator | null = null
+
   // battle_util.c:205-207, data/battle_scripts_1.s:4776: PP is not deducted for extra attacks
   // without movePos (Metronome) or under sleepTalk (Sleep Talk), or when noPpDeduct is set.
   const shouldDeductPp = () =>
@@ -4205,7 +4228,26 @@ export function executeAction(
         deps,
         unmodelled,
         fainted: preFainted,
+        part: spreadDeferTail && !perHitResolution && !_isCalledJump ? 'SPREAD_PASS' : 'FULL',
+        ...(spreadDeferTail && !perHitResolution && !_isCalledJump && spreadChangedItems
+          ? { changedItems: spreadChangedItems }
+          : {}),
       })
+      if (spreadDeferTail && !perHitResolution && !_isCalledJump && spreadChangedItems) {
+        // An absorbed pass is a MOVE_RESULT_DOESNT_AFFECT_FOE pass: it still sums gHpDealt (0) and is the last pass if the
+        // spread loop stops after it.
+        spreadTail = {
+          targetId: currentTargetId,
+          targetDamage: spreadTail?.targetDamage ?? 0,
+          hpDealt: spreadTail?.hpDealt ?? 0,
+          noEffect: true,
+          moveEffect2: null,
+          isCriticalHit: undefined,
+          isSuperEffective: undefined,
+          resolvedMoveType: damageMoveType,
+        }
+        spreadTailEndSerial = spreadPassSerial
+      }
 
       const finalStatChanges: StatChangeOutcome[] = []
       if (absorbOutcome.statChanges.length > 0) finalStatChanges.push(...absorbOutcome.statChanges)
@@ -4529,7 +4571,10 @@ export function executeAction(
     })
 
     // Cmd_moveend state machine ladder (battle_script_commands.c:4309-4968). A multi-hit move walks only cases 0-18 here and
-    // cases 19-30 after its last hit (MoveEndContext.part).
+    // cases 19-30 after its last hit (MoveEndContext.part); a spread move walks cases 0-18 plus case 20 per target and cases
+    // 22-30 once after the last pass ('SPREAD_PASS' / 'SPREAD_TAIL'). A spread move that is also multi-hit keeps the per-hit
+    // path: the tail is not deferred for it (perHitResolution keeps 'FIRST' / 'SECOND').
+    const deferSpreadTail = spreadDeferTail && !perHitResolution && !_isCalledJump && spreadChangedItems !== null
     const moveEndOutcome = runMoveEnd({
       state,
       attackerId: battlerId,
@@ -4548,8 +4593,25 @@ export function executeAction(
       unmodelled,
       fainted,
       targetHasActedThisTurn,
-      part: perHitResolution ? 'FIRST' : 'FULL',
+      part: perHitResolution ? 'FIRST' : deferSpreadTail ? 'SPREAD_PASS' : 'FULL',
+      ...(deferSpreadTail && spreadChangedItems ? { changedItems: spreadChangedItems } : {}),
     })
+    if (deferSpreadTail) {
+      // MOVEEND_SUM_DAMAGE (:4334-4342) and the derived bookkeeping the tail needs. The C keeps ONE savedDmg and one set of
+      // result flags for the whole action; the last pass that reached move-end wins, and only if that pass was the action's
+      // LAST pass do its flags describe the tail's entry state (see the noEffect choice at the tail call).
+      spreadTail = {
+        targetId: currentTargetId,
+        targetDamage: (spreadTail?.targetDamage ?? 0) + (targetDamage ?? 0),
+        hpDealt: (spreadTail?.hpDealt ?? 0) + hpDealt,
+        noEffect: targetDamage === null || targetDamage === 0,
+        moveEffect2: secondaryResult?.moveEffect2 ?? null,
+        isCriticalHit,
+        isSuperEffective,
+        resolvedMoveType: damageMoveType,
+      }
+      spreadTailEndSerial = spreadPassSerial
+    }
 
     const finalStatChanges: StatChangeOutcome[] = []
     if (secondaryResult?.statChanges) finalStatChanges.push(...secondaryResult.statChanges)
@@ -4785,6 +4847,14 @@ export function executeAction(
     }
   }
 
+  // One gBattleStruct->changedItems array for the whole action: case 20 parks a stolen item on whichever pass stole it and
+  // case 27 (in 'SPREAD_TAIL') hands it over once.
+  if (spreadLoopMove) {
+    spreadDeferTail = true
+    spreadChangedItems = new Map<number, string>()
+    spreadPassSerial = 1
+  }
+
   const first = runMovePipeline(performedMove, performedMove, firstTargetId, false)
   if (!spreadLoopMove) return first
   let current = first
@@ -4857,6 +4927,7 @@ export function executeAction(
 
     const notesBefore = unmodelled.length
     currentTargetId = nextTargetId
+    spreadPassSerial++
     current = runMovePipeline(performedMove, performedMove, currentTargetId, false)
     recordPass(current)
     allNotes.push(...current.unmodelled.slice(notesBefore))
@@ -4864,12 +4935,63 @@ export function executeAction(
     if (current.attackerDamage !== null) allAttackerDamage = (allAttackerDamage ?? 0) + current.attackerDamage
   }
 
+  // Cases 22-30 of Cmd_moveend, ONCE (:4782-4822). Every pass that still had a target reset moveendState to 0 and re-entered
+  // the effect script (:4809-4814), so recoil (:4457-4517), Life Orb / Shell Bell (:4823-4827, battle_util.c:6066-6124),
+  // changed items (:4656-4665), Pickpocket (:4828-4853) and CLEAR_BITS (:4934-4957) saw only the LAST pass's flags and the
+  // action's summed savedDmg. A tail runs only when at least one pass actually reached move-end (a first pass cancelled by
+  // sleep/paralysis returns from runMovePipeline before it, and the C's loop never re-enters for it).
+  //
+  // noEffect: the C's MoveValuesCleanUp (:3761-3768) only clears gMoveResultFlags before a RE-entry, so the flags the tail
+  // reads belong to the last pass. If that pass reached move-end, use its own answer. If it did not -- it missed or was
+  // blocked by Protect (:1204 sets MOVE_RESULT_MISSED) or could not move (HITMARKER_UNABLE_TO_USE_MOVE, :4463) -- NO_EFFECT
+  // (battle.h:389 includes MISSED) is still set, so the tail must treat the move as ineffective: recoil is skipped while
+  // Life Orb / Shell Bell, whose gates do not read result flags, still apply on the earlier passes' savedDmg.
+  const notesBeforeTail = unmodelled.length
+  let tailAttackerDamage: number | null = null
+  const tailStatChanges: StatChangeOutcome[] = []
+  let tailStatusApplied: StatusAppliedOutcome | null = null
+  const tailFainted: number[] = []
+  // A function boundary keeps TypeScript from narrowing the closure-assigned accumulator to its `null` initializer.
+  const readSpreadTail = (): SpreadTailAccumulator | null => spreadTail
+  const tailAcc = readSpreadTail()
+  if (tailAcc) {
+    const tailOutcome = runMoveEnd({
+      state,
+      attackerId: battlerId,
+      targetId: tailAcc.targetId,
+      moveId: performedMove.id,
+      chosenMoveId: performedMove.id,
+      targetDamage: tailAcc.targetDamage,
+      hpDealt: tailAcc.hpDealt,
+      noEffect: spreadTailEndSerial === spreadPassSerial ? tailAcc.noEffect : true,
+      isCriticalHit: tailAcc.isCriticalHit,
+      isSuperEffective: tailAcc.isSuperEffective,
+      moveEffect2: tailAcc.moveEffect2,
+      resolvedMoveType: tailAcc.resolvedMoveType,
+      deps,
+      unmodelled,
+      fainted: tailFainted,
+      ...(spreadChangedItems ? { changedItems: spreadChangedItems } : {}),
+      part: 'SPREAD_TAIL',
+    })
+    tailAttackerDamage = tailOutcome.attackerDamage
+    if (tailOutcome.statChanges) tailStatChanges.push(...tailOutcome.statChanges)
+    tailStatusApplied = tailOutcome.statusApplied
+    allFainted.push(...tailFainted)
+    allNotes.push(...unmodelled.slice(notesBeforeTail))
+  }
+
   // The primary fields stay the FIRST pass's (the only target in every single-target
-  // consumer's world); `fainted` is the ordered union across passes and `attackerDamage`
-  // the sum, matching what the one action did overall. Per-pass detail is in `targets`.
+  // consumer's world); `fainted` is the ordered union across passes, `attackerDamage` and
+  // the tail's stat/status output the sums, matching what the one action did overall.
+  // Per-pass detail is in `targets`.
+  const combinedAttackerDamage =
+    allAttackerDamage !== null || tailAttackerDamage !== null ? (allAttackerDamage ?? 0) + (tailAttackerDamage ?? 0) : null
   return {
     ...first,
-    attackerDamage: allAttackerDamage,
+    attackerDamage: combinedAttackerDamage,
+    statChanges: tailStatChanges.length > 0 ? [...(first.statChanges ?? []), ...tailStatChanges] : first.statChanges,
+    statusApplied: first.statusApplied ?? tailStatusApplied,
     unmodelled: allNotes,
     fainted: allFainted,
     targets: passes,
