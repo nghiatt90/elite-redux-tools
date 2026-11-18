@@ -2240,7 +2240,7 @@ const TWO_TURN_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SKY_DROP',
 ])
 
-/** The Pursuit user a chosen switch has to survive before it leaves, resolved by
+/** One Pursuit user a chosen switch has to survive before it leaves, resolved by
  * `findPursuitAttacker` from the CHOSEN actions (the C reads `gChosenActionByBattler`, not
  * `gActionsByTurnOrder`). */
 export interface PursuitSwitchHit {
@@ -2252,8 +2252,16 @@ export interface PursuitSwitchHit {
  * Cmd_jumpifnopursuitswitchdmg (src/battle_script_commands.c:11294-11325), reached from
  * BattleScript_ActionSwitch (data/battle_scripts_1.s:7196-7209) right after STRINGID_RETURNMON.
  *
- * Singles picks the one opposing battler (`multiHitCounter == 1` -> the left foe, :11295-11305).
- * The hit fires only when ALL of these hold (:11310-11313):
+ * Foe selection (:11295-11307): `multiHitCounter == 1` picks OPPONENT_LEFT / PLAYER_LEFT, any
+ * other counter value picks OPPONENT_RIGHT / PLAYER_RIGHT. BattleScript_ActionSwitch sets the
+ * counter to 1 in singles (`setmultihit 1`, :7197-7198) but to 2 in doubles (:7200-7201), and
+ * `decrementmultihit` (:7209) takes 2 -> 1 for the second pass. So singles has one pass
+ * (the LEFT foe) and doubles has two passes in this order: RIGHT foe (counter 2), then LEFT foe
+ * (counter 1). The battler ids are constants.ts:72-75 (PLAYER_LEFT 0, OPPONENT_LEFT 1,
+ * PLAYER_RIGHT 2, OPPONENT_RIGHT 3), so the LEFT foe is `(switcherId & 1) ^ 1` and the RIGHT foe
+ * is that value `| 2`.
+ *
+ * A hit fires only when ALL of these hold (:11310-11313):
  *   - `gChosenActionByBattler[foe] == B_ACTION_USE_MOVE`            -> the foe chose a move
  *   - `gBattlerAttacker == moveTarget[foe]`                        -> that move targets the switcher
  *   - the foe has neither STATUS1_SLEEP nor STATUS1_FREEZE
@@ -2263,24 +2271,33 @@ export interface PursuitSwitchHit {
  * The C compares `moveTarget`, which is the selection-time target, so this reads the chosen action
  * rather than the slot's current action kind: a foe whose slot was already changed to
  * B_ACTION_TRY_FINISH still satisfies it.
+ *
+ * The switcher-hp test is NOT applied here: the C evaluates it at the start of every pass, so
+ * executeAction re-tests it before each hit (a first hit that faints the switcher makes the
+ * second pass take the `else` branch, :11321-11324).
  */
 export function findPursuitAttacker(
   state: BattleState,
   switcherId: number,
   actions: (ChosenAction | null)[],
-): PursuitSwitchHit | null {
-  const foeId = switcherId ^ 1
-  const foe = state.battlers[foeId]
-  const switcher = state.battlers[switcherId]
-  const foeAction = actions[foeId]
-  if (!foe || !switcher || !foeAction || foeAction.action !== 'USE_MOVE' || !foeAction.chosenMove) return null
-  if (foeAction.target !== switcherId) return null
-  if (hasFlag(foe.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) return null
-  if (switcher.mon.hp === 0) return null
-  const truantSlot = findAbilitySlot(foe.mon.abilities, 'ABILITY_TRUANT')
-  if (truantSlot !== -1 && foe.volatiles.abilityState[truantSlot] !== 0 && foeAction.chosenMove.split !== 'STATUS') return null
-  if (foeAction.chosenMove.id !== 'MOVE_PURSUIT') return null
-  return { attackerId: foeId, action: foeAction }
+): PursuitSwitchHit[] {
+  const leftFoeId = (switcherId & 1) ^ 1
+  // :7197-7201 -- singles `setmultihit 1` (one pass, LEFT); doubles `setmultihit 2`
+  // (counter 2 -> RIGHT first, then counter 1 -> LEFT).
+  const foeIds = hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE) ? [leftFoeId | 2, leftFoeId] : [leftFoeId]
+  const hits: PursuitSwitchHit[] = []
+  for (const foeId of foeIds) {
+    const foe = state.battlers[foeId]
+    const foeAction = actions[foeId]
+    if (!foe || !foeAction || foeAction.action !== 'USE_MOVE' || !foeAction.chosenMove) continue
+    if (foeAction.target !== switcherId) continue
+    if (hasFlag(foe.mon.status1, STATUS1_SLEEP | STATUS1_FREEZE)) continue
+    const truantSlot = findAbilitySlot(foe.mon.abilities, 'ABILITY_TRUANT')
+    if (truantSlot !== -1 && foe.volatiles.abilityState[truantSlot] !== 0 && foeAction.chosenMove.split !== 'STATUS') continue
+    if (foeAction.chosenMove.id !== 'MOVE_PURSUIT') continue
+    hits.push({ attackerId: foeId, action: foeAction })
+  }
+  return hits
 }
 
 /**
@@ -2352,8 +2369,10 @@ export function executeAction(
   order: TurnOrder,
   deps: TurnLoopDeps,
   /** BattleScript_ActionSwitch's `jumpifnopursuitswitchdmg` (:7202), resolved by the caller from the
-   * foe's CHOSEN action -- executeAction only receives this battler's own action. */
-  pursuit?: PursuitSwitchHit | null,
+   * foes' CHOSEN actions -- executeAction only receives this battler's own action. In pass order:
+   * the RIGHT foe first, then the LEFT foe in doubles; just the LEFT foe in singles
+   * (data/battle_scripts_1.s:7197-7209, src/battle_script_commands.c:11295-11307). */
+  pursuit?: PursuitSwitchHit[] | null,
 ): ActionOutcome {
   // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
   // does not act. Its slot is still consumed; the action is simply finished.
@@ -2411,20 +2430,29 @@ export function executeAction(
     // does not skip BattleScript_DoSwitchOut when the hit faints the switching mon, so the switch runs
     // either way; the fainted mon's party slot is written with hp 0 and it is replaced by the incoming
     // mon in the same action (see REPORT.md).
+    //
+    // The candidates arrive in pass order (data/battle_scripts_1.s:7197-7209: `setmultihit 2` in
+    // doubles makes pass 1 the RIGHT foe, `decrementmultihit` then makes pass 2 the LEFT foe).
+    // Cmd_jumpifnopursuitswitchdmg tests `gBattleMons[gBattlerAttacker].hp` (the switcher) at the
+    // start of every pass (:11310-11313), so a first hit that faints the switcher makes the second
+    // pass fire nothing.
     const pursuitUnmodelled: string[] = []
     let pursuitDamage: number | null = null
-    let pursuitFainted: number[] = []
-    if (pursuit) {
-      const hit = runPursuitPreSwitchHit(state, battlerId, pursuit, order, deps, pursuitUnmodelled)
-      pursuitDamage = hit.damage
-      pursuitFainted = hit.fainted
+    let pursuitRan = false
+    const pursuitFainted: number[] = []
+    for (const hit of pursuit ?? []) {
+      if (state.battlers[battlerId]!.mon.hp === 0) break
+      const result = runPursuitPreSwitchHit(state, battlerId, hit, order, deps, pursuitUnmodelled)
+      pursuitRan = true
+      if (result.damage !== null) pursuitDamage = (pursuitDamage ?? 0) + result.damage
+      pursuitFainted.push(...result.fainted)
     }
     const switchUnmodelled = performSwitchAction(state, battlerId, deps)
     return {
       ...blank,
       skippedBecauseFainted: false,
       battleOver: false,
-      ...(pursuit ? { targetId: battlerId, targetDamage: pursuitDamage, fainted: pursuitFainted } : {}),
+      ...(pursuitRan ? { targetId: battlerId, targetDamage: pursuitDamage, fainted: pursuitFainted } : {}),
       unmodelled: [...pursuitUnmodelled, ...switchUnmodelled],
     }
   }
@@ -5565,8 +5593,9 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     // iteration already did, and no action body runs.
     if (actionKind === 'FINISHED') continue
 
-    // BattleScript_ActionSwitch's jumpifnopursuitswitchdmg reads the FOE's chosen action, which this
-    // battler's own `action` cannot supply, so resolve it here where the whole actions array is in scope.
+    // BattleScript_ActionSwitch's jumpifnopursuitswitchdmg reads the FOES' chosen actions (both
+    // foes in doubles, RIGHT pass then LEFT), which this battler's own `action` cannot supply, so
+    // resolve them here where the whole actions array is in scope.
     const pursuit = actionKind === 'SWITCH' ? findPursuitAttacker(state, battlerId, actions) : null
     const outcome = executeAction(state, battlerId, action, actionKind, index, order, deps, pursuit)
     outcomes.push(outcome)
