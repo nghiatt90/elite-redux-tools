@@ -942,7 +942,9 @@ export function getMoveTarget(
     case 'BOTH':
     case 'FOES_AND_ALLY':
     case 'OPPONENTS_FIELD': {
-      targetBattler = attacker ^ 1
+      // battle_util.c:6380 -- GetBattlerAtPosition((GetBattlerPosition(attacker) & BIT_SIDE) ^ BIT_SIDE),
+      // the opposing LEFT battler. The old opposite flip wrongly yielded 3 for attacker 2 (right).
+      targetBattler = (attacker & 1) ^ 1
       if (!isAlive(targetBattler)) {
         const partner = getPartner(targetBattler)
         if (isAlive(partner)) {
@@ -963,7 +965,8 @@ export function getMoveTarget(
       } else if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
         targetBattler = setRandomTarget(attacker)
       } else {
-        targetBattler = attacker ^ 1
+        // battle_util.c:6399-6400 -- the same opposing-left position in the non-double arm.
+        targetBattler = (attacker & 1) ^ 1
       }
       break
     }
@@ -1500,7 +1503,10 @@ export function applyDamage(
   // Unless HITMARKER_SKIP_DMG_TRACK is set, accumulates gTakenDmg and tracks source battler.
   if (damage > 0 && !skipDmgTrack) {
     battler.takenDmg += damage
-    battler.takenDmgBy = sourceBattlerId !== undefined ? sourceBattlerId : (battlerId ^ 1)
+    // battle_script_commands.c:1921-1923 sets gTakenDmgByBattler to gBattlerAttacker
+    // (BS_TARGET) or gBattlerTarget (BS_ATTACKER). The sim does not track gBattlerTarget,
+    // so a caller with no sourceBattlerId falls back to the opposing-left default.
+    battler.takenDmgBy = sourceBattlerId !== undefined ? sourceBattlerId : (battlerId & 1) ^ 1
   }
 
   // HP floors at 0; the C never stores a negative hp.
@@ -2114,7 +2120,10 @@ function applyLockedMove(state: BattleState, battlerId: number, action: ChosenAc
   if (!action || !battler || battler.mon.hp === 0 || !locked || !hasFlag(battler.mon.status2, STATUS2_MULTIPLETURNS | STATUS2_RECHARGE)) return action
   if (action.action === 'USE_MOVE' && action.chosenMove?.id === locked) return action
   const view = action.chosenMove ? moveViewFor(action.chosenMove, locked, deps, state, battlerId) : buildMoveView(locked, deps, state, battlerId, state.battlers[battlerId]?.mon.itemId ?? null)
-  const target = action.target ?? (deps.dataContext.move(locked)?.target === 'USER' ? battlerId : battlerId ^ 1)
+  // battle_util.c:160-166: a MULTIPLETURNS / RECHARGE battler uses the moveTarget stored at
+  // selection. The sim does not carry that field, so an unset action.target falls back to the
+  // default cursor, GetDefaultMoveTarget (pokemon.c:1267-1270): the opposing LEFT battler.
+  const target = action.target ?? (deps.dataContext.move(locked)?.target === 'USER' ? battlerId : (battlerId & 1) ^ 1)
   return { action: 'USE_MOVE', chosenMove: view, moveToBeUsed: view, target }
 }
 
@@ -3212,10 +3221,15 @@ export function executeAction(
         // Turn 3: BattleScript_BideAttack (data/battle_scripts_1.s:7516-7538)
         // Unleashes 2 * takenDmg to takenDmgBy without crit or random roll.
         attackerBattler.mon.status2 = clearFlag(attackerBattler.mon.status2, STATUS2_MULTIPLETURNS)
+        // battle_util.c:3422-3429: gBattlerTarget = gTakenDmgByBattler; if that battler is
+        // ABSENT (not merely fainted -- a KO'd damager with the bit clear is still targeted),
+        // C re-derives it with GetMoveTarget(gBattlerAttacker, MOVE_BIDE, 1). setTarget = 1
+        // means MOVE_TARGET_SELECTED (include/constants/battle.h:491); MOVE_BIDE's own data
+        // target is USER, so pass a SELECTED move exactly as moveEnd.ts:1419 does.
         const bideTargetId =
-          attackerBattler.takenDmgBy !== undefined && isBattlerAlive(state, attackerBattler.takenDmgBy)
+          attackerBattler.takenDmgBy !== undefined && !hasFlag(state.absentBattlerFlags, 1 << attackerBattler.takenDmgBy)
             ? attackerBattler.takenDmgBy
-            : (battlerId ^ 1)
+            : getMoveTarget(state, battlerId, 'MOVE_POUND', deps, 1)
         const bideTargetOrderIndex = order.battlerByTurnOrder.indexOf(bideTargetId)
         const bideTargetHasActedThisTurn = bideTargetOrderIndex >= 0 && bideTargetOrderIndex < index
 
