@@ -5261,7 +5261,7 @@ function handleAttackerMoveEndAbility(
     if (
       isCriticalHit === true &&
       attacker.mon.hp > 0 && // ShouldApplyOnHitEffect(battler)
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attackerId !== targetId &&
       slot !== -1 &&
       !attacker.volatiles.abilityState[slot] // CHECK_NOT(GetAbilityState(battler, ability))
@@ -5675,7 +5675,7 @@ function handleAttackerMoveEndAbility(
     if (
       moveId === 'MOVE_FLYING_PRESS' &&
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null &&
       target.volatiles.tauntTimer === 0
@@ -5701,7 +5701,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_YUKI_ONNA') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canInfatuate(state, attackerId, targetId, statusDeps) &&
       state.rng.random16() % 100 < 30
