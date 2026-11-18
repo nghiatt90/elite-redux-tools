@@ -5009,7 +5009,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_SHARP_TALONS') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isStrikerMove(state, attackerId, moveId, statusDeps) &&
       canBleed(state, targetId, attackerId, statusDeps) &&
@@ -5025,7 +5025,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_SHOCKING_JAWS' || abilityId === 'ABILITY_SHOCKING_MAW') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       canBeParalyzed(state, attackerId, targetId, statusDeps) &&
       Boolean(moveData?.flags?.biteBased) &&
@@ -5042,7 +5042,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_STUN_SHOCK') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       state.rng.random16() % 100 < 60
     ) {
@@ -5061,7 +5061,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_LIGHT_SABER') {
     if (
       target.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
       attackerId !== targetId &&
       isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType) &&
       state.rng.random16() % 2 !== 0
@@ -5083,7 +5083,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_HYDRO_CIRCUIT') {
     if (
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060)
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext) &&
@@ -5096,7 +5096,7 @@ function handleAttackerMoveEndAbility(
   // Pinnacle Blade (src/abilities.cc:8687-8720; its onInfiltrate half is statusEffects.ts infiltratesSubstitute): DidMoveHit() only -- the
   // target may already have fainted -- then a Keen Edge move. A keen-edge move always infiltrates Substitute, so the hit landed on the mon.
   if (abilityId === 'ABILITY_PINNACLE_BLADE') {
-    if (hpDealt > 0 && attackerId !== targetId && isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType)) {
+    if (targetTurnDamaged(state, targetId, hpDealt) && attackerId !== targetId && isKeenEdgeMove(state, attackerId, moveId, statusDeps, unmodelled, resolvedMoveType)) { // DidMoveHit (battle_util.c:4060)
       // BattleScript_AttackerDestroysSubstitute (data/battle_scripts_1.s:10706-10710) only prints a message and plays the fade animation; the
       // state change is the C's `substituteHP = 0` (:8698-8700), which MOVEEND_SUBSTITUTE (case 16) turns into the cleared STATUS2_SUBSTITUTE.
       if (target.volatiles.substituteHp) {
@@ -5135,7 +5135,7 @@ function handleAttackerMoveEndAbility(
   }
 
   // ---- Cycle 106b: second batch of on-hit attacker abilities. Same ShouldApplyOnHitEffect(x) approximation as the
-  // Cycle 106 block above (target alive, hpDealt > 0, attacker != target); `moveType` is the effective (ate-adjusted)
+  // Cycle 106 block above (target alive, the hit's damage gate, attacker != target); `moveType` is the effective (ate-adjusted)
   // move type, via the `moveTypeName()` closure defined in Cycle 91b.
 
   // Blood Stain (src/abilities.cc:8372-8386; ON_EITHER(BloodStain), assigned to BOTH hooks by ON_EITHER_ABILITY
@@ -5184,7 +5184,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_DEMOLITIONIST') {
     const targetSide = state.sides[targetId & 1]
     if (
-      hpDealt > 0 && // DidMoveHit()
+      targetTurnDamaged(state, targetId, hpDealt) && // DidMoveHit (battle_util.c:4060)
       attackerId !== targetId &&
       attacker.volatiles.readiedAction &&
       targetSide &&
@@ -5233,7 +5233,7 @@ function handleAttackerMoveEndAbility(
     if (
       moveTypeName() === 'ICE' &&
       target.mon.hp > 0 && // ShouldApplyOnHitEffect(target)
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attackerId !== targetId &&
       !target.volatiles.iceStatue &&
       !battlerHasSimAbility(state, target, abilityId, false, attackerId, false, deps.dataContext)
@@ -5562,7 +5562,7 @@ function handleAttackerMoveEndAbility(
   }
 
   // ---- Cycle 106c: third batch of on-hit attacker abilities. Same ShouldApplyOnHitEffect(x) approximation as the
-  // Cycle 106 / 106b blocks above (target alive, hpDealt > 0, attacker != target); `moveTypeName()` is the effective
+  // Cycle 106 / 106b blocks above (target alive, the hit's damage gate, attacker != target); `moveTypeName()` is the effective
   // (ate-adjusted) move type.
 
   // Venoblaze Pincers (src/abilities.cc:8129-8146): ShouldApplyOnHitEffect(target), a physical move, then the 20% roll,
