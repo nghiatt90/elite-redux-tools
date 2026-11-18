@@ -334,11 +334,20 @@ describe('getMostSuitableMonToSwitchInto: the opposing battler flip (:993-995)',
   })
 })
 
-describe('getMostSuitableMonToSwitchInto: the multi-format throw', () => {
-  it('DOUBLE alone no longer throws; TWO_OPPONENTS still does', () => {
+describe('getMostSuitableMonToSwitchInto: the multi-format party range (:1004)', () => {
+  it('DOUBLE alone and TWO_OPPONENTS both run; the multi range narrows to [3,6) for battler 3', () => {
+    // C: :1004 GetAIPartyIndexes supplies [firstId, lastId); :1012 loops it. The
+    // dbl-4d throw for the multi flags is gone, so the call must run instead.
     const state = doublesState(scripted().rng)
-    expect(() => getMostSuitableMonToSwitchInto(state, 3, deps(state))).not.toThrow()
+    const plain = getMostSuitableMonToSwitchInto(state, 3, deps(state))
+    expect(plain.partyIndex).toBeGreaterThanOrEqual(0)
+    expect(plain.partyIndex).toBeLessThan(PARTY_SIZE)
+
     state.battleTypeFlags |= BATTLE_TYPE_TWO_OPPONENTS
-    expect(() => getMostSuitableMonToSwitchInto(state, 3, deps(state))).toThrow(/two-opponent/)
+    // Battler 3 is flank-right (`3 & BIT_FLANK` = 2), so GetAIPartyIndexes
+    // returns [3,6) (:36-42) and no reserve outside that range is eligible.
+    const multi = getMostSuitableMonToSwitchInto(state, 3, deps(state))
+    expect(multi.partyIndex).toBeGreaterThanOrEqual(3)
+    expect(multi.partyIndex).toBeLessThan(6)
   })
 })

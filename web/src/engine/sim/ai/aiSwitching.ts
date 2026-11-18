@@ -4,17 +4,19 @@
 // caller's own PARTY_SIZE fallback (OpponentHandleChoosePokemon,
 // battle_controller_opponent.c:1643-1693). Singles and BATTLE_TYPE_DOUBLE
 // (:986-999, the battlerIn1/battlerIn2 pair and the opposing battler's
-// absent-bit flip). The remaining multi-battler formats -- TWO_OPPONENTS /
-// INGAME_PARTNER / TOWER_LINK_MULTI -- are out of this batch's scope per the
-// brief (dbl-4d); `getMostSuitableMonToSwitchInto` throws if any of them are
-// set rather than silently computing a singles-shaped (and therefore wrong)
-// answer.
+// absent-bit flip). The multi-battler formats -- TWO_OPPONENTS / INGAME_PARTNER
+// / TOWER_LINK_MULTI -- add no code of their own here: BATTLE_TYPE_DOUBLE is
+// always set alongside them (driver/battleFormat.ts:68-80), so the
+// doubles pair logic above applies unchanged; only the party range changes,
+// through GetAIPartyIndexes below.
 //
-// GetAIPartyIndexes (:30-47) collapses to its own `else` branch -- firstId=0,
-// lastId=6 -- for singles AND for BATTLE_TYPE_DOUBLE (its first branch is the
-// TWO_OPPONENTS/INGAME_PARTNER/TOWER_LINK_MULTI one, excluded above), so it is
-// not ported as its own function; every caller here just uses the literal
-// range.
+// GetAIPartyIndexes (:30-47) is ported as its own function. Its `else` branch
+// (firstId=0, lastId=6) covers singles and plain doubles; the
+// TWO_OPPONENTS/INGAME_PARTNER/TOWER_LINK_MULTI branch splits BOTH sides by
+// flank -- `battlerId & BIT_FLANK` -- into [0,3) / [3,6), which is NOT what
+// partySlots.ts's `partySlotsFor` does (that one is HasNoMonsToSwitch and only
+// splits the opponent side). Its first branch, BATTLE_TWO_VS_ONE_OPPONENT,
+// cannot fire in this sim: see the function's own comment.
 //
 // WIRING NOTE: `chooseReplacement` (switchIn.ts's `ReplacementDeps`) takes an
 // `unmodelled: string[]` output parameter -- the SAME array
@@ -39,7 +41,7 @@
 // batch gives it a real writer.
 
 import type { BattleState, SimPartyMon } from '../state'
-import { hasFlag, BIT_FLANK, PARTY_SIZE, STATUS3_MIRACLE_EYED, STATUS_FIELD_INVERSE_ROOM } from '../constants'
+import { hasFlag, BIT_FLANK, BIT_SIDE, B_SIDE_OPPONENT, PARTY_SIZE, STATUS3_MIRACLE_EYED, STATUS_FIELD_INVERSE_ROOM } from '../constants'
 import { getTypeModifier, type TypeModifierInputs } from '../../typeEffectiveness'
 import { UQ_ONE } from '../../fixed'
 import { getWhoStrikesFirst } from '../turnOrder'
@@ -49,17 +51,45 @@ import { isDoubleBattle } from './aiCheckBadMove'
 
 export type AiSwitchingDeps = AiDamageDeps
 
-/** include/constants/battle.h:64, 71, 72 -- the multi-battler formats this port
- * still refuses to run under (see this module's header). DOUBLE alone is no
- * longer in the mask: its branches are ported below (:986-999). */
+/** include/constants/battle.h:64, 71, 72 -- the multi-battler formats whose
+ * GetAIPartyIndexes branch (:36-42) splits each side's party by flank. DOUBLE
+ * alone is not in this mask. */
 const BATTLE_TYPE_TWO_OPPONENTS = 1 << 15
 const BATTLE_TYPE_INGAME_PARTNER = 1 << 22
 const BATTLE_TYPE_TOWER_LINK_MULTI = 1 << 23
-const BATTLE_TYPE_MULTI_ANY = BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI
 /** include/constants/battle.h:67. Never actually set by anything this tool
  * builds (Battle Arena is not one of the 40 fights), ported anyway per the
  * brief's explicit instruction to include this early return. */
 const BATTLE_TYPE_ARENA = 1 << 18
+
+/**
+ * GetAIPartyIndexes, battle_ai_switch_items.c:30-47.
+ *
+ * `BATTLE_TWO_VS_ONE_OPPONENT` (include/constants/battle.h:87) is
+ * `(gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER) && gTrainerBattleOpponent_B
+ * == 0xFFFF`. The sim has no `gTrainerBattleOpponent_B`, and
+ * `battleTypeFlagsFor` (driver/battleFormat.ts:68-80) always sets
+ * BATTLE_TYPE_TWO_OPPONENTS together with BATTLE_TYPE_INGAME_PARTNER for a
+ * partner format, so "ingame partner without a second opponent" is not a state
+ * this sim can build. The branch is ported as `INGAME_PARTNER &&
+ * !TWO_OPPONENTS` and is therefore unreachable today.
+ *
+ * The second branch tests `battlerId & BIT_FLANK`, not the side, so it splits
+ * BOTH sides: battlers 0 and 1 (B_FLANK_LEFT, the bit clear) get [0,3), 2 and
+ * 3 get [3,6). B_FLANK_LEFT is 0 (include/constants/battle.h:42).
+ */
+export function getAiPartyIndexes(state: BattleState, battlerId: number): [number, number] {
+  const flags = state.battleTypeFlags
+  // :32-35 -- unreachable in this sim (see above).
+  const twoVsOne = (flags & BATTLE_TYPE_INGAME_PARTNER) !== 0 && (flags & BATTLE_TYPE_TWO_OPPONENTS) === 0
+  if (twoVsOne && (battlerId & BIT_SIDE) === B_SIDE_OPPONENT) return [0, PARTY_SIZE]
+  // :36-42.
+  if ((flags & (BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI)) !== 0) {
+    return (battlerId & BIT_FLANK) === 0 ? [0, 3] : [3, PARTY_SIZE]
+  }
+  // :43-46.
+  return [0, PARTY_SIZE]
+}
 
 /** GetTypeModifier's own toggle inputs (typeEffectiveness.ts's
  * TypeModifierInputs), built exactly the way GetTypeModifier(atkType, defType,
@@ -253,15 +283,14 @@ function getBestMonDmg(
  * Arena's own `+1` rule, then Baton Pass, then (a permanent no-op) Defensive,
  * then Offensive, then Dmg, then PARTY_SIZE.
  *
- * Throws for the two-opponent/partner/multi-link battleTypeFlags (the
- * GetAIPartyIndexes branches dbl-4d covers) -- see this module's header.
+ * Singles and plain doubles use the battlerIn1/battlerIn2 pair below (:986-999).
+ * The multi-battler formats (TWO_OPPONENTS / INGAME_PARTNER / TOWER_LINK_MULTI)
+ * have BATTLE_TYPE_DOUBLE set too, so that pair logic applies unchanged; the
+ * only difference is the party range from GetAIPartyIndexes (:1004).
  */
 export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: number, deps: AiSwitchingDeps): { partyIndex: number; unmodelled: string[] } {
   const battler = state.battlers[aiBattlerId]
   if (!battler) throw new Error(`getMostSuitableMonToSwitchInto: no battler at id ${aiBattlerId}`)
-  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_MULTI_ANY)) {
-    throw new Error('getMostSuitableMonToSwitchInto: two-opponent/partner/multi-link branches (battle_ai_switch_items.c:985-996, GetAIPartyIndexes :30-47) are out of scope for this sim')
-  }
 
   const unmodelled: string[] = []
   if (battler.monToSwitchIntoId !== PARTY_SIZE) return { partyIndex: battler.monToSwitchIntoId, unmodelled }
@@ -281,8 +310,9 @@ export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: 
 
   const side = aiBattlerId & 1
   const party = state.sides[side].party
-  const firstId = 0
-  const lastId = 6 // GetAIPartyIndexes' singles-and-doubles else branch -- see this module's header.
+  // :1004 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId). Multi
+  // formats narrow this to the battler's own flank half ([0,3) or [3,6)).
+  const [firstId, lastId] = getAiPartyIndexes(state, aiBattlerId)
 
   let invalidMons = 0
   let aliveCount = 0
@@ -320,18 +350,33 @@ export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: 
 }
 
 /**
- * OpponentHandleChoosePokemon, battle_controller_opponent.c:1643-1693 --
- * the caller's own PARTY_SIZE fallback: the first live party slot that isn't
- * the currently active one, with NO Truant/monToSwitchIntoId filtering (that
- * filtering belongs to GetMostSuitableMonToSwitchInto's own invalid-slot
- * pass, already tried and exhausted by the time this runs).
+ * OpponentHandleChoosePokemon, battle_controller_opponent.c:1652-1680 -- the
+ * caller's own PARTY_SIZE fallback: the first party slot in GetAIPartyIndexes'
+ * range (:1670) whose HP is non-zero and that is neither battler 1's nor
+ * battler 3's active slot (:1672-1674). In singles both `battler1` and
+ * `battler2` are B_POSITION_OPPONENT_LEFT = 1 (:1655-1659), so the second test
+ * is the first. The C does NOT test for an empty species or for
+ * Truant/monToSwitchIntoId (that filtering belongs to
+ * GetMostSuitableMonToSwitchInto's own invalid-slot pass, already tried and
+ * exhausted by the time this runs).
+ *
+ * When nothing qualifies the C's loop falls out at `lastId`, NOT PARTY_SIZE
+ * (:1670-1678), and that value is what it writes into `monToSwitchIntoId`
+ * (:1683). Mirrored exactly: `lastId` is 6 (= PARTY_SIZE) in singles, but 3 or
+ * 6 in the multi formats, so this can return a value that is not a live slot.
+ * See REPORT.md for what the sim's caller does with it.
  */
-function fallbackFirstLiveSlot(party: SimPartyMon[], activePartyIndex: number): number {
-  for (let i = 0; i < 6; i++) {
-    const mon = party[i]
-    if (mon && mon.hp !== 0 && i !== activePartyIndex) return i
+function fallbackFirstLiveSlot(state: BattleState, battlerId: number): number {
+  const party = state.sides[battlerId & 1].party
+  const battler1 = state.battlers[1]?.partyIndex ?? -1
+  const battler2 = isDoubleBattle(state) ? (state.battlers[3]?.partyIndex ?? -1) : battler1
+  const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+  let chosenMonId = firstId
+  for (; chosenMonId < lastId; chosenMonId++) {
+    const mon = party[chosenMonId]
+    if (mon && mon.hp !== 0 && chosenMonId !== battler1 && chosenMonId !== battler2) break
   }
-  return PARTY_SIZE
+  return chosenMonId
 }
 
 /**
@@ -357,7 +402,7 @@ export function createAiOpponentReplacement(deps: AiSwitchingDeps): ReplacementD
       const result = getMostSuitableMonToSwitchInto(state, battlerId, deps)
       unmodelled.push(...result.unmodelled)
       if (result.partyIndex !== PARTY_SIZE) return result.partyIndex
-      return fallbackFirstLiveSlot(state.sides[battlerId & 1].party, battler.partyIndex)
+      return fallbackFirstLiveSlot(state, battlerId)
     },
   }
 }

@@ -1,10 +1,12 @@
 // BattleAI_SetupFlags, src/battle_ai_main.c:131-155 -- the trainer-battle path
 // only. The full function's first six branches (RECORDED, SAFARI, ROAMER,
 // FIRST_BATTLE, FACTORY, the FRONTIER/EREADER_TRAINER/TRAINER_HILL/SECRET_BASE
-// group, TWO_OPPONENTS) select aiFlags for battle types none of the 40 fights
-// this tool targets can ever be -- same precedent as aiSwitching.ts's
-// BATTLE_TYPE_ARENA early return and GetAIPartyIndexes' doubles/multi throw.
-// Every trainer battle this sim runs falls through to the final `else`,
+// group) select aiFlags for battle types none of the 40 fights this tool
+// targets can ever be -- same precedent as aiSwitching.ts's BATTLE_TYPE_ARENA
+// early return. The TWO_OPPONENTS branch (:144-145) IS modelled: this sim runs
+// the two-opponent and in-game-partner formats (driver/battleFormat.ts:68-80
+// sets BATTLE_TYPE_TWO_OPPONENTS for both). Every other trainer battle falls
+// through to the final `else`,
 // `AI_THINKING_STRUCT->aiFlags = gTrainers[gTrainerBattleOpponent_A].aiFlags`.
 //
 // `gTrainers[].aiFlags` itself is not stored in trainers.json (it is a C
@@ -86,15 +88,27 @@ export function trainerAiFlags(trainer: TrainerAiRow): number {
 }
 
 /**
- * BattleAI_SetupFlags, battle_ai_main.c:131-155 -- the trainer-battle `else`
- * branch (:147) plus its own AI_FLAG_DOUBLE_BATTLE OR (:152-154), restricted
- * to the battleTypeFlags-and-trainer-record half of that OR (the
- * `gSaveBlock2Ptr->doubleBattleMode` half does not apply -- see this module's
- * header). `battleTypeFlags` is `state.battleTypeFlags`
- * (BattleState.battleTypeFlags, `gBattleTypeFlags`).
+ * BattleAI_SetupFlags, battle_ai_main.c:131-155 -- the TWO_OPPONENTS branch
+ * (:144-145) and the trainer-record `else` (:147), plus the shared
+ * AI_FLAG_DOUBLE_BATTLE OR (:152-154), restricted to the battleTypeFlags-and-
+ * trainer-record half of that OR (the `gSaveBlock2Ptr->doubleBattleMode` half
+ * does not apply -- see this module's header). `battleTypeFlags` is
+ * `state.battleTypeFlags` (BattleState.battleTypeFlags, `gBattleTypeFlags`).
+ *
+ * The TWO_OPPONENTS branch REPLACES the trainer-derived set rather than ORing
+ * into it, so none of risky/stall/status/noSwitching/SMART_SWITCHING/
+ * HP_AWARE/WILL_SUICIDE survive it; only the fixed four-flag set does, plus the
+ * shared DOUBLE_BATTLE bit.
  */
 export function battleAiSetupFlags(trainer: TrainerAiRow, battleTypeFlags: number): number {
-  let flags = trainerAiFlags(trainer)
+  let flags: number
+  if ((battleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS) !== 0) {
+    // :144-145.
+    flags = AI_FLAG_CHECK_BAD_MOVE | AI_FLAG_TRY_TO_FAINT | AI_FLAG_CHECK_VIABILITY | AI_FLAG_CHECK_FOE
+  } else {
+    flags = trainerAiFlags(trainer)
+  }
+  // :152-154.
   if ((battleTypeFlags & (BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS)) !== 0 || trainer.forcedDouble) {
     flags |= AI_FLAG_DOUBLE_BATTLE
   }

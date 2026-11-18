@@ -5,8 +5,10 @@
 // WHETHER to switch at all, and which party slot to write into
 // `AI_monToSwitchIntoId`/`monToSwitchIntoId` before that port ever runs.
 //
-// GetAIPartyIndexes' singles-only else branch (firstId=0, lastId=6) is used
-// throughout, same precedent as aiSwitching.ts's own header.
+// GetAIPartyIndexes (battle_ai_switch_items.c:30-47) supplies the reserve-scan
+// range at every site the C calls it (:109, :219, :446, :643, :732): the
+// singles/plain-double `else` branch is [0,6), and the multi formats split each
+// side's party by flank into [0,3)/[3,6).
 //
 // `AI_THINKING_STRUCT->switchMon` (`ShouldSwitchIfAllBadMoves`,
 // battle_ai_switch_items.c:49-62) is set by ChooseMoveOrAction_Singles' own
@@ -50,6 +52,7 @@ import { weatherHasEffect } from '../fieldEndTurn'
 import { aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
 import { isAbilityPreventingEscape, type AiChoice } from './aiPipeline'
 import { isDoubleBattle } from './aiCheckBadMove'
+import { getAiPartyIndexes } from './aiSwitching'
 import { canIndexMoveFaintTarget } from './aiScorers'
 import { getWhoStrikesFirst, type ChosenAction, type TurnOrderMoveView } from '../turnOrder'
 
@@ -207,7 +210,9 @@ function findMonThatAbsorbsOpponentsMove(state: BattleState, battlerId: number, 
   if (ownAbility !== null && absorbing.includes(ownAbility)) return { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled }
 
   const party = state.sides[battlerId & 1].party
-  for (let i = 0; i < 6; i++) {
+  // :219 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId); :226 loops it.
+  const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+  for (let i = firstId; i < lastId; i++) {
     if (isInvalidReserveSlot(state, battlerId, i)) continue
     const reserve = party[i]
     if (!reserve) continue
@@ -390,7 +395,9 @@ function findMonWithFlagsAndSuperEffective(
   if (!lastMove || lastMove.power === 0) return { decided: false, chosenPartyIndex: PARTY_SIZE, unmodelled }
 
   const party = state.sides[battlerId & 1].party
-  for (let i = 0; i < 6; i++) {
+  // :446 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId); :453 loops it.
+  const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+  for (let i = firstId; i < lastId; i++) {
     if (isInvalidReserveSlot(state, battlerId, i)) continue
     const reserve = party[i]
     if (!reserve) continue
@@ -517,7 +524,11 @@ function shouldSwitchIfWonderGuard(state: BattleState, battlerId: number, deps: 
   }
 
   const party = state.sides[battlerId & 1].party
-  for (let i = 0; i < 6; i++) {
+  // :109 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId); :117 loops it.
+  // (This is ShouldSwitchIfWonderGuard, which returns FALSE in doubles at :89-90
+  // before it gets here, so only the singles branch is reachable.)
+  const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+  for (let i = firstId; i < lastId; i++) {
     if (isInvalidReserveSlot(state, battlerId, i)) continue
     const reserve = party[i]
     if (!reserve) continue
@@ -624,7 +635,9 @@ export function shouldSwitch(state: BattleState, battlerId: number, deps: AiDama
   if (battler.volatiles.skyDropped) return { shouldSwitch: false, unmodelled: escapeCheck.unmodelled }
 
   let availableToSwitch = 0
-  for (let i = 0; i < 6; i++) {
+  // :643 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId); :650 loops it.
+  const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+  for (let i = firstId; i < lastId; i++) {
     if (!isInvalidReserveSlot(state, battlerId, i)) availableToSwitch++
   }
   if (availableToSwitch === 0) return { shouldSwitch: false, unmodelled: escapeCheck.unmodelled }
@@ -795,7 +808,9 @@ export function aiTrySwitchOrUseItem(
         // the partner checks.
         const partner = isDoubleBattle(state) ? state.battlers[battlerId ^ BIT_FLANK] : null
         monToSwitchId = PARTY_SIZE
-        for (let i = 0; i < 6; i++) {
+        // :732 -- GetAIPartyIndexes(gActiveBattler, &firstId, &lastId); :734 loops it.
+        const [firstId, lastId] = getAiPartyIndexes(state, battlerId)
+        for (let i = firstId; i < lastId; i++) {
           const mon = party[i]
           if (!mon || mon.hp === 0) continue
           if (i === battler.partyIndex) continue
