@@ -20,14 +20,15 @@
 // only gapped moves; it would have become a real scoring bug had a future
 // batch trusted that set as "the real part-2 label list" for anything else.
 //
-// Singles is unchanged; doubles is now partly reachable. Every
-// `if (isDoubleBattle) { ... }` block in the C (the def-partner-ability
-// checks at :674-706, and the doubles halves of EFFECT_ROTOTILLER,
-// EFFECT_GEAR_UP, EFFECT_MAGNETIC_FLUX, EFFECT_HAZE, EFFECT_PERISH_SONG) is
-// still not transcribed branch by branch, but as of dbl-4c (cycle 4c1)
-// `isValidDoubleBattle` below is the real battle_ai_util.c:2270-2280 check, so
-// those branches are reachable in a doubles `BattleState` rather than dead by
-// construction. The five partner helpers that need no `gBattleStruct->moveTarget`
+// Singles is unchanged; doubles is now mostly reachable. As of dbl-4c (cycle
+// 4c1) `isValidDoubleBattle` below is the real battle_ai_util.c:2270-2280
+// check, so the C's `if (isDoubleBattle)` blocks are reachable in a doubles
+// `BattleState` rather than dead by construction. dbl-4c3 transcribed the
+// def-partner ability checks (:674-706) and the doubles halves of
+// EFFECT_ROTOTILLER, EFFECT_GEAR_UP, EFFECT_MAGNETIC_FLUX and
+// EFFECT_PERISH_SONG; EFFECT_HAZE's doubles half is the one remaining from the
+// original list and is still not transcribed branch by branch. The five partner
+// helpers that need no `gBattleStruct->moveTarget`
 // (`PartnerHasSameMoveEffectWithoutTarget`, `PartnerMoveIsSameNoTarget`,
 // `PartnerMoveEffectIsWeather`, `PartnerMoveEffectIsTerrain`, `PartnerMoveIs`)
 // are real transcriptions, and as of dbl-4c2 the three that read
@@ -227,7 +228,8 @@ import { SHIELDS_DOWN_PROTECTED_SPECIES } from '../statusEffects'
 import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, canTargetFaintAi, getHealthPercentage, getRecoilFraction, isTargetingPartner } from './aiScorers'
 import { isAbilityPreventingEscape, countUsablePartyMons, isBattlerAlive } from './aiPipeline'
 import { aiCalcDamage, aiGetTypeEffectiveness as aiGetTypeEffectivenessRaw, aiHoldEffectIs, aiHoldEffectParam, holdEffectId, isBattlerAIControlled, type AiDamageDeps } from './aiCalcDamage'
-import { AI_FLAG_WILL_SUICIDE } from './aiFlags'
+import { AI_FLAG_NEGATE_UNAWARE, AI_FLAG_WILL_SUICIDE } from './aiFlags'
+import { isBattlerGrounded } from '../grounding'
 import { idiv } from '../../fixed'
 import type { MoveBehaviorEntry } from '../../basePower'
 import { CHLOROPLAST_ABILITIES } from '../../multiHit'
@@ -344,6 +346,37 @@ function isSemiInvulnerable(defender: BattlerState, move: ReturnType<AiDamageDep
   if (!hasMoveFlag(move, 'hitsUnderwater') && hasFlag(defender.statuses3, STATUS3_UNDERWATER)) return true
   if (!hasMoveFlag(move, 'hitsUnderground') && hasFlag(defender.statuses3, STATUS3_UNDERGROUND)) return true
   return false
+}
+
+/** Every ability whose `onStatusImmune` hook returns TRUE for CHECK_REDIRECTION
+ * (abilities.cc:10603-10609 ABILITY_PROPELLER_TAIL, :10612-10620 ABILITY_STALWART).
+ * `IsAbilityStatusProtected(battler, CHECK_REDIRECTION)` (battle_script_commands.c:
+ * 6579-6591) scans the battler's slots and then BATTLE_PARTNER(battler)'s with
+ * `checkMoldBreaker` TRUE; the sim's statusEffects.ts table carries the same two
+ * entries at its own :1137-1139. */
+const REDIRECTION_PREVENTION_ABILITIES: readonly string[] = ['ABILITY_PROPELLER_TAIL', 'ABILITY_STALWART']
+
+/** IsMoveRedirectionPrevented, battle_ai_util.c:1130-1135:
+ *   if (aiFlags & AI_FLAG_NEGATE_UNAWARE) return FALSE;
+ *   if (move == MOVE_SKY_DROP || move == MOVE_SNIPE_SHOT ||
+ *       IsAbilityStatusProtected(battler, CHECK_REDIRECTION)) return TRUE;
+ *   return FALSE;
+ * `IsAbilityStatusProtected` reads the battler's own slots first and then its
+ * partner's (only when that partner is alive), both through `defAbility`
+ * (BattlerHasAbility(..., TRUE)): the read is on a DEFENDER-side battler, so
+ * the AI's own attacker-side policy (`selfAbility`) does not apply. */
+export function isMoveRedirectionPrevented(state: BattleState, deps: AiDamageDeps, moveId: string, battlerId: number, attackerHasMoldBreaker: boolean): boolean {
+  if (hasFlag(state.aiFlags, AI_FLAG_NEGATE_UNAWARE)) return false
+  if (moveId === 'MOVE_SKY_DROP' || moveId === 'MOVE_SNIPE_SHOT') return true
+  const protectedBy = (id: number): boolean => {
+    const battler = state.battlers[id]
+    if (!battler) return false
+    return REDIRECTION_PREVENTION_ABILITIES.some((ability) => defAbility(state, deps, battler, ability, attackerHasMoldBreaker))
+  }
+  if (protectedBy(battlerId)) return true
+  const partner = battlePartner(battlerId)
+  if (!isBattlerAlive(state, partner)) return false
+  return protectedBy(partner)
 }
 
 /** IsPowderImmune, battle_util.c:3190-3204 -- Grass-type or Overcoat holder
@@ -1179,9 +1212,55 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
             break
         }
       }
-      // :674-706 -- def-PARTNER ability checks, doubles only. Not transcribed
-      // branch by branch yet; the gate is real as of dbl-4c (cycle 4c1), so
-      // this is dead in singles only (dbl-4c2 adds the branches and tests).
+      // :674-706 -- def-PARTNER ability checks, doubles only. `isDoubleBattle`
+      // here is IsValidDoubleBattle(battlerAtk) (:497), so in singles the whole
+      // block is skipped (and in a double it is skipped when both foes are dead
+      // and the attacker's own partner is dead too). BATTLE_PARTNER(battlerDef)
+      // is battlePartner(battlerDef).
+      if (isValidDoubleBattle(state, battlerAtk)) {
+        const defPartnerId = battlePartner(battlerDef)
+        const defPartner = state.battlers[defPartnerId]
+        if (defPartner) {
+          // :676-681 -- Magic Bounce for the partner. BATTLER_HAS_ABILITY_AND_ALIVE
+          // (include/battle_util.h:74) is `IsBattlerAlive(b) && BattlerHasAbility(b, a, TRUE)`.
+          if (
+            isBattlerAlive(state, defPartnerId) &&
+            defAbility(state, deps, defPartner, 'ABILITY_MAGIC_BOUNCE', atkMoldBreaker) &&
+            hasMoveFlag(move, 'magicCoatAffected') &&
+            (move?.target === 'BOTH' || move?.target === 'FOES_AND_ALLY' || move?.target === 'OPPONENTS_FIELD')
+          ) {
+            return { score: score - 20, unmodelled }
+          }
+
+          // :683-686 -- Sweet Veil for the partner.
+          if (
+            isBattlerAlive(state, defPartnerId) &&
+            defAbility(state, deps, defPartner, 'ABILITY_SWEET_VEIL', atkMoldBreaker) &&
+            (effect === 'EFFECT_SLEEP' || effect === 'EFFECT_YAWN')
+          ) {
+            return { score: score - 10, unmodelled }
+          }
+
+          // :688-705 -- the partner's own slot list (GetBattlerAbilityInSlot is a
+          // raw slot read, no suppression -- same as the defender loop above).
+          const partnerSlots = [defPartner.mon.abilities.ability, ...defPartner.mon.abilities.innates].filter((x): x is string => !!x)
+          for (const abilityToCheck of partnerSlots) {
+            switch (abilityToCheck) {
+              case 'ABILITY_LIGHTNING_ROD':
+                if (resolvedType === 'ELECTRIC' && !isMoveRedirectionPrevented(state, deps, moveId, defPartnerId, atkMoldBreaker)) return { score: score - 20, unmodelled }
+                break
+              case 'ABILITY_RESERVOIR':
+              case 'ABILITY_STORM_DRAIN':
+                if (resolvedType === 'WATER' && !isMoveRedirectionPrevented(state, deps, moveId, defPartnerId, atkMoldBreaker)) return { score: score - 20, unmodelled }
+                break
+              case 'ABILITY_FLOWER_VEIL':
+                // :700 -- the DEFENDER's type, not the partner's (as written).
+                if (isBattlerOfType(defender, 'GRASS') && (isNonVolatileStatusMoveEffect(effect) || isStatLoweringMoveEffect(effect))) return { score: score - 10, unmodelled }
+                break
+            }
+          }
+        }
+      }
     }
 
     // :710-725 -- Magic Guard.
@@ -1413,19 +1492,60 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!battlerStatCanRise(state, attacker, 1, deps) || !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
       else if (!battlerStatCanRise(state, attacker, 4, deps) || !hasMoveWithSplit(attacker, 'SPECIAL', deps)) score -= 8
       break
-    case 'EFFECT_ROTOTILLER':
-      // Only the singles half (:956-960) is transcribed; the doubles half
-      // (:948-955) is left for dbl-4c2's per-branch work.
-      if (!(isBattlerOfType(attacker, 'GRASS') && battlerStatCanRise(state, attacker, 1, deps))) score -= 10
+    case 'EFFECT_ROTOTILLER': {
+      // battle_ai_main.c:947-960. `isDoubleBattle` is IsValidDoubleBattle(battlerAtk)
+      // (:497). AI_IsBattlerGrounded (battle_ai_util.c:1044) is IsBattlerGrounded.
+      const rotPartnerId = battlePartner(battlerAtk)
+      const rotPartner = state.battlers[rotPartnerId]
+      if (isValidDoubleBattle(state, battlerAtk)) {
+        if (
+          !(isBattlerOfType(attacker, 'GRASS') &&
+            isBattlerGrounded(state, battlerAtk, deps.grounding) &&
+            (battlerStatCanRise(state, attacker, 1 /* STAT_ATK */, deps) || battlerStatCanRise(state, attacker, 4 /* STAT_SPATK */, deps))) &&
+          !(!!rotPartner &&
+            isBattlerOfType(rotPartner, 'GRASS') &&
+            isBattlerGrounded(state, rotPartnerId, deps.grounding) &&
+            !defAbility(state, deps, rotPartner, 'ABILITY_CONTRARY', atkMoldBreaker) &&
+            (battlerStatCanRise(state, rotPartner, 1 /* STAT_ATK */, deps) || battlerStatCanRise(state, rotPartner, 4 /* STAT_SPATK */, deps)))
+        ) {
+          score -= 10
+        }
+      } else if (
+        !(isBattlerOfType(attacker, 'GRASS') &&
+          isBattlerGrounded(state, battlerAtk, deps.grounding) &&
+          (battlerStatCanRise(state, attacker, 1 /* STAT_ATK */, deps) || battlerStatCanRise(state, attacker, 4 /* STAT_SPATK */, deps)))
+      ) {
+        score -= 10
+      }
       break
+    }
     case 'EFFECT_GEAR_UP': {
+      // battle_ai_main.c:961-982. `isDoubleBattle` is IsValidDoubleBattle(battlerAtk) (:497).
       const plusMinus = selfAbility(state, deps, attacker, 'ABILITY_PLUS') || selfAbility(state, deps, attacker, 'ABILITY_MINUS')
       if (plusMinus) {
         if (!battlerStatCanRise(state, attacker, 1, deps) || !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) score -= 10
         else if (!battlerStatCanRise(state, attacker, 4, deps) || !hasMoveWithSplit(attacker, 'SPECIAL', deps)) score -= 8
         break
       }
-      score -= 10 // !isDoubleBattle path -- always taken in singles.
+      const gearDouble = isValidDoubleBattle(state, battlerAtk)
+      if (!gearDouble) score -= 10 // :969-971 -- "no partner and our stats wont rise, so don't use"
+      if (gearDouble) {
+        // :973-981. The `||` on the partner's PLUS/MINUS reads is transcribed as
+        // written (:974), and both hasMoveWithSplit calls read the ATTACKER's moves.
+        const gearPartner = state.battlers[battlePartner(battlerAtk)]
+        if (gearPartner) {
+          if (!defAbility(state, deps, gearPartner, 'ABILITY_PLUS', atkMoldBreaker) || !defAbility(state, deps, gearPartner, 'ABILITY_MINUS', atkMoldBreaker)) {
+            if (
+              (!battlerStatCanRise(state, gearPartner, 1 /* STAT_ATK */, deps) || !hasMoveWithSplit(attacker, 'PHYSICAL', deps)) &&
+              (!battlerStatCanRise(state, gearPartner, 4 /* STAT_SPATK */, deps) || !hasMoveWithSplit(attacker, 'SPECIAL', deps))
+            ) {
+              score -= 10
+            }
+          } else if (!selfAbility(state, deps, attacker, 'ABILITY_PLUS') && !selfAbility(state, deps, attacker, 'ABILITY_MINUS')) {
+            score -= 10 // :979 -- "nor our or our partner's ability is plus/minus"
+          }
+        }
+      }
       break
     }
     case 'EFFECT_ACUPRESSURE': {
@@ -1434,12 +1554,27 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       break
     }
     case 'EFFECT_MAGNETIC_FLUX': {
+      // battle_ai_main.c:986-1005. Same shape as Gear Up; `isDoubleBattle` is
+      // IsValidDoubleBattle(battlerAtk) (:497).
       const plusMinus2 = selfAbility(state, deps, attacker, 'ABILITY_PLUS') || selfAbility(state, deps, attacker, 'ABILITY_MINUS')
+      const fluxDouble = isValidDoubleBattle(state, battlerAtk)
       if (plusMinus2) {
         if (!battlerStatCanRise(state, attacker, 2, deps)) score -= 10
         else if (!battlerStatCanRise(state, attacker, 5, deps)) score -= 8
-      } else {
+      } else if (!fluxDouble) {
         score -= 10
+      }
+      if (fluxDouble) {
+        // :996-1004 -- the same `||` quirk on the partner's PLUS/MINUS as Gear Up.
+        const fluxPartner = state.battlers[battlePartner(battlerAtk)]
+        if (fluxPartner) {
+          if (!defAbility(state, deps, fluxPartner, 'ABILITY_PLUS', atkMoldBreaker) || !defAbility(state, deps, fluxPartner, 'ABILITY_MINUS', atkMoldBreaker)) {
+            if (!battlerStatCanRise(state, fluxPartner, 2 /* STAT_DEF */, deps)) score -= 10
+            else if (!battlerStatCanRise(state, fluxPartner, 5 /* STAT_SPDEF */, deps)) score -= 8
+          } else if (!selfAbility(state, deps, attacker, 'ABILITY_PLUS') && !selfAbility(state, deps, attacker, 'ABILITY_MINUS')) {
+            score -= 10
+          }
+        }
       }
       break
     }
@@ -1703,18 +1838,44 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       else if (defender.mon.statStages[7] /* STAT_EVASION */ <= 4 || !isBattlerOfType(defender, 'GHOST') || doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) score -= 9
       break
     case 'EFFECT_PERISH_SONG': {
-      // Doubles branch (:1282-1292) is dead code in singles -- only the else
-      // branch (:1293-1297) is reachable.
-      // IsSoundproof (battle_util.c:8864-8866): ON_ABILITY(battler, TRUE, isSoundproof) -- every
-      // isSoundproof ability, read with checkMoldBreaker TRUE. The attacker's own read follows
-      // this file's attacker-side policy (selfAbility); the foe's is a defender read. The
-      // partner scan never fires in singles.
-      if (countUsablePartyMons(state, battlerAtk) === 0 && !SOUNDPROOF_ABILITIES.some((id) => selfAbility(state, deps, attacker, id)) && countUsablePartyMons(state, battlerDef) >= 1) {
-        score -= 10
-      }
+      // battle_ai_main.c:1281-1298. `isDoubleBattle` is IsValidDoubleBattle(battlerAtk)
+      // (:497). IsSoundproof (battle_util.c:8864-8866) is ON_ABILITY(battler, TRUE,
+      // isSoundproof) -- every isSoundproof ability read with checkMoldBreaker TRUE.
+      // The attacker and its own partner follow this file's attacker-side policy
+      // (`selfAbility`, no Mold Breaker: the AI never writes gBattlerAttacker); the
+      // foe and the foe's partner are defender-side reads (`defAbility`).
       const foe = foeOf(battlerAtk)
-      const foeBattler = state.battlers[foe]
-      if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || SOUNDPROOF_ABILITIES.some((id) => defAbility(state, deps, defender, id, atkMoldBreaker))) score -= 10
+      const foePartner = battlePartner(foe)
+      const atkSoundproof = (b: BattlerState) => SOUNDPROOF_ABILITIES.some((id) => selfAbility(state, deps, b, id))
+      const defSoundproof = (b: BattlerState) => SOUNDPROOF_ABILITIES.some((id) => defAbility(state, deps, b, id, atkMoldBreaker))
+      const attackerSongable = state.battlers[battlerAtk]
+      const attackerPartnerSongable = state.battlers[battlePartner(battlerAtk)]
+      const perishFoe = state.battlers[foe]
+      const perishFoePartner = state.battlers[foePartner]
+      if (isValidDoubleBattle(state, battlerAtk)) {
+        // :1283-1292.
+        if (
+          countUsablePartyMons(state, battlerAtk) === 0 &&
+          !!attackerSongable && !atkSoundproof(attackerSongable) &&
+          !!attackerPartnerSongable && !atkSoundproof(attackerPartnerSongable) &&
+          countUsablePartyMons(state, foe) >= 1
+        ) {
+          score -= 10 // Don't wipe your team if you're going to lose
+        } else if (
+          (!perishFoe || !isBattlerAlive(state, foe) || defSoundproof(perishFoe) || hasFlag(perishFoe.statuses3, STATUS3_PERISH_SONG)) &&
+          (!perishFoePartner || !isBattlerAlive(state, foePartner) || defSoundproof(perishFoePartner) || hasFlag(perishFoePartner.statuses3, STATUS3_PERISH_SONG))
+        ) {
+          score -= 10 // Both enemies are perish songed
+        } else if (doesPartnerHaveSameMoveEffect(state, deps, battlerAtk, battlerDef, moveId)) {
+          score -= 10
+        }
+      } else {
+        if (countUsablePartyMons(state, battlerAtk) === 0 && !SOUNDPROOF_ABILITIES.some((id) => selfAbility(state, deps, attacker, id)) && countUsablePartyMons(state, battlerDef) >= 1) {
+          score -= 10
+        }
+        const foeBattler = state.battlers[foe]
+        if ((foeBattler && hasFlag(foeBattler.statuses3, STATUS3_PERISH_SONG)) || SOUNDPROOF_ABILITIES.some((id) => defAbility(state, deps, defender, id, atkMoldBreaker))) score -= 10
+      }
       break
     }
     // -------------------------------------------------------------------
