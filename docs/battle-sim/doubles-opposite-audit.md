@@ -88,21 +88,22 @@ This audit sizes and categorises all opposite-battler and side-flip idioms to pl
 | web/src/engine/sim/turn.ts:1509 | `battler.takenDmgBy = sourceBattlerId !== undefined ? sourceBattlerId : (battlerId & 1) ^ 1` | side-flip | battle_script_commands.c:1921 | none | applyDamage no-source fallback: cycle49 changed it to the opposing-left default `(battlerId & 1) ^ 1`. C (battle_script_commands.c:1921-1923) writes `gBattlerAttacker` (BS_TARGET) or `gBattlerTarget` (BS_ATTACKER); the sim tracks no `gBattlerTarget`, and callers with no source (self-damage, recoil, hazards) use the default. |
 | web/src/engine/sim/turn.ts:2044 | `? deps.damage.moveType(state, battlerId, battlerId ^ 1, moveId).moveType` | single-foe-by-design | battle_main.c:5206 | none | moveViewFor: mirrors GetTypeBeforeUsingMove(move, battlerAtk) (battle_main.c:5206-5209), target-independent in C; opposing battler satisfies signature. |
 | web/src/engine/sim/turn.ts:2126 | `const target = action.target ?? (deps.dataContext.move(locked)?.target === 'USER' ? battlerId : (battlerId & 1) ^ 1)` | side-flip | battle_util.c:165 | none | applyLockedMove: cycle49 changed the non-USER fallback to the opposing-left default `(battlerId & 1) ^ 1` (GetDefaultMoveTarget, pokemon.c:1267-1270). C's MULTIPLETURNS/RECHARGE branch returns `gBattleStruct->moveTarget[battler]` (battle_util.c:160-166), a stored field the sim does not carry; a set `action.target` is unchanged. |
-| web/src/engine/sim/turn.ts:2272 | `const foeId = switcherId ^ 1` | needs-all-foes | battle_script_commands.c:11295 | all foes | OPEN (cycle49 left it for `dbl-3c-turn-targets-pursuit`): findPursuitAttacker checks only switcherId ^ 1 on switch-out instead of iterating both foes (Cmd_jumpifnopursuitswitchdmg, battle_script_commands.c:11295-11310). |
-| web/src/engine/sim/turn.ts:2638 | `const defSide = (battlerId & 1) ^ 1` | side-flip | battle_util.c:262 | none | Follow Me check at move execution: opposing side index flip (battlerId & 1) ^ 1 (GetBattlerSide(gBattlerAttacker) ^ BIT_SIDE, battle_util.c:262). |
-| web/src/engine/sim/turn.ts:2870 | `const bounceDefSide = (bounceAttackerId & 1) ^ 1` | side-flip | battle_script_commands.c:6935 | none | Magic Coat redirection: opposing side index flip (bounceAttackerId & 1) ^ 1 (VARIOUS_SET_MAGIC_COAT_TARGET, battle_script_commands.c:6935). |
-| web/src/engine/sim/turn.ts:5029 | `? deps.damage.moveType(state, battlerId, battlerId ^ 1, id).moveType` | single-foe-by-design | battle_main.c:5206 | none | buildMoveView: mirrors GetTypeBeforeUsingMove(move, battlerAtk) (battle_main.c:5206-5209), target-independent in C; opposing battler satisfies signature. |
+| web/src/engine/sim/turn.ts:2261 | `so the LEFT foe is (switcherId & 1) ^ 1 and the RIGHT foe` | comment-only | battle_script_commands.c:11295 | none | Doc comment on findPursuitAttacker explaining the foe ids. |
+| web/src/engine/sim/turn.ts:2284 | `const leftFoeId = (switcherId & 1) ^ 1` | side-flip | battle_script_commands.c:11295 | none | RESOLVED cycle50 (`dbl-3c-turn-targets-pursuit`): findPursuitAttacker returns every Pursuit hit in pass order (singles: LEFT foe; doubles: RIGHT foe first, then LEFT -- the LEFT id with bit 2 set), per BattleScript_ActionSwitch `setmultihit` (data/battle_scripts_1.s:7197-7209) and Cmd_jumpifnopursuitswitchdmg (battle_script_commands.c:11295-11313). |
+| web/src/engine/sim/turn.ts:2666 | `const defSide = (battlerId & 1) ^ 1` | side-flip | battle_util.c:262 | none | Follow Me check at move execution: opposing side index flip (battlerId & 1) ^ 1 (GetBattlerSide(gBattlerAttacker) ^ BIT_SIDE, battle_util.c:262). |
+| web/src/engine/sim/turn.ts:2898 | `const bounceDefSide = (bounceAttackerId & 1) ^ 1` | side-flip | battle_script_commands.c:6935 | none | Magic Coat redirection: opposing side index flip (bounceAttackerId & 1) ^ 1 (VARIOUS_SET_MAGIC_COAT_TARGET, battle_script_commands.c:6935). |
+| web/src/engine/sim/turn.ts:5057 | `? deps.damage.moveType(state, battlerId, battlerId ^ 1, id).moveType` | single-foe-by-design | battle_main.c:5206 | none | buildMoveView: mirrors GetTypeBeforeUsingMove(move, battlerAtk) (battle_main.c:5206-5209), target-independent in C; opposing battler satisfies signature. |
 
 ## Summary by Class
 
-- `side-flip`: 38
+- `side-flip`: 39
 - `single-foe-by-design`: 29
-- `needs-all-foes`: 1
+- `needs-all-foes`: 0
 - `needs-chosen-target`: 0
 - `singles-only-ai`: 5
-- `comment-only`: 6
+- `comment-only`: 7
 - `wrong-battler-singles-bug`: 0
-- **Total**: 79
+- **Total**: 80
 
 ## Follow-up items
 
@@ -125,13 +126,13 @@ The one `needs-chosen-target` site in `handleCurse` was fixed in cycle48:
 - Ghost Curse in C (`data/battle_scripts_1.s:4969-4972`) only re-targets when the target IS the user, via `getmovetarget BS_ATTACKER` -> `GetMoveTarget(attacker, move, 0)` (`battle_util.c:6343-6416`, whose SELECTED branch calls `SetRandomTarget`, `battle_util.c:6326-6341`). `handleCurse` now calls the sim's `getMoveTarget` in that branch instead of hard-coding `battlerId ^ 1`, so doubles draws the C's single `Random() % 2` and singles stays draw-free.
 - **Resolved item**: `dbl-3c-curse-target`.
 
-### 4. `web/src/engine/sim/turn.ts` (resolved in cycle49 except Pursuit)
-Cycle49 (`dbl-3c-turn-targets`) fixed every site here except the Pursuit switch-out check, which stays open as `dbl-3c-turn-targets-pursuit`:
+### 4. `web/src/engine/sim/turn.ts` (resolved in cycle49 and cycle50)
+Cycle49 (`dbl-3c-turn-targets`) fixed every site here, and cycle50 (`dbl-3c-turn-targets-pursuit`) closed the Pursuit switch-out check:
 - **Follow Me fallbacks** (lines 935, 964): reclassified as unreachable fallbacks (no fix needed; no code change). `followmeTarget ?? (attacker ^ 1)` is only reached after `isAffectedByFollowMe` returns true, which requires `sideTimers.followmeTimer !== 0` and a live `followmeTarget` battler (`turn.ts:840-872`), so the `??` branch never fires. C reads `gSideTimers[side].followmeTarget` directly (`battle_util.c:6366`, `:6394`).
 - **Multi-target moves in `getMoveTarget`** (line 947): changed from `attacker ^ 1` to `(attacker & 1) ^ 1`, the opposing LEFT battler `GetBattlerAtPosition((GetBattlerPosition(attacker) & BIT_SIDE) ^ BIT_SIDE)` (`battle_util.c:6380`). Attacker 2 previously resolved to battler 3 (the opposing right); it now resolves to 1. Reclassified `side-flip`, no doubles fix needed. The alive/partner fallback at `turn.ts:948-955` already mirrors `:6381-6386` and was not touched.
 - **RANDOM in singles** (line 969): the same expression, `(attacker & 1) ^ 1`, matching `battle_util.c:6399-6400`. Reclassified `side-flip`; singles is bit-identical because `(id & 1) ^ 1 == id ^ 1` there.
 - **Damage source attribution** (line 1509): the no-`sourceBattlerId` fallback is now `(battlerId & 1) ^ 1` (opposing left). C (`battle_script_commands.c:1921-1923`) writes `gBattlerAttacker` for BS_TARGET and `gBattlerTarget` otherwise; the sim tracks no `gBattlerTarget` field, so callers that pass no source (self-damage, recoil, hazards) use the opposing-left default. Reclassified `side-flip`.
 - **Locked move target** (line 2126): the non-USER fallback is now `(battlerId & 1) ^ 1`, the default cursor `GetDefaultMoveTarget` (`pokemon.c:1267-1270`). C's `STATUS2_MULTIPLETURNS` / `STATUS2_RECHARGE` branch returns `gBattleStruct->moveTarget[battler]` (`battle_util.c:160-166`), the target stored at selection; the sim does not carry that field, and a set `action.target` is unchanged. Reclassified `side-flip`.
 - **Bide turn 3 unleash target** (line 3218, row removed): the target is `takenDmgBy` unless `hasFlag(state.absentBattlerFlags, 1 << takenDmgBy)`, in which case it calls the sim's `getMoveTarget(..., 'MOVE_POUND', deps, 1)` (`battle_util.c:3422-3429`; `setTarget = 1` is `MOVE_TARGET_SELECTED`, `include/constants/battle.h:491`). A fainted-but-not-absent damager is still the target, matching C. Resolved.
-- **Pursuit switch-out check** (line 2272, `needs-all-foes`): still OPEN as `dbl-3c-turn-targets-pursuit`. `findPursuitAttacker` tests only `switcherId ^ 1`; `Cmd_jumpifnopursuitswitchdmg` iterates both foes across its multiHitCounter passes (`battle_script_commands.c:11295-11310`).
-- **Resolved item**: `dbl-3c-turn-targets` (all but Pursuit); Pursuit queued as `dbl-3c-turn-targets-pursuit`.
+- **Pursuit switch-out check** (line 2284, `side-flip`): RESOLVED cycle50 as `dbl-3c-turn-targets-pursuit`. `findPursuitAttacker` starts from the LEFT foe `(switcherId & 1) ^ 1` and, in doubles, visits the RIGHT foe first (that id with bit 2 set) then the LEFT, matching `Cmd_jumpifnopursuitswitchdmg` (`battle_script_commands.c:11295-11313`) and BattleScript_ActionSwitch's `setmultihit` (`data/battle_scripts_1.s:7197-7209`: singles 1 pass, doubles 2 passes).
+- **Resolved item**: `dbl-3c-turn-targets`, `dbl-3c-turn-targets-pursuit`.
