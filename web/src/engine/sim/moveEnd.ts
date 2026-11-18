@@ -54,6 +54,7 @@ import {
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
   MOVE_UNSET,
+  NUM_STATS,
   SIDE_STATUS_CRAFTY_SHIELD,
   SIDE_STATUS_MAT_BLOCK,
   SIDE_STATUS_HAZARDS_ANY,
@@ -218,7 +219,7 @@ import { dispatchOnTerrainChange, dispatchOnWeatherChange } from './onWeather'
 import { HP_TRANSFORMATIONS, apeShiftHandler, changeBattlerForm } from './formChange'
 import { TOTAL_SPEED_PRIMARY, getBattlerTotalSpeedStat, getFastestBattler } from './turnOrder'
 import { attackPreModify, calculateBattleStat, defensePreModify, spAttackPreModify, spDefensePreModify } from '../battleStat'
-import { TYPE_NAME_BY_ID } from './hazards'
+import { TYPE_NAME_BY_ID, TYPE_ROCK_ID } from './hazards'
 import {
   canBattlerSwitch,
   consumeBerryWithOverride,
@@ -4312,9 +4313,10 @@ function handleAttackerMoveEndAbility(
     }
   }
 
-  // Angel's Wrath (src/abilities.cc:5570-5666): a `switch (move)` on the literal move used. Tackle (:5573), Electroweb (:5643) and Bug Bite (:5654) are
-  // ported; String Shot (:5592), Harden (:5617) and Iron Defense (:5635) read gMoveResultFlags / WasMoveSuccessful, which MoveEndAbilitiesContext does not
-  // carry, so those three only push an unmodelled note. Its onAccuracy / onTypeEffectiveness / onModifyEffectChance / onCanStatusType hooks are damage-path.
+  // Angel's Wrath (src/abilities.cc:5570-5666): a `switch (move)` on the literal move used. Tackle (:5573), String Shot (:5592), Harden (:5617),
+  // Iron Defense (:5635), Electroweb (:5643) and Bug Bite (:5654) are all ported. The WasMoveSuccessful / MOVE_RESULT_NO_EFFECT gates read the
+  // dispatcher's `noEffect` (MoveEndAbilitiesContext.noEffect), as Hypnotic Trance does below. Its onAccuracy / onTypeEffectiveness /
+  // onModifyEffectChance / onCanStatusType hooks are damage-path.
   if (abilityId === 'ABILITY_ANGELS_WRATH') {
     if (moveId === 'MOVE_TACKLE') {
       // CHECK(ShouldApplyOnHitEffect(target)), !IsAbilityStatusProtected(CHECK_RESTRICTING), not (encoreTimer AND disableTimer); each missing half is
@@ -4363,10 +4365,64 @@ function handleAttackerMoveEndAbility(
         // gBattleMoveDamage = -gHpDealt; if (!gBattleMoveDamage) gBattleMoveDamage = -1 (abilities.cc:5658)
         healFromAbilityDrain(state, attackerId, Math.max(1, hpDealt), deps)
       }
-    } else if (moveId === 'MOVE_STRING_SHOT' || moveId === 'MOVE_HARDEN' || moveId === 'MOVE_IRON_DEFENSE') {
-      unmodelled.push(
-        `Angel's Wrath's ${moveId} case (abilities.cc:5592-5642; ABILITY_ANGELS_WRATH) is not modelled: it reads gMoveResultFlags / WasMoveSuccessful, which the move-end context does not carry`,
-      )
+    } else if (moveId === 'MOVE_STRING_SHOT') {
+      // CHECK(WasMoveSuccessful()) (battle_util.c:4058) = !(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) && gBattlerAttacker != gBattlerTarget.
+      // `noEffect` is that MOVE_RESULT_NO_EFFECT bit; undefined (test dispatch) is treated as success, as Hypnotic Trance does.
+      if (!noEffect && attackerId !== targetId) {
+        // int side = GetBattlerSide(target)
+        const side = state.sides[targetId & 1]
+        // All four hazards already on that side -> `break`: nothing is touched and the script call is skipped.
+        // Otherwise every hazard is re-asserted and BOTH layer counters increment, every time the hook fires.
+        if (
+          !hasFlag(side.statuses, SIDE_STATUS_STEALTH_ROCK) ||
+          !hasFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES) ||
+          !hasFlag(side.statuses, SIDE_STATUS_SPIKES) ||
+          !hasFlag(side.statuses, SIDE_STATUS_STICKY_WEB)
+        ) {
+          // gSideStatuses[side] |= SIDE_STATUS_STEALTH_ROCK; gSideTimers[side].stealthRockType = TYPE_ROCK (:5601-5602)
+          side.statuses = setFlag(side.statuses, SIDE_STATUS_STEALTH_ROCK)
+          side.timers.stealthRockType = TYPE_ROCK_ID
+          // toxicSpikesAmount++ capped at 2 (:5604-5606)
+          side.statuses = setFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES)
+          side.timers.toxicSpikesAmount = Math.min(2, side.timers.toxicSpikesAmount + 1)
+          // spikesAmount++ capped at 3 (:5608-5610)
+          side.statuses = setFlag(side.statuses, SIDE_STATUS_SPIKES)
+          side.timers.spikesAmount = Math.min(3, side.timers.spikesAmount + 1)
+          // gSideStatuses[side] |= SIDE_STATUS_STICKY_WEB (:5612)
+          side.statuses = setFlag(side.statuses, SIDE_STATUS_STICKY_WEB)
+          // BattleScriptCall(BattleScript_AngelsWrath_Effect_String_Shot) (:5614) only prints.
+        }
+      }
+    } else if (moveId === 'MOVE_HARDEN') {
+      // CHECK_NOT(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) (:5618) -- no attacker != target term.
+      if (!noEffect) {
+        // for (i = 1; i < NUM_STATS; i++) skip STAT_DEF; ChangeStatBuffs(battler, 1, i, MOVE_EFFECT_AFFECTS_USER, NULL) (:5621-5625).
+        // NUM_STATS is 6 (include/constants/global.h:68), so i runs 1..5: ATK, SPEED, SPATK, SPDEF -- never Def, accuracy or evasion.
+        // Each stat is its own ChangeStatBuffs call, so each may fail at +6 independently.
+        for (let i = 1; i < NUM_STATS; i++) {
+          if (i === STAT_DEF) continue
+          const res = changeStatBuffs(
+            state,
+            attackerId, // battler = holder
+            attackerId,
+            targetId,
+            1,
+            i,
+            MOVE_EFFECT_AFFECTS_USER,
+            false, // hasBsPtr = false: the C passes NULL
+            { dataContext: deps.dataContext, grounding: deps.grounding },
+            unmodelled,
+            moveId,
+          )
+          if (res.delta !== 0) result.statChanges.push({ battlerId: attackerId, stat: i, change: res.delta })
+        }
+        // BattleScriptCall(BattleScript_AngelsWrath_Effect_Harden) (:5628) only if at least one stat changed; print only.
+      }
+    } else if (moveId === 'MOVE_IRON_DEFENSE') {
+      // CHECK_NOT(gMoveResultFlags & MOVE_RESULT_NO_EFFECT) (:5636); gRoundStructs[battler].protectMove = MOVE_IRON_DEFENSE (:5638)
+      if (!noEffect) {
+        attacker.round.protectMove = 'MOVE_IRON_DEFENSE'
+      }
     }
   }
 

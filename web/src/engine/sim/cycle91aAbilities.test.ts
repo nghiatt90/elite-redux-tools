@@ -686,10 +686,23 @@ describe("Cycle 91a - Angel's Wrath (src/abilities.cc:5570-5666)", () => {
     expect(direct('MOVE_BUG_BITE', { hp: 95 }).holder.mon.hp).toBe(100)
   })
 
-  it('String Shot / Harden / Iron Defense are reported as unmodelled, not silently skipped', () => {
-    for (const id of ['MOVE_STRING_SHOT', 'MOVE_HARDEN', 'MOVE_IRON_DEFENSE']) {
-      const r = direct(id, {}, {}, { hpDealt: 0 })
-      expect(r.unmodelled.some((m) => m.includes(`Angel's Wrath's ${id} case`))).toBe(true)
-    }
+  it('String Shot, Harden and Iron Defense are ported (cycle 3d3o; abilities.cc:5592-5641)', () => {
+    // hpDealt = 0, so the WasMoveSuccessful / NO_EFFECT gates only pass because this direct dispatch carries no
+    // `noEffect` bit: undefined is treated as success (the Hypnotic Trance convention, moveEnd.ts).
+    const stringShot = direct('MOVE_STRING_SHOT', {}, {}, { hpDealt: 0 })
+    expect(hasFlag(stringShot.state.sides[1]!.statuses, SIDE_STATUS_STEALTH_ROCK)).toBe(true)
+    expect(stringShot.state.sides[1]!.timers.spikesAmount).toBe(1)
+    expect(stringShot.state.sides[1]!.timers.toxicSpikesAmount).toBe(1)
+    expect(stringShot.unmodelled.some((m) => m.includes("Angel's Wrath's MOVE_STRING_SHOT case"))).toBe(false)
+
+    // Harden skips STAT_DEF and has no accuracy/evasion targets (abilities.cc:5623-5626, NUM_STATS is 6).
+    const harden = direct('MOVE_HARDEN', {}, {}, { hpDealt: 0 })
+    expect(harden.holder.mon.statStages[STAT_ATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(harden.holder.mon.statStages[STAT_DEF]).toBe(DEFAULT_STAT_STAGE)
+    expect(harden.unmodelled.some((m) => m.includes("Angel's Wrath's MOVE_HARDEN case"))).toBe(false)
+
+    const ironDefense = direct('MOVE_IRON_DEFENSE', {}, {}, { hpDealt: 0 })
+    expect(ironDefense.holder.round.protectMove).toBe('MOVE_IRON_DEFENSE')
+    expect(ironDefense.unmodelled.some((m) => m.includes("Angel's Wrath's MOVE_IRON_DEFENSE case"))).toBe(false)
   })
 })
