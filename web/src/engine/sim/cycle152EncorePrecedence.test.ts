@@ -27,12 +27,14 @@
 // before its damage gate, so one draw from a dispatch = MOVEEND_ABILITIES ran on that
 // battler; zero = it did not. Every count below is derived by hand from the C.
 //
-// Targets: the sim's SetRandomTarget picks the LEFT foe deterministically when
-// battlersCount > 2 (turn.ts's getMoveTarget, port of :6326-6341), while
-// MOVE_TARGET_BOTH picks `attacker ^ 1` (:6369-6377). A four-battler state therefore makes
-// "stored target" / "RANDOM re-derivation" / "BOTH" resolve to different battlers
-// (3, 1 and 3 for attacker 0; 1 and 3 for attacker 2), which is what each assertion reads.
-import { STATUS2_MULTIPLETURNS, STATUS2_RECHARGE } from './constants'
+// Targets: SetRandomTarget (turn.ts's getMoveTarget, port of :6326-6341) draws
+// `Random() % 2` only when BATTLE_TYPE_DOUBLE is set (:6334), so the left/right foe is
+// scripted by the first rng draw; without the flag singles returns the LEFT foe. The BOTH
+// case (:6381-6385) takes GetBattlerAtPosition((GetBattlerPosition(attacker) & BIT_SIDE)
+// ^ BIT_SIDE) -- the opposing LEFT battler, never `attacker ^ 1`. A four-battler state
+// therefore keeps "stored target" / "RANDOM re-derivation" / "BOTH" distinct
+// (3, 1/3 and 1), which is what each assertion reads.
+import { BATTLE_TYPE_DOUBLE, STATUS2_MULTIPLETURNS, STATUS2_RECHARGE } from './constants'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -458,29 +460,48 @@ describe('Cycle 152 - HandleAction_UseMove lock branch precedes Encore', () => {
 
 describe('Cycle 152 - Encore target is re-derived at the battler own action', () => {
   // GetBattlerBattleMoveTargetFlags: EFFECT_EXPANDING_FORCE + Psychic Terrain -> BOTH
-  // (moveTargetFlags.ts:63-66). GetMoveTarget's BOTH case (:6369-6377) picks
-  // `attacker ^ 1`, i.e. 3 for battler 2, while the selection-time SELECTED path goes
-  // through SetRandomTarget's left foe, 1. The recording resolver reads the target the
-  // turn loop actually reached the damage step with.
-  it('3a: Psychic Terrain set by a faster foe moves the encored Expanding Force to BOTH (battler 3)', () => {
-    // Psychic Terrain resolves first (spe 200 > 50) and sets STATUS_FIELD_PSYCHIC_TERRAIN;
-    // by battler 2's action getBattlerBattleMoveTargetFlags returns BOTH, so GetMoveTarget
-    // yields 2 ^ 1 = 3. A target computed once before turn order would stay at the
-    // selection-time SELECTED result, 1.
+  // (moveTargetFlags.ts:63-66). GetMoveTarget's BOTH case (battle_util.c:6381-6385) picks
+  // GetBattlerAtPosition((GetBattlerPosition(attacker) & BIT_SIDE) ^ BIT_SIDE) -- the
+  // opposing LEFT battler, 1 for battler 2, not `attacker ^ 1` (3). The selection-time
+  // SELECTED path goes through SetRandomTarget, whose doubles arm draws `Random() % 2`
+  // (:6334): 3 is reachable there only when the draw is odd. The two resolutions therefore
+  // differ, and the recording resolver reads which one the turn loop actually reached the
+  // damage step with.
+  it('3a: Psychic Terrain set by a faster foe moves the encored Expanding Force to BOTH (opposing left, battler 1)', () => {
+    // Battler 2 is encored into Expanding Force, which is SELECTED until the terrain lands.
+    // Selection (GetFullChosenTarget, :167) runs SetRandomTarget in doubles: the scripted
+    // first draw is 1, so `Random() % 2` takes targets[B_SIDE_PLAYER][1] = battler 3.
+    // Psychic Terrain then resolves first (spe 200 > 50) and sets
+    // STATUS_FIELD_PSYCHIC_TERRAIN; by battler 2's own action getBattlerBattleMoveTargetFlags
+    // returns BOTH, so the :226 re-derivation yields (2 & BIT_SIDE) ^ BIT_SIDE = 1. A target
+    // computed once before turn order would keep 3. BOTH in a double also re-runs the effect
+    // script once per target (MOVEEND_NEXT_TARGET, battle_script_commands.c:4800-4801, the
+    // partner `target ^ 2`), so the resolver sees two dispatches in that order: 1 then 3.
+    // With a cached selection target the order flips (3 then 1).
     const dmg = recordingDamage(0)
-    const { out } = runTurn(
+    const rng = scriptedRng([1])
+    const state = battle(
       [
         { hp: 300, spe: 30 },
         { hp: 300, spe: 200, moves: ['MOVE_PSYCHIC_TERRAIN', null, null, null], pp: [10, 0, 0, 0] },
         { hp: 300, spe: 50, moves: ['MOVE_EXPANDING_FORCE', null, null, null], pp: [10, 0, 0, 0] },
         { hp: 300, spe: 10 },
       ],
+      rng,
+      { battleTypeFlags: BATTLE_TYPE_DOUBLE },
+    )
+    encoreAt(2, 'MOVE_EXPANDING_FORCE')(state)
+    const out = executeTurn(
+      state,
       [null, useMove(0, move('MOVE_PSYCHIC_TERRAIN')), useMove(1, move('MOVE_EXPANDING_FORCE')), null],
       testDeps(dmg.resolver),
-      encoreAt(2, 'MOVE_EXPANDING_FORCE'),
     )
-    expect(dmg.calls).toEqual([{ attackerId: 2, targetId: 3, moveId: 'MOVE_EXPANDING_FORCE', encoredMove: 'MOVE_EXPANDING_FORCE' }])
-    expect(outcomeFor(out, 2).targetId).toBe(3)
+    expect(dmg.calls).toEqual([
+      { attackerId: 2, targetId: 1, moveId: 'MOVE_EXPANDING_FORCE', encoredMove: 'MOVE_EXPANDING_FORCE' },
+      { attackerId: 2, targetId: 3, moveId: 'MOVE_EXPANDING_FORCE', encoredMove: 'MOVE_EXPANDING_FORCE' },
+    ])
+    // The outcome's primary target is the FIRST pass's (:4815's start target), i.e. 1.
+    expect(outcomeFor(out, 2).targetId).toBe(1)
   })
 
   it('3b: without the terrain the same encore keeps the SELECTED target (battler 1)', () => {
