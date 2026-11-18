@@ -4202,7 +4202,7 @@ function handleAttackerMoveEndAbility(
   // Stealth Rock) bypass SetMoveEffect, so they carry no such gates.
   if (abilityId === 'ABILITY_ARCHMAGE') {
     if (
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // DidMoveHit (battle_util.c:4060)
       attackerId !== targetId &&
       moveData?.split !== 'STATUS' &&
       state.rng.random16() % 100 < 30
@@ -4321,7 +4321,7 @@ function handleAttackerMoveEndAbility(
       // set from the target's slot-0 move (gBattleMons[target].moves[0]); BattleScriptCall only prints.
       if (
         target.mon.hp > 0 &&
-        hpDealt > 0 &&
+        targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
         attackerId !== targetId &&
         isAbilityStatusProtected(state, targetId, CHECK_RESTRICTING, attackerId, statusDeps) === null &&
         (target.volatiles.encoreTimer === 0 || target.volatiles.disableTimer === 0)
@@ -4341,7 +4341,7 @@ function handleAttackerMoveEndAbility(
       const speedStage = target.mon.statStages[STAT_SPEED] ?? DEFAULT_STAT_STAGE
       if (
         target.mon.hp > 0 &&
-        hpDealt > 0 &&
+        targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(target) (battle_util.c:4060)
         attackerId !== targetId &&
         !hasFlag(target.mon.status2, STATUS2_ESCAPE_PREVENTION) &&
         speedStage !== MIN_STAT_STAGE
@@ -4355,12 +4355,13 @@ function handleAttackerMoveEndAbility(
       // runs manipulatedamage DMG_TO_HP_FROM_ABILITY = GetDrainedBigRootHp (battle_util.c:2369-2377: Big Root x3/2, Absorbant x3/2) and heals by it.
       if (
         attacker.mon.hp > 0 &&
-        hpDealt > 0 &&
+        targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060), battler = holder = attacker
         attackerId !== targetId &&
         attacker.mon.hp < attacker.mon.maxHp &&
         canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
       ) {
-        healFromAbilityDrain(state, attackerId, hpDealt, deps)
+        // gBattleMoveDamage = -gHpDealt; if (!gBattleMoveDamage) gBattleMoveDamage = -1 (abilities.cc:5658)
+        healFromAbilityDrain(state, attackerId, Math.max(1, hpDealt), deps)
       }
     } else if (moveId === 'MOVE_STRING_SHOT' || moveId === 'MOVE_HARDEN' || moveId === 'MOVE_IRON_DEFENSE') {
       unmodelled.push(
@@ -4382,7 +4383,7 @@ function handleAttackerMoveEndAbility(
   if (abilityId === 'ABILITY_ENERGY_SIPHON') {
     if (
       attacker.mon.hp > 0 &&
-      hpDealt > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) && // ShouldApplyOnHitEffect(battler) (battle_util.c:4060), battler = holder = attacker
       attackerId !== targetId &&
       attacker.mon.hp < attacker.mon.maxHp &&
       canBattlerHeal(state, attackerId, attacker, unmodelled, deps.dataContext)
@@ -4423,7 +4424,7 @@ function handleAttackerMoveEndAbility(
   // i.e. not turn.ts's targetHasActedThisTurn). CanMoveHaveExtraFlinchChance(move) && 20% roll -> AbilityStatusEffectDirect(MOVE_EFFECT_FLINCH); then,
   // independent of the flinch, STATUS2_ESCAPE_PREVENTION + battlerPreventingEscape = holder unless the target is already trapped.
   if (abilityId === 'ABILITY_FROM_THE_SHADOWS') {
-    if (target.mon.hp > 0 && hpDealt > 0 && attackerId !== targetId) {
+    if (target.mon.hp > 0 && targetTurnDamaged(state, targetId, hpDealt) && attackerId !== targetId) {
       if (targetHasActedThisTurn === undefined) {
         const msg = "From the Shadows' turn-order check (abilities.cc:8769) needs the target's turn-order slot, which this move-end call was not given"
         if (!unmodelled.includes(msg)) unmodelled.push(msg)
