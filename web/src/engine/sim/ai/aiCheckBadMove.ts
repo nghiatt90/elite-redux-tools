@@ -254,8 +254,8 @@ export function isDoubleBattle(state: BattleState): boolean {
  * partner logic when both foes are alive OR the attacker's own partner is
  * alive -- a dead partner alone does not invalidate the battle (that is why
  * the helpers below use `isDoubleBattle`, not this, for their own gate).
- * `BATTLE_OPPOSITE(b)` / `BATTLE_PARTNER(b)` are `b ^ 1` / `b ^ 2`
- * (constants/battle.h:36-37; `foeOf`/`battlePartner` above). */
+ * `BATTLE_OPPOSITE(b)` / `BATTLE_PARTNER(b)` (constants/battle.h:36-37) are
+ * the `foeOf` / `battlePartner` helpers above. */
 export function isValidDoubleBattle(state: BattleState, battlerAtk: number): boolean {
   if (!isDoubleBattle(state)) return false
   return (
