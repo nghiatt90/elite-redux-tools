@@ -917,13 +917,28 @@ function isMagicRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
 function isTrickRoomActive(state: BattleState, deps: AiDamageDeps): boolean {
   return !isAbilityOnField(state, deps, 'ABILITY_CLUELESS', null) && hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)
 }
-/** GetBattlerSideSpeedAverage, battle_ai_util.c:2181-2196 -- in singles
+/** GetBattlerSideSpeedAverage, battle_ai_util.c:2181-2196. In singles
  * (`IsDoubleBattle()` false) this is just the battler's own fully-resolved
- * speed stat (numBattlersAlive always 1), so `getBattlerTotalSpeedStat` with
- * TOTAL_SPEED_FULL and no move context is reused directly rather than
- * re-deriving the averaging (which is dead code on this build anyway). */
+ * speed stat; in a double it is `(own + partner) / numBattlersAlive`, with a
+ * battler counted only while `IsBattlerAlive`. The C divides two u16s, so the
+ * result truncates (`Math.trunc`). A zero count would be C division by zero
+ * (undefined); no caller reaches it because `AI_CheckViability` scores a move
+ * for a live attacker, and this guard just keeps the number finite. */
 export function getBattlerSideSpeedAverage(state: BattleState, battlerId: number, deps: AiDamageDeps): number {
-  return getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+  let speed1 = 0
+  let speed2 = 0
+  let numBattlersAlive = 0
+  if (isBattlerAlive(state, battlerId)) {
+    speed1 = getBattlerTotalSpeedStat(state, battlerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+    numBattlersAlive++
+  }
+  const partnerId = battlePartner(battlerId)
+  if (isDoubleBattle(state) && isBattlerAlive(state, partnerId)) {
+    speed2 = getBattlerTotalSpeedStat(state, partnerId, TOTAL_SPEED_FULL, null, deps.turnOrder, deps.statStageRatios)
+    numBattlersAlive++
+  }
+  if (numBattlersAlive === 0) return 0
+  return Math.trunc((speed1 + speed2) / numBattlersAlive)
 }
 
 /** CanBattlerGetOrLoseItem, battle_util.c:8250-8270. The species-locked-item

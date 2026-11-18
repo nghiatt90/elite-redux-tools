@@ -2,7 +2,7 @@
 // BattlerHasAbility / IsAbilityOnField reads built on it. A leaf module -- it
 // must not import aiScorers or aiCheckBadMove (pinned by aiAbilityHelpers.test.ts).
 import type { BattleState, BattlerState } from '../state'
-import { hasFlag, PARTY_SIZE, STATUS3_GASTRO_ACID, STATUS3_EMBARGO } from '../constants'
+import { BATTLE_TYPE_DOUBLE, hasFlag, PARTY_SIZE, STATUS3_GASTRO_ACID, STATUS3_EMBARGO } from '../constants'
 import { battlerHasAbility } from '../../abilities/dispatch'
 import type { AiDamageDeps } from './aiCalcDamage'
 
@@ -216,19 +216,27 @@ export function isEntrainmentTargetOrSimpleBeamBannedAbility(ability: string | n
 }
 
 /**
- * CountUsablePartyMons, battle_ai_util.c:2447-2474 -- singles-only (both
- * "on field" slots collapse to the same `battlerOnField1 === battlerOnField2`
- * the C's own else branch sets at :2461-2462). Eggs are not modelled (same
- * precedent as aiSwitching.ts's own SimPartyMon doc).
+ * CountUsablePartyMons, battle_ai_util.c:2447-2474. A doubles battle excludes
+ * BOTH on-field party slots -- the caller's own and its partner's
+ * (`gBattlerPartyIndexes[GetBattlerAtPosition(GetBattlerPosition(battlerId) ^
+ * BIT_FLANK)]`, i.e. `battlerId ^ 2`); in singles both indexes collapse to the
+ * caller's own slot (:2461-2462). Eggs are not modelled (same precedent as
+ * aiSwitching.ts's own SimPartyMon doc).
  */
 export function countUsablePartyMons(state: BattleState, battlerId: number): number {
   const battler = state.battlers[battlerId]
   if (!battler) return 0
   const side = battlerId & 1
   const party = state.sides[side].party
+  const battlerOnField1 = battler.partyIndex
+  let battlerOnField2 = battlerOnField1
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_DOUBLE)) {
+    const partner = state.battlers[battlerId ^ 2]
+    if (partner) battlerOnField2 = partner.partyIndex
+  }
   let count = 0
   for (let i = 0; i < PARTY_SIZE; i++) {
-    if (i === battler.partyIndex) continue
+    if (i === battlerOnField1 || i === battlerOnField2) continue
     const mon = party[i]
     if (mon && mon.speciesId !== null && mon.hp !== 0) count++
   }

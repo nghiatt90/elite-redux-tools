@@ -1992,7 +1992,16 @@ function applyMoveEffectSwitch(
 
     case 'EFFECT_ROAR':
     case 'EFFECT_CLEAR_SMOG':
-      score += Math.min(countPositiveStatStages(defender), 4)
+      // battle_ai_main.c:2835-2842. The doubles half counts BATTLE_PARTNER(battlerDef)
+      // too and caps at 7. `gBattleMons[partner]` is read even when that mon is
+      // fainted (stat stages persist), so the partner is NOT gated on being alive --
+      // only on the slot existing in this BattleState.
+      if (isDoubleBattle) {
+        const defPartner = state.battlers[battlePartner(battlerDef)]
+        score += Math.min(countPositiveStatStages(defender) + (defPartner ? countPositiveStatStages(defPartner) : 0), 7)
+      } else {
+        score += Math.min(countPositiveStatStages(defender), 4)
+      }
       break
 
     case 'EFFECT_MULTI_HIT':
