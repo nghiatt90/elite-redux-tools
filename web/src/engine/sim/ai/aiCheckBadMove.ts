@@ -196,6 +196,7 @@ import {
   WEATHER_SANDSTORM_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_FOG_ANY,
+  PARTY_SIZE,
 } from '../constants'
 import {
   defAbility,
@@ -1539,7 +1540,15 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
     case 'EFFECT_CONFUSE':
     case 'EFFECT_SWAGGER':
     case 'EFFECT_FLATTER': {
-      const partnerMoveIsConfusion = false // AI_DATA->partnerMove is never set in singles.
+      // battle_ai_main.c:1166-1170: the second operand is
+      // IsConfusionMoveEffect(gBattleMoves[AI_DATA->partnerMove].effect)
+      // (battle_ai_util.c:1084-1094: EFFECT_SWAGGER / EFFECT_FLATTER /
+      // EFFECT_TEETER_DANCE), i.e. the ATTACKER's partner's chosen move.
+      // It is MOVE_NONE -> effect 0 in singles, which is why the old
+      // "never set in singles" note reached the right answer; in doubles a
+      // partner move exists, so the gap is real and is reported here.
+      const partnerMoveIsConfusion = false // IsConfusionMoveEffect(partnerMove) not ported (dbl-4c2).
+      if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: EFFECT_CONFUSE/EFFECT_SWAGGER/EFFECT_FLATTER second operand IsConfusionMoveEffect(AI_DATA->partnerMove) is not ported; treated as false')
       if (!canBeConfused(defender, unmodelled) || partnerMoveIsConfusion) score -= 20
       break
     }
@@ -1778,12 +1787,29 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       }
       break
     case 'EFFECT_FOLLOW_ME':
-    case 'EFFECT_HELPING_HAND':
-      // `!isDoubleBattle` (the C's first OR operand) holds in singles, so only
-      // that half is transcribed; the doubles half (partner alive / partner's
-      // move / partner switching) is dbl-4c2 work.
-      score -= 10
+    case 'EFFECT_HELPING_HAND': {
+      // battle_ai_main.c:1402-1410. `!isDoubleBattle` is the C's first OR
+      // operand and is true in singles, so singles keeps scoring -10. Every
+      // other operand reads the attacker's partner and is therefore
+      // doubles-only:
+      //   PartnerHasSameMoveEffectWithoutTarget (helper above),
+      //   `AI_DATA->partnerMove != MOVE_NONE && IS_MOVE_STATUS(...)` ->
+      //   `split === 'STATUS'` (moveData's own SPLIT_STATUS), and
+      //   `monToSwitchIntoId[partner] != PARTY_SIZE` ("Partner is switching
+      //   out") -- BattlerState.monToSwitchIntoId is that very field, set by
+      //   aiShouldSwitch's AI_TrySwitchOrUseItem before move selection.
+      const partner = battlePartner(battlerAtk)
+      if (
+        !isDoubleBattle(state) ||
+        !isBattlerAlive(state, partner) ||
+        partnerHasSameMoveEffectWithoutTarget(state, deps, moveId, partnerMove) ||
+        (partnerMove !== null && deps.moveData(partnerMove)?.split === 'STATUS') ||
+        (state.battlers[partner]?.monToSwitchIntoId ?? PARTY_SIZE) !== PARTY_SIZE // Partner is switching out.
+      ) {
+        score -= 10
+      }
       break
+    }
     case 'EFFECT_TRICK':
     case 'EFFECT_KNOCK_OFF':
       if (isStickyHold(state, deps, defender, atkMoldBreaker)) score -= 10
@@ -2296,8 +2322,12 @@ export function aiCheckBadMove(state: BattleState, battlerAtk: number, battlerDe
       if (!terrainHasEffect(state, deps)) score -= 20
       break
     case 'EFFECT_PLEDGE':
-      // This combo-move check only applies when a partner exists; it is not
-      // transcribed yet (dbl-4c2), so doubles falls through here too.
+      // battle_ai_main.c:1901-1910: the whole body is gated on
+      // `isDoubleBattle && partner hp > 0`, so singles genuinely scores
+      // nothing. The doubles combo check (partnerMove is a DIFFERENT pledge
+      // move and the partner is asleep/frozen -> -10) is not transcribed yet
+      // (dbl-4c2); report it rather than silently scoring as the C would not.
+      if (isDoubleBattle(state)) unmodelled.push('AI_CheckBadMove: EFFECT_PLEDGE combo check (partner chose a different pledge move while asleep/frozen -> -10) is not ported; treated as false')
       break
     case 'EFFECT_TRICK_ROOM':
       if (isAbilityOnField(state, deps, 'ABILITY_CLUELESS', battlerAtk)) {

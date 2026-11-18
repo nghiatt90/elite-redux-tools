@@ -322,3 +322,64 @@ describe('getAllyChosenMove (battle_ai_util.c:2277-2287)', () => {
     expect(getAllyChosenMove(state, 3)).toBe('MOVE_TAILWIND')
   })
 })
+
+// AI_CheckBadMove, battle_ai_main.c:1402-1410:
+//   case EFFECT_FOLLOW_ME:
+//   case EFFECT_HELPING_HAND:
+//       if (!isDoubleBattle || !IsBattlerAlive(BATTLE_PARTNER(battlerAtk)) ||
+//           PartnerHasSameMoveEffectWithoutTarget(BATTLE_PARTNER(battlerAtk), move, AI_DATA->partnerMove) ||
+//           (AI_DATA->partnerMove != MOVE_NONE && IS_MOVE_STATUS(AI_DATA->partnerMove)) ||
+//           *(gBattleStruct->monToSwitchIntoId + BATTLE_PARTNER(battlerAtk)) != PARTY_SIZE)
+//           score -= 10;
+// All five operands are ported, so the doubles cases below carry no note; the
+// moves' own effect is EFFECT_HELPING_HAND / EFFECT_FOLLOW_ME.
+describe('EFFECT_FOLLOW_ME / EFFECT_HELPING_HAND (-10, battle_ai_main.c:1402-1410)', () => {
+  it('doubles, partner alive and chose no move: no operand true, 100, no unmodelled note', () => {
+    const { state, deps, aiId } = doublesFixture({ aiMoves: ['MOVE_HELPING_HAND', null, null, null] })
+    const r = scoreDoubles(state, deps, aiId, 'MOVE_HELPING_HAND')
+    expect(r.score).toBe(100)
+    expect(r.unmodelled.some((note) => note.includes('FOLLOW_ME') || note.includes('HELPING_HAND'))).toBe(false)
+  })
+
+  it('doubles, partner chose Helping Hand (same effect): 100 - 10 = 90', () => {
+    const { state, deps, aiId } = doublesFixture({
+      aiMoves: ['MOVE_HELPING_HAND', null, null, null],
+      partnerMoves: ['MOVE_HELPING_HAND', null, null, null],
+    })
+    expect(scoreDoubles(state, deps, aiId, 'MOVE_HELPING_HAND').score).toBe(90)
+  })
+
+  it('doubles, partner chose a different STATUS move: 100 - 10 = 90', () => {
+    const { state, deps, aiId } = doublesFixture({
+      aiMoves: ['MOVE_HELPING_HAND', null, null, null],
+      partnerMoves: ['MOVE_HARDEN', null, null, null],
+    })
+    expect(scoreDoubles(state, deps, aiId, 'MOVE_HELPING_HAND').score).toBe(90)
+  })
+
+  it('doubles, partner chose a damaging move: no operand true, 100', () => {
+    const { state, deps, aiId } = doublesFixture({
+      aiMoves: ['MOVE_HELPING_HAND', null, null, null],
+      partnerMoves: ['MOVE_TACKLE', null, null, null],
+    })
+    expect(scoreDoubles(state, deps, aiId, 'MOVE_HELPING_HAND').score).toBe(100)
+  })
+
+  it('doubles, partner is switching out (monToSwitchIntoId != PARTY_SIZE): 100 - 10 = 90', () => {
+    const { state, deps, aiId } = doublesFixture({ aiMoves: ['MOVE_FOLLOW_ME', null, null, null] })
+    state.battlers[aiId ^ 2]!.monToSwitchIntoId = 1
+    expect(scoreDoubles(state, deps, aiId, 'MOVE_FOLLOW_ME').score).toBe(90)
+  })
+
+  it('doubles, partner fainted: 100 - 10 = 90', () => {
+    const { state, deps, aiId } = doublesFixture({ aiMoves: ['MOVE_FOLLOW_ME', null, null, null], partnerAlive: false })
+    expect(scoreDoubles(state, deps, aiId, 'MOVE_FOLLOW_ME').score).toBe(90)
+  })
+
+  it('singles (`!isDoubleBattle` is true): 100 - 10 = 90, unchanged, no note', () => {
+    const { state, deps, aiId } = singlesFixture({ aiMoves: ['MOVE_FOLLOW_ME', null, null, null] })
+    const r = scoreDoubles(state, deps, aiId, 'MOVE_FOLLOW_ME')
+    expect(r.score).toBe(90)
+    expect(r.unmodelled.some((note) => note.includes('FOLLOW_ME') || note.includes('HELPING_HAND'))).toBe(false)
+  })
+})
