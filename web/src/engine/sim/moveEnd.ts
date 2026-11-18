@@ -1812,6 +1812,12 @@ function handleDefenderMoveEndAbility(
     }
   }
 
+  // Every CHECK(ShouldApplyOnHitEffect(...)) / CHECK(DidMoveHit()) from here to Cotton Down reads
+  // DidMoveHit, battle_util.c:4058-4062: `TARGET_TURN_DAMAGED` is gTurnStructs[gBattlerTarget]'s
+  // physicalDmg/specialDmg (include/battle.h:750), written only when HP is actually removed
+  // (battle_script_commands.c:1935-1959) -- never when a Substitute absorbs the hit. A bare
+  // `targetDamage > 0` also fires behind a Substitute, so each gate carries targetTurnDamaged too.
+
   // 6. Gooey family on defender (src/abilities.cc:2482-2492, 2496, 3054, 6106, 10949, 11358, 11629)
   if (
     abilityId === 'ABILITY_GOOEY' ||
@@ -1825,6 +1831,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:2482-2484).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       canLowerStatOrMirrorArmor(state, attackerId, STAT_SPEED, deps.dataContext) &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -1861,7 +1868,7 @@ function handleDefenderMoveEndAbility(
   // reading as Weak Armor above; CHECK(CanLowerStat(battler, STAT_DEF)) is the shared helper
   // (Contrary-aware) so Clear Body/White Smoke reach the stat-drop block below.
   if (abilityId === 'ABILITY_PETAL_SHIELD') {
-    if (targetDamage > 0 && target.mon.hp > 0 && canLowerStat(state, targetId, STAT_DEF, deps.dataContext)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && canLowerStat(state, targetId, STAT_DEF, deps.dataContext)) {
       target.round.disableEjectPack = true // gRoundStructs[battler].disableEjectPack = TRUE
       const defRes = changeStatBuffsImplicit(
         state,
@@ -1888,7 +1895,7 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_MOUSTACHE'
   ) {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:2592-2594).
-    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_DEF, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1914,6 +1921,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:1950-1952).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveData?.split === 'PHYSICAL' &&
       (canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext) || canLowerStat(state, targetId, STAT_DEF, deps.dataContext))
@@ -1966,7 +1974,7 @@ function handleDefenderMoveEndAbility(
   // 9. Anger Point family (src/abilities.cc:1461-1473, 6220-6232, 6237, 6624-6636, 6695, 8785-8792)
   if (abilityId === 'ABILITY_ANGER_POINT' || abilityId === 'ABILITY_CROWNED_SWORD') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:1461-1463).
-    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_ATK, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -1988,7 +1996,7 @@ function handleDefenderMoveEndAbility(
   }
   if (abilityId === 'ABILITY_TIPPING_POINT' || abilityId === 'ABILITY_BERSERKER_RAGE') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6219-6221).
-    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -2010,7 +2018,7 @@ function handleDefenderMoveEndAbility(
   }
   if (abilityId === 'ABILITY_FORTITUDE') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6623-6625).
-    if (targetDamage > 0 && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext)) {
       const stages = isCriticalHit ? 12 : 1
       const res = changeStatBuffs(
         state,
@@ -2034,6 +2042,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:8784-8786).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       isCriticalHit &&
       (canRaiseStat(state, targetId, STAT_ATK, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPATK, deps.dataContext))
@@ -2215,9 +2224,12 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_BALLOON_BLITZ' ||
     abilityId === 'ABILITY_BALLOON_BOMBER'
   ) {
-    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3860-3862).
+    // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3860-3862). The gate is applied to the
+    // Inflatable id only: Balloon Blitz / Balloon Bomber reach this branch through aliases whose own
+    // hook source carries no CHECK (see REPORT.md).
     if (
       targetDamage > 0 &&
+      (abilityId !== 'ABILITY_INFLATABLE' || targetTurnDamaged(state, targetId, hpDealt)) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'FIRE', 'FLYING') &&
       (canRaiseStat(state, targetId, STAT_DEF, deps.dataContext) || canRaiseStat(state, targetId, STAT_SPDEF, deps.dataContext))
@@ -2259,7 +2271,7 @@ function handleDefenderMoveEndAbility(
 
   // 13. Toxic Debris (src/abilities.cc:5061-5068)
   if (abilityId === 'ABILITY_TOXIC_DEBRIS') {
-    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
       const oppSide = (targetId & 1) ^ 1
       const sideState = state.sides[oppSide]!
       if (sideState.timers.toxicSpikesAmount < 2) {
@@ -2275,7 +2287,7 @@ function handleDefenderMoveEndAbility(
     abilityId === 'ABILITY_LOOSE_QUILLS' ||
     abilityId === 'ABILITY_SHATTERED_ARMOR'
   ) {
-    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
       const oppSide = (targetId & 1) ^ 1
       const sideState = state.sides[oppSide]!
       if (sideState.timers.spikesAmount < 3) {
@@ -2285,7 +2297,7 @@ function handleDefenderMoveEndAbility(
     }
   }
   if (abilityId === 'ABILITY_LOOSE_ROCKS') {
-    if (targetDamage > 0 && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && isMoveMakingContact(moveData, attacker, attackerHoldEffect)) {
       const oppSide = (targetId & 1) ^ 1
       const sideState = state.sides[oppSide]!
       if (!hasFlag(sideState.statuses, SIDE_STATUS_STEALTH_ROCK)) {
@@ -2335,6 +2347,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:5787-5789).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       moveTypeMatches(moveData, 'ROCK') &&
       canRaiseStat(state, targetId, STAT_SPEED, deps.dataContext)
@@ -2363,6 +2376,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:7109-7111).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       (canLowerStat(state, attackerId, STAT_ATK, deps.dataContext) || canLowerStat(state, attackerId, STAT_SPATK, deps.dataContext))
@@ -2407,6 +2421,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:4321-4323).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
@@ -2422,6 +2437,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:7278-7280).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       target.mon.hp <= 0 &&
       moveId !== 'MOVE_STRUGGLE' &&
@@ -2442,6 +2458,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(attacker)) (src/abilities.cc:6154-6156).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       attacker.mon.hp > 0 &&
       isMoveMakingContact(moveData, attacker, attackerHoldEffect) &&
       !hasFlag(attacker.mon.status2, STATUS2_WRAPPED)
@@ -2476,6 +2493,7 @@ function handleDefenderMoveEndAbility(
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:3317-3319).
     if (
       targetDamage > 0 &&
+      targetTurnDamaged(state, targetId, hpDealt) &&
       target.mon.hp > 0 &&
       !hasFlag(state.field.weather, WEATHER_SANDSTORM_ANY) &&
       !hasFlag(state.field.weather, WEATHER_PRIMAL_ANY)
@@ -2494,7 +2512,7 @@ function handleDefenderMoveEndAbility(
   // 23. Seed Sower (src/abilities.cc:6859-6866, battle_util.c:3778-3795)
   if (abilityId === 'ABILITY_SEED_SOWER') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:6859-6861).
-    if (targetDamage > 0 && target.mon.hp > 0) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0) {
       if (tryChangeBattleTerrain(state, targetId, STATUS_FIELD_GRASSY_TERRAIN, deps)) {
         dispatchOnTerrainChange(state, deps, unmodelled)
       }
@@ -2504,7 +2522,7 @@ function handleDefenderMoveEndAbility(
   // 24. Wind Power (src/abilities.cc:7032-7041)
   if (abilityId === 'ABILITY_WIND_POWER') {
     // CHECK(ShouldApplyOnHitEffect(battler)) (src/abilities.cc:7032-7034).
-    if (targetDamage > 0 && target.mon.hp > 0 && !!moveData?.flags?.airBased && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && target.mon.hp > 0 && !!moveData?.flags?.airBased && !hasFlag(target.statuses3, STATUS3_CHARGED_UP)) {
       target.statuses3 = setFlag(target.statuses3, STATUS3_CHARGED_UP)
     }
   }
@@ -2515,7 +2533,7 @@ function handleDefenderMoveEndAbility(
   if (abilityId === 'ABILITY_COTTON_DOWN' || abilityId === 'ABILITY_SCARECROW') {
     const opposite = targetId ^ 1
     const anyAlive = (state.battlers[opposite]?.mon.hp ?? 0) > 0 || (state.battlers[opposite ^ 2]?.mon.hp ?? 0) > 0
-    if (targetDamage > 0 && anyAlive) {
+    if (targetDamage > 0 && targetTurnDamaged(state, targetId, hpDealt) && anyAlive) {
       for (let foeId = (targetId & 1) ^ 1; foeId < state.battlersCount; foeId += 2) {
         if ((state.battlers[foeId]?.mon.hp ?? 0) <= 0) continue
         const res = changeStatBuffs(
