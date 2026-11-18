@@ -282,21 +282,60 @@ describe('OpponentHandleChooseMove default: target mask (battle_controller_oppon
   it('a BOTH-target move aims at player left, or player right when player left is absent', () => {
     // :1602-1607 -- gBattlerTarget = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT)
     // (battler 0), unless gAbsentBattlerFlags has its bit, then PLAYER_RIGHT (2).
-    const make = (absentBattlerFlags: number): BattleState => {
-      const state = makeMulti(createRandomSource(1))
+    //
+    // The move must have MOVE_TARGET_BOTH (0x8) exactly. MOVE_EARTHQUAKE is
+    // FOES_AND_ALLY (0x20) -- it does NOT take this branch (see the control at
+    // the end); MOVE_ACID's `moves.json` target is "BOTH".
+    const seed = 3
+    const make = (moveId: string, absentBattlerFlags: number): BattleState => {
+      const state = makeMulti(createRandomSource(seed))
       normaliseBattlers(state)
-      forceSingleMove(state, 3, 'MOVE_EARTHQUAKE') // target: BOTH
+      forceSingleMove(state, 3, moveId)
       state.absentBattlerFlags = absentBattlerFlags
       return state
     }
     const targetFor = (state: BattleState): number | null => chooseAiAction(state, 3, chooseDeps(state)).action.target
+    // The chooser's OWN pick on an identically seeded twin: the same
+    // reconstruction the tests above use -- one outer SetRandomTarget draw,
+    // then ChooseMoveOrAction_Doubles.
+    const chooserTargetFor = (moveId: string, absentBattlerFlags: number): number => {
+      const twin = recording(seed)
+      const state = withSetupFlags(makeMulti(twin.rng))
+      normaliseBattlers(state)
+      forceSingleMove(state, 3, moveId)
+      state.absentBattlerFlags = absentBattlerFlags
+      state.rng.random16() // the outer SetRandomTarget's draw
+      return chooseMoveOrActionDoubles(state, 3, deps(state)).target
+    }
 
-    expect(targetFor(make(0))).toBe(0)
+    // On this board nobody is absent and the chooser scores player right (2)
+    // highest -- the ACTION target is 0 only because of the BOTH rule. Assert
+    // both numbers: a getOpponentSelectedMoveTarget that ignored
+    // MOVE_TARGET_BOTH would return aiChosenTarget (2) here and fail.
+    expect(chooserTargetFor('MOVE_ACID', 0)).toBe(2)
+    expect(targetFor(make('MOVE_ACID', 0))).toBe(0)
+
+    // Absent player left: the BOTH rule falls through to player right.
+    expect(targetFor(make('MOVE_ACID', 1 << 0))).toBe(2)
 
     // Negative control: player RIGHT absent does not move the target off 0.
-    expect(targetFor(make(1 << 2))).toBe(0)
+    // This one cannot discriminate on its own: with battler 2 absent the
+    // chooser's only live candidates are player left (0) and battler 3's own
+    // ally (1), and the ally row is dead-zoned to -1 below 100 points
+    // (battle_ai_main.c:407-411; its score is 70 here), so the chooser's own
+    // pick is 0 as well. The mismatch asserted above (chooser 2 vs action 0)
+    // is the assertion a no-op mask fails.
+    expect(chooserTargetFor('MOVE_ACID', 1 << 2)).toBe(0)
+    expect(targetFor(make('MOVE_ACID', 1 << 2))).toBe(0)
 
-    expect(targetFor(make(1 << 0))).toBe(2)
+    // Control: FOES_AND_ALLY (Earthquake) does NOT get the BOTH rule -- the C
+    // leaves aiChosenTarget alone for every target without MOVE_TARGET_BOTH,
+    // so the action target is the chooser's own pick (2), not the 0 the BOTH
+    // rule would force.
+    expect(chooserTargetFor('MOVE_EARTHQUAKE', 0)).toBe(2)
+    expect(targetFor(make('MOVE_EARTHQUAKE', 0))).toBe(2)
+    // Same with player left absent: still the chooser's own pick, no fallback.
+    expect(targetFor(make('MOVE_EARTHQUAKE', 1 << 0))).toBe(chooserTargetFor('MOVE_EARTHQUAKE', 1 << 0))
   })
 })
 
