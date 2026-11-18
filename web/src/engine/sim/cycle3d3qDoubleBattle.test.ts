@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
 // Cycle 3d3q (dbl-4b first slice): AI_DoubleBattle (battle_ai_main.c:2213-2511)
-// minus the partner-target branch body (:2303-2483, dbl-4b2), plus
+// minus the partner-target branch body (:2303-2483, ported later: ability loop
+// in cycle 3d3r, effect switch left to dbl-4b3), plus
 // GetAllyChosenMove (battle_ai_util.c:2277-2287).
 //
 // C lines checked:
@@ -9,7 +10,9 @@
 //     partner-move-effect switch :2236-2254
 //     own-effect switch          :2257-2272
 //     global-weather switch      :2274-2301
-//     partner-target branch tail :2484 (body :2303-2483 left to dbl-4b2)
+//     partner-target branch tail :2484 (ability loop :2303-2398 ported in
+//                                 cycle 3d3r; effect switch :2401-2483 stays
+//                                 for dbl-4b3)
 //     opponent branch            :2485-2510
 //   GetAllyChosenMove            battle_ai_util.c:2277-2287
 //   IsTrappingMoveEffect         battle_ai_util.c:1501-1513
@@ -409,7 +412,7 @@ describe('opponent branch (:2485-2510)', () => {
 })
 
 describe('partner-target branch tail (:2484)', () => {
-  it('subtracts 30 and reports the named dbl-4b2 gap', () => {
+  it('subtracts 30 and reports the named dbl-4b3 gap', () => {
     const { state, deps } = allyFixture({
       aiMoves: ['MOVE_TACKLE', null, null, null],
       partnerMoves: [null, null, null, null],
@@ -418,7 +421,9 @@ describe('partner-target branch tail (:2484)', () => {
 
     const result = scoreAgainst(state, deps, 'MOVE_TACKLE', 1) // battlerDef == our ally
     expect(result.score).toBe(70)
-    expect(result.unmodelled).toContain('AI_DoubleBattle: partner-target branch (battle_ai_main.c:2303-2483) not ported')
+    // The ability loop (:2303-2398) is ported (cycle 3d3r); only the
+    // attack-effect switch at battle_ai_main.c:2401-2483 remains for dbl-4b3.
+    expect(result.unmodelled).toContain('AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported')
   })
 })
 
@@ -435,7 +440,7 @@ describe('DISPATCH wiring (AI_FLAG_DOUBLE_BATTLE, bit 7)', () => {
     return { state, deps: aiDamageDepsFor(data, state) }
   }
 
-  const NOTE = 'AI_DoubleBattle: partner-target branch (battle_ai_main.c:2303-2483) not ported'
+  const NOTE = 'AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported'
 
   it('runs through chooseMoveOrActionDoubles and reports the partner note for the allied row', () => {
     const { state, deps } = wiringFixture()

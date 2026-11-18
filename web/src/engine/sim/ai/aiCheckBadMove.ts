@@ -285,7 +285,7 @@ export function isBattlerWeatherAffected(state: BattleState, weatherFlag: number
  * default damage path in both part 1 and part 2 -- it only needs to be here,
  * for the pre-switch ladder's own `resolvedType` reads. */
 const VARIABLE_TYPE_EFFECTS = new Set(['EFFECT_HIDDEN_POWER', 'EFFECT_WEATHER_BALL', 'EFFECT_NATURAL_GIFT', 'EFFECT_REVELATION_DANCE', 'EFFECT_CHANGE_TYPE_ON_ITEM'])
-function moveType(moveId: string, deps: AiDamageDeps, unmodelled: string[]): string | null {
+export function moveType(moveId: string, deps: AiDamageDeps, unmodelled: string[]): string | null {
   const move = deps.moveData(moveId)
   if (move?.effect && VARIABLE_TYPE_EFFECTS.has(move.effect)) {
     unmodelled.push(`AI_CheckBadMove: ${moveId} (${move.effect}) has a variable type; scored using its declared type (${move.type ?? 'null'}) rather than GetMoveDynamicType's resolved one`)
@@ -330,7 +330,7 @@ const STAT_LOWERING_EFFECTS = new Set([
   'EFFECT_ACCURACY_DOWN', 'EFFECT_EVASION_DOWN', 'EFFECT_ATTACK_DOWN_2', 'EFFECT_DEFENSE_DOWN_2', 'EFFECT_SPEED_DOWN_2',
   'EFFECT_SPECIAL_ATTACK_DOWN_2', 'EFFECT_SPECIAL_DEFENSE_DOWN_2', 'EFFECT_ACCURACY_DOWN_2', 'EFFECT_EVASION_DOWN_2',
 ])
-function isStatLoweringMoveEffect(effect: string | null): boolean {
+export function isStatLoweringMoveEffect(effect: string | null): boolean {
   return !!effect && STAT_LOWERING_EFFECTS.has(effect)
 }
 
@@ -338,7 +338,7 @@ function isStatLoweringMoveEffect(effect: string | null): boolean {
  * `battler === battlerDef` (self-targeting) always returns false, and a
  * defender holding an Ability Shield (`DoesBattlerHaveAbilityShield`, :1049)
  * is never ignored, matching the C. */
-function doesBattlerIgnoreAbilityChecks(state: BattleState, battlerAtk: number, battlerDef: number, deps: AiDamageDeps): boolean {
+export function doesBattlerIgnoreAbilityChecks(state: BattleState, battlerAtk: number, battlerDef: number, deps: AiDamageDeps): boolean {
   if (battlerAtk === battlerDef) return false
   const defender = state.battlers[battlerDef]
   if (defender && doesBattlerHaveAbilityShield(defender, deps)) return false
@@ -355,7 +355,7 @@ function doesBattlerIgnoreAbilityOrInnateChecks(deps: AiDamageDeps): boolean {
 /** BattlerStatCanRise, battle_ai_util.c:1293-1303. `battler` here is always
  * battlerAtk checking its OWN ability (never suppressed by its own Mold
  * Breaker -- see this module's header). */
-function battlerStatCanRise(state: BattleState, battler: BattlerState, stat: number, deps: AiDamageDeps): boolean {
+export function battlerStatCanRise(state: BattleState, battler: BattlerState, stat: number, deps: AiDamageDeps): boolean {
   if (isBattlerWeatherAffected(state, WEATHER_FOG_ANY, deps) && (battler.volatiles.trickOrTreat || !(isBattlerOfType(battler, 'GHOST') || isBattlerOfType(battler, 'PSYCHIC')))) {
     return false
   }

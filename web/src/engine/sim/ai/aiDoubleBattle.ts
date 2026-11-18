@@ -1,21 +1,25 @@
-// AI_DoubleBattle, battle_ai_main.c:2213-2511 -- the NON-PARTNER-TARGET halves
-// (dbl-4b, cycle 3d3q), plus GetAllyChosenMove (battle_ai_util.c:2277-2287).
-// Ported: the prologue (:2214-2233, minus the two ability-rating locals only the
-// partner branch reads), the partner-move-effect switch (:2236-2254), the
+// AI_DoubleBattle, battle_ai_main.c:2213-2511 -- all but the partner-target
+// attack-effect switch (dbl-4b cycle 3d3q, dbl-4b2 cycle 3d3r), plus
+// GetAllyChosenMove (battle_ai_util.c:2277-2287).
+// Ported: the prologue (:2214-2233, minus the two ability-rating locals only
+// the unported switch reads), the partner-move-effect switch (:2236-2254), the
 // own-effect-relative-to-partner switch (:2257-2272), the global-weather switch
-// (:2274-2301) and the opponent branch (:2485-2510).
+// (:2274-2301), the partner-target DAMAGE GATE and 15-ability loop
+// (:2303-2398, cycle 3d3r) and the opponent branch (:2485-2510).
 //
-// Not ported (dbl-4b2): the body of the `if (IsTargetingPartner(...))` branch,
-// battle_ai_main.c:2303-2483 -- the 15-ability partner loop and the
-// EFFECT_PURIFY..EFFECT_AFTER_YOU switch. The branch's tail
-// (`score -= 30`, :2484) IS ported, preceded by a named gap line; dbl-4b2
-// replaces that line.
+// Not ported (dbl-4b3): the partner-target attack-effect switch,
+// battle_ai_main.c:2401-2483 -- the `if (!partnerProtecting) switch (effect)`
+// block (EFFECT_PURIFY..EFFECT_AFTER_YOU, which also needs the
+// `attackerHasBadAbility`/`partnerHasBadAbility` locals of :2222-2223, and the
+// Instruct/After You turn-order reads). The branch's tail
+// (`score -= 30`, :2484) IS ported, preceded by a named gap line naming only
+// that remaining range.
 //
-// `moveType` (`SetTypeBeforeUsingMove`/`GET_MOVE_TYPE`, :2229-2230) is read
-// only inside the unported branch, so it is not computed here: this slice has
-// no reader for it and a dead local would only be noise. `partnerProtecting`,
-// `atkPartnerHoldEffect`, `attackerHasBadAbility` and `partnerHasBadAbility`
-// (:2219-2222) are likewise partner-branch-only and stay for dbl-4b2.
+// `moveType` (`SetTypeBeforeUsingMove`/`GET_MOVE_TYPE`, :2227-2228) is read
+// only inside the partner-target branch, so it is computed there rather than
+// as a prologue local: no other branch has a reader for it.
+// `partnerProtecting` and `atkPartnerHoldEffect` (:2221, :2220) are likewise
+// partner-branch-only and are computed inside it.
 //
 // `AI_DATA->partnerMove` is `getAllyChosenMove` below; the C fills it in
 // ChooseMoveOrAction_Doubles (:368), which this sim's chooser still does not do
@@ -29,16 +33,17 @@
 
 import type { BattleState, BattlerState } from '../state'
 import type { MoveData } from '../../calculate'
-import { hasFlag, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS4_COMMANDED } from '../constants'
+import { hasFlag, STAT_ATK, STAT_SPATK, STAT_SPEED, STATUS2_ESCAPE_PREVENTION, STATUS2_WRAPPED, STATUS4_COMMANDED } from '../constants'
 import { isBattlerGrounded } from '../grounding'
 import { getWhoStrikesFirst } from '../turnOrder'
 import { getBattlerBattleMoveTargetFlags } from '../moveTargetFlags'
-import { isBattlerAIControlled, type AiDamageDeps } from './aiCalcDamage'
-import { aiGetMoveEffectiveness, isTargetingPartner } from './aiScorers'
-import { battlerAbility, isBattlerOfType } from './aiCheckBadMove'
-import { selfAbility } from './aiAbilityHelpers'
+import { aiHoldEffectParam, holdEffectId, isBattlerAIControlled, type AiDamageDeps } from './aiCalcDamage'
+import { aiGetMoveEffectiveness, canIndexMoveFaintTarget, getMoveDamageResult, isTargetingPartner, MOVE_POWER_WEAK } from './aiScorers'
+import { battlerAbility, battlerStatCanRise, doesBattlerIgnoreAbilityChecks, hasMoveWithSplit, hasMoveWithType, isBattlerOfType, isStatLoweringMoveEffect, moveType as resolveMoveType } from './aiCheckBadMove'
+import { isSuppressed, selfAbility } from './aiAbilityHelpers'
 import { isAbilityOfRating } from './aiAbilityRatings'
 import { isBattlerAlive } from './aiPipeline'
+import { AI_FLAG_HP_AWARE } from './aiFlags'
 import { hasDamagingMove, shouldSetFog, shouldSetHail, shouldSetRain, shouldSetSandstorm, shouldSetSun } from './aiCheckViability'
 
 /** AI_EFFECTIVENESS_x0, constants/battle_ai.h:18. */
@@ -112,11 +117,11 @@ export function getAllyChosenMove(state: BattleState, battlerAtk: number): strin
 }
 
 /**
- * AI_DoubleBattle, battle_ai_main.c:2213-2511, minus :2303-2483 (dbl-4b2).
+ * AI_DoubleBattle, battle_ai_main.c:2213-2511, minus :2401-2483 (dbl-4b3).
  * The same `Scorer` shape as the DISPATCH entries in aiPipeline.ts; `moveIndex`
- * is unused because the C's own AI_DoubleBattle takes no slot index (its
- * partner-branch calls name `AI_THINKING_STRUCT->movesetIndex`, which dbl-4b2
- * will need).
+ * is `AI_THINKING_STRUCT->movesetIndex` (the C's own function takes no slot
+ * index, but its partner-branch `GetMoveDamageResult`/`CanIndexMoveFaintTarget`
+ * calls read the global, so it is threaded in here).
  *
  * `effect` is the scored move's own effect. MOVE_NONE's effect is 0 in the C
  * (EFFECT_HIT), matching "no case label matches"; here an absent move data
@@ -127,7 +132,7 @@ export function aiDoubleBattle(
   battlerAtk: number,
   battlerDef: number,
   moveId: string,
-  _moveIndex: number,
+  moveIndex: number,
   score: number,
   deps: AiDamageDeps,
 ): { score: number; unmodelled: string[] } {
@@ -228,7 +233,121 @@ export function aiDoubleBattle(
 
   // check specific target, :2303-2510
   if (isTargetingPartner(battlerAtk, battlerDef)) {
-    unmodelled.push('AI_DoubleBattle: partner-target branch (battle_ai_main.c:2303-2483) not ported')
+    // :2303-2398 -- the partner-target damage gate and ability loop. The C's
+    // prologue locals this reads: `moveType` (:2227-2228) and
+    // `partnerProtecting` (:2221).
+    const moveType = resolveMoveType(moveId, deps, unmodelled)
+    const partnerProtecting = partnerMoveData?.effect === 'EFFECT_PROTECT'
+    const damageResult = getMoveDamageResult(state, battlerAtk, battlerDef, moveId, moveIndex, deps)
+    unmodelled.push(...damageResult.unmodelled)
+    if (damageResult.result === MOVE_POWER_WEAK) {
+      // partner ability checks. `DoesBattlerIgnoreAbilityChecks(battlerAtk,
+      // battlerDef, move)` passes the PARTNER as battlerDef; the
+      // attackerHasBadAbility/partnerHasBadAbility locals (:2222-2223) belong
+      // to the unported switch below.
+      if (!partnerProtecting && move?.target !== 'BOTH' && !doesBattlerIgnoreAbilityChecks(state, battlerAtk, partnerId, deps)) {
+        // GetNumPossibleAbilitiesForBattler: ability + innates. GetAbilityAtIndex
+        // (pokemon.c:6414) is a raw slot read returning ABILITY_NONE while
+        // IsSuppressed holds (checkMoldBreaker TRUE), so a suppressed slot is
+        // skipped here rather than matching ABILITY_NONE (which has no case).
+        const partnerAbilitySlots = [partner.mon.abilities.ability, ...partner.mon.abilities.innates].filter((id): id is string => !!id)
+        for (const abilityId of partnerAbilitySlots) {
+          if (isSuppressed(state, partner, abilityId, true, deps.grounding.attackerHasMoldBreaker, deps)) continue
+          switch (abilityId) {
+            case 'ABILITY_VOLT_ABSORB':
+            case 'ABILITY_EARTH_EATER':
+              if (!hasFlag(state.aiFlags, AI_FLAG_HP_AWARE)) {
+                return { score: score - 10, unmodelled } // RETURN_SCORE_MINUS(10)
+              }
+              break // handled in AI_HPAware
+            case 'ABILITY_MOTOR_DRIVE':
+              if (moveType === 'ELECTRIC' && battlerStatCanRise(state, partner, STAT_SPEED, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_LIGHTNING_ROD':
+              if (moveType === 'ELECTRIC' && hasMoveWithSplit(partner, 'SPECIAL', deps) && battlerStatCanRise(state, partner, STAT_SPATK, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_WATER_ABSORB':
+            case 'ABILITY_DRY_SKIN':
+              if (!hasFlag(state.aiFlags, AI_FLAG_HP_AWARE)) {
+                return { score: score - 10, unmodelled } // RETURN_SCORE_MINUS(10)
+              }
+              break // handled in AI_HPAware
+            case 'ABILITY_RESERVOIR':
+            case 'ABILITY_STORM_DRAIN':
+              if (moveType === 'WATER' && hasMoveWithSplit(partner, 'SPECIAL', deps) && battlerStatCanRise(state, partner, STAT_SPATK, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_WATER_COMPACTION': {
+              // `if (moveType == TYPE_WATER && GetMoveDamageResult(move) == MOVE_POWER_WEAK)`
+              // -- the damage call is short-circuited behind the type check.
+              if (moveType === 'WATER') {
+                const compactionDamage = getMoveDamageResult(state, battlerAtk, battlerDef, moveId, moveIndex, deps)
+                unmodelled.push(...compactionDamage.unmodelled)
+                if (compactionDamage.result === MOVE_POWER_WEAK) {
+                  return { score: score + 1, unmodelled } // only mon with this ability is weak to water so only make it okay if we do very little damage
+                }
+              }
+              // the C's RETURN_SCORE_MINUS(10) sits OUTSIDE the if, so it is
+              // reached whenever the +1 above is not.
+              return { score: score - 10, unmodelled }
+            }
+            case 'ABILITY_FLASH_FIRE':
+              if (
+                moveType === 'FIRE' &&
+                hasMoveWithType(partner, 'FIRE', deps) &&
+                !partner.volatiles.flashFire &&
+                aiHoldEffectParam(partner, deps) !== holdEffectId('HOLD_EFFECT_MEGA_STONE', deps) // Don't use fire move on ally's pre-mega Houndoom
+              ) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_SAP_SIPPER':
+              if (moveType === 'GRASS' && hasMoveWithSplit(partner, 'PHYSICAL', deps) && battlerStatCanRise(state, partner, STAT_ATK, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_JUSTIFIED': {
+              if (!(moveType === 'DARK' && !isMoveStatus(move) && hasMoveWithSplit(partner, 'PHYSICAL', deps) && battlerStatCanRise(state, partner, STAT_ATK, deps))) break
+              const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, partnerId, moveId, 1, deps)
+              unmodelled.push(...faintCheck.unmodelled)
+              if (!faintCheck.faints) return { score: score + 1, unmodelled }
+              break
+            }
+            case 'ABILITY_RATTLED': {
+              if (!(!isMoveStatus(move) && (moveType === 'DARK' || moveType === 'GHOST' || moveType === 'BUG') && battlerStatCanRise(state, partner, STAT_SPEED, deps))) break
+              const faintCheck = canIndexMoveFaintTarget(state, battlerAtk, partnerId, moveId, 1, deps)
+              unmodelled.push(...faintCheck.unmodelled)
+              if (!faintCheck.faints) return { score: score + 1, unmodelled }
+              break
+            }
+            case 'ABILITY_CONTRARY':
+              if (isStatLoweringMoveEffect(effect)) return { score: score + 2, unmodelled }
+              break
+            case 'ABILITY_CONTEMPT':
+            case 'ABILITY_DEFIANT':
+              if (isStatLoweringMoveEffect(effect) && battlerStatCanRise(state, partner, STAT_ATK, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+            case 'ABILITY_COMPETITIVE':
+              if (isStatLoweringMoveEffect(effect) && battlerStatCanRise(state, partner, STAT_SPATK, deps)) {
+                return { score: score + 1, unmodelled }
+              }
+              break
+          }
+        }
+      } // ability checks
+    } // move power check
+
+    // :2401-2483 -- the `if (!partnerProtecting) switch (effect)` block is
+    // dbl-4b3. Nothing below reads `attackerHasBadAbility`/`partnerHasBadAbility`
+    // (:2222-2223) yet, so those locals are not computed.
+    unmodelled.push('AI_DoubleBattle: partner-target attack-effect switch (battle_ai_main.c:2401-2483) not ported')
     score -= 30 // otherwise, don't target partner
   } else {
     // checking opponent, :2485-2510 -- these checks mostly handled in
