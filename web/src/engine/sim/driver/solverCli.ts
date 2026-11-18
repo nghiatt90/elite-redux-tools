@@ -1,6 +1,6 @@
 // Command line entry for the set solver.
 //
-//   node solverCli.mjs --trainer TRAINER_X --team SPECIES_A,SPECIES_B,... [--level 50] [--tier elite]
+//   node solverCli.mjs --trainer TRAINER_X --team SPECIES_A,SPECIES_B,... [--level N] [--ignore-cap] [--tier elite]
 //                      [--workers 8] [--passes 2]
 //   node solverCli.mjs --chain SCRIPT_ID --team SPECIES_A,SPECIES_B,... [--map MAP] ...
 //
@@ -16,6 +16,12 @@ import { eventsForFight } from './battleEventSetup'
 import { parseBossTrainerIds } from './bossSet'
 import { buildChains, type ChainSpec, type TagBattle, type TrainerChain } from './chains'
 import { FIGHTS } from './fights'
+import {
+  evolutionWarnings,
+  resolveSolverLevel,
+  unrunRows,
+  type ResolvedSolverLevel,
+} from './solverLevel'
 import {
   DEFAULT_SEARCH,
   chainStageEvents,
@@ -50,7 +56,27 @@ async function main(): Promise<void> {
   const chainId = arg('chain', '')
   const trainerId = chainId ? '' : arg('trainer')
   const species = arg('team').split(',')
-  const level = Number(arg('level', '50'))
+  const levelRaw = arg('level', '')
+  const levelArg = levelRaw === '' ? undefined : Number(levelRaw)
+  const ignoreCap = process.argv.includes('--ignore-cap')
+
+  let resolved: ResolvedSolverLevel | undefined
+  let level = 50
+  let levelCap: number | undefined
+  if (!chainId) {
+    resolved = resolveSolverLevel(trainerId, levelArg, ignoreCap)
+    if (resolved.kind === 'refused') {
+      console.log(resolved.message)
+      process.exit(1)
+    }
+    level = resolved.level
+    if (resolved.kind === 'capped') {
+      levelCap = resolved.cap
+    }
+  } else {
+    level = levelArg ?? 50
+  }
+
   const tier = arg('tier', 'elite') as 'ace' | 'elite' | 'hell'
   const workerCount = Number(arg('workers', String(Math.max(1, cpus().length - 1))))
   const passes = Number(arg('passes', String(DEFAULT_SEARCH.passes)))
@@ -107,13 +133,42 @@ async function main(): Promise<void> {
     console.log(`map ${mapName || '(none)'}: ${battleEvents.length}/${allEvents.length} gym events active (defeated: ${[...defeated].join(',') || 'none'})`)
     if (fight.skippedGuards.length) console.log('skipped guards:', fight.skippedGuards.join('; '))
   }
+  if (gym > 0 && resolved?.kind === 'capped' && gym - 1 !== resolved.badges) {
+    console.log(
+      `warning: --gym ${gym} disagrees with the fight's badge count ${resolved.badges}; keeping --gym for Mega stones`,
+    )
+  }
   console.log(`gym ${gym || '(not set)'}: ${allowedStones.size} Mega stones available`)
+
+  if (!chainId && resolved && resolved.kind !== 'refused') {
+    console.log("level caps: Elite (player's setting, confirmed by Yoshi)")
+    if (resolved.kind === 'capped') {
+      console.log(
+        `level cap ${resolved.cap} at badge value ${resolved.badges} (evidence: ${resolved.label}); solver level ${resolved.level}`,
+      )
+      if (resolved.ignoreCapUsed) {
+        console.log(`--ignore-cap used: level ${resolved.level} exceeds the cap ${resolved.cap}`)
+      }
+    } else if (resolved.kind === 'noRow') {
+      console.log(`no fights.ts row for ${trainerId}: --level ${resolved.level} (default 50), no cap`)
+    }
+    for (const w of evolutionWarnings(data0, species, resolved.level)) {
+      console.log(`warning: ${w}`)
+    }
+    for (const line of unrunRows()) {
+      console.log(line)
+    }
+    console.log('note: TM and tutor availability is story-gated and not modelled; the full tutor list is always allowed')
+  }
 
   const data = loadSimData({ dataDir })
   const workerPath = new URL('./solverWorker.mjs', import.meta.url)
   const workers = Array.from(
     { length: workerCount },
-    () => new Worker(workerPath, { workerData: { trainerId, tier, battleEvents, chain, stageEvents } }),
+    () =>
+      new Worker(workerPath, {
+        workerData: { trainerId, tier, battleEvents, chain, stageEvents, levelCap, ignoreCap },
+      }),
   )
   const idle = [...workers]
   const waiting: Array<() => void> = []

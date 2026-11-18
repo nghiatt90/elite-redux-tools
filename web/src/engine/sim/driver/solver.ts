@@ -405,8 +405,10 @@ export function createLocalEvaluator(
   trainer: import('./loadSimData').TrainerData,
   tier: 'ace' | 'elite' | 'hell' = 'elite',
   expectimax?: import('./expectimax').ExpectimaxOptions,
+  options?: { levelCap?: number; ignoreCap?: boolean },
 ): FitnessEvaluator {
-  return async (teams, games) => teams.map((team) => scoreTeam(data, trainer, tier, team, games, expectimax))
+  return async (teams, games) =>
+    teams.map((team) => scoreTeam(data, trainer, tier, team, games, expectimax, undefined, undefined, options))
 }
 
 export function scoreTeam(
@@ -418,9 +420,10 @@ export function scoreTeam(
   expectimax?: import('./expectimax').ExpectimaxOptions,
   seedOffset = 0,
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>,
+  options?: { levelCap?: number; ignoreCap?: boolean },
 ): Fitness {
   const level = Math.max(...team.map((m) => m.level ?? 50))
-  const party = buildPlayerParty(team, level, data)
+  const party = buildPlayerParty(team, level, data, options)
   let wins = 0
   let scoreSum = 0
   for (let g = 1; g <= games; g++) {
