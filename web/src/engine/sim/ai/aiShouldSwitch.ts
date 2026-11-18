@@ -20,6 +20,7 @@
 import type { BattleState, SimPartyMon } from '../state'
 import {
   BATTLER_NONE,
+  BIT_FLANK,
   DEFAULT_STAT_STAGE,
   MOVE_UNSET,
   NUM_BATTLE_STATS,
@@ -754,7 +755,9 @@ export function shouldUseItem(state: BattleState, battlerId: number, target: num
  * (`fallbackFirstLiveSlot`, `OpponentHandleChoosePokemon`'s OWN separate
  * fallback for end-of-turn replacement) -- this one additionally excludes the
  * slot already queued in `monToSwitchIntoId`, which the end-of-turn fallback
- * does not need to.
+ * does not need to. In doubles it also excludes the flank partner's party slot
+ * and queued slot (:729-732) and, unlike every other site, does NOT relax that
+ * for an absent partner.
  *
  * `target`/`choice`/`moveView` are step 1's own results (`chooseMoveOrActionSingles`'s
  * chosen target/action and, when it chose a move, the built `TurnOrderMoveView`)
@@ -784,12 +787,21 @@ export function aiTrySwitchOrUseItem(
       monToSwitchId = suitable.partyIndex
       if (monToSwitchId === PARTY_SIZE) {
         const party = state.sides[battlerId & 1].party
+        // :721-742 -- the local fallback. In doubles `battlerIn2` is ALWAYS the
+        // flank partner (`battlerIdentity ^ BIT_FLANK`); unlike
+        // GetMostSuitableMonToSwitchInto and the three ShouldSwitch sites, this
+        // site has no gAbsentBattlerFlags collapse, so an absent partner's slot
+        // is still excluded. Only a missing battler slot (nothing to read) skips
+        // the partner checks.
+        const partner = isDoubleBattle(state) ? state.battlers[battlerId ^ BIT_FLANK] : null
         monToSwitchId = PARTY_SIZE
         for (let i = 0; i < 6; i++) {
           const mon = party[i]
           if (!mon || mon.hp === 0) continue
           if (i === battler.partyIndex) continue
           if (i === battler.monToSwitchIntoId) continue
+          if (partner && i === partner.partyIndex) continue
+          if (partner && i === partner.monToSwitchIntoId) continue
           monToSwitchId = i
           break
         }

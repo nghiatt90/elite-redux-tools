@@ -2,17 +2,19 @@
 // its four sub-steps (GetBestMonBatonPass :768-797, GetBestMonDefensive
 // :799-874, GetBestMonOffensive :876-936, GetBestMonDmg :938-966) and its
 // caller's own PARTY_SIZE fallback (OpponentHandleChoosePokemon,
-// battle_controller_opponent.c:1643-1693). Singles only -- doubles and every
-// multi-battle branch (BATTLE_TYPE_DOUBLE/TWO_OPPONENTS/INGAME_PARTNER/
-// TOWER_LINK_MULTI, BATTLE_TWO_VS_ONE_OPPONENT) are out of this batch's scope
-// per the brief; `getMostSuitableMonToSwitchInto` throws if any of them are
+// battle_controller_opponent.c:1643-1693). Singles and BATTLE_TYPE_DOUBLE
+// (:986-999, the battlerIn1/battlerIn2 pair and the opposing battler's
+// absent-bit flip). The remaining multi-battler formats -- TWO_OPPONENTS /
+// INGAME_PARTNER / TOWER_LINK_MULTI -- are out of this batch's scope per the
+// brief (dbl-4d); `getMostSuitableMonToSwitchInto` throws if any of them are
 // set rather than silently computing a singles-shaped (and therefore wrong)
 // answer.
 //
 // GetAIPartyIndexes (:30-47) collapses to its own `else` branch -- firstId=0,
-// lastId=6 -- for every reachable battle type once doubles/multi are excluded
-// above, so it is not ported as its own function; every caller here just uses
-// the literal range.
+// lastId=6 -- for singles AND for BATTLE_TYPE_DOUBLE (its first branch is the
+// TWO_OPPONENTS/INGAME_PARTNER/TOWER_LINK_MULTI one, excluded above), so it is
+// not ported as its own function; every caller here just uses the literal
+// range.
 //
 // WIRING NOTE: `chooseReplacement` (switchIn.ts's `ReplacementDeps`) takes an
 // `unmodelled: string[]` output parameter -- the SAME array
@@ -37,22 +39,23 @@
 // batch gives it a real writer.
 
 import type { BattleState, SimPartyMon } from '../state'
-import { hasFlag, PARTY_SIZE, STATUS3_MIRACLE_EYED, STATUS_FIELD_INVERSE_ROOM } from '../constants'
+import { hasFlag, BIT_FLANK, PARTY_SIZE, STATUS3_MIRACLE_EYED, STATUS_FIELD_INVERSE_ROOM } from '../constants'
 import { getTypeModifier, type TypeModifierInputs } from '../../typeEffectiveness'
 import { UQ_ONE } from '../../fixed'
 import { getWhoStrikesFirst } from '../turnOrder'
 import type { ReplacementDeps } from '../switchIn'
 import { aiCalcPartyMonDamage, aiGetTypeEffectiveness, type AiDamageDeps } from './aiCalcDamage'
+import { isDoubleBattle } from './aiCheckBadMove'
 
 export type AiSwitchingDeps = AiDamageDeps
 
-/** include/constants/battle.h:49, 64, 71, 72 -- every multi-battler format bit
- * this port refuses to run under (see this module's header). */
-const BATTLE_TYPE_DOUBLE = 1 << 0
+/** include/constants/battle.h:64, 71, 72 -- the multi-battler formats this port
+ * still refuses to run under (see this module's header). DOUBLE alone is no
+ * longer in the mask: its branches are ported below (:986-999). */
 const BATTLE_TYPE_TWO_OPPONENTS = 1 << 15
 const BATTLE_TYPE_INGAME_PARTNER = 1 << 22
 const BATTLE_TYPE_TOWER_LINK_MULTI = 1 << 23
-const BATTLE_TYPE_MULTI_ANY = BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI
+const BATTLE_TYPE_MULTI_ANY = BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI
 /** include/constants/battle.h:67. Never actually set by anything this tool
  * builds (Battle Arena is not one of the 40 fights), ported anyway per the
  * brief's explicit instruction to include this early return. */
@@ -250,25 +253,36 @@ function getBestMonDmg(
  * Arena's own `+1` rule, then Baton Pass, then (a permanent no-op) Defensive,
  * then Offensive, then Dmg, then PARTY_SIZE.
  *
- * Throws for doubles/multi-battle battleTypeFlags -- see this module's
- * header.
+ * Throws for the two-opponent/partner/multi-link battleTypeFlags (the
+ * GetAIPartyIndexes branches dbl-4d covers) -- see this module's header.
  */
 export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: number, deps: AiSwitchingDeps): { partyIndex: number; unmodelled: string[] } {
   const battler = state.battlers[aiBattlerId]
   if (!battler) throw new Error(`getMostSuitableMonToSwitchInto: no battler at id ${aiBattlerId}`)
   if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_MULTI_ANY)) {
-    throw new Error('getMostSuitableMonToSwitchInto: doubles/multi-battle branches (battle_ai_switch_items.c:985-996) are out of scope for this sim')
+    throw new Error('getMostSuitableMonToSwitchInto: two-opponent/partner/multi-link branches (battle_ai_switch_items.c:985-996, GetAIPartyIndexes :30-47) are out of scope for this sim')
   }
 
   const unmodelled: string[] = []
   if (battler.monToSwitchIntoId !== PARTY_SIZE) return { partyIndex: battler.monToSwitchIntoId, unmodelled }
   if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_ARENA)) return { partyIndex: battler.partyIndex + 1, unmodelled }
 
-  const opposingBattlerId = aiBattlerId ^ 1
+  // :986-999. In doubles battlerIn1 is the AI itself and battlerIn2 is the
+  // flank partner, UNLESS that partner's bit is set in gAbsentBattlerFlags (or
+  // there is no partner battler slot to read), in which case battlerIn2
+  // collapses back onto the AI. The opposing battler is BATTLE_OPPOSITE then,
+  // if ITS absent bit is set, flipped onto the other player-side battler.
+  const double = isDoubleBattle(state)
+  const partnerId = double ? aiBattlerId ^ BIT_FLANK : aiBattlerId
+  const partnerBattler = state.battlers[partnerId]
+  const partner = double && (hasFlag(state.absentBattlerFlags, 1 << partnerId) || !partnerBattler) ? battler : (partnerBattler ?? battler)
+  let opposingBattlerId = aiBattlerId ^ 1
+  if (double && hasFlag(state.absentBattlerFlags, 1 << opposingBattlerId)) opposingBattlerId ^= BIT_FLANK
+
   const side = aiBattlerId & 1
   const party = state.sides[side].party
   const firstId = 0
-  const lastId = 6 // GetAIPartyIndexes' singles-only else branch -- see this module's header.
+  const lastId = 6 // GetAIPartyIndexes' singles-and-doubles else branch -- see this module's header.
 
   let invalidMons = 0
   let aliveCount = 0
@@ -280,7 +294,9 @@ export function getMostSuitableMonToSwitchInto(state: BattleState, aiBattlerId: 
       mon.speciesId === null ||
       mon.hp === 0 ||
       i === battler.partyIndex ||
+      i === partner.partyIndex ||
       i === battler.monToSwitchIntoId ||
+      i === partner.monToSwitchIntoId ||
       (isTruant && isTruantMonVulnerable(state, aiBattlerId, opposingBattlerId, deps))
     if (invalid) invalidMons |= 1 << i
     else aliveCount++
