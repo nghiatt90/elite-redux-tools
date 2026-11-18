@@ -19,7 +19,7 @@ import {
   PARTY_SIZE,
 } from '../constants'
 import { createBattleState, createBattlerState } from '../create'
-import type { InnateTier } from '../innateGate'
+import { gateInnates, type InnateTier } from '../innateGate'
 import type { BattleState, BattlerState, RandomSource, SimBattleMon, SimPartyMon } from '../state'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 
@@ -237,11 +237,25 @@ export function toBattleMon(incoming: SimPartyMon): SimBattleMon {
 }
 
 /**
+ * GetInnateInSlot's player-only gate (battle_util.c:8799-8802): only the player's
+ * OWN mons are gated by level and difficulty. The in-game partner's mons are built
+ * with `isPlayer == FALSE` (battle_controller_player_partner.c:678-680), so they
+ * start with all three innates whatever the tier. Call this with `playerParty`
+ * only -- never with `partnerParty`.
+ */
+export function gatePlayerInnates(playerParty: SimPartyMon[], tier: InnateTier): void {
+  for (const mon of playerParty) {
+    mon.abilities.innates = gateInnates(mon.abilities.innates, mon.level, tier)
+  }
+}
+
+/**
  * Assembles the turn-zero BattleState for `format` from already-built parties. The
  * caller owns party construction (`buildOpponentParty`, `buildPlayerParty`) and the
- * player's innate gate; this function only computes the format's flags, lays the
- * parties into the 6-slot rosters, derives `gBattlerPartyIndexes[]`, and builds the
- * starting battlers.
+ * player's own innate gate (through `gatePlayerInnates`, which must not be applied to
+ * `partnerParty`: the partner starts ungated, battle_controller_player_partner.c:678-680);
+ * this function only computes the format's flags, lays the parties into the 6-slot
+ * rosters, derives `gBattlerPartyIndexes[]`, and builds the starting battlers.
  */
 export function buildBattleState(format: BattleFormat, options: BuildBattleStateOptions): BattleState {
   if (format.opponents.length < 1 || format.opponents.length > 2) {

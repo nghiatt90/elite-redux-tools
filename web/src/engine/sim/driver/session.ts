@@ -18,7 +18,6 @@ import { clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
-import { gateInnates } from '../innateGate'
 import type { GroundingContext } from '../grounding'
 import { battlerHasSimAbility, runReactiveAbilityEffects } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
@@ -29,7 +28,7 @@ import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
-import { buildBattleState } from './battleFormat'
+import { buildBattleState, gatePlayerInnates } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 import { partySlotsFor } from '../partySlots'
 
@@ -260,9 +259,7 @@ export function createSession(options: SessionOptions): BattleSession {
   }
   // GetInnateInSlot (src/battle_util.c:8799-8802) gates the PLAYER's innates by
   // level and difficulty; the AI keeps all three (buildOpponentParty is untouched).
-  for (const mon of playerParty) {
-    mon.abilities.innates = gateInnates(mon.abilities.innates, mon.level, tier)
-  }
+  gatePlayerInnates(playerParty, tier)
 
   const playerMaxLevel = Math.max(...playerParty.map((m) => m.level))
   const opponentParty = buildOpponentParty(options.opponentTrainer, tier, playerMaxLevel, data)
