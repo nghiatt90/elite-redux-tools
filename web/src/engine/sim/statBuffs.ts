@@ -131,8 +131,15 @@ export function benefitsFromStatBuffs(state: BattleState, battlerId: number): bo
   const battler = state.battlers[battlerId]
   if (!battler) return true
   if (hasFlag(battler.mon.status1, STATUS1_BLEED)) return false
-  if (isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_BLOOD_STAIN')) return false
-  if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityAliveOnSide(state, battlerId ^ 1, 'ABILITY_HEMOLYSIS')) return false
+  // IsBloodStainAffected, src/battle_util.c:9000-9004.
+  if (
+    !battler.mon.types.includes('GHOST') &&
+    !battler.mon.types.includes('ROCK') &&
+    battlerHasAbility(battler.mon.abilities, 'ABILITY_BLOOD_STAIN', () => false)
+  ) {
+    return false
+  }
+  if (hasFlag(battler.mon.status1, STATUS1_POISON_ANY) && isAbilityAliveOnSide(state, (battlerId & 1) ^ 1, 'ABILITY_HEMOLYSIS')) return false
   return true
 }
 
