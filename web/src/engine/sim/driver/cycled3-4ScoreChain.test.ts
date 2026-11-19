@@ -248,7 +248,9 @@ describe('cycle d3-4: scoreChain', () => {
     expect(result.finalActive.mon.hp).toBe(result.finalParty[result.finalActive.partyIndex]!.hp)
   })
 
-  it('leaves scoreTeam unchanged: seeds 1..games with the same clamp', () => {
+  // Decision 5 of docs/battle-sim/solver-v2-plan.md: singles seeds move from
+  // `seedOffset + g` to `seedOffset + g * 1000` (k = 0), so game g is seeded `g * 1000`.
+  it('leaves scoreTeam unchanged: seeds g * 1000 with the same clamp', () => {
     const team: Team = [MAGIKARP, GARCHOMP]
     const start = startParty(team)
     const t = 'elite' as const
@@ -261,7 +263,7 @@ describe('cycle d3-4: scoreChain', () => {
         playerParty: start,
         opponentTrainer: trainer(WEAK_FIGHT),
         tier: t,
-        seed: 0 + g,
+        seed: 0 + g * 1000,
       })
       if (result.outcome === 'WON') wins++
       scoreSum += clamp(result)

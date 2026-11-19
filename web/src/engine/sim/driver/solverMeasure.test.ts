@@ -11,6 +11,7 @@ import { highestBadgeRange } from './progression'
 import { defaultSet, scoreTeam, type Team } from './solver'
 import { availableStones } from './stoneAvailability'
 import { wilsonInterval } from './wilson'
+import { batchSeedOffset } from './winProbability'
 
 const Z = 2.807
 const BATCH = 40
@@ -125,7 +126,7 @@ function sampleTeam(
   let n = 0
   let verdict: SampleVerdict = 'open at 80'
   for (let k = 0; k < STEP_04_LOOKS; k++) {
-    const fitness = scoreTeam(data, trainer, 'elite', team, BATCH, undefined, seedOffset + BATCH * k, battleEvents, {
+    const fitness = scoreTeam(data, trainer, 'elite', team, BATCH, undefined, seedOffset + k * BATCH * 1000, battleEvents, {
       levelCap: cap,
     })
     wins += Math.round(fitness.winRate * BATCH)
@@ -168,7 +169,7 @@ describe.skipIf(process.env.SIM_MEASURE !== '1')('solver measurement', () => {
       let wins = 0
       let verdict = 'no verdict at 400'
       for (let k = 0; k < MAX_LOOKS; k++) {
-        const fitness = scoreTeam(data, trainer, 'elite', team, BATCH, undefined, BATCH * k)
+        const fitness = scoreTeam(data, trainer, 'elite', team, BATCH, undefined, batchSeedOffset('tuning', k))
         wins += Math.round(fitness.winRate * BATCH)
         const n = BATCH * (k + 1)
         const { lower, upper } = wilsonInterval(wins, n, Z)

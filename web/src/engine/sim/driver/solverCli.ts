@@ -23,6 +23,7 @@ import {
   type ResolvedSolverLevel,
 } from './solverLevel'
 import { fightSpecFor } from './fightSpec'
+import { SEED_OFFSET } from './winProbability'
 import {
   DEFAULT_SEARCH,
   chainCaveats,
@@ -232,7 +233,7 @@ async function main(): Promise<void> {
       console.log(`Mega form ${mon.species} needs ${m.item}: ${info ? info.reason + (info.unverified ? ' [UNVERIFIED]' : '') : 'listed with --stones'}`)
     }
   }
-  const [fresh] = await evaluateAt([result.team], 40, 1000)
+  const [fresh] = await evaluateAt([result.team], 40, SEED_OFFSET.report)
   console.log(`fresh seeds (40 games): win ${fresh.winRate.toFixed(2)} score ${fresh.meanScore.toFixed(2)}`)
   if (chain) {
     console.log(`chain ${chain.id} seed 1 (stage k uses seed 1000 + k):`)

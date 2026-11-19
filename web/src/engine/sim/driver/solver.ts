@@ -413,7 +413,7 @@ export function fightCaveats(spec: Pick<FightSpec, 'format'>): string[] {
   return isDoubleFight(spec.format) ? [TOP_K_CAVEAT] : []
 }
 
-/** Scores teams in this thread: `games` battles per team on seeds 1..games. */
+/** Scores teams in this thread: `games` battles per team, game `g` on seed `seedOffset + g * 1000`. */
 export function createLocalEvaluator(
   data: SimDataBundle,
   trainer: import('./loadSimData').TrainerData,
@@ -456,7 +456,7 @@ export function scoreTeam(
           playerParty: party,
           opponentTrainer: trainer,
           tier,
-          seed: seedOffset + g,
+          seed: seedOffset + g * 1000,
           expectimax,
           battleEvents: options!.fightSpec!.battleEvents,
           format: options!.fightSpec!.format,
@@ -468,7 +468,7 @@ export function scoreTeam(
           playerParty: party,
           opponentTrainer: trainer,
           tier,
-          seed: seedOffset + g,
+          seed: seedOffset + g * 1000,
           expectimax,
           battleEvents,
         })
