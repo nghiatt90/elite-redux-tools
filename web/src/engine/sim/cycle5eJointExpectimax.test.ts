@@ -315,7 +315,9 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
 
     expect(['WON', 'LOST', 'DREW', 'MAX_TURNS']).toContain(res1.outcome)
     expect(res1.turns).toBeGreaterThan(0)
-    expect(res1.finalActive).toBe(res1.finalActive)
+    expect([0, 1, 2, 3]).toContain(res1.finalActive.partyIndex)
+    expect(PLAYER_4_MONS.map((m) => m.species)).toContain(res1.finalActive.mon.speciesId)
+    expect(res2.finalActive.partyIndex).toBe(res1.finalActive.partyIndex)
     expect(res1.outcome).toBe(res2.outcome)
     expect(res1.turns).toBe(res2.turns)
     expect(res1.finalScore).toBe(res2.finalScore)
