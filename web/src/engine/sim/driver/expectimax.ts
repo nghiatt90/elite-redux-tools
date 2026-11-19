@@ -74,6 +74,9 @@ import { battlerHasSimAbility } from '../statBuffs'
 import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
 import type { ChosenAction } from '../turnOrder'
 import { partySlotsFor } from '../partySlots'
+import { hasLiveReserve } from '../switchIn'
+import type { BattleFormat } from './battleFormat'
+import { defaultPlayerPolicy } from './runBattle'
 import { aiDamageDepsFor, buildMoveAction, cloneParty, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
 import type { SimDataBundle } from './loadSimData'
 
@@ -121,23 +124,33 @@ function hpFraction(hp: number, maxHp: number): number {
 }
 
 function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number; stages: number } {
-  const active = state.battlers[side]
+  const active1 = state.battlers[side]
+  const active2 = state.battlersCount === 4 ? state.battlers[side + 2] : null
   const party = state.sides[side].party
   let hp = 0
   let alive = 0
   for (let i = 0; i < party.length; i++) {
     const mon = party[i]
     if (!mon || mon.speciesId === null) continue
-    const isActive = active !== null && active !== undefined && active.partyIndex === i
-    const curHp = isActive ? active.mon.hp : mon.hp
-    const maxHp = isActive ? active.mon.maxHp : mon.maxHp
+    const activeBattler =
+      active1 !== null && active1 !== undefined && active1.partyIndex === i
+        ? active1
+        : active2 !== null && active2 !== undefined && active2.partyIndex === i
+          ? active2
+          : null
+    const isActive = activeBattler !== null
+    const curHp = isActive ? activeBattler.mon.hp : mon.hp
+    const maxHp = isActive ? activeBattler.mon.maxHp : mon.maxHp
     hp += hpFraction(curHp, maxHp)
     if (curHp > 0) alive++
   }
   let stages = 0
-  if (active && active.mon.hp > 0) {
+  if (active1 && active1.mon.hp > 0) {
     // atk, def, spatk, spdef, speed (indices 1..5 of the 8 stat stages) relative to the neutral 6
-    for (let s = 1; s <= 5; s++) stages += Math.max(-6, Math.min(6, (active.mon.statStages[s] ?? 6) - 6))
+    for (let s = 1; s <= 5; s++) stages += Math.max(-6, Math.min(6, (active1.mon.statStages[s] ?? 6) - 6))
+  }
+  if (active2 && active2.mon.hp > 0) {
+    for (let s = 1; s <= 5; s++) stages += Math.max(-6, Math.min(6, (active2.mon.statStages[s] ?? 6) - 6))
   }
   return { hp, alive, stages }
 }
@@ -146,7 +159,7 @@ function sideScore(state: BattleState, side: 0 | 1): { hp: number; alive: number
  * By default adds the status1 residual/tempo, volatile and per-side field terms
  * (`statusScore`); set `options.statusTerms: false` to score `positionScore` alone
  * (or the terminal +-100). */
-export function evaluateState(state: BattleState, options?: ExpectimaxOptions): number {
+export function evaluateState(state: BattleState, options?: Partial<ExpectimaxOptions>): number {
   if (state.battleOutcome === 'WON') return 100
   if (state.battleOutcome === 'LOST') return -100
   return positionScore(state) + ((options?.statusTerms ?? true) ? statusScore(state, options?.moveData) : 0)
@@ -858,8 +871,8 @@ function terrainMoveTypeBurden(state: BattleState, types: Set<string>): number {
  *
  * Only the ACTIVE battler is on the field: reserves neither take weather chip
  * nor heal from terrain nor attack with a boosted type. */
-function sideFieldConditionBurden(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup): number {
-  const battler = state.battlers[side]
+function sideFieldConditionBurden(state: BattleState, battlerId: number, moveLookup?: MoveLookup): number {
+  const battler = state.battlers[battlerId]
   if (!battler) return 0
   const mon = battler.mon
   if (mon.hp <= 0 || mon.maxHp <= 0) return 0
@@ -954,15 +967,21 @@ function activeSpeed(mon: SimBattleMon): number {
  * false with Clueless on the field. The monotype-champion branches (:8672
  * FLYING, :8675 NORMAL) are not modelled -- the leaf scorer has no champion
  * type. ENDTURN_TRICK_ROOM (:2051-2056) is `!started.trickRoom &&
- * --trickRoomTimer == 0`, so a just-set room keeps its full 5 turns. */
+ * --trickRoomTimer == 0`, so a just-set room keeps its full 5 turns.
+ * NOTE: For doubles, uses the mean activeSpeed of each side's living active
+ * battlers. This is a leaf heuristic, not a C port. */
 function trickRoomValue(state: BattleState): number {
   if (!hasFlag(state.field.statuses, STATUS_FIELD_TRICK_ROOM)) return 0
   if (isAbilityOnField(state, 'ABILITY_CLUELESS')) return 0
-  const player = state.battlers[0]
-  const foe = state.battlers[1]
-  if (!player || !foe || player.mon.hp <= 0 || foe.mon.hp <= 0) return 0
-  const playerSpeed = activeSpeed(player.mon)
-  const foeSpeed = activeSpeed(foe.mon)
+  const playerActives = [state.battlers[0], state.battlersCount === 4 ? state.battlers[2] : null].filter(
+    (b): b is BattlerState => !!b && b.mon.hp > 0,
+  )
+  const foeActives = [state.battlers[1], state.battlersCount === 4 ? state.battlers[3] : null].filter(
+    (b): b is BattlerState => !!b && b.mon.hp > 0,
+  )
+  if (playerActives.length === 0 || foeActives.length === 0) return 0
+  const playerSpeed = playerActives.reduce((sum, b) => sum + activeSpeed(b.mon), 0) / playerActives.length
+  const foeSpeed = foeActives.reduce((sum, b) => sum + activeSpeed(b.mon), 0) / foeActives.length
   if (playerSpeed === foeSpeed) return 0
   const magnitude = TRICK_ROOM_VALUE * timerTurns(state.field.timers.trickRoomTimer)
   return playerSpeed < foeSpeed ? magnitude : -magnitude
@@ -971,24 +990,33 @@ function trickRoomValue(state: BattleState): number {
 /** Sum of `statusMonValue` over one side's living mons, reading the active
  * battler's copy for the active slot and the party copy for the rest -- the
  * same split `sideScore` uses, because status1 persists across switches -- plus
- * the active battler's volatile burden, which does not persist across switches,
+ * the active battlers' volatile burden, which does not persist across switches,
  * plus the side's hazards/screens/Tailwind burden (`sideFieldScore`) and its
- * active mon's field-condition burden (`sideFieldConditionBurden`). */
+ * active mons' field-condition burden (`sideFieldConditionBurden`). */
 function sideStatusScore(state: BattleState, side: 0 | 1, moveLookup?: MoveLookup): number {
-  const active = state.battlers[side]
+  const active1 = state.battlers[side]
+  const active2 = state.battlersCount === 4 ? state.battlers[side + 2] : null
   const party = state.sides[side].party
   let total = 0
   for (let i = 0; i < party.length; i++) {
     const mon = party[i]
     if (!mon || mon.speciesId === null) continue
-    const isActive = active !== null && active !== undefined && active.partyIndex === i
-    const cur = isActive ? active.mon : mon
+    const activeBattler =
+      active1 !== null && active1 !== undefined && active1.partyIndex === i
+        ? active1
+        : active2 !== null && active2 !== undefined && active2.partyIndex === i
+          ? active2
+          : null
+    const isActive = activeBattler !== null
+    const cur = activeBattler ? activeBattler.mon : mon
     if (cur.hp <= 0) continue
     total += statusMonValue({ status1: cur.status1, hp: cur.hp, maxHp: cur.maxHp }, isActive)
   }
-  if (active) total += activeVolatileBurden(state, active)
+  if (active1) total += activeVolatileBurden(state, active1)
+  if (active2 && active2.mon.hp > 0) total += activeVolatileBurden(state, active2)
   total += sideFieldScore(state, side, moveLookup)
   total += sideFieldConditionBurden(state, side, moveLookup)
+  if (active2 && active2.mon.hp > 0) total += sideFieldConditionBurden(state, side + 2, moveLookup)
   return total
 }
 
@@ -1012,15 +1040,15 @@ export function positionScore(state: BattleState): number {
   return me.hp - them.hp + 0.3 * (me.alive - them.alive) + 0.04 * (me.stages - them.stages)
 }
 
-export function legalChoices(session: BattleSession): PlayerChoice[] {
+export function legalChoices(session: BattleSession, battlerId = 0): PlayerChoice[] {
   const { state, data } = session
-  const battler = state.battlers[0]
-  if (!battler || battler.mon.hp === 0) return []
+  const battler = state.battlers[battlerId]
+  if (!battler || battler.mon.hp === 0 || (state.absentBattlerFlags & (1 << battlerId)) !== 0) return []
   const choices: PlayerChoice[] = []
   // An Assault/Tactical Vest holder cannot select a status move (battle_util.c:1571-1578, the player-selection
   // check, and battle_util.c:1651-1653 for the shared filter); MOVE_ME_FIRST is exempt. Both read the hold effect
   // with GetBattlerHoldEffect(battler, TRUE) (battle_util.c:1418), so Klutz/Embargo leave the menu untouched.
-  const vestHoldEffect = holdEffectOfBattler(state, 0, data.dataContext)
+  const vestHoldEffect = holdEffectOfBattler(state, battlerId, data.dataContext)
   const vestBlocksStatus = vestHoldEffect === 'HOLD_EFFECT_ASSAULT_VEST' || vestHoldEffect === 'HOLD_EFFECT_TACTICAL_VEST'
   // TrySetCantSelectMoveBattleScript's choice branch (battle_util.c:1565-1571): a Choice Band/Scarf/Specs
   // holder whose choicedMove is set may only select that move. Both the hold effect and the lock are read
@@ -1033,23 +1061,23 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   // use BATTLER_HAS_ABILITY (checkMoldBreaker=TRUE); the battler's own ability cannot be mold-broken by
   // itself, so attackerHasMoldBreaker is false. Selection-time filter only, like the Choice branch above.
   const abilityLocksMove =
-    battlerHasSimAbility(state, battler, 'ABILITY_DISCIPLINE', true, 0, false, data.dataContext) ||
-    battlerHasSimAbility(state, battler, 'ABILITY_GORILLA_TACTICS', true, 0, false, data.dataContext) ||
-    battlerHasSimAbility(state, battler, 'ABILITY_SAGE_POWER', true, 0, false, data.dataContext)
+    battlerHasSimAbility(state, battler, 'ABILITY_DISCIPLINE', true, battlerId, false, data.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_GORILLA_TACTICS', true, battlerId, false, data.dataContext) ||
+    battlerHasSimAbility(state, battler, 'ABILITY_SAGE_POWER', true, battlerId, false, data.dataContext)
   for (let i = 0; i < battler.mon.moves.length; i++) {
     const moveId = battler.mon.moves[i]
     if (moveId && battler.mon.pp[i] > 0) {
       if (vestBlocksStatus && moveId !== 'MOVE_ME_FIRST' && data.dataContext.move(moveId)?.split === 'STATUS') continue
       if (holdsChoiceItem && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
       if (abilityLocksMove && battler.choicedMove !== null && battler.choicedMove !== moveId) continue
-      const action = buildMoveAction(state, data, 0, moveId, session.turnDeps.damage)
+      const action = buildMoveAction(state, data, battlerId, moveId, session.turnDeps.damage)
       choices.push({ action })
     }
   }
-  if (choices.length === 0) choices.push({ action: buildMoveAction(state, data, 0, 'MOVE_STRUGGLE', session.turnDeps.damage) })
+  if (choices.length === 0) choices.push({ action: buildMoveAction(state, data, battlerId, 'MOVE_STRUGGLE', session.turnDeps.damage) })
 
   const party = state.sides[0].party
-  const [firstSlot, lastSlot] = partySlotsFor(state, 0)
+  const [firstSlot, lastSlot] = partySlotsFor(state, battlerId)
   const active = new Set<number>()
   for (let id = 0; id < state.battlers.length; id++) {
     if ((id & 1) !== 0) continue
@@ -1065,13 +1093,14 @@ export function legalChoices(session: BattleSession): PlayerChoice[] {
   return choices
 }
 
-function applyChoice(session: BattleSession, choice: PlayerChoice): void {
-  const battler = session.state.battlers[0]
+function applyChoice(session: BattleSession, choice: PlayerChoice, battlerId = 0): void {
+  const battler = session.state.battlers[battlerId]
   if (battler) battler.monToSwitchIntoId = choice.switchTo ?? PARTY_SIZE
 }
 
 interface OpponentSample {
   action: ChosenAction | null
+  action3: ChosenAction | null
   seed: number
 }
 
@@ -1082,9 +1111,201 @@ function sampleOpponent(session: BattleSession, count: number, seedBase: number)
     const probe = cloneSession(session, seed)
     const opp = probe.state.battlers[1]
     const action = opp && opp.mon.hp > 0 ? chooseAiAction(probe.state, 1, probe.chooseAiDeps).action : null
-    samples.push({ action, seed })
+    let action3: ChosenAction | null = null
+    // battle_main.c:3629: action selection loops gActiveBattler = 0..gBattlersCount-1
+    if (probe.state.battlersCount === 4) {
+      const opp3 = probe.state.battlers[3]
+      action3 = opp3 && opp3.mon.hp > 0 ? chooseAiAction(probe.state, 3, probe.chooseAiDeps).action : null
+    }
+    samples.push({ action, action3, seed })
   }
   return samples
+}
+
+/** Ranks candidate choices by one-turn expectimax value and retains the top K moves
+ * plus the single best switch choice (mirrors the move/switch split in chooseExpectimaxAction).
+ * In doubles, ranking fixes the other player battler to defaultPlayerPolicy.
+ * Ranking rule: one-turn evaluation (depth 0 leaf score) averaged across the opponent samples.
+ */
+export function pruneChoices(
+  choices: PlayerChoice[] | Array<{ choice: PlayerChoice; score: number }>,
+  scoreFnOrTopK?: ((choice: PlayerChoice) => number) | number,
+  topK = 4,
+): PlayerChoice[] {
+  let ranked: Array<{ choice: PlayerChoice; score: number }>
+  let k = topK
+
+  if (typeof scoreFnOrTopK === 'number') {
+    k = scoreFnOrTopK
+    ranked = choices as Array<{ choice: PlayerChoice; score: number }>
+  } else if (typeof scoreFnOrTopK === 'function') {
+    const list = choices as PlayerChoice[]
+    ranked = list.map((c) => ({ choice: c, score: scoreFnOrTopK(c) }))
+  } else {
+    ranked = choices as Array<{ choice: PlayerChoice; score: number }>
+  }
+
+  const moves: Array<{ choice: PlayerChoice; score: number }> = []
+  const switches: Array<{ choice: PlayerChoice; score: number }> = []
+
+  for (const item of ranked) {
+    if (item.choice.switchTo === undefined) {
+      moves.push(item)
+    } else {
+      switches.push(item)
+    }
+  }
+
+  moves.sort((a, b) => b.score - a.score)
+  switches.sort((a, b) => b.score - a.score)
+
+  const prunedMoves = moves.slice(0, k).map((item) => item.choice)
+  const bestSwitch = switches[0]?.choice
+  return bestSwitch ? [...prunedMoves, bestSwitch] : prunedMoves
+}
+
+function getOtherBattlerPolicyAction(
+  session: BattleSession,
+  otherId: number,
+): { action: ChosenAction | null; switchTo?: number } {
+  const battler = session.state.battlers[otherId]
+  if (!battler) return { action: null }
+  const isAbsent = (session.state.absentBattlerFlags & (1 << otherId)) !== 0
+  const isFaintedNoReserve = battler.mon.hp === 0 && !hasLiveReserve(session.state, otherId)
+  if (isAbsent || isFaintedNoReserve) return { action: null }
+
+  const savedSwitch = battler.monToSwitchIntoId
+  const action = defaultPlayerPolicy(session.state, session.data, session.turnDeps.damage, otherId)
+  const switchTo = battler.monToSwitchIntoId !== PARTY_SIZE ? battler.monToSwitchIntoId : undefined
+  battler.monToSwitchIntoId = savedSwitch
+  return { action, switchTo }
+}
+
+function rankCandidateChoice(
+  session: BattleSession,
+  battlerId: number,
+  choice: PlayerChoice,
+  samples: OpponentSample[],
+  options: ExpectimaxOptions,
+  otherAction: ChosenAction | null,
+  otherSwitchTo?: number,
+): number {
+  const leafOptions = options.moveData ? options : { ...options, moveData: (moveId: string) => session.data.dataContext.move(moveId) }
+  let sum = 0
+  for (const sample of samples) {
+    const next = cloneSession(session, sample.seed)
+    applyChoice(next, choice, battlerId)
+    const otherId = battlerId === 0 ? 2 : 0
+    if (otherSwitchTo !== undefined && next.state.battlers[otherId]) {
+      next.state.battlers[otherId].monToSwitchIntoId = otherSwitchTo
+    }
+    const action0 = battlerId === 0 ? choice.action : otherAction
+    const action2 = battlerId === 2 ? choice.action : otherAction
+    stepTurn(next, action0, sample.action, { 2: action2, 3: sample.action3 })
+    sum += evaluateState(next.state, leafOptions)
+  }
+  return sum / samples.length
+}
+
+function pruneBattlerChoices(
+  session: BattleSession,
+  battlerId: number,
+  choices: PlayerChoice[],
+  samples: OpponentSample[],
+  options: ExpectimaxOptions,
+  topK = 4,
+): PlayerChoice[] {
+  if (choices.length <= 1) return choices
+  const otherId = battlerId === 0 ? 2 : 0
+  const { action: otherAction, switchTo: otherSwitchTo } = getOtherBattlerPolicyAction(session, otherId)
+  return pruneChoices(
+    choices,
+    (choice) => rankCandidateChoice(session, battlerId, choice, samples, options, otherAction, otherSwitchTo),
+    topK,
+  )
+}
+
+function meanOverJoint(
+  session: BattleSession,
+  c0: PlayerChoice | null,
+  c2: PlayerChoice | null,
+  samples: OpponentSample[],
+  depth: number,
+  options: ExpectimaxOptions,
+): number {
+  let sum = 0
+  for (const sample of samples) {
+    const next = cloneSession(session, sample.seed)
+    if (c0) applyChoice(next, c0, 0)
+    if (c2) applyChoice(next, c2, 2)
+    stepTurn(next, c0?.action ?? null, sample.action, { 2: c2?.action ?? null, 3: sample.action3 })
+    sum += value(next, depth - 1, options, sample.seed ^ 0x85ebca6b)
+  }
+  return sum / samples.length
+}
+
+/** Chooses the joint player action for battlers 0 and 2 in a double format.
+ * Prunes each battler's legal choices to topK moves plus the best switch, forms
+ * the cross product skipping pairs switching to the same slot (battle_main.c:3757-3762),
+ * and selects the best pair applying the switchMargin heuristic.
+ */
+export function chooseExpectimaxJointAction(
+  session: BattleSession,
+  options: ExpectimaxOptions,
+  seed: number,
+  topK = 4,
+): { 0: PlayerChoice | null; 2: PlayerChoice | null } {
+  const isAbsent0 = (session.state.absentBattlerFlags & (1 << 0)) !== 0 || !session.state.battlers[0]
+  const isFaintedNoReserve0 = session.state.battlers[0]?.mon.hp === 0 && !hasLiveReserve(session.state, 0)
+  const choices0 = isAbsent0 || isFaintedNoReserve0 ? [] : legalChoices(session, 0)
+
+  const isAbsent2 = (session.state.absentBattlerFlags & (1 << 2)) !== 0 || !session.state.battlers[2]
+  const isFaintedNoReserve2 = session.state.battlers[2]?.mon.hp === 0 && !hasLiveReserve(session.state, 2)
+  const choices2 = isAbsent2 || isFaintedNoReserve2 ? [] : legalChoices(session, 2)
+
+  if (choices0.length === 0 && choices2.length === 0) {
+    return { 0: null, 2: null }
+  }
+
+  const samples = sampleOpponent(session, options.samples, seed)
+  const pruned0 = choices0.length > 0 ? pruneBattlerChoices(session, 0, choices0, samples, options, topK) : []
+  const pruned2 = choices2.length > 0 ? pruneBattlerChoices(session, 2, choices2, samples, options, topK) : []
+
+  const pairs: Array<{ 0: PlayerChoice | null; 2: PlayerChoice | null }> = []
+  if (pruned0.length > 0 && pruned2.length > 0) {
+    for (const c0 of pruned0) {
+      for (const c2 of pruned2) {
+        // C forbids partner from choosing the same switch slot (battle_main.c:3757-3762)
+        if (c0.switchTo !== undefined && c2.switchTo !== undefined && c0.switchTo === c2.switchTo) continue
+        pairs.push({ 0: c0, 2: c2 })
+      }
+    }
+  } else if (pruned0.length > 0) {
+    for (const c0 of pruned0) pairs.push({ 0: c0, 2: null })
+  } else if (pruned2.length > 0) {
+    for (const c2 of pruned2) pairs.push({ 0: null, 2: c2 })
+  }
+
+  if (pairs.length === 0) return { 0: null, 2: null }
+  if (pairs.length === 1) return pairs[0]
+
+  let bestMove: { pair: { 0: PlayerChoice | null; 2: PlayerChoice | null }; v: number } | null = null
+  let bestSwitch: { pair: { 0: PlayerChoice | null; 2: PlayerChoice | null }; v: number } | null = null
+
+  for (const pair of pairs) {
+    const v = meanOverJoint(session, pair[0], pair[2], samples, options.depth, options)
+    const isSwitch = pair[0]?.switchTo !== undefined || pair[2]?.switchTo !== undefined
+    if (isSwitch) {
+      if (!bestSwitch || v > bestSwitch.v) bestSwitch = { pair, v }
+    } else {
+      if (!bestMove || v > bestMove.v) bestMove = { pair, v }
+    }
+  }
+
+  if (bestSwitch && (!bestMove || bestSwitch.v > bestMove.v + options.switchMargin)) {
+    return bestSwitch.pair
+  }
+  return bestMove ? bestMove.pair : bestSwitch ? bestSwitch.pair : { 0: null, 2: null }
 }
 
 function value(session: BattleSession, depth: number, options: ExpectimaxOptions, seedBase: number): number {
@@ -1093,6 +1314,46 @@ function value(session: BattleSession, depth: number, options: ExpectimaxOptions
   // (unless the caller already provided a lookup, e.g. in a unit test).
   const leafOptions = options.moveData ? options : { ...options, moveData: (moveId: string) => session.data.dataContext.move(moveId) }
   if (session.state.battleOutcome || depth === 0) return evaluateState(session.state, leafOptions)
+
+  if (session.state.battlersCount === 4) {
+    const isAbsent0 = (session.state.absentBattlerFlags & (1 << 0)) !== 0 || !session.state.battlers[0]
+    const isFaintedNoReserve0 = session.state.battlers[0]?.mon.hp === 0 && !hasLiveReserve(session.state, 0)
+    const choices0 = isAbsent0 || isFaintedNoReserve0 ? [] : legalChoices(session, 0)
+
+    const isAbsent2 = (session.state.absentBattlerFlags & (1 << 2)) !== 0 || !session.state.battlers[2]
+    const isFaintedNoReserve2 = session.state.battlers[2]?.mon.hp === 0 && !hasLiveReserve(session.state, 2)
+    const choices2 = isAbsent2 || isFaintedNoReserve2 ? [] : legalChoices(session, 2)
+
+    if (choices0.length === 0 && choices2.length === 0) return evaluateState(session.state, leafOptions)
+
+    const samples = sampleOpponent(session, options.innerSamples, seedBase)
+    const pruned0 = choices0.length > 0 ? pruneBattlerChoices(session, 0, choices0, samples, options, 4) : []
+    const pruned2 = choices2.length > 0 ? pruneBattlerChoices(session, 2, choices2, samples, options, 4) : []
+
+    const pairs: Array<{ 0: PlayerChoice | null; 2: PlayerChoice | null }> = []
+    if (pruned0.length > 0 && pruned2.length > 0) {
+      for (const c0 of pruned0) {
+        for (const c2 of pruned2) {
+          if (c0.switchTo !== undefined && c2.switchTo !== undefined && c0.switchTo === c2.switchTo) continue
+          pairs.push({ 0: c0, 2: c2 })
+        }
+      }
+    } else if (pruned0.length > 0) {
+      for (const c0 of pruned0) pairs.push({ 0: c0, 2: null })
+    } else if (pruned2.length > 0) {
+      for (const c2 of pruned2) pairs.push({ 0: null, 2: c2 })
+    }
+
+    if (pairs.length === 0) return evaluateState(session.state, leafOptions)
+
+    let best = -Infinity
+    for (const pair of pairs) {
+      const v = meanOverJoint(session, pair[0], pair[2], samples, depth, options)
+      if (v > best) best = v
+    }
+    return best
+  }
+
   const choices = legalChoices(session)
   if (choices.length === 0) return evaluateState(session.state, leafOptions)
   const samples = sampleOpponent(session, options.innerSamples, seedBase)
@@ -1149,17 +1410,22 @@ export function chooseExpectimaxAction(
 
 /** After a faint the player's replacement comes from the game's own "most suitable mon" heuristic.
  * `inverseBattle` is FlagGet(B_FLAG_INVERSE_BATTLE) (battle_util.c:8028), forwarded to the AI deps
- * that score the candidate switch-ins. */
-export function createHeuristicPlayerReplacement(data: SimDataBundle, inverseBattle = false): (state: BattleState) => number {
-  return (state) => {
+ * that score the candidate switch-ins.
+ * In doubles, battlerId specifies which active battler is fainting (0 or 2); getMostSuitableMonToSwitchInto
+ * automatically excludes the partner's current slot and planned switch-in. */
+export function createHeuristicPlayerReplacement(
+  data: SimDataBundle,
+  inverseBattle = false,
+): (state: BattleState, battlerId?: number) => number {
+  return (state, battlerId = 0) => {
     const deps = aiDamageDepsFor(data, state, inverseBattle)
-    const battler = state.battlers[0]
+    const battler = state.battlers[battlerId]
     if (!battler) return PARTY_SIZE
     const saved = battler.monToSwitchIntoId
     battler.monToSwitchIntoId = PARTY_SIZE
-    const result = getMostSuitableMonToSwitchInto(state, 0, deps)
+    const result = getMostSuitableMonToSwitchInto(state, battlerId, deps)
     battler.monToSwitchIntoId = saved
-    return result.partyIndex === PARTY_SIZE ? firstLiveReplacement(state) : result.partyIndex
+    return result.partyIndex === PARTY_SIZE ? firstLiveReplacement(state, battlerId) : result.partyIndex
   }
 }
 
@@ -1175,6 +1441,8 @@ export interface ExpectimaxBattleOptions {
   /** FlagGet(B_FLAG_INVERSE_BATTLE) (battle_util.c:8028); derived from encounters.json. */
   inverseBattle?: boolean
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
+  format?: BattleFormat
+  startFieldEffects?: Array<{ effectType: string; fieldId: string }>
 }
 
 export interface ExpectimaxBattleResult {
@@ -1206,14 +1474,25 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     playerReplacement: createHeuristicPlayerReplacement(options.data, options.inverseBattle),
     inverseBattle: options.inverseBattle,
     battleEvents: options.battleEvents,
+    format: options.format,
+    startFieldEffects: options.startFieldEffects,
   })
   let turns = 0
   while (!session.state.battleOutcome && turns < maxTurns) {
     turns++
     beginTurn(session)
-    const choice = chooseExpectimaxAction(session, expectimax, (options.seed * 31 + turns) >>> 0)
-    if (choice) applyChoice(session, choice)
-    stepTurn(session, choice ? choice.action : null)
+    if (session.state.battlersCount === 4) {
+      const joint = chooseExpectimaxJointAction(session, expectimax, (options.seed * 31 + turns) >>> 0)
+      const c0 = joint[0]
+      const c2 = joint[2]
+      if (c0) applyChoice(session, c0, 0)
+      if (c2) applyChoice(session, c2, 2)
+      stepTurn(session, c0?.action ?? null, undefined, { 2: c2?.action ?? null })
+    } else {
+      const choice = chooseExpectimaxAction(session, expectimax, (options.seed * 31 + turns) >>> 0)
+      if (choice) applyChoice(session, choice)
+      stepTurn(session, choice ? choice.action : null)
+    }
   }
   return {
     outcome: session.state.battleOutcome ?? 'MAX_TURNS',
