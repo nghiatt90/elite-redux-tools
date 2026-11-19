@@ -322,6 +322,111 @@ The interval helper is consistent with decision 4's own arithmetic (380/400 give
     id 164, `battle_events.h:53`), so that event is a no-op in the C too and beating Kirk changes nothing; the sim must match (no-op), and the search still enumerates the Kirk battle as a unit. Anything not established is
     reported as an open item and that gym's search may try every reachable set (up to `GYM_CAP`).
 
+### Step 0.5 results (cycle7b)
+
+Read 2026-11-19 from the pinned checkout (`pipeline/.upstream/eliteredux-source`, SHA in `sources.lock.json`; nothing fetched). Step 0.4 was not done and stays d4-0c. (a) and (b) are OPEN, (c) is established for five gyms and open for Fortree and Mossdeep, (d) is established. No engine, sim or solver source changed; the only new file is the test in (d), so the expected queue gate `move_notes <= 0, ability_gaps <= 3` is unaffected.
+
+**(a) `adddefeatedcount`: OPEN, macro body not in the pinned checkout.** Grepping `data/`, `src/` and `include/` for `adddefeatedcount` returns only the map `scripts.pory` files (the seven gyms plus Sootopolis), all call sites; there is no definition of the name anywhere in the checkout. Every call site, one block per gym, with the first call of each block carrying the extra `1`:
+
+| Gym | Calls (arguments as written) |
+|---|---|
+| Rustboro | `RustboroCity_Gym/scripts.pory:543-545` `TRAINER_JOSH, 1`; `TRAINER_TOMMY`; `TRAINER_MARC` |
+| Dewford | `DewfordTown_Gym/scripts.pory:712-716` `TRAINER_TAKAO, 1`; `TRAINER_JOCELYN`; `TRAINER_LAURA`; `TRAINER_BRENDEN` (comment `TRAINER_LILITH`); `TRAINER_CRISTIAN` |
+| Mauville | `MauvilleCity_Gym/scripts.pory:580-583` `TRAINER_VIVIAN, 1`; `TRAINER_KIRK`; `TRAINER_SHAWN` (comment `TRAINER_ANGELO`); `TRAINER_BEN` |
+| Lavaridge | `LavaridgeTown_Gym_1F/scripts.pory:629-635` `TRAINER_JEFF, 1`; `TRAINER_JACE`; `TRAINER_ELI` (comment `TRAINER_KEEGAN`); `TRAINER_COLE`; `TRAINER_GERALD`; `TRAINER_AXLE`; `TRAINER_DANIELLE` |
+| Petalburg | `PetalburgCity_Gym/scripts.pory:2013-2019` `TRAINER_RANDALL, 1`; `TRAINER_MARY`; `TRAINER_PARKER`; `TRAINER_ALEXIA`; `TRAINER_GEORGE`; `TRAINER_JODY`; `TRAINER_BERKE` |
+| Fortree | `FortreeCity_Gym/scripts.pory:512-515` `TRAINER_JARED, 1` (comment `TRAINER_ASHLEY`); `TRAINER_FLINT` (comment `TRAINER_EDWARDO`); `TRAINER_HUMBERTO`; `TRAINER_DARIUS` |
+| Mossdeep | `MossdeepCity_Gym/scripts.pory:926-931` `TRAINER_SAMANTHA, 1` (comment `TRAINER_BLAKE`); `TRAINER_MAURA`; `TRAINER_SYLVIA`; `TRAINER_KATHLEEN`; `TRAINER_MACEY`; `TRAINER_NATE` |
+
+Each block is immediately followed by a `switch (var(VAR_RESULT))` that picks the leader's intro text (e.g. Rustboro `:546-556`, Mossdeep's `GiveBattleText` at `:698-722`), so the count is 0..n only under the plan's unverified assumption that each call adds 0 or 1. Two facts worth recording: Lavaridge's block counts `TRAINER_ELI` (comment `TRAINER_KEEGAN`) and never counts `TRAINER_KEEGAN`, while KEEGAN (`:583`) and COLE (`:586`) are the guards, so the count block and the guard set are different id sets; and Mossdeep's first call `:926` is the extra-`1` one, as the plan said. What would settle (a): the Poryscript/macro expansion from a checkout outside the pin (unpinned, so evidence only if unchanged since the pin), or one player observation of the intro line after beating exactly one guarded trainer.
+
+**(b) `starttagbattle` outcome: OPEN; 'both' stays the assumed default.** The same grep finds no definition of `starttagbattle` anywhere in the checkout; its only occurrences are the gym scripts (Dewford `:572`, Mauville `:522`, Lavaridge `:517`, Fortree `:410,443`, Mossdeep `:728,761,794,827,861,895`; Sootopolis has its own). The per-trainer `defeated()` checks the plan names, read exactly:
+
+- `DewfordTown_Gym/scripts.pory:581`: `    if (defeated(TRAINER_BRENDEN)){`
+- `DewfordTown_Gym/scripts.pory:593`: `    if (defeated(TRAINER_LILITH)){`
+- `LavaridgeTown_Gym_1F/scripts.pory:493`: `	if (defeated(TRAINER_KEEGAN)){`
+- `LavaridgeTown_Gym_1F/scripts.pory:505`: `	if (defeated(TRAINER_COLE)){`
+
+Each trainer's script re-offers the shared tag battle only while its own flag is clear (`DewfordTown_Gym/scripts.pory:578-600`, `LavaridgeTown_Gym_1F/scripts.pory:490-519`). That SUGGESTS both ids are set but is not proof: it shows only that the script author expected each trainer to know the battle happened, not what the macro writes. The comments say the same and are equally not proof (`DewfordTown_Gym/scripts.pory:698` "by entension TRAINER_LILITH too", `:711` "brenden is a tag battle so you know the lillith flag throught it."; `MauvilleCity_Gym/scripts.pory:563`; `LavaridgeTown_Gym_1F/scripts.pory:631`; `FortreeCity_Gym/scripts.pory:492,495`). The solver keeps 'both' and the report keeps "tag-battle outcome assumed: both ids set (not in the scripts at pin ...)". What would settle (b): the macro body outside the pin, or one player observation: after beating LILITH+BRENDEN, talk to BRENDEN. If `TRAINER_BRENDEN` is set he shows the post-battle line (`:581-582`); if it is clear he re-runs the tag battle (`:584`).
+
+**(c) opt-in prompt and sight lines.** The talk path is opt-in for every optional trainer in all seven gyms (`yesnobattle` call lines; shared scripts for the tag pairs):
+
+| Gym | Trainers (prompt line) |
+|---|---|
+| Rustboro | Josh `:458`, Tommy `:473`, Marc `:488` |
+| Dewford | Laura `:512`, Takao `:528`, Cristian `:543`, Jocelyn `:558`, Brenden+Lilith `:568` |
+| Mauville | Vivian `:457`, Kirk `:472`, Ben `:487`, Shawn+Angelo `:520` |
+| Lavaridge | Jeff `:451`, Jace `:466`, Eli `:481`, Cole+Keegan `:515`, Gerald `:527`, Axle `:542`, Danielle `:557` |
+| Petalburg | Randall `:1854`, Mary `:1869`, Parker `:1885`, Alexia `:1901`, George `:1917`, Jody `:1933`, Berke `:1949` |
+| Fortree | Humberto `:375`, Edwardo+Flint `:408`, Ashley+Jared `:441`, Darius `:455` |
+| Mossdeep | all six pairs enter `GiveBattleText` (`:698-722`, `yesnobattle` at `:702,705,708,712,715,718`) |
+
+The sight-line question comes from each map's `map.json` (on disk for all seven, as are the layouts: `data/layouts/<Gym>/map.bin`), `trainer_type` and `trainer_sight_or_berry_tree_id` per trainer object:
+
+| Gym | Trainer objects in `map.json` | Sight trigger possible? |
+|---|---|---|
+| Rustboro | all five objects `TRAINER_TYPE_NONE` (Marc's range field is 1, unused) | no: `TRAINER_TYPE_NONE` is skipped (`src/trainer_see.c:224`) |
+| Dewford | all eight objects `TRAINER_TYPE_NONE` (ranges 2-3, unused) | no, same line |
+| Mauville | all seven objects `TRAINER_TYPE_NONE` (ranges 1-2, unused) | no, same line |
+| Lavaridge | all eleven objects `TRAINER_TYPE_NONE` (ranges 0-1, unused) | no, same line |
+| Petalburg | seven `TRAINER_TYPE_NORMAL`, range **0** each | no: a range of 0 yields distance 0 (`src/trainer_see.c:354-386`) |
+| Fortree | six `TRAINER_TYPE_NORMAL`, ranges Jared 3, Flint 2, Ashley 1, Edwardo 2, Humberto 1, Darius 3 | **OPEN** |
+| Mossdeep | twelve `TRAINER_TYPE_NORMAL`, range 1 each | **OPEN** |
+
+For Fortree and Mossdeep the object data permits sight, and the C sight path does not run the object's script as a talk script: it parses the object script as a `trainerbattle` command and starts the battle directly (`src/trainer_see.c:258-261` -> `src/battle_setup.c:1140-1145` -> `data/scripts/trainer_battle.inc:1-7,127-137`), so a sight trigger would bypass the `yesnobattle` prompt. But ER's gym trainer scripts begin `lock`/`faceplayer` (`FortreeCity_Gym/scripts.pory:388-400`), not with a `trainerbattle` opcode, so the parse takes the `default:` branch (`src/battle_setup.c:1129-1136`) over bytes that are not the trainer's id, and the guard `GetTrainerFlagFromScriptPointer` reads offset 2 as a trainer id (`src/battle_setup.c:1159-1170`). Neither what such a trigger would start, nor whether any line reaches the player's walkable route to the leader, can be established here: the compiled map scripts are not in this tree and the layout binaries were not decoded. (c) is therefore OPEN for Fortree and Mossdeep, and the search must not treat their `D_g` sets as fully voluntary until it is settled; for the other five gyms, no trigger exists by the object data and `src/trainer_see.c:224` / `:354-386`.
+
+**(d) guarded events: side and sim handlers.** The guarded `registerbattleevent` calls in the seven gyms (all under `pipeline/.upstream/eliteredux-source/data/maps/<Gym>/scripts.pory`; "sim" is the `case` line in `web/src/engine/sim/battleEvents.ts`). Sides are read from `src/battle_events.c`: `AffectNStatusOnTeamFromLastToFirst` writes `gPlayerParty` slots 1..n-1 (`:134-145`), `gSideStatuses[B_SIDE_PLAYER]` is the player's side, `gSideStatuses[B_SIDE_OPPONENT]` the leader's, and `SET_EXTRA_STATS_LEVEL` / its battle scripts target opponent-left (`:187-191`, `data/battle_scripts_1.s:12116-12121`).
+
+| Gym | Line | Event (args) | Guarded by | Acts for | Sim |
+|---|---|---|---|---|---|
+| Rustboro | `:506` | LAST_STAND (5, 5) | MARC | leader (`:433-441`) | `:538` |
+| Rustboro | `:509` | LAST_BLEED (2) | TOMMY | player (`:134-145`, `:270-273`) | `:346` |
+| Rustboro | `:510` | STEALTH_ROCK | TOMMY | player (`:283-286`) | `:361` |
+| Rustboro | `:513` | POSTURE_DEFENSE | JOSH | leader (`:209-216`) | `:293` |
+| Rustboro | `:514` | STEADY_DEFENSE | JOSH | leader (`:383-385`) | `:457` |
+| Dewford | `:687` | ONSTAY_FORESIGHT (1) | LAURA | player (`:415-419`, `gStatuses4[B_SIDE_PLAYER]`) | `:495` |
+| Dewford | `:690` | LAST_PARALYZED (2) | TAKAO | player (`:254-257`) | `:326` |
+| Dewford | `:693` | SPIKES (2) | CRISTIAN | player (`:291-294`) | `:373` |
+| Dewford | `:696` | ONSWITCH_MAT_BLOCK (1) | JOCELYN | leader (`:402-414`, `:407`) | `:481` |
+| Dewford | `:699` | POSTURE_OFFENSE | BRENDEN (2nd tag arg) | leader (`:201-208`) | `:287` |
+| Mauville | `:555` | LAST_BURNED (3) | VIVIAN | player (`:258-261`) | `:331` |
+| Mauville | `:558` | STICKY_WEB (203) | KIRK | **neither: no case** | **none** |
+| Mauville | `:561` | STEADY_SPEED | BEN | leader (`:392-394`) | `:469` |
+| Mauville | `:564` | ONSTAY_MAGNET_RISE (2) | SHAWN (1st tag arg) | leader (`:427-432`) | `:524` |
+| Mauville | `:565` | POSTURE_SPDEF | SHAWN | leader (`:225-232`) | `:305` |
+| Lavaridge | `:574` | STEADY_SPECIAL | JEFF | leader (`:386-388`) | `:461` |
+| Lavaridge | `:577` | LAST_TOXIC (2) | JACE | player (`:278-281`) | `:356` |
+| Lavaridge | `:580` | PERMA_HEAL_BLOCK | ELI | player (`:461-465`) | `:571` |
+| Lavaridge | `:583` | STEADY_ACCURACY | KEEGAN (2nd tag arg) | leader (`:395-397`) | `:473` |
+| Lavaridge | `:586` | LAST_BURNED (2) | COLE (1st tag arg) | player (`:258-261`) | `:331` |
+| Lavaridge | `:589` | POSTURE_DEFENSE | GERALD | leader (`:209-216`) | `:293` |
+| Lavaridge | `:592` | ONDS_COPY_STATS | AXLE | leader (`:480-484`, `battle_scripts_1.s:12299-12304`) | `:600` |
+| Lavaridge | `:595` | POSTURE_SPECIAL | DANIELLE | leader (`:217-224`) | `:299` |
+| Petalburg | `:1966` | POSTURE_SPEED | RANDALL | leader (`:233-240`) | `:311` |
+| Petalburg | `:1969` | STEADY_ACCURACY | MARY | leader (`:395-397`) | `:473` |
+| Petalburg | `:1970` | LAST_STAND (5, 5) | MARY | leader (`:433-441`) | `:538` |
+| Petalburg | `:1973` | SPIKES (2) | PARKER | player (`:291-294`) | `:373` |
+| Petalburg | `:1976` | POSTURE_DEFENSE | ALEXIA | leader (`:209-216`) | `:293` |
+| Petalburg | `:1979` | ONSTAY_LEECH_SEED (3) | GEORGE | player (`:420-426`) | `:509` |
+| Petalburg | `:1982` | POSTURE_OFFENSE | JODY | leader (`:201-208`) | `:287` |
+| Petalburg | `:1985` | SUBSTITUTE (5) | BERKE | leader (`:455-459`, `gBattlerAttacker = B_SIDE_OPPONENT`) | `:565` |
+| Fortree | `:493` | POSTURE_SPDEF | JARED (2nd tag arg) | leader (`:225-232`) | `:305` |
+| Fortree | `:496` | LAST_FROSTBITE (4) | FLINT (2nd tag arg) | player (`:266-269`) | `:341` |
+| Fortree | `:499` | EMBARGO (4) | HUMBERTO | player (`:295-303`) | `:379` |
+| Fortree | `:502` | POSTURE_DEFENSE | DARIUS | leader (`:209-216`) | `:293` |
+| Mossdeep | `:949` | LIGHTSCREEN (5) | count < 1 | leader (`:309-313`) | `:399` |
+| Mossdeep | `:952` | REFLECT (5) | count < 2 | leader (`:304-308`) | `:393` |
+| Mossdeep | `:955` | LUCKY_CHANT (5) | count < 3 | leader (`:314-318`) | `:405` |
+| Mossdeep | `:958` | PERMA_WIDE_GUARD | count < 4 | leader (`:471-474`) | `:411` |
+| Mossdeep | `:961` | LAST_SLEEP (1) | count < 5 | player (`:262-265`) | `:336` |
+| Mossdeep | `:964` | NO_PROTECT | count < 6 | player (`:330-333` -> `:167-185`) | `:421` |
+
+Every guarded event either acts for the leader or (only `BATTLE_EVENT_STICKY_WEB`) is a no-op; none acts for the player. That licenses decision 8's monotone shortcut, with the one qualification that beating Kirk removes a no-op rather than a leader penalty, so the Kirk battle can never be part of a minimal winning set on event grounds (the search still enumerates it as a unit). `BATTLE_EVENT_TENSE_BATTLE` is registered unguarded in each leader script (Rustboro `:540`, Dewford `:709`, Mauville `:578`, Lavaridge `:628`, Petalburg `:2012`, Fortree `:511`, Mossdeep `:996`), changes only music (`src/battle_events.c:485-495`), and is ported (`web/src/engine/sim/battleEvents.ts:426,617`); it is not part of `D_g`.
+
+**Handler coverage and the Kirk citation.** All 32 distinct guarded event ids have a `case` in `web/src/engine/sim/battleEvents.ts` except `BATTLE_EVENT_STICKY_WEB` (203), which has none, matching the C. The plan's Kirk citations are all correct as written and were left unchanged: `MauvilleCity_Gym/scripts.pory:557` is `if (!defeated(TRAINER_KIRK)){`, `:558` is `registerbattleevent(BATTLE_EVENT_STICKY_WEB)`, `:559` closes the block; `include/constants/battle_events.h:60` is `#define BATTLE_EVENT_STICKY_WEB 203`; and `src/battle_events.c` has `case BATTLE_EVENT_PERMA_STICKY_WEB:` (id 164, `include/constants/battle_events.h:53`) at `:325` and `:475` but no `BATTLE_EVENT_STICKY_WEB` case in either switch. `web/src/engine/sim/cycle7bGuardedEvents.test.ts` asserts the table and the negative case (STICKY_WEB has no handler and leaves the player side untouched; PERMA_STICKY_WEB has one and sets `SIDE_STATUS_STICKY_WEB` on the player's side).
+
+**Consequences.** The gym-trainer search inputs are unchanged except for the facts above: (a) and (b) stay open, so gym 7's count guard stays undecoded (Gym 7 is already excluded as `forcedDouble`/unsupported until D1-D3) and the tag-battle outcome stays 'both' and is printed in every report. (d) supports the monotone shortcut for gyms 1-6. (c) adds one caveat: Fortree and Mossdeep's object data does not rule out a sight-line battle, so their `D_g` sets cannot yet be claimed fully voluntary; the other five gyms are safe on the object data and `src/trainer_see.c:224`. Nothing here changes engine, sim or solver behaviour; the affected audits are unchanged.
+
 ### Step 1 - fight list, statistics and report (no D1-D3 dependency)
 1.0 The progression table (decision 1) and `fights.ts` (decision 2), built jointly with D5 Step 1 (one table; the cap is derived from it). Built by d5-1/d5-1b on the skippable-gym premise; queue item d5-1c corrects it for the fixed route
     (`mayBefore` empty on gym fights, `requiredBefore` = all lower gyms for each gym fight, evidence strings citing map blocks or the literal label `player-observed (Yoshi), not in the scripts at pin bdebcbbf`, subset machinery removed). Tests: every id from `loadBossTrainerIds` appears in exactly one row;
