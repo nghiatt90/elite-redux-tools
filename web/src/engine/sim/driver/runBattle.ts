@@ -3,7 +3,8 @@
 // processes switch-in effects and replacements, and tallies unmodelled mechanics.
 
 import { canMegaEvolve } from '../formChange'
-import { PARTY_SIZE } from '../constants'
+import { BATTLE_TYPE_INGAME_PARTNER, hasFlag, PARTY_SIZE } from '../constants'
+import { chooseAiAction } from '../ai/chooseAiAction'
 import type { BattleOutcome, BattleState, RandomSource, SimPartyMon } from '../state'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
@@ -223,9 +224,17 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
         const isAbsent2 = (state.absentBattlerFlags & (1 << 2)) !== 0 || !state.battlers[2]
         const isFaintedNoReserve2 = state.battlers[2]?.mon.hp === 0 && !hasLiveReserve(state, 2)
         if (!isAbsent2 && !isFaintedNoReserve2) {
-          action2 = options.playerPolicy
-            ? options.playerPolicy(state, turnUnmodelled, 2)
-            : defaultPlayerPolicy(state, data, session.turnDeps.damage, 2)
+          if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER)) {
+            if (state.battlers[2] && state.battlers[2].mon.hp > 0) {
+              const aiResult = chooseAiAction(state, 2, session.chooseAiDeps)
+              action2 = aiResult.action
+              turnUnmodelled.push(...aiResult.unmodelled)
+            }
+          } else {
+            action2 = options.playerPolicy
+              ? options.playerPolicy(state, turnUnmodelled, 2)
+              : defaultPlayerPolicy(state, data, session.turnDeps.damage, 2)
+          }
         }
       }
 

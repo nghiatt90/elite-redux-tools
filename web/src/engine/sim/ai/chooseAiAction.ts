@@ -41,11 +41,11 @@ import { naturalGiftPriority } from '../turnOrder'
 import { battleAiSetupFlags, type TrainerAiRow } from './aiFlags'
 import { chooseMoveOrActionDoubles, chooseMoveOrActionSingles, computeBattleAiScores, setRandomTarget, setRandomTargetSingles, type AiChoice } from './aiPipeline'
 import { aiTrySwitchOrUseItem } from './aiShouldSwitch'
-import { BATTLE_TYPE_DOUBLE, hasFlag, PARTY_SIZE } from '../constants'
+import { BATTLE_TYPE_DOUBLE, BATTLE_TYPE_INGAME_PARTNER, hasFlag, PARTY_SIZE } from '../constants'
 import { canMegaEvolve } from '../formChange'
 import { isKeenEdgeMove } from '../statusEffects'
 import { isSimAbilitySuppressed } from '../statBuffs'
-import { getOpponentSelectedMoveTarget } from '../moveTargetFlags'
+import { getOpponentSelectedMoveTarget, getPartnerSelectedMoveTarget } from '../moveTargetFlags'
 import { resolveEffectiveMoveType } from '../../abilities/dispatchCalc'
 import type { AbilitySlots } from '../../abilities/dispatch'
 
@@ -184,17 +184,19 @@ export interface ChooseAiActionDeps extends AiSwitchingDeps {
  * (`battle_ai_main.c:147`, :152), so `deps.trainer` stays the battle-wide
  * opponent-A row rather than the battler's own trainer (see
  * `trainerForBattler` in driver/battleFormat.ts for the roster-side lookup).
- * Even ids still throw: 0 is player-controlled, and the in-game partner
- * (battler 2, BATTLE_TYPE_INGAME_PARTNER) has its own controller and AI
- * (battle_controller_player_partner.c) that this sim does not port -- dbl-6b.
+ * Even ids still throw, with one exception: 0 is player-controlled, while the
+ * in-game partner (battler 2, BATTLE_TYPE_INGAME_PARTNER) is driven by the
+ * opponent's AI flags through PlayerPartnerHandleChooseMove / PlayerPartnerHandleChooseAction
+ * (battle_controller_player_partner.c:1517-1550) -- dbl-6b2.
  */
 export function chooseAiAction(state: BattleState, battlerId: number, deps: ChooseAiActionDeps): { action: ChosenAction; unmodelled: string[] } {
   if (battlerId < 0 || battlerId >= state.battlersCount) {
     throw new Error(`chooseAiAction: battler ${battlerId} is not in this battle (${state.battlersCount} battlers)`)
   }
-  if ((battlerId & 1) !== 1) {
+  const isPartner = battlerId === 2 && hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER)
+  if ((battlerId & 1) !== 1 && !isPartner) {
     throw new Error(
-      `chooseAiAction: battler ${battlerId} is not on the opponent side (battler 0 is player-controlled; the in-game partner, battler 2, is dbl-6b)`,
+      `chooseAiAction: battler ${battlerId} is not on the opponent side (battler 0 is player-controlled; battler 2 requires BATTLE_TYPE_INGAME_PARTNER; see dbl-6b)`,
     )
   }
   const unmodelled: string[] = []
@@ -293,21 +295,34 @@ export function chooseAiAction(state: BattleState, battlerId: number, deps: Choo
 
   // OpponentHandleChooseMove, battle_controller_opponent.c:1608:
   // "if (CanMegaEvolve(gActiveBattler) && ItemId_GetHoldEffect(mon.item) != HOLD_EFFECT_PRIMAL_ORB) -> RET_MEGA_EVOLUTION"
-  const mega = canMegaEvolve(state, battlerId, deps.dataContext)
+  // PlayerPartnerHandleChooseMove, battle_controller_player_partner.c:1545-1548:
+  // "if (CanMegaEvolve(gActiveBattler)) -> RET_MEGA_EVOLUTION" (no primal orb check)
+  const holdEffect = battler?.mon.itemId ? deps.dataContext.item(battler.mon.itemId)?.resolvedHoldEffect ?? null : null
+  const isPrimalOrb = holdEffect === ('HOLD_' + 'EFFECT_PRIMAL_ORB')
+  const canMega = canMegaEvolve(state, battlerId, deps.dataContext)
+  const mega = isPartner ? canMega : canMega && !isPrimalOrb
+
+  const staticTarget = chosenMoveId === null ? undefined : deps.moveData(chosenMoveId)?.target
+  const target = isPartner
+    ? getPartnerSelectedMoveTarget(
+        battlerId,
+        staticTarget,
+        battlerTarget,
+        state.absentBattlerFlags,
+      )
+    : getOpponentSelectedMoveTarget(
+        battlerId,
+        staticTarget,
+        battlerTarget,
+        state.absentBattlerFlags,
+      )
 
   return {
     action: {
       action: 'USE_MOVE',
       moveToBeUsed: moveView!,
       chosenMove: moveView!,
-      // OpponentHandleChooseMove's `default:` case, battle_controller_opponent.c:1600-1606:
-      // the opponent controller overwrites the AI's own target for self-target moves.
-      target: getOpponentSelectedMoveTarget(
-        battlerId,
-        chosenMoveId === null ? undefined : deps.moveData(chosenMoveId)?.target,
-        battlerTarget,
-        state.absentBattlerFlags,
-      ),
+      target,
       ...(mega ? { mega: true } : {}),
     },
     unmodelled,

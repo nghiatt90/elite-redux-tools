@@ -12,9 +12,9 @@ import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructs
 import { applyBattleStartPass, getSingleUseAbilityCounter, trySetTrickRoom } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
-import { createAiOpponentReplacement } from '../ai/aiSwitching'
+import { createAiOpponentReplacement, createAiPartnerReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { BATTLE_TYPE_DOUBLE, clearFlag, MULTI_PARTY_SIZE, PARTY_SIZE, ROOM_DURATION_MAX, STATUS2_FLINCHED } from '../constants'
+import { BATTLE_TYPE_DOUBLE, BATTLE_TYPE_INGAME_PARTNER, clearFlag, hasFlag, MULTI_PARTY_SIZE, PARTY_SIZE, ROOM_DURATION_MAX, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
@@ -25,7 +25,7 @@ import type { SimDataContext } from '../dataContext'
 import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
-import { getOpponentSelectedMoveTarget, getPlayerSelectedMoveTarget, playerCanSelectMoveTarget } from '../moveTargetFlags'
+import { getOpponentSelectedMoveTarget, getPartnerSelectedMoveTarget, getPlayerSelectedMoveTarget, playerCanSelectMoveTarget } from '../moveTargetFlags'
 import { applyEndOfTurnReplacements, type ReplacementDeps } from '../switchIn'
 import { buildOpponentParty } from './buildParty'
 import { battleTypeFlagsFor, buildBattleState, gatePlayerInnates, type BattleFormat } from './battleFormat'
@@ -215,9 +215,16 @@ export function buildMoveAction(
   const staticTarget = mData?.target ?? 'SELECTED'
   const target =
     (battlerId & 1) === 0
-      ? chosenTargetId !== undefined && playerCanSelectMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
-        ? chosenTargetId
-        : getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
+      ? battlerId === 2 && hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER)
+        ? getPartnerSelectedMoveTarget(
+            battlerId,
+            staticTarget,
+            chosenTargetId ?? 1,
+            state.absentBattlerFlags,
+          )
+        : chosenTargetId !== undefined && playerCanSelectMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
+          ? chosenTargetId
+          : getPlayerSelectedMoveTarget(state, battlerId, moveId, mData, statusDeps, statusDeps)
       : getOpponentSelectedMoveTarget(
           battlerId,
           staticTarget,
@@ -256,9 +263,13 @@ function buildDeps(
   const chooseAiDeps: ChooseAiActionDeps = { ...aiDamageDeps, trainer }
 
   const aiOpponentReplacement = createAiOpponentReplacement(aiDamageDeps)
+  const aiPartnerReplacement = createAiPartnerReplacement(aiDamageDeps)
   const replacementDeps: ReplacementDeps = {
     chooseReplacement(battleState: BattleState, battlerId: number, unmodelled: string[]): number {
       if ((battlerId & 1) === 1) return aiOpponentReplacement.chooseReplacement(battleState, battlerId, unmodelled)
+      if (battlerId === 2 && hasFlag(battleState.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER)) {
+        return aiPartnerReplacement.chooseReplacement(battleState, battlerId, unmodelled)
+      }
       return playerReplacement(battleState, battlerId)
     },
   }
@@ -540,11 +551,24 @@ export function stepTurn(
   )
 
   let opponentAction: ChosenAction | null = fixedOpponentAction ?? null
+  let partnerAction: ChosenAction | null = slotActions?.[2] ?? null
   let secondOpponentAction: ChosenAction | null = slotActions?.[3] ?? null
   if (fixedOpponentAction === undefined) {
     if (state.battlers[1] && state.battlers[1].mon.hp > 0) {
       const aiResult = chooseAiAction(state, 1, session.chooseAiDeps)
       opponentAction = aiResult.action
+      unmodelled.push(...aiResult.unmodelled)
+    }
+    // Battler 2 (in-game partner): when state is INGAME_PARTNER and slotActions?.[2] === undefined,
+    // choose battler 2's action with the AI in battler-id order (between battler 1 and 3, battle_main.c:3629).
+    if (
+      hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER) &&
+      state.battlers[2] &&
+      state.battlers[2].mon.hp > 0 &&
+      slotActions?.[2] === undefined
+    ) {
+      const aiResult = chooseAiAction(state, 2, session.chooseAiDeps)
+      partnerAction = aiResult.action
       unmodelled.push(...aiResult.unmodelled)
     }
     // Battler 3's action: the C picks actions in battler-id order (:3629), so its AI
@@ -559,7 +583,7 @@ export function stepTurn(
 
   const outcome = executeTurn(
     state,
-    [playerAction, opponentAction, slotActions?.[2] ?? null, secondOpponentAction],
+    [playerAction, opponentAction, partnerAction, secondOpponentAction],
     session.turnDeps,
   )
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)

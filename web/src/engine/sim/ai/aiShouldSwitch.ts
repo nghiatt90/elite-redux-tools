@@ -21,6 +21,7 @@
 
 import type { BattleState, SimPartyMon } from '../state'
 import {
+  BATTLE_TYPE_INGAME_PARTNER,
   BATTLER_NONE,
   BIT_FLANK,
   DEFAULT_STAT_STAGE,
@@ -740,9 +741,12 @@ function aiExpectsToFaintPlayer(state: BattleState, battlerId: number, target: n
 }
 
 export function shouldUseItem(state: BattleState, battlerId: number, target: number, choice: AiChoice, moveView: TurnOrderMoveView | null, deps: AiDamageDeps): { usedItem: false; unmodelled: string[] } {
-  // :1089 (BATTLE_TYPE_INGAME_PARTNER at PLAYER_RIGHT) is doubles-only, never an
-  // opponent in singles. :1092 returns before AiExpectsToFaintPlayer, so an
-  // Embargoed AI draws none of its speed-tie RNG.
+  // :1089 (BATTLE_TYPE_INGAME_PARTNER at PLAYER_RIGHT) returns FALSE early without drawing RNG;
+  // now covered by the partner path (dbl-6b2).
+  if (hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER) && battlerId === 2) {
+    return { usedItem: false, unmodelled: [] }
+  }
+  // :1092 returns before AiExpectsToFaintPlayer, so an Embargoed AI draws none of its speed-tie RNG.
   if (hasFlag(state.battlers[battlerId]?.statuses3 ?? 0, STATUS3_EMBARGO)) return { usedItem: false, unmodelled: [] }
   const expects = aiExpectsToFaintPlayer(state, battlerId, target, choice, moveView, deps)
   return {

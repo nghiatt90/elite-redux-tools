@@ -406,3 +406,46 @@ export function createAiOpponentReplacement(deps: AiSwitchingDeps): ReplacementD
     },
   }
 }
+
+/**
+ * PlayerPartnerHandleChoosePokemon fallback, battle_controller_player_partner.c:1571-1585:
+ * When GetMostSuitableMonToSwitchInto() returns 6 (PARTY_SIZE), switch to the next
+ * live mon in slots 3..5 not currently on field (excluding PLAYER_LEFT and PLAYER_RIGHT).
+ * If none qualify, falls out at 6 (PARTY_SIZE).
+ */
+function fallbackFirstLiveSlotPartner(state: BattleState): number {
+  const party = state.sides[0].party
+  const playerMonIdentity = state.battlers[0]?.partyIndex ?? -1
+  const selfIdentity = state.battlers[2]?.partyIndex ?? -1
+  const [firstId, lastId] = getAiPartyIndexes(state, 2)
+  let chosenMonId = firstId
+  for (; chosenMonId < lastId; chosenMonId++) {
+    const mon = party[chosenMonId]
+    if (mon && mon.hp !== 0 && chosenMonId !== playerMonIdentity && chosenMonId !== selfIdentity) {
+      break
+    }
+  }
+  return chosenMonId
+}
+
+/**
+ * Builds a `ReplacementDeps.chooseReplacement` for the player partner (battler 2
+ * under BATTLE_TYPE_INGAME_PARTNER), running PlayerPartnerHandleChoosePokemon
+ * (battle_controller_player_partner.c:1557-1590): GetMostSuitableMonToSwitchInto,
+ * then the partner's own 3..5 fallback loop.
+ */
+export function createAiPartnerReplacement(deps: AiSwitchingDeps): ReplacementDeps {
+  return {
+    chooseReplacement(state: BattleState, battlerId: number, unmodelled: string[]): number {
+      if (battlerId !== 2 || !hasFlag(state.battleTypeFlags, BATTLE_TYPE_INGAME_PARTNER)) {
+        throw new Error(`createAiPartnerReplacement: battler ${battlerId} is not an in-game partner`)
+      }
+      const battler = state.battlers[battlerId]
+      if (!battler) throw new Error(`createAiPartnerReplacement: no battler at id ${battlerId}`)
+      const result = getMostSuitableMonToSwitchInto(state, battlerId, deps)
+      unmodelled.push(...result.unmodelled)
+      if (result.partyIndex !== PARTY_SIZE) return result.partyIndex
+      return fallbackFirstLiveSlotPartner(state)
+    },
+  }
+}

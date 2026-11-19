@@ -351,3 +351,38 @@ export function getOpponentSelectedMoveTarget(
   }
   return aiChosenTarget
 }
+
+/**
+ * The PLAYER PARTNER controller's target choice at move selection,
+ * src/battle_controller_player_partner.c:1536-1543 (PlayerPartnerHandleChooseMove):
+ *
+ *     if (GetBattlerBattleMoveTargetFlags(move, gActiveBattler) & (MOVE_TARGET_USER | MOVE_TARGET_USER_OR_SELECTED))
+ *         gBattlerTarget = gActiveBattler;
+ *     if (GetBattlerBattleMoveTargetFlags(move, gActiveBattler) & MOVE_TARGET_BOTH)
+ *     {
+ *         gBattlerTarget = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
+ *         if (gAbsentBattlerFlags & gBitTable[gBattlerTarget])
+ *             gBattlerTarget = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);
+ *     }
+ */
+export function getPartnerSelectedMoveTarget(
+  battlerId: number,
+  staticTarget: string | undefined,
+  aiChosenTarget: number,
+  absentBattlerFlags: number = 0,
+): number {
+  if (
+    staticTarget === 'USER' ||
+    staticTarget === 'USER_OR_SELECTED' ||
+    staticTarget === 'USER_OR_ALLY' ||
+    staticTarget === 'ALL_BATTLERS'
+  ) {
+    return battlerId
+  }
+  if (staticTarget === 'BOTH') {
+    // B_POSITION_OPPONENT_LEFT is 1 (battle.h:32); GetBattlerAtPosition is the identity for non-multi/partner double
+    const opponentLeft = 1
+    return hasFlag(absentBattlerFlags, 1 << opponentLeft) ? 3 : opponentLeft
+  }
+  return aiChosenTarget
+}
