@@ -248,6 +248,8 @@ on report seeds. This changes the solver's singles seeds from `seedOffset + g` t
     | 20 | 200,960 | about 78.2 h | about 9.8 h |
     | 38 (all 32 units, ceiling) | 357,200 | about 139 h | about 17.4 h |
 
+    **Measured inputs (Step 0.4, cycle8).** `k`: **26 weighted**, because none of the 26 measured singles is won by its starting build (0 won, 19 lost, 7 open at 80; chains and the three non-single ordinary units unmeasured); 35 if the 3 chains are searched too, 38 = this table's ceiling row if the three unsupported ordinary units also need searches. Per-game time: **median 2.69 s** (1,360 games over the 26 units, 9 measurement processes on 8 cores, single run, contended), 1.9x the 1.4 s this table assumes. `UNIT_CAP`, `SET_CAP`, `GYM_CAP`: **no data — all three need the d4-2 feasibility search**, so the placeholders 6,000 / 1,500 / 12,000 stay; the only measured input for `GYM_CAP` is the 40-game (at most 80) cost of sampling one candidate set that needs no build search (Step 0.4 (c)).
+
     The fragility checks dominate the `k = 0` row (600 of 720 per unit); without them it would be 38 x 120 = 4,560 games, about 13 min on 8 workers. The ceiling row is the old fully-searched build-tuning figure (29 x 6,000 + 3 x 3 x 6,000 =
     228,000 singles-game equivalents, about 89 h single-threaded, 11 h on 8 workers) plus the starting runs, the 3 confirmations and the fragility checks the old figure did not count; it is an UPPER BOUND, not an expectation.
     The two `multi_2_vs_2` subset screens (decision 3) add 2 x 20 x 20 = 800 games, negligible.
@@ -426,6 +428,73 @@ Every guarded event either lands on the leader as a buff or on the player as a d
 **Handler coverage and the Kirk citation.** All 32 distinct guarded event ids have a `case` in `web/src/engine/sim/battleEvents.ts` except `BATTLE_EVENT_STICKY_WEB` (203), which has none, matching the C. The plan's Kirk citations are all correct as written and were left unchanged: `MauvilleCity_Gym/scripts.pory:557` is `if (!defeated(TRAINER_KIRK)){`, `:558` is `registerbattleevent(BATTLE_EVENT_STICKY_WEB)`, `:559` closes the block; `include/constants/battle_events.h:60` is `#define BATTLE_EVENT_STICKY_WEB 203`; and `src/battle_events.c` has `case BATTLE_EVENT_PERMA_STICKY_WEB:` (id 164, `include/constants/battle_events.h:53`) at `:325` and `:475` but no `BATTLE_EVENT_STICKY_WEB` case in either switch. `web/src/engine/sim/cycle7bGuardedEvents.test.ts` asserts the table and the negative case (STICKY_WEB has no handler and leaves the player side untouched; PERMA_STICKY_WEB has one and sets `SIDE_STATUS_STICKY_WEB` on the player's side).
 
 **Consequences.** The gym-trainer search inputs are unchanged except for the facts above: (a) and (b) stay open, so gym 7's count guard stays undecoded (Gym 7 is already excluded as `forcedDouble`/unsupported until D1-D3) and the tag-battle outcome stays 'both' and is printed in every report. (d) supports the monotone shortcut for gyms 1-6. (c) adds one caveat: Fortree and Mossdeep's object data does not rule out a sight-line battle, so their `D_g` sets cannot yet be claimed fully voluntary; the other five gyms are safe on the object data and `src/trainer_see.c:224`. Nothing here changes engine, sim or solver behaviour; the affected audits are unchanged.
+
+### Step 0.4 results (cycle8)
+
+Measured 2026-11-19 in the cycle8 worktree. **Sampler only**: (a) the starting build's wins per unit, run without any build search, and (c) the cost of sampling one candidate defeated set on one gym leader. Item (b) (per-unit search cost to the first `won`) and the with-`SET_CAP` half of (c) are NOT measurable yet: the decision-7 feasibility search is queue item d4-2 and does not exist (`improveTeam`, `solver.ts:356`, is a coordinate ascent, whose games-to-first-`won` would not answer the question), so both move to a new queue line **d4-0d**. No engine, sim or solver source changed; new files are `web/src/engine/sim/driver/measureUnits.ts` (`supportedSingleUnits()`) with its always-on test `web/src/engine/sim/cycle8Measure.test.ts`, and two new `it` blocks in the gated `web/src/engine/sim/driver/solverMeasure.test.ts` (Step 0.1-0.2 blocks untouched). All figures are single-run and noisy.
+
+**The unit list is 26 rows.** `FIGHTS` has 43 rows; 7 are `deferred` and 2 `excluded`, leaving the plan's 34 v1 rows (29 ordinary fights + 5 chain rows, the museum chain's three). Of the 29 ordinary fights the sampler covers **26**, skipping the three non-single formats: `TRAINER_TATE_AND_LIZA_1` (double), `TRAINER_COURTNEY_METEOR_FALLS` and `TRAINER_MAXIE_MOSSDEEP` (`multi_2_vs_2`). All three chains are skipped too: the museum chain's `TRAINER_GRUNT_MUSEUM_1`, `_2` and `TRAINER_ARCHIE_SLATEPORT` and the Space Center's `TRAINER_GRUNT_SPACE_CENTER_5` (four single-format rows dropped by `chainId`) and Juan's tag row `TRAINER_JUAN_1`. `supportedSingleUnits()` = `format === 'single'`, no `chainId`, no `excluded`/`deferred`/`awaitingRoute`; the test asserts the count against an independent filter over `FIGHTS`, that `TRAINER_ROXANNE_1` is present, that the double/tag/multi/Museum units are absent, that a `deferred` row is absent, and that every returned row has a settled `levelCapForTrainer` cap.
+
+**Method.** Per unit: level = `levelCapForTrainer(fightId).cap`, badges = `highestBadgeRange(row).min`, `allowedStones = availableStones(data, badges)` (empty before badge 5), team = `GENERIC_PLAYER_SPECS.map(s => defaultSet(data, s.species, level, allowedStones))`. Gym maps get `eventsForFight(data.battleEvents, mapName, new Set())` like `solverCli.ts:136-144`, with the map name from a module-relative copy of `solverCli.ts:42-50`'s `mapForTrainer` (not exported; it reads `docs/battle-sim/boss-fight-coverage.md`). `scoreTeam` is called with `{ levelCap: cap }` as its options argument. The sampler is the decision-4 one: at most 2 looks of `BATCH = 40` games (seeds `40k + 1..`), `wilsonInterval(wins, n, 2.807)`, `won` iff lower >= 0.90, `lost` iff upper < 0.50, else `open at 80`. **40 straight wins gives lower 0.835**, so a `won` can only be declared on the second look; 80/80 gives lower 0.910 and 79/80 only 0.889. Units were sharded over 8 processes (`SIM_SHARD=i/8`, index `% 8`), all nine measurement processes (8 shards plus (c)) ran concurrently on 8 cores.
+
+**Table (a).** `events` is active/all registered map events; `ms` and `ms/game` are wall time in that process. Sort order is route order.
+
+| # | unit | cap | badge | map | events | wins/n | interval | verdict | games | ms | ms/game |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | `TRAINER_MAY_RUSTBORO_TORCHIC` | 23 | 1 | Route104 | 0/0 | 2/40 | [0.009, 0.239] | lost | 40 | 155093 | 3877.3 |
+| 1 | `TRAINER_MAY_ROUTE_110_TORCHIC` | 36 | 2 | Route110 | 0/0 | 1/40 | [0.003, 0.204] | lost | 40 | 159909 | 3997.7 |
+| 2 | `TRAINER_MAY_ROUTE_119_TORCHIC` | 55 | 5 | Route119 | 0/0 | 73/80 | [0.783, 0.968] | open at 80 | 80 | 238040 | 2975.5 |
+| 3 | `TRAINER_ROXANNE_1` | 16 | 0 | RustboroCity_Gym | 6/6 | 0/40 | [-0.000, 0.165] | lost | 40 | 106867 | 2671.7 |
+| 4 | `TRAINER_BRAWLY_1` | 23 | 1 | DewfordTown_Gym | 6/6 | 0/40 | [-0.000, 0.165] | lost | 40 | 74396 | 1859.9 |
+| 5 | `TRAINER_WATTSON_1` | 36 | 2 | MauvilleCity_Gym | 6/6 | 0/40 | [-0.000, 0.165] | lost | 40 | 97455 | 2436.4 |
+| 6 | `TRAINER_FLANNERY_1` | 45 | 3 | LavaridgeTown_Gym_1F | 9/9 | 0/40 | [-0.000, 0.165] | lost | 40 | 99161 | 2479.0 |
+| 7 | `TRAINER_NORMAN_1` | 50 | 4 | PetalburgCity_Gym | 9/9 | 0/40 | [-0.000, 0.165] | lost | 40 | 154376 | 3859.4 |
+| 8 | `TRAINER_WINONA_1` | 55 | 5 | FortreeCity_Gym | 5/5 | 3/40 | [0.017, 0.273] | lost | 40 | 132677 | 3316.9 |
+| 9 | `TRAINER_GRUNT_PETALBURG_WOODS` | 16 | 0 | PetalburgWoods | 0/0 | 44/80 | [0.396, 0.695] | open at 80 | 80 | 171791 | 2147.4 |
+| 10 | `TRAINER_GRUNT_RUSTURF_TUNNEL` | 23 | 1 | RusturfTunnel | 0/0 | 1/40 | [0.003, 0.204] | lost | 40 | 113234 | 2830.9 |
+| 11 | `TRAINER_SHELLY_WEATHER_INSTITUTE` | 55 | 5 | Route119_WeatherInstitute_2F | 0/0 | 4/40 | [0.027, 0.304] | lost | 40 | 133843 | 3346.1 |
+| 12 | `TRAINER_MATT` | 60 | 6 | AquaHideout_B2F | 0/0 | 65/80 | [0.664, 0.905] | open at 80 | 80 | 222756 | 2784.4 |
+| 13 | `TRAINER_ARCHIE_MT_PYRE` | 60 | 6 | MtPyre_Summit | 0/0 | 52/80 | [0.493, 0.780] | open at 80 | 80 | 271540 | 3394.3 |
+| 14 | `TRAINER_ARCHIE` | 70 | 7 | SeafloorCavern_Room9 | 0/0 | 4/40 | [0.027, 0.304] | lost | 40 | 108512 | 2712.8 |
+| 15 | `TRAINER_COURTNEY_SUNHOLLOW` | 50 | 4 | Route111_SunhollowRuins_Museum | 0/0 | 2/40 | [0.009, 0.239] | lost | 40 | 128252 | 3206.3 |
+| 16 | `TRAINER_MAXIE_MT_CHIMNEY` | 45 | 3 | MtChimney | 0/0 | 4/40 | [0.027, 0.304] | lost | 40 | 102375 | 2559.4 |
+| 17 | `TRAINER_MAXIE_MAGMA_HIDEOUT` | 60 | 6 | MagmaHideout_4F | 0/0 | 47/80 | [0.432, 0.727] | open at 80 | 80 | 202659 | 2533.2 |
+| 18 | `TRAINER_STEVEN_GRANITE_CAVE` | 23 | 1 | GraniteCave_StevensRoom | 0/0 | 0/40 | [-0.000, 0.165] | lost | 40 | 82424 | 2060.6 |
+| 19 | `TRAINER_STEVEN_ROUTE118` | 55 | 5 | Route118 | 0/0 | 77/80 | [0.851, 0.991] | open at 80 | 80 | 210245 | 2628.1 |
+| 20 | `TRAINER_STEVEN` | 80 | 8 | EverGrandeCity_ChampionsRoom | 0/0 | 0/40 | [-0.000, 0.165] | lost | 40 | 124608 | 3115.2 |
+| 21 | `TRAINER_WALLY_MAUVILLE` | 36 | 2 | (none) | 0/0 | 0/40 | [-0.000, 0.165] | lost | 40 | 91554 | 2288.8 |
+| 22 | `TRAINER_SIDNEY` | 80 | 8 | EverGrandeCity_SidneysRoom | 0/0 | 52/80 | [0.493, 0.780] | open at 80 | 80 | 287700 | 3596.2 |
+| 23 | `TRAINER_PHOEBE` | 80 | 8 | EverGrandeCity_PhoebesRoom | 0/0 | 18/80 | [0.122, 0.377] | lost | 80 | 195527 | 2444.1 |
+| 24 | `TRAINER_GLACIA` | 80 | 8 | EverGrandeCity_GlaciasRoom | 0/0 | 0/40 | [-0.000, 0.165] | lost | 40 | 89245 | 2231.1 |
+| 25 | `TRAINER_DRAKE` | 80 | 8 | EverGrandeCity_DrakesRoom | 0/0 | 0/40 | [-0.000, 0.165] | lost | 40 | 72151 | 1803.8 |
+
+`TRAINER_WALLY_MAUVILLE` resolves to no map in the coverage doc (no `map:line` after its id) and has no battle events, so the empty event list is correct. The gym rows show every guarded event active (`events = n/n`): the empty defeated set is the candidate set a unit starts from.
+
+**Counts at the start: 0 won, 19 lost, 7 open at 80.** No measured unit is won by the starting build. The seven open ones are `TRAINER_MAY_ROUTE_119_TORCHIC` (73/80), `TRAINER_STEVEN_ROUTE118` (77/80), `TRAINER_MATT` (65/80), `TRAINER_ARCHIE_MT_PYRE` (52/80), `TRAINER_MAXIE_MAGMA_HIDEOUT` (47/80), `TRAINER_SIDNEY` (52/80) and `TRAINER_GRUNT_PETALBURG_WOODS` (44/80); all are candidates for `won` with more games but the 2-look budget stops them. Roxanne is 0/40 here against 15/40 in Step 0.2 because the cap is 16, not the Step 0.2 bench's level 50. **k = 26 weighted over the measured singles** (none won, so every one needs a search). If the 3 chains are all searched too, k = 26 + 3 x 3 = **35**. The three non-single ordinary units cannot be sampled at all until D1-D3 land; if they also need searches they add 3, making k = **38**, the cost table's ceiling row. The measurement therefore rules out the table's `k = 0..20` rows and leaves the ceiling row in play.
+
+**Warm starts: NOT compared.** Decision 7's warm start hands the next unit the previous unit's build; until the d4-2 search exists the only build a previous unit could hand on is its own `defaultSet`, which is exactly what this test already samples. Warm start versus `defaultSet` is therefore unmeasured and the question stays open; decision 7's default (line 158) is unchanged by this cycle.
+
+**Per-game time.** 1,360 games over the 26 units: median **2,692 ms/game**, mean 2,814 ms/game, 3,826 s of CPU. The 8 shards plus the (c) process ran concurrently on 8 cores; load average was 0.63 before launch (20:25), peaked at 8.47 (20:33) and was 0.91 after all jobs finished (20:36). Wall clock for the whole session was about 10.5 min. The median is 1.9x decision 12's unmeasured 1.4 s/game; single run, contended, so treat it as an upper-ish reading for a run of this shape.
+
+**Table (c): one gym leader, `TRAINER_ROXANNE_1` (`RustboroCity_Gym`, cap 16).** Same `defaultSet` team; two candidate defeated sets: the empty set (all 5 guarded events active) and every guarded trainer defeated (`defeatable` from the map's `!defeated(...)` guards, `solverCli.ts:137-142`; events 1/6, `BATTLE_EVENT_TENSE_BATTLE` only). Each candidate was sampled on tuning seeds (offset 0) and on report seeds (offset 10,000,000), 2-look sampler.
+
+| Candidate set | Seeds | events active/all | guarded active | wins/n | interval | verdict | games | ms | ms/game |
+|---|---|---|---|---|---|---|---|---|---|
+| empty | tuning | 6/6 | 5/5 | 0/40 | [-0.000, 0.165] | lost | 40 | 101523 | 2538.1 |
+| empty | report | 6/6 | 5/5 | 0/40 | [-0.000, 0.165] | lost | 40 | 97502 | 2437.6 |
+| all-guarded | tuning | 1/6 | 0/5 | 0/40 | [-0.000, 0.165] | lost | 40 | 118111 | 2952.8 |
+| all-guarded | report | 1/6 | 0/5 | 0/40 | [-0.000, 0.165] | lost | 40 | 113146 | 2828.7 |
+
+A candidate set that needs no build search therefore costs **40 tuning games (97.5-118.1 s) when the sampler settles at the first look** and at most 80 games (two looks) when it does not; that is the `S`-like sample cost, not a search. The two candidate sets are indistinguishable with this team at this resolution (0/40 either way), so (c) says nothing about whether the events matter for a stronger build. The run took 431 s. **The with-`SET_CAP` search cost is not measurable**: no feasibility search exists, so there is no per-set search figure to report, and the same gap blocks item (b).
+
+**Cap proposals (arithmetic from these numbers; no number invented).**
+
+- `UNIT_CAP`: **no data: needs the d4-2 search.** No search ran, so there is no games-to-first-`won` figure; the placeholder 6,000 stays.
+- `SET_CAP`: **no data: needs the d4-2 search.** Same reason; 1,500 stays.
+- `GYM_CAP`: **no data: needs the d4-2 search.** 12,000 stays. The only measured input is the per-set sample cost above (40 games, up to 80): the plan's largest gyms have 128 candidate sets (Lavaridge, Petalburg), which would cost 5,120 games to sample once each at 40 and up to 10,240 at 80 *before* any per-set search, so 12,000 is a sampling budget for those gyms, not a search budget.
+- Per-game time for the budget: use the measured **median 2.69 s**; at it, the `k = 26` interpolation of decision 12's formula is `(38 - 26) x 720 + 26 x 9,400 = 253,040` games, about 189 h single-threaded or 23.7 h on 8 workers at perfect scaling, and the `k = 38` ceiling is 357,200 games, about 267 h or 33.4 h on 8 workers. Both are above the plan's 22.5 h ceiling, which assumed 1.4 s/game; the budget decision must use the measured time.
+
+**What is still missing (d4-0d).** Item (b) (per-unit feasibility-search cost to the first tuning-`won`, or `UNIT_CAP` hit, and the round count) and the with-`SET_CAP` half of (c) need the decision-7 satisficing search (Steps 2.1-2.2), which is not built. They move to a new queue line d4-0d, after d4-2; `UNIT_CAP`, `SET_CAP` and `GYM_CAP` stay at their placeholders until then.
 
 ### Step 1 - fight list, statistics and report (no D1-D3 dependency)
 1.0 The progression table (decision 1) and `fights.ts` (decision 2), built jointly with D5 Step 1 (one table; the cap is derived from it). Built by d5-1/d5-1b on the skippable-gym premise; queue item d5-1c corrects it for the fixed route
