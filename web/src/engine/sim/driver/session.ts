@@ -288,8 +288,7 @@ export function createSession(options: SessionOptions): BattleSession {
   // the player's usable-mon count.
   const format: BattleFormat = options.format ?? { opponents: [options.opponentTrainer] }
   if (format.opponents[0]?.id !== options.opponentTrainer.id) throw new Error(`createSession: format.opponents[0] must be ${options.opponentTrainer.id}`)
-  const hasDoubleBit = (battleTypeFlags: number): boolean => (battleTypeFlags & BATTLE_TYPE_DOUBLE) !== 0
-  const isDouble = hasDoubleBit(battleTypeFlagsFor(format))
+  const isDouble = (battleTypeFlagsFor(format) & BATTLE_TYPE_DOUBLE) !== 0
   const playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
   const leadIndex = options.leadIndex ?? 0
@@ -329,8 +328,7 @@ export function createSession(options: SessionOptions): BattleSession {
   // then loops `gActiveBattler` 0..`gBattlersCount-1` (:3629). Only the format that
   // makes it a double is allowed; an explicit `forcedDouble: false` format is a
   // contradiction and still throws.
-  const forcedDoubleMismatch = (forcedDouble: boolean, battlersCount: number): boolean => forcedDouble && battlersCount !== 4
-  if (forcedDoubleMismatch(options.opponentTrainer.forcedDouble, state.battlersCount)) {
+  if (options.opponentTrainer.forcedDouble && state.battlersCount !== 4) {
     throw new Error(`createSession: forced-double trainer ${options.opponentTrainer.id} needs a double format`)
   }
 

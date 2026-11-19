@@ -321,10 +321,11 @@ export const LOADER_FILES = [
 /**
  * The driver's battle-start path. `loadSimData.ts` is a data loader, so it is
  * deliberately absent: declaring a type field there does not start a battle.
- * `battleFormat.ts` computes `gBattleTypeFlags` for a format, and since dbl-5b
- * `createSession` passes it that format, so a forced-double trainer (and a
- * two-opponent format) starts a four-battler session. `session.ts` reads the
- * DOUBLE bit of that result, which is the driver-side evidence.
+ * `battleFormat.ts` computes `gBattleTypeFlags` for a format, but the inventory
+ * rules only count a driver line: `createSession` now builds a double through
+ * `battleFormat.ts` (`battle_main.c:1757-1762`, `:1910-1913`), but `BATTLE_TYPE_DOUBLE`
+ * is set nowhere in these files, so it qualifies `BATTLE_TYPE_TRAINER` (its own
+ * evidence list) and not `BATTLE_TYPE_DOUBLE`.
  */
 export const BATTLE_TYPE_DRIVER_FILES = [
   'web/src/engine/sim/driver/session.ts',
@@ -1315,10 +1316,11 @@ export const BATTLE_TYPE_SPECS: ReadonlyArray<StaticUnitSpec> = [
     site: 'BattleSetup_StartTrainerBattle',
     // battle_setup.c:1240 sets this when two trainers approach. battle_main.c:1757-1762
     // decides `isDoubleBattle` from the save option or `gTrainers[].doubleBattle`, and
-    // :1910-1913 ORs `gTrainers[].doubleBattle` back in. Since dbl-5b createSession
-    // passes its format to battleFormat.ts and reads the DOUBLE bit, so a forced-double
-    // trainer or a two-opponent format starts four battlers.
-    scope: 'a forced-double trainer or a two-opponent format started by createSession',
+    // :1910-1913 ORs `gTrainers[].doubleBattle` back in. `createSession` now builds a
+    // double through `battleFormat.ts`, but the inventory rules only count a driver line,
+    // so BATTLE_TYPE_DOUBLE is not set on a driver line. The doubles player policy and
+    // driver loop are still missing (dbl-5c).
+    scope: 'doubles driver loop (dbl-5c): createSession builds a double through battleFormat.ts (battle_main.c:1757-1762,:1910-1913) but inventory rules count a driver line',
     citation: cite(`${UPSTREAM_SRC}/battle_setup.c`, 1240),
     evidence: BATTLE_TYPE_DRIVER_EVIDENCE,
   },
@@ -1701,8 +1703,9 @@ export const TRAINER_FLAG_SPECS: ReadonlyArray<StaticUnitSpec> = [
     citation: cite(CODEGEN_PATH, 207),
     // TrainerPartyGenerator.kt:207 emits `doubleBattle = TRUE`, which makes the fight
     // a double: battle_main.c:1757-1762 sets `isDoubleBattle` and :1910-1913 ORs the
-    // bit into `gBattleTypeFlags`. Since dbl-5b session.ts keeps the format (instead
-    // of refusing a forced-double trainer) and ties the flag to four active battlers.
+    // bit into `gBattleTypeFlags`. `createSession` now builds a double through
+    // `battleFormat.ts`, but the inventory rules only count a driver line outside
+    // aiFlags.ts writing battlersCount directly for forcedDouble.
     evidence: {
       productionExcludeFiles: ['web/src/engine/sim/ai/aiFlags.ts'],
       productionLinePattern: /\bbattlersCount\s*(?::|\+?=(?!=))/,
@@ -2697,18 +2700,20 @@ export function generateEnvironmentInventoryDoc(
     '  `buildParty.ts` or `battleFormat.ts`). `BATTLE_TYPE_TRAINER` qualifies (`battleFormat.ts`); `BATTLE_TYPE_DOUBLE`',
   )
   lines.push(
-    '  qualifies because `createSession` passes its format to `buildBattleState` and reads the DOUBLE bit, so a',
+    '  does not because although `createSession` builds a double through `battleFormat.ts` (`battle_main.c:1757-1762`,',
   )
   lines.push(
-    '  forced-double trainer starts four battlers (`battle_main.c:1757-1762`, `:1910-1913`).',
+    '  `:1910-1913`), the inventory rules only count a driver line, so `BATTLE_TYPE_DOUBLE` is not set on a driver file.',
   )
   lines.push(
     '- `forcedDouble` additionally requires a production line outside `aiFlags.ts` that changes the number of active',
   )
   lines.push(
-    '  battlers. `createSession` keeps the format instead of refusing a forced-double trainer, so `buildBattleState`',
+    '  battlers. `createSession` builds a double through `battleFormat.ts` (`battle_main.c:1757-1762`, `:1910-1913`),',
   )
-  lines.push('  builds four battlers (`TrainerPartyGenerator.kt:207` -> `battle_main.c:1910-1913`).')
+  lines.push(
+    '  but the inventory rules only count a driver line, and no production line outside `aiFlags.ts` changes `battlersCount`.',
+  )
   lines.push(
     '- `AI_FLAG_CHECK_FOE` is unported: the C reads it in `GetMovesArray` (`src/battle_ai_util.c:1353`) to choose the',
   )
