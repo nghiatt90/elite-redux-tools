@@ -222,11 +222,14 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
   })
 
   it('4. Dominance: forced KO scenario picks the KO move; negative picks something else', () => {
-    // Party with battler 0 having a lethal move and a non-damaging move (Splash)
+    // Party with battler 0 having a lethal move and a non-damaging move (Harden).
+    // Note: in Elite Redux, MOVE_SPLASH is a damaging physical Heat Crash clone, so
+    // MOVE_HARDEN (status) is used as the non-damaging move. Swampert is given Jolly nature
+    // and Speed EVs so it acts before Tate & Liza's leads instead of fainting before moving.
     const partyKO = buildPlayerParty(
       [
-        { species: 'SPECIES_SWAMPERT', level: 50, moves: ['MOVE_SPLASH', 'MOVE_WATERFALL'] },
-        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_TACKLE'] },
+        { species: 'SPECIES_SWAMPERT', level: 50, nature: 'NATURE_JOLLY', evs: { spe: 252 }, moves: ['MOVE_HARDEN', 'MOVE_WATERFALL'] },
+        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_HARDEN'] },
       ],
       50,
       data,
@@ -239,9 +242,8 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
       rng: createRandomSource(42),
     })
 
-    // Set opponent active battlers to 1 HP so Waterfall definitely KOs
+    // Set opponent active battler 1 to 1 HP so Waterfall definitely KOs
     if (session.state.battlers[1]) session.state.battlers[1].mon.hp = 1
-    if (session.state.battlers[3]) session.state.battlers[3].mon.hp = 1
 
     const joint = chooseExpectimaxJointAction(
       session,
@@ -251,11 +253,11 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     )
     expect(joint[0]?.action.chosenMove?.id).toBe('MOVE_WATERFALL')
 
-    // Negative case: remove Waterfall so only Splash remains
+    // Negative case: remove Waterfall so only Harden remains
     const partyNoKO = buildPlayerParty(
       [
-        { species: 'SPECIES_SWAMPERT', level: 50, moves: ['MOVE_SPLASH'] },
-        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_TACKLE'] },
+        { species: 'SPECIES_SWAMPERT', level: 50, nature: 'NATURE_JOLLY', evs: { spe: 252 }, moves: ['MOVE_HARDEN'] },
+        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_HARDEN'] },
       ],
       50,
       data,
@@ -268,7 +270,6 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
       rng: createRandomSource(42),
     })
     if (sessionNoKO.state.battlers[1]) sessionNoKO.state.battlers[1].mon.hp = 1
-    if (sessionNoKO.state.battlers[3]) sessionNoKO.state.battlers[3].mon.hp = 1
 
     const jointNoKO = chooseExpectimaxJointAction(
       sessionNoKO,
@@ -278,7 +279,7 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     )
     // Must not pick Waterfall
     expect(jointNoKO[0]?.action.chosenMove?.id).not.toBe('MOVE_WATERFALL')
-    expect(jointNoKO[0]?.action.chosenMove?.id).toBe('MOVE_SPLASH')
+    expect(jointNoKO[0]?.action.chosenMove?.id).toBe('MOVE_HARDEN')
   })
 
   it('5. Both battlers act: playExpectimaxBattle on Tate & Liza 1 runs deterministically', () => {
