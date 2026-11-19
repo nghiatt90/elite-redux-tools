@@ -193,17 +193,17 @@ describe('createSession starts a double from a BattleFormat (dbl-5b)', () => {
     }
   })
 
-  it('5. partner formats and a mismatched opponents[0] throw', () => {
-    expect(() =>
-      createSession({
-        data,
-        playerParty: playerParty(),
-        opponentTrainer: trainerA,
-        tier: 'elite',
-        rng: createRandomSource(3),
-        format: { opponents: [trainerA, trainerB], partner: trainerA },
-      }),
-    ).toThrow('createSession: the in-game partner formats are dbl-6b')
+  it('5. partner format builds a 4-battler session (battle_tower.c:2394-2461) and mismatched opponents[0] throws', () => {
+    // FillPartnerParty (battle_tower.c:2394-2461): partner formats build 4 battlers with BATTLE_TYPE_INGAME_PARTNER (dbl-6b)
+    const session = createSession({
+      data,
+      playerParty: playerParty(),
+      opponentTrainer: trainerA,
+      tier: 'elite',
+      rng: createRandomSource(3),
+      format: { opponents: [trainerA, trainerB], partner: trainerA },
+    })
+    expect(session.state.battlersCount).toBe(4)
 
     expect(() =>
       createSession({

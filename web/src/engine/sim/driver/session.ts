@@ -14,7 +14,7 @@ import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { BATTLE_TYPE_DOUBLE, clearFlag, PARTY_SIZE, ROOM_DURATION_MAX, STATUS2_FLINCHED } from '../constants'
+import { BATTLE_TYPE_DOUBLE, clearFlag, MULTI_PARTY_SIZE, PARTY_SIZE, ROOM_DURATION_MAX, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
@@ -55,7 +55,8 @@ export interface SessionOptions {
    * A defaulted format whose trainer is `forcedDouble` is a double: battle_main.c:
    * 1757-1762 sets `isDoubleBattle` and :1910-1913 ORs `gTrainers[].doubleBattle`
    * back into `gBattleTypeFlags`, which battleFormat.ts ports. In-game partner
-   * formats are out of scope (dbl-6b). */
+   * formats build a 4-battler state with BATTLE_TYPE_INGAME_PARTNER (dbl-6b; partner
+   * AI controller is dbl-6b2). */
   format?: BattleFormat
   /** Scripted field effects applied at battle start (TryToSetFieldEffect, battle_util.c:4240-4252).
    * Only BATTLE_FIELD_EFFECT_ROOM + STATUS_FIELD_TRICK_ROOM is currently supported;
@@ -283,8 +284,6 @@ export function createSession(options: SessionOptions): BattleSession {
   const tier = options.tier ?? 'elite'
   const data = options.data
   const inverseBattle = options.inverseBattle ?? false
-  // Partner formats need the partner party and player policy this cycle does not build.
-  if (options.format?.partner) throw new Error('createSession: the in-game partner formats are dbl-6b')
   // battle_main.c:1757-1762 decides `isDoubleBattle` from the save option or
   // `gTrainers[].doubleBattle`, and :1910-1913 ORs `gTrainers[].doubleBattle` back into
   // `gBattleTypeFlags` in the else branch. battleFormat.ts ports both branches, so the
@@ -293,8 +292,16 @@ export function createSession(options: SessionOptions): BattleSession {
   const format: BattleFormat = options.format ?? { opponents: [options.opponentTrainer] }
   if (format.opponents[0]?.id !== options.opponentTrainer.id) throw new Error(`createSession: format.opponents[0] must be ${options.opponentTrainer.id}`)
   const isDouble = (battleTypeFlagsFor(format) & BATTLE_TYPE_DOUBLE) !== 0
-  const playerParty = cloneParty(options.playerParty)
+  let playerParty = cloneParty(options.playerParty)
   if (playerParty.length === 0) throw new Error('createSession: playerParty must not be empty')
+
+  // Under MULTI/partner battle formats, the player's chosen party is capped to
+  // MULTI_PARTY_SIZE (3) mons (party_menu.c:5954-5963 GetMaxBattleEntries). Opponent and
+  // partner levels and innate gating are computed from this capped party.
+  if (format.partner && playerParty.length > MULTI_PARTY_SIZE) {
+    playerParty = playerParty.slice(0, MULTI_PARTY_SIZE)
+  }
+
   const leadIndex = options.leadIndex ?? 0
   const lead = playerParty[leadIndex]
   if (!lead) throw new Error(`createSession: leadIndex ${leadIndex} is outside the ${playerParty.length}-mon playerParty`)
@@ -311,6 +318,19 @@ export function createSession(options: SessionOptions): BattleSession {
   gatePlayerInnates(playerParty, tier)
 
   const playerMaxLevel = Math.max(...playerParty.map((m) => m.level))
+
+  // FillPartnerParty (battle_tower.c:2394-2461): partner mons are built from the
+  // trainer's base (ace) party with level clamped to [1, 100] matching the highest
+  // level in the player's party. Partner mons are not innate-gated.
+  let partnerParty: SimPartyMon[] | undefined
+  if (format.partner) {
+    if (!format.partner.parties?.ace?.length) {
+      throw new Error(`createSession: partner ${format.partner.id} has no ace party`)
+    }
+    const partnerLevel = Math.max(1, Math.min(100, playerMaxLevel))
+    partnerParty = buildOpponentParty(format.partner, 'ace', partnerLevel, data).slice(0, MULTI_PARTY_SIZE)
+  }
+
   const opponentParties = format.opponents.map((trainer) => buildOpponentParty(trainer, tier, playerMaxLevel, data))
   for (let i = 0; i < opponentParties.length; i++) {
     if (opponentParties[i]!.length === 0) {
@@ -323,6 +343,7 @@ export function createSession(options: SessionOptions): BattleSession {
     tier,
     playerParty,
     opponentParties,
+    partnerParty,
     leadIndex: options.leadIndex,
     rng: options.rng,
   })

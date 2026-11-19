@@ -310,9 +310,9 @@ Steven in the Space Center uses this custom branch too (`multi_2_vs_2 ... TRAINE
     `FLAG_SYS_DISABLE_AUTOHEAL`); the chain stays a D3 dependency. Until D3 lands M2 runs each stage as a fresh full-HP fight, which OVERSTATES the
     win probability for stage 2, and solver output for stage 2 must say so explicitly (like the top-K caveat). `TRAINER_JUAN_5` is itself
     `forcedDouble: true`; with TWO_OPPONENTS it is a double regardless.
-6.2 Partner controller: partner AI uses the opponent's AI flags, `PlayerPartnerHandleChooseMove` target rules, no items, partner switches.
-6.3 3-mon player cap, partner in slots 3-5 built from the BASE (ace) party at level = highest of the chosen 3, IV 31 (Step 0.1, `battle_tower.c:2399-2412`).
-6.4 `bossSet.ts` keeps dropping partner ids from the opponent union but the fight spec carries them.
+6.2 Partner controller: partner AI uses the opponent's AI flags, `PlayerPartnerHandleChooseMove` target rules, no items, partner switches. (Remains for dbl-6b2).
+6.3 [DONE in cycle6b] 3-mon player cap, partner in slots 3-5 built from the BASE (ace) party at level = highest of the chosen 3, IV 31 (Step 0.1, `battle_tower.c:2399-2412`).
+6.4 [DONE in cycle6b] `bossSet.ts` keeps dropping partner ids from the opponent union but the fight spec carries them.
 
 ### Step 7 - docs and inventory
 7.1 Update `plan.md` step 6, `solver.md:59-60`, `boss-fight-coverage.md`, `environmentInventory.ts` units and docs, STATE.md D1/D2 lines
