@@ -341,7 +341,7 @@ export const DEFAULT_SEARCH: SearchOptions = {
   allowedStones: new Set<string>(),
 }
 
-function shuffled<T>(items: T[], seed: number): T[] {
+export function shuffled<T>(items: T[], seed: number): T[] {
   const arr = [...items]
   let s = seed >>> 0
   for (let i = arr.length - 1; i > 0; i--) {
