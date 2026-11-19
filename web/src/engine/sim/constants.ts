@@ -390,6 +390,9 @@ export const GRAVITY_DURATION_EXTENDED = 8
 export const TRICK_ROOM_DURATION = 5
 export const TRICK_ROOM_DURATION_SHORT = 3
 
+/** ROOM_DURATION_MAX (255) -- include/battle_util.h:62. */
+export const ROOM_DURATION_MAX = 255
+
 /** WONDER_ROOM_DURATION (5) and MAGIC_ROOM_DURATION (5) -- include/battle_util.h:58-59. */
 export const WONDER_ROOM_DURATION = 5
 export const MAGIC_ROOM_DURATION = 5

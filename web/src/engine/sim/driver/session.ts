@@ -9,12 +9,12 @@
 
 import { createBridgeDamageResolver } from '../damageResolver'
 import { executeTurn, drainQueuedExtraAttacks, drainQueuedSwitches, roundStructsClear, turnStructsClear, type ActionOutcome, type DamageResolver, type TurnLoopDeps, type TurnOutcome } from '../turn'
-import { applyBattleStartPass, getSingleUseAbilityCounter } from '../switchInAbility'
+import { applyBattleStartPass, getSingleUseAbilityCounter, trySetTrickRoom } from '../switchInAbility'
 import { registerBattleEvent, runBattleEvents } from '../battleEvents'
 import { chooseAiAction, type ChooseAiActionDeps } from '../ai/chooseAiAction'
 import { createAiOpponentReplacement } from '../ai/aiSwitching'
 import type { AiDamageDeps } from '../ai/aiCalcDamage'
-import { BATTLE_TYPE_DOUBLE, clearFlag, PARTY_SIZE, STATUS2_FLINCHED } from '../constants'
+import { BATTLE_TYPE_DOUBLE, clearFlag, PARTY_SIZE, ROOM_DURATION_MAX, STATUS2_FLINCHED } from '../constants'
 import { createRandomSource } from '../rng'
 import type { BattleState, RandomSource, SimPartyMon, Slot4 } from '../state'
 import { canMegaEvolve } from '../formChange'
@@ -57,6 +57,10 @@ export interface SessionOptions {
    * back into `gBattleTypeFlags`, which battleFormat.ts ports. In-game partner
    * formats are out of scope (dbl-6b). */
   format?: BattleFormat
+  /** Scripted field effects applied at battle start (TryToSetFieldEffect, battle_util.c:4240-4252).
+   * Only BATTLE_FIELD_EFFECT_ROOM + STATUS_FIELD_TRICK_ROOM is currently supported;
+   * unmodelled entries are recorded in startUnmodelled. */
+  startFieldEffects?: Array<{ effectType: string; fieldId: string }>
 }
 
 export interface BattleSession {
@@ -343,6 +347,19 @@ export function createSession(options: SessionOptions): BattleSession {
 
   const startUnmodelled: string[] = []
   const startOutcomes: ActionOutcome[] = []
+  if (options.startFieldEffects) {
+    for (const eff of options.startFieldEffects) {
+      if (eff.effectType === 'BATTLE_FIELD_EFFECT_ROOM' && eff.fieldId === 'STATUS_FIELD_TRICK_ROOM') {
+        // TryToSetFieldEffect case BATTLE_FIELD_EFFECT_ROOM / STATUS_FIELD_TRICK_ROOM (battle_util.c:4240-4252)
+        // with isTemporary = FALSE sets gFieldTimers.started.trickRoom = TRUE, STATUS_FIELD_TRICK_ROOM,
+        // and gFieldTimers.trickRoomTimer = ROOM_DURATION_MAX (255, battle_util.h:62).
+        // ABILITYEFFECT_SWITCH_IN_TERRAIN (battle_util.c:4346-4347, battle_main.c:3338).
+        trySetTrickRoom(state, ROOM_DURATION_MAX)
+      } else {
+        startUnmodelled.push(`startFieldEffect: unmodelled ${eff.effectType} (${eff.fieldId})`)
+      }
+    }
+  }
   // createBattleState pre-applies the :3406 decrement; the battle-start pass runs before it in C (isFirstTurn is still 2 there, Stakeout abilities.cc:2726).
   for (const battler of state.battlers) {
     if (battler) battler.volatiles.isFirstTurn = 2

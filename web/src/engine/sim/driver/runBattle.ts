@@ -32,6 +32,10 @@ export interface RunBattleOptions {
   /** Custom player action policy; called for each active player battler (`battlerId` is 0
    * in singles; 0 and 2 in doubles). */
   playerPolicy?: (state: BattleState, unmodelled: string[], battlerId: number) => ChosenAction | null
+  /** Battle events to register at battle start (e.g. BATTLE_EVENT_TENSE_BATTLE). */
+  battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>
+  /** Scripted field effects to apply at battle start (TryToSetFieldEffect, battle_util.c:4240-4252). */
+  startFieldEffects?: Array<{ effectType: string; fieldId: string }>
 }
 
 export interface TurnActionSummary {
@@ -195,6 +199,8 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       leadIndex: options.leadIndex,
       inverseBattle: options.inverseBattle,
       format: options.format,
+      battleEvents: options.battleEvents,
+      startFieldEffects: options.startFieldEffects,
     })
     const { state } = session
     recordUnmodelled(session.startUnmodelled)
