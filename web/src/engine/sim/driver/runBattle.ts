@@ -11,6 +11,7 @@ import type { DamageResolver } from '../turn'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getPlayerSelectedMoveTarget } from '../moveTargetFlags'
 import { partySlotsFor } from '../partySlots'
+import { hasLiveReserve } from '../switchIn'
 import { createSession, cloneParty, groundingFor, stepTurn } from './session'
 import type { BattleFormat } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
@@ -26,10 +27,11 @@ export interface RunBattleOptions {
   /** FlagGet(B_FLAG_INVERSE_BATTLE) for the whole battle (battle_util.c:8028); derive it
    * from `isInverseBattleTrainer` in encounters.json's inverseBattles list. */
   inverseBattle?: boolean
-  /** Battle format; defaults to a single-trainer fight for `opponentTrainer`. The
-   * doubles player policy does not exist yet, so a double returns an ERROR result. */
+  /** Battle format; defaults to a single-trainer fight for `opponentTrainer`. */
   format?: BattleFormat
-  playerPolicy?: (state: BattleState, unmodelled: string[]) => ChosenAction | null
+  /** Custom player action policy; called for each active player battler (`battlerId` is 0
+   * in singles; 0 and 2 in doubles). */
+  playerPolicy?: (state: BattleState, unmodelled: string[], battlerId: number) => ChosenAction | null
 }
 
 export interface TurnActionSummary {
@@ -71,11 +73,12 @@ export function defaultPlayerPolicy(
   state: BattleState,
   data: SimDataBundle,
   damage?: DamageResolver,
+  battlerId = 0,
 ): ChosenAction | null {
-  const battler = state.battlers[0]
+  const battler = state.battlers[battlerId]
   if (!battler || battler.mon.hp === 0) {
     const party = state.sides[0].party
-    const [first, last] = partySlotsFor(state, 0)
+    const [first, last] = partySlotsFor(state, battlerId)
     const active = new Set<number>()
     for (let id = 0; id < state.battlers.length; id++) {
       if ((id & 1) !== 0) continue
@@ -127,8 +130,8 @@ export function defaultPlayerPolicy(
   // resolver the declared type stands in -- runBattle passes `session.turnDeps.damage`,
   // so its own policy resolves retypes; a caller-constructed one may not.
   const resolvedType =
-    damage?.moveType && state.battlers[0]
-      ? (damage.moveType(state, 0, 1, moveIdToUse).moveType ?? declaredType)
+    damage?.moveType && state.battlers[battlerId]
+      ? (damage.moveType(state, battlerId, 1, moveIdToUse).moveType ?? declaredType)
       : declaredType
   const moveView: TurnOrderMoveView = {
     id: moveIdToUse,
@@ -142,9 +145,9 @@ export function defaultPlayerPolicy(
     split: mData?.split ?? 'STATUS',
     hasStrongJawBoostFlag: false,
     // IsKeenEdge(battler, move, GetTypeBeforeUsingMove(move, battler)), battle_main.c:4278.
-    isKeenEdge: isKeenEdgeMove(state, 0, moveIdToUse, statusDeps),
+    isKeenEdge: isKeenEdgeMove(state, battlerId, moveIdToUse, statusDeps),
     naturalGiftPriority: mData?.effect === 'EFFECT_NATURAL_GIFT'
-      ? naturalGiftPriority(state.battlers[0]?.mon.itemId ?? null)
+      ? naturalGiftPriority(state.battlers[battlerId]?.mon.itemId ?? null)
       : 0,
     isGrassyTerrainAffected: false,
     myceliumMightAffected: false,
@@ -152,8 +155,8 @@ export function defaultPlayerPolicy(
 
   // The player controller's selection target (battle_controller_player.c:2385-2398), stored in
   // gBattleStruct->moveTarget[] and read back by HandleAction_UseMove (battle_util.c:242).
-  const target = getPlayerSelectedMoveTarget(state, 0, moveIdToUse, mData, statusDeps, statusDeps)
-  const mega = canMegaEvolve(state, 0, data.dataContext)
+  const target = getPlayerSelectedMoveTarget(state, battlerId, moveIdToUse, mData, statusDeps, statusDeps)
+  const mega = canMegaEvolve(state, battlerId, data.dataContext)
   return {
     action: 'USE_MOVE',
     moveToBeUsed: moveView,
@@ -164,7 +167,7 @@ export function defaultPlayerPolicy(
 }
 
 /**
- * Runs a simulated singles battle to completion or until maxTurns.
+ * Runs a simulated battle to completion or until maxTurns.
  */
 export function runBattle(options: RunBattleOptions): BattleRunResult {
   const tier = options.tier ?? 'elite'
@@ -193,17 +196,6 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       inverseBattle: options.inverseBattle,
       format: options.format,
     })
-    // The loop below picks only the player's first battler; the doubles policy is dbl-5c.
-    if (session.state.battlersCount === 4) {
-      return {
-        outcome: 'ERROR',
-        turns: turnCount,
-        log,
-        unmodelled: unmodelledMap,
-        error: 'runBattle: the doubles player policy is dbl-5c',
-        megaEvolutions,
-      }
-    }
     const { state } = session
     recordUnmodelled(session.startUnmodelled)
 
@@ -211,11 +203,31 @@ export function runBattle(options: RunBattleOptions): BattleRunResult {
       turnCount++
       const turnUnmodelled: string[] = []
 
-      const playerAction = options.playerPolicy
-        ? options.playerPolicy(state, turnUnmodelled)
-        : defaultPlayerPolicy(state, data, session.turnDeps.damage)
+      const isAbsent0 = (state.absentBattlerFlags & (1 << 0)) !== 0 || !state.battlers[0]
+      const isFaintedNoReserve0 = state.battlers[0]?.mon.hp === 0 && !hasLiveReserve(state, 0)
+      const playerAction =
+        state.battlersCount === 4 && (isAbsent0 || isFaintedNoReserve0)
+          ? null
+          : options.playerPolicy
+            ? options.playerPolicy(state, turnUnmodelled, 0)
+            : defaultPlayerPolicy(state, data, session.turnDeps.damage, 0)
 
-      const step = stepTurn(session, playerAction)
+      let action2: ChosenAction | null = null
+      if (state.battlersCount === 4) {
+        const isAbsent2 = (state.absentBattlerFlags & (1 << 2)) !== 0 || !state.battlers[2]
+        const isFaintedNoReserve2 = state.battlers[2]?.mon.hp === 0 && !hasLiveReserve(state, 2)
+        if (!isAbsent2 && !isFaintedNoReserve2) {
+          action2 = options.playerPolicy
+            ? options.playerPolicy(state, turnUnmodelled, 2)
+            : defaultPlayerPolicy(state, data, session.turnDeps.damage, 2)
+        }
+      }
+
+      const step =
+        state.battlersCount === 4
+          ? stepTurn(session, playerAction, undefined, { 2: action2 })
+          : stepTurn(session, playerAction)
+
       const turnOutcome = step.outcome
       megaEvolutions += turnOutcome.megaEvolutions ?? 0
       turnUnmodelled.push(...step.unmodelled)

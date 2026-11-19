@@ -217,14 +217,15 @@ describe('createSession starts a double from a BattleFormat (dbl-5b)', () => {
     ).toThrow(`createSession: format.opponents[0] must be ${trainerA.id}`)
   })
 
-  it('6. runBattle refuses a double with the dbl-5c error instead of throwing', () => {
+  it('6. runBattle runs a double battle to completion (dbl-5c)', () => {
     const result = runBattle({
       data,
       playerParty: playerParty(),
       opponentTrainer: tateAndLiza,
       tier: 'elite',
     })
-    expect(result.outcome).toBe('ERROR')
-    expect(result.error).toBe('runBattle: the doubles player policy is dbl-5c')
+    expect(result.outcome).not.toBe('ERROR')
+    expect(result.error).toBeUndefined()
+    expect(result.turns).toBeGreaterThan(0)
   })
 })
