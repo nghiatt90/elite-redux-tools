@@ -17,10 +17,42 @@ export interface FightSpec {
 const JUAN_STAGE_1_SCRIPT = 'SootopolisCity_Gym_1F_EventScript_Juan'
 const JUAN_STAGE_2_SCRIPT = 'SootopolisCity_Gym_1F_EventScript_Juan_Battle_2'
 
+interface MultiFightConfig {
+  opponentIds: [string, string]
+  partnerIds: string[]
+  defaultPartnerId: string
+  script: string
+}
+
+const MULTI_FIGHTS: Record<string, MultiFightConfig> = {
+  // MeteorFalls_1F_1R/scripts.pory:193,202,211,220,229,238
+  TRAINER_COURTNEY_METEOR_FALLS: {
+    opponentIds: ['TRAINER_COURTNEY_METEOR_FALLS', 'TRAINER_GRUNT_METEOR_FALLS'],
+    partnerIds: [
+      'MAY_TREECKO_METEOR_FALLS',
+      'MAY_TORCHIC_METEOR_FALLS',
+      'MAY_MUDKIP_METEOR_FALLS',
+      'BRENDAN_TREECKO_METEOR_FALLS',
+      'BRENDAN_TORCHIC_METEOR_FALLS',
+      'BRENDAN_MUDKIP_METEOR_FALLS',
+    ],
+    defaultPartnerId: 'MAY_TORCHIC_METEOR_FALLS',
+    script: 'MeteorFalls_1F_1R_EventScript_MayBattleTorchic',
+  },
+  // MossdeepCity_SpaceCenter_2F/scripts.pory:274
+  TRAINER_MAXIE_MOSSDEEP: {
+    opponentIds: ['TRAINER_MAXIE_MOSSDEEP', 'TRAINER_COURTNEY_MOSSDEEP'],
+    partnerIds: ['TRAINER_STEVEN_MOSSDEEP'],
+    defaultPartnerId: 'TRAINER_STEVEN_MOSSDEEP',
+    script: 'MossdeepCity_SpaceCenter_2F_EventScript_DoStevenMultiBattle',
+  },
+}
+
 /**
  * Resolves the FightSpec for a given trainer from the encounters data.
  *
- * - Format: resolved from tagBattles for Juan stage 1/2; defaults to single-opponent.
+ * - Format: resolved from MULTI_FIGHTS for the two multi_2_vs_2 fights, or from
+ *   tagBattles for Juan stage 1/2; defaults to single-opponent.
  * - Inverse battle: resolved via isInverseBattleTrainer (FLAG_SYS_INVERSE_BATTLE).
  * - Start field effects: unguarded fieldEffects rows (e.g. Tate & Liza Trick Room).
  * - Battle events: script-matched Tense Battle events for Tate & Liza 1 and Juan stage 1.
@@ -29,7 +61,7 @@ const JUAN_STAGE_2_SCRIPT = 'SootopolisCity_Gym_1F_EventScript_Juan_Battle_2'
 export function fightSpecFor(
   data: SimDataBundle,
   trainerId: string,
-  options?: { juanStage?: 1 | 2 },
+  options?: { juanStage?: 1 | 2; partnerId?: string },
 ): FightSpec {
   const trainer = data.trainersById.get(trainerId)
   if (!trainer) {
@@ -38,46 +70,66 @@ export function fightSpecFor(
 
   const skipped: string[] = []
 
-  // (a) Tag battle resolution (Juan stage 1 / stage 2)
-  let targetJuanScript: string | null = null
-  if (options?.juanStage === 1) {
-    targetJuanScript = JUAN_STAGE_1_SCRIPT
-  } else if (options?.juanStage === 2) {
-    targetJuanScript = JUAN_STAGE_2_SCRIPT
-  } else if (trainerId === 'TRAINER_JUAN_1') {
-    targetJuanScript = JUAN_STAGE_1_SCRIPT
-  } else if (trainerId === 'TRAINER_JUAN_5') {
-    targetJuanScript = JUAN_STAGE_2_SCRIPT
-  }
-
-  const matchingTagBattles = (data.tagBattles ?? []).filter((r) => r.trainers[0] === trainerId)
-  let chosenTagBattle: EncounterTagBattle | undefined = undefined
-
-  for (const row of matchingTagBattles) {
-    const isTarget = targetJuanScript
-      ? row.script === targetJuanScript
-      : row.script === JUAN_STAGE_1_SCRIPT || row.script === JUAN_STAGE_2_SCRIPT
-
-    if (isTarget && !chosenTagBattle) {
-      chosenTagBattle = row
-    } else {
-      skipped.push(`tagBattle:${row.script}:${row.guard ?? 'null'}`)
-    }
-  }
-
   let format: BattleFormat
   let opponentTrainer: TrainerData
-  if (chosenTagBattle) {
-    const opponents = chosenTagBattle.trainers.map((id) => {
+  let chosenTagBattle: EncounterTagBattle | undefined = undefined
+
+  const multiFight = MULTI_FIGHTS[trainerId]
+  if (multiFight) {
+    const partnerId = options?.partnerId ?? multiFight.defaultPartnerId
+    if (!multiFight.partnerIds.includes(partnerId)) {
+      throw new Error(`fightSpecFor: ${partnerId} is not a partner of ${trainerId}`)
+    }
+    const opponents = multiFight.opponentIds.map((id) => {
       const t = data.trainersById.get(id)
-      if (!t) throw new Error(`fightSpecFor: unknown trainer ${id} in tag battle ${chosenTagBattle.script}`)
+      if (!t) throw new Error(`fightSpecFor: unknown trainer ${id}`)
       return t
     })
-    format = { opponents }
+    const partner = data.trainersById.get(partnerId)
+    if (!partner) {
+      throw new Error(`fightSpecFor: unknown trainer ${partnerId}`)
+    }
+    format = { opponents, partner }
     opponentTrainer = opponents[0]!
   } else {
-    format = { opponents: [trainer] }
-    opponentTrainer = trainer
+    // (a) Tag battle resolution (Juan stage 1 / stage 2)
+    let targetJuanScript: string | null = null
+    if (options?.juanStage === 1) {
+      targetJuanScript = JUAN_STAGE_1_SCRIPT
+    } else if (options?.juanStage === 2) {
+      targetJuanScript = JUAN_STAGE_2_SCRIPT
+    } else if (trainerId === 'TRAINER_JUAN_1') {
+      targetJuanScript = JUAN_STAGE_1_SCRIPT
+    } else if (trainerId === 'TRAINER_JUAN_5') {
+      targetJuanScript = JUAN_STAGE_2_SCRIPT
+    }
+
+    const matchingTagBattles = (data.tagBattles ?? []).filter((r) => r.trainers[0] === trainerId)
+
+    for (const row of matchingTagBattles) {
+      const isTarget = targetJuanScript
+        ? row.script === targetJuanScript
+        : row.script === JUAN_STAGE_1_SCRIPT || row.script === JUAN_STAGE_2_SCRIPT
+
+      if (isTarget && !chosenTagBattle) {
+        chosenTagBattle = row
+      } else {
+        skipped.push(`tagBattle:${row.script}:${row.guard ?? 'null'}`)
+      }
+    }
+
+    if (chosenTagBattle) {
+      const opponents = chosenTagBattle.trainers.map((id) => {
+        const t = data.trainersById.get(id)
+        if (!t) throw new Error(`fightSpecFor: unknown trainer ${id} in tag battle ${chosenTagBattle!.script}`)
+        return t
+      })
+      format = { opponents }
+      opponentTrainer = opponents[0]!
+    } else {
+      format = { opponents: [trainer] }
+      opponentTrainer = trainer
+    }
   }
 
   // (b) Inverse battle
