@@ -198,19 +198,34 @@ describe('starting party indexes: SetBattlePartyIds (battle_controllers.c:615-67
     expect(indexes).toEqual([0, 0, 3, 3])
   })
 
-  it('buildBattleState refuses a double side with fewer than two valid mons', () => {
+  it('buildBattleState marks battler 2 absent for a 1-mon player double party (battle_main.c:3327-3330) and refuses <2 opponent mons', () => {
+    // battle_main.c:3327-3330 sets gAbsentBattlerFlags |= gBitTable[i] when starting a double
+    // battle with only one player pokemon (gBattleMons[2].species == SPECIES_NONE || hp == 0).
+    const state = buildBattleState(
+      { opponents: [trainer], forcedDouble: true },
+      {
+        data,
+        tier: 'elite',
+        playerParty: [mon(20)],
+        opponentParties: [buildOpponentParty(trainer, 'elite', 50, data)],
+        rng: createRandomSource(1),
+      },
+    )
+    expect(state.battlers[2]).toBeNull()
+    expect(state.absentBattlerFlags & 4).toBe(4)
+
     expect(() =>
       buildBattleState(
         { opponents: [trainer], forcedDouble: true },
         {
           data,
           tier: 'elite',
-          playerParty: [mon(20)],
-          opponentParties: [buildOpponentParty(trainer, 'elite', 50, data)],
+          playerParty: [mon(20), mon(20)],
+          opponentParties: [[mon(20)]],
           rng: createRandomSource(1),
         },
       ),
-    ).toThrow(/player side has 1 valid mon/)
+    ).toThrow(/opponent side has 1 valid mon/)
   })
 
   it('buildBattleState lays a fainted player slot out by the same scan', () => {

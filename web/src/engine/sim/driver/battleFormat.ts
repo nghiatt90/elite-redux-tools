@@ -235,13 +235,14 @@ export function startingPartyIndexes(
   return indexes
 }
 
-/** A double battle starts two battlers per side, so each side needs two live mons.
- * Marking a battler absent instead is dbl-2b. */
+/** A double battle starts two battlers per side; an invalid player slot is marked
+ * absent per battle_main.c:3327-3330, so the player side needs at least 1 valid mon
+ * while the opponent side needs 2. */
 function assertTwoValidPerSide(playerRoster: SimPartyMon[], opponentRoster: SimPartyMon[]): void {
   const playerValid = playerRoster.filter((slot) => isValidSlot(slot)).length
   const opponentValid = opponentRoster.filter((slot) => isValidSlot(slot)).length
-  if (playerValid < 2) {
-    throw new Error(`buildBattleState: the player side has ${playerValid} valid mon(s); a double battle needs at least 2`)
+  if (playerValid < 1) {
+    throw new Error(`buildBattleState: the player side has ${playerValid} valid mon(s); a double battle needs at least 1`)
   }
   if (opponentValid < 2) {
     throw new Error(`buildBattleState: the opponent side has ${opponentValid} valid mon(s); a double battle needs at least 2`)
@@ -318,28 +319,36 @@ export function buildBattleState(format: BattleFormat, options: BuildBattleState
   const indexes = double
     ? startingPartyIndexes(format, playerRoster, opponentRoster, battlersCount)
     : [0, 0, 0, 0]
-  // createSession's explicit lead: battler 0 starts from this party slot rather than
-  // the first live one. Singles also keeps the pre-change default slot 0 even when the
-  // lead is fainted -- the battle-start sequence replaces it (session.ts:259-264).
-  if (options.leadIndex !== undefined) indexes[0] = options.leadIndex
+  // createSession's explicit lead: in singles, battler 0 starts from this party slot
+  // rather than the first live one (and keeps the pre-change default slot 0 even when
+  // the lead is fainted -- the battle-start sequence replaces it, session.ts:259-264).
+  // In doubles, SetBattlePartyIds (battle_controllers.c:615-675) already chose both
+  // player leads and their fallback slots; overriding indexes[0] alone would break the
+  // `gBattlerPartyIndexes[i - 2]` dependency for battler 2 (:648, :664).
+  if (!double && options.leadIndex !== undefined) indexes[0] = options.leadIndex
 
   const battlers: (BattlerState | null)[] = []
+  let absentBattlerFlags = 0
   for (let id = 0; id < battlersCount; id++) {
     const roster = (id & 1) === 0 ? playerRoster : opponentRoster
     const partyIndex = indexes[id]!
     const entry = roster[partyIndex]
-    // An empty slot here means the layout pointed a battler at nothing. A FAINTED
-    // entry (hp 0) is allowed: singles keeps createSession's default lead even when
-    // it is fainted, and the battle-start sequence replaces it.
+    // battle_main.c:3327-3330: mark invalid mons (species == SPECIES_NONE or hp == 0)
+    // as absent when starting a double battle. A fainted entry (hp 0) in singles is
+    // allowed and NOT marked absent: singles keeps createSession's default lead even
+    // when it is fainted, and the battle-start sequence replaces it (session.ts:259-264).
     if (!entry || entry.speciesId === null) {
-      throw new Error(
-        `buildBattleState: battler ${id} would start from party slot ${partyIndex} of side ${id & 1}, which has no mon`,
-      )
+      battlers.push(null)
+      if (double) absentBattlerFlags |= 1 << id
+      continue
+    }
+    if (double && entry.hp === 0) {
+      absentBattlerFlags |= 1 << id
     }
     battlers.push(createBattlerState(id, toBattleMon(entry), partyIndex))
   }
 
-  return createBattleState({
+  const state = createBattleState({
     battlers,
     playerParty: playerRoster,
     opponentParty: opponentRoster,
@@ -348,4 +357,9 @@ export function buildBattleState(format: BattleFormat, options: BuildBattleState
     tier: options.tier,
     rng: options.rng,
   })
+  if (double) {
+    state.battlersCount = battlersCount
+    state.absentBattlerFlags = absentBattlerFlags
+  }
+  return state
 }
