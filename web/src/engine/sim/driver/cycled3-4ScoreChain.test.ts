@@ -69,7 +69,6 @@ const deferredIds = new Set(FIGHTS.filter((row) => row.deferred).flatMap((row) =
 const v1Ids = new Set(bossIds.filter((id) => !deferredIds.has(id)))
 const v1Chains = buildChains(encounters.trainerChains, encounters.tagBattles, v1Ids)
 
-const JUAN = 'SootopolisCity_Gym_1F_EventScript_Juan'
 const SPACE_CENTER = 'MossdeepCity_SpaceCenter_2F_EventScript_BattleThreeMagmaGrunts'
 const MUSEUM = 'SlateportCity_OceanicMuseum_2F_EventScript_CaptStern'
 
@@ -206,13 +205,6 @@ describe('cycle d3-4: scoreChain', () => {
     const once = playChainOnce(data, twoStage, t, team, 1)
     expect(once).toHaveLength(2)
     expect(once[1]!.partyHp[0]).toBe(0)
-  })
-
-  it('refuses a tag stage instead of faking it as singles', () => {
-    const juan = v1Chains.find((c) => c.id === JUAN)!
-    expect(() => scoreChain(data, juan, 'elite', [GARCHOMP], 1)).toThrow(
-      'scoreChain: stage 1 of SootopolisCity_Gym_1F_EventScript_Juan is a tag battle; doubles is not built',
-    )
   })
 
   it('createChainEvaluator returns one Fitness per team, with the requested game count', async () => {

@@ -36,12 +36,16 @@ export function firstLiveSlot(party: SimPartyMon[]): number {
 export function carryParty(
   startParty: SimPartyMon[],
   endParty: SimPartyMon[],
-  activeBattler?: BattlerState,
+  activeBattler?: BattlerState | BattlerState[],
 ): SimPartyMon[] {
   if (startParty.length !== endParty.length) {
-    throw new Error(
-      `carryParty: startParty has ${startParty.length} slots but endParty has ${endParty.length}`,
-    )
+    if (endParty.length > startParty.length && endParty.slice(startParty.length).every((m) => m.speciesId === null)) {
+      endParty = endParty.slice(0, startParty.length)
+    } else {
+      throw new Error(
+        `carryParty: startParty has ${startParty.length} slots but endParty has ${endParty.length}`,
+      )
+    }
   }
 
   // Items are restored first (battle_main.c:4827 -> TryRestoreStolenItems,
@@ -68,9 +72,12 @@ export function carryParty(
     // the party slot is only written on switch-out (turn.ts:1848-1859) and, for
     // status1, on Rest. The C's REQUEST_ALL_BATTLE handler writes both back from the
     // battle mon (battle_controller_player.c:3821 MON_DATA_STATUS, :3823 MON_DATA_HP).
-    const isActive = activeBattler !== undefined && activeBattler.partyIndex === i
-    const liveHp = isActive ? activeBattler!.mon.hp : end.hp
-    const liveStatus = isActive ? activeBattler!.mon.status1 : end.status1
+    const active = Array.isArray(activeBattler)
+      ? activeBattler.find((b) => b && b.partyIndex === i)
+      : (activeBattler !== undefined && activeBattler.partyIndex === i ? activeBattler : undefined)
+    const isActive = active !== undefined
+    const liveHp = isActive ? active.mon.hp : end.hp
+    const liveStatus = isActive ? active.mon.status1 : end.status1
 
     // CalculateMonStats reads oldMaxHP from the slot before recalculating it
     // (pokemon.c:976,1002-1010). The party slot still holds the form-changed maxHp at

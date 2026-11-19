@@ -1458,6 +1458,8 @@ export interface ExpectimaxBattleResult {
   /** The player's active battler at the end (`state.battlers[0]`): `carryParty` reads
    * its live HP and `status1`, which the party slot above may not have. */
   finalActive: BattlerState
+  /** The player's live battlers at the end: `battlers[0]` and, when `battlersCount === 4`, `battlers[2]`. */
+  finalActives?: BattlerState[]
 }
 
 /** Plays one battle with the expectimax policy on the player's side. */
@@ -1494,12 +1496,17 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
       stepTurn(session, choice ? choice.action : null)
     }
   }
+  const finalActives: BattlerState[] = [session.state.battlers[0]!]
+  if (session.state.battlersCount === 4 && session.state.battlers[2]) {
+    finalActives.push(session.state.battlers[2])
+  }
   return {
     outcome: session.state.battleOutcome ?? 'MAX_TURNS',
     turns,
     finalScore: positionScore(session.state),
     finalParty: cloneParty(session.state.sides[0].party),
     finalActive: session.state.battlers[0]!,
+    finalActives,
   }
 }
 

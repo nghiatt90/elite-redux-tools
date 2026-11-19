@@ -15,8 +15,8 @@ import { buildPlayerParty, type PlayerMonSpec } from './buildParty'
 import { eventsForFight } from './battleEventSetup'
 import { carryParty, firstLiveSlot } from './carryParty'
 import type { ChainSpec } from './chains'
-import type { FightSpec } from './fightSpec'
-import type { EncounterBattleEvent, SimDataBundle, TrainerData } from './loadSimData'
+import { fightSpecFor, type FightSpec } from './fightSpec'
+import type { EncounterBattleEvent, SimDataBundle } from './loadSimData'
 import { isEligibleMove } from './verifiedMoveEffects'
 
 export type Team = PlayerMonSpec[]
@@ -481,19 +481,23 @@ export function scoreTeam(
 /** One stage's `battleEvents`, already filtered by the guards active at that stage. */
 export type StageEvents = Array<Array<{ event: string; data0: number | null; data1: number | null }>>
 
-/** Resolves every stage's trainer; a tag stage cannot run in the singles sim (chains-plan Step 4.3). */
-function chainStageTrainers(data: SimDataBundle, chain: ChainSpec): TrainerData[] {
+/** Resolves every stage's FightSpec from fightSpecFor. */
+function chainStageSpecs(data: SimDataBundle, chain: ChainSpec): FightSpec[] {
   return chain.stages.map((stage, index) => {
-    if (stage.format !== 'single') {
-      throw new Error(
-        `scoreChain: stage ${index + 1} of ${chain.id} is a tag battle; doubles is not built`,
-      )
-    }
     const id = stage.trainerIds[0]!
     const trainer = data.trainersById.get(id)
     if (!trainer) throw new Error(`unknown trainer ${id}`)
-    return trainer
+    return fightSpecFor(data, id, stage.format === 'tag' ? { juanStage: (index + 1) as 1 | 2 } : undefined)
   })
+}
+
+export function chainCaveats(data: SimDataBundle, chain: ChainSpec): string[] {
+  const specs = chainStageSpecs(data, chain)
+  for (const spec of specs) {
+    const caveats = fightCaveats(spec)
+    if (caveats.length > 0) return caveats
+  }
+  return []
 }
 
 /**
@@ -529,7 +533,7 @@ export function scoreChain(
   seedOffset = 0,
   stageEvents?: StageEvents,
 ): Fitness {
-  const trainers = chainStageTrainers(data, chain)
+  const specs = chainStageSpecs(data, chain)
   const level = Math.max(...team.map((m) => m.level ?? 50))
   const startParty = buildPlayerParty(team, level, data)
   let wins = 0
@@ -539,28 +543,44 @@ export function scoreChain(
     let leadIndex: number | undefined
     let gameScore = 0
     let won = true
-    for (let k = 1; k <= trainers.length; k++) {
-      const result = playExpectimaxBattle({
-        data,
-        playerParty: party,
-        opponentTrainer: trainers[k - 1]!,
-        tier,
-        seed: seedOffset + g * 1000 + k,
-        expectimax,
-        battleEvents: stageEvents?.[k - 1],
-        leadIndex,
-      })
+    for (let k = 1; k <= specs.length; k++) {
+      const spec = specs[k - 1]!
+      const isDouble = isDoubleFight(spec.format)
+      const result = isDouble
+        ? playExpectimaxBattle({
+            data,
+            playerParty: party,
+            opponentTrainer: spec.opponentTrainer,
+            tier,
+            seed: seedOffset + g * 1000 + k,
+            expectimax,
+            battleEvents: spec.battleEvents,
+            leadIndex,
+            format: spec.format,
+            inverseBattle: spec.inverseBattle,
+            startFieldEffects: spec.startFieldEffects,
+          })
+        : playExpectimaxBattle({
+            data,
+            playerParty: party,
+            opponentTrainer: spec.opponentTrainer,
+            tier,
+            seed: seedOffset + g * 1000 + k,
+            expectimax,
+            battleEvents: stageEvents?.[k - 1],
+            leadIndex,
+          })
       gameScore += Math.max(-1, Math.min(1, result.finalScore / 6))
-      party = carryParty(party, result.finalParty, result.finalActive)
+      party = carryParty(party, result.finalParty, result.finalActives ?? result.finalActive)
       leadIndex = firstLiveSlot(party)
       if (result.outcome !== 'WON') {
         won = false
-        gameScore -= trainers.length - k
+        gameScore -= specs.length - k
         break
       }
     }
     if (won) wins++
-    scoreSum += gameScore / trainers.length
+    scoreSum += gameScore / specs.length
   }
   return { winRate: wins / games, meanScore: scoreSum / games, games }
 }
@@ -575,25 +595,39 @@ export function playChainOnce(
   seed: number,
   stageEvents?: StageEvents,
 ): Array<{ trainerId: string; outcome: string; turns: number; partyHp: number[] }> {
-  const trainers = chainStageTrainers(data, chain)
+  const specs = chainStageSpecs(data, chain)
   const level = Math.max(...team.map((m) => m.level ?? 50))
   let party = buildPlayerParty(team, level, data)
   let leadIndex: number | undefined
   const out: Array<{ trainerId: string; outcome: string; turns: number; partyHp: number[] }> = []
-  for (let k = 1; k <= trainers.length; k++) {
-    const trainer = trainers[k - 1]!
-    const result = playExpectimaxBattle({
-      data,
-      playerParty: party,
-      opponentTrainer: trainer,
-      tier,
-      seed: seed * 1000 + k,
-      battleEvents: stageEvents?.[k - 1],
-      leadIndex,
-    })
-    party = carryParty(party, result.finalParty, result.finalActive)
+  for (let k = 1; k <= specs.length; k++) {
+    const spec = specs[k - 1]!
+    const isDouble = isDoubleFight(spec.format)
+    const result = isDouble
+      ? playExpectimaxBattle({
+          data,
+          playerParty: party,
+          opponentTrainer: spec.opponentTrainer,
+          tier,
+          seed: seed * 1000 + k,
+          battleEvents: spec.battleEvents,
+          leadIndex,
+          format: spec.format,
+          inverseBattle: spec.inverseBattle,
+          startFieldEffects: spec.startFieldEffects,
+        })
+      : playExpectimaxBattle({
+          data,
+          playerParty: party,
+          opponentTrainer: spec.opponentTrainer,
+          tier,
+          seed: seed * 1000 + k,
+          battleEvents: stageEvents?.[k - 1],
+          leadIndex,
+        })
+    party = carryParty(party, result.finalParty, result.finalActives ?? result.finalActive)
     out.push({
-      trainerId: trainer.id,
+      trainerId: spec.opponentTrainer.id,
       outcome: result.outcome,
       turns: result.turns,
       partyHp: party.map((mon) => mon.hp),

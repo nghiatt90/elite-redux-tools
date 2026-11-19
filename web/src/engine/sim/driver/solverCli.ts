@@ -25,6 +25,7 @@ import {
 import { fightSpecFor } from './fightSpec'
 import {
   DEFAULT_SEARCH,
+  chainCaveats,
   chainStageEvents,
   defaultSet,
   fightCaveats,
@@ -109,10 +110,6 @@ async function main(): Promise<void> {
     if (!chain) {
       throw new Error(`unknown chain ${chainId}; available: ${chains.map((c) => c.id).join(', ')}`)
     }
-    if (chain.stages.some((stage) => stage.format === 'tag')) {
-      console.log(`blocked: ${chain.id} needs doubles (chains-plan Step 4.3)`)
-      process.exit(1)
-    }
     mapName = arg('map', '') || encounters.trainerChains.find((e) => e.script === chainId)?.map || ''
     stageEvents = chainStageEvents(chain, mapName, data0.battleEvents)
     console.log(`chain ${chain.id} on ${mapName || '(none)'}: ${chain.stages.length} stage(s)`)
@@ -124,6 +121,10 @@ async function main(): Promise<void> {
 
   let battleEvents: Array<{ event: string; data0: number | null; data1: number | null }> | undefined
   let caveats: string[] = []
+  if (chain) {
+    caveats = chainCaveats(data0, chain)
+    for (const c of caveats) console.log('caveat: ' + c)
+  }
   if (!chain) {
     const spec = fightSpecFor(data0, trainerId)
     caveats = fightCaveats(spec)
