@@ -8,11 +8,14 @@
 // test or across a worker pool from a CLI.
 
 import type { StatKey } from '../../types'
+import { battleTypeFlagsFor, type BattleFormat } from './battleFormat'
+import { BATTLE_TYPE_DOUBLE } from '../constants'
 import { playExpectimaxBattle } from './expectimax'
 import { buildPlayerParty, type PlayerMonSpec } from './buildParty'
 import { eventsForFight } from './battleEventSetup'
 import { carryParty, firstLiveSlot } from './carryParty'
 import type { ChainSpec } from './chains'
+import type { FightSpec } from './fightSpec'
 import type { EncounterBattleEvent, SimDataBundle, TrainerData } from './loadSimData'
 import { isEligibleMove } from './verifiedMoveEffects'
 
@@ -399,13 +402,28 @@ export async function improveTeam(
   return { team, fitness: current }
 }
 
+export function isDoubleFight(format: BattleFormat): boolean {
+  return (battleTypeFlagsFor(format) & BATTLE_TYPE_DOUBLE) !== 0
+}
+
+export const TOP_K_CAVEAT =
+  'Double fight joint choices are pruned to the top 4 moves plus the best switch per battler, so the win rate is a lower-bound heuristic and may miss optimal lines.'
+
+export function fightCaveats(spec: Pick<FightSpec, 'format'>): string[] {
+  return isDoubleFight(spec.format) ? [TOP_K_CAVEAT] : []
+}
+
 /** Scores teams in this thread: `games` battles per team on seeds 1..games. */
 export function createLocalEvaluator(
   data: SimDataBundle,
   trainer: import('./loadSimData').TrainerData,
   tier: 'ace' | 'elite' | 'hell' = 'elite',
   expectimax?: import('./expectimax').ExpectimaxOptions,
-  options?: { levelCap?: number; ignoreCap?: boolean },
+  options?: {
+    levelCap?: number
+    ignoreCap?: boolean
+    fightSpec?: Pick<FightSpec, 'format' | 'inverseBattle' | 'battleEvents' | 'startFieldEffects'>
+  },
 ): FitnessEvaluator {
   return async (teams, games) =>
     teams.map((team) => scoreTeam(data, trainer, tier, team, games, expectimax, undefined, undefined, options))
@@ -420,14 +438,40 @@ export function scoreTeam(
   expectimax?: import('./expectimax').ExpectimaxOptions,
   seedOffset = 0,
   battleEvents?: Array<{ event: string; data0: number | null; data1: number | null }>,
-  options?: { levelCap?: number; ignoreCap?: boolean },
+  options?: {
+    levelCap?: number
+    ignoreCap?: boolean
+    fightSpec?: Pick<FightSpec, 'format' | 'inverseBattle' | 'battleEvents' | 'startFieldEffects'>
+  },
 ): Fitness {
   const level = Math.max(...team.map((m) => m.level ?? 50))
   const party = buildPlayerParty(team, level, data, options)
   let wins = 0
   let scoreSum = 0
+  const isDouble = Boolean(options?.fightSpec && isDoubleFight(options.fightSpec.format))
   for (let g = 1; g <= games; g++) {
-    const result = playExpectimaxBattle({ data, playerParty: party, opponentTrainer: trainer, tier, seed: seedOffset + g, expectimax, battleEvents })
+    const result = isDouble
+      ? playExpectimaxBattle({
+          data,
+          playerParty: party,
+          opponentTrainer: trainer,
+          tier,
+          seed: seedOffset + g,
+          expectimax,
+          battleEvents: options!.fightSpec!.battleEvents,
+          format: options!.fightSpec!.format,
+          inverseBattle: options!.fightSpec!.inverseBattle,
+          startFieldEffects: options!.fightSpec!.startFieldEffects,
+        })
+      : playExpectimaxBattle({
+          data,
+          playerParty: party,
+          opponentTrainer: trainer,
+          tier,
+          seed: seedOffset + g,
+          expectimax,
+          battleEvents,
+        })
     if (result.outcome === 'WON') wins++
     scoreSum += Math.max(-1, Math.min(1, result.finalScore / 6))
   }

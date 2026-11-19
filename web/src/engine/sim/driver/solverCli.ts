@@ -22,11 +22,14 @@ import {
   unrunRows,
   type ResolvedSolverLevel,
 } from './solverLevel'
+import { fightSpecFor } from './fightSpec'
 import {
   DEFAULT_SEARCH,
   chainStageEvents,
   defaultSet,
+  fightCaveats,
   improveTeam,
+  isDoubleFight,
   playChainOnce,
   type Fitness,
   type FitnessEvaluator,
@@ -120,7 +123,15 @@ async function main(): Promise<void> {
   }
 
   let battleEvents: Array<{ event: string; data0: number | null; data1: number | null }> | undefined
+  let caveats: string[] = []
   if (!chain) {
+    const spec = fightSpecFor(data0, trainerId)
+    caveats = fightCaveats(spec)
+    if (isDoubleFight(spec.format)) {
+      console.log(
+        `fight spec: format double, inverse ${spec.inverseBattle}, ${spec.startFieldEffects.length} start field effect(s)`,
+      )
+    }
     const allEvents = eventsForFight(data0.battleEvents, mapName, new Set<string>()).events
     const defeatable = new Set<string>()
     for (const row of data0.battleEvents) {
@@ -159,6 +170,7 @@ async function main(): Promise<void> {
       console.log(line)
     }
     console.log('note: TM and tutor availability is story-gated and not modelled; the full tutor list is always allowed')
+    for (const c of caveats) console.log('caveat: ' + c)
   }
 
   const data = loadSimData({ dataDir })
@@ -227,8 +239,8 @@ async function main(): Promise<void> {
       console.log(`  ${stage.trainerId}: ${stage.outcome} in ${stage.turns} turns, party HP ${stage.partyHp.join('/')}`)
     }
   }
-  console.log(JSON.stringify({ fitness: result.fitness, fresh, team: result.team }, null, 2))
-  if (out) writeFileSync(out, JSON.stringify({ trainerId, tier, fitness: result.fitness, fresh, team: result.team }, null, 2))
+  console.log(JSON.stringify({ fitness: result.fitness, fresh, team: result.team, ...(caveats.length ? { caveats } : {}) }, null, 2))
+  if (out) writeFileSync(out, JSON.stringify({ trainerId, tier, fitness: result.fitness, fresh, team: result.team, ...(caveats.length ? { caveats } : {}) }, null, 2))
   for (const w of workers) await w.terminate()
 }
 

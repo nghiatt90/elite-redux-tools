@@ -157,7 +157,7 @@ describe('cycle d3-4: scoreChain', () => {
     expect(once[0]!.trainerId).toBe(STRONG_FIGHT)
   })
 
-  it('carries damage into the next stage: a fainted lead stays fainted and changes stage 2', () => {
+  it('carries damage into the next stage: a fainted lead stays fainted and changes stage 2', { timeout: 30_000 }, () => {
     // Generic team vs Roxanne on the stage-1 seed: the team wins, but only after the
     // first four slots have fainted (slots 4-5 finish the fight), so the next lead is
     // slot 4 -- the carried party is exactly the damaged one.

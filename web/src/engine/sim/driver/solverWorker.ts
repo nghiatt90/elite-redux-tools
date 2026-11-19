@@ -4,6 +4,7 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import { resolve } from 'node:path'
 import type { ChainSpec } from './chains'
+import { fightSpecFor } from './fightSpec'
 import { loadSimData } from './loadSimData'
 import { scoreChain, scoreTeam, type StageEvents, type Team } from './solver'
 
@@ -19,6 +20,7 @@ const { trainerId, tier, battleEvents, chain, stageEvents, levelCap, ignoreCap }
 const data = loadSimData({ dataDir: process.env.ER_DATA_DIR ?? resolve(process.cwd(), 'data/v2.65beta') })
 const trainer = chain ? undefined : data.trainersById.get(trainerId!)
 if (!chain && !trainer) throw new Error(`unknown trainer ${trainerId}`)
+const fightSpec = chain ? undefined : fightSpecFor(data, trainerId!)
 
 parentPort!.on('message', (msg: { id: number; team: Team; games: number; seedOffset?: number }) => {
   const fitness = chain
@@ -26,6 +28,7 @@ parentPort!.on('message', (msg: { id: number; team: Team; games: number; seedOff
     : scoreTeam(data, trainer!, tier, msg.team, msg.games, undefined, msg.seedOffset ?? 0, battleEvents, {
         levelCap,
         ignoreCap,
+        fightSpec,
       })
   parentPort!.postMessage({ id: msg.id, fitness })
 })
