@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 
 import { loadSimData } from './driver/loadSimData'
 import { buildPlayerParty } from './driver/buildParty'
-import { createSession } from './driver/session'
+import { createSession, stepTurn } from './driver/session'
 import { createRandomSource } from './rng'
 import { fightSpecFor } from './driver/fightSpec'
 import {
@@ -212,8 +212,17 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     const legal0 = legalChoices(session, 0)
     const legal2 = legalChoices(session, 2)
     // Both choices must be in their battler's legal list
-    expect(legal0.some((c) => c.action.chosenMove?.id === joint[0]?.action.chosenMove?.id || c.switchTo === joint[0]?.switchTo)).toBe(true)
-    expect(legal2.some((c) => c.action.chosenMove?.id === joint[2]?.action.chosenMove?.id || c.switchTo === joint[2]?.switchTo)).toBe(true)
+    const match0 =
+      joint[0]?.switchTo === undefined
+        ? legal0.some((c) => c.action.chosenMove?.id === joint[0]?.action.chosenMove?.id && c.switchTo === undefined)
+        : legal0.some((c) => c.switchTo === joint[0]?.switchTo)
+    expect(match0).toBe(true)
+
+    const match2 =
+      joint[2]?.switchTo === undefined
+        ? legal2.some((c) => c.action.chosenMove?.id === joint[2]?.action.chosenMove?.id && c.switchTo === undefined)
+        : legal2.some((c) => c.switchTo === joint[2]?.switchTo)
+    expect(match2).toBe(true)
 
     // No two switch choices share switchTo
     if (joint[0]?.switchTo !== undefined && joint[2]?.switchTo !== undefined) {
@@ -282,7 +291,90 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     expect(jointNoKO[0]?.action.chosenMove?.id).toBe('MOVE_HARDEN')
   })
 
-  it('5. Both battlers act: playExpectimaxBattle on Tate & Liza 1 runs deterministically', () => {
+  it('5. Dominance battler 2: forced KO scenario picks KO move and stepTurn executes it', () => {
+    // Scaffolding of test 4: battler 0 holds only harmless moves (Harden),
+    // battler 2 holds a harmless move and a lethal move (Waterfall).
+    // Swampert is given Jolly nature and Speed EVs so it acts before Tate & Liza's leads.
+    const partyKO = buildPlayerParty(
+      [
+        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_HARDEN'] },
+        { species: 'SPECIES_SWAMPERT', level: 50, nature: 'NATURE_JOLLY', evs: { spe: 252 }, moves: ['MOVE_HARDEN', 'MOVE_WATERFALL'] },
+      ],
+      50,
+      data,
+    )
+    const session = createSession({
+      data,
+      playerParty: partyKO,
+      opponentTrainer: tateAndLiza,
+      tier: 'elite',
+      rng: createRandomSource(42),
+    })
+
+    // Set opponent active battler 1 to 1 HP so Waterfall definitely KOs
+    expect(session.state.battlers[1]).toBeDefined()
+    session.state.battlers[1]!.mon.hp = 1
+
+    const joint = chooseExpectimaxJointAction(
+      session,
+      { depth: 1, samples: 1, innerSamples: 1, switchMargin: 0.05, statusTerms: false },
+      42,
+      4,
+    )
+    // (a) chooseExpectimaxJointAction returns that KO move for joint[2]
+    expect(joint[2]?.action.chosenMove?.id).toBe('MOVE_WATERFALL')
+
+    // (b) after stepTurn with joint[2].action, the targeted opponent battler's mon.hp is 0
+    const targetedOpponent = session.state.battlers[1]!
+    stepTurn(session, joint[0]!.action, undefined, { 2: joint[2]!.action })
+    expect(targetedOpponent.mon.hp).toBe(0)
+
+    // Negative run with { 2: null } leaves its hp above 0
+    const sessionNegative = createSession({
+      data,
+      playerParty: partyKO,
+      opponentTrainer: tateAndLiza,
+      tier: 'elite',
+      rng: createRandomSource(42),
+    })
+    expect(sessionNegative.state.battlers[1]).toBeDefined()
+    sessionNegative.state.battlers[1]!.mon.hp = 1
+    const negativeOpponent = sessionNegative.state.battlers[1]!
+
+    stepTurn(sessionNegative, joint[0]!.action, undefined, { 2: null })
+    expect(negativeOpponent.mon.hp).toBeGreaterThan(0)
+    expect(sessionNegative.state.battlers[1]!.mon.hp).toBeGreaterThan(0)
+
+    // Negative case: remove Waterfall so only Harden remains on battler 2
+    const partyNoKO = buildPlayerParty(
+      [
+        { species: 'SPECIES_METAGROSS', level: 50, moves: ['MOVE_HARDEN'] },
+        { species: 'SPECIES_SWAMPERT', level: 50, nature: 'NATURE_JOLLY', evs: { spe: 252 }, moves: ['MOVE_HARDEN'] },
+      ],
+      50,
+      data,
+    )
+    const sessionNoKO = createSession({
+      data,
+      playerParty: partyNoKO,
+      opponentTrainer: tateAndLiza,
+      tier: 'elite',
+      rng: createRandomSource(42),
+    })
+    expect(sessionNoKO.state.battlers[1]).toBeDefined()
+    sessionNoKO.state.battlers[1]!.mon.hp = 1
+
+    const jointNoKO = chooseExpectimaxJointAction(
+      sessionNoKO,
+      { depth: 1, samples: 1, innerSamples: 1, switchMargin: 0.05, statusTerms: false },
+      42,
+      4,
+    )
+    expect(jointNoKO[2]?.action.chosenMove?.id).not.toBe('MOVE_WATERFALL')
+    expect(jointNoKO[2]?.action.chosenMove?.id).toBe('MOVE_HARDEN')
+  })
+
+  it('6. Both battlers act: playExpectimaxBattle on Tate & Liza 1 runs deterministically', () => {
     const spec = fightSpecFor(data, 'TRAINER_TATE_AND_LIZA_1')
     const seed = 54321
     const expectimaxOptions = { depth: 1, samples: 2, innerSamples: 1, switchMargin: 0.05, statusTerms: true }
@@ -323,7 +415,7 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     expect(res1.finalScore).toBe(res2.finalScore)
   })
 
-  it('6. Singles unchanged: equivalence of legalChoices and heuristic replacement', () => {
+  it('7. Singles unchanged: equivalence of legalChoices and heuristic replacement', () => {
     const singlesSession = createSession({
       data,
       playerParty: make4MonParty(),
@@ -340,7 +432,7 @@ describe('cycle 5e: joint expectimax choices for two player battlers', () => {
     expect(replacer(singlesSession.state, 0)).toBe(replacer(singlesSession.state))
   })
 
-  it('7. Replacement per battler: battler 2 faint picks live bench mon excluding partners', () => {
+  it('8. Replacement per battler: battler 2 faint picks live bench mon excluding partners', () => {
     const party = make4MonParty()
     const session = createSession({
       data,
