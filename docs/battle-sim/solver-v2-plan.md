@@ -271,6 +271,42 @@ on report seeds. This changes the solver's singles seeds from `seedOffset + g` t
     the count won at the start under each, which also decides decision 7's warm-start default; (b) **the per-unit search cost to the first `won`**: run the decision-7 feasibility search on at least 3 units that are not won at the start, record the
     tuning games to the first tuning-`won` candidate (or that `UNIT_CAP` was hit) and the number of rounds; (c) for one gym leader, the games per candidate set with and without a `SET_CAP` search. These give `k`, `C`, and proposals for
     `UNIT_CAP`, `SET_CAP` and `GYM_CAP`, entered in decision 12's table; the budget (Decisions pending item 4) is decided from them.
+
+### Step 0.1-0.2 results (cycle7a)
+
+Measured 2026-11-19 at `541d828` (cycle7a worktree). All figures are single-run and noisy.
+
+Commands (from the repository root; `--reporter=verbose` is needed because vitest's default reporter swallows test `console.log` output):
+
+- `SIM_MEASURE=1 npm --prefix web test -- --run --reporter=verbose src/engine/sim/driver/solverMeasure.test.ts -t 'Step 0.1'`
+- the same for `-t 'Step 0.2: TRAINER_ROXANNE_1'`, `-t 'Step 0.2: TRAINER_WATTSON_1'` and `-t 'Step 0.2: TRAINER_NORMAN_1'`; the three 0.2 processes ran concurrently to stay inside the 40-minute wall-clock budget
+- `npm --prefix web run solver:build`, then `node web/dist-solver/solverCli.mjs --trainer TRAINER_ROXANNE_1 --team SPECIES_SWAMPERT,SPECIES_GENGAR,SPECIES_TYRANITAR --workers 6 --passes 1`
+
+**0.1 single-threaded depth-1 timing.** `TRAINER_ROXANNE_1`, tier `elite`, the `GENERIC_PLAYER_SPECS` team through `defaultSet(data, species, 50, new Set())`: **15 wins of 40, 123,577 ms, 3,089 ms per game**. The host had 8 cores and a load average of 1.74 when this run started (other users' processes), so the figure is contended but not by this cycle's own jobs. This is 2.2x decision 12's unmeasured 1.4 s/game, so every row of that table is optimistic by roughly that factor.
+
+**0.1 end-to-end `solverCli`.** `npm run solver:build` succeeded and wrote `web/dist-solver/solverCli.mjs` and `solverWorker.mjs` as `vite.solver.config.ts` declares. The CLI run took **436 s (7.3 min) wall with 6 workers and `--passes 1`**. The team was reduced from the six-species `GENERIC_PLAYER_SPECS` to three species (Swampert, Gengar, Tyranitar) because the six-species search is 6 members x (4 + 120 x 4 + 3 x 16) = about 3,200 games, ~28 min at the measured per-game rate on its own; the 3-species run is 3 members x 532 = about 1,600 games. The CLI prints win rates (`start: win 0.00`, `fresh seeds (40 games): win 0.00`) but **no total games count**, so no per-game figure can be derived from it: only wall time is recorded. It also ran concurrently with the three 0.2 processes (load average peaked about 11), so 436 s is contended. It resolved the fight at level cap 16 at badge value 0.
+
+**0.2 sequential Wilson sampler.** `scoreTeam` on the same Lv-50 default-set generic team, batches of 40, seeds 1..400 (`seedOffset = 40k`), cumulative `wilsonInterval(wins, n, 2.807)` after each look; `won` iff lower >= 0.90, `lost` iff upper < 0.50, else continue to 400.
+
+| Fight | Look | Wins/n | p | Wilson interval (z = 2.807) | Stop |
+|---|---|---|---|---|---|
+| Roxanne 1 | 1 | 15/40 | 0.375 | [0.198, 0.593] | |
+| Roxanne 1 | 2 | 29/80 | 0.362 | [0.230, 0.519] | |
+| Roxanne 1 | 3 | 46/120 | 0.383 | [0.270, 0.511] | |
+| Roxanne 1 | 4 | 68/160 | 0.425 | [0.321, 0.536] | |
+| Roxanne 1 | 5 | 86/200 | 0.430 | [0.336, 0.529] | |
+| Roxanne 1 | 6 | 103/240 | 0.429 | [0.343, 0.520] | |
+| Roxanne 1 | 7 | 113/280 | 0.404 | [0.325, 0.487] | lost |
+| Wattson 1 | 1 | 4/40 | 0.100 | [0.027, 0.304] | lost |
+| Norman 1 | 1 | 14/40 | 0.350 | [0.180, 0.570] | |
+| Norman 1 | 2 | 25/80 | 0.313 | [0.190, 0.469] | lost |
+
+No fight reached `won`, so no fight was stopped early by the win rule and the designed "won needs more than one batch" path was not exercised on a real fight; the helper test covers it (40 straight wins gives a corrected lower bound of 0.835). All three fights came out `lost` against this baseline, including "easy early" Roxanne, which needed 280 games for its upper end to fall below 0.50. The Step 0.2 labels are route positions, not measured difficulty with this team, and this baseline wins a little over a third of the games. Consequence for Step 0.4: the starting build's win count will be low for these three, and the sampler's decisive-look costs are on the slow side (Roxanne 923 s under contention for 280 games, Wattson 94 s for 40, Norman 324 s for 80).
+
+The interval helper is consistent with decision 4's own arithmetic (380/400 gives lower 0.910, "about 0.91"). One correction to the task's expected width: at 400 games and 200 wins, the Wilson half-width at z = 2.807 is **0.0695**, not 0.0644; 0.0644 is the normal-approximation half-width at z = 2.576 (or Wilson at z about 2.6). The plan's z = 2.807 is kept.
+
+**Wall clock.** Step 0.1 took 124 s; the three 0.2 fights plus the CLI overlapped for about 19 min; the whole measurement session was under 25 min of wall time, inside the 40-minute budget, with no full-suite run.
+
 0.5 Fact-check the gym-trainer search inputs (the route itself is fixed by Yoshi and is not re-litigated here): (a) what the `adddefeatedcount` macro does PER CALL (not in the sparse checkout). Which ids Mossdeep counts is already
     settled by the script: `CalcDefeatedCount` calls it on exactly one id per pair, the first `starttagbattle` argument (`MossdeepCity_Gym/scripts.pory:926-931`), so the count is 0..6 whatever the macro does, as long as each call adds
     0 or 1; only that per-call behaviour (and the first call's extra `1` argument, `:926`) is open. (b) Which of the three tag-battle outcomes of decision 8 holds ('both', 'first only', 'second only'): the commented partners sharing a
