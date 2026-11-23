@@ -76,6 +76,7 @@ vi.mock('./driver/expectimax', async (orig) => {
         finalParty: args.playerParty,
         finalActives: [] as BattlerState[],
         finalActive: undefined as unknown as BattlerState,
+        summary: { firstFaintTurn: null, faintedSlots: [], endSlot: 0, opponentRemaining: 0 },
       }
     },
   }

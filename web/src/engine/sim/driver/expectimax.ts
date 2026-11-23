@@ -78,6 +78,7 @@ import { hasLiveReserve } from '../switchIn'
 import type { BattleFormat } from './battleFormat'
 import { defaultPlayerPolicy } from './runBattle'
 import { aiDamageDepsFor, buildMoveAction, cloneParty, cloneSession, beginTurn, createSession, firstLiveReplacement, holdEffectOfBattler, stepTurn, type BattleSession } from './session'
+import type { BattleSummary } from './lossAnatomy'
 import type { SimDataBundle } from './loadSimData'
 
 /** The only move metadata the cycle-142 field-condition terms need: whether a
@@ -1445,6 +1446,28 @@ export interface ExpectimaxBattleOptions {
   startFieldEffects?: Array<{ effectType: string; fieldId: string }>
 }
 
+/** Party slots of `side` that are down. A slot's live HP lives on the battler for
+ * the slot currently on the field -- the party slot is stale until switch-out (see
+ * the `finalParty` note below) -- so an active battler's `mon.hp` is authoritative
+ * and `party[i].hp` is read for the rest. Empty slots (`speciesId === null`) are
+ * not party members and never count. In doubles both of a side's battlers are
+ * active and `(id & 1) === side` picks them (ids 0,2 for the player; 1,3 for the
+ * opponent). */
+function downSlots(state: BattleState, side: 0 | 1): number[] {
+  const party = state.sides[side].party
+  const down: number[] = []
+  for (let i = 0; i < party.length; i++) {
+    const mon = party[i]
+    if (!mon || mon.speciesId === null) continue
+    const active = state.battlers.find(
+      (b): b is BattlerState => b !== null && (b.id & 1) === side && b.partyIndex === i,
+    )
+    const hp = active ? active.mon.hp : mon.hp
+    if (hp <= 0) down.push(i)
+  }
+  return down
+}
+
 export interface ExpectimaxBattleResult {
   outcome: 'WON' | 'LOST' | 'DREW' | 'MAX_TURNS'
   turns: number
@@ -1460,6 +1483,9 @@ export interface ExpectimaxBattleResult {
   finalActive: BattlerState
   /** The player's live battlers at the end: `battlers[0]` and, when `battlersCount === 4`, `battlers[2]`. */
   finalActives?: BattlerState[]
+  /** What happened to the player's side this game. Aggregated across games by
+   * `lossAnatomy` (docs/battle-sim/solver-v2-plan.md Step 2.2, decision 9c). */
+  summary: BattleSummary
 }
 
 /** Plays one battle with the expectimax policy on the player's side. */
@@ -1480,6 +1506,7 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     startFieldEffects: options.startFieldEffects,
   })
   let turns = 0
+  let firstFaintTurn: number | null = null
   while (!session.state.battleOutcome && turns < maxTurns) {
     turns++
     beginTurn(session)
@@ -1495,11 +1522,17 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
       if (choice) applyChoice(session, choice)
       stepTurn(session, choice ? choice.action : null)
     }
+    // Both branches above ran one step; a player mon down now means this turn is
+    // the first faint turn (the party slot of an active battler is stale, so
+    // `downSlots` reads the live battler HP).
+    if (firstFaintTurn === null && downSlots(session.state, 0).length > 0) firstFaintTurn = turns
   }
   const finalActives: BattlerState[] = [session.state.battlers[0]!]
   if (session.state.battlersCount === 4 && session.state.battlers[2]) {
     finalActives.push(session.state.battlers[2])
   }
+  const faintedSlots = downSlots(session.state, 0)
+  const opponentSlots = session.state.sides[1].party.filter((mon) => mon.speciesId !== null).length
   return {
     outcome: session.state.battleOutcome ?? 'MAX_TURNS',
     turns,
@@ -1507,6 +1540,12 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     finalParty: cloneParty(session.state.sides[0].party),
     finalActive: session.state.battlers[0]!,
     finalActives,
+    summary: {
+      firstFaintTurn,
+      faintedSlots,
+      endSlot: session.state.battlers[0]!.partyIndex,
+      opponentRemaining: opponentSlots - downSlots(session.state, 1).length,
+    },
   }
 }
 
