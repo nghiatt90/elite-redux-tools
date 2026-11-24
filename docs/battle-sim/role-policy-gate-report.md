@@ -25,18 +25,18 @@ Written by `web/src/engine/sim/driver/policyComparison.test.ts` from the measure
 
 | Fight | Policy | Wins | Games | Rate | Wilson low | Wilson high | ms/game | Capped | Available | Used | Boosted | Attacked boosted |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TRAINER_SIDNEY-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 940.4 | 0 | 7 | 0 | 2 | 2 |
-| TRAINER_SIDNEY-attack | expectimax | 4 | 4 | 100.0% | 0.510 | 1.000 | 1903.0 | 0 | 18 | 8 | 10 | 4 |
-| TRAINER_PHOEBE-attack | role | 3 | 4 | 75.0% | 0.301 | 0.954 | 1021.5 | 0 | 2 | 0 | 0 | 0 |
-| TRAINER_PHOEBE-attack | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 1449.9 | 0 | 16 | 1 | 3 | 3 |
-| TRAINER_GLACIA-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 963.5 | 0 | 4 | 0 | 1 | 1 |
-| TRAINER_GLACIA-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1385.2 | 0 | 13 | 3 | 8 | 6 |
-| TRAINER_DRAKE-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 844.4 | 0 | 5 | 0 | 0 | 0 |
-| TRAINER_DRAKE-attack | expectimax | 3 | 4 | 75.0% | 0.301 | 0.954 | 1823.3 | 0 | 20 | 1 | 1 | 1 |
-| TRAINER_STEVEN-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 711.2 | 0 | 4 | 0 | 0 | 0 |
-| TRAINER_STEVEN-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1047.5 | 0 | 6 | 0 | 4 | 4 |
-| TRAINER_GLACIA-stall | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 3249.1 | 0 | 16 | 0 | 12 | 12 |
-| TRAINER_GLACIA-stall | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 6589.7 | 0 | 31 | 0 | 11 | 7 |
+| TRAINER_SIDNEY-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 924.2 | 0 | 7 | 0 | 2 | 2 |
+| TRAINER_SIDNEY-attack | expectimax | 4 | 4 | 100.0% | 0.510 | 1.000 | 1843.2 | 0 | 18 | 8 | 10 | 4 |
+| TRAINER_PHOEBE-attack | role | 3 | 4 | 75.0% | 0.301 | 0.954 | 986.3 | 0 | 2 | 0 | 0 | 0 |
+| TRAINER_PHOEBE-attack | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 1405.9 | 0 | 16 | 1 | 3 | 3 |
+| TRAINER_GLACIA-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 901.0 | 0 | 4 | 0 | 1 | 1 |
+| TRAINER_GLACIA-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1301.5 | 0 | 13 | 3 | 8 | 6 |
+| TRAINER_DRAKE-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 809.8 | 0 | 5 | 0 | 0 | 0 |
+| TRAINER_DRAKE-attack | expectimax | 3 | 4 | 75.0% | 0.301 | 0.954 | 1773.2 | 0 | 20 | 1 | 1 | 1 |
+| TRAINER_STEVEN-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 687.8 | 0 | 4 | 0 | 0 | 0 |
+| TRAINER_STEVEN-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1021.0 | 0 | 6 | 0 | 4 | 4 |
+| TRAINER_GLACIA-stall | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 3244.1 | 0 | 16 | 0 | 12 | 12 |
+| TRAINER_GLACIA-stall | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 6430.6 | 0 | 31 | 0 | 11 | 7 |
 
 ## AI voluntary switches
 

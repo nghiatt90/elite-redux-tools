@@ -478,6 +478,33 @@ export function playComparisonGame(
   return record
 }
 
+export interface RunFightGamesOptions {
+  games: number
+  seedOffset?: number
+  maxTurns?: number
+  onGame?: (policy: PolicyKind, game: number, record: ComparisonGameRecord) => void
+}
+
+/** The per-fight loop: `role` then `expectimax`, games 1..`games`, each game on
+ * `gameSeed(seedOffset, game)`, logs collected only for role games 1 and 2. */
+export function runFightGames(
+  setup: PolicyFightSetup,
+  options: RunFightGamesOptions,
+): Record<PolicyKind, ComparisonGameRecord[]> {
+  const { games, seedOffset = 0, maxTurns, onGame } = options
+  const records: Record<PolicyKind, ComparisonGameRecord[]> = { role: [], expectimax: [] }
+  for (const policy of ['role', 'expectimax'] as const) {
+    for (let game = 1; game <= games; game++) {
+      const seed = gameSeed(seedOffset, game)
+      const collectLog = policy === 'role' && game <= 2
+      const record = playComparisonGame(setup, policy, seed, { maxTurns, collectLog })
+      records[policy].push(record)
+      onGame?.(policy, game, record)
+    }
+  }
+  return records
+}
+
 // ---------------------------------------------------------------------------
 // Battle log
 // ---------------------------------------------------------------------------
@@ -494,9 +521,7 @@ const STATUS_NAMES: [number, string][] = [
 ]
 
 function statusText(status1: number): string {
-  const names = STATUS_NAMES.filter(([bit]) =>
-    bit === STATUS1_SLEEP ? (status1 & bit) === bit : (status1 & bit) !== 0,
-  ).map(([, name]) => name)
+  const names = STATUS_NAMES.filter(([bit]) => (status1 & bit) !== 0).map(([, name]) => name)
   return names.length > 0 ? names.join('+') : 'none'
 }
 

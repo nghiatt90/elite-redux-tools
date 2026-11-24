@@ -9,14 +9,11 @@ import {
   buildFightSetup,
   classifyWinRates,
   fightKey,
-  gameSeed,
-  playComparisonGame,
   renderGateReport,
+  runFightGames,
   summarizePolicy,
-  type ComparisonGameRecord,
   type FightMeasurement,
   type PolicyComparisonFixture,
-  type PolicyKind,
 } from './policyComparison'
 
 const GAMES = Number(process.env.SIM_POLICY_GAMES ?? 80)
@@ -45,22 +42,23 @@ describe.skipIf(process.env.SIM_POLICY !== '1')('policy comparison gate', () => 
       const key = fightKey(fight)
       mkdirSync(OUT_DIR, { recursive: true })
 
-      const records: Record<PolicyKind, ComparisonGameRecord[]> = { role: [], expectimax: [] }
       const logChunks: string[] = []
-
-      for (const policy of ['role', 'expectimax'] as const) {
-        for (let game = 1; game <= GAMES; game++) {
-          const seed = gameSeed(SEED_OFFSET, game)
-          const collectLog = policy === 'role' && game <= 2
-          const record = playComparisonGame(setup, policy, seed, { maxTurns: MAX_TURNS, collectLog })
-          records[policy].push(record)
-          if (collectLog && record.log) {
-            logChunks.push(`== ${key} ${policy} game ${game} seed ${seed} ==\n${record.log}`)
+      const records = runFightGames(setup, {
+        games: GAMES,
+        seedOffset: SEED_OFFSET,
+        maxTurns: MAX_TURNS,
+        onGame: (policy, game, record) => {
+          if (policy === 'role' && game <= 2 && record.log) {
+            logChunks.push(
+              `== ${key} ${policy} game ${game} seed ${record.seed} ==\n${record.log}`,
+            )
           }
           console.log(
-            `POLICY ${key} ${policy} game=${game} seed=${seed} outcome=${record.outcome} turns=${record.turns} capped=${record.capped} ms=${Math.round(record.ms)}`,
+            `POLICY ${key} ${policy} game=${game} seed=${record.seed} outcome=${record.outcome} turns=${record.turns} capped=${record.capped} ms=${Math.round(record.ms)}`,
           )
-        }
+        },
+      })
+      for (const policy of ['role', 'expectimax'] as const) {
         const summary = summarizePolicy(policy, records[policy])
         console.log(
           `POLICY ${key} ${policy} summary wins=${summary.wins}/${summary.games} rate=${summary.rate.toFixed(3)} wilson=[${summary.lower.toFixed(3)},${summary.upper.toFixed(3)}] msPerGame=${summary.msPerGame.toFixed(1)} capped=${summary.capped}`,

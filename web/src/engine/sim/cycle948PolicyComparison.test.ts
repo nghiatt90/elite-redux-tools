@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { BattlerState, SimPartyMon } from './state'
+import { STATUS1_PARALYSIS } from './constants'
 import { buildPlayerParty } from './driver/buildParty'
 import { legalChoices, playExpectimaxBattle } from './driver/expectimax'
 import type { PlayerChoice } from './driver/expectimax'
@@ -15,10 +16,13 @@ import {
   classifyWinRates,
   createPolicyObserver,
   fightKey,
+  formatBattleLog,
   gameSeed,
   gameSeeds,
   playComparisonGame,
   roleNameFor,
+  runFightGames,
+  type ObservedTurn,
   type PolicyComparisonFixture,
   type PolicyFightSetup,
 } from './driver/policyComparison'
@@ -192,6 +196,48 @@ describe('cycle 948 - classifier', () => {
   })
 })
 
+describe('cycle 948 - battle log status', () => {
+  function playerLine(status1: number): string {
+    const view = (value: number) => ({
+      speciesId: 'SPECIES_SNORLAX',
+      hp: 100,
+      maxHp: 100,
+      status1: value,
+      statStages: [],
+    })
+    const turn = {
+      turn: 1,
+      player: view(status1),
+      opponent: view(0),
+      playerPartySpecies: ['SPECIES_SNORLAX'],
+      opponentPartySpecies: ['SPECIES_MACHAMP'],
+      choice: null,
+      trace: [],
+      chosenActions: [null, null],
+      outcome: { actions: [] },
+    } as unknown as ObservedTurn
+    const log = formatBattleLog([turn], { outcome: 'WON', turns: 1, capped: false })
+    const line = log.split('\n').find((candidate) => candidate.startsWith('  player: '))
+    if (!line) throw new Error('no player line in battle log')
+    return line
+  }
+
+  it('reports any nonzero sleep counter as SLP', () => {
+    expect(playerLine(1)).toContain('status SLP')
+    expect(playerLine(3)).toContain('status SLP')
+  })
+
+  it('reports paralysis and no SLP', () => {
+    const line = playerLine(STATUS1_PARALYSIS)
+    expect(line).toContain('status PAR')
+    expect(line).not.toContain('SLP')
+  })
+
+  it('reports no status for zero', () => {
+    expect(playerLine(0)).toContain('status none')
+  })
+})
+
 describe('cycle 948 - smoke run', () => {
   it(
     'plays two games per policy and keeps its records consistent',
@@ -199,15 +245,7 @@ describe('cycle 948 - smoke run', () => {
     () => {
       const setup = setupFor('TRAINER_GLACIA-stall')
       const maxTurns = 8
-      const role = [1, 2].map((game) =>
-        playComparisonGame(setup, 'role', gameSeed(0, game), {
-          maxTurns,
-          collectLog: game === 1,
-        }),
-      )
-      const expectimax = [1, 2].map((game) =>
-        playComparisonGame(setup, 'expectimax', gameSeed(0, game), { maxTurns }),
-      )
+      const { role, expectimax } = runFightGames(setup, { games: 2, seedOffset: 0, maxTurns })
 
       for (const records of [role, expectimax]) {
         expect(records).toHaveLength(2)
@@ -219,11 +257,18 @@ describe('cycle 948 - smoke run', () => {
         }
       }
 
-      expect(role.map((record) => record.seed)).toEqual(gameSeeds(2, 0))
-      expect(expectimax.map((record) => record.seed)).toEqual(gameSeeds(2, 0))
+      expect(role.map((record) => record.seed)).toEqual([1000, 2000])
+      expect(expectimax.map((record) => record.seed)).toEqual([1000, 2000])
+
+      expect(role[0]!.log).toBeDefined()
+      expect(role[1]!.log).toBeDefined()
+      for (const record of expectimax) expect(record.log).toBeUndefined()
+
+      const short = runFightGames(setup, { games: 2, seedOffset: 7, maxTurns: 1 })
+      expect(short.role.map((record) => record.seed)).toEqual([1007, 2007])
+      expect(short.expectimax.map((record) => record.seed)).toEqual([1007, 2007])
 
       const log = role[0]!.log
-      expect(log).toBeTruthy()
       expect(log!.split('\n').filter((line) => line.startsWith('Turn '))).toHaveLength(role[0]!.turns)
     },
   )
