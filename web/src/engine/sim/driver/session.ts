@@ -521,6 +521,12 @@ export interface StepResult {
   outcome: TurnOutcome
   /** Every unmodelled note raised by the AI and by the turn. */
   unmodelled: string[]
+  /** The four battlers' actions as chosen before `executeTurn` ran, in battler
+   * id order: player, opponent, partner, second opponent. An absent action is
+   * null (no action chosen, e.g. a fainted or absent battler). Exposed so a
+   * caller can tell what the AI selected without reconstructing it from the
+   * turn outcome. */
+  chosenActions: (ChosenAction | null)[]
 }
 
 /** Chooses the opponent's action with the ported AI (or uses `fixedOpponentAction`, `null` meaning no action), then runs one turn with `playerAction`.
@@ -581,11 +587,13 @@ export function stepTurn(
     }
   }
 
-  const outcome = executeTurn(
-    state,
-    [playerAction, opponentAction, partnerAction, secondOpponentAction],
-    session.turnDeps,
-  )
+  const chosenActions: (ChosenAction | null)[] = [
+    playerAction,
+    opponentAction,
+    partnerAction,
+    secondOpponentAction,
+  ]
+  const outcome = executeTurn(state, chosenActions, session.turnDeps)
   for (const a of outcome.actions) unmodelled.push(...a.unmodelled)
   unmodelled.push(
     ...outcome.endTurnUnmodelled,
@@ -594,7 +602,7 @@ export function stepTurn(
     ...outcome.replacementUnmodelled,
     ...(outcome.battleEventsUnmodelled ?? []),
   )
-  return { outcome, unmodelled }
+  return { outcome, unmodelled, chosenActions }
 }
 
 /**

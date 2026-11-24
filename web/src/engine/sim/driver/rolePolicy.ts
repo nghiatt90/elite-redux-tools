@@ -503,7 +503,7 @@ function isCountingStat(stat: number): boolean {
 
 /** The counting stats a self-boost move raises, or null when it is not a
  * self-boost move. */
-function boostStatsOf(session: BattleSession, moveId: string): readonly number[] | null {
+export function boostStatsOf(session: BattleSession, moveId: string): readonly number[] | null {
   const move = session.data.dataContext.move(moveId)
   if (!move || move.split !== 'STATUS' || move.target !== 'USER') return null
   const stats = move.effect ? SELF_BOOST_EFFECTS[move.effect] : undefined

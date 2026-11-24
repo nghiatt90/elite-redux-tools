@@ -13,7 +13,7 @@ import type { BattleFormat } from './battleFormat'
 import { createHeuristicPlayerReplacement } from './expectimax'
 import type { PlayerChoice } from './expectimax'
 import type { SimDataBundle, TrainerData } from './loadSimData'
-import type { BattleSession, Tier } from './session'
+import type { BattleSession, StepResult, Tier } from './session'
 import { beginTurn, createSession, stepTurn } from './session'
 import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
@@ -46,6 +46,10 @@ export interface PolicyBattleOptions {
    * supplies its matchup-scored replacement here. */
   playerReplacement?: (state: BattleState, battlerId: number) => number
   maxTurns?: number
+  /** Called after each `stepTurn`, with the turn number, the action the policy
+   * chose and the step result. Read-only observer hook: the loop does not use
+   * its return value. */
+  onTurn?: (turn: number, choice: PlayerChoice | null, step: StepResult) => void
 }
 
 export interface PolicyBattleResult {
@@ -93,7 +97,8 @@ export function playPolicyBattle(options: PolicyBattleOptions): PolicyBattleResu
     // (turn.ts:1864).
     const battler = session.state.battlers[0]
     if (battler) battler.monToSwitchIntoId = choice?.switchTo ?? PARTY_SIZE
-    stepTurn(session, choice ? choice.action : null)
+    const step = stepTurn(session, choice ? choice.action : null)
+    options.onTurn?.(turns, choice, step)
   }
 
   const outcome = session.state.battleOutcome ?? 'MAX_TURNS'

@@ -1481,6 +1481,12 @@ export interface ExpectimaxBattleResult {
   /** The player's active battler at the end (`state.battlers[0]`): `carryParty` reads
    * its live HP and `status1`, which the party slot above may not have. */
   finalActive: BattlerState
+  /** The opponent's party at the end (`state.sides[1].party`), deep-copied. Same
+   * staleness caveat as `finalParty` above. */
+  finalOpponentParty?: SimPartyMon[]
+  /** The opponent's active battler at the end (`state.battlers[1]`), the mirror of
+   * `finalActive` for the other side. */
+  finalOpponentActive?: BattlerState
   /** The player's live battlers at the end: `battlers[0]` and, when `battlersCount === 4`, `battlers[2]`. */
   finalActives?: BattlerState[]
   /** What happened to the player's side this game. Aggregated across games by
@@ -1539,6 +1545,8 @@ export function playExpectimaxBattle(options: ExpectimaxBattleOptions): Expectim
     finalScore: positionScore(session.state),
     finalParty: cloneParty(session.state.sides[0].party),
     finalActive: session.state.battlers[0]!,
+    finalOpponentParty: cloneParty(session.state.sides[1].party),
+    finalOpponentActive: session.state.battlers[1] ?? undefined,
     finalActives,
     summary: {
       firstFaintTurn,
