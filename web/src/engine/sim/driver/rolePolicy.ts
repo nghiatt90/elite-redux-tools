@@ -5,18 +5,35 @@
 //
 // This file holds the shared inputs every role reads (a 3-sample prediction of
 // the AI's next action, our damage ranges, speed order, the predicted switch-in)
-// and three of the six roles: attacker, pivot and lead/hazard setter. The
-// set-up sweeper, staller and support roles land in s20b2; until then the
-// lead/hazard setter's staller fallback is `chooseStallerStub`.
+// and five of the six roles: attacker, pivot, lead/hazard setter, set-up sweeper
+// and staller. The support role lands in s20b3.
 //
 // Ports of game mechanics cite the C; the policy thresholds (the 50% default
-// safety line, accuracy weighting) are MODEL CHOICES and are marked as such.
+// safety line, accuracy weighting, the heal threshold) are MODEL CHOICES and are
+// marked as such.
 
 import { createBattlerState } from '../create'
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
-import { SIDE_STATUS_STEALTH_ROCK } from '../constants'
+import {
+  DEFAULT_STAT_STAGE,
+  MAX_STAT_STAGE,
+  SIDE_STATUS_STEALTH_ROCK,
+  STAT_ACC,
+  STAT_ATK,
+  STAT_DEF,
+  STAT_SPATK,
+  STAT_SPDEF,
+  STAT_SPEED,
+  STATUS1_ANY,
+  STATUS1_BURN,
+  STATUS1_POISON_ANY,
+  STATUS2_CURSED,
+  STATUS2_NIGHTMARE,
+  STATUS3_LEECHSEED,
+} from '../constants'
 import type { BattleState, SimBattleMon, SimPartyMon } from '../state'
+import { canBeBurned, canBeParalyzed, canBeParalyzedIgnoreType, canBePoisoned, canSleep } from '../statusEffects'
 import { buildTurnOrderContext } from '../turn'
 import type { ChosenAction } from '../turnOrder'
 import { getWhoStrikesFirst } from '../turnOrder'
@@ -27,9 +44,8 @@ import { guaranteedKo, ourDamageRange, pivotMoves, predictAi } from './policyInp
 import type { BattleSession } from './session'
 import { aiDamageDepsFor, cloneSession } from './session'
 
-/** The roles built in this cycle. s20b2 extends the union with
- * `setupSweeper | staller | support`. */
-export type RoleName = 'attacker' | 'pivot' | 'leadHazard'
+/** The roles built so far. `support` lands in s20b3. */
+export type RoleName = 'attacker' | 'pivot' | 'leadHazard' | 'setupSweeper' | 'staller'
 
 /** Role parameters. These are GA genes in the solver (plan decision 14, at most
  * two per role), so every one is optional with the default below. */
@@ -41,9 +57,15 @@ export interface RoleParams {
   targetLayers?: number
   /** leadHazard: role played once the layers are laid. Default 'attacker'. */
   fallbackRole?: 'attacker' | 'staller'
-  /** attacker / pivot / leadHazard: the HP fraction of our active mon above
-   * which a predicted move counts as threatening. Default 50. */
+  /** attacker / pivot / leadHazard / setupSweeper: the HP fraction of our
+   * active mon above which a predicted move counts as threatening. Default 50.
+   * For the sweeper this is also its "safe to boost" line. */
   safetyPct?: number
+  /** setupSweeper: boost while the highest of our Attack / Sp. Atk / Speed
+   * stages is below this many stages above neutral. Default 2. */
+  targetStage?: 1 | 2 | 3 | 6
+  /** staller: heal below this percentage of max HP. Default 50. */
+  healThreshold?: 33 | 50 | 66
 }
 
 /** Per-battler state the caller owns and persists across turns. `lastMove` is
@@ -56,6 +78,9 @@ export interface RoleMemory {
 // MODEL CHOICE: an incoming move that removes more than this percentage of our
 // current HP counts as threatening. 50 is decision 14's default, not a game fact.
 const DEFAULT_SAFETY_PCT = 50
+// MODEL CHOICE: decision 14's own defaults for the two new roles.
+const DEFAULT_TARGET_STAGE = 2
+const DEFAULT_HEAL_THRESHOLD = 50
 // Three samples is decision 14's contract (`predictAi(session, 3, seedBase)`).
 const SAMPLE_COUNT = 3
 // Deterministic probe seeds: the policy is a pure function of the position.
@@ -364,6 +389,188 @@ function bestByLowestRoll(pool: MoveChoiceInfo[]): MoveChoiceInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Set-up sweeper inputs (decision 14)
+// ---------------------------------------------------------------------------
+
+/** Effects that make the opponent able to undo our boosts: Haze resets every
+ * stage, Roar/Whirlwind and the hit-and-switch moves drag us out. Matched by
+ * moves.json `effect` rather than a name list, so a repointed move id is
+ * followed. Verified in data/v2.65beta/moves.json: MOVE_HAZE EFFECT_HAZE,
+ * MOVE_ROAR EFFECT_ROAR, MOVE_DRAGON_TAIL / MOVE_WHIRLWIND / MOVE_CIRCLE_THROW
+ * EFFECT_HIT_SWITCH_TARGET. */
+const PHASE_OUT_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_HAZE',
+  'EFFECT_ROAR',
+  'EFFECT_HIT_SWITCH_TARGET',
+])
+
+/** Abilities with `bitfields.unaware` set in data/v2.65beta/abilityHooks.json --
+ * the same four moveEffects.ts's IsUnaware scan lists (`IsUnaware`,
+ * battle_util.c:9006-9009). An Unaware opponent ignores our stages, so a boost
+ * is wasted. Read off the party mon's `abilities` (AbilitySlots: chosen slot 0
+ * plus the three innates), which is where SimPartyMon keeps them
+ * (state.ts:450). */
+const UNAWARE_ABILITIES: readonly string[] = [
+  'ABILITY_CONTEMPT',
+  'ABILITY_LEPIDOPTERAN',
+  'ABILITY_SWORD_OF_DAMNATION',
+  'ABILITY_UNAWARE',
+]
+
+/** A self-boost move's effect -> the stats its handler raises, with the battle
+ * script that sets `setstatchanger` (data/battle_scripts_1.s). Only rows whose
+ * handler in moveEffects.ts was read; moves that raise an ambiguous stat are
+ * deliberately omitted (EFFECT_SHARPEN picks the user's higher attacking stat,
+ * getHighestAttackingStatId). The sweeper counts only STAT_ATK, STAT_SPATK and
+ * STAT_SPEED; the other entries are here so the map stays a faithful record. */
+const SELF_BOOST_EFFECTS: Readonly<Record<string, readonly number[]>> = {
+  // BattleScript_EffectAttackUp / AttackUp2 / SpecialAttackUp(2/3) / SpeedUp(2).
+  EFFECT_ATTACK_UP: [STAT_ATK],
+  EFFECT_ATTACK_UP_2: [STAT_ATK],
+  EFFECT_SPECIAL_ATTACK_UP: [STAT_SPATK],
+  EFFECT_SPECIAL_ATTACK_UP_2: [STAT_SPATK],
+  EFFECT_SPECIAL_ATTACK_UP_3: [STAT_SPATK],
+  EFFECT_SPEED_UP: [STAT_SPEED],
+  EFFECT_SPEED_UP_2: [STAT_SPEED],
+  // BattleScript_EffectBulkUp (battle_scripts_1.s:6670-6693).
+  EFFECT_BULK_UP: [STAT_ATK, STAT_DEF],
+  // BattleScript_EffectCoil (:2019-2061).
+  EFFECT_COIL: [STAT_ATK, STAT_DEF, STAT_ACC],
+  // BattleScript_EffectCalmMind (:6739-6763).
+  EFFECT_CALM_MIND: [STAT_SPATK, STAT_SPDEF],
+  // BattleScript_EffectDragonDance (:6817-6836).
+  EFFECT_DRAGON_DANCE: [STAT_ATK, STAT_SPEED],
+  // BattleScript_EffectQuiverDance (:2063-2093).
+  EFFECT_QUIVER_DANCE: [STAT_SPATK, STAT_SPDEF, STAT_SPEED],
+  // BattleScript_EffectVictoryDance (:2095-2125).
+  EFFECT_VICTORY_DANCE: [STAT_ATK, STAT_DEF, STAT_SPEED],
+  // BattleScript_EffectMysticDance (:6773-6797).
+  EFFECT_MYSTIC_DANCE: [STAT_SPATK, STAT_SPEED],
+  // BattleScript_EffectAttackUpUserAlly (:34-69): Attack (partner too in doubles).
+  EFFECT_HOWL: [STAT_ATK],
+  // BattleScript_EffectMeditate (:6714-6737).
+  EFFECT_MEDITATE: [STAT_ATK, STAT_SPDEF],
+  // BattleScript_EffectAttackAccUp (:2167-2190).
+  EFFECT_ATTACK_ACCURACY_UP: [STAT_ATK, STAT_ACC],
+  // BattleScript_EffectAttackSpAttackUp (:2142-2165).
+  EFFECT_ATTACK_SPATK_UP: [STAT_ATK, STAT_SPATK],
+  // BattleScript_EffectShiftGear (:1988-2017): Speed +2 (or +1 above stage 10), Attack +1.
+  EFFECT_SHIFT_GEAR: [STAT_SPEED, STAT_ATK],
+  // BattleScript_EffectGrowth (:1912-1946): +1 each, +2 in sun.
+  EFFECT_GROWTH: [STAT_ATK, STAT_SPATK],
+  // BattleScript_EffectShellSmash (:1800-1846): also lowers Def/SpDef, which do not count.
+  EFFECT_SHELL_SMASH: [STAT_ATK, STAT_SPATK, STAT_SPEED],
+  // BattleScript_EffectGeomancy (:4455-4494).
+  EFFECT_GEOMANCY: [STAT_SPATK, STAT_SPDEF, STAT_SPEED],
+  // BattleScript_EffectTakeHeart (:6695-6712).
+  EFFECT_TAKE_HEART: [STAT_SPATK, STAT_SPDEF],
+  // BattleScript_EffectClangorousSoul (:245-257) -> BattleScript_AllStatsUp (:7891-7925).
+  EFFECT_CLANGOROUS_SOUL: [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF],
+  // BattleScript_EffectFilletAway (:5606-5642).
+  EFFECT_FILLET_AWAY: [STAT_ATK, STAT_SPATK, STAT_SPEED],
+  // BattleScript_EffectNoRetreat (:338-354) -> BattleScript_AllStatsUp (:7891-7925).
+  EFFECT_NO_RETREAT: [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF],
+  // BattleScript_EffectTidyUp (:5440-5465).
+  EFFECT_TIDY_UP: [STAT_ATK, STAT_SPEED],
+}
+
+/** The stats that count toward the sweeper's stage: Attack, Sp. Atk, Speed
+ * (decision 14). The Def / Sp. Def / accuracy entries above are informational. */
+function isCountingStat(stat: number): boolean {
+  return stat === STAT_ATK || stat === STAT_SPATK || stat === STAT_SPEED
+}
+
+/** The counting stats a self-boost move raises, or null when it is not a
+ * self-boost move. */
+function boostStatsOf(session: BattleSession, moveId: string): readonly number[] | null {
+  const move = session.data.dataContext.move(moveId)
+  if (!move || move.split !== 'STATUS' || move.target !== 'USER') return null
+  const stats = move.effect ? SELF_BOOST_EFFECTS[move.effect] : undefined
+  return stats ? stats.filter(isCountingStat) : null
+}
+
+// ---------------------------------------------------------------------------
+// Staller inputs (decision 14)
+// ---------------------------------------------------------------------------
+
+/** Effects that set a major status and the C predicate the move's handler checks
+ * before it can (`CanBePoisoned` battle_util.c:5042-5050, `CanBeBurned`
+ * :5061-5070, `CanBeParalyzed` :5072-5080, `CanSleep` :5032-5039), all ported in
+ * statusEffects.ts. Kept small on purpose: the common status moves. */
+const STATUS_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_TOXIC', // BattleScript_EffectToxic, battle_scripts_1.s:3957-3970
+  'EFFECT_POISON', // BattleScript_EffectPoison, :4332-4344 (Poison Powder-family)
+  'EFFECT_WILL_O_WISP', // BattleScript_EffectWillOWisp, :6090-6103
+  'EFFECT_PARALYZE', // BattleScript_EffectParalyze, :4362-4376 (Thunder Wave)
+  'EFFECT_PARALYZE_IGNORE_TYPE', // BattleScript_EffectParalyzeIgnoreType, :4346-4360
+  'EFFECT_SLEEP', // BattleScript_EffectSleep, :3103-...
+])
+
+/** Whether `moveId`'s status effect can land on battler 1, using the same
+ * CanBe* helpers the move handlers use (so type immunity -- Fire vs Will-O-Wisp,
+ * Poison/Steel vs Toxic -- and an existing status are respected). */
+function statusMoveWorks(session: BattleSession, moveId: string, effect: string): boolean {
+  if (((session.state.battlers[1]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
+  const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  switch (effect) {
+    case 'EFFECT_TOXIC':
+    case 'EFFECT_POISON':
+      return canBePoisoned(session.state, 0, 1, moveId, deps)
+    case 'EFFECT_WILL_O_WISP':
+      return canBeBurned(session.state, 1, 0, deps)
+    case 'EFFECT_PARALYZE':
+      return canBeParalyzed(session.state, 0, 1, deps)
+    case 'EFFECT_PARALYZE_IGNORE_TYPE':
+      return canBeParalyzedIgnoreType(session.state, 0, 1, deps)
+    case 'EFFECT_SLEEP':
+      return canSleep(session.state, 1, 0, deps)
+    default:
+      return false
+  }
+}
+
+/** A protection move as ProtectSucceeds / Cmd_setprotectlike read it
+ * (battle_script_commands.c:6649-6655, PROTECT_SUCCESS_RATES :727): the
+ * moves.json `isProtection` flag, effect EFFECT_PROTECT, priority +4 and a
+ * self target. The flag test is what excludes EFFECT_PROTECT moves that are not
+ * protection -- MOVE_CRAFTY_SHIELD is effect EFFECT_PROTECT but unflagged and
+ * priority 3 in the pinned snapshot. */
+function isProtectionMove(session: BattleSession, moveId: string): boolean {
+  const move = session.data.dataContext.move(moveId)
+  return (
+    !!move &&
+    move.effect === 'EFFECT_PROTECT' &&
+    move.flags.isProtection === true &&
+    move.priority === 4 &&
+    move.target === 'USER'
+  )
+}
+
+/** ProtectSucceeds's "the previous move was a protection move" test
+ * (battle_script_commands.c:6649-6655): the C reads `gLastResultingMoves` and
+ * the flag; the policy reads the caller's memory. `protectUses > 0` is the
+ * battle state's own record that a protect already succeeded. */
+function usedProtectionLastTurn(session: BattleSession, memory: RoleMemory): boolean {
+  if ((session.state.battlers[0]?.volatiles.protectUses ?? 0) > 0) return true
+  if (!memory.lastMove) return false
+  return session.data.dataContext.move(memory.lastMove)?.flags.isProtection === true
+}
+
+/** Residual damage ticking on the opponent's active mon (decision 14):
+ * poison/burn/Leech Seed statuses3/status2 bits. */
+function targetHasResidual(session: BattleSession): boolean {
+  const target = session.state.battlers[1]
+  if (!target) return false
+  return (
+    (target.mon.status1 & STATUS1_POISON_ANY) !== 0 ||
+    (target.mon.status1 & STATUS1_BURN) !== 0 ||
+    (target.statuses3 & STATUS3_LEECHSEED) !== 0 ||
+    (target.mon.status2 & STATUS2_CURSED) !== 0 ||
+    (target.mon.status2 & STATUS2_NIGHTMARE) !== 0
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Roles
 // ---------------------------------------------------------------------------
 
@@ -371,6 +578,9 @@ interface RoleDecision {
   choice: PlayerChoice
   /** Short trace tag, e.g. 'fakeout', 'ko', 'pivot'. */
   tag: string
+  /** An optional tag appended after `tag` (the lead/hazard fallback shows the
+   * delegated role's own tag, e.g. ['leadHazard', 'staller', 'status']). */
+  subTag?: string
 }
 
 /** attacker: Fake Out on its first turn in; else a guaranteed KO; else a
@@ -502,6 +712,61 @@ function hazardCount(session: BattleSession, effect: string): number {
   }
 }
 
+/** The highest of our Attack, Sp. Atk and Speed stages relative to neutral.
+ * statStages[] stores the C's internal 0..12 with 6 neutral (constants.ts:63;
+ * STAT_ATK = 1, STAT_SPEED = 3, STAT_SPATK = 4, constants.ts:46-49). */
+function currentBoostStage(session: BattleSession): number {
+  const mon = session.state.battlers[0]?.mon
+  if (!mon) return 0
+  const stages = (stat: number) => (mon.statStages[stat] ?? DEFAULT_STAT_STAGE) - DEFAULT_STAT_STAGE
+  return Math.max(stages(STAT_ATK), stages(STAT_SPATK), stages(STAT_SPEED))
+}
+
+/** True when any live opponent party mon can undo our stages: a Haze or
+ * phazing move, or an Unaware slot. The opposing movesets are visible
+ * (SimPartyMon.moves is Slot4<string | null>, state.ts:447). */
+function opponentCanUndoBoosts(session: BattleSession): boolean {
+  for (const mon of session.state.sides[1].party) {
+    if (!mon || mon.speciesId === null || mon.hp <= 0) continue
+    for (const moveId of mon.moves) {
+      if (!moveId) continue
+      const effect = session.data.dataContext.move(moveId)?.effect
+      if (effect && PHASE_OUT_EFFECTS.has(effect)) return true
+    }
+    for (const ability of [mon.abilities.ability, ...mon.abilities.innates]) {
+      if (ability && UNAWARE_ABILITIES.includes(ability)) return true
+    }
+  }
+  return false
+}
+
+/** setupSweeper: while below the target stage, safe (no sample threatens) and
+ * the opponent cannot undo the boost, use a legal self-boost move; else play as
+ * attacker (decision 14). */
+function chooseSetupSweeper(
+  session: BattleSession,
+  view: PredictionView,
+  targetSlot: number | null,
+  hp: number,
+  params: RoleParams,
+): RoleDecision {
+  const targetStage = params.targetStage ?? DEFAULT_TARGET_STAGE
+  const mon = session.state.battlers[0]?.mon
+  if (!view.threatened && !opponentCanUndoBoosts(session) && currentBoostStage(session) < targetStage) {
+    const moves = evaluateMoves(session, targetSlot)
+    const boost = moves.find((info) => {
+      if (!info.moveId) return false
+      const stats = boostStatsOf(session, info.moveId)
+      if (!stats || stats.length === 0) return false
+      // The handler fails when every stat it raises is already MAX_STAT_STAGE
+      // (BattleScript_EffectStatUp's jumpifstat check); don't pick such a move.
+      return stats.some((stat) => (mon?.statStages[stat] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE)
+    })
+    if (boost) return { choice: boost.choice, tag: 'setup' }
+  }
+  return chooseAttacker(session, view, targetSlot, hp)
+}
+
 /** leadHazard: lay hazards while below the target layers and not threatened
  * with a KO; then play the fallback role (decision 14). */
 function chooseLeadHazard(
@@ -511,7 +776,7 @@ function chooseLeadHazard(
   hp: number,
   params: RoleParams,
   memory: RoleMemory,
-  trace: PolicyTraceEntry[] | undefined,
+  _trace: PolicyTraceEntry[] | undefined,
 ): RoleDecision {
   if (!view.koThreat) {
     const moves = evaluateMoves(session, targetSlot)
@@ -526,22 +791,86 @@ function chooseLeadHazard(
     }
   }
   if ((params.fallbackRole ?? 'attacker') === 'staller') {
-    return { choice: chooseStallerStub(session, params, memory, trace), tag: 'staller' }
+    const staller = chooseStaller(session, view, targetSlot, hp, params, memory)
+    return { choice: staller.choice, tag: 'staller', subTag: staller.tag }
   }
   return chooseAttacker(session, view, targetSlot, hp)
 }
 
-/** s20b2 replaces this with the staller rule; for now it plays the attacker
- * choice, which is what the plan's Step 2.0a stub asks for. */
-export function chooseStallerStub(
+/** staller: status the target when it has none; heal below the threshold
+ * (recovery, or Wish then Protect); Protect while residual damage ticks; else a
+ * residual or damaging move (decision 14). */
+function chooseStaller(
   session: BattleSession,
+  view: PredictionView,
+  targetSlot: number | null,
+  hp: number,
   params: RoleParams,
-  _memory?: RoleMemory,
-  _trace?: PolicyTraceEntry[],
-): PlayerChoice {
-  const view = readPredictions(session, params.safetyPct ?? DEFAULT_SAFETY_PCT)
-  const slot = resolveTargetSlot(session, view.switchSlot)
-  return chooseAttacker(session, view, slot, targetHp(session, slot)).choice
+  memory: RoleMemory,
+): RoleDecision {
+  const moves = evaluateMoves(session, targetSlot)
+  const findEffect = (effect: string): MoveChoiceInfo | undefined =>
+    moves.find((info) => info.moveId !== '' && session.data.dataContext.move(info.moveId)?.effect === effect)
+  const findProtect = (): MoveChoiceInfo | undefined =>
+    moves.find((info) => info.moveId !== '' && isProtectionMove(session, info.moveId))
+
+  // 1. Status the target when it has none and the move works on it. Skipped
+  //    when a sample can KO us: a status move would not save the turn then.
+  if (!view.koThreat) {
+    for (const info of moves) {
+      if (!info.moveId) continue
+      const effect = session.data.dataContext.move(info.moveId)?.effect ?? null
+      if (effect && STATUS_EFFECTS.has(effect) && statusMoveWorks(session, info.moveId, effect)) {
+        return { choice: info.choice, tag: 'status' }
+      }
+    }
+  }
+
+  // 2. Heal below the threshold.
+  const mon = session.state.battlers[0]?.mon
+  const healThreshold = params.healThreshold ?? DEFAULT_HEAL_THRESHOLD
+  if (mon && mon.hp * 100 < healThreshold * mon.maxHp) {
+    // Direct recovery: BattleScript_EffectRestoreHp, battle_scripts_1.s:3940-3955.
+    const recovery = findEffect('EFFECT_RESTORE_HP')
+    if (recovery) return { choice: recovery.choice, tag: 'heal' }
+    // Wish: BattleScript_EffectWish, :6306-6313. Cmd_trywish case 0 fails
+    // while wishCounter != 0 (battle_script_commands.c:11784-11793).
+    const wish = findEffect('EFFECT_WISH')
+    const wishCounter = session.state.field.wishCounter[0] ?? 0
+    if (wish && wishCounter === 0) return { choice: wish.choice, tag: 'wish' }
+    // Counter 1: the Wish used last turn lands at the end of THIS turn, so
+    // Protect now. The C decrements at end of turn and heals when it reaches 0
+    // (battle_util.c:1946).
+    if (wishCounter === 1 && !usedProtectionLastTurn(session, memory)) {
+      const protect = findProtect()
+      if (protect) return { choice: protect.choice, tag: 'protect' }
+    }
+  }
+
+  // 3. Protect while residual damage ticks on the target and we did not protect
+  //    last turn (ProtectSucceeds, battle_script_commands.c:6649-6655).
+  if (!usedProtectionLastTurn(session, memory) && targetHasResidual(session)) {
+    const protect = findProtect()
+    if (protect) return { choice: protect.choice, tag: 'protect' }
+  }
+
+  // 4. Residual, else damaging. Leech Seed fails on a Grass target or when
+  //    already seeded (handleLeechSeed, battle_scripts_1.s:4579-4590); Curse's
+  //    Ghost branch sets STATUS2_CURSED on a target that lacks it
+  //    (Cmd_cursetarget, battle_script_commands.c:11103-11113).
+  const target = session.state.battlers[1]
+  if (target) {
+    const leechSeed = findEffect('EFFECT_LEECH_SEED')
+    if (leechSeed && (target.statuses3 & STATUS3_LEECHSEED) === 0 && !target.mon.types.includes('GRASS')) {
+      return { choice: leechSeed.choice, tag: 'residual' }
+    }
+    const curse = findEffect('EFFECT_CURSE')
+    if (curse && mon?.types.includes('GHOST') && (target.mon.status2 & STATUS2_CURSED) === 0) {
+      return { choice: curse.choice, tag: 'residual' }
+    }
+  }
+
+  return chooseAttacker(session, view, targetSlot, hp)
 }
 
 function decide(
@@ -559,6 +888,10 @@ function decide(
       return choosePivot(session, view, slot, hp, params)
     case 'leadHazard':
       return chooseLeadHazard(session, view, slot, hp, params, memory, trace)
+    case 'setupSweeper':
+      return chooseSetupSweeper(session, view, slot, hp, params)
+    case 'staller':
+      return chooseStaller(session, view, slot, hp, params, memory)
     case 'attacker':
     default:
       return chooseAttacker(session, view, slot, hp)
@@ -588,8 +921,8 @@ export function chooseRoleAction(
   if (trace) {
     trace.push({
       turn,
-      choice: `${role}:${decision.tag}${moveId ? ` ${moveId}` : ''}`,
-      tags: [role, decision.tag],
+      choice: `${role}:${decision.tag}${decision.subTag ? `:${decision.subTag}` : ''}${moveId ? ` ${moveId}` : ''}`,
+      tags: decision.subTag ? [role, decision.tag, decision.subTag] : [role, decision.tag],
     })
   }
   return decision.choice
