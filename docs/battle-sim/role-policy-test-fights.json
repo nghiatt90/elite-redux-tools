@@ -1,5 +1,5 @@
 {
-  "source": "Yoshi, 2026-11-24: teams that won these fights in play (Elite tier, Permanent Mega Mode). Not planned lines: each was won at least once, possibly with a lot of RNG and luck, so a team's true win probability is unknown and may be low; use these for relative comparisons (policy A vs B on the same seeds), never as proof a policy should win. Mega Starmie EVs corrected to 252 Atk (confirmed). 'Kingdra Mega X' is SPECIES_KINGDRA_MEGA (the only Kingdra Mega in the data). 'lead' is the team index sent out first. Roles per docs/battle-sim/solver-v2-plan.md role policies (agreed in discussion, not yet written into the plan).",
+  "source": "Yoshi, 2026-11-24: teams that won these fights in play (Elite tier, Permanent Mega Mode). Not planned lines: each was won at least once, possibly with a lot of RNG and luck, so a team's true win probability is unknown and may be low; use these for relative comparisons (policy A vs B on the same seeds), never as proof a policy should win. Mega Starmie EVs corrected to 252 Atk (confirmed). 'Kingdra Mega X' is SPECIES_KINGDRA_MEGA (the only Kingdra Mega in the data). 'lead' is the team index sent out first. Roles per docs/battle-sim/solver-v2-plan.md decision 14; used by Step 2.0.",
   "fights": [
     {
       "trainer": "TRAINER_SIDNEY",
