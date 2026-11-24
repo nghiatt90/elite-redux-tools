@@ -138,12 +138,11 @@ describe('cycle 942: satisficing unit search', () => {
       generate: () => items.map((item) => [mon(item)]),
     })
     // round 0: screen 3*4 = 12; three tuning runs of 80 (each 40/40 then 80/80); three failed
-    // report confirmations of 40 (4/40 -> lost). round 1: screen 12 + one tuning run of 80,
-    // then the confirmations are gone.
+    // report confirmations of 40 (4/40 -> lost), and the third failure ends the search.
     expect(result.status).toBe('confirmationsExhausted')
     expect(result.confirmations).toBe(MAX_CONFIRMATIONS)
-    expect(result.rounds).toHaveLength(2)
-    expect(result.tuningGames).toBe(3 * SCREEN_GAMES + 3 * 80 + 3 * SCREEN_GAMES + 80)
+    expect(result.rounds).toHaveLength(1)
+    expect(result.tuningGames).toBe(3 * SCREEN_GAMES + 3 * 80)
     expect(result.reportGames).toBe(40 + 3 * 40)
     expect(result.rounds[0]!.candidates.filter((c) => c.reportVerdict === 'lost')).toHaveLength(3)
     expect(result.rounds[0]!.candidates.every((c) => c.tuneVerdict === 'won')).toBe(true)
@@ -163,11 +162,10 @@ describe('cycle 942: satisficing unit search', () => {
       generate: () => items.map((item) => [mon(item)]),
       unitCap: 400,
     })
-    // per round: screen 12 + three lost samples of 40 = 132. Rounds 0-2 spend 396; round 3
-    // screens to 408 and the pre-finalist cap check stops it (overshoot is one screen here).
+    // per round: screen 12 + three lost samples of 40 = 132. Rounds 0-2 spend 396; round 3's
+    // screen would reach 408, so the pre-screen cap check stops it before any game is played.
     expect(result.status).toBe('cap')
-    expect(result.tuningGames).toBe(408)
-    expect(result.tuningGames).toBeGreaterThanOrEqual(400)
+    expect(result.tuningGames).toBe(396)
     expect(result.tuningGames).toBeLessThan(400 + 400)
     expect(result.whatToChange).toHaveLength(RESCORE_CANDIDATES)
     expect(result.whatToChange.every((r) => r.reportVerdict === 'lost')).toBe(true)
@@ -234,10 +232,10 @@ describe('cycle 942: satisficing unit search', () => {
       evaluate: fakeEvaluator(rates, trace, lostOnReport),
       allowedStones: new Set(),
       generate: () => items.map((item) => [mon(item)]),
-      unitCap: 180,
+      unitCap: 184,
     })
     // round 0: screen 12 + 40 (0.2, lost) + 80 (0.3, uncertain then lost) + 40 (0.1, lost) = 172;
-    // round 1 screens to 184 and the pre-finalist cap check stops it.
+    // round 1 screens to exactly 184 and the finalist cap check stops it.
     expect(result.status).toBe('cap')
     expect(result.tuningGames).toBe(3 * SCREEN_GAMES + 40 + 80 + 40 + 3 * SCREEN_GAMES)
     expect(result.rounds).toHaveLength(2)
@@ -268,5 +266,26 @@ describe('cycle 942: satisficing unit search', () => {
     const items = [1, 2, 3, 4, 5, 6, 7, 8]
     expect(shuffled(items, 7)).toEqual(shuffled(items, 7))
     expect(shuffled(items, 7)).not.toEqual(shuffled(items, 8))
+  })
+
+  it('10. a screen that would cross the cap is never run', async () => {
+    const trace: Call[] = []
+    const result = await searchUnit({
+      data,
+      start: start(),
+      evaluate: fakeEvaluator({ [START_ITEM]: 0.1 }, trace),
+      allowedStones: new Set(),
+      generate: () => [WINNING, SITRUS, LIFE_ORB].map((item) => [mon(item)]),
+      unitCap: 10,
+    })
+    // the screen alone would cost 3*4 = 12 > 10, so no tuning game is played at all
+    expect(result.status).toBe('cap')
+    expect(result.tuningGames).toBe(0)
+    expect(result.rounds).toEqual([])
+    expect(result.team).toEqual(start())
+    expect(result.whatToChange).toEqual([])
+    expect(result.reportGames).toBe(40)
+    expect(result.report).toEqual(result.startReport)
+    expect(trace.every((c) => c.seedOffset >= SEED_OFFSET.report)).toBe(true)
   })
 })

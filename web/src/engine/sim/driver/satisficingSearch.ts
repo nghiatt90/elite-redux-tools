@@ -187,10 +187,12 @@ export async function searchUnit(args: SearchUnitArgs): Promise<UnitSearchResult
 
   let incumbent = args.start
   for (let round = 0; ; round++) {
-    // A sampler run of at most 400 games can overshoot the cap by that much (plan decision 7(d)).
+    // The screen is checked against the cap below, so it never overshoots; only a single finalist
+    // sampler run (at most 400 games) can (plan decision 7(d)).
     if (tuningGames >= cap) return finish('cap')
     const generated = args.generate ? args.generate(incumbent) : defaultNeighbours(args, incumbent, round)
     if (generated.length === 0) return finish('noNeighbours')
+    if (tuningGames + generated.length * SCREEN_GAMES > cap) return finish('cap')
 
     const fits = await args.evaluate(generated, SCREEN_GAMES, SEED_OFFSET.tuning)
     tuningGames += generated.length * SCREEN_GAMES
@@ -221,7 +223,6 @@ export async function searchUnit(args: SearchUnitArgs): Promise<UnitSearchResult
       const entry: { record: CandidateRecord; report?: SampledWinProbability } = { record }
       sampled.push(entry)
       if (tune.verdict !== 'won') continue
-      if (confirmations >= MAX_CONFIRMATIONS) return finish('confirmationsExhausted')
       confirmations++
       const report = await sampleWinProbability(runner(record.team), 'report', args.sampler)
       reportGames += report.n
@@ -243,6 +244,9 @@ export async function searchUnit(args: SearchUnitArgs): Promise<UnitSearchResult
           whatToChange: [],
         }
       }
+      // Decision 7(c): at most MAX_CONFIRMATIONS report-seed confirmations per unit; the third
+      // failure ends the search rather than spending more screening and tuning rounds.
+      if (confirmations >= MAX_CONFIRMATIONS) return finish('confirmationsExhausted')
     }
 
     let next = finalists[0]!.record
