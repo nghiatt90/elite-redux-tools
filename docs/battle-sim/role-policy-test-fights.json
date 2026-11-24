@@ -1,0 +1,708 @@
+{
+  "source": "Yoshi, 2026-11-24: teams that won these fights in play (Elite tier, Permanent Mega Mode). Mega Starmie EVs corrected to 252 Atk (confirmed). 'Kingdra Mega X' is SPECIES_KINGDRA_MEGA (the only Kingdra Mega in the data). 'lead' is the team index sent out first. Roles per docs/battle-sim/solver-v2-plan.md role policies (agreed in discussion, not yet written into the plan).",
+  "fights": [
+    {
+      "trainer": "TRAINER_SIDNEY",
+      "kind": "attack",
+      "lead": 4,
+      "team": [
+        {
+          "species": "SPECIES_KINGDRA_MEGA",
+          "ability": "ABILITY_SWIFT_SWIM",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SNIPE_SHOT",
+            "MOVE_DRAGON_PULSE",
+            "MOVE_SLUDGE_BOMB",
+            "MOVE_RAIN_DANCE"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_KAIOSEA",
+          "ability": "ABILITY_MULTISCALE",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_AQUA_BASH",
+            "MOVE_DRILL_PECK",
+            "MOVE_SHOCKING_JAB",
+            "MOVE_SCALE_SHOT"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_STARMIE_MEGA",
+          "ability": "ABILITY_HUGE_POWER",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_WAVE_CRASH",
+            "MOVE_PSYCHOKINETIC_SLAM",
+            "MOVE_ICE_SPINNER",
+            "MOVE_AQUA_JET"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_MR_MIME",
+          "ability": "ABILITY_FILTER",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_MOONBLAST",
+            "MOVE_IRON_DEFENSE",
+            "MOVE_CALM_MIND",
+            "MOVE_BATON_PASS"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_SCYTHER_MEGA",
+          "ability": "ABILITY_AERILATE",
+          "item": "ITEM_LOADED_DICE",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FURY_CUTTER",
+            "MOVE_CUT",
+            "MOVE_KARATE_CHOP",
+            "MOVE_FURY_SWIPES"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_SOPRANICE",
+          "ability": "ABILITY_SNOW_SONG",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SYNCHRONOISE",
+            "MOVE_BOOMBURST",
+            "MOVE_REQUIEM",
+            "MOVE_GHASTLY_ECHO"
+          ],
+          "role": "attacker"
+        }
+      ]
+    },
+    {
+      "trainer": "TRAINER_PHOEBE",
+      "kind": "attack",
+      "lead": 0,
+      "team": [
+        {
+          "species": "SPECIES_KINGDRA_MEGA",
+          "ability": "ABILITY_SWIFT_SWIM",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SNIPE_SHOT",
+            "MOVE_DRAGON_PULSE",
+            "MOVE_SLUDGE_BOMB",
+            "MOVE_RAIN_DANCE"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_KAIOSEA",
+          "ability": "ABILITY_MULTISCALE",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_AQUA_BASH",
+            "MOVE_DRILL_PECK",
+            "MOVE_SHOCKING_JAB",
+            "MOVE_SCALE_SHOT"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_STARMIE_MEGA",
+          "ability": "ABILITY_HUGE_POWER",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_WAVE_CRASH",
+            "MOVE_PSYCHOKINETIC_SLAM",
+            "MOVE_ICE_SPINNER",
+            "MOVE_AQUA_JET"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_MR_MIME",
+          "ability": "ABILITY_FILTER",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_MOONBLAST",
+            "MOVE_IRON_DEFENSE",
+            "MOVE_CALM_MIND",
+            "MOVE_BATON_PASS"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_SCYTHER_MEGA",
+          "ability": "ABILITY_AERILATE",
+          "item": "ITEM_LOADED_DICE",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FURY_CUTTER",
+            "MOVE_CUT",
+            "MOVE_KARATE_CHOP",
+            "MOVE_FURY_SWIPES"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_SOPRANICE",
+          "ability": "ABILITY_SNOW_SONG",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SYNCHRONOISE",
+            "MOVE_BOOMBURST",
+            "MOVE_REQUIEM",
+            "MOVE_GHASTLY_ECHO"
+          ],
+          "role": "attacker"
+        }
+      ]
+    },
+    {
+      "trainer": "TRAINER_GLACIA",
+      "kind": "attack",
+      "lead": 5,
+      "team": [
+        {
+          "species": "SPECIES_KINGDRA_MEGA",
+          "ability": "ABILITY_SWIFT_SWIM",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SNIPE_SHOT",
+            "MOVE_DRAGON_PULSE",
+            "MOVE_SLUDGE_BOMB",
+            "MOVE_RAIN_DANCE"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_KAIOSEA",
+          "ability": "ABILITY_MULTISCALE",
+          "item": "ITEM_CHOICE_BAND",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_AQUA_BASH",
+            "MOVE_DRILL_PECK",
+            "MOVE_SHOCKING_JAB",
+            "MOVE_SCALE_SHOT"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_STARMIE_MEGA",
+          "ability": "ABILITY_HUGE_POWER",
+          "item": "ITEM_CHOICE_BAND",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_WAVE_CRASH",
+            "MOVE_PSYCHOKINETIC_SLAM",
+            "MOVE_ICE_SPINNER",
+            "MOVE_AQUA_JET"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_MR_MIME",
+          "ability": "ABILITY_FILTER",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_MOONBLAST",
+            "MOVE_IRON_DEFENSE",
+            "MOVE_CALM_MIND",
+            "MOVE_BATON_PASS"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_SCYTHER_MEGA",
+          "ability": "ABILITY_AERILATE",
+          "item": "ITEM_CHOICE_BAND",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FURY_CUTTER",
+            "MOVE_CUT",
+            "MOVE_KARATE_CHOP",
+            "MOVE_FURY_SWIPES"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_SOPRANICE",
+          "ability": "ABILITY_SNOW_SONG",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SYNCHRONOISE",
+            "MOVE_BOOMBURST",
+            "MOVE_REQUIEM",
+            "MOVE_GHASTLY_ECHO"
+          ],
+          "role": "attacker"
+        }
+      ]
+    },
+    {
+      "trainer": "TRAINER_DRAKE",
+      "kind": "attack",
+      "lead": 5,
+      "team": [
+        {
+          "species": "SPECIES_KINGDRA_MEGA",
+          "ability": "ABILITY_SWIFT_SWIM",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SNIPE_SHOT",
+            "MOVE_DRAGON_PULSE",
+            "MOVE_SLUDGE_BOMB",
+            "MOVE_RAIN_DANCE"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_KAIOSEA",
+          "ability": "ABILITY_MULTISCALE",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_AQUA_BASH",
+            "MOVE_DRILL_PECK",
+            "MOVE_SHOCKING_JAB",
+            "MOVE_SCALE_SHOT"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_STARMIE_MEGA",
+          "ability": "ABILITY_HUGE_POWER",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_WAVE_CRASH",
+            "MOVE_PSYCHOKINETIC_SLAM",
+            "MOVE_ICE_SPINNER",
+            "MOVE_AQUA_JET"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_MR_MIME",
+          "ability": "ABILITY_FILTER",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_MOONBLAST",
+            "MOVE_IRON_DEFENSE",
+            "MOVE_CALM_MIND",
+            "MOVE_BATON_PASS"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_SCYTHER_MEGA",
+          "ability": "ABILITY_AERILATE",
+          "item": "ITEM_LOADED_DICE",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FURY_CUTTER",
+            "MOVE_CUT",
+            "MOVE_KARATE_CHOP",
+            "MOVE_FURY_SWIPES"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_SOPRANICE",
+          "ability": "ABILITY_SNOW_SONG",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SYNCHRONOISE",
+            "MOVE_BOOMBURST",
+            "MOVE_REQUIEM",
+            "MOVE_GHASTLY_ECHO"
+          ],
+          "role": "attacker"
+        }
+      ]
+    },
+    {
+      "trainer": "TRAINER_STEVEN",
+      "kind": "attack",
+      "lead": 2,
+      "team": [
+        {
+          "species": "SPECIES_KINGDRA_MEGA",
+          "ability": "ABILITY_SWIFT_SWIM",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SNIPE_SHOT",
+            "MOVE_DRAGON_PULSE",
+            "MOVE_SLUDGE_BOMB",
+            "MOVE_RAIN_DANCE"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_KAIOSEA",
+          "ability": "ABILITY_MULTISCALE",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_AQUA_BASH",
+            "MOVE_DRILL_PECK",
+            "MOVE_SHOCKING_JAB",
+            "MOVE_SCALE_SHOT"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_STARMIE_MEGA",
+          "ability": "ABILITY_HUGE_POWER",
+          "item": "ITEM_MYSTIC_WATER",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_WAVE_CRASH",
+            "MOVE_PSYCHOKINETIC_SLAM",
+            "MOVE_ICE_SPINNER",
+            "MOVE_AQUA_JET"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_MR_MIME",
+          "ability": "ABILITY_FILTER",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_MOONBLAST",
+            "MOVE_IRON_DEFENSE",
+            "MOVE_CALM_MIND",
+            "MOVE_BATON_PASS"
+          ],
+          "role": "support",
+          "fallbackRole": "attacker"
+        },
+        {
+          "species": "SPECIES_SCYTHER_MEGA",
+          "ability": "ABILITY_AERILATE",
+          "item": "ITEM_LOADED_DICE",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FURY_CUTTER",
+            "MOVE_CUT",
+            "MOVE_KARATE_CHOP",
+            "MOVE_FURY_SWIPES"
+          ],
+          "role": "attacker"
+        },
+        {
+          "species": "SPECIES_SOPRANICE",
+          "ability": "ABILITY_SNOW_SONG",
+          "item": "ITEM_CHOICE_SCARF",
+          "nature": "NATURE_MODEST",
+          "evs": {
+            "hp": 4,
+            "spatk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_SYNCHRONOISE",
+            "MOVE_BOOMBURST",
+            "MOVE_REQUIEM",
+            "MOVE_GHASTLY_ECHO"
+          ],
+          "role": "attacker"
+        }
+      ]
+    },
+    {
+      "trainer": "TRAINER_GLACIA",
+      "kind": "stall",
+      "lead": 0,
+      "team": [
+        {
+          "species": "SPECIES_LICKILICKY",
+          "ability": "ABILITY_WONDER_SKIN",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_RELAXED",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_WRING_OUT",
+            "MOVE_WISH",
+            "MOVE_SAFE_PASSAGE",
+            "MOVE_PROTECT"
+          ],
+          "role": "staller",
+          "ironPill": true
+        },
+        {
+          "species": "SPECIES_WEEZING",
+          "ability": "ABILITY_NEUTRALIZING_GAS",
+          "item": "ITEM_ABILITY_SHIELD",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_TOXIC",
+            "MOVE_TOXIC_SPIKES",
+            "MOVE_FIRE_BLAST",
+            "MOVE_PROTECT"
+          ],
+          "role": "lead",
+          "fallbackRole": "staller"
+        },
+        {
+          "species": "SPECIES_RHYPERIOR",
+          "ability": "ABILITY_WEAK_ARMOR",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_ADAMANT",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_MOUNTAIN_CHUNK",
+            "MOVE_ASTEROID_DOWNFALL",
+            "MOVE_ROCKET_PUNCH",
+            "MOVE_SWORDS_DANCE"
+          ],
+          "role": "sweeper"
+        },
+        {
+          "species": "SPECIES_BLISSEY",
+          "ability": "ABILITY_TRIAGE",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_SASSY",
+          "evs": {
+            "hp": 252,
+            "def": 4,
+            "spdef": 252
+          },
+          "moves": [
+            "MOVE_SEISMIC_TOSS",
+            "MOVE_WISH",
+            "MOVE_SAFE_PASSAGE",
+            "MOVE_PROTECT"
+          ],
+          "role": "staller",
+          "ironPill": true
+        },
+        {
+          "species": "SPECIES_TANGROWTH",
+          "ability": "ABILITY_BATTLE_ARMOR",
+          "item": "ITEM_LEFTOVERS",
+          "nature": "NATURE_BOLD",
+          "evs": {
+            "hp": 252,
+            "def": 252,
+            "spdef": 4
+          },
+          "moves": [
+            "MOVE_LEECH_SEED",
+            "MOVE_SUBSTITUTE",
+            "MOVE_DRAIN_BRAIN",
+            "MOVE_PROTECT"
+          ],
+          "role": "staller"
+        },
+        {
+          "species": "SPECIES_KANGASKHAN_MEGA",
+          "ability": "ABILITY_TOUGH_CLAWS",
+          "item": "ITEM_SHELL_BELL",
+          "nature": "NATURE_JOLLY",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "spe": 252
+          },
+          "moves": [
+            "MOVE_FAKE_OUT",
+            "MOVE_DOUBLE_EDGE",
+            "MOVE_POWER_UP_PUNCH",
+            "MOVE_PROTECT"
+          ],
+          "role": "attacker"
+        }
+      ]
+    }
+  ]
+}
