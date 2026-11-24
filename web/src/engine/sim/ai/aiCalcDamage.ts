@@ -203,12 +203,16 @@ interface AiScenarioBuild {
  * SetBattlerData masking applied to BOTH battlerAtk and battlerDef
  * (battle_ai_util.c:655-659/861-865), then the same bridge the real player
  * damage path uses (buildBattlerBattleState/buildFieldBattleState). Returns
- * `null` only when the move id itself is unknown. */
-function buildAiScenario(state: BattleState, moveId: string, attackerId: number, defenderId: number, deps: AiDamageDeps): AiScenarioBuild | null {
+ * `null` only when the move id itself is unknown.
+ *
+ * `masked` defaults to TRUE -- every existing AI caller keeps SetBattlerData
+ * exactly as before. `aiDamageRolls` passes FALSE to read the player's REAL
+ * item/moves instead of the AI's concealed view. */
+function buildAiScenario(state: BattleState, moveId: string, attackerId: number, defenderId: number, deps: AiDamageDeps, masked = true): AiScenarioBuild | null {
   const move = deps.moveData(moveId)
   if (!move) return null
 
-  const maskedState = withAiMasking(state, [attackerId, defenderId])
+  const maskedState = masked ? withAiMasking(state, [attackerId, defenderId]) : state
   const roles: CalculationRoles = { attackerId, defenderId }
   const attackerBridge = buildBattlerBattleState(maskedState, attackerId, roles, deps)
   const defenderBridge = buildBattlerBattleState(maskedState, defenderId, roles, deps)
@@ -511,6 +515,54 @@ export function aiCalcDamage(state: BattleState, moveId: string, attackerId: num
   }
 
   return { dmg, unmodelled }
+}
+
+export interface AiDamageRolls {
+  /** All 16 non-crit rolls (85%-100%), ascending. */
+  rolls: number[]
+  /** The same 16 rolls with the crit multiplier forced on, or null when this
+   * move/battler combination can never crit. */
+  critRolls: number[] | null
+  /** Sum of every hit at each roll percentile for a multihit move; null for a
+   * single-hit move. */
+  totalRolls: number[] | null
+  isImmune: boolean
+  unmodelled: string[]
+}
+
+/**
+ * The damage ENGINE's own 16-roll answer for OUR move, with the attacker's real
+ * item and moves -- NOT AI_CalcDamage's blended single number. Builds the same
+ * scenario `aiCalcDamage` builds (same `attackerActsFirst`/`defenderIsSwitching`
+ * values, because those are the only values the AI path has) but with
+ * `masked = false`, so `withAiMasking` does not blank the item/moves the AI has
+ * not yet observed. Returns `null` when the move id is unknown or its power is 0
+ * (the same `if (gBattleMoves[move].power)` gate AI_CalcDamage's own damage call
+ * takes, battle_ai_util.c:665).
+ */
+export function aiDamageRolls(
+  state: BattleState,
+  moveId: string,
+  attackerId: number,
+  defenderId: number,
+  deps: AiDamageDeps,
+): AiDamageRolls | null {
+  const built = buildAiScenario(state, moveId, attackerId, defenderId, deps, false)
+  if (!built || !built.move.power) return null
+  const result = calculateMoveDamage(built.scenario)
+  // Same filter aiGetTypeEffectiveness uses at the end of its body: the
+  // "not modelled" note for a move whose real damage bypasses this formula is
+  // answered elsewhere (or not at all), so it is not reported here.
+  return {
+    rolls: result.rolls,
+    critRolls: result.critRolls,
+    totalRolls: result.totalRolls,
+    isImmune: result.isImmune,
+    unmodelled: [
+      ...built.unmodelled,
+      ...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, built.move.id, built.move.effect)),
+    ],
+  }
 }
 
 /**
