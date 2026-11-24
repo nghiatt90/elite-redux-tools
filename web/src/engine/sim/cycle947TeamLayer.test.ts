@@ -20,6 +20,8 @@ import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import type { PolicyTraceEntry } from './driver/policyBattle'
+import { playPolicyBattle } from './driver/policyBattle'
+import { predictAi } from './driver/policyInputs'
 import {
   chooseRoleAction,
   highestRoll,
@@ -106,6 +108,11 @@ const OUR_JOLTEON: PlayerMonSpec = { species: 'SPECIES_JOLTEON', level: 50, move
 const OUR_MACHAMP_CC: PlayerMonSpec = { species: 'SPECIES_MACHAMP', level: 50, moves: ['MOVE_CLOSE_COMBAT'] }
 const OUR_MACHAMP: PlayerMonSpec = { species: 'SPECIES_MACHAMP', level: 50, moves: ['MOVE_BODY_SLAM'] }
 const MACHAMP_BODY_SLAM = ['MOVE_BODY_SLAM']
+// The per-candidate prediction fixture's Ground candidate: immune to the Thunder
+// Punch their Machamp also carries there, so that prediction and the one made
+// against the fainted Snorlax name different moves. Its Earthquake's worst roll
+// is 86 and its mean 93.5625 onto their 165 HP Machamp (asserted below).
+const OUR_DONPHAN: PlayerMonSpec = { species: 'SPECIES_DONPHAN', level: 50, moves: ['MOVE_EARTHQUAKE'] }
 
 // Their Machamp's Body Slam onto our level-50 Snorlax: 39..46 (cycle945/946's
 // fixture, same call). 46 is the highest roll every threat arithmetic below
@@ -178,20 +185,159 @@ describe('cycle 947 - team layer: purpose order', () => {
 })
 
 describe('cycle 947 - team layer: replacement', () => {
-  it('skips the preserve member while another candidate is acceptable', () => {
+  it('predicts against each candidate, so the AI move it fears depends on who comes in', () => {
+    // Decision 14: "a fresh 3-sample prediction against each candidate". Their
+    // Machamp carries two damaging moves, and which one the AI picks depends on
+    // the monster standing across from it: Body Slam is Normal, which Donphan
+    // (Ground) takes 1x, while Thunder Punch is Electric, which Donphan is
+    // immune to; Aggron (Rock/Steel) takes Thunder Punch 1x and Body Slam at
+    // 1/4x (Normal is halved by Rock and halved again by Steel).
+    // So a prediction made against the FAINTED Snorlax (Body Slam) scores Aggron
+    // highest, and a prediction made against each candidate scores Donphan
+    // highest -- the defect this fixture pins.
+    const s = session(
+      [OUR_SNORLAX, OUR_DONPHAN, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM', 'MOVE_THUNDER_PUNCH'])],
+    )
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker', 'attacker'] })
+    layer.policy(s, 1, [])
+    patchMon(s.state, 0, 0, { hp: 0 })
+
+    // predictAi's defaults are the layer's own SAMPLE_COUNT / PREDICTION_SEED
+    // (3, 0), and the callback dedupes samples in order, so these are exactly
+    // the move lists the rule scores against.
+    const predicted = (slot: number): string[] => {
+      const candidate = stateWithReserve(s.state, 0, s.state.sides[0].party[slot]!, slot)
+      return predictAi({ ...s, state: candidate }, 3, 0).flatMap((sample) => {
+        const action = sample.action
+        if (!action || action.action !== 'USE_MOVE') return []
+        const id = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
+        return id ? [id] : []
+      })
+    }
+    // Against the mon that just fainted, the AI's move is Body Slam -- the one
+    // prediction the old code made for every candidate.
+    const fainted = predictAi({ ...s, state: s.state }, 3, 0)
+    expect(
+      fainted.map((sample) => (sample.action?.action === 'USE_MOVE' ? sample.action.chosenMove?.id : null)),
+    ).toEqual(['MOVE_BODY_SLAM', 'MOVE_BODY_SLAM', 'MOVE_BODY_SLAM'])
+    expect(new Set(predicted(1))).toEqual(new Set(['MOVE_BODY_SLAM']))
+    expect(new Set(predicted(2))).toEqual(new Set(['MOVE_THUNDER_PUNCH']))
+
+    // The damage behind both scores, from the same calls the rule makes.
+    const theirHp = s.state.battlers[1]!.mon.hp
+    expect(theirHp).toBe(165)
+    expect(s.state.sides[0].party[1]!.maxHp).toBe(165)
+    expect(s.state.sides[0].party[2]!.maxHp).toBe(AGGRON_MAX_HP)
+    const bodySlamOnDonphan = highestRoll(rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!)
+    const bodySlamOnAggron = highestRoll(rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 2)!)
+    const punchOnAggron = highestRoll(rangeOnOurReserve(s, 'MOVE_THUNDER_PUNCH', 2)!)
+    const punchOnDonphan = rangeOnOurReserve(s, 'MOVE_THUNDER_PUNCH', 1)!
+    expect(bodySlamOnDonphan).toBe(31) // 31/165 = 18.8%
+    expect(punchOnAggron).toBe(23) // 23/145 = 15.9%
+    expect(bodySlamOnAggron).toBe(BODY_SLAM_VS_AGGRON_MAX) // 5/145 = 3.45%
+    expect(punchOnDonphan.isImmune).toBe(true) // Ground: the AI will not choose it
+    const offense = (slot: number, moveId: string): number => {
+      const state = stateWithReserve(s.state, 0, s.state.sides[0].party[slot]!, slot)
+      return meanRoll(aiDamageRolls(state, moveId, 0, 1, aiDamageDepsFor(data, state, false))!)
+    }
+    const donphanOffense = offense(1, 'MOVE_EARTHQUAKE') // 93.5625 onto their 165 HP
+    const aggronOffense = offense(2, 'MOVE_IRON_HEAD') // 84.6875 onto their 165 HP
+    expect(donphanOffense).toBeCloseTo(93.5625, 4)
+    expect(aggronOffense).toBeCloseTo(84.6875, 4)
+
+    // The rule's own score (offense fraction - incoming fraction), both ways.
+    const score = (offenseMean: number, incomingHigh: number, candidateHp: number): number =>
+      offenseMean / theirHp - incomingHigh / candidateHp
+    const donphanOwn = score(donphanOffense, bodySlamOnDonphan, 165) // 0.5671 - 0.1879 = 0.3792
+    const aggronOwn = score(aggronOffense, punchOnAggron, AGGRON_MAX_HP) // 0.5133 - 0.1586 = 0.3546
+    expect(donphanOwn).toBeGreaterThan(aggronOwn)
+    // With one prediction taken against the fainted Snorlax and reused for both
+    // candidates -- the pre-fix behaviour -- Aggron wins instead, which is what
+    // makes this fixture a regression test rather than a restatement.
+    const aggronAgainstFainted = score(aggronOffense, bodySlamOnAggron, AGGRON_MAX_HP) // 0.5133 - 0.0345 = 0.4788
+    expect(aggronAgainstFainted).toBeGreaterThan(donphanOwn)
+
+    // No probe may touch the real position: the substituted state is a copy and
+    // every predictAi sample clones its own generator, so the fainted lead stays
+    // fainted, the bench stays at full HP and the real RNG is never drawn.
+    const real = s.state.rng
+    let draws = 0
+    s.state.rng = {
+      random16: () => {
+        draws++
+        return real.random16()
+      },
+    }
+    expect(layer.replacement(s.state, 0)).toBe(1)
+    expect(draws).toBe(0)
+    expect(s.state.battlers[0]!.mon.hp).toBe(0)
+    expect(s.state.sides[0].party[1]!.hp).toBe(165)
+    expect(s.state.sides[0].party[2]!.hp).toBe(AGGRON_MAX_HP)
+  })
+
+  it('skips the preserve member when another candidate is acceptable and it scores higher', () => {
     // The replacement callback only runs after a faint and receives only the
     // state, so the layer needs one `policy` call first to hold a session for
     // its prediction probe (teamLayer.ts). The active mon is then set to 0 HP
     // on the created session -- the state a faint hands to the callback.
+    //
+    // Their Machamp has ONE move, so every candidate is predicted against the
+    // same Body Slam and the per-candidate prediction leaves this fixture's
+    // ordering alone. The preserve member is the HIGHER scorer here: Aggron
+    // (slot 2, Iron Head mean 84.6875 onto 165 HP, 5/145 = 3.45% incoming)
+    // scores 0.5133 - 0.0345 = 0.4788, while our Machamp (slot 1, Body Slam
+    // mean 53.1875, 58/165 = 35.2% incoming) scores 0.3223 - 0.3515 = -0.0292.
     const s = session([OUR_SNORLAX, OUR_MACHAMP, OUR_AGGRON], [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)])
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker', 'attacker'], genes: { preserve: 1 } })
-    layer.policy(s, 1, [])
+    const benchStateOf = (slot: number): BattleState =>
+      stateWithReserve(s.state, 0, s.state.sides[0].party[slot]!, slot)
+    const offenseOf = (slot: number, moveId: string): number => {
+      const state = benchStateOf(slot)
+      return meanRoll(aiDamageRolls(state, moveId, 0, 1, aiDamageDepsFor(data, state, false))!)
+    }
+    const aggronOffense = offenseOf(2, 'MOVE_IRON_HEAD')
+    const machampOffense = offenseOf(1, 'MOVE_BODY_SLAM')
+    expect(aggronOffense).toBeCloseTo(84.6875, 4)
+    expect(machampOffense).toBeCloseTo(53.1875, 4)
+    const machampIncoming = highestRoll(rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!)
+    expect(machampIncoming).toBe(58)
+    // Machamp 58/165 = 35.2% is acceptable under the default 50% line, but it
+    // is NOT acceptable under a 20% line -- that is the third case below.
+    expect(machampIncoming * 100).toBeLessThanOrEqual(50 * 165)
+    expect(machampIncoming * 100).toBeGreaterThan(20 * 165)
+    const score = (offenseMean: number, incomingHigh: number, hp: number): number => offenseMean / 165 - incomingHigh / hp
+    expect(score(aggronOffense, BODY_SLAM_VS_AGGRON_MAX, AGGRON_MAX_HP)).toBeGreaterThan(
+      score(machampOffense, machampIncoming, 165),
+    )
+
+    // The preserve member (Aggron) outscores our Machamp, and removing the
+    // preserve filter would return it. With the filter, our Machamp's 35.2% is
+    // acceptable, so the preserve member is skipped and slot 1 comes in.
+    const skipLayer = createTeamLayer({ roles: ['attacker', 'attacker', 'attacker'], genes: { preserve: 2 } })
+    skipLayer.policy(s, 1, [])
     patchMon(s.state, 0, 0, { hp: 0 })
-    // Our Machamp (the preserve member, slot 1) takes 58/165 = 35.2% from the
-    // predicted Body Slam: acceptable, but Aggron takes 5/145 = 3.45% and
-    // scores higher (Iron Head mean 85 onto 165 HP; our Machamp's Body Slam
-    // mean 53), so the preserve member is skipped and Aggron comes in.
-    expect(layer.replacement(s.state, 0)).toBe(2)
+    expect(skipLayer.replacement(s.state, 0)).toBe(1)
+
+    // Control: with no preserve member the scoring is unfiltered and Aggron,
+    // the higher scorer, comes in -- so the slot 1 answer above is the skip,
+    // not the score.
+    const controlState = session([OUR_SNORLAX, OUR_MACHAMP, OUR_AGGRON], [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)])
+    const controlLayer = createTeamLayer({ roles: ['attacker', 'attacker', 'attacker'] })
+    controlLayer.policy(controlState, 1, [])
+    patchMon(controlState.state, 0, 0, { hp: 0 })
+    expect(controlLayer.replacement(controlState.state, 0)).toBe(2)
+
+    // A 20% safety line makes our Machamp unsafe, so the preserve member is the
+    // only acceptable candidate: nothing is left to skip to, it stays in the
+    // pool and wins on score.
+    const strictState = session([OUR_SNORLAX, OUR_MACHAMP, OUR_AGGRON], [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)])
+    const strictLayer = createTeamLayer({
+      roles: ['attacker', 'attacker', 'attacker'],
+      genes: { preserve: 2, switchInSafety: 20 },
+    })
+    strictLayer.policy(strictState, 1, [])
+    patchMon(strictState.state, 0, 0, { hp: 0 })
+    expect(strictLayer.replacement(strictState.state, 0)).toBe(2)
   })
 
   it('uses the preserve member when it is the only live candidate', () => {
@@ -404,6 +550,83 @@ describe('cycle 947 - team layer: the switch mechanism', () => {
     expect(trace[0]!.tags).toEqual(['team', 'preserve'])
     expect(choice!.action.action).toBe('SWITCH')
     expect(choice!.switchTo).toBe(1)
+  })
+})
+
+describe('cycle 947 - team layer: playPolicyBattle wiring', () => {
+  /** The layer with every team rule off, so the active mon's plain `attacker`
+   * role decides: this test is about the replacement option, not the purposes. */
+  const attackerOnlyPolicy = () =>
+    createTeamLayer({
+      roles: ['attacker', 'attacker', 'attacker'],
+      genes: {
+        purposeFlags: {
+          preserve: false,
+          sacrifice: false,
+          counter: false,
+          entryAbility: false,
+          support: false,
+          ppLoop: false,
+        },
+      },
+    }).policy
+
+  it('sends in the slot the supplied playerReplacement names, not the heuristic one', () => {
+    // A real fight, not a hand-set position: the lead Snorlax is passed in at 20
+    // HP (the party is the session's INPUT -- nothing is edited after a turn
+    // runs) and their Machamp's Body Slam rolls 39..46, so every roll KOs it.
+    // `maxTurns: 1` therefore stops right after turn 1's faint and its
+    // replacement, which is all this test needs.
+    const playerParty = (): ReturnType<typeof buildPlayerParty> => {
+      const party = buildPlayerParty([OUR_SNORLAX, OUR_DONPHAN, OUR_AGGRON], 50, data)
+      party[0]!.hp = 20
+      return party
+    }
+    // Both bench mons are alive, so the slot is a real choice; the game's own
+    // "most suitable mon" heuristic (expectimax.ts:1417-1431) picks Donphan
+    // (slot 1) here, which the control run below shows.
+    const calls: Array<{ battlerId: number }> = []
+    const wired = playPolicyBattle({
+      data,
+      playerParty: playerParty(),
+      opponentTrainer: opponent([mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)]),
+      seed: 1,
+      maxTurns: 1,
+      policy: attackerOnlyPolicy(),
+      playerReplacement: (_state, battlerId) => {
+        calls.push({ battlerId })
+        return 2
+      },
+    })
+    expect(wired.outcome).toBe('MAX_TURNS')
+    expect(wired.capped).toBe(true)
+    expect(wired.turns).toBe(1)
+    // The lead really fainted this turn, and the callback really ran for battler 0.
+    expect(wired.session.state.sides[0].party[0]!.hp).toBe(0)
+    expect(calls).toEqual([{ battlerId: 0 }])
+    // The option's answer, not the heuristic's: Aggron (slot 2) is on the field.
+    expect(wired.session.state.battlers[0]!.partyIndex).toBe(2)
+    expect(wired.session.state.battlers[0]!.mon.speciesId).toBe('SPECIES_AGGRON')
+
+    // Control: the same fight without the option. playPolicyBattle falls back to
+    // createHeuristicPlayerReplacement, which sends in slot 1 instead -- so the
+    // assertion above is the wiring, not the game's heuristic agreeing.
+    const control = playPolicyBattle({
+      data,
+      playerParty: playerParty(),
+      opponentTrainer: opponent([mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)]),
+      seed: 1,
+      maxTurns: 1,
+      policy: attackerOnlyPolicy(),
+    })
+    expect(control.session.state.sides[0].party[0]!.hp).toBe(0)
+    expect(control.session.state.battlers[0]!.partyIndex).toBe(1)
+    expect(control.session.state.battlers[0]!.mon.speciesId).toBe('SPECIES_DONPHAN')
+    expect(control.session.state.battlers[0]!.partyIndex).not.toBe(
+      wired.session.state.battlers[0]!.partyIndex,
+    )
+    // The control never went through the supplied callback.
+    expect(calls).toHaveLength(1)
   })
 })
 

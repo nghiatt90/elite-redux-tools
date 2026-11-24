@@ -183,10 +183,13 @@ function benchOutspeedsTheirActive(session: BattleSession, slot: number): boolea
 }
 
 /** The predicted AI moves of a 3-sample `predictAi`, in sample order, deduped.
- * The replacement scores each candidate against the WORST of them (the maximum
- * incoming roll): a faint replacement has no live target for the samples to be
- * ranked against, so all the evidence is kept instead of picking one sample.
- * MODEL CHOICE (sample folding only). */
+ * The replacement makes one prediction PER CANDIDATE, with the candidate sent
+ * in as battler 0 (`stateWithReserve`), because the AI picks its move for its
+ * target (decision 14: "a fresh 3-sample prediction against each candidate").
+ * Each candidate is then scored against the WORST of its own predicted moves
+ * (the maximum incoming roll): the three samples disagree about the move, so
+ * all the evidence is kept instead of picking one sample. MODEL CHOICE (sample
+ * folding only). */
 function predictedMoveIds(predictions: AiPrediction[]): string[] {
   const ids: string[] = []
   for (const sample of predictions) {
@@ -535,12 +538,36 @@ export function createTeamLayer(config: {
     // first live non-active slot, which is where the game's heuristic ends too
     // (createHeuristicPlayerReplacement, expectimax.ts:1427-1429).
     if (!session) return firstLiveReplacement(state, battlerId)
+    // The unsubstituted state: the fainted battler 0 is still on the field, so
+    // `livingBenchSlots` / `scoreBench` see the same party-slot bookkeeping the
+    // live position has (the substituted states put a candidate in slot 0,
+    // which would make that slot read as active instead of benched).
     const probe: BattleSession = { ...session, state }
-    const moveIds = predictedMoveIds(predictAi(probe, SAMPLE_COUNT, PREDICTION_SEED))
 
     const candidates: BenchScore[] = []
     for (const slot of livingBenchSlots(probe)) {
-      const scored = scoreBench(probe, slot, moveIds, genes.switchInSafety)
+      const reserve = state.sides[0].party[slot]
+      if (!reserve || reserve.speciesId === null) continue
+      // The AI chooses its move FOR ITS TARGET, so the prediction has to be
+      // made with the candidate standing in at battler 0 (decision 14: "a
+      // fresh 3-sample prediction against each candidate"). `predictAi` clones
+      // the session it is handed, so neither the real state nor its RNG moves.
+      const substituted = stateWithReserve(state, 0, reserve, slot)
+      // gAbsentBattlerFlags can hold bit 0 when this runs -- in DOUBLES only:
+      // battleFormat.ts:342/346 marks a lead that starts fainted absent, and
+      // switchIn.ts:324 marks a battler that fainted with no reserve, while
+      // hasNoMonsToSwitch is FALSE outside BATTLE_TYPE_DOUBLE (:3611) so
+      // singles never sets it. The candidate IS the live battler 0 in this
+      // copy, so the stale bit must not survive into the AI's target scan
+      // (IsBattlerAlive, battle_util.c:6685-6694). Cleared on the copy only.
+      const candidateState: BattleState =
+        (substituted.absentBattlerFlags & (1 << 0)) === 0
+          ? substituted
+          : { ...substituted, absentBattlerFlags: substituted.absentBattlerFlags & ~(1 << 0) }
+      const predicted = predictedMoveIds(
+        predictAi({ ...session, state: candidateState }, SAMPLE_COUNT, PREDICTION_SEED),
+      )
+      const scored = scoreBench(probe, slot, predicted, genes.switchInSafety)
       if (scored) candidates.push(scored)
     }
     if (candidates.length === 0) return firstLiveReplacement(state, battlerId)
