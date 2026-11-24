@@ -5,12 +5,12 @@
 //
 // This file holds the shared inputs every role reads (a 3-sample prediction of
 // the AI's next action, our damage ranges, speed order, the predicted switch-in)
-// and five of the six roles: attacker, pivot, lead/hazard setter, set-up sweeper
-// and staller. The support role lands in s20b3.
+// and all six roles: attacker, pivot, lead/hazard setter, set-up sweeper,
+// staller and support.
 //
 // Ports of game mechanics cite the C; the policy thresholds (the 50% default
-// safety line, accuracy weighting, the heal threshold) are MODEL CHOICES and are
-// marked as such.
+// safety line, accuracy weighting, the heal threshold, the refresh gene) are
+// MODEL CHOICES and are marked as such.
 
 import { createBattlerState } from '../create'
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
@@ -18,6 +18,9 @@ import { aiDamageRolls } from '../ai/aiCalcDamage'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
+  SIDE_STATUS_AURORA_VEIL,
+  SIDE_STATUS_LIGHTSCREEN,
+  SIDE_STATUS_REFLECT,
   SIDE_STATUS_STEALTH_ROCK,
   STAT_ACC,
   STAT_ATK,
@@ -31,8 +34,21 @@ import {
   STATUS2_CURSED,
   STATUS2_NIGHTMARE,
   STATUS3_LEECHSEED,
+  STATUS_FIELD_ELECTRIC_TERRAIN,
+  STATUS_FIELD_GRASSY_TERRAIN,
+  STATUS_FIELD_MISTY_TERRAIN,
+  STATUS_FIELD_PSYCHIC_TERRAIN,
+  STATUS_FIELD_TOXIC_TERRAIN,
+  STATUS_FIELD_TRICK_ROOM,
+  WEATHER_HAIL_ANY,
+  WEATHER_PRIMAL_ANY,
+  WEATHER_RAIN_ANY,
+  WEATHER_SANDSTORM_ANY,
+  WEATHER_SUN_ANY,
 } from '../constants'
+import { weatherHasEffect } from '../fieldEndTurn'
 import type { BattleState, SimBattleMon, SimPartyMon } from '../state'
+import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { canBeBurned, canBeParalyzed, canBeParalyzedIgnoreType, canBePoisoned, canSleep } from '../statusEffects'
 import { buildTurnOrderContext } from '../turn'
 import type { ChosenAction } from '../turnOrder'
@@ -44,8 +60,9 @@ import { guaranteedKo, ourDamageRange, pivotMoves, predictAi } from './policyInp
 import type { BattleSession } from './session'
 import { aiDamageDepsFor, cloneSession } from './session'
 
-/** The roles built so far. `support` lands in s20b3. */
-export type RoleName = 'attacker' | 'pivot' | 'leadHazard' | 'setupSweeper' | 'staller'
+/** All six roles of decision 14: attacker, pivot, lead/hazard setter, set-up
+ * sweeper, staller and support. */
+export type RoleName = 'attacker' | 'pivot' | 'leadHazard' | 'setupSweeper' | 'staller' | 'support'
 
 /** Role parameters. These are GA genes in the solver (plan decision 14, at most
  * two per role), so every one is optional with the default below. */
@@ -66,6 +83,10 @@ export interface RoleParams {
   targetStage?: 1 | 2 | 3 | 6
   /** staller: heal below this percentage of max HP. Default 50. */
   healThreshold?: 33 | 50 | 66
+  /** support: re-set an effect on its last turn (timer == 1) when the handler
+   * accepts the re-cast. Default 'no'. MODEL CHOICE; only the screens accept a
+   * re-cast and only through Screen Cleaner (see `recastAccepted`). */
+  refresh?: 'yes' | 'no'
 }
 
 /** Per-battler state the caller owns and persists across turns. `lastMove` is
@@ -571,6 +592,108 @@ function targetHasResidual(session: BattleSession): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Support inputs (decision 14)
+// ---------------------------------------------------------------------------
+
+/** The screens, in the rule's priority order. The side status bit and the
+ * side's own countdown live on `state.sides[0]` (constants.ts:279-288,
+ * state.ts:509-525). */
+const SCREEN_EFFECTS: readonly {
+  effect: string
+  up: (session: BattleSession) => boolean
+  timer: (session: BattleSession) => number
+}[] = [
+  {
+    effect: 'EFFECT_REFLECT', // handleReflect, moveEffects.ts:2940-2968
+    up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_REFLECT) !== 0,
+    timer: (s) => s.state.sides[0].timers.reflectTimer,
+  },
+  {
+    effect: 'EFFECT_LIGHT_SCREEN', // handleLightScreen, moveEffects.ts:2970-2998
+    up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_LIGHTSCREEN) !== 0,
+    timer: (s) => s.state.sides[0].timers.lightscreenTimer,
+  },
+  {
+    effect: 'EFFECT_AURORA_VEIL', // handleAuroraVeil, moveEffects.ts:3000-3028
+    up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_AURORA_VEIL) !== 0,
+    timer: (s) => s.state.sides[0].timers.auroraVeilTimer,
+  },
+]
+
+/** The four weather moves, keyed by the `*_ANY` mask of the weather they set
+ * (constants.ts:338-360), with the shared `field.weatherDuration` countdown. */
+const WEATHER_EFFECTS: readonly { effect: string; mask: number }[] = [
+  { effect: 'EFFECT_RAIN_DANCE', mask: WEATHER_RAIN_ANY }, // handleRainDance, moveEffects.ts:3344
+  { effect: 'EFFECT_SUNNY_DAY', mask: WEATHER_SUN_ANY }, // handleSunnyDay, :3354
+  { effect: 'EFFECT_SANDSTORM', mask: WEATHER_SANDSTORM_ANY }, // handleSandstorm, :3364
+  { effect: 'EFFECT_HAIL', mask: WEATHER_HAIL_ANY }, // handleHail, :3374
+]
+
+/** The five terrains and their `STATUS_FIELD_*_TERRAIN` bits (constants.ts:
+ * 313-326), sharing `field.timers.terrainTimer`. */
+const TERRAIN_EFFECTS: readonly { effect: string; flag: number }[] = [
+  { effect: 'EFFECT_ELECTRIC_TERRAIN', flag: STATUS_FIELD_ELECTRIC_TERRAIN }, // handleElectricTerrain, moveEffects.ts:3418
+  { effect: 'EFFECT_GRASSY_TERRAIN', flag: STATUS_FIELD_GRASSY_TERRAIN }, // handleGrassyTerrain, :3422
+  { effect: 'EFFECT_MISTY_TERRAIN', flag: STATUS_FIELD_MISTY_TERRAIN }, // handleMistyTerrain, :3426
+  { effect: 'EFFECT_PSYCHIC_TERRAIN', flag: STATUS_FIELD_PSYCHIC_TERRAIN }, // handlePsychicTerrain, :3430
+  { effect: 'EFFECT_TOXIC_TERRAIN', flag: STATUS_FIELD_TOXIC_TERRAIN }, // handleToxicTerrain, :3434
+]
+
+/** True when the user's Screen Cleaner lets a screen re-cast succeed
+ * (`hasReflect && !hasScreenCleaner`, moveEffects.ts:2952; the same branch in
+ * handleLightScreen :2982 and handleAuroraVeil :3014). */
+function hasScreenCleaner(session: BattleSession): boolean {
+  const battler = session.state.battlers[0]
+  if (!battler) return false
+  return battlerHasSimAbility(session.state, battler, 'ABILITY_SCREEN_CLEANER', false, 0, false, session.data.dataContext)
+}
+
+/** handleAuroraVeil's weather gate: it also fails when it is not hailing and
+ * the user lacks Aurora Borealis (moveEffects.ts:3014). */
+function auroraVeilWorks(session: BattleSession): boolean {
+  if (isBattlerWeatherAffected(session.state, 0, WEATHER_HAIL_ANY, {
+    dataContext: session.data.dataContext,
+    grounding: session.turnDeps.grounding,
+  })) {
+    return true
+  }
+  const battler = session.state.battlers[0]
+  return (
+    !!battler &&
+    battlerHasSimAbility(session.state, battler, 'ABILITY_AURORA_BOREALIS', false, 0, false, session.data.dataContext)
+  )
+}
+
+/** applyWeatherMove's gates: `checkprimalweather` ends the move with no change
+ * while a primal weather is up (moveEffects.ts:3334-3338, unconditional), and
+ * TryChangeBattleWeather fails when weather has no effect at all
+ * (switchInAbility.ts:417-420, `weatherHasEffect` -- Cloud Nine / Air Lock). */
+function weatherMoveWorks(session: BattleSession): boolean {
+  if ((session.state.field.weather & WEATHER_PRIMAL_ANY) !== 0) return false
+  return weatherHasEffect(session.state, session.turnDeps.grounding)
+}
+
+/** Whether `effect`'s handler accepts re-setting it while it is still up.
+ * Screens do, but only through the Screen Cleaner branch (handleReflect
+ * moveEffects.ts:2952, handleLightScreen :2982, handleAuroraVeil :3014); for
+ * Aurora Veil the hail / Aurora Borealis condition (:3014) must hold too.
+ * Everything else rejects a same-effect re-cast: a weather recast fails in
+ * tryChangeBattleWeather (switchInAbility.ts:427, "already active"), a
+ * same-terrain recast fails in setFieldTerrain (moveEffects.ts:3404), and a
+ * Trick Room recast while up TOGGLES IT OFF (handleRoomMove :3461-3475). */
+function recastAccepted(session: BattleSession, effect: string): boolean {
+  switch (effect) {
+    case 'EFFECT_REFLECT':
+    case 'EFFECT_LIGHT_SCREEN':
+      return hasScreenCleaner(session)
+    case 'EFFECT_AURORA_VEIL':
+      return hasScreenCleaner(session) && auroraVeilWorks(session)
+    default:
+      return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Roles
 // ---------------------------------------------------------------------------
 
@@ -873,6 +996,177 @@ function chooseStaller(
   return chooseAttacker(session, view, targetSlot, hp)
 }
 
+/** The support's first effect to (re)set, in decision 14's priority order:
+ * screens, weather, terrain, Trick Room. Null when every effect is already up
+ * (and `refresh` does not re-set it). Timers are decrement-then-test: at
+ * decision time T == 1 means the effect expires at this turn's end. */
+function chooseSupportSetter(
+  session: BattleSession,
+  moves: MoveChoiceInfo[],
+  view: PredictionView,
+  refresh: boolean,
+): RoleDecision | null {
+  const findMove = (effect: string): MoveChoiceInfo | undefined =>
+    moves.find((info) => info.moveId !== '' && session.data.dataContext.move(info.moveId)?.effect === effect)
+  // Set the effect when it is down; with refresh='yes' also re-set it on its
+  // last turn, but only where the handler really accepts the re-cast.
+  const shouldSet = (up: boolean, timer: number, effect: string): boolean =>
+    !up || (refresh && timer === 1 && recastAccepted(session, effect))
+
+  for (const row of SCREEN_EFFECTS) {
+    const move = findMove(row.effect)
+    if (!move) continue
+    const up = row.up(session)
+    // Never pick Aurora Veil when it would fail without hail / Aurora Borealis
+    // (moveEffects.ts:3014). The other screens have no such condition.
+    if (row.effect === 'EFFECT_AURORA_VEIL' && !auroraVeilWorks(session)) continue
+    if (shouldSet(up, row.timer(session), row.effect)) return { choice: move.choice, tag: up ? 'refresh' : 'screen' }
+  }
+
+  if (weatherMoveWorks(session)) {
+    for (const row of WEATHER_EFFECTS) {
+      const move = findMove(row.effect)
+      if (!move) continue
+      const up = (session.state.field.weather & row.mask) !== 0
+      if (shouldSet(up, session.state.field.weatherDuration, row.effect)) {
+        return { choice: move.choice, tag: up ? 'refresh' : 'weather' }
+      }
+    }
+  }
+
+  for (const row of TERRAIN_EFFECTS) {
+    const move = findMove(row.effect)
+    if (!move) continue
+    const up = (session.state.field.statuses & row.flag) !== 0
+    if (shouldSet(up, session.state.field.timers.terrainTimer, row.effect)) {
+      return { choice: move.choice, tag: up ? 'refresh' : 'terrain' }
+    }
+  }
+
+  const trickRoom = findMove('EFFECT_TRICK_ROOM')
+  if (trickRoom) {
+    const up = (session.state.field.statuses & STATUS_FIELD_TRICK_ROOM) !== 0
+    // Never re-cast while up: handleRoomMove toggles it OFF (moveEffects.ts:
+    // 3461-3475). Trick Room helps the slower side, so set it only when we are
+    // slower. Trick Room is priority -7 in the pinned snapshot (moves.json), so
+    // its own action always orders last; compare RAW speed with a
+    // neutral-priority view of the action, the same way chooseAttacker reads
+    // "slower" (rolePolicy.ts:619-623).
+    const neutral = trickRoom.choice.action.chosenMove
+      ? { ...trickRoom.choice.action, chosenMove: { ...trickRoom.choice.action.chosenMove, priority: 0 } }
+      : trickRoom.choice.action
+    if (
+      shouldSet(up, session.state.field.timers.trickRoomTimer, 'EFFECT_TRICK_ROOM') &&
+      !outspeeds(session, neutral, view.predictedAction)
+    ) {
+      return { choice: trickRoom.choice, tag: 'trickroom' }
+    }
+  }
+
+  return null
+}
+
+/** Own boosts for Baton Pass: while below the target stage, safe (the
+ * setupSweeper's gate) and able to pass to a live bench slot, use a legal
+ * self-boost move. Once at the target stage the pivot hand-off below carries
+ * the stages across with Baton Pass (turn.ts:1905-1930, handleBatonPass
+ * moveEffects.ts:10437+). */
+function chooseBatonPassSetup(
+  session: BattleSession,
+  view: PredictionView,
+  moves: MoveChoiceInfo[],
+  params: RoleParams,
+): RoleDecision | null {
+  const batonPass = moves.find(
+    (info) => info.moveId !== '' && session.data.dataContext.move(info.moveId)?.effect === 'EFFECT_BATON_PASS',
+  )
+  if (!batonPass) return null
+  // Both the boost and the pass need a living bench slot to pass into.
+  if (pickBenchSlot(session, view.predictedMoveId) === null) return null
+  const targetStage = params.targetStage ?? DEFAULT_TARGET_STAGE
+  const mon = session.state.battlers[0]?.mon
+  if (view.threatened || opponentCanUndoBoosts(session) || currentBoostStage(session) >= targetStage) return null
+  const boost = moves.find((info) => {
+    if (!info.moveId) return false
+    const stats = boostStatsOf(session, info.moveId)
+    if (!stats || stats.length === 0) return false
+    // Do not pick a boost whose every raised stat is already MAX_STAT_STAGE
+    // (BattleScript_EffectStatUp's jumpifstat check).
+    return stats.some((stat) => (mon?.statStages[stat] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE)
+  })
+  return boost ? { choice: boost.choice, tag: 'setup' } : null
+}
+
+/** The can-switch gate for a pivot move used by support. A HIT_ESCAPE move
+ * only queues its switch after it dealt HP damage (turn.ts:4798-4803,
+ * `sumHpDealt > 0`), so an immune range wastes the turn; the other pivot
+ * effects switch from their own script once a live bench slot exists. */
+function pivotSwitchWorks(pivot: MoveChoiceInfo, effect: string | null): boolean {
+  if (effect === 'EFFECT_HIT_ESCAPE') return !!pivot.range && !pivot.range.isImmune
+  return true
+}
+
+/** support: set its effect when it is not up (screens, weather, terrain,
+ * Trick Room, or its own boosts to pass with Baton Pass); then hand off with a
+ * pivot move if it has one; without one, switch out when threatened and a
+ * teammate takes the predicted move better, else play its fallback role
+ * (decision 14). */
+function chooseSupport(
+  session: BattleSession,
+  view: PredictionView,
+  targetSlot: number | null,
+  hp: number,
+  params: RoleParams,
+  memory: RoleMemory,
+): RoleDecision {
+  const moves = evaluateMoves(session, targetSlot)
+  const refresh = (params.refresh ?? 'no') === 'yes'
+
+  // 1. Set the effect (or refresh it on its last turn).
+  const setter = chooseSupportSetter(session, moves, view, refresh)
+  if (setter) return setter
+  const batonSetup = chooseBatonPassSetup(session, view, moves, params)
+  if (batonSetup) return batonSetup
+
+  // 2. Hand off with a pivot move once nothing is left to set. A live bench
+  // slot is required; a HIT_ESCAPE pivot additionally needs its damage to land.
+  const pivotId = pivotMoves(session.data).find((id) => moves.some((info) => info.moveId === id))
+  if (pivotId) {
+    const pivot = moves.find((info) => info.moveId === pivotId)!
+    const bench = pickBenchSlot(session, view.predictedMoveId)
+    const effect = session.data.dataContext.move(pivotId)?.effect ?? null
+    if (bench !== null && pivotSwitchWorks(pivot, effect)) {
+      return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
+    }
+  }
+
+  // 3. Without a usable pivot move: a hard switch when threatened and a
+  // teammate takes the predicted move better than our active mon.
+  if (view.threatened && view.predictedMoveId) {
+    const bench = pickBenchSlot(session, view.predictedMoveId)
+    if (bench !== null) {
+      const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+      const incoming = aiDamageRolls(session.state, view.predictedMoveId, 1, 0, deps)
+      const ours = incoming && !incoming.isImmune ? highestRoll(incoming) : 0
+      const benchRange = rangeOnOurReserve(session, view.predictedMoveId, bench)
+      const benchHigh = benchRange && !benchRange.isImmune ? highestRoll(benchRange) : 0
+      if (benchHigh < ours) {
+        const switchChoice = legalChoices(session).find(
+          (choice) => choice.action.action === 'SWITCH' && choice.switchTo === bench,
+        )
+        if (switchChoice) return { choice: switchChoice, tag: 'switch' }
+      }
+    }
+  }
+
+  // Fallback role, as chooseLeadHazard does (rolePolicy.ts:793-797).
+  if ((params.fallbackRole ?? 'attacker') === 'staller') {
+    const staller = chooseStaller(session, view, targetSlot, hp, params, memory)
+    return { choice: staller.choice, tag: 'staller', subTag: staller.tag }
+  }
+  return chooseAttacker(session, view, targetSlot, hp)
+}
+
 function decide(
   session: BattleSession,
   role: RoleName,
@@ -892,6 +1186,8 @@ function decide(
       return chooseSetupSweeper(session, view, slot, hp, params)
     case 'staller':
       return chooseStaller(session, view, slot, hp, params, memory)
+    case 'support':
+      return chooseSupport(session, view, slot, hp, params, memory)
     case 'attacker':
     default:
       return chooseAttacker(session, view, slot, hp)
