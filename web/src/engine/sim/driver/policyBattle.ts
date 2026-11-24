@@ -17,7 +17,7 @@ import type { BattleSession, Tier } from './session'
 import { beginTurn, createSession, stepTurn } from './session'
 import { PARTY_SIZE } from '../constants'
 import { createRandomSource } from '../rng'
-import type { SimPartyMon } from '../state'
+import type { BattleState, SimPartyMon } from '../state'
 
 /** One policy-authored trace line. The policy pushes these; the loop itself
  * pushes nothing. `choice` is free-form text the policy writes. */
@@ -41,6 +41,10 @@ export interface PolicyBattleOptions {
   /** Chooses the player's action for this turn. `trace` is the array returned
    * on the result; entries the policy pushes are preserved in order. */
   policy: (session: BattleSession, turn: number, trace: PolicyTraceEntry[]) => PlayerChoice | null
+  /** Which party slot the player sends in after a faint; defaults to the game's
+   * own "most suitable mon" heuristic (expectimax.ts:1417-1431). The team layer
+   * supplies its matchup-scored replacement here. */
+  playerReplacement?: (state: BattleState, battlerId: number) => number
   maxTurns?: number
 }
 
@@ -65,7 +69,8 @@ export function playPolicyBattle(options: PolicyBattleOptions): PolicyBattleResu
     tier: options.tier,
     rng: createRandomSource(options.seed),
     leadIndex: options.leadIndex,
-    playerReplacement: createHeuristicPlayerReplacement(options.data, options.inverseBattle),
+    playerReplacement:
+      options.playerReplacement ?? createHeuristicPlayerReplacement(options.data, options.inverseBattle),
     inverseBattle: options.inverseBattle,
     battleEvents: options.battleEvents,
     format: options.format,

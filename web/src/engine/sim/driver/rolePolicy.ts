@@ -98,12 +98,12 @@ export interface RoleMemory {
 
 // MODEL CHOICE: an incoming move that removes more than this percentage of our
 // current HP counts as threatening. 50 is decision 14's default, not a game fact.
-const DEFAULT_SAFETY_PCT = 50
+export const DEFAULT_SAFETY_PCT = 50
 // MODEL CHOICE: decision 14's own defaults for the two new roles.
 const DEFAULT_TARGET_STAGE = 2
 const DEFAULT_HEAL_THRESHOLD = 50
 // Three samples is decision 14's contract (`predictAi(session, 3, seedBase)`).
-const SAMPLE_COUNT = 3
+export const SAMPLE_COUNT = 3
 // Deterministic probe seeds: the policy is a pure function of the position.
 const PREDICTION_SEED = 0
 const SPEED_PROBE_SEED = 0
@@ -127,15 +127,15 @@ function rollsOf(range: AiDamageRolls): number[] {
   return range.totalRolls ?? range.rolls
 }
 
-function lowestRoll(range: AiDamageRolls): number {
+export function lowestRoll(range: AiDamageRolls): number {
   return rollsOf(range)[0]!
 }
 
-function highestRoll(range: AiDamageRolls): number {
+export function highestRoll(range: AiDamageRolls): number {
   return rollsOf(range)[15]!
 }
 
-function meanRoll(range: AiDamageRolls): number {
+export function meanRoll(range: AiDamageRolls): number {
   const rolls = rollsOf(range)
   let sum = 0
   for (const roll of rolls) sum += roll
@@ -160,7 +160,7 @@ function accuracyPct(session: BattleSession, moveId: string): number {
   return accuracy > 0 ? accuracy : 100
 }
 
-function moveIdOf(choice: PlayerChoice): string | null {
+export function moveIdOf(choice: PlayerChoice): string | null {
   return choice.action.chosenMove?.id ?? choice.action.moveToBeUsed?.id ?? null
 }
 
@@ -201,7 +201,7 @@ function battleMonFromReserve(reserve: SimPartyMon): SimBattleMon {
 /** The state with `battlerId` replaced by a fresh battler holding `reserve` --
  * the same substitution `aiCalcPartyMonDamage` performs for an ATTACKER
  * (aiCalcDamage.ts:610-616), applied to whichever side we need. */
-function stateWithReserve(
+export function stateWithReserve(
   state: BattleState,
   battlerId: number,
   reserve: SimPartyMon,
@@ -232,7 +232,7 @@ function rangeAgainstTheirReserve(
 
 /** Their move `moveId` (battler 1) onto our reserve `slot` (battler 0): used to
  * pick the bench mon that takes the predicted move best. */
-function rangeOnOurReserve(
+export function rangeOnOurReserve(
   session: BattleSession,
   moveId: string,
   slot: number,
@@ -247,7 +247,7 @@ function rangeOnOurReserve(
 // Shared inputs
 // ---------------------------------------------------------------------------
 
-interface PredictionView {
+export interface PredictionView {
   /** Any sample's move removes more than `safetyPct` of our HP or KOs us. */
   threatened: boolean
   /** Any sample's move can KO us at its highest roll (the KO-only gate the
@@ -264,7 +264,7 @@ interface PredictionView {
 /** `chooseAiAction` 3 times on clones (predictAi), then folds the samples into
  * the facts every role reads. A SWITCH sample is safe: the AI is leaving, so
  * nothing hits us this turn (decision 14). */
-function readPredictions(session: BattleSession, safetyPct: number): PredictionView {
+export function readPredictions(session: BattleSession, safetyPct: number): PredictionView {
   const samples = predictAi(session, SAMPLE_COUNT, PREDICTION_SEED)
   const ourHp = session.state.battlers[0]?.mon.hp ?? 0
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
@@ -336,7 +336,7 @@ function targetHp(session: BattleSession, targetSlot: number | null): number {
 
 /** `getWhoStrikesFirst` on a fresh clone: a speed tie draws RNG, so the real
  * session's generator must never move. battler 0 first == return 0. */
-function outspeeds(
+export function outspeeds(
   session: BattleSession,
   ourAction: ChosenAction,
   theirAction: ChosenAction | null,
@@ -349,7 +349,7 @@ function outspeeds(
   )
 }
 
-interface MoveChoiceInfo {
+export interface MoveChoiceInfo {
   choice: PlayerChoice
   moveId: string
   range: AiDamageRolls | null
@@ -358,7 +358,7 @@ interface MoveChoiceInfo {
   accuracy: number
 }
 
-function evaluateMoves(session: BattleSession, targetSlot: number | null): MoveChoiceInfo[] {
+export function evaluateMoves(session: BattleSession, targetSlot: number | null): MoveChoiceInfo[] {
   return legalMoveChoices(session).map((choice) => {
     const moveId = moveIdOf(choice) ?? ''
     const range =
@@ -383,7 +383,7 @@ function accuracyWeightedDamage(info: MoveChoiceInfo): number {
   return meanRoll(info.range) * (info.accuracy / 100)
 }
 
-function bestByDamage(pool: MoveChoiceInfo[]): MoveChoiceInfo {
+export function bestByDamage(pool: MoveChoiceInfo[]): MoveChoiceInfo {
   let best = pool[0]!
   let bestValue = accuracyWeightedDamage(best)
   for (const info of pool) {
@@ -530,7 +530,7 @@ const STATUS_EFFECTS: ReadonlySet<string> = new Set([
 /** Whether `moveId`'s status effect can land on battler 1, using the same
  * CanBe* helpers the move handlers use (so type immunity -- Fire vs Will-O-Wisp,
  * Poison/Steel vs Toxic -- and an existing status are respected). */
-function statusMoveWorks(session: BattleSession, moveId: string, effect: string): boolean {
+export function statusMoveWorks(session: BattleSession, moveId: string, effect: string): boolean {
   if (((session.state.battlers[1]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
   switch (effect) {
@@ -764,7 +764,7 @@ function chooseAttacker(
 /** The bench slot that takes the least of the predicted move's highest roll,
  * or null when there is no living reserve. Singles: the only active slot is
  * battler 0's partyIndex. */
-function pickBenchSlot(session: BattleSession, predictedMoveId: string | null): number | null {
+export function pickBenchSlot(session: BattleSession, predictedMoveId: string | null): number | null {
   const party = session.state.sides[0].party
   const activeSlot = session.state.battlers[0]?.partyIndex ?? 0
   const living: number[] = []
@@ -1101,7 +1101,7 @@ function chooseBatonPassSetup(
  * only queues its switch after it dealt HP damage (turn.ts:4798-4803,
  * `sumHpDealt > 0`), so an immune range wastes the turn; the other pivot
  * effects switch from their own script once a live bench slot exists. */
-function pivotSwitchWorks(pivot: MoveChoiceInfo, effect: string | null): boolean {
+export function pivotSwitchWorks(pivot: MoveChoiceInfo, effect: string | null): boolean {
   if (effect === 'EFFECT_HIT_ESCAPE') return !!pivot.range && !pivot.range.isImmune
   return true
 }
