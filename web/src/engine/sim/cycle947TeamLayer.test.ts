@@ -20,7 +20,14 @@ import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import type { PolicyTraceEntry } from './driver/policyBattle'
-import { chooseRoleAction, rangeOnOurReserve, stateWithReserve } from './driver/rolePolicy'
+import {
+  chooseRoleAction,
+  highestRoll,
+  lowestRoll,
+  meanRoll,
+  rangeOnOurReserve,
+  stateWithReserve,
+} from './driver/rolePolicy'
 import { aiDamageDepsFor, beginTurn, createSession, stepTurn } from './driver/session'
 import type { BattleSession } from './driver/session'
 import { DEFAULT_TEAM_GENES, createTeamLayer } from './driver/teamLayer'
@@ -88,6 +95,15 @@ const OUR_SNORLAX: PlayerMonSpec = {
   moves: ['MOVE_BODY_SLAM', 'MOVE_CELEBRATE'],
 }
 const OUR_AGGRON: PlayerMonSpec = { species: 'SPECIES_AGGRON', level: 50, moves: ['MOVE_IRON_HEAD'] }
+// The fast-heavy-hitter fixture: Jolteon (Speed 150) is far faster than their
+// Machamp (Speed 75), and its Thunderbolt onto their 165 HP Machamp rolls
+// 78..92 with mean 84.6875 -- 2 * 78 = 156 < 165 (no two-hit KO) but
+// 2 * 84.6875 = 169.375 >= 165 (outspeed with heavy damage).
+const OUR_JOLTEON: PlayerMonSpec = { species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_THUNDERBOLT'] }
+// The bench candidate: Close Combat onto their Machamp rolls 103..122, so
+// 2 * 103 = 206 >= 165 KOs in two, and Body Slam onto our Machamp is
+// 58/165 = 35.2% (the replacement test's number), under the default 50%.
+const OUR_MACHAMP_CC: PlayerMonSpec = { species: 'SPECIES_MACHAMP', level: 50, moves: ['MOVE_CLOSE_COMBAT'] }
 const OUR_MACHAMP: PlayerMonSpec = { species: 'SPECIES_MACHAMP', level: 50, moves: ['MOVE_BODY_SLAM'] }
 const MACHAMP_BODY_SLAM = ['MOVE_BODY_SLAM']
 
@@ -221,6 +237,67 @@ describe('cycle 947 - team layer: counter', () => {
     const offense = aiDamageRolls(benchState, 'MOVE_IRON_HEAD', 0, 1, aiDamageDepsFor(data, benchState, false))!
     expect((offense.totalRolls ?? offense.rolls)[0]).toBe(AGGRON_IRON_HEAD_MIN)
     expect(2 * AGGRON_IRON_HEAD_MIN).toBeGreaterThanOrEqual(150)
+  })
+
+  it('does not fire when the active mon outspeeds with heavy damage but no two-hit KO', () => {
+    // Decision 14's active-mon gate exempts a mon that either KOs in two OR
+    // outspeeds with heavy damage. Jolteon does the second and not the first,
+    // so it must stay in; the old gate (KO in two only, plus outspeed) switched
+    // this fast heavy hitter out.
+    const s = session([OUR_JOLTEON, OUR_MACHAMP_CC], [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)])
+    // Speed 150 vs 75: no tie, so `outspeeds` cannot draw RNG and answer false.
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[1]!.mon.maxHp).toBe(165)
+
+    // The numbers the gate straddles, from the same call the rule makes:
+    // 2 * 78 = 156 < 165 (not "KO in two"), 2 * 84.6875 = 169.375 >= 165
+    // ("heavy damage").
+    const activeRolls = aiDamageRolls(
+      s.state,
+      'MOVE_THUNDERBOLT',
+      0,
+      1,
+      aiDamageDepsFor(data, s.state, false),
+    )!
+    expect(lowestRoll(activeRolls)).toBe(78)
+    expect(highestRoll(activeRolls)).toBe(92)
+    expect(meanRoll(activeRolls)).toBeCloseTo(84.6875, 4)
+    expect(2 * lowestRoll(activeRolls)).toBeLessThan(165)
+    expect(2 * meanRoll(activeRolls)).toBeGreaterThanOrEqual(165)
+
+    // The bench mon is a real counter candidate, so only the active gate keeps
+    // the switch from firing: it takes Body Slam for 58/165 = 35.2% and its
+    // Close Combat worst roll KOs their Machamp in two (206 >= 165).
+    const incoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!
+    expect(highestRoll(incoming)).toBe(58)
+    expect(highestRoll(incoming) * 100).toBeLessThanOrEqual(50 * s.state.sides[0].party[1]!.maxHp)
+    const benchState = stateWithReserve(s.state, 0, s.state.sides[0].party[1]!, 1)
+    const offense = aiDamageRolls(
+      benchState,
+      'MOVE_CLOSE_COMBAT',
+      0,
+      1,
+      aiDamageDepsFor(data, benchState, false),
+    )!
+    expect(lowestRoll(offense)).toBe(103)
+    expect(2 * lowestRoll(offense)).toBeGreaterThanOrEqual(165)
+
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const trace: PolicyTraceEntry[] = []
+    const choice = layer.policy(s, 1, trace)
+    // The role's own trace, not the counter's ['team', 'counter']: the layer
+    // fell through and Jolteon attacks.
+    expect(trace[0]!.tags).toEqual(['attacker', 'damage'])
+    expect(choice!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choice!)).toBe('MOVE_THUNDERBOLT')
+
+    // Control: the original counter fixture still fires, so the gate only
+    // removes this exemption case, not the rule.
+    const control = counterSession()
+    const controlTrace: PolicyTraceEntry[] = []
+    createTeamLayer({ roles: ['attacker', 'setupSweeper'] }).policy(control, 1, controlTrace)
+    expect(controlTrace[0]!.tags).toEqual(['team', 'counter'])
   })
 
   it('does not fire when switchInSafety is below the predicted damage', () => {

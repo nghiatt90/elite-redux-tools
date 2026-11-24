@@ -359,9 +359,10 @@ function ruleSacrifice(
 /** counter: a bench teammate takes the predicted move for at most
  * `switchInSafety`% of its current HP AND threatens their active mon (its best
  * move's worst roll KOs in two or fewer hits, or it outspeeds with a mean roll
- * of at least half their HP), while our active mon does neither (no KO in two,
- * and it is either faster or itself threatened). Pick the best such teammate by
- * the replacement score and switch to it. No predicted move: no fire. */
+ * of at least half their HP), while our active mon does neither: no KO in two
+ * AND no outspeed-with-heavy-damage, with `view.threatened` keeping a slower
+ * active mon eligible for the switch. Pick the best such teammate by the
+ * replacement score and switch to it. No predicted move: no fire. */
 function ruleCounter(
   session: BattleSession,
   view: PredictionView,
@@ -386,7 +387,13 @@ function ruleCounter(
   // does not outspeed it must be the one at risk.
   const activeOutspeeds =
     activeBest !== null ? outspeeds(session, activeBest.choice.action, view.predictedAction) : false
-  const activeDoesNeither = !activeKoInTwo && (activeOutspeeds || view.threatened)
+  // Decision 14's other side of "does neither": outspeeding with heavy damage
+  // (mean roll of at least half their HP) also threatens them, so a fast heavy
+  // hitter must not be switched out just because its worst roll falls short of
+  // the two-hit KO. The bench side uses the same test below.
+  const activeFastHeavy =
+    activeOutspeeds && activeBest !== null && 2 * meanRoll(activeBest.range!) >= theirHp
+  const activeDoesNeither = !activeKoInTwo && !activeFastHeavy && (activeOutspeeds || view.threatened)
   if (!activeDoesNeither) return null
 
   const candidates: BenchScore[] = []
