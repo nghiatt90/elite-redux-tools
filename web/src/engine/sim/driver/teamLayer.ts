@@ -9,16 +9,20 @@
 // does not fire falls through, and the active mon's `roles[partyIndex]` rule
 // decides as usual. `replacement` is the same idea for the turn after a faint.
 //
-// Purposes in this slice (s20c): preserve, sacrifice and counter, plus the
-// switch mechanism they share. entryAbility, support and the PP stall loop are
-// typed, ordered and flagged here so s20c2 only adds their rules.
+// All six purposes are implemented: preserve, sacrifice, counter and the switch
+// mechanism they share (s20c), plus entryAbility, support and the PP stall loop
+// (s20c2). The entry-ability and support probes run on cloned sessions, and the
+// PP loop keeps a per-layer stall counter; none of them touch the real RNG.
 //
 // Pure and headless: no React, no I/O. Every game rule cites the C or the data
 // row that fixes it; every threshold a player chose is marked MODEL CHOICE.
 
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
+import { DEFAULT_STAT_STAGE, STAT_ATK, STATUS_FIELD_TERRAIN_ANY } from '../constants'
 import type { BattleState } from '../state'
+import { battlerHasSimAbility } from '../statBuffs'
+import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
 import { buildTurnOrderContext } from '../turn'
 import { getMoveSpeed } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
@@ -44,13 +48,12 @@ import {
   readPredictions,
   stateWithReserve,
   statusMoveWorks,
+  supportEffectPending,
 } from './rolePolicy'
 import type { BattleSession } from './session'
 import { aiDamageDepsFor, cloneSession, firstLiveReplacement } from './session'
 
-/** The six voluntary-switching purposes of decision 14. All six exist here so
- * `purposeOrder` and `purposeFlags` cover the whole design; the last three are
- * implemented in s20c2. */
+/** The six voluntary-switching purposes of decision 14, all implemented. */
 export type TeamPurpose = 'preserve' | 'sacrifice' | 'counter' | 'entryAbility' | 'support' | 'ppLoop'
 
 /** Every purpose, in decision 14's own order (preserve, sacrifice, counter,
@@ -112,12 +115,15 @@ const SPEED_PROBE_SEED = 0
 
 /** The living, non-active party slots on our side (side 0). In singles there is
  * exactly one active party index; the set form keeps the filter honest if a
- * caller ever passes a doubles state. */
+ * caller ever passes a doubles state. Only SIDE 0 battlers may mark a slot
+ * active: the opponent's party has its own indexes, and reading them here would
+ * hide our slot 0 whenever their active mon sits in their slot 0 while ours is
+ * some other slot. */
 function livingBenchSlots(session: BattleSession): number[] {
   const party = session.state.sides[0].party
   const active = new Set<number>()
   for (const battler of session.state.battlers) {
-    if (battler) active.add(battler.partyIndex)
+    if (battler && (battler.id & 1) === 0) active.add(battler.partyIndex)
   }
   const slots: number[] = []
   for (let slot = 0; slot < party.length; slot++) {
@@ -298,6 +304,182 @@ function switchChoice(session: BattleSession, slot: number): PlayerChoice | null
 }
 
 // ---------------------------------------------------------------------------
+// Entry-ability probe
+// ---------------------------------------------------------------------------
+
+// Deterministic seed for the entry-switch probe; the clone gets its own
+// generator, so a random entry effect (Zen Garden's terrain coin) never draws
+// from the real session.
+const ENTRY_PROBE_SEED = 0
+// The support probe's own clone seed, for the same reason.
+const SUPPORT_PROBE_SEED = 0
+
+/** The entry abilities the purpose simulates. C sources:
+ * Intimidate data `abilities.cc:764-768` and `Impl<ABILITY_INTIMIDATE>`
+ * `abilities.cc:771` (`.onEntry = UseIntimidateClone`); the four weather
+ * setters all gate on `TryChangeBattleWeather`, which does nothing when that
+ * weather is already up or a primal weather is up -- Drizzle `abilities.cc:
+ * 501-514`, Sand Stream `:1076`, Drought `:1332`, Snow Warning `:1798`; the
+ * four Surges all `CHECK(TryChangeBattleTerrain(...))` -- Electric `:3144`,
+ * Psychic `:3160`, Misty `:3172`, Grassy `:3184`. Every other entry ability
+ * stays off. */
+export const ENTRY_ABILITIES_HANDLED: readonly string[] = [
+  'ABILITY_INTIMIDATE',
+  'ABILITY_DRIZZLE',
+  'ABILITY_DROUGHT',
+  'ABILITY_SAND_STREAM',
+  'ABILITY_SNOW_WARNING',
+  'ABILITY_ELECTRIC_SURGE',
+  'ABILITY_GRASSY_SURGE',
+  'ABILITY_MISTY_SURGE',
+  'ABILITY_PSYCHIC_SURGE',
+]
+
+// The two setter groups, split out so the entry rule can ask "did THIS group
+// change the field" instead of any effect at all.
+const WEATHER_ENTRY_ABILITIES: readonly string[] = [
+  'ABILITY_DRIZZLE',
+  'ABILITY_DROUGHT',
+  'ABILITY_SAND_STREAM',
+  'ABILITY_SNOW_WARNING',
+]
+const TERRAIN_ENTRY_ABILITIES: readonly string[] = [
+  'ABILITY_ELECTRIC_SURGE',
+  'ABILITY_GRASSY_SURGE',
+  'ABILITY_MISTY_SURGE',
+  'ABILITY_PSYCHIC_SURGE',
+]
+
+/** The switch-in deps `applySwitchInAbilities` needs, built the way session.ts
+ * builds them for the battle-start pass (`BattleStartDeps`, switchInAbility.ts:
+ * 2529-2533): the probe's own grounding, data context, turn order and stat-stage
+ * ratios. `grounding` is `probe.turnDeps.grounding`, which is bound to the
+ * probe's state (session.ts:131-133). */
+function entryProbeDeps(probe: BattleSession): BattleStartDeps {
+  return {
+    grounding: probe.turnDeps.grounding,
+    dataContext: probe.data.dataContext,
+    turnOrder: probe.data.turnOrder,
+    statStageRatios: probe.data.statStageRatios,
+  }
+}
+
+/** A clone of the session with `slot` standing in as battler 0, run through the
+ * sim's own switch-in ability dispatcher (`applySwitchInAbilities`,
+ * switchInAbility.ts:1359). Nothing here touches the real session or its RNG:
+ * `stateWithReserve` copies the state and `cloneSession` deep-copies it with a
+ * fresh generator (session.ts:511-518). */
+function entryProbeFor(session: BattleSession, slot: number): BattleSession | null {
+  const reserve = session.state.sides[0].party[slot]
+  if (!reserve || reserve.speciesId === null || reserve.hp <= 0) return null
+  const probe = cloneSession({ ...session, state: stateWithReserve(session.state, 0, reserve, slot) }, ENTRY_PROBE_SEED)
+  applySwitchInAbilities(probe.state, 0, entryProbeDeps(probe), [])
+  return probe
+}
+
+/** Whether `battlerId`'s ability slots (chosen ability plus the three innates,
+ * with suppression) hold any of `abilityIds`. `battlerHasSimAbility` is the
+ * sim's own test (statBuffs.ts:168). */
+function holdsAnyAbility(
+  session: BattleSession,
+  battlerId: number,
+  abilityIds: readonly string[],
+): boolean {
+  const battler = session.state.battlers[battlerId]
+  if (!battler) return false
+  return abilityIds.some((abilityId) =>
+    battlerHasSimAbility(session.state, battler, abilityId, false, battlerId, false, session.data.dataContext),
+  )
+}
+
+/** MODEL CHOICE: a field change counts only when it helps the team. Build the
+ * session with exactly the probe's field (`{ ...session.state, field }`, so an
+ * Intimidate or other entry effect on the probe cannot leak in) and require at
+ * least one living non-active slot to improve on one of the three axes the
+ * layer cares about: its best move's mean, the predicted move's highest roll on
+ * it, or whether it outspeeds their active mon. The active slot is excluded
+ * because the candidate replaces it. */
+function fieldChangeBenefitsTeam(
+  session: BattleSession,
+  probe: BattleSession,
+  predictedMoveId: string | null,
+): boolean {
+  const withField: BattleSession = { ...session, state: { ...session.state, field: probe.state.field } }
+  for (const slot of livingBenchSlots(session)) {
+    const before = bestReserveMove(session, slot)
+    const after = bestReserveMove(withField, slot)
+    if (before !== null && after !== null && after.mean > before.mean) return true
+    if (predictedMoveId !== null) {
+      const beforeRange = rangeOnOurReserve(session, predictedMoveId, slot)
+      const afterRange = rangeOnOurReserve(withField, predictedMoveId, slot)
+      const beforeHigh = beforeRange && !beforeRange.isImmune ? highestRoll(beforeRange) : 0
+      const afterHigh = afterRange && !afterRange.isImmune ? highestRoll(afterRange) : 0
+      if (afterHigh < beforeHigh) return true
+    }
+    if (!benchOutspeedsTheirActive(session, slot) && benchOutspeedsTheirActive(withField, slot)) return true
+  }
+  return false
+}
+
+// ---------------------------------------------------------------------------
+// PP loop bookkeeping
+// ---------------------------------------------------------------------------
+
+/** MODEL CHOICE: "little or nothing" is 25% of our current HP -- a threshold the
+ * player chose, not a game fact. */
+export const PP_LOOP_LITTLE_PCT = 25
+
+/** Decision 14's stop rule: both sides have switched every turn for 4 turns with
+ * no HP or PP change on either side, then the loop stops. */
+export const PP_LOOP_STALL_LIMIT = 4
+
+/** One `policy` call's position, enough to tell a stalled turn from a real one. */
+interface PpLoopSnapshot {
+  turn: number
+  ourPartyIndex: number
+  theirPartyIndex: number
+  ourHp: number
+  theirHp: number
+  ourPp: number
+  theirPp: number
+}
+
+/** Summed HP and PP of one side's party. For a slot that is active this reads
+ * the BATTLE mon, not the party copy: the party copy's HP is not kept in sync
+ * mid-turn (switchIn.ts:251 `syncPartyHp` is what writes it back), while the
+ * battler's mon is the live value. */
+function sideHpAndPp(session: BattleSession, side: 0 | 1): { hp: number; pp: number } {
+  const party = session.state.sides[side].party
+  let hp = 0
+  let pp = 0
+  for (let slot = 0; slot < party.length; slot++) {
+    const mon = party[slot]
+    if (!mon || mon.speciesId === null) continue
+    const active = session.state.battlers.find(
+      (battler) => battler !== null && (battler.id & 1) === side && battler.partyIndex === slot,
+    )
+    const source = active ? active.mon : mon
+    hp += source.hp
+    for (const value of source.pp) pp += value
+  }
+  return { hp, pp }
+}
+
+function ppLoopSnapshot(session: BattleSession, turn: number): PpLoopSnapshot {
+  const ourTotals = sideHpAndPp(session, 0)
+  const theirTotals = sideHpAndPp(session, 1)
+  return {
+    turn,
+    ourPartyIndex: session.state.battlers[0]?.partyIndex ?? -1,
+    theirPartyIndex: session.state.battlers[1]?.partyIndex ?? -1,
+    ourHp: ourTotals.hp,
+    theirHp: theirTotals.hp,
+    ourPp: ourTotals.pp,
+    theirPp: theirTotals.pp,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Purposes
 // ---------------------------------------------------------------------------
 
@@ -413,6 +595,203 @@ function ruleCounter(
   return switchChoice(session, pickBestBench(candidates)!.slot)
 }
 
+/** entryAbility: a bench mon's switch-in ability applies now and the mon
+ * survives the predicted move. A candidate qualifies when it holds one of
+ * `ENTRY_ABILITIES_HANDLED`, survives the predicted move's highest roll, and
+ * one of:
+ *
+ * - Intimidate: it holds ABILITY_INTIMIDATE, the predicted move is PHYSICAL,
+ *   and the simulated entry actually lowered their active mon's Attack stage
+ *   (a missing statStages entry reads DEFAULT_STAT_STAGE). The comparison to
+ *   the pre-probe stage is what excludes an immune target, a Substitute and a
+ *   foe already at the minimum stage.
+ * - A weather setter: the probe's weather differs from the real one and the
+ *   active mon holds none of the four (MODEL CHOICE: two setters would
+ *   otherwise ping-pong) and the new field helps the team.
+ * - A terrain setter: the same test on `field.statuses & STATUS_FIELD_TERRAIN_ANY`.
+ *
+ * The immunity / already-up cases are not hand-modelled: `applySwitchInAbilities`
+ * runs the real handlers, which are where TryChangeBattleWeather and
+ * UseIntimidateClone refuse. */
+function ruleEntryAbility(
+  session: BattleSession,
+  view: PredictionView,
+  genes: TeamGenes,
+): PlayerChoice | null {
+  const predictedMoveId = view.predictedMoveId
+  const predictedSplit =
+    predictedMoveId === null ? null : (session.data.dataContext.move(predictedMoveId)?.split ?? null)
+  const activeHasWeatherSetter = holdsAnyAbility(session, 0, WEATHER_ENTRY_ABILITIES)
+  const activeHasTerrainSetter = holdsAnyAbility(session, 0, TERRAIN_ENTRY_ABILITIES)
+  const realTerrain = session.state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+  const beforeAtkStage = session.state.battlers[1]?.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+
+  const candidates: BenchScore[] = []
+  for (const slot of livingBenchSlots(session)) {
+    const reserve = session.state.sides[0].party[slot]
+    if (!reserve) continue
+    // Survive the predicted move: its highest roll must not reach our current
+    // HP. No prediction or an immune range counts as surviving.
+    if (predictedMoveId !== null) {
+      const incoming = rangeOnOurReserve(session, predictedMoveId, slot)
+      const high = incoming && !incoming.isImmune ? highestRoll(incoming) : 0
+      if (high >= reserve.hp) continue
+    }
+
+    const probe = entryProbeFor(session, slot)
+    if (!probe) continue
+    if (!holdsAnyAbility(probe, 0, ENTRY_ABILITIES_HANDLED)) continue
+
+    const afterAtkStage = probe.state.battlers[1]?.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+    const intimidate =
+      predictedSplit === 'PHYSICAL' &&
+      holdsAnyAbility(probe, 0, ['ABILITY_INTIMIDATE']) &&
+      afterAtkStage < beforeAtkStage
+
+    const weather =
+      holdsAnyAbility(probe, 0, WEATHER_ENTRY_ABILITIES) &&
+      probe.state.field.weather !== session.state.field.weather &&
+      !activeHasWeatherSetter &&
+      fieldChangeBenefitsTeam(session, probe, predictedMoveId)
+
+    const probeTerrain = probe.state.field.statuses & STATUS_FIELD_TERRAIN_ANY
+    const terrain =
+      holdsAnyAbility(probe, 0, TERRAIN_ENTRY_ABILITIES) &&
+      probeTerrain !== realTerrain &&
+      !activeHasTerrainSetter &&
+      fieldChangeBenefitsTeam(session, probe, predictedMoveId)
+
+    if (!intimidate && !weather && !terrain) continue
+    const scored = scoreBench(session, slot, predictedMoveId ? [predictedMoveId] : [], genes.switchInSafety)
+    if (scored) candidates.push(scored)
+  }
+  if (candidates.length === 0) return null
+  return switchChoice(session, pickBestBench(candidates)!.slot)
+}
+
+/** support: bring in a support teammate whose effect is not up yet. Does not
+ * fire while the active mon is itself a support with an effect still to set,
+ * otherwise two supports would ping-pong before either sets anything. A
+ * candidate must be a living bench slot with role 'support', still have an
+ * effect to set from its own position (`supportEffectPending` on a probe with
+ * the candidate as battler 0 -- the role's own setter logic, not a copy), and
+ * be acceptable under `switchInSafety` without being KO'd. */
+function ruleSupport(
+  session: BattleSession,
+  view: PredictionView,
+  genes: TeamGenes,
+  roles: RoleName[],
+): PlayerChoice | null {
+  const active = session.state.battlers[0]
+  if (!active) return null
+  if (roles[active.partyIndex] === 'support' && supportEffectPending(session, view)) return null
+
+  const predictedIds = view.predictedMoveId ? [view.predictedMoveId] : []
+  const candidates: BenchScore[] = []
+  for (const slot of livingBenchSlots(session)) {
+    if (roles[slot] !== 'support') continue
+    const reserve = session.state.sides[0].party[slot]
+    if (!reserve || reserve.speciesId === null) continue
+    const probe = cloneSession(
+      { ...session, state: stateWithReserve(session.state, 0, reserve, slot) },
+      SUPPORT_PROBE_SEED,
+    )
+    if (!supportEffectPending(probe, view)) continue
+    const scored = scoreBench(session, slot, predictedIds, genes.switchInSafety)
+    if (!scored) continue
+    if (!scored.acceptable || scored.incomingFraction >= 1) continue
+    candidates.push(scored)
+  }
+  if (candidates.length === 0) return null
+  return switchChoice(session, pickBestBench(candidates)!.slot)
+}
+
+/** Their active mon's moves that still have PP and therefore can be forced. */
+function theirUsableMoves(session: BattleSession): string[] {
+  const their = session.state.battlers[1]
+  if (!their) return []
+  const moves: string[] = []
+  for (let i = 0; i < their.mon.moves.length; i++) {
+    const moveId = their.mon.moves[i]
+    const pp = their.mon.pp[i]
+    if (moveId && pp > 0) moves.push(moveId)
+  }
+  return moves
+}
+
+interface PpLoopIncoming {
+  /** The largest highest-roll among their usable moves onto this mon. */
+  highest: number
+  /** The mon's current HP. */
+  hp: number
+}
+
+/** The largest highest-roll their usable moves can land on our active mon
+ * (battler 0) or a bench slot, and that mon's current HP. Null when they have
+ * no usable move (at least one is required) or the mon is not alive. A null or
+ * immune range contributes zero. */
+function ppLoopIncoming(
+  session: BattleSession,
+  theirMoves: readonly string[],
+  slot: number | 'active',
+): PpLoopIncoming | null {
+  if (theirMoves.length === 0) return null
+  const hp =
+    slot === 'active'
+      ? (session.state.battlers[0]?.mon.hp ?? 0)
+      : (session.state.sides[0].party[slot]?.hp ?? 0)
+  if (hp <= 0) return null
+  let highest = 0
+  for (const moveId of theirMoves) {
+    const range =
+      slot === 'active'
+        ? aiDamageRolls(
+            session.state,
+            moveId,
+            1,
+            0,
+            aiDamageDepsFor(session.data, session.state, session.inverseBattle),
+          )
+        : rangeOnOurReserve(session, moveId, slot)
+    if (range && !range.isImmune) highest = Math.max(highest, highestRoll(range))
+  }
+  return { highest, hp }
+}
+
+function takesLittleOrNothing(incoming: PpLoopIncoming | null): incoming is PpLoopIncoming {
+  return incoming !== null && incoming.highest * 100 <= PP_LOOP_LITTLE_PCT * incoming.hp
+}
+
+/** ppLoop: two of our mons both take little or nothing from every move their
+ * mon has, so alternate them to drain its PP. Fires only when the ACTIVE mon
+ * and at least one bench slot both qualify, and switches to the qualifying slot
+ * whose worst-case fraction of HP is smallest (ties go to the lower slot). The
+ * stall count (updated on every `policy` call) stops it once both sides have
+ * switched for `PP_LOOP_STALL_LIMIT` turns with no HP or PP change. */
+function rulePpLoop(session: BattleSession, stallCount: number): PlayerChoice | null {
+  if (stallCount >= PP_LOOP_STALL_LIMIT) return null
+  const theirMoves = theirUsableMoves(session)
+  if (theirMoves.length === 0) return null
+  if (!takesLittleOrNothing(ppLoopIncoming(session, theirMoves, 'active'))) return null
+
+  let best: { slot: number; incoming: PpLoopIncoming } | null = null
+  for (const slot of livingBenchSlots(session)) {
+    const incoming = ppLoopIncoming(session, theirMoves, slot)
+    if (!takesLittleOrNothing(incoming)) continue
+    if (best === null) {
+      best = { slot, incoming }
+      continue
+    }
+    // Compare highest/hp by cross-multiplication so the ordering is exact for
+    // integer rolls; a genuine tie falls to the lower party slot.
+    const left = incoming.highest * best.incoming.hp
+    const right = best.incoming.highest * incoming.hp
+    if (left < right || (left === right && slot < best.slot)) best = { slot, incoming }
+  }
+  if (best === null) return null
+  return switchChoice(session, best.slot)
+}
+
 // ---------------------------------------------------------------------------
 // The layer
 // ---------------------------------------------------------------------------
@@ -477,12 +856,38 @@ export function createTeamLayer(config: {
   // they are handed, so `{ ...lastSession, state }` is a valid probe.
   let lastSession: BattleSession | null = null
 
+  // The PP loop's stall tracker, updated on EVERY policy call before the
+  // purpose loop (whichever purpose fires), as decision 14's stop rule needs.
+  let ppLoopStallCount = 0
+  let ppLoopPrevious: PpLoopSnapshot | null = null
+
+  const observePpLoopStall = (session: BattleSession, turn: number): void => {
+    const current = ppLoopSnapshot(session, turn)
+    if (ppLoopPrevious !== null) {
+      // One stalled turn: the next turn in sequence, BOTH actives changed, and
+      // neither side's HP or PP moved. Anything else resets the count to 0 --
+      // including a non-consecutive turn, which is also how a layer reused for
+      // a new game clears its old state.
+      const stalled =
+        turn === ppLoopPrevious.turn + 1 &&
+        current.ourPartyIndex !== ppLoopPrevious.ourPartyIndex &&
+        current.theirPartyIndex !== ppLoopPrevious.theirPartyIndex &&
+        current.ourHp === ppLoopPrevious.ourHp &&
+        current.theirHp === ppLoopPrevious.theirHp &&
+        current.ourPp === ppLoopPrevious.ourPp &&
+        current.theirPp === ppLoopPrevious.theirPp
+      ppLoopStallCount = stalled ? ppLoopStallCount + 1 : 0
+    }
+    ppLoopPrevious = current
+  }
+
   const policy = (
     session: BattleSession,
     turn: number,
     trace: PolicyTraceEntry[],
   ): PlayerChoice | null => {
     lastSession = session
+    observePpLoopStall(session, turn)
     const active = session.state.battlers[0]
     if (!active || active.mon.hp <= 0) return null
     // One prediction per call, at the role layer's own safety line, shared by
@@ -502,12 +907,14 @@ export function createTeamLayer(config: {
         case 'counter':
           choice = ruleCounter(session, view, genes)
           break
-        // s20c2: the entry-ability purpose, the bring-in-support purpose and
-        // the PP stall loop land in the next slice.
         case 'entryAbility':
+          choice = ruleEntryAbility(session, view, genes)
+          break
         case 'support':
+          choice = ruleSupport(session, view, genes, roles)
+          break
         case 'ppLoop':
-          choice = null
+          choice = rulePpLoop(session, ppLoopStallCount)
           break
       }
       if (choice) {

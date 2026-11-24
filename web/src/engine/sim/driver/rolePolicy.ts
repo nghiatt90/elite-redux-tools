@@ -1066,6 +1066,20 @@ function chooseSupportSetter(
   return null
 }
 
+/** Whether the support role still has a field or side effect to set from this
+ * position: the role's own setter rule (`chooseSupportSetter`) picks something.
+ * The team layer's bring-in-support purpose uses this instead of copying the
+ * "effect is up" logic (teamLayer.ts).
+ *
+ * Only the screens, weather, terrain and Trick Room count. The Baton Pass
+ * own-boost set-up is deliberately excluded (refresh = false, so only the
+ * setter rule runs): a freshly switched-in mon always starts at stage 0, so
+ * counting its own boosts as a pending effect would pull it in forever.
+ * MODEL CHOICE, not a game fact. */
+export function supportEffectPending(session: BattleSession, view: PredictionView): boolean {
+  return chooseSupportSetter(session, evaluateMoves(session, null), view, false) !== null
+}
+
 /** Own boosts for Baton Pass: while below the target stage, safe (the
  * setupSweeper's gate) and able to pass to a live bench slot, use a legal
  * self-boost move. Once at the target stage the pivot hand-off below carries
