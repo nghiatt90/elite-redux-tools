@@ -107,9 +107,9 @@ line in `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c` (`--
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `move-effect` | 888 | 880 | 2 | 2 | 0 | 6 |
 | `secondary-effect` | 314 | 299 | 15 | 15 | 0 | 0 |
-| `legacy-script` | 600 | 461 | 13 | 133 | 0 | 6 |
+| `legacy-script` | 600 | 462 | 12 | 132 | 0 | 6 |
 | `effect-less` | 143 | 59 | 84 | 84 | 0 | 0 |
-| **total** | **1945** | **1699** | **114** | **234** | **0** | **12** |
+| **total** | **1945** | **1700** | **113** | **233** | **0** | **12** |
 
 Unported includes registered-but-untested. C/script locations cited: 378.
 
@@ -146,7 +146,6 @@ has at least one of the group's moves (first 8 ids listed). Trainer ids are sort
 
 - `BattleScript_EffectArgumentHit` (unported): 48 moves (first 15): `MOVE_ARM_THRUST`, `MOVE_BAD_EGG`, `MOVE_BANISHED_POWER`, `MOVE_BARRAGE`, `MOVE_BEATDOWN`, `MOVE_BLAZING_BONE`, `MOVE_BLOCK_DROPPER`, `MOVE_BONE_RUSH`, `MOVE_BONK`, `MOVE_BUBBLE_BEAM`, `MOVE_BULLET_SEED`, `MOVE_COMET_PUNCH`, `MOVE_DIRE_CLAW`, `MOVE_DOUBLE_SLAP`, `MOVE_DREAM_INVERSION`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:11831; 218 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `TRAINER_ACE_TRAINER_GOAT`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ACE_TRAINER_PAGANI`, `TRAINER_ACE_TRAINER_VIOLET`
 - `BattleScript_EffectBleed` (unported): 1 move: `MOVE_BLOOD_SHOT`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:3115; no elite-tier trainer carries them
-- `BattleScript_EffectCalmMind` (registered, untested): 1 move: `MOVE_CALM_MIND`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:6739; 72 elite-tier trainers (first 8): `TRAINER_ACE_TRAINER_ASHLEY`, `TRAINER_ACE_TRAINER_MIKE`, `TRAINER_ALEXIS`, `TRAINER_AURON`, `TRAINER_BENJAMIN_2`, `TRAINER_BRANDI`, `TRAINER_CAMERON_2`, `TRAINER_CAMERON_3`
 - `BattleScript_EffectConfuse` (unported): 2 moves: `MOVE_CONFUSE_RAY`, `MOVE_SUPERSONIC`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4219; 1 elite-tier trainer: `TRAINER_DARIAN`
 - `BattleScript_EffectDefenseUp2` (registered, untested): 2 moves: `MOVE_ACID_ARMOR`, `MOVE_IRON_DEFENSE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4244; 17 elite-tier trainers (first 8): `TRAINER_ABIGAIL_4`, `TRAINER_ALICE`, `TRAINER_BRAXTON`, `TRAINER_BROOKE_1`, `TRAINER_BRYAN`, `TRAINER_BRYANT`, `TRAINER_DUSTY_1`, `TRAINER_GABRIELLE_4`
 - `BattleScript_EffectDoodle` (unported): 1 move: `MOVE_DOODLE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2284; no elite-tier trainer carries them

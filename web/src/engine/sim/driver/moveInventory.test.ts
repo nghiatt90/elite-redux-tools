@@ -99,8 +99,11 @@ const DISTINCT_SCRIPTS = 322
  *
  * Cycle 41: 235 -> 234. `cycle41DoublesActions.test.ts` runs MOVE_AIR_CUTTER through
  * `buildMoveAction`, giving the effect-less move test evidence.
+ *
+ * Cycle s20b2: 234 -> 233. `cycle947RolePolicyC.test.ts` runs `MOVE_CALM_MIND`, so
+ * `BattleScript_EffectCalmMind` (`battle_scripts_1.s:6739`) leaves registered-untested.
  */
-export const UNPORTED_PAIR_COUNT = 234
+export const UNPORTED_PAIR_COUNT = 233
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -125,8 +128,12 @@ export const UNPORTED_PAIR_COUNT = 234
  * Cycle 41: 115 -> 114 (the same pair also leaves unported, 235 -> 234).
  * `cycle41DoublesActions.test.ts` runs MOVE_AIR_CUTTER through `buildMoveAction`, giving
  * the effect-less move test evidence.
+ *
+ * Cycle s20b2: 114 -> 113 (the same pair also leaves unported, 234 -> 233).
+ * `cycle947RolePolicyC.test.ts` runs `MOVE_CALM_MIND`, so `BattleScript_EffectCalmMind`
+ * (`battle_scripts_1.s:6739`) is now test-backed rather than registered-but-untested.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 114
+export const REGISTERED_UNTESTED_PAIR_COUNT = 113
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
@@ -546,18 +553,25 @@ describe('move completeness inventory', () => {
     const scripts = result.units.filter((unit) => unit.kind === 'legacy-script')
     const diverging = scripts.filter((unit) => unit.status !== effectStatusByMove.get(unit.moveId))
     // A script is not a mirror. `BattleScript_EffectRest` is a real port (handleRest
-    // follows the script command by command), so the divergence is Calm Mind: its effect is
-    // tested by name (`EFFECT_CALM_MIND` in a qualifying block) while its script is only
-    // registered-but-untested. Cycle 151c moved `playstatchangeanimation` to the frame set
-    // (presentation only), so the script no longer has an opcode gap; what remains is the
-    // absence of a qualifying block naming `BattleScript_EffectCalmMind`.
+    // follows the script command by command), so the divergence is Nasty Plot: its effect
+    // (`EFFECT_SPECIAL_ATTACK_UP_2`) is tested by name while its script is only
+    // registered-but-untested. Cycle s20b2 moved Calm Mind's script to ported (the
+    // `cycle947RolePolicyC` block runs `MOVE_CALM_MIND`), so the remaining gap is the
+    // absence of a qualifying block naming `BattleScript_EffectSpecialAttackUp2`.
     expect(diverging.length).toBeGreaterThan(0)
+    const nastyPlotScript = scripts.find((unit) => unit.moveId === 'MOVE_NASTY_PLOT')
+    expect(nastyPlotScript?.unit).toBe('BattleScript_EffectSpecialAttackUp2')
+    expect(nastyPlotScript?.status).toBe('unported')
+    expect(nastyPlotScript?.registeredUntested).toBe(true)
+    expect(effectStatusByMove.get('MOVE_NASTY_PLOT')).toBe('ported')
+    // Calm Mind's script is no longer the divergence: a qualifying block runs the move, so
+    // script and effect are both ported now.
     const calmMindScript = scripts.find((unit) => unit.moveId === 'MOVE_CALM_MIND')
     expect(calmMindScript?.unit).toBe('BattleScript_EffectCalmMind')
-    expect(calmMindScript?.status).toBe('unported')
-    expect(calmMindScript?.registeredUntested).toBe(true)
+    expect(calmMindScript?.status).toBe('ported')
+    expect(calmMindScript?.registeredUntested).toBe(false)
     expect(effectStatusByMove.get('MOVE_CALM_MIND')).toBe('ported')
-    // Scripts are still classified on their own: 446 of the 600 legacy-script pairs are
+    // Scripts are still classified on their own: 462 of the 600 legacy-script pairs are
     // ported today, so the divergence above is not an artefact of scripts being ignored.
     expect(scripts.some((unit) => unit.status === 'ported')).toBe(true)
   })
